@@ -1,0 +1,10 @@
+dist/
+/mkvgo
+/mkvgo.exe
+*.test
+*.out
+*.prof
+.idea/
+.vscode/
+*.swp
+*~
