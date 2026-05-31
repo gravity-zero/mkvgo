@@ -43,6 +43,7 @@ var CmdUsage = map[string]string{
 	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv> -t <trackID> -o <out> [-format srt|ass]",
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
+	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
 }
 
 func CmdHelp(cmd string) {

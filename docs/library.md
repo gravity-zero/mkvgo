@@ -160,6 +160,87 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 
 ---
 
+## Reindex
+
+`ops.Reindex` copies every cluster from `srcPath` to `dstPath` verbatim and writes a new SeekHead and Cues index derived from the cluster contents. All other elements (Info, Tracks, Tags, Chapters, Attachments) are also copied verbatim.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/ops"
+
+err := ops.Reindex(ctx, "input.mkv", "output.mkv")
+```
+
+With a progress callback:
+
+```go
+err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
+    Progress: func(processed, total int64) {
+        fmt.Printf("\r%.1f%%", float64(processed)/float64(total)*100)
+    },
+})
+```
+
+---
+
+## Stream I/O (non-seekable io.Reader / io.Writer)
+
+### Reading from a stream
+
+`reader.ReadStream` parses the EBML header and front-loaded segment metadata from a plain `io.Reader`, then returns a `*BlockReader` ready to iterate blocks. No Seek is ever issued. SeekHead and Cues are skipped because they are not usable in a forward-only stream.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/reader"
+
+c, br, err := reader.ReadStream(ctx, r) // r is any io.Reader
+if err != nil { return err }
+
+fmt.Println(c.Info.Title)
+for _, t := range c.Tracks {
+    fmt.Printf("#%d %s %s\n", t.ID, t.Type, t.Codec)
+}
+
+for {
+    block, err := br.Next()
+    if err == io.EOF { break }
+    if err != nil { return err }
+    // block.TrackNumber, block.Timecode, block.Keyframe, block.Data
+}
+```
+
+`reader.NewStreamBlockReader` provides a lower-level entry point when the caller has already parsed metadata elsewhere and only needs block iteration from a bare `io.Reader`:
+
+```go
+br, err := reader.NewStreamBlockReader(r, timecodeScale)
+```
+
+### Writing to a stream
+
+`writer.NewStreamWriter` writes a valid MKV stream to any `io.Writer` without ever seeking back. The Segment and each Cluster are written with unknown size. No SeekHead or Cues are emitted.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/writer"
+
+info := mkv.SegmentInfo{TimecodeScale: 1_000_000}
+sw, err := writer.NewStreamWriter(w, info, tracks) // w is any io.Writer
+if err != nil { return err }
+defer sw.Close()
+
+// A new cluster opens automatically on the first keyframe block.
+if err := sw.WriteBlock(mkv.Block{
+    TrackNumber: 1,
+    Timecode:    0,
+    Keyframe:    true,
+    Data:        frameData,
+}); err != nil {
+    return err
+}
+
+// Force a cluster boundary at any point.
+sw.FlushCluster()
+```
+
+---
+
 ## Splitting and Joining
 
 **Split by time ranges:**

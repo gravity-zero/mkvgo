@@ -87,6 +87,9 @@ func main() {
 	case "compare":
 		commands.RequireArgs(args, 2, "mkvgo compare [-json] <a.mkv> <b.mkv>")
 		commands.CmdCompare(args[0], args[1])
+	case "reindex":
+		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> <output.mkv>")
+		commands.CmdReindex(args)
 	case "merge":
 		commands.CmdMerge(args)
 	case "merge-subtitle":
@@ -126,6 +129,7 @@ Commands:
   probe         Full dump of all metadata
   validate      Check MKV structure for issues
   compare       Diff metadata of two MKV files
+  reindex       Rebuild the seek index (Cues) of a file
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments)

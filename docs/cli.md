@@ -349,6 +349,22 @@ mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
 
 ---
 
+## Indexing
+
+### reindex
+
+Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clusters verbatim and emits a new index derived from their content. Use this on files muxed without a usable seek index to restore fast seeking.
+
+```
+mkvgo reindex <input.mkv> <output.mkv>
+```
+
+```bash
+mkvgo reindex source.mkv reindexed.mkv
+```
+
+---
+
 ## Splitting
 
 ### split

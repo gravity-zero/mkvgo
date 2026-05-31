@@ -56,6 +56,7 @@ Global flags: `-json` (structured output), `--version`
 | | `merge-subtitle` | Inject an external SRT/ASS into an MKV |
 | | `join` | Concatenate multiple MKVs sequentially |
 | **Splitting** | `split` | Split MKV by time ranges or chapters |
+| **Indexing** | `reindex` | Rebuild the seek index (Cues) of a file |
 
 Full CLI reference: [docs/cli.md](docs/cli.md)
 
@@ -137,6 +138,15 @@ err := matroska.Mux(ctx, matroska.MuxOptions{
     },
 })
 ```
+
+**Rebuild the seek index of a file:**
+```go
+err := ops.Reindex(ctx, "input.mkv", "output.mkv")
+```
+
+**Read or write from a non-seekable stream (pipe, network):**
+
+`reader.ReadStream` parses metadata and returns a `*BlockReader` from an `io.Reader` without ever calling Seek. `writer.NewStreamWriter` writes a live MKV stream to an `io.Writer` using unknown-size Segment and Clusters. See [docs/library.md](docs/library.md) for details.
 
 **Edit metadata with custom FS (S3, HTTP, etc.):**
 ```go
