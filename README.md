@@ -68,6 +68,15 @@ mkvgo probe movie.mkv
 mkvgo probe -json movie.mkv | jq '.tracks[]'
 ```
 
+**Read metadata from stdin (pipe-friendly):**
+
+The inspection commands (`info`, `tracks`, `chapters`, `attachments`, `tags`, `probe`) accept `-` as the input path and read from stdin via the streaming reader.
+
+```bash
+cat movie.mkv | mkvgo info -
+cat movie.mkv | mkvgo tracks -json -
+```
+
 **Remove a track:**
 ```bash
 # Remove track 3 (e.g. commentary audio)

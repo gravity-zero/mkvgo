@@ -3,7 +3,7 @@ package commands
 import "fmt"
 
 func CmdInfo(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		PrintJSON(struct {
 			Path        string `json:"path"`
@@ -34,7 +34,7 @@ func CmdInfo(path string) {
 }
 
 func CmdTracks(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		PrintJSON(c.Tracks)
 		return
@@ -58,7 +58,7 @@ func CmdTracks(path string) {
 }
 
 func CmdChapters(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		PrintJSON(c.Chapters)
 		return
@@ -73,7 +73,7 @@ func CmdChapters(path string) {
 }
 
 func CmdAttachments(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		type attJSON struct {
 			ID       uint64 `json:"id"`
@@ -98,7 +98,7 @@ func CmdAttachments(path string) {
 }
 
 func CmdTags(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		PrintJSON(c.Tags)
 		return
@@ -128,7 +128,7 @@ func CmdTags(path string) {
 }
 
 func CmdProbe(path string) {
-	c := OpenMKV(path)
+	c := openInput(path)
 	if JsonOutput {
 		PrintJSON(c)
 		return

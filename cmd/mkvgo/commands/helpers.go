@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 var JsonOutput bool
@@ -21,12 +22,12 @@ const (
 )
 
 var CmdUsage = map[string]string{
-	"info":               "mkvgo info [-json] <file.mkv>",
-	"tracks":             "mkvgo tracks [-json] <file.mkv>",
-	"chapters":           "mkvgo chapters [-json] <file.mkv>",
-	"attachments":        "mkvgo attachments [-json] <file.mkv>",
-	"tags":               "mkvgo tags [-json] <file.mkv>",
-	"probe":              "mkvgo probe [-json] <file.mkv>",
+	"info":               "mkvgo info [-json] <file.mkv|->",
+	"tracks":             "mkvgo tracks [-json] <file.mkv|->",
+	"chapters":           "mkvgo chapters [-json] <file.mkv|->",
+	"attachments":        "mkvgo attachments [-json] <file.mkv|->",
+	"tags":               "mkvgo tags [-json] <file.mkv|->",
+	"probe":              "mkvgo probe [-json] <file.mkv|->",
 	"validate":           "mkvgo validate [-json] <file.mkv>",
 	"compare":            "mkvgo compare [-json] <a.mkv> <b.mkv>",
 	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,...]",
@@ -71,6 +72,21 @@ func OpenMKV(path string) *matroska.Container {
 		Fatal(err.Error())
 	}
 	return c
+}
+
+// openInput opens the MKV container from path. When path is "-" it reads from
+// os.Stdin via ReadStream (forward-only; Cues are not populated). For any other
+// path the existing seekable reader is used so behaviour is identical to before.
+func openInput(path string) *matroska.Container {
+	if path == "-" {
+		c, _, err := reader.ReadStream(context.Background(), os.Stdin)
+		if err != nil {
+			Fatal(err.Error())
+		}
+		c.Path = "<stdin>"
+		return c
+	}
+	return OpenMKV(path)
 }
 
 func PrintJSON(v any) {

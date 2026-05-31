@@ -18,12 +18,15 @@ Global flags:
 Show container info (title, duration, muxing/writing app).
 
 ```
-mkvgo info [-json] <file.mkv>
+mkvgo info [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin (uses the streaming reader; Cues are not available).
 
 ```bash
 mkvgo info movie.mkv
 mkvgo info -json movie.mkv
+cat movie.mkv | mkvgo info -
 ```
 
 ### tracks
@@ -31,11 +34,14 @@ mkvgo info -json movie.mkv
 List all tracks with codec, language, resolution/channels.
 
 ```
-mkvgo tracks [-json] <file.mkv>
+mkvgo tracks [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin.
 
 ```bash
 mkvgo tracks movie.mkv
+cat movie.mkv | mkvgo tracks -
 ```
 
 ### chapters
@@ -43,11 +49,14 @@ mkvgo tracks movie.mkv
 List chapters with start/end timestamps.
 
 ```
-mkvgo chapters [-json] <file.mkv>
+mkvgo chapters [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin.
 
 ```bash
 mkvgo chapters movie.mkv
+cat movie.mkv | mkvgo chapters -
 ```
 
 ### attachments
@@ -55,11 +64,14 @@ mkvgo chapters movie.mkv
 List attachments (fonts, cover art, etc.) with MIME types and sizes.
 
 ```
-mkvgo attachments [-json] <file.mkv>
+mkvgo attachments [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin.
 
 ```bash
 mkvgo attachments movie.mkv
+cat movie.mkv | mkvgo attachments -
 ```
 
 ### tags
@@ -67,11 +79,14 @@ mkvgo attachments movie.mkv
 Show all tags (target type, track associations, key-value pairs).
 
 ```
-mkvgo tags [-json] <file.mkv>
+mkvgo tags [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin.
 
 ```bash
 mkvgo tags movie.mkv
+cat movie.mkv | mkvgo tags -
 ```
 
 ### probe
@@ -79,11 +94,14 @@ mkvgo tags movie.mkv
 Full dump of all metadata: info, tracks, chapters, attachments, tags.
 
 ```
-mkvgo probe [-json] <file.mkv>
+mkvgo probe [-json] <file.mkv|->
 ```
+
+Pass `-` as the path to read from stdin.
 
 ```bash
 mkvgo probe -json movie.mkv | jq '.tracks[] | select(.type == "audio")'
+cat movie.mkv | mkvgo probe -
 ```
 
 ### validate
