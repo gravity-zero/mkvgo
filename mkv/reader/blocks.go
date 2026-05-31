@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -19,10 +20,55 @@ const (
 
 	progressInterval = 50
 	maxBlockSize     = 64 * 1024 * 1024 // 64 MB max per block
+
+	bufSize = 256 << 10 // 256 KiB read-ahead
 )
 
+// countingReader wraps a bufio.Reader and tracks how many bytes have been
+// consumed since creation. Every Read increments the counter; Seek is only
+// called on the underlying io.ReadSeeker when we need a genuine rewind (which
+// BlockReader never needs — skips use discard-forward).
+type countingReader struct {
+	br  *bufio.Reader
+	src io.ReadSeeker // kept for the hybrid skip path
+	pos int64
+}
+
+func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
+	return &countingReader{
+		br:  bufio.NewReaderSize(src, bufSize),
+		src: src,
+		pos: startPos,
+	}
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.br.Read(p)
+	c.pos += int64(n)
+	return n, err
+}
+
+// discard advances the reader by exactly n bytes. io.CopyN routes through
+// c.Read which already increments c.pos, so no extra accounting is needed.
+func (c *countingReader) discard(n int64) error {
+	if n == 0 {
+		return nil
+	}
+	_, err := io.CopyN(io.Discard, c, n)
+	return err
+}
+
+// tell returns the current byte position (offset from file start).
+func (c *countingReader) tell() int64 {
+	return c.pos
+}
+
+// BlockReader reads MKV blocks sequentially from an io.ReadSeeker.
+// Internally it uses a buffered reader and tracks position by counting bytes
+// so that Seek(0, SeekCurrent) syscalls are eliminated on the hot path.
 type BlockReader struct {
-	r             io.ReadSeeker
+	r             *countingReader
+	raw           io.ReadSeeker // kept for interface compatibility
 	segEnd        int64
 	clusterEnd    int64
 	clusterTS     int64
@@ -34,7 +80,12 @@ type BlockReader struct {
 }
 
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
-	br := &BlockReader{r: r, timecodeScale: timecodeScale, segEnd: -1, clusterEnd: -1}
+	br := &BlockReader{
+		raw:           r,
+		timecodeScale: timecodeScale,
+		segEnd:        -1,
+		clusterEnd:    -1,
+	}
 	if err := br.init(); err != nil {
 		return nil, err
 	}
@@ -50,31 +101,43 @@ func (br *BlockReader) reportProgress() {
 	if br.progressFn == nil {
 		return
 	}
-	pos, _ := br.r.Seek(0, io.SeekCurrent)
-	br.progressFn(pos, br.progressTotal)
+	br.progressFn(br.r.tell(), br.progressTotal)
 }
 
 func (br *BlockReader) init() error {
-	h, _, err := ebml.ReadElementHeader(br.r)
+	// Phase 1: read EBML header ID+size from the raw (unbuffered) source.
+	// We must consume these bytes before wrapping in bufio so the buffer
+	// starts at the right position.
+	h1, n1, err := ebml.ReadElementHeader(br.raw)
 	if err != nil {
 		return fmt.Errorf("read EBML header: %w", err)
 	}
-	if h.ID != ebml.IDEBMLHeader {
-		return fmt.Errorf("expected EBML header, got 0x%X", h.ID)
+	if h1.ID != ebml.IDEBMLHeader {
+		return fmt.Errorf("expected EBML header, got 0x%X", h1.ID)
 	}
-	if _, err := br.r.Seek(h.Size, io.SeekCurrent); err != nil {
+	// Skip EBML header body via the raw reader (before we create the buffer).
+	if _, err := io.CopyN(io.Discard, br.raw, h1.Size); err != nil {
 		return err
 	}
-	h, _, err = ebml.ReadElementHeader(br.r)
+
+	// Phase 2: read Segment header.
+	h2, n2, err := ebml.ReadElementHeader(br.raw)
 	if err != nil {
 		return fmt.Errorf("read segment: %w", err)
 	}
-	if h.ID != mkv.IDSegment {
-		return fmt.Errorf("expected Segment, got 0x%X", h.ID)
+	if h2.ID != mkv.IDSegment {
+		return fmt.Errorf("expected Segment, got 0x%X", h2.ID)
 	}
-	if h.Size >= 0 {
-		cur, _ := br.r.Seek(0, io.SeekCurrent)
-		br.segEnd = cur + h.Size
+
+	// Now we know the exact byte position: n1 + h1.Size + n2.
+	startPos := int64(n1) + h1.Size + int64(n2)
+
+	// Wrap the raw reader in a counting buffered reader.
+	// The buffer will issue its first real Read from startPos onwards.
+	br.r = newCountingReader(br.raw, startPos)
+
+	if h2.Size >= 0 {
+		br.segEnd = startPos + h2.Size
 	}
 	return nil
 }
@@ -93,8 +156,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 
 	for {
 		if br.clusterEnd > 0 {
-			cur, _ := br.r.Seek(0, io.SeekCurrent)
-			if cur >= br.clusterEnd {
+			if br.r.tell() >= br.clusterEnd {
 				br.clusterEnd = -1
 				continue
 			}
@@ -118,7 +180,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			case mkv.IDBlockGroup:
 				return br.parseBlockGroup(h.Size)
 			default:
-				if _, err := br.r.Seek(h.Size, io.SeekCurrent); err != nil {
+				if err := br.r.discard(h.Size); err != nil {
 					return mkv.Block{}, err
 				}
 				continue
@@ -126,8 +188,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		}
 
 		if br.segEnd >= 0 {
-			cur, _ := br.r.Seek(0, io.SeekCurrent)
-			if cur >= br.segEnd {
+			if br.r.tell() >= br.segEnd {
 				return mkv.Block{}, io.EOF
 			}
 		}
@@ -141,22 +202,21 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		}
 		if h.ID == mkv.IDCluster {
 			if h.Size >= 0 {
-				cur, _ := br.r.Seek(0, io.SeekCurrent)
-				br.clusterEnd = cur + h.Size
+				br.clusterEnd = br.r.tell() + h.Size
 			}
 			continue
 		}
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
 		}
-		if _, err := br.r.Seek(h.Size, io.SeekCurrent); err != nil {
+		if err := br.r.discard(h.Size); err != nil {
 			return mkv.Block{}, err
 		}
 	}
 }
 
 func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
-	start, _ := br.r.Seek(0, io.SeekCurrent)
+	start := br.r.tell()
 
 	trackNum, _, err := ebml.ReadDataSize(br.r)
 	if err != nil {
@@ -177,8 +237,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	keyframe := simple && flags&0x80 != 0
 	lacing := (flags >> 1) & 0x03
 
-	cur, _ := br.r.Seek(0, io.SeekCurrent)
-	dataSize := size - (cur - start)
+	dataSize := size - (br.r.tell() - start)
 	if dataSize < 0 || dataSize > maxBlockSize {
 		return mkv.Block{}, fmt.Errorf("invalid block data size %d", dataSize)
 	}
@@ -237,14 +296,13 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 }
 
 func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
-	start, _ := br.r.Seek(0, io.SeekCurrent)
+	start := br.r.tell()
 	end := start + size
 	var block mkv.Block
 	var found bool
 
 	for {
-		cur, _ := br.r.Seek(0, io.SeekCurrent)
-		if cur >= end {
+		if br.r.tell() >= end {
 			break
 		}
 		h, _, err := ebml.ReadElementHeader(br.r)
@@ -258,7 +316,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 			}
 			found = true
 		} else {
-			if _, err := br.r.Seek(h.Size, io.SeekCurrent); err != nil {
+			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
 			}
 		}
