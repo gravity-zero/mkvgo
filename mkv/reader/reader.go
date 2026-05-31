@@ -272,6 +272,12 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				return t, err
 			}
 			t.ID = v
+		case mkv.IDTrackUID:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return t, err
+			}
+			t.UID = v
 		case mkv.IDTrackType:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

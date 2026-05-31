@@ -44,6 +44,7 @@ type SegmentInfo struct {
 
 type Track struct {
 	ID              uint64    `json:"id"`
+	UID             uint64    `json:"uid,omitempty"` // Matroska TrackUID (64-bit); distinct from TrackNumber (ID)
 	Type            TrackType `json:"type"`
 	Codec           string    `json:"codec"`
 	Language        string    `json:"language"`

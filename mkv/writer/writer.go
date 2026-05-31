@@ -197,7 +197,11 @@ func WriteTracks(w io.Writer, tracks []mkv.Track) error {
 
 func writeTrackFields(e *ew, t *mkv.Track) {
 	e.uint(mkv.IDTrackNumber, t.ID)
-	e.uint(mkv.IDTrackUID, t.ID)
+	uid := t.UID
+	if uid == 0 {
+		uid = t.ID
+	}
+	e.uint(mkv.IDTrackUID, uid)
 
 	var tt uint64
 	switch t.Type {
