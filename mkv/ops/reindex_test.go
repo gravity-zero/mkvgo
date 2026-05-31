@@ -75,15 +75,13 @@ func buildBlockGroupMKV(t *testing.T, dir, name string, withRef bool) string {
 	}
 
 	// Build a cluster with a BlockGroup manually.
-	// Block header: trackVINT(1) + relTC(0,0) + flags(0x00 = no keyframe if withRef).
-	blockPayload := []byte{0x01, 0x00, 0x00, 0x00} // track=1 (VINT), relTC=0, flags=0, then empty payload...
-	// Actually: VINT for track 1 = 0x81, relTC = 0x00 0x00, flags = 0x80 (keyframe)
-	// but for withRef we want no keyframe flag.
+	// Block payload: track VINT (0x81 = track 1) + relTC (0x00 0x00) + flags + 3 bytes of frame data.
+	// flags 0x80 = keyframe (no ReferenceBlock); 0x00 = non-keyframe (withRef path adds a ReferenceBlock).
 	flags := byte(0x00)
 	if !withRef {
 		flags = 0x80
 	}
-	blockPayload = []byte{0x81, 0x00, 0x00, flags, 0x01, 0x02, 0x03} // small payload
+	blockPayload := []byte{0x81, 0x00, 0x00, flags, 0x01, 0x02, 0x03}
 
 	// Build the Block element.
 	var blockElem bytes.Buffer
