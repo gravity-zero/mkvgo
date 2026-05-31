@@ -153,8 +153,26 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	if err := mw.WriteMetadata(c, c.Tracks, c.DurationMs); err != nil {
 		return err
 	}
+
+	progress := mkv.ProgressFrom(opts)
+
+	// Fast path: copy clusters verbatim and rebuild only the Cues index.
+	// Skipped when the caller provides a progress callback (the fast path has
+	// no per-block loop to report progress), and falls back on unknown-size
+	// clusters (streaming files).
+	if progress == nil {
+		fastErr := reindexFastCopy(mw, srcPath, c.Info.TimecodeScale, fs)
+		if fastErr == nil {
+			return mw.Finalize()
+		}
+		if fastErr != errUnknownSizeCluster {
+			return fastErr
+		}
+		// errUnknownSizeCluster: fall through to streamToWriter.
+	}
+
 	if err := streamToWriter(ctx, mw, srcPath, c.Info.TimecodeScale, fs, streamOpts{
-		remap: identityRemap(c.Tracks), progress: mkv.ProgressFrom(opts),
+		remap: identityRemap(c.Tracks), progress: progress,
 	}); err != nil {
 		return err
 	}
