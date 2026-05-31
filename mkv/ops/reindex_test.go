@@ -512,9 +512,129 @@ func TestReindex_UnknownSizeCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = reindexFastCopy(mw, patched, 1000000, nil)
+	err = reindexFastCopy(mw, patched, 1000000, nil, nil, 0)
 	if err != errUnknownSizeCluster {
 		t.Errorf("expected errUnknownSizeCluster, got %v", err)
+	}
+}
+
+// TestReindex_OversizedCluster verifies that a crafted cluster header claiming a
+// size larger than maxReindexClusterSize is rejected without allocating memory.
+func TestReindex_OversizedCluster(t *testing.T) {
+	dir := t.TempDir()
+
+	src := buildMultiClusterMKV(t, dir, "src.mkv",
+		[]mkv.Track{videoTrack(1)},
+		[][]mkv.Block{
+			{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v0")}},
+		},
+		1000,
+	)
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Locate the Cluster element (IDCluster = 0x1F43B675) and overwrite its
+	// 8-byte data-size field with a value just above maxReindexClusterSize.
+	// EBML data-size encoding for large values uses the 8-byte form:
+	//   0x01 <7 big-endian bytes of actual value>
+	// maxReindexClusterSize = 256<<20 = 0x10000000. We write 0x10000001.
+	idx := bytes.Index(data, clusterIDBytes)
+	if idx < 0 {
+		t.Fatal("IDCluster not found in source file")
+	}
+	if idx+4+8 > len(data) {
+		t.Fatal("file too short to patch cluster size")
+	}
+	// Encode 0x10000001 as VINT: 0x01 00 00 00 10 00 00 01
+	oversize := []byte{0x01, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x01}
+	copy(data[idx+4:], oversize)
+	patched := filepath.Join(dir, "patched.mkv")
+	if err := os.WriteFile(patched, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstPath := filepath.Join(dir, "dst.mkv")
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dstFile.Close()
+
+	mw := writer.NewMKVWriter(dstFile)
+	if err := mw.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000}}
+	if err := mw.WriteMetadata(c, []mkv.Track{videoTrack(1)}, 1000); err != nil {
+		t.Fatal(err)
+	}
+
+	gotErr := reindexFastCopy(mw, patched, 1000000, nil, nil, 0)
+	if gotErr == nil {
+		t.Fatal("expected error for oversized cluster, got nil")
+	}
+	// Must NOT be the unknown-size sentinel — it must be the size-limit error.
+	if gotErr == errUnknownSizeCluster {
+		t.Fatalf("got errUnknownSizeCluster, want size-limit error")
+	}
+}
+
+// TestReindex_TruncatedMidCluster verifies that a file truncated in the middle
+// of a cluster body returns a read error rather than panicking.
+func TestReindex_TruncatedMidCluster(t *testing.T) {
+	dir := t.TempDir()
+
+	src := buildMultiClusterMKV(t, dir, "src.mkv",
+		[]mkv.Track{videoTrack(1)},
+		[][]mkv.Block{
+			{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: bytes.Repeat([]byte("X"), 512)}},
+		},
+		1000,
+	)
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the cluster and keep only the first 10 bytes of its body.
+	idx := bytes.Index(data, clusterIDBytes)
+	if idx < 0 {
+		t.Fatal("IDCluster not found")
+	}
+	// Cluster header is 4 (ID) + up to 8 (size) bytes; truncate just past the header.
+	truncAt := idx + 4 + 8 + 10
+	if truncAt > len(data) {
+		truncAt = len(data) / 2
+	}
+	truncated := filepath.Join(dir, "trunc.mkv")
+	if err := os.WriteFile(truncated, data[:truncAt], 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstPath := filepath.Join(dir, "dst.mkv")
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dstFile.Close()
+
+	mw := writer.NewMKVWriter(dstFile)
+	if err := mw.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000}}
+	if err := mw.WriteMetadata(c, []mkv.Track{videoTrack(1)}, 1000); err != nil {
+		t.Fatal(err)
+	}
+
+	// Must not panic; an error is expected (unexpected EOF from io.ReadFull).
+	gotErr := reindexFastCopy(mw, truncated, 1000000, nil, nil, 0)
+	if gotErr == nil {
+		t.Fatal("expected error for mid-cluster truncation, got nil")
 	}
 }
 
@@ -566,10 +686,10 @@ func TestReindex_MultiCluster_CueTimecodes(t *testing.T) {
 	assertCuesPointToClusters(t, dst, c.Cues)
 }
 
-// TestReindex_Equivalence verifies that the fast path and streamToWriter produce
-// semantically equivalent output (same tracks, same block count and timecodes).
-// Byte equality is not expected because the fast path preserves lacing and the
-// slow path re-serialises as SimpleBlock without lacing.
+// TestReindex_Equivalence verifies that EditMetadata with and without a progress
+// callback produce semantically equivalent output (same tracks, same block count).
+// Since Fix 3, both paths use reindexFastCopy; the progress callback is simply
+// called per-cluster. Byte-level equality is expected since both take the fast path.
 func TestReindex_Equivalence(t *testing.T) {
 	dir := t.TempDir()
 
@@ -590,19 +710,24 @@ func TestReindex_Equivalence(t *testing.T) {
 		2000,
 	)
 
-	// Fast path output (progress=nil → takes fast path).
+	// Output without progress callback.
 	dstFast := filepath.Join(dir, "fast.mkv")
 	ctx := context.Background()
 	if err := EditMetadata(ctx, src, dstFast, func(c *mkv.Container) {}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Slow path output (progress != nil → takes streamToWriter).
-	dstSlow := filepath.Join(dir, "slow.mkv")
+	// Output with progress callback — also takes the fast path, and must invoke
+	// the callback at least once per cluster.
+	var progressCalls int
+	dstSlow := filepath.Join(dir, "with_progress.mkv")
 	if err := EditMetadata(ctx, src, dstSlow, func(c *mkv.Container) {}, mkv.Options{
-		Progress: func(_, _ int64) {},
+		Progress: func(_, _ int64) { progressCalls++ },
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if progressCalls == 0 {
+		t.Error("progress callback was never called in fast path")
 	}
 
 	fastC, err := reader.Open(ctx, dstFast)
@@ -611,12 +736,12 @@ func TestReindex_Equivalence(t *testing.T) {
 	}
 	slowC, err := reader.Open(ctx, dstSlow)
 	if err != nil {
-		t.Fatalf("open slow output: %v", err)
+		t.Fatalf("open with_progress output: %v", err)
 	}
 
 	// Same track count.
 	if len(fastC.Tracks) != len(slowC.Tracks) {
-		t.Errorf("track count: fast=%d slow=%d", len(fastC.Tracks), len(slowC.Tracks))
+		t.Errorf("track count: no-progress=%d with-progress=%d", len(fastC.Tracks), len(slowC.Tracks))
 	}
 
 	// Same block count per track.
@@ -624,7 +749,7 @@ func TestReindex_Equivalence(t *testing.T) {
 	slowCounts := countBlocksFromFile(t, dstSlow, 1000000)
 	for trackID := range slowCounts {
 		if fastCounts[trackID] != slowCounts[trackID] {
-			t.Errorf("track %d block count: fast=%d slow=%d", trackID, fastCounts[trackID], slowCounts[trackID])
+			t.Errorf("track %d block count: no-progress=%d with-progress=%d", trackID, fastCounts[trackID], slowCounts[trackID])
 		}
 	}
 
@@ -784,6 +909,114 @@ func TestReindex_DurationPreserved(t *testing.T) {
 	}
 }
 
+// TestReindex_TagTrackUID_RoundTrip verifies that after EditMetadata (fast path),
+// every Tag.TargetID still matches an existing track's UID.
+//
+// This is the property that was broken before Fix 2: the writer was using t.ID
+// (the small track number) as IDTrackUID, while the reader preserved the
+// original large 64-bit UID in Tag.TargetID → dangling reference.
+func TestReindex_TagTrackUID_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	// Build a source with an explicit large TrackUID (as real encoders write).
+	const bigUID = uint64(0xDEADBEEF_CAFEBABE)
+	track := mkv.Track{
+		ID: 1, UID: bigUID,
+		Type: mkv.VideoTrack, Codec: "h264", Language: "eng",
+		Width: u32(1920), Height: u32(1080), CodecPrivate: []byte{0x01},
+	}
+	// A tag that references the track by its 64-bit UID.
+	tag := mkv.Tag{
+		TargetType: "MOVIE",
+		TargetID:   bigUID,
+		SimpleTags: []mkv.SimpleTag{{Name: "TITLE", Value: "Test"}},
+	}
+
+	src := filepath.Join(dir, "src.mkv")
+	{
+		f, err := os.Create(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mw := writer.NewMKVWriter(f)
+		if err := mw.WriteStart(); err != nil {
+			t.Fatal(err)
+		}
+		c := &mkv.Container{
+			Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"},
+			Tags: []mkv.Tag{tag},
+		}
+		if err := mw.WriteMetadata(c, []mkv.Track{track}, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.WriteClusterWithCues(0, 1000000, []mkv.Block{
+			{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("kf")},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.Finalize(); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+
+	// Verify the source itself is consistent before reindex.
+	ctx := context.Background()
+	srcC, err := reader.Open(ctx, src)
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	if srcC.Tracks[0].UID != bigUID {
+		t.Fatalf("src track UID not preserved by reader: got %d, want %d", srcC.Tracks[0].UID, bigUID)
+	}
+
+	// Run EditMetadata (takes fast path since no progress).
+	dst := filepath.Join(dir, "dst.mkv")
+	if err := EditMetadata(ctx, src, dst, func(c *mkv.Container) {
+		c.Info.Title = "Tagged"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dstC, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatalf("open dst: %v", err)
+	}
+
+	// Build a set of valid UIDs from the output tracks.
+	validUIDs := make(map[uint64]bool, len(dstC.Tracks))
+	for _, tr := range dstC.Tracks {
+		uid := tr.UID
+		if uid == 0 {
+			uid = tr.ID
+		}
+		validUIDs[uid] = true
+	}
+
+	// Assert every tag with a non-zero TargetID references a real track UID.
+	for i, tg := range dstC.Tags {
+		if tg.TargetID == 0 {
+			continue
+		}
+		if !validUIDs[tg.TargetID] {
+			t.Errorf("Tag[%d].TargetID=%d does not match any track UID in output (valid: %v)",
+				i, tg.TargetID, validUIDs)
+		}
+	}
+
+	// Specifically: the bigUID tag must survive.
+	found := false
+	for _, tg := range dstC.Tags {
+		if tg.TargetID == bigUID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("no tag with TargetID=%d found in output; tags: %+v", bigUID, dstC.Tags)
+	}
+}
+
 // --- Benchmarks ---
 
 // BenchmarkReindex measures the throughput of the fast path on a large synthetic
@@ -842,8 +1075,8 @@ func BenchmarkReindex(b *testing.B) {
 	}
 }
 
-// BenchmarkReindexSlow measures the old streamToWriter path for comparison.
-func BenchmarkReindexSlow(b *testing.B) {
+// BenchmarkReindexWithProgress measures the fast path with a progress callback.
+func BenchmarkReindexWithProgress(b *testing.B) {
 	dir := b.TempDir()
 
 	const blockSize = 4 * 1024
@@ -889,7 +1122,6 @@ func BenchmarkReindexSlow(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		dst := filepath.Join(dir, "bench_dst.mkv")
 		ctx := context.Background()
-		// Force slow path by providing a progress callback.
 		if err := EditMetadata(ctx, src, dst, func(c *mkv.Container) {}, mkv.Options{
 			Progress: func(_, _ int64) {},
 		}); err != nil {
