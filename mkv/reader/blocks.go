@@ -63,17 +63,28 @@ func (c *countingReader) tell() int64 {
 	return c.pos
 }
 
+// peekedHeader is a pre-read element header kept for one iteration of Next().
+type peekedHeader struct {
+	h ebml.ElementHeader
+}
+
 // BlockReader reads MKV blocks sequentially from an io.ReadSeeker.
 // Internally it uses a buffered reader and tracks position by counting bytes
 // so that Seek(0, SeekCurrent) syscalls are eliminated on the hot path.
+//
+// Unknown-size clusters are supported: clusterEnd==-1 combined with inCluster
+// means we are inside an unknown-size cluster; the boundary is detected by
+// peeking ahead and checking if the next element is a segment-level element.
 type BlockReader struct {
 	r             *countingReader
-	raw           io.ReadSeeker // kept for interface compatibility
+	raw           io.ReadSeeker // kept for interface compatibility; nil for stream readers
 	segEnd        int64
 	clusterEnd    int64
+	inCluster     bool // true when inside a cluster (including unknown-size)
 	clusterTS     int64
 	timecodeScale int64
 	pending       []mkv.Block
+	peeked        *peekedHeader // element read in peek-ahead, to be processed next iteration
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -142,6 +153,19 @@ func (br *BlockReader) init() error {
 	return nil
 }
 
+// isSegmentLevelID returns true for element IDs that can appear directly
+// inside a Segment (as opposed to inside a Cluster). These are used to detect
+// the boundary of unknown-size clusters: reading such an ID while inside a
+// cluster means the cluster has ended.
+func isSegmentLevelID(id uint32) bool {
+	switch id {
+	case mkv.IDCluster, mkv.IDSeekHead, mkv.IDInfo, mkv.IDTracks,
+		mkv.IDCues, mkv.IDAttachments, mkv.IDChapters, mkv.IDTags:
+		return true
+	}
+	return false
+}
+
 func (br *BlockReader) Next() (mkv.Block, error) {
 	if len(br.pending) > 0 {
 		b := br.pending[0]
@@ -155,18 +179,39 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 	}
 
 	for {
-		if br.clusterEnd > 0 {
-			if br.r.tell() >= br.clusterEnd {
+		// --- Inside a cluster ---
+		if br.inCluster {
+			// Check known-size cluster boundary.
+			if br.clusterEnd >= 0 && br.r.tell() >= br.clusterEnd {
+				br.inCluster = false
 				br.clusterEnd = -1
 				continue
 			}
-			h, _, err := ebml.ReadElementHeader(br.r)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return mkv.Block{}, io.EOF
+
+			// Read next element header (or use peeked one).
+			var h ebml.ElementHeader
+			if br.peeked != nil {
+				h = br.peeked.h
+				br.peeked = nil
+			} else {
+				var err error
+				h, _, err = ebml.ReadElementHeader(br.r)
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						return mkv.Block{}, io.EOF
+					}
+					return mkv.Block{}, err
 				}
-				return mkv.Block{}, err
 			}
+
+			// For unknown-size clusters, a segment-level element ends the cluster.
+			if br.clusterEnd < 0 && isSegmentLevelID(h.ID) {
+				br.inCluster = false
+				br.clusterEnd = -1
+				br.peeked = &peekedHeader{h: h}
+				continue
+			}
+
 			switch h.ID {
 			case mkv.IDTimestamp:
 				v, err := ebml.ReadUint(br.r, h.Size)
@@ -180,6 +225,10 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			case mkv.IDBlockGroup:
 				return br.parseBlockGroup(h.Size)
 			default:
+				if h.Size < 0 {
+					// Unknown-size non-top-level element inside cluster: skip safely.
+					return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X inside cluster", h.ID)
+				}
 				if err := br.r.discard(h.Size); err != nil {
 					return mkv.Block{}, err
 				}
@@ -187,22 +236,34 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			}
 		}
 
+		// --- Between clusters (segment level) ---
 		if br.segEnd >= 0 {
 			if br.r.tell() >= br.segEnd {
 				return mkv.Block{}, io.EOF
 			}
 		}
 
-		h, _, err := ebml.ReadElementHeader(br.r)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return mkv.Block{}, io.EOF
+		var h ebml.ElementHeader
+		if br.peeked != nil {
+			h = br.peeked.h
+			br.peeked = nil
+		} else {
+			var err error
+			h, _, err = ebml.ReadElementHeader(br.r)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return mkv.Block{}, io.EOF
+				}
+				return mkv.Block{}, err
 			}
-			return mkv.Block{}, err
 		}
+
 		if h.ID == mkv.IDCluster {
+			br.inCluster = true
 			if h.Size >= 0 {
 				br.clusterEnd = br.r.tell() + h.Size
+			} else {
+				br.clusterEnd = -1 // unknown-size cluster
 			}
 			continue
 		}
