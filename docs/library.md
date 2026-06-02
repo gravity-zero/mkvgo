@@ -12,7 +12,9 @@
 | `matroska` | `github.com/gravity-zero/mkvgo/matroska` | Facade -- re-exports everything |
 | `ebml` | `github.com/gravity-zero/mkvgo/ebml` | Low-level EBML codec |
 
-For most use cases, import `matroska` (the facade). Import sub-packages directly when you need fine-grained control.
+`matroska` is the stable public API -- import it for most use cases. The `mkv`, `mkv/reader`, `mkv/writer`, `mkv/ops` and `mkv/subtitle` packages are lower-level and experimental: their APIs may change between minor versions. Import them directly when you need capabilities the facade does not expose (streaming, `NewWebMStreamWriter`).
+
+Operations process the container incrementally -- they read and write block by block (or cluster by cluster) and never hold the whole file in memory, so multi-gigabyte inputs run with bounded memory.
 
 ---
 
@@ -68,6 +70,34 @@ import "github.com/gravity-zero/mkvgo/mkv/writer"
 var buf bytes.Buffer
 err := writer.Write(&buf, container)
 ```
+
+---
+
+## WebM Output
+
+WebM is a constrained Matroska profile: the `webm` DocType and a small codec set (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles).
+
+Check whether a `Container` can be written as WebM:
+
+```go
+if err := matroska.ValidateWebM(container); err != nil {
+    // Names each track whose codec is outside the WebM subset, or which is
+    // missing mandatory init data (Opus OpusHead, Vorbis headers, AV1 av1C).
+    return err
+}
+```
+
+`matroska.WriteWebM` writes the `webm` DocType (version 4 when an AV1 track is present, else 2) plus Info and Tracks. Like `writer.Write`, it writes metadata only -- no clusters.
+
+For a complete, playable WebM with frames, remux a source file:
+
+```go
+err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
+```
+
+`RemuxToWebM` validates the codecs, copies every block verbatim into time-bounded `webm` clusters, and rejects sources with non-WebM codecs. Elements outside the WebM subset (Chapters, Attachments, Tags) are dropped; list them beforehand with `matroska.WebMNonSubsetElements(container)`.
+
+To write a WebM stream live (no source file), use `writer.NewWebMStreamWriter` -- the WebM counterpart of `NewStreamWriter`.
 
 ---
 
@@ -344,16 +374,16 @@ err := matroska.RemoveTrack(ctx, "in.mkv", "out.mkv", []uint64{3}, opts)
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/subtitle"
 
-entries, err := subtitle.ParseSRT(srtReader)
-// []subtitle.SRTEntry{Index, StartMs, EndMs, Text}
+entries, err := subtitle.ParseSRT("subs.srt")
+// []subtitle.SRTEntry{StartMs, EndMs, Text}
 ```
 
 ### ASS/SSA
 
 ```go
-assFile, err := subtitle.ParseASS(assReader)
-// assFile.ScriptInfo, assFile.Styles, assFile.Events
-// Each event: Layer, Start, End, Style, Name, Text
+assFile, err := subtitle.ParseASS("subs.ass")
+// assFile.Header (raw [Script Info] + [V4+ Styles] block), assFile.Events
+// Each subtitle.ASSEvent{StartMs, EndMs, Fields}
 ```
 
 ### Extract from MKV
@@ -381,6 +411,8 @@ err := matroska.MergeASS(ctx, "movie.mkv", "subs.ass", "out.mkv", "jpn", "Japane
 ## Error Handling
 
 All functions return `error`. No panics, no logging.
+
+The reader tolerates corrupted bodies: a zeroed or padded region between clusters (seen in some real-world rips) does not abort the read -- the parser resyncs to the next valid Cluster and returns the metadata gathered so far. A damaged EBML/Segment header still returns an error. Malformed input never panics.
 
 ```go
 c, err := matroska.Open(ctx, path)

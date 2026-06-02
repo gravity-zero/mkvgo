@@ -122,3 +122,119 @@ func identityRemap(tracks []mkv.Track) map[uint64]uint64 {
 	}
 	return remap
 }
+
+// mergeSource is one input to streamMergeToWriter: a file, its TimecodeScale,
+// and the map of its source track numbers to the output track numbers to keep.
+type mergeSource struct {
+	path  string
+	scale int64
+	remap map[uint64]uint64
+}
+
+// streamMergeToWriter k-way merges the wanted blocks of several sources by
+// timecode and writes them as time-bounded clusters. It holds only one block
+// per source plus the current cluster in memory -- bounded regardless of file
+// size, so it is safe for very large inputs (unlike collecting + sorting every
+// block). Block.Timecode is in milliseconds for every source, so cross-source
+// comparison needs no scale normalisation.
+func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int64, fs *mkv.FS, sources []mergeSource) error {
+	type state struct {
+		br   *reader.BlockReader
+		f    mkv.ReadSeekCloser
+		head mkv.Block
+		ok   bool
+	}
+	states := make([]*state, len(sources))
+	defer func() {
+		for _, s := range states {
+			if s != nil && s.f != nil {
+				s.f.Close()
+			}
+		}
+	}()
+
+	advance := func(i int) error {
+		st := states[i]
+		for {
+			blk, err := st.br.Next()
+			if err == io.EOF {
+				st.ok = false
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			newID, ok := sources[i].remap[blk.TrackNumber]
+			if !ok {
+				continue
+			}
+			blk.TrackNumber = newID
+			st.head, st.ok = blk, true
+			return nil
+		}
+	}
+
+	for i, src := range sources {
+		f, err := fs.DoOpen(src.path)
+		if err != nil {
+			return err
+		}
+		br, err := reader.NewBlockReader(f, src.scale)
+		if err != nil {
+			f.Close()
+			return err
+		}
+		states[i] = &state{br: br, f: f}
+		if err := advance(i); err != nil {
+			return err
+		}
+	}
+
+	var cluster []mkv.Block
+	clusterTS := int64(-1)
+	flush := func() error {
+		if len(cluster) == 0 {
+			return nil
+		}
+		err := mw.WriteClusterWithCues(clusterTS, outScale, cluster)
+		cluster = cluster[:0]
+		return err
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// Pick the source whose head block has the smallest timecode. Each
+		// source is read in file order; for the common single-track-per-source
+		// case that order is already sorted, so this reproduces a global sort.
+		mi := -1
+		for i, st := range states {
+			if !st.ok {
+				continue
+			}
+			if mi < 0 || st.head.Timecode < states[mi].head.Timecode {
+				mi = i
+			}
+		}
+		if mi < 0 {
+			break
+		}
+		blk := states[mi].head
+		if err := advance(mi); err != nil {
+			return err
+		}
+
+		if clusterTS < 0 {
+			clusterTS = blk.Timecode
+		}
+		if blk.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
+			if err := flush(); err != nil {
+				return err
+			}
+			clusterTS = blk.Timecode
+		}
+		cluster = append(cluster, blk)
+	}
+	return flush()
+}

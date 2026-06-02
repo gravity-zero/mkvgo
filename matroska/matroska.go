@@ -1,5 +1,12 @@
-// Package matroska provides backward-compatible access to the mkvgo toolkit.
-// New code should import mkv, mkv/reader, mkv/writer, mkv/ops, mkv/subtitle directly.
+// Package matroska is the stable, supported public API of mkvgo: a small,
+// curated facade over the lower-level building blocks in mkv and its
+// subpackages. Prefer it for application code — its exported surface is the one
+// kept backward-compatible.
+//
+// The mkv, mkv/reader, mkv/writer, mkv/ops and mkv/subtitle packages are
+// lower-level and EXPERIMENTAL: their APIs may change between minor versions.
+// Import them directly only for capabilities this facade does not expose yet
+// (e.g. streaming readers/writers, NewWebMStreamWriter).
 package matroska
 
 import (
@@ -79,18 +86,71 @@ func Write(w io.Writer, c *Container) error {
 	return writer.Write(w, c)
 }
 
+// WriteWebM writes c as a WebM file (validates WebM codec compatibility, then
+// writes with the "webm" DocType). See mkv.ValidateWebM.
+func WriteWebM(w io.Writer, c *Container) error {
+	return writer.WriteWebM(w, c)
+}
+
+// ValidateWebM reports whether c can be written as WebM, naming any track whose
+// codec falls outside the WebM subset (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
+func ValidateWebM(c *Container) error {
+	return mkv.ValidateWebM(c)
+}
+
+// IsWebMCodec reports whether a codec (short name "vp9" or Matroska id "V_VP9")
+// is permitted in WebM.
+func IsWebMCodec(codec string) bool {
+	return mkv.IsWebMCodec(codec)
+}
+
+// WebMDocTypeVersion returns the EBML DocTypeVersion needed for c as WebM
+// (4 when an AV1 track is present, else 2).
+func WebMDocTypeVersion(c *Container) uint64 {
+	return mkv.WebMDocTypeVersion(c)
+}
+
+// RemuxToWebM reads srcPath and writes a complete, playable WebM file to
+// dstPath, copying the media verbatim. Rejects sources with non-WebM codecs.
+// Non-subset elements (Chapters/Attachments/Tags) are dropped — see
+// WebMNonSubsetElements to detect that loss beforehand.
+func RemuxToWebM(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	return ops.RemuxToWebM(ctx, srcPath, dstPath, opts...)
+}
+
+// WebMNonSubsetElements lists the elements in c (Chapters/Attachments/Tags) that
+// a WebM remux will drop; empty means nothing is lost.
+func WebMNonSubsetElements(c *Container) []string {
+	return mkv.WebMNonSubsetElements(c)
+}
+
 // --- Operations ---
 
-func Mux(ctx context.Context, opts MuxOptions) error                 { return ops.Mux(ctx, opts) }
-func Demux(ctx context.Context, opts DemuxOptions) error             { return ops.Demux(ctx, opts) }
-func Split(ctx context.Context, opts SplitOptions) ([]string, error) { return ops.Split(ctx, opts) }
-func Join(ctx context.Context, sources []string, dstPath string) error {
-	return ops.Join(ctx, sources, dstPath)
+func Mux(ctx context.Context, opts MuxOptions, extra ...Options) error {
+	return ops.Mux(ctx, opts, extra...)
 }
-func Merge(ctx context.Context, opts MergeOptions) error         { return ops.Merge(ctx, opts) }
-func Validate(ctx context.Context, path string) ([]Issue, error) { return ops.Validate(ctx, path) }
-func Compare(ctx context.Context, pathA, pathB string) ([]Diff, error) {
-	return ops.Compare(ctx, pathA, pathB)
+func Demux(ctx context.Context, opts DemuxOptions, extra ...Options) error {
+	return ops.Demux(ctx, opts, extra...)
+}
+func Split(ctx context.Context, opts SplitOptions, extra ...Options) ([]string, error) {
+	return ops.Split(ctx, opts, extra...)
+}
+func Join(ctx context.Context, sources []string, dstPath string, opts ...Options) error {
+	return ops.Join(ctx, sources, dstPath, opts...)
+}
+func Merge(ctx context.Context, opts MergeOptions, extra ...Options) error {
+	return ops.Merge(ctx, opts, extra...)
+}
+func Validate(ctx context.Context, path string, opts ...Options) ([]Issue, error) {
+	return ops.Validate(ctx, path, opts...)
+}
+func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff, error) {
+	return ops.Compare(ctx, pathA, pathB, opts...)
+}
+
+// Reindex rebuilds the seek index (Cues) of a file. See ops.Reindex.
+func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	return ops.Reindex(ctx, srcPath, dstPath, opts...)
 }
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {

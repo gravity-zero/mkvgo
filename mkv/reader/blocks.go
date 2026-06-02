@@ -323,7 +323,10 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		return mkv.Block{}, err
 	}
 
-	frameCount := int(raw[0]) + 1
+	if len(raw) == 0 {
+		return mkv.Block{}, fmt.Errorf("laced block missing lacing header byte")
+	}
+	frameCount := int(raw[0]) + 1 // Matroska lace count byte = number of frames minus 1
 	raw = raw[1:]
 
 	frameSizes, err := decodeLacingSizes(lacing, raw, frameCount)
@@ -332,6 +335,9 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	}
 
 	headerBytes := lacingHeaderLen(lacing, frameSizes)
+	if headerBytes < 0 || headerBytes > len(raw) {
+		return mkv.Block{}, fmt.Errorf("laced block header (%d bytes) exceeds data (%d bytes)", headerBytes, len(raw))
+	}
 	raw = raw[headerBytes:]
 
 	tc, err := safeTimecodeMs(br.clusterTS+int64(relTC), br.timecodeScale)
@@ -362,10 +368,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	var block mkv.Block
 	var found bool
 
-	for {
-		if br.r.tell() >= end {
-			break
-		}
+	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
 			return mkv.Block{}, err
@@ -427,7 +430,13 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) ([]int, error) {
 		pos += width
 		total := firstSize
 		for i := 1; i < frameCount-1; i++ {
+			if pos > len(raw) {
+				return nil, fmt.Errorf("ebml lacing: header truncated at frame %d", i)
+			}
 			val, w := readVINTFromBuf(raw[pos:])
+			if w == 0 {
+				return nil, fmt.Errorf("ebml lacing: invalid size vint at frame %d", i)
+			}
 			pos += w
 			dataBits := uint(w * 7)
 			bias := int64(1) << (dataBits - 1)

@@ -3,35 +3,34 @@ package ops
 import (
 	"context"
 	"fmt"
-	"io"
-	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) error {
+func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
 	out, err := fs.DoCreate(opts.OutputPath)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	defer out.Close()
+	// Surface a Close error on the success path (e.g. a custom FS that finalises
+	// the write on Close) instead of silently dropping it.
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	tracks, trackMap, err := buildMuxTracks(ctx, opts.Tracks, fs)
 	if err != nil {
 		return err
 	}
 
-	blocks, timecodeScale, err := collectBlocks(ctx, opts.Tracks, trackMap, fs)
+	sources, timecodeScale, durationMs, err := buildMuxSources(ctx, opts.Tracks, trackMap, fs)
 	if err != nil {
 		return err
-	}
-
-	var durationMs int64
-	if len(blocks) > 0 {
-		durationMs = blocks[len(blocks)-1].Timecode
 	}
 
 	c := &mkv.Container{
@@ -53,7 +52,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) error {
 	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		return err
 	}
-	if err := writeBlocksAsClusters(mw, blocks, timecodeScale); err != nil {
+	if err := streamMergeToWriter(ctx, mw, timecodeScale, fs, sources); err != nil {
 		return err
 	}
 	return mw.Finalize()
@@ -102,74 +101,40 @@ type trackKey struct {
 	trackID uint64
 }
 
-func collectBlocks(ctx context.Context, inputs []mkv.TrackInput, trackMap map[trackKey]uint64, fs *mkv.FS) ([]mkv.Block, int64, error) {
-	type sourceReq struct {
-		path       string
-		wantTracks map[uint64]uint64
-	}
-	sourceMap := make(map[string]*sourceReq)
+// buildMuxSources groups the track inputs by source file (each becomes one
+// mergeSource with a track remap) and returns them along with the output
+// TimecodeScale and duration -- read from source metadata, so no blocks are
+// loaded. streamMergeToWriter then merges them with bounded memory.
+func buildMuxSources(ctx context.Context, inputs []mkv.TrackInput, trackMap map[trackKey]uint64, fs *mkv.FS) ([]mergeSource, int64, int64, error) {
+	order := make([]string, 0, len(inputs))
+	remaps := make(map[string]map[uint64]uint64)
 	for _, inp := range inputs {
-		sr, ok := sourceMap[inp.SourcePath]
+		rm, ok := remaps[inp.SourcePath]
 		if !ok {
-			sr = &sourceReq{path: inp.SourcePath, wantTracks: make(map[uint64]uint64)}
-			sourceMap[inp.SourcePath] = sr
+			rm = make(map[uint64]uint64)
+			remaps[inp.SourcePath] = rm
+			order = append(order, inp.SourcePath)
 		}
-		newID := trackMap[trackKey{inp.SourcePath, inp.TrackID}]
-		sr.wantTracks[inp.TrackID] = newID
+		rm[inp.TrackID] = trackMap[trackKey{inp.SourcePath, inp.TrackID}]
 	}
 
-	var allBlocks []mkv.Block
-	var timecodeScale int64
-
-	for _, sr := range sourceMap {
-		c, err := reader.OpenWithFS(ctx, sr.path, fs)
+	var timecodeScale, durationMs int64
+	sources := make([]mergeSource, 0, len(order))
+	for _, path := range order {
+		c, err := reader.OpenWithFS(ctx, path, fs)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		if timecodeScale == 0 {
 			timecodeScale = c.Info.TimecodeScale
 		}
-
-		f, err := fs.DoOpen(sr.path)
-		if err != nil {
-			return nil, 0, err
+		if c.DurationMs > durationMs {
+			durationMs = c.DurationMs
 		}
-
-		br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
-		if err != nil {
-			f.Close()
-			return nil, 0, err
-		}
-
-		for {
-			if ctx.Err() != nil {
-				f.Close()
-				return nil, 0, ctx.Err()
-			}
-			blk, err := br.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				f.Close()
-				return nil, 0, err
-			}
-			newID, ok := sr.wantTracks[blk.TrackNumber]
-			if !ok {
-				continue
-			}
-			blk.TrackNumber = newID
-			allBlocks = append(allBlocks, blk)
-		}
-		f.Close()
+		sources = append(sources, mergeSource{path: path, scale: c.Info.TimecodeScale, remap: remaps[path]})
 	}
-
-	sort.Slice(allBlocks, func(i, j int) bool {
-		return allBlocks[i].Timecode < allBlocks[j].Timecode
-	})
-
 	if timecodeScale == 0 {
 		timecodeScale = 1000000
 	}
-	return allBlocks, timecodeScale, nil
+	return sources, timecodeScale, durationMs, nil
 }

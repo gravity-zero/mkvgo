@@ -205,7 +205,7 @@ mkvgo edit <file.mkv> -o <out.mkv> -
 The JSON is a partial `Container` struct. Only fields you include are changed.
 
 ```bash
-mkvgo edit movie.mkv -o out.mkv '{"title":"New Title"}}'
+mkvgo edit movie.mkv -o out.mkv '{"title":"New Title"}'
 cat patch.json | mkvgo edit movie.mkv -o out.mkv -
 ```
 
@@ -255,7 +255,7 @@ mkvgo edit-inplace <file.mkv> '<json>'
 ```
 
 ```bash
-mkvgo edit-inplace movie.mkv '{"title":"Quick Fix"}}'
+mkvgo edit-inplace movie.mkv '{"title":"Quick Fix"}'
 ```
 
 ### remove-track

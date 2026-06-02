@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -67,6 +68,13 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) err
 			return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
 		}
 	}
+	// Flush buffered writers so a final write error (e.g. disk full) is surfaced
+	// rather than swallowed by the deferred Close.
+	for id, w := range writers {
+		if err := w.Flush(); err != nil {
+			return fmt.Errorf("flush track %d: %w", id, err)
+		}
+	}
 	return nil
 }
 
@@ -90,8 +98,8 @@ func buildTrackSet(c *mkv.Container, trackIDs []uint64) map[uint64]mkv.Track {
 	return m
 }
 
-func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[uint64]io.Writer, []io.Closer, error) {
-	writers := make(map[uint64]io.Writer, len(tracks))
+func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[uint64]*bufio.Writer, []io.Closer, error) {
+	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	var closers []io.Closer
 	for id, t := range tracks {
 		ext := sanitizeCodec(t.Codec)
@@ -110,7 +118,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[u
 			}
 			return nil, nil, err
 		}
-		writers[id] = f
+		writers[id] = bufio.NewWriterSize(f, 64<<10) // batch block writes
 		closers = append(closers, f)
 	}
 	return writers, closers, nil

@@ -157,6 +157,13 @@ err := ops.Reindex(ctx, "input.mkv", "output.mkv")
 
 `reader.ReadStream` parses metadata and returns a `*BlockReader` from an `io.Reader` without ever calling Seek. `writer.NewStreamWriter` writes a live MKV stream to an `io.Writer` using unknown-size Segment and Clusters. See [docs/library.md](docs/library.md) for details.
 
+**Remux a file to WebM:**
+```go
+// Validates the codecs (VP8/VP9/AV1, Vorbis/Opus, WebVTT), copies the media
+// verbatim into a webm-DocType container, rejects non-WebM codecs.
+err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
+```
+
 **Edit metadata with custom FS (S3, HTTP, etc.):**
 ```go
 s3fs := &matroska.FS{
@@ -178,12 +185,12 @@ err := matroska.EditMetadata(ctx, "s3://bucket/movie.mkv", "s3://bucket/out.mkv"
 cmd/mkvgo/         CLI binary
   commands/        one file per command group
 
-matroska/          facade -- re-exports everything, backward compat
+matroska/          facade -- stable public API, re-exports everything
 
-mkv/               core types, FS port, EBML IDs
+mkv/               core types, FS port, EBML IDs (experimental, may change)
   reader/          parse MKV → Container
   writer/          Container → MKV bytes
-  ops/             high-level operations (mux, split, merge, edit...)
+  ops/             high-level operations (mux, split, merge, edit, remux-webm...)
   subtitle/        SRT/ASS parsing
 
 ebml/              low-level EBML encoding/decoding (no Matroska knowledge)

@@ -65,6 +65,37 @@ func Write(w io.Writer, c *mkv.Container) error {
 	if err := WriteEBMLHeader(w); err != nil {
 		return err
 	}
+	return writeSegment(w, c)
+}
+
+// WriteWebM writes c as a WebM file: it first verifies that every track uses a
+// WebM-compatible codec (mkv.ValidateWebM), then writes the container with the
+// "webm" DocType. If any track is incompatible it returns an error without
+// writing anything — mkvgo cannot transcode, so this is a hard failure.
+func WriteWebM(w io.Writer, c *mkv.Container) error {
+	if err := mkv.ValidateWebM(c); err != nil {
+		return err
+	}
+	if err := writeEBMLHeaderDocType(w, "webm", mkv.WebMDocTypeVersion(c), 2); err != nil {
+		return err
+	}
+	// WebM permits only a restricted element set, so write just Info + Tracks
+	// (no chapters/attachments/tags). NOTE: like writer.Write, this writes
+	// metadata only — NO clusters. For a complete, playable .webm use
+	// writer.NewWebMStreamWriter or ops.RemuxToWebM.
+	var seg bytes.Buffer
+	if err := WriteSegmentInfo(&seg, &c.Info, c.DurationMs); err != nil {
+		return err
+	}
+	if len(c.Tracks) > 0 {
+		if err := WriteTracks(&seg, c.Tracks); err != nil {
+			return err
+		}
+	}
+	return WriteMasterElement(w, mkv.IDSegment, seg.Bytes())
+}
+
+func writeSegment(w io.Writer, c *mkv.Container) error {
 	var seg bytes.Buffer
 	if err := WriteSegmentInfo(&seg, &c.Info, c.DurationMs); err != nil {
 		return err
@@ -134,14 +165,23 @@ func WriteMasterElement(w io.Writer, id uint32, children []byte) error {
 }
 
 func WriteEBMLHeader(w io.Writer) error {
+	return writeEBMLHeaderDocType(w, "matroska", 4, 2)
+}
+
+// WriteEBMLHeaderWebM writes an EBML header declaring the "webm" DocType.
+func WriteEBMLHeaderWebM(w io.Writer) error {
+	return writeEBMLHeaderDocType(w, "webm", 2, 2)
+}
+
+func writeEBMLHeaderDocType(w io.Writer, docType string, version, readVersion uint64) error {
 	var e ew
 	e.uint(ebml.IDEBMLVersion, 1)
 	e.uint(ebml.IDEBMLReadVersion, 1)
 	e.uint(ebml.IDEBMLMaxIDLength, 4)
 	e.uint(ebml.IDEBMLMaxSizeLength, 8)
-	e.str(ebml.IDDocType, "matroska")
-	e.uint(ebml.IDDocTypeVersion, 4)
-	e.uint(ebml.IDDocTypeReadVersion, 2)
+	e.str(ebml.IDDocType, docType)
+	e.uint(ebml.IDDocTypeVersion, version)
+	e.uint(ebml.IDDocTypeReadVersion, readVersion)
 	return e.flush(w, ebml.IDEBMLHeader)
 }
 
@@ -378,6 +418,9 @@ func WriteSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, 
 }
 
 func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mkv.Block) error {
+	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
+		timecodeScale = 1000000
+	}
 	rawTS := uint64(clusterTS * 1000000 / timecodeScale)
 	var e ew
 	e.uint(mkv.IDTimestamp, rawTS)
@@ -393,6 +436,9 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 }
 
 func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {
+	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
+		timecodeScale = 1000000
+	}
 	var e ew
 	for i := range cues {
 		cp := &cues[i]

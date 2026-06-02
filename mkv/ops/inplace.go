@@ -14,6 +14,11 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// EditInPlace rewrites only the metadata region of path on disk (instant, no
+// cluster copy). It writes directly over the source via Seek+Write, so it is
+// NOT crash-safe: a crash mid-write can corrupt the file, and it fails if the
+// new metadata does not fit the existing region. For precious or untrusted data,
+// prefer EditMetadata, which writes a fresh file the caller can atomically rename.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, path, fs)
@@ -84,6 +89,14 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 
+	// Flush to stable storage. NOTE: the write above is in-place and NOT atomic —
+	// a crash mid-write can corrupt the source file. Use EditMetadata (full
+	// rewrite to a new file) when crash safety matters.
+	if s, ok := f.(interface{ Sync() error }); ok {
+		if err := s.Sync(); err != nil {
+			return fmt.Errorf("sync: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -142,6 +155,9 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 
 		switch eh.ID {
 		case mkv.IDInfo, mkv.IDTracks, mkv.IDChapters, mkv.IDAttachments, mkv.IDTags, mkv.IDSeekHead, mkv.IDVoid:
+			if eh.Size < 0 { // unknown-size metadata: a negative Seek would corrupt the scan
+				return metadataRegion{}, fmt.Errorf("unknown-size metadata element 0x%X", eh.ID)
+			}
 			if region.start < 0 {
 				region.start = pos
 			}
