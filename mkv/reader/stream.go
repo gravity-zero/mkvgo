@@ -257,7 +257,9 @@ func (p *streamParser) parseStreamInfo(size int64, c *mkv.Container) error {
 			if err != nil {
 				return err
 			}
-			c.Info.TimecodeScale = int64(v)
+			if v > 0 { // keep default; 0 scale would divide-by-zero downstream
+				c.Info.TimecodeScale = int64(v)
+			}
 		case mkv.IDDuration:
 			v, err := p.readFloat(h.Size)
 			if err != nil {
@@ -376,12 +378,49 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 			return p.parseStreamVideo(h.Size, &t)
 		case mkv.IDAudio:
 			return p.parseStreamAudio(h.Size, &t)
+		case mkv.IDContentEncodings:
+			return p.parseStreamContentEncodings(h.Size, &t)
 		default:
 			return p.skip(h.Size)
 		}
 		return nil
 	})
 	return t, err
+}
+
+// parseStreamContentEncodings mirrors the seekable parser: it extracts the
+// header-stripping bytes (ContentCompSettings) so the streaming reader restores
+// blocks identically to the seekable one.
+func (p *streamParser) parseStreamContentEncodings(size int64, t *mkv.Track) error {
+	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		if h.ID == mkv.IDContentEncoding {
+			return p.parseStreamContentEncoding(h.Size, t)
+		}
+		return p.skip(h.Size)
+	})
+}
+
+func (p *streamParser) parseStreamContentEncoding(size int64, t *mkv.Track) error {
+	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		if h.ID == mkv.IDContentCompression {
+			return p.parseStreamContentCompression(h.Size, t)
+		}
+		return p.skip(h.Size)
+	})
+}
+
+func (p *streamParser) parseStreamContentCompression(size int64, t *mkv.Track) error {
+	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		if h.ID == mkv.IDContentCompSettings {
+			v, err := p.readBytes(h.Size)
+			if err != nil {
+				return err
+			}
+			t.HeaderStripping = v
+			return nil
+		}
+		return p.skip(h.Size)
+	})
 }
 
 func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
@@ -450,7 +489,7 @@ func (p *streamParser) parseStreamChapters(size int64, c *mkv.Container) error {
 func (p *streamParser) parseStreamEdition(size int64, c *mkv.Container) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		if h.ID == mkv.IDChapterAtom {
-			ch, err := p.parseStreamChapterAtom(h.Size)
+			ch, err := p.parseStreamChapterAtom(h.Size, 0)
 			if err != nil {
 				return err
 			}
@@ -461,7 +500,10 @@ func (p *streamParser) parseStreamEdition(size int64, c *mkv.Container) error {
 	})
 }
 
-func (p *streamParser) parseStreamChapterAtom(size int64) (mkv.Chapter, error) {
+func (p *streamParser) parseStreamChapterAtom(size int64, depth int) (mkv.Chapter, error) {
+	if depth > maxChapterDepth {
+		return mkv.Chapter{}, fmt.Errorf("chapter nesting exceeds %d levels", maxChapterDepth)
+	}
 	ch := mkv.Chapter{}
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
@@ -485,6 +527,12 @@ func (p *streamParser) parseStreamChapterAtom(size int64) (mkv.Chapter, error) {
 			ch.EndMs = int64(v / 1_000_000)
 		case mkv.IDChapterDisplay:
 			return p.parseStreamChapterDisplay(h.Size, &ch)
+		case mkv.IDChapterAtom:
+			sub, err := p.parseStreamChapterAtom(h.Size, depth+1)
+			if err != nil {
+				return err
+			}
+			ch.SubChapters = append(ch.SubChapters, sub)
 		default:
 			return p.skip(h.Size)
 		}
@@ -579,7 +627,7 @@ func (p *streamParser) parseStreamTag(size int64) (mkv.Tag, error) {
 		case mkv.IDTargets:
 			return p.parseStreamTargets(h.Size, &tag)
 		case mkv.IDSimpleTag:
-			st, err := p.parseStreamSimpleTag(h.Size)
+			st, err := p.parseStreamSimpleTag(h.Size, 0)
 			if err != nil {
 				return err
 			}
@@ -614,7 +662,10 @@ func (p *streamParser) parseStreamTargets(size int64, tag *mkv.Tag) error {
 	})
 }
 
-func (p *streamParser) parseStreamSimpleTag(size int64) (mkv.SimpleTag, error) {
+func (p *streamParser) parseStreamSimpleTag(size int64, depth int) (mkv.SimpleTag, error) {
+	if depth > maxTagDepth {
+		return mkv.SimpleTag{}, fmt.Errorf("SimpleTag nesting exceeds %d levels", maxTagDepth)
+	}
 	st := mkv.SimpleTag{}
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
@@ -636,6 +687,18 @@ func (p *streamParser) parseStreamSimpleTag(size int64) (mkv.SimpleTag, error) {
 				return err
 			}
 			st.Language = v
+		case mkv.IDTagBinary:
+			v, err := p.readBytes(h.Size)
+			if err != nil {
+				return err
+			}
+			st.Binary = v
+		case mkv.IDSimpleTag:
+			sub, err := p.parseStreamSimpleTag(h.Size, depth+1)
+			if err != nil {
+				return err
+			}
+			st.SubTags = append(st.SubTags, sub)
 		default:
 			return p.skip(h.Size)
 		}

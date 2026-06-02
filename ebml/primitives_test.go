@@ -104,6 +104,30 @@ func TestReadBytes_ExceedsMaxSize(t *testing.T) {
 	}
 }
 
+// TestReadBytes_HugeDeclaredSizeNoAlloc guards against a memory DoS: a tiny
+// input that declares a near-MaxElementSize element must fail with the data
+// available, NOT allocate the declared size upfront. (If it over-allocated, this
+// test would spike ~256 MB / be killed under the race detector's memory limits.)
+func TestReadBytes_HugeDeclaredSizeNoAlloc(t *testing.T) {
+	r := bytes.NewReader([]byte{1, 2, 3, 4, 5})
+	_, err := ReadBytes(r, 256*1024*1024) // 256 MB declared, 5 bytes available
+	if err == nil {
+		t.Fatal("expected error for truncated huge element")
+	}
+}
+
+func TestCheckSizeBoundary(t *testing.T) {
+	if err := checkSize(MaxElementSize); err != nil {
+		t.Errorf("checkSize(MaxElementSize) = %v, want nil (cap is inclusive)", err)
+	}
+	if err := checkSize(MaxElementSize + 1); err == nil {
+		t.Error("checkSize(MaxElementSize+1) = nil, want error")
+	}
+	if err := checkSize(-1); err == nil {
+		t.Error("checkSize(-1) = nil, want error")
+	}
+}
+
 func TestReadBytes_NegativeSize(t *testing.T) {
 	r := strings.NewReader("x")
 	_, err := ReadBytes(r, -1)

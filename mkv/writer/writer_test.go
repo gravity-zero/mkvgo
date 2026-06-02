@@ -7,9 +7,123 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
+
+// ebmlHeaderInfo parses the EBML header of data and returns its DocType and
+// DocTypeVersion.
+func ebmlHeaderInfo(t *testing.T, data []byte) (docType string, docTypeVersion uint64) {
+	t.Helper()
+	r := bytes.NewReader(data)
+	h, _, err := ebml.ReadElementHeader(r)
+	if err != nil || h.ID != ebml.IDEBMLHeader {
+		t.Fatalf("not an EBML header: id=0x%X err=%v", h.ID, err)
+	}
+	body := make([]byte, h.Size)
+	if _, err := io.ReadFull(r, body); err != nil {
+		t.Fatal(err)
+	}
+	br := bytes.NewReader(body)
+	for {
+		eh, _, err := ebml.ReadElementHeader(br)
+		if err != nil {
+			break // end of header body
+		}
+		switch eh.ID {
+		case ebml.IDDocType:
+			if docType, err = ebml.ReadString(br, eh.Size); err != nil {
+				t.Fatal(err)
+			}
+		case ebml.IDDocTypeVersion:
+			if docTypeVersion, err = ebml.ReadUint(br, eh.Size); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			br.Seek(eh.Size, io.SeekCurrent)
+		}
+	}
+	return docType, docTypeVersion
+}
+
+// TestWriteZeroTimecodeScaleNoPanic: a malformed source can yield TimecodeScale=0;
+// WriteCluster/WriteCues must not divide-by-zero (they default to 1000000).
+func TestWriteZeroTimecodeScaleNoPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("divide-by-zero panic on TimecodeScale=0: %v", r)
+		}
+	}()
+	var cbuf bytes.Buffer
+	if err := WriteCluster(&cbuf, 0, 0, []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte{1}}}); err != nil {
+		t.Fatalf("WriteCluster: %v", err)
+	}
+	var qbuf bytes.Buffer
+	if err := WriteCues(&qbuf, []mkv.CuePoint{{TimeMs: 0, Track: 1, ClusterPos: 0}}, 0); err != nil {
+		t.Fatalf("WriteCues: %v", err)
+	}
+}
+
+func TestWriteWebM(t *testing.T) {
+	opusHead := append([]byte("OpusHead"), 0x01, 0x02, 0x38, 0x01, 0x80, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00)
+	webmOK := &mkv.Container{
+		Info: mkv.SegmentInfo{TimecodeScale: 1000000},
+		Tracks: []mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "V_VP9"},
+			{ID: 2, Type: mkv.AudioTrack, Codec: "A_OPUS", CodecPrivate: opusHead},
+		},
+	}
+
+	// Default matroska writer keeps the matroska DocType.
+	var mkvBuf bytes.Buffer
+	if err := Write(&mkvBuf, webmOK); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if dt, _ := ebmlHeaderInfo(t, mkvBuf.Bytes()); dt != "matroska" {
+		t.Errorf("Write DocType = %q, want matroska", dt)
+	}
+
+	// WebM writer emits the webm DocType at version 2 for VP9/Opus.
+	var webmBuf bytes.Buffer
+	if err := WriteWebM(&webmBuf, webmOK); err != nil {
+		t.Fatalf("WriteWebM: %v", err)
+	}
+	if dt, ver := ebmlHeaderInfo(t, webmBuf.Bytes()); dt != "webm" || ver != 2 {
+		t.Errorf("WriteWebM header = (%q, v%d), want (webm, v2)", dt, ver)
+	}
+	// And it still reads back as a valid container.
+	c, err := reader.Read(context.Background(), bytes.NewReader(webmBuf.Bytes()), "out.webm")
+	if err != nil {
+		t.Fatalf("read back WebM: %v", err)
+	}
+	if len(c.Tracks) != 2 {
+		t.Errorf("read back %d tracks, want 2", len(c.Tracks))
+	}
+
+	// AV1 bumps DocTypeVersion to 4.
+	av1 := &mkv.Container{
+		Info:   mkv.SegmentInfo{TimecodeScale: 1000000},
+		Tracks: []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "V_AV1", CodecPrivate: []byte{0x81, 0x00, 0x00, 0x00}}},
+	}
+	var av1Buf bytes.Buffer
+	if err := WriteWebM(&av1Buf, av1); err != nil {
+		t.Fatalf("WriteWebM AV1: %v", err)
+	}
+	if dt, ver := ebmlHeaderInfo(t, av1Buf.Bytes()); dt != "webm" || ver != 4 {
+		t.Errorf("WriteWebM AV1 header = (%q, v%d), want (webm, v4)", dt, ver)
+	}
+
+	// Incompatible codec is rejected and nothing is written.
+	bad := &mkv.Container{Tracks: []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "V_MPEG4/ISO/AVC"}}}
+	var badBuf bytes.Buffer
+	if err := WriteWebM(&badBuf, bad); err == nil {
+		t.Fatal("WriteWebM accepted a non-WebM codec")
+	}
+	if badBuf.Len() != 0 {
+		t.Errorf("WriteWebM wrote %d bytes despite rejecting the container", badBuf.Len())
+	}
+}
 
 func TestWriteAndReadBack(t *testing.T) {
 	w := uint32(1920)

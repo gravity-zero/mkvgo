@@ -48,7 +48,10 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 
 	var totalDurationMs int64
 	for _, src := range sources {
-		c, _ := reader.OpenWithFS(ctx, src, fs)
+		c, err := reader.OpenWithFS(ctx, src, fs)
+		if err != nil {
+			return err
+		}
 		totalDurationMs += c.DurationMs
 	}
 

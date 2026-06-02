@@ -26,11 +26,11 @@ func ReadVINT(r io.Reader) (uint64, int, error) {
 
 	val := uint64(b)
 	if width > 1 {
-		rest := make([]byte, width-1)
-		if _, err := io.ReadFull(r, rest); err != nil {
+		var rest [7]byte // width is 1..8, so width-1 fits; avoids a heap alloc per VINT
+		if _, err := io.ReadFull(r, rest[:width-1]); err != nil {
 			return 0, 0, err
 		}
-		for _, rb := range rest {
+		for _, rb := range rest[:width-1] {
 			val = (val << 8) | uint64(rb)
 		}
 	}

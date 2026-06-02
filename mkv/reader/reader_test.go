@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -58,6 +59,233 @@ func TestInvalidVINT(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "VINT") && !strings.Contains(err.Error(), "zero") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// realCluster builds a minimal but realistic Cluster element: it opens with a
+// Timestamp (the first child the resync validator looks for) and carries one
+// tiny SimpleBlock, so isClusterAt accepts it as a genuine cluster.
+func realCluster() []byte {
+	var body bytes.Buffer
+	ebml.WriteElementHeader(&body, mkv.IDTimestamp, 1)
+	body.WriteByte(0x00)
+	var sb bytes.Buffer
+	ebml.WriteDataSize(&sb, 1)               // track number VINT = 1
+	sb.Write([]byte{0x00, 0x00, 0x80, 0xAA}) // relTC=0, flags=keyframe, 1 data byte
+	ebml.WriteElementHeader(&body, mkv.IDSimpleBlock, int64(sb.Len()))
+	body.Write(sb.Bytes())
+
+	var clu bytes.Buffer
+	ebml.WriteElementHeader(&clu, mkv.IDCluster, int64(body.Len()))
+	clu.Write(body.Bytes())
+	return clu.Bytes()
+}
+
+func gappedInfo() []byte {
+	var info bytes.Buffer
+	var tcs bytes.Buffer
+	ebml.WriteUint(&tcs, 500000, 4) // non-default TimecodeScale
+	ebml.WriteElementHeader(&info, mkv.IDTimecodeScale, int64(tcs.Len()))
+	info.Write(tcs.Bytes())
+	var dur bytes.Buffer
+	ebml.WriteFloat(&dur, 1234)
+	ebml.WriteElementHeader(&info, mkv.IDDuration, int64(dur.Len()))
+	info.Write(dur.Bytes())
+
+	var out bytes.Buffer
+	ebml.WriteElementHeader(&out, mkv.IDInfo, int64(info.Len()))
+	out.Write(info.Bytes())
+	return out.Bytes()
+}
+
+func wrapSegment(inner []byte) []byte {
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(len(inner)))
+	buf.Write(inner)
+	return buf.Bytes()
+}
+
+func oneCuePoint() []byte {
+	var cue bytes.Buffer
+	ebml.WriteElementHeader(&cue, mkv.IDCuePoint, 0)
+	var out bytes.Buffer
+	ebml.WriteElementHeader(&out, mkv.IDCues, int64(cue.Len()))
+	out.Write(cue.Bytes())
+	return out.Bytes()
+}
+
+// buildGappedMKV builds a valid MKV whose body contains a run of zero bytes
+// between two clusters — the corruption pattern seen in some real-world rips,
+// where a multi-MB region is zeroed out. If postCluster is true a recoverable
+// Cluster (followed by a Cues element) is placed after the gap.
+func buildGappedMKV(gap int, postCluster bool) []byte {
+	var inner bytes.Buffer
+	inner.Write(gappedInfo())
+	inner.Write(realCluster())     // first (good) cluster
+	inner.Write(make([]byte, gap)) // zeroed/corrupted region
+	if postCluster {
+		inner.Write(realCluster()) // resync anchor
+		inner.Write(oneCuePoint())
+	}
+	return wrapSegment(inner.Bytes())
+}
+
+func TestRecoverFromZeroPaddingGap(t *testing.T) {
+	tests := []struct {
+		name        string
+		gap         int
+		postCluster bool
+		wantCues    int
+	}{
+		// gap > 64 KiB resync window: exercises the boundary-carry path.
+		{"recoverable gap", 200 << 10, true, 1},
+		// corruption runs to the segment end: nothing to resync to, but the
+		// metadata read before the gap must still succeed (no error).
+		{"gap to end", 4096, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := buildGappedMKV(tt.gap, tt.postCluster)
+			c, err := Read(context.Background(), bytes.NewReader(data), tt.name+".mkv")
+			if err != nil {
+				t.Fatalf("Read returned error on recoverable corruption: %v", err)
+			}
+			if c.Info.TimecodeScale != 500000 {
+				t.Errorf("pre-gap Info lost: TimecodeScale = %d, want 500000", c.Info.TimecodeScale)
+			}
+			if c.Info.Duration != 1234 {
+				t.Errorf("pre-gap Info lost: Duration = %g, want 1234", c.Info.Duration)
+			}
+			if len(c.Cues) != tt.wantCues {
+				t.Errorf("post-gap recovery: got %d cues, want %d", len(c.Cues), tt.wantCues)
+			}
+		})
+	}
+}
+
+// TestResyncSkipsFalseClusterMagic plants the 4-byte Cluster ID by chance inside
+// the corrupted region. The false anchor declares a huge size: a naive resync
+// that trusted it would skip clean past the genuine cluster AND the Cues (losing
+// them), so this test fails if the validation in isClusterAt is removed. With
+// the guard, the candidate is rejected (its declared size overruns the segment)
+// and recovery lands on the real cluster, so the Cues survive.
+func TestResyncSkipsFalseClusterMagic(t *testing.T) {
+	// Cluster magic + a 3-byte size VINT encoding 65535 — far past segment end.
+	falseAnchor := []byte{0x1F, 0x43, 0xB6, 0x75, 0x20, 0xFF, 0xFF}
+
+	var gap bytes.Buffer
+	gap.Write(make([]byte, 4096))
+	gap.Write(falseAnchor)
+	gap.Write(make([]byte, 4096))
+
+	var inner bytes.Buffer
+	inner.Write(gappedInfo())
+	inner.Write(realCluster()) // first good cluster
+	inner.Write(gap.Bytes())   // corruption containing a false magic
+	inner.Write(realCluster()) // the genuine resync target
+	inner.Write(oneCuePoint())
+
+	data := wrapSegment(inner.Bytes())
+	c, err := Read(context.Background(), bytes.NewReader(data), "false-magic.mkv")
+	if err != nil {
+		t.Fatalf("Read errored instead of skipping the false magic: %v", err)
+	}
+	if len(c.Cues) != 1 {
+		t.Fatalf("expected recovery at the genuine cluster (1 cue), got %d — false magic was likely trusted", len(c.Cues))
+	}
+}
+
+// TestRecoveryMultipleGaps deliberately corrupts the body with TWO separate
+// zero-padding regions; the parser must resync past both and still reach the
+// trailing Cues.
+func TestRecoveryMultipleGaps(t *testing.T) {
+	var inner bytes.Buffer
+	inner.Write(gappedInfo())
+	inner.Write(realCluster())
+	inner.Write(make([]byte, 70<<10)) // gap 1 (> 64 KiB window)
+	inner.Write(realCluster())
+	inner.Write(make([]byte, 70<<10)) // gap 2
+	inner.Write(realCluster())
+	inner.Write(oneCuePoint())
+
+	c, err := Read(context.Background(), bytes.NewReader(wrapSegment(inner.Bytes())), "multigap.mkv")
+	if err != nil {
+		t.Fatalf("Read across 2 gaps: %v", err)
+	}
+	if c.Info.TimecodeScale != 500000 {
+		t.Errorf("pre-corruption Info lost: %d", c.Info.TimecodeScale)
+	}
+	if len(c.Cues) != 1 {
+		t.Errorf("recovery across 2 gaps failed: got %d cues, want 1", len(c.Cues))
+	}
+}
+
+// TestRecoveryTruncatedInGap simulates a truncated download: the Segment claims
+// more bytes than the file actually holds, and the data ends inside a corrupted
+// gap. The parser must return the metadata it already gathered, without erroring
+// or panicking.
+func TestRecoveryTruncatedInGap(t *testing.T) {
+	var inner bytes.Buffer
+	inner.Write(gappedInfo())
+	inner.Write(realCluster())
+	inner.Write(make([]byte, 8192)) // gap — then the file just stops here
+
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(inner.Len())+100000) // Segment claims more than exists
+	buf.Write(inner.Bytes())
+
+	c, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "truncated.mkv")
+	if err != nil {
+		t.Fatalf("truncated file should recover gracefully, got: %v", err)
+	}
+	if c.Info.TimecodeScale != 500000 {
+		t.Errorf("pre-truncation Info lost: %d", c.Info.TimecodeScale)
+	}
+}
+
+// TestReadCorruptionNoPanic feeds many deliberately-corrupted variants of a real
+// muxer fixture (truncations, zeroed regions, garbage injection, header
+// byte-flips) to Read. The contract under any corruption: never panic — only
+// return data or an error. (A real-corpus complement to FuzzRead.)
+func TestReadCorruptionNoPanic(t *testing.T) {
+	orig, err := os.ReadFile("../../internal/testdata/sample.mkv")
+	if err != nil {
+		t.Skipf("sample.mkv not available: %v", err)
+	}
+	n := len(orig)
+
+	read := func(label string, data []byte) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("panic on %s: %v", label, r)
+			}
+		}()
+		_, _ = Read(context.Background(), bytes.NewReader(data), "corrupt.mkv")
+	}
+
+	for _, p := range []int{1, 5, 10, 25, 50, 75, 90, 99} {
+		read(fmt.Sprintf("trunc-%d%%", p), orig[:n*p/100])
+	}
+	for _, p := range []int{5, 20, 40, 60, 80} {
+		d := append([]byte(nil), orig...)
+		for i := n * p / 100; i < n*p/100+4096 && i < n; i++ {
+			d[i] = 0
+		}
+		read(fmt.Sprintf("zerogap-%d%%", p), d)
+	}
+	for _, p := range []int{5, 30, 60, 90} {
+		d := append([]byte(nil), orig...)
+		for i := n * p / 100; i < n*p/100+512 && i < n; i++ {
+			d[i] = 0xFF
+		}
+		read(fmt.Sprintf("garbage-%d%%", p), d)
+	}
+	for off := 0; off < 2048 && off < n; off += 8 {
+		d := append([]byte(nil), orig...)
+		d[off] ^= 0xFF
+		read(fmt.Sprintf("flip@%d", off), d)
 	}
 }
 
@@ -1234,5 +1462,37 @@ func TestTruncatedParsers(t *testing.T) {
 	for limit := 1; limit < len(fullData); limit++ {
 		tr := &errAtReader{data: fullData[:limit]}
 		Read(context.Background(), tr, "trunc.mkv")
+	}
+}
+
+// TestChapterRecursionDepthLimit guards against unbounded ChapterAtom recursion
+// (a crafted deeply-nested chapters file would otherwise stack-overflow).
+func TestChapterRecursionDepthLimit(t *testing.T) {
+	atom := []byte{} // innermost empty ChapterAtom body
+	for i := 0; i < 70; i++ {
+		var wrap bytes.Buffer
+		ebml.WriteElementHeader(&wrap, mkv.IDChapterAtom, int64(len(atom)))
+		wrap.Write(atom)
+		atom = wrap.Bytes()
+	}
+	// Chapters > EditionEntry > (70 nested ChapterAtoms)
+	var edition bytes.Buffer
+	ebml.WriteElementHeader(&edition, mkv.IDEditionEntry, int64(len(atom)))
+	edition.Write(atom)
+	var seg bytes.Buffer
+	ebml.WriteElementHeader(&seg, mkv.IDChapters, int64(edition.Len()))
+	seg.Write(edition.Bytes())
+
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+
+	_, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "deepchap.mkv")
+	if err == nil {
+		t.Fatal("expected error for deep chapter nesting")
+	}
+	if !strings.Contains(err.Error(), "chapter nesting") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

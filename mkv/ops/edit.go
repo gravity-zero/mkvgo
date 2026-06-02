@@ -3,7 +3,6 @@ package ops
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -84,18 +83,6 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	newID := uint64(len(c.Tracks) + 1)
 	remap := identityRemap(c.Tracks)
 
-	blocks, err := readFilteredBlocks(ctx, srcPath, c.Info.TimecodeScale, remap, fs)
-	if err != nil {
-		return err
-	}
-
-	addRemap := map[uint64]uint64{input.TrackID: newID}
-	addBlocks, err := readFilteredBlocks(ctx, input.SourcePath, srcAdd.Info.TimecodeScale, addRemap, fs)
-	if err != nil {
-		return err
-	}
-	blocks = mergeBlocks(blocks, addBlocks)
-
 	t := *addedTrack
 	t.ID = newID
 	if input.Language != "" {
@@ -107,9 +94,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	t.IsDefault = input.IsDefault
 	tracks := append(c.Tracks, t)
 
-	var durationMs int64
-	if len(blocks) > 0 {
-		durationMs = blocks[len(blocks)-1].Timecode
+	durationMs := c.DurationMs
+	if srcAdd.DurationMs > durationMs {
+		durationMs = srcAdd.DurationMs
 	}
 
 	out, err := fs.DoCreate(dstPath)
@@ -125,7 +112,11 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		return err
 	}
-	if err := writeBlocksAsClusters(mw, blocks, c.Info.TimecodeScale); err != nil {
+	sources := []mergeSource{
+		{path: srcPath, scale: c.Info.TimecodeScale, remap: remap},
+		{path: input.SourcePath, scale: srcAdd.Info.TimecodeScale, remap: map[uint64]uint64{input.TrackID: newID}},
+	}
+	if err := streamMergeToWriter(ctx, mw, c.Info.TimecodeScale, fs, sources); err != nil {
 		return err
 	}
 	return mw.Finalize()
@@ -195,79 +186,4 @@ func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, out
 		}
 	}
 	return fmt.Errorf("attachment %d not found", attachID)
-}
-
-func writeBlocksAsClusters(mw *writer.MKVWriter, blocks []mkv.Block, timecodeScale int64) error {
-	if len(blocks) == 0 {
-		return nil
-	}
-	var cluster []mkv.Block
-	clusterTS := blocks[0].Timecode
-
-	for i := range blocks {
-		b := &blocks[i]
-		if b.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
-			if err := mw.WriteClusterWithCues(clusterTS, timecodeScale, cluster); err != nil {
-				return err
-			}
-			cluster = cluster[:0]
-			clusterTS = b.Timecode
-		}
-		cluster = append(cluster, *b)
-	}
-	if len(cluster) > 0 {
-		return mw.WriteClusterWithCues(clusterTS, timecodeScale, cluster)
-	}
-	return nil
-}
-
-func readFilteredBlocks(ctx context.Context, path string, timecodeScale int64, remap map[uint64]uint64, fs *mkv.FS) ([]mkv.Block, error) {
-	f, err := fs.DoOpen(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	br, err := reader.NewBlockReader(f, timecodeScale)
-	if err != nil {
-		return nil, err
-	}
-
-	var blocks []mkv.Block
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		blk, err := br.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		newID, ok := remap[blk.TrackNumber]
-		if !ok {
-			continue
-		}
-		blk.TrackNumber = newID
-		blocks = append(blocks, blk)
-	}
-	return blocks, nil
-}
-
-func mergeBlocks(a, b []mkv.Block) []mkv.Block {
-	merged := make([]mkv.Block, 0, len(a)+len(b))
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		if a[i].Timecode <= b[j].Timecode {
-			merged = append(merged, a[i])
-			i++
-		} else {
-			merged = append(merged, b[j])
-			j++
-		}
-	}
-	merged = append(merged, a[i:]...)
-	merged = append(merged, b[j:]...)
-	return merged
 }

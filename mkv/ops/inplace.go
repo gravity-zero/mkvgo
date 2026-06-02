@@ -142,6 +142,9 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 
 		switch eh.ID {
 		case mkv.IDInfo, mkv.IDTracks, mkv.IDChapters, mkv.IDAttachments, mkv.IDTags, mkv.IDSeekHead, mkv.IDVoid:
+			if eh.Size < 0 { // unknown-size metadata: a negative Seek would corrupt the scan
+				return metadataRegion{}, fmt.Errorf("unknown-size metadata element 0x%X", eh.ID)
+			}
 			if region.start < 0 {
 				region.start = pos
 			}

@@ -390,6 +390,9 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	if ebmlHdr.Size < 0 {
 		return fmt.Errorf("reindex: EBML header has unknown size")
 	}
+	if ebmlHdr.Size > maxReindexClusterSize {
+		return fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
+	}
 	ebmlBody := make([]byte, ebmlHdr.Size)
 	if _, err := io.ReadFull(r, ebmlBody); err != nil {
 		return fmt.Errorf("reindex: read EBML body: %w", err)
@@ -474,6 +477,9 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 			// Copy verbatim; record position so Finalize's SeekHead points here.
 			if h.Size < 0 {
 				return fmt.Errorf("reindex: unknown-size metadata element 0x%X", h.ID)
+			}
+			if h.Size > maxReindexClusterSize {
+				return fmt.Errorf("reindex: metadata element 0x%X size %d exceeds limit (%d bytes)", h.ID, h.Size, maxReindexClusterSize)
 			}
 			// Buffer the body so we can (a) scan Info for timecodeScale and
 			// (b) write it out verbatim in one step.

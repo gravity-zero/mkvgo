@@ -53,13 +53,36 @@ func ReadFloat(r io.Reader, size int64) (float64, error) {
 	return math.Float64frombits(binary.BigEndian.Uint64(buf)), nil
 }
 
+// readExact reads exactly size bytes. For sizes above a small threshold it
+// grows the buffer incrementally (via io.LimitReader) instead of allocating
+// size bytes upfront, so a malformed element that declares a huge size but
+// supplies little data cannot force a giant allocation (memory DoS).
+func readExact(r io.Reader, size int64) ([]byte, error) {
+	if err := checkSize(size); err != nil {
+		return nil, err
+	}
+	const maxUpfront = 1 << 20 // 1 MiB: allocate exactly for the common small case
+	if size <= maxUpfront {
+		buf := make([]byte, size)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, err
+		}
+		return buf, nil
+	}
+	buf, err := io.ReadAll(io.LimitReader(r, size))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(buf)) != size {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return buf, nil
+}
+
 // ReadString reads a UTF-8/ASCII string, trimming trailing nulls.
 func ReadString(r io.Reader, size int64) (string, error) {
-	if err := checkSize(size); err != nil {
-		return "", err
-	}
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(r, buf); err != nil {
+	buf, err := readExact(r, size)
+	if err != nil {
 		return "", err
 	}
 	for len(buf) > 0 && buf[len(buf)-1] == 0 {
@@ -70,12 +93,5 @@ func ReadString(r io.Reader, size int64) (string, error) {
 
 // ReadBytes reads raw bytes.
 func ReadBytes(r io.Reader, size int64) ([]byte, error) {
-	if err := checkSize(size); err != nil {
-		return nil, err
-	}
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return readExact(r, size)
 }

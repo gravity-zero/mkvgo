@@ -49,12 +49,35 @@ type StreamWriter struct {
 // precision). The Duration field of info is intentionally ignored: a live
 // stream has unknown duration.
 func NewStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track) (*StreamWriter, error) {
+	return newStreamWriter(w, info, tracks, WriteEBMLHeader)
+}
+
+// NewWebMStreamWriter is like NewStreamWriter but produces a complete WebM
+// stream: it first validates that every track uses a WebM-compatible codec
+// (mkv.ValidateWebM), then writes the "webm" DocType header at the right version
+// (4 if AV1, else 2). The streaming layout it emits — Info + Tracks + Clusters,
+// with no chapters/attachments/tags/SeekHead — is already within the WebM
+// element subset, so the result is a real, playable .webm (frames included),
+// unlike the metadata-only writer.WriteWebM.
+func NewWebMStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track) (*StreamWriter, error) {
+	probe := &mkv.Container{Tracks: tracks}
+	if err := mkv.ValidateWebM(probe); err != nil {
+		return nil, err
+	}
+	version := mkv.WebMDocTypeVersion(probe)
+	header := func(w io.Writer) error {
+		return writeEBMLHeaderDocType(w, "webm", version, 2)
+	}
+	return newStreamWriter(w, info, tracks, header)
+}
+
+func newStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track, writeHeader func(io.Writer) error) (*StreamWriter, error) {
 	if info.TimecodeScale <= 0 {
 		info.TimecodeScale = 1_000_000
 	}
 
 	// EBML header.
-	if err := WriteEBMLHeader(w); err != nil {
+	if err := writeHeader(w); err != nil {
 		return nil, fmt.Errorf("stream writer: EBML header: %w", err)
 	}
 

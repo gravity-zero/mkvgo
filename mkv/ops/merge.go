@@ -46,7 +46,10 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 		return fmt.Errorf("no tracks selected")
 	}
 
-	first, _ := reader.OpenWithFS(ctx, opts.Inputs[0].SourcePath, fs)
+	first, err := reader.OpenWithFS(ctx, opts.Inputs[0].SourcePath, fs)
+	if err != nil {
+		return err
+	}
 	muxOpts := mkv.MuxOptions{
 		OutputPath: opts.OutputPath,
 		Tracks:     trackInputs,

@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -105,7 +106,20 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return err
+			// A corrupted or zero-padded region in the body (seen in some real
+			// rips: a multi-MB run of 0x00 between clusters) makes the next
+			// element header undecodable. Rather than abort the whole read like
+			// a strict parser, resync to the next Cluster and keep going, as
+			// ffmpeg/mkvtoolnix do. If nothing recognizable remains, stop with
+			// the metadata gathered so far.
+			off, rerr := p.resyncToCluster(endPos)
+			if rerr != nil {
+				return rerr
+			}
+			if off < 0 {
+				break
+			}
+			continue
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
@@ -144,6 +158,120 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	return nil
 }
 
+// clusterMagic is the 4-byte Cluster element ID (0x1F43B675), the anchor used
+// to resync after a corrupted/padded region in the body.
+var clusterMagic = []byte{0x1F, 0x43, 0xB6, 0x75}
+
+// clusterChildIDs are element IDs that can legitimately be the first child of a
+// Cluster. A real cluster opens with one of these; requiring it rejects a
+// clusterMagic byte-sequence that occurs by chance inside corrupted data.
+var clusterChildIDs = map[uint32]bool{
+	mkv.IDTimestamp:   true, // 0xE7
+	mkv.IDSimpleBlock: true, // 0xA3
+	mkv.IDBlockGroup:  true, // 0xA0
+	mkv.IDVoid:        true, // 0xEC
+	0xA7:              true, // Position
+	0xAB:              true, // PrevSize
+	0xBF:              true, // CRC-32
+	0x5854:            true, // SilentTracks
+}
+
+// resyncToCluster scans forward from the current position for the next *valid*
+// Cluster, bounded by limit (the segment end, or -1 to scan until EOF). A
+// candidate is accepted only if isClusterAt confirms it (real Cluster ID + a
+// recognizable first child), so a magic sequence occurring by chance inside
+// corruption is skipped rather than trusted. On success it positions the reader
+// at the Cluster ID and returns its offset; it returns -1 (with a nil error)
+// when no valid Cluster remains before limit. Only genuine I/O errors are returned.
+func (p *parser) resyncToCluster(limit int64) (int64, error) {
+	from, err := p.r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return -1, err
+	}
+	for {
+		off, err := p.scanForMagic(from, limit)
+		if err != nil || off < 0 {
+			return -1, err
+		}
+		valid, err := p.isClusterAt(off, limit)
+		if err != nil {
+			return -1, err
+		}
+		if valid {
+			if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+				return -1, err
+			}
+			return off, nil
+		}
+		from = off + 1 // false positive: resume scanning just past it
+	}
+}
+
+// scanForMagic returns the absolute offset of the next clusterMagic at or after
+// `from` and before `limit` (-1 = until EOF), or -1 if none. It reads forward in
+// windows, carrying the last few bytes so a magic split across a read boundary
+// is still found.
+func (p *parser) scanForMagic(from, limit int64) (int64, error) {
+	if _, err := p.r.Seek(from, io.SeekStart); err != nil {
+		return -1, err
+	}
+	const window = 64 << 10
+	buf := make([]byte, len(clusterMagic)-1+window)
+	tail := 0
+	next := from
+	for {
+		base := next - int64(tail) // absolute offset of buf[0]
+		n, rerr := p.r.Read(buf[tail : tail+window])
+		end := tail + n
+
+		search := buf[:end]
+		if limit >= 0 {
+			if max := limit - base; max < int64(end) {
+				if max < 0 {
+					max = 0
+				}
+				search = buf[:max]
+			}
+		}
+		if i := bytes.Index(search, clusterMagic); i >= 0 {
+			return base + int64(i), nil
+		}
+
+		next += int64(n)
+		if (limit >= 0 && next >= limit) || rerr != nil {
+			return -1, nil
+		}
+		keep := len(clusterMagic) - 1
+		if end < keep {
+			keep = end
+		}
+		copy(buf[:keep], buf[end-keep:end])
+		tail = keep
+	}
+}
+
+// isClusterAt reports whether a real Cluster begins at off: the element ID must
+// be Cluster, its declared size must decode and (when known) fit within limit,
+// and its first child must be a recognizable cluster-level element.
+func (p *parser) isClusterAt(off, limit int64) (bool, error) {
+	if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+		return false, err
+	}
+	h, _, err := p.readHeader()
+	if err != nil || h.ID != mkv.IDCluster {
+		return false, nil
+	}
+	bodyStart, _ := p.r.Seek(0, io.SeekCurrent)
+	if h.Size >= 0 && limit >= 0 && bodyStart+h.Size > limit {
+		return false, nil // declared size overruns the segment — not a real cluster
+	}
+	child, _, err := p.readHeader()
+	if err != nil {
+		return false, nil
+	}
+	return clusterChildIDs[child.ID], nil
+}
+
 func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
@@ -164,7 +292,9 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			if err != nil {
 				return err
 			}
-			c.Info.TimecodeScale = int64(v)
+			if v > 0 { // keep the 1000000 default; a 0 scale would divide-by-zero downstream
+				c.Info.TimecodeScale = int64(v)
+			}
 		case mkv.IDDuration:
 			v, err := ebml.ReadFloat(p.r, eh.Size)
 			if err != nil {
@@ -477,7 +607,7 @@ func (p *parser) parseEditionEntry(size int64, c *mkv.Container) error {
 			}
 			ordered = v == 1
 		case mkv.IDChapterAtom:
-			ch, err := p.parseChapterAtom(eh.Size)
+			ch, err := p.parseChapterAtom(eh.Size, 0)
 			if err != nil {
 				return err
 			}
@@ -493,7 +623,10 @@ func (p *parser) parseEditionEntry(size int64, c *mkv.Container) error {
 	return nil
 }
 
-func (p *parser) parseChapterAtom(size int64) (mkv.Chapter, error) {
+func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
+	if depth > maxChapterDepth {
+		return mkv.Chapter{}, fmt.Errorf("chapter nesting exceeds %d levels", maxChapterDepth)
+	}
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	ch := mkv.Chapter{}
@@ -530,7 +663,7 @@ func (p *parser) parseChapterAtom(size int64) (mkv.Chapter, error) {
 				return ch, err
 			}
 		case mkv.IDChapterAtom:
-			sub, err := p.parseChapterAtom(eh.Size)
+			sub, err := p.parseChapterAtom(eh.Size, depth+1)
 			if err != nil {
 				return ch, err
 			}
@@ -745,6 +878,8 @@ func (p *parser) parseTargets(size int64, tag *mkv.Tag) error {
 	}
 	return nil
 }
+
+const maxChapterDepth = 64
 
 const maxTagDepth = 64
 
