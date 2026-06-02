@@ -33,7 +33,7 @@ func OpenWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, e
 }
 
 func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, error) {
-	p := &parser{r: r}
+	p := &parser{r: r, metaBudget: maxMetadataBytes}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
@@ -53,7 +53,22 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 }
 
 type parser struct {
-	r io.ReadSeeker
+	r          io.ReadSeeker
+	metaBudget int64 // remaining bytes allowed for in-memory metadata
+}
+
+// maxMetadataBytes caps the TOTAL bytes a single parse pulls into the Container
+// (attachments, codec-private, binary tags). The 512MB per-element cap does not
+// bound a file with many large metadata elements; this does. Untrusted-input
+// callers that ingest concurrently should still bound their own parallelism.
+const maxMetadataBytes = 1 << 30 // 1 GiB
+
+func (p *parser) chargeMeta(n int64) error {
+	p.metaBudget -= n
+	if p.metaBudget < 0 {
+		return fmt.Errorf("in-memory metadata exceeds %d-byte budget", maxMetadataBytes)
+	}
+	return nil
 }
 
 func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
@@ -432,6 +447,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				t.Codec = v
 			}
 		case mkv.IDCodecPrivate:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return t, err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return t, err
@@ -770,6 +788,9 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 			}
 			att.MIMEType = v
 		case mkv.IDFileData:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return att, err
+			}
 			data, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return att, err
@@ -919,6 +940,9 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 			}
 			st.Language = v
 		case mkv.IDTagBinary:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return st, err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return st, err

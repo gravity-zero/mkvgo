@@ -14,6 +14,11 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// EditInPlace rewrites only the metadata region of path on disk (instant, no
+// cluster copy). It writes directly over the source via Seek+Write, so it is
+// NOT crash-safe: a crash mid-write can corrupt the file, and it fails if the
+// new metadata does not fit the existing region. For precious or untrusted data,
+// prefer EditMetadata, which writes a fresh file the caller can atomically rename.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, path, fs)
@@ -84,6 +89,14 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 
+	// Flush to stable storage. NOTE: the write above is in-place and NOT atomic —
+	// a crash mid-write can corrupt the source file. Use EditMetadata (full
+	// rewrite to a new file) when crash safety matters.
+	if s, ok := f.(interface{ Sync() error }); ok {
+		if err := s.Sync(); err != nil {
+			return fmt.Errorf("sync: %w", err)
+		}
+	}
 	return nil
 }
 

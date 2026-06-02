@@ -44,6 +44,11 @@ func ReadElementID(r io.Reader) (uint32, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	if n > 4 {
+		// EBML element IDs are 1-4 octets; a wider VINT would silently truncate
+		// into uint32. Reject it rather than corrupt the parse.
+		return 0, n, fmt.Errorf("invalid element ID: %d-octet VINT exceeds 4-octet limit", n)
+	}
 	return uint32(val), n, nil
 }
 

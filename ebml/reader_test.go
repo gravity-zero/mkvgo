@@ -102,3 +102,17 @@ func TestReadVINT_MultiByteValues(t *testing.T) {
 		}
 	}
 }
+
+func TestReadElementID_RejectsWideVINT(t *testing.T) {
+	// A 5-octet VINT (first set bit at position 3 -> width 5) is not a valid
+	// element ID and would silently truncate into uint32.
+	_, _, err := ReadElementID(bytes.NewReader([]byte{0x08, 0x00, 0x00, 0x00, 0x01}))
+	if err == nil {
+		t.Fatal("expected error for 5-octet element ID")
+	}
+	// A valid 4-octet ID (EBML header) must still parse.
+	id, n, err := ReadElementID(bytes.NewReader([]byte{0x1A, 0x45, 0xDF, 0xA3}))
+	if err != nil || n != 4 || id != IDEBMLHeader {
+		t.Fatalf("4-octet ID: id=0x%X n=%d err=%v", id, n, err)
+	}
+}

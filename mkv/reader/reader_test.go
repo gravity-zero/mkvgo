@@ -1496,3 +1496,36 @@ func TestChapterRecursionDepthLimit(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestChargeMeta(t *testing.T) {
+	p := &parser{metaBudget: 100}
+	if err := p.chargeMeta(60); err != nil {
+		t.Fatalf("60/100: %v", err)
+	}
+	if err := p.chargeMeta(40); err != nil {
+		t.Fatalf("exactly-at-budget should pass: %v", err)
+	}
+	if err := p.chargeMeta(1); err == nil {
+		t.Fatal("expected budget-exceeded error")
+	}
+}
+
+func TestMetadataBudgetRejectsHugeAttachment(t *testing.T) {
+	// AttachedFile whose FileData declares 2 GiB (> 1 GiB budget), no body.
+	var fd bytes.Buffer
+	ebml.WriteElementHeader(&fd, mkv.IDFileData, 2<<30)
+	atts := wrapEl(mkv.IDAttachments, wrapEl(mkv.IDAttachedFile, fd.Bytes()))
+
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(len(atts)))
+	buf.Write(atts)
+
+	_, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "huge-att.mkv")
+	if err == nil {
+		t.Fatal("expected metadata-budget error")
+	}
+	if !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("expected budget error, got: %v", err)
+	}
+}
