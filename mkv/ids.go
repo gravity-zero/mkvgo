@@ -30,16 +30,18 @@ const (
 )
 
 const (
-	IDTrackEntry   = 0xAE
-	IDTrackNumber  = 0xD7
-	IDTrackUID     = 0x73C5
-	IDTrackType    = 0x83
-	IDFlagDefault  = 0x88
-	IDFlagForced   = 0x55AA
-	IDCodecID      = 0x86
-	IDLanguage     = 0x22B59C
-	IDName         = 0x536E
-	IDCodecPrivate = 0x63A2
+	IDTrackEntry      = 0xAE
+	IDTrackNumber     = 0xD7
+	IDTrackUID        = 0x73C5
+	IDTrackType       = 0x83
+	IDFlagDefault     = 0x88
+	IDFlagForced      = 0x55AA
+	IDCodecID         = 0x86
+	IDLanguage        = 0x22B59C // legacy ISO 639-2 language element
+	IDLanguageBCP47   = 0x22B59D // IETF BCP-47 language element (takes precedence)
+	IDName            = 0x536E
+	IDCodecPrivate    = 0x63A2
+	IDDefaultDuration = 0x23E383 // nominal frame duration in ns (fps = 1e9/value)
 )
 
 const (
@@ -54,6 +56,19 @@ const (
 	IDVideo       = 0xE0
 	IDPixelWidth  = 0xB0
 	IDPixelHeight = 0xBA
+)
+
+// Colour element (0x55B0) and its sub-elements. Values are CICP / ITU-T H.273
+// code points, identical to the enums FFmpeg exposes as color_space,
+// color_transfer, color_primaries and color_range. See mkv/colour.go for the
+// code-point → ffprobe-name mapping.
+const (
+	IDColour               = 0x55B0
+	IDColourMatrix         = 0x55B1 // MatrixCoefficients  → ffprobe color_space
+	IDColourBitsPerChannel = 0x55B2 // BitsPerChannel      → video bit depth
+	IDColourRange          = 0x55B9 // Range               → ffprobe color_range
+	IDColourTransfer       = 0x55BA // TransferCharacter.  → ffprobe color_transfer
+	IDColourPrimaries      = 0x55BB // Primaries           → ffprobe color_primaries
 )
 
 const (
@@ -157,4 +172,28 @@ var CodecShortName = map[string]string{
 	"S_VOBSUB":         "vobsub",
 	"S_HDMV/PGS":       "pgs",
 	"S_DVBSUB":         "dvbsub",
+}
+
+// ffprobeCodecName maps the (intentionally kept) mkvgo short codec names to the
+// codec_name FFmpeg's ffprobe reports for the same stream, for the cases where
+// the two diverge. mkvgo does NOT rename its own values (existing consumers rely
+// on them); this lookup lets a consumer normalize to ffprobe vocabulary when it
+// wants probe equivalence. Only divergent names are listed — anything absent is
+// identical in both tools (e.g. h264, hevc, aac, opus, ass).
+var ffprobeCodecName = map[string]string{
+	"srt":    "subrip",            // S_TEXT/UTF8
+	"vobsub": "dvd_subtitle",      // S_VOBSUB
+	"pgs":    "hdmv_pgs_subtitle", // S_HDMV/PGS
+	"dvbsub": "dvb_subtitle",      // S_DVBSUB
+}
+
+// FFprobeCodecName returns the codec_name ffprobe would report for a track whose
+// mkvgo Codec is shortName (as found in Track.Codec / CodecShortName). For codecs
+// that share the same name in both tools it returns shortName unchanged, so it is
+// always safe to call. It does not mutate Track.Codec.
+func FFprobeCodecName(shortName string) string {
+	if n, ok := ffprobeCodecName[shortName]; ok {
+		return n
+	}
+	return shortName
 }

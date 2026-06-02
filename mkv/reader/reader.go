@@ -399,7 +399,7 @@ func (p *parser) parseTracks(size int64, c *mkv.Container) error {
 func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
-	t := mkv.Track{Language: "eng", IsDefault: true}
+	t := mkv.Track{}
 
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
@@ -461,6 +461,14 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				return t, err
 			}
 			t.Language = v
+			t.LanguagePresent = true
+		case mkv.IDLanguageBCP47:
+			v, err := ebml.ReadString(p.r, eh.Size)
+			if err != nil {
+				return t, err
+			}
+			t.LanguageBCP47 = v
+			t.LanguagePresent = true
 		case mkv.IDName:
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
@@ -473,12 +481,23 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				return t, err
 			}
 			t.IsDefault = v == 1
+			t.DefaultPresent = true
 		case mkv.IDFlagForced:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {
 				return t, err
 			}
 			t.IsForced = v == 1
+			t.ForcedPresent = true
+		case mkv.IDDefaultDuration:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return t, err
+			}
+			if v > 0 {
+				fps := 1e9 / float64(v)
+				t.FrameRate = &fps
+			}
 		case mkv.IDVideo:
 			if err := p.parseVideoSettings(eh.Size, &t); err != nil {
 				return t, err
@@ -496,6 +515,20 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				return t, err
 			}
 		}
+	}
+	// FlagDefault defaults to 1 per the Matroska spec when absent: keep that for
+	// IsDefault, but DefaultPresent stays false so a consumer can tell an explicit
+	// flag from the applied default. Language is intentionally NOT defaulted to
+	// "eng" (v0.4.0 behaviour change): an absent language stays "" with
+	// LanguagePresent=false, matching what ffprobe reports.
+	if !t.DefaultPresent {
+		t.IsDefault = true
+	}
+	// DefaultDuration exists on audio tracks too (block duration), but exposing it
+	// as FrameRate is only meaningful for video — and matches ffprobe, which only
+	// reports r_frame_rate for video streams.
+	if t.Type != mkv.VideoTrack {
+		t.FrameRate = nil
 	}
 	return t, nil
 }
@@ -527,6 +560,70 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			}
 			h := uint32(v)
 			t.Height = &h
+		case mkv.IDColour:
+			if err := p.parseColour(eh.Size, t); err != nil {
+				return err
+			}
+		default:
+			if err := p.skip(eh.Size); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// parseColour reads the Video>Colour element (0x55B0), populating the track's
+// CICP colour code points (matrix/transfer/primaries/range) and video bit depth.
+// Each field stays nil when its sub-element is absent.
+func (p *parser) parseColour(size int64, t *mkv.Track) error {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			break
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return err
+		}
+		switch eh.ID {
+		case mkv.IDColourMatrix:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			cs := uint16(v)
+			t.ColorSpace = &cs
+		case mkv.IDColourTransfer:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			tr := uint16(v)
+			t.ColorTransfer = &tr
+		case mkv.IDColourPrimaries:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			pr := uint16(v)
+			t.ColorPrimaries = &pr
+		case mkv.IDColourRange:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			rg := uint16(v)
+			t.ColorRange = &rg
+		case mkv.IDColourBitsPerChannel:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			bd := uint16(v)
+			t.VideoBitDepth = &bd
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return err

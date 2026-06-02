@@ -306,7 +306,7 @@ func (p *streamParser) parseStreamTracks(size int64, c *mkv.Container) error {
 }
 
 func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
-	t := mkv.Track{Language: "eng", IsDefault: true}
+	t := mkv.Track{}
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTrackNumber:
@@ -356,6 +356,14 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 				return err
 			}
 			t.Language = v
+			t.LanguagePresent = true
+		case mkv.IDLanguageBCP47:
+			v, err := p.readString(h.Size)
+			if err != nil {
+				return err
+			}
+			t.LanguageBCP47 = v
+			t.LanguagePresent = true
 		case mkv.IDName:
 			v, err := p.readString(h.Size)
 			if err != nil {
@@ -368,12 +376,23 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 				return err
 			}
 			t.IsDefault = v == 1
+			t.DefaultPresent = true
 		case mkv.IDFlagForced:
 			v, err := p.readUint(h.Size)
 			if err != nil {
 				return err
 			}
 			t.IsForced = v == 1
+			t.ForcedPresent = true
+		case mkv.IDDefaultDuration:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			if v > 0 {
+				fps := 1e9 / float64(v)
+				t.FrameRate = &fps
+			}
 		case mkv.IDVideo:
 			return p.parseStreamVideo(h.Size, &t)
 		case mkv.IDAudio:
@@ -385,6 +404,15 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 		}
 		return nil
 	})
+	// Mirror the seekable parser: apply the Matroska FlagDefault spec default (1)
+	// when the element is absent, while leaving DefaultPresent false. Language is
+	// not defaulted to "eng" (v0.4.0 behaviour change). FrameRate stays video-only.
+	if !t.DefaultPresent {
+		t.IsDefault = true
+	}
+	if t.Type != mkv.VideoTrack {
+		t.FrameRate = nil
+	}
 	return t, err
 }
 
@@ -440,6 +468,55 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			}
 			hv := uint32(v)
 			t.Height = &hv
+		case mkv.IDColour:
+			return p.parseStreamColour(h.Size, t)
+		default:
+			return p.skip(h.Size)
+		}
+		return nil
+	})
+}
+
+// parseStreamColour mirrors the seekable parser's parseColour: it reads the
+// Video>Colour CICP code points and video bit depth into the track.
+func (p *streamParser) parseStreamColour(size int64, t *mkv.Track) error {
+	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		switch h.ID {
+		case mkv.IDColourMatrix:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			cs := uint16(v)
+			t.ColorSpace = &cs
+		case mkv.IDColourTransfer:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			tr := uint16(v)
+			t.ColorTransfer = &tr
+		case mkv.IDColourPrimaries:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			pr := uint16(v)
+			t.ColorPrimaries = &pr
+		case mkv.IDColourRange:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			rg := uint16(v)
+			t.ColorRange = &rg
+		case mkv.IDColourBitsPerChannel:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			bd := uint16(v)
+			t.VideoBitDepth = &bd
 		default:
 			return p.skip(h.Size)
 		}

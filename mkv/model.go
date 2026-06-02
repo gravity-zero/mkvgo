@@ -47,7 +47,7 @@ type Track struct {
 	UID             uint64    `json:"uid,omitempty"` // Matroska TrackUID (64-bit); distinct from TrackNumber (ID)
 	Type            TrackType `json:"type"`
 	Codec           string    `json:"codec"`
-	Language        string    `json:"language"`
+	Language        string    `json:"language"` // legacy ISO 639-2 (0x22B59C); "" when absent — see LanguagePresent
 	Name            string    `json:"name"`
 	IsDefault       bool      `json:"is_default"`
 	IsForced        bool      `json:"is_forced"`
@@ -57,7 +57,40 @@ type Track struct {
 	Height          *uint32   `json:"height,omitempty"`
 	Channels        *uint8    `json:"channels,omitempty"`
 	SampleRate      *float64  `json:"sample_rate,omitempty"`
-	BitDepth        *uint8    `json:"bit_depth,omitempty"`
+	BitDepth        *uint8    `json:"bit_depth,omitempty"` // audio bits/sample (0x6264); video uses VideoBitDepth
+
+	// Probe metadata (added v0.4.0). The *Present flags let a consumer tell a
+	// value that was explicitly written in the file from a spec default that the
+	// reader applied. See ResolvedLanguage for language precedence.
+	LanguageBCP47   string `json:"language_bcp47,omitempty"` // raw 0x22B59D, "" if absent
+	LanguagePresent bool   `json:"language_present"`         // a Language or LanguageBCP47 element was read
+	DefaultPresent  bool   `json:"default_present"`          // a FlagDefault element was read (else IsDefault is the spec default)
+	ForcedPresent   bool   `json:"forced_present"`           // a FlagForced element was read
+
+	// Video metadata (added v0.4.0). All nil when the source omits the element.
+	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
+	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2)
+	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings
+	// ffprobe reports with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
+	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) — ffprobe color_space
+	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
+	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
+	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9)
+}
+
+// ResolvedLanguage returns the track's effective language per the Matroska spec:
+// LanguageBCP47 (0x22B59D) takes precedence over the legacy Language (0x22B59C)
+// element when both are present. It returns "" when neither was in the file —
+// check LanguagePresent to tell that apart from an explicit empty value.
+//
+// The two elements use different vocabularies: BCP47 is e.g. "fr" / "pt-BR",
+// the legacy element is ISO 639-2 e.g. "fre" / "por". mkvgo returns the raw
+// stored value; a consumer normalizing to one scheme must convert.
+func (t *Track) ResolvedLanguage() string {
+	if t.LanguageBCP47 != "" {
+		return t.LanguageBCP47
+	}
+	return t.Language
 }
 
 type Chapter struct {

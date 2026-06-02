@@ -66,6 +66,10 @@ const (
 
 var CodecShortName = mkv.CodecShortName
 
+// FFprobeCodecName maps an mkvgo short codec name to the codec_name ffprobe would
+// report, for consumers normalizing track metadata to ffprobe vocabulary.
+var FFprobeCodecName = mkv.FFprobeCodecName
+
 // --- Reader ---
 
 func Open(ctx context.Context, path string) (*Container, error) {
