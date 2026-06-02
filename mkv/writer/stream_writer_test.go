@@ -601,3 +601,69 @@ func TestStreamWriterVerifyUnknownSizeSegmentAndClusters(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamWriterTimecodeOverflow verifies that a block whose timecode is more
+// than int16 milliseconds from the cluster start is rejected with an error,
+// instead of silently wrapping (a SimpleBlock's relative timecode is a signed
+// 16-bit field, so an out-of-range cast would corrupt the timestamp).
+func TestStreamWriterTimecodeOverflow(t *testing.T) {
+	info := mkv.SegmentInfo{TimecodeScale: 1_000_000}
+	// Audio-only stream: no keyframes, so WriteBlock never reopens a cluster and
+	// the relative timecode grows without bound — the exact at-risk case.
+	tracks := []mkv.Track{{ID: 1, Type: mkv.AudioTrack, Codec: "opus", IsDefault: true}}
+
+	newSW := func() *StreamWriter {
+		var buf bytes.Buffer
+		sw, err := NewStreamWriter(&buf, info, tracks)
+		if err != nil {
+			t.Fatalf("NewStreamWriter: %v", err)
+		}
+		return sw
+	}
+
+	// First block opens the cluster at ts=0; a later non-keyframe block +32768 ms
+	// away must error (before the fix it wrapped to -32768).
+	t.Run("WriteBlock past int16 max", func(t *testing.T) {
+		sw := newSW()
+		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 0, Data: []byte{0xAA}}); err != nil {
+			t.Fatalf("first WriteBlock: %v", err)
+		}
+		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 32768, Data: []byte{0xBB}}); err == nil {
+			t.Fatal("WriteBlock(+32768ms): expected overflow error, got nil")
+		}
+	})
+
+	// Exactly +32767 ms is the largest offset that still fits — must succeed.
+	t.Run("WriteBlock at int16 max", func(t *testing.T) {
+		sw := newSW()
+		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 0, Data: []byte{0xAA}}); err != nil {
+			t.Fatalf("first WriteBlock: %v", err)
+		}
+		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 32767, Data: []byte{0xBB}}); err != nil {
+			t.Fatalf("WriteBlock(+32767ms): unexpected error: %v", err)
+		}
+	})
+
+	// A far keyframe via WriteBlockInCurrentCluster does not reopen a cluster, so
+	// it too must error rather than wrap.
+	t.Run("WriteBlockInCurrentCluster past int16 max", func(t *testing.T) {
+		sw := newSW()
+		if err := sw.WriteBlockInCurrentCluster(mkv.Block{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte{0xAA}}); err != nil {
+			t.Fatalf("first block: %v", err)
+		}
+		if err := sw.WriteBlockInCurrentCluster(mkv.Block{TrackNumber: 1, Timecode: 40000, Keyframe: true, Data: []byte{0xBB}}); err == nil {
+			t.Fatal("WriteBlockInCurrentCluster(+40000ms): expected overflow error, got nil")
+		}
+	})
+
+	// Negative overflow: a block far before the cluster start must also error.
+	t.Run("past int16 min", func(t *testing.T) {
+		sw := newSW()
+		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 100000, Data: []byte{0xAA}}); err != nil {
+			t.Fatalf("first WriteBlock: %v", err)
+		}
+		if err := sw.WriteBlockInCurrentCluster(mkv.Block{TrackNumber: 1, Timecode: 0, Data: []byte{0xBB}}); err == nil {
+			t.Fatal("WriteBlockInCurrentCluster(-100000ms): expected overflow error, got nil")
+		}
+	})
+}

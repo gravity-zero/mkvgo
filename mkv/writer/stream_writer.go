@@ -28,6 +28,7 @@ package writer
 import (
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -138,12 +139,30 @@ func (s *StreamWriter) FlushCluster() {
 	s.inCluster = false
 }
 
+// relativeTimecode expresses b.Timecode relative to the current cluster start,
+// as the signed 16-bit value a SimpleBlock encodes. A SimpleBlock's timecode
+// field is an int16, so the offset from the cluster timestamp must fit in
+// [math.MinInt16, math.MaxInt16] (±~32 s at millisecond scale). Beyond that, a
+// blind int16() cast would wrap and silently corrupt the timestamp, so this
+// returns an error instead: the caller must open a nearer cluster (a keyframe
+// block via WriteBlock, or FlushCluster) before writing.
+func (s *StreamWriter) relativeTimecode(b mkv.Block) (int16, error) {
+	delta := b.Timecode - s.clusterTS
+	if delta < math.MinInt16 || delta > math.MaxInt16 {
+		return 0, fmt.Errorf("stream writer: block timecode %dms is %+dms from cluster start %dms, outside SimpleBlock's int16 range; open a new cluster", b.Timecode, delta, s.clusterTS)
+	}
+	return int16(delta), nil
+}
+
 // WriteBlock appends a block to the stream. A new cluster is opened
 // automatically when:
 //   - No cluster has been opened yet (first block ever).
 //   - The block is a keyframe (b.Keyframe == true) and already in a cluster.
 //
-// b.Timecode is in milliseconds (matching the mkv.Block convention).
+// b.Timecode is in milliseconds (matching the mkv.Block convention). It returns
+// an error if b.Timecode is more than int16 milliseconds (±~32 s) from the
+// current cluster's start, since a SimpleBlock cannot encode a larger offset;
+// keeping clusters short (keyframes, or FlushCluster) holds offsets in range.
 func (s *StreamWriter) WriteBlock(b mkv.Block) error {
 	// Start a new cluster on keyframe or on the very first block.
 	if !s.inCluster || b.Keyframe {
@@ -153,7 +172,10 @@ func (s *StreamWriter) WriteBlock(b mkv.Block) error {
 		s.inCluster = true
 	}
 
-	relTC := int16(b.Timecode - s.clusterTS)
+	relTC, err := s.relativeTimecode(b)
+	if err != nil {
+		return err
+	}
 	return WriteSimpleBlock(s.w, b.TrackNumber, relTC, b.Keyframe, b.Data)
 }
 
@@ -162,6 +184,11 @@ func (s *StreamWriter) WriteBlock(b mkv.Block) error {
 // streams where video keyframes should not split audio blocks mid-way.
 //
 // If no cluster is open, one is opened first.
+//
+// Because this method never opens a new cluster for a keyframe, the caller owns
+// cluster boundaries: it errors (like WriteBlock) if b.Timecode lands outside
+// int16 range relative to the current cluster start, so long-running clusters
+// must be split with FlushCluster to keep block offsets encodable.
 func (s *StreamWriter) WriteBlockInCurrentCluster(b mkv.Block) error {
 	if !s.inCluster {
 		if err := s.openCluster(b.Timecode); err != nil {
@@ -169,7 +196,10 @@ func (s *StreamWriter) WriteBlockInCurrentCluster(b mkv.Block) error {
 		}
 		s.inCluster = true
 	}
-	relTC := int16(b.Timecode - s.clusterTS)
+	relTC, err := s.relativeTimecode(b)
+	if err != nil {
+		return err
+	}
 	return WriteSimpleBlock(s.w, b.TrackNumber, relTC, b.Keyframe, b.Data)
 }
 
