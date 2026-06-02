@@ -368,10 +368,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	var block mkv.Block
 	var found bool
 
-	for {
-		if br.r.tell() >= end {
-			break
-		}
+	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
 			return mkv.Block{}, err

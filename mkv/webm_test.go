@@ -64,6 +64,11 @@ func TestValidateWebM(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "vorbis with setup ok",
+			tracks:  []Track{{ID: 1, Type: AudioTrack, Codec: "A_VORBIS", CodecPrivate: vorbisInit}},
+			wantErr: false,
+		},
+		{
 			// short names, as a real parsed Container carries them.
 			name:    "short-name vp9 + opus ok",
 			tracks:  []Track{{ID: 1, Type: VideoTrack, Codec: "vp9"}, {ID: 2, Type: AudioTrack, Codec: "opus", CodecPrivate: opusHead}},
