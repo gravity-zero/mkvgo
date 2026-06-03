@@ -31,26 +31,39 @@ func TestExtractSubtitleNotFound(t *testing.T) {
 	}
 }
 
+// TestExtractSubtitleReal is an opt-in smoke test against a real file the
+// developer points at — e.g. a real 4K HEVC HDR rip with a text subtitle track.
+// No file is committed; set MKVGO_TEST_MKV to run it. It extracts the first
+// subtitle track and checks the SRT has timing markers.
 func TestExtractSubtitleReal(t *testing.T) {
-	const realMKV = "/mnt/e/Cartoon/Serie/Man vs baby/S01/Man vs baby S01E02 - FRENCH - 1080P.mkv"
-	if _, err := os.Stat(realMKV); err != nil {
-		t.Skipf("real MKV not available: %v", err)
+	path := os.Getenv("MKVGO_TEST_MKV")
+	if path == "" {
+		t.Skip("set MKVGO_TEST_MKV to a real MKV with a text subtitle track to run")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("MKVGO_TEST_MKV not available: %v", err)
 	}
 
-	dir := t.TempDir()
-	outPath := dir + "/subs.srt"
-	assertNoErr(t, ExtractSubtitle(context.Background(), realMKV, 3, outPath))
+	c, err := OpenMeta(context.Background(), path)
+	assertNoErr(t, err)
+	var subID uint64
+	found := false
+	for _, tr := range c.Tracks {
+		if tr.Type == SubtitleTrack {
+			subID, found = tr.ID, true
+			break
+		}
+	}
+	if !found {
+		t.Skip("MKVGO_TEST_MKV has no subtitle track")
+	}
+
+	outPath := t.TempDir() + "/subs.srt"
+	assertNoErr(t, ExtractSubtitle(context.Background(), path, subID, outPath))
 
 	data, err := os.ReadFile(outPath)
 	assertNoErr(t, err)
-
-	content := string(data)
-	if !strings.Contains(content, "-->") {
+	if !strings.Contains(string(data), "-->") {
 		t.Error("SRT file doesn't contain timing markers")
-	}
-	lines := strings.Split(content, "\n")
-	t.Logf("SRT: %d lines, first 10:", len(lines))
-	for i := 0; i < 10 && i < len(lines); i++ {
-		t.Logf("  %s", lines[i])
 	}
 }
