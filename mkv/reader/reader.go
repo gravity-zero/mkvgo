@@ -42,14 +42,24 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	if err := p.parseSegment(ctx, c); err != nil {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
+	if err := setDurationMs(c); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// setDurationMs derives c.DurationMs from Info.Duration (in TimecodeScale units),
+// guarding against an overflowing product. Shared by Read and ReadMeta so both
+// report identical durations.
+func setDurationMs(c *mkv.Container) error {
 	if c.Info.Duration > 0 && c.Info.TimecodeScale > 0 {
 		d := c.Info.Duration * float64(c.Info.TimecodeScale) / 1e6
 		if d > float64(math.MaxInt64) || d < float64(math.MinInt64) {
-			return nil, fmt.Errorf("duration overflow: %g * %d", c.Info.Duration, c.Info.TimecodeScale)
+			return fmt.Errorf("duration overflow: %g * %d", c.Info.Duration, c.Info.TimecodeScale)
 		}
 		c.DurationMs = int64(d)
 	}
-	return c, nil
+	return nil
 }
 
 type parser struct {

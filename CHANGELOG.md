@@ -4,6 +4,45 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-06-03
+
+Fast metadata-only read path for library indexing. Additive — `Read` / `Open`
+are unchanged.
+
+### Added
+
+- **`ReadMeta(ctx, r, path)`** plus **`OpenMeta`** / **`OpenMetaWithFS`**,
+  mirroring the `Read` / `Open` / `OpenWithFS` trio (also re-exported from the
+  `matroska` facade). They return the same `Tracks` + `Info` (and `DurationMs`)
+  as a full `Read` — byte-identical, via the same `parseInfo` / `parseTracks`
+  logic — but stop as soon as both are parsed:
+  - never parse the Cues index, never traverse Clusters;
+  - reads are buffered (~2 KiB) so the byte-at-a-time EBML reads cost one syscall
+    instead of hundreds (matters on a network-mounted library);
+  - a head `SeekHead` is used to jump straight to Info/Tracks, so a file whose
+    `Tracks` element sits after the first Cluster still works without scanning.
+  - `Chapters`, `Attachments`, `Tags` and `Cues` are left **nil** — call
+    `Read` / `Open` for those.
+  - Hardened for untrusted input: a forged `SeekHead` cannot make the fast path
+    over-read (the `SeekID` size is bounded to a real element-ID width and
+    `SeekPosition` offsets are range-checked).
+
+### Performance (measured)
+
+On 5 real 5–9 GB mkvmerge files (`bench/main.go`), per file:
+
+| read                | bytes read | time        |
+|---------------------|-----------:|------------:|
+| `reader.Read` (full)|   ~180 KB  | ~17,000 ms  |
+| `ReadMeta`          |    ~2 KB   |    ~0.2 ms  |
+| `ffprobe` (ref)     |   ~1.2 MB  |     ~50 ms  |
+
+`ReadMeta` reads ~90× fewer bytes and is ~80,000× faster than the full `Read`,
+and ~600× fewer bytes / ~250× faster than forking `ffprobe`. The full `Read`'s
+cost is the Cues index (~790 KB across the five files) plus walking every
+Cluster — neither needed for indexing. A media server can now use the in-process
+reader for indexing instead of forking `ffprobe` per file.
+
 ## [0.4.0] - 2026-06-03
 
 Probe metadata: the track reader now exposes the fields a media indexer needs to
@@ -80,6 +119,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[0.5.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.4.0
 [0.3.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.3.1
 [0.3.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.3.0

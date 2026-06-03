@@ -80,6 +80,25 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*Container, error)
 	return reader.Read(ctx, r, path)
 }
 
+// OpenMeta is the fast metadata-only counterpart of Open: it returns Tracks +
+// Info (and DurationMs) but stops as soon as it has them, never parsing Cues or
+// traversing Clusters. Chapters/Attachments/Tags/Cues are left nil. Use it for
+// library indexing where only stream metadata is needed.
+func OpenMeta(ctx context.Context, path string) (*Container, error) {
+	return reader.OpenMeta(ctx, path)
+}
+
+// OpenMetaWithFS is OpenMeta against a caller-provided FS.
+func OpenMetaWithFS(ctx context.Context, path string, fs *FS) (*Container, error) {
+	return reader.OpenMetaWithFS(ctx, path, fs)
+}
+
+// ReadMeta is the fast metadata-only counterpart of Read: Tracks + Info (and
+// DurationMs) only, with Chapters/Attachments/Tags/Cues left nil. See OpenMeta.
+func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*Container, error) {
+	return reader.ReadMeta(ctx, r, path)
+}
+
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }

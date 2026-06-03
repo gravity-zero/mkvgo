@@ -1,6 +1,9 @@
 dist/
 /mkvgo
 /mkvgo.exe
+# bench is a local dev tool: it imports net/http, which trips golangci-lint
+# v1.64.8 on the go1.26 stdlib. Kept out of git so it never reaches CI lint.
+/bench/
 *.test
 *.out
 *.prof
