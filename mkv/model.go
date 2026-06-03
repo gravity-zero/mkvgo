@@ -68,14 +68,18 @@ type Track struct {
 	ForcedPresent   bool   `json:"forced_present"`           // a FlagForced element was read
 
 	// Video metadata (added v0.4.0). All nil when the source omits the element.
+	// As of v0.6.0 the colour fields and VideoBitDepth are also filled from the
+	// codec bitstream (H.264/HEVC SPS VUI, AV1 color_config, VP9 vpcC) when the
+	// container Colour element is absent — the container value still wins per field.
 	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
-	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2)
+	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
 	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings
 	// ffprobe reports with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
 	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) — ffprobe color_space
 	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
 	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
-	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9)
+	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
+	Profile        string  `json:"profile,omitempty"`         // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
 }
 
 // ResolvedLanguage returns the track's effective language per the Matroska spec:

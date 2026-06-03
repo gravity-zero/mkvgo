@@ -4,6 +4,58 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-06-03
+
+`ReadMeta`/`Read` now derive colour/HDR metadata from the codec bitstream when the
+container Colour element (0x55B0) is absent. Many files signal colour only in the
+codec SPS/VUI; such a track previously read as having no colour. Additive — no API
+change, the same `Track` fields are populated more often.
+
+### Added
+
+- **Colour from the codec bitstream**, as a fallback to the container Colour
+  element. When the container did not supply a field, it is filled from the
+  in-memory `Track.CodecPrivate` (no extra file I/O):
+  - **H.264** (avcC → SPS VUI): colour primaries / transfer / matrix, bit depth, profile.
+  - **HEVC** (hvcC header + SPS VUI): bit depth and profile from hvcC; primaries /
+    transfer / matrix from the SPS VUI.
+  - **AV1** (av1C header + sequence-header OBU `color_config`): primaries /
+    transfer / matrix, bit depth, profile.
+  - **VP9** (vpcC fixed fields, when a CodecPrivate is present) — best-effort.
+
+  The recovered values are CICP / ITU-T H.273 code points feeding the existing
+  `ColorSpace`/`ColorTransfer`/`ColorPrimaries`/`ColorRange`/`VideoBitDepth` fields
+  and `IsHDR()`. A Colour-less HDR10 track then reports `ColorSpaceName()="bt2020nc"`,
+  `ColorTransferName()="smpte2084"`, `VideoBitDepth=10`, `IsHDR()=true` instead of
+  empty/SDR.
+- New additive field **`Track.Profile`** (e.g. "Main 10"), derived from the SPS.
+
+### Behaviour
+
+- The container Colour element stays **authoritative**: the bitstream only fills
+  fields the container left nil (per-field precedence).
+- CICP code 2 ("unspecified") from the bitstream is treated as absent (left nil);
+  bit depth is constrained to {8, 10, 12}.
+
+### Security
+
+- The SPS / VUI / OBU parsing is **fail-soft**: a truncated, malformed or
+  adversarial `CodecPrivate` never errors, panics, hangs or allocates unboundedly
+  — the colour fields stay nil and the read continues. The parsers are panic- and
+  hang-free on their own — a bounds-checked Exp-Golomb reader with a capped
+  leading-zero run, every bitstream-driven loop count and bit width bounded, and
+  emulation-prevention stripping; the `recover()` in the dispatcher is only a
+  last-resort backstop. **`FuzzCodecColour`** drives random bytes straight at the
+  parsers *without* that backstop, so a missing bound surfaces instead of being
+  masked — it found and fixed an out-of-range bit depth and an Exp-Golomb-driven
+  loop, both kept as regression seeds.
+
+### Codecs covered
+
+H.264, HEVC and AV1 are covered with hermetic byte-fixture tests. VP9 (vpcC) is
+best-effort: VP9 colour usually lives in the container or in per-frame headers,
+the latter outside the metadata path. VVC / Dolby Vision are out of scope.
+
 ## [0.5.0] - 2026-06-03
 
 Fast metadata-only read path for library indexing. Additive — `Read` / `Open`
@@ -119,6 +171,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[0.6.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.4.0
 [0.3.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.3.1

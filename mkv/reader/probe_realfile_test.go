@@ -53,9 +53,12 @@ func TestProbeRealFileGolden(t *testing.T) {
 	}
 	v, a0, a1, s := c.Tracks[0], c.Tracks[1], c.Tracks[2], c.Tracks[3]
 
-	// Video — ffprobe: hevc 320x240 color_space=bt2020nc color_range=tv
-	// r_frame_rate=24000/1001. ffmpeg's mkv muxer wrote MatrixCoefficients+Range
-	// only (no Transfer/Primaries/BitsPerChannel), so those stay nil in BOTH tools.
+	// Video — ffprobe: hevc 320x240 color_space=bt2020nc color_range=tv Main 10
+	// 10-bit, r_frame_rate=24000/1001. ffmpeg's mkv muxer wrote only
+	// MatrixCoefficients+Range in the container Colour; the SPS VUI carries CICP 2
+	// (unspecified) for transfer/primaries, so those stay nil (matching ffprobe,
+	// which omits unspecified). Bit depth and profile come from the hvcC SPS
+	// fallback added in v0.6.0.
 	if v.Codec != "hevc" || deref(t, v.Width) != 320 || deref(t, v.Height) != 240 {
 		t.Errorf("video = %s %dx%d, want hevc 320x240", v.Codec, deref(t, v.Width), deref(t, v.Height))
 	}
@@ -65,12 +68,17 @@ func TestProbeRealFileGolden(t *testing.T) {
 	if v.ColorRangeName() != "tv" {
 		t.Errorf("color_range = %q, want tv", v.ColorRangeName())
 	}
-	if v.ColorTransfer != nil || v.ColorPrimaries != nil || v.VideoBitDepth != nil {
-		t.Errorf("transfer/primaries/bitdepth should be nil (absent in container), got %v/%v/%v",
-			v.ColorTransfer, v.ColorPrimaries, v.VideoBitDepth)
+	if v.ColorTransfer != nil || v.ColorPrimaries != nil {
+		t.Errorf("transfer/primaries should be nil (container absent + SPS unspecified), got %v/%v", v.ColorTransfer, v.ColorPrimaries)
 	}
-	if v.IsHDR() { // transfer absent → cannot assert HDR from container alone
-		t.Error("IsHDR = true, want false (no transfer function in Colour)")
+	if p16(v.VideoBitDepth) != 10 {
+		t.Errorf("VideoBitDepth = %v, want 10 (from hvcC SPS fallback)", v.VideoBitDepth)
+	}
+	if v.Profile != "Main 10" {
+		t.Errorf("profile = %q, want Main 10 (from hvcC)", v.Profile)
+	}
+	if v.IsHDR() { // transfer unspecified → cannot assert HDR
+		t.Error("IsHDR = true, want false (transfer unspecified)")
 	}
 	if v.FrameRate == nil || math.Abs(*v.FrameRate-24000.0/1001.0) > 0.01 {
 		t.Errorf("FrameRate = %v, want ~23.976", v.FrameRate)
