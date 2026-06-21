@@ -96,6 +96,10 @@ func main() {
 		commands.CmdMergeSubtitle(args)
 	case "edit-inplace":
 		commands.CmdEditInPlace(args)
+	case "to-mp4":
+		commands.CmdToMP4(args)
+	case "from-mp4":
+		commands.CmdFromMP4(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -130,6 +134,8 @@ Commands:
   validate      Check MKV structure for issues
   compare       Diff metadata of two MKV files
   reindex       Rebuild the seek index (Cues) of a file
+  to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported)
+  from-mp4      Remux an MP4 to MKV
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments)

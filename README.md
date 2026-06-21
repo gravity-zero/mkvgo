@@ -57,6 +57,8 @@ Global flags: `-json` (structured output), `--version`
 | | `join` | Concatenate multiple MKVs sequentially |
 | **Splitting** | `split` | Split MKV by time ranges or chapters |
 | **Indexing** | `reindex` | Rebuild the seek index (Cues) of a file |
+| **Remux** | `to-mp4` | Remux MKV/WebM to MP4 (`--faststart`, `--skip-unsupported`) |
+| | `from-mp4` | Remux MP4 to MKV |
 
 Full CLI reference: [docs/cli.md](docs/cli.md)
 

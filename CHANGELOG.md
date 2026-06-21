@@ -34,6 +34,8 @@ low-level code with `ebml`/`mkv`) and is experimental.
   BlockDuration by the block reader.
 - The MKV writer now emits the `Colour` element for tracks carrying colour code
   points.
+- **CLI** — `mkvgo to-mp4 [--faststart] [--skip-unsupported] <in> <out.mp4>` and
+  `mkvgo from-mp4 <in.mp4> <out.mkv>`.
 
 ## [0.6.0] - 2026-06-03
 

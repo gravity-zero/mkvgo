@@ -383,6 +383,38 @@ mkvgo reindex source.mkv reindexed.mkv
 
 ---
 
+## Remux
+
+### to-mp4
+
+Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT subtitles (→ tx3g). Colour/HDR, chapters and B-frame ordering are preserved.
+
+```
+mkvgo to-mp4 [--faststart] [--skip-unsupported] <input.mkv> <output.mp4>
+```
+
+- `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
+- `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
+
+```bash
+mkvgo to-mp4 movie.mkv movie.mp4
+mkvgo to-mp4 --faststart --skip-unsupported movie.mkv movie.mp4
+```
+
+### from-mp4
+
+Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC and tx3g subtitles; colour and chapters round-trip back to Matroska.
+
+```
+mkvgo from-mp4 <input.mp4> <output.mkv>
+```
+
+```bash
+mkvgo from-mp4 movie.mp4 movie.mkv
+```
+
+---
+
 ## Splitting
 
 ### split
