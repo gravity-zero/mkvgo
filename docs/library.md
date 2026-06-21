@@ -101,6 +101,58 @@ To write a WebM stream live (no source file), use `writer.NewWebMStreamWriter` -
 
 ---
 
+## MP4 Remux
+
+The `mp4` package remuxes between Matroska/WebM and MP4 (ISO base media file format) without transcoding. It is isolated from the EBML core -- it shares no low-level code with `ebml`/`mkv` -- and is experimental: its API may change between minor versions.
+
+```go
+import "github.com/gravity-zero/mkvgo/mp4"
+```
+
+### MKV/WebM → MP4
+
+```go
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
+```
+
+Each track's compressed samples are copied verbatim into MP4 sample tables. Supported codecs:
+
+- **Video:** H.264, HEVC, AV1.
+- **Audio:** AAC, Opus, AC-3, E-AC-3, FLAC, MP3, DTS (incl. DTS-HD; carried as `mp4a`/`esds`).
+- **Subtitles:** SRT (`S_TEXT/UTF8`) is carried as `tx3g` timed text. Bitmap/styled formats (PGS, VOBSUB, ASS) are dropped.
+
+By default an unsupported audio/video codec (e.g. TrueHD) aborts the remux, so the output never silently omits content. Set `Options.SkipUnsupported` to drop such tracks instead; each dropped track is reported via `Options.OnDrop`:
+
+```go
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{
+    SkipUnsupported: true,
+    OnDrop: func(d mp4.DroppedTrack) {
+        log.Printf("dropped track %d (%s): %s", d.ID, d.Codec, d.Reason)
+    },
+})
+```
+
+Other behaviour:
+
+- **B-frame** reordering is preserved via a signed `ctts` box.
+- **Colour/HDR** code points are written as a `colr` (nclx) box.
+- **Chapters** are written both as a Nero `chpl` box and as a QuickTime chapter track linked from the media tracks with `tref`/`chap`.
+- `moov` is placed after `mdat` by default. Set `Options.FastStart` to write `moov` first (one extra pass over the media, via a temporary file), for progressive HTTP playback.
+
+Memory use scales with the sample count, not the file size: sample data is streamed to `mdat` while only the sample tables are held in memory.
+
+### MP4 → MKV
+
+```go
+err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
+```
+
+Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC` and `tx3g`. Colour code points and chapters round-trip back to the Matroska `Colour` element and chapter atoms. Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+
+`Options` also carries `FS` (custom filesystem) and `Progress` (callback), like the other operations.
+
+---
+
 ## Mux / Demux
 
 **Mux** -- combine tracks from multiple sources:

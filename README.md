@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/gravity-zero/mkvgo/branch/master/graph/badge.svg)](https://codecov.io/gh/gravity-zero/mkvgo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Pure Go MKV/WebM toolkit. Read, write, mux, split, edit MKV containers. Stdlib only, zero external dependencies.
+Pure Go MKV/WebM toolkit. Read, write, mux, split, edit MKV containers, and remux to/from MP4. Stdlib only, zero external dependencies.
 
 CLI tool and importable Go library.
 
@@ -164,6 +164,15 @@ err := ops.Reindex(ctx, "input.mkv", "output.mkv")
 err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 ```
 
+**Remux to/from MP4 (no transcode):**
+```go
+// H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT→tx3g;
+// chapters, colour/HDR and B-frame ordering preserved. Options{FastStart:true}
+// writes moov first; Options{SkipUnsupported:true} drops unsupported tracks.
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
+err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
+```
+
 **Edit metadata with custom FS (S3, HTTP, etc.):**
 ```go
 s3fs := &matroska.FS{
@@ -194,9 +203,11 @@ mkv/               core types, FS port, EBML IDs (experimental, may change)
   subtitle/        SRT/ASS parsing
 
 ebml/              low-level EBML encoding/decoding (no Matroska knowledge)
+
+mp4/               MP4 (ISO-BMFF) remux to/from MKV (experimental, isolated from EBML core)
 ```
 
-Import graph: `cmd/mkvgo` -> `matroska` -> `mkv/*` -> `ebml`
+Import graph: `cmd/mkvgo` -> `matroska` -> `mkv/*` -> `ebml`; `mp4` -> `mkv/*`
 
 ## Build
 

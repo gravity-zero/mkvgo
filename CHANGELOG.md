@@ -4,6 +4,37 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+New `mp4` package: remux between Matroska/WebM and MP4 (ISO base media file
+format) without transcoding. It is isolated from the EBML core (shares no
+low-level code with `ebml`/`mkv`) and is experimental.
+
+### Added
+
+- **`mp4.RemuxToMP4`** — MKV/WebM → progressive MP4. Compressed samples are
+  copied verbatim into MP4 sample tables.
+  - Video: H.264, HEVC, AV1. Audio: AAC, Opus, AC-3, E-AC-3, FLAC, MP3, DTS
+    (incl. DTS-HD, carried as `mp4a`/`esds`). Subtitles: SRT (`S_TEXT/UTF8`) →
+    `tx3g` timed text.
+  - B-frame reordering preserved via a signed `ctts` box; colour/HDR code points
+    written as a `colr` (nclx) box; 64-bit `mdat` with `co64` when needed.
+  - Chapters written both as a Nero `chpl` box and a QuickTime chapter track
+    (`tref`/`chap`).
+  - `Options.FastStart` places `moov` before `mdat` for progressive HTTP
+    playback; `Options.SkipUnsupported` drops tracks whose codec cannot be
+    carried (reported via `Options.OnDrop`) instead of failing.
+- **`mp4.RemuxFromMP4`** — MP4 → MKV. Reads the codecs above plus their MP4
+  sample entries; colour and chapters round-trip back to the Matroska `Colour`
+  element and chapter atoms.
+- **`writer.WriteBlockGroup`** — writes a BlockGroup with a BlockDuration; used
+  for subtitle cues. `WriteCluster` now emits a BlockGroup for any block with a
+  non-zero `Duration`.
+- **`Block.Duration`** — new additive field, populated from a BlockGroup's
+  BlockDuration by the block reader.
+- The MKV writer now emits the `Colour` element for tracks carrying colour code
+  points.
+
 ## [0.6.0] - 2026-06-03
 
 `ReadMeta`/`Read` now derive colour/HDR metadata from the codec bitstream when the
