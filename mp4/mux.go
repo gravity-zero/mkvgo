@@ -158,19 +158,29 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 	)
 	for i := range c.Tracks {
 		t := c.Tracks[i]
-		if t.Type == mkv.SubtitleTrack && !isTextSubtitle(t.Codec) {
-			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-				Reason: "subtitle format not representable as MP4 timed text"})
-			continue
-		}
-		spec, ok := lookupCodec(t.Codec)
-		if !ok {
-			if o.SkipUnsupported {
+
+		// Subtitles never fail the remux: they are either carried or dropped with a
+		// reason, so a stray subtitle codec cannot block an otherwise-fine file.
+		var spec codecSpec
+		if t.Type == mkv.SubtitleTrack {
+			s, ok := subtitleCarriage(t.Codec, o.FlattenStyledSubs, o.NativeWebVTT)
+			if !ok {
 				o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-					Reason: "codec not supported for MP4"})
+					Reason: subtitleDropReason(t.Codec)})
 				continue
 			}
-			return nil, nil, errf("track %d: codec %q cannot be remuxed to MP4 (set Options.SkipUnsupported to drop it)", t.ID, t.Codec)
+			spec = s
+		} else {
+			s, ok := lookupCodec(t.Codec)
+			if !ok {
+				if o.SkipUnsupported {
+					o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+						Reason: "codec not supported for MP4"})
+					continue
+				}
+				return nil, nil, errf("track %d: codec %q cannot be remuxed to MP4 (set Options.SkipUnsupported to drop it)", t.ID, t.Codec)
+			}
+			spec = s
 		}
 		ot := &outTrack{
 			mkv:        t,

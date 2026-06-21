@@ -167,6 +167,7 @@ var CodecShortName = map[string]string{
 	"A_TRUEHD":         "truehd",
 	"A_PCM/INT/LIT":    "pcm",
 	"S_TEXT/UTF8":      "srt",
+	"S_TEXT/WEBVTT":    "webvtt",
 	"S_TEXT/ASS":       "ass",
 	"S_TEXT/SSA":       "ssa",
 	"S_VOBSUB":         "vobsub",

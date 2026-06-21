@@ -34,6 +34,18 @@ type Options struct {
 	// progressive HTTP streaming. It costs one extra pass over the media (written
 	// to a temporary file first). Only RemuxToMP4 honours this.
 	FastStart bool
+	// FlattenStyledSubs carries styled text subtitles that have no plain-text-safe
+	// default — ASS/SSA — as tx3g timed text instead of dropping them. Flattening
+	// is lossy: all styling, positioning and karaoke is discarded, only the text
+	// remains. (SRT and WebVTT are already carried as tx3g by default.) Only
+	// RemuxToMP4 honours this.
+	FlattenStyledSubs bool
+	// NativeWebVTT carries WebVTT tracks as native wvtt (ISO/IEC 14496-30) instead
+	// of the default tx3g. wvtt is lossless (cue settings and inline markup are
+	// preserved) and is read by Apple/Safari/CMAF, but ffmpeg's MP4 demuxer does
+	// not recognise it. Leave it off for the widest playback compatibility. Only
+	// RemuxToMP4 honours this.
+	NativeWebVTT bool
 }
 
 func optionsFrom(opts []Options) Options {

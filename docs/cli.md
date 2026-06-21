@@ -413,23 +413,29 @@ mkvgo reindex source.mkv reindexed.mkv
 
 ### to-mp4
 
-Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT subtitles (→ tx3g). Colour/HDR, chapters and B-frame ordering are preserved.
+Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT and WebVTT subtitles (→ tx3g; WebVTT can also be carried natively, see below). Colour/HDR, chapters and B-frame ordering are preserved.
 
 ```
-mkvgo to-mp4 [--faststart] [--skip-unsupported] <input.mkv> <output.mp4>
+mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] <input.mkv> <output.mp4>
 ```
 
 - `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
+- `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy — all styling, positioning and karaoke is discarded.
+- `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by ffmpeg's MP4 demuxer; leave it off for the widest compatibility.
+
+Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.
 
 ```bash
 mkvgo to-mp4 video.mkv video.mp4
 mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
+mkvgo to-mp4 --flatten-subs anime.mkv anime.mp4         # ASS → plain tx3g
+mkvgo to-mp4 --webvtt-native web.mkv web.mp4            # WebVTT → lossless wvtt (Apple/CMAF)
 ```
 
 ### from-mp4
 
-Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC and tx3g subtitles; colour and chapters round-trip back to Matroska.
+Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour and chapters round-trip back to Matroska.
 
 ```
 mkvgo from-mp4 <input.mp4> <output.mkv>

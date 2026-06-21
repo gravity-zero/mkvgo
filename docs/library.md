@@ -147,7 +147,16 @@ Memory use scales with the sample count, not the file size: sample data is strea
 err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 ```
 
-Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC` and `tx3g`. Colour code points and chapters round-trip back to the Matroska `Colour` element and chapter atoms. Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points and chapters round-trip back to the Matroska `Colour` element and chapter atoms. Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+
+#### Subtitles
+
+`RemuxToMP4` never lets a subtitle block the remux:
+
+- **SRT** (`S_TEXT/UTF8`) and **WebVTT** (`S_TEXT/WEBVTT`, and the WebM-era `D_WEBVTT/*` ids) are carried as `tx3g` timed text by default — the only MP4 subtitle form read universally (ffmpeg included). Inline markup is stripped.
+- **`Options.NativeWebVTT`** carries WebVTT losslessly as native `wvtt` (ISO/IEC 14496-30) instead: cue settings and markup are preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not — so it is opt-in.
+- **`Options.FlattenStyledSubs`** carries ASS/SSA (no native MP4 form) as `tx3g`, stripping the dialogue framing and override tags. Lossy: styling/positioning/karaoke is discarded. Without it, ASS/SSA are dropped (reported via `OnDrop`).
+- Bitmap subtitles (PGS/VOBSUB) have no MP4 timed-text form and are dropped.
 
 `Options` also carries `FS` (custom filesystem) and `Progress` (callback), like the other operations. A fully-specified call:
 

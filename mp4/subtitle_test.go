@@ -34,7 +34,7 @@ func TestTextLookaheadLeadInAndDefault(t *testing.T) {
 	// first cue runs until the next (gap-derived 2000ms), the last uses the
 	// default duration.
 	var buf bytes.Buffer
-	var tr outTrack
+	tr := outTrack{spec: codecTable["srt"]}
 	cw := &countWriter{w: &buf}
 	if err := tr.addTextBlock(cw, mkv.Block{Timecode: 1000, Data: []byte("First")}); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestTextLookaheadExplicitDurationLeavesGap(t *testing.T) {
 	// Cues with explicit BlockDuration shorter than the gap leave an empty sample
 	// between them.
 	var buf bytes.Buffer
-	var tr outTrack
+	tr := outTrack{spec: codecTable["srt"]}
 	cw := &countWriter{w: &buf}
 	_ = tr.addTextBlock(cw, mkv.Block{Timecode: 0, Duration: 500, Data: []byte("A")})
 	_ = tr.addTextBlock(cw, mkv.Block{Timecode: 2000, Duration: 500, Data: []byte("B")})

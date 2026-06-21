@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -28,6 +29,12 @@ type codecSpec struct {
 	// needsFirstFrame is set, and is nil otherwise. It returns an error when the
 	// track lacks the data needed to produce a spec-correct entry.
 	sampleEntry func(t *mkv.Track, firstFrame []byte) ([]byte, error)
+
+	// Timed-text subtitle encoders (set only when text is true). cueSample turns
+	// one Matroska subtitle block's payload into an MP4 sample; emptySample is the
+	// gap/lead-in/bridge sample that keeps the text track continuous.
+	cueSample   func(payload []byte) []byte
+	emptySample []byte
 }
 
 // lookupCodec returns the codecSpec for a Matroska short codec name, or ok=false
@@ -51,16 +58,70 @@ var codecTable = map[string]codecSpec{
 	// MP3 in MKV (A_MPEG/L3) is left unmapped by the reader, so it arrives as the
 	// raw codec ID.
 	"A_MPEG/L3": {handler: "soun", video: false, sampleEntry: mp3Entry},
-	// SRT subtitles (S_TEXT/UTF8 → mkvgo short "srt") become tx3g timed text.
-	"srt": {handler: "text", text: true, sampleEntry: srtEntry},
+	// SRT (S_TEXT/UTF8) becomes tx3g timed text. This entry is also the carriage
+	// used by default for WebVTT and for flattened ASS/SSA — tx3g is the only
+	// MP4 subtitle form universally read by players (ffmpeg included).
+	"srt": {handler: "text", text: true, sampleEntry: srtEntry, cueSample: encodeCue, emptySample: emptyCue},
 }
 
-// isTextSubtitle reports whether a subtitle codec can be carried as MP4 timed
-// text (tx3g). Only UTF-8 text (SRT) qualifies; bitmap formats (PGS, VOBSUB)
-// and styled formats (ASS/SSA) do not.
-func isTextSubtitle(codec string) bool {
-	s, ok := codecTable[codec]
-	return ok && s.text
+// wvttSpec carries WebVTT losslessly as native wvtt (ISO/IEC 14496-30). It is
+// opt-in (Options.NativeWebVTT): wvtt preserves cue settings and markup and is
+// read by Apple/Safari/CMAF, but ffmpeg's MP4 demuxer does not recognise it, so
+// it is not the default.
+var wvttSpec = codecSpec{handler: "text", text: true, sampleEntry: wvttEntry,
+	cueSample: encodeWVTTCue, emptySample: wvttEmptyCue}
+
+// subtitleCarriage returns how a Matroska subtitle codec is carried into MP4.
+//
+//   - SRT and WebVTT are carried as tx3g by default — the only MP4 subtitle form
+//     read universally (ffmpeg included). WebVTT uses native lossless wvtt instead
+//     when nativeWebVTT is set (Apple/CMAF; ffmpeg cannot read it).
+//   - ASS/SSA have no plain-text-safe default and are dropped unless flatten is
+//     set, which carries them as tx3g (all styling/positioning lost).
+//   - Bitmap formats (PGS/VOBSUB) have no MP4 timed-text form and are dropped.
+//
+// ok=false means "drop this track".
+func subtitleCarriage(codec string, flatten, nativeWebVTT bool) (codecSpec, bool) {
+	switch canonicalSubCodec(codec) {
+	case "srt":
+		return codecTable["srt"], true
+	case "webvtt":
+		if nativeWebVTT {
+			return wvttSpec, true
+		}
+		return codecTable["srt"], true
+	case "ass", "ssa":
+		if !flatten {
+			return codecSpec{}, false
+		}
+		s := codecTable["srt"]
+		s.cueSample = func(p []byte) []byte { return encodeCue(flattenASS(p)) }
+		return s, true
+	default:
+		return codecSpec{}, false
+	}
+}
+
+// canonicalSubCodec folds the WebM-era WebVTT codec IDs (D_WEBVTT/SUBTITLES,
+// /CAPTIONS, /DESCRIPTIONS, /METADATA — written by some muxers, including ffmpeg)
+// into the canonical "webvtt" short name, so they are carried like S_TEXT/WEBVTT
+// rather than dropped.
+func canonicalSubCodec(codec string) string {
+	if strings.HasPrefix(codec, "D_WEBVTT/") {
+		return "webvtt"
+	}
+	return codec
+}
+
+// subtitleDropReason explains why a subtitle codec could not be carried, so the
+// reason surfaced via Options.OnDrop tells the user what to do.
+func subtitleDropReason(codec string) string {
+	switch canonicalSubCodec(codec) {
+	case "ass", "ssa":
+		return "styled subtitles (ASS/SSA) have no native MP4 form; set Options.FlattenStyledSubs to carry them as plain timed text (styling is lost)"
+	default:
+		return "subtitle format not representable as MP4 timed text"
+	}
 }
 
 // visualEntry returns a sampleEntry builder for a video codec whose MKV

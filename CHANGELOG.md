@@ -4,6 +4,28 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] - 2026-06-22
+
+### Added
+
+- **WebVTT subtitles in MP4 remux.** `RemuxToMP4` now carries WebVTT tracks
+  (`S_TEXT/WEBVTT` and the WebM-era `D_WEBVTT/*` ids that ffmpeg writes) instead
+  of dropping them:
+  - By default a WebVTT track is carried as `tx3g` timed text — the only MP4
+    subtitle form read universally (ffmpeg included).
+  - **`Options.NativeWebVTT`** (CLI `--webvtt-native`) carries it losslessly as
+    native `wvtt` (ISO/IEC 14496-30) instead — cue settings and inline markup are
+    preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not, so
+    it is opt-in. `RemuxFromMP4` reads `wvtt` back to `S_TEXT/WEBVTT`.
+- **`Options.FlattenStyledSubs`** (CLI `--flatten-subs`) carries ASS/SSA — which
+  have no native MP4 form — as `tx3g`, stripping the dialogue framing and override
+  tags (`{\...}`, `\N`, `\h`). Lossy: all styling/positioning/karaoke is discarded.
+- Subtitles **never fail a remux**: a subtitle whose format cannot be carried is
+  now always dropped with a reason via `Options.OnDrop` (pointing at the relevant
+  flag), instead of being silently skipped or — for some inputs — aborting.
+- New codec short name **`webvtt`** for `S_TEXT/WEBVTT` (reader and writer), for
+  parity with `srt`/`ass`/`ssa`.
+
 ## [0.7.1] - 2026-06-21
 
 ### Added
@@ -219,6 +241,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[0.7.2]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.2
 [0.7.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.1
 [0.7.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.6.0

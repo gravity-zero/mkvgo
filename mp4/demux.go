@@ -157,7 +157,7 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 
 		block := mkv.Block{TrackNumber: uint64(ref.track + 1), Timecode: s.ctsMs, Keyframe: s.sync, Data: data}
 		if tk.trackType == mkv.SubtitleTrack {
-			text, ok := decodeTx3g(data)
+			text, ok := decodeSubtitleSample(tk.codec, data)
 			if !ok {
 				continue // empty/gap cue → no Matroska block
 			}

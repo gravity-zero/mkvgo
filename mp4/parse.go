@@ -320,6 +320,10 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
 	case "tx3g":
 		tr.codec = "srt" // tx3g timed text → S_TEXT/UTF8
 		return true, nil
+	case "wvtt":
+		tr.codec = "webvtt" // native WebVTT → S_TEXT/WEBVTT
+		extractWVTTConfig(tr, entry.payload)
+		return true, nil
 	default:
 		return false, nil
 	}

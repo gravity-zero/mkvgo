@@ -115,9 +115,13 @@ mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 
 **Remux to/from MP4 (no transcode):**
 ```bash
-# MKV/WebM → MP4 (H.264/HEVC/AV1 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS, SRT→tx3g,
-# chapters, colour/HDR preserved)
+# MKV/WebM → MP4 (H.264/HEVC/AV1 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS,
+# SRT/WebVTT→tx3g, chapters, colour/HDR preserved)
 mkvgo to-mp4 video.mkv video.mp4
+
+# Subtitles: ASS/SSA → tx3g (lossy), or WebVTT → lossless native wvtt (Apple/CMAF)
+mkvgo to-mp4 --flatten-subs anime.mkv anime.mp4
+mkvgo to-mp4 --webvtt-native web.mkv web.mp4
 
 # moov before mdat (progressive HTTP), and drop tracks MP4 can't carry (e.g. TrueHD)
 mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
@@ -187,9 +191,10 @@ err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 
 **Remux to/from MP4 (no transcode):**
 ```go
-// H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT→tx3g;
-// chapters, colour/HDR and B-frame ordering preserved. Options{FastStart:true}
-// writes moov first; Options{SkipUnsupported:true} drops unsupported tracks.
+// H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT/WebVTT→tx3g
+// (Options{NativeWebVTT:true} keeps WebVTT lossless as wvtt; Options{FlattenStyledSubs:true}
+// carries ASS/SSA as tx3g); chapters, colour/HDR and B-frame ordering preserved.
+// Options{FastStart:true} writes moov first; Options{SkipUnsupported:true} drops tracks.
 err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
 err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 ```
