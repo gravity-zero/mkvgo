@@ -24,9 +24,9 @@ mkvgo info [-json] <file.mkv|->
 Pass `-` as the path to read from stdin (uses the streaming reader; Cues are not available).
 
 ```bash
-mkvgo info movie.mkv
-mkvgo info -json movie.mkv
-cat movie.mkv | mkvgo info -
+mkvgo info video.mkv
+mkvgo info -json video.mkv
+cat video.mkv | mkvgo info -
 ```
 
 ### tracks
@@ -40,8 +40,8 @@ mkvgo tracks [-json] <file.mkv|->
 Pass `-` as the path to read from stdin.
 
 ```bash
-mkvgo tracks movie.mkv
-cat movie.mkv | mkvgo tracks -
+mkvgo tracks video.mkv
+cat video.mkv | mkvgo tracks -
 ```
 
 ### chapters
@@ -55,8 +55,8 @@ mkvgo chapters [-json] <file.mkv|->
 Pass `-` as the path to read from stdin.
 
 ```bash
-mkvgo chapters movie.mkv
-cat movie.mkv | mkvgo chapters -
+mkvgo chapters video.mkv
+cat video.mkv | mkvgo chapters -
 ```
 
 ### attachments
@@ -70,8 +70,8 @@ mkvgo attachments [-json] <file.mkv|->
 Pass `-` as the path to read from stdin.
 
 ```bash
-mkvgo attachments movie.mkv
-cat movie.mkv | mkvgo attachments -
+mkvgo attachments video.mkv
+cat video.mkv | mkvgo attachments -
 ```
 
 ### tags
@@ -85,8 +85,8 @@ mkvgo tags [-json] <file.mkv|->
 Pass `-` as the path to read from stdin.
 
 ```bash
-mkvgo tags movie.mkv
-cat movie.mkv | mkvgo tags -
+mkvgo tags video.mkv
+cat video.mkv | mkvgo tags -
 ```
 
 ### probe
@@ -100,8 +100,8 @@ mkvgo probe [-json] <file.mkv|->
 Pass `-` as the path to read from stdin.
 
 ```bash
-mkvgo probe -json movie.mkv | jq '.tracks[] | select(.type == "audio")'
-cat movie.mkv | mkvgo probe -
+mkvgo probe -json video.mkv | jq '.tracks[] | select(.type == "audio")'
+cat video.mkv | mkvgo probe -
 ```
 
 ### validate
@@ -113,7 +113,7 @@ mkvgo validate [-json] <file.mkv>
 ```
 
 ```bash
-mkvgo validate movie.mkv
+mkvgo validate video.mkv
 ```
 
 ### compare
@@ -146,8 +146,8 @@ mkvgo demux <file.mkv> -o <dir> [-t trackID,...]
 | `-t` | Comma-separated track IDs to extract (default: all) |
 
 ```bash
-mkvgo demux movie.mkv -o ./streams/
-mkvgo demux movie.mkv -o ./streams/ -t 1,2
+mkvgo demux video.mkv -o ./streams/
+mkvgo demux video.mkv -o ./streams/ -t 1,2
 ```
 
 ### extract-attachment
@@ -163,7 +163,7 @@ mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>
 | `-o` | Output file path (required) |
 
 ```bash
-mkvgo extract-attachment movie.mkv 1 -o cover.jpg
+mkvgo extract-attachment video.mkv 1 -o cover.jpg
 ```
 
 ### extract-subtitle
@@ -181,8 +181,8 @@ mkvgo extract-subtitle <file.mkv> -t <trackID> -o <out> [-format srt|ass]
 | `-format` | Output format: `srt` (default) or `ass` |
 
 ```bash
-mkvgo extract-subtitle movie.mkv -t 3 -o subs.srt
-mkvgo extract-subtitle movie.mkv -t 3 -o subs.ass -format ass
+mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
+mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 ```
 
 ---
@@ -205,8 +205,8 @@ mkvgo edit <file.mkv> -o <out.mkv> -
 The JSON is a partial `Container` struct. Only fields you include are changed.
 
 ```bash
-mkvgo edit movie.mkv -o out.mkv '{"title":"New Title"}'
-cat patch.json | mkvgo edit movie.mkv -o out.mkv -
+mkvgo edit video.mkv -o out.mkv '{"title":"New Title"}'
+cat patch.json | mkvgo edit video.mkv -o out.mkv -
 ```
 
 ### edit-title
@@ -222,7 +222,7 @@ mkvgo edit-title <file.mkv> -o <out.mkv> <title>
 | `-o` | Output file path (required) |
 
 ```bash
-mkvgo edit-title movie.mkv -o out.mkv "My Movie (2024)"
+mkvgo edit-title video.mkv -o out.mkv "My Video (2024)"
 ```
 
 ### edit-track
@@ -243,7 +243,7 @@ mkvgo edit-track <file.mkv> -o <out.mkv> -t <id> [-lang x] [-name x] [-default|-
 | `-forced` / `-no-forced` | Toggle forced flag |
 
 ```bash
-mkvgo edit-track movie.mkv -o out.mkv -t 2 -lang jpn -name "Japanese" -default
+mkvgo edit-track video.mkv -o out.mkv -t 2 -lang jpn -name "Japanese" -default
 ```
 
 ### edit-inplace
@@ -255,7 +255,7 @@ mkvgo edit-inplace <file.mkv> '<json>'
 ```
 
 ```bash
-mkvgo edit-inplace movie.mkv '{"title":"Quick Fix"}'
+mkvgo edit-inplace video.mkv '{"title":"Quick Fix"}'
 ```
 
 ### remove-track
@@ -272,7 +272,7 @@ mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>
 | `-t` | Comma-separated track IDs to remove (required) |
 
 ```bash
-mkvgo remove-track movie.mkv -o clean.mkv -t 3,4
+mkvgo remove-track video.mkv -o clean.mkv -t 3,4
 ```
 
 ### add-track
@@ -290,7 +290,7 @@ mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID> [-lang code] [-name tex
 | `-name` | Name for the new track |
 
 ```bash
-mkvgo add-track movie.mkv -o out.mkv commentary.mkv:1 -lang eng -name "Commentary"
+mkvgo add-track video.mkv -o out.mkv commentary.mkv:1 -lang eng -name "Commentary"
 ```
 
 ---
@@ -345,8 +345,8 @@ mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass] [-lang
 | `-name` | Track name (e.g. `"English"`) |
 
 ```bash
-mkvgo merge-subtitle movie.mkv -o out.mkv subs.srt -lang eng -name "English"
-mkvgo merge-subtitle movie.mkv -o out.mkv subs.ass -format ass -lang jpn
+mkvgo merge-subtitle video.mkv -o out.mkv subs.srt -lang eng -name "English"
+mkvgo merge-subtitle video.mkv -o out.mkv subs.ass -format ass -lang jpn
 ```
 
 ### join
@@ -397,8 +397,8 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] <input.mkv> <output.mp4>
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
 
 ```bash
-mkvgo to-mp4 movie.mkv movie.mp4
-mkvgo to-mp4 --faststart --skip-unsupported movie.mkv movie.mp4
+mkvgo to-mp4 video.mkv video.mp4
+mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
 ```
 
 ### from-mp4
@@ -410,7 +410,7 @@ mkvgo from-mp4 <input.mp4> <output.mkv>
 ```
 
 ```bash
-mkvgo from-mp4 movie.mp4 movie.mkv
+mkvgo from-mp4 video.mp4 video.mkv
 ```
 
 ---
@@ -433,8 +433,8 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
 
 ```bash
 # Split by chapters
-mkvgo split movie.mkv -o chapters/ -chapters
+mkvgo split video.mkv -o chapters/ -chapters
 
 # Split first 5 minutes into its own file
-mkvgo split movie.mkv -o parts/ -range 0-300000,300000-0
+mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
 ```

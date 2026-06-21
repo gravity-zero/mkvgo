@@ -24,7 +24,7 @@ Operations process the container incrementally -- they read and write block by b
 ```go
 import "github.com/gravity-zero/mkvgo/matroska"
 
-c, err := matroska.Open(ctx, "movie.mkv")
+c, err := matroska.Open(ctx, "video.mkv")
 if err != nil { return err }
 
 fmt.Println(c.Info.Title)
@@ -44,7 +44,7 @@ c, err := reader.Read(ctx, myReadSeeker, "label.mkv")
 
 **Block-level access (frame iteration):**
 ```go
-f, _ := os.Open("movie.mkv")
+f, _ := os.Open("video.mkv")
 defer f.Close()
 
 br, err := matroska.NewBlockReader(f, c.Info.TimecodeScale)
@@ -189,7 +189,7 @@ err := matroska.Mux(ctx, matroska.MuxOptions{
 
 ```go
 err := matroska.Demux(ctx, matroska.DemuxOptions{
-    SourcePath: "movie.mkv",
+    SourcePath: "video.mkv",
     OutputDir:  "./streams/",
     TrackIDs:   []uint64{1, 2},  // empty = all tracks
 })
@@ -234,7 +234,7 @@ err := matroska.EditMetadata(ctx, "input.mkv", "output.mkv",
 Modifies the file directly without rewriting cluster data. Only safe for metadata changes that fit in the existing header space.
 
 ```go
-err := matroska.EditInPlace(ctx, "movie.mkv",
+err := matroska.EditInPlace(ctx, "video.mkv",
     func(c *matroska.Container) {
         c.Info.Title = "Quick Fix"
     },
@@ -344,20 +344,20 @@ sw.FlushCluster()
 **Split by time ranges:**
 ```go
 files, err := matroska.Split(ctx, matroska.SplitOptions{
-    SourcePath: "movie.mkv",
+    SourcePath: "video.mkv",
     OutputDir:  "./parts/",
     Ranges: []matroska.TimeRange{
         {StartMs: 0, EndMs: 300000},
         {StartMs: 300000, EndMs: 0},  // 0 = end of file
     },
 })
-// files = ["./parts/movie_001.mkv", "./parts/movie_002.mkv"]
+// files = ["./parts/video_001.mkv", "./parts/video_002.mkv"]
 ```
 
 **Split by chapters:**
 ```go
 files, err := matroska.Split(ctx, matroska.SplitOptions{
-    SourcePath: "movie.mkv",
+    SourcePath: "video.mkv",
     OutputDir:  "./chapters/",
     ByChapters: true,
 })
@@ -458,20 +458,20 @@ assFile, err := subtitle.ParseASS("subs.ass")
 
 ```go
 // As SRT
-err := matroska.ExtractSubtitle(ctx, "movie.mkv", trackID, "out.srt")
+err := matroska.ExtractSubtitle(ctx, "video.mkv", trackID, "out.srt")
 
 // As ASS
-err := matroska.ExtractASS(ctx, "movie.mkv", trackID, "out.ass")
+err := matroska.ExtractASS(ctx, "video.mkv", trackID, "out.ass")
 ```
 
 ### Merge into MKV
 
 ```go
 // SRT
-err := matroska.MergeSubtitle(ctx, "movie.mkv", "subs.srt", "out.mkv", "eng", "English")
+err := matroska.MergeSubtitle(ctx, "video.mkv", "subs.srt", "out.mkv", "eng", "English")
 
 // ASS
-err := matroska.MergeASS(ctx, "movie.mkv", "subs.ass", "out.mkv", "jpn", "Japanese")
+err := matroska.MergeASS(ctx, "video.mkv", "subs.ass", "out.mkv", "jpn", "Japanese")
 ```
 
 ---
@@ -493,7 +493,7 @@ if err != nil {
 Validation returns structured issues instead of failing:
 
 ```go
-issues, err := matroska.Validate(ctx, "movie.mkv")
+issues, err := matroska.Validate(ctx, "video.mkv")
 if err != nil { return err }
 
 for _, iss := range issues {

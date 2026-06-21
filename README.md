@@ -66,8 +66,8 @@ Full CLI reference: [docs/cli.md](docs/cli.md)
 
 **Probe a file:**
 ```bash
-mkvgo probe movie.mkv
-mkvgo probe -json movie.mkv | jq '.tracks[]'
+mkvgo probe video.mkv
+mkvgo probe -json video.mkv | jq '.tracks[]'
 ```
 
 **Read metadata from stdin (pipe-friendly):**
@@ -75,54 +75,54 @@ mkvgo probe -json movie.mkv | jq '.tracks[]'
 The inspection commands (`info`, `tracks`, `chapters`, `attachments`, `tags`, `probe`) accept `-` as the input path and read from stdin via the streaming reader.
 
 ```bash
-cat movie.mkv | mkvgo info -
-cat movie.mkv | mkvgo tracks -json -
+cat video.mkv | mkvgo info -
+cat video.mkv | mkvgo tracks -json -
 ```
 
 **Remove a track:**
 ```bash
 # Remove track 3 (e.g. commentary audio)
-mkvgo remove-track movie.mkv -o clean.mkv -t 3
+mkvgo remove-track video.mkv -o clean.mkv -t 3
 ```
 
 **Edit metadata with JSON:**
 ```bash
 # Via argument
-mkvgo edit movie.mkv -o edited.mkv '{"title":"New Title"}'
+mkvgo edit video.mkv -o edited.mkv '{"title":"New Title"}'
 
 # Via stdin (pipe from file or another tool)
-cat meta.json | mkvgo edit movie.mkv -o edited.mkv -
+cat meta.json | mkvgo edit video.mkv -o edited.mkv -
 ```
 
 **Split by time:**
 ```bash
 # Split into two parts: 0-5min and 5min-end
-mkvgo split movie.mkv -o parts/ -range 0-300000,300000-0
+mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
 ```
 
 **Merge subtitles:**
 ```bash
-mkvgo merge-subtitle movie.mkv -o output.mkv subs.srt -lang eng -name "English"
-mkvgo merge-subtitle movie.mkv -o output.mkv subs.ass -format ass -lang jpn -name "Japanese"
+mkvgo merge-subtitle video.mkv -o output.mkv subs.srt -lang eng -name "English"
+mkvgo merge-subtitle video.mkv -o output.mkv subs.ass -format ass -lang jpn -name "Japanese"
 ```
 
 **Extract subtitles:**
 ```bash
-mkvgo extract-subtitle movie.mkv -t 3 -o subs.srt
-mkvgo extract-subtitle movie.mkv -t 3 -o subs.ass -format ass
+mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
+mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 ```
 
 **Remux to/from MP4 (no transcode):**
 ```bash
 # MKV/WebM → MP4 (H.264/HEVC/AV1 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS, SRT→tx3g,
 # chapters, colour/HDR preserved)
-mkvgo to-mp4 movie.mkv movie.mp4
+mkvgo to-mp4 video.mkv video.mp4
 
 # moov before mdat (progressive HTTP), and drop tracks MP4 can't carry (e.g. TrueHD)
-mkvgo to-mp4 --faststart --skip-unsupported movie.mkv movie.mp4
+mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
 
 # MP4 → MKV
-mkvgo from-mp4 movie.mp4 movie.mkv
+mkvgo from-mp4 video.mp4 video.mkv
 ```
 
 ## Library Usage
@@ -142,7 +142,7 @@ import (
 )
 
 func main() {
-    c, err := matroska.Open(context.Background(), "movie.mkv")
+    c, err := matroska.Open(context.Background(), "video.mkv")
     if err != nil { panic(err) }
 
     fmt.Println(c.Info.Title, c.DurationMs, "ms")
@@ -195,7 +195,7 @@ s3fs := &matroska.FS{
     Create: func(p string) (mkv.WriteSeekCloser, error) { /* S3 PutObject */ },
 }
 
-err := matroska.EditMetadata(ctx, "s3://bucket/movie.mkv", "s3://bucket/out.mkv",
+err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv",
     func(c *matroska.Container) {
         c.Info.Title = "Updated"
     },
