@@ -112,6 +112,19 @@ mkvgo extract-subtitle movie.mkv -t 3 -o subs.srt
 mkvgo extract-subtitle movie.mkv -t 3 -o subs.ass -format ass
 ```
 
+**Remux to/from MP4 (no transcode):**
+```bash
+# MKV/WebM → MP4 (H.264/HEVC/AV1 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS, SRT→tx3g,
+# chapters, colour/HDR preserved)
+mkvgo to-mp4 movie.mkv movie.mp4
+
+# moov before mdat (progressive HTTP), and drop tracks MP4 can't carry (e.g. TrueHD)
+mkvgo to-mp4 --faststart --skip-unsupported movie.mkv movie.mp4
+
+# MP4 → MKV
+mkvgo from-mp4 movie.mp4 movie.mkv
+```
+
 ## Library Usage
 
 Full library guide: [docs/library.md](docs/library.md)

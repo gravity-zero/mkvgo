@@ -149,7 +149,23 @@ err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 
 Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC` and `tx3g`. Colour code points and chapters round-trip back to the Matroska `Colour` element and chapter atoms. Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
 
-`Options` also carries `FS` (custom filesystem) and `Progress` (callback), like the other operations.
+`Options` also carries `FS` (custom filesystem) and `Progress` (callback), like the other operations. A fully-specified call:
+
+```go
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{
+    FastStart:       true, // moov before mdat (progressive HTTP)
+    SkipUnsupported: true, // drop e.g. TrueHD instead of failing
+    Progress: func(done, total int64) {
+        fmt.Printf("\r%d / %d bytes", done, total)
+    },
+    OnDrop: func(d mp4.DroppedTrack) {
+        fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+    },
+})
+```
+
+The same two operations are exposed on the CLI as `mkvgo to-mp4` and
+`mkvgo from-mp4` (see [cli.md](cli.md)).
 
 ---
 
