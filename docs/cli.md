@@ -439,3 +439,15 @@ mkvgo from-mp4 <input.mp4> <output.mkv>
 mkvgo from-mp4 video.mp4 video.mkv
 ```
 
+### to-webm
+
+Remux an MKV/WebM file to WebM, copying the media verbatim. Only WebM-subset codecs are allowed (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles); a source with any other codec is rejected. Non-WebM elements (chapters, attachments, tags) are dropped.
+
+```
+mkvgo to-webm <input.mkv> <output.webm>
+```
+
+```bash
+mkvgo to-webm video.mkv video.webm
+```
+

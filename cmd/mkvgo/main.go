@@ -100,6 +100,8 @@ func main() {
 		commands.CmdToMP4(args)
 	case "from-mp4":
 		commands.CmdFromMP4(args)
+	case "to-webm":
+		commands.CmdToWebM(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -136,6 +138,7 @@ Commands:
   reindex       Rebuild the seek index (Cues) of a file
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported)
   from-mp4      Remux an MP4 to MKV
+  to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments)

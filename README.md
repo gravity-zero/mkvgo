@@ -59,6 +59,7 @@ Global flags: `-json` (structured output), `--version`
 | **Indexing** | `reindex` | Rebuild the seek index (Cues) of a file |
 | **Remux** | `to-mp4` | Remux MKV/WebM to MP4 (`--faststart`, `--skip-unsupported`) |
 | | `from-mp4` | Remux MP4 to MKV |
+| | `to-webm` | Remux MKV/WebM to WebM (WebM-subset codecs only) |
 
 Full CLI reference: [docs/cli.md](docs/cli.md)
 
@@ -123,6 +124,9 @@ mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
 
 # MP4 → MKV
 mkvgo from-mp4 video.mp4 video.mkv
+
+# MKV/WebM → WebM (VP8/VP9/AV1 + Vorbis/Opus only; other codecs rejected)
+mkvgo to-webm video.mkv video.webm
 ```
 
 ## Library Usage
