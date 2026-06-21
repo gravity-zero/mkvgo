@@ -4,6 +4,20 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-06-21
+
+### Added
+
+- **`mp4.OpenMeta`** / **`OpenMetaWithFS`** / **`ReadMeta`** — metadata-only probe
+  of an MP4 file, the counterpart of the MKV reader's `OpenMeta`/`ReadMeta`. They
+  parse only the movie header (`moov`: track sample entries, colour code points,
+  chapters) and return a `*mkv.Container` (Info, Tracks, Chapters, DurationMs)
+  **without reading any sample data (`mdat`) or writing an output file**. This is
+  the fast path for indexing/scanning an MP4 library — previously the only way to
+  read an MP4's codecs/colour/chapters was a full `RemuxFromMP4` to disk.
+  `RemuxFromMP4` and the probe now build their Matroska metadata from a single
+  shared helper, so they report identical tracks/chapters/duration.
+
 ## [0.7.0] - 2026-06-21
 
 New `mp4` package: remux between Matroska/WebM and MP4 (ISO base media file
@@ -205,6 +219,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[0.7.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.1
 [0.7.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.5.0

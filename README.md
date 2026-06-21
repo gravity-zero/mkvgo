@@ -156,6 +156,8 @@ func main() {
 }
 ```
 
+For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed — never walking Clusters/Cues — so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues.
+
 **Mux tracks from multiple sources:**
 ```go
 err := matroska.Mux(ctx, matroska.MuxOptions{
@@ -190,6 +192,14 @@ err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 // writes moov first; Options{SkipUnsupported:true} drops unsupported tracks.
 err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
 err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
+```
+
+**Probe an MP4's metadata without remuxing (fast path for indexing):**
+```go
+// Reads only the moov box — codecs, colour, chapters, duration — never the
+// sample data. Counterpart of matroska.OpenMeta for MKV.
+c, err := mp4.OpenMeta(ctx, "video.mp4")
+fmt.Println(c.DurationMs, len(c.Tracks), "tracks")
 ```
 
 **Edit metadata with custom FS (S3, HTTP, etc.):**

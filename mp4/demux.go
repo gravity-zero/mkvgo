@@ -113,11 +113,8 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		return errf("write start: %w", err)
 	}
 	const scale = 1_000_000
-	c := &mkv.Container{
-		Info:     mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo", WritingApp: "mkvgo"},
-		Chapters: mv.chapters,
-	}
-	if err := m.WriteMetadata(c, tracks, movieDurationMs(mv)); err != nil {
+	c := containerFromMovie(mv)
+	if err := m.WriteMetadata(c, tracks, c.DurationMs); err != nil {
 		return errf("write metadata: %w", err)
 	}
 
