@@ -367,6 +367,32 @@ mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
 
 ---
 
+## Splitting
+
+### split
+
+Split an MKV by time ranges or by chapters.
+
+```
+mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
+```
+
+| Flag | Description |
+|---|---|
+| `-o` | Output directory (required) |
+| `-chapters` | Split at chapter boundaries |
+| `-range` | Comma-separated time ranges in milliseconds (0 = end of file) |
+
+```bash
+# Split by chapters
+mkvgo split video.mkv -o chapters/ -chapters
+
+# Split first 5 minutes into its own file
+mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
+```
+
+---
+
 ## Indexing
 
 ### reindex
@@ -413,28 +439,3 @@ mkvgo from-mp4 <input.mp4> <output.mkv>
 mkvgo from-mp4 video.mp4 video.mkv
 ```
 
----
-
-## Splitting
-
-### split
-
-Split an MKV by time ranges or by chapters.
-
-```
-mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
-```
-
-| Flag | Description |
-|---|---|
-| `-o` | Output directory (required) |
-| `-chapters` | Split at chapter boundaries |
-| `-range` | Comma-separated time ranges in milliseconds (0 = end of file) |
-
-```bash
-# Split by chapters
-mkvgo split video.mkv -o chapters/ -chapters
-
-# Split first 5 minutes into its own file
-mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
-```
