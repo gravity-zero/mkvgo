@@ -45,6 +45,9 @@ var CmdUsage = map[string]string{
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
+	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] <input.mkv> <output.mp4>",
+	"from-mp4":           "mkvgo from-mp4 <input.mp4> <output.mkv>",
+	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
 }
 
 func CmdHelp(cmd string) {

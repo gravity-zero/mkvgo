@@ -136,7 +136,7 @@ Commands:
   validate      Check MKV structure for issues
   compare       Diff metadata of two MKV files
   reindex       Rebuild the seek index (Cues) of a file
-  to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported)
+  to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native)
   from-mp4      Remux an MP4 to MKV
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
 
