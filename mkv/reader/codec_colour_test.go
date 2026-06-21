@@ -93,6 +93,21 @@ func TestCodecColourParsers(t *testing.T) {
 	}
 }
 
+// h264RealAvcCHex is a real x264-produced avcC (High profile, BT.709) used as a
+// second real-world fixture for the AVC colour/bit-depth parser.
+const h264RealAvcCHex = "0164000affe1001c6764000aacd94426c05a810100a000000300200000030141e244b2c001000768ebe3cb3002c0fdf8f800"
+
+func TestCodecColourAVCRealFixture(t *testing.T) {
+	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: mustHex(t, h264RealAvcCHex)}
+	fillColourFromCodecPrivate(&tr)
+	if got := p16(tr.ColorSpace); got != 1 {
+		t.Errorf("matrix = %d, want 1 (bt709)", got)
+	}
+	if got := p16(tr.VideoBitDepth); got != 8 {
+		t.Errorf("bit depth = %d, want 8", got)
+	}
+}
+
 // --- integration: through ReadMeta on a built MKV (no container Colour) -------
 
 func bytesElem(id uint32, b []byte) []byte {

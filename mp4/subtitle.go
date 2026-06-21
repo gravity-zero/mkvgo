@@ -99,7 +99,7 @@ func truncateRunes(b []byte, max int) int {
 	if max > len(b) {
 		max = len(b)
 	}
-	for max > 0 && b[max]&0xC0 == 0x80 { // mid-rune continuation byte
+	for max > 0 && max < len(b) && b[max]&0xC0 == 0x80 { // mid-rune continuation byte
 		max--
 	}
 	return max
