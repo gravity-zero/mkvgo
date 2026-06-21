@@ -16,7 +16,8 @@ import (
 // minimal, content-irrelevant codec private blobs (mkvgo only copies them).
 var (
 	fakeAVCC = []byte{0x01, 0x64, 0x00, 0x1F, 0xFF, 0xE1, 0x00, 0x04, 0x67, 0x42, 0x00, 0x1F, 0x01, 0x00, 0x04, 0x68, 0xCE, 0x3C, 0x80}
-	fakeASC  = []byte{0x12, 0x10} // AAC-LC, 44100, stereo
+	fakeASC  = []byte{0x12, 0x10}             // AAC-LC, 44100, stereo
+	fakeAV1C = []byte{0x81, 0x04, 0x0C, 0x00} // AV1CodecConfigurationRecord stub (copied verbatim)
 )
 
 func u32p(v uint32) *uint32   { return &v }
@@ -257,6 +258,60 @@ func TestRemuxToMP4Opus(t *testing.T) {
 	if len(traks) != 1 || traks[0].sampleEntry != "Opus" {
 		t.Fatalf("expected single Opus track, got %v", traks)
 	}
+}
+
+// TestRemuxWebMAV1OpusToMP4 covers the WebM → MP4 case: AV1 video + Opus audio
+// is the codec subset WebM and MP4 share. RemuxToMP4 reads any EBML container
+// (MKV or WebM) through the same path, so such a source remuxes to MP4 with
+// av01 + Opus sample entries and verbatim samples.
+func TestRemuxWebMAV1OpusToMP4(t *testing.T) {
+	head := makeOpusHead(2, 312, 48000, 0, 0, nil)
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "av1", CodecPrivate: fakeAV1C,
+			Width: u32p(640), Height: u32p(360), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "opus", CodecPrivate: head,
+			Channels: u8p(2), SampleRate: f64p(48000)},
+	}
+	var blocks []genBlock
+	var wantVideo, wantAudio [][]byte
+	vIdx, aIdx := 0, 0
+	for ts := int64(0); ts < 160; ts += 20 {
+		if ts%40 == 0 {
+			d := bytes.Repeat([]byte{0xA1, byte(vIdx)}, 5+vIdx)
+			blocks = append(blocks, genBlock{track: 1, pts: ts, key: vIdx == 0, data: d})
+			wantVideo = append(wantVideo, d)
+			vIdx++
+		}
+		d := bytes.Repeat([]byte{0x0F, byte(aIdx)}, 3+aIdx)
+		blocks = append(blocks, genBlock{track: 2, pts: ts, key: true, data: d})
+		wantAudio = append(wantAudio, d)
+		aIdx++
+	}
+
+	src := buildMKV(t, tracks, blocks)
+	data, boxes := remux(t, src)
+
+	traks := moovTraks(t, boxes)
+	if len(traks) != 2 {
+		t.Fatalf("got %d traks, want 2", len(traks))
+	}
+	var video, audio parsedTrack
+	for _, pt := range traks {
+		switch pt.handler {
+		case "vide":
+			video = pt
+		case "soun":
+			audio = pt
+		}
+	}
+	if video.sampleEntry != "av01" {
+		t.Errorf("video entry = %q, want av01", video.sampleEntry)
+	}
+	if audio.sampleEntry != "Opus" {
+		t.Errorf("audio entry = %q, want Opus", audio.sampleEntry)
+	}
+	assertSamplesEqual(t, "video", extractSamples(t, data, video), wantVideo)
+	assertSamplesEqual(t, "audio", extractSamples(t, data, audio), wantAudio)
 }
 
 func TestRemuxToMP4RejectsUnsupportedCodec(t *testing.T) {
