@@ -269,13 +269,29 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.IsForced {
 		e.uint(mkv.IDFlagForced, 1)
 	}
-	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil) {
+	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || hasColour(t)) {
 		e.master(mkv.IDVideo, func(v *ew) {
 			if t.Width != nil {
 				v.uint(mkv.IDPixelWidth, uint64(*t.Width))
 			}
 			if t.Height != nil {
 				v.uint(mkv.IDPixelHeight, uint64(*t.Height))
+			}
+			if hasColour(t) {
+				v.master(mkv.IDColour, func(c *ew) {
+					if t.ColorRange != nil {
+						c.uint(mkv.IDColourRange, uint64(*t.ColorRange))
+					}
+					if t.ColorSpace != nil {
+						c.uint(mkv.IDColourMatrix, uint64(*t.ColorSpace))
+					}
+					if t.ColorTransfer != nil {
+						c.uint(mkv.IDColourTransfer, uint64(*t.ColorTransfer))
+					}
+					if t.ColorPrimaries != nil {
+						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
+					}
+				})
 			}
 		})
 	}
@@ -430,9 +446,41 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 		if e.err != nil {
 			break
 		}
+		if b.Duration > 0 {
+			// A block with an explicit duration (e.g. a subtitle cue) is written
+			// as a BlockGroup so the duration can be carried.
+			rawDur := uint64(b.Duration * 1000000 / timecodeScale)
+			e.err = WriteBlockGroup(&e.Buffer, b.TrackNumber, relTC, b.Data, rawDur)
+			continue
+		}
 		e.err = WriteSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, b.Data)
 	}
 	return e.flush(w, mkv.IDCluster)
+}
+
+// WriteBlockGroup writes a BlockGroup containing a Block and a BlockDuration
+// (in raw timecode-scale units). Used for subtitle cues, which need a duration.
+func WriteBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64) error {
+	var inner bytes.Buffer
+	trackVINT := ebml.DataSizeLen(int64(trackNum))
+	bodySize := int64(trackVINT + 2 + 1 + len(data))
+	if _, err := ebml.WriteElementHeader(&inner, mkv.IDBlock, bodySize); err != nil {
+		return err
+	}
+	if _, err := ebml.WriteDataSize(&inner, int64(trackNum)); err != nil {
+		return err
+	}
+	inner.Write([]byte{byte(uint16(relTC) >> 8), byte(relTC), 0x00}) // timecode + flags
+	inner.Write(data)
+	if err := WriteUintElement(&inner, mkv.IDBlockDuration, rawDuration); err != nil {
+		return err
+	}
+	return WriteMasterElement(w, mkv.IDBlockGroup, inner.Bytes())
+}
+
+// hasColour reports whether a track carries any colour code points.
+func hasColour(t *mkv.Track) bool {
+	return t.ColorPrimaries != nil || t.ColorTransfer != nil || t.ColorSpace != nil || t.ColorRange != nil
 }
 
 func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {

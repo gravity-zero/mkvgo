@@ -367,19 +367,30 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	end := start + size
 	var block mkv.Block
 	var found bool
+	var durationMs int64
 
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
 			return mkv.Block{}, err
 		}
-		if h.ID == mkv.IDBlock {
+		switch h.ID {
+		case mkv.IDBlock:
 			block, err = br.parseBlock(h.Size, false)
 			if err != nil {
 				return mkv.Block{}, err
 			}
 			found = true
-		} else {
+		case mkv.IDBlockDuration:
+			raw, err := ebml.ReadUint(br.r, h.Size)
+			if err != nil {
+				return mkv.Block{}, err
+			}
+			durationMs, err = safeTimecodeMs(int64(raw), br.timecodeScale)
+			if err != nil {
+				return mkv.Block{}, err
+			}
+		default:
 			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
 			}
@@ -388,6 +399,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	if !found {
 		return mkv.Block{}, fmt.Errorf("BlockGroup without Block element")
 	}
+	block.Duration = durationMs
 	return block, nil
 }
 

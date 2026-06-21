@@ -138,6 +138,10 @@ type Block struct {
 	Timecode    int64
 	Keyframe    bool
 	Data        []byte
+	// Duration is the block's duration in milliseconds, read from a BlockGroup's
+	// BlockDuration element. It is 0 when absent (e.g. SimpleBlocks, which never
+	// carry one). Subtitle cues store their on-screen time here.
+	Duration int64
 }
 
 // RestoreHeader prepends the stripped header bytes to block data.
