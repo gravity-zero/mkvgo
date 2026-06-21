@@ -29,7 +29,7 @@ jobs:
 
       - name: Test
         shell: bash
-        run: go test -race -coverprofile=coverage.out -covermode=atomic -coverpkg=github.com/gravity-zero/mkvgo/ebml,github.com/gravity-zero/mkvgo/mkv/...,github.com/gravity-zero/mkvgo/matroska ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic -coverpkg=github.com/gravity-zero/mkvgo/ebml,github.com/gravity-zero/mkvgo/mkv/...,github.com/gravity-zero/mkvgo/matroska,github.com/gravity-zero/mkvgo/mp4 ./...
 
       - name: Upload coverage reports to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
