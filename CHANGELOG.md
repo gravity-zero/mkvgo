@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-06-21
 
 New `mp4` package: remux between Matroska/WebM and MP4 (ISO base media file
 format) without transcoding. It is isolated from the EBML core (shares no
@@ -204,6 +204,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[0.7.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.4.0
