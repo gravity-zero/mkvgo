@@ -274,7 +274,7 @@ func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string
 		if !tmpClosed {
 			tmp.Close()
 		}
-		fs.DoRemove(tmpPath)
+		_ = fs.DoRemove(tmpPath) // best-effort cleanup of the temporary mdat file
 	}()
 
 	tbuf := bufio.NewWriterSize(tmp, 256<<10)
