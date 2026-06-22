@@ -18,15 +18,18 @@ All notable changes to mkvgo are documented here. The format is based on
   Exposed via `mkv.DolbyVision` / `mkv.ParseDolbyVisionConfig`, shared by both
   readers, so a probe can report Dolby Vision without a packet scan.
 
-- **Head-only keyframe index.** `mp4.Keyframes` / `KeyframesWithFS` /
-  `ReadKeyframes` and `matroska.Keyframes` / `KeyframesWithFS` / `ReadKeyframes`
-  return a video track's keyframe timestamps (milliseconds, ascending,
-  de-duplicated) without reading sample data or scanning the body:
-  - MP4 reads the sync-sample table (`stss`) and per-sample timing (`stts`/`ctts`)
-    from the `moov` box — the same parse `ReadMeta` already does.
-  - Matroska/WebM reads the `Cues` seek index via the `SeekHead` (one seek to one
-    element, no `Cluster` scan). It errors when the file carries no usable Cues
-    index, so a caller can fall back to a packet scan.
+- **Head-only keyframe index on the Container.** `Container.Keyframes` ([]int64,
+  milliseconds, ascending, de-duplicated) is now filled by the metadata probe in
+  the same pass — no separate call, no second open:
+  - MP4 `OpenMeta`/`ReadMeta` derive it from the sync-sample table (`stss`) and
+    per-sample timing (`stts`/`ctts`) already parsed from `moov`, with the edit
+    list (`elst`) applied as ffmpeg does — an empty edit's delay and a non-empty
+    edit's `media_time` shift the timestamps, and keyframes trimmed before the
+    edit start are dropped.
+  - Matroska/WebM `OpenMeta`/`ReadMeta` derive it from the `Cues` seek index,
+    reached via the `SeekHead` (one seek to one element, no `Cluster` scan); a full
+    `Read` exposes it too. nil when the source has no usable index, so a caller can
+    fall back to a packet scan.
   This replaces a full packet scan for `-c copy` HLS/DASH segment alignment.
 
 - **MP4 probe reads track-selection metadata.** `OpenMeta` / `ReadMeta` /

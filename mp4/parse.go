@@ -58,6 +58,7 @@ type inTrack struct {
 	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
 	forced        bool   // a DASH-role kind box marks this track forced
 	forcedKnown   bool   // a DASH-role kind box was read, so forced is meaningful
+	editShiftMs   int64  // edit-list (elst) presentation shift applied to sample times
 
 	// colour code points (CICP), nil when the entry had no colr box.
 	colorPrimaries *uint16
@@ -171,12 +172,22 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 		return nil, errf("parse moov: %w", err)
 	}
 
+	// mvhd carries the movie timescale, needed to convert empty-edit durations
+	// (which are in the movie timebase, unlike media_time which is per-track).
+	var movieTS uint32
+	if mvhd, ok := findMemBox(moovBoxes, "mvhd"); ok {
+		movieTS, _ = parseMdhd(mvhd.payload) // mvhd shares mdhd's timescale layout
+	}
+	if movieTS == 0 {
+		movieTS = 1000
+	}
+
 	var mv movie
 	for _, b := range moovBoxes {
 		if b.typ != "trak" {
 			continue
 		}
-		tr, dropped, err := parseTrak(b.payload, size)
+		tr, dropped, err := parseTrak(b.payload, size, movieTS)
 		if err != nil {
 			return nil, err
 		}
@@ -205,7 +216,7 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 // (e.g. cover art / attached picture) — it returns a zero track and a non-nil
 // *DroppedTrack describing it, so the caller can surface it instead of dropping it
 // silently. An error is returned only for malformed structure.
-func parseTrak(payload []byte, fileSize int64) (inTrack, *DroppedTrack, error) {
+func parseTrak(payload []byte, fileSize int64, movieTS uint32) (inTrack, *DroppedTrack, error) {
 	var tr inTrack
 	trakBoxes, err := iterBoxes(payload)
 	if err != nil {
@@ -258,6 +269,18 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, *DroppedTrack, error) {
 	}
 	if tr.timescale == 0 {
 		tr.timescale = 1000
+	}
+	// Edit list (edts/elst): the presentation timeline shift ffmpeg applies. An
+	// empty edit adds a delay (movie timebase); a non-empty edit's media_time
+	// trims the start (media timebase). Net shift = empty_delay - media_time.
+	if edts, ok := findMemBox(trakBoxes, "edts"); ok {
+		if eb, err := iterBoxes(edts.payload); err == nil {
+			if elst, ok := findMemBox(eb, "elst"); ok {
+				if mediaTime, emptyDur, ok := parseElst(elst.payload); ok {
+					tr.editShiftMs = ticksToMs(emptyDur, movieTS) - ticksToMs(mediaTime, tr.timescale)
+				}
+			}
+		}
 	}
 	// An elng box (ISO 14496-12) overrides mdhd with a full BCP-47 tag.
 	if elng, ok := findMemBox(mdiaBoxes, "elng"); ok {
@@ -346,6 +369,48 @@ func parseMdhd(payload []byte) (timescale uint32, lang string) {
 		lang = decodeMdhdLanguage(binary.BigEndian.Uint16(payload[langOff : langOff+2]))
 	}
 	return timescale, lang
+}
+
+// parseElst reads an edit list box and returns the first non-empty edit's
+// media_time (media timescale) together with the total duration of any leading
+// empty edits (movie timescale). ok is false when the box carries no edit that
+// shifts the presentation timeline. Later edits (multi-segment timelines) are not
+// modelled — only the leading delay and the start trim, which is what shifts the
+// keyframe times.
+func parseElst(payload []byte) (mediaTime, emptyDuration int64, ok bool) {
+	if len(payload) < 8 {
+		return 0, 0, false
+	}
+	version := payload[0]
+	count := binary.BigEndian.Uint32(payload[4:8])
+	off := 8
+	for i := uint32(0); i < count; i++ {
+		var segDur, mt int64
+		if version == 1 {
+			if off+20 > len(payload) {
+				break
+			}
+			segDur = int64(binary.BigEndian.Uint64(payload[off : off+8]))
+			mt = int64(binary.BigEndian.Uint64(payload[off+8 : off+16])) // signed
+			off += 20
+		} else {
+			if off+12 > len(payload) {
+				break
+			}
+			segDur = int64(binary.BigEndian.Uint32(payload[off : off+4]))
+			mt = int64(int32(binary.BigEndian.Uint32(payload[off+4 : off+8]))) // signed
+			off += 12
+		}
+		if mt < 0 { // empty edit → presentation delay
+			emptyDuration += segDur
+			continue
+		}
+		return mt, emptyDuration, true // first non-empty edit: the start trim
+	}
+	if emptyDuration > 0 {
+		return 0, emptyDuration, true
+	}
+	return 0, 0, false
 }
 
 // decodeMdhdLanguage unpacks the mdhd language field. ISO 639-2/T is packed as

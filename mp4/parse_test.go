@@ -54,7 +54,7 @@ func craftTrak(handler, sampleEntry, kindValue string, trackID uint32) []byte {
 // is reported (not silently skipped): cover art (video handler, unsupported entry)
 // and a non-media handler.
 func TestParseTrakSurfacesDroppedTracks(t *testing.T) {
-	_, dropped, err := parseTrak(craftTrak("vide", "jpeg", "", 2), 1<<20)
+	_, dropped, err := parseTrak(craftTrak("vide", "jpeg", "", 2), 1<<20, 1000)
 	if err != nil {
 		t.Fatalf("parseTrak(cover): %v", err)
 	}
@@ -62,7 +62,7 @@ func TestParseTrakSurfacesDroppedTracks(t *testing.T) {
 		t.Errorf("cover drop = %+v, want {ID:2 Type:video Codec:jpeg}", dropped)
 	}
 
-	_, dropped, err = parseTrak(craftTrak("tmcd", "tmcd", "", 3), 1<<20)
+	_, dropped, err = parseTrak(craftTrak("tmcd", "tmcd", "", 3), 1<<20, 1000)
 	if err != nil {
 		t.Fatalf("parseTrak(tmcd): %v", err)
 	}
@@ -91,7 +91,7 @@ func TestParseKind(t *testing.T) {
 // TestParseTrakReadsForcedKind checks that a track-level DASH-role kind box sets
 // the forced disposition — including on non-subtitle tracks (a real muxing quirk).
 func TestParseTrakReadsForcedKind(t *testing.T) {
-	tr, _, err := parseTrak(craftTrak("vide", "jpeg", "forced-subtitle", 4), 1<<20)
+	tr, _, err := parseTrak(craftTrak("vide", "jpeg", "forced-subtitle", 4), 1<<20, 1000)
 	if err != nil {
 		t.Fatalf("parseTrak(forced): %v", err)
 	}
@@ -99,7 +99,7 @@ func TestParseTrakReadsForcedKind(t *testing.T) {
 		t.Errorf("forced kind: forced=%v known=%v, want true/true", tr.forced, tr.forcedKnown)
 	}
 	// A non-forced role is read (known) but must not mark the track forced.
-	tr, _, err = parseTrak(craftTrak("vide", "jpeg", "subtitle", 5), 1<<20)
+	tr, _, err = parseTrak(craftTrak("vide", "jpeg", "subtitle", 5), 1<<20, 1000)
 	if err != nil {
 		t.Fatalf("parseTrak(role): %v", err)
 	}
