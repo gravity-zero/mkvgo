@@ -19,7 +19,8 @@ type readerOnly struct{ r io.Reader }
 func (r *readerOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
 
 // buildStreamMKV builds a minimal well-formed streamable MKV:
-//   EBML header (size=0) | Segment (known or unknown size) | Info | Tracks | Clusters
+//
+//	EBML header (size=0) | Segment (known or unknown size) | Info | Tracks | Clusters
 func buildStreamMKV(t *testing.T, unknownSizeSeg bool, clusters [][]mkv.Block, timecodeScale int64) []byte {
 	t.Helper()
 

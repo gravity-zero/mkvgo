@@ -1,0 +1,27 @@
+package mkv
+
+import "testing"
+
+func TestParseDolbyVisionConfig(t *testing.T) {
+	// profile 8, level 6, rpu=1 el=0 bl=1, bl_signal_compatibility_id 1 (HDR10).
+	//   byte2 = profile<<1 | level>>5 = 16
+	//   byte3 = level<<3 | rpu<<2 | el<<1 | bl = 0x35
+	//   byte4 = compat<<4 = 0x10
+	rec := []byte{1, 0, 16, 0x35, 0x10, 0, 0, 0}
+	dv := ParseDolbyVisionConfig(rec)
+	if dv == nil {
+		t.Fatal("ParseDolbyVisionConfig returned nil for a valid record")
+	}
+	if dv.VersionMajor != 1 || dv.VersionMinor != 0 {
+		t.Errorf("version = %d.%d, want 1.0", dv.VersionMajor, dv.VersionMinor)
+	}
+	if dv.Profile != 8 || dv.Level != 6 || dv.BLSignalCompatID != 1 {
+		t.Errorf("profile/level/compat = %d/%d/%d, want 8/6/1", dv.Profile, dv.Level, dv.BLSignalCompatID)
+	}
+	if !dv.RPUPresent || dv.ELPresent || !dv.BLPresent {
+		t.Errorf("flags rpu/el/bl = %v/%v/%v, want true/false/true", dv.RPUPresent, dv.ELPresent, dv.BLPresent)
+	}
+	if ParseDolbyVisionConfig([]byte{1, 0, 0, 0}) != nil {
+		t.Error("ParseDolbyVisionConfig should return nil for a record shorter than 5 bytes")
+	}
+}

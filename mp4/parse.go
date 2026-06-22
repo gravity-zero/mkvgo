@@ -64,6 +64,9 @@ type inTrack struct {
 	colorTransfer  *uint16
 	colorMatrix    *uint16
 	colorRange     *uint16
+
+	// Dolby Vision configuration (dvcC/dvvC), nil when absent.
+	dolbyVision *mkv.DolbyVision
 }
 
 // movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
@@ -469,13 +472,16 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
 	const audioHdr = 28
 
 	switch entry.typ {
-	case "avc1", "avc3":
+	case "avc1", "avc3", "dvav", "dva1":
+		// dvav/dva1 are Dolby Vision over AVC: an avcC plus a dvcC/dvvC box.
 		tr.codec = "h264"
 		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "avcC")
-	case "hvc1", "hev1":
+	case "hvc1", "hev1", "dvhe", "dvh1":
+		// dvhe/dvh1 are Dolby Vision over HEVC: an hvcC plus a dvcC/dvvC box.
 		tr.codec = "hevc"
 		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "hvcC")
-	case "av01":
+	case "av01", "dav1":
+		// dav1 is Dolby Vision over AV1: an av1C plus a dvvC box.
 		tr.codec = "av1"
 		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "av1C")
 	case "mp4a":
@@ -600,7 +606,29 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 	}
 	tr.codecPrivate = append([]byte(nil), cfg...)
 	parseColr(tr, payload, headerLen)
+	parseDolbyVision(tr, payload, headerLen)
 	return nil
+}
+
+// parseDolbyVision reads a dvcC or dvvC box from a visual sample entry and records
+// the decoded Dolby Vision configuration. Both box types carry the same record;
+// dvcC is used for profiles without a cross-compatibility id, dvvC for the rest.
+func parseDolbyVision(tr *inTrack, payload []byte, headerLen int) {
+	if len(payload) < headerLen {
+		return
+	}
+	children, err := iterBoxes(payload[headerLen:])
+	if err != nil {
+		return
+	}
+	for _, typ := range [...]string{"dvvC", "dvcC"} {
+		if b, ok := findMemBox(children, typ); ok {
+			if dv := mkv.ParseDolbyVisionConfig(b.payload); dv != nil {
+				tr.dolbyVision = dv
+				return
+			}
+		}
+	}
 }
 
 // parseColr reads a colr box (nclx type) from a visual sample entry and records

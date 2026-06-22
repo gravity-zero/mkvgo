@@ -58,6 +58,22 @@ const (
 	IDPixelHeight = 0xBA
 )
 
+// BlockAdditionMapping (TrackEntry sub-element) and its children. It carries
+// codec-private supplemental data keyed by a four-character BlockAddIDType; for
+// Dolby Vision the type is dvcC/dvvC and the ExtraData is the
+// DOVIDecoderConfigurationRecord. See mkv/dolbyvision.go.
+const (
+	IDBlockAdditionMapping = 0x41E4
+	IDBlockAddIDValue      = 0x41F0
+	IDBlockAddIDName       = 0x41A4
+	IDBlockAddIDType       = 0x41E7
+	IDBlockAddIDExtraData  = 0x41ED
+
+	// BlockAddIDType values for Dolby Vision (the four-character codes as uint32).
+	BlockAddIDTypeDVCC = 0x64766343 // "dvcC"
+	BlockAddIDTypeDVVC = 0x64767643 // "dvvC"
+)
+
 // Colour element (0x55B0) and its sub-elements. Values are CICP / ITU-T H.273
 // code points, identical to the enums FFmpeg exposes as color_space,
 // color_transfer, color_primaries and color_range. See mkv/colour.go for the

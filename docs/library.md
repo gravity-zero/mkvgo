@@ -191,7 +191,7 @@ for _, d := range dropped { // cover art / non-media tracks not in c.Tracks
 }
 ```
 
-Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel count (from the codec config, not the unreliable sample-entry field) and colour code points (`colr`, falling back to the codec bitstream). The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
+Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel count (from the codec config, not the unreliable sample-entry field), colour code points (`colr`, falling back to the codec bitstream) and, when present, its Dolby Vision configuration (`Track.DolbyVision`: profile, level and `bl_signal_compatibility_id`, from the `dvcC`/`dvvC` box — or the `dvcC`/`dvvC` `BlockAdditionMapping` for MKV). The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
 
 `OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters and DurationMs are populated; Attachments, Tags and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
 

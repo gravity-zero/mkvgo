@@ -109,6 +109,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			// field the colr box did not supply — matches ffprobe's color_space on
 			// SDR streams that carry colour only in the SPS.
 			reader.FillColourFromCodecPrivate(&mt)
+			mt.DolbyVision = t.dolbyVision
 		case mkv.AudioTrack:
 			if t.channels > 0 {
 				ch := t.channels

@@ -523,6 +523,10 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err := p.parseContentEncodings(eh.Size, &t); err != nil {
 				return t, err
 			}
+		case mkv.IDBlockAdditionMapping:
+			if err := p.parseBlockAdditionMapping(eh.Size, &t); err != nil {
+				return t, err
+			}
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return t, err
@@ -644,6 +648,53 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// parseBlockAdditionMapping reads a BlockAdditionMapping (0x41E4). When its
+// BlockAddIDType marks Dolby Vision (dvcC/dvvC), the BlockAddIDExtraData holds the
+// DOVIDecoderConfigurationRecord, which is decoded onto the track.
+func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	var addType uint64
+	var extra []byte
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			break
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return err
+		}
+		switch eh.ID {
+		case mkv.IDBlockAddIDType:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			addType = v
+		case mkv.IDBlockAddIDExtraData:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
+			v, err := ebml.ReadBytes(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			extra = v
+		default:
+			if err := p.skip(eh.Size); err != nil {
+				return err
+			}
+		}
+	}
+	if addType == mkv.BlockAddIDTypeDVCC || addType == mkv.BlockAddIDTypeDVVC {
+		if dv := mkv.ParseDolbyVisionConfig(extra); dv != nil {
+			t.DolbyVision = dv
 		}
 	}
 	return nil
