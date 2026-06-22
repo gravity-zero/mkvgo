@@ -19,7 +19,10 @@ All notable changes to mkvgo are documented here. The format is based on
     too, so a full language survives a round-trip.
   - **Dolby Vision** is carried both ways: `RemuxFromMP4` writes a `dvcC`/`dvvC`
     `BlockAdditionMapping`, `RemuxToMP4` writes the `dvcC`/`dvvC` box into the visual
-    sample entry. New `mkv.EncodeDolbyVisionConfig` / `DolbyVision.BoxType`.
+    sample entry — using the Dolby sample entry type (`dvh1`/`dva1`/`dav1`) for a
+    non-cross-compatible stream (`bl_signal_compatibility_id` 0, e.g. profile 5) and
+    keeping the plain `hvc1`/`avc1`/`av01` tag for a cross-compatible one (profile 8).
+    New `mkv.EncodeDolbyVisionConfig` / `DolbyVision.BoxType`.
   - MP4 video tracks now report an average **frame rate** (from the sample timing,
     when the sample table is built).
 

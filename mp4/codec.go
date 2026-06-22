@@ -46,9 +46,9 @@ func lookupCodec(short string) (codecSpec, bool) {
 }
 
 var codecTable = map[string]codecSpec{
-	"h264": {handler: "vide", video: true, brand: "avc1", sampleEntry: visualEntry("avc1", "avcC")},
-	"hevc": {handler: "vide", video: true, brand: "hvc1", sampleEntry: visualEntry("hvc1", "hvcC")},
-	"av1":  {handler: "vide", video: true, brand: "av01", sampleEntry: visualEntry("av01", "av1C")},
+	"h264": {handler: "vide", video: true, brand: "avc1", sampleEntry: visualEntry("avc1", "dva1", "avcC")},
+	"hevc": {handler: "vide", video: true, brand: "hvc1", sampleEntry: visualEntry("hvc1", "dvh1", "hvcC")},
+	"av1":  {handler: "vide", video: true, brand: "av01", sampleEntry: visualEntry("av01", "dav1", "av1C")},
 	"aac":  {handler: "soun", video: false, sampleEntry: aacEntry},
 	"opus": {handler: "soun", video: false, sampleEntry: opusEntry},
 	"flac": {handler: "soun", video: false, sampleEntry: flacEntry},
@@ -127,13 +127,21 @@ func subtitleDropReason(codec string) string {
 // visualEntry returns a sampleEntry builder for a video codec whose MKV
 // CodecPrivate is exactly the payload of the named MP4 configuration box
 // (true for H.264/avcC, HEVC/hvcC and AV1/av1C).
-func visualEntry(entryType, configType string) func(*mkv.Track, []byte) ([]byte, error) {
+func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []byte) ([]byte, error) {
 	return func(t *mkv.Track, _ []byte) ([]byte, error) {
 		if len(t.CodecPrivate) == 0 {
 			return nil, errf("track %d (%s): missing CodecPrivate, cannot build %s", t.ID, t.Codec, configType)
 		}
+		et := entryType
+		// A non-cross-compatible Dolby Vision stream (bl_signal_compatibility_id 0,
+		// e.g. profile 5/7) needs the Dolby sample entry type — its base layer is not
+		// a standard HEVC/AVC/AV1 stream, so a plain hvc1/avc1/av01 tag would mislead
+		// a non-DV decoder. Cross-compatible profiles (profile 8) keep the plain tag.
+		if t.DolbyVision != nil && t.DolbyVision.BLSignalCompatID == 0 {
+			et = dvEntryType
+		}
 		config := box(configType, t.CodecPrivate)
-		return visualSampleEntry(entryType, t, config), nil
+		return visualSampleEntry(et, t, config), nil
 	}
 }
 

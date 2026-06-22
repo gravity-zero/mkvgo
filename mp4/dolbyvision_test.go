@@ -64,7 +64,17 @@ func TestDolbyVisionMP4Absent(t *testing.T) {
 // remux directions: MKV (BlockAdditionMapping) → MP4 (dvvC) → MKV, checking the
 // profile and compatibility id survive each hop.
 func TestDolbyVisionRemuxRoundTrip(t *testing.T) {
-	dv := &mkv.DolbyVision{VersionMajor: 1, Profile: 8, Level: 6, RPUPresent: true, BLPresent: true, BLSignalCompatID: 1}
+	// Cross-compatible (profile 8, dvvC, plain hvc1/avc1 entry) and single-layer
+	// (profile 5, dvcC, dedicated dva1 entry) must both survive both directions.
+	t.Run("profile8", func(t *testing.T) {
+		roundTripDV(t, &mkv.DolbyVision{VersionMajor: 1, Profile: 8, Level: 6, RPUPresent: true, BLPresent: true, BLSignalCompatID: 1})
+	})
+	t.Run("profile5", func(t *testing.T) {
+		roundTripDV(t, &mkv.DolbyVision{VersionMajor: 1, Profile: 5, Level: 6, RPUPresent: true, BLPresent: true, BLSignalCompatID: 0})
+	})
+}
+
+func roundTripDV(t *testing.T, dv *mkv.DolbyVision) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,
 			Width: u32p(320), Height: u32p(240), FrameRate: f64p(25), DolbyVision: dv},
@@ -75,12 +85,18 @@ func TestDolbyVisionRemuxRoundTrip(t *testing.T) {
 		{track: 1, pts: 0, key: true, data: []byte{1}},
 		{track: 2, pts: 0, key: true, data: []byte{2}},
 	}
-	// The writer emits a dvvC BlockAdditionMapping for the source MKV.
+	// The writer emits a dvcC/dvvC BlockAdditionMapping for the source MKV.
 	srcMKV := buildMKVWithChapters(t, tracks, blocks, nil)
 	dir := t.TempDir()
 
-	// MKV → MP4: a dvvC box is written into the visual sample entry; the probe
-	// reads it back (this also proves the reader parsed the source's mapping).
+	check := func(stage string, got *mkv.DolbyVision) {
+		if got == nil || got.Profile != dv.Profile || got.BLSignalCompatID != dv.BLSignalCompatID {
+			t.Fatalf("%s Dolby Vision = %+v, want profile %d / compat %d", stage, got, dv.Profile, dv.BLSignalCompatID)
+		}
+	}
+
+	// MKV → MP4: the config box is written into the visual sample entry; the probe
+	// reads it back (also proving the reader parsed the source's mapping).
 	mp4Path := filepath.Join(dir, "dv.mp4")
 	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
 		t.Fatalf("RemuxToMP4: %v", err)
@@ -89,19 +105,15 @@ func TestDolbyVisionRemuxRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenMeta: %v", err)
 	}
-	if got := videoDV(c.Tracks); got == nil || got.Profile != 8 || got.BLSignalCompatID != 1 {
-		t.Fatalf("MP4 Dolby Vision = %+v, want profile 8 / compat 1", got)
-	}
+	check("MP4", videoDV(c.Tracks))
 
-	// MP4 → MKV: a dvvC BlockAdditionMapping is written; the reader reads it back.
+	// MP4 → MKV: a BlockAdditionMapping is written; the reader reads it back.
 	backMKV := filepath.Join(dir, "back.mkv")
 	if err := RemuxFromMP4(context.Background(), mp4Path, backMKV); err != nil {
 		t.Fatalf("RemuxFromMP4: %v", err)
 	}
 	full, _ := readMKV(t, backMKV)
-	if got := videoDV(full.Tracks); got == nil || got.Profile != 8 || got.BLSignalCompatID != 1 {
-		t.Fatalf("round-tripped MKV Dolby Vision = %+v, want profile 8 / compat 1", got)
-	}
+	check("round-tripped MKV", videoDV(full.Tracks))
 }
 
 func videoDV(tracks []mkv.Track) *mkv.DolbyVision {
@@ -111,4 +123,30 @@ func videoDV(tracks []mkv.Track) *mkv.DolbyVision {
 		}
 	}
 	return nil
+}
+
+// TestDolbyVisionSampleEntryType checks the visual sample entry uses the Dolby
+// tag (dva1/dvh1/dav1) only for a non-cross-compatible stream, and keeps the plain
+// tag for a cross-compatible one.
+func TestDolbyVisionSampleEntryType(t *testing.T) {
+	videoEntry := func(dv *mkv.DolbyVision) string {
+		tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,
+			Width: u32p(320), Height: u32p(240), FrameRate: f64p(25), DolbyVision: dv}}
+		blocks := []genBlock{{track: 1, pts: 0, key: true, data: []byte{1}}}
+		_, boxes := remux(t, buildMKV(t, tracks, blocks))
+		for _, tr := range moovTraks(t, boxes) {
+			if tr.handler == "vide" {
+				return tr.sampleEntry
+			}
+		}
+		return ""
+	}
+	// Cross-compatible (bl_signal_compatibility_id != 0) keeps the plain AVC tag.
+	if got := videoEntry(&mkv.DolbyVision{Profile: 8, BLSignalCompatID: 1, RPUPresent: true, BLPresent: true}); got != "avc1" {
+		t.Errorf("profile 8 entry = %q, want avc1", got)
+	}
+	// Single-layer (bl_signal_compatibility_id 0) uses the Dolby entry type.
+	if got := videoEntry(&mkv.DolbyVision{Profile: 5, BLSignalCompatID: 0, RPUPresent: true, BLPresent: true}); got != "dva1" {
+		t.Errorf("profile 5 entry = %q, want dva1", got)
+	}
 }
