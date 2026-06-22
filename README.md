@@ -34,17 +34,19 @@ Global flags: `-json` (structured output), `--version`
 
 | Category | Command | Description |
 |---|---|---|
-| **Inspection** | `info` | Show container info (title, duration, muxing app) |
-| | `tracks` | List all tracks with codec, language, resolution |
-| | `chapters` | List chapters with timestamps |
+| **Inspection** | `info` | Show container info (title, duration, muxing app) — MKV or MP4 |
+| | `tracks` | List all tracks with codec, language, resolution, Dolby Vision — MKV or MP4 |
+| | `chapters` | List chapters with timestamps — MKV or MP4 |
 | | `attachments` | List attachments (fonts, images) |
 | | `tags` | Show all tags |
-| | `probe` | Full dump of all metadata |
+| | `probe` | Full dump of all metadata (colour, Dolby Vision, keyframes, dropped tracks) — MKV or MP4 |
+| | `keyframes` | List video keyframe timestamps (MKV Cues / MP4 sample table) |
 | | `validate` | Check MKV structure for issues |
 | | `compare` | Diff metadata of two MKV files |
 | **Extraction** | `demux` | Extract tracks to raw streams |
 | | `extract-attachment` | Extract an attachment to file |
-| | `extract-subtitle` | Extract subtitle track as SRT or ASS |
+| | `extract-subtitle` | Extract subtitle track as SRT, ASS or WebVTT (MKV or MP4) |
+| | `to-vtt` | Convert an external `.srt`/`.ass`/`.vtt` sidecar to WebVTT |
 | **Editing** | `edit` | Edit metadata from JSON (arg or stdin) |
 | | `edit-title` | Change the container title |
 | | `edit-track` | Edit track properties (lang, name, default, forced) |
