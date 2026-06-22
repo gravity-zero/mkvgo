@@ -78,6 +78,82 @@ func findSync(frame []byte, sync uint16, maxScan int) int {
 
 var ac3SampleRates = [4]uint32{48000, 44100, 32000, 0}
 
+// --- channel counts from codec config (read side) ----------------------------
+//
+// AudioSampleEntry.channelcount is unreliable for multichannel audio: many MP4
+// muxers leave it at 2 regardless of the real layout. The true count lives in the
+// codec configuration — the AAC AudioSpecificConfig, or the AC-3/E-AC-3 dac3/dec3
+// boxes — which these helpers read. Each returns 0 when the count cannot be
+// determined, so the caller keeps the sample-entry value as a fallback.
+
+// ac3AcmodChannels maps an AC-3/E-AC-3 audio coding mode to its full-bandwidth
+// channel count (before adding the LFE).
+var ac3AcmodChannels = [8]uint8{2, 1, 2, 3, 3, 4, 4, 5}
+
+// aacConfigChannels maps an AAC channelConfiguration to a channel count. Index 0
+// means the layout is carried in a program config element (not resolved here).
+var aacConfigChannels = [8]uint8{0, 1, 2, 3, 4, 5, 6, 8}
+
+// aacChannels reads the channelConfiguration from an AudioSpecificConfig.
+func aacChannels(asc []byte) uint8 {
+	r := &bitReader{data: asc}
+	aot := r.bits(5)
+	if aot == 31 { // escape: audioObjectTypeExt
+		r.skip(6)
+	}
+	if r.bits(4) == 15 { // samplingFrequencyIndex == 0xF → explicit 24-bit rate
+		r.skip(24)
+	}
+	cc := r.bits(4)
+	if r.err || cc >= uint32(len(aacConfigChannels)) {
+		return 0
+	}
+	return aacConfigChannels[cc]
+}
+
+// ac3Channels reads acmod + lfeon from a dac3 (AC3SpecificBox) payload.
+func ac3Channels(dac3 []byte) uint8 {
+	r := &bitReader{data: dac3}
+	r.skip(2 + 5 + 3) // fscod, bsid, bsmod
+	acmod := r.bits(3)
+	lfeon := r.bits(1)
+	if r.err {
+		return 0
+	}
+	return ac3AcmodChannels[acmod] + uint8(lfeon)
+}
+
+// eac3ChanLocChannels maps each chan_loc bit (custom dependent-substream channel
+// locations, ETSI TS 102 366 Annex E) to the number of channels it carries.
+var eac3ChanLocChannels = [9]uint8{2, 2, 1, 1, 2, 2, 2, 1, 1}
+
+// eac3Channels reads the channel count of the first independent substream from a
+// dec3 (EC3SpecificBox) payload, including any dependent-substream channels.
+func eac3Channels(dec3 []byte) uint8 {
+	r := &bitReader{data: dec3}
+	r.skip(13)        // data_rate
+	r.skip(3)         // num_ind_sub - 1
+	r.skip(2 + 5)     // fscod, bsid
+	r.skip(1 + 1 + 3) // reserved, asvc, bsmod
+	acmod := r.bits(3)
+	lfeon := r.bits(1)
+	r.skip(3) // reserved
+	numDepSub := r.bits(4)
+	ch := ac3AcmodChannels[acmod] + uint8(lfeon)
+	if numDepSub > 0 {
+		chanLoc := r.bits(9)
+		for i := 0; i < 9; i++ {
+			if chanLoc&(1<<uint(i)) != 0 {
+				ch += eac3ChanLocChannels[i]
+			}
+		}
+	}
+	if r.err {
+		return 0
+	}
+	return ch
+}
+
 // --- AC-3 (ac-3 + dac3) ------------------------------------------------------
 
 func ac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {

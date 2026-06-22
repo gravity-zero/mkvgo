@@ -245,3 +245,73 @@ func TestACEAC3ReverseMapping(t *testing.T) {
 		}
 	}
 }
+
+// TestChannelCountsFromConfig verifies the read-side channel counts are taken
+// from the codec configuration, not the (often wrong) AudioSampleEntry field.
+func TestChannelCountsFromConfig(t *testing.T) {
+	// AAC AudioSpecificConfig: AOT=2 (LC), sfi=4 (44100), channelConfiguration.
+	asc := func(chanConfig uint32) []byte {
+		var w bitWriter
+		w.write(2, 5)
+		w.write(4, 4)
+		w.write(chanConfig, 4)
+		return w.bytes()
+	}
+	if got := aacChannels(asc(2)); got != 2 {
+		t.Errorf("aacChannels(stereo) = %d, want 2", got)
+	}
+	if got := aacChannels(asc(6)); got != 6 {
+		t.Errorf("aacChannels(5.1) = %d, want 6", got)
+	}
+	if got := aacChannels(asc(7)); got != 8 {
+		t.Errorf("aacChannels(7.1) = %d, want 8", got)
+	}
+	if got := aacChannels(fakeASC); got != 2 {
+		t.Errorf("aacChannels(fakeASC) = %d, want 2", got)
+	}
+
+	// AC-3 dac3: acmod=7 (3/2), lfeon=1 → 5.1.
+	dac3 := func() []byte {
+		var w bitWriter
+		w.write(0, 2) // fscod
+		w.write(8, 5) // bsid
+		w.write(0, 3) // bsmod
+		w.write(7, 3) // acmod
+		w.write(1, 1) // lfeon
+		w.write(0, 5) // bit_rate_code
+		w.write(0, 5) // reserved
+		return w.bytes()
+	}()
+	if got := ac3Channels(dac3); got != 6 {
+		t.Errorf("ac3Channels(5.1) = %d, want 6", got)
+	}
+
+	// E-AC-3 dec3: one independent substream, acmod=7, lfeon=1, no dep → 5.1.
+	dec3 := func(numDepSub, chanLoc uint32) []byte {
+		var w bitWriter
+		w.write(0, 13) // data_rate
+		w.write(0, 3)  // num_ind_sub - 1
+		w.write(0, 2)  // fscod
+		w.write(8, 5)  // bsid
+		w.write(0, 1)  // reserved
+		w.write(0, 1)  // asvc
+		w.write(0, 3)  // bsmod
+		w.write(7, 3)  // acmod
+		w.write(1, 1)  // lfeon
+		w.write(0, 3)  // reserved
+		w.write(numDepSub, 4)
+		if numDepSub > 0 {
+			w.write(chanLoc, 9)
+		} else {
+			w.write(0, 1) // reserved
+		}
+		return w.bytes()
+	}
+	if got := eac3Channels(dec3(0, 0)); got != 6 {
+		t.Errorf("eac3Channels(5.1) = %d, want 6", got)
+	}
+	// dependent substream carrying Lrs/Rrs (chan_loc bit 1 = 2 channels) → 7.1.
+	if got := eac3Channels(dec3(1, 1<<1)); got != 8 {
+		t.Errorf("eac3Channels(7.1) = %d, want 8", got)
+	}
+}

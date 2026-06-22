@@ -301,13 +301,15 @@ func parseMdhd(payload []byte) (timescale uint32, lang string) {
 	return timescale, lang
 }
 
-// decodeMdhdLanguage unpacks the mdhd language field: three 5-bit values, each
-// offset by 0x60, forming a lowercase ISO 639-2/T code. It returns "" for the
-// zero field and for "und" (undefined), and for any value that is not three
-// a–z letters.
+// decodeMdhdLanguage unpacks the mdhd language field. ISO 639-2/T is packed as
+// three 5-bit values, each offset by 0x60, forming a lowercase code. QuickTime-
+// origin files instead store a small Macintosh language code: the two forms are
+// unambiguous because the smallest valid packed code ("aaa") is 0x421, so any
+// value below 0x400 is a Mac code. Returns "" for an unknown/zero/"und" value and
+// for anything that is not three a–z letters.
 func decodeMdhdLanguage(packed uint16) string {
-	if packed == 0 {
-		return ""
+	if packed < 0x400 {
+		return macLanguageToISO(packed)
 	}
 	c := [3]byte{
 		byte((packed>>10)&0x1f) + 0x60,
@@ -324,6 +326,23 @@ func decodeMdhdLanguage(packed uint16) string {
 	}
 	return ""
 }
+
+// macLanguageCodes maps the Macintosh language codes (QuickTime mdhd) to ISO
+// 639-2/T, the same vocabulary the packed form yields. It is deliberately limited
+// to codes seen in real media; an unlisted code resolves to "" (treated as absent)
+// rather than risk a wrong mapping.
+var macLanguageCodes = map[uint16]string{
+	0: "eng", 1: "fra", 2: "deu", 3: "ita", 4: "nld", 5: "swe", 6: "spa",
+	7: "dan", 8: "por", 9: "nor", 10: "heb", 11: "jpn", 12: "ara", 13: "fin",
+	14: "ell", 15: "isl", 16: "mlt", 17: "tur", 18: "hrv", 19: "zho", 20: "urd",
+	21: "hin", 22: "tha", 23: "kor", 24: "lit", 25: "pol", 26: "hun", 27: "est",
+	28: "lav", 30: "fao", 31: "fas", 32: "rus", 33: "zho", 35: "gle", 36: "sqi",
+	37: "ron", 38: "ces", 39: "slk", 40: "slv", 41: "yid", 42: "srp", 43: "mkd",
+	44: "bul", 45: "ukr", 46: "bel", 48: "kaz", 49: "aze", 51: "hye", 52: "kat",
+	80: "vie", 81: "ind",
+}
+
+func macLanguageToISO(code uint16) string { return macLanguageCodes[code] }
 
 // tkhdEnabled reports whether a track header's track_enabled flag (bit 0 of the
 // 24-bit flags) is set. ffmpeg maps this to the "default" stream disposition.
@@ -386,10 +405,20 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
 	case "ac-3":
 		tr.codec = "ac3"
 		parseAudioFields(tr, entry.payload)
+		if dac3, err := childConfig(entry.payload, audioHdr, "dac3"); err == nil {
+			if ch := ac3Channels(dac3); ch > 0 {
+				tr.channels = ch
+			}
+		}
 		return true, nil
 	case "ec-3":
 		tr.codec = "eac3"
 		parseAudioFields(tr, entry.payload)
+		if dec3, err := childConfig(entry.payload, audioHdr, "dec3"); err == nil {
+			if ch := eac3Channels(dec3); ch > 0 {
+				tr.channels = ch
+			}
+		}
 		return true, nil
 	case "fLaC":
 		tr.codec = "flac"
@@ -425,6 +454,11 @@ func parseMP4A(tr *inTrack, payload []byte, headerLen int) (bool, error) {
 		}
 		tr.codec = "aac"
 		tr.codecPrivate = asc
+		// The AudioSampleEntry channelcount is unreliable for multichannel AAC;
+		// the AudioSpecificConfig carries the true layout.
+		if ch := aacChannels(asc); ch > 0 {
+			tr.channels = ch
+		}
 		return true, nil
 	case 0x69, 0x6B: // MPEG-2/1 Audio Layer III
 		tr.codec = "A_MPEG/L3"

@@ -100,8 +100,10 @@ func TestDecodeMdhdLanguage(t *testing.T) {
 	}{
 		{packLanguage("fre"), "fre"},
 		{packLanguage("und"), ""}, // undefined → treated as absent
-		{0, ""},                   // zero field → absent
-		{0x7FFF, ""},              // out-of-range letters → rejected
+		{0, "eng"},                // Macintosh language code 0 = English
+		{1, "fra"},                // Macintosh language code 1 = French
+		{0x2FF, ""},               // unknown Mac code (<0x400) → absent
+		{0x7FFF, ""},              // unspecified packed value → rejected
 	}
 	for _, c := range cases {
 		if got := decodeMdhdLanguage(c.packed); got != c.want {
