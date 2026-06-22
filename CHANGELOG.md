@@ -31,18 +31,27 @@ All notable changes to mkvgo are documented here. The format is based on
   readers, so a probe can report Dolby Vision without a packet scan.
 
 - **Head-only keyframe index on the Container.** `Container.Keyframes` ([]int64,
-  milliseconds, ascending, de-duplicated) is now filled by the metadata probe in
-  the same pass — no separate call, no second open:
-  - MP4 `OpenMeta`/`ReadMeta` derive it from the sync-sample table (`stss`) and
-    per-sample timing (`stts`/`ctts`) already parsed from `moov`, with the edit
-    list (`elst`) applied as ffmpeg does — an empty edit's delay and a non-empty
-    edit's `media_time` shift the timestamps, and keyframes trimmed before the
-    edit start are dropped.
-  - Matroska/WebM `OpenMeta`/`ReadMeta` derive it from the `Cues` seek index,
-    reached via the `SeekHead` (one seek to one element, no `Cluster` scan); a full
-    `Read` exposes it too. nil when the source has no usable index, so a caller can
-    fall back to a packet scan.
-  This replaces a full packet scan for `-c copy` HLS/DASH segment alignment.
+  milliseconds, ascending, de-duplicated), the cut points for `-c copy` HLS/DASH
+  segmentation, replacing a full packet scan:
+  - Matroska/WebM `OpenMeta`/`ReadMeta` fill it from the `Cues` seek index, reached
+    via the `SeekHead` (one seek to one element, no `Cluster` scan); a full `Read`
+    exposes it too.
+  - MP4 fills it from the sync-sample table (`stss`) and per-sample timing
+    (`stts`/`ctts`), with the edit list (`elst`) applied as ffmpeg does (an empty
+    edit's delay and a non-empty edit's `media_time` shift the timestamps; keyframes
+    before the edit start are dropped). This is **opt-in** via
+    `Options{Keyframes: true}` — building the sample table is the dominant cost on a
+    long movie, so the default metadata probe skips it.
+  nil when the source has no usable index, so a caller can fall back to a packet scan.
+
+### Changed
+
+- **MP4 `OpenMeta`/`ReadMeta` are now head-only by default.** They read only the
+  `moov` box headers (`mvhd`/`tkhd`/`mdhd`/`stsd`/…) and no longer expand the
+  per-sample tables, so probing a long movie's metadata is much faster. The
+  duration comes from `mvhd` in this mode. Request `Options{Keyframes: true}` to
+  build the sample table and populate `Container.Keyframes`. `OpenMeta`/`ReadMeta`
+  gain a variadic `...Options` parameter (existing calls are unaffected).
 
 - **MP4 probe reads track-selection metadata.** `OpenMeta` / `ReadMeta` /
   `RemuxFromMP4` now populate, for each track:

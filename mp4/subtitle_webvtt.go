@@ -34,7 +34,7 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		return err
 	}
 
-	mv, err := parseMP4(src, fi.Size())
+	mv, err := parseMP4(src, fi.Size(), true)
 	if err != nil {
 		return err
 	}

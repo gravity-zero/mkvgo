@@ -248,7 +248,7 @@ func TestRemuxFromMP4NoMoov(t *testing.T) {
 func TestParseMP4RejectsTruncatedBox(t *testing.T) {
 	// Box claims a size larger than the data.
 	bad := []byte{0x00, 0x00, 0x10, 0x00, 'm', 'o', 'o', 'v'}
-	if _, err := parseMP4(bytes.NewReader(bad), int64(len(bad))); err == nil {
+	if _, err := parseMP4(bytes.NewReader(bad), int64(len(bad)), true); err == nil {
 		t.Error("expected error for oversized box")
 	}
 }

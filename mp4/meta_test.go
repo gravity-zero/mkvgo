@@ -42,7 +42,7 @@ func buildTestMP4(t *testing.T) string {
 func TestOpenMetaMatchesRemux(t *testing.T) {
 	mp4Path := buildTestMP4(t)
 
-	c, dropped, err := OpenMeta(context.Background(), mp4Path)
+	c, dropped, err := OpenMeta(context.Background(), mp4Path, Options{Keyframes: true})
 	if err != nil {
 		t.Fatalf("OpenMeta: %v", err)
 	}

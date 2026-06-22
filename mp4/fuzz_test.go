@@ -45,7 +45,7 @@ func FuzzParseMP4(f *testing.F) {
 	f.Add(sampleMP4(f))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		mv, err := parseMP4(bytes.NewReader(data), int64(len(data)))
+		mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), true)
 		if err == nil && mv == nil {
 			t.Fatal("nil movie with nil error")
 		}

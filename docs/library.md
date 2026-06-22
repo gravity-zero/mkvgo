@@ -200,14 +200,16 @@ Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel 
 To align `-c copy` HLS/DASH segments on source keyframes without a full packet scan, read `Container.Keyframes` — the metadata probe fills it in the same pass, no separate call or second open:
 
 ```go
-c, _, err := mp4.OpenMeta(ctx, "video.mp4")
+// MKV/WebM: filled from the Cues index in the normal metadata pass.
+c, err := matroska.OpenMeta(ctx, "video.mkv")
 ks := c.Keyframes                                  // []int64 ms, ascending, de-duplicated
 
-c, err := matroska.OpenMeta(ctx, "video.mkv")
-ks = c.Keyframes                                   // same field, from the Cues index
+// MP4: opt-in, since building the sample table dominates the parse on a long movie.
+c, _, err := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{Keyframes: true})
+ks = c.Keyframes
 ```
 
-`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MP4 derives them from the `stss`/`stts`/`ctts` sample tables already parsed from `moov` (free); MKV/WebM derives them from the `Cues` element reached via the `SeekHead` — one seek, no `Cluster` scan — and a full `matroska.Read` exposes them too. It is nil when the source has no usable index, so the caller can fall back to a packet scan.
+`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does — but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index, so the caller can fall back to a packet scan.
 
 ### Subtitles to WebVTT
 

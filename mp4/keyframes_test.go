@@ -32,7 +32,7 @@ func TestKeyframesMP4(t *testing.T) {
 		t.Fatalf("RemuxToMP4: %v", err)
 	}
 
-	c, _, err := OpenMeta(context.Background(), mp4Path)
+	c, _, err := OpenMeta(context.Background(), mp4Path, Options{Keyframes: true})
 	if err != nil {
 		t.Fatalf("OpenMeta: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestKeyframesMP4NoVideo(t *testing.T) {
 	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
 		t.Fatalf("RemuxToMP4: %v", err)
 	}
-	c, _, err := OpenMeta(context.Background(), mp4Path)
+	c, _, err := OpenMeta(context.Background(), mp4Path, Options{Keyframes: true})
 	if err != nil {
 		t.Fatalf("OpenMeta: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestKeyframesMP4FromReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	c, _, err := ReadMeta(context.Background(), f, "label.mp4")
+	c, _, err := ReadMeta(context.Background(), f, "label.mp4", Options{Keyframes: true})
 	if err != nil {
 		t.Fatalf("ReadMeta: %v", err)
 	}

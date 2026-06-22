@@ -40,6 +40,12 @@ type Options struct {
 	// remains. (SRT and WebVTT are already carried as tx3g by default.) Only
 	// RemuxToMP4 honours this.
 	FlattenStyledSubs bool
+	// Keyframes, on the metadata probe (OpenMeta/ReadMeta), builds the MP4 sample
+	// table so Container.Keyframes is populated. It is off by default because
+	// expanding the sample table is the dominant cost of parsing a long movie's
+	// moov; leave it off when only stream metadata is needed. Ignored by the remux
+	// entry points, which always build the sample table.
+	Keyframes bool
 	// NativeWebVTT carries WebVTT tracks as native wvtt (ISO/IEC 14496-30) instead
 	// of the default tx3g. wvtt is lossless (cue settings and inline markup are
 	// preserved) and is read by Apple/Safari/CMAF, but ffmpeg's MP4 demuxer does

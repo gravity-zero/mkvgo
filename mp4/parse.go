@@ -73,9 +73,10 @@ type inTrack struct {
 // movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
 // that were recognised but not carried (so callers can surface them).
 type movie struct {
-	tracks   []inTrack
-	chapters []mkv.Chapter
-	dropped  []DroppedTrack
+	tracks     []inTrack
+	chapters   []mkv.Chapter
+	dropped    []DroppedTrack
+	durationMs int64 // from mvhd, used when the sample table was not built
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -162,7 +163,10 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 }
 
 // parseMP4 reads and parses the movie header of a seekable MP4 of the given size.
-func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
+// withSamples builds each track's full sample table (offsets, sync samples, timing
+// — the work a keyframe index or a remux needs); leave it false for a metadata-only
+// probe, which is far cheaper on a long movie (no per-sample expansion).
+func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 	moovPayload, err := readMoov(r, size)
 	if err != nil {
 		return nil, err
@@ -172,22 +176,27 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 		return nil, errf("parse moov: %w", err)
 	}
 
-	// mvhd carries the movie timescale, needed to convert empty-edit durations
-	// (which are in the movie timebase, unlike media_time which is per-track).
+	var mv movie
+	// mvhd carries the movie timescale (needed to convert empty-edit durations,
+	// which are in the movie timebase) and the movie duration (used as the metadata
+	// duration when the sample table is not built).
 	var movieTS uint32
 	if mvhd, ok := findMemBox(moovBoxes, "mvhd"); ok {
-		movieTS, _ = parseMdhd(mvhd.payload) // mvhd shares mdhd's timescale layout
+		var durTicks uint64
+		movieTS, durTicks = parseMovieHeader(mvhd.payload)
+		if movieTS > 0 && durTicks > 0 && durTicks < 1<<62 && durTicks != 0xFFFFFFFF {
+			mv.durationMs = int64(durTicks) * 1000 / int64(movieTS)
+		}
 	}
 	if movieTS == 0 {
 		movieTS = 1000
 	}
 
-	var mv movie
 	for _, b := range moovBoxes {
 		if b.typ != "trak" {
 			continue
 		}
-		tr, dropped, err := parseTrak(b.payload, size, movieTS)
+		tr, dropped, err := parseTrak(b.payload, size, movieTS, withSamples)
 		if err != nil {
 			return nil, err
 		}
@@ -216,7 +225,7 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 // (e.g. cover art / attached picture) — it returns a zero track and a non-nil
 // *DroppedTrack describing it, so the caller can surface it instead of dropping it
 // silently. An error is returned only for malformed structure.
-func parseTrak(payload []byte, fileSize int64, movieTS uint32) (inTrack, *DroppedTrack, error) {
+func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool) (inTrack, *DroppedTrack, error) {
 	var tr inTrack
 	trakBoxes, err := iterBoxes(payload)
 	if err != nil {
@@ -343,10 +352,33 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32) (inTrack, *Droppe
 			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
 	}
 
-	if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
-		return tr, nil, err
+	if withSamples {
+		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
+			return tr, nil, err
+		}
 	}
 	return tr, nil, nil
+}
+
+// parseMovieHeader reads the movie timescale and duration from an mvhd box.
+func parseMovieHeader(payload []byte) (timescale uint32, durationTicks uint64) {
+	if len(payload) < 4 {
+		return 0, 0
+	}
+	if payload[0] == 1 {
+		// version1: creation(8) modification(8) timescale(4)@20 duration(8)@24
+		if len(payload) >= 32 {
+			timescale = binary.BigEndian.Uint32(payload[20:24])
+			durationTicks = binary.BigEndian.Uint64(payload[24:32])
+		}
+		return timescale, durationTicks
+	}
+	// version0: creation(4) modification(4) timescale(4)@12 duration(4)@16
+	if len(payload) >= 20 {
+		timescale = binary.BigEndian.Uint32(payload[12:16])
+		durationTicks = uint64(binary.BigEndian.Uint32(payload[16:20]))
+	}
+	return timescale, durationTicks
 }
 
 // parseMdhd reads an mdhd box and returns the media timescale and the ISO 639-2
