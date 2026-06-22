@@ -181,12 +181,17 @@ The same two operations are exposed on the CLI as `mkvgo to-mp4` and
 To read an MP4's codecs, colour, chapters and duration without converting it, use the metadata-only probe — the counterpart of `matroska.OpenMeta` for MKV. It parses only the `moov` box and never reads sample data (`mdat`) or writes an output file, so it is fast and bounded regardless of file size — the path to use when indexing or scanning a library.
 
 ```go
-c, err := mp4.OpenMeta(ctx, "video.mp4")          // *mkv.Container
+c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")  // *mkv.Container, []mp4.DroppedTrack
 fmt.Println(c.DurationMs, "ms")
 for _, t := range c.Tracks {
-    fmt.Printf("  #%d %s %s\n", t.ID, t.Type, t.Codec)
+    fmt.Printf("  #%d %s %s %s default=%v\n", t.ID, t.Type, t.Codec, t.Language, t.IsDefault)
+}
+for _, d := range dropped { // cover art / non-media tracks not in c.Tracks
+    fmt.Printf("  dropped #%d %s: %s\n", d.ID, d.Codec, d.Reason)
 }
 ```
+
+Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel count (from the codec config, not the unreliable sample-entry field) and colour code points (`colr`, falling back to the codec bitstream). The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
 
 `OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters and DurationMs are populated; Attachments, Tags and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
 

@@ -3,7 +3,62 @@ package mp4
 import (
 	"bytes"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
+
+// craftTrak builds a minimal trak payload (tkhd + mdia) with the given media
+// handler and first sample-entry fourcc, for exercising the drop path.
+func craftTrak(handler, sampleEntry string, trackID uint32) []byte {
+	mdhd := fullBox("mdhd", 0, 0, func(w *bw) {
+		w.u32(0)    // creation
+		w.u32(0)    // modification
+		w.u32(1000) // timescale
+		w.u32(0)    // duration
+		w.u16(0)    // language
+		w.u16(0)    // pre_defined
+	})
+	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {
+		w.u32(0) // pre_defined
+		w.fourcc(handler)
+		w.zeros(12)
+		w.u8(0)
+	})
+	stsd := fullBox("stsd", 0, 0, func(w *bw) {
+		w.u32(1) // entry_count
+		w.bytes(box(sampleEntry, make([]byte, 80)))
+	})
+	mdia := container("mdia", mdhd, hdlr, container("minf", container("stbl", stsd)))
+	tkhd := fullBox("tkhd", 0, 0x000007, func(w *bw) {
+		w.u32(0) // creation
+		w.u32(0) // modification
+		w.u32(trackID)
+		w.u32(0) // reserved
+		w.u32(0) // duration
+	})
+	return append(append([]byte{}, tkhd...), mdia...)
+}
+
+// TestParseTrakSurfacesDroppedTracks checks that a recognised-but-uncarried track
+// is reported (not silently skipped): cover art (video handler, unsupported entry)
+// and a non-media handler.
+func TestParseTrakSurfacesDroppedTracks(t *testing.T) {
+	_, dropped, err := parseTrak(craftTrak("vide", "jpeg", 2), 1<<20)
+	if err != nil {
+		t.Fatalf("parseTrak(cover): %v", err)
+	}
+	if dropped == nil || dropped.Type != mkv.VideoTrack || dropped.Codec != "jpeg" || dropped.ID != 2 {
+		t.Errorf("cover drop = %+v, want {ID:2 Type:video Codec:jpeg}", dropped)
+	}
+
+	_, dropped, err = parseTrak(craftTrak("tmcd", "tmcd", 3), 1<<20)
+	if err != nil {
+		t.Fatalf("parseTrak(tmcd): %v", err)
+	}
+	if dropped == nil || dropped.Codec != "tmcd" {
+		t.Errorf("non-media drop = %+v, want Codec:tmcd", dropped)
+	}
+}
 
 func TestParseStszUniformAndErrors(t *testing.T) {
 	// sample_size != 0 → every sample shares that size, no size array.

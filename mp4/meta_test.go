@@ -42,9 +42,16 @@ func buildTestMP4(t *testing.T) string {
 func TestOpenMetaMatchesRemux(t *testing.T) {
 	mp4Path := buildTestMP4(t)
 
-	c, err := OpenMeta(context.Background(), mp4Path)
+	c, dropped, err := OpenMeta(context.Background(), mp4Path)
 	if err != nil {
 		t.Fatalf("OpenMeta: %v", err)
+	}
+	// The synthetic QuickTime chapter track (chapters are read from chpl) reads
+	// back as a dropped "text" entry; no audio/video track must ever be dropped.
+	for _, d := range dropped {
+		if d.Type == mkv.VideoTrack || d.Type == mkv.AudioTrack {
+			t.Errorf("a media track was dropped: %+v", d)
+		}
 	}
 
 	if c.Path != mp4Path {
@@ -133,7 +140,7 @@ func TestReadMetaFromReader(t *testing.T) {
 	}
 	defer f.Close()
 
-	c, err := ReadMeta(context.Background(), f, "label.mp4")
+	c, _, err := ReadMeta(context.Background(), f, "label.mp4")
 	if err != nil {
 		t.Fatalf("ReadMeta: %v", err)
 	}
@@ -150,7 +157,7 @@ func TestReadMetaCancelled(t *testing.T) {
 	mp4Path := buildTestMP4(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := OpenMeta(ctx, mp4Path); err == nil {
+	if _, _, err := OpenMeta(ctx, mp4Path); err == nil {
 		t.Fatal("OpenMeta with a cancelled context should error")
 	}
 }
@@ -163,7 +170,7 @@ func TestOpenMetaNoMoov(t *testing.T) {
 	if err := os.WriteFile(bad, []byte{0, 0, 0, 0x10, 'f', 't', 'y', 'p', 'm', 'p', '4', '2', 0, 0, 0, 0}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenMeta(context.Background(), bad); err == nil {
+	if _, _, err := OpenMeta(context.Background(), bad); err == nil {
 		t.Fatal("OpenMeta on a moov-less file should error")
 	}
 }

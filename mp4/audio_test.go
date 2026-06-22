@@ -143,7 +143,7 @@ func TestFlacEntryRoundTrip(t *testing.T) {
 		w.bytes(entry)
 	})
 	var got inTrack
-	ok, err := parseSampleEntry(&got, stsd[8:])
+	ok, _, err := parseSampleEntry(&got, stsd[8:])
 	if err != nil || !ok {
 		t.Fatalf("parseSampleEntry: ok=%v err=%v", ok, err)
 	}
@@ -170,7 +170,7 @@ func TestMP3Entry(t *testing.T) {
 		w.bytes(entry)
 	})
 	var got inTrack
-	ok, err := parseSampleEntry(&got, stsd[8:])
+	ok, _, err := parseSampleEntry(&got, stsd[8:])
 	if err != nil || !ok {
 		t.Fatalf("parseSampleEntry: ok=%v err=%v", ok, err)
 	}
@@ -197,7 +197,7 @@ func TestDTSEntry(t *testing.T) {
 		w.bytes(entry)
 	})
 	var got inTrack
-	ok, err := parseSampleEntry(&got, stsd[8:])
+	ok, _, err := parseSampleEntry(&got, stsd[8:])
 	if err != nil || !ok {
 		t.Fatalf("parseSampleEntry: ok=%v err=%v", ok, err)
 	}
@@ -233,7 +233,7 @@ func TestACEAC3ReverseMapping(t *testing.T) {
 			w.bytes(entry)
 		})
 		var got inTrack
-		ok, err := parseSampleEntry(&got, stsd[8:])
+		ok, _, err := parseSampleEntry(&got, stsd[8:])
 		if err != nil || !ok {
 			t.Fatalf("%s parse: ok=%v err=%v", c.codec, ok, err)
 		}

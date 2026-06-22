@@ -201,10 +201,11 @@ err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 
 **Probe an MP4's metadata without remuxing (fast path for indexing):**
 ```go
-// Reads only the moov box — codecs, colour, chapters, duration — never the
-// sample data. Counterpart of matroska.OpenMeta for MKV.
-c, err := mp4.OpenMeta(ctx, "video.mp4")
-fmt.Println(c.DurationMs, len(c.Tracks), "tracks")
+// Reads only the moov box — codecs, language, default flag, channels, colour,
+// chapters, duration — never the sample data. Counterpart of matroska.OpenMeta.
+// The second value lists non-carried tracks (cover art, hint/timecode).
+c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
+fmt.Println(c.DurationMs, len(c.Tracks), "tracks,", len(dropped), "dropped")
 ```
 
 **Edit metadata with custom FS (S3, HTTP, etc.):**

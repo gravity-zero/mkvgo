@@ -4,6 +4,34 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MP4 probe reads track-selection metadata.** `OpenMeta` / `ReadMeta` /
+  `RemuxFromMP4` now populate, for each track:
+  - **language** — `mdhd.language` (ISO 639-2; the QuickTime Macintosh language
+    codes are decoded too) and the `elng` box (BCP-47) → `Track.Language` /
+    `LanguageBCP47` / `LanguagePresent`.
+  - **default flag** — the `tkhd` `track_enabled` flag → `Track.IsDefault` /
+    `DefaultPresent`.
+  - **audio channel count** — read from the codec configuration (AAC
+    `AudioSpecificConfig`, AC-3/E-AC-3 `dac3`/`dec3`) instead of the
+    `AudioSampleEntry` field, which many muxers leave at 2 for multichannel audio.
+  - **colour** — any field the `colr` box omits is filled from the codec
+    bitstream (e.g. the H.264 SPS VUI), via the now-exported
+    `reader.FillColourFromCodecPrivate`.
+- **Dropped (non-carried) tracks are surfaced.** `OpenMeta` / `OpenMetaWithFS` /
+  `ReadMeta` return an additional `[]DroppedTrack` listing tracks present in the
+  file but not in `Container.Tracks` — cover art / attached pictures and non-media
+  tracks (hint, timecode, metadata) — each with its track ID, fourcc and a reason.
+  `RemuxFromMP4` reports the same tracks through `Options.OnDrop`.
+
+### Changed
+
+- **BREAKING:** `mp4.OpenMeta`, `OpenMetaWithFS` and `ReadMeta` now return
+  `(*mkv.Container, []DroppedTrack, error)` (was `(*mkv.Container, error)`).
+
 ## [0.7.2] - 2026-06-22
 
 ### Added

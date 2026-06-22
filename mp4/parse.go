@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"strconv"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -58,10 +59,12 @@ type inTrack struct {
 	colorRange     *uint16
 }
 
-// movie is the parsed result: the tracks RemuxFromMP4 will emit.
+// movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
+// that were recognised but not carried (so callers can surface them).
 type movie struct {
 	tracks   []inTrack
 	chapters []mkv.Chapter
+	dropped  []DroppedTrack
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -163,13 +166,15 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 		if b.typ != "trak" {
 			continue
 		}
-		tr, ok, err := parseTrak(b.payload, size)
+		tr, dropped, err := parseTrak(b.payload, size)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			mv.tracks = append(mv.tracks, tr)
+		if dropped != nil {
+			mv.dropped = append(mv.dropped, *dropped)
+			continue
 		}
+		mv.tracks = append(mv.tracks, tr)
 	}
 	if len(mv.tracks) == 0 {
 		return nil, errf("no convertible tracks found in MP4")
@@ -184,29 +189,35 @@ func parseMP4(r io.ReadSeeker, size int64) (*movie, error) {
 	return &mv, nil
 }
 
-// parseTrak parses one trak box. ok is false (with nil error) when the track's
-// codec is recognised as out of scope and should be skipped silently; an error
-// is returned only for malformed structure.
-func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
+// parseTrak parses one trak box. On success it returns the track and a nil
+// *DroppedTrack. When the track has a recognised structure but cannot be carried
+// — a non-media handler (hint/timecode/metadata) or an unsupported sample entry
+// (e.g. cover art / attached picture) — it returns a zero track and a non-nil
+// *DroppedTrack describing it, so the caller can surface it instead of dropping it
+// silently. An error is returned only for malformed structure.
+func parseTrak(payload []byte, fileSize int64) (inTrack, *DroppedTrack, error) {
 	var tr inTrack
 	trakBoxes, err := iterBoxes(payload)
 	if err != nil {
-		return tr, false, err
+		return tr, nil, err
 	}
-	// tkhd carries the selection flags. track_enabled (bit 0) is what ffmpeg maps
-	// to the "default" disposition, so it feeds Track.IsDefault on the read side.
+	// tkhd carries the selection flags and the track_ID. track_enabled (bit 0) is
+	// what ffmpeg maps to the "default" disposition, so it feeds Track.IsDefault on
+	// the read side; the track_ID labels any DroppedTrack for correlation.
+	var trackID uint64
 	if tkhd, ok := findMemBox(trakBoxes, "tkhd"); ok {
 		tr.enabled = tkhdEnabled(tkhd.payload)
 		tr.flagsKnown = true
+		trackID = uint64(tkhdTrackID(tkhd.payload))
 	}
 
 	mdia, ok := findMemBox(trakBoxes, "mdia")
 	if !ok {
-		return tr, false, errf("trak without mdia")
+		return tr, nil, errf("trak without mdia")
 	}
 	mdiaBoxes, err := iterBoxes(mdia.payload)
 	if err != nil {
-		return tr, false, err
+		return tr, nil, err
 	}
 
 	if mdhd, ok := findMemBox(mdiaBoxes, "mdhd"); ok {
@@ -230,12 +241,13 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
 
 	hdlr, ok := findMemBox(mdiaBoxes, "hdlr")
 	if !ok {
-		return tr, false, errf("mdia without hdlr")
+		return tr, nil, errf("mdia without hdlr")
 	}
 	if len(hdlr.payload) < 12 {
-		return tr, false, errf("hdlr too short")
+		return tr, nil, errf("hdlr too short")
 	}
-	switch string(hdlr.payload[8:12]) {
+	handler := string(hdlr.payload[8:12])
+	switch handler {
 	case "vide":
 		tr.trackType = mkv.VideoTrack
 	case "soun":
@@ -243,40 +255,47 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
 	case "text", "sbtl":
 		tr.trackType = mkv.SubtitleTrack
 	default:
-		return tr, false, nil // hint/meta/etc — skip
+		// hint/timecode/metadata — not media; surface it rather than dropping it.
+		return tr, &DroppedTrack{ID: trackID, Codec: handler,
+			Reason: "non-media handler " + quoteFourcc(handler)}, nil
 	}
 
 	minf, ok := findMemBox(mdiaBoxes, "minf")
 	if !ok {
-		return tr, false, errf("mdia without minf")
+		return tr, nil, errf("mdia without minf")
 	}
 	minfBoxes, err := iterBoxes(minf.payload)
 	if err != nil {
-		return tr, false, err
+		return tr, nil, err
 	}
 	stbl, ok := findMemBox(minfBoxes, "stbl")
 	if !ok {
-		return tr, false, errf("minf without stbl")
+		return tr, nil, errf("minf without stbl")
 	}
 	stblBoxes, err := iterBoxes(stbl.payload)
 	if err != nil {
-		return tr, false, err
+		return tr, nil, err
 	}
 
 	stsd, ok := findMemBox(stblBoxes, "stsd")
 	if !ok {
-		return tr, false, errf("stbl without stsd")
+		return tr, nil, errf("stbl without stsd")
 	}
-	if codecOK, err := parseSampleEntry(&tr, stsd.payload); err != nil {
-		return tr, false, err
-	} else if !codecOK {
-		return tr, false, nil // unsupported codec — skip the track
+	codecOK, fourcc, err := parseSampleEntry(&tr, stsd.payload)
+	if err != nil {
+		return tr, nil, err
+	}
+	if !codecOK {
+		// Recognised media handler but an unsupported sample entry — typically cover
+		// art (an attached picture in a jpeg/png/… video track). Surface it.
+		return tr, &DroppedTrack{ID: trackID, Type: tr.trackType, Codec: fourcc,
+			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
 	}
 
 	if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
-		return tr, false, err
+		return tr, nil, err
 	}
-	return tr, true, nil
+	return tr, nil, nil
 }
 
 // parseMdhd reads an mdhd box and returns the media timescale and the ISO 639-2
@@ -354,6 +373,23 @@ func tkhdEnabled(payload []byte) bool {
 	return flags&0x000001 != 0
 }
 
+// tkhdTrackID reads the track_ID from a track header. Its offset depends on the
+// box version (v0 uses 32-bit times, v1 64-bit). Returns 0 when the box is short.
+func tkhdTrackID(payload []byte) uint32 {
+	off := 12 // v0: version+flags(4) + creation(4) + modification(4)
+	if len(payload) > 0 && payload[0] == 1 {
+		off = 20 // v1: version+flags(4) + creation(8) + modification(8)
+	}
+	if len(payload) < off+4 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(payload[off : off+4])
+}
+
+// quoteFourcc renders a four-character box type for a reason string, escaping any
+// non-printable bytes (cover-art entries sometimes carry an all-zero fourcc).
+func quoteFourcc(typ string) string { return strconv.Quote(typ) }
+
 // parseElng reads the null-terminated BCP-47 tag from an elng (Extended Language
 // Tag) box, skipping the 4-byte fullbox version/flags header.
 func parseElng(payload []byte) string {
@@ -369,18 +405,19 @@ func parseElng(payload []byte) string {
 
 // parseSampleEntry reads the first sample entry from an stsd box and fills the
 // track's codec, codec private data and dimensions. It returns ok=false for a
-// recognised-but-unsupported codec.
-func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
+// recognised-but-unsupported codec, along with the sample entry's fourcc so the
+// caller can report it.
+func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
 	if len(stsdPayload) < 8 {
-		return false, errf("stsd too short")
+		return false, "", errf("stsd too short")
 	}
 	// fullbox header(4) + entry_count(4), then the sample entry box.
 	entries, err := iterBoxes(stsdPayload[8:])
 	if err != nil {
-		return false, errf("parse stsd: %w", err)
+		return false, "", errf("parse stsd: %w", err)
 	}
 	if len(entries) == 0 {
-		return false, errf("stsd has no sample entry")
+		return false, "", errf("stsd has no sample entry")
 	}
 	entry := entries[0]
 
@@ -390,18 +427,19 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
 	switch entry.typ {
 	case "avc1", "avc3":
 		tr.codec = "h264"
-		return true, extractVisual(tr, entry.payload, visualHdr, "avcC")
+		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "avcC")
 	case "hvc1", "hev1":
 		tr.codec = "hevc"
-		return true, extractVisual(tr, entry.payload, visualHdr, "hvcC")
+		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "hvcC")
 	case "av01":
 		tr.codec = "av1"
-		return true, extractVisual(tr, entry.payload, visualHdr, "av1C")
+		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "av1C")
 	case "mp4a":
-		return parseMP4A(tr, entry.payload, audioHdr)
+		ok, err := parseMP4A(tr, entry.payload, audioHdr)
+		return ok, entry.typ, err
 	case "Opus":
 		tr.codec = "opus"
-		return true, extractOpus(tr, entry.payload, audioHdr)
+		return true, entry.typ, extractOpus(tr, entry.payload, audioHdr)
 	case "ac-3":
 		tr.codec = "ac3"
 		parseAudioFields(tr, entry.payload)
@@ -410,7 +448,7 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
 				tr.channels = ch
 			}
 		}
-		return true, nil
+		return true, entry.typ, nil
 	case "ec-3":
 		tr.codec = "eac3"
 		parseAudioFields(tr, entry.payload)
@@ -419,19 +457,19 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, error) {
 				tr.channels = ch
 			}
 		}
-		return true, nil
+		return true, entry.typ, nil
 	case "fLaC":
 		tr.codec = "flac"
-		return true, extractFLAC(tr, entry.payload, audioHdr)
+		return true, entry.typ, extractFLAC(tr, entry.payload, audioHdr)
 	case "tx3g":
 		tr.codec = "srt" // tx3g timed text → S_TEXT/UTF8
-		return true, nil
+		return true, entry.typ, nil
 	case "wvtt":
 		tr.codec = "webvtt" // native WebVTT → S_TEXT/WEBVTT
 		extractWVTTConfig(tr, entry.payload)
-		return true, nil
+		return true, entry.typ, nil
 	default:
-		return false, nil
+		return false, entry.typ, nil
 	}
 }
 

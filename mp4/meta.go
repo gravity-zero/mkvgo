@@ -19,42 +19,48 @@ import (
 // Cues are left nil (MP4 carries no equivalent of the first two, and Cues are
 // not built on the metadata path). Only the moov box is read — never the mdat
 // sample data — so it is fast and bounded regardless of file size.
-func OpenMeta(ctx context.Context, path string) (*mkv.Container, error) {
+//
+// The second return value lists tracks present in the file but not represented in
+// Container.Tracks — cover art / attached pictures and other non-media tracks
+// (hint, timecode, metadata). It is nil when every track was carried. Surfacing
+// them lets a probe report, for instance, that a file ffprobe counts as having two
+// video streams has one playable video track plus a cover image.
+func OpenMeta(ctx context.Context, path string) (*mkv.Container, []DroppedTrack, error) {
 	return OpenMetaWithFS(ctx, path, nil)
 }
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS (nil = the real OS FS).
-func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, error) {
+func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, []DroppedTrack, error) {
 	src, err := fs.DoOpen(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer src.Close()
 	return ReadMeta(ctx, src, path)
 }
 
 // ReadMeta reads only the MP4 movie header from r and returns the equivalent
-// Matroska metadata (Info, Tracks, Chapters, DurationMs). It is the seekable,
-// FS-free counterpart of OpenMeta; r must support seeking (the moov box may sit
-// after the media). No sample data is read.
-func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, error) {
+// Matroska metadata (Info, Tracks, Chapters, DurationMs) plus the dropped (non-
+// carried) tracks. It is the seekable, FS-free counterpart of OpenMeta; r must
+// support seeking (the moov box may sit after the media). No sample data is read.
+func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, []DroppedTrack, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	size, err := r.Seek(0, io.SeekEnd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	mv, err := parseMP4(r, size)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c := containerFromMovie(mv)
 	c.Path = path
-	return c, nil
+	return c, mv.dropped, nil
 }
 
 // containerFromMovie assembles the Matroska metadata for a parsed movie. It is

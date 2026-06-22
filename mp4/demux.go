@@ -51,6 +51,9 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	if err != nil {
 		return err
 	}
+	for _, d := range mv.dropped {
+		o.report(d) // cover art / non-media tracks the MKV output does not carry
+	}
 	tracks := buildMKVTracks(mv)
 
 	dst, err := fs.DoCreate(dstPath)
