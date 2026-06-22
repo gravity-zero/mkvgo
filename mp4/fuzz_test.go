@@ -45,12 +45,37 @@ func FuzzParseMP4(f *testing.F) {
 	f.Add(sampleMP4(f))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), true)
-		if err == nil && mv == nil {
-			t.Fatal("nil movie with nil error")
+		// Both the full parse and the metadata-only (head-only) parse must be safe.
+		for _, withSamples := range []bool{true, false} {
+			mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), withSamples)
+			if err == nil && mv == nil {
+				t.Fatal("nil movie with nil error")
+			}
 		}
 		// iterBoxes is reachable on the moov payload; exercise it directly too.
 		_, _ = iterBoxes(data)
+	})
+}
+
+// FuzzBoxParsers fuzzes the byte-level box parsers that run on attacker-controlled
+// moov contents. None may panic on arbitrary input.
+func FuzzBoxParsers(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0})
+	f.Add([]byte{1, 0, 16, 0x35, 0x10, 0, 0, 0}) // a Dolby Vision record
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = parseMdhd(data)
+		_, _, _ = parseElst(data)
+		_, _ = parseMovieHeader(data)
+		_, _ = parseKind(data)
+		_ = parseElng(data)
+		_ = tkhdEnabled(data)
+		_ = tkhdTrackID(data)
+		_ = mkv.ParseDolbyVisionConfig(data)
+		_ = aacChannels(data)
+		_ = ac3Channels(data)
+		_ = eac3Channels(data)
 	})
 }
 

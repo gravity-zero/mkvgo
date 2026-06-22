@@ -112,14 +112,9 @@ func videoKeyframesMs(mv *movie) []int64 {
 		}
 		times := make([]int64, 0, len(t.samples)/8+1)
 		for j := range t.samples {
-			if !t.samples[j].sync {
-				continue
-			}
-			// Apply the edit-list shift, as ffmpeg does. A negative result is a
-			// keyframe in the trimmed pre-roll (before the edit start) — not presented.
-			ms := t.samples[j].ctsMs + t.editShiftMs
-			if ms >= 0 {
-				times = append(times, ms)
+			// ctsMs already carries the edit-list shift (applied in buildSampleTable).
+			if t.samples[j].sync {
+				times = append(times, t.samples[j].ctsMs)
 			}
 		}
 		if len(times) == 0 {

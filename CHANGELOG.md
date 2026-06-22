@@ -8,6 +8,26 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Remux fidelity — read↔write parity.** The remux now preserves the
+  track-selection and HDR metadata the probe reports:
+  - **Edit list** (`elst`) is folded into the composition times in
+    `buildSampleTable`, so `RemuxFromMP4` (and the keyframe index) present the same
+    timeline as ffmpeg, not one offset by `media_time`.
+  - `RemuxToMP4` writes the **default** flag (`tkhd` track_enabled from
+    `IsDefault`), the **forced** flag (DASH-role `kind` box from `IsForced`) and the
+    **BCP-47 language** (`elng` box); the MKV writer now persists `LanguageBCP47`
+    too, so a full language survives a round-trip.
+  - **Dolby Vision** is carried both ways: `RemuxFromMP4` writes a `dvcC`/`dvvC`
+    `BlockAdditionMapping`, `RemuxToMP4` writes the `dvcC`/`dvvC` box into the visual
+    sample entry. New `mkv.EncodeDolbyVisionConfig` / `DolbyVision.BoxType`.
+  - MP4 video tracks now report an average **frame rate** (from the sample timing,
+    when the sample table is built).
+
+### Fixed
+
+- The MP4 probe no longer reports a QuickTime **chapter track** (referenced via
+  `tref/chap`) as a dropped track — its content is already read from `chpl`.
+
 - **CLI parity for the MP4 / probe / subtitle features.** The `mkvgo` command now
   exposes what the library gained:
   - `info`, `tracks`, `chapters`, `probe` accept an **MP4/MOV** path (via the

@@ -110,6 +110,11 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			// SDR streams that carry colour only in the SPS.
 			reader.FillColourFromCodecPrivate(&mt)
 			mt.DolbyVision = t.dolbyVision
+			// Average frame rate from the sample timing (only available when the
+			// sample table was built — like the keyframe index).
+			if fps := videoFrameRate(t.samples); fps > 0 {
+				mt.FrameRate = &fps
+			}
 		case mkv.AudioTrack:
 			if t.channels > 0 {
 				ch := t.channels
@@ -123,6 +128,26 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 		tracks[i] = mt
 	}
 	return tracks
+}
+
+// videoFrameRate returns the average frame rate from a track's sample durations,
+// or 0 when there are too few samples (e.g. the metadata-only probe built none).
+func videoFrameRate(samples []inSample) float64 {
+	if len(samples) < 2 {
+		return 0
+	}
+	var total int64
+	for i := range samples {
+		total += samples[i].durMs
+	}
+	if total <= 0 {
+		return 0
+	}
+	avg := float64(total) / float64(len(samples))
+	if avg <= 0 {
+		return 0
+	}
+	return 1000 / avg
 }
 
 // sampleRef points at one sample within a parsed track.

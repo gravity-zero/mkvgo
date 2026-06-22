@@ -159,7 +159,21 @@ func visualSampleEntry(typ string, t *mkv.Track, config []byte) []byte {
 		if colr := colrBox(t); colr != nil {
 			w.bytes(colr)
 		}
+		if dv := dvConfigBox(t); dv != nil {
+			w.bytes(dv)
+		}
 	})
+}
+
+// dvConfigBox builds the Dolby Vision configuration box (dvcC or dvvC, per
+// profile) for a track that carries a Dolby Vision configuration, so DV survives
+// a remux into MP4. Returns nil when the track is not Dolby Vision.
+func dvConfigBox(t *mkv.Track) []byte {
+	if t.DolbyVision == nil {
+		return nil
+	}
+	name, _ := t.DolbyVision.BoxType()
+	return box(name, mkv.EncodeDolbyVisionConfig(t.DolbyVision))
 }
 
 // colrBox builds a Colour Information box ('colr', type 'nclx') carrying the

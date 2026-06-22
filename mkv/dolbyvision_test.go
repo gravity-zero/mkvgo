@@ -25,3 +25,24 @@ func TestParseDolbyVisionConfig(t *testing.T) {
 		t.Error("ParseDolbyVisionConfig should return nil for a record shorter than 5 bytes")
 	}
 }
+
+func TestDolbyVisionConfigRoundTrip(t *testing.T) {
+	cases := []DolbyVision{
+		{VersionMajor: 1, Profile: 5, Level: 6, RPUPresent: true, BLPresent: true},
+		{VersionMajor: 1, Profile: 8, Level: 9, RPUPresent: true, BLPresent: true, BLSignalCompatID: 1},
+		{VersionMajor: 1, Profile: 7, Level: 4, RPUPresent: true, ELPresent: true, BLPresent: true},
+	}
+	for _, want := range cases {
+		got := ParseDolbyVisionConfig(EncodeDolbyVisionConfig(&want))
+		if got == nil || *got != want {
+			t.Errorf("round trip: got %+v, want %+v", got, want)
+		}
+	}
+
+	if name, id := (&DolbyVision{Profile: 5}).BoxType(); name != "dvcC" || id != BlockAddIDTypeDVCC {
+		t.Errorf("profile 5 box = %q/%#x, want dvcC", name, id)
+	}
+	if name, id := (&DolbyVision{Profile: 8}).BoxType(); name != "dvvC" || id != BlockAddIDTypeDVVC {
+		t.Errorf("profile 8 box = %q/%#x, want dvvC", name, id)
+	}
+}

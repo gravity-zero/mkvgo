@@ -46,3 +46,35 @@ func ParseDolbyVisionConfig(b []byte) *DolbyVision {
 		BLSignalCompatID: b[4] >> 4,
 	}
 }
+
+// EncodeDolbyVisionConfig builds a 24-byte DOVIDecoderConfigurationRecord from dv
+// (the inverse of ParseDolbyVisionConfig), so the configuration can be carried
+// through a remux — into an MP4 dvcC/dvvC box or a Matroska BlockAddIDExtraData.
+func EncodeDolbyVisionConfig(dv *DolbyVision) []byte {
+	b := make([]byte, 24)
+	b[0] = dv.VersionMajor
+	b[1] = dv.VersionMinor
+	b[2] = dv.Profile<<1 | (dv.Level>>5)&0x01
+	b[3] = (dv.Level & 0x1f) << 3
+	if dv.RPUPresent {
+		b[3] |= 0x04
+	}
+	if dv.ELPresent {
+		b[3] |= 0x02
+	}
+	if dv.BLPresent {
+		b[3] |= 0x01
+	}
+	b[4] = dv.BLSignalCompatID << 4
+	return b
+}
+
+// DolbyVisionBoxType returns the four-character config box / BlockAddIDType for a
+// Dolby Vision profile: dvvC for the cross-compatible profiles (8 and up), dvcC
+// otherwise. Returned as the uint32 used by Matroska's BlockAddIDType.
+func (dv *DolbyVision) BoxType() (name string, blockAddIDType uint32) {
+	if dv.Profile >= 8 {
+		return "dvvC", BlockAddIDTypeDVVC
+	}
+	return "dvcC", BlockAddIDTypeDVCC
+}

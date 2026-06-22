@@ -52,37 +52,84 @@ func TestParseElst(t *testing.T) {
 	}
 }
 
-// TestVideoKeyframesEditShift checks the edit-list shift is applied to keyframe
-// timestamps and that pre-roll keyframes (negative after the shift) are dropped.
-func TestVideoKeyframesEditShift(t *testing.T) {
-	mv := &movie{tracks: []inTrack{{
-		trackType:   mkv.VideoTrack,
-		editShiftMs: -83, // media_time 83 ms trimmed from the start
-		samples: []inSample{
-			{ctsMs: 83, sync: true},
-			{ctsMs: 1083, sync: true},
-			{ctsMs: 2083, sync: true},
-		},
-	}}}
-	got := videoKeyframesMs(mv)
-	want := []int64{0, 1000, 2000}
-	if len(got) != len(want) {
-		t.Fatalf("keyframes = %v, want %v", got, want)
+// bytesU32 builds a box payload from a sequence of big-endian uint32 fields.
+func bytesU32(vals ...uint32) []byte {
+	var w bw
+	for _, v := range vals {
+		w.u32(v)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("keyframes = %v, want %v", got, want)
+	return w.b
+}
+
+// editStbl is a minimal sample table: 3 samples, 1s apart, composition offset 83
+// ticks (so cts = 83/1083/2083 ms at timescale 1000).
+func editStbl() []memBox {
+	return []memBox{
+		{typ: "stsz", payload: bytesU32(0, 0, 3, 10, 10, 10)},
+		{typ: "stco", payload: bytesU32(0, 1, 0)},
+		{typ: "stsc", payload: bytesU32(0, 1, 1, 3, 1)},
+		{typ: "stts", payload: bytesU32(0, 1, 3, 1000)},
+		{typ: "ctts", payload: bytesU32(0, 1, 3, 83)},
+	}
+}
+
+// TestBuildSampleTableEditShift checks the edit-list shift is folded into the
+// composition times — so both the remux and the keyframe index see it — and that a
+// presentation time before the edit start is clamped to 0.
+func TestBuildSampleTableEditShift(t *testing.T) {
+	// media_time 83 ms trimmed: cts 83/1083/2083 → 0/1000/2000.
+	tr := inTrack{timescale: 1000, editShiftMs: -83}
+	if err := buildSampleTable(&tr, editStbl(), 1000); err != nil {
+		t.Fatalf("buildSampleTable: %v", err)
+	}
+	want := []int64{0, 1000, 2000}
+	for i, s := range tr.samples {
+		if s.ctsMs != want[i] {
+			t.Errorf("sample %d ctsMs = %d, want %d", i, s.ctsMs, want[i])
+		}
+	}
+	// videoKeyframesMs reads the already-shifted times (every sample is sync here).
+	mv := &movie{tracks: []inTrack{{trackType: mkv.VideoTrack, samples: tr.samples}}}
+	for i, k := range videoKeyframesMs(mv) {
+		if k != want[i] {
+			t.Errorf("keyframe %d = %d, want %d", i, k, want[i])
 		}
 	}
 
-	// A keyframe whose presentation time falls before the edit start is dropped.
-	mv.tracks[0].samples = []inSample{
-		{ctsMs: 0, sync: true},    // -83 after shift → dropped
-		{ctsMs: 83, sync: true},   // 0
-		{ctsMs: 1083, sync: true}, // 1000
+	// A larger trim pushes the early cues before 0 → clamped, not negative.
+	tr2 := inTrack{timescale: 1000, editShiftMs: -2000}
+	if err := buildSampleTable(&tr2, editStbl(), 1000); err != nil {
+		t.Fatalf("buildSampleTable: %v", err)
 	}
-	got = videoKeyframesMs(mv)
-	if len(got) != 2 || got[0] != 0 || got[1] != 1000 {
-		t.Errorf("with pre-roll keyframes = %v, want [0 1000]", got)
+	if tr2.samples[0].ctsMs != 0 || tr2.samples[2].ctsMs != 83 {
+		t.Errorf("clamped cts = %d/%d/%d, want 0/0/83",
+			tr2.samples[0].ctsMs, tr2.samples[1].ctsMs, tr2.samples[2].ctsMs)
+	}
+}
+
+// TestChapterTrackRefs checks tref/chap references are collected so the chapter
+// track is not surfaced as a dropped track.
+func TestChapterTrackRefs(t *testing.T) {
+	moovBoxes := []memBox{
+		{typ: "trak", payload: box("tref", box("chap", bytesU32(3)))},
+		{typ: "trak", payload: nil}, // a track without tref
+	}
+	ids := chapterTrackRefs(moovBoxes)
+	if !ids[3] || len(ids) != 1 {
+		t.Errorf("chapterTrackRefs = %v, want {3}", ids)
+	}
+}
+
+// TestVideoFrameRate checks the average-frame-rate derivation from sample timing.
+func TestVideoFrameRate(t *testing.T) {
+	s40 := []inSample{{durMs: 40}, {durMs: 40}, {durMs: 40}} // 25 fps
+	if fps := videoFrameRate(s40); fps != 25 {
+		t.Errorf("videoFrameRate(40ms) = %v, want 25", fps)
+	}
+	if fps := videoFrameRate(nil); fps != 0 {
+		t.Errorf("videoFrameRate(nil) = %v, want 0 (no samples)", fps)
+	}
+	if fps := videoFrameRate([]inSample{{durMs: 40}}); fps != 0 {
+		t.Errorf("videoFrameRate(1 sample) = %v, want 0", fps)
 	}
 }

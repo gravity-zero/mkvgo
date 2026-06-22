@@ -68,11 +68,19 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 	}
 
 	// Resolve times. dts accumulates in the media timescale; cts = dts + ctts.
+	// The edit-list shift (empty-edit delay minus the start trim) is folded into the
+	// composition time here, so both the keyframe index and the remux see the same
+	// presentation timeline ffmpeg would. A presentation time before the edit start
+	// (negative after the shift) is clamped to 0 rather than emitted negative.
 	ts := tr.timescale
 	dts := int64(0)
 	for i := 0; i < n; i++ {
+		cts := ticksToMs(dts+int64(cttsOffsets[i]), ts) + tr.editShiftMs
+		if cts < 0 {
+			cts = 0
+		}
 		samples[i].dtsMs = ticksToMs(dts, ts)
-		samples[i].ctsMs = ticksToMs(dts+int64(cttsOffsets[i]), ts)
+		samples[i].ctsMs = cts
 		samples[i].durMs = ticksToMs(int64(durations[i]), ts)
 		samples[i].sync = syncSet == nil || syncSet[i+1]
 		dts += int64(durations[i])

@@ -15,10 +15,10 @@ func buildTestMP4(t *testing.T) string {
 	t.Helper()
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,
-			Width: u32p(1920), Height: u32p(1080), FrameRate: f64p(25), Language: "fre",
+			Width: u32p(1920), Height: u32p(1080), FrameRate: f64p(25), Language: "fre", IsDefault: true,
 			ColorPrimaries: u16p(9), ColorTransfer: u16p(16), ColorSpace: u16p(9), ColorRange: u16p(1)},
 		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC,
-			Channels: u8p(2), SampleRate: f64p(48000), Language: "fre"},
+			Channels: u8p(2), SampleRate: f64p(48000), Language: "fre", IsDefault: true},
 	}
 	blocks := []genBlock{
 		{track: 1, pts: 0, key: true, data: []byte{1}},

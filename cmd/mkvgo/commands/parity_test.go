@@ -61,10 +61,14 @@ func TestCLIProbeMP4(t *testing.T) {
 		t.Fatalf("RemuxToMP4: %v", err)
 	}
 	out := capture(t, func() { commands.CmdProbe(mp4Path) })
-	for _, want := range []string{"Tracks (3)", "Keyframes:", "Dropped tracks"} {
+	for _, want := range []string{"Tracks (3)", "Keyframes:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("probe MP4 output missing %q:\n%s", want, out)
 		}
+	}
+	// The QuickTime chapter track must NOT be surfaced as a dropped track.
+	if strings.Contains(out, "Dropped tracks") {
+		t.Errorf("chapter track wrongly reported as dropped:\n%s", out)
 	}
 }
 

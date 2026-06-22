@@ -260,6 +260,9 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.Language != "" {
 		e.str(mkv.IDLanguage, t.Language)
 	}
+	if t.LanguageBCP47 != "" {
+		e.str(mkv.IDLanguageBCP47, t.LanguageBCP47)
+	}
 	if t.Name != "" {
 		e.str(mkv.IDName, t.Name)
 	}
@@ -293,6 +296,15 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 					}
 				})
 			}
+		})
+	}
+	if t.DolbyVision != nil {
+		_, addType := t.DolbyVision.BoxType()
+		rec := mkv.EncodeDolbyVisionConfig(t.DolbyVision)
+		e.master(mkv.IDBlockAdditionMapping, func(m *ew) {
+			m.uint(mkv.IDBlockAddIDValue, 1)
+			m.uint(mkv.IDBlockAddIDType, uint64(addType))
+			m.raw(mkv.IDBlockAddIDExtraData, rec)
 		})
 	}
 	if t.Type == mkv.AudioTrack && (t.SampleRate != nil || t.Channels != nil || t.BitDepth != nil) {

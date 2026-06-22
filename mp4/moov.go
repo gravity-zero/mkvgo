@@ -105,21 +105,55 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		mediaHeader = smhd()
 	}
 	minf := container("minf", mediaHeader, buildDinf(), buildStbl(t, tim, mdatBase, co64))
-	mdia := container("mdia",
-		buildMdhd(dur, mdhdLanguage(t.mkv)),
-		buildHdlr(t.spec.handler, handlerName(t.spec.handler)),
-		minf,
-	)
+	mdiaChildren := [][]byte{buildMdhd(dur, mdhdLanguage(t.mkv))}
+	// An elng box carries the BCP-47 language tag (mdhd holds only the legacy
+	// ISO 639-2 code), so a full language round-trips through the remux.
+	if t.mkv.LanguageBCP47 != "" {
+		mdiaChildren = append(mdiaChildren, buildElng(t.mkv.LanguageBCP47))
+	}
+	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, handlerName(t.spec.handler)), minf)
+	mdia := container("mdia", mdiaChildren...)
+
 	trakChildren := [][]byte{buildTkhd(t, dur)}
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
+	}
+	// MP4 has no native forced flag; record it the way ffmpeg does — a track-level
+	// kind box with the DASH role scheme.
+	if t.mkv.IsForced {
+		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}
 	trakChildren = append(trakChildren, mdia)
 	return container("trak", trakChildren...), dur
 }
 
+// buildElng builds an Extended Language Tag box (ISO/IEC 14496-12) carrying a
+// null-terminated BCP-47 language tag.
+func buildElng(bcp47 string) []byte {
+	return fullBox("elng", 0, 0, func(w *bw) {
+		w.bytes([]byte(bcp47))
+		w.u8(0)
+	})
+}
+
+// buildKind builds a kind box: a fullbox with a null-terminated schemeURI followed
+// by a null-terminated value.
+func buildKind(scheme, value string) []byte {
+	return fullBox("kind", 0, 0, func(w *bw) {
+		w.bytes([]byte(scheme))
+		w.u8(0)
+		w.bytes([]byte(value))
+		w.u8(0)
+	})
+}
+
 func buildTkhd(t *outTrack, durationMs uint32) []byte {
-	const flags = 0x000007 // track_enabled | in_movie | in_preview
+	// in_movie | in_preview, plus track_enabled when the track is the default —
+	// ffmpeg maps track_enabled back to the "default" disposition.
+	flags := uint32(0x000006)
+	if t.mkv.IsDefault {
+		flags |= 0x000001
+	}
 	var volume uint16
 	if t.spec.handler == "soun" {
 		volume = 0x0100

@@ -191,6 +191,10 @@ func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 	if movieTS == 0 {
 		movieTS = 1000
 	}
+	// QuickTime chapter tracks are referenced from the media tracks via tref/chap;
+	// their content (the chapter titles) is already read from chpl, so they are not
+	// "lost" media and must not be surfaced as dropped tracks.
+	chapterTrackIDs := chapterTrackRefs(moovBoxes)
 
 	for _, b := range moovBoxes {
 		if b.typ != "trak" {
@@ -201,7 +205,9 @@ func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 			return nil, err
 		}
 		if dropped != nil {
-			mv.dropped = append(mv.dropped, *dropped)
+			if !chapterTrackIDs[uint32(dropped.ID)] {
+				mv.dropped = append(mv.dropped, *dropped)
+			}
 			continue
 		}
 		mv.tracks = append(mv.tracks, tr)
@@ -217,6 +223,37 @@ func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 		}
 	}
 	return &mv, nil
+}
+
+// chapterTrackRefs returns the set of track_IDs referenced as QuickTime chapter
+// tracks (trak/tref/chap) by any track in the movie.
+func chapterTrackRefs(moovBoxes []memBox) map[uint32]bool {
+	ids := map[uint32]bool{}
+	for _, b := range moovBoxes {
+		if b.typ != "trak" {
+			continue
+		}
+		tb, err := iterBoxes(b.payload)
+		if err != nil {
+			continue
+		}
+		tref, ok := findMemBox(tb, "tref")
+		if !ok {
+			continue
+		}
+		rb, err := iterBoxes(tref.payload)
+		if err != nil {
+			continue
+		}
+		chap, ok := findMemBox(rb, "chap")
+		if !ok {
+			continue
+		}
+		for off := 0; off+4 <= len(chap.payload); off += 4 {
+			ids[binary.BigEndian.Uint32(chap.payload[off:off+4])] = true
+		}
+	}
+	return ids
 }
 
 // parseTrak parses one trak box. On success it returns the track and a nil
