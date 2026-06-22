@@ -8,6 +8,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Subtitle extraction to WebVTT**, replacing an `ffmpeg -f webvtt` fork:
+  - `ops.ExtractSubtitleWebVTT(ctx, src, trackID, w, …)` writes an embedded
+    Matroska/WebM text subtitle track as WebVTT (S_TEXT/UTF8 and S_TEXT/WEBVTT
+    pass through, S_TEXT/ASS is flattened), using each cue's BlockDuration.
+  - `mp4.ExtractSubtitleWebVTT(ctx, src, trackID, w, …)` does the same for an MP4
+    track (tx3g / wvtt), head-only plus the subtitle samples.
+  - `subtitle.FileToWebVTT(path, w)` converts an external `.srt` / `.ass`/`.ssa` /
+    `.vtt` sidecar to WebVTT.
+  - Building blocks: `subtitle.Cue`, `WriteWebVTT`, `FormatVTTTime`, `SRTToCues`,
+    `ASSToCues`, `FlattenASSBlock`, `ResolveCueEnds`. Output streams to any
+    `io.Writer` (e.g. an HTTP response), so there is no temp file or subprocess.
+
 - **Dolby Vision configuration.** Video tracks now expose `Track.DolbyVision`
   (profile, level, RPU/EL/BL presence and `bl_signal_compatibility_id`), decoded
   from the `DOVIDecoderConfigurationRecord`:

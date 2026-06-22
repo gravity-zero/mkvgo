@@ -84,6 +84,93 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	return nil
 }
 
+// ExtractSubtitleWebVTT extracts the subtitle track trackID from the Matroska
+// file at srcPath and writes it as WebVTT to w — the head of the work an
+// `ffmpeg -map 0:s:N -f webvtt` fork does, in-process. Text codecs are decoded by
+// kind: S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through, S_TEXT/ASS is flattened
+// to plain text. Each cue's end is its BlockDuration, falling back to the next
+// cue's start (then a default) when absent. Bitmap subtitles are not supported.
+func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
+	fs := mkv.FSFrom(opts)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	if err != nil {
+		return err
+	}
+
+	var codec string
+	found := false
+	for _, t := range c.Tracks {
+		if t.ID == trackID && t.Type == mkv.SubtitleTrack {
+			codec, found = t.Codec, true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("subtitle track %d not found", trackID)
+	}
+	if !isTextSubtitle(codec) {
+		return fmt.Errorf("subtitle track %d codec %q is not text (cannot convert to WebVTT)", trackID, codec)
+	}
+
+	f, err := fs.DoOpen(srcPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
+	if err != nil {
+		return err
+	}
+
+	var cues []subtitle.Cue
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if blk.TrackNumber != trackID {
+			continue
+		}
+		text := decodeSubtitleCue(codec, blk.Data)
+		if text == "" {
+			continue
+		}
+		end := int64(0)
+		if blk.Duration > 0 {
+			end = blk.Timecode + blk.Duration
+		}
+		cues = append(cues, subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text})
+	}
+	subtitle.ResolveCueEnds(cues, defaultSubDurationMs)
+	return subtitle.WriteWebVTT(w, cues)
+}
+
+// isTextSubtitle reports whether a Matroska subtitle codec short name is a text
+// format convertible to WebVTT.
+func isTextSubtitle(codec string) bool {
+	switch codec {
+	case "srt", "ass", "ssa", "webvtt":
+		return true
+	}
+	return false
+}
+
+// decodeSubtitleCue turns one subtitle block into WebVTT cue text by codec.
+func decodeSubtitleCue(codec string, data []byte) string {
+	switch codec {
+	case "ass", "ssa":
+		return subtitle.FlattenASSBlock(data)
+	default: // srt (S_TEXT/UTF8), webvtt (S_TEXT/WEBVTT)
+		return trimNulls(data)
+	}
+}
+
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...mkv.Options) error {
 	entries, err := subtitle.ParseSRT(srtPath)
 	if err != nil {

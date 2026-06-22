@@ -209,6 +209,21 @@ ks = c.Keyframes                                   // same field, from the Cues 
 
 `Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MP4 derives them from the `stss`/`stts`/`ctts` sample tables already parsed from `moov` (free); MKV/WebM derives them from the `Cues` element reached via the `SeekHead` — one seek, no `Cluster` scan — and a full `matroska.Read` exposes them too. It is nil when the source has no usable index, so the caller can fall back to a packet scan.
 
+### Subtitles to WebVTT
+
+To serve a text subtitle as WebVTT without forking `ffmpeg -f webvtt`, extract straight to an `io.Writer` (e.g. an HTTP response):
+
+```go
+// Embedded track (by Container.Tracks ID), MKV/WebM or MP4:
+err := ops.ExtractSubtitleWebVTT(ctx, "movie.mkv", trackID, w)
+err = mp4.ExtractSubtitleWebVTT(ctx, "movie.mp4", trackID, w)
+
+// External sidecar (.srt / .ass / .ssa / .vtt):
+err = subtitle.FileToWebVTT("subs.fr.srt", w)
+```
+
+S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces — `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` — are exported for custom pipelines.
+
 ---
 
 ## Mux / Demux
