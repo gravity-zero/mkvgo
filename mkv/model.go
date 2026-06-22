@@ -28,6 +28,13 @@ type Container struct {
 	Tags        []Tag        `json:"tags"`
 	Cues        []CuePoint   `json:"cues,omitempty"`
 	DurationMs  int64        `json:"duration_ms"`
+
+	// Keyframes holds the video track's keyframe presentation timestamps in
+	// milliseconds (ascending, de-duplicated) — the points an "-c copy" segmenter
+	// must cut on. It is filled in the same pass as the rest of the metadata: from
+	// the MP4 sync-sample table, or the Matroska Cues seek index. nil when the
+	// source carries no usable keyframe index.
+	Keyframes []int64 `json:"keyframes,omitempty"`
 }
 
 type SegmentInfo struct {

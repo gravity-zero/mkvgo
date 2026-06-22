@@ -195,6 +195,20 @@ Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel 
 
 `OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters and DurationMs are populated; Attachments, Tags and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
 
+### Keyframe index (head-only)
+
+To align `-c copy` HLS/DASH segments on source keyframes without a full packet scan, read `Container.Keyframes` — the metadata probe fills it in the same pass, no separate call or second open:
+
+```go
+c, _, err := mp4.OpenMeta(ctx, "video.mp4")
+ks := c.Keyframes                                  // []int64 ms, ascending, de-duplicated
+
+c, err := matroska.OpenMeta(ctx, "video.mkv")
+ks = c.Keyframes                                   // same field, from the Cues index
+```
+
+`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MP4 derives them from the `stss`/`stts`/`ctts` sample tables already parsed from `moov` (free); MKV/WebM derives them from the `Cues` element reached via the `SeekHead` — one seek, no `Cluster` scan — and a full `matroska.Read` exposes them too. It is nil when the source has no usable index, so the caller can fall back to a packet scan.
+
 ---
 
 ## Mux / Demux

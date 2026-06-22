@@ -3,6 +3,7 @@ package mp4
 import (
 	"context"
 	"io"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -79,5 +80,37 @@ func containerFromMovie(mv *movie) *mkv.Container {
 		Tracks:     buildMKVTracks(mv),
 		Chapters:   mv.chapters,
 		DurationMs: durMs,
+		Keyframes:  videoKeyframesMs(mv),
 	}
+}
+
+// videoKeyframesMs returns the first video track's keyframe presentation
+// timestamps (ms), ascending and de-duplicated, from the sync samples already
+// parsed into the sample table — so the keyframe index costs nothing beyond the
+// metadata parse OpenMeta already does. nil when there is no video track.
+func videoKeyframesMs(mv *movie) []int64 {
+	for i := range mv.tracks {
+		t := &mv.tracks[i]
+		if t.trackType != mkv.VideoTrack {
+			continue
+		}
+		times := make([]int64, 0, len(t.samples)/8+1)
+		for j := range t.samples {
+			if t.samples[j].sync {
+				times = append(times, t.samples[j].ctsMs)
+			}
+		}
+		if len(times) == 0 {
+			return nil
+		}
+		sort.Slice(times, func(a, b int) bool { return times[a] < times[b] })
+		out := times[:1]
+		for _, v := range times[1:] {
+			if v != out[len(out)-1] {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	return nil
 }

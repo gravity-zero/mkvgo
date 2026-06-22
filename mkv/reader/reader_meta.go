@@ -100,7 +100,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 	}
 
 	var gotInfo, gotTracks bool
-	var infoOff, tracksOff int64 = -1, -1 // absolute offsets from a SeekHead, if any
+	var infoOff, tracksOff, cuesOff int64 = -1, -1, -1 // absolute offsets from a SeekHead, if any
 
 	for {
 		if ctx.Err() != nil {
@@ -124,8 +124,14 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 				return err
 			}
 			gotTracks = true
+		case mkv.IDCues:
+			// Cues inline before the Clusters (less common): read them now so the
+			// keyframe index comes from the same pass.
+			if err := p.parseCues(eh.Size, c); err != nil {
+				return err
+			}
 		case mkv.IDSeekHead:
-			ioff, toff, err := p.parseSeekHeadMeta(eh.Size, segStart, endPos)
+			ioff, toff, coff, err := p.parseSeekHeadMeta(eh.Size, segStart, endPos)
 			if err != nil {
 				return err
 			}
@@ -134,6 +140,9 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 			}
 			if toff >= 0 {
 				tracksOff = toff
+			}
+			if coff >= 0 {
+				cuesOff = coff
 			}
 		case mkv.IDCluster:
 			// Media reached. If Info/Tracks are still missing, the only cheap way
@@ -163,10 +172,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 				}
 			}
 			if gotInfo && gotTracks {
-				return nil
+				return p.finalizeKeyframes(c, cuesOff)
 			}
 			if eh.Size < 0 {
-				return nil // unknown-size cluster: cannot skip — stop with what we have
+				return p.finalizeKeyframes(c, cuesOff) // unknown-size cluster: cannot skip
 			}
 			if _, err := p.r.Seek(resume, io.SeekStart); err != nil {
 				return err
@@ -181,9 +190,24 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 			}
 		}
 		if gotInfo && gotTracks {
-			break // early stop — do not touch Cues or Clusters
+			break // early stop — Cues are pulled by finalizeKeyframes, no Cluster scan
 		}
 	}
+	return p.finalizeKeyframes(c, cuesOff)
+}
+
+// finalizeKeyframes derives Container.Keyframes from the Cues seek index in the
+// same metadata pass. If the Cues were not read inline it follows the SeekHead's
+// Cues offset (one seek to one element, no Cluster scan). It then leaves Cues nil —
+// the metadata path's contract — exposing only the derived Keyframes.
+func (p *parser) finalizeKeyframes(c *mkv.Container, cuesOff int64) error {
+	if len(c.Cues) == 0 && cuesOff >= 0 {
+		if _, err := p.parseElementAt(cuesOff, mkv.IDCues, c, p.parseCues); err != nil {
+			return err
+		}
+	}
+	c.Keyframes = keyframeTimesMs(c)
+	c.Cues = nil
 	return nil
 }
 
@@ -215,28 +239,28 @@ func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(
 }
 
 // parseSeekHeadMeta reads a SeekHead and returns the absolute file offsets of the
-// Info and Tracks elements it points at (or -1 each if absent). SeekPosition is
-// relative to the Segment's data start (segStart).
-func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (infoOff, tracksOff int64, err error) {
-	infoOff, tracksOff = -1, -1
+// Info, Tracks and Cues elements it points at (or -1 each if absent). SeekPosition
+// is relative to the Segment's data start (segStart).
+func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (infoOff, tracksOff, cuesOff int64, err error) {
+	infoOff, tracksOff, cuesOff = -1, -1, -1
 	end := p.pos() + size
 	for p.pos() < end {
 		eh, _, e := p.readHeader()
 		if e != nil {
-			return infoOff, tracksOff, e
+			return infoOff, tracksOff, cuesOff, e
 		}
 		if eh.ID != mkv.IDSeek {
 			if eh.Size < 0 {
-				return infoOff, tracksOff, nil
+				return infoOff, tracksOff, cuesOff, nil
 			}
 			if e := p.skip(eh.Size); e != nil {
-				return infoOff, tracksOff, e
+				return infoOff, tracksOff, cuesOff, e
 			}
 			continue
 		}
 		id, pos, ok, e := p.parseSeekEntry(eh.Size)
 		if e != nil {
-			return infoOff, tracksOff, e
+			return infoOff, tracksOff, cuesOff, e
 		}
 		if !ok {
 			continue
@@ -250,9 +274,11 @@ func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (infoOff, track
 			infoOff = abs
 		case mkv.IDTracks:
 			tracksOff = abs
+		case mkv.IDCues:
+			cuesOff = abs
 		}
 	}
-	return infoOff, tracksOff, nil
+	return infoOff, tracksOff, cuesOff, nil
 }
 
 // parseSeekEntry reads one Seek element, returning the referenced element ID and

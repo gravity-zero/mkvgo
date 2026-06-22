@@ -8,6 +8,27 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Dolby Vision configuration.** Video tracks now expose `Track.DolbyVision`
+  (profile, level, RPU/EL/BL presence and `bl_signal_compatibility_id`), decoded
+  from the `DOVIDecoderConfigurationRecord`:
+  - MP4 reads the `dvcC`/`dvvC` box from the video sample entry, and recognises
+    the Dolby Vision sample entry types (`dvhe`/`dvh1` over HEVC, `dvav`/`dva1`
+    over AVC, `dav1` over AV1) so those tracks are no longer dropped.
+  - Matroska/WebM reads the `dvcC`/`dvvC` `BlockAdditionMapping`.
+  Exposed via `mkv.DolbyVision` / `mkv.ParseDolbyVisionConfig`, shared by both
+  readers, so a probe can report Dolby Vision without a packet scan.
+
+- **Head-only keyframe index on the Container.** `Container.Keyframes` ([]int64,
+  milliseconds, ascending, de-duplicated) is now filled by the metadata probe in
+  the same pass — no separate call, no second open:
+  - MP4 `OpenMeta`/`ReadMeta` derive it from the sync-sample table (`stss`) and
+    per-sample timing (`stts`/`ctts`) already parsed from `moov`.
+  - Matroska/WebM `OpenMeta`/`ReadMeta` derive it from the `Cues` seek index,
+    reached via the `SeekHead` (one seek to one element, no `Cluster` scan); a full
+    `Read` exposes it too. nil when the source has no usable index, so a caller can
+    fall back to a packet scan.
+  This replaces a full packet scan for `-c copy` HLS/DASH segment alignment.
+
 - **MP4 probe reads track-selection metadata.** `OpenMeta` / `ReadMeta` /
   `RemuxFromMP4` now populate, for each track:
   - **language** — `mdhd.language` (ISO 639-2; the QuickTime Macintosh language

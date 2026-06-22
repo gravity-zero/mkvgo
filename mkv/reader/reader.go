@@ -45,6 +45,9 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	if err := setDurationMs(c); err != nil {
 		return nil, err
 	}
+	// Derive the keyframe index from the Cues a full Read already parsed, so
+	// Container.Keyframes is available from Read as well as the metadata path.
+	c.Keyframes = keyframeTimesMs(c)
 	return c, nil
 }
 
