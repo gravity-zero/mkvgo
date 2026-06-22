@@ -93,6 +93,10 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.IsDefault = t.enabled
 			mt.DefaultPresent = true
 		}
+		if t.forcedKnown {
+			mt.IsForced = t.forced
+			mt.ForcedPresent = true
+		}
 		switch t.trackType {
 		case mkv.VideoTrack:
 			w, h := t.width, t.height

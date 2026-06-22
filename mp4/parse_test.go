@@ -7,9 +7,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// craftTrak builds a minimal trak payload (tkhd + mdia) with the given media
-// handler and first sample-entry fourcc, for exercising the drop path.
-func craftTrak(handler, sampleEntry string, trackID uint32) []byte {
+// craftTrak builds a minimal trak payload (tkhd + mdia, plus an optional
+// udta/kind) with the given media handler and first sample-entry fourcc, for
+// exercising the drop and forced-disposition paths. kindValue == "" omits udta.
+func craftTrak(handler, sampleEntry, kindValue string, trackID uint32) []byte {
 	mdhd := fullBox("mdhd", 0, 0, func(w *bw) {
 		w.u32(0)    // creation
 		w.u32(0)    // modification
@@ -36,14 +37,24 @@ func craftTrak(handler, sampleEntry string, trackID uint32) []byte {
 		w.u32(0) // reserved
 		w.u32(0) // duration
 	})
-	return append(append([]byte{}, tkhd...), mdia...)
+	out := append(append([]byte{}, tkhd...), mdia...)
+	if kindValue != "" {
+		kind := fullBox("kind", 0, 0, func(w *bw) {
+			w.bytes([]byte(dashRoleScheme))
+			w.u8(0)
+			w.bytes([]byte(kindValue))
+			w.u8(0)
+		})
+		out = append(out, container("udta", kind)...)
+	}
+	return out
 }
 
 // TestParseTrakSurfacesDroppedTracks checks that a recognised-but-uncarried track
 // is reported (not silently skipped): cover art (video handler, unsupported entry)
 // and a non-media handler.
 func TestParseTrakSurfacesDroppedTracks(t *testing.T) {
-	_, dropped, err := parseTrak(craftTrak("vide", "jpeg", 2), 1<<20)
+	_, dropped, err := parseTrak(craftTrak("vide", "jpeg", "", 2), 1<<20)
 	if err != nil {
 		t.Fatalf("parseTrak(cover): %v", err)
 	}
@@ -51,12 +62,49 @@ func TestParseTrakSurfacesDroppedTracks(t *testing.T) {
 		t.Errorf("cover drop = %+v, want {ID:2 Type:video Codec:jpeg}", dropped)
 	}
 
-	_, dropped, err = parseTrak(craftTrak("tmcd", "tmcd", 3), 1<<20)
+	_, dropped, err = parseTrak(craftTrak("tmcd", "tmcd", "", 3), 1<<20)
 	if err != nil {
 		t.Fatalf("parseTrak(tmcd): %v", err)
 	}
 	if dropped == nil || dropped.Codec != "tmcd" {
 		t.Errorf("non-media drop = %+v, want Codec:tmcd", dropped)
+	}
+}
+
+func TestParseKind(t *testing.T) {
+	kind := func(value string) []byte {
+		return fullBox("kind", 0, 0, func(w *bw) {
+			w.bytes([]byte(dashRoleScheme))
+			w.u8(0)
+			w.bytes([]byte(value))
+			w.u8(0)
+		})[8:] // strip the box header — parseKind reads the payload
+	}
+	if s, v := parseKind(kind("forced-subtitle")); s != dashRoleScheme || v != "forced-subtitle" {
+		t.Errorf("parseKind = (%q, %q), want (%q, forced-subtitle)", s, v, dashRoleScheme)
+	}
+	if s, _ := parseKind([]byte{0, 0}); s != "" {
+		t.Errorf("short kind scheme = %q, want empty", s)
+	}
+}
+
+// TestParseTrakReadsForcedKind checks that a track-level DASH-role kind box sets
+// the forced disposition — including on non-subtitle tracks (a real muxing quirk).
+func TestParseTrakReadsForcedKind(t *testing.T) {
+	tr, _, err := parseTrak(craftTrak("vide", "jpeg", "forced-subtitle", 4), 1<<20)
+	if err != nil {
+		t.Fatalf("parseTrak(forced): %v", err)
+	}
+	if !tr.forcedKnown || !tr.forced {
+		t.Errorf("forced kind: forced=%v known=%v, want true/true", tr.forced, tr.forcedKnown)
+	}
+	// A non-forced role is read (known) but must not mark the track forced.
+	tr, _, err = parseTrak(craftTrak("vide", "jpeg", "subtitle", 5), 1<<20)
+	if err != nil {
+		t.Fatalf("parseTrak(role): %v", err)
+	}
+	if tr.forced || !tr.forcedKnown {
+		t.Errorf("subtitle role: forced=%v known=%v, want false/true", tr.forced, tr.forcedKnown)
 	}
 }
 

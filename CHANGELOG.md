@@ -15,6 +15,9 @@ All notable changes to mkvgo are documented here. The format is based on
     `LanguageBCP47` / `LanguagePresent`.
   - **default flag** — the `tkhd` `track_enabled` flag → `Track.IsDefault` /
     `DefaultPresent`.
+  - **forced flag** — the track-level `kind` box with the DASH role scheme
+    (`urn:mpeg:dash:role:2011`, value `forced…`) that ffmpeg writes, since MP4 has
+    no native forced flag → `Track.IsForced` / `ForcedPresent`.
   - **audio channel count** — read from the codec configuration (AAC
     `AudioSpecificConfig`, AC-3/E-AC-3 `dac3`/`dec3`) instead of the
     `AudioSampleEntry` field, which many muxers leave at 2 for multichannel audio.

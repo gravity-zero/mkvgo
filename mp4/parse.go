@@ -5,9 +5,14 @@ import (
 	"encoding/binary"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
+
+// dashRoleScheme is the schemeURI of the DASH role kind box (ISO/IEC 23009-1)
+// that ffmpeg uses to record an MP4 track's "forced" disposition.
+const dashRoleScheme = "urn:mpeg:dash:role:2011"
 
 // parse.go — a minimal, defensive ISO-BMFF reader for the boxes RemuxFromMP4
 // needs: ftyp is ignored, moov is parsed for track configuration and sample
@@ -51,6 +56,8 @@ type inTrack struct {
 	languageKnown bool   // a usable language was read (mdhd or elng)
 	enabled       bool   // tkhd track_enabled flag (ffprobe's "default" disposition)
 	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
+	forced        bool   // a DASH-role kind box marks this track forced
+	forcedKnown   bool   // a DASH-role kind box was read, so forced is meaningful
 
 	// colour code points (CICP), nil when the entry had no colr box.
 	colorPrimaries *uint16
@@ -209,6 +216,24 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, *DroppedTrack, error) {
 		tr.enabled = tkhdEnabled(tkhd.payload)
 		tr.flagsKnown = true
 		trackID = uint64(tkhdTrackID(tkhd.payload))
+	}
+	// MP4 has no native "forced" flag; ffmpeg records it as a track-level kind box
+	// with the DASH role scheme (e.g. value "forced-subtitle"), which its demuxer
+	// reads back as AV_DISPOSITION_FORCED — regardless of the track's media type.
+	if udta, ok := findMemBox(trakBoxes, "udta"); ok {
+		if ub, err := iterBoxes(udta.payload); err == nil {
+			for _, kb := range ub {
+				if kb.typ != "kind" {
+					continue
+				}
+				if scheme, value := parseKind(kb.payload); scheme == dashRoleScheme {
+					tr.forcedKnown = true
+					if strings.HasPrefix(value, "forced") {
+						tr.forced = true
+					}
+				}
+			}
+		}
 	}
 
 	mdia, ok := findMemBox(trakBoxes, "mdia")
@@ -401,6 +426,25 @@ func parseElng(payload []byte) string {
 		s = s[:i]
 	}
 	return string(s)
+}
+
+// parseKind reads a kind box (ISO/IEC 14496-12): a fullbox holding a
+// null-terminated schemeURI followed by a null-terminated value.
+func parseKind(payload []byte) (scheme, value string) {
+	if len(payload) < 4 {
+		return "", ""
+	}
+	s := payload[4:] // skip version/flags
+	i := bytes.IndexByte(s, 0)
+	if i < 0 {
+		return string(s), ""
+	}
+	scheme = string(s[:i])
+	rest := s[i+1:]
+	if j := bytes.IndexByte(rest, 0); j >= 0 {
+		rest = rest[:j]
+	}
+	return scheme, string(rest)
 }
 
 // parseSampleEntry reads the first sample entry from an stsd box and fills the
