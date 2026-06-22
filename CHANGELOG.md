@@ -8,111 +8,61 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
-- **Remux fidelity — read↔write parity.** The remux now preserves the
-  track-selection and HDR metadata the probe reports:
-  - **Edit list** (`elst`) is folded into the composition times in
-    `buildSampleTable`, so `RemuxFromMP4` (and the keyframe index) present the same
-    timeline as ffmpeg, not one offset by `media_time`.
-  - `RemuxToMP4` writes the **default** flag (`tkhd` track_enabled from
-    `IsDefault`), the **forced** flag (DASH-role `kind` box from `IsForced`) and the
-    **BCP-47 language** (`elng` box); the MKV writer now persists `LanguageBCP47`
-    too, so a full language survives a round-trip.
-  - **Dolby Vision** is carried both ways: `RemuxFromMP4` writes a `dvcC`/`dvvC`
-    `BlockAdditionMapping`, `RemuxToMP4` writes the `dvcC`/`dvvC` box into the visual
-    sample entry — using the Dolby sample entry type (`dvh1`/`dva1`/`dav1`) for a
-    non-cross-compatible stream (`bl_signal_compatibility_id` 0, e.g. profile 5) and
-    keeping the plain `hvc1`/`avc1`/`av01` tag for a cross-compatible one (profile 8).
-    New `mkv.EncodeDolbyVisionConfig` / `DolbyVision.BoxType`.
-  - MP4 video tracks now report an average **frame rate** (from the sample timing,
-    when the sample table is built).
+- **MP4 metadata probe.** `mp4.OpenMeta` / `OpenMetaWithFS` / `ReadMeta` read an
+  MP4's stream metadata head-only, reporting per track: **language** (`mdhd`
+  ISO 639-2 — including QuickTime Macintosh language codes — and the `elng` BCP-47
+  box), the **default** flag (`tkhd` track_enabled), the **forced** flag (DASH-role
+  `kind` box), the **audio channel count** (from the AAC `AudioSpecificConfig` and
+  AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field), and
+  **colour** code points (`colr`, falling back to the codec bitstream via the now
+  exported `reader.FillColourFromCodecPrivate`).
+- **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
+  `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
+  each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through
+  `Options.OnDrop`. (A QuickTime chapter track is not reported — see Fixed.)
+- **Dolby Vision.** `Track.DolbyVision` exposes the decoded
+  `DOVIDecoderConfigurationRecord` (profile, level, RPU/EL/BL, `bl_signal_compatibility_id`),
+  read from the MP4 `dvcC`/`dvvC` box (and the `dvhe`/`dvh1`/`dvav`/`dva1`/`dav1`
+  sample entry types) or the Matroska `dvcC`/`dvvC` `BlockAdditionMapping`. It is
+  carried through both remux directions, choosing the Dolby sample entry type
+  (`dvh1`/`dva1`/`dav1`) for a non-cross-compatible stream and the plain
+  `hvc1`/`avc1`/`av01` tag for a cross-compatible one. New `mkv.DolbyVision`,
+  `ParseDolbyVisionConfig`, `EncodeDolbyVisionConfig`, `DolbyVision.BoxType`.
+- **Head-only keyframe index** on `Container.Keyframes` ([]int64 ms, ascending,
+  de-duplicated) — the cut points for `-c copy` HLS/DASH segmentation. MKV/WebM
+  fills it from the `Cues` index via the `SeekHead` (one seek, no `Cluster` scan)
+  in the metadata pass; MP4 fills it from the `stss`/`stts`/`ctts` tables, with the
+  edit list (`elst`) applied as ffmpeg does, opt-in via `Options{Keyframes: true}`.
+- **Subtitle extraction to WebVTT**, replacing an `ffmpeg -f webvtt` fork:
+  `ops.ExtractSubtitleWebVTT` (embedded MKV/WebM track), `mp4.ExtractSubtitleWebVTT`
+  (embedded MP4 tx3g/wvtt track) and `subtitle.FileToWebVTT` (external
+  `.srt`/`.ass`/`.ssa`/`.vtt` sidecar), streaming to any `io.Writer`. Building
+  blocks: `subtitle.Cue`, `WriteWebVTT`, `FormatVTTTime`, `SRTToCues`, `ASSToCues`,
+  `FlattenASSBlock`, `ResolveCueEnds`.
+- **Remux preserves what the probe reads.** `RemuxToMP4` writes the default flag
+  (`tkhd` track_enabled), the forced flag (`kind` box) and the BCP-47 language
+  (`elng`); the MKV writer persists `LanguageBCP47`. The edit list is folded into
+  the composition times so `RemuxFromMP4` and the keyframe index present ffmpeg's
+  timeline. MP4 video tracks report an average **frame rate** from the sample timing.
+- **CLI parity.** `info`/`tracks`/`chapters`/`probe` accept an MP4/MOV path;
+  `probe` prints colour, Dolby Vision, the keyframe index and dropped tracks; new
+  **`keyframes`** command; `extract-subtitle` gains `-format vtt` (and an MP4
+  source); new **`to-vtt`** command for external sidecars.
+
+### Changed
+
+- **MP4 `OpenMeta`/`ReadMeta` are head-only by default**: they read only the `moov`
+  box headers and no longer expand the per-sample tables, so probing a long movie
+  is far faster (the duration comes from `mvhd`). Pass `Options{Keyframes: true}` to
+  build the sample table and populate `Container.Keyframes`. Both gain a variadic
+  `...Options` parameter (existing two-arg calls are unaffected).
+- **BREAKING:** `mp4.OpenMeta`, `OpenMetaWithFS` and `ReadMeta` now return
+  `(*mkv.Container, []DroppedTrack, error)` (was `(*mkv.Container, error)`).
 
 ### Fixed
 
 - The MP4 probe no longer reports a QuickTime **chapter track** (referenced via
   `tref/chap`) as a dropped track — its content is already read from `chpl`.
-
-- **CLI parity for the MP4 / probe / subtitle features.** The `mkvgo` command now
-  exposes what the library gained:
-  - `info`, `tracks`, `chapters`, `probe` accept an **MP4/MOV** path (via the
-    head-only MP4 probe), not just MKV/WebM.
-  - `probe` prints colour code points, **Dolby Vision** configuration, the
-    keyframe index, and (MP4) dropped/non-carried tracks; `tracks` flags DoVi.
-  - New **`keyframes`** command lists a file's video keyframe timestamps
-    (MKV from the Cues index, MP4 from the sample table).
-  - `extract-subtitle` gains **`-format vtt`** and accepts an MP4 source; new
-    **`to-vtt`** command converts an external `.srt`/`.ass`/`.vtt` sidecar to WebVTT.
-
-- **Subtitle extraction to WebVTT**, replacing an `ffmpeg -f webvtt` fork:
-  - `ops.ExtractSubtitleWebVTT(ctx, src, trackID, w, …)` writes an embedded
-    Matroska/WebM text subtitle track as WebVTT (S_TEXT/UTF8 and S_TEXT/WEBVTT
-    pass through, S_TEXT/ASS is flattened), using each cue's BlockDuration.
-  - `mp4.ExtractSubtitleWebVTT(ctx, src, trackID, w, …)` does the same for an MP4
-    track (tx3g / wvtt), head-only plus the subtitle samples.
-  - `subtitle.FileToWebVTT(path, w)` converts an external `.srt` / `.ass`/`.ssa` /
-    `.vtt` sidecar to WebVTT.
-  - Building blocks: `subtitle.Cue`, `WriteWebVTT`, `FormatVTTTime`, `SRTToCues`,
-    `ASSToCues`, `FlattenASSBlock`, `ResolveCueEnds`. Output streams to any
-    `io.Writer` (e.g. an HTTP response), so there is no temp file or subprocess.
-
-- **Dolby Vision configuration.** Video tracks now expose `Track.DolbyVision`
-  (profile, level, RPU/EL/BL presence and `bl_signal_compatibility_id`), decoded
-  from the `DOVIDecoderConfigurationRecord`:
-  - MP4 reads the `dvcC`/`dvvC` box from the video sample entry, and recognises
-    the Dolby Vision sample entry types (`dvhe`/`dvh1` over HEVC, `dvav`/`dva1`
-    over AVC, `dav1` over AV1) so those tracks are no longer dropped.
-  - Matroska/WebM reads the `dvcC`/`dvvC` `BlockAdditionMapping`.
-  Exposed via `mkv.DolbyVision` / `mkv.ParseDolbyVisionConfig`, shared by both
-  readers, so a probe can report Dolby Vision without a packet scan.
-
-- **Head-only keyframe index on the Container.** `Container.Keyframes` ([]int64,
-  milliseconds, ascending, de-duplicated), the cut points for `-c copy` HLS/DASH
-  segmentation, replacing a full packet scan:
-  - Matroska/WebM `OpenMeta`/`ReadMeta` fill it from the `Cues` seek index, reached
-    via the `SeekHead` (one seek to one element, no `Cluster` scan); a full `Read`
-    exposes it too.
-  - MP4 fills it from the sync-sample table (`stss`) and per-sample timing
-    (`stts`/`ctts`), with the edit list (`elst`) applied as ffmpeg does (an empty
-    edit's delay and a non-empty edit's `media_time` shift the timestamps; keyframes
-    before the edit start are dropped). This is **opt-in** via
-    `Options{Keyframes: true}` — building the sample table is the dominant cost on a
-    long movie, so the default metadata probe skips it.
-  nil when the source has no usable index, so a caller can fall back to a packet scan.
-
-### Changed
-
-- **MP4 `OpenMeta`/`ReadMeta` are now head-only by default.** They read only the
-  `moov` box headers (`mvhd`/`tkhd`/`mdhd`/`stsd`/…) and no longer expand the
-  per-sample tables, so probing a long movie's metadata is much faster. The
-  duration comes from `mvhd` in this mode. Request `Options{Keyframes: true}` to
-  build the sample table and populate `Container.Keyframes`. `OpenMeta`/`ReadMeta`
-  gain a variadic `...Options` parameter (existing calls are unaffected).
-
-- **MP4 probe reads track-selection metadata.** `OpenMeta` / `ReadMeta` /
-  `RemuxFromMP4` now populate, for each track:
-  - **language** — `mdhd.language` (ISO 639-2; the QuickTime Macintosh language
-    codes are decoded too) and the `elng` box (BCP-47) → `Track.Language` /
-    `LanguageBCP47` / `LanguagePresent`.
-  - **default flag** — the `tkhd` `track_enabled` flag → `Track.IsDefault` /
-    `DefaultPresent`.
-  - **forced flag** — the track-level `kind` box with the DASH role scheme
-    (`urn:mpeg:dash:role:2011`, value `forced…`) that ffmpeg writes, since MP4 has
-    no native forced flag → `Track.IsForced` / `ForcedPresent`.
-  - **audio channel count** — read from the codec configuration (AAC
-    `AudioSpecificConfig`, AC-3/E-AC-3 `dac3`/`dec3`) instead of the
-    `AudioSampleEntry` field, which many muxers leave at 2 for multichannel audio.
-  - **colour** — any field the `colr` box omits is filled from the codec
-    bitstream (e.g. the H.264 SPS VUI), via the now-exported
-    `reader.FillColourFromCodecPrivate`.
-- **Dropped (non-carried) tracks are surfaced.** `OpenMeta` / `OpenMetaWithFS` /
-  `ReadMeta` return an additional `[]DroppedTrack` listing tracks present in the
-  file but not in `Container.Tracks` — cover art / attached pictures and non-media
-  tracks (hint, timecode, metadata) — each with its track ID, fourcc and a reason.
-  `RemuxFromMP4` reports the same tracks through `Options.OnDrop`.
-
-### Changed
-
-- **BREAKING:** `mp4.OpenMeta`, `OpenMetaWithFS` and `ReadMeta` now return
-  `(*mkv.Container, []DroppedTrack, error)` (was `(*mkv.Container, error)`).
 
 ## [0.7.2] - 2026-06-22
 
