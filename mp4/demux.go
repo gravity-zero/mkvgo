@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
@@ -78,6 +79,17 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			Codec:        t.codec,
 			CodecPrivate: t.codecPrivate,
 		}
+		// Language and the "default" selection flag, so a probe carries the same
+		// track-selection metadata ffprobe reports (not gated by codec support).
+		if t.languageKnown {
+			mt.Language = t.language
+			mt.LanguageBCP47 = t.languageBCP47
+			mt.LanguagePresent = true
+		}
+		if t.flagsKnown {
+			mt.IsDefault = t.enabled
+			mt.DefaultPresent = true
+		}
 		switch t.trackType {
 		case mkv.VideoTrack:
 			w, h := t.width, t.height
@@ -86,6 +98,10 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.ColorTransfer = t.colorTransfer
 			mt.ColorSpace = t.colorMatrix
 			mt.ColorRange = t.colorRange
+			// Fall back to the codec bitstream (e.g. H.264 SPS VUI) for any colour
+			// field the colr box did not supply — matches ffprobe's color_space on
+			// SDR streams that carry colour only in the SPS.
+			reader.FillColourFromCodecPrivate(&mt)
 		case mkv.AudioTrack:
 			if t.channels > 0 {
 				ch := t.channels

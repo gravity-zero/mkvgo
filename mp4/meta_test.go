@@ -15,10 +15,10 @@ func buildTestMP4(t *testing.T) string {
 	t.Helper()
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,
-			Width: u32p(1920), Height: u32p(1080), FrameRate: f64p(25),
+			Width: u32p(1920), Height: u32p(1080), FrameRate: f64p(25), Language: "fre",
 			ColorPrimaries: u16p(9), ColorTransfer: u16p(16), ColorSpace: u16p(9), ColorRange: u16p(1)},
 		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC,
-			Channels: u8p(2), SampleRate: f64p(48000)},
+			Channels: u8p(2), SampleRate: f64p(48000), Language: "fre"},
 	}
 	blocks := []genBlock{
 		{track: 1, pts: 0, key: true, data: []byte{1}},
@@ -81,6 +81,17 @@ func TestOpenMetaMatchesRemux(t *testing.T) {
 	}
 	if audio.Codec != "aac" {
 		t.Errorf("audio codec = %q, want aac", audio.Codec)
+	}
+
+	// Language and the default flag must be read from the ISO-BMFF boxes (mdhd /
+	// tkhd), not left at their zero values — they drive track selection.
+	for _, tk := range []*mkv.Track{video, audio} {
+		if !tk.LanguagePresent || tk.Language != "fre" {
+			t.Errorf("%s language = %q (present=%v), want fre", tk.Type, tk.Language, tk.LanguagePresent)
+		}
+		if !tk.DefaultPresent || !tk.IsDefault {
+			t.Errorf("%s default = %v (present=%v), want true (enabled track)", tk.Type, tk.IsDefault, tk.DefaultPresent)
+		}
 	}
 
 	if len(c.Chapters) != 2 || c.Chapters[0].Title != "Alpha" || c.Chapters[1].Title != "Bravo" {

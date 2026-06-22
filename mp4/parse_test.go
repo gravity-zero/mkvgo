@@ -62,30 +62,78 @@ func TestParseChunkOffsetsStcoCo64(t *testing.T) {
 	}
 }
 
-func TestParseMdhdTimescale(t *testing.T) {
-	// version 0: timescale at offset 12.
+func TestParseMdhd(t *testing.T) {
+	// version 0: timescale at offset 12, language at offset 20.
 	var v0 bw
-	v0.u32(0)     // version/flags
-	v0.u32(0)     // creation
-	v0.u32(0)     // modification
-	v0.u32(48000) // timescale
-	v0.u32(0)     // duration
-	if got := parseMdhdTimescale(v0.b); got != 48000 {
-		t.Errorf("v0 timescale = %d, want 48000", got)
+	v0.u32(0)                   // version/flags
+	v0.u32(0)                   // creation
+	v0.u32(0)                   // modification
+	v0.u32(48000)               // timescale
+	v0.u32(0)                   // duration
+	v0.u16(packLanguage("fre")) // language
+	v0.u16(0)                   // pre_defined
+	if ts, lang := parseMdhd(v0.b); ts != 48000 || lang != "fre" {
+		t.Errorf("v0 = (%d, %q), want (48000, \"fre\")", ts, lang)
 	}
-	// version 1: timescale at offset 20.
+	// version 1: timescale at offset 20, language at offset 32.
 	var v1 bw
 	v1.u8(1)
-	v1.u24(0)     // flags
-	v1.u64(0)     // creation
-	v1.u64(0)     // modification
-	v1.u32(90000) // timescale
-	v1.u64(0)     // duration
-	if got := parseMdhdTimescale(v1.b); got != 90000 {
-		t.Errorf("v1 timescale = %d, want 90000", got)
+	v1.u24(0)                   // flags
+	v1.u64(0)                   // creation
+	v1.u64(0)                   // modification
+	v1.u32(90000)               // timescale
+	v1.u64(0)                   // duration
+	v1.u16(packLanguage("jpn")) // language
+	v1.u16(0)                   // pre_defined
+	if ts, lang := parseMdhd(v1.b); ts != 90000 || lang != "jpn" {
+		t.Errorf("v1 = (%d, %q), want (90000, \"jpn\")", ts, lang)
 	}
-	if got := parseMdhdTimescale([]byte{0, 0}); got != 0 {
-		t.Errorf("short mdhd = %d, want 0", got)
+	if ts, lang := parseMdhd([]byte{0, 0}); ts != 0 || lang != "" {
+		t.Errorf("short mdhd = (%d, %q), want (0, \"\")", ts, lang)
+	}
+}
+
+func TestDecodeMdhdLanguage(t *testing.T) {
+	cases := []struct {
+		packed uint16
+		want   string
+	}{
+		{packLanguage("fre"), "fre"},
+		{packLanguage("und"), ""}, // undefined → treated as absent
+		{0, ""},                   // zero field → absent
+		{0x7FFF, ""},              // out-of-range letters → rejected
+	}
+	for _, c := range cases {
+		if got := decodeMdhdLanguage(c.packed); got != c.want {
+			t.Errorf("decodeMdhdLanguage(%#04x) = %q, want %q", c.packed, got, c.want)
+		}
+	}
+}
+
+func TestTkhdEnabled(t *testing.T) {
+	enabled := []byte{0, 0, 0, 0x07}  // enabled|in_movie|in_preview
+	disabled := []byte{0, 0, 0, 0x06} // in_movie|in_preview, not enabled
+	if !tkhdEnabled(enabled) {
+		t.Error("flags 0x07 should be enabled")
+	}
+	if tkhdEnabled(disabled) {
+		t.Error("flags 0x06 should not be enabled")
+	}
+	if tkhdEnabled([]byte{0, 0}) {
+		t.Error("short tkhd should not be enabled")
+	}
+}
+
+func TestParseElng(t *testing.T) {
+	var b bw
+	b.u32(0) // version/flags
+	b.bytes([]byte("pt-BR"))
+	b.u8(0) // null terminator
+	if got := parseElng(b.b); got != "pt-BR" {
+		t.Errorf("parseElng = %q, want pt-BR", got)
+	}
+	if got := parseElng([]byte{0, 0}); got != "" {
+		t.Errorf("short elng = %q, want empty", got)
 	}
 }
 

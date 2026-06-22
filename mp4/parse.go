@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -42,6 +43,13 @@ type inTrack struct {
 	sampleRate   float64
 	timescale    uint32
 	samples      []inSample
+
+	// language and selection flags read from the track header / media header.
+	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
+	languageBCP47 string // BCP-47 from an elng box; "" when absent
+	languageKnown bool   // a usable language was read (mdhd or elng)
+	enabled       bool   // tkhd track_enabled flag (ffprobe's "default" disposition)
+	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
 
 	// colour code points (CICP), nil when the entry had no colr box.
 	colorPrimaries *uint16
@@ -185,6 +193,13 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
 	if err != nil {
 		return tr, false, err
 	}
+	// tkhd carries the selection flags. track_enabled (bit 0) is what ffmpeg maps
+	// to the "default" disposition, so it feeds Track.IsDefault on the read side.
+	if tkhd, ok := findMemBox(trakBoxes, "tkhd"); ok {
+		tr.enabled = tkhdEnabled(tkhd.payload)
+		tr.flagsKnown = true
+	}
+
 	mdia, ok := findMemBox(trakBoxes, "mdia")
 	if !ok {
 		return tr, false, errf("trak without mdia")
@@ -195,10 +210,22 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
 	}
 
 	if mdhd, ok := findMemBox(mdiaBoxes, "mdhd"); ok {
-		tr.timescale = parseMdhdTimescale(mdhd.payload)
+		var lang string
+		tr.timescale, lang = parseMdhd(mdhd.payload)
+		if lang != "" {
+			tr.language = lang
+			tr.languageKnown = true
+		}
 	}
 	if tr.timescale == 0 {
 		tr.timescale = 1000
+	}
+	// An elng box (ISO 14496-12) overrides mdhd with a full BCP-47 tag.
+	if elng, ok := findMemBox(mdiaBoxes, "elng"); ok {
+		if bcp47 := parseElng(elng.payload); bcp47 != "" {
+			tr.languageBCP47 = bcp47
+			tr.languageKnown = true
+		}
 	}
 
 	hdlr, ok := findMemBox(mdiaBoxes, "hdlr")
@@ -252,23 +279,73 @@ func parseTrak(payload []byte, fileSize int64) (inTrack, bool, error) {
 	return tr, true, nil
 }
 
-func parseMdhdTimescale(payload []byte) uint32 {
+// parseMdhd reads an mdhd box and returns the media timescale and the ISO 639-2
+// language code (decoded from the packed 16-bit field). lang is "" when the box
+// is too short, the field is zero, or it decodes to "und" (undefined).
+func parseMdhd(payload []byte) (timescale uint32, lang string) {
 	if len(payload) < 4 {
-		return 0
+		return 0, ""
 	}
-	version := payload[0]
-	if version == 1 {
-		// version1: creation(8)+modification(8)+timescale(4)+duration(8)
-		if len(payload) < 4+16+4 {
-			return 0
+	// version0: creation(4)+modification(4)+timescale(4)+duration(4)+language(2)
+	// version1: creation(8)+modification(8)+timescale(4)+duration(8)+language(2)
+	tsOff, langOff := 12, 20
+	if payload[0] == 1 {
+		tsOff, langOff = 20, 32
+	}
+	if len(payload) >= tsOff+4 {
+		timescale = binary.BigEndian.Uint32(payload[tsOff : tsOff+4])
+	}
+	if len(payload) >= langOff+2 {
+		lang = decodeMdhdLanguage(binary.BigEndian.Uint16(payload[langOff : langOff+2]))
+	}
+	return timescale, lang
+}
+
+// decodeMdhdLanguage unpacks the mdhd language field: three 5-bit values, each
+// offset by 0x60, forming a lowercase ISO 639-2/T code. It returns "" for the
+// zero field and for "und" (undefined), and for any value that is not three
+// a–z letters.
+func decodeMdhdLanguage(packed uint16) string {
+	if packed == 0 {
+		return ""
+	}
+	c := [3]byte{
+		byte((packed>>10)&0x1f) + 0x60,
+		byte((packed>>5)&0x1f) + 0x60,
+		byte(packed&0x1f) + 0x60,
+	}
+	for _, ch := range c {
+		if ch < 'a' || ch > 'z' {
+			return ""
 		}
-		return binary.BigEndian.Uint32(payload[20:24])
 	}
-	// version0: creation(4)+modification(4)+timescale(4)+duration(4)
-	if len(payload) < 4+8+4 {
-		return 0
+	if s := string(c[:]); s != "und" {
+		return s
 	}
-	return binary.BigEndian.Uint32(payload[12:16])
+	return ""
+}
+
+// tkhdEnabled reports whether a track header's track_enabled flag (bit 0 of the
+// 24-bit flags) is set. ffmpeg maps this to the "default" stream disposition.
+func tkhdEnabled(payload []byte) bool {
+	if len(payload) < 4 {
+		return false
+	}
+	flags := uint32(payload[1])<<16 | uint32(payload[2])<<8 | uint32(payload[3])
+	return flags&0x000001 != 0
+}
+
+// parseElng reads the null-terminated BCP-47 tag from an elng (Extended Language
+// Tag) box, skipping the 4-byte fullbox version/flags header.
+func parseElng(payload []byte) string {
+	if len(payload) < 4 {
+		return ""
+	}
+	s := payload[4:]
+	if i := bytes.IndexByte(s, 0); i >= 0 {
+		s = s[:i]
+	}
+	return string(s)
 }
 
 // parseSampleEntry reads the first sample entry from an stsd box and fills the

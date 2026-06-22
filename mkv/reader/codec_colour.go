@@ -59,6 +59,15 @@ func spsRange(fullRangeFlag uint32) *uint16 {
 	return u16p(1)
 }
 
+// FillColourFromCodecPrivate fills any nil colour/HDR field of a video track from
+// its codec bitstream (Track.CodecPrivate), the same fallback the Matroska reader
+// applies internally. It is exported for probes that assemble tracks outside the
+// reader (e.g. the mp4 package, where colour may live only in the SPS VUI and not
+// in a colr box). Safe on any input: malformed bitstreams leave the fields nil.
+func FillColourFromCodecPrivate(t *mkv.Track) {
+	fillColourFromCodecPrivate(t)
+}
+
 // fillColourFromCodecPrivate fills any colour field the container Colour element
 // left nil from the codec bitstream. Called for video tracks after the TrackEntry
 // is parsed. Safe on any input.
