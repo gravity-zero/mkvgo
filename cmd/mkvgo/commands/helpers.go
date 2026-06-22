@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 var JsonOutput bool
@@ -22,12 +24,14 @@ const (
 )
 
 var CmdUsage = map[string]string{
-	"info":               "mkvgo info [-json] <file.mkv|->",
-	"tracks":             "mkvgo tracks [-json] <file.mkv|->",
-	"chapters":           "mkvgo chapters [-json] <file.mkv|->",
+	"info":               "mkvgo info [-json] <file.mkv|.mp4|->",
+	"tracks":             "mkvgo tracks [-json] <file.mkv|.mp4|->",
+	"chapters":           "mkvgo chapters [-json] <file.mkv|.mp4|->",
 	"attachments":        "mkvgo attachments [-json] <file.mkv|->",
 	"tags":               "mkvgo tags [-json] <file.mkv|->",
-	"probe":              "mkvgo probe [-json] <file.mkv|->",
+	"probe":              "mkvgo probe [-json] <file.mkv|.mp4|->",
+	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
+	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] <file.mkv>",
 	"compare":            "mkvgo compare [-json] <a.mkv> <b.mkv>",
 	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,...]",
@@ -41,7 +45,7 @@ var CmdUsage = map[string]string{
 	"edit-track":         "mkvgo edit-track <file.mkv> -o <out.mkv> -t <id> [-lang x] [-name x] [-default|-no-default] [-forced|-no-forced]",
 	"edit-inplace":       "mkvgo edit-inplace <file.mkv> '<json>' (instant, no rewrite)",
 	"extract-attachment": "mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>",
-	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv> -t <trackID> -o <out> [-format srt|ass]",
+	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt]",
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
@@ -90,6 +94,35 @@ func openInput(path string) *matroska.Container {
 		return c
 	}
 	return OpenMKV(path)
+}
+
+// isMP4Path reports whether path looks like an ISO-BMFF file the mp4 package
+// handles (by extension).
+func isMP4Path(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mp4", ".m4v", ".m4a", ".mov":
+		return true
+	}
+	return false
+}
+
+// loadContainer reads metadata from path, handling MP4 (mp4.OpenMeta) as well as
+// Matroska/WebM. keyframes requests the MP4 keyframe index (which builds the
+// sample table); for MKV the keyframe index is filled from the Cues regardless.
+// The second return is any non-carried MP4 tracks (cover art, hint/timecode).
+func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
+	if path != "-" && isMP4Path(path) {
+		var opts []mp4.Options
+		if keyframes {
+			opts = append(opts, mp4.Options{Keyframes: true})
+		}
+		c, dropped, err := mp4.OpenMeta(context.Background(), path, opts...)
+		if err != nil {
+			Fatal(err.Error())
+		}
+		return c, dropped
+	}
+	return openInput(path), nil
 }
 
 func PrintJSON(v any) {

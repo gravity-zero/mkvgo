@@ -57,8 +57,13 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo tags [-json] <file.mkv>")
 		commands.CmdTags(args[0])
 	case "probe":
-		commands.RequireArgs(args, 1, "mkvgo probe [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, "mkvgo probe [-json] <file.mkv|.mp4>")
 		commands.CmdProbe(args[0])
+	case "keyframes":
+		commands.RequireArgs(args, 1, "mkvgo keyframes [-json] <file.mkv|.mp4>")
+		commands.CmdKeyframes(args[0])
+	case "to-vtt":
+		commands.CmdToVTT(args)
 	case "demux":
 		commands.CmdDemux(args)
 	case "mux":
@@ -113,9 +118,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `mkvgo — pure Go MKV/WebM toolkit
 
 Commands:
-  info          Show container info
-  tracks        List tracks
-  chapters      List chapters
+  info          Show container info (MKV/WebM or MP4)
+  tracks        List tracks (MKV/WebM or MP4)
+  chapters      List chapters (MKV/WebM or MP4)
   attachments   List attachments
   demux         Extract tracks to raw streams
   mux           Combine tracks into a single MKV
@@ -125,14 +130,16 @@ Commands:
   edit-title    Change the container title
   edit-track    Edit track properties (lang, name, default, forced)
   extract-attachment  Extract an attachment to file
-  extract-subtitle    Extract subtitle track as SRT
+  extract-subtitle    Extract subtitle track as SRT/ASS/WebVTT (MKV or MP4)
+  to-vtt        Convert an external .srt/.ass/.vtt sidecar to WebVTT
+  keyframes     List video keyframe timestamps (from Cues / sample table)
   split         Split MKV by time ranges or chapters
   join          Concatenate multiple MKVs
   merge         Combine all tracks from multiple MKVs
   merge-subtitle  Inject an external SRT into an MKV
   edit-inplace  Edit metadata without rewriting clusters (instant)
   tags          Show tags
-  probe         Full dump of all metadata
+  probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
   compare       Diff metadata of two MKV files
   reindex       Rebuild the seek index (Cues) of a file

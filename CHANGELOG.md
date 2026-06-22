@@ -8,6 +8,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **CLI parity for the MP4 / probe / subtitle features.** The `mkvgo` command now
+  exposes what the library gained:
+  - `info`, `tracks`, `chapters`, `probe` accept an **MP4/MOV** path (via the
+    head-only MP4 probe), not just MKV/WebM.
+  - `probe` prints colour code points, **Dolby Vision** configuration, the
+    keyframe index, and (MP4) dropped/non-carried tracks; `tracks` flags DoVi.
+  - New **`keyframes`** command lists a file's video keyframe timestamps
+    (MKV from the Cues index, MP4 from the sample table).
+  - `extract-subtitle` gains **`-format vtt`** and accepts an MP4 source; new
+    **`to-vtt`** command converts an external `.srt`/`.ass`/`.vtt` sidecar to WebVTT.
+
 - **Subtitle extraction to WebVTT**, replacing an `ffmpeg -f webvtt` fork:
   - `ops.ExtractSubtitleWebVTT(ctx, src, trackID, w, …)` writes an embedded
     Matroska/WebM text subtitle track as WebVTT (S_TEXT/UTF8 and S_TEXT/WEBVTT

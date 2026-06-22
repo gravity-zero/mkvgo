@@ -1,9 +1,14 @@
 package commands
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
+)
 
 func CmdInfo(path string) {
-	c := openInput(path)
+	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		PrintJSON(struct {
 			Path        string `json:"path"`
@@ -34,7 +39,7 @@ func CmdInfo(path string) {
 }
 
 func CmdTracks(path string) {
-	c := openInput(path)
+	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		PrintJSON(c.Tracks)
 		return
@@ -53,12 +58,15 @@ func CmdTracks(path string) {
 		if t.IsForced {
 			fmt.Print("  [forced]")
 		}
+		if t.DolbyVision != nil {
+			fmt.Printf("  [DoVi p%d]", t.DolbyVision.Profile)
+		}
 		fmt.Println()
 	}
 }
 
 func CmdChapters(path string) {
-	c := openInput(path)
+	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		PrintJSON(c.Chapters)
 		return
@@ -73,7 +81,7 @@ func CmdChapters(path string) {
 }
 
 func CmdAttachments(path string) {
-	c := openInput(path)
+	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		type attJSON struct {
 			ID       uint64 `json:"id"`
@@ -98,7 +106,7 @@ func CmdAttachments(path string) {
 }
 
 func CmdTags(path string) {
-	c := openInput(path)
+	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		PrintJSON(c.Tags)
 		return
@@ -128,9 +136,16 @@ func CmdTags(path string) {
 }
 
 func CmdProbe(path string) {
-	c := openInput(path)
+	c, dropped := loadContainer(path, true)
 	if JsonOutput {
-		PrintJSON(c)
+		if len(dropped) == 0 {
+			PrintJSON(c)
+			return
+		}
+		PrintJSON(struct {
+			*matroska.Container
+			Dropped []mp4.DroppedTrack `json:"dropped_tracks"`
+		}{c, dropped})
 		return
 	}
 	fmt.Printf("File:        %s\n", c.Path)
@@ -168,6 +183,25 @@ func CmdProbe(path string) {
 			fmt.Printf("  codec_private=%d bytes", len(t.CodecPrivate))
 		}
 		fmt.Println()
+		if t.ColorSpace != nil || t.ColorTransfer != nil || t.ColorPrimaries != nil {
+			fmt.Printf("        colour: space=%s transfer=%s primaries=%s range=%s\n",
+				t.ColorSpaceName(), t.ColorTransferName(), t.ColorPrimariesName(), t.ColorRangeName())
+		}
+		if dv := t.DolbyVision; dv != nil {
+			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",
+				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent)
+		}
+	}
+
+	if len(dropped) > 0 {
+		fmt.Printf("\nDropped tracks (%d, not carried):\n", len(dropped))
+		for _, d := range dropped {
+			fmt.Printf("  #%d  %-8s  %s\n", d.ID, d.Type, d.Reason)
+		}
+	}
+	if len(c.Keyframes) > 0 {
+		fmt.Printf("\nKeyframes: %d (first %s, last %s)\n",
+			len(c.Keyframes), FmtMs(c.Keyframes[0]), FmtMs(c.Keyframes[len(c.Keyframes)-1]))
 	}
 
 	if len(c.Chapters) > 0 {

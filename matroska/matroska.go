@@ -204,6 +204,18 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	return ops.ExtractASS(ctx, srcPath, trackID, outPath, opts...)
 }
 
+// ExtractSubtitleWebVTT writes an embedded Matroska/WebM text subtitle track as
+// WebVTT to w. See ops.ExtractSubtitleWebVTT.
+func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...Options) error {
+	return ops.ExtractSubtitleWebVTT(ctx, srcPath, trackID, w, opts...)
+}
+
+// SubtitleFileToWebVTT converts an external subtitle sidecar (.srt/.ass/.ssa/.vtt)
+// to WebVTT, written to w. See subtitle.FileToWebVTT.
+func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {
+	return subtitle.FileToWebVTT(srcPath, w)
+}
+
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	return ops.MergeSubtitle(ctx, srcPath, srtPath, dstPath, lang, name, opts...)
 }

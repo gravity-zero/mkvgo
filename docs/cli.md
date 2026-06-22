@@ -91,17 +91,31 @@ cat video.mkv | mkvgo tags -
 
 ### probe
 
-Full dump of all metadata: info, tracks, chapters, attachments, tags.
+Full dump of all metadata: info, tracks (with colour code points and Dolby Vision configuration), chapters, attachments, tags, the keyframe index, and — for MP4 — any dropped (non-carried) tracks such as cover art.
 
 ```
-mkvgo probe [-json] <file.mkv|->
+mkvgo probe [-json] <file.mkv|.mp4|->
 ```
 
-Pass `-` as the path to read from stdin.
+`info`, `tracks`, `chapters` and `probe` accept an MP4/MOV path as well as MKV/WebM (read via the head-only MP4 probe; `probe` additionally builds the keyframe index). Pass `-` to read MKV from stdin.
 
 ```bash
 mkvgo probe -json video.mkv | jq '.tracks[] | select(.type == "audio")'
+mkvgo probe movie.mp4
 cat video.mkv | mkvgo probe -
+```
+
+### keyframes
+
+List the video track's keyframe timestamps — MKV/WebM from the Cues seek index (head-only), MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
+
+```
+mkvgo keyframes [-json] <file.mkv|.mp4>
+```
+
+```bash
+mkvgo keyframes video.mkv            # HH:MM:SS  <ms>  per line
+mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 ```
 
 ### validate
@@ -168,21 +182,35 @@ mkvgo extract-attachment video.mkv 1 -o cover.jpg
 
 ### extract-subtitle
 
-Extract a subtitle track as SRT or ASS.
+Extract an embedded text subtitle track as SRT, ASS or WebVTT. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt).
 
 ```
-mkvgo extract-subtitle <file.mkv> -t <trackID> -o <out> [-format srt|ass]
+mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt]
 ```
 
 | Flag | Description |
 |---|---|
 | `-t` | Track ID to extract (required) |
 | `-o` | Output file path (required) |
-| `-format` | Output format: `srt` (default) or `ass` |
+| `-format` | Output format: `srt` (default), `ass`, or `vtt` |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
 mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
+mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt
+mkvgo extract-subtitle movie.mp4  -t 3 -o subs.vtt -format vtt
+```
+
+### to-vtt
+
+Convert an external subtitle sidecar (`.srt`, `.ass`/`.ssa`, or `.vtt`) to WebVTT.
+
+```
+mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>
+```
+
+```bash
+mkvgo to-vtt subs.fr.srt -o subs.fr.vtt
 ```
 
 ---
