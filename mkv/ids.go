@@ -53,9 +53,11 @@ const (
 )
 
 const (
-	IDVideo       = 0xE0
-	IDPixelWidth  = 0xB0
-	IDPixelHeight = 0xBA
+	IDVideo         = 0xE0
+	IDPixelWidth    = 0xB0
+	IDPixelHeight   = 0xBA
+	IDDisplayWidth  = 0x54B0
+	IDDisplayHeight = 0x54BA
 )
 
 // BlockAdditionMapping (TrackEntry sub-element) and its children. It carries

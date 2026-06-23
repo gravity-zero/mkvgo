@@ -18,7 +18,7 @@ func u16p(v uint16) *uint16 { return &v }
 func TestRoundTripColourAndSubtitles(t *testing.T) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{0x01, 0x02, 0x03, 0x04},
-			Width: u32p(3840), Height: u32p(2160), FrameRate: f64p(25),
+			Width: u32p(2880), Height: u32p(2160), DisplayWidth: u32p(3840), DisplayHeight: u32p(2160), FrameRate: f64p(25),
 			ColorPrimaries: u16p(9), ColorTransfer: u16p(16), ColorSpace: u16p(9), ColorRange: u16p(1)},
 		{ID: 2, Type: mkv.SubtitleTrack, Codec: "srt"},
 	}
@@ -60,6 +60,11 @@ func TestRoundTripColourAndSubtitles(t *testing.T) {
 		video.ColorSpace == nil || *video.ColorSpace != 9 {
 		t.Errorf("colour not round-tripped: primaries=%v transfer=%v matrix=%v",
 			video.ColorPrimaries, video.ColorTransfer, video.ColorSpace)
+	}
+
+	// The anamorphic display dimensions must survive (via the pasp box) → DAR 16:9.
+	if video.DisplayWidth == nil || *video.DisplayWidth != 3840 || video.DisplayAspectRatio() != "16:9" {
+		t.Errorf("display dims not round-tripped: width=%v DAR=%q", video.DisplayWidth, video.DisplayAspectRatio())
 	}
 
 	// Subtitle cues must survive with their text (markup stripped) and a duration.

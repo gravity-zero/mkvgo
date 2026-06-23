@@ -45,6 +45,8 @@ type inTrack struct {
 	codecPrivate     []byte
 	width            uint32
 	height           uint32
+	displayWidth     uint32 // from a pasp box (anamorphic); 0 when pixels are square
+	displayHeight    uint32
 	channels         uint8
 	sampleRate       float64
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
@@ -747,7 +749,34 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 	tr.codecPrivate = append([]byte(nil), cfg...)
 	parseColr(tr, payload, headerLen)
 	parseDolbyVision(tr, payload, headerLen)
+	parsePasp(tr, payload, headerLen)
 	return nil
+}
+
+// parsePasp reads a pasp box (PixelAspectRatio: hSpacing:vSpacing) from a visual
+// sample entry and, when the pixels are non-square, records the intended display
+// dimensions (display width = coded width × hSpacing / vSpacing, height
+// unchanged) — the same derivation ffmpeg's mov demuxer applies. Square pixels
+// (1:1) leave the fields unset.
+func parsePasp(tr *inTrack, payload []byte, headerLen int) {
+	if len(payload) < headerLen || tr.width == 0 || tr.height == 0 {
+		return
+	}
+	children, err := iterBoxes(payload[headerLen:])
+	if err != nil {
+		return
+	}
+	pasp, ok := findMemBox(children, "pasp")
+	if !ok || len(pasp.payload) < 8 {
+		return
+	}
+	h := binary.BigEndian.Uint32(pasp.payload[0:4])
+	v := binary.BigEndian.Uint32(pasp.payload[4:8])
+	if h == 0 || v == 0 || h == v {
+		return // missing or square pixels
+	}
+	tr.displayWidth = uint32(int64(tr.width) * int64(h) / int64(v))
+	tr.displayHeight = tr.height
 }
 
 // parseDolbyVision reads a dvcC or dvvC box from a visual sample entry and records

@@ -306,6 +306,28 @@ func colrEntry(colrType string, primaries, transfer, matrix uint16, extra []byte
 
 func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)) }
 
+func u32be(v uint32) []byte { return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
+
+// TestParsePasp checks the pasp box → display-dimension derivation: an anamorphic
+// ratio sets DisplayWidth = Width·hSpacing/vSpacing; square pixels leave it unset.
+func TestParsePasp(t *testing.T) {
+	// pasp 32:27 over a 720×576 coded frame → display 720·32/27 = 853, height 576.
+	entry := append(make([]byte, 78), box("pasp", append(u32be(32), u32be(27)...))...)
+	tr := inTrack{width: 720, height: 576}
+	parsePasp(&tr, entry, 78)
+	if tr.displayWidth != 853 || tr.displayHeight != 576 {
+		t.Errorf("anamorphic pasp → %dx%d, want 853x576", tr.displayWidth, tr.displayHeight)
+	}
+
+	// Square pixels (1:1) leave the display dimensions unset.
+	square := append(make([]byte, 78), box("pasp", append(u32be(1), u32be(1)...))...)
+	sq := inTrack{width: 1920, height: 1080}
+	parsePasp(&sq, square, 78)
+	if sq.displayWidth != 0 || sq.displayHeight != 0 {
+		t.Errorf("square pasp should not set display dims, got %dx%d", sq.displayWidth, sq.displayHeight)
+	}
+}
+
 // TestParseColr covers the colour-type handling: 'nclc' (no range byte) is read
 // like 'nclx', and a stream specifying only the matrix (BT.709) with unspecified
 // primaries/transfer still reports its colour_space — matching ffprobe.

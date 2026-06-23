@@ -42,6 +42,46 @@ func TestRestoreHeader_NilData(t *testing.T) {
 	}
 }
 
+func TestAspectRatios(t *testing.T) {
+	u32 := func(v uint32) *uint32 { return &v }
+	for _, tt := range []struct {
+		name             string
+		t                Track
+		wantSAR, wantDAR string
+	}{
+		{"square 1920x1080", Track{Width: u32(1920), Height: u32(1080)}, "1:1", "16:9"},
+		{"anamorphic NTSC DVD 720x480 → 16:9",
+			Track{Width: u32(720), Height: u32(480), DisplayWidth: u32(853), DisplayHeight: u32(480)},
+			"853:720", "853:480"},
+		{"anamorphic exact 32:27 (PAL wide)",
+			Track{Width: u32(720), Height: u32(576), DisplayWidth: u32(1024), DisplayHeight: u32(576)},
+			"64:45", "16:9"},
+		{"no dimensions", Track{}, "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.t.SampleAspectRatio(); got != tt.wantSAR {
+				t.Errorf("SampleAspectRatio = %q, want %q", got, tt.wantSAR)
+			}
+			if got := tt.t.DisplayAspectRatio(); got != tt.wantDAR {
+				t.Errorf("DisplayAspectRatio = %q, want %q", got, tt.wantDAR)
+			}
+		})
+	}
+}
+
+func TestEffectiveSampleRate(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	if got := (&Track{SampleRate: f(24000), OutputSampleRate: f(48000)}).EffectiveSampleRate(); got != 48000 {
+		t.Errorf("SBR effective rate = %v, want 48000", got)
+	}
+	if got := (&Track{SampleRate: f(44100)}).EffectiveSampleRate(); got != 44100 {
+		t.Errorf("plain effective rate = %v, want 44100", got)
+	}
+	if got := (&Track{}).EffectiveSampleRate(); got != 0 {
+		t.Errorf("unknown effective rate = %v, want 0", got)
+	}
+}
+
 func TestIssue_String(t *testing.T) {
 	for _, tt := range []struct {
 		issue Issue

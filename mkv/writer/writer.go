@@ -272,13 +272,19 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.IsForced {
 		e.uint(mkv.IDFlagForced, 1)
 	}
-	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || hasColour(t)) {
+	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t)) {
 		e.master(mkv.IDVideo, func(v *ew) {
 			if t.Width != nil {
 				v.uint(mkv.IDPixelWidth, uint64(*t.Width))
 			}
 			if t.Height != nil {
 				v.uint(mkv.IDPixelHeight, uint64(*t.Height))
+			}
+			if t.DisplayWidth != nil {
+				v.uint(mkv.IDDisplayWidth, uint64(*t.DisplayWidth))
+			}
+			if t.DisplayHeight != nil {
+				v.uint(mkv.IDDisplayHeight, uint64(*t.DisplayHeight))
 			}
 			if hasColour(t) {
 				v.master(mkv.IDColour, func(c *ew) {

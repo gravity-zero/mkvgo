@@ -101,6 +101,10 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 		case mkv.VideoTrack:
 			w, h := t.width, t.height
 			mt.Width, mt.Height = &w, &h
+			if t.displayWidth > 0 && t.displayHeight > 0 {
+				dw, dh := t.displayWidth, t.displayHeight
+				mt.DisplayWidth, mt.DisplayHeight = &dw, &dh
+			}
 			mt.ColorPrimaries = t.colorPrimaries
 			mt.ColorTransfer = t.colorTransfer
 			mt.ColorSpace = t.colorMatrix

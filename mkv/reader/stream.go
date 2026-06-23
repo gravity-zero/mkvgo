@@ -471,6 +471,20 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			}
 			hv := uint32(v)
 			t.Height = &hv
+		case mkv.IDDisplayWidth:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			dw := uint32(v)
+			t.DisplayWidth = &dw
+		case mkv.IDDisplayHeight:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			dh := uint32(v)
+			t.DisplayHeight = &dh
 		case mkv.IDColour:
 			return p.parseStreamColour(h.Size, t)
 		default:

@@ -167,10 +167,48 @@ func visualSampleEntry(typ string, t *mkv.Track, config []byte) []byte {
 		if colr := colrBox(t); colr != nil {
 			w.bytes(colr)
 		}
+		if pasp := paspBox(t); pasp != nil {
+			w.bytes(pasp)
+		}
 		if dv := dvConfigBox(t); dv != nil {
 			w.bytes(dv)
 		}
 	})
+}
+
+// paspBox builds a PixelAspectRatio box ('pasp') for an anamorphic track so the
+// MP4 signals the same display aspect the source did. The pixel aspect ratio is
+// recovered from the display and coded dimensions: hSpacing:vSpacing =
+// (DisplayWidth · Height) : (DisplayHeight · Width). Returns nil for square
+// pixels or when dimensions are missing.
+func paspBox(t *mkv.Track) []byte {
+	if t.Width == nil || t.Height == nil || *t.Width == 0 || *t.Height == 0 {
+		return nil
+	}
+	if t.DisplayWidth == nil || t.DisplayHeight == nil || *t.DisplayWidth == 0 || *t.DisplayHeight == 0 {
+		return nil
+	}
+	num := uint64(*t.DisplayWidth) * uint64(*t.Height)
+	den := uint64(*t.DisplayHeight) * uint64(*t.Width)
+	if num == 0 || den == 0 || num == den {
+		return nil // square pixels — no pasp needed
+	}
+	g := gcdU64(num, den)
+	return boxf("pasp", func(w *bw) {
+		w.u32(uint32(num / g)) // hSpacing
+		w.u32(uint32(den / g)) // vSpacing
+	})
+}
+
+// gcdU64 returns the greatest common divisor of a and b (gcd(x,0)=x, never 0).
+func gcdU64(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
 }
 
 // dvConfigBox builds the Dolby Vision configuration box (dvcC or dvvC, per

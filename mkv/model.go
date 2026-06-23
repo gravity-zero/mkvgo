@@ -81,6 +81,11 @@ type Track struct {
 	// container Colour element is absent — the container value still wins per field.
 	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
 	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
+	// Display dimensions for anamorphic video, nil when pixels are square. From the
+	// Matroska DisplayWidth/DisplayHeight (0x54B0/0x54BA) or derived from the MP4
+	// pasp box. See DisplayAspectRatio / SampleAspectRatio.
+	DisplayWidth  *uint32 `json:"display_width,omitempty"`
+	DisplayHeight *uint32 `json:"display_height,omitempty"`
 	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings
 	// ffprobe reports with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
 	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) — ffprobe color_space
@@ -125,6 +130,61 @@ func (t *Track) EffectiveSampleRate() float64 {
 		return *t.SampleRate
 	}
 	return 0
+}
+
+// displayDims returns the track's intended display dimensions: the explicit
+// DisplayWidth/DisplayHeight when set (anamorphic), else the coded Width/Height
+// (square pixels). Both zero when no video dimensions are known.
+func (t *Track) displayDims() (uint32, uint32) {
+	if t.DisplayWidth != nil && t.DisplayHeight != nil && *t.DisplayWidth > 0 && *t.DisplayHeight > 0 {
+		return *t.DisplayWidth, *t.DisplayHeight
+	}
+	if t.Width != nil && t.Height != nil {
+		return *t.Width, *t.Height
+	}
+	return 0, 0
+}
+
+// DisplayAspectRatio returns the picture aspect ratio ffprobe reports as
+// display_aspect_ratio ("16:9", reduced), from the display dimensions when the
+// stream is anamorphic or the coded dimensions otherwise. "" when no video
+// dimensions are known.
+func (t *Track) DisplayAspectRatio() string {
+	w, h := t.displayDims()
+	if w == 0 || h == 0 {
+		return ""
+	}
+	g := gcd(uint64(w), uint64(h))
+	return fmt.Sprintf("%d:%d", uint64(w)/g, uint64(h)/g)
+}
+
+// SampleAspectRatio returns the pixel aspect ratio ffprobe reports as
+// sample_aspect_ratio ("1:1" for square pixels, "32:27" for anamorphic, reduced).
+// "" when the coded dimensions are unknown.
+func (t *Track) SampleAspectRatio() string {
+	if t.Width == nil || t.Height == nil || *t.Width == 0 || *t.Height == 0 {
+		return ""
+	}
+	dw, dh := t.displayDims()
+	// SAR = (DisplayWidth · Height) : (DisplayHeight · Width).
+	num := uint64(dw) * uint64(*t.Height)
+	den := uint64(dh) * uint64(*t.Width)
+	if num == 0 || den == 0 {
+		return "1:1"
+	}
+	g := gcd(num, den)
+	return fmt.Sprintf("%d:%d", num/g, den/g)
+}
+
+// gcd returns the greatest common divisor of a and b (gcd(x,0)=x).
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
 }
 
 type Chapter struct {

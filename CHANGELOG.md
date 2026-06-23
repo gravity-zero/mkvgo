@@ -23,8 +23,13 @@ All notable changes to mkvgo are documented here. The format is based on
   the `nclx` and the QuickTime `nclc` forms, each CICP field taken independently
   so a stream that specifies only the matrix still reports its colour_space —
   falling back to the codec bitstream via the now exported
-  `reader.FillColourFromCodecPrivate`), and the codec **level** (`Track.Level`,
-  the SPS `level_idc` that ffprobe reports as `level`, for H.264/HEVC/AV1).
+  `reader.FillColourFromCodecPrivate`), the codec **level** (`Track.Level`,
+  the SPS `level_idc` that ffprobe reports as `level`, for H.264/HEVC/AV1), and
+  the **display aspect ratio** for anamorphic video (`Track.DisplayWidth`/
+  `DisplayHeight` from the MP4 `pasp` box or Matroska `DisplayWidth`/`DisplayHeight`
+  0x54B0/0x54BA, with `SampleAspectRatio()`/`DisplayAspectRatio()` helpers
+  returning ffprobe's `sample_aspect_ratio`/`display_aspect_ratio`). The remux
+  carries display dimensions through in both directions.
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
   each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through

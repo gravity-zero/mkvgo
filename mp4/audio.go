@@ -151,7 +151,7 @@ func parseAACConfig(asc []byte) aacInfo {
 		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
 			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
 				sbr = true
-				outputRate = readSamplingFrequency(r) // extensionSamplingFrequency
+				outputRate = readSamplingFrequency(r)         // extensionSamplingFrequency
 				if bitsLeft(r) >= 12 && r.bits(11) == 0x548 { // syncExtensionType: PS
 					ps = r.bits(1) == 1 // psPresentFlag
 				}

@@ -126,9 +126,12 @@ func TestWriteWebM(t *testing.T) {
 }
 
 func TestWriteAndReadBack(t *testing.T) {
-	w := uint32(1920)
-	h := uint32(1080)
-	sr := 48000.0
+	w := uint32(720)
+	h := uint32(576)
+	dw := uint32(1024)
+	dh := uint32(576)
+	sr := 24000.0
+	osr := 48000.0
 	ch := uint8(2)
 
 	c := &mkv.Container{
@@ -139,8 +142,10 @@ func TestWriteAndReadBack(t *testing.T) {
 			WritingApp:    "test",
 		},
 		Tracks: []mkv.Track{
-			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", Language: "eng", IsDefault: true, Width: &w, Height: &h},
-			{ID: 2, Type: mkv.AudioTrack, Codec: "opus", Language: "eng", SampleRate: &sr, Channels: &ch},
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", Language: "eng", IsDefault: true,
+				Width: &w, Height: &h, DisplayWidth: &dw, DisplayHeight: &dh},
+			{ID: 2, Type: mkv.AudioTrack, Codec: "opus", Language: "eng",
+				SampleRate: &sr, OutputSampleRate: &osr, Channels: &ch},
 		},
 		DurationMs: 5000,
 	}
@@ -160,6 +165,19 @@ func TestWriteAndReadBack(t *testing.T) {
 	}
 	if len(got.Tracks) != 2 {
 		t.Fatalf("tracks = %d, want 2", len(got.Tracks))
+	}
+	// Display dimensions (anamorphic) survive the round trip → DAR 16:9.
+	v := got.Tracks[0]
+	if v.DisplayWidth == nil || *v.DisplayWidth != 1024 || v.DisplayHeight == nil || *v.DisplayHeight != 576 {
+		t.Errorf("display dims = %v/%v, want 1024/576", v.DisplayWidth, v.DisplayHeight)
+	}
+	if v.DisplayAspectRatio() != "16:9" {
+		t.Errorf("DAR = %q, want 16:9", v.DisplayAspectRatio())
+	}
+	// OutputSamplingFrequency (SBR) survives the round trip.
+	a := got.Tracks[1]
+	if a.OutputSampleRate == nil || *a.OutputSampleRate != 48000 || a.EffectiveSampleRate() != 48000 {
+		t.Errorf("output sample rate = %v (effective %v), want 48000", a.OutputSampleRate, a.EffectiveSampleRate())
 	}
 }
 

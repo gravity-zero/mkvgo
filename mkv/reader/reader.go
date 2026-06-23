@@ -580,6 +580,20 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			}
 			h := uint32(v)
 			t.Height = &h
+		case mkv.IDDisplayWidth:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			dw := uint32(v)
+			t.DisplayWidth = &dw
+		case mkv.IDDisplayHeight:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			dh := uint32(v)
+			t.DisplayHeight = &dh
 		case mkv.IDColour:
 			if err := p.parseColour(eh.Size, t); err != nil {
 				return err
