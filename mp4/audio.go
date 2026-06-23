@@ -130,9 +130,10 @@ type aacInfo struct {
 //     ext 44100, channelConfiguration 1) — we report 1 channel (the ASC's mono
 //     core), ffprobe reports 2 (it decodes the reconstructed stereo).
 //
-// Both are true head-only limitations (the data is in no header), unlike colour,
-// which always lives in a header (colr box or SPS VUI) and is read head-only.
-// Don't chase them without parsing sample data.
+// Both are true head-only limitations: the data is in no header. The colour
+// analogue is matrix/primaries/transfer signalled only in an in-band SPS rather
+// than the avcC's SPS — likewise invisible head-only (see codec_colour.go).
+// Don't chase any of them without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)

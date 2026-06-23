@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"encoding/hex"
 	"math/bits"
 	"testing"
 
@@ -91,5 +92,27 @@ func TestAVCVUIMatrixOnly(t *testing.T) {
 	}
 	if tr.ColorPrimaries != nil {
 		t.Errorf("primaries should stay nil (unspecified), got %d", *tr.ColorPrimaries)
+	}
+}
+
+// TestAVCColourInBandSPSOnly documents an accepted head-only limitation. This is
+// a real Main@L4.2 avcC (1280x720) whose SPS sets video_signal_type_present_flag
+// = 0 — it carries NO colour. The file's BT.709 lives only in a second, in-band
+// SPS that ffprobe reaches by decoding a frame; head-only mkvgo reads the avcC's
+// SPS and correctly reports no colour. Same class as implicit in-band SBR/PS: the
+// data is in no header we parse, so reporting "" is correct, not a bug.
+func TestAVCColourInBandSPSOnly(t *testing.T) {
+	avcc, err := hex.DecodeString("014d042affe1000e674d042ae900a00b7403c2211a8001000468ee3c80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
+	fillColourFromCodecPrivate(&tr)
+	// The avcC SPS is parsed correctly (profile/level), but it has no VUI colour.
+	if tr.Profile != "Main" || tr.Level == nil || *tr.Level != 42 {
+		t.Errorf("avcC parse: profile=%q level=%v, want Main / 42", tr.Profile, p16(tr.Level))
+	}
+	if tr.ColorSpace != nil {
+		t.Errorf("color_space should be nil (this avcC SPS carries no colour), got %d", *tr.ColorSpace)
 	}
 }
