@@ -24,6 +24,7 @@ type bitstreamColour struct {
 	rng       *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
 	bitDepth  *uint16 // luma bit depth (8/10/12)
 	profile   string  // e.g. "Main 10"
+	level     *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 }
 
 func u16p(v uint16) *uint16 { return &v }
@@ -96,6 +97,9 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 	}
 	if t.Profile == "" && bc.profile != "" {
 		t.Profile = bc.profile
+	}
+	if t.Level == nil && bc.level != nil {
+		t.Level = bc.level
 	}
 }
 
@@ -218,7 +222,7 @@ func unescapeRBSP(b []byte) []byte {
 // nonEmpty reports whether bc carries at least one value worth returning.
 func (bc *bitstreamColour) nonEmpty() bool {
 	return bc.primaries != nil || bc.transfer != nil || bc.matrix != nil ||
-		bc.rng != nil || bc.bitDepth != nil || bc.profile != ""
+		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil
 }
 
 // --- H.264 / AVC ---------------------------------------------------------------
@@ -256,9 +260,9 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	r := &bitReader{data: rbsp}
 	bc := &bitstreamColour{}
 	profileIDC := r.bits(8)
-	r.bits(8) // constraint flags + reserved
-	r.bits(8) // level_idc
-	r.ue()    // seq_parameter_set_id
+	r.bits(8)                          // constraint flags + reserved
+	bc.level = u16p(uint16(r.bits(8))) // level_idc (ffprobe level)
+	r.ue()                             // seq_parameter_set_id
 	bc.profile = avcProfileName(profileIDC)
 
 	high := false
@@ -438,7 +442,7 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 	r.bits(4) // sps_video_parameter_set_id
 	maxSub := r.bits(3)
 	r.bit() // sps_temporal_id_nesting_flag
-	skipHEVCProfileTierLevel(r, maxSub)
+	skipHEVCProfileTierLevel(r, maxSub, bc)
 	r.ue() // sps_seq_parameter_set_id
 	cf := r.ue()
 	if cf == 3 {
@@ -499,13 +503,13 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 	}
 }
 
-func skipHEVCProfileTierLevel(r *bitReader, maxSub uint32) {
+func skipHEVCProfileTierLevel(r *bitReader, maxSub uint32, bc *bitstreamColour) {
 	// general profile/tier/level: 2+1+5 +32 +4 +44 +8 = 96 bits.
-	r.bits(8)  // profile_space(2) tier(1) profile_idc(5)
-	r.bits(32) // general_profile_compatibility_flags
-	r.bits(32) // 4 source flags + 28 of the 44 reserved
-	r.bits(16) // remaining 16 of reserved (4+44 = 48 total -> 32+16)
-	r.bits(8)  // general_level_idc
+	r.bits(8)                          // profile_space(2) tier(1) profile_idc(5)
+	r.bits(32)                         // general_profile_compatibility_flags
+	r.bits(32)                         // 4 source flags + 28 of the 44 reserved
+	r.bits(16)                         // remaining 16 of reserved (4+44 = 48 total -> 32+16)
+	bc.level = u16p(uint16(r.bits(8))) // general_level_idc (ffprobe level, 30×level)
 	prof := make([]uint32, maxSub)
 	lvl := make([]uint32, maxSub)
 	for i := uint32(0); i < maxSub; i++ {
@@ -711,7 +715,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 	r.bit()   // still_picture
 	reduced := r.bit()
 	if reduced == 1 {
-		r.bits(5) // seq_level_idx[0]
+		bc.level = u16p(uint16(r.bits(5))) // seq_level_idx[0]
 	} else {
 		timing := r.bit()
 		decoderModel := uint32(0)
@@ -736,6 +740,9 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 		for i := uint32(0); i < opCnt; i++ {
 			r.bits(12) // operating_point_idc
 			levelIdx := r.bits(5)
+			if i == 0 {
+				bc.level = u16p(uint16(levelIdx)) // seq_level_idx[0] (ffprobe level)
+			}
 			if levelIdx > 7 {
 				r.bit() // seq_tier
 			}

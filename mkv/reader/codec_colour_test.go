@@ -106,6 +106,10 @@ func TestCodecColourAVCRealFixture(t *testing.T) {
 	if got := p16(tr.VideoBitDepth); got != 8 {
 		t.Errorf("bit depth = %d, want 8", got)
 	}
+	// avcC byte 3 (and the SPS level_idc) is 0x0a → level 1.0.
+	if got := p16(tr.Level); got != 10 {
+		t.Errorf("level = %d, want 10", got)
+	}
 }
 
 // --- integration: through ReadMeta on a built MKV (no container Colour) -------
@@ -151,6 +155,10 @@ func TestColourFromBitstreamViaReadMeta(t *testing.T) {
 	}
 	if tr.Profile != "Main 10" {
 		t.Errorf("profile = %q, want Main 10", tr.Profile)
+	}
+	// HEVC general_level_idc is read from the profile_tier_level (30×level).
+	if tr.Level == nil || *tr.Level == 0 {
+		t.Errorf("HEVC level = %v, want a non-zero general_level_idc", tr.Level)
 	}
 }
 

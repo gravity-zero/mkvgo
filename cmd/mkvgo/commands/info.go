@@ -186,6 +186,13 @@ func CmdProbe(path string) {
 			fmt.Printf("  codec_private=%d bytes", len(t.CodecPrivate))
 		}
 		fmt.Println()
+		if t.Profile != "" || t.Level != nil {
+			fmt.Printf("        codec: profile=%q", t.Profile)
+			if t.Level != nil {
+				fmt.Printf(" level=%d", *t.Level)
+			}
+			fmt.Println()
+		}
 		if t.ColorSpace != nil || t.ColorTransfer != nil || t.ColorPrimaries != nil {
 			fmt.Printf("        colour: space=%s transfer=%s primaries=%s range=%s\n",
 				t.ColorSpaceName(), t.ColorTransferName(), t.ColorPrimariesName(), t.ColorRangeName())

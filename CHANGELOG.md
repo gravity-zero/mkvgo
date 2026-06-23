@@ -23,7 +23,8 @@ All notable changes to mkvgo are documented here. The format is based on
   the `nclx` and the QuickTime `nclc` forms, each CICP field taken independently
   so a stream that specifies only the matrix still reports its colour_space —
   falling back to the codec bitstream via the now exported
-  `reader.FillColourFromCodecPrivate`).
+  `reader.FillColourFromCodecPrivate`), and the codec **level** (`Track.Level`,
+  the SPS `level_idc` that ffprobe reports as `level`, for H.264/HEVC/AV1).
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
   each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through
