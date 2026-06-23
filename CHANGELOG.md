@@ -20,12 +20,15 @@ validated against ffprobe over a sweep of real files.
 - **Codec level.** `Track.Level` exposes the SPS `level_idc` ffprobe reports as
   `level` (H.264, HEVC, AV1), via the shared codec-bitstream fallback.
 - **Display aspect ratio for anamorphic video.** `Track.DisplayWidth` /
-  `DisplayHeight` (from the MP4 `pasp` box, or the Matroska `DisplayWidth`/
-  `DisplayHeight` 0x54B0/0x54BA elements), with `DisplayAspectRatio()` /
-  `SampleAspectRatio()` helpers returning ffprobe's `display_aspect_ratio` /
-  `sample_aspect_ratio`. Both reader paths (seekable and streaming) and the writer
-  handle the elements; the MP4 remux emits a `pasp` box so anamorphic display
-  survives a round trip.
+  `DisplayHeight` (their ratio is the display aspect), with `DisplayAspectRatio()`
+  / `SampleAspectRatio()` helpers returning ffprobe's `display_aspect_ratio` /
+  `sample_aspect_ratio`. Read, in precedence order, from the MP4 `pasp` box, the
+  Matroska `DisplayWidth`/`DisplayHeight` (0x54B0/0x54BA) elements, or the H.264/
+  HEVC SPS VUI `aspect_ratio_info` (Table E-1 `aspect_ratio_idc`, or Extended_SAR
+  `sar_width:sar_height`) — the most common H.264 SAR carrier, read head-only from
+  the avcC. The ratio is stored exactly (no rounding that would collapse a fine
+  pixel aspect). Both reader paths and the writer handle the elements; the MP4
+  remux emits a `pasp` box so anamorphic display survives a round trip.
 - **Per-stream average bitrate.** `Track.Bitrate` from the MP4 `btrt` box (or the
   esds `avgBitrate` for AAC).
 - CLI `probe` surfaces all of the above (output sample rate, codec profile/level,

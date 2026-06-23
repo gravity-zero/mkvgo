@@ -25,6 +25,26 @@ type bitstreamColour struct {
 	bitDepth  *uint16 // luma bit depth (8/10/12)
 	profile   string  // e.g. "Main 10"
 	level     *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
+	sarWidth  uint32  // VUI sample aspect ratio width (0 when absent/square)
+	sarHeight uint32  // VUI sample aspect ratio height
+}
+
+// avcSAR is H.264/HEVC Table E-1: aspect_ratio_idc (1–16) → sample aspect ratio
+// width:height. Index 0 is unspecified; 255 is Extended_SAR (read inline).
+var avcSAR = [17][2]uint16{
+	{}, {1, 1}, {12, 11}, {10, 11}, {16, 11}, {40, 33}, {24, 11}, {20, 11},
+	{32, 11}, {80, 33}, {18, 11}, {15, 11}, {64, 33}, {160, 99}, {4, 3}, {3, 2}, {2, 1},
+}
+
+// gcd64 returns the greatest common divisor of a and b (never 0).
+func gcd64(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
 }
 
 func u16p(v uint16) *uint16 { return &v }
@@ -100,6 +120,18 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 	}
 	if t.Level == nil && bc.level != nil {
 		t.Level = bc.level
+	}
+	// Sample aspect ratio from the SPS VUI → display dimensions, only when the
+	// container/pasp did not already supply them (those take precedence) and the
+	// pixels are non-square. DisplayWidth:DisplayHeight = (W·sarW):(H·sarH), reduced.
+	if t.DisplayWidth == nil && t.DisplayHeight == nil &&
+		bc.sarWidth > 0 && bc.sarHeight > 0 && bc.sarWidth != bc.sarHeight &&
+		t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
+		dw := uint64(*t.Width) * uint64(bc.sarWidth)
+		dh := uint64(*t.Height) * uint64(bc.sarHeight)
+		g := gcd64(dw, dh)
+		a, b := uint32(dw/g), uint32(dh/g)
+		t.DisplayWidth, t.DisplayHeight = &a, &b
 	}
 }
 
@@ -222,7 +254,8 @@ func unescapeRBSP(b []byte) []byte {
 // nonEmpty reports whether bc carries at least one value worth returning.
 func (bc *bitstreamColour) nonEmpty() bool {
 	return bc.primaries != nil || bc.transfer != nil || bc.matrix != nil ||
-		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil
+		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil ||
+		bc.sarWidth != 0
 }
 
 // --- H.264 / AVC ---------------------------------------------------------------
@@ -335,10 +368,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 
 func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 	if r.bit() == 1 { // aspect_ratio_info_present_flag
-		if r.bits(8) == 255 { // Extended_SAR
-			r.bits(16)
-			r.bits(16)
-		}
+		readVUIAspectRatio(r, bc)
 	}
 	if r.bit() == 1 { // overscan_info_present_flag
 		r.bit()
@@ -352,6 +382,25 @@ func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 		}
 		bc.rng = spsRange(full)
 		bc.primaries, bc.transfer, bc.matrix = p, t, m
+	}
+}
+
+// readVUIAspectRatio reads aspect_ratio_idc (after aspect_ratio_info_present_flag)
+// and records the sample aspect ratio: Table E-1 for idc 1–16, or the inline
+// sar_width:sar_height for Extended_SAR (255). This is the most common way H.264
+// signals SAR, and it lives in the avcC's SPS, so it is read head-only.
+func readVUIAspectRatio(r *bitReader, bc *bitstreamColour) {
+	idc := r.bits(8)
+	switch {
+	case idc == 255: // Extended_SAR
+		w := r.bits(16)
+		h := r.bits(16)
+		if !r.err {
+			bc.sarWidth, bc.sarHeight = w, h
+		}
+	case idc >= 1 && idc <= 16:
+		bc.sarWidth = uint32(avcSAR[idc][0])
+		bc.sarHeight = uint32(avcSAR[idc][1])
 	}
 }
 
@@ -613,10 +662,7 @@ func skipHEVCShortTermRPS(r *bitReader, num uint32) {
 
 func parseHEVCVUI(r *bitReader, bc *bitstreamColour) {
 	if r.bit() == 1 { // aspect_ratio_info_present_flag
-		if r.bits(8) == 255 {
-			r.bits(16)
-			r.bits(16)
-		}
+		readVUIAspectRatio(r, bc)
 	}
 	if r.bit() == 1 { // overscan_info_present_flag
 		r.bit()

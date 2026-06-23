@@ -37,9 +37,9 @@ func (w *tbw) bytes() []byte {
 	return out
 }
 
-// buildHighSPSAvcC builds an avcC for a High-profile SPS whose VUI carries the
-// given colour code points (no container colr).
-func buildHighSPSAvcC(primaries, transfer, matrix uint32) []byte {
+// spsPrefix builds a High-profile SPS up to (and including) the
+// vui_parameters_present_flag, leaving the caller to append the VUI body.
+func spsPrefix() *tbw {
 	b := &tbw{}
 	b.u(100, 8) // profile_idc = High
 	b.u(0, 8)   // constraint flags + reserved
@@ -61,7 +61,21 @@ func buildHighSPSAvcC(primaries, transfer, matrix uint32) []byte {
 	b.u(1, 1)   // direct_8x8_inference_flag
 	b.u(0, 1)   // frame_cropping_flag = 0
 	b.u(1, 1)   // vui_parameters_present_flag = 1
-	// VUI
+	return b
+}
+
+// wrapAvcC wraps a completed SPS RBSP in an AVCDecoderConfigurationRecord.
+func wrapAvcC(b *tbw) []byte {
+	nal := append([]byte{0x67}, b.bytes()...) // NAL header: SPS (type 7)
+	avcc := []byte{0x01, 100, 0, 40, 0xFF, 0xE1}
+	avcc = append(avcc, byte(len(nal)>>8), byte(len(nal)))
+	return append(avcc, nal...)
+}
+
+// buildHighSPSAvcC builds an avcC for a High-profile SPS whose VUI carries the
+// given colour code points (no aspect_ratio_info, no container colr).
+func buildHighSPSAvcC(primaries, transfer, matrix uint32) []byte {
+	b := spsPrefix()
 	b.u(0, 1)         // aspect_ratio_info_present_flag
 	b.u(0, 1)         // overscan_info_present_flag
 	b.u(1, 1)         // video_signal_type_present_flag
@@ -71,12 +85,22 @@ func buildHighSPSAvcC(primaries, transfer, matrix uint32) []byte {
 	b.u(primaries, 8) // colour_primaries
 	b.u(transfer, 8)  // transfer_characteristics
 	b.u(matrix, 8)    // matrix_coefficients
+	return wrapAvcC(b)
+}
 
-	rbsp := b.bytes()
-	nal := append([]byte{0x67}, rbsp...) // NAL header: SPS (type 7)
-	avcc := []byte{0x01, 100, 0, 40, 0xFF, 0xE1}
-	avcc = append(avcc, byte(len(nal)>>8), byte(len(nal)))
-	return append(avcc, nal...)
+// buildSPSAspectAvcC builds an avcC for a High-profile SPS whose VUI carries
+// aspect_ratio_info (idc, or Extended_SAR 255 with sarW:sarH) and no colour.
+func buildSPSAspectAvcC(idc, sarW, sarH uint32) []byte {
+	b := spsPrefix()
+	b.u(1, 1)   // aspect_ratio_info_present_flag
+	b.u(idc, 8) // aspect_ratio_idc
+	if idc == 255 {
+		b.u(sarW, 16)
+		b.u(sarH, 16)
+	}
+	b.u(0, 1) // overscan_info_present_flag
+	b.u(0, 1) // video_signal_type_present_flag = 0 (no colour)
+	return wrapAvcC(b)
 }
 
 // TestAVCVUIMatrixOnly reproduces the reported case: SDR H.264 with NO colr box,
@@ -92,6 +116,39 @@ func TestAVCVUIMatrixOnly(t *testing.T) {
 	}
 	if tr.ColorPrimaries != nil {
 		t.Errorf("primaries should stay nil (unspecified), got %d", *tr.ColorPrimaries)
+	}
+}
+
+// TestAVCVUIAspectRatio covers the SAR read from the SPS VUI aspect_ratio_info —
+// the most common H.264 SAR signalling, head-only in the avcC. No pasp box.
+func TestAVCVUIAspectRatio(t *testing.T) {
+	w, h := uint32(1280), uint32(720)
+	check := func(avcc []byte, wantSAR, wantDAR string) {
+		t.Helper()
+		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc, Width: &w, Height: &h}
+		fillColourFromCodecPrivate(&tr)
+		if tr.SampleAspectRatio() != wantSAR || tr.DisplayAspectRatio() != wantDAR {
+			t.Errorf("sar=%q dar=%q, want %s / %s", tr.SampleAspectRatio(), tr.DisplayAspectRatio(), wantSAR, wantDAR)
+		}
+	}
+	// Extended_SAR 257:160 (Goal 2.mp4) over 1280x720 → DAR = SAR*W/H = 257:90.
+	check(buildSPSAspectAvcC(255, 257, 160), "257:160", "257:90")
+	// Predefined idc 14 = 4:3 → DAR = (1280*4):(720*3) = 64:27.
+	check(buildSPSAspectAvcC(14, 0, 0), "4:3", "64:27")
+	// idc 1 = square (1:1) → no display dims set, DAR is the coded 16:9.
+	check(buildSPSAspectAvcC(1, 0, 0), "1:1", "16:9")
+}
+
+// TestPaspTakesPrecedenceOverVUI: when both a container/pasp display aspect and a
+// VUI SAR exist, the former wins (the VUI only fills a gap).
+func TestPaspTakesPrecedenceOverVUI(t *testing.T) {
+	w, h := uint32(1280), uint32(720)
+	dw, dh := uint32(4), uint32(3) // pre-set display aspect 4:3 (e.g. from pasp)
+	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: buildSPSAspectAvcC(255, 257, 160),
+		Width: &w, Height: &h, DisplayWidth: &dw, DisplayHeight: &dh}
+	fillColourFromCodecPrivate(&tr)
+	if tr.DisplayWidth == nil || *tr.DisplayWidth != 4 || *tr.DisplayHeight != 3 {
+		t.Errorf("pasp display aspect must win, got %v:%v", tr.DisplayWidth, tr.DisplayHeight)
 	}
 }
 
