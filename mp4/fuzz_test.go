@@ -86,7 +86,7 @@ func FuzzDescriptors(f *testing.F) {
 	f.Add(esdsBox(0x40, []byte{0x12, 0x10})[8:])
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _, _ = parseESDS(data)
+		_, _, _, _ = parseESDS(data)
 		_, _ = opusHeadFromDOps(data)
 		_, _ = dOpsBox(data)
 		_, _ = parseAC3(data)

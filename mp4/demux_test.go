@@ -198,7 +198,7 @@ func TestParseESDSRoundTrip(t *testing.T) {
 	for _, asc := range [][]byte{{0x12, 0x10}, {0x11, 0x90, 0x56, 0xE5, 0x00}} {
 		// esdsBox returns a full box; the parser receives the payload (as childConfig
 		// would hand it), so strip the 8-byte box header.
-		objType, got, err := parseESDS(esdsBox(0x40, asc)[8:])
+		objType, got, _, err := parseESDS(esdsBox(0x40, asc)[8:])
 		if err != nil {
 			t.Fatalf("parseESDS: %v", err)
 		}

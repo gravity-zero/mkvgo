@@ -176,6 +176,9 @@ func CmdProbe(path string) {
 		if t.BitDepth != nil {
 			fmt.Printf("  %dbit", *t.BitDepth)
 		}
+		if t.Bitrate != nil {
+			fmt.Printf("  %dkb/s", *t.Bitrate/1000)
+		}
 		if t.IsDefault {
 			fmt.Print("  [default]")
 		}

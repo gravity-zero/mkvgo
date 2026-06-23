@@ -244,16 +244,16 @@ func TestParseElng(t *testing.T) {
 
 func TestParseESDSAACAndMP3(t *testing.T) {
 	asc := []byte{0x12, 0x10}
-	objType, got, err := parseESDS(esdsBox(0x40, asc)[8:])
+	objType, got, _, err := parseESDS(esdsBox(0x40, asc)[8:])
 	if err != nil || objType != 0x40 || !bytes.Equal(got, asc) {
 		t.Fatalf("AAC esds: obj=%#x asc=% x err=%v", objType, got, err)
 	}
 	// MP3: object type 0x6B, no DecoderSpecificInfo.
-	objType, got, err = parseESDS(esdsBox(0x6B, nil)[8:])
+	objType, got, _, err = parseESDS(esdsBox(0x6B, nil)[8:])
 	if err != nil || objType != 0x6B || len(got) != 0 {
 		t.Fatalf("MP3 esds: obj=%#x asc=% x err=%v", objType, got, err)
 	}
-	if _, _, err := parseESDS([]byte{0x00}); err == nil {
+	if _, _, _, err := parseESDS([]byte{0x00}); err == nil {
 		t.Error("expected error for short esds")
 	}
 }
@@ -307,6 +307,28 @@ func colrEntry(colrType string, primaries, transfer, matrix uint16, extra []byte
 func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)) }
 
 func u32be(v uint32) []byte { return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
+
+// TestParseBitrate checks the btrt box → average bitrate, with the maxBitrate
+// fallback when the average is zero.
+func TestParseBitrate(t *testing.T) {
+	btrt := func(maxBR, avgBR uint32) []byte {
+		p := append(u32be(0), u32be(maxBR)...) // bufferSizeDB, maxBitrate
+		return box("btrt", append(p, u32be(avgBR)...))
+	}
+	// avgBitrate present → used directly.
+	entry := append(make([]byte, 28), btrt(256000, 192000)...)
+	var tr inTrack
+	parseBitrate(&tr, entry, 28)
+	if tr.bitrate != 192000 {
+		t.Errorf("avg bitrate = %d, want 192000", tr.bitrate)
+	}
+	// avgBitrate zero → fall back to maxBitrate.
+	var tr2 inTrack
+	parseBitrate(&tr2, append(make([]byte, 28), btrt(256000, 0)...), 28)
+	if tr2.bitrate != 256000 {
+		t.Errorf("max-fallback bitrate = %d, want 256000", tr2.bitrate)
+	}
+}
 
 // TestParsePasp checks the pasp box → display-dimension derivation: an anamorphic
 // ratio sets DisplayWidth = Width·hSpacing/vSpacing; square pixels leave it unset.

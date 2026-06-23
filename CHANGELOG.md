@@ -29,7 +29,9 @@ All notable changes to mkvgo are documented here. The format is based on
   `DisplayHeight` from the MP4 `pasp` box or Matroska `DisplayWidth`/`DisplayHeight`
   0x54B0/0x54BA, with `SampleAspectRatio()`/`DisplayAspectRatio()` helpers
   returning ffprobe's `sample_aspect_ratio`/`display_aspect_ratio`). The remux
-  carries display dimensions through in both directions.
+  carries display dimensions through in both directions. The per-stream average
+  **bitrate** (`Track.Bitrate`, from the MP4 `btrt` box or the esds
+  `avgBitrate`) is also read.
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
   each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through

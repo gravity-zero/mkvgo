@@ -50,6 +50,7 @@ type inTrack struct {
 	channels         uint8
 	sampleRate       float64
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
+	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
 	timescale        uint32
 	samples          []inSample
 
@@ -668,9 +669,12 @@ func parseMP4A(tr *inTrack, payload []byte, headerLen int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	objType, asc, err := parseESDS(esds)
+	objType, asc, avgBitrate, err := parseESDS(esds)
 	if err != nil {
 		return false, err
+	}
+	if tr.bitrate == 0 { // a btrt box, when present, takes precedence
+		tr.bitrate = avgBitrate
 	}
 	switch objType {
 	case 0x40, 0x66, 0x67: // MPEG-4/2 AAC
@@ -750,7 +754,33 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 	parseColr(tr, payload, headerLen)
 	parseDolbyVision(tr, payload, headerLen)
 	parsePasp(tr, payload, headerLen)
+	parseBitrate(tr, payload, headerLen)
 	return nil
+}
+
+// parseBitrate reads a btrt box (BitRateBox: bufferSizeDB, maxBitrate, avgBitrate)
+// from a sample entry and records the average bitrate — what ffprobe reports as
+// bit_rate. It falls back to maxBitrate when the average is zero (some muxers
+// only fill the max).
+func parseBitrate(tr *inTrack, payload []byte, headerLen int) {
+	if len(payload) < headerLen {
+		return
+	}
+	children, err := iterBoxes(payload[headerLen:])
+	if err != nil {
+		return
+	}
+	btrt, ok := findMemBox(children, "btrt")
+	if !ok || len(btrt.payload) < 12 {
+		return
+	}
+	avg := binary.BigEndian.Uint32(btrt.payload[8:12])
+	if avg == 0 {
+		avg = binary.BigEndian.Uint32(btrt.payload[4:8]) // maxBitrate fallback
+	}
+	if avg > 0 {
+		tr.bitrate = avg
+	}
 }
 
 // parsePasp reads a pasp box (PixelAspectRatio: hSpacing:vSpacing) from a visual
@@ -859,65 +889,70 @@ func parseAudioFields(tr *inTrack, payload []byte) {
 	if len(payload) >= 28 {
 		tr.channels = uint8(binary.BigEndian.Uint16(payload[16:18]))
 		tr.sampleRate = float64(binary.BigEndian.Uint32(payload[24:28]) >> 16)
+		parseBitrate(tr, payload, 28) // a btrt box may sit among the entry's children
 	}
 }
 
 // parseESDS walks an esds box payload's MPEG-4 descriptor tree and returns the
-// object type indication and the DecoderSpecificInfo (the AudioSpecificConfig
-// for AAC; absent for MP3, in which case asc is nil).
-func parseESDS(esds []byte) (objType byte, asc []byte, err error) {
+// object type indication, the DecoderSpecificInfo (the AudioSpecificConfig for
+// AAC; absent for MP3, in which case asc is nil) and the average bitrate from the
+// DecoderConfigDescriptor (0 when unset).
+func parseESDS(esds []byte) (objType byte, asc []byte, avgBitrate uint32, err error) {
 	if len(esds) < 4 {
-		return 0, nil, errf("esds too short")
+		return 0, nil, 0, errf("esds too short")
 	}
 	d := &descReader{buf: esds[4:]} // skip fullbox version/flags
 	tag, body, err := d.next()
 	if err != nil || tag != 0x03 {
-		return 0, nil, errf("esds: expected ES_Descriptor")
+		return 0, nil, 0, errf("esds: expected ES_Descriptor")
 	}
 	// ES_Descriptor: ES_ID(2) + flags(1) + optional fields.
 	es := &descReader{buf: body}
 	if err := es.skip(3); err != nil {
-		return 0, nil, err
+		return 0, nil, 0, err
 	}
 	flags := body[2]
 	if flags&0x80 != 0 { // dependsOn_ES_ID
 		if err := es.skip(2); err != nil {
-			return 0, nil, err
+			return 0, nil, 0, err
 		}
 	}
 	if flags&0x40 != 0 { // URL
 		if es.pos >= len(es.buf) {
-			return 0, nil, errf("esds: truncated URL length")
+			return 0, nil, 0, errf("esds: truncated URL length")
 		}
 		urlLen := int(es.buf[es.pos])
 		if err := es.skip(1 + urlLen); err != nil {
-			return 0, nil, err
+			return 0, nil, 0, err
 		}
 	}
 	if flags&0x20 != 0 { // OCR
 		if err := es.skip(2); err != nil {
-			return 0, nil, err
+			return 0, nil, 0, err
 		}
 	}
 	tag, dcfg, err := es.next()
 	if err != nil || tag != 0x04 {
-		return 0, nil, errf("esds: expected DecoderConfigDescriptor")
+		return 0, nil, 0, errf("esds: expected DecoderConfigDescriptor")
 	}
 	if len(dcfg) < 1 {
-		return 0, nil, errf("esds: empty DecoderConfigDescriptor")
+		return 0, nil, 0, errf("esds: empty DecoderConfigDescriptor")
 	}
 	objType = dcfg[0]
 	// DecoderConfigDescriptor header: objectType(1) streamType(1) buffer(3)
 	// max(4) avg(4) = 13 bytes, optionally followed by a DecoderSpecificInfo.
+	if len(dcfg) >= 13 {
+		avgBitrate = binary.BigEndian.Uint32(dcfg[9:13])
+	}
 	dc := &descReader{buf: dcfg}
 	if err := dc.skip(13); err != nil {
-		return objType, nil, nil // no DecoderSpecificInfo (e.g. MP3)
+		return objType, nil, avgBitrate, nil // no DecoderSpecificInfo (e.g. MP3)
 	}
 	tag, dsi, err := dc.next()
 	if err != nil || tag != 0x05 {
-		return objType, nil, nil
+		return objType, nil, avgBitrate, nil
 	}
-	return objType, append([]byte(nil), dsi...), nil
+	return objType, append([]byte(nil), dsi...), avgBitrate, nil
 }
 
 // opusHeadFromDOps rebuilds an OpusHead (RFC 7845) from a dOps box payload.
