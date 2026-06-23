@@ -124,6 +124,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 				mt.FrameRate = &fps
 			}
 			mt.Rotation = t.rotation
+			mt.FrameCount = t.frameCount
 		case mkv.AudioTrack:
 			if t.channels > 0 {
 				ch := t.channels

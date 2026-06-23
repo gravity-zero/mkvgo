@@ -196,4 +196,8 @@ func TestOpenMetaFrameRateHeadOnly(t *testing.T) {
 	if video.FrameRate == nil || *video.FrameRate != 25 {
 		t.Errorf("head-only FrameRate = %v, want 25", video.FrameRate)
 	}
+	// The fixture has two video samples → nb_frames 2, read head-only from stsz.
+	if video.FrameCount != 2 {
+		t.Errorf("head-only FrameCount = %d, want 2", video.FrameCount)
+	}
 }

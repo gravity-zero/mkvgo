@@ -179,6 +179,9 @@ func CmdProbe(path string) {
 		if t.Bitrate != nil {
 			fmt.Printf("  %dkb/s", *t.Bitrate/1000)
 		}
+		if t.FrameCount > 0 {
+			fmt.Printf("  %dframes", t.FrameCount)
+		}
 		if t.IsDefault {
 			fmt.Print("  [default]")
 		}

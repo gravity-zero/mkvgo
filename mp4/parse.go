@@ -54,6 +54,7 @@ type inTrack struct {
 	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
+	frameCount       int64   // sample count from stsz (ffprobe nb_frames); 0 when unknown
 	timescale        uint32
 	samples          []inSample
 
@@ -397,10 +398,11 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
 	}
 
-	// The nominal frame rate is in the header (stts), so derive it head-only —
-	// expanding the sample table is not needed just for the rate.
+	// The nominal frame rate (stts) and the frame count (stsz) are in the header, so
+	// derive them head-only — no need to expand the sample table.
 	if tr.trackType == mkv.VideoTrack {
 		tr.frameRate = headerFrameRate(stblBoxes, tr.timescale)
+		tr.frameCount = headerFrameCount(stblBoxes)
 	}
 
 	if withSamples {
@@ -429,6 +431,20 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 		return 0
 	}
 	return float64(timescale) / float64(delta)
+}
+
+// headerFrameCount returns the sample count (= frame count for a video track)
+// from the stsz/stz2 box, read head-only from the header. 0 when absent.
+func headerFrameCount(stblBoxes []memBox) int64 {
+	if stsz, ok := findMemBox(stblBoxes, "stsz"); ok && len(stsz.payload) >= 12 {
+		// stsz: version+flags(4), sample_size(4), sample_count(4).
+		return int64(binary.BigEndian.Uint32(stsz.payload[8:12]))
+	}
+	if stz2, ok := findMemBox(stblBoxes, "stz2"); ok && len(stz2.payload) >= 12 {
+		// stz2: version+flags(4), reserved(3)+field_size(1), sample_count(4).
+		return int64(binary.BigEndian.Uint32(stz2.payload[8:12]))
+	}
+	return 0
 }
 
 // parseMovieHeader reads the movie timescale and duration from an mvhd box.

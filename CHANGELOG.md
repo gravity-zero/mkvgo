@@ -42,6 +42,11 @@ validated against ffprobe over a sweep of real files.
 - **Field order.** `Track.FieldOrder` ("progressive"/"interlaced", ffprobe
   `field_order`) from the Matroska `FlagInterlaced` (0x9A) element or the H.264
   `frame_mbs_only_flag`.
+- **Frame count.** `Track.FrameCount` (ffprobe `nb_frames`) from the MP4 `stsz`/
+  `stz2` sample count — read head-only, no sample-table expansion. Matroska has no
+  head-only frame count, so it stays 0 there.
+- **Display rotation, pixel format, field order and frame count** are printed by
+  the CLI `probe` and carried in `-json`.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without
