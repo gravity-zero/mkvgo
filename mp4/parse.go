@@ -765,8 +765,13 @@ func parseDolbyVision(tr *inTrack, payload []byte, headerLen int) {
 	}
 }
 
-// parseColr reads a colr box (nclx type) from a visual sample entry and records
-// the colour code points. Other colr types (e.g. 'nclc', 'rICC') are ignored.
+// parseColr reads a colr box from a visual sample entry and records the colour
+// code points. Two on-screen colour types are read: 'nclx' (CICP primaries /
+// transfer / matrix plus a full-range flag) and 'nclc' (the QuickTime form —
+// identical but without the range byte). ICC-profile types ('rICC', 'prof') are
+// ignored. Each CICP field is taken independently, so an SDR stream that
+// specifies only the matrix (e.g. BT.709) while leaving primaries/transfer
+// unspecified still reports its colour_space, matching ffprobe.
 func parseColr(tr *inTrack, payload []byte, headerLen int) {
 	if len(payload) < headerLen {
 		return
@@ -776,7 +781,11 @@ func parseColr(tr *inTrack, payload []byte, headerLen int) {
 		return
 	}
 	colr, ok := findMemBox(children, "colr")
-	if !ok || len(colr.payload) < 11 || string(colr.payload[:4]) != "nclx" {
+	if !ok || len(colr.payload) < 10 {
+		return
+	}
+	typ := string(colr.payload[:4])
+	if typ != "nclx" && typ != "nclc" {
 		return
 	}
 	p := binary.BigEndian.Uint16(colr.payload[4:6])
@@ -785,11 +794,15 @@ func parseColr(tr *inTrack, payload []byte, headerLen int) {
 	tr.colorTransfer = &tc
 	m := binary.BigEndian.Uint16(colr.payload[8:10])
 	tr.colorMatrix = &m
-	rng := uint16(1) // limited
-	if colr.payload[10]&0x80 != 0 {
-		rng = 2 // full
+	// Only 'nclx' carries the full-range flag. For 'nclc' the range is left unset
+	// so the codec-bitstream fallback (SPS VUI) can supply it, as ffmpeg does.
+	if typ == "nclx" && len(colr.payload) >= 11 {
+		rng := uint16(1) // limited
+		if colr.payload[10]&0x80 != 0 {
+			rng = 2 // full
+		}
+		tr.colorRange = &rng
 	}
-	tr.colorRange = &rng
 }
 
 func extractOpus(tr *inTrack, payload []byte, headerLen int) error {

@@ -291,6 +291,62 @@ func TestTicksToMsAndDeref(t *testing.T) {
 	}
 }
 
+// colrEntry builds a minimal visual sample entry payload (the 78-byte header
+// followed by a colr box) carrying the given colour type and CICP code points.
+func colrEntry(colrType string, primaries, transfer, matrix uint16, extra []byte) []byte {
+	cb := make([]byte, 0, 10+len(extra))
+	cb = append(cb, colrType...)
+	cb = appendU16(cb, primaries)
+	cb = appendU16(cb, transfer)
+	cb = appendU16(cb, matrix)
+	cb = append(cb, extra...)
+	entry := make([]byte, 78)
+	return append(entry, box("colr", cb)...)
+}
+
+func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)) }
+
+// TestParseColr covers the colour-type handling: 'nclc' (no range byte) is read
+// like 'nclx', and a stream specifying only the matrix (BT.709) with unspecified
+// primaries/transfer still reports its colour_space — matching ffprobe.
+func TestParseColr(t *testing.T) {
+	deref := func(p *uint16) int {
+		if p == nil {
+			return -1
+		}
+		return int(*p)
+	}
+
+	// nclc with matrix=bt709 (1) but unspecified primaries/transfer (2).
+	var nclc inTrack
+	parseColr(&nclc, colrEntry("nclc", 2, 2, 1, nil), 78)
+	if deref(nclc.colorMatrix) != 1 {
+		t.Errorf("nclc matrix = %d, want 1 (bt709)", deref(nclc.colorMatrix))
+	}
+	if nclc.colorRange != nil {
+		t.Errorf("nclc range = %d, want unset (no range byte)", deref(nclc.colorRange))
+	}
+	var mt mkv.Track
+	mt.ColorSpace = nclc.colorMatrix
+	if mt.ColorSpaceName() != "bt709" {
+		t.Errorf("nclc ColorSpaceName = %q, want bt709", mt.ColorSpaceName())
+	}
+
+	// nclx full-range flag (high bit of the byte after the three code points).
+	var nclx inTrack
+	parseColr(&nclx, colrEntry("nclx", 9, 16, 9, []byte{0x80}), 78)
+	if deref(nclx.colorMatrix) != 9 || deref(nclx.colorRange) != 2 {
+		t.Errorf("nclx matrix/range = %d/%d, want 9/2", deref(nclx.colorMatrix), deref(nclx.colorRange))
+	}
+
+	// ICC-profile colr types are ignored.
+	var prof inTrack
+	parseColr(&prof, colrEntry("prof", 1, 1, 1, nil), 78)
+	if prof.colorMatrix != nil {
+		t.Errorf("prof colr should be ignored, got matrix %d", deref(prof.colorMatrix))
+	}
+}
+
 func TestTruncateRunes(t *testing.T) {
 	if n := truncateRunes([]byte("abc"), 10); n != 3 {
 		t.Errorf("max>len → %d, want 3", n)
