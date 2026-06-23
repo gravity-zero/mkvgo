@@ -133,6 +133,35 @@ func PrintJSON(v any) {
 	}
 }
 
+// trackJSON augments a Track for JSON output with the derived display strings
+// ffprobe reports as fields (codec_long_name, channel_layout) but which the
+// library exposes as methods. The embedded Track's fields are promoted, so the
+// JSON shape is the Track plus these two extras.
+type trackJSON struct {
+	matroska.Track
+	CodecLongName string `json:"codec_long_name,omitempty"`
+	ChannelLayout string `json:"channel_layout,omitempty"`
+}
+
+// tracksForJSON wraps tracks so the marshaled JSON carries the derived display
+// fields alongside the raw values.
+func tracksForJSON(tracks []matroska.Track) []trackJSON {
+	out := make([]trackJSON, len(tracks))
+	for i, t := range tracks {
+		out[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(), ChannelLayout: t.ChannelLayout()}
+	}
+	return out
+}
+
+// containerForJSON wraps a container so its tracks carry the derived display
+// fields. The outer Tracks field shadows the embedded container's in the JSON.
+func containerForJSON(c *matroska.Container) any {
+	return struct {
+		*matroska.Container
+		Tracks []trackJSON `json:"tracks"`
+	}{Container: c, Tracks: tracksForJSON(c.Tracks)}
+}
+
 func ParseTrackIDs(s string) []uint64 {
 	var ids []uint64
 	for _, part := range strings.Split(s, ",") {
