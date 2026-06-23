@@ -471,6 +471,12 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			}
 			hv := uint32(v)
 			t.Height = &hv
+		case mkv.IDFlagInterlaced:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			t.FieldOrder = interlacedName(v)
 		case mkv.IDDisplayWidth:
 			v, err := p.readUint(h.Size)
 			if err != nil {

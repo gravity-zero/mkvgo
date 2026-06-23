@@ -39,6 +39,9 @@ validated against ffprobe over a sweep of real files.
   (H.264/HEVC SPS, AV1 colour config, VP9 `vpcC`). For HEVC `hev1` with in-band
   parameter sets, the 4:2:0 chroma of Main/Main 10 is taken from the `hvcC` profile,
   so it still reads head-only.
+- **Field order.** `Track.FieldOrder` ("progressive"/"interlaced", ffprobe
+  `field_order`) from the Matroska `FlagInterlaced` (0x9A) element or the H.264
+  `frame_mbs_only_flag`.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without

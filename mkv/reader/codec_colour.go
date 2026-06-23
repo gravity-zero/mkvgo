@@ -18,16 +18,17 @@ import "github.com/gravity-zero/mkvgo/mkv"
 // bitstreamColour holds the per-field values recovered from a bitstream. Each is
 // nil when the bitstream did not carry it.
 type bitstreamColour struct {
-	primaries *uint16 // CICP colour_primaries
-	transfer  *uint16 // CICP transfer_characteristics
-	matrix    *uint16 // CICP matrix_coefficients (ffprobe color_space)
-	rng       *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
-	bitDepth  *uint16 // luma bit depth (8/10/12)
-	profile   string  // e.g. "Main 10"
-	level     *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
-	sarWidth  uint32  // VUI sample aspect ratio width (0 when absent/square)
-	sarHeight uint32  // VUI sample aspect ratio height
-	chroma    *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
+	primaries  *uint16 // CICP colour_primaries
+	transfer   *uint16 // CICP transfer_characteristics
+	matrix     *uint16 // CICP matrix_coefficients (ffprobe color_space)
+	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
+	bitDepth   *uint16 // luma bit depth (8/10/12)
+	profile    string  // e.g. "Main 10"
+	level      *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
+	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
+	sarHeight  uint32  // VUI sample aspect ratio height
+	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
+	fieldOrder string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag; "" unknown
 }
 
 // pixelFormat composes the ffprobe pix_fmt string from a chroma_format_idc and a
@@ -160,6 +161,9 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 		if pf := pixelFormat(bc.chroma, t.VideoBitDepth); pf != "" {
 			t.PixelFormat = pf
 		}
+	}
+	if t.FieldOrder == "" && bc.fieldOrder != "" {
+		t.FieldOrder = bc.fieldOrder
 	}
 	// Sample aspect ratio from the SPS VUI → display dimensions, only when the
 	// container/pasp did not already supply them (those take precedence) and the
@@ -295,7 +299,7 @@ func unescapeRBSP(b []byte) []byte {
 func (bc *bitstreamColour) nonEmpty() bool {
 	return bc.primaries != nil || bc.transfer != nil || bc.matrix != nil ||
 		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil ||
-		bc.sarWidth != 0 || bc.chroma != nil
+		bc.sarWidth != 0 || bc.chroma != nil || bc.fieldOrder != ""
 }
 
 // --- H.264 / AVC ---------------------------------------------------------------
@@ -386,11 +390,14 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 			r.se() // num_ref_frames_in_pic_order_cnt_cycle (≤255)
 		}
 	}
-	r.ue()  // max_num_ref_frames
-	r.bit() // gaps_in_frame_num_value_allowed_flag
-	r.ue()  // pic_width_in_mbs_minus1
-	r.ue()  // pic_height_in_map_units_minus1
-	if r.bit() == 0 {
+	r.ue()                       // max_num_ref_frames
+	r.bit()                      // gaps_in_frame_num_value_allowed_flag
+	r.ue()                       // pic_width_in_mbs_minus1
+	r.ue()                       // pic_height_in_map_units_minus1
+	frameMbsOnly := r.bit() == 1 // 1 → progressive
+	bc.fieldOrder = "progressive"
+	if !frameMbsOnly {
+		bc.fieldOrder = "interlaced"
 		r.bit() // mb_adaptive_frame_field_flag
 	}
 	r.bit() // direct_8x8_inference_flag

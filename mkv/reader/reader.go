@@ -553,6 +553,19 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	return t, nil
 }
 
+// interlacedName maps a Matroska FlagInterlaced value (0 undetermined, 1
+// interlaced, 2 progressive) to the ffprobe-style field_order string, "" when
+// undetermined.
+func interlacedName(v uint64) string {
+	switch v {
+	case 1:
+		return "interlaced"
+	case 2:
+		return "progressive"
+	}
+	return ""
+}
+
 func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
@@ -580,6 +593,12 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			}
 			h := uint32(v)
 			t.Height = &h
+		case mkv.IDFlagInterlaced:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			t.FieldOrder = interlacedName(v)
 		case mkv.IDDisplayWidth:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

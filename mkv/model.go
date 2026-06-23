@@ -101,6 +101,7 @@ type Track struct {
 	Profile        string  `json:"profile,omitempty"`         // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
 	Level          *uint16 `json:"level,omitempty"`           // codec level_idc from the SPS (ffprobe level): H.264 10×level, HEVC 30×level
 	PixelFormat    string  `json:"pixel_format,omitempty"`    // ffprobe pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
+	FieldOrder     string  `json:"field_order,omitempty"`     // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
 	Bitrate        *uint32 `json:"bitrate,omitempty"`         // average stream bitrate in bits/s (MP4 btrt box / esds avgBitrate); nil when unknown
 
 	// DolbyVision holds the decoded dvcC/dvvC configuration when the track signals
