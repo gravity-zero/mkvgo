@@ -361,6 +361,16 @@ func TestChannelCountsFromConfig(t *testing.T) {
 		t.Errorf("AAC-LC rates = %v/%v, want 44100/0", cfg.sampleRate, cfg.outputRate)
 	}
 
+	// Real-world explicit-SBR mono ASC (0x2b8a0800: AOT 5, core 22050, ext 44100,
+	// channelConfiguration 1). When the stream carries in-band PS, ffprobe reports
+	// 2 channels by decoding; head-only we report the ASC's mono core and the
+	// doubled output rate. Documents the accepted in-band-PS limitation.
+	inbandPS := []byte{0x2b, 0x8a, 0x08, 0x00}
+	if cfg := parseAACConfig(inbandPS); cfg.channels != 1 || cfg.sampleRate != 22050 || cfg.outputRate != 44100 {
+		t.Errorf("explicit-SBR mono ASC = %dch %v/%v, want 1ch 22050/44100",
+			cfg.channels, cfg.sampleRate, cfg.outputRate)
+	}
+
 	// AC-3 dac3: acmod=7 (3/2), lfeon=1 → 5.1.
 	dac3 := func() []byte {
 		var w bitWriter

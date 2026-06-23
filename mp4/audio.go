@@ -122,13 +122,17 @@ type aacInfo struct {
 // and the backward-compatible trailing sync extension (0x2b7 → SBR, 0x548 → PS)
 // are detected.
 //
-// Limitation: HE-AAC v1 with purely *implicit* SBR — where the ASC is a plain
-// AAC-LC config (e.g. 0x1310) and SBR is signalled only in-band in the audio
-// frames — is genuinely not detectable from the head alone; ffprobe reports its
-// doubled rate only because it decodes a frame. We report the core rate in that
-// case. This is a true head-only limitation (the data is not in any header),
-// unlike colour, which always lives in a header (colr box or SPS VUI) and is
-// read head-only. Don't chase it without parsing sample data.
+// Limitation: when SBR or Parametric Stereo is signalled only *in-band* (in the
+// audio frames, not the ASC), it is invisible from the head. Two real shapes:
+//   - implicit SBR: a plain AAC-LC ASC (e.g. 0x1310) whose frames carry SBR — we
+//     report the core rate, ffprobe reports the doubled rate (it decodes a frame).
+//   - in-band PS over an explicit-SBR mono core (e.g. ASC 0x2b8a0800: AOT 5, SBR
+//     ext 44100, channelConfiguration 1) — we report 1 channel (the ASC's mono
+//     core), ffprobe reports 2 (it decodes the reconstructed stereo).
+//
+// Both are true head-only limitations (the data is in no header), unlike colour,
+// which always lives in a header (colr box or SPS VUI) and is read head-only.
+// Don't chase them without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)
