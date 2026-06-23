@@ -15,7 +15,11 @@ All notable changes to mkvgo are documented here. The format is based on
   `kind` box), the **audio channel count** (from the AAC `AudioSpecificConfig` and
   AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field —
   including HE-AACv2 **Parametric Stereo**, where a mono core decodes to stereo,
-  reported as 2 channels like ffprobe), and **colour** code points (`colr`, both
+  reported as 2 channels like ffprobe), the **audio output sample rate** for SBR
+  streams (HE-AAC): the new `Track.OutputSampleRate` (Matroska
+  `OutputSamplingFrequency` 0x78B5, or the AAC SBR extension rate) carries the
+  decoder's doubled rate, and `Track.EffectiveSampleRate()` returns what ffprobe
+  reports as `sample_rate`; and **colour** code points (`colr`, both
   the `nclx` and the QuickTime `nclc` forms, each CICP field taken independently
   so a stream that specifies only the matrix still reports its colour_space —
   falling back to the codec bitstream via the now exported

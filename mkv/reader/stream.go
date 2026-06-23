@@ -536,6 +536,12 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 				return err
 			}
 			t.SampleRate = &v
+		case mkv.IDOutputSamplingFreq:
+			v, err := p.readFloat(h.Size)
+			if err != nil {
+				return err
+			}
+			t.OutputSampleRate = &v
 		case mkv.IDChannels:
 			v, err := p.readUint(h.Size)
 			if err != nil {

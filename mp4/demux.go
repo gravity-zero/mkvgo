@@ -124,6 +124,10 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 				sr := t.sampleRate
 				mt.SampleRate = &sr
 			}
+			if t.outputSampleRate > 0 {
+				osr := t.outputSampleRate
+				mt.OutputSampleRate = &osr
+			}
 		}
 		tracks[i] = mt
 	}

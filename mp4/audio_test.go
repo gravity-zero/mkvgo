@@ -322,6 +322,45 @@ func TestChannelCountsFromConfig(t *testing.T) {
 		t.Errorf("aacChannels(mono LC) = %d, want 1", got)
 	}
 
+	// AAC sample rate from the config: HE-AAC SBR codes a half-rate core and the
+	// decoder doubles it; parseAACConfig reports both the core and the SBR output
+	// rate so the caller can present ffprobe's output rate.
+	// Explicit hierarchical SBR (AOT=5): core 22050, extension 44100, stereo.
+	explicitSBR := func() []byte {
+		var w bitWriter
+		w.write(5, 5) // audioObjectType = SBR
+		w.write(7, 4) // samplingFrequencyIndex = 22050 (core)
+		w.write(2, 4) // channelConfiguration = stereo
+		w.write(4, 4) // extensionSamplingFrequencyIndex = 44100 (output)
+		w.write(2, 5) // underlying audioObjectType = AAC-LC
+		return w.bytes()
+	}()
+	if cfg := parseAACConfig(explicitSBR); cfg.sampleRate != 22050 || cfg.outputRate != 44100 {
+		t.Errorf("explicit SBR rates = %v/%v, want 22050/44100", cfg.sampleRate, cfg.outputRate)
+	}
+
+	// Backward-compatible SBR: front AAC-LC 24000, sync extension flags SBR at 48000.
+	backCompatSBR := func() []byte {
+		var w bitWriter
+		w.write(2, 5)      // audioObjectType = AAC-LC
+		w.write(6, 4)      // samplingFrequencyIndex = 24000 (core)
+		w.write(2, 4)      // channelConfiguration = stereo
+		w.write(0, 3)      // GASpecificConfig (cc!=0): all flags zero
+		w.write(0x2b7, 11) // syncExtensionType: SBR
+		w.write(5, 5)      // extension audioObjectType = SBR
+		w.write(1, 1)      // sbrPresentFlag
+		w.write(3, 4)      // extensionSamplingFrequencyIndex = 48000 (output)
+		return w.bytes()
+	}()
+	if cfg := parseAACConfig(backCompatSBR); cfg.sampleRate != 24000 || cfg.outputRate != 48000 {
+		t.Errorf("backward-compat SBR rates = %v/%v, want 24000/48000", cfg.sampleRate, cfg.outputRate)
+	}
+
+	// Plain AAC-LC: no SBR, so no output rate (the base rate stands).
+	if cfg := parseAACConfig(fakeASC); cfg.sampleRate != 44100 || cfg.outputRate != 0 {
+		t.Errorf("AAC-LC rates = %v/%v, want 44100/0", cfg.sampleRate, cfg.outputRate)
+	}
+
 	// AC-3 dac3: acmod=7 (3/2), lfeon=1 → 5.1.
 	dac3 := func() []byte {
 		var w bitWriter

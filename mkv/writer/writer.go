@@ -307,10 +307,13 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			m.raw(mkv.IDBlockAddIDExtraData, rec)
 		})
 	}
-	if t.Type == mkv.AudioTrack && (t.SampleRate != nil || t.Channels != nil || t.BitDepth != nil) {
+	if t.Type == mkv.AudioTrack && (t.SampleRate != nil || t.OutputSampleRate != nil || t.Channels != nil || t.BitDepth != nil) {
 		e.master(mkv.IDAudio, func(a *ew) {
 			if t.SampleRate != nil {
 				a.float64(mkv.IDSamplingFreq, *t.SampleRate)
+			}
+			if t.OutputSampleRate != nil {
+				a.float64(mkv.IDOutputSamplingFreq, *t.OutputSampleRate)
 			}
 			if t.Channels != nil {
 				a.uint(mkv.IDChannels, uint64(*t.Channels))

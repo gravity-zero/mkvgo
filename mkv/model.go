@@ -50,21 +50,22 @@ type SegmentInfo struct {
 }
 
 type Track struct {
-	ID              uint64    `json:"id"`
-	UID             uint64    `json:"uid,omitempty"` // Matroska TrackUID (64-bit); distinct from TrackNumber (ID)
-	Type            TrackType `json:"type"`
-	Codec           string    `json:"codec"`
-	Language        string    `json:"language"` // legacy ISO 639-2 (0x22B59C); "" when absent — see LanguagePresent
-	Name            string    `json:"name"`
-	IsDefault       bool      `json:"is_default"`
-	IsForced        bool      `json:"is_forced"`
-	CodecPrivate    []byte    `json:"-"`
-	HeaderStripping []byte    `json:"-"` // bytes stripped from each block (ContentCompression)
-	Width           *uint32   `json:"width,omitempty"`
-	Height          *uint32   `json:"height,omitempty"`
-	Channels        *uint8    `json:"channels,omitempty"`
-	SampleRate      *float64  `json:"sample_rate,omitempty"`
-	BitDepth        *uint8    `json:"bit_depth,omitempty"` // audio bits/sample (0x6264); video uses VideoBitDepth
+	ID               uint64    `json:"id"`
+	UID              uint64    `json:"uid,omitempty"` // Matroska TrackUID (64-bit); distinct from TrackNumber (ID)
+	Type             TrackType `json:"type"`
+	Codec            string    `json:"codec"`
+	Language         string    `json:"language"` // legacy ISO 639-2 (0x22B59C); "" when absent — see LanguagePresent
+	Name             string    `json:"name"`
+	IsDefault        bool      `json:"is_default"`
+	IsForced         bool      `json:"is_forced"`
+	CodecPrivate     []byte    `json:"-"`
+	HeaderStripping  []byte    `json:"-"` // bytes stripped from each block (ContentCompression)
+	Width            *uint32   `json:"width,omitempty"`
+	Height           *uint32   `json:"height,omitempty"`
+	Channels         *uint8    `json:"channels,omitempty"`
+	SampleRate       *float64  `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
+	OutputSampleRate *float64  `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) — see EffectiveSampleRate
+	BitDepth         *uint8    `json:"bit_depth,omitempty"`          // audio bits/sample (0x6264); video uses VideoBitDepth
 
 	// Probe metadata (added v0.4.0). The *Present flags let a consumer tell a
 	// value that was explicitly written in the file from a spec default that the
@@ -107,6 +108,22 @@ func (t *Track) ResolvedLanguage() string {
 		return t.LanguageBCP47
 	}
 	return t.Language
+}
+
+// EffectiveSampleRate returns the audio sample rate a decoder produces — the
+// value ffprobe reports as sample_rate. For SBR streams (HE-AAC / HE-AACv2) the
+// coded core runs at half rate and the decoder doubles it, so OutputSampleRate
+// (the Matroska OutputSamplingFrequency, or the AAC AudioSpecificConfig SBR
+// extension rate) wins when present; otherwise the base SampleRate. Returns 0
+// when neither is known.
+func (t *Track) EffectiveSampleRate() float64 {
+	if t.OutputSampleRate != nil && *t.OutputSampleRate > 0 {
+		return *t.OutputSampleRate
+	}
+	if t.SampleRate != nil {
+		return *t.SampleRate
+	}
+	return 0
 }
 
 type Chapter struct {

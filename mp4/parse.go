@@ -40,15 +40,16 @@ type inSample struct {
 
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.
 type inTrack struct {
-	trackType    mkv.TrackType
-	codec        string // mkvgo short codec name (e.g. "h264", "aac")
-	codecPrivate []byte
-	width        uint32
-	height       uint32
-	channels     uint8
-	sampleRate   float64
-	timescale    uint32
-	samples      []inSample
+	trackType        mkv.TrackType
+	codec            string // mkvgo short codec name (e.g. "h264", "aac")
+	codecPrivate     []byte
+	width            uint32
+	height           uint32
+	channels         uint8
+	sampleRate       float64
+	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
+	timescale        uint32
+	samples          []inSample
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -676,11 +677,16 @@ func parseMP4A(tr *inTrack, payload []byte, headerLen int) (bool, error) {
 		}
 		tr.codec = "aac"
 		tr.codecPrivate = asc
-		// The AudioSampleEntry channelcount is unreliable for multichannel AAC;
-		// the AudioSpecificConfig carries the true layout.
-		if ch := aacChannels(asc); ch > 0 {
-			tr.channels = ch
+		// The AudioSampleEntry channelcount and sample rate are unreliable for AAC:
+		// multichannel layouts and HE-AAC SBR/PS live in the AudioSpecificConfig.
+		cfg := parseAACConfig(asc)
+		if cfg.channels > 0 {
+			tr.channels = cfg.channels
 		}
+		if cfg.sampleRate > 0 {
+			tr.sampleRate = cfg.sampleRate
+		}
+		tr.outputSampleRate = cfg.outputRate // SBR-doubled rate, 0 when not SBR
 		return true, nil
 	case 0x69, 0x6B: // MPEG-2/1 Audio Layer III
 		tr.codec = "A_MPEG/L3"

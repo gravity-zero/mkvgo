@@ -166,6 +166,9 @@ func CmdProbe(path string) {
 		}
 		if t.SampleRate != nil {
 			fmt.Printf("  %.0fHz", *t.SampleRate)
+			if t.OutputSampleRate != nil && *t.OutputSampleRate != *t.SampleRate {
+				fmt.Printf("(out %.0fHz)", *t.OutputSampleRate)
+			}
 		}
 		if t.Channels != nil {
 			fmt.Printf("  %dch", *t.Channels)

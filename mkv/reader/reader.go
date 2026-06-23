@@ -719,6 +719,12 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 				return err
 			}
 			t.SampleRate = &v
+		case mkv.IDOutputSamplingFreq:
+			v, err := ebml.ReadFloat(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			t.OutputSampleRate = &v
 		case mkv.IDChannels:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

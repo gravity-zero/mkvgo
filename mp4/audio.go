@@ -94,38 +94,52 @@ var ac3AcmodChannels = [8]uint8{2, 1, 2, 3, 3, 4, 4, 5}
 // means the layout is carried in a program config element (not resolved here).
 var aacConfigChannels = [8]uint8{0, 1, 2, 3, 4, 5, 6, 8}
 
-// aacChannels returns the number of channels an AAC decoder configured by asc
-// (an AudioSpecificConfig) produces. It is more than the front
-// channelConfiguration: a Parametric Stereo stream (HE-AACv2) codes a mono core
-// — channelConfiguration 1 — but the decoder reconstructs a stereo signal, so
-// ffmpeg/ffprobe report 2 channels. Both signalling forms are detected:
+// aacSampleRates maps a 4-bit samplingFrequencyIndex to a rate in Hz; indices
+// 13–15 are reserved (0).
+var aacSampleRates = [16]uint32{
+	96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+	16000, 12000, 11025, 8000, 7350, 0, 0, 0,
+}
+
+// aacInfo is everything the AudioSpecificConfig tells us that the AudioSampleEntry
+// gets wrong or omits: the real channel count and the decoder's output sample
+// rate.
+type aacInfo struct {
+	channels   uint8   // 0 when carried in a program config element
+	sampleRate float64 // base/core rate, 0 if not derivable
+	outputRate float64 // SBR extension (output) rate, 0 when no SBR
+}
+
+// parseAACConfig walks an AudioSpecificConfig and reports the decoder's effective
+// channel count and sample rate. Two things make the front fields insufficient:
 //
-//   - explicit hierarchical: audioObjectType 29 (PS) up front;
-//   - backward-compatible: a trailing sync extension (0x2b7 → SBR, then an inner
-//     0x548 → PS) after the GASpecificConfig.
+//   - Parametric Stereo (HE-AACv2) codes a mono core (channelConfiguration 1) the
+//     decoder upmixes to stereo → 2 channels, like ffprobe.
+//   - SBR (HE-AAC) codes a half-rate core the decoder doubles → ffprobe reports
+//     the extensionSamplingFrequency, not the core rate.
 //
-// Returns 0 when the channel layout is carried in a program config element
-// (channelConfiguration 0), so the caller keeps the sample-entry value.
-func aacChannels(asc []byte) uint8 {
+// Both the explicit hierarchical form (audioObjectType 5 = SBR, 29 = PS up front)
+// and the backward-compatible trailing sync extension (0x2b7 → SBR, 0x548 → PS)
+// are detected.
+func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)
-	if r.bits(4) == 0xF { // samplingFrequencyIndex == 0xF → explicit 24-bit rate
-		r.skip(24)
-	}
+	baseRate := readSamplingFrequency(r)
 	cc := r.bits(4)
 
 	ps := false
+	sbr := false
+	outputRate := float64(0)
 	explicitExt := false
 	if aot == 5 || aot == 29 { // SBR or PS signalled hierarchically up front
 		explicitExt = true
+		sbr = true
 		if aot == 29 {
 			ps = true
 		}
-		if r.bits(4) == 0xF { // extensionSamplingFrequencyIndex
-			r.skip(24)
-		}
-		aot = getAudioObjectType(r) // underlying object type
-		if aot == 22 {              // ER BSAC carries an extension channel config
+		outputRate = readSamplingFrequency(r) // extensionSamplingFrequency
+		aot = getAudioObjectType(r)           // underlying object type
+		if aot == 22 {                        // ER BSAC carries an extension channel config
 			r.skip(4)
 		}
 	}
@@ -136,9 +150,8 @@ func aacChannels(asc []byte) uint8 {
 	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc) {
 		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
 			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
-				if r.bits(4) == 0xF { // extensionSamplingFrequencyIndex
-					r.skip(24)
-				}
+				sbr = true
+				outputRate = readSamplingFrequency(r) // extensionSamplingFrequency
 				if bitsLeft(r) >= 12 && r.bits(11) == 0x548 { // syncExtensionType: PS
 					ps = r.bits(1) == 1 // psPresentFlag
 				}
@@ -146,7 +159,31 @@ func aacChannels(asc []byte) uint8 {
 		}
 	}
 
-	return aacChannelsFrom(cc, ps)
+	if r.err {
+		// A short/partial parse still yields the trustworthy front fields.
+		outputRate = 0
+	}
+	if !sbr {
+		outputRate = 0
+	}
+	return aacInfo{channels: aacChannelsFrom(cc, ps), sampleRate: baseRate, outputRate: outputRate}
+}
+
+// readSamplingFrequency reads a 4-bit samplingFrequencyIndex (or the explicit
+// 24-bit rate when the index is 0xF) and returns the rate in Hz, 0 if reserved.
+func readSamplingFrequency(r *bitReader) float64 {
+	idx := r.bits(4)
+	if idx == 0xF {
+		return float64(r.bits(24))
+	}
+	return float64(aacSampleRates[idx])
+}
+
+// aacChannels returns the decoder's output channel count for an
+// AudioSpecificConfig (accounting for Parametric Stereo). 0 when the layout is in
+// a program config element. Thin wrapper over parseAACConfig.
+func aacChannels(asc []byte) uint8 {
+	return parseAACConfig(asc).channels
 }
 
 // aacChannelsFrom resolves a channelConfiguration plus a Parametric Stereo flag

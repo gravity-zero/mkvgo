@@ -88,10 +88,11 @@ const (
 )
 
 const (
-	IDAudio        = 0xE1
-	IDSamplingFreq = 0xB5
-	IDChannels     = 0x9F
-	IDBitDepth     = 0x6264
+	IDAudio              = 0xE1
+	IDSamplingFreq       = 0xB5
+	IDOutputSamplingFreq = 0x78B5
+	IDChannels           = 0x9F
+	IDBitDepth           = 0x6264
 )
 
 const (
