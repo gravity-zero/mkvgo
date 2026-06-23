@@ -34,6 +34,11 @@ validated against ffprobe over a sweep of real files.
   round trip.
 - **Per-stream average bitrate.** `Track.Bitrate` from the MP4 `btrt` box (or the
   esds `avgBitrate` for AAC).
+- **Pixel format.** `Track.PixelFormat` (ffprobe `pix_fmt`, e.g. `yuv420p`,
+  `yuv420p10le`) composed from the codec's chroma subsampling and bit depth
+  (H.264/HEVC SPS, AV1 colour config, VP9 `vpcC`). For HEVC `hev1` with in-band
+  parameter sets, the 4:2:0 chroma of Main/Main 10 is taken from the `hvcC` profile,
+  so it still reads head-only.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without

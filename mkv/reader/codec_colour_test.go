@@ -106,6 +106,9 @@ func TestCodecColourAVCRealFixture(t *testing.T) {
 	if got := p16(tr.VideoBitDepth); got != 8 {
 		t.Errorf("bit depth = %d, want 8", got)
 	}
+	if tr.PixelFormat != "yuv420p" {
+		t.Errorf("pix_fmt = %q, want yuv420p (High 4:2:0 8-bit)", tr.PixelFormat)
+	}
 	// avcC byte 3 (and the SPS level_idc) is 0x0a → level 1.0.
 	if got := p16(tr.Level); got != 10 {
 		t.Errorf("level = %d, want 10", got)
@@ -155,6 +158,9 @@ func TestColourFromBitstreamViaReadMeta(t *testing.T) {
 	}
 	if tr.Profile != "Main 10" {
 		t.Errorf("profile = %q, want Main 10", tr.Profile)
+	}
+	if tr.PixelFormat != "yuv420p10le" {
+		t.Errorf("pix_fmt = %q, want yuv420p10le (Main 10, 4:2:0)", tr.PixelFormat)
 	}
 	// HEVC general_level_idc is read from the profile_tier_level (30×level).
 	if tr.Level == nil || *tr.Level == 0 {

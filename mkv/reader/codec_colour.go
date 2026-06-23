@@ -27,6 +27,41 @@ type bitstreamColour struct {
 	level     *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth  uint32  // VUI sample aspect ratio width (0 when absent/square)
 	sarHeight uint32  // VUI sample aspect ratio height
+	chroma    *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
+}
+
+// pixelFormat composes the ffprobe pix_fmt string from a chroma_format_idc and a
+// luma bit depth, or "" when the chroma is unknown. Covers the planar YUV formats
+// real video uses; an unexpected chroma yields "".
+func pixelFormat(chroma, bitDepth *uint16) string {
+	if chroma == nil {
+		return "" // monochrome/unknown handled below for the known cases only
+	}
+	depth := uint16(8)
+	if bitDepth != nil {
+		depth = *bitDepth
+	}
+	suffix := ""
+	switch depth {
+	case 10:
+		suffix = "10le"
+	case 12:
+		suffix = "12le"
+	}
+	switch *chroma {
+	case 0:
+		if suffix == "" {
+			return "gray"
+		}
+		return "gray" + suffix
+	case 1:
+		return "yuv420p" + suffix
+	case 2:
+		return "yuv422p" + suffix
+	case 3:
+		return "yuv444p" + suffix
+	}
+	return ""
 }
 
 // avcSAR is H.264/HEVC Table E-1: aspect_ratio_idc (1–16) → sample aspect ratio
@@ -120,6 +155,11 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 	}
 	if t.Level == nil && bc.level != nil {
 		t.Level = bc.level
+	}
+	if t.PixelFormat == "" {
+		if pf := pixelFormat(bc.chroma, t.VideoBitDepth); pf != "" {
+			t.PixelFormat = pf
+		}
 	}
 	// Sample aspect ratio from the SPS VUI → display dimensions, only when the
 	// container/pasp did not already supply them (those take precedence) and the
@@ -255,7 +295,7 @@ func unescapeRBSP(b []byte) []byte {
 func (bc *bitstreamColour) nonEmpty() bool {
 	return bc.primaries != nil || bc.transfer != nil || bc.matrix != nil ||
 		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil ||
-		bc.sarWidth != 0
+		bc.sarWidth != 0 || bc.chroma != nil
 }
 
 // --- H.264 / AVC ---------------------------------------------------------------
@@ -298,6 +338,8 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	r.ue()                             // seq_parameter_set_id
 	bc.profile = avcProfileName(profileIDC)
 
+	bc.chroma = u16p(1) // Baseline/Main/Extended are always 4:2:0
+
 	high := false
 	switch profileIDC {
 	case 100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135:
@@ -305,6 +347,9 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	}
 	if high {
 		cf := r.ue() // chroma_format_idc
+		if cf <= 3 {
+			bc.chroma = u16p(uint16(cf))
+		}
 		if cf == 3 {
 			r.bit() // separate_colour_plane_flag
 		}
@@ -457,6 +502,13 @@ func hevcColour(cp []byte) *bitstreamColour {
 	bc := &bitstreamColour{}
 	bc.bitDepth = validBitDepth(uint32(cp[17]&0x07) + 8)
 	bc.profile = hevcProfileName(cp[1] & 0x1f)
+	// Main and Main 10 are 4:2:0 by profile definition, so the chroma is known from
+	// the hvcC header even when the SPS is in-band (hev1, no NAL arrays here). The
+	// SPS, when present, overrides with its exact chroma_format_idc.
+	switch cp[1] & 0x1f {
+	case 1, 2:
+		bc.chroma = u16p(1)
+	}
 
 	numArrays := int(cp[22])
 	off := 23
@@ -494,6 +546,9 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 	skipHEVCProfileTierLevel(r, maxSub, bc)
 	r.ue() // sps_seq_parameter_set_id
 	cf := r.ue()
+	if cf <= 3 {
+		bc.chroma = u16p(uint16(cf))
+	}
 	if cf == 3 {
 		r.bit() // separate_colour_plane_flag
 	}
@@ -885,14 +940,43 @@ func parseAV1ColorConfig(r *bitReader, seqProfile uint32, bc *bitstreamColour) {
 	bc.transfer = cicpOrNil(tc)
 	bc.matrix = cicpOrNil(mc)
 	if mono == 1 {
-		bc.rng = spsRange(r.bit()) // color_range
+		bc.chroma = u16p(0) // monochrome
+		bc.rng = spsRange(r.bit())
 		return
 	}
 	if cp == 1 && tc == 13 && mc == 0 {
-		bc.rng = u16p(2) // full range implied
+		bc.chroma = u16p(3) // sRGB → 4:4:4
+		bc.rng = u16p(2)    // full range implied
 		return
 	}
 	bc.rng = spsRange(r.bit()) // color_range
+	// Chroma subsampling per seq_profile (AV1 spec 5.5.2): profile 0 is always
+	// 4:2:0, profile 1 always 4:4:4; profile 2 carries it (4:2:2, or explicit at
+	// 12-bit).
+	switch seqProfile {
+	case 0:
+		bc.chroma = u16p(1)
+	case 1:
+		bc.chroma = u16p(3)
+	default: // profile 2
+		if bitDepth == 12 {
+			sx := r.bit()
+			sy := uint32(0)
+			if sx == 1 {
+				sy = r.bit()
+			}
+			switch {
+			case sx == 1 && sy == 1:
+				bc.chroma = u16p(1)
+			case sx == 1 && sy == 0:
+				bc.chroma = u16p(2)
+			default:
+				bc.chroma = u16p(3)
+			}
+		} else {
+			bc.chroma = u16p(2) // 4:2:2
+		}
+	}
 }
 
 func (r *bitReader) uvlc() uint32 {
@@ -968,6 +1052,14 @@ func vp9Colour(cp []byte) *bitstreamColour {
 	bc.transfer = u16p(uint16(b[4]))
 	bc.matrix = u16p(uint16(b[5]))
 	bc.rng = spsRange(uint32(fullRange))
+	switch (b[2] >> 1) & 0x7 { // chromaSubsampling: 0/1=4:2:0, 2=4:2:2, 3=4:4:4
+	case 0, 1:
+		bc.chroma = u16p(1)
+	case 2:
+		bc.chroma = u16p(2)
+	case 3:
+		bc.chroma = u16p(3)
+	}
 	// Reject obviously-bogus records (all-zero colour with zero bit depth).
 	if bc.bitDepth == nil && b[3] == 0 && b[4] == 0 && b[5] == 0 {
 		return nil

@@ -195,10 +195,13 @@ func CmdProbe(path string) {
 		if t.Rotation != 0 {
 			fmt.Printf("        rotation: %d°\n", t.Rotation)
 		}
-		if t.Profile != "" || t.Level != nil {
+		if t.Profile != "" || t.Level != nil || t.PixelFormat != "" {
 			fmt.Printf("        codec: profile=%q", t.Profile)
 			if t.Level != nil {
 				fmt.Printf(" level=%d", *t.Level)
+			}
+			if t.PixelFormat != "" {
+				fmt.Printf(" pix_fmt=%s", t.PixelFormat)
 			}
 			fmt.Println()
 		}

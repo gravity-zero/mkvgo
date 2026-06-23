@@ -100,6 +100,7 @@ type Track struct {
 	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
 	Profile        string  `json:"profile,omitempty"`         // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
 	Level          *uint16 `json:"level,omitempty"`           // codec level_idc from the SPS (ffprobe level): H.264 10×level, HEVC 30×level
+	PixelFormat    string  `json:"pixel_format,omitempty"`    // ffprobe pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
 	Bitrate        *uint32 `json:"bitrate,omitempty"`         // average stream bitrate in bits/s (MP4 btrt box / esds avgBitrate); nil when unknown
 
 	// DolbyVision holds the decoded dvcC/dvvC configuration when the track signals
