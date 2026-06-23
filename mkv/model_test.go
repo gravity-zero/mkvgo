@@ -69,6 +69,31 @@ func TestAspectRatios(t *testing.T) {
 	}
 }
 
+func TestAvReduce(t *testing.T) {
+	for _, tt := range []struct {
+		num, den, max uint64
+		wantN, wantD  uint64
+	}{
+		// Faithful av_reduce: a pathological near-square ratio under a tight bound
+		// collapses to the (max-1):max best approximation, like ffmpeg → 719:720.
+		{48379, 48420, 720, 719, 720},
+		// Legit ratios stay exact under ffmpeg's 1024*1024 bound.
+		{257, 160, aspectReduceMax, 257, 160},
+		{48379, 48420, aspectReduceMax, 48379, 48420},
+		{16, 9, aspectReduceMax, 16, 9},
+		// Already reduced; gcd applied first.
+		{3840, 2160, aspectReduceMax, 16, 9},
+	} {
+		if n, d := avReduce(tt.num, tt.den, tt.max); n != tt.wantN || d != tt.wantD {
+			t.Errorf("avReduce(%d,%d,%d) = %d:%d, want %d:%d", tt.num, tt.den, tt.max, n, d, tt.wantN, tt.wantD)
+		}
+	}
+	// Both parts must always stay within the bound.
+	if n, d := avReduce(7_000_003, 6_999_999, aspectReduceMax); n > aspectReduceMax || d > aspectReduceMax {
+		t.Errorf("avReduce over-bound: %d:%d exceeds %d", n, d, aspectReduceMax)
+	}
+}
+
 func TestEffectiveSampleRate(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	if got := (&Track{SampleRate: f(24000), OutputSampleRate: f(48000)}).EffectiveSampleRate(); got != 48000 {

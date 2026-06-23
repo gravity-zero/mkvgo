@@ -27,8 +27,11 @@ validated against ffprobe over a sweep of real files.
   HEVC SPS VUI `aspect_ratio_info` (Table E-1 `aspect_ratio_idc`, or Extended_SAR
   `sar_width:sar_height`) — the most common H.264 SAR carrier, read head-only from
   the avcC. The ratio is stored exactly (no rounding that would collapse a fine
-  pixel aspect). Both reader paths and the writer handle the elements; the MP4
-  remux emits a `pasp` box so anamorphic display survives a round trip.
+  pixel aspect), and the helpers reduce it with the same bounded `av_reduce`
+  (1024×1024) ffmpeg uses, so the `sar`/`dar` strings match ffprobe even on
+  pathological near-square ratios. Both reader paths and the writer handle the
+  elements; the MP4 remux emits a `pasp` box so anamorphic display survives a
+  round trip.
 - **Per-stream average bitrate.** `Track.Bitrate` from the MP4 `btrt` box (or the
   esds `avgBitrate` for AAC).
 - CLI `probe` surfaces all of the above (output sample rate, codec profile/level,

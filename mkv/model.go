@@ -149,21 +149,24 @@ func (t *Track) displayDims() (uint32, uint32) {
 }
 
 // DisplayAspectRatio returns the picture aspect ratio ffprobe reports as
-// display_aspect_ratio ("16:9", reduced), from the display dimensions when the
-// stream is anamorphic or the coded dimensions otherwise. "" when no video
-// dimensions are known.
+// display_aspect_ratio ("16:9"), from the display dimensions when the stream is
+// anamorphic or the coded dimensions otherwise. "" when no video dimensions are
+// known. The fraction is reduced with the same bounded av_reduce ffmpeg uses, so
+// a pathological near-square ratio collapses to a sane approximation rather than
+// an absurd one (matching ffprobe).
 func (t *Track) DisplayAspectRatio() string {
 	w, h := t.displayDims()
 	if w == 0 || h == 0 {
 		return ""
 	}
-	g := gcd(uint64(w), uint64(h))
-	return fmt.Sprintf("%d:%d", uint64(w)/g, uint64(h)/g)
+	num, den := avReduce(uint64(w), uint64(h), aspectReduceMax)
+	return fmt.Sprintf("%d:%d", num, den)
 }
 
 // SampleAspectRatio returns the pixel aspect ratio ffprobe reports as
-// sample_aspect_ratio ("1:1" for square pixels, "32:27" for anamorphic, reduced).
-// "" when the coded dimensions are unknown.
+// sample_aspect_ratio ("1:1" for square pixels, "32:27" for anamorphic). "" when
+// the coded dimensions are unknown. Reduced with the same bounded av_reduce as
+// DisplayAspectRatio.
 func (t *Track) SampleAspectRatio() string {
 	if t.Width == nil || t.Height == nil || *t.Width == 0 || *t.Height == 0 {
 		return ""
@@ -175,9 +178,13 @@ func (t *Track) SampleAspectRatio() string {
 	if num == 0 || den == 0 {
 		return "1:1"
 	}
-	g := gcd(num, den)
-	return fmt.Sprintf("%d:%d", num/g, den/g)
+	rn, rd := avReduce(num, den, aspectReduceMax)
+	return fmt.Sprintf("%d:%d", rn, rd)
 }
+
+// aspectReduceMax bounds the numerator and denominator of a reduced aspect ratio.
+// It is ffmpeg's constant for display aspect ratios (av_reduce(..., 1024*1024)).
+const aspectReduceMax = 1024 * 1024
 
 // gcd returns the greatest common divisor of a and b (gcd(x,0)=x).
 func gcd(a, b uint64) uint64 {
@@ -188,6 +195,49 @@ func gcd(a, b uint64) uint64 {
 		return 1
 	}
 	return a
+}
+
+// avReduce reduces num/den to lowest terms, then — if either part still exceeds
+// max — to the best rational approximation whose numerator and denominator are
+// both ≤ max. It is a port of ffmpeg's av_reduce (non-negative inputs), so the
+// SAR/DAR strings match ffprobe, including how it tames absurd near-square ratios.
+func avReduce(num, den, max uint64) (uint64, uint64) {
+	if g := gcd(num, den); g != 0 {
+		num, den = num/g, den/g
+	}
+	a0n, a0d := uint64(0), uint64(1)
+	a1n, a1d := uint64(1), uint64(0)
+	if num <= max && den <= max {
+		a1n, a1d = num, den
+		den = 0
+	}
+	for den != 0 {
+		x := num / den
+		nextDen := num - den*x
+		a2n := x*a1n + a0n
+		a2d := x*a1d + a0d
+		if a2n > max || a2d > max {
+			if a1n != 0 {
+				x = (max - a0n) / a1n
+			}
+			if a1d != 0 {
+				if t := (max - a0d) / a1d; t < x {
+					x = t
+				}
+			}
+			if den*(2*x*a1d+a0d) > num*a1d {
+				a1n, a1d = x*a1n+a0n, x*a1d+a0d
+			}
+			break
+		}
+		a0n, a0d = a1n, a1d
+		a1n, a1d = a2n, a2d
+		num, den = den, nextDen
+	}
+	if a1d == 0 {
+		return a1n, 1
+	}
+	return a1n, a1d
 }
 
 type Chapter struct {
