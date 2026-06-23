@@ -124,10 +124,11 @@ type aacInfo struct {
 //
 // Limitation: HE-AAC v1 with purely *implicit* SBR — where the ASC is a plain
 // AAC-LC config (e.g. 0x1310) and SBR is signalled only in-band in the audio
-// frames — is not detectable from the head alone; ffprobe reports its doubled
-// rate only because it decodes a frame. We report the core rate in that case,
-// the same accepted head-only trade-off as colour read from the SPS VUI. Don't
-// chase it without parsing sample data.
+// frames — is genuinely not detectable from the head alone; ffprobe reports its
+// doubled rate only because it decodes a frame. We report the core rate in that
+// case. This is a true head-only limitation (the data is not in any header),
+// unlike colour, which always lives in a header (colr box or SPS VUI) and is
+// read head-only. Don't chase it without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)
