@@ -4,6 +4,51 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-06-23
+
+Field-equivalence pass: the metadata probe reports more of what ffprobe does,
+validated against ffprobe over a sweep of real files.
+
+### Added
+
+- **Audio output sample rate for SBR (HE-AAC).** `Track.OutputSampleRate` carries
+  the decoder's doubled rate (Matroska `OutputSamplingFrequency` 0x78B5, or the
+  AAC `AudioSpecificConfig` SBR extension rate — explicit AOT 5 and the
+  backward-compatible 0x2b7 sync extension), and `Track.EffectiveSampleRate()`
+  returns what ffprobe reports as `sample_rate`. Read on both the MP4 and Matroska
+  paths; the writer persists 0x78B5 for round-trip.
+- **Codec level.** `Track.Level` exposes the SPS `level_idc` ffprobe reports as
+  `level` (H.264, HEVC, AV1), via the shared codec-bitstream fallback.
+- **Display aspect ratio for anamorphic video.** `Track.DisplayWidth` /
+  `DisplayHeight` (from the MP4 `pasp` box, or the Matroska `DisplayWidth`/
+  `DisplayHeight` 0x54B0/0x54BA elements), with `DisplayAspectRatio()` /
+  `SampleAspectRatio()` helpers returning ffprobe's `display_aspect_ratio` /
+  `sample_aspect_ratio`. Both reader paths (seekable and streaming) and the writer
+  handle the elements; the MP4 remux emits a `pasp` box so anamorphic display
+  survives a round trip.
+- **Per-stream average bitrate.** `Track.Bitrate` from the MP4 `btrt` box (or the
+  esds `avgBitrate` for AAC).
+- CLI `probe` surfaces all of the above (output sample rate, codec profile/level,
+  sample/display aspect ratio, bitrate); `-json` carries the new fields.
+
+### Fixed
+
+- **HE-AACv2 Parametric Stereo channel count.** A PS stream codes a mono core
+  (`channelConfiguration` 1) the decoder upmixes to stereo; `mp4.OpenMeta` now
+  reports 2 channels like ffprobe, detecting both explicit (AOT 29) and
+  backward-compatible (0x2b7 / 0x548) signalling.
+- **QuickTime `nclc` colr type.** The MP4 probe read only the `nclx` colr type and
+  silently skipped the QuickTime `nclc` form, leaving `color_space` empty on files
+  that carry their matrix only there. Both types are now read, each CICP field
+  taken independently (a matrix-only stream still reports its `color_space`).
+
+### Notes
+
+- Documented three accepted head-only limitations — data present only in the media
+  frames, not in any header the probe parses, so ffprobe surfaces it by decoding a
+  frame while mkvgo reports the header values: implicit in-band SBR and Parametric
+  Stereo (audio), and colour signalled only in an in-band SPS (video).
+
 ## [0.8.0] - 2026-06-23
 
 ### Added
@@ -13,25 +58,9 @@ All notable changes to mkvgo are documented here. The format is based on
   ISO 639-2 — including QuickTime Macintosh language codes — and the `elng` BCP-47
   box), the **default** flag (`tkhd` track_enabled), the **forced** flag (DASH-role
   `kind` box), the **audio channel count** (from the AAC `AudioSpecificConfig` and
-  AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field —
-  including HE-AACv2 **Parametric Stereo**, where a mono core decodes to stereo,
-  reported as 2 channels like ffprobe), the **audio output sample rate** for SBR
-  streams (HE-AAC): the new `Track.OutputSampleRate` (Matroska
-  `OutputSamplingFrequency` 0x78B5, or the AAC SBR extension rate) carries the
-  decoder's doubled rate, and `Track.EffectiveSampleRate()` returns what ffprobe
-  reports as `sample_rate`; and **colour** code points (`colr`, both
-  the `nclx` and the QuickTime `nclc` forms, each CICP field taken independently
-  so a stream that specifies only the matrix still reports its colour_space —
-  falling back to the codec bitstream via the now exported
-  `reader.FillColourFromCodecPrivate`), the codec **level** (`Track.Level`,
-  the SPS `level_idc` that ffprobe reports as `level`, for H.264/HEVC/AV1), and
-  the **display aspect ratio** for anamorphic video (`Track.DisplayWidth`/
-  `DisplayHeight` from the MP4 `pasp` box or Matroska `DisplayWidth`/`DisplayHeight`
-  0x54B0/0x54BA, with `SampleAspectRatio()`/`DisplayAspectRatio()` helpers
-  returning ffprobe's `sample_aspect_ratio`/`display_aspect_ratio`). The remux
-  carries display dimensions through in both directions. The per-stream average
-  **bitrate** (`Track.Bitrate`, from the MP4 `btrt` box or the esds
-  `avgBitrate`) is also read.
+  AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field), and
+  **colour** code points (`colr`, falling back to the codec bitstream via the now
+  exported `reader.FillColourFromCodecPrivate`).
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
   each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through
