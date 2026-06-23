@@ -784,10 +784,11 @@ func parseBitrate(tr *inTrack, payload []byte, headerLen int) {
 }
 
 // parsePasp reads a pasp box (PixelAspectRatio: hSpacing:vSpacing) from a visual
-// sample entry and, when the pixels are non-square, records the intended display
-// dimensions (display width = coded width × hSpacing / vSpacing, height
-// unchanged) — the same derivation ffmpeg's mov demuxer applies. Square pixels
-// (1:1) leave the fields unset.
+// sample entry and, when the pixels are non-square, records the display aspect as
+// DisplayWidth:DisplayHeight = (codedWidth·hSpacing):(codedHeight·vSpacing),
+// reduced. The ratio is stored exactly rather than as rounded display pixels:
+// rounding would collapse a fine ratio (e.g. a 426:425 pasp) to square and yield
+// the wrong sample/display aspect. Square pixels (1:1) leave the fields unset.
 func parsePasp(tr *inTrack, payload []byte, headerLen int) {
 	if len(payload) < headerLen || tr.width == 0 || tr.height == 0 {
 		return
@@ -805,8 +806,11 @@ func parsePasp(tr *inTrack, payload []byte, headerLen int) {
 	if h == 0 || v == 0 || h == v {
 		return // missing or square pixels
 	}
-	tr.displayWidth = uint32(int64(tr.width) * int64(h) / int64(v))
-	tr.displayHeight = tr.height
+	dw := uint64(tr.width) * uint64(h)
+	dh := uint64(tr.height) * uint64(v)
+	g := gcdU64(dw, dh)
+	tr.displayWidth = uint32(dw / g)
+	tr.displayHeight = uint32(dh / g)
 }
 
 // parseDolbyVision reads a dvcC or dvvC box from a visual sample entry and records

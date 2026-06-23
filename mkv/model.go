@@ -81,9 +81,11 @@ type Track struct {
 	// container Colour element is absent — the container value still wins per field.
 	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
 	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
-	// Display dimensions for anamorphic video, nil when pixels are square. From the
-	// Matroska DisplayWidth/DisplayHeight (0x54B0/0x54BA) or derived from the MP4
-	// pasp box. See DisplayAspectRatio / SampleAspectRatio.
+	// Display dimensions for anamorphic video, nil when pixels are square. Their
+	// ratio is the display aspect: literal pixels from the Matroska
+	// DisplayWidth/DisplayHeight (0x54B0/0x54BA), or the reduced (codedW·hSpacing):
+	// (codedH·vSpacing) fraction derived from the MP4 pasp box. Read the aspect via
+	// DisplayAspectRatio / SampleAspectRatio rather than these raw values.
 	DisplayWidth  *uint32 `json:"display_width,omitempty"`
 	DisplayHeight *uint32 `json:"display_height,omitempty"`
 	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings

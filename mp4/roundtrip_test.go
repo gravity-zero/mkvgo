@@ -62,9 +62,11 @@ func TestRoundTripColourAndSubtitles(t *testing.T) {
 			video.ColorPrimaries, video.ColorTransfer, video.ColorSpace)
 	}
 
-	// The anamorphic display dimensions must survive (via the pasp box) → DAR 16:9.
-	if video.DisplayWidth == nil || *video.DisplayWidth != 3840 || video.DisplayAspectRatio() != "16:9" {
-		t.Errorf("display dims not round-tripped: width=%v DAR=%q", video.DisplayWidth, video.DisplayAspectRatio())
+	// The anamorphic display ASPECT must survive (via the pasp box). MP4 carries
+	// only the ratio, not literal display pixels, so the DAR is the invariant.
+	if video.DisplayWidth == nil || video.DisplayAspectRatio() != "16:9" {
+		t.Errorf("display aspect not round-tripped: dims=%v/%v DAR=%q",
+			video.DisplayWidth, video.DisplayHeight, video.DisplayAspectRatio())
 	}
 
 	// Subtitle cues must survive with their text (markup stripped) and a duration.

@@ -190,8 +190,7 @@ func CmdProbe(path string) {
 		}
 		fmt.Println()
 		if t.Type == matroska.VideoTrack && t.DisplayWidth != nil && t.DisplayHeight != nil {
-			fmt.Printf("        aspect: display=%dx%d sar=%s dar=%s\n",
-				*t.DisplayWidth, *t.DisplayHeight, t.SampleAspectRatio(), t.DisplayAspectRatio())
+			fmt.Printf("        aspect: sar=%s dar=%s\n", t.SampleAspectRatio(), t.DisplayAspectRatio())
 		}
 		if t.Profile != "" || t.Level != nil {
 			fmt.Printf("        codec: profile=%q", t.Profile)

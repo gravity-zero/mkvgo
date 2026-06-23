@@ -330,23 +330,33 @@ func TestParseBitrate(t *testing.T) {
 	}
 }
 
-// TestParsePasp checks the pasp box → display-dimension derivation: an anamorphic
-// ratio sets DisplayWidth = Width·hSpacing/vSpacing; square pixels leave it unset.
+// TestParsePasp checks the pasp box → display aspect, stored exactly (no rounding
+// that would collapse a fine ratio). Asserts via the ffprobe-equivalent helpers.
 func TestParsePasp(t *testing.T) {
-	// pasp 32:27 over a 720×576 coded frame → display 720·32/27 = 853, height 576.
-	entry := append(make([]byte, 78), box("pasp", append(u32be(32), u32be(27)...))...)
-	tr := inTrack{width: 720, height: 576}
-	parsePasp(&tr, entry, 78)
-	if tr.displayWidth != 853 || tr.displayHeight != 576 {
-		t.Errorf("anamorphic pasp → %dx%d, want 853x576", tr.displayWidth, tr.displayHeight)
+	asp := func(w, h, hs, vs uint32) (string, string) {
+		entry := append(make([]byte, 78), box("pasp", append(u32be(hs), u32be(vs)...))...)
+		tr := inTrack{width: w, height: h}
+		parsePasp(&tr, entry, 78)
+		mt := mkv.Track{Width: &w, Height: &h}
+		if tr.displayWidth > 0 {
+			dw, dh := tr.displayWidth, tr.displayHeight
+			mt.DisplayWidth, mt.DisplayHeight = &dw, &dh
+		}
+		return mt.SampleAspectRatio(), mt.DisplayAspectRatio()
 	}
 
-	// Square pixels (1:1) leave the display dimensions unset.
-	square := append(make([]byte, 78), box("pasp", append(u32be(1), u32be(1)...))...)
-	sq := inTrack{width: 1920, height: 1080}
-	parsePasp(&sq, square, 78)
-	if sq.displayWidth != 0 || sq.displayHeight != 0 {
-		t.Errorf("square pasp should not set display dims, got %dx%d", sq.displayWidth, sq.displayHeight)
+	// 720×576, pasp 32:27 → SAR 32:27, DAR 40:27.
+	if sar, dar := asp(720, 576, 32, 27); sar != "32:27" || dar != "40:27" {
+		t.Errorf("32:27 pasp → sar=%s dar=%s, want 32:27 / 40:27", sar, dar)
+	}
+	// Real fine ratio (roubaix.mp4): 340×426, pasp 426:425 → SAR 426:425, DAR 4:5.
+	// The old rounding collapsed this to 1:1; the exact ratio must survive.
+	if sar, dar := asp(340, 426, 426, 425); sar != "426:425" || dar != "4:5" {
+		t.Errorf("426:425 pasp → sar=%s dar=%s, want 426:425 / 4:5", sar, dar)
+	}
+	// Square pixels (1:1) leave the display dimensions unset → SAR 1:1, DAR coded.
+	if sar, dar := asp(1920, 1080, 1, 1); sar != "1:1" || dar != "16:9" {
+		t.Errorf("square pasp → sar=%s dar=%s, want 1:1 / 16:9", sar, dar)
 	}
 }
 
