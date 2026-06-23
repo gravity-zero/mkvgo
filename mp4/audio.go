@@ -121,6 +121,13 @@ type aacInfo struct {
 // Both the explicit hierarchical form (audioObjectType 5 = SBR, 29 = PS up front)
 // and the backward-compatible trailing sync extension (0x2b7 → SBR, 0x548 → PS)
 // are detected.
+//
+// Limitation: HE-AAC v1 with purely *implicit* SBR — where the ASC is a plain
+// AAC-LC config (e.g. 0x1310) and SBR is signalled only in-band in the audio
+// frames — is not detectable from the head alone; ffprobe reports its doubled
+// rate only because it decodes a frame. We report the core rate in that case,
+// the same accepted head-only trade-off as colour read from the SPS VUI. Don't
+// chase it without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)
