@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -52,6 +53,7 @@ type inTrack struct {
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
 	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
+	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
 	timescale        uint32
 	samples          []inSample
 
@@ -281,6 +283,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 		tr.enabled = tkhdEnabled(tkhd.payload)
 		tr.flagsKnown = true
 		trackID = uint64(tkhdTrackID(tkhd.payload))
+		tr.rotation = tkhdRotation(tkhd.payload)
 	}
 	// MP4 has no native "forced" flag; ffmpeg records it as a track-level kind box
 	// with the DASH role scheme (e.g. value "forced-subtitle"), which its demuxer
@@ -577,6 +580,31 @@ func tkhdTrackID(payload []byte) uint32 {
 		return 0
 	}
 	return binary.BigEndian.Uint32(payload[off : off+4])
+}
+
+// tkhdRotation reads the 3×3 display matrix from a track header and returns the
+// clockwise display rotation in degrees, normalised to [0,360). The angle comes
+// from the matrix's a,b entries (16.16 fixed point): rotation = atan2(b, a). The
+// matrix sits after the (version-dependent) timing fields, the reserved/layer/
+// group/volume block. Returns 0 on an identity matrix or a short box.
+func tkhdRotation(payload []byte) int {
+	if len(payload) < 1 {
+		return 0
+	}
+	matOff := 40 // v0: 4 + (4+4+4+4+4) + 8 + (2+2+2+2)
+	if payload[0] == 1 {
+		matOff = 52 // v1: timing fields are 8-byte
+	}
+	if len(payload) < matOff+8 {
+		return 0
+	}
+	a := int32(binary.BigEndian.Uint32(payload[matOff : matOff+4]))
+	b := int32(binary.BigEndian.Uint32(payload[matOff+4 : matOff+8]))
+	if a == 0 && b == 0 {
+		return 0
+	}
+	deg := int(math.Round(math.Atan2(float64(b), float64(a)) * 180 / math.Pi))
+	return ((deg % 360) + 360) % 360
 }
 
 // quoteFourcc renders a four-character box type for a reason string, escaping any

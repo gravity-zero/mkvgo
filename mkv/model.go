@@ -81,6 +81,10 @@ type Track struct {
 	// container Colour element is absent — the container value still wins per field.
 	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
 	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
+	// Rotation is the clockwise display rotation in degrees (0/90/180/270) from the
+	// MP4 tkhd display matrix; 0 when none/unknown. Phone videos commonly encode 90
+	// or 270 (portrait). ffprobe exposes the same matrix as Display Matrix side data.
+	Rotation int `json:"rotation,omitempty"`
 	// Display dimensions for anamorphic video, nil when pixels are square. Their
 	// ratio is the display aspect: literal pixels from the Matroska
 	// DisplayWidth/DisplayHeight (0x54B0/0x54BA), or the reduced (codedW·hSpacing):

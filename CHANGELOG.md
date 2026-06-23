@@ -38,6 +38,9 @@ validated against ffprobe over a sweep of real files.
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without
   expanding the sample table (it previously needed `Options{Keyframes: true}`).
+- **Display rotation.** `Track.Rotation` (0/90/180/270, clockwise) read from the
+  MP4 `tkhd` display matrix — the same matrix ffprobe exposes as Display Matrix
+  side data. Lets a player show portrait phone video the right way up.
 - CLI `probe` surfaces all of the above (output sample rate, codec profile/level,
   sample/display aspect ratio, bitrate); `-json` carries the new fields.
 

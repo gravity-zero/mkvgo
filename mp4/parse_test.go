@@ -308,6 +308,40 @@ func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)
 
 func u32be(v uint32) []byte { return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
 
+// TestTkhdRotation checks the display-matrix → clockwise-rotation derivation for
+// the four cardinal orientations (the matrix a,b entries, 16.16 fixed point).
+func TestTkhdRotation(t *testing.T) {
+	// buildTkhd builds a v0 tkhd with the given matrix a,b (rest of the matrix is
+	// irrelevant to rotation); 40-byte prefix + matrix(36) + width/height(8).
+	buildTkhd := func(a, b uint32) []byte {
+		p := make([]byte, 40)
+		p[0] = 0                   // version 0
+		p = append(p, u32be(a)...) // matrix a
+		p = append(p, u32be(b)...) // matrix b
+		p = append(p, make([]byte, 28+8)...)
+		return p
+	}
+	const one = 0x10000    // 1.0 in 16.16
+	const neg = 0xFFFF0000 // -1.0 in 16.16
+	for _, tt := range []struct {
+		name string
+		a, b uint32
+		want int
+	}{
+		{"identity 0°", one, 0, 0},
+		{"90° CW", 0, one, 90},
+		{"180°", neg, 0, 180},
+		{"270° CW", 0, neg, 270},
+	} {
+		if got := tkhdRotation(buildTkhd(tt.a, tt.b)); got != tt.want {
+			t.Errorf("%s: rotation = %d, want %d", tt.name, got, tt.want)
+		}
+	}
+	if got := tkhdRotation([]byte{0, 0, 0}); got != 0 {
+		t.Errorf("short tkhd should be 0, got %d", got)
+	}
+}
+
 // TestParseBitrate checks the btrt box → average bitrate, with the maxBitrate
 // fallback when the average is zero.
 func TestParseBitrate(t *testing.T) {
