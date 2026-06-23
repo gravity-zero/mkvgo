@@ -45,8 +45,12 @@ validated against ffprobe over a sweep of real files.
 - **Frame count.** `Track.FrameCount` (ffprobe `nb_frames`) from the MP4 `stsz`/
   `stz2` sample count — read head-only, no sample-table expansion. Matroska has no
   head-only frame count, so it stays 0 there.
-- **Display rotation, pixel format, field order and frame count** are printed by
-  the CLI `probe` and carried in `-json`.
+- **Codec long name and channel layout.** `Track.CodecLongName()` returns ffprobe's
+  `codec_long_name` (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"), and
+  `Track.ChannelLayout()` returns `channel_layout` ("stereo", "5.1(side)", …) from
+  the channel count — display strings the fast path previously omitted.
+- **Display rotation, pixel format, field order, frame count, codec long name and
+  channel layout** are printed by the CLI `probe` and carried in `-json`.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without

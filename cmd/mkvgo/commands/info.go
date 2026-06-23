@@ -172,6 +172,9 @@ func CmdProbe(path string) {
 		}
 		if t.Channels != nil {
 			fmt.Printf("  %dch", *t.Channels)
+			if cl := t.ChannelLayout(); cl != "" {
+				fmt.Printf("(%s)", cl)
+			}
 		}
 		if t.BitDepth != nil {
 			fmt.Printf("  %dbit", *t.BitDepth)
@@ -192,6 +195,9 @@ func CmdProbe(path string) {
 			fmt.Printf("  codec_private=%d bytes", len(t.CodecPrivate))
 		}
 		fmt.Println()
+		if ln := t.CodecLongName(); ln != "" {
+			fmt.Printf("        codec_long_name: %s\n", ln)
+		}
 		if t.Type == matroska.VideoTrack && t.DisplayWidth != nil && t.DisplayHeight != nil {
 			fmt.Printf("        aspect: sar=%s dar=%s\n", t.SampleAspectRatio(), t.DisplayAspectRatio())
 		}

@@ -94,6 +94,35 @@ func TestAvReduce(t *testing.T) {
 	}
 }
 
+func TestCodecLongNameAndChannelLayout(t *testing.T) {
+	if got := (&Track{Codec: "h264"}).CodecLongName(); got != "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10" {
+		t.Errorf("h264 long name = %q", got)
+	}
+	if got := (&Track{Codec: "eac3"}).CodecLongName(); got != "ATSC A/52B (AC-3, E-AC-3)" {
+		t.Errorf("eac3 long name = %q", got)
+	}
+	if got := (&Track{Codec: "wat"}).CodecLongName(); got != "" {
+		t.Errorf("unknown codec long name = %q, want empty", got)
+	}
+	u8 := func(v uint8) *uint8 { return &v }
+	for _, tt := range []struct {
+		codec string
+		ch    *uint8
+		want  string
+	}{
+		{"aac", u8(1), "mono"},
+		{"aac", u8(2), "stereo"},
+		{"eac3", u8(6), "5.1(side)"}, // E-AC-3 surrounds at the sides
+		{"ac3", u8(6), "5.1"},        // AC-3 uses the back positions
+		{"aac", u8(8), "7.1"},
+		{"aac", nil, ""},
+	} {
+		if got := (&Track{Codec: tt.codec, Channels: tt.ch}).ChannelLayout(); got != tt.want {
+			t.Errorf("ChannelLayout(%s,%v) = %q, want %q", tt.codec, tt.ch, got, tt.want)
+		}
+	}
+}
+
 func TestEffectiveSampleRate(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	if got := (&Track{SampleRate: f(24000), OutputSampleRate: f(48000)}).EffectiveSampleRate(); got != 48000 {
