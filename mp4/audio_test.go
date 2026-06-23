@@ -270,6 +270,58 @@ func TestChannelCountsFromConfig(t *testing.T) {
 		t.Errorf("aacChannels(fakeASC) = %d, want 2", got)
 	}
 
+	// HE-AACv2 with explicit hierarchical signalling: AOT=29 (PS), mono core
+	// (channelConfiguration=1) → the decoder upmixes to stereo, so 2 channels.
+	explicitPS := func() []byte {
+		var w bitWriter
+		w.write(29, 5) // audioObjectType = PS
+		w.write(4, 4)  // samplingFrequencyIndex
+		w.write(1, 4)  // channelConfiguration = mono core
+		w.write(4, 4)  // extensionSamplingFrequencyIndex
+		w.write(2, 5)  // underlying audioObjectType = AAC-LC
+		return w.bytes()
+	}()
+	if got := aacChannels(explicitPS); got != 2 {
+		t.Errorf("aacChannels(explicit PS) = %d, want 2", got)
+	}
+
+	// HE-AACv2 with backward-compatible signalling: front says AAC-LC mono, a
+	// trailing sync extension (0x2b7 SBR, then 0x548 PS) flags Parametric Stereo.
+	backCompatPS := func(psFlag uint32) []byte {
+		var w bitWriter
+		w.write(2, 5) // audioObjectType = AAC-LC
+		w.write(4, 4) // samplingFrequencyIndex
+		w.write(1, 4) // channelConfiguration = mono
+		// GASpecificConfig (AAC-LC, cc!=0): frameLengthFlag, dependsOnCoreCoder,
+		// extensionFlag — all zero.
+		w.write(0, 3)
+		w.write(0x2b7, 11) // syncExtensionType: SBR
+		w.write(5, 5)      // extension audioObjectType = SBR
+		w.write(1, 1)      // sbrPresentFlag
+		w.write(4, 4)      // extensionSamplingFrequencyIndex
+		w.write(0x548, 11) // syncExtensionType: PS
+		w.write(psFlag, 1) // psPresentFlag
+		return w.bytes()
+	}
+	if got := aacChannels(backCompatPS(1)); got != 2 {
+		t.Errorf("aacChannels(backward-compat PS) = %d, want 2", got)
+	}
+	// Same stream, SBR only (psPresentFlag=0): a mono core stays mono.
+	if got := aacChannels(backCompatPS(0)); got != 1 {
+		t.Errorf("aacChannels(SBR mono, no PS) = %d, want 1", got)
+	}
+	// Plain AAC-LC mono with no extension stays mono.
+	monoLC := func() []byte {
+		var w bitWriter
+		w.write(2, 5)
+		w.write(4, 4)
+		w.write(1, 4)
+		return w.bytes()
+	}()
+	if got := aacChannels(monoLC); got != 1 {
+		t.Errorf("aacChannels(mono LC) = %d, want 1", got)
+	}
+
 	// AC-3 dac3: acmod=7 (3/2), lfeon=1 → 5.1.
 	dac3 := func() []byte {
 		var w bitWriter

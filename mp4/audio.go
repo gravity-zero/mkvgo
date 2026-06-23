@@ -94,21 +94,125 @@ var ac3AcmodChannels = [8]uint8{2, 1, 2, 3, 3, 4, 4, 5}
 // means the layout is carried in a program config element (not resolved here).
 var aacConfigChannels = [8]uint8{0, 1, 2, 3, 4, 5, 6, 8}
 
-// aacChannels reads the channelConfiguration from an AudioSpecificConfig.
+// aacChannels returns the number of channels an AAC decoder configured by asc
+// (an AudioSpecificConfig) produces. It is more than the front
+// channelConfiguration: a Parametric Stereo stream (HE-AACv2) codes a mono core
+// — channelConfiguration 1 — but the decoder reconstructs a stereo signal, so
+// ffmpeg/ffprobe report 2 channels. Both signalling forms are detected:
+//
+//   - explicit hierarchical: audioObjectType 29 (PS) up front;
+//   - backward-compatible: a trailing sync extension (0x2b7 → SBR, then an inner
+//     0x548 → PS) after the GASpecificConfig.
+//
+// Returns 0 when the channel layout is carried in a program config element
+// (channelConfiguration 0), so the caller keeps the sample-entry value.
 func aacChannels(asc []byte) uint8 {
 	r := &bitReader{data: asc}
-	aot := r.bits(5)
-	if aot == 31 { // escape: audioObjectTypeExt
-		r.skip(6)
-	}
-	if r.bits(4) == 15 { // samplingFrequencyIndex == 0xF → explicit 24-bit rate
+	aot := getAudioObjectType(r)
+	if r.bits(4) == 0xF { // samplingFrequencyIndex == 0xF → explicit 24-bit rate
 		r.skip(24)
 	}
 	cc := r.bits(4)
-	if r.err || cc >= uint32(len(aacConfigChannels)) {
+
+	ps := false
+	explicitExt := false
+	if aot == 5 || aot == 29 { // SBR or PS signalled hierarchically up front
+		explicitExt = true
+		if aot == 29 {
+			ps = true
+		}
+		if r.bits(4) == 0xF { // extensionSamplingFrequencyIndex
+			r.skip(24)
+		}
+		aot = getAudioObjectType(r) // underlying object type
+		if aot == 22 {              // ER BSAC carries an extension channel config
+			r.skip(4)
+		}
+	}
+
+	// Backward-compatible signalling rides as a sync extension after the
+	// GASpecificConfig. ffmpeg only looks for it when SBR was not already signalled
+	// explicitly, so walk the GASpecificConfig to position the reader, then probe.
+	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc) {
+		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
+			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
+				if r.bits(4) == 0xF { // extensionSamplingFrequencyIndex
+					r.skip(24)
+				}
+				if bitsLeft(r) >= 12 && r.bits(11) == 0x548 { // syncExtensionType: PS
+					ps = r.bits(1) == 1 // psPresentFlag
+				}
+			}
+		}
+	}
+
+	return aacChannelsFrom(cc, ps)
+}
+
+// aacChannelsFrom resolves a channelConfiguration plus a Parametric Stereo flag
+// to the decoder's output channel count: a PS stream over a mono core yields 2.
+func aacChannelsFrom(cc uint32, ps bool) uint8 {
+	if cc == 0 || cc >= uint32(len(aacConfigChannels)) {
 		return 0
 	}
-	return aacConfigChannels[cc]
+	ch := aacConfigChannels[cc]
+	if ps && ch == 1 {
+		ch = 2
+	}
+	return ch
+}
+
+// getAudioObjectType reads an AAC audioObjectType: 5 bits, or 5+6 (escape) when
+// the first five are all ones.
+func getAudioObjectType(r *bitReader) uint32 {
+	aot := r.bits(5)
+	if aot == 31 {
+		aot = 32 + r.bits(6)
+	}
+	return aot
+}
+
+// bitsLeft reports how many bits remain unread in r.
+func bitsLeft(r *bitReader) int {
+	return len(r.data)*8 - int(r.pos)
+}
+
+// isGAObjectType reports whether aot uses a GASpecificConfig (the General Audio
+// object types whose config skipGASpecificConfig can walk).
+func isGAObjectType(aot uint32) bool {
+	switch aot {
+	case 1, 2, 3, 4, 6, 7, 17, 19, 20, 21, 22, 23:
+		return true
+	}
+	return false
+}
+
+// skipGASpecificConfig advances r past a GASpecificConfig (ISO/IEC 14496-3
+// §4.4.1) so the reader is positioned at any trailing sync extension. It returns
+// false — and leaves the position unusable — when the layout cannot be walked
+// (a program config element) or the buffer runs out.
+func skipGASpecificConfig(r *bitReader, aot, cc uint32) bool {
+	if cc == 0 {
+		return false // program_config_element: not walked
+	}
+	r.skip(1)           // frameLengthFlag
+	if r.bits(1) == 1 { // dependsOnCoreCoder
+		r.skip(14) // coreCoderDelay
+	}
+	extensionFlag := r.bits(1)
+	if aot == 6 || aot == 20 {
+		r.skip(3) // layerNr
+	}
+	if extensionFlag == 1 {
+		if aot == 22 {
+			r.skip(5 + 11) // numOfSubFrame + layer_length
+		}
+		if aot == 17 || aot == 19 || aot == 20 || aot == 23 {
+			r.skip(3) // section/scalefactor/spectral data resilience flags
+		}
+		r.skip(1) // extensionFlag3
+	}
+	return !r.err
 }
 
 // ac3Channels reads acmod + lfeon from a dac3 (AC3SpecificBox) payload.

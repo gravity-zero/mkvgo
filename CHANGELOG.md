@@ -13,8 +13,9 @@ All notable changes to mkvgo are documented here. The format is based on
   ISO 639-2 — including QuickTime Macintosh language codes — and the `elng` BCP-47
   box), the **default** flag (`tkhd` track_enabled), the **forced** flag (DASH-role
   `kind` box), the **audio channel count** (from the AAC `AudioSpecificConfig` and
-  AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field), and
-  **colour** code points (`colr`, falling back to the codec bitstream via the now
+  AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field —
+  including HE-AACv2 **Parametric Stereo**, where a mono core decodes to stereo,
+  reported as 2 channels like ffprobe), and **colour** code points (`colr`, falling back to the codec bitstream via the now
   exported `reader.FillColourFromCodecPrivate`).
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
