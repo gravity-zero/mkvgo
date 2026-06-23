@@ -86,9 +86,10 @@ func containerFromMovie(mv *movie) *mkv.Container {
 	if durMs == 0 {
 		durMs = mv.durationMs
 	}
-	return &mkv.Container{
+	c := &mkv.Container{
 		Info: mkv.SegmentInfo{
 			TimecodeScale: scale,
+			Title:         mv.title,
 			MuxingApp:     "mkvgo",
 			WritingApp:    "mkvgo",
 			Duration:      float64(durMs),
@@ -98,6 +99,10 @@ func containerFromMovie(mv *movie) *mkv.Container {
 		DurationMs: durMs,
 		Keyframes:  videoKeyframesMs(mv),
 	}
+	if len(mv.tags) > 0 {
+		c.Tags = []mkv.Tag{{SimpleTags: mv.tags}}
+	}
+	return c
 }
 
 // videoKeyframesMs returns the first video track's keyframe presentation

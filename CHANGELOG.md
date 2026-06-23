@@ -49,6 +49,11 @@ validated against ffprobe over a sweep of real files.
   the MP4 `mdhd` (duration ÷ media timescale), so a track that differs from the
   movie length is reported individually. Matroska carries no per-track header
   duration, so it stays 0 there.
+- **MP4 file-level tags.** The metadata probe now reads the iTunes/QuickTime
+  `udta`/`meta`/`ilst` atoms — `Container.Tags` gets the text tags (`©nam`→`TITLE`,
+  `©ART`→`ARTIST`, `©day`→`DATE_RELEASED`, `©too`→`ENCODER`, …) and `Info.Title` is
+  filled from `©nam`, matching how the Matroska reader exposes tags. Non-text atoms
+  (cover art) are skipped.
 - **Codec long name and channel layout.** `Track.CodecLongName()` returns ffprobe's
   `codec_long_name` (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"), and
   `Track.ChannelLayout()` returns `channel_layout` ("stereo", "5.1(side)", …) from

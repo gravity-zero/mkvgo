@@ -308,6 +308,40 @@ func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)
 
 func u32be(v uint32) []byte { return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
 
+// TestParseMP4Tags checks the udta/meta/ilst iTunes-tag reader: text atoms become
+// Matroska SimpleTags (with the title surfaced separately), non-text atoms (cover
+// art) are skipped.
+func TestParseMP4Tags(t *testing.T) {
+	data := func(s string) []byte { // a "data" box: type 1 (UTF-8), locale 0, value
+		return box("data", append([]byte{0, 0, 0, 1, 0, 0, 0, 0}, s...))
+	}
+	cover := box("covr", box("data", []byte{0, 0, 0, 13, 0, 0, 0, 0, 0xFF, 0xD8})) // type 13 = JPEG, skipped
+	ilst := box("ilst", bytes.Join([][]byte{
+		box("\xa9nam", data("My Title")),
+		box("\xa9too", data("Lavf60")),
+		cover,
+	}, nil))
+	meta := box("meta", append([]byte{0, 0, 0, 0}, ilst...)) // meta FullBox: version/flags + children
+	udtaBoxes, err := iterBoxes(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags, title := parseMP4Tags(udtaBoxes)
+	if title != "My Title" {
+		t.Errorf("title = %q, want My Title", title)
+	}
+	got := map[string]string{}
+	for _, st := range tags {
+		got[st.Name] = st.Value
+	}
+	if got["TITLE"] != "My Title" || got["ENCODER"] != "Lavf60" {
+		t.Errorf("tags = %v, want TITLE/ENCODER", got)
+	}
+	if _, ok := got["covr"]; ok || len(tags) != 2 {
+		t.Errorf("cover art (non-text) must be skipped, got %d tags: %v", len(tags), got)
+	}
+}
+
 // TestTkhdRotation checks the display-matrix → clockwise-rotation derivation for
 // the four cardinal orientations (the matrix a,b entries, 16.16 fixed point).
 func TestTkhdRotation(t *testing.T) {

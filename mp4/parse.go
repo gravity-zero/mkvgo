@@ -85,7 +85,9 @@ type movie struct {
 	tracks     []inTrack
 	chapters   []mkv.Chapter
 	dropped    []DroppedTrack
-	durationMs int64 // from mvhd, used when the sample table was not built
+	durationMs int64           // from mvhd, used when the sample table was not built
+	tags       []mkv.SimpleTag // file-level metadata from udta/meta/ilst
+	title      string          // ©nam, for Info.Title
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -229,9 +231,88 @@ func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 			if chpl, ok := findMemBox(ub, "chpl"); ok {
 				mv.chapters = parseChpl(chpl.payload)
 			}
+			mv.tags, mv.title = parseMP4Tags(ub)
 		}
 	}
 	return &mv, nil
+}
+
+// metaAtomNames maps the common iTunes/QuickTime ilst atom types to Matroska-style
+// tag names. The leading byte 0xA9 is the "©" copyright-sign prefix.
+var metaAtomNames = map[string]string{
+	"\xa9nam": "TITLE",
+	"\xa9ART": "ARTIST",
+	"\xa9alb": "ALBUM",
+	"\xa9day": "DATE_RELEASED",
+	"\xa9gen": "GENRE",
+	"\xa9cmt": "COMMENT",
+	"\xa9too": "ENCODER",
+	"\xa9wrt": "COMPOSER",
+	"desc":    "DESCRIPTION",
+}
+
+// parseMP4Tags reads file-level metadata from a udta box's meta/ilst atoms (the
+// iTunes-style tags). It returns the tags as Matroska SimpleTags plus the title
+// (©nam), for Info.Title. Non-text values (cover art, etc.) are skipped.
+func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string) {
+	meta, ok := findMemBox(udtaBoxes, "meta")
+	if !ok || len(meta.payload) < 4 {
+		return nil, ""
+	}
+	// meta is a FullBox: 4 bytes of version/flags precede its child boxes. A few
+	// muxers omit them, so fall back to parsing from the start.
+	metaBoxes, err := iterBoxes(meta.payload[4:])
+	if err != nil || !hasMemBox(metaBoxes, "ilst") {
+		if mb, err2 := iterBoxes(meta.payload); err2 == nil && hasMemBox(mb, "ilst") {
+			metaBoxes = mb
+		}
+	}
+	ilst, ok := findMemBox(metaBoxes, "ilst")
+	if !ok {
+		return nil, ""
+	}
+	atoms, err := iterBoxes(ilst.payload)
+	if err != nil {
+		return nil, ""
+	}
+	for _, a := range atoms {
+		name, ok := metaAtomNames[a.typ]
+		if !ok {
+			continue
+		}
+		val := ilstDataValue(a.payload)
+		if val == "" {
+			continue
+		}
+		tags = append(tags, mkv.SimpleTag{Name: name, Value: val})
+		if name == "TITLE" {
+			title = val
+		}
+	}
+	return tags, title
+}
+
+func hasMemBox(boxes []memBox, typ string) bool {
+	_, ok := findMemBox(boxes, typ)
+	return ok
+}
+
+// ilstDataValue extracts the UTF-8 text value from an ilst atom's "data" box,
+// or "" when the atom carries a non-text value (binary/integer, e.g. cover art).
+func ilstDataValue(atomPayload []byte) string {
+	boxes, err := iterBoxes(atomPayload)
+	if err != nil {
+		return ""
+	}
+	data, ok := findMemBox(boxes, "data")
+	if !ok || len(data.payload) < 8 {
+		return ""
+	}
+	// data: version(1)+well-known-type(3) reserved(4) value… Type 1 is UTF-8 text.
+	if binary.BigEndian.Uint32(data.payload[0:4])&0xFFFFFF != 1 {
+		return ""
+	}
+	return strings.TrimRight(string(data.payload[8:]), "\x00")
 }
 
 // chapterTrackRefs returns the set of track_IDs referenced as QuickTime chapter
