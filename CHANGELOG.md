@@ -28,12 +28,16 @@ validated against ffprobe over a sweep of real files.
   `sar_width:sar_height`) — the most common H.264 SAR carrier, read head-only from
   the avcC. The ratio is stored exactly (no rounding that would collapse a fine
   pixel aspect), and the helpers reduce it with the same bounded `av_reduce`
-  (1024×1024) ffmpeg uses, so the `sar`/`dar` strings match ffprobe even on
-  pathological near-square ratios. Both reader paths and the writer handle the
+  (1024×1024) ffmpeg uses, so the `sar`/`dar` strings match ffprobe on every
+  ordinary ratio and tame absurd ones. Both reader paths and the writer handle the
   elements; the MP4 remux emits a `pasp` box so anamorphic display survives a
   round trip.
 - **Per-stream average bitrate.** `Track.Bitrate` from the MP4 `btrt` box (or the
   esds `avgBitrate` for AAC).
+- **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
+  `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
+  for constant-frame-rate video — so the metadata probe reports it without
+  expanding the sample table (it previously needed `Options{Keyframes: true}`).
 - CLI `probe` surfaces all of the above (output sample rate, codec profile/level,
   sample/display aspect ratio, bitrate); `-json` carries the new fields.
 
@@ -54,6 +58,11 @@ validated against ffprobe over a sweep of real files.
   frames, not in any header the probe parses, so ffprobe surfaces it by decoding a
   frame while mkvgo reports the header values: implicit in-band SBR and Parametric
   Stereo (audio), and colour signalled only in an in-band SPS (video).
+- On pathological **near-square** sample aspect ratios, ffprobe's `sample_aspect_ratio`
+  can differ from mkvgo's: ffprobe re-derives the SAR from the dimension-reduced DAR
+  (so the same VUI SAR prints differently at different resolutions), whereas mkvgo
+  reports the exact VUI/`pasp` ratio. Display-only and imperceptible (all ≈ the same
+  picture shape); mkvgo keeps the true signal rather than mirror that quirk.
 
 ## [0.8.0] - 2026-06-23
 

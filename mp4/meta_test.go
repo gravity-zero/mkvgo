@@ -174,3 +174,26 @@ func TestOpenMetaNoMoov(t *testing.T) {
 		t.Fatal("OpenMeta on a moov-less file should error")
 	}
 }
+
+// TestOpenMetaFrameRateHeadOnly checks the video frame rate is reported on the
+// head-only path (no Keyframes option, so the sample table is never expanded).
+// It is derived from the stts header (timescale / first sample_delta).
+func TestOpenMetaFrameRateHeadOnly(t *testing.T) {
+	mp4Path := buildTestMP4(t)
+	c, _, err := OpenMeta(context.Background(), mp4Path) // head-only: no Options{Keyframes}
+	if err != nil {
+		t.Fatalf("OpenMeta: %v", err)
+	}
+	var video *mkv.Track
+	for i := range c.Tracks {
+		if c.Tracks[i].Type == mkv.VideoTrack {
+			video = &c.Tracks[i]
+		}
+	}
+	if video == nil {
+		t.Fatal("no video track")
+	}
+	if video.FrameRate == nil || *video.FrameRate != 25 {
+		t.Errorf("head-only FrameRate = %v, want 25", video.FrameRate)
+	}
+}

@@ -167,6 +167,11 @@ func (t *Track) DisplayAspectRatio() string {
 // sample_aspect_ratio ("1:1" for square pixels, "32:27" for anamorphic). "" when
 // the coded dimensions are unknown. Reduced with the same bounded av_reduce as
 // DisplayAspectRatio.
+//
+// On pathological near-square ratios this can differ from ffprobe, which
+// re-derives the SAR from the dimension-reduced DAR (so the same VUI SAR prints
+// differently at different resolutions). mkvgo reports the exact ratio instead —
+// display-only and imperceptible. See CHANGELOG 0.9.0 Notes.
 func (t *Track) SampleAspectRatio() string {
 	if t.Width == nil || t.Height == nil || *t.Width == 0 || *t.Height == 0 {
 		return ""

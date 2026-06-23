@@ -51,6 +51,7 @@ type inTrack struct {
 	sampleRate       float64
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
 	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
+	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
 	timescale        uint32
 	samples          []inSample
 
@@ -393,12 +394,38 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
 	}
 
+	// The nominal frame rate is in the header (stts), so derive it head-only —
+	// expanding the sample table is not needed just for the rate.
+	if tr.trackType == mkv.VideoTrack {
+		tr.frameRate = headerFrameRate(stblBoxes, tr.timescale)
+	}
+
 	if withSamples {
 		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
 			return tr, nil, err
 		}
 	}
 	return tr, nil, nil
+}
+
+// headerFrameRate derives the nominal (constant) frame rate from the first stts
+// entry without expanding the sample table: timescale / sample_delta. This is
+// ffprobe's r_frame_rate for CFR video and is readable head-only. Returns 0 when
+// the stts is absent/short or the delta is zero.
+func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
+	if timescale == 0 {
+		return 0
+	}
+	stts, ok := findMemBox(stblBoxes, "stts")
+	if !ok || len(stts.payload) < 16 {
+		return 0
+	}
+	// stts: version+flags(4), entry_count(4), then [sample_count(4) sample_delta(4)]…
+	delta := binary.BigEndian.Uint32(stts.payload[12:16])
+	if delta == 0 {
+		return 0
+	}
+	return float64(timescale) / float64(delta)
 }
 
 // parseMovieHeader reads the movie timescale and duration from an mvhd box.
