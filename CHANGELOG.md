@@ -45,6 +45,10 @@ validated against ffprobe over a sweep of real files.
 - **Frame count.** `Track.FrameCount` (ffprobe `nb_frames`) from the MP4 `stsz`/
   `stz2` sample count — read head-only, no sample-table expansion. Matroska has no
   head-only frame count, so it stays 0 there.
+- **Per-track duration.** `Track.DurationMs` (ffprobe per-stream `duration`) from
+  the MP4 `mdhd` (duration ÷ media timescale), so a track that differs from the
+  movie length is reported individually. Matroska carries no per-track header
+  duration, so it stays 0 there.
 - **Codec long name and channel layout.** `Track.CodecLongName()` returns ffprobe's
   `codec_long_name` (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"), and
   `Track.ChannelLayout()` returns `channel_layout` ("stereo", "5.1(side)", …) from

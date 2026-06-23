@@ -185,6 +185,9 @@ func CmdProbe(path string) {
 		if t.FrameCount > 0 {
 			fmt.Printf("  %dframes", t.FrameCount)
 		}
+		if t.DurationMs > 0 {
+			fmt.Printf("  %.2fs", float64(t.DurationMs)/1000)
+		}
 		if t.IsDefault {
 			fmt.Print("  [default]")
 		}

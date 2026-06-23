@@ -143,6 +143,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			br := t.bitrate
 			mt.Bitrate = &br
 		}
+		mt.DurationMs = t.durationMs
 		tracks[i] = mt
 	}
 	return tracks

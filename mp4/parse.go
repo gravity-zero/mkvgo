@@ -55,6 +55,7 @@ type inTrack struct {
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
 	frameCount       int64   // sample count from stsz (ffprobe nb_frames); 0 when unknown
+	durationMs       int64   // per-track duration from mdhd; 0 when unknown
 	timescale        uint32
 	samples          []inSample
 
@@ -317,6 +318,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 	if mdhd, ok := findMemBox(mdiaBoxes, "mdhd"); ok {
 		var lang string
 		tr.timescale, lang = parseMdhd(mdhd.payload)
+		tr.durationMs = mdhdDurationMs(mdhd.payload)
 		if lang != "" {
 			tr.language = lang
 			tr.languageKnown = true
@@ -488,6 +490,36 @@ func parseMdhd(payload []byte) (timescale uint32, lang string) {
 		lang = decodeMdhdLanguage(binary.BigEndian.Uint16(payload[langOff : langOff+2]))
 	}
 	return timescale, lang
+}
+
+// mdhdDurationMs returns the track's duration in milliseconds from an mdhd box
+// (duration ÷ media timescale), or 0 when absent/unset. Read head-only — the
+// per-track counterpart of the movie duration in mvhd.
+func mdhdDurationMs(payload []byte) int64 {
+	if len(payload) < 4 {
+		return 0
+	}
+	tsOff, durOff, durSize := 12, 16, 4
+	if payload[0] == 1 {
+		tsOff, durOff, durSize = 20, 24, 8
+	}
+	if len(payload) < tsOff+4 || len(payload) < durOff+durSize {
+		return 0
+	}
+	ts := binary.BigEndian.Uint32(payload[tsOff : tsOff+4])
+	if ts == 0 {
+		return 0
+	}
+	var ticks uint64
+	if durSize == 8 {
+		ticks = binary.BigEndian.Uint64(payload[durOff : durOff+8])
+	} else {
+		ticks = uint64(binary.BigEndian.Uint32(payload[durOff : durOff+4]))
+	}
+	if ticks == 0 || ticks == 0xFFFFFFFF || ticks >= 1<<62 {
+		return 0 // unset/sentinel
+	}
+	return int64(ticks) * 1000 / int64(ts)
 }
 
 // parseElst reads an edit list box and returns the first non-empty edit's
