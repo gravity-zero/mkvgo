@@ -58,8 +58,6 @@ validated against ffprobe over a sweep of real files.
   `codec_long_name` (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"), and
   `Track.ChannelLayout()` returns `channel_layout` ("stereo", "5.1(side)", …) from
   the channel count — display strings the fast path previously omitted.
-- **Display rotation, pixel format, field order, frame count, codec long name and
-  channel layout** are printed by the CLI `probe` and carried in `-json`.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
   `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
   for constant-frame-rate video — so the metadata probe reports it without
@@ -67,8 +65,11 @@ validated against ffprobe over a sweep of real files.
 - **Display rotation.** `Track.Rotation` (0/90/180/270, clockwise) read from the
   MP4 `tkhd` display matrix — the same matrix ffprobe exposes as Display Matrix
   side data. Lets a player show portrait phone video the right way up.
-- CLI `probe` surfaces all of the above (output sample rate, codec profile/level,
-  sample/display aspect ratio, bitrate); `-json` carries the new fields.
+- **CLI** — `probe` prints all of the above per track (codec long name, profile/
+  level, pixel format, aspect ratio, rotation, frame rate, frame count, per-track
+  duration, bitrate, field order, channel layout, output sample rate); `probe -json`
+  and `tracks -json` carry the same fields, including the derived `codec_long_name`
+  and `channel_layout`. See [docs/library.md](docs/library.md) for the full table.
 
 ### Fixed
 

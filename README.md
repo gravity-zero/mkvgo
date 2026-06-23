@@ -39,7 +39,7 @@ Global flags: `-json` (structured output), `--version`
 | | `chapters` | List chapters with timestamps — MKV or MP4 |
 | | `attachments` | List attachments (fonts, images) |
 | | `tags` | Show all tags |
-| | `probe` | Full dump of all metadata (colour, Dolby Vision, keyframes, dropped tracks) — MKV or MP4 |
+| | `probe` | Full dump of all metadata (ffprobe-equivalent stream fields: colour/HDR, Dolby Vision, pix_fmt, aspect ratio, rotation, bitrate, keyframes, dropped tracks…) — MKV or MP4 |
 | | `keyframes` | List video keyframe timestamps (MKV Cues / MP4 sample table) |
 | | `validate` | Check MKV structure for issues |
 | | `compare` | Diff metadata of two MKV files |
@@ -203,8 +203,10 @@ err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 
 **Probe an MP4's metadata without remuxing (fast path for indexing):**
 ```go
-// Reads only the moov box — codecs, language, default flag, channels, colour,
-// chapters, duration — never the sample data. Counterpart of matroska.OpenMeta.
+// Reads only the moov box — the ffprobe-equivalent stream fields (codecs, profile/
+// level, pixel format, colour/HDR, Dolby Vision, aspect ratio, rotation, frame rate,
+// bitrate, channels/layout, per-track duration, file tags…) — never the sample data.
+// Counterpart of matroska.OpenMeta. See docs/library.md for the full field table.
 // The second value lists non-carried tracks (cover art, hint/timecode).
 c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
 fmt.Println(c.DurationMs, len(c.Tracks), "tracks,", len(dropped), "dropped")

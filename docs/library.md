@@ -191,9 +191,36 @@ for _, d := range dropped { // cover art / non-media tracks not in c.Tracks
 }
 ```
 
-Each track carries its language (`mdhd`/`elng`), default flag (`tkhd`), channel count (from the codec config, not the unreliable sample-entry field), colour code points (`colr`, falling back to the codec bitstream) and, when present, its Dolby Vision configuration (`Track.DolbyVision`: profile, level and `bl_signal_compatibility_id`, from the `dvcC`/`dvvC` box — or the `dvcC`/`dvvC` `BlockAdditionMapping` for MKV). The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
+The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
 
-`OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters and DurationMs are populated; Attachments, Tags and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
+`OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters, DurationMs and (for MP4) file-level Tags / `Info.Title` are populated; Attachments and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
+
+#### Track metadata fields
+
+Each `Track` carries the stream metadata ffprobe reports, read head-only from the container headers and codec configuration (no frame decode). Most map directly to an ffprobe `-show_streams` field; the derived display strings are helper methods, mirroring `ColorSpaceName()` etc.
+
+| `Track` field / method | ffprobe field | Source |
+|---|---|---|
+| `Codec` / `CodecLongName()` | `codec_name` / `codec_long_name` | container codec id |
+| `Language`, `LanguageBCP47` | `tags:language` | `mdhd`/`elng`, Matroska language |
+| `IsDefault`, `IsForced` | `disposition` | `tkhd` flags / DASH-role `kind`; Matroska flags |
+| `DurationMs` | per-stream `duration` | MP4 `mdhd` (per-track; 0 for Matroska) |
+| `Bitrate` | `bit_rate` | MP4 `btrt` / esds `avgBitrate` |
+| `Width`, `Height` | `width`, `height` | sample entry / `PixelWidth` |
+| `DisplayAspectRatio()`, `SampleAspectRatio()` | `display_aspect_ratio`, `sample_aspect_ratio` | MP4 `pasp` / Matroska `DisplayWidth` / H.264-HEVC VUI `aspect_ratio_info` (bounded `av_reduce` like ffmpeg) |
+| `Rotation` | Display Matrix side data | MP4 `tkhd` matrix (0/90/180/270) |
+| `FrameRate` | `r_frame_rate` | MP4 `stts` (timescale ÷ first delta) / Matroska `DefaultDuration` |
+| `FrameCount` | `nb_frames` | MP4 `stsz` count (0 for Matroska) |
+| `Profile`, `Level` | `profile`, `level` | SPS / hvcC |
+| `PixelFormat` | `pix_fmt` | chroma subsampling + bit depth (SPS / av1C / vpcC) |
+| `FieldOrder` | `field_order` | Matroska `FlagInterlaced` / H.264 `frame_mbs_only_flag` |
+| `VideoBitDepth` | bit depth | `colr`/Colour or codec bitstream |
+| `ColorSpaceName()`, `ColorTransferName()`, `ColorPrimariesName()`, `ColorRangeName()`, `IsHDR()` | `color_space`/`color_transfer`/`color_primaries`/`color_range` | `colr` (nclx/nclc) / Matroska Colour / SPS VUI |
+| `DolbyVision` | side data | MP4 `dvcC`/`dvvC` box / Matroska `BlockAdditionMapping` |
+| `Channels` / `ChannelLayout()` | `channels` / `channel_layout` | codec config (HE-AACv2 PS counted) |
+| `SampleRate`, `OutputSampleRate`, `EffectiveSampleRate()` | `sample_rate` | sample entry / Matroska; SBR output rate from the AAC ASC or `OutputSamplingFrequency` |
+
+A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo and colour signalled only in a second in-band SPS. In those the probe reports the header value (e.g. the AAC core rate, or no colour) rather than guessing. See the [0.9.0 CHANGELOG notes](../CHANGELOG.md).
 
 ### Keyframe index (head-only)
 
