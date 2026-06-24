@@ -2,6 +2,7 @@ package mkv
 
 import (
 	"bytes"
+	"math"
 	"testing"
 )
 
@@ -56,6 +57,11 @@ func TestAspectRatios(t *testing.T) {
 		{"anamorphic exact 32:27 (PAL wide)",
 			Track{Width: u32(720), Height: u32(576), DisplayWidth: u32(1024), DisplayHeight: u32(576)},
 			"64:45", "16:9"},
+		// Zero display dimensions must be ignored (fall back to coded dims), so the
+		// SAR is 1:1, not a 0-based ratio.
+		{"zero display dims → coded",
+			Track{Width: u32(1920), Height: u32(1080), DisplayWidth: u32(0), DisplayHeight: u32(0)},
+			"1:1", "16:9"},
 		{"no dimensions", Track{}, "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,15 +89,58 @@ func TestAvReduce(t *testing.T) {
 		{16, 9, aspectReduceMax, 16, 9},
 		// Already reduced; gcd applied first.
 		{3840, 2160, aspectReduceMax, 16, 9},
+		// Boundary: a value exactly at max stays as-is (the num<=max && den<=max
+		// short-circuit must include equality).
+		{aspectReduceMax, 1, aspectReduceMax, aspectReduceMax, 1},
 	} {
 		if n, d := avReduce(tt.num, tt.den, tt.max); n != tt.wantN || d != tt.wantD {
 			t.Errorf("avReduce(%d,%d,%d) = %d:%d, want %d:%d", tt.num, tt.den, tt.max, n, d, tt.wantN, tt.wantD)
 		}
 	}
-	// Both parts must always stay within the bound.
-	if n, d := avReduce(7_000_003, 6_999_999, aspectReduceMax); n > aspectReduceMax || d > aspectReduceMax {
-		t.Errorf("avReduce over-bound: %d:%d exceeds %d", n, d, aspectReduceMax)
+
+	// Property test: for several ratios that exceed the bound, avReduce must return
+	// terms within the bound AND the best rational approximation achievable there —
+	// verified against a brute-force search. This pins the internal arithmetic: any
+	// mutation either over-shoots the bound or yields a worse approximation.
+	for _, c := range []struct{ num, den, max uint64 }{
+		{48379, 48420, 720},
+		{3000001, 2999990, 4096},
+		{5000000, 4999993, 10000},
+		{16000, 9001, 1000},
+		{1920000, 1079999, 5000},
+	} {
+		n, d := avReduce(c.num, c.den, c.max)
+		if n == 0 || d == 0 || n > c.max || d > c.max {
+			t.Errorf("avReduce(%d,%d,%d) = %d:%d out of bound", c.num, c.den, c.max, n, d)
+			continue
+		}
+		target := float64(c.num) / float64(c.den)
+		got := math.Abs(float64(n)/float64(d) - target)
+		best := bestRationalError(target, c.max)
+		if got > best+1e-12 {
+			t.Errorf("avReduce(%d,%d,%d) = %d:%d (err %.3e) not optimal (best %.3e)",
+				c.num, c.den, c.max, n, d, got, best)
+		}
 	}
+}
+
+// bestRationalError returns the smallest |p/q - target| over all p,q in [1,max] —
+// a brute-force reference for the best bounded rational approximation.
+func bestRationalError(target float64, max uint64) float64 {
+	best := math.MaxFloat64
+	for q := uint64(1); q <= max; q++ {
+		p := uint64(math.Round(float64(q) * target))
+		if p < 1 {
+			p = 1
+		}
+		if p > max {
+			p = max
+		}
+		if e := math.Abs(float64(p)/float64(q) - target); e < best {
+			best = e
+		}
+	}
+	return best
 }
 
 func TestCodecLongNameAndChannelLayout(t *testing.T) {
@@ -130,6 +179,10 @@ func TestEffectiveSampleRate(t *testing.T) {
 	}
 	if got := (&Track{SampleRate: f(44100)}).EffectiveSampleRate(); got != 44100 {
 		t.Errorf("plain effective rate = %v, want 44100", got)
+	}
+	// A zero OutputSampleRate must NOT win — it falls through to the base rate.
+	if got := (&Track{SampleRate: f(44100), OutputSampleRate: f(0)}).EffectiveSampleRate(); got != 44100 {
+		t.Errorf("zero output rate should fall through to base, got %v", got)
 	}
 	if got := (&Track{}).EffectiveSampleRate(); got != 0 {
 		t.Errorf("unknown effective rate = %v, want 0", got)

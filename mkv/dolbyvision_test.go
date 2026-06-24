@@ -24,6 +24,12 @@ func TestParseDolbyVisionConfig(t *testing.T) {
 	if ParseDolbyVisionConfig([]byte{1, 0, 0, 0}) != nil {
 		t.Error("ParseDolbyVisionConfig should return nil for a record shorter than 5 bytes")
 	}
+	// Boundary: exactly 5 bytes is the minimum that parses (not nil).
+	if dv := ParseDolbyVisionConfig([]byte{2, 1, 0, 0, 0}); dv == nil {
+		t.Error("ParseDolbyVisionConfig should parse a 5-byte record (boundary)")
+	} else if dv.VersionMajor != 2 || dv.VersionMinor != 1 {
+		t.Errorf("5-byte record fields = %d/%d, want 2/1", dv.VersionMajor, dv.VersionMinor)
+	}
 }
 
 func TestDolbyVisionConfigRoundTrip(t *testing.T) {
