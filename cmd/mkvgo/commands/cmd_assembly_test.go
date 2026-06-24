@@ -85,6 +85,43 @@ func TestCmdMux(t *testing.T) {
 	}
 }
 
+// TestCmdMux_ColonInPath guards the file:trackID parser against paths that
+// themselves contain a colon — most importantly Windows drive-letter paths
+// (C:\dir\file.mkv:1). The spec must split on the LAST colon, keeping the path
+// intact. A colon in the filename is legal on Linux, so it stands in for the
+// Windows case in CI.
+func TestCmdMux_ColonInPath(t *testing.T) {
+	src := sampleMKV(t)
+	ref, err := matroska.Open(context.Background(), src)
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	if len(ref.Tracks) < 1 {
+		t.Skip("fixture has no tracks")
+	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read src: %v", err)
+	}
+	colonSrc := filepath.Join(t.TempDir(), "C:weird.mkv")
+	if err := os.WriteFile(colonSrc, data, 0o600); err != nil {
+		t.Fatalf("write colon-named source: %v", err)
+	}
+
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	spec := fmt.Sprintf("%s:%d", colonSrc, ref.Tracks[0].ID)
+	capture(t, func() { commands.CmdMux([]string{"-o", dst, spec}) })
+
+	c, err := matroska.Open(context.Background(), dst)
+	if err != nil {
+		t.Fatalf("open output: %v", err)
+	}
+	if len(c.Tracks) != 1 {
+		t.Errorf("want 1 track in mux output, got %d", len(c.Tracks))
+	}
+}
+
 // TestCmdRemoveTrack removes the second track and asserts one track remains.
 func TestCmdRemoveTrack(t *testing.T) {
 	src := sampleMKV(t)
