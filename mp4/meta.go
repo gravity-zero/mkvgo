@@ -42,8 +42,10 @@ func OpenMeta(ctx context.Context, path string, opts ...Options) (*mkv.Container
 }
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS (nil = the real OS FS).
-func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, []DroppedTrack, error) {
-	return OpenMeta(ctx, path, Options{FS: fs})
+func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...Options) (*mkv.Container, []DroppedTrack, error) {
+	o := optionsFrom(opts)
+	o.FS = fs
+	return OpenMeta(ctx, path, o)
 }
 
 // ReadMeta reads only the MP4 movie header from r and returns the equivalent
@@ -72,6 +74,9 @@ func readMeta(ctx context.Context, r io.ReadSeeker, path string, o Options) (*mk
 	}
 	c := containerFromMovie(mv)
 	c.Path = path
+	if o.InBandColour {
+		fillInBandColour(r, mv, c)
+	}
 	return c, mv.dropped, nil
 }
 

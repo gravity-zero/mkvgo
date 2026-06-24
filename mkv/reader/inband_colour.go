@@ -72,6 +72,16 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	}
 }
 
+// NeedsInBandColour reports whether t is an HEVC video track whose colour can
+// only come from an in-band SPS (no container/codec-private colour, bare hvcC).
+// Exposed so the mp4 package can drive the same fallback off its sample table.
+func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) }
+
+// ApplyInBandColour fills t's colour from one length-prefixed HEVC access unit
+// (the first sample): the SPS VUI and an Alternative Transfer Characteristics
+// SEI override if present. Safe on any input; leaves colour unset on failure.
+func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandSPSColour(t, frame) }
+
 // needsInBandColour reports whether t is a video track whose colour can only come
 // from an in-band SPS: no container/SPS colour yet, HEVC, and a hvcC that holds
 // no NAL arrays (numOfArrays == 0, byte 22 of the configuration record).

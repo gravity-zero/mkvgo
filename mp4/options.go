@@ -52,6 +52,12 @@ type Options struct {
 	// not recognise it. Leave it off for the widest playback compatibility. Only
 	// RemuxToMP4 honours this.
 	NativeWebVTT bool
+	// InBandColour, on the metadata probe (OpenMeta/ReadMeta), recovers a video
+	// track's colour from the first sample's in-band SPS (and Alternative Transfer
+	// Characteristics SEI) when it is absent from both the colr box and a bare
+	// hvcC — the MP4 counterpart of reader.WithInBandColourFallback. Off by
+	// default; only a track that needs it reads one bounded sample.
+	InBandColour bool
 }
 
 func optionsFrom(opts []Options) Options {

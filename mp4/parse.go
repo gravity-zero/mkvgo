@@ -69,6 +69,11 @@ type inTrack struct {
 	forcedKnown   bool   // a DASH-role kind box was read, so forced is meaningful
 	editShiftMs   int64  // edit-list (elst) presentation shift applied to sample times
 
+	// first sample location (stco[0] + stsz[0]), read head-only for the optional
+	// in-band colour fallback; firstSampleSize == 0 when unavailable.
+	firstSampleOffset int64
+	firstSampleSize   uint32
+
 	// colour code points (CICP), nil when the entry had no colr box.
 	colorPrimaries *uint16
 	colorTransfer  *uint16
@@ -486,6 +491,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 	if tr.trackType == mkv.VideoTrack {
 		tr.frameRate = headerFrameRate(stblBoxes, tr.timescale)
 		tr.frameCount = headerFrameCount(stblBoxes)
+		tr.firstSampleOffset, tr.firstSampleSize = firstSampleLoc(stblBoxes)
 	}
 
 	if withSamples {
