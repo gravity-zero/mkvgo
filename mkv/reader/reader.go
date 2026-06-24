@@ -1244,7 +1244,36 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 	return nil
 }
 
+// maxCuesBuffer caps how large a Cues index parseCues pulls into memory in a
+// single read before falling back to streaming. Real Cues indexes are at most a
+// few MB even for multi-hour 4K files, so this leaves generous headroom while
+// refusing to allocate for a pathological or malicious declared size.
+const maxCuesBuffer = 64 << 20 // 64 MiB
+
+// parseCues reads the whole Cues index in ONE io.ReadFull and parses it from
+// memory, instead of letting the nested CuePoint walk issue ~4 tiny reads per
+// entry directly against p.r. A long file's index is tens of thousands of
+// CuePoints: on local disk the per-read cost is negligible, but on a network FS
+// (9p/SMB) every read is a round-trip and the index alone can take minutes. The
+// in-memory bytes.Reader makes the nested seeks free. (ops/reindex.go already
+// buffers cluster bodies the same way.) A declared size that is unknown (<0) or
+// larger than maxCuesBuffer falls back to streaming off p.r.
 func (p *parser) parseCues(size int64, c *mkv.Container) error {
+	if size < 0 || size > maxCuesBuffer {
+		return p.parseCuesFrom(size, c)
+	}
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(p.r, buf); err != nil {
+		return err
+	}
+	saved := p.r
+	p.r = bytes.NewReader(buf)
+	err := p.parseCuesFrom(int64(len(buf)), c)
+	p.r = saved // the real reader is already positioned past the Cues body
+	return err
+}
+
+func (p *parser) parseCuesFrom(size int64, c *mkv.Container) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
