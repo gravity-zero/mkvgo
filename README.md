@@ -243,7 +243,7 @@ mkv/               core types, FS port, EBML IDs (experimental, may change)
 
 ebml/              low-level EBML encoding/decoding (no Matroska knowledge)
 
-mp4/               MP4 (ISO-BMFF) remux to/from MKV (experimental, isolated from EBML core)
+mp4/               MP4 (ISO-BMFF) remux to/from MKV (isolated from EBML core)
 ```
 
 Import graph: `cmd/mkvgo` -> `matroska` -> `mkv/*` -> `ebml`; `mp4` -> `mkv/*`

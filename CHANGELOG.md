@@ -4,6 +4,49 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-06-25
+
+### Added
+
+- **In-band colour fallback (opt-in).** `reader.WithInBandColourFallback()`
+  (re-exported as `matroska.WithInBandColourFallback()`) and
+  `mp4.Options{InBandColour: true}` recover a video track's colour when it is
+  carried only in an in-band HEVC SPS — a bare hvcC with no parameter sets and no
+  container colour, as some streaming-style HDR muxes write. The head parse is
+  unchanged; only a track that still lacks colour reads a bounded slice of its
+  first sample, parses the SPS VUI, and applies an Alternative Transfer
+  Characteristics SEI (payload type 147) override — HLG's `bt2020-10` →
+  `arib-std-b67` compatibility signal. Off by default; tracks that carry colour
+  in the header read no frame.
+
+### Performance
+
+- **Full read on high-latency filesystems (9p/SMB/network mounts).** A full
+  `Read` / `matroska.Open` no longer walks every cluster header to reach the
+  metadata that follows the media:
+  - the Cues index is read in one bulk read instead of ~4 tiny reads per
+    CuePoint;
+  - when a SeekHead is present, the whole cluster region is skipped in a single
+    seek (or the read stops at the first cluster when the SeekHead is already
+    exhausted);
+  - with no SeekHead, a trailing Cues index is located by a bounded scan back
+    from EOF rather than a forward cluster walk;
+  - the remaining cluster-walk fallback reads raw, with no buffer amplification.
+
+  Net: reads that previously took seconds over a network mount complete in a
+  handful of seeks, and the result is byte-identical to the unoptimised walk.
+
+### Fixed
+
+- **Windows.** The `mux` / `add-track` `file:trackID` spec is split on the last
+  colon, so a drive-letter path (`C:\dir\file.mkv:1`) parses correctly; a test
+  helper that left a temp file open now closes it so Windows can remove it.
+
+### Build
+
+- golangci-lint upgraded to v2 (go1.26 compatibility); the Go toolchain is pinned
+  to 1.26.4.
+
 ## [0.9.0] - 2026-06-23
 
 Field-equivalence pass: the metadata probe reports more of what ffprobe does,

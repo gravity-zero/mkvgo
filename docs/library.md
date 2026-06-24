@@ -103,7 +103,7 @@ To write a WebM stream live (no source file), use `writer.NewWebMStreamWriter` -
 
 ## MP4 Remux
 
-The `mp4` package remuxes between Matroska/WebM and MP4 (ISO base media file format) without transcoding. It is isolated from the EBML core -- it shares no low-level code with `ebml`/`mkv` -- and is experimental: its API may change between minor versions.
+The `mp4` package remuxes between Matroska/WebM and MP4 (ISO base media file format) without transcoding. It is isolated from the EBML core -- it shares no low-level code with `ebml`/`mkv`.
 
 ```go
 import "github.com/gravity-zero/mkvgo/mp4"
@@ -220,7 +220,16 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `Channels` / `ChannelLayout()` | `channels` / `channel_layout` | codec config (HE-AACv2 PS counted) |
 | `SampleRate`, `OutputSampleRate`, `EffectiveSampleRate()` | `sample_rate` | sample entry / Matroska; SBR output rate from the AAC ASC or `OutputSamplingFrequency` |
 
-A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo and colour signalled only in a second in-band SPS. In those the probe reports the header value (e.g. the AAC core rate, or no colour) rather than guessing. See the [0.9.0 CHANGELOG notes](../CHANGELOG.md).
+A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo, and colour carried only in an in-band SPS. In those the probe reports the header value (e.g. the AAC core rate) rather than guessing. See the [CHANGELOG notes](../CHANGELOG.md).
+
+**In-band colour fallback (opt-in).** Some streaming-style HEVC muxes keep the SPS in-band (a bare hvcC with no parameter sets) and write no container colour, so a head-only probe sees no colour at all. Passing the in-band option makes the probe — only for such a track — read its first sample, parse the SPS VUI, and apply an Alternative Transfer Characteristics SEI override (HLG's `bt2020-10` → `arib-std-b67` compatibility signal). It is off by default; tracks that already carry colour in the header read no frame.
+
+```go
+// MKV
+c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithInBandColourFallback())
+// MP4
+c, _, _ := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{InBandColour: true})
+```
 
 ### Keyframe index (head-only)
 
