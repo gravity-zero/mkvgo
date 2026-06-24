@@ -27,14 +27,14 @@ func walkBoxes(t *testing.T, data []byte, base int64) []tbox {
 		size := int64(binary.BigEndian.Uint32(data[off : off+4]))
 		typ := string(data[off+4 : off+8])
 		hdr := 8
-		switch {
-		case size == 1:
+		switch size {
+		case 1:
 			if off+16 > len(data) {
 				t.Fatalf("truncated 64-bit box %q", typ)
 			}
 			size = int64(binary.BigEndian.Uint64(data[off+8 : off+16]))
 			hdr = 16
-		case size == 0:
+		case 0:
 			size = int64(len(data) - off) // extends to end
 		}
 		if size < int64(hdr) || off+int(size) > len(data) {

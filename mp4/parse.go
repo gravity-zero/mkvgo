@@ -104,14 +104,14 @@ func iterBoxes(buf []byte) ([]memBox, error) {
 		size := int64(binary.BigEndian.Uint32(buf[off : off+4]))
 		typ := string(buf[off+4 : off+8])
 		hdr := 8
-		switch {
-		case size == 1:
+		switch size {
+		case 1:
 			if off+16 > len(buf) {
 				return nil, errf("truncated 64-bit box %q", typ)
 			}
 			size = int64(binary.BigEndian.Uint64(buf[off+8 : off+16]))
 			hdr = 16
-		case size == 0:
+		case 0:
 			size = int64(len(buf) - off)
 		}
 		if size < int64(hdr) || off+int(size) > len(buf) {
@@ -147,14 +147,14 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
 		typ := string(hdr[4:8])
 		headerLen := int64(8)
-		switch {
-		case boxSize == 1:
+		switch boxSize {
+		case 1:
 			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
 				return nil, errf("read largesize: %w", err)
 			}
 			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
 			headerLen = 16
-		case boxSize == 0:
+		case 0:
 			boxSize = size - off
 		}
 		if boxSize < headerLen || off+boxSize > size {
