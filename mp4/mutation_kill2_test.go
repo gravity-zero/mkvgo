@@ -68,18 +68,18 @@ func TestEAC3ChannelsNumDepSubZero(t *testing.T) {
 	// Build a dec3 payload: acmod=7 (5ch), lfeon=1 → ch=6, numDepSub=0.
 	// Trailing 0xFF bytes ensure mutation would read non-zero chanLoc.
 	var bw bitWriter
-	bw.write(0, 13)   // data_rate
-	bw.write(0, 3)    // num_ind_sub-1
-	bw.write(0, 2)    // fscod
-	bw.write(8, 5)    // bsid
-	bw.write(0, 1)    // reserved
-	bw.write(0, 1)    // asvc
-	bw.write(0, 3)    // bsmod
-	bw.write(7, 3)    // acmod=7 → 5 ch
-	bw.write(1, 1)    // lfeon=1 → +1 = 6 total
-	bw.write(0, 3)    // reserved
-	bw.write(0, 4)    // numDepSub=0
-	bw.write(0, 1)    // reserved
+	bw.write(0, 13)                        // data_rate
+	bw.write(0, 3)                         // num_ind_sub-1
+	bw.write(0, 2)                         // fscod
+	bw.write(8, 5)                         // bsid
+	bw.write(0, 1)                         // reserved
+	bw.write(0, 1)                         // asvc
+	bw.write(0, 3)                         // bsmod
+	bw.write(7, 3)                         // acmod=7 → 5 ch
+	bw.write(1, 1)                         // lfeon=1 → +1 = 6 total
+	bw.write(0, 3)                         // reserved
+	bw.write(0, 4)                         // numDepSub=0
+	bw.write(0, 1)                         // reserved
 	dec3 := append(bw.bytes(), 0xFF, 0xFF) // garbage chanLoc if guard is wrong
 
 	if got := eac3Channels(dec3); got != 6 {
@@ -263,10 +263,10 @@ func TestMdhdDurationMsDurOffBoundary(t *testing.T) {
 func TestParseElstV0ExactEntry(t *testing.T) {
 	// v0 elst: version+flags(4) count(4) [segDur(4) mt(4) rate(4) = 12 bytes]
 	var w bw
-	w.u32(0)  // version=0, flags=0
-	w.u32(1)  // count=1
-	w.u32(50) // segDur=50 ms
-	w.u32(10) // mediaTime=10 (positive → start trim)
+	w.u32(0)          // version=0, flags=0
+	w.u32(1)          // count=1
+	w.u32(50)         // segDur=50 ms
+	w.u32(10)         // mediaTime=10 (positive → start trim)
 	w.u32(0x00010000) // media_rate 1.0
 	mt, emptyDur, ok := parseElst(w.b)
 	if !ok || mt != 10 || emptyDur != 0 {
@@ -286,9 +286,13 @@ func TestParseElstEmptyEditArithmetic(t *testing.T) {
 	w.u32(0) // version=0
 	w.u32(2) // count=2
 	// First entry: mt=-1 (empty edit, segDur=100).
-	w.u32(100); w.u32(0xFFFFFFFF); w.u32(0x00010000)
+	w.u32(100)
+	w.u32(0xFFFFFFFF)
+	w.u32(0x00010000)
 	// Second entry: mt=0 (start trim at 0, segDur=200).
-	w.u32(200); w.u32(0); w.u32(0x00010000)
+	w.u32(200)
+	w.u32(0)
+	w.u32(0x00010000)
 	mt, emptyDur, ok := parseElst(w.b)
 	if !ok || mt != 0 || emptyDur != 100 {
 		t.Errorf("elst two-entry: ok=%v mt=%d emptyDur=%d, want ok=true mt=0 emptyDur=100", ok, mt, emptyDur)
@@ -300,7 +304,8 @@ func TestParseElstEmptyEditArithmetic(t *testing.T) {
 // `mt <= 0` would treat mt=0 as empty and accumulate segDur instead.
 func TestParseElstNegativeMtBoundary(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(1)
+	w.u32(0)
+	w.u32(1)
 	w.u32(500) // segDur
 	w.u32(0)   // mediaTime=0 (not negative)
 	w.u32(0x00010000)
@@ -356,7 +361,7 @@ func TestDecodeMdhdLanguageCharBoundaries(t *testing.T) {
 // `len(payload) < off+4`.  v0: off=12 → boundary at 16 bytes.
 func TestTkhdTrackIDBoundary(t *testing.T) {
 	var p [16]byte
-	p[0] = 0 // version 0
+	p[0] = 0                                // version 0
 	binary.BigEndian.PutUint32(p[12:16], 7) // trackID=7
 	if got := tkhdTrackID(p[:]); got != 7 {
 		t.Errorf("16-byte tkhd v0: trackID=%d, want 7", got)
@@ -499,8 +504,10 @@ func TestParseESDSDecoderConfigLen(t *testing.T) {
 		dc := descriptor(0x04, dcfg)
 		sl := descriptor(0x06, []byte{0x02})
 		var es bw
-		es.u16(1); es.u8(0)
-		es.bytes(dc); es.bytes(sl)
+		es.u16(1)
+		es.u8(0)
+		es.bytes(dc)
+		es.bytes(sl)
 		return fullBox("esds", 0, 0, func(w *bw) { w.bytes(descriptor(0x03, es.b)) })
 	}
 
@@ -523,7 +530,8 @@ func TestParseESDSDecoderConfigLen(t *testing.T) {
 func TestParseESDSDcfgMinBoundary(t *testing.T) {
 	sl := descriptor(0x06, []byte{0x02})
 	var es bw
-	es.u16(1); es.u8(0)
+	es.u16(1)
+	es.u8(0)
 	es.bytes(descriptor(0x04, []byte{})) // empty dcfg
 	es.bytes(sl)
 	esds := fullBox("esds", 0, 0, func(w *bw) { w.bytes(descriptor(0x03, es.b)) })
@@ -590,8 +598,8 @@ func TestDescReaderNextBoundary(t *testing.T) {
 func TestBuildSampleTableCiPlusOne(t *testing.T) {
 	// One chunk at offset 100, one sample of size 4. The single stsc entry has
 	// firstChunk=1 (1-based). If ci+1→ci the lookup returns 0 and si!=n → error.
-	sizes := buildStsz([]uint32{4})           // 1 sample, size=4
-	stco := buildStco([]uint64{100})           // 1 chunk at offset 100
+	sizes := buildStsz([]uint32{4})  // 1 sample, size=4
+	stco := buildStco([]uint64{100}) // 1 chunk at offset 100
 	stsc := buildStsc([]stscEntry{{firstChunk: 1, perChunk: 1}})
 	stts := buildSttsPayload([]uint32{1}, []uint32{33}) // 1 run, delta=33
 	stblBoxes := []memBox{
@@ -695,9 +703,9 @@ func TestBuildSampleTableSiMismatchError(t *testing.T) {
 func TestParseStszVariableSizeIndexBoundary(t *testing.T) {
 	// 5 samples: need 12 + 5*4 = 32 bytes.
 	var w bw
-	w.u32(0)          // version/flags
-	w.u32(0)          // sampleSize=0 (individual)
-	w.u32(5)          // count=5
+	w.u32(0) // version/flags
+	w.u32(0) // sampleSize=0 (individual)
+	w.u32(5) // count=5
 	for i := uint32(1); i <= 5; i++ {
 		w.u32(i * 10) // sizes: 10, 20, 30, 40, 50
 	}
@@ -720,7 +728,9 @@ func TestParseChunkOffsetsStcoBoundary(t *testing.T) {
 	var w bw
 	w.u32(0) // version/flags
 	w.u32(3) // count=3
-	w.u32(100); w.u32(200); w.u32(300)
+	w.u32(100)
+	w.u32(200)
+	w.u32(300)
 	offs, err := parseChunkOffsets([]memBox{{typ: "stco", payload: w.b}})
 	if err != nil || len(offs) != 3 || offs[0] != 100 || offs[2] != 300 {
 		t.Fatalf("stco 3 chunks: err=%v offs=%v", err, offs)
@@ -734,7 +744,8 @@ func TestParseChunkOffsetsStcoBoundary(t *testing.T) {
 // TestParseChunkOffsetsCo64Boundary kills the corresponding co64 boundaries.
 func TestParseChunkOffsetsCo64Boundary(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(2)
+	w.u32(0)
+	w.u32(2)
 	w.u64(uint64(1) << 33) // large offset >32-bit
 	w.u64(uint64(1) << 34)
 	offs, err := parseChunkOffsets([]memBox{{typ: "co64", payload: w.b}})
@@ -753,9 +764,12 @@ func TestParseChunkOffsetsCo64Boundary(t *testing.T) {
 func TestParseSttsEntryBoundary(t *testing.T) {
 	// 2 entries: need 8+2*8=24 bytes.
 	var w bw
-	w.u32(0); w.u32(2)
-	w.u32(3); w.u32(33) // run=3, delta=33
-	w.u32(2); w.u32(66) // run=2, delta=66
+	w.u32(0)
+	w.u32(2)
+	w.u32(3)
+	w.u32(33) // run=3, delta=33
+	w.u32(2)
+	w.u32(66) // run=2, delta=66
 	durs, err := parseStts(w.b, 5)
 	if err != nil || len(durs) != 5 || durs[0] != 33 || durs[3] != 66 {
 		t.Fatalf("parseStts 2 entries: err=%v durs=%v", err, durs)
@@ -769,10 +783,14 @@ func TestParseSttsEntryBoundary(t *testing.T) {
 // index expression.
 func TestParseSttsBaseArithmetic(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(3)
-	w.u32(1); w.u32(10) // entry 0: run=1, delta=10
-	w.u32(1); w.u32(20) // entry 1: run=1, delta=20
-	w.u32(1); w.u32(30) // entry 2: run=1, delta=30
+	w.u32(0)
+	w.u32(3)
+	w.u32(1)
+	w.u32(10) // entry 0: run=1, delta=10
+	w.u32(1)
+	w.u32(20) // entry 1: run=1, delta=20
+	w.u32(1)
+	w.u32(30) // entry 2: run=1, delta=30
 	durs, err := parseStts(w.b, 3)
 	if err != nil || durs[0] != 10 || durs[1] != 20 || durs[2] != 30 {
 		t.Errorf("stts base arithmetic: err=%v durs=%v, want [10 20 30]", err, durs)
@@ -784,8 +802,10 @@ func TestParseSttsBaseArithmetic(t *testing.T) {
 // panic writing past the end.
 func TestParseSttsInnerLoopBoundary(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(1)
-	w.u32(4); w.u32(100) // run=4, exactly n=4
+	w.u32(0)
+	w.u32(1)
+	w.u32(4)
+	w.u32(100) // run=4, exactly n=4
 	durs, err := parseStts(w.b, 4)
 	if err != nil || len(durs) != 4 {
 		t.Fatalf("run==n: err=%v len=%d", err, len(durs))
@@ -802,9 +822,12 @@ func TestParseSttsInnerLoopBoundary(t *testing.T) {
 // each delta maps to the correct sample position.
 func TestParseSttsIdxArithmetic(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(2)
-	w.u32(2); w.u32(7)  // samples 0..1 = 7
-	w.u32(3); w.u32(11) // samples 2..4 = 11
+	w.u32(0)
+	w.u32(2)
+	w.u32(2)
+	w.u32(7) // samples 0..1 = 7
+	w.u32(3)
+	w.u32(11) // samples 2..4 = 11
 	durs, err := parseStts(w.b, 5)
 	if err != nil {
 		t.Fatalf("parseStts: %v", err)
@@ -824,9 +847,12 @@ func TestParseSttsIdxArithmetic(t *testing.T) {
 func TestParseCttsExactBoundary(t *testing.T) {
 	// 2 ctts entries: 8+2*8=24 bytes.
 	var w bw
-	w.u32(0); w.u32(2)
-	w.u32(3); w.u32(50) // 3 samples offset +50
-	w.u32(2); w.u32(0)  // 2 samples offset +0
+	w.u32(0)
+	w.u32(2)
+	w.u32(3)
+	w.u32(50) // 3 samples offset +50
+	w.u32(2)
+	w.u32(0) // 2 samples offset +0
 	offsets := parseCtts([]memBox{{typ: "ctts", payload: w.b}}, 5)
 	if len(offsets) != 5 || offsets[0] != 50 || offsets[3] != 0 {
 		t.Errorf("ctts 2 entries: %v, want [50 50 50 0 0]", offsets)
@@ -837,10 +863,14 @@ func TestParseCttsExactBoundary(t *testing.T) {
 // on the `base = 8+i*8` and `idx++` expressions.
 func TestParseCttsIdxAndArithmetic(t *testing.T) {
 	var w bw
-	w.u32(0); w.u32(3)
-	w.u32(1); w.u32(100)
-	w.u32(1); w.u32(200)
-	w.u32(1); w.u32(300)
+	w.u32(0)
+	w.u32(3)
+	w.u32(1)
+	w.u32(100)
+	w.u32(1)
+	w.u32(200)
+	w.u32(1)
+	w.u32(300)
 	offsets := parseCtts([]memBox{{typ: "ctts", payload: w.b}}, 3)
 	if len(offsets) != 3 || offsets[0] != 100 || offsets[1] != 200 || offsets[2] != 300 {
 		t.Errorf("ctts 3 entries: %v, want [100 200 300]", offsets)
@@ -853,8 +883,11 @@ func TestParseCttsIdxAndArithmetic(t *testing.T) {
 func TestParseStssMinBoundary(t *testing.T) {
 	// 3 sync samples: 8+3*4=20 bytes.
 	var p bw
-	p.u32(0); p.u32(3)
-	p.u32(2); p.u32(5); p.u32(9)
+	p.u32(0)
+	p.u32(3)
+	p.u32(2)
+	p.u32(5)
+	p.u32(9)
 	boxes := []memBox{{typ: "stss", payload: p.b}}
 	set := parseStss(boxes)
 	if !set[2] || !set[5] || !set[9] || len(set) != 3 {
@@ -973,7 +1006,7 @@ func TestParseChplTitleLenBoundary(t *testing.T) {
 	var p []byte
 	p = append(p, 1, 0, 0, 0) // version/flags
 	p = append(p, 0, 0, 0, 0) // reserved
-	p = append(p, 2)           // count=2
+	p = append(p, 2)          // count=2
 	// Entry 0: valid (100ms, title "A").
 	var s0 [8]byte
 	binary.BigEndian.PutUint64(s0[:], 1000000) // 100ms
@@ -998,7 +1031,7 @@ func TestParseChplStart100nsArithmeticDirect(t *testing.T) {
 	var p []byte
 	p = append(p, 1, 0, 0, 0) // version/flags
 	p = append(p, 0, 0, 0, 0) // reserved
-	p = append(p, 1)           // count=1
+	p = append(p, 1)          // count=1
 	var s [8]byte
 	binary.BigEndian.PutUint64(s[:], 6000000) // 600ms in 100ns
 	p = append(p, s[:]...)
@@ -1358,12 +1391,12 @@ func TestPaspBoxZeroDimensions(t *testing.T) {
 // Build a complete dOps and verify every field in the reconstructed OpusHead.
 func TestOpusHeadFromDOpsFull(t *testing.T) {
 	dops := make([]byte, 11)
-	dops[0] = 0       // version
-	dops[1] = 2       // channels=2
-	binary.BigEndian.PutUint16(dops[2:4], 312)  // preSkip=312
+	dops[0] = 0                                  // version
+	dops[1] = 2                                  // channels=2
+	binary.BigEndian.PutUint16(dops[2:4], 312)   // preSkip=312
 	binary.BigEndian.PutUint32(dops[4:8], 48000) // inputSampleRate=48000
 	binary.BigEndian.PutUint16(dops[8:10], 0)    // outputGain=0
-	dops[10] = 0                                  // family=0
+	dops[10] = 0                                 // family=0
 
 	head, err := opusHeadFromDOps(dops)
 	if err != nil {
@@ -1394,8 +1427,8 @@ func TestOpusHeadFromDOpsFull(t *testing.T) {
 // buildStsz builds a parseStsz-compatible payload for the given sizes (variable-size form).
 func buildStsz(sizes []uint32) []byte {
 	var w bw
-	w.u32(0)            // version/flags
-	w.u32(0)            // sampleSize=0 (individual)
+	w.u32(0) // version/flags
+	w.u32(0) // sampleSize=0 (individual)
 	w.u32(uint32(len(sizes)))
 	for _, s := range sizes {
 		w.u32(s)

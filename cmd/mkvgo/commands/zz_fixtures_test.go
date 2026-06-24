@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/cmd/mkvgo/commands"
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
@@ -14,6 +15,24 @@ import (
 // real file with frames (copied from internal/testdata) for the commands that
 // process media (demux, mux, remux, extract, reindex, …). The stdout-capturing
 // `capture` helper and `writeMKV` live in the existing test files.
+
+// mustFatal asserts that fn triggers Fatal (the process-exit hook). It overrides
+// the hook to panic, runs fn, and recovers — so the CLI error paths are exercised
+// in-process. out is whatever fn printed to stderr before exiting.
+func mustFatal(t *testing.T, fn func()) {
+	t.Helper()
+	called := false
+	restore := commands.SetExit(func(int) { called = true; panic("exit") })
+	defer restore()
+	defer func() {
+		_ = recover() // swallow the panic raised by the overridden exit hook
+		if !called {
+			t.Error("expected the command to call Fatal/os.Exit, but it did not")
+		}
+	}()
+	fn()
+	t.Error("the command returned without calling Fatal")
+}
 
 // richContainer is a metadata-rich Matroska container: video + audio + subtitle
 // tracks, two chapters, an attachment and tags.

@@ -433,10 +433,10 @@ func TestTrackHeaderStrippingBoundary(t *testing.T) {
 // (line 275), so a colour-only track (no pixel dims) depends entirely on
 // hasColour returning true.
 func TestHasColourFieldsIndividually(t *testing.T) {
-	cr := uint16(1)  // ColorRange: TV/limited
-	cs := uint16(1)  // ColorSpace: BT.709
-	ct := uint16(1)  // ColorTransfer: BT.709
-	cp := uint16(1)  // ColorPrimaries: BT.709
+	cr := uint16(1) // ColorRange: TV/limited
+	cs := uint16(1) // ColorSpace: BT.709
+	ct := uint16(1) // ColorTransfer: BT.709
+	cp := uint16(1) // ColorPrimaries: BT.709
 
 	tests := []struct {
 		name  string

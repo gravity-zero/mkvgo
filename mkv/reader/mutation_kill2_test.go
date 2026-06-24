@@ -859,8 +859,8 @@ func TestRead2CueFields(t *testing.T) {
 		uintElem(mkv.IDCueClusterPos, 1024, 2),
 	)
 	cuePoint := masterElem(mkv.IDCuePoint,
-		cueTrackPos,                       // processed first → 1295 mutation returns early
-		uintElem(mkv.IDCueTime, 500, 2),   // only processed if mutation is NOT active
+		cueTrackPos,                     // processed first → 1295 mutation returns early
+		uintElem(mkv.IDCueTime, 500, 2), // only processed if mutation is NOT active
 	)
 	// IDVoid before IDCuePoint in Cues: kills parseCues skip mutation (line ~1266).
 	cues := masterElem(mkv.IDCues,

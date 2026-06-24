@@ -47,8 +47,8 @@ func TestIterBoxes7BytesIsEmpty(t *testing.T) {
 func TestIterBoxes64BitBoxBoundary(t *testing.T) {
 	var buf [16]byte
 	binary.BigEndian.PutUint32(buf[0:4], 1)   // size==1 → 64-bit largesize
-	copy(buf[4:8], "test")                     // type
-	binary.BigEndian.PutUint64(buf[8:16], 16)  // largesize = 16 (header only, no payload)
+	copy(buf[4:8], "test")                    // type
+	binary.BigEndian.PutUint64(buf[8:16], 16) // largesize = 16 (header only, no payload)
 	boxes, err := iterBoxes(buf[:])
 	if err != nil || len(boxes) != 1 || len(boxes[0].payload) != 0 {
 		t.Fatalf("64-bit box 16B: err=%v boxes=%d payload=%d", err, len(boxes), len(boxes[0].payload))
@@ -114,12 +114,18 @@ func TestHeaderFrameRateExact16Bytes(t *testing.T) {
 // timescale==0 both return 0 (no divide-by-zero).
 func TestHeaderFrameRateDeltaZeroAndNoTimescale(t *testing.T) {
 	var p bw
-	p.u32(0); p.u32(1); p.u32(1); p.u32(0) // delta=0
+	p.u32(0)
+	p.u32(1)
+	p.u32(1)
+	p.u32(0) // delta=0
 	if fps := headerFrameRate([]memBox{{typ: "stts", payload: p.b}}, 90000); fps != 0 {
 		t.Errorf("delta=0 → %v, want 0", fps)
 	}
 	var p2 bw
-	p2.u32(0); p2.u32(1); p2.u32(1); p2.u32(1001) // delta=1001
+	p2.u32(0)
+	p2.u32(1)
+	p2.u32(1)
+	p2.u32(1001) // delta=1001
 	if fps := headerFrameRate([]memBox{{typ: "stts", payload: p2.b}}, 0); fps != 0 {
 		t.Errorf("timescale=0 → %v, want 0", fps)
 	}
@@ -152,15 +158,25 @@ func TestHeaderFrameCountExact12Bytes(t *testing.T) {
 func TestMdhdDurationMsSentinelsAndArithmetic(t *testing.T) {
 	v0 := func(ts, dur uint32) []byte {
 		var w bw
-		w.u32(0); w.u32(0); w.u32(0)
-		w.u32(ts); w.u32(dur); w.u16(0); w.u16(0)
+		w.u32(0)
+		w.u32(0)
+		w.u32(0)
+		w.u32(ts)
+		w.u32(dur)
+		w.u16(0)
+		w.u16(0)
 		return w.b
 	}
 	v1 := func(ts uint32, dur uint64) []byte {
 		var w bw
-		w.u8(1); w.u24(0)
-		w.u64(0); w.u64(0) // creation/modification
-		w.u32(ts); w.u64(dur); w.u16(0); w.u16(0)
+		w.u8(1)
+		w.u24(0)
+		w.u64(0)
+		w.u64(0) // creation/modification
+		w.u32(ts)
+		w.u64(dur)
+		w.u16(0)
+		w.u16(0)
 		return w.b
 	}
 
@@ -236,14 +252,16 @@ func TestParseStszUniformBoundary(t *testing.T) {
 // count==maxSamples+1 must error.
 func TestParseStszMaxSamplesBoundary(t *testing.T) {
 	var wOk bw
-	wOk.u32(0); wOk.u32(1) // version/flags, sampleSize=1 (uniform, no size array)
+	wOk.u32(0)
+	wOk.u32(1) // version/flags, sampleSize=1 (uniform, no size array)
 	wOk.u32(maxSamples)
 	if _, err := parseStsz(wOk.b); err != nil {
 		t.Errorf("count==maxSamples should succeed: %v", err)
 	}
 
 	var wErr bw
-	wErr.u32(0); wErr.u32(1)
+	wErr.u32(0)
+	wErr.u32(1)
 	wErr.u32(maxSamples + 1)
 	if _, err := parseStsz(wErr.b); err == nil {
 		t.Error("count==maxSamples+1 must error")
@@ -326,7 +344,10 @@ func TestParseSttsRunCapAtN(t *testing.T) {
 // TestParseSttsExactRunMatchesN verifies the run exactly filling n samples.
 func TestParseSttsExactRunMatchesN(t *testing.T) {
 	var p bw
-	p.u32(0); p.u32(1); p.u32(5); p.u32(33) // run=5, delta=33, n=5
+	p.u32(0)
+	p.u32(1)
+	p.u32(5)
+	p.u32(33) // run=5, delta=33, n=5
 
 	durs, err := parseStts(p.b, 5)
 	if err != nil || len(durs) != 5 {
@@ -347,7 +368,9 @@ func TestParseStssCountAndTruncation(t *testing.T) {
 	var p bw
 	p.u32(0) // version/flags
 	p.u32(3) // count=3
-	p.u32(1); p.u32(5); p.u32(9)
+	p.u32(1)
+	p.u32(5)
+	p.u32(9)
 
 	set := parseStss([]memBox{{typ: "stss", payload: p.b}})
 	if !set[1] || !set[5] || !set[9] || len(set) != 3 {
@@ -356,8 +379,11 @@ func TestParseStssCountAndTruncation(t *testing.T) {
 
 	// Payload claims 4 entries but only has 3 worth → nil (defensive).
 	var p2 bw
-	p2.u32(0); p2.u32(4)
-	p2.u32(1); p2.u32(5); p2.u32(9)
+	p2.u32(0)
+	p2.u32(4)
+	p2.u32(1)
+	p2.u32(5)
+	p2.u32(9)
 	if parseStss([]memBox{{typ: "stss", payload: p2.b}}) != nil {
 		t.Error("truncated stss must return nil")
 	}
@@ -563,7 +589,7 @@ func TestParseChplExact18BytesBoundary(t *testing.T) {
 	var p []byte
 	p = append(p, 1, 0, 0, 0) // version/flags
 	p = append(p, 0, 0, 0, 0) // reserved
-	p = append(p, 1)           // count=1
+	p = append(p, 1)          // count=1
 	startBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(startBytes, 1000000) // 100ms * 10000
 	p = append(p, startBytes...)
@@ -591,7 +617,7 @@ func TestParseChplStart100nsArithmetic(t *testing.T) {
 	var p []byte
 	p = append(p, 1, 0, 0, 0) // version/flags
 	p = append(p, 0, 0, 0, 0) // reserved
-	p = append(p, 1)           // count
+	p = append(p, 1)          // count
 	startBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(startBytes, 5000000)
 	p = append(p, startBytes...)
@@ -656,15 +682,19 @@ func TestMdhdLanguageBoundary(t *testing.T) {
 // TestPaspBoxSquarePixels kills the num == den CONDITIONALS_NEGATION mutant.
 // Square pixels (dw*h == dh*w) must return nil; non-square must not.
 func TestPaspBoxSquarePixels(t *testing.T) {
-	w := uint32(1920); h := uint32(1080)
-	dw := uint32(1920); dh := uint32(1080)
+	w := uint32(1920)
+	h := uint32(1080)
+	dw := uint32(1920)
+	dh := uint32(1080)
 	tr := &mkv.Track{Width: &w, Height: &h, DisplayWidth: &dw, DisplayHeight: &dh}
 	if paspBox(tr) != nil {
 		t.Error("square pixels (1920×1080 = 1920×1080) must return nil pasp")
 	}
 	// Non-square: DisplayWidth*Height ≠ DisplayHeight*Width.
-	dw2 := uint32(1024); dh2 := uint32(576) // 16:9 display on 720×576 coded
-	w2 := uint32(720); h2 := uint32(576)
+	dw2 := uint32(1024)
+	dh2 := uint32(576) // 16:9 display on 720×576 coded
+	w2 := uint32(720)
+	h2 := uint32(576)
 	tr2 := &mkv.Track{Width: &w2, Height: &h2, DisplayWidth: &dw2, DisplayHeight: &dh2}
 	if paspBox(tr2) == nil {
 		t.Error("anamorphic pixels must return non-nil pasp")

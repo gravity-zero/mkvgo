@@ -188,9 +188,9 @@ func TestCmdEditTitle(t *testing.T) {
 
 func TestCmdEditTrack(t *testing.T) {
 	tests := []struct {
-		name    string
-		extra   []string // appended after [src, "-o", out]
-		verify  func(t *testing.T, c *matroska.Container)
+		name   string
+		extra  []string // appended after [src, "-o", out]
+		verify func(t *testing.T, c *matroska.Container)
 	}{
 		{
 			name:  "language",

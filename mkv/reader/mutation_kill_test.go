@@ -73,11 +73,11 @@ func TestSpsRangeBothValues(t *testing.T) {
 // TestGcd64Arithmetic kills mutations on the gcd64 loop and the a==0 guard.
 func TestGcd64Arithmetic(t *testing.T) {
 	cases := []struct{ a, b, want uint64 }{
-		{0, 0, 1},    // a reaches 0 at end → return 1 (not 0)
-		{4, 0, 4},    // b starts at 0, loop skipped
-		{0, 5, 5},    // a=0, b=5 → one swap then done
-		{12, 8, 4},   // standard GCD
-		{7, 3, 1},    // coprime
+		{0, 0, 1},  // a reaches 0 at end → return 1 (not 0)
+		{4, 0, 4},  // b starts at 0, loop skipped
+		{0, 5, 5},  // a=0, b=5 → one swap then done
+		{12, 8, 4}, // standard GCD
+		{7, 3, 1},  // coprime
 		{100, 50, 50},
 		{2560, 720, 80}, // used in SAR display dim test below
 	}
@@ -114,20 +114,20 @@ func spsPrefixCF3() *tbw {
 	b.u(40, 8)  // level_idc
 	b.ue(0)     // seq_parameter_set_id
 	// High-profile section:
-	b.ue(3) // chroma_format_idc = 3 (4:4:4)
+	b.ue(3)   // chroma_format_idc = 3 (4:4:4)
 	b.u(0, 1) // separate_colour_plane_flag (present because cf==3)
-	b.ue(0) // bit_depth_luma_minus8 → 8-bit
-	b.ue(0) // bit_depth_chroma_minus8
+	b.ue(0)   // bit_depth_luma_minus8 → 8-bit
+	b.ue(0)   // bit_depth_chroma_minus8
 	b.u(0, 1) // qpprime_y_zero_transform_bypass_flag
 	b.u(0, 1) // seq_scaling_matrix_present_flag = 0
 	// Rest of SPS skeleton:
-	b.ue(0) // log2_max_frame_num_minus4
-	b.ue(0) // pic_order_cnt_type = 0
-	b.ue(0) // log2_max_pic_order_cnt_lsb_minus4
-	b.ue(1) // max_num_ref_frames
+	b.ue(0)   // log2_max_frame_num_minus4
+	b.ue(0)   // pic_order_cnt_type = 0
+	b.ue(0)   // log2_max_pic_order_cnt_lsb_minus4
+	b.ue(1)   // max_num_ref_frames
 	b.u(0, 1) // gaps_in_frame_num_value_allowed_flag
-	b.ue(29) // pic_width_in_mbs_minus1
-	b.ue(17) // pic_height_in_map_units_minus1
+	b.ue(29)  // pic_width_in_mbs_minus1
+	b.ue(17)  // pic_height_in_map_units_minus1
 	b.u(1, 1) // frame_mbs_only_flag = 1 (progressive)
 	b.u(1, 1) // direct_8x8_inference_flag
 	b.u(0, 1) // frame_cropping_flag = 0
@@ -154,16 +154,24 @@ func TestAVCSPSChromaFormatIDC0(t *testing.T) {
 	b.u(100, 8) // High
 	b.u(0, 8)
 	b.u(40, 8)
-	b.ue(0)   // seq_parameter_set_id
-	b.ue(0)   // chroma_format_idc = 0 (monochrome)
+	b.ue(0) // seq_parameter_set_id
+	b.ue(0) // chroma_format_idc = 0 (monochrome)
 	// no separate_colour_plane_flag since cf!=3
 	b.ue(0) // bit_depth_luma_minus8
 	b.ue(0) // bit_depth_chroma_minus8
 	b.u(0, 1)
 	b.u(0, 1)
-	b.ue(0); b.ue(0); b.ue(0); b.ue(1); b.u(0, 1)
-	b.ue(29); b.ue(17)
-	b.u(1, 1); b.u(1, 1); b.u(0, 1); b.u(0, 1)
+	b.ue(0)
+	b.ue(0)
+	b.ue(0)
+	b.ue(1)
+	b.u(0, 1)
+	b.ue(29)
+	b.ue(17)
+	b.u(1, 1)
+	b.u(1, 1)
+	b.u(0, 1)
+	b.u(0, 1)
 	avcc := wrapAvcC(b)
 	bc := parseCodecColour("h264", avcc)
 	if bc == nil {
@@ -180,15 +188,15 @@ func TestAVCSPSChromaFormatIDC0(t *testing.T) {
 func TestSARIdcBoundaries(t *testing.T) {
 	w, h := uint32(1280), uint32(720)
 	cases := []struct {
-		idc         uint32
-		wantSARSet  bool
-		wantSARW    uint32
-		wantSARH    uint32
+		idc        uint32
+		wantSARSet bool
+		wantSARW   uint32
+		wantSARH   uint32
 	}{
-		{0, false, 0, 0},  // idc=0: falls through switch, no SAR
+		{0, false, 0, 0}, // idc=0: falls through switch, no SAR
 		// idc=1 → SAR {1,1}: sarWidth==sarHeight → no display dims (equivalent mutant for idc>=1).
 		{1, false, 0, 0},
-		{16, true, 2, 1}, // idc=16: last table entry {2,1} — kills idc <= 16 → idc < 16
+		{16, true, 2, 1},  // idc=16: last table entry {2,1} — kills idc <= 16 → idc < 16
 		{17, false, 0, 0}, // idc=17: out of range, no SAR
 	}
 	for _, c := range cases {
@@ -305,8 +313,8 @@ func TestHevcBitDepthFromHeaderBits(t *testing.T) {
 	}
 	for _, c := range cases {
 		cp := make([]byte, 23)
-		cp[0] = 1           // valid marker
-		cp[17] = c.lowBits  // bitDepthLumaMinus8 in low 3 bits
+		cp[0] = 1          // valid marker
+		cp[17] = c.lowBits // bitDepthLumaMinus8 in low 3 bits
 		// No NAL arrays (cp[22] = 0).
 		bc := hevcColour(cp)
 		if bc == nil {
@@ -324,10 +332,10 @@ func TestHevcBitDepthFromHeaderBits(t *testing.T) {
 // buildMinimalAV1C builds a 4-byte av1C header with no OBUs.
 func buildMinimalAV1C(seqProfile, highBitDepth, twelveBit uint8) []byte {
 	return []byte{
-		0x81,                                        // marker=1, version=1
-		seqProfile << 5,                             // seq_profile in bits 7:5
-		(highBitDepth << 6) | (twelveBit << 5),     // high_bit_depth(1) twelve_bit(1)
-		0x00,                                        // no configOBUs
+		0x81,                                   // marker=1, version=1
+		seqProfile << 5,                        // seq_profile in bits 7:5
+		(highBitDepth << 6) | (twelveBit << 5), // high_bit_depth(1) twelve_bit(1)
+		0x00,                                   // no configOBUs
 	}
 }
 
@@ -335,8 +343,8 @@ func buildMinimalAV1C(seqProfile, highBitDepth, twelveBit uint8) []byte {
 func TestAV1BitDepthSeqProfile(t *testing.T) {
 	type tc struct {
 		seqProfile, highBD, twelveBit uint8
-		wantBD                         int
-		wantProfile                    string
+		wantBD                        int
+		wantProfile                   string
 	}
 	cases := []tc{
 		{0, 0, 0, 8, "Main"},          // default 8-bit
@@ -412,8 +420,8 @@ func TestBitReaderUELeadingZerosGuard(t *testing.T) {
 func TestBitReaderBitsExactValue(t *testing.T) {
 	// Read 4 bits at a time and verify exact values.
 	r := &bitReader{data: []byte{0xA5}} // 1010 0101
-	n0 := r.bits(4) // 1010 = 10
-	n1 := r.bits(4) // 0101 = 5
+	n0 := r.bits(4)                     // 1010 = 10
+	n1 := r.bits(4)                     // 0101 = 5
 	if r.err {
 		t.Fatal("unexpected err reading 8 bits from 1-byte buffer")
 	}
@@ -584,10 +592,10 @@ func TestSignedVINTLenExactBiasValues(t *testing.T) {
 		diff int
 		want int
 	}{
-		{63, 1},   // w=1 bias=64: 63 < 64 fits
-		{-64, 1},  // -64 >= -64 fits
-		{64, 2},   // 64 >= 64 → needs w=2
-		{-65, 2},  // -65 < -64 → needs w=2
+		{63, 1},  // w=1 bias=64: 63 < 64 fits
+		{-64, 1}, // -64 >= -64 fits
+		{64, 2},  // 64 >= 64 → needs w=2
+		{-65, 2}, // -65 < -64 → needs w=2
 		// w=2: bias = 2^13 = 8192
 		{8191, 2},  // < 8192 fits
 		{-8192, 2}, // >= -8192 fits
@@ -609,11 +617,11 @@ func TestVintLenExactBoundaries(t *testing.T) {
 		want int
 	}{
 		{0, 1},
-		{126, 1},  // 2^7-2 = 126: max 1-byte
-		{127, 2},  // 2^7-1 = 127: triggers 2-byte
+		{126, 1}, // 2^7-2 = 126: max 1-byte
+		{127, 2}, // 2^7-1 = 127: triggers 2-byte
 		{128, 2},
-		{16382, 2},  // 2^14-2 = 16382: max 2-byte
-		{16383, 3},  // triggers 3-byte
+		{16382, 2}, // 2^14-2 = 16382: max 2-byte
+		{16383, 3}, // triggers 3-byte
 		{math.MaxUint64, 8},
 	}
 	for _, c := range cases {
@@ -817,14 +825,14 @@ func TestIdFromBytes(t *testing.T) {
 		b    []byte
 		want uint32
 	}{
-		{[]byte{0xE7}, mkv.IDTimestamp},                     // 1-byte
-		{[]byte{0x16, 0x54, 0xAE, 0x6B}, mkv.IDTracks},     // 4-byte
-		{[]byte{0x1F, 0x43, 0xB6, 0x75}, mkv.IDCluster},    // 4-byte
-		{[]byte{0x18, 0x53, 0x80, 0x67}, mkv.IDSegment},    // 4-byte
-		{[]byte{0x11, 0x4D, 0x9B, 0x74}, mkv.IDSeekHead},   // 4-byte
-		{[]byte{0x1C, 0x53, 0xBB, 0x6B}, mkv.IDCues},       // 4-byte
-		{[]byte{0x73, 0xA4}, mkv.IDSegmentUID},              // 2-byte
-		{[]byte{0xA3}, mkv.IDSimpleBlock},                   // 1-byte
+		{[]byte{0xE7}, mkv.IDTimestamp},                  // 1-byte
+		{[]byte{0x16, 0x54, 0xAE, 0x6B}, mkv.IDTracks},   // 4-byte
+		{[]byte{0x1F, 0x43, 0xB6, 0x75}, mkv.IDCluster},  // 4-byte
+		{[]byte{0x18, 0x53, 0x80, 0x67}, mkv.IDSegment},  // 4-byte
+		{[]byte{0x11, 0x4D, 0x9B, 0x74}, mkv.IDSeekHead}, // 4-byte
+		{[]byte{0x1C, 0x53, 0xBB, 0x6B}, mkv.IDCues},     // 4-byte
+		{[]byte{0x73, 0xA4}, mkv.IDSegmentUID},           // 2-byte
+		{[]byte{0xA3}, mkv.IDSimpleBlock},                // 1-byte
 		// Byte-by-byte: {0x01, 0x02} → (0x01<<8)|0x02 = 0x0102
 		{[]byte{0x01, 0x02}, 0x0102},
 		// 3-byte: {0xAB, 0xCD, 0xEF} → 0xABCDEF
@@ -844,7 +852,7 @@ func TestIdFromBytes(t *testing.T) {
 func TestSetDurationMsExact(t *testing.T) {
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{
-			Duration:      2000.0,   // 2000 timecode units
+			Duration:      2000.0,    // 2000 timecode units
 			TimecodeScale: 1_000_000, // 1 ms per unit
 		},
 	}
@@ -875,8 +883,8 @@ func TestSetDurationMsZeroDuration(t *testing.T) {
 func TestSetDurationMsNonStandardScale(t *testing.T) {
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{
-			Duration:      1000.0,   // 1000 units
-			TimecodeScale: 500_000,  // 0.5 ms per unit → 500 ms total
+			Duration:      1000.0,  // 1000 units
+			TimecodeScale: 500_000, // 0.5 ms per unit → 500 ms total
 		},
 	}
 	if err := setDurationMs(c); err != nil {
@@ -1052,7 +1060,9 @@ func TestVP9ColourBitDepthBoundaries(t *testing.T) {
 	// An unsupported depth (e.g. 4) must leave bitDepth nil.
 	cp := make([]byte, 8)
 	cp[2] = 4 << 4 // bitDepth=4
-	cp[3] = 1; cp[4] = 1; cp[5] = 1
+	cp[3] = 1
+	cp[4] = 1
+	cp[5] = 1
 	bc := vp9Colour(cp)
 	if bc == nil {
 		t.Fatal("vp9Colour with bad bitDepth: bc should be non-nil (valid primaries)")
@@ -1068,7 +1078,9 @@ func TestVP9ColourFullRangeFlag(t *testing.T) {
 	for _, full := range []uint8{0, 1} {
 		cp := make([]byte, 8)
 		cp[2] = (8 << 4) | full // bitDepth=8, fullRange=full
-		cp[3] = 1; cp[4] = 1; cp[5] = 1
+		cp[3] = 1
+		cp[4] = 1
+		cp[5] = 1
 		bc := vp9Colour(cp)
 		if bc == nil {
 			t.Fatalf("vp9Colour(full=%d): nil", full)

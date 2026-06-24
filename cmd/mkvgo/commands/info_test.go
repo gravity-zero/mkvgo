@@ -28,10 +28,10 @@ func writeMKV(t *testing.T, c *matroska.Container) string {
 	return path
 }
 
-func ptrU32(v uint32) *uint32 { return &v }
-func ptrU16(v uint16) *uint16 { return &v }
+func ptrU32(v uint32) *uint32   { return &v }
+func ptrU16(v uint16) *uint16   { return &v }
 func ptrF64(v float64) *float64 { return &v }
-func ptrU8(v uint8) *uint8 { return &v }
+func ptrU8(v uint8) *uint8      { return &v }
 
 // TestFmtMs exercises every arithmetic operator in the helpers.go FmtMs function.
 // The value 3661000 ms = 1h 1m 1s produces "01:01:01", which distinguishes all
