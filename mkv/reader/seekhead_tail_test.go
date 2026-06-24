@@ -191,9 +191,9 @@ func TestFullReadStopsWhenSeekHeadHasNoTail(t *testing.T) {
 }
 
 // TestFullReadTailFallbackNoSeekHead checks the fallback: with no SeekHead the
-// reader walks the clusters sequentially (read count grows with cluster count)
-// but still finds the tail Cues and Tags.
-func TestFullReadTailFallbackNoSeekHead(t *testing.T) {
+// reader locates them by scanning back from EOF (no cluster walk), so the read
+// count does not grow with the cluster count and the tail is parsed correctly.
+func TestFullReadNoSeekHeadTailCuesScan(t *testing.T) {
 	const clusterSize = 128 << 10
 
 	small := &callCountingReadSeeker{rs: bytes.NewReader(buildTailMKV(t, false, 20, clusterSize, false))}
@@ -202,16 +202,30 @@ func TestFullReadTailFallbackNoSeekHead(t *testing.T) {
 		t.Fatalf("Read(20 clusters, no seekhead): %v", err)
 	}
 	large := &callCountingReadSeeker{rs: bytes.NewReader(buildTailMKV(t, false, 200, clusterSize, false))}
-	_, err = Read(context.Background(), large, "large.mkv")
+	cLarge, err := Read(context.Background(), large, "large.mkv")
 	if err != nil {
 		t.Fatalf("Read(200 clusters, no seekhead): %v", err)
 	}
 
-	assertTailParsed(t, cSmall) // correctness preserved without a SeekHead
+	assertTailParsed(t, cSmall)
+	assertTailParsed(t, cLarge)
 
-	if large.calls <= small.calls {
-		t.Errorf("without a SeekHead the walk should read more with more clusters: 20=%d, 200=%d", small.calls, large.calls)
+	if small.calls != large.calls {
+		t.Errorf("the tail scan should not read more with more clusters: 20=%d, 200=%d", small.calls, large.calls)
 	}
+}
+
+// buildNoCuesMKV assembles [Info][Tracks][Cluster×n] with no SeekHead and no
+// Cues — the only layout that still forces a full cluster walk to EOF, since
+// there is nothing at the tail to scan for.
+func buildNoCuesMKV(t *testing.T, nClusters, clusterSize int) []byte {
+	t.Helper()
+	cluster := bigCluster(clusterSize)
+	clusters := make([]byte, 0, nClusters*len(cluster))
+	for i := 0; i < nClusters; i++ {
+		clusters = append(clusters, cluster...)
+	}
+	return segmentMKV(infoElem(), tracksElem(), clusters)
 }
 
 // TestFullReadStaleSeekHeadFallsBack poisons the SeekHead's Cues offset so it

@@ -133,6 +133,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 
 	var seekOffsets []int64 // absolute offsets of the elements a head SeekHead points at
 	jumpedToTail := false
+	triedTailScan := false
 
 	for {
 		if ctx.Err() != nil {
@@ -225,12 +226,32 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					// tail SeekHead would have an offset past the clusters and taken
 					// the jump branch above, so it is not missed here.
 					return nil
+				} else if len(c.Cues) == 0 && !triedTailScan {
+					// No SeekHead, and the Cues have not appeared yet: on most real
+					// libraries (~70% here) the muxer omits the SeekHead and writes the
+					// Cues at the very end. Rather than walk every cluster to reach
+					// them, scan back from EOF for a Cues element that tiles exactly to
+					// the file end, and parse the tail straight from that one read. Done
+					// at most once — a file with no tail Cues falls through to the walk.
+					triedTailScan = true
+					bodyPos := p.pos()
+					done, err := p.scanTailForCues(c)
+					if err != nil {
+						return err
+					}
+					if done {
+						return nil
+					}
+					if _, err := p.r.Seek(bodyPos, io.SeekStart); err != nil {
+						return err
+					}
 				}
 			}
-			// Fallback walk: no usable SeekHead, so every cluster header must be read
-			// to reach whatever follows. Drop to the raw reader first — keeping the
-			// buffer here would refill (and immediately discard) a full window per
-			// cluster body-skip, ballooning a 0.3 MB walk into one window per cluster.
+			// Fallback walk: no usable SeekHead and no tail Cues found, so every
+			// cluster header must be read to reach whatever follows. Drop to the raw
+			// reader first — keeping the buffer here would refill (and immediately
+			// discard) a full window per cluster body-skip, ballooning a 0.3 MB walk
+			// into one window per cluster.
 			if err := p.unbuffer(); err != nil {
 				return err
 			}
@@ -335,6 +356,137 @@ func (p *parser) unbuffer() error {
 		return err
 	}
 	p.r = raw
+	return nil
+}
+
+// cuesMagic is the 4-byte Cues element ID (0x1C53BB6B), scanned for from the end
+// of a SeekHead-less file to locate the Cues index without walking the clusters.
+var cuesMagic = []byte{0x1C, 0x53, 0xBB, 0x6B}
+
+// tailScanWindow is the slice read from the real file end when hunting for a
+// trailing Cues index. One bounded read: it covers a typical Cues+Tags
+// (~100-300 KiB) so the common case is found immediately, while a file that has
+// no tail Cues wastes only this much before falling back to the cluster walk. A
+// Cues index that starts further than this from EOF is left to the walk.
+const tailScanWindow = 512 << 10
+
+// scanTailForCues locates a SeekHead-less file's trailing Cues by reading one
+// window at the real end of the file and scanning it for a Cues element whose
+// top-level elements tile exactly to EOF. On a hit it parses the whole tail
+// (Cues plus any following Tags/Chapters/…) straight from that buffer — no
+// re-read — and returns true; the caller is then done. On a miss it returns
+// false and the caller walks the clusters. Using the real EOF (not the declared
+// segment size) keeps it safe on truncated files: a short read or a tail that
+// does not tile simply misses and defers to the resync-tolerant walk.
+func (p *parser) scanTailForCues(c *mkv.Container) (bool, error) {
+	start := p.pos() // current cluster body — never scan before here
+	end, err := p.r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return false, err
+	}
+	if end-start > tailScanWindow {
+		start = end - tailScanWindow
+	}
+	if end <= start {
+		return false, nil
+	}
+	buf := make([]byte, end-start)
+	if _, err := p.r.Seek(start, io.SeekStart); err != nil {
+		return false, err
+	}
+	if _, err := io.ReadFull(p.r, buf); err != nil {
+		return false, nil // truncated/short tail: defer to the walk
+	}
+	rel, ok := tailAnchor(buf, start, end)
+	if !ok {
+		return false, nil
+	}
+	if err := p.parseTailBuffer(c, buf[rel:]); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// tailAnchor scans buf (covering [bufStart, end)) for the earliest Cues element
+// ID whose elements tile exactly to end, returning its index within buf. A
+// cuesMagic byte sequence occurring inside cluster data fails the tiling check,
+// so it is not mistaken for the real index.
+func tailAnchor(buf []byte, bufStart, end int64) (int, bool) {
+	for i := 0; ; {
+		j := bytes.Index(buf[i:], cuesMagic)
+		if j < 0 {
+			return 0, false
+		}
+		at := i + j
+		if tilesToEnd(buf[at:], bufStart+int64(at), end) {
+			return at, true
+		}
+		i = at + 1
+	}
+}
+
+// tilesToEnd reports whether the elements starting at buf[0] (file offset abs)
+// are all segment-level (or Void padding) with definite sizes and tile exactly
+// to end, leaving no gap and never overshooting.
+func tilesToEnd(buf []byte, abs, end int64) bool {
+	for off := 0; abs < end; {
+		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(buf[off:]))
+		if err != nil || eh.Size < 0 || !isTailElement(eh.ID) {
+			return false
+		}
+		step := int64(hlen) + eh.Size
+		if abs+step > end {
+			return false
+		}
+		abs += step
+		off += int(step)
+	}
+	return abs == end
+}
+
+func isTailElement(id uint32) bool {
+	return id == mkv.IDVoid || isSegmentLevelID(id)
+}
+
+// parseTailBuffer parses the post-cluster metadata from an in-memory tail slice
+// (already validated by tilesToEnd), reusing the normal element parsers via a
+// bytes.Reader so no further I/O is needed.
+func (p *parser) parseTailBuffer(c *mkv.Container, tail []byte) error {
+	saved := p.r
+	p.r = bytes.NewReader(tail)
+	defer func() { p.r = saved }()
+	end := int64(len(tail))
+	for p.pos() < end {
+		eh, _, err := p.readHeader()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		switch eh.ID {
+		case mkv.IDCues:
+			err = p.parseCues(eh.Size, c)
+		case mkv.IDTags:
+			err = p.parseTags(eh.Size, c)
+		case mkv.IDChapters:
+			err = p.parseChapters(eh.Size, c)
+		case mkv.IDAttachments:
+			err = p.parseAttachments(eh.Size, c)
+		case mkv.IDInfo:
+			err = p.parseInfo(eh.Size, c)
+		case mkv.IDTracks:
+			err = p.parseTracks(eh.Size, c)
+		default:
+			if eh.Size < 0 {
+				return fmt.Errorf("tail element 0x%X has unknown size", eh.ID)
+			}
+			err = p.skip(eh.Size)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

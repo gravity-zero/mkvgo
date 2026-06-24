@@ -85,36 +85,63 @@ func TestIOBudget_SeekHeadHeadCues_StopEarlyO1(t *testing.T) {
 	}
 }
 
-// (c) No SeekHead: the walk must cross every cluster, so seeks scale with the
-// cluster count (unavoidable). The point under test is that bytes do NOT — the
-// 33 KiB clusters (> fullReadBufSize) would each trigger a buffer refill if the
-// walk were buffered, so a regression would read ~32 KiB × clusters. The
-// unbuffered walk keeps bytes well under 1 MiB at any cluster count.
-func TestIOBudget_NoSeekHead_WalkNoAmplification(t *testing.T) {
+// (c) No SeekHead AND no Cues (clusters run to EOF): nothing to scan for, so the
+// walk must cross every cluster and seeks scale with the cluster count
+// (unavoidable). The point under test is that bytes do NOT — the 33 KiB clusters
+// (> fullReadBufSize) would each trigger a buffer refill if the walk were
+// buffered, so a regression would read ~32 KiB × clusters. The unbuffered walk
+// keeps bytes well under 1 MiB at any cluster count.
+func TestIOBudget_NoSeekHead_NoCues_WalkNoAmplification(t *testing.T) {
 	const clusterSize = 33 << 10
-	small := &ioCounter{rs: bytes.NewReader(buildTailMKV(t, false, 20, clusterSize, false))}
+	small := &ioCounter{rs: bytes.NewReader(buildNoCuesMKV(t, 20, clusterSize))}
 	cs, err := Read(context.Background(), small, "s.mkv")
 	if err != nil {
 		t.Fatalf("20 clusters: %v", err)
 	}
-	large := &ioCounter{rs: bytes.NewReader(buildTailMKV(t, false, 2000, clusterSize, false))}
+	large := &ioCounter{rs: bytes.NewReader(buildNoCuesMKV(t, 2000, clusterSize))}
 	cl, err := Read(context.Background(), large, "l.mkv")
 	if err != nil {
 		t.Fatalf("2000 clusters: %v", err)
 	}
 
-	assertTailParsed(t, cs)
-	assertTailParsed(t, cl)
-
+	if len(cs.Tracks) != 2 || len(cl.Tracks) != 2 {
+		t.Fatalf("tracks not parsed: %d / %d", len(cs.Tracks), len(cl.Tracks))
+	}
 	if large.seeks <= small.seeks {
-		t.Errorf("a no-SeekHead walk should seek more with more clusters: 20=%d 2000=%d", small.seeks, large.seeks)
+		t.Errorf("a no-Cues walk should seek more with more clusters: 20=%d 2000=%d", small.seeks, large.seeks)
 	}
 	if small.bytes > oneMiB || large.bytes > oneMiB {
 		t.Errorf("buffer amplification on the fallback walk: bytes 20cl=%d 2000cl=%d (want < 1 MiB; a per-cluster refill would read ~%d)",
 			small.bytes, large.bytes, int64(2000)*fullReadBufSize)
 	}
-	t.Logf("(c) no-seekhead: 20cl reads=%d seeks=%d bytes=%d | 2000cl reads=%d seeks=%d bytes=%d",
+	t.Logf("(c) no-seekhead/no-cues walk: 20cl reads=%d seeks=%d bytes=%d | 2000cl reads=%d seeks=%d bytes=%d",
 		small.reads, small.seeks, small.bytes, large.reads, large.seeks, large.bytes)
+}
+
+// (c2) No SeekHead but Cues at the tail (the ~70% real-library case): the reader
+// must scan back from EOF instead of walking, so seeks and bytes are constant
+// regardless of cluster count, and the budget stays small. Cluster size is 2 KiB
+// so even at 20 clusters the region exceeds the scan window's reach from the
+// head, exercising a genuine tail seek rather than a whole-file read.
+func TestIOBudget_NoSeekHead_TailCues_BackwardScanO1(t *testing.T) {
+	const clusterSize = 2 << 10
+	var prev *ioCounter
+	for _, n := range []int{20, 2000, 20000} {
+		cnt := &ioCounter{rs: bytes.NewReader(buildTailMKV(t, false, n, clusterSize, false))}
+		c, err := Read(context.Background(), cnt, "x.mkv")
+		if err != nil {
+			t.Fatalf("n=%d: %v", n, err)
+		}
+		assertTailParsed(t, c)
+		if cnt.bytes > oneMiB {
+			t.Errorf("n=%d read %d bytes (> 1 MiB): the tail scan read too much", n, cnt.bytes)
+		}
+		if prev != nil && cnt.seeks != prev.seeks {
+			t.Errorf("seeks scale with cluster count (%d at n=%d vs %d before): the tail scan is walking clusters", cnt.seeks, n, prev.seeks)
+		}
+		t.Logf("(c2) n=%5d: reads=%d seeks=%d bytes=%d", n, cnt.reads, cnt.seeks, cnt.bytes)
+		prev = cnt
+	}
 }
 
 // (point 5) The optimized full Read must return a Container byte-identical to the
