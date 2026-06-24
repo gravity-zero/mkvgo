@@ -136,6 +136,13 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 	if bc == nil {
 		return
 	}
+	mergeBitstreamColour(t, bc)
+}
+
+// mergeBitstreamColour fills any track field the container left nil from a
+// bitstream-derived colour — a codec-private SPS, or an in-band SPS read from the
+// first sample. Container values always win; the bitstream only fills gaps.
+func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
 	if t.ColorPrimaries == nil && bc.primaries != nil {
 		t.ColorPrimaries = bc.primaries
 	}

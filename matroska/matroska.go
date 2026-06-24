@@ -84,20 +84,30 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*Container, error)
 // Info (and DurationMs) but stops as soon as it has them, never parsing Cues or
 // traversing Clusters. Chapters/Attachments/Tags/Cues are left nil. Use it for
 // library indexing where only stream metadata is needed.
-func OpenMeta(ctx context.Context, path string) (*Container, error) {
-	return reader.OpenMeta(ctx, path)
+func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*Container, error) {
+	return reader.OpenMeta(ctx, path, opts...)
 }
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS.
-func OpenMetaWithFS(ctx context.Context, path string, fs *FS) (*Container, error) {
-	return reader.OpenMetaWithFS(ctx, path, fs)
+func OpenMetaWithFS(ctx context.Context, path string, fs *FS, opts ...ReadOption) (*Container, error) {
+	return reader.OpenMetaWithFS(ctx, path, fs, opts...)
 }
 
 // ReadMeta is the fast metadata-only counterpart of Read: Tracks + Info (and
 // DurationMs) only, with Chapters/Attachments/Tags/Cues left nil. See OpenMeta.
-func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*Container, error) {
-	return reader.ReadMeta(ctx, r, path)
+func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*Container, error) {
+	return reader.ReadMeta(ctx, r, path, opts...)
 }
+
+// ReadOption configures an optional metadata-read behaviour (see
+// WithInBandColourFallback).
+type ReadOption = reader.ReadOption
+
+// WithInBandColourFallback recovers a video track's colour from the first
+// sample's in-band SPS when it is absent from both the container and the codec-
+// private record (a bare hvcC). Off by default; the read stays head-only unless
+// passed. See reader.WithInBandColourFallback.
+func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallback() }
 
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)

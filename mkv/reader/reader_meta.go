@@ -20,23 +20,23 @@ const metaBufSize = 2 << 10
 // OpenMeta opens path and returns only its Info + Tracks via the fast
 // metadata-only path (see ReadMeta). Chapters, Attachments, Tags and Cues are
 // left nil. Use Open for a full read.
-func OpenMeta(ctx context.Context, path string) (*mkv.Container, error) {
+func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	return ReadMeta(ctx, f, path)
+	return ReadMeta(ctx, f, path, opts...)
 }
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS.
-func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, error) {
+func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	return ReadMeta(ctx, f, path)
+	return ReadMeta(ctx, f, path, opts...)
 }
 
 // ReadMeta reads ONLY the metadata an indexer needs — Info and Tracks — and stops
@@ -61,7 +61,12 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Containe
 // precedes the metadata: on such a damaged head it returns what it managed to
 // parse (possibly empty). Callers that must tolerate corruption before the
 // metadata should fall back to Read.
-func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, error) {
+func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*mkv.Container, error) {
+	var o readOpts
+	for _, fn := range opts {
+		fn(&o)
+	}
+
 	br, err := newBufReadSeeker(r, metaBufSize)
 	if err != nil {
 		return nil, err
@@ -77,6 +82,11 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container
 	}
 	if err := setDurationMs(c); err != nil {
 		return nil, err
+	}
+	if o.inBandColour {
+		// Opted-in, and only for tracks that need it: recover colour from the
+		// first sample's in-band SPS. The head parse above stays untouched.
+		fillColourFromFirstSample(ctx, r, c)
 	}
 	return c, nil
 }
