@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 )
@@ -62,16 +61,16 @@ func CmdMux(args []string) {
 			outPath = args[i]
 			continue
 		}
-		parts := strings.SplitN(args[i], ":", 2)
-		if len(parts) != 2 {
+		srcPath, trackID, ok := splitTrackSpec(args[i])
+		if !ok {
 			Fatal(fmt.Sprintf("invalid track spec %q, expected file:trackID", args[i]))
 		}
-		id, err := strconv.ParseUint(parts[1], 10, 64)
+		id, err := strconv.ParseUint(trackID, 10, 64)
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid track ID %q: %v", parts[1], err))
+			Fatal(fmt.Sprintf("invalid track ID %q: %v", trackID, err))
 		}
 		inputs = append(inputs, matroska.TrackInput{
-			SourcePath: parts[0], TrackID: id, IsDefault: true,
+			SourcePath: srcPath, TrackID: id, IsDefault: true,
 		})
 	}
 	if outPath == "" {
@@ -140,13 +139,12 @@ func CmdAddTrack(args []string) {
 			i++
 			input.Name = args[i]
 		default:
-			parts := strings.SplitN(args[i], ":", 2)
-			if len(parts) == 2 {
-				id, err := strconv.ParseUint(parts[1], 10, 64)
+			if srcPath, trackID, ok := splitTrackSpec(args[i]); ok {
+				id, err := strconv.ParseUint(trackID, 10, 64)
 				if err != nil {
-					Fatal(fmt.Sprintf("invalid track ID %q", parts[1]))
+					Fatal(fmt.Sprintf("invalid track ID %q", trackID))
 				}
-				input.SourcePath = parts[0]
+				input.SourcePath = srcPath
 				input.TrackID = id
 			}
 		}

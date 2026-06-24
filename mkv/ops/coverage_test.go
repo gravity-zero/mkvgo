@@ -704,7 +704,6 @@ func TestCovMux_CloseError(t *testing.T) {
 	dir := t.TempDir()
 	src := buildMinimalMKV(t, dir, "mx.mkv", []mkv.Track{videoTrack(1)}, testBlocks(1), 300)
 
-	closeErr := false
 	fs := &mkv.FS{
 		Create: func(path string) (mkv.WriteSeekCloser, error) {
 			f, err := os.Create(path)
@@ -715,22 +714,29 @@ func TestCovMux_CloseError(t *testing.T) {
 		},
 		Open: func(path string) (mkv.ReadSeekCloser, error) { return os.Open(path) },
 	}
-	_ = closeErr
 
 	err := Mux(context.Background(), mkv.MuxOptions{
 		OutputPath: filepath.Join(dir, "out.mkv"),
 		Tracks:     []mkv.TrackInput{{SourcePath: src, TrackID: 1}},
 	}, mkv.Options{FS: fs})
-	// The Close error is surfaced when the stream write path succeeds.
-	// We don't assert a specific error here, just that the test runs without panic.
-	_ = err
+	// On the success path Mux surfaces the output's Close error instead of
+	// dropping it, so we expect the simulated failure back.
+	if err == nil || !strings.Contains(err.Error(), "simulated close failure") {
+		t.Fatalf("expected the simulated close failure to surface, got %v", err)
+	}
 }
 
 type closeErrWSC struct {
 	mkv.WriteSeekCloser
 }
 
-func (c *closeErrWSC) Close() error { return nil }
+// Close releases the underlying handle (so the OS file can be removed, which
+// matters on Windows) and then reports a simulated failure to exercise Mux's
+// close-error path.
+func (c *closeErrWSC) Close() error {
+	_ = c.WriteSeekCloser.Close()
+	return fmt.Errorf("simulated close failure")
+}
 
 // ── Reindex: error paths for unknown-size elements ────────────────────────────
 
