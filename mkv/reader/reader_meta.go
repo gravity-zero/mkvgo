@@ -397,6 +397,17 @@ func (b *bufReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	return b.off, fmt.Errorf("bufReadSeeker: invalid whence %d", whence)
 }
 
+// raw returns the underlying reader seeked to the buffer's current logical
+// offset, so a caller can continue reading from exactly where the buffered view
+// left off — without the buffer. Any bytes still buffered ahead are discarded;
+// they will be re-read from the underlying reader on demand.
+func (b *bufReadSeeker) raw() (io.ReadSeeker, error) {
+	if _, err := b.rs.Seek(b.off, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return b.rs, nil
+}
+
 func (b *bufReadSeeker) seekAbs(target int64) (int64, error) {
 	if _, err := b.rs.Seek(target, io.SeekStart); err != nil {
 		return b.off, err

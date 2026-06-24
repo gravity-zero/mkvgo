@@ -32,8 +32,20 @@ func OpenWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, e
 	return Read(ctx, f, path)
 }
 
+// fullReadBufSize buffers the head of a full read. The EBML reader pulls VINTs a
+// byte at a time and the parser issues many position queries (Seek(0,
+// SeekCurrent)) while parsing Info/Tracks/Cues; a bufReadSeeker serves both from
+// memory, so a SeekHead jump completes in a handful of real seeks rather than
+// one per VINT. The cluster-walk fallback unbuffers itself (parseSegment), so a
+// body-skip there never refills a window it would immediately discard.
+const fullReadBufSize = 32 << 10
+
 func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, error) {
-	p := &parser{r: r, metaBudget: maxMetadataBytes}
+	br, err := newBufReadSeeker(r, fullReadBufSize)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{r: br, metaBudget: maxMetadataBytes}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
@@ -113,21 +125,22 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 		return fmt.Errorf("expected Segment (0x%X), got 0x%X", mkv.IDSegment, h.ID)
 	}
 
+	segStart := p.pos()
 	var endPos int64 = -1
 	if h.Size >= 0 {
-		cur, _ := p.r.Seek(0, io.SeekCurrent)
-		endPos = cur + h.Size
+		endPos = segStart + h.Size
 	}
+
+	var seekOffsets []int64 // absolute offsets of the elements a head SeekHead points at
+	jumpedToTail := false
 
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if endPos >= 0 {
-			cur, _ := p.r.Seek(0, io.SeekCurrent)
-			if cur >= endPos {
-				break
-			}
+		elemStart := p.pos()
+		if endPos >= 0 && elemStart >= endPos {
+			break
 		}
 		eh, _, err := p.readHeader()
 		if err != nil {
@@ -174,6 +187,59 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if err := p.parseCues(eh.Size, c); err != nil {
 				return err
 			}
+		case mkv.IDSeekHead:
+			offs, err := p.parseSeekHeadOffsets(eh.Size, segStart, endPos)
+			if err != nil {
+				return err
+			}
+			seekOffsets = append(seekOffsets, offs...)
+		case mkv.IDCluster:
+			// Reaching the media is where a sequential walk gets expensive: the
+			// Cues/Tags/Attachments that sit AFTER the clusters are only found by
+			// reading one header per cluster — thousands on a long file, each a
+			// round-trip on a network FS. If a head SeekHead told us where the
+			// post-cluster metadata begins, Seek straight to it ONCE and resume the
+			// normal walk from there, skipping the whole cluster region. Resuming
+			// the walk (rather than jumping to each referenced element) means a tail
+			// element missing from the SeekHead is still discovered, and the merge/
+			// resync semantics of the sequential reader are preserved.
+			if !jumpedToTail {
+				if tailStart, ok := minOffsetAtOrAfter(seekOffsets, elemStart); ok {
+					valid, err := p.offsetIsSegmentElement(tailStart)
+					if err != nil {
+						return err
+					}
+					if valid {
+						jumpedToTail = true
+						if _, err := p.r.Seek(tailStart, io.SeekStart); err != nil {
+							return err
+						}
+						continue
+					}
+					seekOffsets = nil // stale SeekHead: stop trusting it, walk the clusters
+				} else if len(seekOffsets) > 0 {
+					// A SeekHead gave us valid offsets and NONE lie past the clusters:
+					// everything it indexes (Info/Tracks/Cues/…) is at the head and
+					// already parsed, so there is nothing to find by walking the
+					// clusters to EOF — stop. A trailing element listed in a nested
+					// tail SeekHead would have an offset past the clusters and taken
+					// the jump branch above, so it is not missed here.
+					return nil
+				}
+			}
+			// Fallback walk: no usable SeekHead, so every cluster header must be read
+			// to reach whatever follows. Drop to the raw reader first — keeping the
+			// buffer here would refill (and immediately discard) a full window per
+			// cluster body-skip, ballooning a 0.3 MB walk into one window per cluster.
+			if err := p.unbuffer(); err != nil {
+				return err
+			}
+			if eh.Size < 0 {
+				return fmt.Errorf("unknown-size element 0x%X cannot be skipped", eh.ID)
+			}
+			if err := p.skip(eh.Size); err != nil {
+				return err
+			}
 		default:
 			if eh.Size < 0 {
 				return fmt.Errorf("unknown-size element 0x%X cannot be skipped", eh.ID)
@@ -183,6 +249,92 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			}
 		}
 	}
+	return nil
+}
+
+// parseSeekHeadOffsets reads a SeekHead and returns the absolute file offset of
+// every element it references (Info, Tracks, Cues, Tags, a nested SeekHead, …),
+// reusing parseSeekEntry. SeekPosition is relative to the Segment data start
+// (segStart). Entries that fall outside [segStart, endPos) are dropped.
+func (p *parser) parseSeekHeadOffsets(size, segStart, endPos int64) ([]int64, error) {
+	var offs []int64
+	end := p.pos() + size
+	for p.pos() < end {
+		eh, _, e := p.readHeader()
+		if e != nil {
+			return offs, e
+		}
+		if eh.ID != mkv.IDSeek {
+			if eh.Size < 0 {
+				return offs, nil
+			}
+			if e := p.skip(eh.Size); e != nil {
+				return offs, e
+			}
+			continue
+		}
+		_, pos, ok, e := p.parseSeekEntry(eh.Size)
+		if e != nil {
+			return offs, e
+		}
+		if !ok {
+			continue
+		}
+		abs := segStart + pos
+		if abs < segStart || (endPos >= 0 && abs >= endPos) {
+			continue // out-of-range or overflowed (huge SeekPosition) entry
+		}
+		offs = append(offs, abs)
+	}
+	return offs, nil
+}
+
+// minOffsetAtOrAfter returns the smallest offset in offs that is >= floor — the
+// start of the post-cluster metadata region — or ok=false if none qualifies.
+func minOffsetAtOrAfter(offs []int64, floor int64) (int64, bool) {
+	best := int64(-1)
+	for _, o := range offs {
+		if o >= floor && (best < 0 || o < best) {
+			best = o
+		}
+	}
+	return best, best >= 0
+}
+
+// offsetIsSegmentElement reports whether off points at a decodable segment-level
+// element, without disturbing the reader position. It guards the SeekHead jump
+// against a stale/forged SeekPosition that lands mid-cluster: an undecodable or
+// unexpected header there means the SeekHead is not trustworthy, so the caller
+// falls back to walking the clusters rather than parsing garbage.
+func (p *parser) offsetIsSegmentElement(off int64) (bool, error) {
+	saved := p.pos()
+	if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+		return false, err
+	}
+	eh, _, herr := p.readHeader()
+	if _, err := p.r.Seek(saved, io.SeekStart); err != nil {
+		return false, err
+	}
+	if herr != nil {
+		return false, nil
+	}
+	return isSegmentLevelID(eh.ID), nil
+}
+
+// unbuffer swaps a buffered reader for its raw underlying reader, positioned at
+// the current logical offset. The cluster walk calls this so header reads are
+// small and body-skips are bare seeks, with no buffer window to refill. It is a
+// no-op once the reader is already raw.
+func (p *parser) unbuffer() error {
+	br, ok := p.r.(*bufReadSeeker)
+	if !ok {
+		return nil
+	}
+	raw, err := br.raw()
+	if err != nil {
+		return err
+	}
+	p.r = raw
 	return nil
 }
 
