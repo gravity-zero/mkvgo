@@ -11,7 +11,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.22', stable]
+        # go.mod pins `toolchain go1.26.4`, so every build uses >= 1.26.4 (an older
+        # setup-go version would auto-upgrade to it). Test the pinned floor and the
+        # latest stable.
+        go-version: ['1.26.4', stable]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
