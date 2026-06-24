@@ -94,6 +94,24 @@ validated against ffprobe over a sweep of real files.
   reports the exact VUI/`pasp` ratio. Display-only and imperceptible (all ≈ the same
   picture shape); mkvgo keeps the true signal rather than mirror that quirk.
 
+### Tests
+
+- **Greatly expanded the test surface**, driven by statement coverage and gremlins
+  mutation testing. Statement coverage is now **≥ 90% in every package**
+  (`cmd/mkvgo/commands` 16.6% → 97.9%, `mkv/reader` → 90.6%, `mkv/ops` → 92.0%,
+  `mp4` → 92.9%; `ebml`/`mkv`/`mkv/subtitle`/`mkv/writer` 90–98%), and global
+  mutation efficacy rose from 70% to 82% (mutator coverage 85% → 95%). The new
+  tests cover the previously-untested error/edge paths: malformed and truncated
+  inputs, bit-reader / Exp-Golomb boundaries, sample-table and EBML element/VINT
+  parsing, the `av_reduce` aspect algorithm (brute-force property test), and the
+  codec-bitstream skip paths (scaling lists, RPS).
+- **CLI is now integration-tested.** Every command is exercised on a fixture
+  (inspection via captured stdout and `-json`, edit/extract by re-reading the
+  output, assembly/split/remux/reindex by parsing the produced file). To make the
+  `Fatal`/error paths reachable in-process, the CLI's process exit is now an
+  injectable hook (`Fatal` calls a `var osExit = os.Exit`) — behaviour is identical
+  in production.
+
 ## [0.8.0] - 2026-06-23
 
 ### Added
