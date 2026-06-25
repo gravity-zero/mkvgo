@@ -153,6 +153,13 @@ func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
 }
 
 func (p *parser) skip(size int64) error {
+	// Reject an unknown size (-1): only Segment and Cluster may be unknown-size, so
+	// inside a leaf element it is malformed. Skipping it as Seek(-1) would seek a
+	// byte backwards and desync the framing — a clean error is better than garbage.
+	// Top-level loops guard size<0 before reaching here (they resync instead).
+	if size < 0 {
+		return fmt.Errorf("cannot skip element with unknown size")
+	}
 	_, err := p.r.Seek(size, io.SeekCurrent)
 	return err
 }

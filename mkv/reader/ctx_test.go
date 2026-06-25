@@ -37,3 +37,15 @@ func TestInnerLoopHonorsCtx(t *testing.T) {
 		t.Errorf("nil ctx should parse fine, got %v", err)
 	}
 }
+
+// TestSkipRejectsUnknownSize checks the skip guard: an unknown size (-1) errors
+// rather than seeking a byte backwards and desyncing the framing.
+func TestSkipRejectsUnknownSize(t *testing.T) {
+	p := &parser{r: bytes.NewReader(make([]byte, 16))}
+	if err := p.skip(-1); err == nil {
+		t.Error("skip(-1) must error, not seek backwards")
+	}
+	if err := p.skip(4); err != nil {
+		t.Errorf("skip(4) should advance fine, got %v", err)
+	}
+}
