@@ -210,6 +210,18 @@ func (t *Track) EffectiveSampleRate() float64 {
 	return 0
 }
 
+// AvgFrameRate returns the average frame rate (ffprobe avg_frame_rate): the total
+// frame count over the track's duration. It is non-zero only when both FrameCount
+// and DurationMs are known — MP4 video, head-only — and differs from FrameRate
+// (the nominal rate) for variable-frame-rate content. It returns 0 for Matroska,
+// whose header carries no frame count, so a caller falls back to FrameRate.
+func (t *Track) AvgFrameRate() float64 {
+	if t.FrameCount > 0 && t.DurationMs > 0 {
+		return float64(t.FrameCount) * 1000 / float64(t.DurationMs)
+	}
+	return 0
+}
+
 // displayDims returns the track's intended display dimensions: the explicit
 // DisplayWidth/DisplayHeight when set (anamorphic), else the coded Width/Height
 // (square pixels). Both zero when no video dimensions are known.

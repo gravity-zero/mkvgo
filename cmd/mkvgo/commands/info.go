@@ -186,6 +186,17 @@ func CmdProbe(path string) {
 		if t.FrameCount > 0 {
 			fmt.Printf("  %dframes", t.FrameCount)
 		}
+		if avg := t.AvgFrameRate(); avg > 0 {
+			nominal := 0.0
+			if t.FrameRate != nil {
+				nominal = *t.FrameRate
+			}
+			// Show the average rate when it diverges from the nominal (VFR) or the
+			// nominal is unknown; for clean CFR the two agree and it adds nothing.
+			if nominal == 0 || avg < nominal*0.99 || avg > nominal*1.01 {
+				fmt.Printf("  %.3ffps(avg)", avg)
+			}
+		}
 		if t.DurationMs > 0 {
 			fmt.Printf("  %.2fs", float64(t.DurationMs)/1000)
 		}

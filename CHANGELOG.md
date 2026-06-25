@@ -8,6 +8,24 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg writes per track
+  (bits per second, what ffprobe reports as `bit_rate`) is now surfaced as the
+  typed `Track.Bitrate`, keyed by the track UID. Full read only (the metadata path
+  stops before Tags). MP4 already filled it from `btrt`/`esds`.
+- **Extended disposition flags.** `Track.HearingImpaired`, `VisualImpaired`,
+  `TextDescriptions`, `Original` and `Commentary` expose the Matroska
+  FlagHearingImpaired/…/FlagCommentary elements — the ffprobe stream dispositions
+  of the same name — alongside the existing default/forced. Shown in `probe` and
+  JSON. Matroska-only (MP4 has no equivalent boxes).
+- **3D stereo + 360 projection.** `Track.StereoMode` (with `StereoModeName()`) and
+  `Track.Projection` report stereoscopic-3D arrangement and spherical/360
+  projection — from the Matroska StereoMode/Projection elements or the MP4
+  `st3d`/`sv3d` boxes (st3d mapped to the Matroska StereoMode values). Shown in
+  `probe` and JSON; unset for ordinary 2D video.
+- **Average frame rate.** `Track.AvgFrameRate()` returns ffprobe's
+  `avg_frame_rate` (frame count over duration) — non-zero for MP4 video
+  (head-only), 0 for Matroska where the header carries no frame count. Surfaced in
+  `probe` (when it diverges from the nominal rate, i.e. VFR) and JSON.
 - **HDR10 static metadata.** `Track.HDR` (`HDRStaticMetadata`) now carries the
   Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering
   Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931

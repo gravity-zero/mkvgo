@@ -144,8 +144,9 @@ func PrintJSON(v any) {
 // JSON shape is the Track plus these two extras.
 type trackJSON struct {
 	matroska.Track
-	CodecLongName string `json:"codec_long_name,omitempty"`
-	ChannelLayout string `json:"channel_layout,omitempty"`
+	CodecLongName string  `json:"codec_long_name,omitempty"`
+	ChannelLayout string  `json:"channel_layout,omitempty"`
+	AvgFrameRate  float64 `json:"avg_frame_rate,omitempty"`
 }
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
@@ -153,7 +154,7 @@ type trackJSON struct {
 func tracksForJSON(tracks []matroska.Track) []trackJSON {
 	out := make([]trackJSON, len(tracks))
 	for i, t := range tracks {
-		out[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(), ChannelLayout: t.ChannelLayout()}
+		out[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(), ChannelLayout: t.ChannelLayout(), AvgFrameRate: t.AvgFrameRate()}
 	}
 	return out
 }
