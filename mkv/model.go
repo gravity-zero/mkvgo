@@ -39,11 +39,12 @@ type Container struct {
 	// Fragmented is true for a fragmented MP4 (an mvex box in the moov), whose
 	// per-sample metadata lives in the moof fragments rather than the moov. The
 	// probe still recovers the frame rate from the fragment defaults (mvex>trex)
-	// and the keyframe index from the random-access index (mfra/tfra at the file
-	// tail) — both bounded and head-only — so a fragmented file usually still
-	// reports FrameRate and Keyframes. They stay unset only when no random-access
-	// index is present; a caller should fall back to a full demux when a
-	// Fragmented file leaves them empty. Always false for Matroska.
+	// and the keyframe index from a random-access index — the mfra/tfra at the
+	// file tail, or the sidx Segment Index at the head that streaming fMP4 carries
+	// — both bounded and head-only, so a fragmented file usually still reports
+	// FrameRate and Keyframes. They stay unset only when no such index is present;
+	// a caller should fall back to a full demux when a Fragmented file leaves them
+	// empty. Always false for Matroska.
 	Fragmented bool `json:"fragmented,omitempty"`
 }
 

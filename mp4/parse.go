@@ -352,11 +352,25 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 	}
 	if mode == sampleKeyframes && mv.fragmented {
 		// A fragmented file's keyframes live in the moof fragments; recover them
-		// from the random-access index (mfra/tfra) at the file tail, bounded.
-		// Best-effort: no usable index leaves Keyframes nil and the caller falls back.
+		// head-only from a random-access index, preferring the mfra/tfra at the
+		// file tail, then the sidx at the head (the source streaming fMP4 carries
+		// when there is no mfra). Best-effort: no usable index leaves Keyframes nil
+		// and the caller falls back.
 		readFragmentKeyframes(r, size, mv)
+		if vt := videoTrack(mv); vt != nil && vt.keyframesMs == nil {
+			readSidxKeyframes(r, size, mv)
+		}
 	}
 	return mv, nil
+}
+
+func videoTrack(mv *movie) *inTrack {
+	for i := range mv.tracks {
+		if mv.tracks[i].trackType == mkv.VideoTrack {
+			return &mv.tracks[i]
+		}
+	}
+	return nil
 }
 
 // maxMfraBytes bounds the random-access index read; a real mfra is tens of KB
@@ -466,6 +480,125 @@ func parseTfra(payload []byte) (trackID uint32, times []uint64, ok bool) {
 		off += entrySize
 	}
 	return trackID, times, true
+}
+
+// readSidxKeyframes recovers a fragmented MP4's video keyframes from a Segment
+// Index (sidx), which precedes the fragments and lists each subsegment's duration
+// and whether it starts on a Stream Access Point. It is the streaming-fMP4
+// keyframe source when there is no mfra. Head-only and bounded (the sidx boxes
+// before the first moof); closed-GOP SAPs only (SAP_type <= 2), for a clean
+// seek/segment index. Leaves keyframes nil when no matching sidx is present.
+func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
+	vt := videoTrack(mv)
+	if vt == nil {
+		return
+	}
+	for _, sidx := range scanSidxBoxes(r, size) {
+		times, ok := sidxKeyframeMs(sidx, vt.trackID)
+		if !ok {
+			continue
+		}
+		ms := make([]int64, len(times))
+		for i, t := range times {
+			if v := t + vt.editShiftMs; v > 0 {
+				ms[i] = v
+			}
+		}
+		vt.keyframesMs = sortDedupTimes(ms)
+		return
+	}
+}
+
+// scanSidxBoxes returns the payloads of the sidx boxes that precede the first
+// fragment (moof) — a bounded head scan of the top-level boxes.
+func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
+	var out [][]byte
+	var hdr [16]byte
+	for off := int64(0); off+8 <= size; {
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
+			return out
+		}
+		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
+			return out
+		}
+		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
+		typ := string(hdr[4:8])
+		headerLen := int64(8)
+		switch boxSize {
+		case 1:
+			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
+				return out
+			}
+			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
+			headerLen = 16
+		case 0:
+			boxSize = size - off
+		}
+		if boxSize < headerLen || off+boxSize > size {
+			return out
+		}
+		switch typ {
+		case "sidx":
+			payload := make([]byte, boxSize-headerLen)
+			if _, err := io.ReadFull(r, payload); err != nil {
+				return out
+			}
+			out = append(out, payload)
+		case "moof", "mdat":
+			return out // fragments started; no head sidx beyond here
+		}
+		off += boxSize
+	}
+	return out
+}
+
+// sidxKeyframeMs reads a sidx box payload and returns the start times (ms) of the
+// subsegments that begin with a closed-GOP Stream Access Point. ok is false when
+// the box does not reference wantRefID or is malformed.
+func sidxKeyframeMs(payload []byte, wantRefID uint32) ([]int64, bool) {
+	if len(payload) < 12 || binary.BigEndian.Uint32(payload[4:8]) != wantRefID {
+		return nil, false
+	}
+	version := payload[0]
+	timescale := binary.BigEndian.Uint32(payload[8:12])
+	if timescale == 0 {
+		return nil, false
+	}
+	off := 12
+	var t uint64 // earliest_presentation_time, then the running subsegment start
+	if version == 0 {
+		if len(payload) < off+8 {
+			return nil, false
+		}
+		t = uint64(binary.BigEndian.Uint32(payload[off : off+4]))
+		off += 8 // earliest_presentation_time(4) + first_offset(4)
+	} else {
+		if len(payload) < off+16 {
+			return nil, false
+		}
+		t = binary.BigEndian.Uint64(payload[off : off+8])
+		off += 16 // earliest_presentation_time(8) + first_offset(8)
+	}
+	if len(payload) < off+4 {
+		return nil, false
+	}
+	count := int(binary.BigEndian.Uint16(payload[off+2 : off+4])) // after 2 reserved bytes
+	off += 4
+	var times []int64
+	for i := 0; i < count; i++ {
+		if off+12 > len(payload) {
+			break
+		}
+		subDur := uint64(binary.BigEndian.Uint32(payload[off+4 : off+8]))
+		w := binary.BigEndian.Uint32(payload[off+8 : off+12])
+		if w>>31 == 1 && (w>>28)&0x7 <= 2 { // starts_with_SAP, closed-GOP SAP_type
+			sapDelta := uint64(w & 0x0FFFFFFF)
+			times = append(times, ticksToMs(int64(t+sapDelta), timescale))
+		}
+		t += subDur
+		off += 12
+	}
+	return times, true
 }
 
 // readMoovForMode returns the moov payload: the full box for the remux/extract
