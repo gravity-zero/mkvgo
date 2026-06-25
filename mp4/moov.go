@@ -84,6 +84,26 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 }
 
 // buildTrak builds one trak box and returns it with the track's duration (ms).
+// buildEdts writes an edit list that re-signals an audio track's gapless priming
+// (Matroska CodecDelay, in ns) as the MP4 encoder delay: one edit starting at
+// media_time = priming, so a decoder discards it. This is what carries the priming
+// back across an MKV->MP4 round-trip, the way ffmpeg writes it.
+func buildEdts(codecDelayNs int64, durMs uint32) []byte {
+	mediaTime := codecDelayNs / 1_000_000 // ns -> ms (media timescale == movieTimescale)
+	segDur := int64(durMs) - mediaTime
+	if segDur < 0 {
+		segDur = 0
+	}
+	elst := fullBox("elst", 0, 0, func(w *bw) {
+		w.u32(1)                // entry_count
+		w.u32(uint32(segDur))   // segment_duration (movie timescale)
+		w.i32(int32(mediaTime)) // media_time (media timescale)
+		w.u16(1)                // media_rate integer (1.0)
+		w.u16(0)                // media_rate fraction
+	})
+	return container("edts", elst)
+}
+
 func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	var tim timing
 	if t.spec.text || t.isChapter {
@@ -122,6 +142,11 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	// kind box with the DASH role scheme.
 	if t.mkv.IsForced {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
+	}
+	// Re-signal the gapless priming (Matroska CodecDelay) as an MP4 edit list, so a
+	// decoder discards it and the delay survives the MKV->MP4 round-trip.
+	if t.mkv.CodecDelay > 0 {
+		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, dur))
 	}
 	trakChildren = append(trakChildren, mdia)
 	return container("trak", trakChildren...), dur

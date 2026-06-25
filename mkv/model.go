@@ -85,6 +85,13 @@ type Track struct {
 	SampleRate       *float64 `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
 	OutputSampleRate *float64 `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) — see EffectiveSampleRate
 	BitDepth         *uint8   `json:"bit_depth,omitempty"`          // audio bits/sample (0x6264); video uses VideoBitDepth
+	// CodecDelay is the codec's built-in delay in NANOSECONDS (Matroska 0x56AA) —
+	// the gapless/encoder priming a decoder must discard from the start. It is the
+	// portable home for an MP4 audio track's edit-list priming (AAC/AC-3), so the
+	// MP4↔MKV round-trip preserves it instead of silently shifting the audio. 0 when
+	// absent. SeekPreRoll (0x56BB) is the matching pre-roll for seeking (Opus).
+	CodecDelay  int64 `json:"codec_delay,omitempty"`
+	SeekPreRoll int64 `json:"seek_pre_roll,omitempty"`
 
 	// Probe metadata (added v0.4.0). The *Present flags let a consumer tell a
 	// value that was explicitly written in the file from a spec default that the

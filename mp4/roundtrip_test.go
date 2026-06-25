@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +11,53 @@ import (
 )
 
 func u16p(v uint16) *uint16 { return &v }
+
+// TestRoundTripCodecDelay checks that an audio track's gapless priming survives a
+// MKV -> MP4 -> MKV round trip: the MKV CodecDelay is written as an MP4 edit list
+// (elst) and read back as CodecDelay. Before this, the priming was dropped on the
+// MP4 side and the decoded audio drifted by ~10-15 ms each round trip.
+func TestRoundTripCodecDelay(t *testing.T) {
+	const delayNs = 21_000_000 // 21 ms (a typical AAC encoder delay)
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC,
+			Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: delayNs},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1}},
+		{track: 2, pts: 0, key: true, data: []byte{2, 3}},
+		{track: 1, pts: 40, key: false, data: []byte{4}},
+		{track: 2, pts: 21, key: true, data: []byte{5, 6}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+
+	mp4Path := filepath.Join(t.TempDir(), "mid.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	if b, _ := os.ReadFile(mp4Path); !bytes.Contains(b, []byte("elst")) {
+		t.Error("RemuxToMP4 should emit an elst edit list for the audio CodecDelay")
+	}
+
+	outMKV := filepath.Join(t.TempDir(), "out.mkv")
+	if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
+	c, _ := readMKV(t, outMKV)
+	var audio *mkv.Track
+	for i := range c.Tracks {
+		if c.Tracks[i].Type == mkv.AudioTrack {
+			audio = &c.Tracks[i]
+		}
+	}
+	if audio == nil {
+		t.Fatal("round trip lost the audio track")
+	}
+	if d := audio.CodecDelay; d < 20_000_000 || d > 22_000_000 {
+		t.Errorf("CodecDelay = %d ns, want ~21 ms preserved across the round trip", d)
+	}
+}
 
 // TestRoundTripColourAndSubtitles checks that colour code points and SRT cues
 // survive the full MKV → MP4 → MKV round trip (exercising the colr box and the

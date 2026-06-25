@@ -175,6 +175,15 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 	return nil
 }
 
+// ticksToNs converts a media-timescale duration to nanoseconds (Matroska's unit
+// for CodecDelay), without the millisecond rounding ticksToMs would introduce.
+func ticksToNs(ticks int64, timescale uint32) int64 {
+	if timescale == 0 {
+		return ticks
+	}
+	return ticks * 1_000_000_000 / int64(timescale)
+}
+
 func ticksToMs(ticks int64, timescale uint32) int64 {
 	if timescale == 0 {
 		return ticks

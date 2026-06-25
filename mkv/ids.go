@@ -47,6 +47,8 @@ const (
 	IDName                 = 0x536E
 	IDCodecPrivate         = 0x63A2
 	IDDefaultDuration      = 0x23E383 // nominal frame duration in ns (fps = 1e9/value)
+	IDCodecDelay           = 0x56AA   // codec built-in delay in ns (gapless/encoder priming)
+	IDSeekPreRoll          = 0x56BB   // pre-roll to decode before a seek point, in ns
 )
 
 const (

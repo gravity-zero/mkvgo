@@ -266,6 +266,12 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.Name != "" {
 		e.str(mkv.IDName, t.Name)
 	}
+	if t.CodecDelay > 0 {
+		e.uint(mkv.IDCodecDelay, uint64(t.CodecDelay))
+	}
+	if t.SeekPreRoll > 0 {
+		e.uint(mkv.IDSeekPreRoll, uint64(t.SeekPreRoll))
+	}
 	if !t.IsDefault {
 		e.uint(mkv.IDFlagDefault, 0)
 	}

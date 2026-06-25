@@ -148,6 +148,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.Bitrate = &br
 		}
 		mt.DurationMs = t.durationMs
+		mt.CodecDelay = t.codecDelayNs // gapless priming -> Matroska CodecDelay
 		tracks[i] = mt
 	}
 	return tracks

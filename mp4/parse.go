@@ -71,6 +71,7 @@ type inTrack struct {
 	forced        bool   // a DASH-role kind box marks this track forced
 	forcedKnown   bool   // a DASH-role kind box was read, so forced is meaningful
 	editShiftMs   int64  // edit-list (elst) presentation shift applied to sample times
+	codecDelayNs  int64  // audio encoder priming (edit-list media_time) → Matroska CodecDelay
 
 	// first sample location (stco[0] + stsz[0]), read head-only for the optional
 	// in-band colour fallback; firstSampleSize == 0 when unavailable.
@@ -967,15 +968,16 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	if tr.timescale == 0 {
 		tr.timescale = 1000
 	}
-	// Edit list (edts/elst): the presentation timeline shift ffmpeg applies. An
-	// empty edit adds a delay (movie timebase); a non-empty edit's media_time
-	// trims the start (media timebase). Net shift = empty_delay - media_time.
+	// Edit list (edts/elst): an empty edit adds a presentation delay (movie
+	// timebase); a non-empty edit's media_time trims the start (media timebase).
+	// Resolved once the track type is known (below the hdlr): for audio the trim is
+	// the encoder priming and becomes CodecDelay; otherwise it folds into editShiftMs.
+	var editMediaTime, editEmptyDur int64
+	var hasEdit bool
 	if edts, ok := findMemBox(trakBoxes, "edts"); ok {
 		if eb, err := iterBoxes(edts.payload); err == nil {
 			if elst, ok := findMemBox(eb, "elst"); ok {
-				if mediaTime, emptyDur, ok := parseElst(elst.payload); ok {
-					tr.editShiftMs = ticksToMs(emptyDur, movieTS) - ticksToMs(mediaTime, tr.timescale)
-				}
+				editMediaTime, editEmptyDur, hasEdit = parseElst(elst.payload)
 			}
 		}
 	}
@@ -1006,6 +1008,19 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		// hint/timecode/metadata — not media; surface it rather than dropping it.
 		return tr, &DroppedTrack{ID: trackID, Codec: handler,
 			Reason: "non-media handler " + quoteFourcc(handler)}, nil
+	}
+
+	// Resolve the edit list now the track type is known. An audio media_time trim
+	// is the gapless/encoder priming: carry it as CodecDelay (preserved across the
+	// round-trip) rather than shifting block times. Video keeps the net shift.
+	if hasEdit {
+		emptyMs := ticksToMs(editEmptyDur, movieTS)
+		if tr.trackType == mkv.AudioTrack && editMediaTime > 0 {
+			tr.codecDelayNs = ticksToNs(editMediaTime, tr.timescale)
+			tr.editShiftMs = emptyMs
+		} else {
+			tr.editShiftMs = emptyMs - ticksToMs(editMediaTime, tr.timescale)
+		}
 	}
 
 	minf, ok := findMemBox(mdiaBoxes, "minf")

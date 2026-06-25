@@ -8,6 +8,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Gapless audio priming across MP4 <-> MKV.** New `Track.CodecDelay` and
+  `Track.SeekPreRoll` (Matroska `0x56AA`/`0x56BB`, nanoseconds) are read and
+  written. An MP4 audio track's encoder-delay/priming (its edit-list `media_time`,
+  for AAC/AC-3) is now carried as `CodecDelay` on the MKV side and re-emitted as an
+  MP4 edit list (`elst`) on the way back, so the gapless delay survives a
+  `RemuxFromMP4` / `RemuxToMP4` round trip instead of being dropped - which used to
+  shift the decoded audio by ~10-15 ms. (Opus already round-tripped via its in-band
+  pre-skip.) Preserved to the MP4 writer's millisecond timescale.
 - **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg writes per track
   (bits per second, what ffprobe reports as `bit_rate`) is now surfaced as the
   typed `Track.Bitrate`, keyed by the track UID. Full read only (the metadata path

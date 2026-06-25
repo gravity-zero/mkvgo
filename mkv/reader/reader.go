@@ -959,6 +959,18 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				fps := 1e9 / float64(v)
 				t.FrameRate = &fps
 			}
+		case mkv.IDCodecDelay:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return t, err
+			}
+			t.CodecDelay = int64(v)
+		case mkv.IDSeekPreRoll:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return t, err
+			}
+			t.SeekPreRoll = int64(v)
 		case mkv.IDVideo:
 			if err := p.parseVideoSettings(eh.Size, &t); err != nil {
 				return t, err
