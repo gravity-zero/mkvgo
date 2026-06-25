@@ -63,6 +63,13 @@ All notable changes to mkvgo are documented here. The format is based on
   `Join`, `Split`, `Reindex`, `MergeSubtitle`/`MergeASS`, `ExtractSubtitle`/
   `ExtractASS` and `RemuxToWebM` now return a Close error on the success path
   (e.g. a custom `FS` that commits the write on Close), matching `Mux`.
+- **Duplicate Info/Tracks (non-conformant files).** A file with more than one
+  Info or Tracks element (the spec allows one each) is now handled "first wins"
+  by both `Read` and `ReadMeta` — previously the full `Read` appended a second
+  Tracks set, doubling the tracks, and the two readers could disagree.
+- **Debuggable parse errors.** A parse failure now carries the failing element's
+  ID and byte offset (`element 0x… at offset N: …`) instead of a bare error, so a
+  failure on a real-world file points at where it went wrong.
 
 ### Hardened
 

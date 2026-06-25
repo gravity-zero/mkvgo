@@ -134,6 +134,13 @@ func (p *parser) checkCtx() error {
 	return p.ctx.Err()
 }
 
+// elemErr wraps a parse failure with the element's ID and byte offset, so a
+// failure on a real-world (often non-conformant) file is debuggable instead of a
+// bare "unexpected EOF". Applied at the Segment walk, which sees every element.
+func (p *parser) elemErr(id uint32, at int64, err error) error {
+	return fmt.Errorf("element 0x%X at offset %d: %w", id, at, err)
+}
+
 // maxMetadataBytes caps the TOTAL bytes a single parse pulls into the Container
 // (attachments, codec-private, binary tags). The 512MB per-element cap does not
 // bound a file with many large metadata elements; this does. Untrusted-input
@@ -199,6 +206,10 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	var seekOffsets []int64 // absolute offsets of the elements a head SeekHead points at
 	jumpedToTail := false
 	triedTailScan := false
+	// The spec allows exactly one Info and one Tracks. Some non-conformant muxers
+	// write more; take the FIRST of each and skip the rest, so a duplicate Tracks
+	// does not append a second set of tracks (and so Read matches ReadMeta).
+	var gotInfo, gotTracks bool
 
 	for {
 		if ctx.Err() != nil {
@@ -230,33 +241,47 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
+			if gotInfo {
+				if err := p.skip(eh.Size); err != nil {
+					return err
+				}
+				break // duplicate Info: first wins
+			}
 			if err := p.parseInfo(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
+			gotInfo = true
 		case mkv.IDTracks:
-			if err := p.parseTracks(eh.Size, c); err != nil {
-				return err
+			if gotTracks {
+				if err := p.skip(eh.Size); err != nil {
+					return err
+				}
+				break // duplicate Tracks: first wins (avoid appending a second set)
 			}
+			if err := p.parseTracks(eh.Size, c); err != nil {
+				return p.elemErr(eh.ID, elemStart, err)
+			}
+			gotTracks = true
 		case mkv.IDChapters:
 			if err := p.parseChapters(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDAttachments:
 			if err := p.parseAttachments(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDTags:
 			if err := p.parseTags(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDCues:
 			if err := p.parseCues(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDSeekHead:
 			offs, err := p.parseSeekHeadOffsets(eh.Size, segStart, endPos)
 			if err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 			seekOffsets = append(seekOffsets, offs...)
 		case mkv.IDCluster:

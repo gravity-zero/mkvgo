@@ -134,31 +134,44 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 		if endPos >= 0 && p.pos() >= endPos {
 			break
 		}
+		elemStart := p.pos()
 		eh, _, err := p.readHeader()
 		if err != nil {
 			break // EOF or an undecodable head region: return what we have
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
+			if gotInfo {
+				if err := p.skip(eh.Size); err != nil {
+					return err
+				}
+				break // duplicate Info: first wins (parity with Read)
+			}
 			if err := p.parseInfo(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 			gotInfo = true
 		case mkv.IDTracks:
+			if gotTracks {
+				if err := p.skip(eh.Size); err != nil {
+					return err
+				}
+				break // duplicate Tracks: first wins
+			}
 			if err := p.parseTracks(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 			gotTracks = true
 		case mkv.IDCues:
 			// Cues inline before the Clusters (less common): read them now so the
 			// keyframe index comes from the same pass.
 			if err := p.parseCues(eh.Size, c); err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDSeekHead:
 			ioff, toff, coff, err := p.parseSeekHeadMeta(eh.Size, segStart, endPos)
 			if err != nil {
-				return err
+				return p.elemErr(eh.ID, elemStart, err)
 			}
 			if ioff >= 0 {
 				infoOff = ioff
