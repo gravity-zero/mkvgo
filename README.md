@@ -6,15 +6,13 @@
 [![codecov](https://codecov.io/gh/gravity-zero/mkvgo/branch/master/graph/badge.svg)](https://codecov.io/gh/gravity-zero/mkvgo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**mkvgo inspects, edits and converts video files** — Matroska (`.mkv`/`.webm`) and
-MP4 (`.mp4`/`.mov`) — both as a **command-line tool** and an **importable Go
-library**. It is written in pure Go with **zero external dependencies**: no
-ffmpeg, no mkvtoolnix, no C — just one small static binary (or a `go get` away).
+In-process MKV/WebM container toolkit in pure Go. Probe, edit, remux to/from MP4 - no ffmpeg, no cgo, zero dependencies.
 
-Use it to read what's inside a file (codecs, languages, colour/HDR, chapters,
-keyframes…), index a media library fast, prepare files for streaming, convert
-between MKV and MP4, extract or merge subtitles, or edit metadata — without
-shelling out to an external tool.
+mkvgo is both a **command-line tool** and an **importable Go library** for
+Matroska (`.mkv`/`.webm`) and MP4 (`.mp4`/`.mov`). Use it to read what's inside a
+file (codecs, languages, colour/HDR, chapters, keyframes...), index a media
+library fast, prepare files for streaming, convert between MKV and MP4, extract or
+merge subtitles, or edit metadata - without shelling out to an external tool.
 
 ### Supported formats
 
@@ -22,28 +20,28 @@ shelling out to an external tool.
 |---|:---:|:---:|---|
 | **Matroska** `.mkv` | ✅ | ✅ | MP4, WebM |
 | **WebM** `.webm` | ✅ | ✅ (WebM-subset codecs) | MP4, WebM |
-| **MP4 / MOV** `.mp4` `.mov` | ✅ | — (remux only) | MKV |
+| **MP4 / MOV** `.mp4` `.mov` | ✅ | - (remux only) | MKV |
 
 WebM is read and written as Matroska. MP4/MOV is fully inspected (head-only, like
-ffprobe) and remuxed to/from MKV — with no re-encoding in either direction.
+ffprobe) and remuxed to/from MKV - with no re-encoding in either direction.
 
 Editing, muxing, splitting and joining are **Matroska operations**: to do them on
 MP4 content, remux it to MKV first (`from-mp4`), operate, then remux back
-(`to-mp4`) — every step is lossless (`-c copy`).
+(`to-mp4`) - every step is lossless (`-c copy`).
 
 ### Why mkvgo?
 
 - **Zero dependencies.** Stdlib only. A single ~2 MB static binary that
   cross-compiles to Linux/macOS/Windows; or embed the library directly in your Go
-  service — no subprocess, no ffmpeg to ship.
+  service - no subprocess, no ffmpeg to ship.
 - **Fast metadata.** Probing is *head-only*: it reads the container headers, not
-  the whole file, and never decodes a frame — so indexing a large library is
+  the whole file, and never decodes a frame - so indexing a large library is
   orders of magnitude faster than a full demux.
 - **ffprobe-equivalent fields.** Codecs, profile/level, pixel format, colour and
   HDR (HDR10 static metadata **and** Dolby Vision), aspect ratio, rotation,
-  per-track bitrate, keyframes… mapped to the names ffprobe uses.
+  per-track bitrate, keyframes... mapped to the names ffprobe uses.
 - **A full toolkit, not just a reader.** Write, mux, split, join, remux
-  (MKV↔MP4, →WebM), convert subtitles, and edit metadata — including an *instant*
+  (MKV↔MP4, →WebM), convert subtitles, and edit metadata - including an *instant*
   in-place edit that rewrites only the header.
 - **Built for real-world files.** Corruption-tolerant parsing (resyncs past
   damaged regions), bounded memory on hostile input, and continuously fuzzed.
@@ -73,7 +71,7 @@ Chapters (2):
 
 Add `-json` to any inspection command for machine-readable output.
 
-New here? Start with the **[recipes](docs/recipes.md)** — common tasks, copy-paste
+New here? Start with the **[recipes](docs/recipes.md)** - common tasks, copy-paste
 ready. For the full reference see **[docs/cli.md](docs/cli.md)** (CLI) and
 **[docs/library.md](docs/library.md)** (Go library).
 
@@ -101,12 +99,12 @@ Global flags: `-json` (structured output), `--version`
 
 | Category | Command | Description |
 |---|---|---|
-| **Inspection** | `info` | Show container info (title, duration, muxing app) — MKV or MP4 |
-| | `tracks` | List all tracks with codec, language, resolution, Dolby Vision — MKV or MP4 |
-| | `chapters` | List chapters with timestamps — MKV or MP4 |
+| **Inspection** | `info` | Show container info (title, duration, muxing app) - MKV or MP4 |
+| | `tracks` | List all tracks with codec, language, resolution, Dolby Vision - MKV or MP4 |
+| | `chapters` | List chapters with timestamps - MKV or MP4 |
 | | `attachments` | List attachments (fonts, images) |
 | | `tags` | Show all tags |
-| | `probe` | Full dump of all metadata (ffprobe-equivalent stream fields: colour/HDR, Dolby Vision, pix_fmt, aspect ratio, rotation, bitrate, keyframes, dropped tracks…) — MKV or MP4 |
+| | `probe` | Full dump of all metadata (ffprobe-equivalent stream fields: colour/HDR, Dolby Vision, pix_fmt, aspect ratio, rotation, bitrate, keyframes, dropped tracks…) - MKV or MP4 |
 | | `keyframes` | List video keyframe timestamps (MKV Cues, or a complete structural scan when absent; MP4 sample table) |
 | | `validate` | Check MKV structure for issues |
 | | `compare` | Diff metadata of two MKV files |
@@ -229,7 +227,7 @@ func main() {
 }
 ```
 
-For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed — never walking Clusters/Cues — so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues.
+For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed - never walking Clusters/Cues - so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues.
 
 **Mux tracks from multiple sources:**
 ```go
@@ -270,9 +268,9 @@ err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 
 **Probe an MP4's metadata without remuxing (fast path for indexing):**
 ```go
-// Reads only the moov box — the ffprobe-equivalent stream fields (codecs, profile/
+// Reads only the moov box - the ffprobe-equivalent stream fields (codecs, profile/
 // level, pixel format, colour/HDR, Dolby Vision, aspect ratio, rotation, frame rate,
-// bitrate, channels/layout, per-track duration, file tags…) — never the sample data.
+// bitrate, channels/layout, per-track duration, file tags…) - never the sample data.
 // Counterpart of matroska.OpenMeta. See docs/library.md for the full field table.
 // The second value lists non-carried tracks (cover art, hint/timecode).
 c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
@@ -296,15 +294,15 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
 
 ## Documentation
 
-- **[docs/recipes.md](docs/recipes.md)** — task-oriented cookbook: probe, index a
+- **[docs/recipes.md](docs/recipes.md)** - task-oriented cookbook: probe, index a
   library, keyframes for HLS, HDR, subtitles, remux, split/join, edit… copy-paste
   ready (CLI **and** Go side by side). Start here.
-- **[docs/cli.md](docs/cli.md)** — full CLI reference: every command, flag and
+- **[docs/cli.md](docs/cli.md)** - full CLI reference: every command, flag and
   output field.
-- **[docs/library.md](docs/library.md)** — full library guide: the API, the
+- **[docs/library.md](docs/library.md)** - full library guide: the API, the
   head-only probe field table (mapped to ffprobe), streaming, custom FS, and the
   capabilities a head-only read cannot reach.
-- **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** — generated
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** - generated
   Go API reference.
 
 ## Architecture
