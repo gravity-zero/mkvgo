@@ -35,6 +35,13 @@ type Container struct {
 	// the MP4 sync-sample table, or the Matroska Cues seek index. nil when the
 	// source carries no usable keyframe index.
 	Keyframes []int64 `json:"keyframes,omitempty"`
+
+	// Fragmented is true for a fragmented MP4 (an mvex box in the moov): the
+	// per-sample metadata — frame rate, the keyframe index — lives in the moof
+	// fragments, not in the head-only moov, so a metadata probe cannot complete
+	// it. It is mkvgo signalling "I can't read this head-only"; the caller should
+	// fall back to a full demux for those fields. Always false for Matroska.
+	Fragmented bool `json:"fragmented,omitempty"`
 }
 
 type SegmentInfo struct {

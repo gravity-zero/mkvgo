@@ -95,6 +95,7 @@ type movie struct {
 	durationMs int64           // from mvhd, used when the sample table was not built
 	tags       []mkv.SimpleTag // file-level metadata from udta/meta/ilst
 	title      string          // ©nam, for Info.Title
+	fragmented bool            // an mvex box is present → sample data is in moof fragments
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -369,6 +370,11 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	}
 
 	var mv movie
+	// An mvex box marks a fragmented MP4: its trak sample tables are empty and the
+	// real per-sample data (frame rate, keyframes) lives in the moof fragments,
+	// which a head-only probe does not read. Record it so the caller can fall back.
+	mv.fragmented = hasMemBox(moovBoxes, "mvex")
+
 	// mvhd carries the movie timescale (needed to convert empty-edit durations,
 	// which are in the movie timebase) and the movie duration (used as the metadata
 	// duration when the sample table is not built).

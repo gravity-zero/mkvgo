@@ -6,6 +6,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [0.9.2] - 2026-06-25
 
+### Added
+
+- **Fragmented-MP4 signal.** `Container.Fragmented` is true for a fragmented MP4
+  (an mvex box in the moov), whose per-sample metadata — frame rate, the keyframe
+  index — lives in the moof fragments rather than the head-only moov. The probe
+  reports it (also in `probe` output and JSON) instead of silently returning an
+  incomplete result, so a caller can fall back to a full demux for those fields.
+
 ### Performance
 
 - **Cheap MP4 keyframe index.** The MP4 keyframe index (`OpenMeta` with

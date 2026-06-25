@@ -106,6 +106,7 @@ func containerFromMovie(mv *movie) *mkv.Container {
 		Chapters:   mv.chapters,
 		DurationMs: durMs,
 		Keyframes:  videoKeyframesMs(mv),
+		Fragmented: mv.fragmented,
 	}
 	if len(mv.tags) > 0 {
 		c.Tags = []mkv.Tag{{SimpleTags: mv.tags}}
