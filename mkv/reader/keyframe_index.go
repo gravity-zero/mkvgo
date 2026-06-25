@@ -165,10 +165,16 @@ func (p *parser) resyncCluster(segEnd int64, inCluster, haveTS *bool, clusterTS,
 	return true
 }
 
-// keyframeScanBufSize is the read-ahead window for the sequential keyframe pass:
-// large enough that the Segment is pulled in a few big reads (cheap on SMB/NAS)
-// rather than many small ones.
-const keyframeScanBufSize = 256 << 10
+// keyframeScanBufSize is the read-ahead window for the sequential keyframe pass.
+// It must sit comfortably above the mount's read size (CIFS rsize is ~1–4 MiB) so
+// each underlying read is large and the kernel read-ahead amortises per-read
+// latency — at 256 KiB a 1.25 GB Segment costs ~5000 SMB reads (latency-bound);
+// at 8 MiB it is a few hundred, in ffprobe's range.
+const keyframeScanBufSize = 8 << 20
+
+// discardChunk caps a single bufio.Discard call so the int conversion is safe on
+// a 32-bit int platform; bufio refills across the cap on its own.
+const discardChunk = 1 << 30
 
 // rawSeeker returns the underlying seekable reader positioned where the buffered
 // reader currently is, so the sequential pass can read from there with its own
@@ -204,9 +210,22 @@ func (s *seqSkipReader) Read(p []byte) (int, error) {
 }
 
 func (s *seqSkipReader) discard(n int64) (int64, error) {
-	m, err := io.CopyN(io.Discard, s.br, n)
-	s.off += m
-	return s.off, err
+	// bufio.Reader.Discard advances past n bytes WITHOUT copying them to a
+	// destination (unlike io.CopyN, which streams through an 8 KiB scratch buffer),
+	// refilling from rs in buffer-sized reads.
+	for n > 0 {
+		chunk := n
+		if chunk > discardChunk {
+			chunk = discardChunk
+		}
+		m, err := s.br.Discard(int(chunk))
+		s.off += int64(m)
+		n -= int64(m)
+		if err != nil {
+			return s.off, err
+		}
+	}
+	return s.off, nil
 }
 
 func (s *seqSkipReader) seekAbs(target int64) (int64, error) {
