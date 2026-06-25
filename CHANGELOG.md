@@ -59,6 +59,23 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Fixed-lacing residual bytes.** A fixed-lacing block whose data size is not a
   multiple of its frame count now errors instead of silently dropping the
   remainder.
+- **Output Close errors surfaced.** `RemoveTrack`, `AddTrack`, `EditMetadata`,
+  `Join`, `Split`, `Reindex`, `MergeSubtitle`/`MergeASS`, `ExtractSubtitle`/
+  `ExtractASS` and `RemuxToWebM` now return a Close error on the success path
+  (e.g. a custom `FS` that commits the write on Close), matching `Mux`.
+
+### Hardened
+
+- **Context cancellation in inner parse loops.** `parseInfo`/`parseTracks`/
+  `parseTrackEntry`/`parseTags` now honour a cancelled context, not only the
+  top-level Segment walk, so a forged file with millions of sub-elements stops
+  promptly on cancel.
+- **Leaf-element framing.** Skipping an element now rejects an unknown size (-1)
+  rather than seeking a byte backwards and desyncing the framing inside a leaf
+  parser (only Segment/Cluster may legitimately be unknown-size).
+- **Cumulative budget on head strings.** The Info app/title/segment-UID and track
+  Name reads now count against the cumulative metadata budget instead of only the
+  512 MB-per-element cap, so many large forged strings cannot exceed it in total.
 
 ### CI
 

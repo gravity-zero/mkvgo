@@ -291,6 +291,46 @@ func TestFixedLacingIndivisible(t *testing.T) {
 	}
 }
 
+// TestZeroDataBlockAccepted covers the `dataSize < 0` bound: a block with a valid
+// header but no frame data (dataSize == 0) must parse, not be rejected — kills the
+// `<= 0` mutant.
+func TestZeroDataBlockAccepted(t *testing.T) {
+	var cluster bytes.Buffer
+	ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, 1)
+	ebml.WriteUint(&cluster, 0, 1)
+	blockPayload := []byte{0x81, 0x00, 0x00, 0x00} // track 1, tc 0, flags 0, zero frame data
+	ebml.WriteElementHeader(&cluster, mkv.IDSimpleBlock, int64(len(blockPayload)))
+	cluster.Write(blockPayload)
+
+	br, err := NewBlockReader(buildBlockReaderInput(cluster.Bytes()), 1000000)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	b, err := br.Next()
+	if err != nil {
+		t.Fatalf("a zero-data block must parse, got %v", err)
+	}
+	if len(b.Data) != 0 {
+		t.Errorf("Data = %d bytes, want 0", len(b.Data))
+	}
+}
+
+// TestEBMLLacingNegativeDiff covers the signed inter-frame diff in EBML lacing
+// with a DECREASING frame size (negative diff), so a flipped-sign mutant (which
+// would size the frame as 140 instead of 60) is caught.
+func TestEBMLLacingNegativeDiff(t *testing.T) {
+	// first size = 100 (VINT 0xE4); diff = -40 (signed VINT 0x98 = bias 64 + (-40));
+	// 200 bytes of frame data → last frame = 200 - 100 - 60 = 40.
+	raw := append([]byte{0xE4, 0x98}, make([]byte, 200)...)
+	sizes, err := decodeLacingSizes(lacingEBML, raw, 3)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(sizes) != 3 || sizes[0] != 100 || sizes[1] != 60 || sizes[2] != 40 {
+		t.Errorf("sizes = %v, want [100 60 40] (negative diff)", sizes)
+	}
+}
+
 func TestEBMLLacing(t *testing.T) {
 	var cluster bytes.Buffer
 	ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, 1)
