@@ -19,10 +19,15 @@ All notable changes to mkvgo are documented here. The format is based on
   (re-exported as `matroska.WithSampledKeyframes`) recovers a coarse keyframe
   index for a Matroska that carries no Cues: after the head parse, and only when
   no Cues were found, it probes n evenly-spaced byte offsets in the Segment body,
-  resyncing to the next Cluster at each and reading its Timestamp — every Cluster
-  start being a real seek point. Bounded to about n seeks (no block-by-block
-  scan), so a Cues-less file reports keyframes instead of forcing an external
-  fallback. The CLI `keyframes` command uses it automatically for such files.
+  resyncing to the next Cluster at each. Within the Cluster it reads block headers
+  (payloads skipped by element size) to find the first real video keyframe — a
+  SimpleBlock keyframe flag, or a BlockGroup with no ReferenceBlock — and emits
+  that block's exact presentation time, so every point is a genuine seek point
+  even when the muxer does not align Clusters to keyframes (the Cluster start is
+  NOT assumed to be a keyframe). A Cluster with no video keyframe is skipped
+  (bounded). Bounded to about n seeks, no block-by-block decode, so a Cues-less
+  file reports keyframes instead of forcing an external fallback. The CLI
+  `keyframes` command uses it automatically for such files.
 - **Fragmented-MP4 metadata.** For a fragmented MP4 (an mvex box in the moov),
   the probe now recovers the frame rate from the fragment defaults (mvex>trex)
   and the keyframe index from a random-access index — the mfra/tfra at the file
