@@ -58,8 +58,21 @@ func NewStreamBlockReader(r io.Reader, timecodeScale int64) (*BlockReader, error
 
 // streamParser is a forward-only parser: skips via io.CopyN, no Seek.
 type streamParser struct {
-	r   io.Reader
-	pos int64 // bytes consumed from r (tracks sub-element boundaries)
+	r          io.Reader
+	pos        int64 // bytes consumed from r (tracks sub-element boundaries)
+	metaBudget int64 // remaining bytes allowed for in-memory metadata (parity with the seekable parser)
+}
+
+// chargeMeta debits the cumulative metadata budget, bounding the TOTAL bytes a
+// stream read pulls into memory (codec-private, attachments, binary tags). Without
+// it a forged stream with many large metadata elements could exhaust memory — the
+// streaming counterpart of the seekable parser's guard.
+func (p *streamParser) chargeMeta(n int64) error {
+	p.metaBudget -= n
+	if p.metaBudget < 0 {
+		return fmt.Errorf("in-memory metadata exceeds %d-byte budget", maxMetadataBytes)
+	}
+	return nil
 }
 
 func (p *streamParser) readHeader() (ebml.ElementHeader, int, error) {
@@ -94,6 +107,9 @@ func (p *streamParser) readFloat(size int64) (float64, error) {
 }
 
 func (p *streamParser) readString(size int64) (string, error) {
+	if err := p.chargeMeta(size); err != nil {
+		return "", err
+	}
 	v, err := ebml.ReadString(p.r, size)
 	if err == nil {
 		p.pos += size
@@ -102,6 +118,9 @@ func (p *streamParser) readString(size int64) (string, error) {
 }
 
 func (p *streamParser) readBytes(size int64) ([]byte, error) {
+	if err := p.chargeMeta(size); err != nil {
+		return nil, err
+	}
 	v, err := ebml.ReadBytes(p.r, size)
 	if err == nil {
 		p.pos += size
@@ -135,7 +154,7 @@ func (p *streamParser) boundedLoop(size int64, fn func(ebml.ElementHeader) error
 // SeekHead and Cues are silently skipped (they cannot be acted on in a
 // forward-only stream). The returned Container has no Cues field populated.
 func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader, error) {
-	p := &streamParser{r: r}
+	p := &streamParser{r: r, metaBudget: maxMetadataBytes}
 
 	// EBML header.
 	h, _, err := p.readHeader()

@@ -83,6 +83,9 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Cumulative budget on head strings.** The Info app/title/segment-UID and track
   Name reads now count against the cumulative metadata budget instead of only the
   512 MB-per-element cap, so many large forged strings cannot exceed it in total.
+- **Streaming reader memory budget.** `ReadStream` now enforces the same
+  cumulative in-memory metadata budget as the seekable reader (codec-private,
+  attachments, binary tags), so a forged stream cannot exhaust memory.
 
 ### CI
 
