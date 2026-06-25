@@ -222,6 +222,8 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 
 A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo, and colour carried only in an in-band SPS. In those the probe reports the header value (e.g. the AAC core rate) rather than guessing. See the [CHANGELOG notes](../CHANGELOG.md).
 
+**Colour determinacy.** `Track.ColourDetermined` reports whether the colour was actually read from a source — the container Colour element, an MP4 `colr` box, or the codec bitstream's colour signalling (H.264/HEVC VUI, AV1 `color_config`, VP9 `vpcC`) — *even when it resolves to "unspecified"* (every `Color*` left nil). It lets a caller tell a confirmed-SDR/unspecified stream (`true`, no colour values) from one whose colour could not be read at all (`false`): only the latter warrants a fallback. A 10-bit SDR stream whose SPS says `colour_description_present_flag = 0` is `ColourDetermined == true` with nil `Color*` — confirmed SDR, not "unread".
+
 **In-band colour fallback (opt-in).** Some streaming-style HEVC muxes keep the SPS in-band (a bare hvcC with no parameter sets) and write no container colour, so a head-only probe sees no colour at all. Passing the in-band option makes the probe — only for such a track — read its first sample, parse the SPS VUI, and apply an Alternative Transfer Characteristics SEI override (HLG's `bt2020-10` → `arib-std-b67` compatibility signal). It is off by default; tracks that already carry colour in the header read no frame.
 
 ```go
@@ -240,12 +242,18 @@ To align `-c copy` HLS/DASH segments on source keyframes without a full packet s
 c, err := matroska.OpenMeta(ctx, "video.mkv")
 ks := c.Keyframes                                  // []int64 ms, ascending, de-duplicated
 
+// MKV/WebM with no Cues: build the complete index in-process (no ffprobe).
+c, _ = matroska.OpenMeta(ctx, "no-cues.mkv", matroska.WithKeyframeIndex())
+ks = c.Keyframes
+
 // MP4: opt-in, since building the sample table dominates the parse on a long movie.
 c, _, err := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{Keyframes: true})
 ks = c.Keyframes
 ```
 
-`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does — but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index, so the caller can fall back to a packet scan.
+`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does — but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index.
+
+**Cues-less Matroska.** Some muxers ship MKV/WebM with no `Cues`, so `Keyframes` is nil after the head-only pass. Rather than fall back to an external probe, two opt-in options recover it: `WithKeyframeIndex()` builds the **complete** index (every keyframe, equal to `ffprobe -skip_frame nokey`) in one sequential read-ahead pass over the Segment — header-only, no demux/decode, video keyframes only (SimpleBlock keyframe flag, or a BlockGroup with no `ReferenceBlock`); `WithSampledKeyframes(n)` is the cheaper coarse variant (one keyframe per sampled interval). Files that already carry `Cues` are never scanned. The CLI `keyframes` command uses `WithKeyframeIndex()` automatically.
 
 ### Subtitles to WebVTT
 
@@ -575,11 +583,16 @@ err := matroska.MergeASS(ctx, "video.mkv", "subs.ass", "out.mkv", "jpn", "Japane
 
 All functions return `error`. No panics, no logging.
 
-The reader tolerates corrupted bodies: a zeroed or padded region between clusters (seen in some real-world rips) does not abort the read -- the parser resyncs to the next valid Cluster and returns the metadata gathered so far. A damaged EBML/Segment header still returns an error. Malformed input never panics.
+The reader tolerates corrupted bodies: a zeroed or padded region between clusters (seen in some real-world rips) does not abort the read -- the parser resyncs to the next valid Cluster and returns the metadata gathered so far. A file truncated mid-element after the head metadata likewise returns what was parsed (Info + Tracks) rather than failing. A damaged EBML/Segment header still returns an error. Malformed input never panics.
 
 ```go
 c, err := matroska.Open(ctx, path)
 if err != nil {
+    // A misnamed .mkv that is actually an MP4-family file reports a typed error,
+    // so a caller dispatching by extension can re-route to the mp4 reader.
+    if errors.Is(err, matroska.ErrNotMatroska) {
+        return mp4.OpenMeta(ctx, path)
+    }
     // Could be: file not found, invalid EBML, truncated file, etc.
     return fmt.Errorf("open %s: %w", path, err)
 }
