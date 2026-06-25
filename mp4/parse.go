@@ -86,6 +86,9 @@ type inTrack struct {
 
 	// Dolby Vision configuration (dvcC/dvvC), nil when absent.
 	dolbyVision *mkv.DolbyVision
+
+	// HDR10 static metadata (clli + mdcv boxes), nil when absent.
+	hdr *mkv.HDRStaticMetadata
 }
 
 // movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
@@ -1504,6 +1507,7 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 	}
 	tr.codecPrivate = append([]byte(nil), cfg...)
 	parseColr(tr, payload, headerLen)
+	parseHDRStatic(tr, payload, headerLen)
 	parseDolbyVision(tr, payload, headerLen)
 	parsePasp(tr, payload, headerLen)
 	parseBitrate(tr, payload, headerLen)
@@ -1563,6 +1567,45 @@ func parsePasp(tr *inTrack, payload []byte, headerLen int) {
 	g := gcdU64(dw, dh)
 	tr.displayWidth = uint32(dw / g)
 	tr.displayHeight = uint32(dh / g)
+}
+
+// parseHDRStatic reads the HDR10 static-metadata boxes from a visual sample entry:
+// clli (Content Light Level — MaxCLL/MaxFALL in cd/m²) and mdcv (Mastering Display
+// Colour Volume, SMPTE ST 2086). mdcv stores its primaries in G,B,R order with
+// chromaticities in units of 0.00002 and luminances in 0.0001 cd/m²; those are
+// converted to the units MasteringDisplay holds. Absent boxes leave tr.hdr nil.
+func parseHDRStatic(tr *inTrack, payload []byte, headerLen int) {
+	if len(payload) < headerLen {
+		return
+	}
+	children, err := iterBoxes(payload[headerLen:])
+	if err != nil {
+		return
+	}
+	if clli, ok := findMemBox(children, "clli"); ok && len(clli.payload) >= 4 {
+		h := ensureMP4HDR(tr)
+		h.MaxCLL = uint32(binary.BigEndian.Uint16(clli.payload[0:2]))
+		h.MaxFALL = uint32(binary.BigEndian.Uint16(clli.payload[2:4]))
+	}
+	if mdcv, ok := findMemBox(children, "mdcv"); ok && len(mdcv.payload) >= 24 {
+		b := mdcv.payload
+		chroma := func(off int) float64 { return float64(binary.BigEndian.Uint16(b[off:off+2])) / 50000 }
+		lum := func(off int) float64 { return float64(binary.BigEndian.Uint32(b[off:off+4])) / 10000 }
+		ensureMP4HDR(tr).MasteringDisplay = &mkv.MasteringDisplay{
+			GreenX: chroma(0), GreenY: chroma(2), // mdcv primaries are G, B, R
+			BlueX: chroma(4), BlueY: chroma(6),
+			RedX: chroma(8), RedY: chroma(10),
+			WhiteX: chroma(12), WhiteY: chroma(14),
+			LuminanceMax: lum(16), LuminanceMin: lum(20),
+		}
+	}
+}
+
+func ensureMP4HDR(tr *inTrack) *mkv.HDRStaticMetadata {
+	if tr.hdr == nil {
+		tr.hdr = &mkv.HDRStaticMetadata{}
+	}
+	return tr.hdr
 }
 
 // parseDolbyVision reads a dvcC or dvvC box from a visual sample entry and records

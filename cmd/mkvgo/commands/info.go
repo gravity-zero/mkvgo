@@ -227,6 +227,17 @@ func CmdProbe(path string) {
 		} else if t.ColourDetermined {
 			fmt.Printf("        colour: unspecified (determined — SDR)\n")
 		}
+		if hdr := t.HDR; hdr != nil {
+			fmt.Print("        hdr10:")
+			if hdr.MaxCLL > 0 || hdr.MaxFALL > 0 {
+				fmt.Printf(" MaxCLL=%d MaxFALL=%d", hdr.MaxCLL, hdr.MaxFALL)
+			}
+			if md := hdr.MasteringDisplay; md != nil {
+				fmt.Printf(" mastering(R=%.4g,%.4g G=%.4g,%.4g B=%.4g,%.4g WP=%.4g,%.4g lum=%.4g-%.4g)",
+					md.RedX, md.RedY, md.GreenX, md.GreenY, md.BlueX, md.BlueY, md.WhiteX, md.WhiteY, md.LuminanceMin, md.LuminanceMax)
+			}
+			fmt.Println()
+		}
 		if dv := t.DolbyVision; dv != nil {
 			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",
 				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent)

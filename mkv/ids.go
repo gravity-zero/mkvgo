@@ -88,6 +88,25 @@ const (
 	IDColourRange          = 0x55B9 // Range               → ffprobe color_range
 	IDColourTransfer       = 0x55BA // TransferCharacter.  → ffprobe color_transfer
 	IDColourPrimaries      = 0x55BB // Primaries           → ffprobe color_primaries
+	IDColourMaxCLL         = 0x55BC // MaxCLL (cd/m²)      → HDR10 content light level
+	IDColourMaxFALL        = 0x55BD // MaxFALL (cd/m²)     → HDR10 frame-average light
+)
+
+// MasteringMetadata (0x55D0) and its sub-elements (SMPTE ST 2086 mastering display
+// colour volume), nested inside the Colour element. Chromaticities are EBML floats
+// in CIE 1931 (x,y) 0..1; luminances are EBML floats in cd/m².
+const (
+	IDMasteringMetadata = 0x55D0
+	IDPrimaryRChromaX   = 0x55D1
+	IDPrimaryRChromaY   = 0x55D2
+	IDPrimaryGChromaX   = 0x55D3
+	IDPrimaryGChromaY   = 0x55D4
+	IDPrimaryBChromaX   = 0x55D5
+	IDPrimaryBChromaY   = 0x55D6
+	IDWhitePointChromaX = 0x55D7
+	IDWhitePointChromaY = 0x55D8
+	IDLuminanceMax      = 0x55D9
+	IDLuminanceMin      = 0x55DA
 )
 
 const (

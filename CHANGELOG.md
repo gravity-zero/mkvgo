@@ -4,6 +4,21 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **HDR10 static metadata.** `Track.HDR` (`HDRStaticMetadata`) now carries the
+  Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering
+  Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931
+  chromaticities and the luminance range), read head-only from the Matroska
+  Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/
+  `mdcv` boxes — the frame side data ffprobe reports, the last colour/HDR gap
+  versus a head-only probe (HDR detection, CICP colour and Dolby Vision were
+  already covered). mdcv's fixed-point values (and its G,B,R primary order) are
+  normalised to the same units as the Matroska floats. Shown in `probe` output
+  and JSON (`hdr`). nil when the stream carries no such metadata.
+
 ## [0.10.0] - 2026-06-25
 
 ### Added
@@ -530,6 +545,7 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
+[Unreleased]: https://github.com/gravity-zero/mkvgo/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.10.0
 [0.9.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.9.1
 [0.9.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.9.0

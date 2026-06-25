@@ -1020,12 +1020,91 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 			}
 			bd := uint16(v)
 			t.VideoBitDepth = &bd
+		case mkv.IDColourMaxCLL:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			ensureHDR(t).MaxCLL = uint32(v)
+		case mkv.IDColourMaxFALL:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			ensureHDR(t).MaxFALL = uint32(v)
+		case mkv.IDMasteringMetadata:
+			if err := p.parseMasteringMetadata(eh.Size, t); err != nil {
+				return err
+			}
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+// ensureHDR lazily allocates the track's HDR10 static-metadata holder.
+func ensureHDR(t *mkv.Track) *mkv.HDRStaticMetadata {
+	if t.HDR == nil {
+		t.HDR = &mkv.HDRStaticMetadata{}
+	}
+	return t.HDR
+}
+
+// parseMasteringMetadata reads the MasteringMetadata element (SMPTE ST 2086): the
+// R/G/B primary and white-point chromaticities and the luminance range, all EBML
+// floats already in the units MasteringDisplay stores (chromaticity 0..1, cd/m²).
+func (p *parser) parseMasteringMetadata(size int64, t *mkv.Track) error {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	md := &mkv.MasteringDisplay{}
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			break
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return err
+		}
+		set := func(dst *float64) error {
+			v, e := ebml.ReadFloat(p.r, eh.Size)
+			if e == nil {
+				*dst = v
+			}
+			return e
+		}
+		switch eh.ID {
+		case mkv.IDPrimaryRChromaX:
+			err = set(&md.RedX)
+		case mkv.IDPrimaryRChromaY:
+			err = set(&md.RedY)
+		case mkv.IDPrimaryGChromaX:
+			err = set(&md.GreenX)
+		case mkv.IDPrimaryGChromaY:
+			err = set(&md.GreenY)
+		case mkv.IDPrimaryBChromaX:
+			err = set(&md.BlueX)
+		case mkv.IDPrimaryBChromaY:
+			err = set(&md.BlueY)
+		case mkv.IDWhitePointChromaX:
+			err = set(&md.WhiteX)
+		case mkv.IDWhitePointChromaY:
+			err = set(&md.WhiteY)
+		case mkv.IDLuminanceMax:
+			err = set(&md.LuminanceMax)
+		case mkv.IDLuminanceMin:
+			err = set(&md.LuminanceMin)
+		default:
+			err = p.skip(eh.Size)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	ensureHDR(t).MasteringDisplay = md
 	return nil
 }
 

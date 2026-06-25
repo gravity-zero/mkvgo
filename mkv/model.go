@@ -128,6 +128,40 @@ type Track struct {
 	// Dolby Vision (MP4 dvcC/dvvC box, or Matroska dvcC/dvvC BlockAdditionMapping);
 	// nil otherwise. See ParseDolbyVisionConfig.
 	DolbyVision *DolbyVision `json:"dolby_vision,omitempty"`
+
+	// HDR holds the HDR10 static metadata (Content Light Level + Mastering Display)
+	// when the stream carries it; nil otherwise. ffprobe reports it as frame side
+	// data. Read head-only from the Matroska Colour element (MaxCLL/MaxFALL +
+	// MasteringMetadata) or the MP4 clli/mdcv boxes. See HDRStaticMetadata.
+	HDR *HDRStaticMetadata `json:"hdr,omitempty"`
+}
+
+// HDRStaticMetadata is the HDR10 static metadata: the Content Light Level
+// (MaxCLL/MaxFALL, in cd/m²) and the SMPTE ST 2086 Mastering Display colour
+// volume. Either part may be absent (MaxCLL/MaxFALL 0, MasteringDisplay nil);
+// values are normalised to the same units regardless of the source container.
+type HDRStaticMetadata struct {
+	MaxCLL           uint32            `json:"max_cll,omitempty"`  // Maximum Content Light Level (cd/m²); 0 when absent
+	MaxFALL          uint32            `json:"max_fall,omitempty"` // Maximum Frame-Average Light Level (cd/m²); 0 when absent
+	MasteringDisplay *MasteringDisplay `json:"mastering_display,omitempty"`
+}
+
+// MasteringDisplay is the SMPTE ST 2086 mastering display colour volume: the
+// display's R/G/B primaries and white point as CIE 1931 (x,y) chromaticities
+// (0..1), and the display luminance range in cd/m². It mirrors the Matroska
+// MasteringMetadata element and the MP4 mdcv box (whose fixed-point values are
+// converted to these units).
+type MasteringDisplay struct {
+	RedX         float64 `json:"red_x"`
+	RedY         float64 `json:"red_y"`
+	GreenX       float64 `json:"green_x"`
+	GreenY       float64 `json:"green_y"`
+	BlueX        float64 `json:"blue_x"`
+	BlueY        float64 `json:"blue_y"`
+	WhiteX       float64 `json:"white_x"`
+	WhiteY       float64 `json:"white_y"`
+	LuminanceMax float64 `json:"luminance_max"`
+	LuminanceMin float64 `json:"luminance_min"`
 }
 
 // ResolvedLanguage returns the track's effective language per the Matroska spec:
