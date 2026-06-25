@@ -78,12 +78,12 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	return ranges
 }
 
-func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS) error {
+func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS) (err error) {
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {

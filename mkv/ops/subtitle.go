@@ -13,7 +13,7 @@ import (
 
 const defaultSubDurationMs = 3000
 
-func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) error {
+func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -46,7 +46,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	seq := 1
 	for {
@@ -171,7 +171,7 @@ func decodeSubtitleCue(codec string, data []byte) string {
 	}
 }
 
-func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...mkv.Options) error {
+func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
 	entries, err := subtitle.ParseSRT(srtPath)
 	if err != nil {
 		return fmt.Errorf("parse SRT: %w", err)
@@ -209,7 +209,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {

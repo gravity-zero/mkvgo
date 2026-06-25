@@ -19,7 +19,7 @@ import (
 // outside the WebM subset is rejected with an error and no output is produced.
 //
 // Unlike writer.WriteWebM (metadata only), this produces a file with frames.
-func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) error {
+func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
 
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
@@ -44,7 +44,7 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
+	defer closeWithErr(dst, &err)
 
 	// Buffer the output: the StreamWriter emits several small writes per block,
 	// which would otherwise be a syscall each on this file-copy hot path. (The

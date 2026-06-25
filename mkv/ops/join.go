@@ -10,7 +10,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Options) error {
+func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	if len(sources) == 0 {
 		return fmt.Errorf("no sources to join")
@@ -54,7 +54,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {

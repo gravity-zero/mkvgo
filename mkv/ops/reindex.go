@@ -359,7 +359,7 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // Use this instead of EditMetadata when the only goal is to add a seek index to
 // a file that lacks one or has a stale one, and fidelity to the original
 // metadata encoding matters.
-func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
+func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	progress := mkv.ProgressFrom(opts)
 
@@ -373,7 +373,7 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	if err != nil {
 		return fmt.Errorf("reindex create dst: %w", err)
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	r := bufio.NewReaderSize(raw, reindexBufSize)
 	mw := writer.NewMKVWriter(out)

@@ -12,7 +12,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...mkv.Options) error {
+func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
 	ass, err := subtitle.ParseASS(assPath)
 	if err != nil {
 		return fmt.Errorf("parse ASS: %w", err)
@@ -51,7 +51,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {
@@ -68,7 +68,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	return mw.Finalize()
 }
 
-func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) error {
+func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -104,7 +104,7 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	if len(track.CodecPrivate) > 0 {
 		if _, err := fmt.Fprintf(out, "%s\n", track.CodecPrivate); err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...mkv.Options) error {
+func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -41,7 +41,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {
@@ -58,7 +58,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	return mw.Finalize()
 }
 
-func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...mkv.Options) error {
+func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -103,7 +103,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {
@@ -122,7 +122,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	return mw.Finalize()
 }
 
-func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.Container), opts ...mkv.Options) error {
+func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -135,7 +135,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
 	if err := mw.WriteStart(); err != nil {
