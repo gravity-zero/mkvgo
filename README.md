@@ -25,7 +25,11 @@ shelling out to an external tool.
 | **MP4 / MOV** `.mp4` `.mov` | ✅ | — (remux only) | MKV |
 
 WebM is read and written as Matroska. MP4/MOV is fully inspected (head-only, like
-ffprobe) and remuxed to/from MKV, with no re-encoding in either direction.
+ffprobe) and remuxed to/from MKV — with no re-encoding in either direction.
+
+Editing, muxing, splitting and joining are **Matroska operations**: to do them on
+MP4 content, remux it to MKV first (`from-mp4`), operate, then remux back
+(`to-mp4`) — every step is lossless (`-c copy`).
 
 ### Why mkvgo?
 

@@ -162,6 +162,12 @@ mkvgo to-webm video.mkv video.webm   # VP8/VP9/AV1 + Vorbis/Opus only
 err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 ```
 
+---
+
+> The editing and assembly recipes below (add/remove track, merge, split, join,
+> edit) operate on **Matroska**. To apply them to MP4 content, remux it to MKV
+> first (`from-mp4`), operate, then remux back (`to-mp4`) — every step is lossless.
+
 ## Add or remove a track
 
 ```bash
