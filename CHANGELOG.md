@@ -101,6 +101,14 @@ All notable changes to mkvgo are documented here. The format is based on
   fails if a single parse exceeds a deadline — Go fuzzing flags panics but not
   slow-but-completing inputs, so a complexity DoS would otherwise pass silently.
 
+### Documentation
+
+- **Approachable README + recipes.** The README now opens with what mkvgo is, a
+  supported-formats table (MKV/WebM/MP4), a "why", and a real `probe` example
+  before the reference. A new task-oriented cookbook ([docs/recipes.md](docs/recipes.md))
+  shows common jobs with the CLI and the Go library side by side, and documents
+  that the `-json` output equals `json.Marshal` of the library container.
+
 ## [0.10.0] - 2026-06-25
 
 ### Added

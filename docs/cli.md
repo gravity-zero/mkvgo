@@ -1,5 +1,8 @@
 # CLI Reference
 
+The complete command/flag/output reference. New here? The
+**[recipes](recipes.md)** are a gentler, task-first starting point.
+
 ```
 mkvgo <command> [options]
 ```

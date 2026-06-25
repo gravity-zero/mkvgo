@@ -6,9 +6,72 @@
 [![codecov](https://codecov.io/gh/gravity-zero/mkvgo/branch/master/graph/badge.svg)](https://codecov.io/gh/gravity-zero/mkvgo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Pure Go MKV/WebM toolkit. Read, write, mux, split, edit MKV containers, and remux to/from MP4. Stdlib only, zero external dependencies.
+**mkvgo inspects, edits and converts video files** — Matroska (`.mkv`/`.webm`) and
+MP4 (`.mp4`/`.mov`) — both as a **command-line tool** and an **importable Go
+library**. It is written in pure Go with **zero external dependencies**: no
+ffmpeg, no mkvtoolnix, no C — just one small static binary (or a `go get` away).
 
-CLI tool and importable Go library.
+Use it to read what's inside a file (codecs, languages, colour/HDR, chapters,
+keyframes…), index a media library fast, prepare files for streaming, convert
+between MKV and MP4, extract or merge subtitles, or edit metadata — without
+shelling out to an external tool.
+
+### Supported formats
+
+| Format | Inspect / probe | Edit · mux · split · join | Convert to |
+|---|:---:|:---:|---|
+| **Matroska** `.mkv` | ✅ | ✅ | MP4, WebM |
+| **WebM** `.webm` | ✅ | ✅ (WebM-subset codecs) | MP4, WebM |
+| **MP4 / MOV** `.mp4` `.mov` | ✅ | — (remux only) | MKV |
+
+WebM is read and written as Matroska. MP4/MOV is fully inspected (head-only, like
+ffprobe) and remuxed to/from MKV, with no re-encoding in either direction.
+
+### Why mkvgo?
+
+- **Zero dependencies.** Stdlib only. A single ~2 MB static binary that
+  cross-compiles to Linux/macOS/Windows; or embed the library directly in your Go
+  service — no subprocess, no ffmpeg to ship.
+- **Fast metadata.** Probing is *head-only*: it reads the container headers, not
+  the whole file, and never decodes a frame — so indexing a large library is
+  orders of magnitude faster than a full demux.
+- **ffprobe-equivalent fields.** Codecs, profile/level, pixel format, colour and
+  HDR (HDR10 static metadata **and** Dolby Vision), aspect ratio, rotation,
+  per-track bitrate, keyframes… mapped to the names ffprobe uses.
+- **A full toolkit, not just a reader.** Write, mux, split, join, remux
+  (MKV↔MP4, →WebM), convert subtitles, and edit metadata — including an *instant*
+  in-place edit that rewrites only the header.
+- **Built for real-world files.** Corruption-tolerant parsing (resyncs past
+  damaged regions), bounded memory on hostile input, and continuously fuzzed.
+
+### See it in action
+
+```console
+$ mkvgo probe video.mkv
+File:        video.mkv
+Title:       Regression Fixture
+Duration:    00:00:06 (6023 ms)
+MuxingApp:   Lavf60.16.100
+
+Tracks (3):
+  #1  video     h264        lang=und    name=""  320x180
+        codec: profile="High 4:4:4 Predictive" level=12 pix_fmt=yuv444p field_order=progressive
+        colour: unspecified (determined — SDR)
+  #2  audio     aac         lang=fre    name="French"  44100Hz  1ch(mono)  [default]
+  #3  audio     aac         lang=eng    name="English"  44100Hz  1ch(mono)
+
+Keyframes: 6 (first 00:00:00, last 00:00:05)
+
+Chapters (2):
+  Chapter One  [00:00:00 - 00:00:03]
+  Chapter Two  [00:00:03 - 00:00:06]
+```
+
+Add `-json` to any inspection command for machine-readable output.
+
+New here? Start with the **[recipes](docs/recipes.md)** — common tasks, copy-paste
+ready. For the full reference see **[docs/cli.md](docs/cli.md)** (CLI) and
+**[docs/library.md](docs/library.md)** (Go library).
 
 ## Install
 
@@ -226,6 +289,19 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
     matroska.Options{FS: s3fs},
 )
 ```
+
+## Documentation
+
+- **[docs/recipes.md](docs/recipes.md)** — task-oriented cookbook: probe, index a
+  library, keyframes for HLS, HDR, subtitles, remux, split/join, edit… copy-paste
+  ready (CLI **and** Go side by side). Start here.
+- **[docs/cli.md](docs/cli.md)** — full CLI reference: every command, flag and
+  output field.
+- **[docs/library.md](docs/library.md)** — full library guide: the API, the
+  head-only probe field table (mapped to ffprobe), streaming, custom FS, and the
+  capabilities a head-only read cannot reach.
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** — generated
+  Go API reference.
 
 ## Architecture
 

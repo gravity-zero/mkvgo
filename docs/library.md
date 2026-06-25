@@ -1,5 +1,8 @@
 # Library Usage Guide
 
+The complete API guide. New here? The **[recipes](recipes.md)** are a gentler,
+task-first starting point (CLI and Go side by side).
+
 ## Package Overview
 
 | Package | Import | Purpose |
