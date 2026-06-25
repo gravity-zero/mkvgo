@@ -29,6 +29,9 @@ type bitstreamColour struct {
 	sarHeight  uint32  // VUI sample aspect ratio height
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
 	fieldOrder string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag; "" unknown
+	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
+	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
+	// from one whose colour could not be read at all. See Track.ColourDetermined.
 }
 
 // pixelFormat composes the ffprobe pix_fmt string from a chroma_format_idc and a
@@ -143,6 +146,9 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 // bitstream-derived colour — a codec-private SPS, or an in-band SPS read from the
 // first sample. Container values always win; the bitstream only fills gaps.
 func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
+	if bc.determined {
+		t.ColourDetermined = true
+	}
 	if t.ColorPrimaries == nil && bc.primaries != nil {
 		t.ColorPrimaries = bc.primaries
 	}
@@ -441,6 +447,9 @@ func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 		}
 		bc.rng = spsRange(full)
 		bc.primaries, bc.transfer, bc.matrix = p, t, m
+	}
+	if !r.err {
+		bc.determined = true // VUI colour signalling parsed (explicit, or confirmed unspecified)
 	}
 }
 
@@ -746,6 +755,9 @@ func parseHEVCVUI(r *bitReader, bc *bitstreamColour) {
 		bc.rng = spsRange(full)
 		bc.primaries, bc.transfer, bc.matrix = p, t, m
 	}
+	if !r.err {
+		bc.determined = true // VUI colour signalling parsed (explicit, or confirmed unspecified)
+	}
 }
 
 func hevcProfileName(profileIDC byte) string {
@@ -949,6 +961,7 @@ func parseAV1ColorConfig(r *bitReader, seqProfile uint32, bc *bitstreamColour) {
 	if r.err {
 		return
 	}
+	bc.determined = true // AV1 always carries color_config; it has now been read
 	bc.bitDepth = validBitDepth(bitDepth)
 	bc.primaries = cicpOrNil(cp)
 	bc.transfer = cicpOrNil(tc)
@@ -1078,5 +1091,6 @@ func vp9Colour(cp []byte) *bitstreamColour {
 	if bc.bitDepth == nil && b[3] == 0 && b[4] == 0 && b[5] == 0 {
 		return nil
 	}
+	bc.determined = true // vpcC always carries the colour fields
 	return bc
 }

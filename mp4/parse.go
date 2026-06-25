@@ -78,10 +78,11 @@ type inTrack struct {
 	firstSampleSize   uint32
 
 	// colour code points (CICP), nil when the entry had no colr box.
-	colorPrimaries *uint16
-	colorTransfer  *uint16
-	colorMatrix    *uint16
-	colorRange     *uint16
+	colorPrimaries   *uint16
+	colorTransfer    *uint16
+	colorMatrix      *uint16
+	colorRange       *uint16
+	colourDetermined bool // a colr box (nclx/nclc) was read for this track
 
 	// Dolby Vision configuration (dvcC/dvvC), nil when absent.
 	dolbyVision *mkv.DolbyVision
@@ -1608,6 +1609,7 @@ func parseColr(tr *inTrack, payload []byte, headerLen int) {
 	if typ != "nclx" && typ != "nclc" {
 		return
 	}
+	tr.colourDetermined = true // an on-screen colr box is present
 	p := binary.BigEndian.Uint16(colr.payload[4:6])
 	tr.colorPrimaries = &p
 	tc := binary.BigEndian.Uint16(colr.payload[6:8])

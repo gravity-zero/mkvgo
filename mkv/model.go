@@ -109,13 +109,20 @@ type Track struct {
 	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
 	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
 	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
-	Profile        string  `json:"profile,omitempty"`         // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
-	Level          *uint16 `json:"level,omitempty"`           // codec level_idc from the SPS (ffprobe level): H.264 10×level, HEVC 30×level
-	PixelFormat    string  `json:"pixel_format,omitempty"`    // ffprobe pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
-	FieldOrder     string  `json:"field_order,omitempty"`     // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
-	FrameCount     int64   `json:"frame_count,omitempty"`     // number of frames (ffprobe nb_frames), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
-	DurationMs     int64   `json:"duration_ms,omitempty"`     // per-track duration in ms (ffprobe per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
-	Bitrate        *uint32 `json:"bitrate,omitempty"`         // average stream bitrate in bits/s (MP4 btrt box / esds avgBitrate); nil when unknown
+	// ColourDetermined reports that the colour was actually read from a source — the
+	// container Colour element, an MP4 colr box, or the codec bitstream's colour
+	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) — even when it resolves
+	// to "unspecified" (all Color* nil). It distinguishes a confirmed-SDR/unspecified
+	// stream (true, Color* nil) from one whose colour could not be read at all
+	// (false): a caller should treat the latter, not the former, as "fall back".
+	ColourDetermined bool    `json:"colour_determined,omitempty"`
+	Profile          string  `json:"profile,omitempty"`      // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
+	Level            *uint16 `json:"level,omitempty"`        // codec level_idc from the SPS (ffprobe level): H.264 10×level, HEVC 30×level
+	PixelFormat      string  `json:"pixel_format,omitempty"` // ffprobe pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
+	FieldOrder       string  `json:"field_order,omitempty"`  // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
+	FrameCount       int64   `json:"frame_count,omitempty"`  // number of frames (ffprobe nb_frames), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
+	DurationMs       int64   `json:"duration_ms,omitempty"`  // per-track duration in ms (ffprobe per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
+	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt box / esds avgBitrate); nil when unknown
 
 	// DolbyVision holds the decoded dvcC/dvvC configuration when the track signals
 	// Dolby Vision (MP4 dvcC/dvvC box, or Matroska dvcC/dvvC BlockAdditionMapping);

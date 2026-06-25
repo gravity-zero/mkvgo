@@ -970,6 +970,7 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 // CICP colour code points (matrix/transfer/primaries/range) and video bit depth.
 // Each field stays nil when its sub-element is absent.
 func (p *parser) parseColour(size int64, t *mkv.Track) error {
+	t.ColourDetermined = true // the container carries an explicit Colour element
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {

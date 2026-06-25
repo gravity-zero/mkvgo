@@ -224,6 +224,8 @@ func CmdProbe(path string) {
 		if t.ColorSpace != nil || t.ColorTransfer != nil || t.ColorPrimaries != nil {
 			fmt.Printf("        colour: space=%s transfer=%s primaries=%s range=%s\n",
 				t.ColorSpaceName(), t.ColorTransferName(), t.ColorPrimariesName(), t.ColorRangeName())
+		} else if t.ColourDetermined {
+			fmt.Printf("        colour: unspecified (determined — SDR)\n")
 		}
 		if dv := t.DolbyVision; dv != nil {
 			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",

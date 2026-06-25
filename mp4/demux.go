@@ -109,6 +109,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.ColorTransfer = t.colorTransfer
 			mt.ColorSpace = t.colorMatrix
 			mt.ColorRange = t.colorRange
+			mt.ColourDetermined = t.colourDetermined
 			// Fall back to the codec bitstream (e.g. H.264 SPS VUI) for any colour
 			// field the colr box did not supply — matches ffprobe's color_space on
 			// SDR streams that carry colour only in the SPS.
