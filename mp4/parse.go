@@ -139,17 +139,17 @@ func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 	return memBox{}, false
 }
 
-// readMoov scans the top-level boxes of a seekable MP4 and returns the moov box
-// payload. moov may appear before or after mdat, so the whole file is scanned by
-// header until it is found.
-func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
+// findMoov scans the top-level boxes of a seekable MP4 and returns the file
+// offset and length of the moov box payload. moov may appear before or after
+// mdat, so the file is scanned by header until it is found.
+func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
 	var hdr [16]byte
 	for off := int64(0); off+8 <= size; {
 		if _, err := r.Seek(off, io.SeekStart); err != nil {
-			return nil, err
+			return 0, 0, err
 		}
 		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
-			return nil, errf("read box header: %w", err)
+			return 0, 0, errf("read box header: %w", err)
 		}
 		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
 		typ := string(hdr[4:8])
@@ -157,7 +157,7 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 		switch boxSize {
 		case 1:
 			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
-				return nil, errf("read largesize: %w", err)
+				return 0, 0, errf("read largesize: %w", err)
 			}
 			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
 			headerLen = 16
@@ -165,19 +165,162 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 			boxSize = size - off
 		}
 		if boxSize < headerLen || off+boxSize > size {
-			return nil, errf("box %q has invalid size %d at offset %d", typ, boxSize, off)
+			return 0, 0, errf("box %q has invalid size %d at offset %d", typ, boxSize, off)
 		}
 		if typ == "moov" {
-			payloadLen := boxSize - headerLen
-			payload := make([]byte, payloadLen)
-			if _, err := io.ReadFull(r, payload); err != nil {
-				return nil, errf("read moov: %w", err)
-			}
-			return payload, nil
+			return off + headerLen, boxSize - headerLen, nil
 		}
 		off += boxSize
 	}
-	return nil, errf("no moov box found")
+	return 0, 0, errf("no moov box found")
+}
+
+// readMoov returns the full moov box payload — every sample-table byte included.
+// Used by the remux/extract path, which needs the complete tables.
+func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
+	dataOff, payloadLen, err := findMoov(r, size)
+	if err != nil {
+		return nil, err
+	}
+	payload := make([]byte, payloadLen)
+	if _, err := r.Seek(dataOff, io.SeekStart); err != nil {
+		return nil, err
+	}
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return nil, errf("read moov: %w", err)
+	}
+	return payload, nil
+}
+
+// lazyContainers are the boxes readMoovLazy descends into to reach the sample
+// tables; lazySkipBody are the large sample-table boxes whose bodies it skips
+// (reading only the header + first entry). Everything else is read whole.
+var lazyContainers = map[string]bool{
+	"moov": true, "trak": true, "mdia": true, "minf": true, "stbl": true, "edts": true,
+}
+var lazySkipBody = map[string]bool{
+	"stsz": true, "stco": true, "co64": true, "stsc": true, "stz2": true,
+}
+
+// lazyKeepHead is how much of a skipped box's body is still read: its
+// version/flags + count + first entry — enough for headerFrameCount and
+// firstSampleLoc, which are all the metadata/keyframe path reads from them.
+const lazyKeepHead = 16
+
+// lazyChunk is how far ahead the lazy reader fills in one disk read, so the
+// scattered small boxes (headers + stsd/stts/stss/ctts bodies) come in a few
+// large contiguous reads rather than one read per box.
+const lazyChunk = 64 << 10
+
+// readMoovLazy returns a moov payload buffer of the real moov size, reading from
+// disk only the small boxes plus the header and first entry of the large
+// sample-table boxes (stsz/stco/co64/stsc/stz2); their bodies are left zeroed and
+// never fetched. The buffer is structurally identical to a full moov read (same
+// box headers at the same offsets), so iterBoxes/parseTrak treat it the same —
+// the metadata/keyframe path never reads the skipped bodies. Reads are coalesced
+// into lazyChunk-sized runs and only the large bodies are seeked over, so it is
+// both I/O-light and round-trip-light on a network mount, where those sample
+// tables are most of the moov's bytes. Any read error or out-of-range box returns
+// an error, so the caller falls back to the full read.
+func readMoovLazy(r io.ReadSeeker, size int64) ([]byte, error) {
+	dataOff, payloadLen, err := findMoov(r, size)
+	if err != nil {
+		return nil, err
+	}
+	m := &lazyMoov{r: r, base: dataOff, buf: make([]byte, payloadLen)}
+	if err := m.parse(0, len(m.buf)); err != nil {
+		return nil, err
+	}
+	return m.buf, nil
+}
+
+// lazyMoov fills a moov buffer forward, coalescing reads and skipping the large
+// sample-table bodies. filled is how far buf is populated (read, or zeroed by a
+// skip); the next disk read starts at base+filled.
+type lazyMoov struct {
+	r      io.ReadSeeker
+	base   int64
+	buf    []byte
+	filled int
+}
+
+// ensure loads buf up to at least n bytes, reading from disk in lazyChunk runs.
+func (m *lazyMoov) ensure(n int) error {
+	if n <= m.filled {
+		return nil
+	}
+	end := m.filled + lazyChunk
+	if end < n {
+		end = n
+	}
+	if end > len(m.buf) {
+		end = len(m.buf)
+	}
+	if _, err := m.r.Seek(m.base+int64(m.filled), io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := io.ReadFull(m.r, m.buf[m.filled:end]); err != nil {
+		return err
+	}
+	m.filled = end
+	return nil
+}
+
+// skip advances filled past a box body without reading it (the bytes stay zero);
+// the next ensure seeks over the gap.
+func (m *lazyMoov) skip(boxEnd int) {
+	if boxEnd > m.filled {
+		m.filled = boxEnd
+	}
+}
+
+func (m *lazyMoov) parse(start, end int) error {
+	for off := start; off+8 <= end; {
+		if err := m.ensure(off + 8); err != nil {
+			return err
+		}
+		boxSize := int64(binary.BigEndian.Uint32(m.buf[off : off+4]))
+		typ := string(m.buf[off+4 : off+8])
+		hdr := 8
+		switch boxSize {
+		case 1:
+			if off+16 > end {
+				return errf("truncated 64-bit box %q", typ)
+			}
+			if err := m.ensure(off + 16); err != nil {
+				return err
+			}
+			boxSize = int64(binary.BigEndian.Uint64(m.buf[off+8 : off+16]))
+			hdr = 16
+		case 0:
+			boxSize = int64(end - off)
+		}
+		if boxSize < int64(hdr) || off+int(boxSize) > end {
+			return errf("box %q has invalid size %d", typ, boxSize)
+		}
+		boxEnd := off + int(boxSize)
+		switch {
+		case lazyContainers[typ]:
+			if err := m.parse(off+hdr, boxEnd); err != nil {
+				return err
+			}
+		case lazySkipBody[typ]:
+			keep := boxEnd
+			if off+hdr+lazyKeepHead < keep {
+				keep = off + hdr + lazyKeepHead
+			}
+			if err := m.ensure(keep); err != nil {
+				return err
+			}
+			m.skip(boxEnd)
+		default:
+			if err := m.ensure(boxEnd); err != nil {
+				return err
+			}
+		}
+		off = boxEnd
+	}
+	return nil
 }
 
 // sampleMode selects how much per-sample work parseMP4 does:
@@ -197,10 +340,29 @@ const (
 
 // parseMP4 reads and parses the movie header of a seekable MP4 of the given size.
 func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
-	moovPayload, err := readMoov(r, size)
+	moovPayload, err := readMoovForMode(r, size, mode)
 	if err != nil {
 		return nil, err
 	}
+	return parseMoov(moovPayload, size, mode)
+}
+
+// readMoovForMode returns the moov payload: the full box for the remux/extract
+// path (which needs the complete sample tables), or the I/O-light lazy read
+// (with a full-read fallback on any unexpected layout) for the metadata path.
+func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode) ([]byte, error) {
+	if mode == sampleFull {
+		return readMoov(r, size)
+	}
+	if payload, err := readMoovLazy(r, size); err == nil {
+		return payload, nil
+	}
+	return readMoov(r, size)
+}
+
+// parseMoov parses an in-memory moov payload into a movie. Splitting it from the
+// read lets the lazy and full moov buffers be parsed identically.
+func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) {
 	moovBoxes, err := iterBoxes(moovPayload)
 	if err != nil {
 		return nil, errf("parse moov: %w", err)
