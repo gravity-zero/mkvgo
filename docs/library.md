@@ -210,6 +210,7 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `DisplayAspectRatio()`, `SampleAspectRatio()` | `display_aspect_ratio`, `sample_aspect_ratio` | MP4 `pasp` / Matroska `DisplayWidth` / H.264-HEVC VUI `aspect_ratio_info` (bounded `av_reduce` like ffmpeg) |
 | `Rotation` | Display Matrix side data | MP4 `tkhd` matrix (0/90/180/270) |
 | `FrameRate` | `r_frame_rate` | MP4 `stts` (timescale ÷ first delta) / Matroska `DefaultDuration` |
+| `AvgFrameRate()` | `avg_frame_rate` | frame count ÷ duration (MP4 video; 0 for Matroska) |
 | `FrameCount` | `nb_frames` | MP4 `stsz` count (0 for Matroska) |
 | `Profile`, `Level` | `profile`, `level` | SPS / hvcC |
 | `PixelFormat` | `pix_fmt` | chroma subsampling + bit depth (SPS / av1C / vpcC) |
@@ -218,6 +219,9 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `ColorSpaceName()`, `ColorTransferName()`, `ColorPrimariesName()`, `ColorRangeName()`, `IsHDR()` | `color_space`/`color_transfer`/`color_primaries`/`color_range` | `colr` (nclx/nclc) / Matroska Colour / SPS VUI |
 | `DolbyVision` | side data | MP4 `dvcC`/`dvvC` box / Matroska `BlockAdditionMapping` |
 | `HDR` (`MaxCLL`/`MaxFALL`, `MasteringDisplay`) | side data (Content light level / Mastering display metadata) | Matroska Colour `MaxCLL`/`MaxFALL`/`MasteringMetadata` / MP4 `clli`/`mdcv` |
+| `StereoMode` (`StereoModeName()`), `Projection` | Stereo 3D / Spherical Mapping side data | Matroska `StereoMode`/`Projection` / MP4 `st3d`/`sv3d` |
+| `Bitrate` | `bit_rate` | MP4 `btrt`/`esds` / Matroska `BPS` tag |
+| `HearingImpaired`, `VisualImpaired`, `TextDescriptions`, `Original`, `Commentary` | `disposition.*` | Matroska Flag* elements (Matroska only) |
 | `Channels` / `ChannelLayout()` | `channels` / `channel_layout` | codec config (HE-AACv2 PS counted) |
 | `SampleRate`, `OutputSampleRate`, `EffectiveSampleRate()` | `sample_rate` | sample entry / Matroska; SBR output rate from the AAC ASC or `OutputSamplingFrequency` |
 
