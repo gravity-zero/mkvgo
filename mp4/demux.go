@@ -47,7 +47,7 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	}
 	size := fi.Size()
 
-	mv, err := parseMP4(src, size, true)
+	mv, err := parseMP4(src, size, sampleFull)
 	if err != nil {
 		return err
 	}
@@ -288,12 +288,14 @@ func minTimecode(blocks []mkv.Block) int64 {
 func movieDurationMs(mv *movie) int64 {
 	var max int64
 	for i := range mv.tracks {
-		s := mv.tracks[i].samples
-		if len(s) == 0 {
-			continue
+		t := &mv.tracks[i]
+		var end int64
+		if s := t.samples; len(s) > 0 {
+			end = s[len(s)-1].ctsMs
+		} else {
+			// sampleKeyframes mode builds no sample table but records the end.
+			end = t.sampleEndMs
 		}
-		last := s[len(s)-1]
-		end := last.ctsMs
 		if end > max {
 			max = end
 		}

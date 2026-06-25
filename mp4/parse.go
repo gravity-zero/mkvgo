@@ -58,6 +58,8 @@ type inTrack struct {
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
 	timescale        uint32
 	samples          []inSample
+	keyframesMs      []int64 // sync-sample presentation times (sampleKeyframes mode); nil otherwise
+	sampleEndMs      int64   // last sample's cts (sampleKeyframes mode), for the movie duration
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -178,11 +180,23 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 	return nil, errf("no moov box found")
 }
 
+// sampleMode selects how much per-sample work parseMP4 does:
+//   - sampleNone: head-only, no per-sample table (the cheapest probe).
+//   - sampleKeyframes: only the sync-sample presentation times (stss + stts/ctts),
+//     for the metadata keyframe index — no byte offsets, so far cheaper than a
+//     full table on a long movie.
+//   - sampleFull: the full table (offsets + sizes + timing), which a remux or a
+//     subtitle/sample extract needs to read sample bytes.
+type sampleMode int
+
+const (
+	sampleNone sampleMode = iota
+	sampleKeyframes
+	sampleFull
+)
+
 // parseMP4 reads and parses the movie header of a seekable MP4 of the given size.
-// withSamples builds each track's full sample table (offsets, sync samples, timing
-// — the work a keyframe index or a remux needs); leave it false for a metadata-only
-// probe, which is far cheaper on a long movie (no per-sample expansion).
-func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
+func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 	moovPayload, err := readMoov(r, size)
 	if err != nil {
 		return nil, err
@@ -216,7 +230,7 @@ func parseMP4(r io.ReadSeeker, size int64, withSamples bool) (*movie, error) {
 		if b.typ != "trak" {
 			continue
 		}
-		tr, dropped, err := parseTrak(b.payload, size, movieTS, withSamples)
+		tr, dropped, err := parseTrak(b.payload, size, movieTS, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -357,7 +371,7 @@ func chapterTrackRefs(moovBoxes []memBox) map[uint32]bool {
 // (e.g. cover art / attached picture) — it returns a zero track and a non-nil
 // *DroppedTrack describing it, so the caller can surface it instead of dropping it
 // silently. An error is returned only for malformed structure.
-func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool) (inTrack, *DroppedTrack, error) {
+func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) (inTrack, *DroppedTrack, error) {
 	var tr inTrack
 	trakBoxes, err := iterBoxes(payload)
 	if err != nil {
@@ -494,7 +508,23 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, withSamples bool)
 		tr.firstSampleOffset, tr.firstSampleSize = firstSampleLoc(stblBoxes)
 	}
 
-	if withSamples {
+	switch mode {
+	case sampleKeyframes:
+		// Only the keyframe index is needed: derive sync-sample times from
+		// stss + stts/ctts, skipping the byte-offset resolution (stsz/stco/stsc)
+		// that the full table builds.
+		// endMs is computed for every track (the movie duration is the max across
+		// tracks); only video collects the sync-sample keyframe times.
+		isVideo := tr.trackType == mkv.VideoTrack
+		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo)
+		if err != nil {
+			return tr, nil, err
+		}
+		tr.sampleEndMs = endMs
+		if isVideo {
+			tr.keyframesMs = kf
+		}
+	case sampleFull:
 		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
 			return tr, nil, err
 		}

@@ -287,13 +287,13 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 	})
 
 	// trak with no mdia box → error.
-	if _, _, err := parseTrak(tkhd, 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(tkhd, 1<<20, 1000, sampleNone); err == nil {
 		t.Error("no mdia: want error")
 	}
 
 	// mdia present but no hdlr → error.
 	mdiaNoHdlr := container("mdia", mdhd)
-	if _, _, err := parseTrak(append(tkhd, mdiaNoHdlr...), 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(append(tkhd, mdiaNoHdlr...), 1<<20, 1000, sampleNone); err == nil {
 		t.Error("mdia without hdlr: want error")
 	}
 
@@ -302,7 +302,7 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 		w.u32(0) // pre_defined only; no handler_type follows (payload = 4 bytes < 12)
 	})
 	mdiaShortHdlr := container("mdia", mdhd, hdlrShort)
-	if _, _, err := parseTrak(append(tkhd, mdiaShortHdlr...), 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(append(tkhd, mdiaShortHdlr...), 1<<20, 1000, sampleNone); err == nil {
 		t.Error("hdlr too short: want error")
 	}
 
@@ -314,14 +314,14 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 		w.u8(0)
 	})
 	mdiaNoMinf := container("mdia", mdhd, hdlr)
-	if _, _, err := parseTrak(append(tkhd, mdiaNoMinf...), 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(append(tkhd, mdiaNoMinf...), 1<<20, 1000, sampleNone); err == nil {
 		t.Error("mdia without minf: want error")
 	}
 
 	// minf without stbl → error.
 	minfNoStbl := container("minf", container("vmhd"))
 	mdiaNoStbl := container("mdia", mdhd, hdlr, minfNoStbl)
-	if _, _, err := parseTrak(append(tkhd, mdiaNoStbl...), 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(append(tkhd, mdiaNoStbl...), 1<<20, 1000, sampleNone); err == nil {
 		t.Error("minf without stbl: want error")
 	}
 
@@ -329,7 +329,7 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 	stblNoStsd := container("stbl", box("stts", nil))
 	minfNoStsd := container("minf", container("stbl", stblNoStsd))
 	mdiaNoStsd := container("mdia", mdhd, hdlr, minfNoStsd)
-	if _, _, err := parseTrak(append(tkhd, mdiaNoStsd...), 1<<20, 1000, false); err == nil {
+	if _, _, err := parseTrak(append(tkhd, mdiaNoStsd...), 1<<20, 1000, sampleNone); err == nil {
 		t.Error("stbl without stsd: want error")
 	}
 }

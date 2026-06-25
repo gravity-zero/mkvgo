@@ -1,6 +1,9 @@
 package mp4
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"sort"
+)
 
 // sampletable.go — turns an stbl's child boxes into a flat list of samples with
 // absolute file offsets and millisecond decode/composition times. Everything is
@@ -10,6 +13,66 @@ import "encoding/binary"
 type stscEntry struct {
 	firstChunk uint32
 	perChunk   uint32
+}
+
+// buildKeyframeTimes computes a video track's keyframe presentation times (ms,
+// ascending, de-duplicated) from the sync-sample table only — stss for which
+// samples are sync, stts/ctts for their times — WITHOUT resolving byte offsets
+// (no stsz/stco/stsc). It is the cheap path behind the metadata keyframe index;
+// remux/extract use buildSampleTable, which also yields the offsets they need.
+// The cts computation mirrors buildSampleTable exactly (including the edit-list
+// shift), so both report identical keyframe timestamps.
+// collectSync collects the sync-sample times into times (video, for the keyframe
+// index); otherwise only endMs is computed (audio/other, for the movie duration).
+func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64, collectSync bool) (times []int64, endMs int64, err error) {
+	n := int(headerFrameCount(stblBoxes)) // sample count from the stsz header, O(1)
+	if n <= 0 {
+		return nil, 0, nil
+	}
+	stts, ok := findMemBox(stblBoxes, "stts")
+	if !ok {
+		return nil, 0, nil
+	}
+	durations, err := parseStts(stts.payload, n)
+	if err != nil {
+		return nil, 0, err
+	}
+	ctts := parseCtts(stblBoxes, n) // zero-filled when absent
+	var sync map[int]bool
+	if collectSync {
+		sync = parseStss(stblBoxes) // nil → every sample is a sync sample
+		times = make([]int64, 0, n/8+1)
+	}
+
+	dts := int64(0)
+	for i := 0; i < n; i++ {
+		cts := ticksToMs(dts+int64(ctts[i]), timescale) + editShiftMs
+		if cts < 0 {
+			cts = 0
+		}
+		if collectSync && (sync == nil || sync[i+1]) {
+			times = append(times, cts)
+		}
+		endMs = cts // last sample's cts — the track's end, matching the full table
+		dts += int64(durations[i])
+	}
+	return sortDedupTimes(times), endMs, nil
+}
+
+// sortDedupTimes returns times ascending with consecutive duplicates removed, or
+// nil when empty. Shared by the keyframe-only and full-table keyframe paths.
+func sortDedupTimes(times []int64) []int64 {
+	if len(times) == 0 {
+		return nil
+	}
+	sort.Slice(times, func(a, b int) bool { return times[a] < times[b] })
+	out := times[:1]
+	for _, v := range times[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // buildSampleTable populates tr.samples from the sample table boxes.

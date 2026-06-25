@@ -46,8 +46,8 @@ func FuzzParseMP4(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Both the full parse and the metadata-only (head-only) parse must be safe.
-		for _, withSamples := range []bool{true, false} {
-			mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), withSamples)
+		for _, mode := range []sampleMode{sampleNone, sampleKeyframes, sampleFull} {
+			mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), mode)
 			if err == nil && mv == nil {
 				t.Fatal("nil movie with nil error")
 			}

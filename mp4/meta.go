@@ -3,7 +3,6 @@ package mp4
 import (
 	"context"
 	"io"
-	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -68,7 +67,11 @@ func readMeta(ctx context.Context, r io.ReadSeeker, path string, o Options) (*mk
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, nil, err
 	}
-	mv, err := parseMP4(r, size, o.Keyframes)
+	mode := sampleNone
+	if o.Keyframes {
+		mode = sampleKeyframes
+	}
+	mv, err := parseMP4(r, size, mode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -120,6 +123,11 @@ func videoKeyframesMs(mv *movie) []int64 {
 		if t.trackType != mkv.VideoTrack {
 			continue
 		}
+		// sampleKeyframes mode already computed the times without offsets.
+		if t.keyframesMs != nil {
+			return t.keyframesMs
+		}
+		// Full-table path (remux): derive from the built sample table.
 		times := make([]int64, 0, len(t.samples)/8+1)
 		for j := range t.samples {
 			// ctsMs already carries the edit-list shift (applied in buildSampleTable).
@@ -127,17 +135,7 @@ func videoKeyframesMs(mv *movie) []int64 {
 				times = append(times, t.samples[j].ctsMs)
 			}
 		}
-		if len(times) == 0 {
-			return nil
-		}
-		sort.Slice(times, func(a, b int) bool { return times[a] < times[b] })
-		out := times[:1]
-		for _, v := range times[1:] {
-			if v != out[len(out)-1] {
-				out = append(out, v)
-			}
-		}
-		return out
+		return sortDedupTimes(times)
 	}
 	return nil
 }
