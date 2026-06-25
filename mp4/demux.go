@@ -148,7 +148,13 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.Bitrate = &br
 		}
 		mt.DurationMs = t.durationMs
-		mt.CodecDelay = t.codecDelayNs // gapless priming -> Matroska CodecDelay
+		// Carry the edit-list priming as CodecDelay only for codecs whose delay is
+		// NOT already intrinsic to their config. Opus keeps its pre-skip in the
+		// OpusHead (codec-private, copied verbatim); a derived CodecDelay would
+		// double-count it and shift the decoded audio.
+		if t.codec != "opus" {
+			mt.CodecDelay = t.codecDelayNs
+		}
 		tracks[i] = mt
 	}
 	return tracks

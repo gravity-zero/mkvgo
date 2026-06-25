@@ -14,8 +14,10 @@ All notable changes to mkvgo are documented here. The format is based on
   for AAC/AC-3) is now carried as `CodecDelay` on the MKV side and re-emitted as an
   MP4 edit list (`elst`) on the way back, so the gapless delay survives a
   `RemuxFromMP4` / `RemuxToMP4` round trip instead of being dropped - which used to
-  shift the decoded audio by ~10-15 ms. (Opus already round-tripped via its in-band
-  pre-skip.) Preserved to the MP4 writer's millisecond timescale.
+  shift the decoded audio by ~10-15 ms. Opus is excluded from this path: its
+  pre-skip is intrinsic to the OpusHead (carried verbatim), so deriving a
+  CodecDelay would double-count it and shift the audio the other way. Preserved to
+  the MP4 writer's millisecond timescale.
 - **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg writes per track
   (bits per second, what ffprobe reports as `bit_rate`) is now surfaced as the
   typed `Track.Bitrate`, keyed by the track UID. Full read only (the metadata path

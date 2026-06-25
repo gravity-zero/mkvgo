@@ -59,6 +59,42 @@ func TestRoundTripCodecDelay(t *testing.T) {
 	}
 }
 
+// TestRoundTripOpusNoDerivedCodecDelay guards the Opus regression: Opus carries
+// its pre-skip in the OpusHead (codec-private, copied verbatim), so the pipeline
+// must NOT add a second delay via an MP4 edit list / Matroska CodecDelay — doing
+// so double-counts the pre-skip and shifts the decoded audio.
+func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
+	opusHead := makeOpusHead(2, 312, 48000, 0, 0, nil) // pre-skip 312 samples, in the OpusHead
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.AudioTrack, Codec: "opus", CodecPrivate: opusHead,
+			Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: 6_500_000}, // even with a CodecDelay set
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1, 2}},
+		{track: 1, pts: 20, key: true, data: []byte{3, 4}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+
+	mp4Path := filepath.Join(t.TempDir(), "mid.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	if b, _ := os.ReadFile(mp4Path); bytes.Contains(b, []byte("elst")) {
+		t.Error("RemuxToMP4 must not emit an edit list for Opus (pre-skip already in dOps)")
+	}
+
+	outMKV := filepath.Join(t.TempDir(), "out.mkv")
+	if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
+	c, _ := readMKV(t, outMKV)
+	for i := range c.Tracks {
+		if tr := c.Tracks[i]; tr.Type == mkv.AudioTrack && tr.CodecDelay != 0 {
+			t.Errorf("Opus acquired CodecDelay=%d ns on round trip; its pre-skip would be double-counted", tr.CodecDelay)
+		}
+	}
+}
+
 // TestRoundTripColourAndSubtitles checks that colour code points and SRT cues
 // survive the full MKV → MP4 → MKV round trip (exercising the colr box and the
 // tx3g text track in both directions, plus the MKV writer's Colour element and
