@@ -45,7 +45,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{r: br, metaBudget: maxMetadataBytes}
+	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
@@ -118,9 +118,20 @@ func setDurationMs(c *mkv.Container) error {
 
 type parser struct {
 	r          io.ReadSeeker
-	metaBudget int64 // remaining bytes allowed for in-memory metadata
-	segStart   int64 // Segment body start offset (set once the Segment header is read)
-	segEnd     int64 // Segment body end offset, or -1 for an unknown-size Segment
+	metaBudget int64           // remaining bytes allowed for in-memory metadata
+	segStart   int64           // Segment body start offset (set once the Segment header is read)
+	segEnd     int64           // Segment body end offset, or -1 for an unknown-size Segment
+	ctx        context.Context // cancellation, also honoured in the inner element loops
+}
+
+// checkCtx reports a cancellation error so the inner element loops (parseInfo /
+// parseTracks / parseTrackEntry / parseTags / …) stop promptly on a cancelled
+// context, not only the top-level Segment walk.
+func (p *parser) checkCtx() error {
+	if p.ctx == nil {
+		return nil
+	}
+	return p.ctx.Err()
 }
 
 // maxMetadataBytes caps the TOTAL bytes a single parse pulls into the Container
@@ -657,6 +668,9 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 	c.Info.TimecodeScale = 1000000
 
 	for {
+		if err := p.checkCtx(); err != nil {
+			return err
+		}
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
@@ -737,6 +751,9 @@ func (p *parser) parseTracks(size int64, c *mkv.Container) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
+		if err := p.checkCtx(); err != nil {
+			return err
+		}
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
@@ -766,6 +783,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	t := mkv.Track{}
 
 	for {
+		if err := p.checkCtx(); err != nil {
+			return t, err
+		}
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
@@ -1505,6 +1525,9 @@ func (p *parser) parseTags(size int64, c *mkv.Container) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
+		if err := p.checkCtx(); err != nil {
+			return err
+		}
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
