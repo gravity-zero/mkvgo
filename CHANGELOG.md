@@ -4,6 +4,23 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-06-25
+
+### Performance
+
+- **Cheap MP4 keyframe index.** The MP4 keyframe index (`OpenMeta` with
+  `Keyframes`, CLI `probe`) is now derived from the sync-sample table
+  (stss + stts/ctts) without building the full sample-offset table, so it costs a
+  fraction of the CPU on a long movie while reporting identical keyframes. The
+  full table is still built for remux/extract.
+- **Lazy moov read for the metadata probe.** `OpenMeta` / `ReadMeta` read only
+  the moov boxes the metadata and keyframe index need, seeking over the large
+  sample-table bodies (stsz/stco/co64/stsc) instead of reading them; reads are
+  coalesced, so it is both I/O- and round-trip-light — about 90% fewer bytes read
+  and ~2× faster on a high-latency (9p/SMB/NAS) mount, with lower variance. The
+  full table is still read for remux/extract; any unexpected layout falls back to
+  the full read, and the result is byte-identical.
+
 ## [0.9.1] - 2026-06-25
 
 ### Added
