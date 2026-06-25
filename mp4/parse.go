@@ -41,6 +41,7 @@ type inSample struct {
 
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.
 type inTrack struct {
+	trackID          uint32 // tkhd track_ID, for correlating mvex/trex and mfra/tfra
 	trackType        mkv.TrackType
 	codec            string // mkvgo short codec name (e.g. "h264", "aac")
 	codecPrivate     []byte
@@ -345,7 +346,126 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseMoov(moovPayload, size, mode)
+	mv, err := parseMoov(moovPayload, size, mode)
+	if err != nil {
+		return nil, err
+	}
+	if mode == sampleKeyframes && mv.fragmented {
+		// A fragmented file's keyframes live in the moof fragments; recover them
+		// from the random-access index (mfra/tfra) at the file tail, bounded.
+		// Best-effort: no usable index leaves Keyframes nil and the caller falls back.
+		readFragmentKeyframes(r, size, mv)
+	}
+	return mv, nil
+}
+
+// maxMfraBytes bounds the random-access index read; a real mfra is tens of KB
+// even for a long movie, so anything larger is treated as malformed.
+const maxMfraBytes = 16 << 20
+
+// readFragmentKeyframes recovers a fragmented MP4's video keyframe times from its
+// Movie Fragment Random Access index: the mfro box at the very end of the file
+// gives the mfra size, the mfra holds one tfra per track mapping presentation
+// times to random-access points. Head-only and bounded (one tail read), like the
+// Matroska Cues back-scan. Anything missing or out of range leaves keyframes nil.
+func readFragmentKeyframes(r io.ReadSeeker, size int64, mv *movie) {
+	if size < 16 {
+		return
+	}
+	var tail [16]byte
+	if _, err := r.Seek(size-16, io.SeekStart); err != nil {
+		return
+	}
+	if _, err := io.ReadFull(r, tail[:]); err != nil || string(tail[4:8]) != "mfro" {
+		return // no random-access index
+	}
+	mfraSize := int64(binary.BigEndian.Uint32(tail[12:16]))
+	if mfraSize < 8 || mfraSize > size || mfraSize > maxMfraBytes {
+		return
+	}
+	buf := make([]byte, mfraSize)
+	if _, err := r.Seek(size-mfraSize, io.SeekStart); err != nil {
+		return
+	}
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return
+	}
+	boxes, err := iterBoxes(buf)
+	if err != nil || len(boxes) == 0 || boxes[0].typ != "mfra" {
+		return
+	}
+	inner, err := iterBoxes(boxes[0].payload)
+	if err != nil {
+		return
+	}
+	for _, b := range inner {
+		if b.typ != "tfra" {
+			continue
+		}
+		tid, times, ok := parseTfra(b.payload)
+		if !ok {
+			continue
+		}
+		t := trackByID(mv, tid)
+		if t == nil || t.trackType != mkv.VideoTrack {
+			continue
+		}
+		ms := make([]int64, 0, len(times))
+		for _, tk := range times {
+			v := ticksToMs(int64(tk), t.timescale) + t.editShiftMs
+			if v < 0 {
+				v = 0
+			}
+			ms = append(ms, v)
+		}
+		t.keyframesMs = sortDedupTimes(ms)
+	}
+}
+
+func trackByID(mv *movie, id uint32) *inTrack {
+	for i := range mv.tracks {
+		if mv.tracks[i].trackID == id {
+			return &mv.tracks[i]
+		}
+	}
+	return nil
+}
+
+// parseTfra reads a Track Fragment Random Access box, returning its track_ID and
+// the presentation time (media timescale) of every random-access point.
+func parseTfra(payload []byte) (trackID uint32, times []uint64, ok bool) {
+	if len(payload) < 16 {
+		return 0, nil, false
+	}
+	version := payload[0]
+	trackID = binary.BigEndian.Uint32(payload[4:8])
+	// payload[8:12] = reserved(26) + length_size_of_{traf,trun,sample}_num (2 each);
+	// the field byte counts are those 2-bit values + 1.
+	lens := payload[11]
+	trafSize := int((lens>>4)&0x3) + 1
+	trunSize := int((lens>>2)&0x3) + 1
+	sampleSize := int(lens&0x3) + 1
+	n := binary.BigEndian.Uint32(payload[12:16])
+	timeSize := 4
+	if version == 1 {
+		timeSize = 8
+	}
+	entrySize := timeSize + timeSize + trafSize + trunSize + sampleSize // time + moof_offset + 3 ids
+	off := 16
+	for i := uint32(0); i < n; i++ {
+		if off+entrySize > len(payload) {
+			break
+		}
+		var t uint64
+		if version == 1 {
+			t = binary.BigEndian.Uint64(payload[off : off+8])
+		} else {
+			t = uint64(binary.BigEndian.Uint32(payload[off : off+4]))
+		}
+		times = append(times, t)
+		off += entrySize
+	}
+	return trackID, times, true
 }
 
 // readMoovForMode returns the moov payload: the full box for the remux/extract
@@ -413,6 +533,20 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	if len(mv.tracks) == 0 {
 		return nil, errf("no convertible tracks found in MP4")
 	}
+	if mv.fragmented {
+		// The moov's sample tables are empty, so headerFrameRate gave 0. The
+		// per-fragment default sample duration in mvex>trex yields the (CFR) frame
+		// rate head-only — what ffprobe reports for a constant-rate fragmented stream.
+		defDur := trexDefaultDurations(moovBoxes)
+		for i := range mv.tracks {
+			t := &mv.tracks[i]
+			if t.trackType == mkv.VideoTrack && t.frameRate == 0 && t.timescale > 0 {
+				if d := defDur[t.trackID]; d > 0 {
+					t.frameRate = float64(t.timescale) / float64(d)
+				}
+			}
+		}
+	}
 	if udta, ok := findMemBox(moovBoxes, "udta"); ok {
 		if ub, err := iterBoxes(udta.payload); err == nil {
 			if chpl, ok := findMemBox(ub, "chpl"); ok {
@@ -422,6 +556,29 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		}
 	}
 	return &mv, nil
+}
+
+// trexDefaultDurations reads mvex>trex and returns each track's
+// default_sample_duration — the per-fragment default a CFR fragmented stream
+// uses for samples that do not carry their own duration.
+func trexDefaultDurations(moovBoxes []memBox) map[uint32]uint32 {
+	mvex, ok := findMemBox(moovBoxes, "mvex")
+	if !ok {
+		return nil
+	}
+	boxes, err := iterBoxes(mvex.payload)
+	if err != nil {
+		return nil
+	}
+	out := make(map[uint32]uint32)
+	for _, b := range boxes {
+		// trex: version/flags(4) track_ID(4) default_sample_description_index(4)
+		// default_sample_duration(4) default_sample_size(4) default_sample_flags(4).
+		if b.typ == "trex" && len(b.payload) >= 16 {
+			out[binary.BigEndian.Uint32(b.payload[4:8])] = binary.BigEndian.Uint32(b.payload[12:16])
+		}
+	}
+	return out
 }
 
 // metaAtomNames maps the common iTunes/QuickTime ilst atom types to Matroska-style
@@ -552,7 +709,8 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	if tkhd, ok := findMemBox(trakBoxes, "tkhd"); ok {
 		tr.enabled = tkhdEnabled(tkhd.payload)
 		tr.flagsKnown = true
-		trackID = uint64(tkhdTrackID(tkhd.payload))
+		tr.trackID = tkhdTrackID(tkhd.payload)
+		trackID = uint64(tr.trackID)
 		tr.rotation = tkhdRotation(tkhd.payload)
 	}
 	// MP4 has no native "forced" flag; ffmpeg records it as a track-level kind box

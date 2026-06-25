@@ -36,11 +36,14 @@ type Container struct {
 	// source carries no usable keyframe index.
 	Keyframes []int64 `json:"keyframes,omitempty"`
 
-	// Fragmented is true for a fragmented MP4 (an mvex box in the moov): the
-	// per-sample metadata — frame rate, the keyframe index — lives in the moof
-	// fragments, not in the head-only moov, so a metadata probe cannot complete
-	// it. It is mkvgo signalling "I can't read this head-only"; the caller should
-	// fall back to a full demux for those fields. Always false for Matroska.
+	// Fragmented is true for a fragmented MP4 (an mvex box in the moov), whose
+	// per-sample metadata lives in the moof fragments rather than the moov. The
+	// probe still recovers the frame rate from the fragment defaults (mvex>trex)
+	// and the keyframe index from the random-access index (mfra/tfra at the file
+	// tail) — both bounded and head-only — so a fragmented file usually still
+	// reports FrameRate and Keyframes. They stay unset only when no random-access
+	// index is present; a caller should fall back to a full demux when a
+	// Fragmented file leaves them empty. Always false for Matroska.
 	Fragmented bool `json:"fragmented,omitempty"`
 }
 

@@ -8,11 +8,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
-- **Fragmented-MP4 signal.** `Container.Fragmented` is true for a fragmented MP4
-  (an mvex box in the moov), whose per-sample metadata — frame rate, the keyframe
-  index — lives in the moof fragments rather than the head-only moov. The probe
-  reports it (also in `probe` output and JSON) instead of silently returning an
-  incomplete result, so a caller can fall back to a full demux for those fields.
+- **Fragmented-MP4 metadata.** For a fragmented MP4 (an mvex box in the moov),
+  the probe now recovers the frame rate from the fragment defaults (mvex>trex)
+  and the keyframe index from the random-access index (mfra/tfra at the file
+  tail) — both bounded and head-only — so fragmented files report the same frame
+  rate and keyframes as a full demux. `Container.Fragmented` flags the file (also
+  in `probe` output and JSON); when no random-access index is present those
+  fields stay unset and the caller should fall back.
 
 ### Performance
 

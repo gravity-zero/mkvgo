@@ -242,7 +242,7 @@ func CmdProbe(path string) {
 			len(c.Keyframes), FmtMs(c.Keyframes[0]), FmtMs(c.Keyframes[len(c.Keyframes)-1]))
 	}
 	if c.Fragmented {
-		fmt.Printf("\nFragmented MP4: frame rate and keyframes live in the moof fragments (not read head-only) — demux for those fields.\n")
+		fmt.Printf("\nFragmented MP4 (frame rate from trex, keyframes from mfra; fall back if either is empty)\n")
 	}
 
 	if len(c.Chapters) > 0 {
