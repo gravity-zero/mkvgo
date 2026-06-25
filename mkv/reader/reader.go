@@ -116,6 +116,8 @@ func setDurationMs(c *mkv.Container) error {
 type parser struct {
 	r          io.ReadSeeker
 	metaBudget int64 // remaining bytes allowed for in-memory metadata
+	segStart   int64 // Segment body start offset (set once the Segment header is read)
+	segEnd     int64 // Segment body end offset, or -1 for an unknown-size Segment
 }
 
 // maxMetadataBytes caps the TOTAL bytes a single parse pulls into the Container

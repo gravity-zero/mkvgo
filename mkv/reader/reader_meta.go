@@ -86,6 +86,12 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	if err := setDurationMs(c); err != nil {
 		return nil, err
 	}
+	if o.sampledKeyframes > 0 && len(c.Keyframes) == 0 {
+		// Opted-in, and only when the file had no Cues: recover a coarse keyframe
+		// index by sampling Cluster timestamps, so the caller need not fall back to
+		// an external probe.
+		c.Keyframes = p.sampleClusterKeyframes(o.sampledKeyframes, c.Info.TimecodeScale)
+	}
 	if o.inBandColour {
 		// Opted-in, and only for tracks that need it: recover colour from the
 		// first sample's in-band SPS. The head parse above stays untouched.
@@ -111,6 +117,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container) error {
 	if h.Size >= 0 {
 		endPos = segStart + h.Size
 	}
+	p.segStart, p.segEnd = segStart, endPos
 
 	var gotInfo, gotTracks bool
 	var infoOff, tracksOff, cuesOff int64 = -1, -1, -1 // absolute offsets from a SeekHead, if any

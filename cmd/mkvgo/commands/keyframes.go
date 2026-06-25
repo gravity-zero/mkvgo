@@ -10,7 +10,8 @@ import (
 )
 
 // CmdKeyframes prints a file's video keyframe timestamps (ms). MKV/WebM reads the
-// Cues seek index head-only; MP4 builds the sample table (opt-in).
+// Cues seek index head-only; MP4 builds the sample table (opt-in). A Cues-less
+// Matroska falls back to a bounded sampled index (Cluster timestamps).
 func CmdKeyframes(path string) {
 	var ks []int64
 	if isMP4Path(path) {
@@ -20,7 +21,10 @@ func CmdKeyframes(path string) {
 		}
 		ks = c.Keyframes
 	} else {
-		c, err := matroska.OpenMeta(context.Background(), path)
+		// WithSampledKeyframes is a no-op when the file has Cues, so passing it
+		// always keeps Cues-indexed files head-only while recovering an index for
+		// Cues-less ones.
+		c, err := matroska.OpenMeta(context.Background(), path, matroska.WithSampledKeyframes(0))
 		if err != nil {
 			Fatal(err.Error())
 		}

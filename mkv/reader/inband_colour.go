@@ -11,7 +11,28 @@ import (
 type ReadOption func(*readOpts)
 
 type readOpts struct {
-	inBandColour bool
+	inBandColour     bool
+	sampledKeyframes int // 0 = off; >0 = number of Cluster timestamps to sample
+}
+
+// defaultKeyframeSamples is the sample count WithSampledKeyframes uses for a
+// non-positive n: enough Cluster timestamps for a usable seek index on a
+// feature-length file without an unreasonable number of seeks.
+const defaultKeyframeSamples = 200
+
+// WithSampledKeyframes enables a bounded, coarse keyframe index for a Matroska
+// that carries no Cues (so the head-only keyframe index would be empty). AFTER
+// the head parse, and only when no Cues were found, it probes n evenly-spaced
+// byte offsets in the Segment body, resyncing to the next Cluster at each and
+// reading that Cluster's Timestamp — every Cluster start being a real seek point.
+// n ≤ 0 uses defaultKeyframeSamples. The result is coarse-but-valid (one keyframe
+// per sampled interval, deduplicated), bounded to about n seeks; it spares the
+// caller an external ffprobe fallback. Files that already carry Cues never sample.
+func WithSampledKeyframes(n int) ReadOption {
+	if n <= 0 {
+		n = defaultKeyframeSamples
+	}
+	return func(o *readOpts) { o.sampledKeyframes = n }
 }
 
 // WithInBandColourFallback enables a bounded colour fallback. By default a read

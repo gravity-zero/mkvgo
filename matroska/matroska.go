@@ -115,6 +115,13 @@ type ReadOption = reader.ReadOption
 // passed. See reader.WithInBandColourFallback.
 func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallback() }
 
+// WithSampledKeyframes enables a bounded, coarse keyframe index for a Matroska
+// that carries no Cues: it samples Cluster timestamps at n evenly-spaced byte
+// offsets (n ≤ 0 uses a default), so a Cues-less file still reports Keyframes
+// instead of leaving the caller to an external probe. Files with Cues never
+// sample. See reader.WithSampledKeyframes.
+func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes(n) }
+
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }
