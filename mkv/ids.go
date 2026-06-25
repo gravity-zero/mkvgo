@@ -64,6 +64,9 @@ const (
 	IDDisplayWidth   = 0x54B0
 	IDDisplayHeight  = 0x54BA
 	IDFlagInterlaced = 0x9A
+	IDStereoMode     = 0x53B8 // 3D stereo arrangement (0 = mono)
+	IDProjection     = 0x7670 // video projection (360/spherical) container
+	IDProjectionType = 0x7671 // 0 rectangular, 1 equirectangular, 2 cubemap, 3 mesh
 )
 
 // BlockAdditionMapping (TrackEntry sub-element) and its children. It carries

@@ -116,6 +116,8 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			reader.FillColourFromCodecPrivate(&mt)
 			mt.DolbyVision = t.dolbyVision
 			mt.HDR = t.hdr
+			mt.StereoMode = t.stereoMode
+			mt.Projection = t.projection
 			// Nominal frame rate from the stts header (head-only), falling back to
 			// the sample-timing average when the table was built (Keyframes opt-in).
 			fps := t.frameRate

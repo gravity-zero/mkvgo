@@ -935,6 +935,36 @@ func interlacedName(v uint64) string {
 	return ""
 }
 
+// parseProjection reads the Video>Projection element and records its
+// ProjectionType (360/spherical layout) as the track's Projection name.
+func (p *parser) parseProjection(size int64, t *mkv.Track) error {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			break
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return err
+		}
+		switch eh.ID {
+		case mkv.IDProjectionType:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			t.Projection = mkv.ProjectionTypeName(v)
+		default:
+			if err := p.skip(eh.Size); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
@@ -984,6 +1014,19 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			t.DisplayHeight = &dh
 		case mkv.IDColour:
 			if err := p.parseColour(eh.Size, t); err != nil {
+				return err
+			}
+		case mkv.IDStereoMode:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			if v != 0 { // 0 = mono: leave nil (no stereo)
+				sm := uint16(v)
+				t.StereoMode = &sm
+			}
+		case mkv.IDProjection:
+			if err := p.parseProjection(eh.Size, t); err != nil {
 				return err
 			}
 		default:

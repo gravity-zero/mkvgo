@@ -257,6 +257,16 @@ func CmdProbe(path string) {
 			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",
 				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent)
 		}
+		if t.StereoMode != nil || t.Projection != "" {
+			fmt.Print("        spatial:")
+			if sm := t.StereoModeName(); sm != "" {
+				fmt.Printf(" stereo=%q", sm)
+			}
+			if t.Projection != "" {
+				fmt.Printf(" projection=%s", t.Projection)
+			}
+			fmt.Println()
+		}
 	}
 
 	if len(dropped) > 0 {

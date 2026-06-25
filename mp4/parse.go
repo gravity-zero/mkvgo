@@ -89,6 +89,11 @@ type inTrack struct {
 
 	// HDR10 static metadata (clli + mdcv boxes), nil when absent.
 	hdr *mkv.HDRStaticMetadata
+
+	// 3D stereo arrangement (st3d, mapped to Matroska StereoMode) and 360/spherical
+	// projection (sv3d); nil / "" for ordinary flat 2D video.
+	stereoMode *uint16
+	projection string
 }
 
 // movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
@@ -1508,6 +1513,7 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 	tr.codecPrivate = append([]byte(nil), cfg...)
 	parseColr(tr, payload, headerLen)
 	parseHDRStatic(tr, payload, headerLen)
+	parseSpatial(tr, payload, headerLen)
 	parseDolbyVision(tr, payload, headerLen)
 	parsePasp(tr, payload, headerLen)
 	parseBitrate(tr, payload, headerLen)
@@ -1599,6 +1605,66 @@ func parseHDRStatic(tr *inTrack, payload []byte, headerLen int) {
 			LuminanceMax: lum(16), LuminanceMin: lum(20),
 		}
 	}
+}
+
+// parseSpatial reads the spatial-media boxes from a visual sample entry: st3d
+// (stereoscopic 3D, mapped to the Matroska StereoMode the model stores) and sv3d
+// (spherical/360 projection). Absent boxes leave the fields unset.
+func parseSpatial(tr *inTrack, payload []byte, headerLen int) {
+	if len(payload) < headerLen {
+		return
+	}
+	children, err := iterBoxes(payload[headerLen:])
+	if err != nil {
+		return
+	}
+	if st3d, ok := findMemBox(children, "st3d"); ok && len(st3d.payload) >= 5 {
+		if m := mp4StereoToMatroska(st3d.payload[4]); m != 0 { // [4] = stereo_mode, after version+flags
+			sm := m
+			tr.stereoMode = &sm
+		}
+	}
+	if sv3d, ok := findMemBox(children, "sv3d"); ok {
+		tr.projection = sv3dProjection(sv3d.payload)
+	}
+}
+
+// mp4StereoToMatroska maps an st3d stereo_mode (0 mono, 1 top-bottom, 2 left-right)
+// to the equivalent Matroska StereoMode value; 0 when mono or custom/unknown.
+func mp4StereoToMatroska(mode byte) uint16 {
+	switch mode {
+	case 1:
+		return 3 // top-bottom (left eye first)
+	case 2:
+		return 1 // side by side (left eye first)
+	}
+	return 0
+}
+
+// sv3dProjection returns the projection name from an sv3d box by the proj sub-box
+// it carries (equi/cbmp/mesh); "" when none is recognised.
+func sv3dProjection(payload []byte) string {
+	children, err := iterBoxes(payload)
+	if err != nil {
+		return ""
+	}
+	proj, ok := findMemBox(children, "proj")
+	if !ok {
+		return ""
+	}
+	pb, err := iterBoxes(proj.payload)
+	if err != nil {
+		return ""
+	}
+	switch {
+	case hasMemBox(pb, "equi"):
+		return "equirectangular"
+	case hasMemBox(pb, "cbmp"):
+		return "cubemap"
+	case hasMemBox(pb, "mesh"):
+		return "mesh"
+	}
+	return ""
 }
 
 func ensureMP4HDR(tr *inTrack) *mkv.HDRStaticMetadata {
