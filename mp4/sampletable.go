@@ -119,10 +119,22 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 
 	samples := make([]inSample, n)
 
-	// Resolve each sample's file offset from the chunk layout.
+	// Resolve each sample's file offset from the chunk layout. The stsc entries are
+	// keyed by ascending first-chunk and the chunks are walked in order, so a single
+	// monotonic cursor (ei) selects the entry for each chunk in O(chunks + entries)
+	// — calling samplesForChunk per chunk would be O(chunks × entries), a quadratic
+	// blow-up a forged stco+stsc pair could weaponise into a multi-second stall.
 	si := 0
+	ei := 0
 	for ci, off := range chunkOffsets {
-		perChunk := samplesForChunk(uint32(ci+1), stscEntries)
+		chunk := uint32(ci + 1)
+		for ei+1 < len(stscEntries) && stscEntries[ei+1].firstChunk <= chunk {
+			ei++
+		}
+		var perChunk uint32
+		if len(stscEntries) > 0 && chunk >= stscEntries[ei].firstChunk {
+			perChunk = stscEntries[ei].perChunk
+		}
 		pos := off
 		for k := uint32(0); k < perChunk && si < n; k++ {
 			size := sizes[si]

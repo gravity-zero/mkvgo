@@ -45,7 +45,10 @@ All notable changes to mkvgo are documented here. The format is based on
   allocation on a small file. The count is now bounded by the file size (samples
   must physically fit) before any allocation, on both the full-table and
   keyframe-only paths.
-- **`Join` codec validation.** Sources were checked for matching track count and
+- **MP4 chunk/stsc quadratic.** Building the full sample table looked up the
+  samples-per-chunk with a linear scan of the stsc entries *per chunk* — O(chunks ×
+  entries), which a forged stco+stsc pair could turn into a multi-second stall. A
+  monotonic cursor makes it linear (O(chunks + entries)). Sources were checked for matching track count and
   type but not codec, so concatenating mismatched codecs (e.g. H.264 + HEVC)
   silently produced a broken file. Join now also requires matching `Codec` and
   codec-private configuration per track.
@@ -91,6 +94,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - **Nightly fuzzing.** A scheduled workflow runs every `Fuzz*` target for a
   bounded time, exploring fresh inputs beyond the committed seed corpus.
+- **Complexity guard in the MP4 fuzzer.** `FuzzParseMP4` now times each input and
+  fails if a single parse exceeds a deadline — Go fuzzing flags panics but not
+  slow-but-completing inputs, so a complexity DoS would otherwise pass silently.
 
 ## [0.10.0] - 2026-06-25
 

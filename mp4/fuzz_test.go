@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -46,6 +47,7 @@ func FuzzParseMP4(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Both the full parse and the metadata-only (head-only) parse must be safe.
+		start := time.Now()
 		for _, mode := range []sampleMode{sampleNone, sampleKeyframes, sampleFull} {
 			mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), mode)
 			if err == nil && mv == nil {
@@ -54,6 +56,12 @@ func FuzzParseMP4(f *testing.F) {
 		}
 		// iterBoxes is reachable on the moov payload; exercise it directly too.
 		_, _ = iterBoxes(data)
+		// Go fuzzing flags panics/crashes but NOT slow-but-completing inputs, so a
+		// complexity DoS would otherwise pass silently. Inline timing (no per-input
+		// goroutine, so fuzz throughput is unhurt) flags a stall with its bytes.
+		if d := time.Since(start); d > 3*time.Second {
+			t.Fatalf("parse took %v (complexity DoS) on %d-byte input: %x", d, len(data), data)
+		}
 	})
 }
 
