@@ -114,14 +114,14 @@ func TestParseStszUniformAndErrors(t *testing.T) {
 	w.u32(0)   // version/flags
 	w.u32(100) // sample_size
 	w.u32(3)   // count
-	sizes, err := parseStsz(w.b)
+	sizes, err := parseStsz(w.b, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sizes) != 3 || sizes[0] != 100 || sizes[2] != 100 {
 		t.Errorf("uniform stsz = %v, want [100 100 100]", sizes)
 	}
-	if _, err := parseStsz([]byte{0, 0, 0}); err == nil {
+	if _, err := parseStsz([]byte{0, 0, 0}, 0); err == nil {
 		t.Error("expected error for short stsz")
 	}
 	// declared count with missing size array.
@@ -129,7 +129,7 @@ func TestParseStszUniformAndErrors(t *testing.T) {
 	w2.u32(0)
 	w2.u32(0) // sample_size 0 → individual sizes follow
 	w2.u32(5) // but none present
-	if _, err := parseStsz(w2.b); err == nil {
+	if _, err := parseStsz(w2.b, 0); err == nil {
 		t.Error("expected error for stsz declaring sizes it lacks")
 	}
 }

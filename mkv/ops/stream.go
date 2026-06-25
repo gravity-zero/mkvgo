@@ -12,13 +12,33 @@ import (
 const defaultClusterDurationMs = 1000
 
 type streamOpts struct {
-	remap         map[uint64]uint64
-	timeOffset    int64
+	remap      map[uint64]uint64
+	timeOffset int64
+	// trackOffsets, when non-nil, shifts each block by a PER-OUTPUT-TRACK offset
+	// (keyed by the remapped track id) instead of the single timeOffset. Join uses
+	// it so each track is concatenated against its own end, avoiding the A/V drift
+	// a single per-file offset causes when tracks end at slightly different times.
+	trackOffsets map[uint64]int64
+	// trackEnds, when non-nil, is filled with each output track's next free start
+	// timecode (its last frame's end), so the caller can use it as the next file's
+	// trackOffsets. Independent of trackOffsets.
+	trackEnds     map[uint64]int64
 	timeStart     int64
 	timeEnd       int64
 	keyframeAlign bool // split on keyframe boundaries
 	extraSubs     []mkv.Block
 	progress      mkv.ProgressFunc
+}
+
+// trackEndState tracks one output track's end while streaming: the last frame's
+// timecode, the smallest positive inter-frame gap (a frame-duration estimate when
+// blocks carry no explicit duration) and the largest explicit block duration.
+type trackEndState struct {
+	maxTC   int64
+	prevTC  int64
+	hasPrev bool
+	minGap  int64
+	maxDur  int64
 }
 
 func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, timecodeScale int64, fs *mkv.FS, opts streamOpts) error {
@@ -43,6 +63,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	var cluster []mkv.Block
 	clusterTS := int64(-1)
 	subIdx := 0
+	endStates := map[uint64]*trackEndState{}
 
 	flush := func() error {
 		if len(cluster) == 0 {
@@ -60,6 +81,24 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 	}
 
+	// recordEnds publishes each output track's next free start (its last frame's
+	// end) so a concatenating caller can rebase the following file per track.
+	recordEnds := func() {
+		if opts.trackEnds == nil {
+			return
+		}
+		for id, s := range endStates {
+			frame := s.maxDur
+			if s.minGap > frame {
+				frame = s.minGap
+			}
+			if frame <= 0 {
+				frame = 1 // no second frame seen: nudge to avoid an exact overlap
+			}
+			opts.trackEnds[id] = s.maxTC + frame
+		}
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -67,6 +106,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		blk, err := br.Next()
 		if err == io.EOF {
 			injectSubs(1 << 62)
+			recordEnds()
 			return flush()
 		}
 		if err != nil {
@@ -94,7 +134,31 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		blk.TrackNumber = newID
 
-		blk.Timecode = blk.Timecode - opts.timeStart + opts.timeOffset
+		off := opts.timeOffset
+		if opts.trackOffsets != nil {
+			off = opts.trackOffsets[newID]
+		}
+		blk.Timecode = blk.Timecode - opts.timeStart + off
+
+		if opts.trackEnds != nil {
+			s := endStates[newID]
+			if s == nil {
+				s = &trackEndState{}
+				endStates[newID] = s
+			}
+			if s.hasPrev && blk.Timecode > s.prevTC {
+				if g := blk.Timecode - s.prevTC; s.minGap == 0 || g < s.minGap {
+					s.minGap = g
+				}
+			}
+			s.prevTC, s.hasPrev = blk.Timecode, true
+			if blk.Timecode > s.maxTC {
+				s.maxTC = blk.Timecode
+			}
+			if blk.Duration > s.maxDur {
+				s.maxDur = blk.Duration
+			}
+		}
 
 		if clusterTS < 0 {
 			clusterTS = blk.Timecode
@@ -112,6 +176,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	}
 
 	injectSubs(1 << 62)
+	recordEnds()
 	return flush()
 }
 

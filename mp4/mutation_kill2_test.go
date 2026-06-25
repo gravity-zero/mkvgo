@@ -709,12 +709,12 @@ func TestParseStszVariableSizeIndexBoundary(t *testing.T) {
 	for i := uint32(1); i <= 5; i++ {
 		w.u32(i * 10) // sizes: 10, 20, 30, 40, 50
 	}
-	sizes, err := parseStsz(w.b)
+	sizes, err := parseStsz(w.b, 0)
 	if err != nil || len(sizes) != 5 || sizes[4] != 50 {
 		t.Fatalf("parseStsz 5 samples: err=%v sizes=%v", err, sizes)
 	}
 	// Remove 4 bytes (one sample entry): must error.
-	if _, err := parseStsz(w.b[:len(w.b)-4]); err == nil {
+	if _, err := parseStsz(w.b[:len(w.b)-4], 0); err == nil {
 		t.Error("truncated by 4 bytes: want error")
 	}
 }

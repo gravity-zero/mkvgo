@@ -1051,7 +1051,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		// endMs is computed for every track (the movie duration is the max across
 		// tracks); only video collects the sync-sample keyframe times.
 		isVideo := tr.trackType == mkv.VideoTrack
-		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo)
+		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo, fileSize)
 		if err != nil {
 			return tr, nil, err
 		}

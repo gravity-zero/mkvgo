@@ -236,7 +236,7 @@ func TestParseStszUniformBoundary(t *testing.T) {
 	w.u32(512) // sampleSize=512 (uniform)
 	w.u32(4)   // count=4
 
-	sizes, err := parseStsz(w.b)
+	sizes, err := parseStsz(w.b, 0)
 	if err != nil || len(sizes) != 4 {
 		t.Fatalf("uniform stsz: err=%v len=%d, want 4", err, len(sizes))
 	}
@@ -255,7 +255,7 @@ func TestParseStszMaxSamplesBoundary(t *testing.T) {
 	wOk.u32(0)
 	wOk.u32(1) // version/flags, sampleSize=1 (uniform, no size array)
 	wOk.u32(maxSamples)
-	if _, err := parseStsz(wOk.b); err != nil {
+	if _, err := parseStsz(wOk.b, 0); err != nil {
 		t.Errorf("count==maxSamples should succeed: %v", err)
 	}
 
@@ -263,7 +263,7 @@ func TestParseStszMaxSamplesBoundary(t *testing.T) {
 	wErr.u32(0)
 	wErr.u32(1)
 	wErr.u32(maxSamples + 1)
-	if _, err := parseStsz(wErr.b); err == nil {
+	if _, err := parseStsz(wErr.b, 0); err == nil {
 		t.Error("count==maxSamples+1 must error")
 	}
 }
@@ -280,7 +280,7 @@ func TestParseStszVariableSizesIndexArithmetic(t *testing.T) {
 	w.u32(22)
 	w.u32(33)
 
-	sizes, err := parseStsz(w.b)
+	sizes, err := parseStsz(w.b, 0)
 	if err != nil || len(sizes) != 3 {
 		t.Fatalf("variable stsz: err=%v len=%d", err, len(sizes))
 	}

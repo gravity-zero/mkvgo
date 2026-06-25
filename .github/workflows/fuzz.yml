@@ -1,0 +1,44 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # nightly at 03:00 UTC
+  workflow_dispatch: {} # allow manual runs
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Run every fuzz target
+        shell: bash
+        run: |
+          # Discover and run each Fuzz* target for a bounded time. Unlike the seed
+          # corpus the unit tests replay, this explores fresh inputs, so a new
+          # complexity stall or panic surfaces on its own.
+          set -uo pipefail
+          fail=0
+          for pkg in $(go list ./...); do
+            for fn in $(go test -list '^Fuzz' "$pkg" 2>/dev/null | grep '^Fuzz' || true); do
+              echo "::group::$pkg $fn"
+              if ! go test "$pkg" -run '^$' -fuzz="^${fn}$" -fuzztime=60s; then
+                fail=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $fail
+
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore

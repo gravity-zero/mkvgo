@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -15,24 +16,38 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		return fmt.Errorf("no sources to join")
 	}
 
-	first, err := reader.OpenWithFS(ctx, sources[0], fs)
-	if err != nil {
-		return err
-	}
-
-	for _, src := range sources[1:] {
+	// Open each source once for its metadata (it was opened three times before).
+	conts := make([]*mkv.Container, len(sources))
+	for i, src := range sources {
 		c, err := reader.OpenWithFS(ctx, src, fs)
 		if err != nil {
 			return err
 		}
-		if len(c.Tracks) != len(first.Tracks) {
-			return fmt.Errorf("%s has %d tracks, expected %d", src, len(c.Tracks), len(first.Tracks))
-		}
-		for i, t := range c.Tracks {
-			if t.Type != first.Tracks[i].Type {
-				return fmt.Errorf("%s track %d: type %s, expected %s", src, i+1, t.Type, first.Tracks[i].Type)
+		conts[i] = c
+	}
+	first := conts[0]
+
+	// Every source must line up with the first: same track count, types AND codecs
+	// (a codec mismatch — e.g. H.264 + HEVC — would silently produce a broken file).
+	var totalDurationMs int64
+	for i, c := range conts {
+		if i > 0 {
+			if len(c.Tracks) != len(first.Tracks) {
+				return fmt.Errorf("%s has %d tracks, expected %d", sources[i], len(c.Tracks), len(first.Tracks))
+			}
+			for j, t := range c.Tracks {
+				ft := first.Tracks[j]
+				switch {
+				case t.Type != ft.Type:
+					return fmt.Errorf("%s track %d: type %s, expected %s", sources[i], j+1, t.Type, ft.Type)
+				case t.Codec != ft.Codec:
+					return fmt.Errorf("%s track %d: codec %s, expected %s (cannot concatenate)", sources[i], j+1, t.Codec, ft.Codec)
+				case !bytes.Equal(t.CodecPrivate, ft.CodecPrivate):
+					return fmt.Errorf("%s track %d: codec configuration differs from the first file (cannot concatenate)", sources[i], j+1)
+				}
 			}
 		}
+		totalDurationMs += c.DurationMs
 	}
 
 	out, err := fs.DoCreate(dstPath)
@@ -45,41 +60,34 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-
-	var totalDurationMs int64
-	for _, src := range sources {
-		c, err := reader.OpenWithFS(ctx, src, fs)
-		if err != nil {
-			return err
-		}
-		totalDurationMs += c.DurationMs
-	}
-
 	if err := mw.WriteMetadata(first, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}
 
-	var timeOffset int64
-	for _, src := range sources {
+	// Per-track offsets: each track is concatenated against ITS OWN end, not the
+	// single container duration, so tracks that end at slightly different times do
+	// not accumulate A/V drift across joins.
+	trackOffsets := make(map[uint64]int64, len(first.Tracks))
+	for i, src := range sources {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		c, err := reader.OpenWithFS(ctx, src, fs)
-		if err != nil {
-			return err
-		}
-
+		c := conts[i]
 		remap := make(map[uint64]uint64, len(c.Tracks))
-		for i, t := range c.Tracks {
-			remap[t.ID] = first.Tracks[i].ID
+		for j, t := range c.Tracks {
+			remap[t.ID] = first.Tracks[j].ID
 		}
-
+		trackEnds := make(map[uint64]int64, len(c.Tracks))
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
-			remap: remap, timeOffset: timeOffset,
+			remap: remap, trackOffsets: trackOffsets, trackEnds: trackEnds,
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", src, err)
 		}
-		timeOffset += c.DurationMs
+		for id, end := range trackEnds {
+			if end > trackOffsets[id] {
+				trackOffsets[id] = end
+			}
+		}
 	}
 
 	return mw.Finalize()

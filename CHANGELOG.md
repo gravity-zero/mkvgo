@@ -19,6 +19,34 @@ All notable changes to mkvgo are documented here. The format is based on
   normalised to the same units as the Matroska floats. Shown in `probe` output
   and JSON (`hdr`). nil when the stream carries no such metadata.
 
+### Fixed
+
+- **MP4 sample-table complexity DoS.** A constant-size `stsz` (and the keyframe
+  index's frame count) was bounded only by the 134M `maxSamples` cap, so a tiny
+  box could declare a huge sample count and force a multi-second, multi-GB
+  allocation on a small file. The count is now bounded by the file size (samples
+  must physically fit) before any allocation, on both the full-table and
+  keyframe-only paths.
+- **`Join` codec validation.** Sources were checked for matching track count and
+  type but not codec, so concatenating mismatched codecs (e.g. H.264 + HEVC)
+  silently produced a broken file. Join now also requires matching `Codec` and
+  codec-private configuration per track.
+- **`Join` A/V drift.** Each input was offset by a single per-file value (the
+  container duration), which drifts when tracks end at slightly different times.
+  Each track is now rebased on its own end, so audio and video stay in sync across
+  joins.
+- **`Join` redundant opens.** Each source was opened three times (validation,
+  duration, streaming); the metadata is now read once and cached, halving the open
+  count — relevant for an S3/HTTP `FS`.
+- **Fixed-lacing residual bytes.** A fixed-lacing block whose data size is not a
+  multiple of its frame count now errors instead of silently dropping the
+  remainder.
+
+### CI
+
+- **Nightly fuzzing.** A scheduled workflow runs every `Fuzz*` target for a
+  bounded time, exploring fresh inputs beyond the committed seed corpus.
+
 ## [0.10.0] - 2026-06-25
 
 ### Added

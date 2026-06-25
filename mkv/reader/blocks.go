@@ -429,6 +429,9 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) ([]int, error) {
 		sizes[frameCount-1] = last
 		return sizes, nil
 	case lacingFixed:
+		if len(raw)%frameCount != 0 {
+			return nil, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", len(raw), frameCount)
+		}
 		sz := len(raw) / frameCount
 		for i := range sizes {
 			sizes[i] = sz

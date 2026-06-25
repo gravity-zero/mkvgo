@@ -278,6 +278,19 @@ func TestFixedLacing(t *testing.T) {
 	}
 }
 
+// TestFixedLacingIndivisible covers the fixed-lacing data-size check: a frame
+// count that does not evenly divide the data is malformed and must error rather
+// than silently drop the residual bytes.
+func TestFixedLacingIndivisible(t *testing.T) {
+	if _, err := decodeLacingSizes(lacingFixed, make([]byte, 7), 3); err == nil {
+		t.Error("fixed lacing with indivisible data must error")
+	}
+	sizes, err := decodeLacingSizes(lacingFixed, make([]byte, 6), 3)
+	if err != nil || len(sizes) != 3 || sizes[0] != 2 || sizes[2] != 2 {
+		t.Errorf("valid fixed lacing: sizes=%v err=%v, want [2 2 2]/nil", sizes, err)
+	}
+}
+
 func TestEBMLLacing(t *testing.T) {
 	var cluster bytes.Buffer
 	ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, 1)

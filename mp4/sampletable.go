@@ -24,11 +24,21 @@ type stscEntry struct {
 // shift), so both report identical keyframe timestamps.
 // collectSync collects the sync-sample times into times (video, for the keyframe
 // index); otherwise only endMs is computed (audio/other, for the movie duration).
-func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64, collectSync bool) (times []int64, endMs int64, err error) {
-	n := int(headerFrameCount(stblBoxes)) // sample count from the stsz header, O(1)
-	if n <= 0 {
+func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64, collectSync bool, fileSize int64) (times []int64, endMs int64, err error) {
+	fc := headerFrameCount(stblBoxes) // sample count from the stsz header, O(1)
+	if fc <= 0 {
 		return nil, 0, nil
 	}
+	// Bound the count before any n-sized allocation/loop: a tiny stsz must not be
+	// trusted to declare 134M samples (complexity DoS). Each sample occupies bytes
+	// in the file, so the count cannot exceed the file size.
+	if fc > maxSamples {
+		return nil, 0, errf("stsz sample_count %d exceeds limit", fc)
+	}
+	if fileSize > 0 && fc > fileSize {
+		return nil, 0, errf("stsz lists %d samples, more than the %d-byte file holds", fc, fileSize)
+	}
+	n := int(fc)
 	stts, ok := findMemBox(stblBoxes, "stts")
 	if !ok {
 		return nil, 0, nil
@@ -81,7 +91,7 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 	if !ok {
 		return errf("stbl without stsz")
 	}
-	sizes, err := parseStsz(stsz.payload)
+	sizes, err := parseStsz(stsz.payload, fileSize)
 	if err != nil {
 		return err
 	}
@@ -166,7 +176,13 @@ func mustFind(boxes []memBox, typ string) []byte {
 	return b.payload
 }
 
-func parseStsz(payload []byte) ([]uint32, error) {
+// parseStsz returns the per-sample sizes. fileSize bounds the constant-size path
+// (sampleSize != 0), where the table carries no per-sample bytes: a tiny stsz must
+// not be trusted to declare more samples than the file can physically hold — the
+// classic complexity DoS that maxSamples alone (134M) does not stop. Pass
+// fileSize == 0 to disable that bound (callers with no file size). The allocation
+// happens only after the count is validated, in both paths.
+func parseStsz(payload []byte, fileSize int64) ([]uint32, error) {
 	if len(payload) < 12 {
 		return nil, errf("stsz too short")
 	}
@@ -175,8 +191,11 @@ func parseStsz(payload []byte) ([]uint32, error) {
 	if count > maxSamples {
 		return nil, errf("stsz sample_count %d exceeds limit", count)
 	}
-	sizes := make([]uint32, count)
 	if sampleSize != 0 {
+		if fileSize > 0 && int64(count)*int64(sampleSize) > fileSize {
+			return nil, errf("stsz constant-size table (%d × %d) exceeds file size %d", count, sampleSize, fileSize)
+		}
+		sizes := make([]uint32, count)
 		for i := range sizes {
 			sizes[i] = sampleSize
 		}
@@ -185,6 +204,7 @@ func parseStsz(payload []byte) ([]uint32, error) {
 	if len(payload) < 12+int(count)*4 {
 		return nil, errf("stsz declares %d samples but is too short", count)
 	}
+	sizes := make([]uint32, count)
 	for i := uint32(0); i < count; i++ {
 		sizes[i] = binary.BigEndian.Uint32(payload[12+i*4 : 16+i*4])
 	}
