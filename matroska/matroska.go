@@ -40,6 +40,12 @@ type MergeOptions = mkv.MergeOptions
 type SplitOptions = mkv.SplitOptions
 type TimeRange = mkv.TimeRange
 type Severity = mkv.Severity
+
+// ErrNotMatroska is returned by Open/Read/OpenMeta/ReadMeta when the input is not
+// Matroska/WebM but looks like an MP4-family (ISO base media) file. Catch it with
+// errors.Is to re-route to the mp4 reader.
+var ErrNotMatroska = reader.ErrNotMatroska
+
 type Issue = mkv.Issue
 type DiffType = mkv.DiffType
 type Diff = mkv.Diff

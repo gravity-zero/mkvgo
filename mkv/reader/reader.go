@@ -49,9 +49,12 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
+		if looksLikeISOBMFF(r) {
+			return nil, fmt.Errorf("%s: %w", path, ErrNotMatroska)
+		}
 		return nil, fmt.Errorf("ebml header: %w", err)
 	}
-	if err := p.parseSegment(ctx, c); err != nil {
+	if err := p.parseSegment(ctx, c); err != nil && !tolerableTailError(err, c) {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
 	if err := setDurationMs(c); err != nil {
@@ -61,6 +64,39 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	// Container.Keyframes is available from Read as well as the metadata path.
 	c.Keyframes = keyframeTimesMs(c)
 	return c, nil
+}
+
+// ErrNotMatroska wraps the read error when the input is not Matroska/WebM but
+// looks like ISO base media (MP4): an EBML-header failure whose first box is a
+// recognised ISOBMFF box. A caller that dispatched by file extension can catch it
+// (errors.Is) and re-route to the mp4 reader instead of reporting a cryptic
+// EBML error.
+var ErrNotMatroska = errors.New("not Matroska/WebM (looks like ISO base media / MP4)")
+
+// looksLikeISOBMFF peeks the first box header to tell an MP4-family file from
+// genuinely-corrupt Matroska: ISOBMFF opens with [size][type] where type is a
+// known box. Best-effort; a read/seek failure just reports false.
+func looksLikeISOBMFF(r io.ReadSeeker) bool {
+	var b [8]byte
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return false
+	}
+	switch string(b[4:8]) {
+	case "ftyp", "styp", "moov", "moof", "mdat", "sidx", "free", "skip":
+		return true
+	}
+	return false
+}
+
+// tolerableTailError reports whether a segment-parse error is just a truncated
+// tail — the file was cut mid-element after the head metadata was already read.
+// It surfaces as an unexpected EOF; with the tracks in hand there is nothing more
+// to gain by failing the whole read, so return what was parsed, as ffprobe does.
+func tolerableTailError(err error, c *mkv.Container) bool {
+	return (errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)) && len(c.Tracks) > 0
 }
 
 // setDurationMs derives c.DurationMs from Info.Duration (in TimecodeScale units),

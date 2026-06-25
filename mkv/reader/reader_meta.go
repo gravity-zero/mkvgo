@@ -75,9 +75,12 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
+		if looksLikeISOBMFF(r) {
+			return nil, fmt.Errorf("%s: %w", path, ErrNotMatroska)
+		}
 		return nil, fmt.Errorf("ebml header: %w", err)
 	}
-	if err := p.parseSegmentMeta(ctx, c); err != nil {
+	if err := p.parseSegmentMeta(ctx, c); err != nil && !tolerableTailError(err, c) {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
 	if err := setDurationMs(c); err != nil {

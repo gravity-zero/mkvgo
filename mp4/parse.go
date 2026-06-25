@@ -141,10 +141,19 @@ func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 	return memBox{}, false
 }
 
-// findMoov scans the top-level boxes of a seekable MP4 and returns the file
-// offset and length of the moov box payload. moov may appear before or after
-// mdat, so the file is scanned by header until it is found.
+// findMoov returns the file offset and length of the moov box payload. It walks
+// the top-level boxes by header; if that walk desyncs — a box whose declared
+// size is wrong sends it into the mdat (some real files have a slightly-off mdat
+// size) — it falls back to a bounded backward scan for the moov, which sits near
+// the end in those files. That tolerance matches ffprobe, which still reads them.
 func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
+	if dataOff, plen, ferr := findMoovForward(r, size); ferr == nil {
+		return dataOff, plen, nil
+	}
+	return findMoovBackward(r, size)
+}
+
+func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
 	var hdr [16]byte
 	for off := int64(0); off+8 <= size; {
 		if _, err := r.Seek(off, io.SeekStart); err != nil {
@@ -175,6 +184,69 @@ func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err er
 		off += boxSize
 	}
 	return 0, 0, errf("no moov box found")
+}
+
+// maxMoovScanWindow caps the backward moov scan; a moov is at most tens of MB
+// even for a long movie, so growing past this means there is genuinely no moov.
+const maxMoovScanWindow = 256 << 20
+
+// findMoovBackward scans back from EOF for the last moov box, validated by its
+// first child being a real moov child (mvhd/trak/…), so a "moov" byte sequence
+// inside the mdat is not mistaken for it.
+func findMoovBackward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
+	for window := int64(1 << 20); ; window *= 4 {
+		start := size - window
+		atStart := false
+		if start <= 0 {
+			start, atStart = 0, true
+		}
+		buf := make([]byte, size-start)
+		if _, err := r.Seek(start, io.SeekStart); err != nil {
+			return 0, 0, err
+		}
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return 0, 0, err
+		}
+		for end := len(buf); ; {
+			i := bytes.LastIndex(buf[:end], []byte("moov"))
+			if i < 4 { // need the 4-byte size field before the type
+				break
+			}
+			boxStart := start + int64(i-4)
+			boxSize := int64(binary.BigEndian.Uint32(buf[i-4 : i]))
+			if boxSize >= 16 && boxStart+boxSize <= size && validMoovAt(r, boxStart, boxSize, size) {
+				return boxStart + 8, boxSize - 8, nil
+			}
+			end = i
+		}
+		if atStart || window >= maxMoovScanWindow {
+			return 0, 0, errf("no moov box found")
+		}
+	}
+}
+
+// validMoovAt confirms a moov candidate by reading its first child header: a real
+// moov opens with a known child box (mvhd in practice) whose size fits inside it.
+func validMoovAt(r io.ReadSeeker, boxStart, boxSize, size int64) bool {
+	if boxStart+16 > size {
+		return false
+	}
+	var hdr [8]byte
+	if _, err := r.Seek(boxStart+8, io.SeekStart); err != nil {
+		return false
+	}
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return false
+	}
+	childSize := int64(binary.BigEndian.Uint32(hdr[:4]))
+	if childSize < 8 || childSize > boxSize-8 {
+		return false
+	}
+	switch string(hdr[4:8]) {
+	case "mvhd", "iods", "trak", "mvex", "udta", "meta":
+		return true
+	}
+	return false
 }
 
 // readMoov returns the full moov box payload — every sample-table byte included.
