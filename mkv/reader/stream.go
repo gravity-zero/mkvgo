@@ -188,6 +188,7 @@ metaLoop:
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
+		elemStart := p.pos
 		eh, _, err := p.readHeader()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -198,23 +199,23 @@ metaLoop:
 		switch eh.ID {
 		case mkv.IDInfo:
 			if err := p.parseStreamInfo(eh.Size, c); err != nil {
-				return nil, nil, err
+				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDTracks:
 			if err := p.parseStreamTracks(eh.Size, c); err != nil {
-				return nil, nil, err
+				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDChapters:
 			if err := p.parseStreamChapters(eh.Size, c); err != nil {
-				return nil, nil, err
+				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDAttachments:
 			if err := p.parseStreamAttachments(eh.Size, c); err != nil {
-				return nil, nil, err
+				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDTags:
 			if err := p.parseStreamTags(eh.Size, c); err != nil {
-				return nil, nil, err
+				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDCluster:
 			peekedCluster = &eh

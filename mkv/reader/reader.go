@@ -138,6 +138,12 @@ func (p *parser) checkCtx() error {
 // failure on a real-world (often non-conformant) file is debuggable instead of a
 // bare "unexpected EOF". Applied at the Segment walk, which sees every element.
 func (p *parser) elemErr(id uint32, at int64, err error) error {
+	return elemErrAt(id, at, err)
+}
+
+// elemErrAt is the shared element-context wrapper, used by both the seekable and
+// the streaming Segment walks.
+func elemErrAt(id uint32, at int64, err error) error {
 	return fmt.Errorf("element 0x%X at offset %d: %w", id, at, err)
 }
 
