@@ -63,6 +63,9 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	// Derive the keyframe index from the Cues a full Read already parsed, so
 	// Container.Keyframes is available from Read as well as the metadata path.
 	c.Keyframes = keyframeTimesMs(c)
+	// Surface the per-track "BPS" bitrate tag (ffmpeg writes it; ffprobe reports
+	// it as bit_rate) as the typed Track.Bitrate, now that Tags are parsed.
+	promoteTrackBitrate(c)
 	return c, nil
 }
 
@@ -141,6 +144,12 @@ func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
 func (p *parser) skip(size int64) error {
 	_, err := p.r.Seek(size, io.SeekCurrent)
 	return err
+}
+
+// readFlag reads a Matroska boolean flag element (1 = set, anything else clear).
+func (p *parser) readFlag(size int64) (bool, error) {
+	v, err := ebml.ReadUint(p.r, size)
+	return v == 1, err
 }
 
 func (p *parser) parseEBMLHeader() error {
@@ -844,6 +853,24 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			}
 			t.IsForced = v == 1
 			t.ForcedPresent = true
+		case mkv.IDFlagHearingImpaired, mkv.IDFlagVisualImpaired, mkv.IDFlagTextDescriptions,
+			mkv.IDFlagOriginal, mkv.IDFlagCommentary:
+			b, e := p.readFlag(eh.Size)
+			if e != nil {
+				return t, e
+			}
+			switch eh.ID {
+			case mkv.IDFlagHearingImpaired:
+				t.HearingImpaired = b
+			case mkv.IDFlagVisualImpaired:
+				t.VisualImpaired = b
+			case mkv.IDFlagTextDescriptions:
+				t.TextDescriptions = b
+			case mkv.IDFlagOriginal:
+				t.Original = b
+			case mkv.IDFlagCommentary:
+				t.Commentary = b
+			}
 		case mkv.IDDefaultDuration:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

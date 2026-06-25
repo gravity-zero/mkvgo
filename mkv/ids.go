@@ -30,18 +30,23 @@ const (
 )
 
 const (
-	IDTrackEntry      = 0xAE
-	IDTrackNumber     = 0xD7
-	IDTrackUID        = 0x73C5
-	IDTrackType       = 0x83
-	IDFlagDefault     = 0x88
-	IDFlagForced      = 0x55AA
-	IDCodecID         = 0x86
-	IDLanguage        = 0x22B59C // legacy ISO 639-2 language element
-	IDLanguageBCP47   = 0x22B59D // IETF BCP-47 language element (takes precedence)
-	IDName            = 0x536E
-	IDCodecPrivate    = 0x63A2
-	IDDefaultDuration = 0x23E383 // nominal frame duration in ns (fps = 1e9/value)
+	IDTrackEntry           = 0xAE
+	IDTrackNumber          = 0xD7
+	IDTrackUID             = 0x73C5
+	IDTrackType            = 0x83
+	IDFlagDefault          = 0x88
+	IDFlagForced           = 0x55AA
+	IDFlagHearingImpaired  = 0x55AB // ffprobe disposition hearing_impaired
+	IDFlagVisualImpaired   = 0x55AC // ffprobe disposition visual_impaired
+	IDFlagTextDescriptions = 0x55AD // ffprobe disposition descriptions
+	IDFlagOriginal         = 0x55AE // ffprobe disposition original
+	IDFlagCommentary       = 0x55AF // ffprobe disposition comment
+	IDCodecID              = 0x86
+	IDLanguage             = 0x22B59C // legacy ISO 639-2 language element
+	IDLanguageBCP47        = 0x22B59D // IETF BCP-47 language element (takes precedence)
+	IDName                 = 0x536E
+	IDCodecPrivate         = 0x63A2
+	IDDefaultDuration      = 0x23E383 // nominal frame duration in ns (fps = 1e9/value)
 )
 
 const (

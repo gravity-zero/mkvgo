@@ -195,6 +195,21 @@ func CmdProbe(path string) {
 		if t.IsForced {
 			fmt.Print("  [forced]")
 		}
+		if t.Commentary {
+			fmt.Print("  [comment]")
+		}
+		if t.HearingImpaired {
+			fmt.Print("  [hearing-impaired]")
+		}
+		if t.VisualImpaired {
+			fmt.Print("  [visual-impaired]")
+		}
+		if t.Original {
+			fmt.Print("  [original]")
+		}
+		if t.TextDescriptions {
+			fmt.Print("  [descriptions]")
+		}
 		if len(t.CodecPrivate) > 0 {
 			fmt.Printf("  codec_private=%d bytes", len(t.CodecPrivate))
 		}
