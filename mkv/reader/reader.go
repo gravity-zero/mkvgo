@@ -702,18 +702,27 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			}
 			c.Info.Duration = v
 		case mkv.IDMuxingApp:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return err
 			}
 			c.Info.MuxingApp = v
 		case mkv.IDWritingApp:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return err
 			}
 			c.Info.WritingApp = v
 		case mkv.IDTitle:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return err
@@ -728,18 +737,27 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			t := epoch.Add(time.Duration(int64(v)))
 			c.Info.DateUTC = &t
 		case mkv.IDSegmentUID:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return err
 			}
 			c.Info.SegmentUID = v
 		case mkv.IDPrevUID:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return err
 			}
 			c.Info.PrevUID = v
 		case mkv.IDNextUID:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return err
@@ -861,6 +879,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			t.LanguageBCP47 = v
 			t.LanguagePresent = true
 		case mkv.IDName:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return t, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return t, err

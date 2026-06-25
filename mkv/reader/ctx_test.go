@@ -38,6 +38,21 @@ func TestInnerLoopHonorsCtx(t *testing.T) {
 	}
 }
 
+// TestInfoStringsChargedAgainstBudget checks that the Info strings/UIDs count
+// against the cumulative metadata budget (they previously bypassed it, capped only
+// at 512 MB per element).
+func TestInfoStringsChargedAgainstBudget(t *testing.T) {
+	body := strElem(mkv.IDTitle, "0123456789abcdef0123456789") // 26-byte title value
+	tiny := &parser{r: bytes.NewReader(body), metaBudget: 10}
+	if err := tiny.parseInfo(int64(len(body)), &mkv.Container{}); err == nil {
+		t.Error("a Title larger than the remaining budget must error")
+	}
+	ample := &parser{r: bytes.NewReader(body), metaBudget: maxMetadataBytes}
+	if err := ample.parseInfo(int64(len(body)), &mkv.Container{}); err != nil {
+		t.Errorf("within budget should parse: %v", err)
+	}
+}
+
 // TestSkipRejectsUnknownSize checks the skip guard: an unknown size (-1) errors
 // rather than seeking a byte backwards and desyncing the framing.
 func TestSkipRejectsUnknownSize(t *testing.T) {
