@@ -93,7 +93,10 @@ All notable changes to mkvgo are documented here. The format is based on
 ### CI
 
 - **Nightly fuzzing.** A scheduled workflow runs every `Fuzz*` target for a
-  bounded time, exploring fresh inputs beyond the committed seed corpus.
+  bounded time, exploring fresh inputs beyond the committed seed corpus. The
+  coverage corpus is cached between runs (`$GOCACHE/fuzz`), so each night resumes
+  from the previous night's findings and the search deepens over time rather than
+  restarting cold.
 - **Complexity guard in the MP4 fuzzer.** `FuzzParseMP4` now times each input and
   fails if a single parse exceeds a deadline — Go fuzzing flags panics but not
   slow-but-completing inputs, so a complexity DoS would otherwise pass silently.

@@ -16,6 +16,23 @@ jobs:
           go-version: stable
           cache: false
 
+      - name: Locate fuzz corpus directory
+        id: gofuzz
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+
+      - name: Restore and persist the fuzz corpus
+        uses: actions/cache@v4
+        with:
+          # Go accumulates coverage-expanding inputs under $GOCACHE/fuzz. Without
+          # this they are lost on every fresh runner, so each night re-explores
+          # shallowly from the seed corpus. A unique key forces a save each run,
+          # while restore-keys pulls the most recent prior corpus — so tonight
+          # resumes from yesterday's coverage and the search deepens over time.
+          path: ${{ steps.gofuzz.outputs.dir }}
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-
+
       - name: Run every fuzz target
         shell: bash
         run: |
