@@ -32,6 +32,19 @@ All notable changes to mkvgo are documented here. The format is based on
   full table is still read for remux/extract; any unexpected layout falls back to
   the full read, and the result is byte-identical.
 
+### Fixed
+
+- **Truncated Matroska tail.** A file cut mid-element after the head metadata
+  (Info + Tracks) now returns what was parsed instead of failing with an
+  unexpected EOF, as ffprobe does on a truncated file.
+- **Desynced MP4 box walk.** When the top-level box walk runs into the mdat (a
+  file with a wrong mdat size), `findMoov` falls back to a bounded, validated
+  backward scan for the moov, recovering files ffprobe still reads.
+- **Typed non-Matroska error.** `Open`/`Read`/`OpenMeta`/`ReadMeta` return the new
+  `ErrNotMatroska` (matchable with `errors.Is`) when a misnamed `.mkv` is actually
+  an MP4-family file, so a caller dispatching by extension can re-route to the mp4
+  reader instead of getting a cryptic EBML error.
+
 ## [0.9.1] - 2026-06-25
 
 ### Added
