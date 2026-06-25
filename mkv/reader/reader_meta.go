@@ -86,11 +86,16 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	if err := setDurationMs(c); err != nil {
 		return nil, err
 	}
-	if o.sampledKeyframes > 0 && len(c.Keyframes) == 0 {
-		// Opted-in, and only when the file had no Cues: recover a coarse keyframe
-		// index by sampling Cluster timestamps, so the caller need not fall back to
-		// an external probe.
-		c.Keyframes = p.sampleClusterKeyframes(o.sampledKeyframes, c.Info.TimecodeScale, videoTrackID(c))
+	// Keyframe recovery for a Cues-less file (Cues, when present, already filled
+	// Keyframes head-only above and win). The complete index is preferred over the
+	// sample when both are requested.
+	if len(c.Keyframes) == 0 {
+		switch {
+		case o.keyframeIndex:
+			c.Keyframes = p.buildKeyframeIndex(videoTrackID(c), c.Info.TimecodeScale)
+		case o.sampledKeyframes > 0:
+			c.Keyframes = p.sampleClusterKeyframes(o.sampledKeyframes, c.Info.TimecodeScale, videoTrackID(c))
+		}
 	}
 	if o.inBandColour {
 		// Opted-in, and only for tracks that need it: recover colour from the

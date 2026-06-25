@@ -122,6 +122,13 @@ func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallb
 // sample. See reader.WithSampledKeyframes.
 func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes(n) }
 
+// WithKeyframeIndex builds a COMPLETE video keyframe index (every keyframe, equal
+// to ffprobe -skip_frame nokey) for a Cues-less Matroska, via one sequential
+// header-only pass over the Segment — no demux, no decode. Use it for the "no
+// external fallback" path; prefer WithSampledKeyframes for a cheaper coarse
+// index. Files with Cues are never scanned. See reader.WithKeyframeIndex.
+func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
+
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }

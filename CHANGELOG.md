@@ -15,6 +15,20 @@ All notable changes to mkvgo are documented here. The format is based on
   left nil). It lets a caller tell a confirmed-SDR/unspecified stream (true, no
   colour values) from one whose colour could not be read at all (false), rather
   than conflating both as a bare nil. Shown in `probe` output.
+- **Complete keyframe index for Cues-less Matroska.** `WithKeyframeIndex()`
+  (re-exported as `matroska.WithKeyframeIndex`) builds the *complete* video
+  keyframe index — every keyframe, equal to `ffprobe -skip_frame nokey`, not a
+  sample — for a Matroska that carries no Cues. After the head parse, and only
+  when no Cues were found, it makes a single sequential structural pass over the
+  Segment (cluster by cluster, never a per-block seek), reading element headers
+  and skipping block payloads by their declared size — no demux, no decode. Per
+  Cluster it reads the Timestamp, then each SimpleBlock/BlockGroup, emitting a
+  keyframe (SimpleBlock keyframe flag, or a BlockGroup with no ReferenceBlock) on
+  the video track only at `Timestamp + relative-timecode`. It is the "no external
+  fallback" path; `WithSampledKeyframes` remains the cheaper coarse variant. Files
+  with Cues are never scanned. The CLI `keyframes` command uses it for such files.
+  (Matroska has no edit list, so no time shift is applied — parity with the
+  Cues-derived index.)
 - **Sampled keyframe index for Cues-less Matroska.** `WithSampledKeyframes(n)`
   (re-exported as `matroska.WithSampledKeyframes`) recovers a coarse keyframe
   index for a Matroska that carries no Cues: after the head parse, and only when

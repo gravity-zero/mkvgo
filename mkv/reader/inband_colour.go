@@ -12,7 +12,20 @@ type ReadOption func(*readOpts)
 
 type readOpts struct {
 	inBandColour     bool
-	sampledKeyframes int // 0 = off; >0 = number of Cluster timestamps to sample
+	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
+	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
+}
+
+// WithKeyframeIndex builds a COMPLETE video keyframe index for a Matroska that
+// carries no Cues — every keyframe, equal to `ffprobe -skip_frame nokey`, not a
+// sample. AFTER the head parse, and only when no Cues were found, it makes a
+// single sequential structural pass over the Segment (cluster by cluster, no
+// per-block seek), reading element headers and skipping block payloads by size —
+// no demux, no decode. Use it for the "no external fallback" path; use the
+// cheaper WithSampledKeyframes when a coarse index suffices. Files with Cues are
+// never scanned (the head-only Cues index is used).
+func WithKeyframeIndex() ReadOption {
+	return func(o *readOpts) { o.keyframeIndex = true }
 }
 
 // defaultKeyframeSamples is the sample count WithSampledKeyframes uses for a
