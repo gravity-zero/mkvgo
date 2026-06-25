@@ -19,9 +19,12 @@ All notable changes to mkvgo are documented here. The format is based on
   (re-exported as `matroska.WithKeyframeIndex`) builds the *complete* video
   keyframe index — every keyframe, equal to `ffprobe -skip_frame nokey`, not a
   sample — for a Matroska that carries no Cues. After the head parse, and only
-  when no Cues were found, it makes a single sequential structural pass over the
+  when no Cues were found, it makes a single sequential read-ahead pass over the
   Segment (cluster by cluster, never a per-block seek), reading element headers
-  and skipping block payloads by their declared size — no demux, no decode. Per
+  and discarding block payloads in-stream — no demux, no decode. It transfers the
+  Segment like ffprobe but pure-Go in-process; discarding rather than seeking past
+  payloads keeps the reads sequential, so it stays I/O-bound (not seek-bound) on a
+  high-latency SMB/NAS mount. Per
   Cluster it reads the Timestamp, then each SimpleBlock/BlockGroup, emitting a
   keyframe (SimpleBlock keyframe flag, or a BlockGroup with no ReferenceBlock) on
   the video track only at `Timestamp + relative-timecode`. It is the "no external

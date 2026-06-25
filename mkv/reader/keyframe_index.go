@@ -1,6 +1,8 @@
 package reader
 
 import (
+	"bufio"
+	"fmt"
 	"io"
 	"sort"
 
@@ -36,6 +38,19 @@ func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
 	if _, err := p.r.Seek(segStart, io.SeekStart); err != nil {
 		return nil
 	}
+	// Read the Segment sequentially with read-ahead, discarding block payloads
+	// in-stream rather than seeking past them: a seek-per-block walk pays a
+	// round-trip per block and collapses on SMB/NAS latency (~67k blocks → minutes),
+	// while a streaming read transfers the data in a few large reads, like ffprobe,
+	// but pure-Go with no demux/decode. Existing helpers (readHeader/skip/…) are
+	// reused unchanged; only the reader under them changes for the pass.
+	raw, err := rawSeeker(p.r)
+	if err != nil {
+		return nil
+	}
+	prev := p.r
+	p.r = newSeqSkipReader(raw, segStart)
+	defer func() { p.r = prev }()
 	if scale <= 0 {
 		scale = 1_000_000
 	}
@@ -148,6 +163,91 @@ func (p *parser) resyncCluster(segEnd int64, inCluster, haveTS *bool, clusterTS,
 		*clusterEnd = -1
 	}
 	return true
+}
+
+// keyframeScanBufSize is the read-ahead window for the sequential keyframe pass:
+// large enough that the Segment is pulled in a few big reads (cheap on SMB/NAS)
+// rather than many small ones.
+const keyframeScanBufSize = 256 << 10
+
+// rawSeeker returns the underlying seekable reader positioned where the buffered
+// reader currently is, so the sequential pass can read from there with its own
+// large buffer instead of through the small metadata buffer.
+func rawSeeker(r io.ReadSeeker) (io.ReadSeeker, error) {
+	if b, ok := r.(*bufReadSeeker); ok {
+		return b.raw()
+	}
+	return r, nil
+}
+
+// seqSkipReader reads an io.ReadSeeker sequentially behind a large read-ahead
+// buffer, serving a forward skip (a positive SeekCurrent, or a forward SeekStart)
+// by DISCARDING bytes through the buffer rather than seeking past them. That keeps
+// the underlying reads sequential: on SMB/NAS a seek-per-block walk pays a
+// round-trip per block, whereas a streaming read with read-ahead transfers the
+// data in a few large reads. A backward or current-position seek (the rare resync
+// path, and position queries) is served directly.
+type seqSkipReader struct {
+	rs  io.ReadSeeker
+	br  *bufio.Reader
+	off int64
+}
+
+func newSeqSkipReader(rs io.ReadSeeker, startOff int64) *seqSkipReader {
+	return &seqSkipReader{rs: rs, br: bufio.NewReaderSize(rs, keyframeScanBufSize), off: startOff}
+}
+
+func (s *seqSkipReader) Read(p []byte) (int, error) {
+	n, err := s.br.Read(p)
+	s.off += int64(n)
+	return n, err
+}
+
+func (s *seqSkipReader) discard(n int64) (int64, error) {
+	m, err := io.CopyN(io.Discard, s.br, n)
+	s.off += m
+	return s.off, err
+}
+
+func (s *seqSkipReader) seekAbs(target int64) (int64, error) {
+	if _, err := s.rs.Seek(target, io.SeekStart); err != nil {
+		return s.off, err
+	}
+	s.br.Reset(s.rs)
+	s.off = target
+	return target, nil
+}
+
+func (s *seqSkipReader) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekCurrent:
+		switch {
+		case offset == 0:
+			return s.off, nil
+		case offset > 0:
+			return s.discard(offset)
+		default:
+			return s.seekAbs(s.off + offset)
+		}
+	case io.SeekStart:
+		switch {
+		case offset == s.off:
+			return s.off, nil
+		case offset > s.off:
+			return s.discard(offset - s.off)
+		default:
+			return s.seekAbs(offset)
+		}
+	case io.SeekEnd:
+		t, err := s.rs.Seek(offset, io.SeekEnd)
+		if err != nil {
+			return s.off, err
+		}
+		s.br.Reset(s.rs)
+		s.off = t
+		return t, nil
+	}
+	return s.off, fmt.Errorf("seqSkipReader: invalid whence %d", whence)
 }
 
 // finalizeIndex sorts and de-duplicates the collected keyframe times.

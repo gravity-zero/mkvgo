@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"io"
 	"reflect"
 	"testing"
 )
@@ -86,6 +87,47 @@ func TestKeyframeIndexResync(t *testing.T) {
 	want := []int64{0, 1000}
 	if !reflect.DeepEqual(c.Keyframes, want) {
 		t.Errorf("Keyframes after resync = %v, want %v", c.Keyframes, want)
+	}
+}
+
+// TestSeqSkipReader locks the sequential reader behind the complete pass: a
+// forward skip discards in-stream (no seek), a backward skip falls back to a real
+// seek, and position queries / SeekEnd resolve correctly.
+func TestSeqSkipReader(t *testing.T) {
+	data := []byte("0123456789abcdef")
+	s := newSeqSkipReader(bytes.NewReader(data), 0)
+
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(s, buf); err != nil || string(buf) != "0123" {
+		t.Fatalf("read = %q (%v), want 0123", buf, err)
+	}
+	if pos, _ := s.Seek(0, io.SeekCurrent); pos != 4 {
+		t.Fatalf("position query = %d, want 4", pos)
+	}
+	// Forward skip (discard): jump over "45".
+	if pos, err := s.Seek(2, io.SeekCurrent); err != nil || pos != 6 {
+		t.Fatalf("forward skip = %d (%v), want 6", pos, err)
+	}
+	if _, err := io.ReadFull(s, buf); err != nil || string(buf) != "6789" {
+		t.Fatalf("read after skip = %q (%v), want 6789", buf, err)
+	}
+	// Forward SeekStart (discard): to index 12.
+	if pos, err := s.Seek(12, io.SeekStart); err != nil || pos != 12 {
+		t.Fatalf("forward SeekStart = %d (%v), want 12", pos, err)
+	}
+	if _, err := io.ReadFull(s, buf); err != nil || string(buf) != "cdef" {
+		t.Fatalf("read at 12 = %q (%v), want cdef", buf, err)
+	}
+	// Backward SeekStart (real seek): back to index 1.
+	if pos, err := s.Seek(1, io.SeekStart); err != nil || pos != 1 {
+		t.Fatalf("backward SeekStart = %d (%v), want 1", pos, err)
+	}
+	if _, err := io.ReadFull(s, buf); err != nil || string(buf) != "1234" {
+		t.Fatalf("read at 1 = %q (%v), want 1234", buf, err)
+	}
+	// SeekEnd resolves the size.
+	if pos, err := s.Seek(0, io.SeekEnd); err != nil || pos != int64(len(data)) {
+		t.Fatalf("SeekEnd = %d (%v), want %d", pos, err, len(data))
 	}
 }
 
