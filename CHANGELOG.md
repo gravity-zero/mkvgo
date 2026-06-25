@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.11.0] - 2026-06-26
 
 ### Added
 
@@ -635,7 +635,8 @@ and types are unchanged.
   parser hardening (bounded recursion/allocations); streaming/seekable parser
   parity.
 
-[Unreleased]: https://github.com/gravity-zero/mkvgo/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/gravity-zero/mkvgo/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.11.0
 [0.10.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.10.0
 [0.9.1]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.9.1
 [0.9.0]: https://github.com/gravity-zero/mkvgo/releases/tag/v0.9.0
