@@ -10,14 +10,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - **Sample-exact audio across MP4 <-> MKV round trips.** Audio that survives a
   `RemuxFromMP4` / `RemuxToMP4` round trip now decodes bit-identically to the source
-  for AAC, Opus, FLAC, MP3, AC-3 and E-AC-3 (verified by decoding both sides to PCM
-  and comparing). Two changes make this hold:
+  for AAC, FLAC, AC-3 and E-AC-3 (verified by decoding both sides to PCM). Opus and
+  MP3 stay sample-accurate at the head (no desync) but may keep a few samples of
+  encoder padding at the tail — their delay is intrinsic to the bitstream and ffmpeg
+  does not trim that tail from an MP4 either. Two changes make this hold:
   - New `Track.CodecDelay` / `Track.SeekPreRoll` (Matroska `0x56AA`/`0x56BB`, ns) are
     read and written. A codec's container-signalled encoder/decoder delay (the MP4
     edit-list `media_time`) is carried as `CodecDelay` on the MKV side and re-emitted
-    as an MP4 edit list (`elst`) on the way back, for AAC/MP3/AC-3/E-AC-3. Opus/Vorbis
-    keep their pre-skip in the codec config (copied verbatim), so they are excluded to
-    avoid double-counting; FLAC/DTS/PCM have no priming.
+    as an MP4 edit list (`elst`) on the way back, for AAC/AC-3/E-AC-3. Opus, MP3 and
+    Vorbis carry their delay intrinsically (Opus pre-skip in the OpusHead, MP3 in its
+    in-band Xing/LAME header), which ffmpeg's decoder applies regardless of the
+    container, so they are excluded — a derived edit list would over-trim them;
+    FLAC/DTS/PCM have no priming.
   - **Audio tracks are written on a sample-rate media timescale** (`mdhd`), as ffmpeg
     does, instead of the millisecond movie timescale. This makes the edit list's
     `media_time` sample-exact, which is required for ffmpeg to trim a codec's priming

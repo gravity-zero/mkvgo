@@ -132,19 +132,21 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 // delay across the MP4 <-> MKV round trip via Matroska CodecDelay and an MP4 edit
 // list. The criterion is "the delay is container-signalled (not intrinsic to the
 // codec config) and ffmpeg reproduces it from a sample-exact edit list":
-//   - AAC, MP3: encoder/decoder delay lives in the MP4 edit list, lost otherwise.
+//   - AAC: encoder delay lives only in the MP4 edit list, lost otherwise.
 //   - AC-3, E-AC-3: a fixed decoder delay (256 samples) the source trims via the
 //     edit list. ffmpeg only trims it when the edit list is sample-exact, which is
 //     why audio tracks are written on a sample-rate media timescale (mediaTimescale)
 //     rather than the millisecond movie timescale.
-//   - Opus, Vorbis: pre-skip is intrinsic to the codec config (OpusHead / setup
-//     headers), copied verbatim -> a derived CodecDelay would double-count it.
+//   - Opus, Vorbis, MP3: the delay is intrinsic to the bitstream (Opus pre-skip in
+//     the OpusHead, MP3 encoder delay in the in-band Xing/LAME header) and ffmpeg's
+//     decoder applies it regardless of the container. A derived edit list ADDS to
+//     that, over-trimming and desyncing the head — a native-MKV MP3 lost ~20 ms of
+//     real audio at the start before this. ffmpeg likewise writes no useful edit
+//     list when copying a native MP3/Opus to MP4.
 //   - FLAC/DTS/PCM: no encoder priming.
 func hasContainerPriming(codec string) bool {
 	switch codec {
-	// "A_MPEG/L3" is mkvgo's name for MP3 on both sides (the reader leaves the raw
-	// Matroska CodecID unmapped, and from-mp4 tags the inTrack with the same string).
-	case "aac", "ac3", "eac3", "A_MPEG/L3":
+	case "aac", "ac3", "eac3":
 		return true
 	}
 	return false

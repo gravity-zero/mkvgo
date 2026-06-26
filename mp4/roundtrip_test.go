@@ -221,11 +221,34 @@ func TestRoundTripAVOffset(t *testing.T) {
 	}
 }
 
+// TestMP3NoDerivedEditList guards the native-MKV MP3 head-desync fix: MP3's encoder
+// delay lives in its in-band Xing/LAME header, which ffmpeg's decoder applies anyway,
+// so a derived MP4 edit list over-trims and desyncs the head (a native MKV MP3 lost
+// ~20 ms of real audio). No edit list must be written for MP3.
+func TestMP3NoDerivedEditList(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.AudioTrack, Codec: "A_MPEG/L3",
+			Channels: u8p(2), SampleRate: f64p(44100), CodecDelay: 24_000_000},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{0xFF, 0xFB, 0x90, 0x00}},
+		{track: 1, pts: 26, key: true, data: []byte{0xFF, 0xFB, 0x90, 0x00}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	if b, _ := os.ReadFile(mp4Path); bytes.Contains(b, []byte("elst")) {
+		t.Error("MP4 must not emit an edit list for MP3 (delay is in the in-band LAME header)")
+	}
+}
+
 // TestRoundTripOpusNoDerivedCodecDelay guards the rule that only codecs whose delay
-// the CodecDelay path reproduces (AAC, MP3 — see hasContainerPriming) get a
-// container-derived delay. Opus carries its pre-skip in the OpusHead, so it must NOT
-// acquire a second delay via an MP4 edit list / Matroska CodecDelay — doing so
-// double-counts the pre-skip and shifts the decoded audio.
+// is container-signalled (AAC/AC-3/E-AC-3 — see hasContainerPriming) get a
+// container-derived delay. Opus carries its pre-skip in the OpusHead (and MP3 in its
+// in-band Xing/LAME header), so they must NOT acquire a second delay via an MP4 edit
+// list / Matroska CodecDelay — doing so double-counts it and shifts the decoded audio.
 func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
 	opusHead := makeOpusHead(2, 312, 48000, 0, 0, nil) // pre-skip 312 samples, in the OpusHead
 	tracks := []mkv.Track{
