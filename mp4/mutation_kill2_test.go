@@ -946,7 +946,7 @@ func TestReconstructTimingBFrameOffsets(t *testing.T) {
 		{pts: 20},
 		{pts: 60},
 	}
-	tim := reconstructTiming(s, 20)
+	tim := reconstructTiming(s, 20, movieTimescale)
 	if len(tim.durations) != 4 {
 		t.Fatalf("durations len = %d, want 4", len(tim.durations))
 	}

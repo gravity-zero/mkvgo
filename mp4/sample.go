@@ -78,15 +78,28 @@ func textTiming(samples []sample) timing {
 // lastDurMs is the duration assigned to the final sample (which has no following
 // sample to diff against); pass a frame duration derived from the track when
 // known, else 0 to reuse the previous sample's duration.
-func reconstructTiming(samples []sample, lastDurMs int64) timing {
+//
+// mts is the target media timescale. Sample pts are in the movie timescale (ms);
+// they are scaled to mts so the table is expressed in the track's own units. Audio
+// tracks pass their sample rate, which makes the durations — and the edit list
+// derived from CodecDelay — sample-exact. For mts == movieTimescale this is the
+// identity (video/text are unaffected). Scaling the cumulative pts and then diffing
+// keeps the rounding error bounded (it does not accumulate across samples).
+func reconstructTiming(samples []sample, lastDurMs int64, mts uint32) timing {
 	n := len(samples)
 	if n == 0 {
 		return timing{}
 	}
+	scale := func(ptsMs int64) int64 {
+		if mts == movieTimescale {
+			return ptsMs
+		}
+		return ptsMs * int64(mts) / int64(movieTimescale)
+	}
 
 	dts := make([]int64, n)
 	for i := range samples {
-		dts[i] = samples[i].pts
+		dts[i] = scale(samples[i].pts)
 	}
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
 
@@ -99,14 +112,14 @@ func reconstructTiming(samples []sample, lastDurMs int64) timing {
 	}
 	switch {
 	case lastDurMs > 0:
-		t.durations[n-1] = lastDurMs
+		t.durations[n-1] = scale(lastDurMs)
 	case n > 1:
 		t.durations[n-1] = t.durations[n-2]
 	default:
 		t.durations[n-1] = 1
 	}
 	for i := 0; i < n; i++ {
-		off := samples[i].pts - dts[i]
+		off := scale(samples[i].pts) - dts[i]
 		t.ctts[i] = int32(off)
 		if off != 0 {
 			t.hasCTTS = true

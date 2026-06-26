@@ -83,32 +83,50 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 	})
 }
 
-// buildTrak builds one trak box and returns it with the track's duration (ms).
-// hasContainerPriming reports whether mkvgo should carry a codec's encoder delay
-// across the MP4 <-> MKV round trip via Matroska CodecDelay / an MP4 edit list.
-//
-// The criterion is not "has a delay" but "is the delay both container-signalled
-// AND faithfully reproduced by the CodecDelay path":
-//   - AAC, MP3: their encoder/decoder delay lives in the MP4 edit list and is lost
-//     otherwise; ffmpeg trims it correctly from a derived edit list -> carry it.
+// hasContainerPriming reports whether mkvgo should carry a codec's encoder/decoder
+// delay across the MP4 <-> MKV round trip via Matroska CodecDelay and an MP4 edit
+// list. The criterion is "the delay is container-signalled (not intrinsic to the
+// codec config) and ffmpeg reproduces it from a sample-exact edit list":
+//   - AAC, MP3: encoder/decoder delay lives in the MP4 edit list, lost otherwise.
+//   - AC-3, E-AC-3: a fixed decoder delay (256 samples) the source trims via the
+//     edit list. ffmpeg only trims it when the edit list is sample-exact, which is
+//     why audio tracks are written on a sample-rate media timescale (mediaTimescale)
+//     rather than the millisecond movie timescale.
 //   - Opus, Vorbis: pre-skip is intrinsic to the codec config (OpusHead / setup
 //     headers), copied verbatim -> a derived CodecDelay would double-count it.
-//   - AC-3: has a real 256-sample decoder delay the source trims, but ffmpeg PADS
-//     (not trims) a millisecond-quantised edit list for it, so carrying it does not
-//     reproduce the trim; a sample-exact edit list (MP4 media timescale == sample
-//     rate) is needed first. Excluded until then rather than injecting a bad delay.
 //   - FLAC/DTS/PCM: no encoder priming.
 func hasContainerPriming(codec string) bool {
-	return codec == "aac" || codec == "mp3"
+	switch codec {
+	// "A_MPEG/L3" is mkvgo's name for MP3 on both sides (the reader leaves the raw
+	// Matroska CodecID unmapped, and from-mp4 tags the inTrack with the same string).
+	case "aac", "ac3", "eac3", "A_MPEG/L3":
+		return true
+	}
+	return false
+}
+
+// mediaTimescale returns the mdia/mdhd timescale for a track. Audio tracks use their
+// sample rate (as ffmpeg does), making the sample table and the CodecDelay-derived
+// edit list sample-exact — required for ffmpeg to trim a codec's priming precisely
+// (notably AC-3, whose decoder delay it ignores from a millisecond-quantised edit
+// list). Everything else uses the movie timescale.
+func mediaTimescale(t *outTrack) uint32 {
+	if t.spec.handler == "soun" && t.mkv.SampleRate != nil && *t.mkv.SampleRate > 0 {
+		return uint32(*t.mkv.SampleRate)
+	}
+	return movieTimescale
 }
 
 // buildEdts writes an edit list that re-signals an audio track's gapless priming
 // (Matroska CodecDelay, in ns) as the MP4 encoder delay: one edit starting at
 // media_time = priming, so a decoder discards it. This is what carries the priming
 // back across an MKV->MP4 round-trip, the way ffmpeg writes it.
-func buildEdts(codecDelayNs int64, durMs uint32) []byte {
-	mediaTime := codecDelayNs / 1_000_000 // ns -> ms (media timescale == movieTimescale)
-	segDur := int64(durMs) - mediaTime
+func buildEdts(codecDelayNs int64, durMovieMs, mts uint32) []byte {
+	// media_time is in the media timescale (mts == sample rate for audio), so the
+	// trim is sample-exact; segment_duration is in the movie timescale (ms). Round to
+	// nearest so an N-sample priming comes back as exactly N samples, not N-1.
+	mediaTime := (codecDelayNs*int64(mts) + 500_000_000) / 1_000_000_000
+	segDur := int64(durMovieMs) - codecDelayNs/1_000_000
 	if segDur < 0 {
 		segDur = 0
 	}
@@ -123,13 +141,24 @@ func buildEdts(codecDelayNs int64, durMs uint32) []byte {
 }
 
 func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
+	// Audio tracks use their sample rate as the media timescale so the sample table
+	// and the CodecDelay-derived edit list are sample-exact (see mediaTimescale);
+	// text/video stay on the movie timescale. tim.total is then in the media
+	// timescale, while tkhd/mvhd and the edit list's segment_duration need the movie
+	// timescale (ms) — durMovie.
+	mts := mediaTimescale(t)
 	var tim timing
 	if t.spec.text || t.isChapter {
+		mts = movieTimescale
 		tim = textTiming(t.samples.samples)
 	} else {
-		tim = reconstructTiming(t.samples.samples, t.frameDurMs)
+		tim = reconstructTiming(t.samples.samples, t.frameDurMs, mts)
 	}
-	dur := uint32(tim.total)
+	durMedia := uint32(tim.total)
+	durMovie := durMedia
+	if mts != movieTimescale {
+		durMovie = uint32(tim.total * int64(movieTimescale) / int64(mts))
+	}
 
 	var mediaHeader []byte
 	switch {
@@ -143,7 +172,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		mediaHeader = smhd()
 	}
 	minf := container("minf", mediaHeader, buildDinf(), buildStbl(t, tim, mdatBase, co64))
-	mdiaChildren := [][]byte{buildMdhd(dur, mdhdLanguage(t.mkv))}
+	mdiaChildren := [][]byte{buildMdhd(durMedia, mts, mdhdLanguage(t.mkv))}
 	// An elng box carries the BCP-47 language tag (mdhd holds only the legacy
 	// ISO 639-2 code), so a full language round-trips through the remux.
 	if t.mkv.LanguageBCP47 != "" {
@@ -152,7 +181,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, handlerName(t.spec.handler)), minf)
 	mdia := container("mdia", mdiaChildren...)
 
-	trakChildren := [][]byte{buildTkhd(t, dur)}
+	trakChildren := [][]byte{buildTkhd(t, durMovie)}
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
@@ -165,10 +194,10 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	// decoder discards it and the delay survives the MKV->MP4 round-trip. Limited to
 	// the codecs the CodecDelay path reproduces correctly (see hasContainerPriming).
 	if t.mkv.CodecDelay > 0 && hasContainerPriming(t.mkv.Codec) {
-		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, dur))
+		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, durMovie, mts))
 	}
 	trakChildren = append(trakChildren, mdia)
-	return container("trak", trakChildren...), dur
+	return container("trak", trakChildren...), durMovie
 }
 
 // buildElng builds an Extended Language Tag box (ISO/IEC 14496-12) carrying a
@@ -224,12 +253,12 @@ func buildTkhd(t *outTrack, durationMs uint32) []byte {
 	})
 }
 
-func buildMdhd(durationMs uint32, lang string) []byte {
+func buildMdhd(duration, timescale uint32, lang string) []byte {
 	return fullBox("mdhd", 0, 0, func(w *bw) {
 		w.u32(0) // creation_time
 		w.u32(0) // modification_time
-		w.u32(movieTimescale)
-		w.u32(durationMs)
+		w.u32(timescale)
+		w.u32(duration)
 		w.u16(packLanguage(lang))
 		w.u16(0) // pre_defined
 	})

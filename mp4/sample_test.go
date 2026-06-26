@@ -16,7 +16,7 @@ func samplesFromPTS(pts []int64, sync []bool) []sample {
 
 func TestReconstructTimingNoBFrames(t *testing.T) {
 	s := samplesFromPTS([]int64{0, 40, 80, 120}, []bool{true, false, false, false})
-	tim := reconstructTiming(s, 40)
+	tim := reconstructTiming(s, 40, movieTimescale)
 	if !reflect.DeepEqual(tim.durations, []int64{40, 40, 40, 40}) {
 		t.Errorf("durations = %v", tim.durations)
 	}
@@ -31,7 +31,7 @@ func TestReconstructTimingNoBFrames(t *testing.T) {
 func TestReconstructTimingBFrames(t *testing.T) {
 	// Decode order with reordering: PTS go backwards (B-frames).
 	s := samplesFromPTS([]int64{0, 120, 40, 80}, []bool{true, false, false, false})
-	tim := reconstructTiming(s, 40)
+	tim := reconstructTiming(s, 40, movieTimescale)
 	if !tim.hasCTTS {
 		t.Fatalf("expected ctts for reordered PTS")
 	}
@@ -51,7 +51,7 @@ func TestReconstructTimingBFrames(t *testing.T) {
 
 func TestReconstructTimingSingleSample(t *testing.T) {
 	s := samplesFromPTS([]int64{0}, []bool{true})
-	tim := reconstructTiming(s, 0)
+	tim := reconstructTiming(s, 0, movieTimescale)
 	if len(tim.durations) != 1 || tim.durations[0] != 1 {
 		t.Errorf("single-sample duration = %v, want [1]", tim.durations)
 	}
@@ -60,7 +60,7 @@ func TestReconstructTimingSingleSample(t *testing.T) {
 func TestReconstructTimingLastDurFallback(t *testing.T) {
 	// lastDurMs=0 and n>1 → reuse previous delta.
 	s := samplesFromPTS([]int64{0, 30, 60}, []bool{true, false, false})
-	tim := reconstructTiming(s, 0)
+	tim := reconstructTiming(s, 0, movieTimescale)
 	if tim.durations[2] != 30 {
 		t.Errorf("last duration = %d, want 30 (reused delta)", tim.durations[2])
 	}

@@ -181,7 +181,9 @@ func ticksToNs(ticks int64, timescale uint32) int64 {
 	if timescale == 0 {
 		return ticks
 	}
-	return ticks * 1_000_000_000 / int64(timescale)
+	// Round to nearest: a priming of N samples must survive the ns round trip back
+	// to exactly N samples in the edit list (truncation would lose a sample).
+	return (ticks*1_000_000_000 + int64(timescale)/2) / int64(timescale)
 }
 
 func ticksToMs(ticks int64, timescale uint32) int64 {

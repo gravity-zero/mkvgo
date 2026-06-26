@@ -3,12 +3,57 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
+
+// audioEditList walks an MP4's boxes and returns the first audio (soun) track's
+// mdhd timescale and edit-list media_time (0 if no edit list). It is how the tests
+// assert the sample-exact priming layout that lets ffmpeg trim each codec's delay.
+func audioEditList(t *testing.T, data []byte) (timescale uint32, mediaTime int64) {
+	t.Helper()
+	top, err := iterBoxes(data)
+	if err != nil {
+		t.Fatalf("iterBoxes: %v", err)
+	}
+	moov, ok := findMemBox(top, "moov")
+	if !ok {
+		t.Fatal("no moov")
+	}
+	moovBoxes, _ := iterBoxes(moov.payload)
+	for _, b := range moovBoxes {
+		if b.typ != "trak" {
+			continue
+		}
+		trakBoxes, _ := iterBoxes(b.payload)
+		mdia, ok := findMemBox(trakBoxes, "mdia")
+		if !ok {
+			continue
+		}
+		mdiaBoxes, _ := iterBoxes(mdia.payload)
+		if hdlr, ok := findMemBox(mdiaBoxes, "hdlr"); !ok || len(hdlr.payload) < 12 || string(hdlr.payload[8:12]) != "soun" {
+			continue
+		}
+		mdhd, ok := findMemBox(mdiaBoxes, "mdhd")
+		if !ok || len(mdhd.payload) < 16 {
+			t.Fatal("audio track without a readable mdhd")
+		}
+		timescale = binary.BigEndian.Uint32(mdhd.payload[12:16]) // v0: after version/flags + 2 times
+		if edts, ok := findMemBox(trakBoxes, "edts"); ok {
+			eb, _ := iterBoxes(edts.payload)
+			if elst, ok := findMemBox(eb, "elst"); ok {
+				mediaTime, _, _ = parseElst(elst.payload)
+			}
+		}
+		return timescale, mediaTime
+	}
+	t.Fatal("no audio track")
+	return 0, 0
+}
 
 func u16p(v uint16) *uint16 { return &v }
 
@@ -56,6 +101,41 @@ func TestRoundTripCodecDelay(t *testing.T) {
 	}
 	if d := audio.CodecDelay; d < 20_000_000 || d > 22_000_000 {
 		t.Errorf("CodecDelay = %d ns, want ~21 ms preserved across the round trip", d)
+	}
+}
+
+// TestEditListSampleExact locks in the layout that makes the priming round trip
+// sample-exact for every audio codec: audio tracks are written on a sample-rate
+// media timescale, and the CodecDelay becomes an edit list whose media_time is the
+// exact priming in samples. ffmpeg only trims a codec's delay (notably AC-3) from
+// such a sample-exact edit list — a millisecond-quantised one is ignored/padded.
+func TestEditListSampleExact(t *testing.T) {
+	const rate = 48000
+	const primingSamples = 1024
+	codecDelayNs := int64(primingSamples) * 1_000_000_000 / rate
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC,
+			Channels: u8p(2), SampleRate: f64p(rate), CodecDelay: codecDelayNs},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1, 2}},
+		{track: 1, pts: 21, key: true, data: []byte{3, 4}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	data, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, mediaTime := audioEditList(t, data)
+	if ts != rate {
+		t.Errorf("audio mdhd timescale = %d, want %d (sample rate)", ts, rate)
+	}
+	if mediaTime != primingSamples {
+		t.Errorf("edit-list media_time = %d, want %d samples (sample-exact)", mediaTime, primingSamples)
 	}
 }
 
