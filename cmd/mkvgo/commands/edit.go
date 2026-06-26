@@ -78,6 +78,7 @@ JSON schema:
 			i++
 			outPath = args[i]
 		} else {
+			rejectFlagArg(args[i])
 			jsonStr = args[i]
 		}
 	}
@@ -122,6 +123,7 @@ func CmdEditTitle(args []string) {
 			i++
 			outPath = args[i]
 		} else {
+			rejectFlagArg(args[i])
 			title = args[i]
 		}
 	}
@@ -179,6 +181,8 @@ func CmdEditTrack(args []string) {
 		case "-no-forced":
 			v := false
 			setForced = &v
+		default:
+			rejectFlagArg(args[i])
 		}
 	}
 	if outPath == "" || trackID == 0 {

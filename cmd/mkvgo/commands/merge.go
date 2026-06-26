@@ -21,6 +21,7 @@ func CmdMerge(args []string) {
 			outPath = args[i]
 			continue
 		}
+		rejectFlagArg(args[i])
 		inputs = append(inputs, matroska.MergeInput{SourcePath: args[i]})
 	}
 	if outPath == "" || len(inputs) == 0 {
@@ -59,6 +60,7 @@ func CmdMergeSubtitle(args []string) {
 			i++
 			name = args[i]
 		default:
+			rejectFlagArg(args[i])
 			subPath = args[i]
 		}
 	}

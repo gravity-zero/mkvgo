@@ -24,6 +24,8 @@ func CmdExtractAttachment(args []string) {
 		if args[i] == "-o" {
 			i++
 			outPath = args[i]
+		} else {
+			rejectFlagArg(args[i])
 		}
 	}
 	if outPath == "" {
@@ -62,6 +64,8 @@ func CmdExtractSubtitle(args []string) {
 		case "-format":
 			i++
 			format = args[i]
+		default:
+			rejectFlagArg(args[i])
 		}
 	}
 	if outPath == "" || trackID == 0 {

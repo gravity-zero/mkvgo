@@ -30,6 +30,8 @@ func CmdDemux(args []string) {
 				Fatal("-t requires track IDs (comma-separated)")
 			}
 			trackIDs = ParseTrackIDs(args[i])
+		default:
+			rejectFlagArg(args[i])
 		}
 	}
 	if outDir == "" {
@@ -61,6 +63,7 @@ func CmdMux(args []string) {
 			outPath = args[i]
 			continue
 		}
+		rejectFlagArg(args[i])
 		srcPath, trackID, ok := splitTrackSpec(args[i])
 		if !ok {
 			Fatal(fmt.Sprintf("invalid track spec %q, expected file:trackID", args[i]))
@@ -105,6 +108,8 @@ func CmdRemoveTrack(args []string) {
 		case "-t":
 			i++
 			trackIDs = ParseTrackIDs(args[i])
+		default:
+			rejectFlagArg(args[i])
 		}
 	}
 	if outPath == "" || len(trackIDs) == 0 {
@@ -139,6 +144,7 @@ func CmdAddTrack(args []string) {
 			i++
 			input.Name = args[i]
 		default:
+			rejectFlagArg(args[i])
 			if srcPath, trackID, ok := splitTrackSpec(args[i]); ok {
 				id, err := strconv.ParseUint(trackID, 10, 64)
 				if err != nil {

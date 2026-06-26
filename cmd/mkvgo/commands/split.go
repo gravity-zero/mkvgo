@@ -26,6 +26,8 @@ func CmdSplit(args []string) {
 		case "-range":
 			i++
 			ranges = ParseTimeRanges(args[i])
+		default:
+			rejectFlagArg(args[i])
 		}
 	}
 	if outDir == "" {
@@ -61,6 +63,7 @@ func CmdJoin(args []string) {
 			i++
 			outPath = args[i]
 		} else {
+			rejectFlagArg(args[i])
 			sources = append(sources, args[i])
 		}
 	}

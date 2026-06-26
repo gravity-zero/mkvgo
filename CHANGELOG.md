@@ -128,6 +128,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Hardened
 
+- **CLI rejects unknown flags.** A mistyped or unsupported `-`/`--` option (e.g.
+  `to-mp4 --fastart`) was silently treated as a positional argument — a confusing
+  `no such file` for some commands, silently ignored for others (`split`). Every
+  command now fails fast with `unknown flag: …`. Flag values that contain a dash
+  (e.g. `split -range 0-2000,2000-0`) are unaffected.
 - **Context cancellation in inner parse loops.** `parseInfo`/`parseTracks`/
   `parseTrackEntry`/`parseTags` now honour a cancelled context, not only the
   top-level Segment walk, so a forged file with millions of sub-elements stops

@@ -28,6 +28,7 @@ func CmdToMP4(args []string) {
 		case "--mp3-container-delay", "-mp3-container-delay":
 			mp3delay = true
 		default:
+			rejectFlagArg(a)
 			rest = append(rest, a)
 		}
 	}
@@ -71,6 +72,7 @@ func CmdFromMP4(args []string) {
 		case "--mp3-container-delay", "-mp3-container-delay":
 			mp3delay = true
 		default:
+			rejectFlagArg(a)
 			rest = append(rest, a)
 		}
 	}

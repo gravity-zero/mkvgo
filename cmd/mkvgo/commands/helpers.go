@@ -72,6 +72,15 @@ func Fatal(msg string) {
 	osExit(1)
 }
 
+// rejectFlagArg fails with a clear "unknown flag" error when a positional argument
+// looks like an option (starts with '-'), so a mistyped flag fails loudly instead of
+// being treated as a filename. A lone "-" (conventionally stdin) is allowed.
+func rejectFlagArg(a string) {
+	if len(a) > 1 && a[0] == '-' {
+		Fatal("unknown flag: " + a)
+	}
+}
+
 func RequireArgs(args []string, n int, usage string) {
 	if len(args) < n {
 		Fatal("usage: " + usage)
