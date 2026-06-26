@@ -144,10 +144,11 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}
 	// Re-signal the gapless priming (Matroska CodecDelay) as an MP4 edit list, so a
-	// decoder discards it and the delay survives the MKV->MP4 round-trip. Opus is
-	// excluded: its pre-skip lives in the OpusHead (carried into the MP4 dOps box),
-	// so an extra edit list would double-count it.
-	if t.mkv.CodecDelay > 0 && t.mkv.Codec != "opus" {
+	// decoder discards it and the delay survives the MKV->MP4 round-trip. ONLY AAC:
+	// it is the codec whose encoder delay is genuinely container-signalled. Opus
+	// keeps its pre-skip in the OpusHead (carried into the MP4 dOps), and AC-3/MP3/
+	// FLAC/DTS have no priming, so an edit list there would inject a spurious delay.
+	if t.mkv.CodecDelay > 0 && t.mkv.Codec == "aac" {
 		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, dur))
 	}
 	trakChildren = append(trakChildren, mdia)

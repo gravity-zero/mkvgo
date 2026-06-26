@@ -148,11 +148,13 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.Bitrate = &br
 		}
 		mt.DurationMs = t.durationMs
-		// Carry the edit-list priming as CodecDelay only for codecs whose delay is
-		// NOT already intrinsic to their config. Opus keeps its pre-skip in the
-		// OpusHead (codec-private, copied verbatim); a derived CodecDelay would
-		// double-count it and shift the decoded audio.
-		if t.codec != "opus" {
+		// Carry the edit-list priming as CodecDelay ONLY for AAC. AAC is the codec
+		// whose encoder delay is genuinely container-signalled (edit-list / iTunSMPB)
+		// and otherwise lost. Opus/Vorbis keep their pre-skip in the codec config
+		// (copied verbatim); AC-3/MP3/FLAC/DTS/PCM have no encoder priming, so any
+		// edit-list there is a duration-rounding artefact — applying it would inject
+		// a spurious delay. Whitelisting AAC avoids replaying this per delay-less codec.
+		if t.codec == "aac" {
 			mt.CodecDelay = t.codecDelayNs
 		}
 		tracks[i] = mt
