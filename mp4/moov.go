@@ -84,6 +84,24 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 }
 
 // buildTrak builds one trak box and returns it with the track's duration (ms).
+// hasContainerPriming reports whether mkvgo should carry a codec's encoder delay
+// across the MP4 <-> MKV round trip via Matroska CodecDelay / an MP4 edit list.
+//
+// The criterion is not "has a delay" but "is the delay both container-signalled
+// AND faithfully reproduced by the CodecDelay path":
+//   - AAC, MP3: their encoder/decoder delay lives in the MP4 edit list and is lost
+//     otherwise; ffmpeg trims it correctly from a derived edit list -> carry it.
+//   - Opus, Vorbis: pre-skip is intrinsic to the codec config (OpusHead / setup
+//     headers), copied verbatim -> a derived CodecDelay would double-count it.
+//   - AC-3: has a real 256-sample decoder delay the source trims, but ffmpeg PADS
+//     (not trims) a millisecond-quantised edit list for it, so carrying it does not
+//     reproduce the trim; a sample-exact edit list (MP4 media timescale == sample
+//     rate) is needed first. Excluded until then rather than injecting a bad delay.
+//   - FLAC/DTS/PCM: no encoder priming.
+func hasContainerPriming(codec string) bool {
+	return codec == "aac" || codec == "mp3"
+}
+
 // buildEdts writes an edit list that re-signals an audio track's gapless priming
 // (Matroska CodecDelay, in ns) as the MP4 encoder delay: one edit starting at
 // media_time = priming, so a decoder discards it. This is what carries the priming
@@ -144,11 +162,9 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}
 	// Re-signal the gapless priming (Matroska CodecDelay) as an MP4 edit list, so a
-	// decoder discards it and the delay survives the MKV->MP4 round-trip. ONLY AAC:
-	// it is the codec whose encoder delay is genuinely container-signalled. Opus
-	// keeps its pre-skip in the OpusHead (carried into the MP4 dOps), and AC-3/MP3/
-	// FLAC/DTS have no priming, so an edit list there would inject a spurious delay.
-	if t.mkv.CodecDelay > 0 && t.mkv.Codec == "aac" {
+	// decoder discards it and the delay survives the MKV->MP4 round-trip. Limited to
+	// the codecs the CodecDelay path reproduces correctly (see hasContainerPriming).
+	if t.mkv.CodecDelay > 0 && hasContainerPriming(t.mkv.Codec) {
 		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, dur))
 	}
 	trakChildren = append(trakChildren, mdia)

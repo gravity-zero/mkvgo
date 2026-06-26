@@ -10,15 +10,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - **Gapless audio priming across MP4 <-> MKV.** New `Track.CodecDelay` and
   `Track.SeekPreRoll` (Matroska `0x56AA`/`0x56BB`, nanoseconds) are read and
-  written. An MP4 audio track's encoder-delay/priming (its edit-list `media_time`,
-  for AAC/AC-3) is now carried as `CodecDelay` on the MKV side and re-emitted as an
-  MP4 edit list (`elst`) on the way back, so the gapless delay survives a
-  `RemuxFromMP4` / `RemuxToMP4` round trip instead of being dropped - which used to
-  shift the decoded audio by ~10-15 ms. This is applied to **AAC only**: it is the
-  one codec whose encoder delay is genuinely container-signalled and otherwise
-  lost. Opus/Vorbis keep their pre-skip in the codec config (copied verbatim), and
-  AC-3/MP3/FLAC/DTS have no encoder priming, so deriving a CodecDelay for them
-  would inject a spurious delay. Preserved to the MP4 writer's millisecond timescale.
+  written. An audio track's container-signalled encoder delay (the MP4 edit-list
+  `media_time`) is now carried as `CodecDelay` on the MKV side and re-emitted as an
+  MP4 edit list (`elst`) on the way back, so the delay survives a `RemuxFromMP4` /
+  `RemuxToMP4` round trip instead of being dropped - which used to shift the decoded
+  audio by ~10-15 ms. Applied to **AAC and MP3**, whose delay is container-signalled
+  and faithfully reproduced through the edit list. Opus/Vorbis keep their pre-skip
+  in the codec config (copied verbatim), so deriving a CodecDelay would double-count
+  it; AC-3's sub-frame decoder-delay trim is not reproduced by a millisecond-
+  quantised edit list (a future sample-exact edit list is needed) and FLAC/DTS/PCM
+  have no priming - all excluded. Preserved to the MP4 writer's millisecond timescale.
 - **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg writes per track
   (bits per second, what ffprobe reports as `bit_rate`) is now surfaced as the
   typed `Track.Bitrate`, keyed by the track UID. Full read only (the metadata path

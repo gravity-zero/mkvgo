@@ -59,12 +59,11 @@ func TestRoundTripCodecDelay(t *testing.T) {
 	}
 }
 
-// TestRoundTripOpusNoDerivedCodecDelay guards the rule that ONLY AAC gets a
-// container-derived CodecDelay. Opus (here) carries its pre-skip in the OpusHead,
-// and AC-3/MP3/FLAC/DTS have no priming at all — so the pipeline must NOT add a
-// delay via an MP4 edit list / Matroska CodecDelay for any of them. Opus is the
-// representative non-AAC codec; AC-3 took the same branch and had the same bug (a
-// ~6 ms duration-rounding edit list misread as priming).
+// TestRoundTripOpusNoDerivedCodecDelay guards the rule that only codecs whose delay
+// the CodecDelay path reproduces (AAC, MP3 — see hasContainerPriming) get a
+// container-derived delay. Opus carries its pre-skip in the OpusHead, so it must NOT
+// acquire a second delay via an MP4 edit list / Matroska CodecDelay — doing so
+// double-counts the pre-skip and shifts the decoded audio.
 func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
 	opusHead := makeOpusHead(2, 312, 48000, 0, 0, nil) // pre-skip 312 samples, in the OpusHead
 	tracks := []mkv.Track{
