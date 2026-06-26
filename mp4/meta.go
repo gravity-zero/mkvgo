@@ -94,6 +94,12 @@ func containerFromMovie(mv *movie) *mkv.Container {
 	if durMs == 0 {
 		durMs = mv.durationMs
 	}
+	// The Nero chpl box carries no end times; parseChpl closes each chapter at the
+	// next one's start and leaves the last open. Close the last at the movie end so
+	// an explicit final ChapterTimeEnd survives the round trip instead of reading 0.
+	if n := len(mv.chapters); n > 0 && mv.chapters[n-1].EndMs == 0 && durMs > mv.chapters[n-1].StartMs {
+		mv.chapters[n-1].EndMs = durMs
+	}
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{
 			TimecodeScale: scale,

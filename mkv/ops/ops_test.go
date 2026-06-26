@@ -538,6 +538,52 @@ func TestSplit_Success(t *testing.T) {
 	}
 }
 
+func TestSplit_DropsCodecDelayOnLaterSegments(t *testing.T) {
+	dir := t.TempDir()
+	at := audioTrack(2)
+	at.CodecDelay = 23_000_000 // ~1024-sample encoder priming
+	tracks := []mkv.Track{videoTrack(1), at}
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v0")},
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Data: []byte("a0")},
+		{TrackNumber: 1, Timecode: 100, Keyframe: true, Data: []byte("v1")},
+		{TrackNumber: 2, Timecode: 100, Keyframe: true, Data: []byte("a1")},
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", tracks, blocks, 200)
+
+	files, err := Split(context.Background(), mkv.SplitOptions{
+		SourcePath: src, OutputDir: filepath.Join(dir, "parts"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 100}, {StartMs: 100, EndMs: 200}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first segment starts at the original priming and keeps CodecDelay; a later
+	// segment begins on real audio, so it must drop it — else a decoder/remux trims
+	// one frame of real audio at the seam.
+	if d := audioCodecDelay(t, files[0]); d == 0 {
+		t.Error("first segment should keep CodecDelay")
+	}
+	if d := audioCodecDelay(t, files[1]); d != 0 {
+		t.Errorf("later segment must drop CodecDelay, got %d ns", d)
+	}
+}
+
+func audioCodecDelay(t *testing.T, path string) int64 {
+	t.Helper()
+	c, err := reader.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range c.Tracks {
+		if tr.Type == mkv.AudioTrack {
+			return tr.CodecDelay
+		}
+	}
+	t.Fatal("no audio track")
+	return 0
+}
+
 func TestSplit_InvalidSource(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()

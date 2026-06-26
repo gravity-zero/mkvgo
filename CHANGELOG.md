@@ -54,6 +54,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Split no longer trims a frame of real audio at the seam.** Every output segment
+  inherited the source's `CodecDelay` (encoder priming), but only the first segment
+  actually starts with that priming — a later segment begins on real audio. A
+  decoder or `to-mp4` then trimmed `CodecDelay` worth of real samples (one AAC frame,
+  ~23 ms) at each cut. Later segments now drop `CodecDelay`, so the audio across a
+  split is sample-accurate (matching ffmpeg's segment muxer; the unavoidable decoder
+  warm-up at the boundary remains, as it does for any tool).
+- **Last chapter's end time preserved across MP4.** The Nero `chpl` box carries only
+  start times, so `from-mp4` closed each chapter at the next one's start and left the
+  last open (read back as `0`). The last chapter now closes at the movie end, so an
+  explicit final `ChapterTimeEnd` survives the round trip.
 - **Container title and track name now map to MP4.** `to-mp4` carried a track's
   language but dropped the container title and per-track name. Both are now written
   where the tooling reads them: the title as `moov/udta/meta/ilst/©nam` (ffprobe's

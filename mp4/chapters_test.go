@@ -142,6 +142,39 @@ func TestRoundTripChapters(t *testing.T) {
 	}
 }
 
+func TestRoundTripLastChapterEnd(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1}},
+		{track: 1, pts: 5000, key: true, data: []byte{2}},
+	}
+	chapters := []mkv.Chapter{
+		{StartMs: 0, EndMs: 2000, Title: "Intro"},
+		{StartMs: 2000, EndMs: 5000, Title: "Corps"},
+	}
+	src := buildMKVWithChapters(t, tracks, blocks, chapters)
+
+	mp4Path := filepath.Join(t.TempDir(), "mid.mp4")
+	if err := RemuxToMP4(context.Background(), src, mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	outMKV := filepath.Join(t.TempDir(), "out.mkv")
+	if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := readMKV(t, outMKV)
+	if len(c.Chapters) == 0 {
+		t.Fatal("no chapters")
+	}
+	// The Nero chpl box has no end times; the last chapter must close at the movie
+	// end, not collapse to 0 (the bug).
+	if last := c.Chapters[len(c.Chapters)-1]; last.EndMs < 4500 {
+		t.Errorf("last chapter end = %d, want ~5000 (movie end)", last.EndMs)
+	}
+}
+
 func TestChapterTrackForApple(t *testing.T) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},

@@ -89,7 +89,19 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-	if err := mw.WriteMetadata(c, c.Tracks, durationMs); err != nil {
+	// Only the first segment starts with the original encoder priming. A later
+	// segment begins on real audio, so its CodecDelay (which a decoder/remux uses to
+	// trim the priming) must be dropped — otherwise one frame of real audio is
+	// trimmed at the segment start (the -1 AAC frame seen at a split seam).
+	tracks := c.Tracks
+	if r.StartMs > 0 {
+		tracks = make([]mkv.Track, len(c.Tracks))
+		copy(tracks, c.Tracks)
+		for i := range tracks {
+			tracks[i].CodecDelay = 0
+		}
+	}
+	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
