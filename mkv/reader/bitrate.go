@@ -11,8 +11,9 @@ import (
 // promoteTrackBitrate fills a track's Bitrate from the Matroska "BPS" tag (bits
 // per second) that ffmpeg writes per track, matching ffprobe's per-stream
 // bit_rate. The tag targets the track by its UID; a missing or non-numeric value
-// is ignored, and a Bitrate already set from another source is kept. Only the full
-// Read reaches this — the metadata path stops before Tags.
+// is ignored, and a Bitrate already set from another source is kept. The full Read
+// always reaches this; the metadata path does so only under WithBitrate, which
+// follows the head SeekHead to the Tags element (staying nil otherwise).
 func promoteTrackBitrate(c *mkv.Container) {
 	for _, tag := range c.Tags {
 		if tag.TargetID == 0 {

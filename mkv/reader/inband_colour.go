@@ -14,6 +14,18 @@ type readOpts struct {
 	inBandColour     bool
 	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
 	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
+	bitrate          bool // follow the SeekHead to Tags for per-track BPS → Track.Bitrate
+}
+
+// WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (bits per
+// second, what ffprobe reports as the per-stream bit_rate) on the metadata-only
+// path. The default OpenMeta/ReadMeta stops before Tags, so Track.Bitrate is nil
+// for Matroska; this option follows the head SeekHead straight to the Tags element
+// (one seek, no Cluster scan — ffmpeg references Tags from the SeekHead near the
+// head) and reads only it. The raw Tags stay nil, exactly the metadata contract; a
+// full Read sets Bitrate regardless. No effect on MP4 (already filled from btrt/esds).
+func WithBitrate() ReadOption {
+	return func(o *readOpts) { o.bitrate = true }
 }
 
 // WithKeyframeIndex builds a COMPLETE video keyframe index for a Matroska that

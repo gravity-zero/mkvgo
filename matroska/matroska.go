@@ -129,6 +129,12 @@ func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes
 // index. Files with Cues are never scanned. See reader.WithKeyframeIndex.
 func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
 
+// WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (ffprobe's
+// per-stream bit_rate) on the metadata-only path, which otherwise leaves it nil for
+// Matroska. It follows the head SeekHead straight to the Tags element (one seek, no
+// Cluster scan); the raw Tags stay nil. No effect on MP4. See reader.WithBitrate.
+func WithBitrate() ReadOption { return reader.WithBitrate() }
+
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }
