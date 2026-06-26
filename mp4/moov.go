@@ -223,7 +223,14 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if t.mkv.LanguageBCP47 != "" {
 		mdiaChildren = append(mdiaChildren, buildElng(t.mkv.LanguageBCP47))
 	}
-	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, handlerName(t.spec.handler)), minf)
+	// The hdlr name is the human-readable track description QuickTime/ffprobe surface
+	// (ffprobe's handler_name); carry the Matroska track Name there so it is visible,
+	// falling back to the generic handler name.
+	hName := handlerName(t.spec.handler)
+	if t.mkv.Name != "" {
+		hName = t.mkv.Name
+	}
+	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, hName), minf)
 	mdia := container("mdia", mdiaChildren...)
 
 	trakChildren := [][]byte{buildTkhd(t, durMovie)}

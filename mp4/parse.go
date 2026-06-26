@@ -143,6 +143,18 @@ func iterBoxes(buf []byte) ([]memBox, error) {
 	return out, nil
 }
 
+// genericHandlerName reports whether an hdlr name is a generic handler description
+// (the default muxers write) rather than a meaningful track name, so it is not
+// imported as Track.Name. Most muxers' defaults contain "Handler".
+func genericHandlerName(s string) bool {
+	switch s {
+	case "", "SoundHandler", "VideoHandler", "SubtitleHandler", "DataHandler",
+		"Core Media Audio", "Core Media Video", "Core Media Text":
+		return true
+	}
+	return strings.Contains(s, "Handler")
+}
+
 func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 	for _, b := range boxes {
 		if b.typ == typ {
@@ -1002,6 +1014,13 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		return tr, nil, errf("hdlr too short")
 	}
 	handler := string(hdlr.payload[8:12])
+	// Fallback track name: when no udta/name box was present, a non-generic hdlr name
+	// (the field ffprobe surfaces as handler_name) is the track's human-readable name.
+	if tr.name == "" && len(hdlr.payload) > 24 {
+		if hn := string(bytes.TrimRight(hdlr.payload[24:], "\x00")); !genericHandlerName(hn) {
+			tr.name = hn
+		}
+	}
 	switch handler {
 	case "vide":
 		tr.trackType = mkv.VideoTrack
