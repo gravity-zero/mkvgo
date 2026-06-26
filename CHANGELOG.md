@@ -80,14 +80,17 @@ All notable changes to mkvgo are documented here. The format is based on
   start times, so `from-mp4` closed each chapter at the next one's start and left the
   last open (read back as `0`). The last chapter now closes at the movie end, so an
   explicit final `ChapterTimeEnd` survives the round trip.
-- **Container title and track name now map to MP4.** `to-mp4` carried a track's
-  language but dropped the container title and per-track name. Both are now written
-  where the tooling reads them: the title as `moov/udta/meta/ilst/©nam` (ffprobe's
-  format `title`) and the track name as the `hdlr` name (ffprobe's stream
+- **Container title, global tags and track name now map to MP4.** `to-mp4` carried a
+  track's language but dropped the container title, the other global tags and the
+  per-track name. All are now written where the tooling reads them: the title as
+  `moov/udta/meta/ilst/©nam` (ffprobe's format `title`); the other global tags as
+  their iTunes atoms (`ARTIST`→`©ART`, `ALBUM`→`©alb`, `DATE_RELEASED`→`©day`,
+  `GENRE`→`©gen`, `COMMENT`→`©cmt`, `COMPOSER`→`©wrt`, `DESCRIPTION`→`desc`,
+  `ENCODER`→`©too`); and the track name as the `hdlr` name (ffprobe's stream
   `handler_name`, the only per-track string MP4 exposes — MP4 has no readable stream
-  `title`), plus the QuickTime `trak/udta/name` box ffmpeg writes. `from-mp4` reads
-  both back into `Info.Title` / `Track.Name`, so they survive a round trip (and an
-  MP4-in/MP4-out edit) instead of being lost at the MP4 boundary.
+  `title`) plus the QuickTime `trak/udta/name` box ffmpeg writes. `from-mp4` reads
+  them all back into `Info.Title` / `Tags` / `Track.Name`, so they survive a round
+  trip (and an MP4-in/MP4-out edit) instead of being lost at the MP4 boundary.
 - **MP4 sample-table complexity DoS.** A constant-size `stsz` (and the keyframe
   index's frame count) was bounded only by the 134M `maxSamples` cap, so a tiny
   box could declare a huge sample count and force a multi-second, multi-GB

@@ -147,6 +147,34 @@ func TestRoundTripTitleAndTrackName(t *testing.T) {
 	}
 }
 
+// TestBuildMovieMetaTags checks the movie metadata box carries the title and the
+// mapped global tags (ARTIST -> ©ART, ALBUM -> ©alb, ...) and skips unmapped ones.
+func TestBuildMovieMetaTags(t *testing.T) {
+	meta := buildMovieMeta("Mon Titre", []mkv.SimpleTag{
+		{Name: "ARTIST", Value: "Studio"},
+		{Name: "ALBUM", Value: "Coll"},
+		{Name: "WEIRD_TAG", Value: "ZZUNMAPPEDZZ"},
+		{Name: "ARTIST", Value: "Dup"}, // duplicate name → first wins
+	})
+	if meta == nil {
+		t.Fatal("expected a meta box")
+	}
+	for _, want := range []string{"\xa9nam", "Mon Titre", "\xa9ART", "Studio", "\xa9alb", "Coll"} {
+		if !bytes.Contains(meta, []byte(want)) {
+			t.Errorf("meta box missing %q", want)
+		}
+	}
+	if bytes.Contains(meta, []byte("ZZUNMAPPEDZZ")) {
+		t.Error("unmapped tag value should not be written")
+	}
+	if bytes.Contains(meta, []byte("Dup")) {
+		t.Error("duplicate atom should keep the first value")
+	}
+	if buildMovieMeta("", nil) != nil {
+		t.Error("no title and no tags should yield no meta box")
+	}
+}
+
 func trackName(c *mkv.Container) string {
 	if len(c.Tracks) == 0 {
 		return ""

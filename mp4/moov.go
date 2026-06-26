@@ -39,7 +39,7 @@ func dedupeBrands(in []string) []string {
 // buildMoov assembles the complete moov box. Tracks with no samples are skipped.
 // mdatBase is the absolute file offset of the mdat payload (added to the stored
 // relative chunk offsets); co64 selects 64-bit chunk offsets.
-func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, chapters []mkv.Chapter) []byte {
+func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, tags []mkv.SimpleTag, chapters []mkv.Chapter) []byte {
 	var (
 		traks    [][]byte
 		movieDur uint32
@@ -64,7 +64,7 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, chap
 	// One moov-level udta carrying the movie title (iTunes meta/ilst, what ffmpeg
 	// writes and ffprobe reads as the format "title") and the chapter list.
 	var udtaKids [][]byte
-	if meta := buildMetaTitle(title); meta != nil {
+	if meta := buildMovieMeta(title, tags); meta != nil {
 		udtaKids = append(udtaKids, meta)
 	}
 	if chpl := buildChplBox(chapters); chpl != nil {
@@ -76,18 +76,54 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, chap
 	return container("moov", children...)
 }
 
-// buildMetaTitle builds the iTunes-style metadata box carrying the movie title as a
-// meta/ilst/©nam atom — exactly what ffmpeg writes and ffprobe reports as the format
-// "title" tag (and what from-mp4 reads back into Info.Title). Returns nil for an
-// empty title. The caller places it inside the moov udta.
-func buildMetaTitle(title string) []byte {
-	if title == "" {
+// mp4MetaAtoms maps mkvgo/Matroska global tag names to the iTunes ilst atom that
+// carries them in MP4 — the inverse of parse.go's metaAtomNames. TITLE is omitted:
+// the movie title is written as ©nam from Info.Title (see buildMovieMeta).
+var mp4MetaAtoms = map[string]string{
+	"ARTIST":        "\xa9ART",
+	"ALBUM":         "\xa9alb",
+	"DATE_RELEASED": "\xa9day",
+	"GENRE":         "\xa9gen",
+	"COMMENT":       "\xa9cmt",
+	"ENCODER":       "\xa9too",
+	"COMPOSER":      "\xa9wrt",
+	"DESCRIPTION":   "desc",
+}
+
+// buildMovieMeta builds the iTunes-style metadata box carrying the movie title
+// (©nam, what ffprobe reports as the format "title") and the other global tags as
+// ilst atoms (ARTIST→©ART, ALBUM→©alb, …), exactly as ffmpeg writes them and as
+// from-mp4 reads them back. Returns nil when there is nothing to write.
+func buildMovieMeta(title string, tags []mkv.SimpleTag) []byte {
+	type atom struct{ typ, val string }
+	var atoms []atom
+	seen := map[string]bool{}
+	add := func(typ, val string) {
+		if val == "" || seen[typ] {
+			return
+		}
+		seen[typ] = true
+		atoms = append(atoms, atom{typ, val})
+	}
+	add("\xa9nam", title)
+	for _, tg := range tags {
+		if a, ok := mp4MetaAtoms[tg.Name]; ok {
+			add(a, tg.Value)
+		}
+	}
+	if len(atoms) == 0 {
 		return nil
 	}
-	data := fullBox("data", 0, 1, func(w *bw) { // flags = 1 → UTF-8 text
-		w.u32(0) // locale
-		w.bytes([]byte(title))
-	})
+	ilstChildren := make([][]byte, len(atoms))
+	for i, a := range atoms {
+		val := a.val
+		data := fullBox("data", 0, 1, func(w *bw) { // flags = 1 → UTF-8 text
+			w.u32(0) // locale
+			w.bytes([]byte(val))
+		})
+		ilstChildren[i] = container(a.typ, data)
+	}
+	ilst := container("ilst", ilstChildren...)
 	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {
 		w.u32(0)         // pre_defined
 		w.fourcc("mdir") // handler_type: metadata
@@ -95,7 +131,6 @@ func buildMetaTitle(title string) []byte {
 		w.zeros(8)
 		w.u8(0) // null name
 	})
-	ilst := container("ilst", container("\xa9nam", data))
 	return fullBox("meta", 0, 0, func(w *bw) {
 		w.bytes(hdlr)
 		w.bytes(ilst)
