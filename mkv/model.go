@@ -137,7 +137,7 @@ type Track struct {
 	FieldOrder       string  `json:"field_order,omitempty"`  // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
 	FrameCount       int64   `json:"frame_count,omitempty"`  // number of frames (ffprobe nb_frames), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
 	DurationMs       int64   `json:"duration_ms,omitempty"`  // per-track duration in ms (ffprobe per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
-	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt box / esds avgBitrate); nil when unknown
+	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt/esds avgBitrate = ffprobe bit_rate; or the Matroska BPS tag, which ffprobe shows as TAG:BPS); nil when unknown
 	// StereoMode is the 3D stereo arrangement (Matroska StereoMode, or the MP4 st3d
 	// box mapped to the same values); nil for ordinary 2D video. See StereoModeName.
 	StereoMode *uint16 `json:"stereo_mode,omitempty"`

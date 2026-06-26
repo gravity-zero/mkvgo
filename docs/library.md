@@ -243,7 +243,7 @@ c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithInBandColourFallback())
 c, _, _ := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{InBandColour: true})
 ```
 
-**Per-track bitrate (opt-in).** ffmpeg/mkvmerge write a per-track `BPS` tag (ffprobe's per-stream `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV (MP4 fills it from `btrt`/`esds` regardless). Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element — one seek, no Cluster scan, since the muxer references `Tags` from the head — and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
+**Per-track bitrate (opt-in).** ffmpeg/mkvmerge write a per-track `BPS` tag — the per-track bitrate ffprobe surfaces as `TAG:BPS` (ffprobe's own `bit_rate` field stays `N/A` for Matroska, so this gives *more* than ffprobe; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and *does* equal ffprobe's `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV. Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element — one seek, no Cluster scan, since the muxer references `Tags` from the head — and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
 
 ```go
 c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())

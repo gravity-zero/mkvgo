@@ -31,13 +31,14 @@ All notable changes to mkvgo are documented here. The format is based on
     precisely — notably AC-3, whose decoder delay it ignores from a millisecond-
     quantised edit list. Video/text/subtitle timing is unchanged.
 - **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg/mkvmerge write per
-  track (bits per second, what ffprobe reports as `bit_rate`) is now surfaced as the
-  typed `Track.Bitrate`, keyed by the track UID. A full `Read` fills it; the
-  metadata-only probe does too under the new `matroska.WithBitrate()` /
-  `reader.WithBitrate()` option, which follows the head `SeekHead` straight to the
-  `Tags` element (one seek, no Cluster scan — the muxer references `Tags` from the
-  head). Off by default, so the default probe stays minimal. MP4 fills it from
-  `btrt`/`esds` regardless.
+  track (bits per second) is now surfaced as the typed `Track.Bitrate`, keyed by the
+  track UID. This is the value ffprobe exposes as `TAG:BPS` — ffprobe leaves its own
+  per-stream `bit_rate` field `N/A` for Matroska, so this gives more than ffprobe
+  there; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and equals ffprobe's
+  `bit_rate`. A full `Read` fills it; the metadata-only probe does too under the new
+  `matroska.WithBitrate()` / `reader.WithBitrate()` option, which follows the head
+  `SeekHead` straight to the `Tags` element (one seek, no Cluster scan — the muxer
+  references `Tags` from the head). Off by default, so the default probe stays minimal.
 - **Extended disposition flags.** `Track.HearingImpaired`, `VisualImpaired`,
   `TextDescriptions`, `Original` and `Commentary` expose the Matroska
   FlagHearingImpaired/…/FlagCommentary elements — the ffprobe stream dispositions

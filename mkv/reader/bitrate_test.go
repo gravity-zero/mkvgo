@@ -9,7 +9,7 @@ import (
 )
 
 // TestPromoteBPSBitrate covers surfacing the Matroska "BPS" per-track tag as the
-// typed Track.Bitrate (matching ffprobe's bit_rate), keyed by the track UID.
+// typed Track.Bitrate (the value ffprobe shows as TAG:BPS), keyed by the track UID.
 func TestPromoteBPSBitrate(t *testing.T) {
 	track := trackEntry(
 		uintElem(mkv.IDTrackNumber, 1, 1),
