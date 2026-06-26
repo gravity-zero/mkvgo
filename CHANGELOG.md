@@ -54,6 +54,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A/V presentation offset preserved across MP4.** A per-track start offset (the
+  empty edit ffmpeg writes for an `-itsoffset`/sync correction — e.g. audio starting
+  476 ms after video) was read into the block timestamps but never re-emitted by
+  `to-mp4`: each track was rebased to 0, silently desyncing the audio. `to-mp4` now
+  writes the offset as a leading empty edit (`media_time -1`), so the A/V gap
+  survives the round trip. Coded data was always intact; only the timing was lost.
 - **Split no longer trims a frame of real audio at the seam.** Every output segment
   inherited the source's `CodecDelay` (encoder priming), but only the first segment
   actually starts with that priming — a later segment begins on real audio. A

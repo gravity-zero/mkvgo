@@ -162,11 +162,12 @@ func mediaTimescale(t *outTrack) uint32 {
 	return movieTimescale
 }
 
-// buildEdts writes an edit list that re-signals an audio track's gapless priming
-// (Matroska CodecDelay, in ns) as the MP4 encoder delay: one edit starting at
-// media_time = priming, so a decoder discards it. This is what carries the priming
-// back across an MKV->MP4 round-trip, the way ffmpeg writes it.
-func buildEdts(codecDelayNs int64, durMovieMs, mts uint32) []byte {
+// buildEdts writes a track's edit list. Up to two entries, the way ffmpeg writes
+// them: an optional leading empty edit (media_time -1) carrying a presentation
+// offset — the A/V sync gap, since the sample table is rebased to 0 — followed by
+// the media edit, whose media_time re-signals an audio track's gapless priming
+// (Matroska CodecDelay) as the MP4 encoder delay so a decoder discards it.
+func buildEdts(codecDelayNs, offsetMovieMs int64, durMovieMs, mts uint32) []byte {
 	// media_time is in the media timescale (mts == sample rate for audio), so the
 	// trim is sample-exact; segment_duration is in the movie timescale (ms). Round to
 	// nearest so an N-sample priming comes back as exactly N samples, not N-1.
@@ -175,12 +176,23 @@ func buildEdts(codecDelayNs int64, durMovieMs, mts uint32) []byte {
 	if segDur < 0 {
 		segDur = 0
 	}
+	type entry struct {
+		segDur    uint32
+		mediaTime int32
+	}
+	var entries []entry
+	if offsetMovieMs > 0 {
+		entries = append(entries, entry{uint32(offsetMovieMs), -1}) // empty edit: the offset
+	}
+	entries = append(entries, entry{uint32(segDur), int32(mediaTime)}) // media edit
 	elst := fullBox("elst", 0, 0, func(w *bw) {
-		w.u32(1)                // entry_count
-		w.u32(uint32(segDur))   // segment_duration (movie timescale)
-		w.i32(int32(mediaTime)) // media_time (media timescale)
-		w.u16(1)                // media_rate integer (1.0)
-		w.u16(0)                // media_rate fraction
+		w.u32(uint32(len(entries)))
+		for _, e := range entries {
+			w.u32(e.segDur)    // segment_duration (movie timescale)
+			w.i32(e.mediaTime) // media_time (-1 = empty; else media timescale)
+			w.u16(1)           // media_rate integer (1.0)
+			w.u16(0)           // media_rate fraction
+		}
 	})
 	return container("edts", elst)
 }
@@ -204,6 +216,20 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if mts != movieTimescale {
 		durMovie = uint32(tim.total * int64(movieTimescale) / int64(mts))
 	}
+	// Presentation offset: the smallest sample PTS is where the track starts on the
+	// movie timeline (the A/V sync gap ffmpeg writes as an empty edit). The sample
+	// table is rebased to 0, so without re-emitting this the offset is lost and the
+	// tracks desync. The track's presentation span is the offset plus its media.
+	var offsetMs int64
+	if n := len(t.samples.samples); n > 0 {
+		offsetMs = t.samples.samples[0].pts
+		for _, s := range t.samples.samples {
+			if s.pts < offsetMs {
+				offsetMs = s.pts
+			}
+		}
+	}
+	presentDur := durMovie + uint32(offsetMs)
 
 	var mediaHeader []byte
 	switch {
@@ -233,7 +259,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, hName), minf)
 	mdia := container("mdia", mdiaChildren...)
 
-	trakChildren := [][]byte{buildTkhd(t, durMovie)}
+	trakChildren := [][]byte{buildTkhd(t, presentDur)}
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
@@ -250,14 +276,18 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if len(trakUdta) > 0 {
 		trakChildren = append(trakChildren, container("udta", trakUdta...))
 	}
-	// Re-signal the gapless priming (Matroska CodecDelay) as an MP4 edit list, so a
-	// decoder discards it and the delay survives the MKV->MP4 round-trip. Limited to
-	// the codecs the CodecDelay path reproduces correctly (see hasContainerPriming).
-	if t.mkv.CodecDelay > 0 && hasContainerPriming(t.mkv.Codec) {
-		trakChildren = append(trakChildren, buildEdts(t.mkv.CodecDelay, durMovie, mts))
+	// Emit an edit list for a presentation offset (A/V sync) and/or to re-signal the
+	// gapless priming (CodecDelay) so a decoder discards it across the round trip.
+	// Priming is limited to codecs the CodecDelay path reproduces (hasContainerPriming).
+	codecDelay := int64(0)
+	if hasContainerPriming(t.mkv.Codec) {
+		codecDelay = t.mkv.CodecDelay
+	}
+	if offsetMs > 0 || codecDelay > 0 {
+		trakChildren = append(trakChildren, buildEdts(codecDelay, offsetMs, durMovie, mts))
 	}
 	trakChildren = append(trakChildren, mdia)
-	return container("trak", trakChildren...), durMovie
+	return container("trak", trakChildren...), presentDur
 }
 
 // buildElng builds an Extended Language Tag box (ISO/IEC 14496-12) carrying a

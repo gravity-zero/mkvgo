@@ -12,9 +12,10 @@ import (
 )
 
 // audioEditList walks an MP4's boxes and returns the first audio (soun) track's
-// mdhd timescale and edit-list media_time (0 if no edit list). It is how the tests
-// assert the sample-exact priming layout that lets ffmpeg trim each codec's delay.
-func audioEditList(t *testing.T, data []byte) (timescale uint32, mediaTime int64) {
+// mdhd timescale, edit-list media_time and empty-edit offset (all 0 if no edit
+// list). It is how the tests assert the priming layout (media_time) and the A/V
+// presentation offset (the empty edit).
+func audioEditList(t *testing.T, data []byte) (timescale uint32, mediaTime, offset int64) {
 	t.Helper()
 	top, err := iterBoxes(data)
 	if err != nil {
@@ -46,13 +47,13 @@ func audioEditList(t *testing.T, data []byte) (timescale uint32, mediaTime int64
 		if edts, ok := findMemBox(trakBoxes, "edts"); ok {
 			eb, _ := iterBoxes(edts.payload)
 			if elst, ok := findMemBox(eb, "elst"); ok {
-				mediaTime, _, _ = parseElst(elst.payload)
+				mediaTime, offset, _ = parseElst(elst.payload)
 			}
 		}
-		return timescale, mediaTime
+		return timescale, mediaTime, offset
 	}
 	t.Fatal("no audio track")
-	return 0, 0
+	return 0, 0, 0
 }
 
 func u16p(v uint16) *uint16 { return &v }
@@ -179,12 +180,44 @@ func TestEditListSampleExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts, mediaTime := audioEditList(t, data)
+	ts, mediaTime, _ := audioEditList(t, data)
 	if ts != rate {
 		t.Errorf("audio mdhd timescale = %d, want %d (sample rate)", ts, rate)
 	}
 	if mediaTime != primingSamples {
 		t.Errorf("edit-list media_time = %d, want %d samples (sample-exact)", mediaTime, primingSamples)
+	}
+}
+
+// TestRoundTripAVOffset checks that a per-track presentation offset (the A/V sync
+// gap ffmpeg writes as an empty edit) survives MKV -> MP4: the audio track starts
+// 476 ms after the video, and that gap must be re-emitted as an empty edit, not
+// rebased to 0 (which silently desyncs the audio).
+func TestRoundTripAVOffset(t *testing.T) {
+	const offsetMs = 476
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32p(64), Height: u32p(64), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC,
+			Channels: u8p(2), SampleRate: f64p(48000)},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1}},
+		{track: 1, pts: 40, key: false, data: []byte{2}},
+		{track: 2, pts: offsetMs, key: true, data: []byte{3, 4}},
+		{track: 2, pts: offsetMs + 21, key: true, data: []byte{5, 6}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	data, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, offset := audioEditList(t, data); offset != offsetMs {
+		t.Errorf("audio empty-edit offset = %d ms, want %d (A/V sync lost)", offset, offsetMs)
 	}
 }
 
