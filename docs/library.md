@@ -150,7 +150,7 @@ Memory use scales with the sample count, not the file size: sample data is strea
 err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 ```
 
-Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points and chapters round-trip back to the Matroska `Colour` element and chapter atoms. Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points, chapters, the movie title (`udta/meta/ilst/©nam` → `Info.Title`) and per-track names (`udta/name` → `Track.Name`) round-trip back to Matroska — and back out to MP4 with `RemuxToMP4`. Audio decodes bit-identically across the round trip (the encoder/decoder priming is preserved). Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
 
 #### Subtitles
 

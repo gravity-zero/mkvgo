@@ -104,6 +104,55 @@ func TestRoundTripCodecDelay(t *testing.T) {
 	}
 }
 
+// TestRoundTripTitleAndTrackName checks that the container title and a per-track
+// name reach the MP4 (title -> moov/udta/meta/ilst/©nam, name -> trak/udta/name, the
+// way ffmpeg writes them) and survive the full MKV -> MP4 -> MKV round trip.
+func TestRoundTripTitleAndTrackName(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32p(64), Height: u32p(64), FrameRate: f64p(25), Name: "Piste Vidéo VF"},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{1}},
+		{track: 1, pts: 40, key: false, data: []byte{2}},
+	}
+	srcMKV := buildMKVTitled(t, "Mon Titre", tracks, blocks)
+
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	data, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("\xa9nam")) || !bytes.Contains(data, []byte("Mon Titre")) {
+		t.Error("MP4 is missing the movie title (moov/udta/meta/ilst/©nam)")
+	}
+	if !bytes.Contains(data, []byte("namePiste Vidéo VF")) {
+		t.Error("MP4 is missing the track name box (trak/udta/name)")
+	}
+
+	outMKV := filepath.Join(t.TempDir(), "back.mkv")
+	if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
+	c, _ := readMKV(t, outMKV)
+	if c.Info.Title != "Mon Titre" {
+		t.Errorf("Info.Title = %q, want %q", c.Info.Title, "Mon Titre")
+	}
+	if len(c.Tracks) == 0 || c.Tracks[0].Name != "Piste Vidéo VF" {
+		t.Errorf("track name lost on round trip: %q", trackName(c))
+	}
+}
+
+func trackName(c *mkv.Container) string {
+	if len(c.Tracks) == 0 {
+		return ""
+	}
+	return c.Tracks[0].Name
+}
+
 // TestEditListSampleExact locks in the layout that makes the priming round trip
 // sample-exact for every audio codec: audio tracks are written on a sample-rate
 // media timescale, and the CodecDelay becomes an edit list whose media_time is the

@@ -39,6 +39,50 @@ func buildMKV(t testing.TB, tracks []mkv.Track, blocks []genBlock) string {
 	return buildMKVWithChapters(t, tracks, blocks, nil)
 }
 
+// buildMKVTitled is buildMKV with a container title (Info.Title), for exercising the
+// title metadata mapping.
+func buildMKVTitled(t testing.TB, title string, tracks []mkv.Track, blocks []genBlock) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "in.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const scale = 1_000_000
+	var blks []mkv.Block
+	var durationMs int64
+	for _, gb := range blocks {
+		blks = append(blks, mkv.Block{TrackNumber: gb.track, Timecode: gb.pts, Keyframe: gb.key, Data: gb.data})
+		if gb.pts > durationMs {
+			durationMs = gb.pts
+		}
+	}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, Title: title, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}}
+	m := writer.NewMKVWriter(f)
+	if err := m.WriteStart(); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(c, tracks, durationMs); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if len(blks) > 0 {
+		if err := m.WriteClusterWithCues(0, scale, blks); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func buildMKVWithChapters(t testing.TB, tracks []mkv.Track, blocks []genBlock, chapters []mkv.Chapter) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "in.mkv")

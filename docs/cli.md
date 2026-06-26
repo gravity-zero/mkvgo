@@ -466,7 +466,7 @@ mkvgo to-mp4 --webvtt-native web.mkv web.mp4            # WebVTT → lossless wv
 
 ### from-mp4
 
-Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour and chapters round-trip back to Matroska.
+Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour, chapters, the movie title, per-track names and language round-trip back to Matroska (and back out to MP4 with `to-mp4`). Audio decodes bit-identically across the round trip.
 
 ```
 mkvgo from-mp4 <input.mp4> <output.mkv>

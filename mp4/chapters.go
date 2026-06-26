@@ -14,14 +14,14 @@ import (
 // maxChapters is the chpl count field width (one byte).
 const maxChapters = 255
 
-// buildChapterUdta returns a udta box carrying the chapters as a chpl box, or
-// nil when there are no chapters.
-func buildChapterUdta(chapters []mkv.Chapter) []byte {
+// buildChplBox returns the chapter-list (chpl) box, or nil when there are no titled
+// top-level chapters. The caller places it in the moov udta (shared with the title).
+func buildChplBox(chapters []mkv.Chapter) []byte {
 	chapters = flattenChapters(chapters)
 	if len(chapters) == 0 {
 		return nil
 	}
-	return container("udta", buildChpl(chapters))
+	return buildChpl(chapters)
 }
 
 // flattenChapters returns the top-level chapters with a title (sub-chapters and

@@ -39,7 +39,7 @@ func dedupeBrands(in []string) []string {
 // buildMoov assembles the complete moov box. Tracks with no samples are skipped.
 // mdatBase is the absolute file offset of the mdat payload (added to the stored
 // relative chunk offsets); co64 selects 64-bit chunk offsets.
-func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, chapters []mkv.Chapter) []byte {
+func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, chapters []mkv.Chapter) []byte {
 	var (
 		traks    [][]byte
 		movieDur uint32
@@ -61,10 +61,55 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, chapters []mkv.Cha
 	children := make([][]byte, 0, len(traks)+2)
 	children = append(children, buildMvhd(movieDur, maxID+1))
 	children = append(children, traks...)
-	if udta := buildChapterUdta(chapters); udta != nil {
-		children = append(children, udta)
+	// One moov-level udta carrying the movie title (iTunes meta/ilst, what ffmpeg
+	// writes and ffprobe reads as the format "title") and the chapter list.
+	var udtaKids [][]byte
+	if meta := buildMetaTitle(title); meta != nil {
+		udtaKids = append(udtaKids, meta)
+	}
+	if chpl := buildChplBox(chapters); chpl != nil {
+		udtaKids = append(udtaKids, chpl)
+	}
+	if len(udtaKids) > 0 {
+		children = append(children, container("udta", udtaKids...))
 	}
 	return container("moov", children...)
+}
+
+// buildMetaTitle builds the iTunes-style metadata box carrying the movie title as a
+// meta/ilst/©nam atom — exactly what ffmpeg writes and ffprobe reports as the format
+// "title" tag (and what from-mp4 reads back into Info.Title). Returns nil for an
+// empty title. The caller places it inside the moov udta.
+func buildMetaTitle(title string) []byte {
+	if title == "" {
+		return nil
+	}
+	data := fullBox("data", 0, 1, func(w *bw) { // flags = 1 → UTF-8 text
+		w.u32(0) // locale
+		w.bytes([]byte(title))
+	})
+	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {
+		w.u32(0)         // pre_defined
+		w.fourcc("mdir") // handler_type: metadata
+		w.fourcc("appl") // reserved (Apple)
+		w.zeros(8)
+		w.u8(0) // null name
+	})
+	ilst := container("ilst", container("\xa9nam", data))
+	return fullBox("meta", 0, 0, func(w *bw) {
+		w.bytes(hdlr)
+		w.bytes(ilst)
+	})
+}
+
+// buildTrackName builds the QuickTime udta/name box carrying a track's name (the
+// Matroska TrackEntry Name) — the form ffmpeg writes for a per-track title. The box
+// payload is the raw UTF-8 string. Returns nil for an empty name.
+func buildTrackName(name string) []byte {
+	if name == "" {
+		return nil
+	}
+	return boxf("name", func(w *bw) { w.bytes([]byte(name)) })
 }
 
 func buildMvhd(durationMs, nextTrackID uint32) []byte {
@@ -185,10 +230,18 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
-	// MP4 has no native forced flag; record it the way ffmpeg does — a track-level
-	// kind box with the DASH role scheme.
+	// One track-level udta: the track name (QuickTime name box, the way ffmpeg writes
+	// a per-track title) and — MP4 having no native forced flag — the forced marker as
+	// a kind box with the DASH role scheme, the way ffmpeg records it.
+	var trakUdta [][]byte
+	if nm := buildTrackName(t.mkv.Name); nm != nil {
+		trakUdta = append(trakUdta, nm)
+	}
 	if t.mkv.IsForced {
-		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
+		trakUdta = append(trakUdta, buildKind(dashRoleScheme, "forced-subtitle"))
+	}
+	if len(trakUdta) > 0 {
+		trakChildren = append(trakChildren, container("udta", trakUdta...))
 	}
 	// Re-signal the gapless priming (Matroska CodecDelay) as an MP4 edit list, so a
 	// decoder discards it and the delay survives the MKV->MP4 round-trip. Limited to

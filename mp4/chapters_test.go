@@ -94,13 +94,13 @@ func TestEmitChapterSamplesDurations(t *testing.T) {
 	}
 }
 
-func TestBuildChapterUdtaEmpty(t *testing.T) {
-	if buildChapterUdta(nil) != nil {
-		t.Error("no chapters → nil udta")
+func TestBuildChplBoxEmpty(t *testing.T) {
+	if buildChplBox(nil) != nil {
+		t.Error("no chapters → nil chpl")
 	}
 	// chapters without titles are skipped → nil.
-	if buildChapterUdta([]mkv.Chapter{{StartMs: 0}}) != nil {
-		t.Error("untitled chapters → nil udta")
+	if buildChplBox([]mkv.Chapter{{StartMs: 0}}) != nil {
+		t.Error("untitled chapters → nil chpl")
 	}
 }
 

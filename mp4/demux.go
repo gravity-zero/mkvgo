@@ -89,6 +89,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.LanguageBCP47 = t.languageBCP47
 			mt.LanguagePresent = true
 		}
+		mt.Name = t.name // QuickTime udta/name -> Matroska TrackEntry Name
 		if t.flagsKnown {
 			mt.IsDefault = t.enabled
 			mt.DefaultPresent = true

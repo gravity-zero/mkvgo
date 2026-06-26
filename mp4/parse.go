@@ -65,6 +65,7 @@ type inTrack struct {
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
 	languageBCP47 string // BCP-47 from an elng box; "" when absent
+	name          string // track name from the QuickTime udta/name box; "" when absent
 	languageKnown bool   // a usable language was read (mdhd or elng)
 	enabled       bool   // tkhd track_enabled flag (ffprobe's "default" disposition)
 	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
@@ -934,14 +935,18 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	if udta, ok := findMemBox(trakBoxes, "udta"); ok {
 		if ub, err := iterBoxes(udta.payload); err == nil {
 			for _, kb := range ub {
-				if kb.typ != "kind" {
-					continue
-				}
-				if scheme, value := parseKind(kb.payload); scheme == dashRoleScheme {
-					tr.forcedKnown = true
-					if strings.HasPrefix(value, "forced") {
-						tr.forced = true
+				switch kb.typ {
+				case "kind":
+					if scheme, value := parseKind(kb.payload); scheme == dashRoleScheme {
+						tr.forcedKnown = true
+						if strings.HasPrefix(value, "forced") {
+							tr.forced = true
+						}
 					}
+				case "name":
+					// QuickTime track-name box (the way ffmpeg writes a per-track
+					// title): the payload is the raw UTF-8 name. -> Matroska Name.
+					tr.name = string(bytes.TrimRight(kb.payload, "\x00"))
 				}
 			}
 		}

@@ -54,6 +54,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Container title and track name now map to MP4.** `to-mp4` carried a track's
+  language but dropped the container title and per-track name. Both are now written
+  the way ffmpeg does — the title as `moov/udta/meta/ilst/©nam` (ffprobe's format
+  `title`), the name as the QuickTime `trak/udta/name` box — and `from-mp4` reads
+  them back, so they survive a round trip (and an MP4-in/MP4-out edit) instead of
+  being lost at the MP4 boundary.
 - **MP4 sample-table complexity DoS.** A constant-size `stsz` (and the keyframe
   index's frame count) was bounded only by the 134M `maxSamples` cap, so a tiny
   box could declare a huge sample count and force a multi-second, multi-GB
