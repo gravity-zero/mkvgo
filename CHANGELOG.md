@@ -58,9 +58,11 @@ All notable changes to mkvgo are documented here. The format is based on
   inherited the source's `CodecDelay` (encoder priming), but only the first segment
   actually starts with that priming — a later segment begins on real audio. A
   decoder or `to-mp4` then trimmed `CodecDelay` worth of real samples (one AAC frame,
-  ~23 ms) at each cut. Later segments now drop `CodecDelay`, so the audio across a
-  split is sample-accurate (matching ffmpeg's segment muxer; the unavoidable decoder
-  warm-up at the boundary remains, as it does for any tool).
+  ~23 ms) at each cut. Later segments now drop `CodecDelay`, so a split is lossless:
+  no coded packet is dropped and the decoded sample count is exact. (Decoding a later
+  segment in isolation still differs from the source within the segment — AAC frames
+  share overlap-add context across the cut, so a clean boundary is impossible without
+  re-encoding; this is codec physics, not a loss. The coded stream is intact.)
 - **Last chapter's end time preserved across MP4.** The Nero `chpl` box carries only
   start times, so `from-mp4` closed each chapter at the next one's start and left the
   last open (read back as `0`). The last chapter now closes at the movie end, so an
