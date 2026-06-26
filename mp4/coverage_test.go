@@ -749,7 +749,7 @@ func TestBuildMKVTracksSubtitleField(t *testing.T) {
 			},
 		},
 	}
-	tracks := buildMKVTracks(mv)
+	tracks := buildMKVTracks(mv, false)
 	if len(tracks) != 1 {
 		t.Fatalf("tracks = %d, want 1", len(tracks))
 	}
@@ -993,7 +993,7 @@ func TestBuildMKVTracksOutputSampleRate(t *testing.T) {
 			outputSampleRate: 48000, // SBR-doubled rate
 		}},
 	}
-	tracks := buildMKVTracks(mv)
+	tracks := buildMKVTracks(mv, false)
 	if len(tracks) != 1 {
 		t.Fatalf("got %d tracks, want 1", len(tracks))
 	}

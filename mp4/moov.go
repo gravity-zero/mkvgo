@@ -282,7 +282,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	// gapless priming (CodecDelay) so a decoder discards it across the round trip.
 	// Priming is limited to codecs the CodecDelay path reproduces (hasContainerPriming).
 	codecDelay := int64(0)
-	if hasContainerPriming(t.mkv.Codec) {
+	if wantsEditList(t.mkv.Codec, t.mp3Delay) {
 		codecDelay = t.mkv.CodecDelay
 	}
 	if offsetMs > 0 || codecDelay > 0 {

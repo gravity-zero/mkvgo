@@ -58,6 +58,20 @@ type Options struct {
 	// hvcC — the MP4 counterpart of reader.WithInBandColourFallback. Off by
 	// default; only a track that needs it reads one bounded sample.
 	InBandColour bool
+	// MP3ContainerDelay carries an MP3 track's encoder delay through the container
+	// (the MP4 edit list <-> Matroska CodecDelay), like AAC. Off by default because
+	// MP3's delay is already in its in-band Xing/LAME header, which ffmpeg applies on
+	// decode; a derived edit list then over-trims and desyncs native MKV/WebM MP3.
+	// Opt in only to round-trip an MP3 that originated in an MP4 (rare) back to MP4.
+	// Both RemuxFromMP4 and RemuxToMP4 must enable it for a full round trip.
+	MP3ContainerDelay bool
+}
+
+// wantsEditList reports whether a codec's container delay should be carried as an
+// MP4 edit list / Matroska CodecDelay: always for hasContainerPriming codecs, and
+// for MP3 only under the MP3ContainerDelay opt-in.
+func wantsEditList(codec string, mp3Delay bool) bool {
+	return hasContainerPriming(codec) || (mp3Delay && codec == "A_MPEG/L3")
 }
 
 func optionsFrom(opts []Options) Options {

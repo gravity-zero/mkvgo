@@ -33,6 +33,7 @@ type outTrack struct {
 	mp4ID       uint32 // 1-based MP4 track_ID
 	sampleEntry []byte // pre-built stsd sample entry (validated up front)
 	frameDurMs  int64  // duration hint for the final sample (0 = unknown)
+	mp3Delay    bool   // Options.MP3ContainerDelay: carry an MP3 delay as an edit list
 
 	samples    trackSamples
 	pending    []byte // current chunk's sample bytes, not yet written to mdat
@@ -187,6 +188,7 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			spec:       spec,
 			mp4ID:      nextID,
 			frameDurMs: frameDurationMs(t),
+			mp3Delay:   o.MP3ContainerDelay,
 		}
 		// Codecs whose config comes from CodecPrivate are validated now (fail
 		// fast); those needing the first frame are built lazily during streaming.

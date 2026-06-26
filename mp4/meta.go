@@ -108,7 +108,7 @@ func containerFromMovie(mv *movie) *mkv.Container {
 			WritingApp:    "mkvgo",
 			Duration:      float64(durMs),
 		},
-		Tracks:     buildMKVTracks(mv),
+		Tracks:     buildMKVTracks(mv, false), // probe: MP3 container-delay opt-in is remux-only
 		Chapters:   mv.chapters,
 		DurationMs: durMs,
 		Keyframes:  videoKeyframesMs(mv),

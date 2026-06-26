@@ -54,7 +54,7 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	for _, d := range mv.dropped {
 		o.report(d) // cover art / non-media tracks the MKV output does not carry
 	}
-	tracks := buildMKVTracks(mv)
+	tracks := buildMKVTracks(mv, o.MP3ContainerDelay)
 
 	dst, err := fs.DoCreate(dstPath)
 	if err != nil {
@@ -70,7 +70,8 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 }
 
 // buildMKVTracks maps the parsed MP4 tracks to Matroska tracks (1-based IDs).
-func buildMKVTracks(mv *movie) []mkv.Track {
+// mp3Delay carries an MP3 edit-list delay into CodecDelay (opt-in, see wantsEditList).
+func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 	tracks := make([]mkv.Track, len(mv.tracks))
 	for i := range mv.tracks {
 		t := &mv.tracks[i]
@@ -149,7 +150,7 @@ func buildMKVTracks(mv *movie) []mkv.Track {
 			mt.Bitrate = &br
 		}
 		mt.DurationMs = t.durationMs
-		if hasContainerPriming(t.codec) {
+		if wantsEditList(t.codec, mp3Delay) {
 			mt.CodecDelay = t.codecDelayNs
 		}
 		tracks[i] = mt

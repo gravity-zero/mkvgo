@@ -13,7 +13,7 @@ import (
 // --flatten-subs (carry ASS/SSA as plain tx3g, losing styling), --webvtt-native
 // (carry WebVTT as lossless wvtt instead of tx3g; not read by ffmpeg).
 func CmdToMP4(args []string) {
-	var faststart, skip, flatten, wvtt bool
+	var faststart, skip, flatten, wvtt, mp3delay bool
 	var rest []string
 	for _, a := range args {
 		switch a {
@@ -25,12 +25,14 @@ func CmdToMP4(args []string) {
 			flatten = true
 		case "--webvtt-native", "-webvtt-native":
 			wvtt = true
+		case "--mp3-container-delay", "-mp3-container-delay":
+			mp3delay = true
 		default:
 			rest = append(rest, a)
 		}
 	}
 	if len(rest) < 2 {
-		Fatal("usage: mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] <input.mkv> <output.mp4>")
+		Fatal("usage: mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>")
 	}
 	src, dst := rest[0], rest[1]
 
@@ -47,6 +49,7 @@ func CmdToMP4(args []string) {
 		SkipUnsupported:   skip,
 		FlattenStyledSubs: flatten,
 		NativeWebVTT:      wvtt,
+		MP3ContainerDelay: mp3delay,
 		OnDrop: func(d mp4.DroppedTrack) {
 			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 		},
@@ -58,14 +61,25 @@ func CmdToMP4(args []string) {
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }
 
-// CmdFromMP4 remuxes an MP4 file to MKV.
+// CmdFromMP4 remuxes an MP4 file to MKV. --mp3-container-delay carries an MP3's
+// edit-list delay into Matroska CodecDelay (opt-in; see Options.MP3ContainerDelay).
 func CmdFromMP4(args []string) {
-	if len(args) < 2 {
-		Fatal("usage: mkvgo from-mp4 <input.mp4> <output.mkv>")
+	var mp3delay bool
+	var rest []string
+	for _, a := range args {
+		switch a {
+		case "--mp3-container-delay", "-mp3-container-delay":
+			mp3delay = true
+		default:
+			rest = append(rest, a)
+		}
 	}
-	src, dst := args[0], args[1]
+	if len(rest) < 2 {
+		Fatal("usage: mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>")
+	}
+	src, dst := rest[0], rest[1]
 
-	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{Progress: NewProgressBar()})
+	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{Progress: NewProgressBar(), MP3ContainerDelay: mp3delay})
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())

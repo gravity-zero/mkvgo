@@ -21,7 +21,10 @@ All notable changes to mkvgo are documented here. The format is based on
     Vorbis carry their delay intrinsically (Opus pre-skip in the OpusHead, MP3 in its
     in-band Xing/LAME header), which ffmpeg's decoder applies regardless of the
     container, so they are excluded — a derived edit list would over-trim them;
-    FLAC/DTS/PCM have no priming.
+    FLAC/DTS/PCM have no priming. (`Options.MP3ContainerDelay` /
+    `--mp3-container-delay` opts MP3 back into the edit-list path, to round-trip an
+    MP3 that originated in an MP4 — rare; it over-trims a native-MKV MP3, so it is off
+    by default.)
   - **Audio tracks are written on a sample-rate media timescale** (`mdhd`), as ffmpeg
     does, instead of the millisecond movie timescale. This makes the edit list's
     `media_time` sample-exact, which is required for ffmpeg to trim a codec's priming

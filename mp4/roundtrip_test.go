@@ -244,6 +244,27 @@ func TestMP3NoDerivedEditList(t *testing.T) {
 	}
 }
 
+// TestMP3ContainerDelayOptIn checks the opt-in flag carries an MP3 delay as an edit
+// list (for recovering a round trip of an MP3 that originated in an MP4).
+func TestMP3ContainerDelayOptIn(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.AudioTrack, Codec: "A_MPEG/L3",
+			Channels: u8p(2), SampleRate: f64p(44100), CodecDelay: 24_000_000},
+	}
+	blocks := []genBlock{
+		{track: 1, pts: 0, key: true, data: []byte{0xFF, 0xFB, 0x90, 0x00}},
+		{track: 1, pts: 26, key: true, data: []byte{0xFF, 0xFB, 0x90, 0x00}},
+	}
+	srcMKV := buildMKV(t, tracks, blocks)
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path, Options{MP3ContainerDelay: true}); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	if b, _ := os.ReadFile(mp4Path); !bytes.Contains(b, []byte("elst")) {
+		t.Error("with MP3ContainerDelay the MP4 should carry an MP3 edit list")
+	}
+}
+
 // TestRoundTripOpusNoDerivedCodecDelay guards the rule that only codecs whose delay
 // is container-signalled (AAC/AC-3/E-AC-3 — see hasContainerPriming) get a
 // container-derived delay. Opus carries its pre-skip in the OpusHead (and MP3 in its
