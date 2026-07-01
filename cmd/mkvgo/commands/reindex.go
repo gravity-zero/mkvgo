@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gravity-zero/mkvgo/mkv"
-	"github.com/gravity-zero/mkvgo/mkv/ops"
+	"github.com/gravity-zero/mkvgo/matroska"
 )
 
 func CmdReindex(args []string) {
@@ -15,7 +14,7 @@ func CmdReindex(args []string) {
 	src, dst := args[0], args[1]
 	GuardOverwrite(dst)
 
-	err := ops.Reindex(context.Background(), src, dst, mkv.Options{Progress: NewProgressBar()})
+	err := matroska.Reindex(context.Background(), src, dst, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())

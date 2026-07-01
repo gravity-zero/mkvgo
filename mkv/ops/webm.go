@@ -62,7 +62,7 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	// Group blocks into time-bounded clusters (~1s) rather than splitting on
 	// every keyframe: in multiplexed A/V every Opus frame is a "keyframe", so a
 	// keyframe-per-cluster policy would emit one tiny cluster per audio frame.
-	const clusterDurationMs = 1000
+	const clusterDurationMs = defaultClusterDurationMs
 	clusterStart := int64(-1)
 	for {
 		if ctx.Err() != nil {
