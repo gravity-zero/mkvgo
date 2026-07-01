@@ -367,10 +367,21 @@ func TestCmdValidate_OK(t *testing.T) {
 	}
 }
 
+// recordExit installs an exit hook that records the code instead of
+// terminating the test binary (validate/compare exit 1 on findings).
+func recordExit(t *testing.T) *int {
+	t.Helper()
+	code := -1
+	restore := commands.SetExit(func(c int) { code = c })
+	t.Cleanup(restore)
+	return &code
+}
+
 func TestCmdValidate_WithIssues(t *testing.T) {
 	// richMKV is metadata-only (no blocks, video track lacks CodecPrivate)
 	// → triggers at least "video without CodecPrivate" and "no blocks found".
 	path := richMKV(t)
+	exitCode := recordExit(t)
 	out := capture(t, func() { commands.CmdValidate(path) })
 	if strings.Contains(out, ": OK") {
 		t.Errorf("CmdValidate issues: should not contain ': OK'\noutput:\n%s", out)
@@ -378,10 +389,14 @@ func TestCmdValidate_WithIssues(t *testing.T) {
 	if !strings.Contains(out, "[warning]") {
 		t.Errorf("CmdValidate issues: expected '[warning]'\noutput:\n%s", out)
 	}
+	if *exitCode != 1 {
+		t.Errorf("CmdValidate with issues: exit code = %d, want 1 (scriptability)", *exitCode)
+	}
 }
 
 func TestCmdValidate_JSON(t *testing.T) {
 	path := richMKV(t)
+	recordExit(t)
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
 	out := capture(t, func() { commands.CmdValidate(path) })
@@ -417,12 +432,16 @@ func TestCmdCompare_Diff(t *testing.T) {
 	cB.Info.Title = "Different Title"
 	pathA := writeMKV(t, cA)
 	pathB := writeMKV(t, cB)
+	exitCode := recordExit(t)
 	out := capture(t, func() { commands.CmdCompare(pathA, pathB) })
 	if !strings.Contains(out, "info.title") {
 		t.Errorf("CmdCompare diff: expected 'info.title' in output\noutput:\n%s", out)
 	}
 	if strings.Contains(out, "identical metadata") {
 		t.Errorf("CmdCompare diff: should not contain 'identical metadata'\noutput:\n%s", out)
+	}
+	if *exitCode != 1 {
+		t.Errorf("CmdCompare with diffs: exit code = %d, want 1 (scriptability)", *exitCode)
 	}
 }
 
@@ -432,6 +451,7 @@ func TestCmdCompare_JSON(t *testing.T) {
 	cB.Info.Title = "Different Title"
 	pathA := writeMKV(t, cA)
 	pathB := writeMKV(t, cB)
+	recordExit(t)
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
 	out := capture(t, func() { commands.CmdCompare(pathA, pathB) })
