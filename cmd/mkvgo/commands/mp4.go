@@ -81,7 +81,13 @@ func CmdFromMP4(args []string) {
 	}
 	src, dst := rest[0], rest[1]
 
-	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{Progress: NewProgressBar(), MP3ContainerDelay: mp3delay})
+	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
+		Progress:          NewProgressBar(),
+		MP3ContainerDelay: mp3delay,
+		OnDrop: func(d mp4.DroppedTrack) {
+			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+		},
+	})
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
