@@ -13,6 +13,11 @@
 // and DTS (audio); the AC-3/E-AC-3 configuration boxes are derived from the
 // elementary bitstream, which Matroska carries no CodecPrivate for, and DTS
 // (incl. DTS-HD) is carried as mp4a/esds the way ffmpeg's mov muxer does it.
-// TrueHD has no portable MP4 mapping and is rejected. This package is
-// experimental and its API may change between minor versions.
+// TrueHD has no portable MP4 mapping and is rejected.
+//
+// QuickTime .mov files are read as well, including the raw-camera layout
+// (mdat before a trailing moov, wide preamble, brand "qt  ") and QuickTime
+// version 1/2 sound descriptions with a wave-wrapped esds.
+//
+// This package is experimental and its API may change between minor versions.
 package mp4

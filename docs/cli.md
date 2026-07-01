@@ -509,8 +509,12 @@ Remux an MP4 file to MKV. Reads H.264/HEVC/AV1, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FL
 mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>
 ```
 
+QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
+(`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).
+
 ```bash
 mkvgo from-mp4 video.mp4 video.mkv
+mkvgo from-mp4 iphone_clip.mov clip.mkv
 ```
 
 ### to-webm

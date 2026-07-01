@@ -251,7 +251,11 @@ func cicp(p *uint16) uint16 {
 }
 
 // audioSampleEntry assembles an AudioSampleEntry (ISO/IEC 14496-12 §12.2.3)
-// followed by its codec configuration box.
+// followed by its codec configuration box. A source track missing Channels or
+// SampleRate (spec-invalid, unseen in real muxer output) falls back to 2 ch /
+// 48000 Hz; without a real SampleRate the media timescale falls back to
+// milliseconds, so the sample-exact edit-list guarantee degrades to ms
+// precision for that track.
 func audioSampleEntry(typ string, t *mkv.Track, config []byte) []byte {
 	channels := uint16(2)
 	if t.Channels != nil && *t.Channels > 0 {
