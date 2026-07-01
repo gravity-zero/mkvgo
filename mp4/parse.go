@@ -1406,7 +1406,7 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
 	entry := entries[0]
 
 	const visualHdr = 78
-	const audioHdr = 28
+	audioHdr := audioExtOffset(entry.payload)
 
 	switch entry.typ {
 	case "avc1", "avc3", "dvav", "dva1":
@@ -1534,6 +1534,15 @@ func childConfig(entryPayload []byte, headerLen int, configType string) ([]byte,
 		return nil, err
 	}
 	cfg, ok := findMemBox(children, configType)
+	if !ok {
+		// QuickTime wraps an audio entry's config in a 'wave' extension
+		// (siDecompressionParam: frma + the config + a terminator atom).
+		if wave, wok := findMemBox(children, "wave"); wok {
+			if sub, serr := iterBoxes(wave.payload); serr == nil {
+				cfg, ok = findMemBox(sub, configType)
+			}
+		}
+	}
 	if !ok {
 		return nil, errf("sample entry missing %s configuration box", configType)
 	}
@@ -1789,12 +1798,44 @@ func extractOpus(tr *inTrack, payload []byte, headerLen int) error {
 	return nil
 }
 
+// audioExtOffset returns the offset of the first extension box inside an audio
+// sample entry payload. ISO and QuickTime version 0 entries have a 28-byte
+// fixed part; a QuickTime SoundDescription version 1 adds 16 bytes of
+// per-packet compression fields, and version 2 is a 64-byte struct with its
+// own float64 sample rate. The version field sits at payload[8:10] — reserved
+// (zero) in ISO files, so version 0 keeps the ISO layout.
+func audioExtOffset(payload []byte) int {
+	if len(payload) < 10 {
+		return 28
+	}
+	switch binary.BigEndian.Uint16(payload[8:10]) {
+	case 1:
+		return 44
+	case 2:
+		return 64
+	}
+	return 28
+}
+
 func parseAudioFields(tr *inTrack, payload []byte) {
+	ext := audioExtOffset(payload)
+	if ext == 64 {
+		// QuickTime SoundDescription v2: float64 sample rate at 32, 32-bit
+		// channel count at 40 (the v0 fields hold placeholder constants).
+		if len(payload) >= 64 {
+			tr.sampleRate = math.Float64frombits(binary.BigEndian.Uint64(payload[32:40]))
+			tr.channels = uint8(binary.BigEndian.Uint32(payload[40:44]))
+			parseBitrate(tr, payload, ext)
+		}
+		return
+	}
 	// AudioSampleEntry: reserved(8) channels(2) samplesize(2) pre(2) res(2) rate(4 fixed16.16)
 	if len(payload) >= 28 {
 		tr.channels = uint8(binary.BigEndian.Uint16(payload[16:18]))
 		tr.sampleRate = float64(binary.BigEndian.Uint32(payload[24:28]) >> 16)
-		parseBitrate(tr, payload, 28) // a btrt box may sit among the entry's children
+	}
+	if len(payload) >= ext {
+		parseBitrate(tr, payload, ext) // a btrt box may sit among the entry's children
 	}
 }
 

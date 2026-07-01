@@ -309,9 +309,6 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
   default Matroska `TimecodeScale` (1 ms); finer scales are quantised.
   `reindex` copies clusters verbatim and is exempt. MP4→MKV→MP4 audio
   round-trips are sample-exact except Opus/MP3 tail padding.
-- **QuickTime `.mov` with `moov` at the end of the file** (non-faststart, e.g.
-  straight from an iPhone) is not parsed; the reader fails with an explicit
-  error rather than misparse.
 - **Parser bounds** (anti-DoS, not configurable): 512 MB per EBML element,
   64 MB per block, 1 GiB of cumulative metadata, 256 MB per cluster on
   reindex. A legitimate file beyond these limits is rejected with an explicit

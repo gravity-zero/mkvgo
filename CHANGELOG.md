@@ -39,6 +39,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **QuickTime `.mov` support (non-faststart).** The MP4 reader now parses the
+  layout raw iPhone/camera QuickTime files use — `wide` + `mdat` first, `moov`
+  at the end — which previously failed with `box ... has invalid size`: the
+  audio SoundDescription version 1 (16 extra per-packet bytes before the
+  extension boxes) and version 2 (64-byte struct, float64 sample rate) are now
+  honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
+  `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
+  output verified decodable by ffmpeg.
 - **CLI overwrite guard.** Commands that write a new file refuse to overwrite an
   existing one unless the global `-f`/`--force` flag is passed. `edit-inplace`
   (which edits its input by design) is flagged as destructive in its help.
