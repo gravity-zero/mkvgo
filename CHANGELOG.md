@@ -4,6 +4,53 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Block timing on non-default `TimecodeScale` sources.** `WriteCluster` and the
+  `StreamWriter` converted the cluster timestamp to timecode-scale units but wrote
+  each block's relative offset in raw milliseconds, so any source authored with a
+  scale other than 1 ms produced silently mistimed blocks when its clusters were
+  rebuilt (mux/merge/split/join/edit; `reindex` copies verbatim and was unaffected).
+  Offsets are now converted like the cluster timestamp, and an offset that cannot
+  fit a SimpleBlock's int16 is an explicit error instead of a silent int16 wrap.
+  Sparse extra subtitle cues (merge-subtitle) now roll clusters forward instead of
+  overflowing the current one; `WriteSegmentInfo` falls back to the Matroska default
+  scale (1 ms) when `TimecodeScale` is 0 so the Duration element is still derived.
+- **Split keyframe alignment gates on video keyframes.** Every audio block is
+  flagged keyframe, so alignment on "any keyframe" opened a segment on audio and
+  then admitted mid-GOP video (corrupt until the next real keyframe). A segment now
+  starts at the first video keyframe at/after the range start (leading audio is
+  dropped with it), keeps the GOP straddling the end cut (no frame lost across
+  chained segments), and a range that contains media but no video keyframe is an
+  explicit error instead of a silently empty or corrupt part.
+- **Split rebases chapters.** Each segment now carries only the chapters
+  overlapping its range, clipped and shifted to the segment timeline (previously
+  every part carried the full source list at absolute timestamps).
+- **`validate`/`compare` exit codes.** Both exit `1` when issues or differences are
+  found (previously always `0`), so they can gate scripts.
+- **`Merge` no longer discards attachments.** `MuxOptions` gained
+  `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
+  and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
+  it is now honoured.
+- **`mp4.OpenMeta` godoc** claimed Tags stay nil; they are populated from the
+  iTunes `ilst` atoms (and the title from `©nam`) since 0.11.
+
+### Added
+
+- **CLI overwrite guard.** Commands that write a new file refuse to overwrite an
+  existing one unless the global `-f`/`--force` flag is passed. `edit-inplace`
+  (which edits its input by design) is flagged as destructive in its help.
+- **Progress everywhere.** `Options.Progress` is honoured by Mux, Merge, Split,
+  Join, Demux and AddTrack (aggregated across sources for multi-input operations);
+  the CLI shows a progress bar on all cluster-rewriting commands.
+- **Runtime loss warnings.** `to-webm` warns about the chapters/attachments/tags
+  actually present in the source and dropped by the WebM subset; `from-mp4` reports
+  dropped tracks via `OnDrop` (parity with `to-mp4`).
+- **`make fuzz`** runs the parser fuzzers locally; `README` gained consolidated
+  *Limitations* and *Versioning* sections; command help now shows flag defaults.
+
 ## [0.11.0] - 2026-06-26
 
 ### Added

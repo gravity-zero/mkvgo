@@ -227,7 +227,7 @@ func main() {
 }
 ```
 
-For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed - never walking Clusters/Cues - so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues.
+For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed - never walking Clusters/Cues - so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues. Opt-in read options extend the head-only probe: `WithBitrate()` (per-track BPS bitrate from the Tags element), `WithKeyframeIndex()` (complete keyframe index for a Cues-less file), `WithInBandColourFallback()` (colour from the first sample's SPS).
 
 **Mux tracks from multiple sources:**
 ```go
@@ -292,6 +292,38 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
 )
 ```
 
+## Limitations
+
+- **No transcoding.** Every operation copies compressed samples verbatim; a
+  codec the target container cannot carry is rejected or dropped (reported),
+  never converted.
+- **MP4 output codec set**: H.264/HEVC/AV1 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
+  audio. VP8/VP9/Vorbis, TrueHD and bitmap subtitles (PGS/VOBSUB) cannot go to
+  MP4. WebM output accepts only the WebM subset (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
+- **Elements dropped by remuxes**: `to-webm` drops chapters, attachments and
+  tags; `to-mp4` drops attachments, track-targeted tags and unmapped global
+  tags (see [docs/cli.md](docs/cli.md)). Streaming outputs (`to-webm`,
+  `StreamWriter`) carry no SeekHead/Cues.
+- **Timing resolution**: operations that rebuild clusters (mux, merge, split,
+  join, edit, remux) work on millisecond-quantised timecodes — exact for the
+  default Matroska `TimecodeScale` (1 ms); finer scales are quantised.
+  `reindex` copies clusters verbatim and is exempt. MP4→MKV→MP4 audio
+  round-trips are sample-exact except Opus/MP3 tail padding.
+- **QuickTime `.mov` with `moov` at the end of the file** (non-faststart, e.g.
+  straight from an iPhone) is not parsed; the reader fails with an explicit
+  error rather than misparse.
+- **Parser bounds** (anti-DoS, not configurable): 512 MB per EBML element,
+  64 MB per block, 1 GiB of cumulative metadata, 256 MB per cluster on
+  reindex. A legitimate file beyond these limits is rejected with an explicit
+  error.
+
+## Versioning
+
+Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). The `matroska` facade is
+the stable public API: held additive and backward-compatible across 0.x
+releases by policy. The `mkv/*`, `mp4` and `ebml` sub-packages are
+experimental and may change between minor versions.
+
 ## Documentation
 
 - **[docs/recipes.md](docs/recipes.md)** - task-oriented cookbook: probe, index a
@@ -331,6 +363,8 @@ Import graph: `cmd/mkvgo` -> `matroska` -> `mkv/*` -> `ebml`; `mp4` -> `mkv/*`
 ```bash
 make build                # build for current platform
 make test                 # run tests with -race
+make vet                  # go vet
+make fuzz                 # run the parser fuzzers locally (30s each)
 make release              # cross-compile all platforms
 ```
 

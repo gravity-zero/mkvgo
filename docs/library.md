@@ -299,10 +299,16 @@ err := matroska.Mux(ctx, matroska.MuxOptions{
         {SourcePath: "video.mkv", TrackID: 1},
         {SourcePath: "audio.mkv", TrackID: 1, Language: "eng", Name: "Stereo", IsDefault: true},
     },
-    Chapters: chapters,  // optional
-    Tags:     tags,       // optional
+    Title:       "My movie",   // optional
+    Chapters:    chapters,     // optional
+    Tags:        tags,         // optional
+    Attachments: attachments,  // optional
 })
 ```
+
+Mux writes the metadata you pass (title/chapters/tags/attachments) as-is; it
+does not read any of it from the sources. `MuxingApp`/`WritingApp` in the
+output are `"mkvgo"`.
 
 **Demux** -- extract tracks to raw streams:
 
@@ -328,6 +334,10 @@ err := matroska.Merge(ctx, matroska.MergeOptions{
     },
 })
 ```
+
+Merge's metadata policy is first-wins: the output's title, chapters, tags and
+attachments come from the first input only; the other inputs contribute
+tracks, not metadata.
 
 ---
 
@@ -482,10 +492,24 @@ files, err := matroska.Split(ctx, matroska.SplitOptions{
 })
 ```
 
+Cut policy (keyframe alignment): a segment starts at the first **video
+keyframe** at/after `StartMs` (leading audio and mid-GOP video are dropped so
+the segment starts decodable) and ends right before the next video keyframe
+at/after `EndMs` (the straddling GOP is kept, so chaining segments loses no
+frame). A range that contains media but no video keyframe is an explicit
+error. Audio-only sources cut exactly at the requested times. Chapters are
+clipped to each segment's range and rebased to its timeline; block timecodes
+are rebased to start at 0.
+
 **Join sequential files:**
 ```go
 err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
 ```
+
+Join requires the same track layout (count, types, codecs, codec
+configuration) in every file and errors on mismatch. The output's
+title/chapters/tags/attachments come from the first file (first-wins);
+chapters keep their original timestamps.
 
 ---
 
@@ -551,6 +575,11 @@ err := matroska.RemoveTrack(ctx, "in.mkv", "out.mkv", []uint64{3}, opts)
 ```
 
 `total` is `-1` when the file size is unknown.
+
+Progress is honoured by every cluster-walking operation: Mux, Merge, Split,
+Join, Demux, AddTrack, RemoveTrack, EditMetadata, Reindex, RemuxToWebM and the
+MP4 remuxes (`mp4.Options.Progress`). Multi-source operations (Mux/Merge/Join)
+aggregate: `processed`/`total` cover the byte total of all inputs.
 
 ---
 

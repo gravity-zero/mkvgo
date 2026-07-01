@@ -8,9 +8,14 @@ mkvgo <command> [options]
 ```
 
 Global flags:
-- `-json` -- structured JSON output (supported by inspection commands)
+- `-json` -- structured JSON output (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare; accepted but ignored by writing commands)
+- `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`). `edit-inplace` is the exception: it modifies its input file by design.
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
+
+Exit codes: `0` success, `1` any error (bad usage, unreadable input, failed
+operation). `validate` and `compare` also exit `1` when issues or differences
+are found, so they can gate scripts (`mkvgo validate f.mkv && ...`).
 
 ---
 
@@ -67,8 +72,10 @@ cat video.mkv | mkvgo chapters -
 List attachments (fonts, cover art, etc.) with MIME types and sizes.
 
 ```
-mkvgo attachments [-json] <file.mkv|->
+mkvgo attachments [-json] <file.mkv|.mp4|->
 ```
+
+MP4 paths are accepted (MP4 has no attachment equivalent, so the list is empty).
 
 Pass `-` as the path to read from stdin.
 
@@ -82,8 +89,10 @@ cat video.mkv | mkvgo attachments -
 Show all tags (target type, track associations, key-value pairs).
 
 ```
-mkvgo tags [-json] <file.mkv|->
+mkvgo tags [-json] <file.mkv|.mp4|->
 ```
+
+MP4 paths are accepted: the movie-level iTunes tags (`ilst`) are shown as tags.
 
 Pass `-` as the path to read from stdin.
 
@@ -129,8 +138,11 @@ Check MKV structure for issues. Reports errors and warnings.
 mkvgo validate [-json] <file.mkv>
 ```
 
+Exits `0` when the file is clean, `1` when any issue is reported (also with
+`-json`), so it is scriptable.
+
 ```bash
-mkvgo validate video.mkv
+mkvgo validate video.mkv && echo clean
 ```
 
 ### compare
@@ -140,6 +152,8 @@ Diff metadata of two MKV files. Shows added, removed, and changed elements.
 ```
 mkvgo compare [-json] <a.mkv> <b.mkv>
 ```
+
+Exits `0` when the metadata is identical, `1` when it differs (also with `-json`).
 
 ```bash
 mkvgo compare original.mkv reencoded.mkv
@@ -356,6 +370,10 @@ mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]
 |---|---|
 | `-o` | Output file path (required) |
 
+Metadata policy (first-wins): the output's title, chapters, tags and
+attachments come from the **first** input only; the other inputs contribute
+tracks, not metadata.
+
 ```bash
 mkvgo merge -o combined.mkv video.mkv audio.mkv subs.mkv
 ```
@@ -371,8 +389,8 @@ mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass] [-lang
 | Flag | Description |
 |---|---|
 | `-o` | Output file path (required) |
-| `-format` | Subtitle format: `srt` (default) or `ass` |
-| `-lang` | Language code (e.g. `eng`) |
+| `-format` | Subtitle format: `srt` or `ass`. Default: detected from the sidecar's extension (`.ass`/`.ssa` → ass, otherwise srt) |
+| `-lang` | Language code (e.g. `eng`; default `und`) |
 | `-name` | Track name (e.g. `"English"`) |
 
 ```bash
@@ -382,7 +400,8 @@ mkvgo merge-subtitle video.mkv -o out.mkv subs.ass -format ass -lang jpn
 
 ### join
 
-Concatenate multiple MKV files sequentially (same codec/track layout required).
+Concatenate multiple MKV files sequentially (same codec/track layout required;
+a track-count, codec or codec-configuration mismatch is an error).
 
 ```
 mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
@@ -391,6 +410,9 @@ mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
 | Flag | Description |
 |---|---|
 | `-o` | Output file path (required) |
+
+Metadata policy (first-wins): the output's title, chapters, tags and
+attachments come from the **first** file; later files' metadata is not carried.
 
 ```bash
 mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
@@ -413,6 +435,15 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
 | `-o` | Output directory (required) |
 | `-chapters` | Split at chapter boundaries |
 | `-range` | Comma-separated time ranges in milliseconds (0 = end of file) |
+
+Cut policy (keyframe alignment): a segment starts at the first **video
+keyframe** at/after its start time (leading audio and mid-GOP video are
+dropped so the segment starts decodable), and ends right before the next video
+keyframe at/after its end time (the GOP straddling the cut is kept, so
+chaining segments loses no frame). A range that contains media but no video
+keyframe is an explicit error. Audio-only files cut exactly at the requested
+times. Chapters are clipped to each segment's range and rebased to its
+timeline.
 
 ```bash
 # Split by chapters
@@ -457,6 +488,8 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-nativ
 - `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header — a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
 
 Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.
+
+Not carried into MP4: **attachments** (fonts, cover art — note an ASS track flattened with `--flatten-subs` loses its attached fonts separately), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
 
 ```bash
 mkvgo to-mp4 video.mkv video.mp4

@@ -76,7 +76,10 @@ magnitude faster than a full `Open` on a large file.
 
 ```go
 c, err := matroska.OpenMeta(ctx, "video.mkv") // Tracks + Info only
-// MP4 counterpart (second value lists non-carried tracks like cover art):
+// Per-track bitrate (the TAG:BPS ffprobe shows) stays head-only with the opt-in:
+c, err = matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
+// MP4 counterpart (second value lists non-carried tracks like cover art;
+// bitrate needs no opt-in there — MP4 carries it in btrt/esds):
 mc, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
 ```
 
