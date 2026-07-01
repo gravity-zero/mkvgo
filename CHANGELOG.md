@@ -52,6 +52,14 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **Cover art across MKV ↔ MP4.** `to-mp4` carries the source's first JPEG/PNG
+  image attachment (one named `cover.*` preferred) as the iTunes `covr` atom;
+  `from-mp4`/`OpenMeta` bring a `covr` back as a Matroska attachment
+  (`cover.jpg`/`cover.png`). Fonts and other non-image attachments are still
+  not representable in MP4.
+- **`split -range` accepts clock times.** Each range bound can be milliseconds
+  (`300000`), fractional seconds (`90.5`) or `[HH:]MM:SS[.fraction]` (`5:00`,
+  `01:30:00`).
 - **Seekable WebM output.** `RemuxToWebM`/`to-webm` now writes a real indexed
   file — known-size clusters, a Cues seek index and a SeekHead — instead of the
   unknown-size streaming layout with no index. The output is readable by the

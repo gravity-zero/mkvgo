@@ -492,7 +492,9 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-nativ
 
 Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.
 
-Not carried into MP4: **attachments** (fonts, cover art — note an ASS track flattened with `--flatten-subs` loses its attached fonts separately), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
+Cover art IS carried: the first JPEG/PNG image attachment (one named `cover.*` preferred) becomes the iTunes `covr` atom, and `from-mp4` brings it back as an attachment.
+
+Not carried into MP4: **other attachments** (fonts — note an ASS track flattened with `--flatten-subs` loses its attached fonts), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
 
 ```bash
 mkvgo to-mp4 video.mkv video.mp4
