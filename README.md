@@ -302,8 +302,8 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
   MP4. WebM output accepts only the WebM subset (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
 - **Elements dropped by remuxes**: `to-webm` drops chapters, attachments and
   tags; `to-mp4` drops attachments, track-targeted tags and unmapped global
-  tags (see [docs/cli.md](docs/cli.md)). Streaming outputs (`to-webm`,
-  `StreamWriter`) carry no SeekHead/Cues.
+  tags (see [docs/cli.md](docs/cli.md)). The live `StreamWriter` output carries
+  no SeekHead/Cues (impossible without seeking back).
 - **Timing resolution**: operations that rebuild clusters (mux, merge, split,
   join, edit, remux) work on millisecond-quantised timecodes — exact for the
   default Matroska `TimecodeScale` (1 ms); finer scales are quantised.

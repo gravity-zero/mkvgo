@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,15 +11,15 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// RemuxToWebM reads srcPath and writes a complete, playable WebM file to
-// dstPath: it validates that every track uses a WebM-compatible codec, then
-// copies the media (every block, verbatim) into a "webm"-DocType container with
-// keyframe-aligned clusters. It does NOT transcode — a source whose codecs fall
-// outside the WebM subset is rejected with an error and no output is produced.
+// RemuxToWebM reads srcPath and writes a complete, playable, SEEKABLE WebM
+// file to dstPath: it validates that every track uses a WebM-compatible codec,
+// then copies the media (every block, verbatim) into a "webm"-DocType container
+// with time-bounded clusters, a Cues seek index and a SeekHead. It does NOT
+// transcode — a source whose codecs fall outside the WebM subset is rejected
+// with an error and no output is produced.
 //
 // Elements NOT carried into the output: Chapters, Attachments and Tags are
-// dropped (mkv.WebMNonSubsetElements lists the ones present in a source), and
-// the streaming output has no SeekHead/Cues (unknown-size clusters).
+// dropped (mkv.WebMNonSubsetElements lists the ones present in a source).
 //
 // Unlike writer.WriteWebM (metadata only), this produces a file with frames.
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) (err error) {
@@ -43,6 +42,11 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	if err != nil {
 		return err
 	}
+	if p := mkv.ProgressFrom(extra); p != nil {
+		if st, _ := fs.DoStat(srcPath); st != nil {
+			br.SetProgress(p, st.Size())
+		}
+	}
 
 	dst, err := fs.DoCreate(dstPath)
 	if err != nil {
@@ -50,20 +54,30 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	}
 	defer closeWithErr(dst, &err)
 
-	// Buffer the output: the StreamWriter emits several small writes per block,
-	// which would otherwise be a syscall each on this file-copy hot path. (The
-	// StreamWriter itself stays unbuffered so live-streaming callers keep low latency.)
-	buf := bufio.NewWriterSize(dst, 256<<10)
-	sw, err := writer.NewWebMStreamWriter(buf, c.Info, c.Tracks)
-	if err != nil {
+	mw := writer.NewMKVWriter(dst)
+	if err := mw.WriteStartWebM(mkv.WebMDocTypeVersion(c)); err != nil {
+		return err
+	}
+	// Only Info + Tracks: chapters/attachments/tags are outside the WebM subset.
+	meta := *c
+	meta.Chapters, meta.Attachments, meta.Tags = nil, nil, nil
+	if err := mw.WriteMetadata(&meta, c.Tracks, c.DurationMs); err != nil {
 		return err
 	}
 
 	// Group blocks into time-bounded clusters (~1s) rather than splitting on
 	// every keyframe: in multiplexed A/V every Opus frame is a "keyframe", so a
 	// keyframe-per-cluster policy would emit one tiny cluster per audio frame.
-	const clusterDurationMs = defaultClusterDurationMs
+	var cluster []mkv.Block
 	clusterStart := int64(-1)
+	flush := func() error {
+		if len(cluster) == 0 {
+			return nil
+		}
+		err := mw.WriteClusterWithCues(clusterStart, c.Info.TimecodeScale, cluster)
+		cluster = cluster[:0]
+		return err
+	}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -75,16 +89,19 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 		if err != nil {
 			return fmt.Errorf("remux webm: read block: %w", err)
 		}
-		if clusterStart < 0 || b.Timecode-clusterStart >= clusterDurationMs {
-			sw.FlushCluster() // force the next write to open a fresh cluster
+		if clusterStart >= 0 && b.Timecode-clusterStart >= defaultClusterDurationMs {
+			if err := flush(); err != nil {
+				return fmt.Errorf("remux webm: write cluster: %w", err)
+			}
+			clusterStart = -1
+		}
+		if clusterStart < 0 {
 			clusterStart = b.Timecode
 		}
-		if err := sw.WriteBlockInCurrentCluster(b); err != nil {
-			return fmt.Errorf("remux webm: write block: %w", err)
-		}
+		cluster = append(cluster, b)
 	}
-	if err := buf.Flush(); err != nil {
-		return fmt.Errorf("remux webm: flush: %w", err)
+	if err := flush(); err != nil {
+		return fmt.Errorf("remux webm: write cluster: %w", err)
 	}
-	return nil
+	return mw.Finalize()
 }

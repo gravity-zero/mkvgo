@@ -52,6 +52,11 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **Seekable WebM output.** `RemuxToWebM`/`to-webm` now writes a real indexed
+  file — known-size clusters, a Cues seek index and a SeekHead — instead of the
+  unknown-size streaming layout with no index. The output is readable by the
+  seekable reader, `keyframes` works head-only on it, and players can seek.
+  `Options.Progress` is honoured by the remux (it was ignored).
 - **CLI overwrite guard.** Commands that write a new file refuse to overwrite an
   existing one unless the global `-f`/`--force` flag is passed. `edit-inplace`
   (which edits its input by design) is flagged as destructive in its help.

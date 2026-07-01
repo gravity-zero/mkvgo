@@ -196,6 +196,55 @@ func TestRemuxToWebMClustersByTime(t *testing.T) {
 	}
 }
 
+// The remuxed WebM is a SEEKABLE file: known-size clusters readable by the
+// seekable reader, a Cues index, DocType "webm", and a verbatim block copy.
+func TestRemuxToWebMSeekableOutput(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	dst := filepath.Join(dir, "out.webm")
+
+	w, h := uint32(320), uint32(240)
+	info := mkv.SegmentInfo{TimecodeScale: 1_000_000}
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "vp9", Width: &w, Height: &h}}
+	var blocks []mkv.Block
+	for i := 0; i < 60; i++ { // 3s of video, keyframe every second
+		blocks = append(blocks, mkv.Block{
+			TrackNumber: 1, Timecode: int64(i) * 50, Keyframe: i%20 == 0, Data: []byte{0xAA},
+		})
+	}
+
+	var seg bytes.Buffer
+	mustNil(t, writer.WriteSegmentInfo(&seg, &info, 3000))
+	mustNil(t, writer.WriteTracks(&seg, tracks))
+	mustNil(t, writer.WriteCluster(&seg, 0, info.TimecodeScale, blocks))
+	var buf bytes.Buffer
+	mustNil(t, writer.WriteEBMLHeader(&buf))
+	mustNil(t, writer.WriteMasterElement(&buf, mkv.IDSegment, seg.Bytes()))
+	mustNil(t, os.WriteFile(src, buf.Bytes(), 0o644))
+
+	mustNil(t, RemuxToWebM(context.Background(), src, dst))
+
+	// The seekable reader (which cannot read unknown-size clusters — the old
+	// streaming output) must parse the file and find a Cues index.
+	got, err := reader.Open(context.Background(), dst)
+	mustNil(t, err)
+	if len(got.Cues) == 0 {
+		t.Errorf("remuxed WebM has no Cues index (not seekable)")
+	}
+	if len(got.Tracks) != 1 || got.Tracks[0].Codec != "vp9" {
+		t.Errorf("tracks = %+v, want 1 vp9 track", got.Tracks)
+	}
+	raw, err := os.ReadFile(dst)
+	mustNil(t, err)
+	if !bytes.Contains(raw[:64], []byte("webm")) {
+		t.Errorf("output does not declare the webm DocType")
+	}
+	counts := countBlocksFromFile(t, dst, 1_000_000)
+	if counts[1] != 60 {
+		t.Errorf("blocks = %d, want 60 (verbatim copy)", counts[1])
+	}
+}
+
 func mustNil(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

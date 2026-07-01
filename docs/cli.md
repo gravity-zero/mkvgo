@@ -519,7 +519,7 @@ mkvgo from-mp4 iphone_clip.mov clip.mkv
 
 ### to-webm
 
-Remux an MKV/WebM file to WebM, copying the media verbatim. Only WebM-subset codecs are allowed (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles); a source with any other codec is rejected. Non-WebM elements (chapters, attachments, tags) are dropped.
+Remux an MKV/WebM file to WebM, copying the media verbatim. Only WebM-subset codecs are allowed (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles); a source with any other codec is rejected. Non-WebM elements (chapters, attachments, tags) are dropped (a warning lists the ones actually present). The output is seekable: it carries a Cues index and a SeekHead.
 
 ```
 mkvgo to-webm <input.mkv> <output.webm>

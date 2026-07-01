@@ -45,6 +45,19 @@ func (m *MKVWriter) WriteStart() error {
 	if err := WriteEBMLHeader(m.W); err != nil {
 		return err
 	}
+	return m.startSegment()
+}
+
+// WriteStartWebM is WriteStart with a "webm" DocType header at the given
+// DocTypeVersion (see mkv.WebMDocTypeVersion).
+func (m *MKVWriter) WriteStartWebM(version uint64) error {
+	if err := writeEBMLHeaderDocType(m.W, "webm", version, 2); err != nil {
+		return err
+	}
+	return m.startSegment()
+}
+
+func (m *MKVWriter) startSegment() error {
 	if _, err := ebml.WriteElementID(m.W, mkv.IDSegment); err != nil {
 		return err
 	}
