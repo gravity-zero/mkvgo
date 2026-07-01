@@ -406,8 +406,12 @@ type CuePoint struct {
 type MuxOptions struct {
 	OutputPath string
 	Tracks     []TrackInput
-	Chapters   []Chapter
-	Tags       []Tag
+	// Title, Chapters, Tags and Attachments are written to the output as-is;
+	// Mux does not read them from the sources. Leave empty to write none.
+	Title       string
+	Chapters    []Chapter
+	Tags        []Tag
+	Attachments []Attachment
 }
 
 type DemuxOptions struct {
@@ -432,7 +436,9 @@ type MergeInput struct {
 type MergeOptions struct {
 	OutputPath string
 	Inputs     []MergeInput
-	Progress   ProgressFunc
+	// Progress reports merge progress (bytes processed across all inputs).
+	// Options.Progress, when passed, takes precedence.
+	Progress ProgressFunc
 }
 
 type SplitOptions struct {

@@ -253,7 +253,7 @@ type mergeSource struct {
 // size, so it is safe for very large inputs (unlike collecting + sorting every
 // block). Block.Timecode is in milliseconds for every source, so cross-source
 // comparison needs no scale normalisation.
-func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int64, fs *mkv.FS, sources []mergeSource) error {
+func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int64, fs *mkv.FS, sources []mergeSource, progress mkv.ProgressFunc) error {
 	type state struct {
 		br   *reader.BlockReader
 		f    mkv.ReadSeekCloser
@@ -268,6 +268,19 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 			}
 		}
 	}()
+
+	// Aggregated progress: each source reports its own byte position; the
+	// caller sees the sum over the total size of all sources.
+	var progTotal int64
+	var progPositions []int64
+	if progress != nil {
+		progPositions = make([]int64, len(sources))
+		for _, src := range sources {
+			if st, _ := fs.DoStat(src.path); st != nil {
+				progTotal += st.Size()
+			}
+		}
+	}
 
 	advance := func(i int) error {
 		st := states[i]
@@ -299,6 +312,17 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		if err != nil {
 			f.Close()
 			return err
+		}
+		if progress != nil {
+			idx := i
+			br.SetProgress(func(p, _ int64) {
+				progPositions[idx] = p
+				var sum int64
+				for _, v := range progPositions {
+					sum += v
+				}
+				progress(sum, progTotal)
+			}, progTotal)
 		}
 		states[i] = &state{br: br, f: f}
 		if err := advance(i); err != nil {

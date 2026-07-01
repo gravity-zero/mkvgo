@@ -8,10 +8,25 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
+// Merge combines the selected tracks of several inputs into one file.
+//
+// Metadata policy (first-wins): the output's title, chapters, tags and
+// attachments come from the FIRST input only; the other inputs contribute
+// tracks, not metadata.
 func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) error {
 	fs := mkv.FSFrom(extra)
 	if len(opts.Inputs) == 0 {
 		return fmt.Errorf("no inputs")
+	}
+	// Honour MergeOptions.Progress unless Options.Progress is already set.
+	if opts.Progress != nil && mkv.ProgressFrom(extra) == nil {
+		if len(extra) == 0 {
+			extra = []mkv.Options{{Progress: opts.Progress}}
+		} else {
+			o := extra[0] // copy, do not mutate the caller's value
+			o.Progress = opts.Progress
+			extra = append([]mkv.Options{o}, extra[1:]...)
+		}
 	}
 
 	var trackInputs []mkv.TrackInput
@@ -51,10 +66,12 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 		return err
 	}
 	muxOpts := mkv.MuxOptions{
-		OutputPath: opts.OutputPath,
-		Tracks:     trackInputs,
-		Chapters:   first.Chapters,
-		Tags:       first.Tags,
+		OutputPath:  opts.OutputPath,
+		Tracks:      trackInputs,
+		Title:       first.Info.Title,
+		Chapters:    first.Chapters,
+		Tags:        first.Tags,
+		Attachments: first.Attachments,
 	}
 
 	return Mux(ctx, muxOpts, extra...)

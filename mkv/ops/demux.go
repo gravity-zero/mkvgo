@@ -46,6 +46,11 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) err
 	if err != nil {
 		return err
 	}
+	if p := mkv.ProgressFrom(extra); p != nil {
+		if st, _ := fs.DoStat(opts.SourcePath); st != nil {
+			br.SetProgress(p, st.Size())
+		}
+	}
 
 	for {
 		if ctx.Err() != nil {

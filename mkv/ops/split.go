@@ -59,7 +59,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 			durationMs = c.DurationMs - r.StartMs
 		}
 
-		if err := splitRange(ctx, c, outPath, r, remap, durationMs, fs); err != nil {
+		if err := splitRange(ctx, c, outPath, r, remap, durationMs, fs, mkv.ProgressFrom(extra)); err != nil {
 			return outputs, fmt.Errorf("part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, outPath)
@@ -78,7 +78,7 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	return ranges
 }
 
-func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS) (err error) {
+func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
 		return err
@@ -111,6 +111,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
 		videoTracks: videoTrackSet(c.Tracks),
+		progress:    progress,
 	}); err != nil {
 		return err
 	}

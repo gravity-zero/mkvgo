@@ -64,6 +64,17 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		return err
 	}
 
+	// Aggregated progress across the sources (bytes processed / total bytes).
+	progress := mkv.ProgressFrom(opts)
+	var progDone, progTotal int64
+	if progress != nil {
+		for _, src := range sources {
+			if st, _ := fs.DoStat(src); st != nil {
+				progTotal += st.Size()
+			}
+		}
+	}
+
 	// Per-track offsets: each track is concatenated against ITS OWN end, not the
 	// single container duration, so tracks that end at slightly different times do
 	// not accumulate A/V drift across joins.
@@ -77,9 +88,18 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		for j, t := range c.Tracks {
 			remap[t.ID] = first.Tracks[j].ID
 		}
+		var srcProgress mkv.ProgressFunc
+		if progress != nil {
+			done := progDone
+			srcProgress = func(p, _ int64) { progress(done+p, progTotal) }
+			if st, _ := fs.DoStat(src); st != nil {
+				progDone += st.Size()
+			}
+		}
 		trackEnds := make(map[uint64]int64, len(c.Tracks))
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, trackOffsets: trackOffsets, trackEnds: trackEnds,
+			progress: srcProgress,
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", src, err)
 		}

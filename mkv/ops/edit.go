@@ -116,7 +116,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 		{path: srcPath, scale: c.Info.TimecodeScale, remap: remap},
 		{path: input.SourcePath, scale: srcAdd.Info.TimecodeScale, remap: map[uint64]uint64{input.TrackID: newID}},
 	}
-	if err := streamMergeToWriter(ctx, mw, c.Info.TimecodeScale, fs, sources); err != nil {
+	if err := streamMergeToWriter(ctx, mw, c.Info.TimecodeScale, fs, sources, mkv.ProgressFrom(opts)); err != nil {
 		return err
 	}
 	return mw.Finalize()

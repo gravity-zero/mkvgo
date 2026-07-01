@@ -36,13 +36,15 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{
 			TimecodeScale: timecodeScale,
+			Title:         opts.Title,
 			MuxingApp:     "mkvgo",
 			WritingApp:    "mkvgo",
 		},
-		Tracks:     tracks,
-		Chapters:   opts.Chapters,
-		Tags:       opts.Tags,
-		DurationMs: durationMs,
+		Tracks:      tracks,
+		Chapters:    opts.Chapters,
+		Tags:        opts.Tags,
+		Attachments: opts.Attachments,
+		DurationMs:  durationMs,
 	}
 
 	mw := writer.NewMKVWriter(out)
@@ -52,7 +54,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		return err
 	}
-	if err := streamMergeToWriter(ctx, mw, timecodeScale, fs, sources); err != nil {
+	if err := streamMergeToWriter(ctx, mw, timecodeScale, fs, sources, mkv.ProgressFrom(extra)); err != nil {
 		return err
 	}
 	return mw.Finalize()
