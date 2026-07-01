@@ -14,8 +14,9 @@ Global flags:
 - `-h`, `--help` -- show help for a command
 
 Exit codes: `0` success, `1` any error (bad usage, unreadable input, failed
-operation). `validate` and `compare` also exit `1` when issues or differences
-are found, so they can gate scripts (`mkvgo validate f.mkv && ...`).
+operation). `validate` also exits `1` when error-severity issues are found
+(`-strict` makes warnings fail too) and `compare` when the files differ, so
+they can gate scripts (`mkvgo validate f.mkv && ...`).
 
 ---
 
@@ -135,14 +136,16 @@ mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 Check MKV structure for issues. Reports errors and warnings.
 
 ```
-mkvgo validate [-json] <file.mkv>
+mkvgo validate [-json] [-strict] <file.mkv>
 ```
 
-Exits `0` when the file is clean, `1` when any issue is reported (also with
-`-json`), so it is scriptable.
+Exits `0` when no error-severity issue is found (warnings are printed but do
+not fail), `1` otherwise — also with `-json` — so it is scriptable. `-strict`
+makes warnings fail too.
 
 ```bash
-mkvgo validate video.mkv && echo clean
+mkvgo validate video.mkv && echo "no errors"
+mkvgo validate -strict video.mkv && echo "no errors, no warnings"
 ```
 
 ### compare

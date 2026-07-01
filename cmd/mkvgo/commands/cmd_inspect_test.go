@@ -361,7 +361,7 @@ func TestCmdProbeJSON(t *testing.T) {
 
 func TestCmdValidate_OK(t *testing.T) {
 	// regfixMKV is a well-formed ffmpeg-muxed file; Validate should return no issues.
-	out := capture(t, func() { commands.CmdValidate(regfixMKV) })
+	out := capture(t, func() { commands.CmdValidate([]string{regfixMKV}) })
 	if !strings.Contains(out, ": OK") {
 		t.Errorf("CmdValidate OK: expected ': OK' in output\noutput:\n%s", out)
 	}
@@ -379,18 +379,28 @@ func recordExit(t *testing.T) *int {
 
 func TestCmdValidate_WithIssues(t *testing.T) {
 	// richMKV is metadata-only (no blocks, video track lacks CodecPrivate)
-	// → triggers at least "video without CodecPrivate" and "no blocks found".
+	// → triggers WARNING-severity issues only: printed, but the exit code
+	// stays 0 without -strict.
 	path := richMKV(t)
 	exitCode := recordExit(t)
-	out := capture(t, func() { commands.CmdValidate(path) })
+	out := capture(t, func() { commands.CmdValidate([]string{path}) })
 	if strings.Contains(out, ": OK") {
 		t.Errorf("CmdValidate issues: should not contain ': OK'\noutput:\n%s", out)
 	}
 	if !strings.Contains(out, "[warning]") {
 		t.Errorf("CmdValidate issues: expected '[warning]'\noutput:\n%s", out)
 	}
+	if *exitCode != -1 {
+		t.Errorf("CmdValidate warnings only: exit code = %d, want none (warnings do not fail)", *exitCode)
+	}
+}
+
+func TestCmdValidate_StrictFailsOnWarnings(t *testing.T) {
+	path := richMKV(t)
+	exitCode := recordExit(t)
+	capture(t, func() { commands.CmdValidate([]string{"-strict", path}) })
 	if *exitCode != 1 {
-		t.Errorf("CmdValidate with issues: exit code = %d, want 1 (scriptability)", *exitCode)
+		t.Errorf("CmdValidate -strict with warnings: exit code = %d, want 1", *exitCode)
 	}
 }
 
@@ -399,7 +409,7 @@ func TestCmdValidate_JSON(t *testing.T) {
 	recordExit(t)
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
-	out := capture(t, func() { commands.CmdValidate(path) })
+	out := capture(t, func() { commands.CmdValidate([]string{path}) })
 
 	var issues []map[string]interface{}
 	if err := json.Unmarshal([]byte(out), &issues); err != nil {

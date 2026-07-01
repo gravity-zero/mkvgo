@@ -89,8 +89,8 @@ func main() {
 	case "join":
 		commands.CmdJoin(args)
 	case "validate":
-		commands.RequireArgs(args, 1, "mkvgo validate [-json] <file.mkv>")
-		commands.CmdValidate(args[0])
+		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
+		commands.CmdValidate(args)
 	case "compare":
 		commands.RequireArgs(args, 2, "mkvgo compare [-json] <a.mkv> <b.mkv>")
 		commands.CmdCompare(args[0], args[1])
@@ -155,8 +155,8 @@ Global flags:
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
 
-Exit codes: 0 success; 1 error. validate/compare also exit 1 when issues or
-differences are found.
+Exit codes: 0 success; 1 error. validate also exits 1 on error-severity issues
+(-strict: warnings too); compare exits 1 when the files differ.
 
 Usage: mkvgo <command> [options]`)
 }

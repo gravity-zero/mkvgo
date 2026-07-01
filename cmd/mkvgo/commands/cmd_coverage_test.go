@@ -887,7 +887,7 @@ func TestCmdToWebM_IncompatibleCodec(t *testing.T) {
 // ---------- CmdValidate error paths -------------------------------------------
 
 func TestCmdValidate_BadPath(t *testing.T) {
-	mustFatal(t, func() { commands.CmdValidate("/no/such/file.mkv") })
+	mustFatal(t, func() { commands.CmdValidate([]string{"/no/such/file.mkv"}) })
 }
 
 // ---------- CmdCompare error paths --------------------------------------------

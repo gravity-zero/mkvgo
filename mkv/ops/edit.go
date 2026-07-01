@@ -37,6 +37,29 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 		return fmt.Errorf("cannot remove all tracks")
 	}
 
+	// Tags targeting a removed track's UID would be orphans in the output:
+	// drop them. Global tags (TargetID 0) and tags on kept tracks survive.
+	removedUIDs := map[uint64]bool{}
+	for _, t := range c.Tracks {
+		if remove[t.ID] {
+			uid := t.UID
+			if uid == 0 {
+				uid = t.ID // the writer defaults a zero UID to the track ID
+			}
+			removedUIDs[uid] = true
+		}
+	}
+	if len(c.Tags) > 0 {
+		keptTags := c.Tags[:0]
+		for _, tag := range c.Tags {
+			if tag.TargetID != 0 && removedUIDs[tag.TargetID] {
+				continue
+			}
+			keptTags = append(keptTags, tag)
+		}
+		c.Tags = keptTags
+	}
+
 	out, err := fs.DoCreate(dstPath)
 	if err != nil {
 		return err

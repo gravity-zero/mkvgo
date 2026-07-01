@@ -7,9 +7,26 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-// CmdValidate exits 0 when the file is clean and 1 when issues are found, so
-// the command is scriptable (`mkvgo validate f.mkv && ...`).
-func CmdValidate(path string) {
+// CmdValidate exits 1 when error-severity issues are found (warnings are
+// printed but do not fail), so the command is scriptable
+// (`mkvgo validate f.mkv && ...`). -strict makes warnings fail too.
+func CmdValidate(args []string) {
+	var strict bool
+	var rest []string
+	for _, a := range args {
+		switch a {
+		case "-strict", "--strict":
+			strict = true
+		default:
+			rejectFlagArg(a)
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) < 1 {
+		Fatal("usage: " + CmdUsage["validate"])
+	}
+	path := rest[0]
+
 	issues, err := matroska.Validate(context.Background(), path)
 	if err != nil {
 		Fatal(err.Error())
@@ -24,7 +41,13 @@ func CmdValidate(path string) {
 			fmt.Println(issue)
 		}
 	}
-	if len(issues) > 0 {
+	failing := 0
+	for _, issue := range issues {
+		if issue.Severity == matroska.SeverityError || strict {
+			failing++
+		}
+	}
+	if failing > 0 {
 		osExit(1)
 	}
 }

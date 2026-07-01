@@ -28,12 +28,17 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Split rebases chapters.** Each segment now carries only the chapters
   overlapping its range, clipped and shifted to the segment timeline (previously
   every part carried the full source list at absolute timestamps).
-- **`validate`/`compare` exit codes.** Both exit `1` when issues or differences are
-  found (previously always `0`), so they can gate scripts.
+- **`validate`/`compare` exit codes.** `validate` exits `1` when error-severity
+  issues are found (warnings are printed but do not fail; `-strict` makes them
+  fail too) and `compare` when the files differ — both previously always exited
+  `0`, so neither could gate a script.
 - **`Merge` no longer discards attachments.** `MuxOptions` gained
   `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
   and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
   it is now honoured.
+- **`RemoveTrack` drops orphan tags.** Tags targeting a removed track's UID are
+  no longer carried into the output (they pointed at a track that no longer
+  exists); global tags and tags on kept tracks survive.
 - **`mp4.OpenMeta` godoc** claimed Tags stay nil; they are populated from the
   iTunes `ilst` atoms (and the title from `©nam`) since 0.11.
 
