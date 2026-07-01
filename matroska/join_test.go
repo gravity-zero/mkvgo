@@ -2,17 +2,57 @@ package matroska
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-func TestJoin(t *testing.T) {
-	requireFixture(t)
-	dir := t.TempDir()
+// buildSplittableMKV writes a 2-track source with video keyframes at 0 and
+// 500ms, so a [0,500)+[500,∞) split has a valid cut point (keyframe
+// alignment).
+func buildSplittableMKV(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	assertNoErr(t, err)
+	c := &Container{
+		Info: SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "test", WritingApp: "test"},
+	}
+	w, h := uint32(320), uint32(240)
+	sr := 48000.0
+	ch := uint8(2)
+	tracks := []Track{
+		{ID: 1, Type: VideoTrack, Codec: "h264", Width: &w, Height: &h, CodecPrivate: []byte{1}},
+		{ID: 2, Type: AudioTrack, Codec: "aac", SampleRate: &sr, Channels: &ch},
+	}
+	// Interleaved by timecode, like a real muxer's cluster stream.
+	var blocks []mkv.Block
+	for tc := int64(0); tc < 1000; tc += 125 {
+		if tc%250 == 0 {
+			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%500 == 0, Data: []byte("v")})
+		}
+		blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+	}
+	mw := writer.NewMKVWriter(f)
+	assertNoErr(t, mw.WriteStart())
+	assertNoErr(t, mw.WriteMetadata(c, tracks, 1000))
+	for _, b := range blocks {
+		assertNoErr(t, mw.WriteClusterWithCues(b.Timecode, 1_000_000, []mkv.Block{b}))
+	}
+	assertNoErr(t, mw.Finalize())
+	assertNoErr(t, f.Close())
+}
 
-	// Split fixture in 2, then join back
+func TestJoin(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src.mkv")
+	buildSplittableMKV(t, srcPath)
+
+	// Split in 2 at the 500ms keyframe, then join back
 	parts, err := Split(context.Background(), SplitOptions{
-		SourcePath: fixturePath,
+		SourcePath: srcPath,
 		OutputDir:  dir,
 		Ranges: []TimeRange{
 			{StartMs: 0, EndMs: 500},
@@ -31,12 +71,11 @@ func TestJoin(t *testing.T) {
 	counts := countBlocks(t, outPath, c.Info.TimecodeScale)
 	t.Logf("joined blocks: %v", counts)
 
-	// Blocks at the exact split boundary may land in only one part.
-	// On a 1s fixture split at 500ms, losing ~20% is expected.
-	origCounts := countBlocks(t, fixturePath, c.Info.TimecodeScale)
+	// A cut at an exact keyframe boundary loses no block.
+	origCounts := countBlocks(t, srcPath, c.Info.TimecodeScale)
 	for id, origN := range origCounts {
-		if counts[id] < origN/2 {
-			t.Errorf("track %d: joined=%d, original=%d — too many lost", id, counts[id], origN)
+		if counts[id] != origN {
+			t.Errorf("track %d: joined=%d, original=%d — blocks lost at the seam", id, counts[id], origN)
 		}
 	}
 }

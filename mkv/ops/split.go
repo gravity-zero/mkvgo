@@ -101,13 +101,64 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 			tracks[i].CodecDelay = 0
 		}
 	}
-	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
+	// Each segment gets only the chapters that overlap its range, shifted to
+	// its own timeline — not the source's full list at absolute timestamps.
+	segMeta := *c
+	segMeta.Chapters = clipChapters(c.Chapters, r.StartMs, r.EndMs)
+	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
+		videoTracks: videoTrackSet(c.Tracks),
 	}); err != nil {
 		return err
 	}
 	return mw.Finalize()
+}
+
+// videoTrackSet returns the source track numbers of the video tracks, for
+// keyframe alignment (audio blocks are all keyframes, so alignment must key on
+// video keyframes when a video track exists).
+func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
+	var set map[uint64]bool
+	for _, t := range tracks {
+		if t.Type == mkv.VideoTrack {
+			if set == nil {
+				set = make(map[uint64]bool)
+			}
+			set[t.ID] = true
+		}
+	}
+	return set
+}
+
+// clipChapters keeps the chapters (recursively) that overlap [startMs, endMs)
+// and rebases them onto the segment's own timeline. endMs == 0 means
+// "until the end of the source".
+func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
+	var out []mkv.Chapter
+	for _, ch := range chapters {
+		if endMs > 0 && ch.StartMs >= endMs {
+			continue
+		}
+		if ch.EndMs > 0 && ch.EndMs <= startMs {
+			continue
+		}
+		clipped := ch
+		clipped.StartMs = ch.StartMs - startMs
+		if clipped.StartMs < 0 {
+			clipped.StartMs = 0
+		}
+		if ch.EndMs > 0 {
+			end := ch.EndMs
+			if endMs > 0 && end > endMs {
+				end = endMs
+			}
+			clipped.EndMs = end - startMs
+		}
+		clipped.SubChapters = clipChapters(ch.SubChapters, startMs, endMs)
+		out = append(out, clipped)
+	}
+	return out
 }

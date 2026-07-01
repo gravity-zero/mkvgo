@@ -516,7 +516,16 @@ func TestSplit_ByChaptersNoChapters(t *testing.T) {
 
 func TestSplit_Success(t *testing.T) {
 	dir := t.TempDir()
-	src := buildTestMKV(t, dir)
+	// Part 2 starts at 100ms: the video block there must be a keyframe for the
+	// range to be splittable (keyframe alignment).
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("video0")},
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Data: []byte("audio0")},
+		{TrackNumber: 1, Timecode: 100, Keyframe: true, Data: []byte("video1")},
+		{TrackNumber: 2, Timecode: 100, Keyframe: true, Data: []byte("audio1")},
+	}
+	src := buildMinimalMKV(t, dir, "test.mkv", tracks, blocks, 200)
 	outDir := filepath.Join(dir, "parts")
 
 	ctx := context.Background()

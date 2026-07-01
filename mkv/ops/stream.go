@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -26,6 +27,11 @@ type streamOpts struct {
 	timeStart     int64
 	timeEnd       int64
 	keyframeAlign bool // split on keyframe boundaries
+	// videoTracks holds the SOURCE track numbers of video tracks. keyframeAlign
+	// aligns on these: every audio block is flagged keyframe, so aligning on
+	// "any keyframe" would start a segment mid-GOP (corrupt video until the
+	// next real video keyframe). Empty means no video track: any keyframe cuts.
+	videoTracks   map[uint64]bool
 	extraSubs     []mkv.Block
 	progress      mkv.ProgressFunc
 }
@@ -63,6 +69,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	var cluster []mkv.Block
 	clusterTS := int64(-1)
 	subIdx := 0
+	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
 	endStates := map[uint64]*trackEndState{}
 
 	flush := func() error {
@@ -120,6 +127,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			if clusterTS < 0 && gateSkipped {
+				return noCutKeyframeErr(opts.timeStart)
+			}
 			if err := injectSubs(1 << 62); err != nil {
 				return err
 			}
@@ -130,19 +140,29 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			return err
 		}
 
+		// cutKeyframe: a keyframe a segment may start or end on. With a video
+		// track only a video keyframe qualifies (see videoTracks above).
+		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
+
 		if opts.timeStart > 0 && blk.Timecode < opts.timeStart {
 			continue
 		}
-		// keyframeAlign: wait for a keyframe to actually start writing
-		if opts.keyframeAlign && opts.timeStart > 0 && clusterTS < 0 && !blk.Keyframe {
+		// keyframeAlign: drop everything (audio included) until the first cut
+		// keyframe, so the segment starts decodable and A/V start together.
+		if opts.keyframeAlign && opts.timeStart > 0 && clusterTS < 0 && !cutKeyframe {
+			gateSkipped = true
 			continue
 		}
 		if opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd {
-			// keyframeAlign: keep going until a keyframe for clean cut
-			if opts.keyframeAlign && !blk.Keyframe {
-				continue // skip non-keyframes past the end point
+			if clusterTS < 0 && gateSkipped {
+				return noCutKeyframeErr(opts.timeStart)
 			}
-			break
+			if !opts.keyframeAlign || cutKeyframe {
+				break
+			}
+			// keyframeAlign: the cut lands on the next cut keyframe at/after
+			// timeEnd. Blocks before it belong to the GOP that started inside
+			// the range: keep them so no frame is lost across segments.
 		}
 
 		newID, ok := opts.remap[blk.TrackNumber]
@@ -201,6 +221,14 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	}
 	recordEnds()
 	return flush()
+}
+
+// noCutKeyframeErr reports a range that contains blocks but no video keyframe
+// to start on: writing it would either drop the content silently (empty part)
+// or produce corrupt video until the next real keyframe, so it is an explicit
+// error instead.
+func noCutKeyframeErr(startMs int64) error {
+	return fmt.Errorf("no video keyframe at/after %dms: cannot start a decodable segment there (video keyframes are sparse in the source); adjust the range to a keyframe", startMs)
 }
 
 func identityRemap(tracks []mkv.Track) map[uint64]uint64 {
