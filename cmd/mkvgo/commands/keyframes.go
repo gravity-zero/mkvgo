@@ -59,12 +59,14 @@ func CmdToVTT(args []string) {
 			}
 			continue
 		}
+		rejectFlagArg(args[i])
 		rest = append(rest, args[i])
 	}
 	if len(rest) < 1 || outPath == "" {
 		Fatal("usage: " + CmdUsage["to-vtt"])
 	}
 	src := rest[0]
+	GuardOverwrite(outPath)
 
 	out, err := os.Create(outPath)
 	if err != nil {

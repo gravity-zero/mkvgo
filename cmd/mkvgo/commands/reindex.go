@@ -13,6 +13,7 @@ func CmdReindex(args []string) {
 		Fatal("usage: mkvgo reindex <input.mkv> <output.mkv>")
 	}
 	src, dst := args[0], args[1]
+	GuardOverwrite(dst)
 
 	err := ops.Reindex(context.Background(), src, dst, mkv.Options{Progress: NewProgressBar()})
 	ClearProgress()

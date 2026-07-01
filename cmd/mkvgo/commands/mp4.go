@@ -36,6 +36,7 @@ func CmdToMP4(args []string) {
 		Fatal("usage: mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>")
 	}
 	src, dst := rest[0], rest[1]
+	GuardOverwrite(dst)
 
 	if flatten {
 		fmt.Fprintln(os.Stderr, "warning: --flatten-subs converts styled subtitles to plain text (styling, positioning and karaoke are lost)")
@@ -80,6 +81,7 @@ func CmdFromMP4(args []string) {
 		Fatal("usage: mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>")
 	}
 	src, dst := rest[0], rest[1]
+	GuardOverwrite(dst)
 
 	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
 		Progress:          NewProgressBar(),

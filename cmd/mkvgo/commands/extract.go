@@ -31,6 +31,7 @@ func CmdExtractAttachment(args []string) {
 	if outPath == "" {
 		Fatal("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
+	GuardOverwrite(outPath)
 
 	err = matroska.ExtractAttachment(context.Background(), source, attID, outPath)
 	if err != nil {
@@ -71,6 +72,7 @@ func CmdExtractSubtitle(args []string) {
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: " + usage)
 	}
+	GuardOverwrite(outPath)
 
 	var err error
 	switch format {

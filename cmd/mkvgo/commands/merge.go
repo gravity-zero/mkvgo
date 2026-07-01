@@ -27,10 +27,12 @@ func CmdMerge(args []string) {
 	if outPath == "" || len(inputs) == 0 {
 		Fatal("usage: mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]")
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.Merge(context.Background(), matroska.MergeOptions{
 		OutputPath: outPath, Inputs: inputs,
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -67,6 +69,7 @@ func CmdMergeSubtitle(args []string) {
 	if outPath == "" || subPath == "" {
 		Fatal("usage: mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass]")
 	}
+	GuardOverwrite(outPath)
 
 	if format == "" {
 		lower := strings.ToLower(subPath)

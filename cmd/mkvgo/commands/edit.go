@@ -101,10 +101,12 @@ JSON schema:
 	if err := json.Unmarshal(raw, &patch); err != nil {
 		Fatal(fmt.Sprintf("invalid JSON: %v", err))
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
 		applyPatch(c, patch)
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -130,6 +132,7 @@ func CmdEditTitle(args []string) {
 	if outPath == "" || title == "" {
 		Fatal("usage: mkvgo edit-title <file.mkv> -o <out.mkv> <title>")
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
 		c.Info.Title = title
@@ -188,6 +191,7 @@ func CmdEditTrack(args []string) {
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: mkvgo edit-track <file.mkv> -o <out.mkv> -t <trackID> [-lang x] [-name x]")
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
 		for i := range c.Tracks {
@@ -209,7 +213,8 @@ func CmdEditTrack(args []string) {
 			return
 		}
 		Fatal(fmt.Sprintf("track %d not found", trackID))
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}

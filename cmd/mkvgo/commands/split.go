@@ -42,7 +42,8 @@ func CmdSplit(args []string) {
 		OutputDir:  outDir,
 		ByChapters: byChapters,
 		Ranges:     ranges,
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -70,8 +71,10 @@ func CmdJoin(args []string) {
 	if outPath == "" || len(sources) == 0 {
 		Fatal("usage: mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...")
 	}
+	GuardOverwrite(outPath)
 
-	err := matroska.Join(context.Background(), sources, outPath)
+	err := matroska.Join(context.Background(), sources, outPath, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}

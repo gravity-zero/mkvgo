@@ -18,6 +18,21 @@ import (
 
 var JsonOutput bool
 
+// Force is the global -f/--force flag: allow overwriting an existing output
+// file. Without it, commands that write a new file refuse to clobber one.
+var Force bool
+
+// GuardOverwrite refuses to overwrite an existing output file unless the
+// global -f/--force flag is set, so a typo cannot silently destroy a file.
+func GuardOverwrite(path string) {
+	if Force || path == "" || path == "-" {
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		Fatal(fmt.Sprintf("%s already exists (use -f/--force to overwrite)", path))
+	}
+}
+
 const (
 	progressThrottle = 100 * time.Millisecond
 	barWidth         = 30
@@ -27,25 +42,25 @@ var CmdUsage = map[string]string{
 	"info":               "mkvgo info [-json] <file.mkv|.mp4|->",
 	"tracks":             "mkvgo tracks [-json] <file.mkv|.mp4|->",
 	"chapters":           "mkvgo chapters [-json] <file.mkv|.mp4|->",
-	"attachments":        "mkvgo attachments [-json] <file.mkv|->",
-	"tags":               "mkvgo tags [-json] <file.mkv|->",
+	"attachments":        "mkvgo attachments [-json] <file.mkv|.mp4|->",
+	"tags":               "mkvgo tags [-json] <file.mkv|.mp4|->",
 	"probe":              "mkvgo probe [-json] <file.mkv|.mp4|->",
 	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] <file.mkv>",
 	"compare":            "mkvgo compare [-json] <a.mkv> <b.mkv>",
-	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,...]",
+	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)]",
 	"mux":                "mkvgo mux -o <out.mkv> <file:trackID> [<file:trackID> ...]",
 	"merge":              "mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]",
-	"merge-subtitle":     "mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass] [-lang code] [-name text]",
+	"merge-subtitle":     "mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass (default: from extension)] [-lang code (default: und)] [-name text]",
 	"remove-track":       "mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>",
 	"add-track":          "mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID> [-lang code] [-name text]",
 	"edit":               "mkvgo edit <file.mkv> -o <out.mkv> '<json>' (or - for stdin)",
 	"edit-title":         "mkvgo edit-title <file.mkv> -o <out.mkv> <title>",
 	"edit-track":         "mkvgo edit-track <file.mkv> -o <out.mkv> -t <id> [-lang x] [-name x] [-default|-no-default] [-forced|-no-forced]",
-	"edit-inplace":       "mkvgo edit-inplace <file.mkv> '<json>' (instant, no rewrite)",
+	"edit-inplace":       "mkvgo edit-inplace <file.mkv> '<json>' (instant, no rewrite; DESTRUCTIVE: modifies <file.mkv> itself)",
 	"extract-attachment": "mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>",
-	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt]",
+	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt (default: srt)]",
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",

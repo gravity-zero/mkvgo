@@ -23,6 +23,7 @@ func CmdToWebM(args []string) {
 		Fatal("usage: mkvgo to-webm <input.mkv> <output.webm>")
 	}
 	src, dst := args[0], args[1]
+	GuardOverwrite(dst)
 
 	// Warn about the non-WebM elements this remux will drop, so the loss is
 	// explicit at run time (not only in the docs).

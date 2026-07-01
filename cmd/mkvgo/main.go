@@ -20,6 +20,8 @@ func main() {
 		switch a {
 		case "-json":
 			commands.JsonOutput = true
+		case "-f", "--force", "-force":
+			commands.Force = true
 		case "--version", "-version":
 			fmt.Printf("mkvgo %s\n", version)
 			os.Exit(0)
@@ -148,7 +150,13 @@ Commands:
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
 
 Global flags:
-  -json         Output as JSON (info, tracks, chapters, attachments)
+  -json         Output as JSON (info, tracks, chapters, attachments, tags,
+                probe, keyframes, validate, compare; ignored elsewhere)
+  -f, --force   Overwrite an existing output file (commands that write a new
+                file refuse to clobber one without it)
+
+Exit codes: 0 success; 1 error. validate/compare also exit 1 when issues or
+differences are found.
 
 Usage: mkvgo <command> [options]`)
 }

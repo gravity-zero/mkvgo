@@ -40,7 +40,8 @@ func CmdDemux(args []string) {
 
 	err := matroska.Demux(context.Background(), matroska.DemuxOptions{
 		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs,
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -82,10 +83,12 @@ func CmdMux(args []string) {
 	if len(inputs) == 0 {
 		Fatal("no track inputs specified")
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.Mux(context.Background(), matroska.MuxOptions{
 		OutputPath: outPath, Tracks: inputs,
-	})
+	}, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -115,6 +118,7 @@ func CmdRemoveTrack(args []string) {
 	if outPath == "" || len(trackIDs) == 0 {
 		Fatal("usage: mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>")
 	}
+	GuardOverwrite(outPath)
 
 	err := matroska.RemoveTrack(context.Background(), source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
@@ -158,8 +162,10 @@ func CmdAddTrack(args []string) {
 	if outPath == "" || input.SourcePath == "" {
 		Fatal("usage: mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID>")
 	}
+	GuardOverwrite(outPath)
 
-	err := matroska.AddTrack(context.Background(), base, outPath, input)
+	err := matroska.AddTrack(context.Background(), base, outPath, input, matroska.Options{Progress: NewProgressBar()})
+	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
