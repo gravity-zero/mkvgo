@@ -49,10 +49,16 @@ type Container struct {
 }
 
 type SegmentInfo struct {
-	Title         string     `json:"title"`
-	MuxingApp     string     `json:"muxing_app"`
-	WritingApp    string     `json:"writing_app"`
-	Duration      float64    `json:"duration"`
+	Title string `json:"title"`
+	// MuxingApp/WritingApp default to "mkvgo" at write time when empty.
+	MuxingApp  string `json:"muxing_app"`
+	WritingApp string `json:"writing_app"`
+	// Duration is in TimecodeScale units (the raw stored value). At write time
+	// a Duration > 0 wins over the Container.DurationMs-derived value; leave it
+	// 0 to have the writer derive the Duration element from DurationMs.
+	Duration float64 `json:"duration"`
+	// TimecodeScale is in nanoseconds per timecode unit (Matroska default
+	// 1_000_000 = 1 ms). 0 means "unset": writers fall back to 1_000_000.
 	TimecodeScale int64      `json:"timecode_scale"`
 	DateUTC       *time.Time `json:"date_utc,omitempty"`
 	SegmentUID    []byte     `json:"segment_uid,omitempty"`
@@ -61,14 +67,23 @@ type SegmentInfo struct {
 }
 
 type Track struct {
-	ID        uint64    `json:"id"`
-	UID       uint64    `json:"uid,omitempty"` // Matroska TrackUID (64-bit); distinct from TrackNumber (ID)
-	Type      TrackType `json:"type"`
-	Codec     string    `json:"codec"`
-	Language  string    `json:"language"` // legacy ISO 639-2 (0x22B59C); "" when absent — see LanguagePresent
-	Name      string    `json:"name"`
-	IsDefault bool      `json:"is_default"`
-	IsForced  bool      `json:"is_forced"`
+	ID uint64 `json:"id"`
+	// UID is the Matroska TrackUID (64-bit); distinct from TrackNumber (ID).
+	// At write time a zero UID defaults to the track's ID.
+	UID   uint64    `json:"uid,omitempty"`
+	Type  TrackType `json:"type"`
+	Codec string    `json:"codec"`
+	// Language is the legacy ISO 639-2 code (0x22B59C); "" when absent — see
+	// LanguagePresent. NOTE: at write time an empty Language writes no element,
+	// and the Matroska spec default is "eng" — other tools will report such a
+	// track as English. Write "und" explicitly for "undetermined".
+	Language string `json:"language"`
+	Name     string `json:"name"`
+	// IsDefault false is written as an explicit FlagDefault=0 (the spec default
+	// is 1, so omitting the element would mean "default"). DefaultPresent/
+	// ForcedPresent are read-side only; they are not consulted at write time.
+	IsDefault bool `json:"is_default"`
+	IsForced  bool `json:"is_forced"`
 	// Extended disposition flags (Matroska FlagHearingImpaired/…/FlagCommentary),
 	// mapping to the ffprobe stream dispositions of the same name. All false when
 	// absent. Matroska-only; MP4 has no equivalent boxes so they stay false there.

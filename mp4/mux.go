@@ -104,7 +104,15 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, dur int64, sync
 // from a local file, or post-process for progressive HTTP streaming.
 //
 // Composition reordering (B-frames) is preserved via a signed ctts box. Timing
-// uses a 1 ms timescale, which is exact for the default Matroska TimecodeScale.
+// uses a 1 ms movie timescale, which is exact for the default Matroska
+// TimecodeScale (finer source scales are quantised to milliseconds); audio uses
+// its sample rate as the media timescale, keeping the audio path sample-exact.
+//
+// Metadata NOT carried into MP4: attachments (fonts, cover art), track-targeted
+// tags, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED,
+// GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION → iTunes ilst). Chapters are
+// flattened (sub-chapters and untitled chapters are omitted) and the Nero chpl
+// list caps at 255 entries; the QuickTime chapter track carries the full list.
 func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (err error) {
 	o := optionsFrom(opts)
 	fs := o.FS

@@ -8,6 +8,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// SeekHeadReserve is the byte budget reserved at the head of the Segment for
+// the SeekHead written by Finalize. When the final SeekHead does not fit (more
+// entries than the reserve allows), it is appended at the END of the file
+// instead of the reserved spot — still valid, but readers discover it later.
 const SeekHeadReserve = 256
 
 type MKVWriter struct {

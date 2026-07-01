@@ -78,10 +78,19 @@ var FFprobeCodecName = mkv.FFprobeCodecName
 
 // --- Reader ---
 
+// Open reads the FULL metadata of the Matroska/WebM file at path: Info, Tracks,
+// Chapters, Attachments (with data), Tags and the Cues seek index, walking the
+// whole Segment (Clusters are skipped by seeking, block payloads are not read).
+// For a cheap head-only read (streaming indexers, probes), use OpenMeta instead.
+// Returns ErrNotMatroska when the file is not an EBML/Matroska container.
 func Open(ctx context.Context, path string) (*Container, error) {
 	return reader.Open(ctx, path)
 }
 
+// Read is Open over a caller-provided io.ReadSeeker (a seekable source is
+// required: the parser follows SeekHead and skips Clusters by seeking; for a
+// pure forward-only io.Reader use reader.ReadStream). path is informational
+// (Container.Path, error messages).
 func Read(ctx context.Context, r io.ReadSeeker, path string) (*Container, error) {
 	return reader.Read(ctx, r, path)
 }
@@ -142,6 +151,11 @@ func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) 
 
 // --- Writer ---
 
+// Write serialises c's METADATA ONLY — EBML header, Info, Tracks, Chapters,
+// Attachments and Tags. It writes NO Clusters (a Container holds no block
+// data) and no Cues/SeekHead, so the result is not a playable media file.
+// To produce a complete file, remux from a source (RemuxToWebM, mp4.RemuxToMP4,
+// Mux/Merge) or write blocks yourself via writer.MKVWriter / writer.NewStreamWriter.
 func Write(w io.Writer, c *Container) error {
 	return writer.Write(w, c)
 }

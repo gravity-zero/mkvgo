@@ -63,6 +63,11 @@ func (e *ew) flush(w io.Writer, id uint32) error {
 	return WriteMasterElement(w, id, e.Bytes())
 }
 
+// Write serialises c's METADATA ONLY — EBML header, Info, Tracks, Chapters,
+// Attachments, Tags. It writes NO Clusters (a Container holds no block data)
+// and no Cues/SeekHead, so the result is not a playable media file. For a
+// complete file, write blocks through MKVWriter or NewStreamWriter, or remux
+// from a source (ops.RemuxToWebM, mp4.RemuxToMP4, ops.Mux).
 func Write(w io.Writer, c *mkv.Container) error {
 	if err := WriteEBMLHeader(w); err != nil {
 		return err

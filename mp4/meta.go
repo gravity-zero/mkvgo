@@ -15,9 +15,10 @@ import (
 // OpenMeta/ReadMeta. Use RemuxFromMP4 to convert the media itself.
 
 // OpenMeta opens the MP4 file at path and returns its metadata as a Container:
-// Info, Tracks, Chapters and DurationMs are populated; Attachments, Tags and
-// Cues are left nil (MP4 carries no equivalent of the first two, and Cues are
-// not built on the metadata path). Only the moov box's headers are read — never
+// Info (including the title from ©nam), Tracks, Chapters, movie-level Tags
+// (mapped from the iTunes ilst atoms) and DurationMs are populated; Attachments
+// and Cues are left nil (MP4 has no attachment equivalent, and Cues are not
+// built on the metadata path). Only the moov box's headers are read — never
 // the mdat sample data, and never the per-sample tables unless keyframes are
 // requested — so it is fast and bounded regardless of file size.
 //

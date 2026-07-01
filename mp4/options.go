@@ -19,7 +19,9 @@ type DroppedTrack struct {
 type Options struct {
 	// FS, when non-nil, replaces direct OS filesystem access.
 	FS *mkv.FS
-	// Progress, when non-nil, receives processed/total byte counts.
+	// Progress, when non-nil, receives processed/total byte counts. Only the
+	// remux entry points report progress; OpenMeta/ReadMeta ignore it (the
+	// metadata probe is a single bounded read).
 	Progress mkv.ProgressFunc
 	// SkipUnsupported drops audio/video tracks whose codec cannot be carried in
 	// the output instead of failing the whole remux. The remux still fails if no

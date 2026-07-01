@@ -18,6 +18,10 @@ import (
 // keyframe-aligned clusters. It does NOT transcode — a source whose codecs fall
 // outside the WebM subset is rejected with an error and no output is produced.
 //
+// Elements NOT carried into the output: Chapters, Attachments and Tags are
+// dropped (mkv.WebMNonSubsetElements lists the ones present in a source), and
+// the streaming output has no SeekHead/Cues (unknown-size clusters).
+//
 // Unlike writer.WriteWebM (metadata only), this produces a file with frames.
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
