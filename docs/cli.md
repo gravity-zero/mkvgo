@@ -437,7 +437,7 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
 |---|---|
 | `-o` | Output directory (required) |
 | `-chapters` | Split at chapter boundaries |
-| `-range` | Comma-separated time ranges in milliseconds (0 = end of file) |
+| `-range` | Comma-separated `start-end` ranges. Each bound is milliseconds (`300000`), fractional seconds (`90.5`) or a clock time (`5:00`, `01:30:00`, `1:30.5`); `0` = end of file |
 
 Cut policy (keyframe alignment): a segment starts at the first **video
 keyframe** at/after its start time (leading audio and mid-GOP video are
@@ -453,7 +453,7 @@ timeline.
 mkvgo split video.mkv -o chapters/ -chapters
 
 # Split first 5 minutes into its own file
-mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
+mkvgo split video.mkv -o parts/ -range 0-5:00,5:00-0
 ```
 
 ---

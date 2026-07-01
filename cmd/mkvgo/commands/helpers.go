@@ -61,7 +61,7 @@ var CmdUsage = map[string]string{
 	"edit-inplace":       "mkvgo edit-inplace <file.mkv> '<json>' (instant, no rewrite; DESTRUCTIVE: modifies <file.mkv> itself)",
 	"extract-attachment": "mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>",
 	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt (default: srt)]",
-	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]",
+	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0] (bounds: ms, seconds.frac or [HH:]MM:SS)",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>",
@@ -223,17 +223,46 @@ func ParseTimeRanges(s string) []matroska.TimeRange {
 		if len(parts) != 2 {
 			Fatal(fmt.Sprintf("invalid range %q, expected start-end", part))
 		}
-		start, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		start, err := ParseTimePoint(parts[0])
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid start time %q", parts[0]))
+			Fatal(fmt.Sprintf("invalid start time %q: %v", parts[0], err))
 		}
-		end, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		end, err := ParseTimePoint(parts[1])
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid end time %q", parts[1]))
+			Fatal(fmt.Sprintf("invalid end time %q: %v", parts[1], err))
 		}
 		ranges = append(ranges, matroska.TimeRange{StartMs: start, EndMs: end})
 	}
 	return ranges
+}
+
+// ParseTimePoint parses one range bound into milliseconds. Accepted forms:
+// plain integer milliseconds ("300000"), seconds with a fraction ("90.5"),
+// or a clock time [HH:]MM:SS[.fraction] ("5:00", "01:30:00", "1:30.5").
+func ParseTimePoint(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if !strings.ContainsAny(s, ":.") {
+		return strconv.ParseInt(s, 10, 64) // milliseconds
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) > 3 {
+		return 0, fmt.Errorf("expected [HH:]MM:SS[.fraction]")
+	}
+	// The last field carries the seconds (possibly fractional); the fields
+	// before it are minutes, then hours.
+	sec, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+	if err != nil || sec < 0 {
+		return 0, fmt.Errorf("invalid seconds %q", parts[len(parts)-1])
+	}
+	total := sec
+	for i, mult := len(parts)-2, float64(60); i >= 0; i, mult = i-1, mult*60 {
+		v, err := strconv.ParseInt(parts[i], 10, 64)
+		if err != nil || v < 0 {
+			return 0, fmt.Errorf("invalid time component %q", parts[i])
+		}
+		total += float64(v) * mult
+	}
+	return int64(total * 1000), nil
 }
 
 func FmtMs(ms int64) string {
