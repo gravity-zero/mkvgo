@@ -2,7 +2,9 @@ package writer
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -187,13 +189,17 @@ func writeEBMLHeaderDocType(w io.Writer, docType string, version, readVersion ui
 
 func WriteSegmentInfo(w io.Writer, info *mkv.SegmentInfo, durationMs int64) error {
 	var e ew
-	if info.TimecodeScale > 0 {
-		e.uint(mkv.IDTimecodeScale, uint64(info.TimecodeScale))
+	// A zero TimecodeScale means "unset": fall back to the Matroska default
+	// (1_000_000 = 1 ms) so a Duration can still be derived from durationMs.
+	scale := info.TimecodeScale
+	if scale <= 0 {
+		scale = 1_000_000
 	}
+	e.uint(mkv.IDTimecodeScale, uint64(scale))
 	if info.Duration > 0 {
 		e.float64(mkv.IDDuration, info.Duration)
-	} else if durationMs > 0 && info.TimecodeScale > 0 {
-		e.float64(mkv.IDDuration, float64(durationMs)*1e6/float64(info.TimecodeScale))
+	} else if durationMs > 0 {
+		e.float64(mkv.IDDuration, float64(durationMs)*1e6/float64(scale))
 	}
 	if info.Title != "" {
 		e.str(mkv.IDTitle, info.Title)
@@ -469,7 +475,13 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 	e.uint(mkv.IDTimestamp, rawTS)
 	for i := range blocks {
 		b := &blocks[i]
-		relTC := int16(b.Timecode - clusterTS)
+		// Block timecodes are milliseconds internally; the SimpleBlock offset is
+		// stored in raw timecode-scale units, like the cluster Timestamp above.
+		delta := (b.Timecode - clusterTS) * 1000000 / timecodeScale
+		if delta < math.MinInt16 || delta > math.MaxInt16 {
+			return fmt.Errorf("block timecode %dms is %+d timecode units from cluster start %dms, outside SimpleBlock's int16 range", b.Timecode, delta, clusterTS)
+		}
+		relTC := int16(delta)
 		if e.err != nil {
 			break
 		}

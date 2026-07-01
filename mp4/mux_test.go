@@ -33,10 +33,24 @@ type genBlock struct {
 
 // buildMKV writes a seekable .mkv file (known-size clusters, SeekHead + Cues,
 // like a real muxer) from the given tracks and blocks. Blocks must be supplied
-// in non-decreasing timecode order; they are placed in a single cluster, so
-// timecodes must stay within int16 ms of zero.
+// in non-decreasing timecode order; they are grouped into ~1s clusters.
 func buildMKV(t testing.TB, tracks []mkv.Track, blocks []genBlock) string {
 	return buildMKVWithChapters(t, tracks, blocks, nil)
+}
+
+// writeTestClusters groups blocks into ~1s clusters so block offsets stay
+// within a SimpleBlock's int16 range regardless of the total duration.
+func writeTestClusters(m *writer.MKVWriter, scale int64, blks []mkv.Block) error {
+	start := 0
+	for i := 1; i <= len(blks); i++ {
+		if i == len(blks) || blks[i].Timecode-blks[start].Timecode >= 1000 {
+			if err := m.WriteClusterWithCues(blks[start].Timecode, scale, blks[start:i]); err != nil {
+				return err
+			}
+			start = i
+		}
+	}
+	return nil
 }
 
 // buildMKVTitled is buildMKV with a container title (Info.Title), for exercising the
@@ -68,7 +82,7 @@ func buildMKVTitled(t testing.TB, title string, tracks []mkv.Track, blocks []gen
 		t.Fatal(err)
 	}
 	if len(blks) > 0 {
-		if err := m.WriteClusterWithCues(0, scale, blks); err != nil {
+		if err := writeTestClusters(m, scale, blks); err != nil {
 			f.Close()
 			t.Fatal(err)
 		}
@@ -112,7 +126,7 @@ func buildMKVWithChapters(t testing.TB, tracks []mkv.Track, blocks []genBlock, c
 		t.Fatal(err)
 	}
 	if len(blks) > 0 {
-		if err := m.WriteClusterWithCues(0, scale, blks); err != nil {
+		if err := writeTestClusters(m, scale, blks); err != nil {
 			f.Close()
 			t.Fatal(err)
 		}

@@ -79,15 +79,18 @@ func TestSegmentInfoDurationBranches(t *testing.T) {
 			t.Errorf("Duration = %g, want 3000.0", got.Info.Duration)
 		}
 	})
-	t.Run("TimecodeScale=0 blocks the durationMs branch", func(t *testing.T) {
-		// line 195: else if durationMs > 0 && info.TimecodeScale > 0
-		// With TimecodeScale=0 the second clause is false; DurationMs stays 0.
+	t.Run("TimecodeScale=0 falls back to the Matroska default", func(t *testing.T) {
+		// An unset TimecodeScale is written as the 1_000_000 default, so the
+		// Duration derived from durationMs still round-trips.
 		got := writeAndRead(t, &mkv.Container{
 			Info:       mkv.SegmentInfo{TimecodeScale: 0, Duration: 0.0},
 			DurationMs: 8000,
 		})
-		if got.DurationMs != 0 {
-			t.Errorf("DurationMs = %d; want 0 (TimecodeScale=0 blocks branch)", got.DurationMs)
+		if got.Info.TimecodeScale != 1_000_000 {
+			t.Errorf("TimecodeScale = %d; want 1_000_000 (default applied)", got.Info.TimecodeScale)
+		}
+		if got.DurationMs != 8000 {
+			t.Errorf("DurationMs = %d; want 8000 (derived with default scale)", got.DurationMs)
 		}
 	})
 }

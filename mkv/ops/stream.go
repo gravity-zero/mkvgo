@@ -74,11 +74,26 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		return err
 	}
 
-	injectSubs := func(upTo int64) {
+	// injectSubs appends the pending extra subtitle blocks up to the given
+	// timecode, rolling the cluster forward when a cue is too far from the
+	// cluster start (a SimpleBlock offset must fit in int16 timecode units, so
+	// sparse cues cannot all share one cluster).
+	injectSubs := func(upTo int64) error {
 		for subIdx < len(opts.extraSubs) && opts.extraSubs[subIdx].Timecode <= upTo {
-			cluster = append(cluster, opts.extraSubs[subIdx])
+			sub := opts.extraSubs[subIdx]
+			if clusterTS >= 0 && sub.Timecode-clusterTS >= defaultClusterDurationMs {
+				if err := flush(); err != nil {
+					return err
+				}
+				clusterTS = sub.Timecode
+			}
+			if clusterTS < 0 {
+				clusterTS = sub.Timecode
+			}
+			cluster = append(cluster, sub)
 			subIdx++
 		}
+		return nil
 	}
 
 	// recordEnds publishes each output track's next free start (its last frame's
@@ -105,7 +120,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
-			injectSubs(1 << 62)
+			if err := injectSubs(1 << 62); err != nil {
+				return err
+			}
 			recordEnds()
 			return flush()
 		}
@@ -164,18 +181,24 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			clusterTS = blk.Timecode
 		}
 		if blk.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
-			injectSubs(blk.Timecode)
+			if err := injectSubs(blk.Timecode); err != nil {
+				return err
+			}
 			if err := flush(); err != nil {
 				return err
 			}
 			clusterTS = blk.Timecode
 		}
 
-		injectSubs(blk.Timecode)
+		if err := injectSubs(blk.Timecode); err != nil {
+			return err
+		}
 		cluster = append(cluster, blk)
 	}
 
-	injectSubs(1 << 62)
+	if err := injectSubs(1 << 62); err != nil {
+		return err
+	}
 	recordEnds()
 	return flush()
 }

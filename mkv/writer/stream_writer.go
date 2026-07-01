@@ -39,7 +39,7 @@ type StreamWriter struct {
 	w             io.Writer
 	timecodeScale int64
 	inCluster     bool
-	clusterTS     int64 // raw timecode of current cluster (in timecode units)
+	clusterTS     int64 // timestamp of current cluster, in milliseconds
 }
 
 // NewStreamWriter writes the EBML header, an unknown-size Segment, and the
@@ -140,16 +140,18 @@ func (s *StreamWriter) FlushCluster() {
 }
 
 // relativeTimecode expresses b.Timecode relative to the current cluster start,
-// as the signed 16-bit value a SimpleBlock encodes. A SimpleBlock's timecode
-// field is an int16, so the offset from the cluster timestamp must fit in
-// [math.MinInt16, math.MaxInt16] (±~32 s at millisecond scale). Beyond that, a
-// blind int16() cast would wrap and silently corrupt the timestamp, so this
-// returns an error instead: the caller must open a nearer cluster (a keyframe
-// block via WriteBlock, or FlushCluster) before writing.
+// as the signed 16-bit value a SimpleBlock encodes. Block timecodes are
+// milliseconds internally; the offset is stored in raw timecode-scale units,
+// like the cluster Timestamp. A SimpleBlock's timecode field is an int16, so
+// the offset must fit in [math.MinInt16, math.MaxInt16] (±~32 s at millisecond
+// scale). Beyond that, a blind int16() cast would wrap and silently corrupt
+// the timestamp, so this returns an error instead: the caller must open a
+// nearer cluster (a keyframe block via WriteBlock, or FlushCluster) before
+// writing.
 func (s *StreamWriter) relativeTimecode(b mkv.Block) (int16, error) {
-	delta := b.Timecode - s.clusterTS
+	delta := (b.Timecode - s.clusterTS) * 1_000_000 / s.timecodeScale
 	if delta < math.MinInt16 || delta > math.MaxInt16 {
-		return 0, fmt.Errorf("stream writer: block timecode %dms is %+dms from cluster start %dms, outside SimpleBlock's int16 range; open a new cluster", b.Timecode, delta, s.clusterTS)
+		return 0, fmt.Errorf("stream writer: block timecode %dms is %+d timecode units from cluster start %dms, outside SimpleBlock's int16 range; open a new cluster", b.Timecode, delta, s.clusterTS)
 	}
 	return int16(delta), nil
 }
