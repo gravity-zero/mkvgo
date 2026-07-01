@@ -309,13 +309,13 @@ func appendU16(b []byte, v uint16) []byte { return append(b, byte(v>>8), byte(v)
 func u32be(v uint32) []byte { return []byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
 
 // TestParseMP4Tags checks the udta/meta/ilst iTunes-tag reader: text atoms become
-// Matroska SimpleTags (with the title surfaced separately), non-text atoms (cover
-// art) are skipped.
+// Matroska SimpleTags (with the title surfaced separately), the covr cover art
+// comes back as an attachment.
 func TestParseMP4Tags(t *testing.T) {
 	data := func(s string) []byte { // a "data" box: type 1 (UTF-8), locale 0, value
 		return box("data", append([]byte{0, 0, 0, 1, 0, 0, 0, 0}, s...))
 	}
-	cover := box("covr", box("data", []byte{0, 0, 0, 13, 0, 0, 0, 0, 0xFF, 0xD8})) // type 13 = JPEG, skipped
+	cover := box("covr", box("data", []byte{0, 0, 0, 13, 0, 0, 0, 0, 0xFF, 0xD8})) // type 13 = JPEG
 	ilst := box("ilst", bytes.Join([][]byte{
 		box("\xa9nam", data("My Title")),
 		box("\xa9too", data("Lavf60")),
@@ -326,7 +326,7 @@ func TestParseMP4Tags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tags, title := parseMP4Tags(udtaBoxes)
+	tags, title, att := parseMP4Tags(udtaBoxes)
 	if title != "My Title" {
 		t.Errorf("title = %q, want My Title", title)
 	}
@@ -337,8 +337,12 @@ func TestParseMP4Tags(t *testing.T) {
 	if got["TITLE"] != "My Title" || got["ENCODER"] != "Lavf60" {
 		t.Errorf("tags = %v, want TITLE/ENCODER", got)
 	}
-	if _, ok := got["covr"]; ok || len(tags) != 2 {
-		t.Errorf("cover art (non-text) must be skipped, got %d tags: %v", len(tags), got)
+	if len(tags) != 2 {
+		t.Errorf("cover art must not appear among text tags, got %d tags: %v", len(tags), got)
+	}
+	if att == nil || att.MIMEType != "image/jpeg" || att.Name != "cover.jpg" ||
+		!bytes.Equal(att.Data, []byte{0xFF, 0xD8}) {
+		t.Errorf("cover attachment = %+v, want JPEG cover.jpg with the image bytes", att)
 	}
 }
 

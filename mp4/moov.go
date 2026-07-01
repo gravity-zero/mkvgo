@@ -1,6 +1,10 @@
 package mp4
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"strings"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
 
 // moov.go — assembles the movie box (moov) and its sub-tree from the sample
 // tables collected during the mdat pass. All timing is in the movie timescale
@@ -39,7 +43,7 @@ func dedupeBrands(in []string) []string {
 // buildMoov assembles the complete moov box. Tracks with no samples are skipped.
 // mdatBase is the absolute file offset of the mdat payload (added to the stored
 // relative chunk offsets); co64 selects 64-bit chunk offsets.
-func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, tags []mkv.SimpleTag, chapters []mkv.Chapter) []byte {
+func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []byte {
 	var (
 		traks    [][]byte
 		movieDur uint32
@@ -64,10 +68,10 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, title string, tags
 	// One moov-level udta carrying the movie title (iTunes meta/ilst, what ffmpeg
 	// writes and ffprobe reads as the format "title") and the chapter list.
 	var udtaKids [][]byte
-	if meta := buildMovieMeta(title, tags); meta != nil {
-		udtaKids = append(udtaKids, meta)
+	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover); mb != nil {
+		udtaKids = append(udtaKids, mb)
 	}
-	if chpl := buildChplBox(chapters); chpl != nil {
+	if chpl := buildChplBox(meta.chapters); chpl != nil {
 		udtaKids = append(udtaKids, chpl)
 	}
 	if len(udtaKids) > 0 {
@@ -90,11 +94,45 @@ var mp4MetaAtoms = map[string]string{
 	"DESCRIPTION":   "desc",
 }
 
+// coverArt is an image attachment carried as the iTunes covr ilst atom.
+type coverArt struct {
+	data []byte
+	png  bool // selects the data box's well-known type: 14 (PNG) vs 13 (JPEG)
+}
+
+// pickCoverArt selects the source attachment to carry as MP4 cover art: the
+// first JPEG/PNG image attachment, preferring one whose name starts with
+// "cover" (the Matroska cover-art convention). Nil when there is none.
+func pickCoverArt(atts []mkv.Attachment) *coverArt {
+	var found *coverArt
+	for _, a := range atts {
+		var png bool
+		switch a.MIMEType {
+		case "image/jpeg":
+		case "image/png":
+			png = true
+		default:
+			continue
+		}
+		if len(a.Data) == 0 {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(a.Name), "cover") {
+			return &coverArt{data: a.Data, png: png}
+		}
+		if found == nil {
+			found = &coverArt{data: a.Data, png: png}
+		}
+	}
+	return found
+}
+
 // buildMovieMeta builds the iTunes-style metadata box carrying the movie title
-// (©nam, what ffprobe reports as the format "title") and the other global tags as
-// ilst atoms (ARTIST→©ART, ALBUM→©alb, …), exactly as ffmpeg writes them and as
-// from-mp4 reads them back. Returns nil when there is nothing to write.
-func buildMovieMeta(title string, tags []mkv.SimpleTag) []byte {
+// (©nam, what ffprobe reports as the format "title"), the other global tags as
+// ilst atoms (ARTIST→©ART, ALBUM→©alb, …) and the cover art (covr), exactly as
+// ffmpeg writes them and as from-mp4 reads them back. Returns nil when there is
+// nothing to write.
+func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt) []byte {
 	type atom struct{ typ, val string }
 	var atoms []atom
 	seen := map[string]bool{}
@@ -111,17 +149,28 @@ func buildMovieMeta(title string, tags []mkv.SimpleTag) []byte {
 			add(a, tg.Value)
 		}
 	}
-	if len(atoms) == 0 {
+	if len(atoms) == 0 && cover == nil {
 		return nil
 	}
-	ilstChildren := make([][]byte, len(atoms))
-	for i, a := range atoms {
+	ilstChildren := make([][]byte, 0, len(atoms)+1)
+	for _, a := range atoms {
 		val := a.val
 		data := fullBox("data", 0, 1, func(w *bw) { // flags = 1 → UTF-8 text
 			w.u32(0) // locale
 			w.bytes([]byte(val))
 		})
-		ilstChildren[i] = container(a.typ, data)
+		ilstChildren = append(ilstChildren, container(a.typ, data))
+	}
+	if cover != nil {
+		typ := uint32(13) // JPEG
+		if cover.png {
+			typ = 14
+		}
+		data := fullBox("data", 0, typ, func(w *bw) {
+			w.u32(0) // locale
+			w.bytes(cover.data)
+		})
+		ilstChildren = append(ilstChildren, container("covr", data))
 	}
 	ilst := container("ilst", ilstChildren...)
 	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {

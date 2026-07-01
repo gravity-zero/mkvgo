@@ -569,9 +569,9 @@ func TestParseMP4TagsMissingMeta(t *testing.T) {
 	// udta with no meta box → returns nil tags.
 	udtaBoxes := []memBox{{typ: "udta", payload: box("cprt", []byte("test"))}}
 	udtaInner, _ := iterBoxes(udtaBoxes[0].payload)
-	tags, title := parseMP4Tags(udtaInner)
-	if tags != nil || title != "" {
-		t.Errorf("no meta: got tags=%v title=%q, want nil/empty", tags, title)
+	tags, title, cover := parseMP4Tags(udtaInner)
+	if tags != nil || title != "" || cover != nil {
+		t.Errorf("no meta: got tags=%v title=%q cover=%v, want nil/empty", tags, title, cover)
 	}
 }
 

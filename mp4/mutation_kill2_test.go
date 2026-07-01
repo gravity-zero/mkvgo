@@ -1050,7 +1050,7 @@ func TestParseChplStart100nsArithmeticDirect(t *testing.T) {
 func TestBuildMoovPicksMaxDurAndMaxID(t *testing.T) {
 	t1 := makeOutTrackForMoov(1, 500) // mp4ID=1, dur=500ms
 	t2 := makeOutTrackForMoov(3, 200) // mp4ID=3, dur=200ms → maxID=3
-	moov := buildMoov([]*outTrack{t1, t2}, 1000, false, "", nil, nil)
+	moov := buildMoov([]*outTrack{t1, t2}, 1000, false, movieMeta{})
 	boxes, err := iterBoxes(moov[8:]) // skip moov header
 	if err != nil {
 		t.Fatalf("iterBoxes moov: %v", err)

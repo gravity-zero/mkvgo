@@ -118,6 +118,9 @@ func containerFromMovie(mv *movie) *mkv.Container {
 	if len(mv.tags) > 0 {
 		c.Tags = []mkv.Tag{{SimpleTags: mv.tags}}
 	}
+	if mv.cover != nil {
+		c.Attachments = []mkv.Attachment{*mv.cover}
+	}
 	return c
 }
 

@@ -107,6 +107,7 @@ type movie struct {
 	durationMs int64           // from mvhd, used when the sample table was not built
 	tags       []mkv.SimpleTag // file-level metadata from udta/meta/ilst
 	title      string          // ©nam, for Info.Title
+	cover      *mkv.Attachment // covr cover art, carried as an MKV attachment
 	fragmented bool            // an mvex box is present → sample data is in moof fragments
 }
 
@@ -780,7 +781,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 			if chpl, ok := findMemBox(ub, "chpl"); ok {
 				mv.chapters = parseChpl(chpl.payload)
 			}
-			mv.tags, mv.title = parseMP4Tags(ub)
+			mv.tags, mv.title, mv.cover = parseMP4Tags(ub)
 		}
 	}
 	return &mv, nil
@@ -825,11 +826,12 @@ var metaAtomNames = map[string]string{
 
 // parseMP4Tags reads file-level metadata from a udta box's meta/ilst atoms (the
 // iTunes-style tags). It returns the tags as Matroska SimpleTags plus the title
-// (©nam), for Info.Title. Non-text values (cover art, etc.) are skipped.
-func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string) {
+// (©nam), for Info.Title, and the cover art (covr) as a Matroska-style
+// attachment. Other non-text values are skipped.
+func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment) {
 	meta, ok := findMemBox(udtaBoxes, "meta")
 	if !ok || len(meta.payload) < 4 {
-		return nil, ""
+		return nil, "", nil
 	}
 	// meta is a FullBox: 4 bytes of version/flags precede its child boxes. A few
 	// muxers omit them, so fall back to parsing from the start.
@@ -841,13 +843,19 @@ func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string) {
 	}
 	ilst, ok := findMemBox(metaBoxes, "ilst")
 	if !ok {
-		return nil, ""
+		return nil, "", nil
 	}
 	atoms, err := iterBoxes(ilst.payload)
 	if err != nil {
-		return nil, ""
+		return nil, "", nil
 	}
 	for _, a := range atoms {
+		if a.typ == "covr" {
+			if att := ilstCoverValue(a.payload); att != nil {
+				cover = att
+			}
+			continue
+		}
 		name, ok := metaAtomNames[a.typ]
 		if !ok {
 			continue
@@ -861,7 +869,36 @@ func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string) {
 			title = val
 		}
 	}
-	return tags, title
+	return tags, title, cover
+}
+
+// ilstCoverValue extracts a covr atom's image as a Matroska-style attachment.
+// The data box's well-known type selects the format: 13 = JPEG, 14 = PNG.
+func ilstCoverValue(atomPayload []byte) *mkv.Attachment {
+	boxes, err := iterBoxes(atomPayload)
+	if err != nil {
+		return nil
+	}
+	data, ok := findMemBox(boxes, "data")
+	if !ok || len(data.payload) < 8 {
+		return nil
+	}
+	name, mime := "cover.jpg", "image/jpeg"
+	switch binary.BigEndian.Uint32(data.payload[0:4]) & 0xFFFFFF {
+	case 13: // JPEG
+	case 14: // PNG
+		name, mime = "cover.png", "image/png"
+	default:
+		return nil
+	}
+	img := data.payload[8:]
+	if len(img) == 0 {
+		return nil
+	}
+	return &mkv.Attachment{
+		ID: 1, Name: name, MIMEType: mime,
+		Size: int64(len(img)), Data: append([]byte(nil), img...),
+	}
 }
 
 func hasMemBox(boxes []memBox, typ string) bool {

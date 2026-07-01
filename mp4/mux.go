@@ -154,7 +154,21 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		}
 	}()
 
-	return writeMP4(ctx, dst, dstPath, br, tracks, brands, c.Info.Title, globalTags(c), c.Chapters, o)
+	meta := movieMeta{
+		title:    c.Info.Title,
+		tags:     globalTags(c),
+		chapters: c.Chapters,
+		cover:    pickCoverArt(c.Attachments),
+	}
+	return writeMP4(ctx, dst, dstPath, br, tracks, brands, meta, o)
+}
+
+// movieMeta bundles the file-level metadata carried into the moov box.
+type movieMeta struct {
+	title    string
+	tags     []mkv.SimpleTag
+	chapters []mkv.Chapter
+	cover    *coverArt
 }
 
 // globalTags collects the file-level (non track-targeted) SimpleTags of a container,
@@ -254,14 +268,14 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 // mdatHeaderLen is the fixed size of the 64-bit-largesize mdat box header.
 const mdatHeaderLen = 16
 
-func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, brands []string, title string, tags []mkv.SimpleTag, chapters []mkv.Chapter, o Options) error {
+func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, brands []string, meta movieMeta, o Options) error {
 	ftyp := buildFtyp(brands)
 	routing := make(map[uint64]*outTrack, len(tracks))
 	for _, t := range tracks {
 		routing[t.mkv.ID] = t
 	}
 	if o.FastStart {
-		return writeFastStart(ctx, dst, dstPath, br, tracks, ftyp, routing, title, tags, chapters, o)
+		return writeFastStart(ctx, dst, dstPath, br, tracks, ftyp, routing, meta, o)
 	}
 
 	// Normal layout: ftyp, mdat (header + data), then moov at the end. The mdat
@@ -281,7 +295,7 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *
 
 	base := int64(len(ftyp)) + mdatHeaderLen
 	co64 := needCo64(dataLen)
-	if _, err := buf.Write(buildMoov(tracks, base, co64, title, tags, chapters)); err != nil {
+	if _, err := buf.Write(buildMoov(tracks, base, co64, meta)); err != nil {
 		return errf("write moov: %w", err)
 	}
 	if err := buf.Flush(); err != nil {
@@ -294,7 +308,7 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *
 // begin before the whole file is available. The media is streamed to a temporary
 // file first; the moov (whose size is fixed once the chunk-offset width is known)
 // is then written ahead of it, with chunk offsets pointing past it.
-func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, ftyp []byte, routing map[uint64]*outTrack, title string, tags []mkv.SimpleTag, chapters []mkv.Chapter, o Options) (err error) {
+func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, ftyp []byte, routing map[uint64]*outTrack, meta movieMeta, o Options) (err error) {
 	fs := o.FS
 	tmpPath := dstPath + ".mdat.tmp"
 	tmp, err := fs.DoCreate(tmpPath)
@@ -324,14 +338,14 @@ func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string
 	tmpClosed = true
 
 	co64 := needCo64(dataLen)
-	moovSize := int64(len(buildMoov(tracks, 0, co64, title, tags, chapters))) // size is base-independent
+	moovSize := int64(len(buildMoov(tracks, 0, co64, meta))) // size is base-independent
 	base := int64(len(ftyp)) + moovSize + mdatHeaderLen
 
 	out := bufio.NewWriterSize(dst, 256<<10)
 	if _, err := out.Write(ftyp); err != nil {
 		return errf("write ftyp: %w", err)
 	}
-	if _, err := out.Write(buildMoov(tracks, base, co64, title, tags, chapters)); err != nil {
+	if _, err := out.Write(buildMoov(tracks, base, co64, meta)); err != nil {
 		return errf("write moov: %w", err)
 	}
 	if _, err := out.Write(mdatHeader(dataLen)); err != nil {
