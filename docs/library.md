@@ -201,6 +201,20 @@ pass, lazily; cache it if requested often. The remaining difference: the
 master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
 Cues index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### ABR light (`mp4.RemuxToABR`)
+
+```go
+err := mp4.RemuxToABR(ctx, []string{"1080p.mkv", "720p.mkv"}, "stream/", mp4.Options{SegmentMs: 6000})
+```
+
+Packages pre-encoded quality variants (best first) into one multi-variant HLS
+master — the packaging half of ABR, no transcoding. The first source is the
+reference (audio + subtitles for every variant, from `v1/`); the others are
+packaged `Options.VideoOnly`. Every variant gets its real
+`BANDWIDTH`/`RESOLUTION`/`CODECS` in the top `master.m3u8`. HLS-only as a
+combined presentation (per-variant `manifest.mpd` inside each directory);
+sources should share GOP cadence for seamless switching.
+
 ### Securing HLS delivery
 
 ```go

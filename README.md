@@ -132,6 +132,7 @@ Global flags: `-json` (structured output), `--version`
 | | `to-webm` | Remux MKV/WebM to WebM (WebM-subset codecs only) |
 | | `to-hls` | Package MKV/WebM as CMAF: HLS (m3u8) + DASH (mpd) over the same demuxed fragmented-MP4 segments |
 | | `hls-segment` | Serve one HLS resource on demand (master/playlist/init/N) — zero pre-generation |
+| | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging, no transcoding) |
 
 Full CLI reference: [docs/cli.md](docs/cli.md)
 

@@ -753,3 +753,28 @@ mkvgo hls-segment movie.mkv seg00042.m4s           # same, by player-facing name
 mkvgo hls-segment movie.mkv sub1.vtt               # a subtitle rendition
 mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 3's ranges
 ```
+
+### to-abr
+
+Package several **pre-encoded quality variants** of the same content into one
+multi-variant HLS presentation — "ABR light": mkvgo does the packaging (no
+transcoding; producing the encodes remains a transcoder's job). The first
+source is the reference: its audio tracks and subtitles serve every variant;
+the other sources contribute only their video rendition (packaged
+`VideoOnly`). Each source lands in `v1/`, `v2/`, … and the top `master.m3u8`
+declares one variant per source with its real `BANDWIDTH`/`RESOLUTION`/
+`CODECS` over the shared audio/subtitle groups.
+
+```
+mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--aes-key … --aes-key-uri …] [--url-prefix …]
+```
+
+For seamless switching the sources should share the keyframe cadence (same
+GOP length); mismatched cadences still play, switches realign on the next
+keyframe. The combined presentation is HLS-only (DASH multi-Representation
+requires aligned timelines); each variant directory carries its own
+`manifest.mpd`.
+
+```bash
+mkvgo to-abr -o stream/ movie-1080p.mkv movie-720p.mkv movie-480p.mkv
+```

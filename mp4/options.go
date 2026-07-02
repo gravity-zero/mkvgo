@@ -71,6 +71,11 @@ type Options struct {
 	// HLSEncryption.
 	Encrypt *HLSEncryption
 
+	// VideoOnly carries only the (first) video track — no audio, no subtitle
+	// renditions. RemuxToABR packages its non-reference variants with it; it
+	// is also useful for a video-only preview rendition.
+	VideoOnly bool
+
 	// RewriteURL, when set, rewrites every URI the HLS playlists and the DASH
 	// manifest reference (segments, inits, playlists, subtitles) — the hook
 	// for URL templating: prepending a CDN base, appending a signed token

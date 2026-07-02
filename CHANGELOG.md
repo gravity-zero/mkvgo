@@ -62,6 +62,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **ABR light** (`mp4.RemuxToABR`, CLI `to-abr`). Packages several
+  pre-encoded quality variants of the same content into one multi-variant
+  HLS presentation without transcoding: the first source is the reference
+  (its audio tracks and subtitles serve every variant), the others
+  contribute their video rendition only (`Options.VideoOnly`, also exposed
+  standalone). The top `master.m3u8` carries each variant's real
+  `BANDWIDTH`/`RESOLUTION`/`CODECS` over the shared audio/subtitle groups;
+  security options (AES-128, `RewriteURL`) apply to every variant.
+  ffmpeg-verified end to end on a two-quality set.
 - **HLS delivery security.** `Options.Encrypt` (`HLSEncryption{Key, KeyURI,
   IV?}`) AES-128-encrypts every media segment — whole-segment CBC with PKCS#7
   and IV = media sequence per RFC 8216 — and writes the `EXT-X-KEY` line;

@@ -75,8 +75,24 @@ type segInfo struct {
 // decodable. Text subtitles (SRT, WebVTT, ASS/SSA flattened to plain text) ride
 // as WebVTT renditions; bitmap subtitles (PGS/VOBSUB) are dropped and reported
 // via Options.OnDrop.
-func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options) (err error) {
+func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options) error {
 	o := optionsFrom(opts)
+	_, err := remuxToHLSInto(ctx, srcPath, outputDir, &o)
+	return err
+}
+
+// hlsResult carries what a packaging pass established — the ABR packager
+// builds its top-level master from these.
+type hlsResult struct {
+	fts  []*fragTrack
+	subs []hlsSubTrack
+	segs []segInfo
+	durs []float64
+}
+
+// remuxToHLSInto is RemuxToHLS's body, returning the packaging facts.
+func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options) (res *hlsResult, err error) {
+	o := *op
 	fs := o.FS
 	segMs := o.SegmentMs
 	if segMs <= 0 {
@@ -84,17 +100,17 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	}
 	if o.Encrypt != nil {
 		if err := o.Encrypt.validate(); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	planned, _, err := planTracks(c, o)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// One demuxed rendition per track: the video, each audio, and the text
 	// subtitles as WebVTT renditions. Secondary video tracks have no HLS/DASH
@@ -112,16 +128,21 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 				continue
 			}
 			videoSeen = true
+		} else if o.VideoOnly {
+			continue // an ABR variant contributes only its video rendition
 		}
 		media = append(media, t)
 	}
 	if len(media) == 0 {
-		return errf("no audio or video track to segment")
+		return nil, errf("no audio or video track to segment")
 	}
-	subs := planSubTracks(c, o)
+	var subs []hlsSubTrack
+	if !o.VideoOnly {
+		subs = planSubTracks(c, o)
+	}
 
 	if err := fs.DoMkdirAll(outputDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 
 	fts := make([]*fragTrack, len(media))
@@ -130,7 +151,7 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		tmpPath := filepath.Join(outputDir, fmt.Sprintf(".mkvgo-hls-t%d.tmp", t.mp4ID))
 		tmp, cerr := fs.DoCreate(tmpPath)
 		if cerr != nil {
-			return cerr
+			return nil, cerr
 		}
 		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t), tmp: tmp, tmpPath: tmpPath}
 		routing[t.mkv.ID] = fts[i]
@@ -148,14 +169,14 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	// Phase 1 — stream every block, buffering media sample bytes to the
 	// per-track temp files and collecting subtitle cues.
 	if err := collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress); err != nil {
-		return err
+		return nil, err
 	}
 	for _, ft := range fts {
 		if len(ft.samples) == 0 {
-			return errf("track %d produced no samples", ft.outTrack.mp4ID)
+			return nil, errf("track %d produced no samples", ft.outTrack.mp4ID)
 		}
 		if cerr := ft.tmp.Close(); cerr != nil {
-			return cerr
+			return nil, cerr
 		}
 		ft.tmp = nil
 		off, hasCTS, totalTS := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale)
@@ -170,7 +191,7 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	// Phase 2 — segment boundaries from the video track's keyframes.
 	video := pickVideoFrag(fts)
 	if video == nil {
-		return errf("HLS output requires a video track")
+		return nil, errf("HLS output requires a video track")
 	}
 	bounds := segmentBoundaries(video.samples, segMs)
 
@@ -184,13 +205,13 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		}
 		initData := buildInitSegment([]*fragTrack{ft}, m)
 		if err := fs.DoWriteFile(filepath.Join(outputDir, renditionInit(fts, i)), initData, 0o644); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	segs, err := writeSegments(ctx, &o, fs, outputDir, fts, bounds)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	durs := make([]float64, len(segs))
 	for i := range segs {
@@ -200,25 +221,26 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		i := i
 		if err := writeMediaPlaylist(&o, fs, filepath.Join(outputDir, renditionPlaylist(fts, i)), durs,
 			renditionInit(fts, i), func(k int) string { return renditionSegment(fts, i, k) }); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for i := range subs {
 		if err := writeSubtitleRendition(&o, fs, outputDir, i, &subs[i], bounds, durs, fts); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := writeMasterPlaylist(&o, fs, outputDir, fts, subs, segs); err != nil {
-		return err
+		return nil, err
 	}
+	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs}
 	if o.Encrypt != nil {
-		return nil // AES-128 is HLS-only; no DASH manifest for an encrypted presentation
+		return res, nil // AES-128 is HLS-only; no DASH manifest for an encrypted presentation
 	}
 	// The DASH side of the CMAF packaging: same init + segments, second
 	// manifest. The MPD references each subtitle rendition as one whole file
 	// (subN.vtt), which writeSubtitleRendition also wrote.
 	mpd := buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs))
-	return fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
+	return res, fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
 
 // planSubTracks selects the text subtitle tracks carried as WebVTT renditions.

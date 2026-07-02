@@ -170,3 +170,24 @@ func CmdHLSSegment(args []string) {
 	}
 	fmt.Fprintf(os.Stderr, "%s → %s (%d bytes, %d segments total)\n", what, outPath, len(data), plan.NumSegments())
 }
+
+// CmdToABR packages several pre-encoded quality variants of the same content
+// into one multi-variant HLS presentation (no transcoding): the first source
+// is the reference (audio + subtitles), the others contribute their video.
+func CmdToABR(args []string) {
+	f := parseHLSFlags(args)
+	if len(f.rest) < 2 || f.outDir == "" {
+		Fatal("usage: " + CmdUsage["to-abr"])
+	}
+	opts := f.options(f.rest[0])
+	opts.Progress = NewProgressBar()
+	opts.OnDrop = func(d mp4.DroppedTrack) {
+		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+	}
+	err := mp4.RemuxToABR(context.Background(), f.rest, f.outDir, opts)
+	ClearProgress()
+	if err != nil {
+		Fatal(err.Error())
+	}
+	fmt.Printf("ABR presentation written → %s (play master.m3u8; %d variants)\n", f.outDir, len(f.rest))
+}
