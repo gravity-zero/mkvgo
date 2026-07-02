@@ -54,6 +54,24 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
+  new `httpfs` package implements the FS port over ranged GETs (cached
+  512 KiB windows, configurable client/headers, explicit refusal when a
+  server ignores `Range` — never a silent full download; `BytesFetched()`
+  reports the transfer cost). Combined with the head-only probe, indexing a
+  remote media library transfers a few kilobytes per file. The CLI accepts
+  `http(s)://` URLs on the inspection commands (`info`/`tracks`/`probe`/
+  `keyframes`, plus `chapters`/`tags`/`attachments` for MP4) and as the
+  source of `to-mp4`/`from-mp4`/`to-hls` via `httpfs.Hybrid()` (URLs read
+  over HTTP, writes on the OS) — remuxing straight from a NAS/S3 URL is a
+  streamed download. Verified byte-identical to a local remux.
+- **Deterministic outputs, guaranteed.** The writers never stamp wall-clock
+  times or random IDs (fixed `MuxingApp`/`WritingApp`, `DateUTC` only copied
+  from the source, MP4 timestamps zero), so the same input and options
+  produce byte-identical files — now documented as a guarantee and locked by
+  a regression test (MKV rewrite, MP4 remux, HLS segments over the in-memory
+  FS). Safe for content-addressed storage, dedup and golden tests. `make
+  build`/`make release` now set `CGO_ENABLED=0` (pure-Go static binaries).
 - **WebAssembly build** (`make wasm` → `dist/wasm/mkvgo.wasm`, ~4.7 MB raw /
   ~1.3 MB gzipped). The probe/remux/HLS engine runs client-side: a global
   `MkvGo` object exposes `probe`, `remuxToMP4`, `remuxFromMP4`, `remuxToWebM`,

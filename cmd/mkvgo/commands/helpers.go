@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -110,6 +112,9 @@ func RequireArgs(args []string, n int, usage string) {
 }
 
 func OpenMKV(path string) *matroska.Container {
+	if httpfs.IsURL(path) {
+		Fatal("this command needs the full local file; http(s) URLs are supported by the inspection commands (info, tracks, probe, keyframes — and chapters/tags on MP4)")
+	}
 	c, err := matroska.Open(context.Background(), path)
 	if err != nil {
 		Fatal(err.Error())
@@ -133,8 +138,11 @@ func openInput(path string) *matroska.Container {
 }
 
 // isMP4Path reports whether path looks like an ISO-BMFF file the mp4 package
-// handles (by extension).
+// handles (by extension; query/fragment suffixes of a URL are ignored).
 func isMP4Path(path string) bool {
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp4", ".m4v", ".m4a", ".mov":
 		return true
@@ -147,6 +155,9 @@ func isMP4Path(path string) bool {
 // sample table); for MKV the keyframe index is filled from the Cues regardless.
 // The second return is any non-carried MP4 tracks (cover art, hint/timecode).
 func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
+	if httpfs.IsURL(path) {
+		return loadRemote(path, keyframes)
+	}
 	if path != "-" && isMP4Path(path) {
 		var opts []mp4.Options
 		if keyframes {
@@ -159,6 +170,44 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 		return c, dropped
 	}
 	return openInput(path), nil
+}
+
+// sourceFS returns the FS for a remux whose source may be an http(s) URL:
+// the hybrid port (URLs ranged over HTTP, local paths and all writes on the
+// OS), or nil (pure OS) for a local source. A remux reads sequentially, so a
+// remote source amounts to a streamed download.
+func sourceFS(src string) *mkv.FS {
+	if httpfs.IsURL(src) {
+		return httpfs.Hybrid()
+	}
+	return nil
+}
+
+// loadRemote reads a remote file's metadata over HTTP Range requests — the
+// head-only probe, so only a few ranged kilobytes are transferred whatever the
+// file size. The MP4 probe is fully head-only (chapters/tags included); a
+// remote Matroska read is metadata-only (Info/Tracks/keyframes — chapters,
+// attachments and tags live in a full read, which stays local).
+func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
+	hfs := httpfs.New()
+	if isMP4Path(url) {
+		c, dropped, err := mp4.OpenMeta(context.Background(), url,
+			mp4.Options{Keyframes: keyframes, FS: hfs.Port()})
+		if err != nil {
+			Fatal(err.Error())
+		}
+		return c, dropped
+	}
+	var ro []matroska.ReadOption
+	if keyframes {
+		ro = append(ro, matroska.WithKeyframeIndex())
+	}
+	c, err := matroska.OpenMetaWithFS(context.Background(), url, hfs.Port(), ro...)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	fmt.Fprintln(os.Stderr, "note: remote Matroska reads are metadata-only (info/tracks/keyframes); chapters, attachments and tags need the local file")
+	return c, nil
 }
 
 func PrintJSON(v any) {

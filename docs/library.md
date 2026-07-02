@@ -646,6 +646,45 @@ err = mp4.RemuxToHLS(ctx, "in.mkv", "hls", mp4.Options{FS: m.FS()})
 for _, p := range m.Paths() { … }   // hls/master.m3u8, hls/init.mp4, hls/seg00001.m4s, …
 ```
 
+### Remote files over HTTP Range (`httpfs`)
+
+`github.com/gravity-zero/mkvgo/httpfs` implements the port over HTTP(S) Range
+requests (a separate package, so builds that don't need it — the wasm binary —
+don't link `net/http`). Combined with the head-only probe, indexing a media
+library on S3/HTTP transfers a few ranged kilobytes per file:
+
+```go
+import "github.com/gravity-zero/mkvgo/httpfs"
+
+f := httpfs.New()                       // Options: Client, WindowSize, Header (auth)
+c, err := matroska.OpenMetaWithFS(ctx, "https://nas/movie.mkv", f.Port())
+fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file size
+```
+
+Reads are cached in 512 KiB windows (configurable). The server must answer
+`206 Partial Content`; one that ignores `Range` gets an explicit error rather
+than a silent full download. The FS is read-only — for a remux whose source is
+remote and destination local, `httpfs.Hybrid()` routes URLs to HTTP and
+everything else (including writes) to the OS:
+
+```go
+err := mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4",
+    mp4.Options{FS: httpfs.Hybrid(), FastStart: true})   // a streamed download
+```
+
+---
+
+## Deterministic outputs
+
+mkvgo's writers never stamp wall-clock times or random IDs: `MuxingApp`/
+`WritingApp` default to the fixed string `"mkvgo"`, `DateUTC` is only ever
+copied from the source, MP4 `creation_time`/`modification_time` are written as
+zero, and element order is fixed. **The same input and options produce
+byte-identical output**, across runs and machines — verified by a regression
+test over the in-memory FS (MKV rewrite, MP4 remux, HLS segments). This makes
+outputs safe for content-addressed storage and dedup (the file hash is a
+stable key) and for golden-file tests.
+
 ---
 
 ## Progress Callbacks

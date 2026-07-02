@@ -339,6 +339,11 @@ sub-packages are lower-level and may change between minor versions.
 - **[docs/wasm.md](docs/wasm.md)** - the WebAssembly build (~1.3 MB gzipped):
   probe/remux/HLS in the browser, the typed `web/mkvgo.ts` wrapper, React/Vue
   examples, and a runnable MSE-playback demo.
+
+Also: remote `http(s)://` inputs over HTTP Range requests (probe a library on
+S3/HTTP for a few KB per file, remux straight from a URL — see the `httpfs`
+package and cli.md), and **deterministic outputs** — same input, same bytes,
+byte-identical across runs (see docs/library.md).
 - **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** - generated
   Go API reference.
 

@@ -42,6 +42,7 @@ func CmdToHLS(args []string) {
 	src := rest[0]
 
 	err := mp4.RemuxToHLS(context.Background(), src, outDir, mp4.Options{
+		FS:        sourceFS(src),
 		Progress:  NewProgressBar(),
 		SegmentMs: segMs,
 		OnDrop: func(d mp4.DroppedTrack) {

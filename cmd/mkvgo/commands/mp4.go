@@ -48,6 +48,7 @@ func CmdToMP4(args []string) {
 	}
 
 	err := mp4.RemuxToMP4(context.Background(), src, dst, mp4.Options{
+		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		FastStart:         faststart,
 		SkipUnsupported:   skip,
@@ -87,6 +88,7 @@ func CmdFromMP4(args []string) {
 	GuardOverwrite(dst)
 
 	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
+		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		MP3ContainerDelay: mp3delay,
 		OnDrop: func(d mp4.DroppedTrack) {

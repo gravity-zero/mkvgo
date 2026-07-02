@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -13,9 +15,13 @@ import (
 // Cues seek index head-only; MP4 builds the sample table (opt-in). A Cues-less
 // Matroska builds the complete keyframe index from a sequential structural pass.
 func CmdKeyframes(path string) {
+	var fs *mkv.FS
+	if httpfs.IsURL(path) {
+		fs = httpfs.New().Port() // head-only over HTTP Range requests
+	}
 	var ks []int64
 	if isMP4Path(path) {
-		c, _, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: true})
+		c, _, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: true, FS: fs})
 		if err != nil {
 			Fatal(err.Error())
 		}
@@ -23,8 +29,8 @@ func CmdKeyframes(path string) {
 	} else {
 		// WithKeyframeIndex is a no-op when the file has Cues, so passing it always
 		// keeps Cues-indexed files head-only while building the complete index for
-		// Cues-less ones (the "no external fallback" path).
-		c, err := matroska.OpenMeta(context.Background(), path, matroska.WithKeyframeIndex())
+		// Cues-less ones (the "no external fallback" path). A nil fs is the OS.
+		c, err := matroska.OpenMetaWithFS(context.Background(), path, fs, matroska.WithKeyframeIndex())
 		if err != nil {
 			Fatal(err.Error())
 		}

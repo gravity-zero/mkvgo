@@ -18,6 +18,21 @@ operation). `validate` also exits `1` when error-severity issues are found
 (`-strict` makes warnings fail too) and `compare` when the files differ, so
 they can gate scripts (`mkvgo validate f.mkv && ...`).
 
+**Remote files.** An `http://`/`https://` URL is accepted as the input by the
+inspection commands (`info`, `tracks`, `probe`, `keyframes` — and `chapters`/
+`tags`/`attachments` on MP4, whose probe is fully head-only) and as the
+**source** of `to-mp4`, `from-mp4` and `to-hls`. Reads go through HTTP Range
+requests: inspection transfers a few ranged kilobytes whatever the file size;
+a remux reads sequentially (a streamed download). The server must honour
+`Range` (S3, nginx, caddy… do); one that ignores it gets an explicit error,
+never a silent full download. Remote Matroska metadata is head-only
+(Info/Tracks/keyframes) — chapters, attachments and tags need the local file.
+
+```bash
+mkvgo probe https://nas.local/library/movie.mkv     # a few KB transferred
+mkvgo to-mp4 https://nas.local/movie.mkv local.mp4  # remux while downloading
+```
+
 ---
 
 ## Inspection
