@@ -73,6 +73,7 @@ var CmdUsage = map[string]string{
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
+	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] (fragmented-MP4 HLS: init.mp4 + segments + playlist.m3u8)",
 }
 
 func CmdHelp(cmd string) {
