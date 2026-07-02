@@ -553,6 +553,20 @@ chapters keep their original timestamps.
 
 ---
 
+## Self-verifying files (content hashes)
+
+```go
+// Store each track's content SHA-256 as a CONTENT_SHA256 tag (dstPath "" =
+// in place, instant on mkvgo-written files thanks to the metadata reserve).
+err := matroska.WriteContentHashes(ctx, "archive.mkv", "")
+
+// Later — detect bit rot / transfer corruption, no external checksum file:
+mismatches, err := matroska.VerifyContentHashes(ctx, "archive.mkv")
+// nil mismatches = every hashed track is byte-intact.
+```
+
+---
+
 ## Custom Filesystem (FS Port)
 
 The `mkv.FS` struct lets you swap out OS file operations. Pass it via `Options` to any operation. When `nil`, operations use the real filesystem.

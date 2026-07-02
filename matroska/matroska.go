@@ -251,6 +251,23 @@ func FormatOGMChapters(w io.Writer, chapters []Chapter) error {
 	return mkv.FormatOGMChapters(w, chapters)
 }
 
+// HashMismatch describes one track whose recomputed content digest does not
+// match its stored CONTENT_SHA256 tag. See ops.HashMismatch.
+type HashMismatch = ops.HashMismatch
+
+// WriteContentHashes stores each track's content SHA-256 as a CONTENT_SHA256
+// tag, making the file self-verifying (dstPath == "" edits in place). See
+// ops.WriteContentHashes.
+func WriteContentHashes(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	return ops.WriteContentHashes(ctx, srcPath, dstPath, opts...)
+}
+
+// VerifyContentHashes recomputes the per-track content digests and compares
+// them with the stored CONTENT_SHA256 tags. See ops.VerifyContentHashes.
+func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]HashMismatch, error) {
+	return ops.VerifyContentHashes(ctx, path, opts...)
+}
+
 // CompareBlocks diffs the media CONTENT of two Matroska/WebM files: per-track
 // block count, payload byte total and payload SHA-256 in stream order. An
 // empty result proves a lossless round-trip. See ops.CompareBlocks.

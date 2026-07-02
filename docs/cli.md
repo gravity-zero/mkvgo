@@ -148,6 +148,37 @@ mkvgo validate video.mkv && echo "no errors"
 mkvgo validate -strict video.mkv && echo "no errors, no warnings"
 ```
 
+### hash
+
+Store each track's content SHA-256 as a `CONTENT_SHA256` tag, making the file
+self-verifying (`mkvgo verify`) — bit rot or transfer corruption is detectable
+with no external checksum file. Without `-o` the tags are written in place
+(instant on mkvgo-written files, which reserve metadata padding; a file with
+no room needs `-o` for a full rewrite). Re-hashing replaces the tags.
+
+```
+mkvgo hash <file.mkv> [-o <out.mkv>]
+```
+
+```bash
+mkvgo hash archive.mkv                # in place
+mkvgo hash video.mkv -o hashed.mkv    # full rewrite
+```
+
+### verify
+
+Recompute the per-track content hashes and compare them with the stored
+`CONTENT_SHA256` tags. Exits `0` when every hashed track is intact, `1` on any
+mismatch; errors when the file was never hashed.
+
+```
+mkvgo verify [-json] <file.mkv>
+```
+
+```bash
+mkvgo hash archive.mkv && mkvgo verify archive.mkv && echo intact
+```
+
 ### compare
 
 Diff metadata of two files. Shows added, removed, and changed elements. Either

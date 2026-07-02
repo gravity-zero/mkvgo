@@ -99,6 +99,10 @@ func main() {
 	case "validate":
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
+	case "hash":
+		commands.CmdHash(args)
+	case "verify":
+		commands.CmdVerify(args)
 	case "compare":
 		commands.RequireArgs(args, 2, "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>")
 		commands.CmdCompare(args)
@@ -155,6 +159,8 @@ Commands:
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
+  hash          Store per-track content hashes (self-verifying file)
+  verify        Recompute content hashes; exit 1 on corruption
   compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
   reindex       Rebuild the seek index (Cues) of a file
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)

@@ -38,11 +38,11 @@ type trackDigest struct {
 // byte-identically — beyond what the metadata compare can show.
 func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
 	fs := mkv.FSFrom(opts)
-	a, err := digestTracks(ctx, pathA, fs)
+	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts))
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", pathA, err)
 	}
-	b, err := digestTracks(ctx, pathB, fs)
+	_, b, err := digestTracks(ctx, pathB, fs, nil)
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", pathB, err)
 	}
@@ -75,12 +75,12 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options
 	return diffs, nil
 }
 
-// digestTracks walks every block of the file and returns one digest per track,
-// ordered like Container.Tracks.
-func digestTracks(ctx context.Context, path string, fs *mkv.FS) ([]trackDigest, error) {
+// digestTracks walks every block of the file and returns the parsed container
+// plus one digest per track, ordered like Container.Tracks.
+func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
 	c, err := reader.OpenWithFS(ctx, path, fs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	order := make(map[uint64]int, len(c.Tracks))
 	for i, t := range c.Tracks {
@@ -100,23 +100,28 @@ func digestTracks(ctx context.Context, path string, fs *mkv.FS) ([]trackDigest, 
 
 	f, err := fs.DoOpen(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if progress != nil {
+		if st, _ := fs.DoStat(path); st != nil {
+			br.SetProgress(progress, st.Size())
+		}
 	}
 	for {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		i, ok := order[blk.TrackNumber]
 		if !ok {
@@ -132,7 +137,7 @@ func digestTracks(ctx context.Context, path string, fs *mkv.FS) ([]trackDigest, 
 		accs[i].h.Sum(accs[i].d.hash[:0])
 		out[i] = accs[i].d
 	}
-	return out, nil
+	return c, out, nil
 }
 
 // CompareContainers diffs the metadata of two already-parsed containers. It is
