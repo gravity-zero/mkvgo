@@ -268,6 +268,12 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if len(t.CodecPrivate) > 0 {
 		e.raw(mkv.IDCodecPrivate, t.CodecPrivate)
 	}
+	// DefaultDuration round-trips the declared frame rate (the reader derives
+	// FrameRate = 1e9/DefaultDuration); without it every rewrite silently
+	// dropped the source's nominal frame duration.
+	if t.FrameRate != nil && *t.FrameRate > 0 {
+		e.uint(mkv.IDDefaultDuration, uint64(1e9 / *t.FrameRate + 0.5))
+	}
 	if t.Language != "" {
 		e.str(mkv.IDLanguage, t.Language)
 	}

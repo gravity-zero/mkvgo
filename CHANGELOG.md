@@ -62,6 +62,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **`validate` streaming-readiness checks.** Beyond the structural checks,
+  `validate` now audits what seeking and on-demand serving rely on: missing
+  Cues index, cue points referencing a non-video track (error — seeking
+  lands on audio; the write-side bug class fixed this release), cue times
+  matching no actual video keyframe (stale index), subtitle blocks without
+  BlockDuration, video tracks without DefaultDuration, AAC without its
+  AudioSpecificConfig, attachments without a MIME type. Each finding names
+  the fix.
 - **Keyframe extraction for thumbnails/scrubbing**
   (`matroska.ExtractKeyframeSample`, CLI `extract-frame`). Returns the video
   keyframe nearest a timestamp, seeked through the Cues (a few bounded

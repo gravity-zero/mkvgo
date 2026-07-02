@@ -148,7 +148,14 @@ mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 
 ### validate
 
-Check MKV structure for issues. Reports errors and warnings.
+Check MKV structure for issues. Reports errors and warnings — structural
+(TimecodeScale, duplicate track IDs, missing codec data, backwards
+timecodes…) and **streaming readiness**: a missing Cues index, cue points
+referencing a non-video track (seeking would land on audio — an error),
+cue times matching no actual video keyframe (stale index), subtitle blocks
+without BlockDuration (cue end times lost), video without DefaultDuration,
+AAC without its AudioSpecificConfig. Every finding names the fix
+(usually `mkvgo reindex`).
 
 ```
 mkvgo validate [-json] [-strict] <file.mkv>
