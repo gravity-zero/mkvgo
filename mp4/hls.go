@@ -82,6 +82,11 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	if segMs <= 0 {
 		segMs = defaultSegmentMs
 	}
+	if o.Encrypt != nil {
+		if err := o.Encrypt.validate(); err != nil {
+			return err
+		}
+	}
 
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -183,7 +188,7 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		}
 	}
 
-	segs, err := writeSegments(ctx, fs, outputDir, fts, bounds)
+	segs, err := writeSegments(ctx, &o, fs, outputDir, fts, bounds)
 	if err != nil {
 		return err
 	}
@@ -193,23 +198,26 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	}
 	for i := range fts {
 		i := i
-		if err := writeMediaPlaylist(fs, filepath.Join(outputDir, renditionPlaylist(fts, i)), durs,
+		if err := writeMediaPlaylist(&o, fs, filepath.Join(outputDir, renditionPlaylist(fts, i)), durs,
 			renditionInit(fts, i), func(k int) string { return renditionSegment(fts, i, k) }); err != nil {
 			return err
 		}
 	}
 	for i := range subs {
-		if err := writeSubtitleRendition(fs, outputDir, i, &subs[i], bounds, durs, fts); err != nil {
+		if err := writeSubtitleRendition(&o, fs, outputDir, i, &subs[i], bounds, durs, fts); err != nil {
 			return err
 		}
 	}
-	if err := writeMasterPlaylist(fs, outputDir, fts, subs, segs); err != nil {
+	if err := writeMasterPlaylist(&o, fs, outputDir, fts, subs, segs); err != nil {
 		return err
+	}
+	if o.Encrypt != nil {
+		return nil // AES-128 is HLS-only; no DASH manifest for an encrypted presentation
 	}
 	// The DASH side of the CMAF packaging: same init + segments, second
 	// manifest. The MPD references each subtitle rendition as one whole file
 	// (subN.vtt), which writeSubtitleRendition also wrote.
-	mpd := buildDASHManifest(fts, subs, durs, peakBandwidth(segs))
+	mpd := buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs))
 	return fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
 
@@ -408,7 +416,7 @@ func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
 
 // writeSegments writes each rendition's .m4s per boundary interval and returns
 // the per-boundary aggregate duration/bytes (across renditions), for BANDWIDTH.
-func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, error) {
+func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, error) {
 	// A sequential reader over each track's temp file: samples are stored in
 	// decode order, segments are emitted in order and keyframe-aligned (closed
 	// GOPs), so each segment's bytes are a contiguous forward run.
@@ -444,18 +452,42 @@ func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack
 		for i, ft := range fts {
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			head := buildSegmentFile(uint32(k+1), seg)
-			out, err := fs.DoCreate(filepath.Join(dir, renditionSegment(fts, i, k)))
-			if err != nil {
-				return nil, err
+			var fileBytes int64
+			if o.Encrypt != nil {
+				// Whole-segment AES-128-CBC: assemble in memory (one segment at
+				// a time), encrypt, write.
+				plain := make([]byte, 0, int64(len(head))+seg.dataLen)
+				plain = append(plain, head...)
+				if seg.dataLen > 0 {
+					buf := make([]byte, seg.dataLen)
+					if _, err := io.ReadFull(readers[i], buf); err != nil {
+						return nil, errf("read segment media: %w", err)
+					}
+					plain = append(plain, buf...)
+				}
+				enc, err := o.Encrypt.encryptSegment(plain, uint32(k))
+				if err != nil {
+					return nil, err
+				}
+				if err := fs.DoWriteFile(filepath.Join(dir, renditionSegment(fts, i, k)), enc, 0o644); err != nil {
+					return nil, err
+				}
+				fileBytes = int64(len(enc))
+			} else {
+				out, err := fs.DoCreate(filepath.Join(dir, renditionSegment(fts, i, k)))
+				if err != nil {
+					return nil, err
+				}
+				werr := writeSegmentFile(out, head, seg.dataLen, readers[i])
+				if cerr := out.Close(); werr == nil {
+					werr = cerr
+				}
+				if werr != nil {
+					return nil, werr
+				}
+				fileBytes = int64(len(head)) + seg.dataLen
 			}
-			werr := writeSegmentFile(out, head, seg.dataLen, readers[i])
-			if cerr := out.Close(); werr == nil {
-				werr = cerr
-			}
-			if werr != nil {
-				return nil, werr
-			}
-			segBytes += int64(len(head)) + seg.dataLen
+			segBytes += fileBytes
 		}
 		infos = append(infos, segInfo{
 			durSec: float64(segEndOrLast(bounds, k, fts)-segStart) / 1000,
@@ -523,11 +555,12 @@ func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 
 // writeMediaPlaylist writes a VOD HLS media playlist. mapURI, when non-empty,
 // is emitted as EXT-X-MAP (the fMP4 init segment); WebVTT playlists pass "".
-func writeMediaPlaylist(fs *mkv.FS, path string, durs []float64, mapURI string, segName func(i int) string) error {
-	return fs.DoWriteFile(path, buildMediaPlaylist(durs, mapURI, segName), 0o644)
+func writeMediaPlaylist(o *Options, fs *mkv.FS, path string, durs []float64, mapURI string, segName func(i int) string) error {
+	return fs.DoWriteFile(path, buildMediaPlaylist(o, durs, mapURI, segName), 0o644)
 }
 
-func buildMediaPlaylist(durs []float64, mapURI string, segName func(i int) string) []byte {
+func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(i int) string) []byte {
+	rw := urlRewriter(o)
 	var max float64
 	for _, d := range durs {
 		if d > max {
@@ -538,20 +571,33 @@ func buildMediaPlaylist(durs []float64, mapURI string, segName func(i int) strin
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
+	if o != nil && o.Encrypt != nil && mapURI != "" {
+		// Media segments only (fMP4 renditions); the init and subtitle files
+		// stay clear, so subtitle playlists (mapURI == "") carry no key line.
+		b = append(b, o.Encrypt.keyLine()...)
+	}
 	if mapURI != "" {
-		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", mapURI)...)
+		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
 	}
 	for i, d := range durs {
-		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, segName(i))...)
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(i)))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
 	return b
 }
 
+// urlRewriter returns the Options.RewriteURL hook, or the identity.
+func urlRewriter(o *Options) func(string) string {
+	if o != nil && o.RewriteURL != nil {
+		return o.RewriteURL
+	}
+	return func(s string) string { return s }
+}
+
 // writeSubtitleRendition writes one subtitle track as segmented WebVTT: one
 // .vtt per media-segment window (cues overlapping the window, absolute
 // timestamps) plus its media playlist.
-func writeSubtitleRendition(fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bounds []int64, durs []float64, fts []*fragTrack) error {
+func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bounds []int64, durs []float64, fts []*fragTrack) error {
 	subtitle.ResolveCueEnds(st.cues, 2000)
 	for k := range durs {
 		segStart := bounds[k]
@@ -582,7 +628,7 @@ func writeSubtitleRendition(fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bo
 	if err := fs.DoWriteFile(filepath.Join(dir, fmt.Sprintf("sub%d.vtt", idx+1)), []byte(whole.String()), 0o644); err != nil {
 		return err
 	}
-	return writeMediaPlaylist(fs, filepath.Join(dir, fmt.Sprintf("sub%d.m3u8", idx+1)), durs, "",
+	return writeMediaPlaylist(o, fs, filepath.Join(dir, fmt.Sprintf("sub%d.m3u8", idx+1)), durs, "",
 		func(i int) string { return fmt.Sprintf("sub%d_%05d.vtt", idx+1, i+1) })
 }
 
@@ -590,8 +636,8 @@ func writeSubtitleRendition(fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bo
 // (BANDWIDTH from the peak aggregate segment bitrate, RESOLUTION/FRAME-RATE,
 // CODECS when every track's RFC 6381 string is known), each audio track as an
 // EXT-X-MEDIA AUDIO rendition, and the subtitle renditions as another group.
-func writeMasterPlaylist(fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) error {
-	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), buildMasterPlaylist(fts, subs, segs), 0o644)
+func writeMasterPlaylist(o *Options, fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) error {
+	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), buildMasterPlaylist(o, fts, subs, segs), 0o644)
 }
 
 // peakBandwidth returns the highest per-segment bitrate in bits/s.
@@ -607,7 +653,8 @@ func peakBandwidth(segs []segInfo) int64 {
 	return int64(peak)
 }
 
-func buildMasterPlaylist(fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) []byte {
+func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) []byte {
+	rw := urlRewriter(o)
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 
@@ -638,7 +685,7 @@ func buildMasterPlaylist(fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) [
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, renditionPlaylist(fts, i))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(renditionPlaylist(fts, i)))...)
 	}
 
 	for i := range subs {
@@ -660,7 +707,7 @@ func buildMasterPlaylist(fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) [
 		if t.IsForced {
 			attrs += ",FORCED=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=\"sub%d.m3u8\"\n", attrs, i+1)...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 	}
 
 	// Peak and average bandwidth over the media segments (bits per second).
@@ -698,6 +745,6 @@ func buildMasterPlaylist(fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) [
 	if len(subs) > 0 {
 		inf += ",SUBTITLES=\"subs\""
 	}
-	b = append(b, (inf + "\nplaylist.m3u8\n")...)
+	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
 	return b
 }

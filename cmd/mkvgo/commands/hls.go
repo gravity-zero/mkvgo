@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -9,18 +10,25 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-// CmdToHLS remuxes an MKV/WebM file to a fragmented-MP4 HLS presentation
-// (init.mp4 + segments + playlist.m3u8) in an output directory.
-func CmdToHLS(args []string) {
-	var outDir string
-	var segMs int64
-	var rest []string
+// hlsFlags holds the flags to-hls and hls-segment share; they must match
+// between the two for byte-identical output.
+type hlsFlags struct {
+	outDir  string
+	segMs   int64
+	encrypt *mp4.HLSEncryption
+	prefix  string
+	rest    []string
+}
+
+func parseHLSFlags(args []string) hlsFlags {
+	var f hlsFlags
+	var keyHex, keyURI string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
 			i++
 			if i < len(args) {
-				outDir = args[i]
+				f.outDir = args[i]
 			}
 		case "-segment", "--segment":
 			// Segment length in seconds (HLS convention, like ffmpeg -hls_time).
@@ -30,26 +38,67 @@ func CmdToHLS(args []string) {
 				if err != nil || secs <= 0 {
 					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
 				}
-				segMs = int64(secs * 1000)
+				f.segMs = int64(secs * 1000)
+			}
+		case "--aes-key":
+			i++
+			if i < len(args) {
+				keyHex = args[i]
+			}
+		case "--aes-key-uri":
+			i++
+			if i < len(args) {
+				keyURI = args[i]
+			}
+		case "--url-prefix":
+			i++
+			if i < len(args) {
+				f.prefix = args[i]
 			}
 		default:
 			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
+			f.rest = append(f.rest, args[i])
 		}
 	}
+	if keyHex != "" || keyURI != "" {
+		key, err := hex.DecodeString(keyHex)
+		if err != nil {
+			Fatal("invalid --aes-key (expected 32 hex chars): " + err.Error())
+		}
+		f.encrypt = &mp4.HLSEncryption{Key: key, KeyURI: keyURI}
+	}
+	return f
+}
+
+func (f hlsFlags) options(src string) mp4.Options {
+	o := mp4.Options{
+		FS:        sourceFS(src),
+		SegmentMs: f.segMs,
+		Encrypt:   f.encrypt,
+	}
+	if f.prefix != "" {
+		prefix := f.prefix
+		o.RewriteURL = func(name string) string { return prefix + name }
+	}
+	return o
+}
+
+// CmdToHLS remuxes an MKV/WebM file to a fragmented-MP4 HLS presentation
+// (init.mp4 + segments + playlist.m3u8) in an output directory.
+func CmdToHLS(args []string) {
+	f := parseHLSFlags(args)
+	outDir, rest := f.outDir, f.rest
 	if len(rest) < 1 || outDir == "" {
 		Fatal("usage: " + CmdUsage["to-hls"])
 	}
 	src := rest[0]
 
-	err := mp4.RemuxToHLS(context.Background(), src, outDir, mp4.Options{
-		FS:        sourceFS(src),
-		Progress:  NewProgressBar(),
-		SegmentMs: segMs,
-		OnDrop: func(d mp4.DroppedTrack) {
-			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-		},
-	})
+	opts := f.options(src)
+	opts.Progress = NewProgressBar()
+	opts.OnDrop = func(d mp4.DroppedTrack) {
+		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+	}
+	err := mp4.RemuxToHLS(context.Background(), src, outDir, opts)
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
@@ -64,42 +113,18 @@ func CmdToHLS(args []string) {
 // HLS requests with no pre-generated files. The source may be a local path or
 // an http(s) URL.
 func CmdHLSSegment(args []string) {
-	var outPath string
-	var segMs int64
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
-		case "-segment", "--segment":
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				segMs = int64(secs * 1000)
-			}
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	f := parseHLSFlags(args)
+	outPath, rest := f.outDir, f.rest
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["hls-segment"])
 	}
 	src, what := rest[0], rest[1]
 
-	plan, err := mp4.PlanHLS(context.Background(), src, mp4.Options{
-		FS:        sourceFS(src),
-		SegmentMs: segMs,
-		OnDrop: func(d mp4.DroppedTrack) {
-			fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-		},
-	})
+	opts := f.options(src)
+	opts.OnDrop = func(d mp4.DroppedTrack) {
+		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+	}
+	plan, err := mp4.PlanHLS(context.Background(), src, opts)
 	if err != nil {
 		Fatal(err.Error())
 	}

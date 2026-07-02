@@ -64,6 +64,19 @@ type Options struct {
 	// milliseconds. Segments are cut on video keyframes, so the actual duration
 	// is the first keyframe at/after each multiple. 0 selects the default (6 s).
 	SegmentMs int64
+
+	// Encrypt, when set, AES-128-encrypts every HLS media segment and writes
+	// the EXT-X-KEY line in the media playlists (RemuxToHLS and PlanHLS). The
+	// DASH manifest is not emitted for an encrypted presentation. See
+	// HLSEncryption.
+	Encrypt *HLSEncryption
+
+	// RewriteURL, when set, rewrites every URI the HLS playlists and the DASH
+	// manifest reference (segments, inits, playlists, subtitles) — the hook
+	// for URL templating: prepending a CDN base, appending a signed token
+	// (?token=…), or mapping names to a route. Resource names stay canonical;
+	// the server strips its decoration before calling Resource.
+	RewriteURL func(name string) string
 	// ContentHashes, on RemuxToMP4, computes each track's content SHA-256 while
 	// the samples stream (no extra I/O) and stores them as freeform ilst atoms
 	// (mean "org.mkvgo", name "CONTENT_SHA256_<track_ID>"), making the output

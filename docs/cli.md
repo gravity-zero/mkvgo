@@ -696,7 +696,27 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
 mkvgo to-hls video.mkv -o stream/
 mkvgo to-hls video.mkv -o stream/ -segment 4
 # serve stream/ over HTTP; play stream/master.m3u8 (hls.js/Safari) or stream/manifest.mpd (dash.js)
+
+# AES-128 encryption + signed URLs:
+mkvgo to-hls video.mkv -o stream/ --aes-key 00112233445566778899aabbccddeeff \
+  --aes-key-uri https://api.example.com/key --url-prefix "https://cdn.example.com/v1/"
 ```
+
+Security flags (shared with `hls-segment`; both must use the same values):
+
+- `--aes-key <32 hex>` + `--aes-key-uri <uri>` — encrypt every media segment
+  with AES-128-CBC (whole-segment, PKCS#7, IV = segment sequence, per RFC
+  8216) and write the `EXT-X-KEY` line. The key itself is never written to the
+  output — serving it (with authentication) is the server's job. Init segments
+  and subtitles stay clear. AES-128 is HLS-only: no `manifest.mpd` is emitted
+  for an encrypted presentation (DASH uses CENC, not implemented). Supported
+  by hls.js; Safari/FairPlay requires SAMPLE-AES (DRM territory, out of
+  scope). ffmpeg's own HLS demuxer does not decrypt whole-segment fMP4 —
+  verified spec-conformant by openssl round-trip.
+- `--url-prefix <prefix>` — prepend a base to every URI the playlists and the
+  MPD reference (CDN base, or a token route). The library form is
+  `Options.RewriteURL func(name) string`, which can append per-resource signed
+  tokens instead.
 
 ### hls-segment
 

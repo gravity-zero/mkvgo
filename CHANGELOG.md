@@ -62,6 +62,20 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **HLS delivery security.** `Options.Encrypt` (`HLSEncryption{Key, KeyURI,
+  IV?}`) AES-128-encrypts every media segment — whole-segment CBC with PKCS#7
+  and IV = media sequence per RFC 8216 — and writes the `EXT-X-KEY` line;
+  `to-hls`/`hls-segment` expose it as `--aes-key`/`--aes-key-uri`. Both
+  serving modes produce identical ciphertext; init segments and subtitles
+  stay clear; the key is only advertised, never stored. Verified by an
+  openssl decrypt round-trip of the whole presentation (ffmpeg's own HLS
+  demuxer does not decrypt whole-segment fMP4; hls.js does). AES-128 is
+  HLS-only, so no DASH manifest is emitted when encrypting. Alongside it,
+  `Options.RewriteURL func(name) string` (CLI `--url-prefix`) rewrites every
+  URI the playlists/MPD reference — the hook for CDN prefixes and per-URL
+  signed tokens (HMAC example in library.md). On-demand subtitle cues are
+  now loaded once and cached, and the windowed `subN_*.vtt` resources make
+  the on-demand subtitle playlists byte-identical to the full pass.
 - **DASH output and demuxed CMAF renditions.** The packaging is CMAF proper:
   one demuxed rendition per track — the video (`playlist.m3u8`, `init.mp4`,
   `seg00001.m4s` …) and each audio track (`audio1.m3u8`, `init_a1.mp4`,

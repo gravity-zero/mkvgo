@@ -17,7 +17,8 @@ import (
 // each subtitle as a whole-file WebVTT) over the same CMAF segments the HLS
 // playlists reference. durs are the segment durations in seconds; bandwidth
 // is the peak aggregate segment bitrate in bits/s.
-func buildDASHManifest(fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64) []byte {
+func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64) []byte {
+	rw := urlRewriter(o)
 	var totalSec float64
 	for _, d := range durs {
 		totalSec += d
@@ -66,7 +67,7 @@ func buildDASHManifest(fts []*fragTrack, subs []hlsSubTrack, durs []float64, ban
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		media := strings.Replace(renditionSegment(fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
-			renditionInit(fts, i), media)
+			rw(renditionInit(fts, i)), rw(media))
 		b.WriteString(timeline)
 		b.WriteString("        </SegmentTemplate>\n")
 		b.WriteString("      </Representation>\n")
@@ -82,7 +83,7 @@ func buildDASHManifest(fts []*fragTrack, subs []hlsSubTrack, durs []float64, ban
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
-		fmt.Fprintf(&b, "        <BaseURL>sub%d.vtt</BaseURL>\n", i+1)
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
 		b.WriteString("      </Representation>\n")
 		b.WriteString("    </AdaptationSet>\n")
 	}

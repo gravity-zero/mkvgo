@@ -47,6 +47,7 @@ type HLSPlan struct {
 	master   []byte
 	mpd      []byte
 	segCount int
+	opts     Options       // Encrypt / RewriteURL ride along for Resource builds
 	subs     []hlsSubTrack // declared renditions; cues fetched lazily, then cached
 	subOnce  []sync.Once   // one-shot cue loaders (the sequential pass runs once per track)
 	subErr   []error
@@ -102,7 +103,12 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, errf("HLS output requires a video track")
 	}
 
-	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale}
+	if o.Encrypt != nil {
+		if err := o.Encrypt.validate(); err != nil {
+			return nil, err
+		}
+	}
+	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o}
 	p.subs = planSubTracks(c, o)
 	p.subOnce = make([]sync.Once, len(p.subs))
 	p.subErr = make([]error, len(p.subs))
@@ -202,8 +208,10 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
 	}
-	p.master = buildMasterPlaylist(fts, p.subs, segs)
-	p.mpd = buildDASHManifest(fts, p.subs, p.durs, peakBandwidth(segs))
+	p.master = buildMasterPlaylist(&o, fts, p.subs, segs)
+	if o.Encrypt == nil {
+		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs))
+	}
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
 	for i, ft := range fts {
 		m := movieMeta{}
@@ -212,7 +220,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m))
 		i := i
-		p.medias = append(p.medias, buildMediaPlaylist(p.durs, renditionInit(fts, i),
+		p.medias = append(p.medias, buildMediaPlaylist(&o, p.durs, renditionInit(fts, i),
 			func(k int) string { return renditionSegment(fts, i, k) }))
 	}
 	return p, nil
@@ -460,6 +468,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	for x := range window {
 		out = append(out, window[x].data...)
 	}
+	if p.opts.Encrypt != nil {
+		return p.opts.Encrypt.encryptSegment(out, uint32(n))
+	}
 	return out, nil
 }
 
@@ -469,7 +480,10 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 // audio track), and each subtitle rendition (its HLS playlist and its WebVTT).
 // Serving a presentation is: answer any of these names through Resource.
 func (p *HLSPlan) Resources() []string {
-	names := []string{"master.m3u8", "manifest.mpd"}
+	names := []string{"master.m3u8"}
+	if p.mpd != nil {
+		names = append(names, "manifest.mpd")
+	}
 	fts := p.fts()
 	for i := range fts {
 		names = append(names, renditionPlaylist(fts, i), renditionInit(fts, i))
@@ -504,6 +518,9 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	case "master.m3u8":
 		return p.master, mimeM3U8, nil
 	case "manifest.mpd":
+		if p.mpd == nil {
+			return nil, "", errf("no DASH manifest for an AES-128-encrypted presentation (HLS only)")
+		}
 		return p.mpd, "application/dash+xml", nil
 	}
 	fts := p.fts()
@@ -536,7 +553,7 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		}
 		// Windowed like the full pass (byte-identical playlist); the cues are
 		// loaded once, so each window is served from the cache.
-		pl := buildMediaPlaylist(p.durs, "",
+		pl := buildMediaPlaylist(&p.opts, p.durs, "",
 			func(k int) string { return fmt.Sprintf("sub%d_%05d.vtt", i, k+1) })
 		return pl, mimeM3U8, nil
 	}

@@ -201,6 +201,34 @@ pass, lazily; cache it if requested often. The remaining difference: the
 master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
 Cues index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Securing HLS delivery
+
+```go
+opts := mp4.Options{
+    Encrypt: &mp4.HLSEncryption{
+        Key:    key,                                  // 16 bytes; never written to the output
+        KeyURI: "https://api.example.com/key?title=42", // what EXT-X-KEY advertises
+    },
+    RewriteURL: func(name string) string {            // URL templating / token signing
+        mac := hmac.New(sha256.New, secret)
+        mac.Write([]byte(name + expiry))
+        return name + "?e=" + expiry + "&sig=" + hex.EncodeToString(mac.Sum(nil))
+    },
+}
+```
+
+`Encrypt` AES-128-encrypts every media segment (whole-segment CBC, PKCS#7,
+IV = segment sequence — RFC 8216) in both `RemuxToHLS` and `PlanHLS`; the two
+modes produce identical ciphertext. Init segments and subtitles stay clear;
+the DASH manifest is withheld (AES-128 is an HLS mechanism). The key is only
+ever advertised (`KeyURI`), never stored — authenticating that endpoint is the
+server's access control.
+
+`RewriteURL` rewrites every URI the playlists and the MPD reference. Resource
+names stay canonical: the server strips its decoration (query token, prefix)
+before calling `plan.Resource(ctx, name)`, and verifies the signature — the
+hook makes every segment URL individually signed and expirable.
+
 ### MP4 → MKV
 
 ```go
