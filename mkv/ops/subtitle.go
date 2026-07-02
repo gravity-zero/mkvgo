@@ -198,9 +198,16 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 
 	subBlocks := make([]mkv.Block, len(entries))
 	for i, e := range entries {
+		// The cue's end time rides as the BlockDuration (BlockGroup); without it
+		// the SRT end times are lost and readers fall back to guessed durations.
+		var dur int64
+		if e.EndMs > e.StartMs {
+			dur = e.EndMs - e.StartMs
+		}
 		subBlocks[i] = mkv.Block{
 			TrackNumber: newID,
 			Timecode:    e.StartMs,
+			Duration:    dur,
 			Data:        []byte(e.Text),
 		}
 	}
