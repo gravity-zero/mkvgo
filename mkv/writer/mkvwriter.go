@@ -32,6 +32,7 @@ type MKVWriter struct {
 	CuesPos       int64
 	Cues          []mkv.CuePoint
 	TimecodeScale int64
+	videoTracks   map[uint64]bool // set by WriteMetadata; cue selection keys on these
 }
 
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
@@ -80,10 +81,14 @@ const minCueIntervalMs = 500
 func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, blocks []mkv.Block) error {
 	clusterOffset := m.RelPos()
 
-	// Find first keyframe for cue
+	// Cue the cluster's first VIDEO keyframe. Every audio block carries the
+	// keyframe flag, so keying on "first keyframe-flagged block" cued audio in
+	// mixed clusters — cue times then named the audio block, not the seek
+	// target, skewing every consumer of the index (same bug class as the
+	// reindex fix; here in the writer).
 	cued := false
 	for i := range blocks {
-		if blocks[i].Keyframe {
+		if blocks[i].Keyframe && (m.videoTracks == nil || m.videoTracks[blocks[i].TrackNumber]) {
 			m.Cues = append(m.Cues, mkv.CuePoint{
 				TimeMs: blocks[i].Timecode, Track: blocks[i].TrackNumber,
 				ClusterPos: clusterOffset,
@@ -93,8 +98,10 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 		}
 	}
 
-	// Audio-only: no keyframes, cue on first block (max 1 per 500ms per spec)
-	if !cued && len(blocks) > 0 {
+	// Audio-only file (no video track declared): cue on the first block,
+	// throttled (max 1 per 500ms per spec). A video file's cluster without a
+	// video keyframe is NOT cued — a mid-GOP cue is a false seek target.
+	if !cued && len(blocks) > 0 && len(m.videoTracks) == 0 {
 		lastCueTime := int64(-minCueIntervalMs - 1)
 		if len(m.Cues) > 0 {
 			lastCueTime = m.Cues[len(m.Cues)-1].TimeMs
@@ -174,6 +181,12 @@ func (m *MKVWriter) Finalize() error {
 }
 
 func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, durationMs int64) error {
+	m.videoTracks = map[uint64]bool{}
+	for _, t := range tracks {
+		if t.Type == mkv.VideoTrack {
+			m.videoTracks[t.ID] = true
+		}
+	}
 	m.TimecodeScale = c.Info.TimecodeScale
 	if m.TimecodeScale == 0 {
 		m.TimecodeScale = 1000000
