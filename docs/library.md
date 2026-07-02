@@ -156,6 +156,32 @@ Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s)
 
 Memory is bounded regardless of file size: per-sample metadata is held in RAM (the same order the progressive muxer holds) while sample bytes are streamed through one temp file per track and read back sequentially as the segments are written.
 
+### On-demand HLS (`mp4.PlanHLS`)
+
+```go
+plan, err := mp4.PlanHLS(ctx, "in.mkv", mp4.Options{SegmentMs: 6000})
+plan.MasterPlaylist()               // []byte — multivariant playlist
+plan.MediaPlaylist()                // []byte — playlist.m3u8
+plan.InitSegment()                  // []byte — init.mp4
+data, err := plan.Segment(ctx, n)   // the n-th (0-based) media segment
+plan.NumSegments(); plan.SegmentName(n)
+```
+
+The zero-storage counterpart of `RemuxToHLS`: `PlanHLS` performs a few bounded
+reads (the metadata head with its Cues, the first and last clusters) and each
+`Segment(n)` then seeks straight to its window through the Cues and reads only
+that window — a server answers any HLS request in milliseconds with nothing
+pre-generated. Combined with an `httpfs` source, only the ranges a viewer
+actually watches are ever transferred from remote storage.
+
+The fragments are built by the same code as `RemuxToHLS`, so every resource is
+**byte-identical** to the full pass (regression-tested) — pre-generated and
+on-demand serving mix transparently. On-demand differences: subtitle tracks
+are reported via `OnDrop` instead of becoming WebVTT renditions, cover art is
+not read, and the master `BANDWIDTH` is estimated from cluster sizes. The
+source must carry a Cues index. The plan is immutable and safe for concurrent
+`Segment` calls.
+
 ### MP4 → MKV
 
 ```go

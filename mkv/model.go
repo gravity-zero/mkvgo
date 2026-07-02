@@ -29,6 +29,12 @@ type Container struct {
 	Cues        []CuePoint   `json:"cues,omitempty"`
 	DurationMs  int64        `json:"duration_ms"`
 
+	// SegmentStart is the absolute file offset of the Segment body — the origin
+	// CuePoint.ClusterPos values are relative to. Filled by the seekable readers
+	// (Read/ReadMeta); 0 is a valid value only for a file with no EBML header,
+	// so treat it together with Cues presence.
+	SegmentStart int64 `json:"-"`
+
 	// Keyframes holds the video track's keyframe presentation timestamps in
 	// milliseconds (ascending, de-duplicated) — the points an "-c copy" segmenter
 	// must cut on. It is filled in the same pass as the rest of the metadata: from
@@ -415,7 +421,7 @@ func (t *Track) RestoreHeader(data []byte) []byte {
 type CuePoint struct {
 	TimeMs     int64
 	Track      uint64
-	ClusterPos int64
+	ClusterPos int64 // relative to the Segment body (Container.SegmentStart)
 }
 
 type MuxOptions struct {

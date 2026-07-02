@@ -113,6 +113,15 @@ else
 fi
 echo "  HLS OK: playlist + standalone segment decode"
 
+echo "== on-demand HLS: hls-segment byte-identical to the full pass"
+"$MKVGO" hls-segment "$TMP/src.mkv" init -segment 1 > "$TMP/od-init.mp4"
+cmp "$TMP/od-init.mp4" "$TMP/hls/init.mp4"
+"$MKVGO" hls-segment "$TMP/src.mkv" playlist -segment 1 > "$TMP/od-playlist.m3u8"
+cmp "$TMP/od-playlist.m3u8" "$TMP/hls/playlist.m3u8"
+"$MKVGO" hls-segment "$TMP/src.mkv" 2 -segment 1 > "$TMP/od-seg2.m4s"
+cmp "$TMP/od-seg2.m4s" "$TMP/hls/seg00002.m4s"
+echo "  on-demand OK: init + playlist + mid segment identical"
+
 echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" probe "$TMP/src.mov" >/dev/null
 "$MKVGO" -f from-mp4 "$TMP/src.mov" "$TMP/mov.mkv" >/dev/null

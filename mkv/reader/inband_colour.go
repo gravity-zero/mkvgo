@@ -15,6 +15,24 @@ type readOpts struct {
 	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
 	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
 	bitrate          bool // follow the SeekHead to Tags for per-track BPS → Track.Bitrate
+	cues             bool // keep the raw CuePoints on the metadata path (WithCues)
+	tags             bool // keep the Tags element on the metadata path (WithTags)
+}
+
+// WithTags keeps Container.Tags populated on the metadata-only path (normally
+// left nil). The Tags element is reached through its SeekHead entry — one seek
+// to one element, no Cluster scan — so the read stays head-only.
+func WithTags() ReadOption {
+	return func(o *readOpts) { o.tags = true }
+}
+
+// WithCues keeps Container.Cues populated on the metadata-only path (they are
+// normally consumed into Keyframes and dropped). Each CuePoint's ClusterPos is
+// relative to Container.SegmentStart — together they let a caller seek straight
+// to the cluster holding a given time, which is what cue-driven readers (e.g.
+// on-demand HLS segmenting) need. The read stays head-only.
+func WithCues() ReadOption {
+	return func(o *readOpts) { o.cues = true }
 }
 
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track

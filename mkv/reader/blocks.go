@@ -103,6 +103,26 @@ func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) 
 	return br, nil
 }
 
+// NewBlockReaderAt is NewBlockReader starting mid-file: r is positioned at
+// offset — the absolute file offset of a Cluster element (e.g. a CuePoint's
+// Container.SegmentStart + ClusterPos) — and blocks are read from that cluster
+// on. The caller supplies the TimecodeScale (from a prior metadata read); the
+// EBML/Segment headers are not re-parsed. The segment end is unknown, so
+// reading stops at EOF or at a non-cluster top-level element.
+func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*BlockReader, error) {
+	if _, err := r.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	br := &BlockReader{
+		raw:           r,
+		timecodeScale: timecodeScale,
+		segEnd:        -1,
+		clusterEnd:    -1,
+	}
+	br.r = newCountingReader(r, offset)
+	return br, nil
+}
+
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
 	br.progressFn = fn
 	br.progressTotal = total

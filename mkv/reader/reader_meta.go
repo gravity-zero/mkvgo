@@ -80,7 +80,7 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 		}
 		return nil, fmt.Errorf("ebml header: %w", err)
 	}
-	if err := p.parseSegmentMeta(ctx, c, o.bitrate); err != nil && !tolerableTailError(err, c) {
+	if err := p.parseSegmentMeta(ctx, c, o); err != nil && !tolerableTailError(err, c) {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
 	if err := setDurationMs(c); err != nil {
@@ -109,7 +109,7 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 // parse Info and Tracks — reusing the same parseInfo/parseTracks as the full
 // reader for correctness parity — then returns. A head SeekHead is recorded so it
 // can jump straight to Info/Tracks when they sit after the first Cluster.
-func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, wantBitrate bool) error {
+func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readOpts) error {
 	h, _, err := p.readHeader()
 	if err != nil {
 		return err
@@ -118,6 +118,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, wantBit
 		return fmt.Errorf("expected Segment (0x%X), got 0x%X", mkv.IDSegment, h.ID)
 	}
 	segStart := p.pos()
+	c.SegmentStart = segStart
 	endPos := int64(-1)
 	if h.Size >= 0 {
 		endPos = segStart + h.Size
@@ -171,7 +172,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, wantBit
 		case mkv.IDTags:
 			// Tags inline before the Clusters: read them now only for the per-track
 			// BPS bitrate when requested; otherwise skip (Tags are not exposed here).
-			if wantBitrate && c.Tags == nil {
+			if o.bitrate && c.Tags == nil {
 				if err := p.parseTags(eh.Size, c); err != nil {
 					return p.elemErr(eh.ID, elemStart, err)
 				}
@@ -223,10 +224,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, wantBit
 				}
 			}
 			if gotInfo && gotTracks {
-				return p.finalizeHeadMeta(c, cuesOff, tagsOff, wantBitrate)
+				return p.finalizeHeadMeta(c, cuesOff, tagsOff, o)
 			}
 			if eh.Size < 0 {
-				return p.finalizeHeadMeta(c, cuesOff, tagsOff, wantBitrate) // unknown-size cluster: cannot skip
+				return p.finalizeHeadMeta(c, cuesOff, tagsOff, o) // unknown-size cluster: cannot skip
 			}
 			if _, err := p.r.Seek(resume, io.SeekStart); err != nil {
 				return err
@@ -244,29 +245,34 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, wantBit
 			break // early stop — Cues/Tags are pulled by finalizeHeadMeta, no Cluster scan
 		}
 	}
-	return p.finalizeHeadMeta(c, cuesOff, tagsOff, wantBitrate)
+	return p.finalizeHeadMeta(c, cuesOff, tagsOff, o)
 }
 
 // finalizeHeadMeta derives Container.Keyframes from the Cues seek index, and — when
-// wantBitrate — fills each track's Bitrate from the Tags' BPS. Either element, if
+// o.bitrate — fills each track's Bitrate from the Tags' BPS. Either element, if
 // not already read inline, is reached by following its SeekHead offset (one seek to
 // one element, no Cluster scan). It then leaves Cues and Tags nil — the metadata
-// path's contract — exposing only the derived Keyframes and Track.Bitrate.
-func (p *parser) finalizeHeadMeta(c *mkv.Container, cuesOff, tagsOff int64, wantBitrate bool) error {
+// path's contract — exposing only the derived Keyframes and Track.Bitrate; with
+// o.cues the raw CuePoints are kept too (WithCues), for cue-driven seeking.
+func (p *parser) finalizeHeadMeta(c *mkv.Container, cuesOff, tagsOff int64, o readOpts) error {
 	if len(c.Cues) == 0 && cuesOff >= 0 {
 		if _, err := p.parseElementAt(cuesOff, mkv.IDCues, c, p.parseCues); err != nil {
 			return err
 		}
 	}
 	c.Keyframes = keyframeTimesMs(c)
-	c.Cues = nil
-	if wantBitrate {
-		if c.Tags == nil && tagsOff >= 0 {
-			if _, err := p.parseElementAt(tagsOff, mkv.IDTags, c, p.parseTags); err != nil {
-				return err
-			}
+	if !o.cues {
+		c.Cues = nil
+	}
+	if (o.bitrate || o.tags) && c.Tags == nil && tagsOff >= 0 {
+		if _, err := p.parseElementAt(tagsOff, mkv.IDTags, c, p.parseTags); err != nil {
+			return err
 		}
+	}
+	if o.bitrate {
 		promoteTrackBitrate(c)
+	}
+	if !o.tags {
 		c.Tags = nil
 	}
 	return nil

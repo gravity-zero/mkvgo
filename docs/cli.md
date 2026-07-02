@@ -698,3 +698,33 @@ mkvgo to-hls video.mkv -o stream/ -segment 4
 # serve stream/ over HTTP; play stream/master.m3u8 in hls.js / Safari / ffmpeg
 ```
 
+### hls-segment
+
+Serve one resource of an HLS presentation **on demand** — nothing is
+pre-generated. `PlanHLS` reads the source's metadata, Cues and first/last
+clusters (a few bounded reads, ranged when the source is a URL), then builds
+just the requested resource: the master or media playlist, the init segment,
+or the N-th media segment (1-based, matching the playlist's `segNNNNN.m4s`).
+A media segment is built by seeking straight to its window through the Cues
+and reading only that window — first-play latency is milliseconds and storage
+cost is zero, whatever the file size.
+
+```
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6]
+```
+
+Without `-o` the resource goes to stdout (pipe it from a server handler).
+`-segment` must match across calls — it defines the boundaries.
+
+The output is **byte-identical** to the corresponding file `to-hls` writes
+(same boundaries, same fragments), so pre-generated and on-demand serving can
+be mixed transparently. Differences from `to-hls`: subtitle tracks are not
+carried (no WebVTT renditions — extract them separately), cover art is not
+read, and the master playlist's `BANDWIDTH` is estimated from the source's
+cluster sizes. The source must carry a Cues index (`mkvgo reindex` adds one).
+
+```bash
+mkvgo hls-segment movie.mkv master                 # multivariant playlist → stdout
+mkvgo hls-segment movie.mkv 42 -o seg00042.m4s     # just that segment
+mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 3's ranges
+```

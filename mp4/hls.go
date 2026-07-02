@@ -361,7 +361,7 @@ func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack
 				trackID:      ft.outTrack.mp4ID,
 				baseDecodeTS: ft.samples[start].dtsTS,
 				samples:      ft.samples[start:j],
-				hasCTS:       ft.hasCTS,
+				hasCTS:       windowHasCTS(ft.samples[start:j]),
 			}
 			for x := start; x < j; x++ {
 				seg.dataLen += int64(ft.samples[x].size)
@@ -427,6 +427,19 @@ func writeOneSegment(out io.Writer, moof []byte, segs []trackSegment, fts []*fra
 	return nil
 }
 
+// windowHasCTS reports whether any sample in the window carries a non-zero
+// composition offset — the trun writes its CTS column only then. Window-local
+// (not track-global) so the full pass and the on-demand path (hlsplan.go)
+// produce identical fragments.
+func windowHasCTS(samples []fragSample) bool {
+	for i := range samples {
+		if samples[i].ctsTS != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func trackReaderIndex(fts []*fragTrack, trackID uint32) int {
 	for i, ft := range fts {
 		if ft.outTrack.mp4ID == trackID {
@@ -457,6 +470,10 @@ func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 // writeMediaPlaylist writes a VOD HLS media playlist. mapURI, when non-empty,
 // is emitted as EXT-X-MAP (the fMP4 init segment); WebVTT playlists pass "".
 func writeMediaPlaylist(fs *mkv.FS, path string, durs []float64, mapURI string, segName func(i int) string) error {
+	return fs.DoWriteFile(path, buildMediaPlaylist(durs, mapURI, segName), 0o644)
+}
+
+func buildMediaPlaylist(durs []float64, mapURI string, segName func(i int) string) []byte {
 	var max float64
 	for _, d := range durs {
 		if d > max {
@@ -474,7 +491,7 @@ func writeMediaPlaylist(fs *mkv.FS, path string, durs []float64, mapURI string, 
 		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, segName(i))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
-	return fs.DoWriteFile(path, b, 0o644)
+	return b
 }
 
 // writeSubtitleRendition writes one subtitle track as segmented WebVTT: one
@@ -512,6 +529,10 @@ func writeSubtitleRendition(fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bo
 // CODECS when every track's RFC 6381 string is known) and the subtitle
 // renditions as an EXT-X-MEDIA group.
 func writeMasterPlaylist(fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) error {
+	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), buildMasterPlaylist(fts, subs, segs), 0o644)
+}
+
+func buildMasterPlaylist(fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) []byte {
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 
@@ -570,5 +591,5 @@ func writeMasterPlaylist(fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSub
 		inf += ",SUBTITLES=\"subs\""
 	}
 	b = append(b, (inf + "\nplaylist.m3u8\n")...)
-	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), b, 0o644)
+	return b
 }

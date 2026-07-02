@@ -123,6 +123,8 @@ func main() {
 		commands.CmdToWebM(args)
 	case "to-hls":
 		commands.CmdToHLS(args)
+	case "hls-segment":
+		commands.CmdHLSSegment(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -169,6 +171,7 @@ Commands:
   from-mp4      Remux an MP4 to MKV (--mp3-container-delay)
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
+hls-segment   Serve one HLS resource on demand (master/playlist/init/N) — no pre-generation
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments, tags,

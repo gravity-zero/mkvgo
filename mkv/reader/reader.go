@@ -204,6 +204,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	}
 
 	segStart := p.pos()
+	c.SegmentStart = segStart
 	var endPos int64 = -1
 	if h.Size >= 0 {
 		endPos = segStart + h.Size

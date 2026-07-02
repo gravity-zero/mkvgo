@@ -41,6 +41,14 @@ All notable changes to mkvgo are documented here. The format is based on
   `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
   and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
   it is now honoured.
+- **The writer cued audio in mixed clusters.** `WriteClusterWithCues` keyed
+  the Cues on the cluster's first keyframe-flagged block — and every audio
+  block carries that flag, so files written by mux/merge/edit carried cue
+  times naming an audio block instead of the video keyframe (the same bug
+  class as the 0.12.0 reindex fix, here on the write side). Cues now key on
+  video keyframes; a video file's cluster without one is not cued (a mid-GOP
+  cue is a false seek target), and audio-only files keep the throttled
+  first-block cues.
 - **`merge-subtitle` kept no cue durations.** The SRT/ASS end times were not
   written as BlockDurations, so every merged cue's length was lost (readers
   fell back to guessed durations). The end time now rides as the
@@ -54,6 +62,21 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **On-demand HLS** (`mp4.PlanHLS`, CLI `hls-segment`). The zero-storage
+  counterpart of `to-hls`: `PlanHLS` reads the metadata head (with its Cues),
+  the first and the last cluster — a few bounded reads — and `Segment(n)`
+  then builds any single media segment by seeking straight to its window
+  through the Cues and reading only that window. A server answers HLS
+  requests (master/media playlist, init, any segment) in milliseconds with
+  nothing pre-generated; with an `httpfs` source only the ranges a viewer
+  actually watches are transferred. Every resource is byte-identical to what
+  the full `to-hls` pass writes (regression-tested on synthetic and real
+  files), so both serving modes mix transparently. Subtitle renditions and
+  cover art are full-pass-only; the master `BANDWIDTH` is estimated from
+  cluster sizes. New reader primitives back it: `WithCues()` and `WithTags()`
+  keep those elements on the head-only path, `Container.SegmentStart`
+  anchors the cue positions, and `NewBlockReaderAt` starts a block reader at
+  a cued cluster.
 - **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
   new `httpfs` package implements the FS port over ranged GETs (cached
   512 KiB windows, configurable client/headers, explicit refusal when a

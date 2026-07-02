@@ -131,6 +131,7 @@ Global flags: `-json` (structured output), `--version`
 | | `from-mp4` | Remux MP4 to MKV |
 | | `to-webm` | Remux MKV/WebM to WebM (WebM-subset codecs only) |
 | | `to-hls` | Remux MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8) |
+| | `hls-segment` | Serve one HLS resource on demand (master/playlist/init/N) — zero pre-generation |
 
 Full CLI reference: [docs/cli.md](docs/cli.md)
 
