@@ -3,6 +3,8 @@ package ops
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -26,12 +28,22 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 	}
 
 	var ranges []mkv.TimeRange
-	if opts.ByChapters {
+	var titles []string // per-range chapter titles, for the {title} pattern token
+	switch {
+	case opts.ByChapters:
 		if len(c.Chapters) == 0 {
 			return nil, fmt.Errorf("no chapters to split by")
 		}
 		ranges = chaptersToRanges(c.Chapters)
-	} else {
+		for _, ch := range c.Chapters {
+			titles = append(titles, ch.Title)
+		}
+	case opts.EveryMs > 0:
+		ranges, err = rangesEvery(c.Keyframes, opts.EveryMs)
+		if err != nil {
+			return nil, err
+		}
+	default:
 		ranges = opts.Ranges
 	}
 	if len(ranges) == 0 {
@@ -44,11 +56,26 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 	}
 
 	var outputs []string
+	used := map[string]bool{}
 	for i, r := range ranges {
 		if ctx.Err() != nil {
 			return outputs, ctx.Err()
 		}
-		name := fmt.Sprintf(pattern, i+1)
+		pat := pattern
+		if i < len(titles) {
+			pat = strings.ReplaceAll(pat, "{title}", sanitizeName(titles[i], i+1))
+		}
+		name := pat
+		if strings.Contains(pat, "%") {
+			name = fmt.Sprintf(pat, i+1)
+		}
+		// A {title}-only pattern with duplicate chapter titles must not make
+		// parts overwrite each other: suffix the part number.
+		if used[name] {
+			ext := filepath.Ext(name)
+			name = strings.TrimSuffix(name, ext) + fmt.Sprintf("_%d", i+1) + ext
+		}
+		used[name] = true
 		outPath, err := safePath(opts.OutputDir, name)
 		if err != nil {
 			return outputs, err
@@ -65,6 +92,50 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		outputs = append(outputs, outPath)
 	}
 	return outputs, nil
+}
+
+// rangesEvery builds keyframe-aligned split ranges of roughly everyMs each:
+// every boundary is the first keyframe at/after the previous boundary plus
+// everyMs, so each part starts decodable without re-encoding.
+func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
+	if len(keyframes) == 0 {
+		return nil, fmt.Errorf("no keyframe index (Cues) to segment on; rebuild it with reindex first")
+	}
+	var bounds []int64
+	prev := int64(0)
+	for _, k := range keyframes {
+		if k >= prev+everyMs {
+			bounds = append(bounds, k)
+			prev = k
+		}
+	}
+	ranges := make([]mkv.TimeRange, 0, len(bounds)+1)
+	start := int64(0)
+	for _, b := range bounds {
+		ranges = append(ranges, mkv.TimeRange{StartMs: start, EndMs: b})
+		start = b
+	}
+	return append(ranges, mkv.TimeRange{StartMs: start, EndMs: 0}), nil
+}
+
+// sanitizeName makes a chapter title safe as a file-name fragment; an empty
+// or fully-stripped title falls back to "chapter_<n>".
+func sanitizeName(title string, n int) string {
+	var b strings.Builder
+	for _, r := range title {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == ' ', r == '-', r == '_', r == '.', r == '(', r == ')', r > 127:
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	s := strings.Trim(b.String(), " .")
+	if s == "" {
+		return fmt.Sprintf("chapter_%02d", n)
+	}
+	return s
 }
 
 func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {

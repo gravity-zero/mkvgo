@@ -82,6 +82,14 @@ func main() {
 		commands.CmdEditTrack(args)
 	case "extract-attachment":
 		commands.CmdExtractAttachment(args)
+	case "add-attachment":
+		commands.CmdAddAttachment(args)
+	case "set-chapters":
+		commands.CmdSetChapters(args)
+	case "extract-chapters":
+		commands.CmdExtractChapters(args)
+	case "remove-attachment":
+		commands.CmdRemoveAttachment(args)
 	case "extract-subtitle":
 		commands.CmdExtractSubtitle(args)
 	case "split":
@@ -132,6 +140,8 @@ Commands:
   edit-title    Change the container title
   edit-track    Edit track properties (lang, name, default, forced)
   extract-attachment  Extract an attachment to file
+  add-attachment      Attach a file (font, cover art; MIME sniffed)
+  remove-attachment   Remove an attachment by ID or name
   extract-subtitle    Extract subtitle track as SRT/ASS/WebVTT (MKV or MP4)
   to-vtt        Convert an external .srt/.ass/.vtt sidecar to WebVTT
   keyframes     List video keyframe timestamps (from Cues / sample table)
@@ -140,6 +150,8 @@ Commands:
   merge         Combine all tracks from multiple MKVs
   merge-subtitle  Inject an external SRT into an MKV
   edit-inplace  Edit metadata without rewriting clusters (instant)
+  set-chapters  Replace chapters from an OGM-format text file
+  extract-chapters  Export chapters as OGM text (mkvmerge/ffmpeg compatible)
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues

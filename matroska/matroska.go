@@ -222,6 +222,35 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff,
 	return ops.Compare(ctx, pathA, pathB, opts...)
 }
 
+// AddAttachment rewrites srcPath to dstPath with att appended to the
+// attachments (ID auto-assigned when 0). See ops.AddAttachment.
+func AddAttachment(ctx context.Context, srcPath, dstPath string, att Attachment, opts ...Options) error {
+	return ops.AddAttachment(ctx, srcPath, dstPath, att, opts...)
+}
+
+// RemoveAttachment rewrites srcPath to dstPath without the attachment matching
+// target (a decimal ID or an exact name); it errors before writing anything
+// when no attachment matches. See ops.RemoveAttachment.
+func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts ...Options) error {
+	return ops.RemoveAttachment(ctx, srcPath, dstPath, target, opts...)
+}
+
+// SetChapters rewrites srcPath to dstPath with its chapters replaced (e.g.
+// from ParseOGMChapters). See ops.SetChapters.
+func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []Chapter, opts ...Options) error {
+	return ops.SetChapters(ctx, srcPath, dstPath, chapters, opts...)
+}
+
+// ParseOGMChapters parses the OGM/mkvmerge simple chapter text format
+// (CHAPTER01=00:00:00.000 / CHAPTER01NAME=Intro). See mkv.ParseOGMChapters.
+func ParseOGMChapters(r io.Reader) ([]Chapter, error) { return mkv.ParseOGMChapters(r) }
+
+// FormatOGMChapters renders chapters in the OGM simple chapter text format.
+// See mkv.FormatOGMChapters.
+func FormatOGMChapters(w io.Writer, chapters []Chapter) error {
+	return mkv.FormatOGMChapters(w, chapters)
+}
+
 // CompareContainers diffs the metadata of two already-parsed containers —
 // format-agnostic, so an MKV can be compared against an mp4.OpenMeta result to
 // verify a remux round-trip. See ops.CompareContainers.

@@ -461,7 +461,15 @@ type SplitOptions struct {
 	OutputDir  string
 	Ranges     []TimeRange
 	ByChapters bool
-	Pattern    string
+	// EveryMs splits into keyframe-aligned segments of roughly this duration:
+	// each boundary is the first video keyframe at/after the previous boundary
+	// plus EveryMs (from the Cues index — a file without one must be reindexed
+	// first). Mutually exclusive with Ranges/ByChapters.
+	EveryMs int64
+	// Pattern names the output parts (default "part_%03d.mkv"; %d gets the
+	// 1-based part number). When splitting by chapters, the literal token
+	// "{title}" is replaced by the sanitized chapter title.
+	Pattern string
 }
 
 type TimeRange struct {

@@ -52,6 +52,17 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **`add-attachment` / `remove-attachment`.** Attach a file (font, cover art —
+  MIME sniffed from magic bytes, `-mime` to override) or remove one by ID or
+  exact name; removal fails before writing anything when nothing matches.
+- **Chapters as OGM text.** `set-chapters` replaces a file's chapters from the
+  `CHAPTER01=…`/`CHAPTER01NAME=…` format mkvmerge and ffmpeg understand;
+  `extract-chapters` exports them (MP4/MOV accepted). Library:
+  `matroska.ParseOGMChapters`/`FormatOGMChapters`.
+- **`split -every <duration>`.** Splits into keyframe-aligned segments of
+  roughly the given duration, boundaries taken from the Cues index. And
+  `split -pattern` is exposed on the CLI; with `-chapters` the `{title}` token
+  names each part after its (sanitized) chapter title.
 - **Cross-format `compare`.** Either side of `mkvgo compare` may now be an
   MP4/MOV (read via the head-only MP4 probe), so a remux round-trip can be
   verified: `mkvgo compare movie.mkv movie.mp4`. The library gains

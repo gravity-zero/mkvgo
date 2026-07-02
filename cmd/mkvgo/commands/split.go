@@ -12,8 +12,9 @@ func CmdSplit(args []string) {
 		Fatal("usage: mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]")
 	}
 	source := args[0]
-	var outDir string
+	var outDir, pattern string
 	var byChapters bool
+	var everyMs int64
 	var ranges []matroska.TimeRange
 
 	for i := 1; i < len(args); i++ {
@@ -26,6 +27,16 @@ func CmdSplit(args []string) {
 		case "-range":
 			i++
 			ranges = ParseTimeRanges(args[i])
+		case "-every":
+			i++
+			ms, err := ParseTimePoint(args[i])
+			if err != nil || ms <= 0 {
+				Fatal(fmt.Sprintf("invalid -every duration %q", args[i]))
+			}
+			everyMs = ms
+		case "-pattern":
+			i++
+			pattern = args[i]
 		default:
 			rejectFlagArg(args[i])
 		}
@@ -33,8 +44,14 @@ func CmdSplit(args []string) {
 	if outDir == "" {
 		Fatal("missing -o <dir>")
 	}
-	if !byChapters && len(ranges) == 0 {
-		Fatal("specify -chapters or -range")
+	modes := 0
+	for _, on := range []bool{byChapters, len(ranges) > 0, everyMs > 0} {
+		if on {
+			modes++
+		}
+	}
+	if modes != 1 {
+		Fatal("specify exactly one of -chapters, -range or -every")
 	}
 
 	outputs, err := matroska.Split(context.Background(), matroska.SplitOptions{
@@ -42,6 +59,8 @@ func CmdSplit(args []string) {
 		OutputDir:  outDir,
 		ByChapters: byChapters,
 		Ranges:     ranges,
+		EveryMs:    everyMs,
+		Pattern:    pattern,
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {

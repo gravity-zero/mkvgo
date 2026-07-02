@@ -110,19 +110,21 @@ Global flags: `-json` (structured output), `--version`
 | | `compare` | Diff metadata of two files (MKV or MP4 — verify a remux round-trip) |
 | **Extraction** | `demux` | Extract tracks to raw streams |
 | | `extract-attachment` | Extract an attachment to file |
+| | `add-attachment` / `remove-attachment` | Attach a file (MIME sniffed) / remove one by ID or name |
 | | `extract-subtitle` | Extract subtitle track as SRT, ASS or WebVTT (MKV or MP4) |
 | | `to-vtt` | Convert an external `.srt`/`.ass`/`.vtt` sidecar to WebVTT |
 | **Editing** | `edit` | Edit metadata from JSON (arg or stdin) |
 | | `edit-title` | Change the container title |
 | | `edit-track` | Edit track properties (lang, name, default, forced) |
 | | `edit-inplace` | Edit metadata without rewriting clusters (instant) |
+| | `set-chapters` / `extract-chapters` | Import/export chapters as OGM text (mkvmerge/ffmpeg compatible) |
 | | `remove-track` | Remove tracks from an MKV |
 | | `add-track` | Add a track from another MKV |
 | **Assembly** | `mux` | Combine tracks into a single MKV |
 | | `merge` | Combine all tracks from multiple MKVs |
 | | `merge-subtitle` | Inject an external SRT/ASS into an MKV |
 | | `join` | Concatenate multiple MKVs sequentially |
-| **Splitting** | `split` | Split MKV by time ranges or chapters |
+| **Splitting** | `split` | Split MKV by time ranges, chapters or fixed duration (`-every`) |
 | **Indexing** | `reindex` | Rebuild the seek index (Cues) of a file |
 | **Remux** | `to-mp4` | Remux MKV/WebM to MP4 (`--faststart`, `--skip-unsupported`) |
 | | `from-mp4` | Remux MP4 to MKV |

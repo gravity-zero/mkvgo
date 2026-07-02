@@ -203,6 +203,41 @@ mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>
 mkvgo extract-attachment video.mkv 1 -o cover.jpg
 ```
 
+### add-attachment
+
+Attach a file (font, cover art, ...). The MIME type is sniffed from the content
+(JPEG/PNG/GIF/WebP images, TTF/OTF/WOFF fonts, PDF) unless `-mime` is given.
+An attached `cover.jpg`/`cover.png` is what `to-mp4` carries as the MP4 cover art.
+
+```
+mkvgo add-attachment <file.mkv> -o <out.mkv> <attachment file> [-name text] [-mime type]
+```
+
+| Flag | Description |
+|---|---|
+| `-o` | Output file path (required) |
+| `-name` | Attachment name (default: the file's base name) |
+| `-mime` | MIME type (default: sniffed from content, then extension) |
+
+```bash
+mkvgo add-attachment video.mkv -o out.mkv cover.jpg
+mkvgo add-attachment video.mkv -o out.mkv font.ttf -name "Subtitle font"
+```
+
+### remove-attachment
+
+Remove an attachment by ID or exact name. Fails before writing anything when
+no attachment matches.
+
+```
+mkvgo remove-attachment <file.mkv> -o <out.mkv> <attachmentID|name>
+```
+
+```bash
+mkvgo remove-attachment video.mkv -o out.mkv cover.jpg
+mkvgo remove-attachment video.mkv -o out.mkv 2
+```
+
 ### extract-subtitle
 
 Extract an embedded text subtitle track as SRT, ASS or WebVTT. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt).
@@ -307,6 +342,41 @@ mkvgo edit-inplace <file.mkv> '<json>'
 
 ```bash
 mkvgo edit-inplace video.mkv '{"title":"Quick Fix"}'
+```
+
+### set-chapters
+
+Replace a file's chapters from an OGM simple-format text file -- the
+`CHAPTER01=...`/`CHAPTER01NAME=...` format mkvmerge (`--chapters`) and ffmpeg
+understand. Each chapter ends where the next starts.
+
+```
+mkvgo set-chapters <file.mkv> -o <out.mkv> <chapters.txt>
+```
+
+```
+CHAPTER01=00:00:00.000
+CHAPTER01NAME=Intro
+CHAPTER02=00:05:12.500
+CHAPTER02NAME=Part One
+```
+
+```bash
+mkvgo set-chapters video.mkv -o out.mkv chapters.txt
+```
+
+### extract-chapters
+
+Export a file's chapters in the same OGM format, to stdout or `-o <file>` --
+ready for `set-chapters` or `mkvmerge --chapters`. MP4/MOV inputs are accepted.
+
+```
+mkvgo extract-chapters <file.mkv|.mp4> [-o <chapters.txt>]
+```
+
+```bash
+mkvgo extract-chapters video.mkv > chapters.txt
+mkvgo extract-chapters movie.mp4 -o chapters.txt
 ```
 
 ### remove-track
@@ -433,7 +503,7 @@ mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
 Split an MKV by time ranges or by chapters.
 
 ```
-mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
+mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00] [-pattern name]
 ```
 
 | Flag | Description |
@@ -441,6 +511,10 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]
 | `-o` | Output directory (required) |
 | `-chapters` | Split at chapter boundaries |
 | `-range` | Comma-separated `start-end` ranges. Each bound is milliseconds (`300000`), fractional seconds (`90.5`) or a clock time (`5:00`, `01:30:00`, `1:30.5`); `0` = end of file |
+| `-every` | Split into keyframe-aligned segments of roughly this duration (same time syntax). Boundaries come from the Cues index -- reindex a file without one first |
+| `-pattern` | Output name pattern (default `part_%03d.mkv`; `%d` = part number). With `-chapters`, `{title}` is replaced by the sanitized chapter title (duplicates get a numeric suffix) |
+
+Exactly one of `-chapters`, `-range` or `-every` must be given.
 
 Cut policy (keyframe alignment): a segment starts at the first **video
 keyframe** at/after its start time (leading audio and mid-GOP video are
@@ -457,6 +531,12 @@ mkvgo split video.mkv -o chapters/ -chapters
 
 # Split first 5 minutes into its own file
 mkvgo split video.mkv -o parts/ -range 0-5:00,5:00-0
+
+# Keyframe-aligned ~6-minute segments (archive / pre-segmentation)
+mkvgo split video.mkv -o segments/ -every 6:00
+
+# One file per chapter, named after the chapter titles
+mkvgo split video.mkv -o chapters/ -chapters -pattern "{title}.mkv"
 ```
 
 ---

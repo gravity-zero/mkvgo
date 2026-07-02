@@ -120,7 +120,7 @@ err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
 
 Each track's compressed samples are copied verbatim into MP4 sample tables. Supported codecs:
 
-- **Video:** H.264, HEVC, AV1.
+- **Video:** H.264, HEVC, AV1, VP9 (`vp09`; the `vpcC` comes from the CodecPrivate or the first keyframe's header).
 - **Audio:** AAC, Opus, AC-3, E-AC-3, FLAC, MP3, DTS (incl. DTS-HD; carried as `mp4a`/`esds`).
 - **Subtitles:** SRT (`S_TEXT/UTF8`) is carried as `tx3g` timed text. Bitmap/styled formats (PGS, VOBSUB, ASS) are dropped.
 
@@ -150,7 +150,7 @@ Memory use scales with the sample count, not the file size: sample data is strea
 err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 ```
 
-Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points, chapters, the movie title (`udta/meta/ilst/©nam` → `Info.Title`), the other global tags (`©ART`/`©alb`/`©gen`/… → `Tags`) and per-track names (`udta/name`/`hdlr` → `Track.Name`) round-trip back to Matroska — and back out to MP4 with `RemuxToMP4`. Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (delay handled by the decoder from the bitstream). Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `vp09`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points, chapters, the movie title (`udta/meta/ilst/©nam` → `Info.Title`), the other global tags (`©ART`/`©alb`/`©gen`/… → `Tags`) and per-track names (`udta/name`/`hdlr` → `Track.Name`) round-trip back to Matroska — and back out to MP4 with `RemuxToMP4`. Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (delay handled by the decoder from the bitstream). Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
 
 #### Subtitles
 
@@ -372,6 +372,25 @@ err := matroska.EditInPlace(ctx, "video.mkv",
 )
 ```
 
+### Attachments and chapters
+
+```go
+// Attach a file (ID auto-assigned); what to-mp4 carries as MP4 cover art
+// when it is a cover.* image.
+err := matroska.AddAttachment(ctx, "in.mkv", "out.mkv", matroska.Attachment{
+    Name: "cover.jpg", MIMEType: "image/jpeg", Data: jpg,
+})
+
+// Remove by decimal ID or exact name; errors BEFORE writing when nothing matches.
+err = matroska.RemoveAttachment(ctx, "in.mkv", "out.mkv", "cover.jpg")
+
+// Replace the chapter list; ParseOGMChapters/FormatOGMChapters convert to and
+// from the OGM text format (CHAPTER01=... / CHAPTER01NAME=...) that mkvmerge
+// and ffmpeg understand.
+chaps, err := matroska.ParseOGMChapters(file)
+err = matroska.SetChapters(ctx, "in.mkv", "out.mkv", chaps)
+```
+
 ### Add / Remove tracks
 
 ```go
@@ -484,6 +503,20 @@ files, err := matroska.Split(ctx, matroska.SplitOptions{
 })
 // files = ["./parts/video_001.mkv", "./parts/video_002.mkv"]
 ```
+
+**Split into fixed-duration, keyframe-aligned segments:**
+```go
+files, err := matroska.Split(ctx, matroska.SplitOptions{
+    SourcePath: "video.mkv",
+    OutputDir:  "./segments/",
+    EveryMs:    6 * 60 * 1000, // ~6-minute parts, cut at video keyframes
+})
+```
+
+Boundaries come from the Cues index (the first keyframe at/after each
+multiple); a file without Cues must be reindexed first. `Pattern` names the
+parts (default `part_%03d.mkv`); when splitting by chapters the `{title}`
+token is replaced by the sanitized chapter title.
 
 **Split by chapters:**
 ```go
