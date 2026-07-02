@@ -55,7 +55,7 @@ decode_ok() {
 }
 
 echo "== build mkvgo"
-go build -o "$TMP/mkvgo" ./cmd/mkvgo
+CGO_ENABLED=0 go build -o "$TMP/mkvgo" ./cmd/mkvgo
 MKVGO="$TMP/mkvgo"
 
 echo "== generate fixtures with ffmpeg"
