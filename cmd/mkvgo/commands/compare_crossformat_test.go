@@ -19,7 +19,7 @@ func TestCmdCompare_CrossFormat(t *testing.T) {
 	}
 
 	recordExit(t)
-	stdout := capture(t, func() { commands.CmdCompare(regfixMKV, out) })
+	stdout := capture(t, func() { commands.CmdCompare([]string{regfixMKV, out}) })
 
 	// The remux changes the muxing/writing app ("mkvgo"), so the compare must
 	// run cross-format and report that — not fail to open the MP4.

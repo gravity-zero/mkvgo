@@ -55,10 +55,38 @@ func CmdValidate(args []string) {
 // CmdCompare exits 0 when the metadata is identical and 1 when it differs.
 // Either side may be an MP4/MOV (read via the head-only MP4 probe), so a
 // remux round-trip can be verified: `mkvgo compare in.mkv out.mp4`.
-func CmdCompare(pathA, pathB string) {
+// -blocks additionally compares the media CONTENT (per-track payload hashes,
+// MKV/WebM only): an identical result proves a lossless round-trip.
+func CmdCompare(args []string) {
+	var blocks bool
+	var rest []string
+	for _, a := range args {
+		switch a {
+		case "-blocks", "--blocks":
+			blocks = true
+		default:
+			rejectFlagArg(a)
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) < 2 {
+		Fatal("usage: " + CmdUsage["compare"])
+	}
+	pathA, pathB := rest[0], rest[1]
+
 	a, _ := loadContainer(pathA, false)
 	b, _ := loadContainer(pathB, false)
 	diffs := matroska.CompareContainers(a, b)
+	if blocks {
+		if isMP4Path(pathA) || isMP4Path(pathB) {
+			Fatal("-blocks compares Matroska/WebM content only (remux the MP4 side to MKV first)")
+		}
+		bd, err := matroska.CompareBlocks(context.Background(), pathA, pathB)
+		if err != nil {
+			Fatal(err.Error())
+		}
+		diffs = append(diffs, bd...)
+	}
 	switch {
 	case JsonOutput:
 		PrintJSON(diffs)

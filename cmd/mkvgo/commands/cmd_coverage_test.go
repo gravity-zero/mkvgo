@@ -894,7 +894,7 @@ func TestCmdValidate_BadPath(t *testing.T) {
 
 func TestCmdCompare_BadPathA(t *testing.T) {
 	pathB := richMKV(t)
-	mustFatal(t, func() { commands.CmdCompare("/no/such/a.mkv", pathB) })
+	mustFatal(t, func() { commands.CmdCompare([]string{"/no/such/a.mkv", pathB}) })
 }
 
 // ---------- CmdExtractSubtitle additional paths ------------------------------

@@ -430,7 +430,7 @@ func TestCmdValidate_JSON(t *testing.T) {
 func TestCmdCompare_Identical(t *testing.T) {
 	pathA := richMKV(t)
 	pathB := richMKV(t)
-	out := capture(t, func() { commands.CmdCompare(pathA, pathB) })
+	out := capture(t, func() { commands.CmdCompare([]string{pathA, pathB}) })
 	if !strings.Contains(out, "identical metadata") {
 		t.Errorf("CmdCompare identical: expected 'identical metadata'\noutput:\n%s", out)
 	}
@@ -443,7 +443,7 @@ func TestCmdCompare_Diff(t *testing.T) {
 	pathA := writeMKV(t, cA)
 	pathB := writeMKV(t, cB)
 	exitCode := recordExit(t)
-	out := capture(t, func() { commands.CmdCompare(pathA, pathB) })
+	out := capture(t, func() { commands.CmdCompare([]string{pathA, pathB}) })
 	if !strings.Contains(out, "info.title") {
 		t.Errorf("CmdCompare diff: expected 'info.title' in output\noutput:\n%s", out)
 	}
@@ -464,7 +464,7 @@ func TestCmdCompare_JSON(t *testing.T) {
 	recordExit(t)
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
-	out := capture(t, func() { commands.CmdCompare(pathA, pathB) })
+	out := capture(t, func() { commands.CmdCompare([]string{pathA, pathB}) })
 
 	var diffs []map[string]interface{}
 	if err := json.Unmarshal([]byte(out), &diffs); err != nil {

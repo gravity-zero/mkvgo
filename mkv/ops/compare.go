@@ -2,7 +2,9 @@ package ops
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -19,6 +21,118 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]m
 		return nil, fmt.Errorf("open %s: %w", pathB, err)
 	}
 	return CompareContainers(a, b), nil
+}
+
+// trackDigest summarises one track's media content: block count, total payload
+// bytes and a running SHA-256 over the payloads in file order.
+type trackDigest struct {
+	blocks int64
+	bytes  int64
+	hash   [sha256.Size]byte
+}
+
+// CompareBlocks diffs the media CONTENT of two Matroska/WebM files, track by
+// track (matched by position, like the metadata compare): block count, total
+// payload bytes, and a SHA-256 over the payloads in stream order. An empty
+// result proves a remux/reindex/split+join round-trip carried every frame
+// byte-identically — beyond what the metadata compare can show.
+func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
+	fs := mkv.FSFrom(opts)
+	a, err := digestTracks(ctx, pathA, fs)
+	if err != nil {
+		return nil, fmt.Errorf("digest %s: %w", pathA, err)
+	}
+	b, err := digestTracks(ctx, pathB, fs)
+	if err != nil {
+		return nil, fmt.Errorf("digest %s: %w", pathB, err)
+	}
+
+	var diffs []mkv.Diff
+	n := len(a)
+	if len(b) > n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		section := fmt.Sprintf("track[%d]", i+1)
+		switch {
+		case i >= len(a):
+			diffs = append(diffs, mkv.Diff{Type: mkv.DiffAdded, Section: section,
+				Detail: fmt.Sprintf("%d blocks, %d bytes", b[i].blocks, b[i].bytes)})
+		case i >= len(b):
+			diffs = append(diffs, mkv.Diff{Type: mkv.DiffRemoved, Section: section,
+				Detail: fmt.Sprintf("%d blocks, %d bytes", a[i].blocks, a[i].bytes)})
+		case a[i].blocks != b[i].blocks:
+			diffs = append(diffs, mkv.Diff{Type: mkv.DiffChanged, Section: section + ".blocks",
+				Detail: fmt.Sprintf("%d → %d", a[i].blocks, b[i].blocks)})
+		case a[i].bytes != b[i].bytes:
+			diffs = append(diffs, mkv.Diff{Type: mkv.DiffChanged, Section: section + ".bytes",
+				Detail: fmt.Sprintf("%d → %d", a[i].bytes, b[i].bytes)})
+		case a[i].hash != b[i].hash:
+			diffs = append(diffs, mkv.Diff{Type: mkv.DiffChanged, Section: section + ".content",
+				Detail: fmt.Sprintf("payload hash differs (%d blocks, %d bytes each side)", a[i].blocks, a[i].bytes)})
+		}
+	}
+	return diffs, nil
+}
+
+// digestTracks walks every block of the file and returns one digest per track,
+// ordered like Container.Tracks.
+func digestTracks(ctx context.Context, path string, fs *mkv.FS) ([]trackDigest, error) {
+	c, err := reader.OpenWithFS(ctx, path, fs)
+	if err != nil {
+		return nil, err
+	}
+	order := make(map[uint64]int, len(c.Tracks))
+	for i, t := range c.Tracks {
+		order[t.ID] = i
+	}
+	type acc struct {
+		h interface {
+			io.Writer
+			Sum([]byte) []byte
+		}
+		d trackDigest
+	}
+	accs := make([]acc, len(c.Tracks))
+	for i := range accs {
+		accs[i].h = sha256.New()
+	}
+
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		i, ok := order[blk.TrackNumber]
+		if !ok {
+			continue // block for an undeclared track: not attributable
+		}
+		accs[i].d.blocks++
+		accs[i].d.bytes += int64(len(blk.Data))
+		accs[i].h.Write(blk.Data)
+	}
+
+	out := make([]trackDigest, len(accs))
+	for i := range accs {
+		accs[i].h.Sum(accs[i].d.hash[:0])
+		out[i] = accs[i].d
+	}
+	return out, nil
 }
 
 // CompareContainers diffs the metadata of two already-parsed containers. It is

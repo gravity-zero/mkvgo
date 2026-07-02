@@ -100,8 +100,8 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
 	case "compare":
-		commands.RequireArgs(args, 2, "mkvgo compare [-json] <a.mkv|.mp4> <b.mkv|.mp4>")
-		commands.CmdCompare(args[0], args[1])
+		commands.RequireArgs(args, 2, "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>")
+		commands.CmdCompare(args)
 	case "reindex":
 		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> <output.mkv>")
 		commands.CmdReindex(args)

@@ -251,6 +251,13 @@ func FormatOGMChapters(w io.Writer, chapters []Chapter) error {
 	return mkv.FormatOGMChapters(w, chapters)
 }
 
+// CompareBlocks diffs the media CONTENT of two Matroska/WebM files: per-track
+// block count, payload byte total and payload SHA-256 in stream order. An
+// empty result proves a lossless round-trip. See ops.CompareBlocks.
+func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff, error) {
+	return ops.CompareBlocks(ctx, pathA, pathB, opts...)
+}
+
 // CompareContainers diffs the metadata of two already-parsed containers —
 // format-agnostic, so an MKV can be compared against an mp4.OpenMeta result to
 // verify a remux round-trip. See ops.CompareContainers.
