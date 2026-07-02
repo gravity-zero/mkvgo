@@ -4,6 +4,202 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-07-02
+
+### Fixed
+
+- **Rewrites dropped the declared frame rate.** The writer never emitted
+  `DefaultDuration`, so every rewrite (mux/merge/edit/split/remux) silently
+  lost the source's nominal frame rate; it now round-trips via
+  `Track.FrameRate`. Surfaced by the new `validate` streaming-readiness check.
+- **The writer cued audio in mixed clusters.** `WriteClusterWithCues` keyed
+  the Cues on the cluster's first keyframe-flagged block — and every audio
+  block carries that flag, so files written by mux/merge/edit carried cue
+  times naming an audio block instead of the video keyframe (the same bug
+  class as the 0.12.0 reindex fix, here on the write side). Cues now key on
+  video keyframes; a video file's cluster without one is not cued (a mid-GOP
+  cue is a false seek target), and audio-only files keep the throttled
+  first-block cues.
+- **`merge-subtitle` kept no cue durations.** The SRT/ASS end times were not
+  written as BlockDurations, so every merged cue's length was lost (readers
+  fell back to guessed durations). The end time now rides as the
+  BlockDuration, so extraction and HLS WebVTT renditions reproduce the exact
+  source timing.
+
+### Added
+
+- **DASH output and demuxed CMAF renditions.** The packaging is CMAF proper:
+  one demuxed rendition per track — the video (`playlist.m3u8`, `init.mp4`,
+  `seg00001.m4s` …) and each audio track (`audio1.m3u8`, `init_a1.mp4`,
+  `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group) — served through two
+  manifests over the same segments: HLS (`master.m3u8`) and **DASH**
+  (`manifest.mpd`, static VOD, one AdaptationSet per rendition with an exact
+  `SegmentTimeline`). Multi-audio sources (VF/VO) get native language
+  selection in hls.js/Safari/dash.js, and DASH players — which reject muxed
+  representations — are first-class. Movie metadata (title, tags, cover art)
+  rides on the video init; a track that ends early keeps its rendition
+  aligned with empty fragments; secondary video tracks are dropped with a
+  reason. Both serving modes (`to-hls` and `hls-segment`/`PlanHLS`) emit the
+  layout byte-identically (regression-tested per rendition, ffmpeg-verified
+  for both manifests).
+- **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
+  an MKV/WebM into a complete HLS presentation — `master.m3u8` (multivariant
+  playlist with `BANDWIDTH`/`RESOLUTION` and RFC 6381 `CODECS`), the muxed
+  audio+video media playlist, `init.mp4` (ftyp + moov with `mvex`/`trex` and
+  empty sample tables) and `styp`/`moof`/`mdat` media segments. Text subtitle
+  tracks (SRT, WebVTT, ASS/SSA flattened) ride as segmented WebVTT renditions
+  declared in the master playlist (language/name/default/forced); bitmap
+  subtitles are dropped with a reason. No transcoding: samples are copied
+  verbatim into CMAF fragments (H.264/HEVC/AV1/VP9 + AAC/…). Segments are cut
+  on video keyframes at roughly `Options.SegmentMs` (default 6 s) and are
+  independently decodable (random access); audio gapless priming (CodecDelay)
+  is re-signalled as an edit list in the init segment, like the progressive
+  remux. Memory is bounded — per-sample metadata in RAM, sample bytes streamed
+  through one temp file per track. This is the CMAF "copy rung" of an HLS
+  ladder; bitrate variants (real ABR) remain a transcoder's job.
+  ffmpeg-verified: exact frame parity with the source and standalone
+  mid-stream segment decode.
+- **On-demand HLS** (`mp4.PlanHLS`, CLI `hls-segment`). The zero-storage
+  counterpart of `to-hls`: `PlanHLS` reads the metadata head (with its Cues),
+  the first and the last cluster — a few bounded reads — and `Segment(n)`
+  then builds any single media segment by seeking straight to its window
+  through the Cues and reading only that window. A server answers HLS
+  requests (master/media playlist, init, any segment) in milliseconds with
+  nothing pre-generated; with an `httpfs` source only the ranges a viewer
+  actually watches are transferred. Every resource is byte-identical to what
+  the full `to-hls` pass writes (regression-tested on synthetic and real
+  files), so both serving modes mix transparently — including cover art and
+  global tags in the init segment. `plan.Resource(ctx, name)` is the
+  declarative entry point (player-facing name → bytes + Content-Type, an
+  HTTP handler is one call; `Resources()` lists every servable name), and
+  text subtitle tracks are declared in the master playlist and served as one
+  whole-presentation WebVTT rendition each (lazy — one sequential pass on
+  first request). The master `BANDWIDTH` is estimated from cluster sizes.
+  New reader primitives back it: `WithCues()`, `WithTags()` and
+  `WithAttachments()` keep those elements on the head-only path (the latter
+  two through their SeekHead entries), `Container.SegmentStart` anchors the
+  cue positions, and `NewBlockReaderAt` starts a block reader at a cued
+  cluster. In the WebAssembly build the same engine is `openHLS(input)`: a
+  handle `{resources, resource(name), segment(n)}` over a `Uint8Array` or a
+  `Blob`/`File` — the latter read through ranged slices, so a huge local
+  file plays through MSE with bounded memory (the browser demo does).
+- **MP4/MOV packaging sources.** `to-hls`, `to-abr` and `hls-segment` (and
+  the wasm `openHLS`) now accept MP4/MOV inputs, sniffed from the first
+  bytes — the Bento4-style workflow without a pre-remux. For the on-demand
+  plan the moov sample table IS the index: the plan is exact by
+  construction, so every resource — master playlist, DASH manifest and
+  I-frame playlist included — is byte-identical to the full pass
+  (regression-tested; ffmpeg-verified for both manifests).
+- **ABR light** (`mp4.RemuxToABR`, CLI `to-abr`). Packages several
+  pre-encoded quality variants of the same content into one multi-variant
+  HLS presentation without transcoding: the first source is the reference
+  (its audio tracks and subtitles serve every variant), the others
+  contribute their video rendition only (`Options.VideoOnly`, also exposed
+  standalone). The top `master.m3u8` carries each variant's real
+  `BANDWIDTH`/`RESOLUTION`/`CODECS` over the shared audio/subtitle groups;
+  security options (AES-128, `RewriteURL`) apply to every variant.
+  ffmpeg-verified end to end on a two-quality set.
+- **Single-file byte-range serving** (`Options.SingleFile`, CLI
+  `--single-file`). Each rendition becomes one progressive file — init +
+  `sidx` Segment Index + all CMAF fragments, byte-identical to the segmented
+  mode's — served by ranges: `EXT-X-BYTERANGE` playlists and the DASH
+  on-demand profile (`SegmentBase`/`indexRange`). Two media files instead of
+  hundreds; the server only needs HTTP Range support. ffmpeg-verified for
+  both manifests. Incompatible with `Encrypt`.
+- **Trick-play I-frame playlists.** `to-hls` emits `iframe.m3u8`
+  (`EXT-X-I-FRAMES-ONLY`) declared in the master via
+  `EXT-X-I-FRAME-STREAM-INF`: one keyframe per segment referenced as a byte
+  range into the existing segments (styp + moof + mdat header + the
+  keyframe sample) — zero extra media, decodability of a range verified
+  end to end (range → ffmpeg → JPEG). MP4-source on-demand plans expose it
+  too (ranges computable head-only); not emitted when encrypting. DASH
+  trick mode is not emitted: it requires a derived reduced track
+  (transcoder territory).
+- **Audio-only presentations.** Music/podcast sources (no video track)
+  package fine: the first audio track is the primary rendition (historical
+  file names), segment boundaries follow its sample grid, the master
+  carries no RESOLUTION. ffmpeg-verified for HLS and DASH.
+- **HLS delivery security.** `Options.Encrypt` (`HLSEncryption{Key, KeyURI,
+  IV?}`) AES-128-encrypts every media segment — whole-segment CBC with PKCS#7
+  and IV = media sequence per RFC 8216 — and writes the `EXT-X-KEY` line;
+  `to-hls`/`hls-segment` expose it as `--aes-key`/`--aes-key-uri`. Both
+  serving modes produce identical ciphertext; init segments and subtitles
+  stay clear; the key is only advertised, never stored. Verified by an
+  openssl decrypt round-trip of the whole presentation (ffmpeg's own HLS
+  demuxer does not decrypt whole-segment fMP4; hls.js does). AES-128 is
+  HLS-only, so no DASH manifest is emitted when encrypting. Alongside it,
+  `Options.RewriteURL func(name) string` (CLI `--url-prefix`) rewrites every
+  URI the playlists/MPD reference — the hook for CDN prefixes and per-URL
+  signed tokens (HMAC example in library.md). On-demand subtitle cues are
+  now loaded once and cached, and the windowed `subN_*.vtt` resources make
+  the on-demand subtitle playlists byte-identical to the full pass.
+- **Keyframe extraction for thumbnails/scrubbing**
+  (`matroska.ExtractKeyframeSample`, CLI `extract-frame`). Returns the video
+  keyframe nearest a timestamp, seeked through the Cues (a few bounded
+  reads) and packed decoder-ready — Annex-B with the parameter sets
+  prepended (H.264/HEVC) or an IVF wrapper (VP8/VP9/AV1). mkvgo never
+  decodes: the image is one `ffmpeg -frames:v 1` call away; a scrubbing
+  storyboard is a loop over the keyframe index. Verified end to end
+  (extracted frame → ffmpeg → JPEG).
+- **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
+  new `httpfs` package implements the FS port over ranged GETs (cached
+  512 KiB windows, configurable client/headers, explicit refusal when a
+  server ignores `Range` — never a silent full download; `BytesFetched()`
+  reports the transfer cost). Combined with the head-only probe, indexing a
+  remote media library transfers a few kilobytes per file. The CLI accepts
+  `http(s)://` URLs on the inspection commands (`info`/`tracks`/`probe`/
+  `keyframes`, plus `chapters`/`tags`/`attachments` for MP4) and as the
+  source of `to-mp4`/`from-mp4`/`to-hls` via `httpfs.Hybrid()` (URLs read
+  over HTTP, writes on the OS) — remuxing straight from a NAS/S3 URL is a
+  streamed download. Verified byte-identical to a local remux.
+- **Deterministic outputs, guaranteed.** The writers never stamp wall-clock
+  times or random IDs (fixed `MuxingApp`/`WritingApp`, `DateUTC` only copied
+  from the source, MP4 timestamps zero), so the same input and options
+  produce byte-identical files — now documented as a guarantee and locked by
+  a regression test (MKV rewrite, MP4 remux, HLS segments over the in-memory
+  FS). Safe for content-addressed storage, dedup and golden tests. `make
+  build`/`make release` now set `CGO_ENABLED=0` (pure-Go static binaries).
+- **WebAssembly build** (`make wasm` → `dist/wasm/mkvgo.wasm`, ~4.7 MB raw /
+  ~1.3 MB gzipped). The probe/remux/HLS engine runs client-side: a global
+  `MkvGo` object exposes `probe`, `remuxToMP4`, `remuxFromMP4`, `remuxToWebM`,
+  `remuxToHLS` and `extractSubtitleVTT`, all Promise-based, with the input
+  format sniffed from its first bytes. `probe` also accepts a `Blob`/`File`
+  read through ranged slices — head-only, so probing a 40 GB file in a file
+  input transfers a few hundred kilobytes without uploading anything. A typed
+  TypeScript wrapper (`web/mkvgo.ts`), a runnable browser demo with MSE
+  playback of the HLS output (`web/example/`), React/Vue integration examples
+  (`docs/wasm.md`) and a Node end-to-end smoke test (`make wasm-smoke`) ship
+  with it.
+- **WebAssembly ergonomics.** Every wasm method now honours
+  `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
+  reads, remux, segment builds), wired for React effect cleanups.
+  `hlsSegmentStream(plan)` exposes the video rendition as a progressive
+  `ReadableStream`. `web/react.ts` ships copyable hooks: `useMkvGo`,
+  `useProbe` (auto-abort), `useHLSPlayer` (MSE playback of a local File via
+  on-demand demuxed segments, bounded memory).
+- **Runnable examples.** `examples/hls-server/` is a complete ~90-line
+  on-demand HLS + DASH server (`mp4.PlanHLS` + one handler, local file or
+  http(s):// URL source, landing page that plays the output in hls.js and
+  dash.js). `web/vue.ts` adds Vue 3 composables mirroring the React hooks
+  (`web/react.ts`). Both TypeScript files typecheck under `--strict`.
+- **`mkv.MemFS`** — an in-memory implementation of the `FS` port. Every
+  operation taking `Options{FS: …}` can run without a filesystem (the wasm
+  build's foundation, also useful for tests and servers assembling outputs in
+  memory): `NewMemFS()`, `Put`/`Get`/`Paths`, and `FS()` returning the wired
+  port.
+- **`validate` streaming-readiness checks.** Beyond the structural checks,
+  `validate` now audits what seeking and on-demand serving rely on: missing
+  Cues index, cue points referencing a non-video track (error — seeking
+  lands on audio; the write-side bug class fixed this release), cue times
+  matching no actual video keyframe (stale index), subtitle blocks without
+  BlockDuration, video tracks without DefaultDuration, AAC without its
+  AudioSpecificConfig, attachments without a MIME type. Each finding names
+  the fix.
+- **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism —
+  mkvgo packages VOD files) and multi-period DASH (a discontinuity model
+  that would degrade seeking if used for chapters) were evaluated and
+  deliberately left out; the rationale lives in library.md.
+
 ## [0.12.0] - 2026-07-02
 
 ### Fixed
@@ -41,19 +237,6 @@ All notable changes to mkvgo are documented here. The format is based on
   `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
   and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
   it is now honoured.
-- **The writer cued audio in mixed clusters.** `WriteClusterWithCues` keyed
-  the Cues on the cluster's first keyframe-flagged block — and every audio
-  block carries that flag, so files written by mux/merge/edit carried cue
-  times naming an audio block instead of the video keyframe (the same bug
-  class as the 0.12.0 reindex fix, here on the write side). Cues now key on
-  video keyframes; a video file's cluster without one is not cued (a mid-GOP
-  cue is a false seek target), and audio-only files keep the throttled
-  first-block cues.
-- **`merge-subtitle` kept no cue durations.** The SRT/ASS end times were not
-  written as BlockDurations, so every merged cue's length was lost (readers
-  fell back to guessed durations). The end time now rides as the
-  BlockDuration, so extraction and HLS WebVTT renditions reproduce the exact
-  source timing.
 - **`RemoveTrack` drops orphan tags.** Tags targeting a removed track's UID are
   no longer carried into the output (they pointed at a track that no longer
   exists); global tags and tags on kept tracks survive.
@@ -62,177 +245,6 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
-- **MP4/MOV packaging sources.** `to-hls`, `to-abr` and `hls-segment` (and
-  the wasm `openHLS`) now accept MP4/MOV inputs, sniffed from the first
-  bytes — the Bento4-style workflow without a pre-remux. For the on-demand
-  plan the moov sample table IS the index: the plan is exact by
-  construction, so every resource — master playlist, DASH manifest and
-  I-frame playlist included — is byte-identical to the full pass
-  (regression-tested; ffmpeg-verified for both manifests).
-- **Trick-play I-frame playlists.** `to-hls` emits `iframe.m3u8`
-  (`EXT-X-I-FRAMES-ONLY`) declared in the master via
-  `EXT-X-I-FRAME-STREAM-INF`: one keyframe per segment referenced as a byte
-  range into the existing segments (styp + moof + mdat header + the
-  keyframe sample) — zero extra media, decodability of a range verified
-  end to end (range → ffmpeg → JPEG). MP4-source on-demand plans expose it
-  too (ranges computable head-only); not emitted when encrypting. DASH
-  trick mode is not emitted: it requires a derived reduced track
-  (transcoder territory).
-- **Audio-only presentations.** Music/podcast sources (no video track)
-  package fine: the first audio track is the primary rendition (historical
-  file names), segment boundaries follow its sample grid, the master
-  carries no RESOLUTION. ffmpeg-verified for HLS and DASH.
-- **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism —
-  mkvgo packages VOD files) and multi-period DASH (a discontinuity model
-  that would degrade seeking if used for chapters) were evaluated and
-  deliberately left out; the rationale lives in library.md.
-- **Runnable examples.** `examples/hls-server/` is a complete ~90-line
-  on-demand HLS + DASH server (`mp4.PlanHLS` + one handler, local file or
-  http(s):// URL source, landing page that plays the output in hls.js and
-  dash.js). `web/vue.ts` adds Vue 3 composables mirroring the React hooks
-  (`web/react.ts`). Both TypeScript files typecheck under `--strict`.
-- **WebAssembly ergonomics.** Every wasm method now honours
-  `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
-  reads, remux, segment builds), wired for React effect cleanups.
-  `hlsSegmentStream(plan)` exposes the video rendition as a progressive
-  `ReadableStream`. `web/react.ts` ships copyable hooks: `useMkvGo`,
-  `useProbe` (auto-abort), `useHLSPlayer` (MSE playback of a local File via
-  on-demand demuxed segments, bounded memory).
-- **`validate` streaming-readiness checks.** Beyond the structural checks,
-  `validate` now audits what seeking and on-demand serving rely on: missing
-  Cues index, cue points referencing a non-video track (error — seeking
-  lands on audio; the write-side bug class fixed this release), cue times
-  matching no actual video keyframe (stale index), subtitle blocks without
-  BlockDuration, video tracks without DefaultDuration, AAC without its
-  AudioSpecificConfig, attachments without a MIME type. Each finding names
-  the fix.
-- **Keyframe extraction for thumbnails/scrubbing**
-  (`matroska.ExtractKeyframeSample`, CLI `extract-frame`). Returns the video
-  keyframe nearest a timestamp, seeked through the Cues (a few bounded
-  reads) and packed decoder-ready — Annex-B with the parameter sets
-  prepended (H.264/HEVC) or an IVF wrapper (VP8/VP9/AV1). mkvgo never
-  decodes: the image is one `ffmpeg -frames:v 1` call away; a scrubbing
-  storyboard is a loop over the keyframe index. Verified end to end
-  (extracted frame → ffmpeg → JPEG).
-- **Single-file byte-range serving** (`Options.SingleFile`, CLI
-  `--single-file`). Each rendition becomes one progressive file — init +
-  `sidx` Segment Index + all CMAF fragments, byte-identical to the segmented
-  mode's — served by ranges: `EXT-X-BYTERANGE` playlists and the DASH
-  on-demand profile (`SegmentBase`/`indexRange`). Two media files instead of
-  hundreds; the server only needs HTTP Range support. ffmpeg-verified for
-  both manifests. Incompatible with `Encrypt`.
-- **ABR light** (`mp4.RemuxToABR`, CLI `to-abr`). Packages several
-  pre-encoded quality variants of the same content into one multi-variant
-  HLS presentation without transcoding: the first source is the reference
-  (its audio tracks and subtitles serve every variant), the others
-  contribute their video rendition only (`Options.VideoOnly`, also exposed
-  standalone). The top `master.m3u8` carries each variant's real
-  `BANDWIDTH`/`RESOLUTION`/`CODECS` over the shared audio/subtitle groups;
-  security options (AES-128, `RewriteURL`) apply to every variant.
-  ffmpeg-verified end to end on a two-quality set.
-- **HLS delivery security.** `Options.Encrypt` (`HLSEncryption{Key, KeyURI,
-  IV?}`) AES-128-encrypts every media segment — whole-segment CBC with PKCS#7
-  and IV = media sequence per RFC 8216 — and writes the `EXT-X-KEY` line;
-  `to-hls`/`hls-segment` expose it as `--aes-key`/`--aes-key-uri`. Both
-  serving modes produce identical ciphertext; init segments and subtitles
-  stay clear; the key is only advertised, never stored. Verified by an
-  openssl decrypt round-trip of the whole presentation (ffmpeg's own HLS
-  demuxer does not decrypt whole-segment fMP4; hls.js does). AES-128 is
-  HLS-only, so no DASH manifest is emitted when encrypting. Alongside it,
-  `Options.RewriteURL func(name) string` (CLI `--url-prefix`) rewrites every
-  URI the playlists/MPD reference — the hook for CDN prefixes and per-URL
-  signed tokens (HMAC example in library.md). On-demand subtitle cues are
-  now loaded once and cached, and the windowed `subN_*.vtt` resources make
-  the on-demand subtitle playlists byte-identical to the full pass.
-- **DASH output and demuxed CMAF renditions.** The packaging is CMAF proper:
-  one demuxed rendition per track — the video (`playlist.m3u8`, `init.mp4`,
-  `seg00001.m4s` …) and each audio track (`audio1.m3u8`, `init_a1.mp4`,
-  `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group) — served through two
-  manifests over the same segments: HLS (`master.m3u8`) and **DASH**
-  (`manifest.mpd`, static VOD, one AdaptationSet per rendition with an exact
-  `SegmentTimeline`). Multi-audio sources (VF/VO) get native language
-  selection in hls.js/Safari/dash.js, and DASH players — which reject muxed
-  representations — are first-class. Movie metadata (title, tags, cover art)
-  rides on the video init; a track that ends early keeps its rendition
-  aligned with empty fragments; secondary video tracks are dropped with a
-  reason. Both serving modes (`to-hls` and `hls-segment`/`PlanHLS`) emit the
-  layout byte-identically (regression-tested per rendition, ffmpeg-verified
-  for both manifests).
-- **On-demand HLS** (`mp4.PlanHLS`, CLI `hls-segment`). The zero-storage
-  counterpart of `to-hls`: `PlanHLS` reads the metadata head (with its Cues),
-  the first and the last cluster — a few bounded reads — and `Segment(n)`
-  then builds any single media segment by seeking straight to its window
-  through the Cues and reading only that window. A server answers HLS
-  requests (master/media playlist, init, any segment) in milliseconds with
-  nothing pre-generated; with an `httpfs` source only the ranges a viewer
-  actually watches are transferred. Every resource is byte-identical to what
-  the full `to-hls` pass writes (regression-tested on synthetic and real
-  files), so both serving modes mix transparently — including cover art and
-  global tags in the init segment. `plan.Resource(ctx, name)` is the
-  declarative entry point (player-facing name → bytes + Content-Type, an
-  HTTP handler is one call; `Resources()` lists every servable name), and
-  text subtitle tracks are declared in the master playlist and served as one
-  whole-presentation WebVTT rendition each (lazy — one sequential pass on
-  first request). The master `BANDWIDTH` is estimated from cluster sizes.
-  New reader primitives back it: `WithCues()`, `WithTags()` and
-  `WithAttachments()` keep those elements on the head-only path (the latter
-  two through their SeekHead entries), `Container.SegmentStart` anchors the
-  cue positions, and `NewBlockReaderAt` starts a block reader at a cued
-  cluster. In the WebAssembly build the same engine is `openHLS(input)`: a
-  handle `{resources, resource(name), segment(n)}` over a `Uint8Array` or a
-  `Blob`/`File` — the latter read through ranged slices, so a huge local
-  file plays through MSE with bounded memory (the browser demo does).
-- **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
-  new `httpfs` package implements the FS port over ranged GETs (cached
-  512 KiB windows, configurable client/headers, explicit refusal when a
-  server ignores `Range` — never a silent full download; `BytesFetched()`
-  reports the transfer cost). Combined with the head-only probe, indexing a
-  remote media library transfers a few kilobytes per file. The CLI accepts
-  `http(s)://` URLs on the inspection commands (`info`/`tracks`/`probe`/
-  `keyframes`, plus `chapters`/`tags`/`attachments` for MP4) and as the
-  source of `to-mp4`/`from-mp4`/`to-hls` via `httpfs.Hybrid()` (URLs read
-  over HTTP, writes on the OS) — remuxing straight from a NAS/S3 URL is a
-  streamed download. Verified byte-identical to a local remux.
-- **Deterministic outputs, guaranteed.** The writers never stamp wall-clock
-  times or random IDs (fixed `MuxingApp`/`WritingApp`, `DateUTC` only copied
-  from the source, MP4 timestamps zero), so the same input and options
-  produce byte-identical files — now documented as a guarantee and locked by
-  a regression test (MKV rewrite, MP4 remux, HLS segments over the in-memory
-  FS). Safe for content-addressed storage, dedup and golden tests. `make
-  build`/`make release` now set `CGO_ENABLED=0` (pure-Go static binaries).
-- **WebAssembly build** (`make wasm` → `dist/wasm/mkvgo.wasm`, ~4.7 MB raw /
-  ~1.3 MB gzipped). The probe/remux/HLS engine runs client-side: a global
-  `MkvGo` object exposes `probe`, `remuxToMP4`, `remuxFromMP4`, `remuxToWebM`,
-  `remuxToHLS` and `extractSubtitleVTT`, all Promise-based, with the input
-  format sniffed from its first bytes. `probe` also accepts a `Blob`/`File`
-  read through ranged slices — head-only, so probing a 40 GB file in a file
-  input transfers a few hundred kilobytes without uploading anything. A typed
-  TypeScript wrapper (`web/mkvgo.ts`), a runnable browser demo with MSE
-  playback of the HLS output (`web/example/`), React/Vue integration examples
-  (`docs/wasm.md`) and a Node end-to-end smoke test (`make wasm-smoke`) ship
-  with it.
-- **`mkv.MemFS`** — an in-memory implementation of the `FS` port. Every
-  operation taking `Options{FS: …}` can run without a filesystem (the wasm
-  build's foundation, also useful for tests and servers assembling outputs in
-  memory): `NewMemFS()`, `Put`/`Get`/`Paths`, and `FS()` returning the wired
-  port.
-- **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
-  an MKV/WebM into a complete HLS presentation — `master.m3u8` (multivariant
-  playlist with `BANDWIDTH`/`RESOLUTION` and RFC 6381 `CODECS`), the muxed
-  audio+video media playlist, `init.mp4` (ftyp + moov with `mvex`/`trex` and
-  empty sample tables) and `styp`/`moof`/`mdat` media segments. Text subtitle
-  tracks (SRT, WebVTT, ASS/SSA flattened) ride as segmented WebVTT renditions
-  declared in the master playlist (language/name/default/forced); bitmap
-  subtitles are dropped with a reason. No transcoding: samples are copied
-  verbatim into CMAF fragments (H.264/HEVC/AV1/VP9 + AAC/…). Segments are cut
-  on video keyframes at roughly `Options.SegmentMs` (default 6 s) and are
-  independently decodable (random access); audio gapless priming (CodecDelay)
-  is re-signalled as an edit list in the init segment, like the progressive
-  remux. Memory is bounded — per-sample metadata in RAM, sample bytes streamed
-  through one temp file per track. This is the CMAF "copy rung" of an HLS
-  ladder; bitrate variants (real ABR) remain a transcoder's job.
-  ffmpeg-verified: exact frame parity with the source and standalone
-  mid-stream segment decode.
 - **QuickTime `.mov` support (non-faststart).** The MP4 reader now parses the
   layout raw iPhone/camera QuickTime files use — `wide` + `mdat` first, `moov`
   at the end — which previously failed with `box ... has invalid size`: the
