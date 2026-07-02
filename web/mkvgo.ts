@@ -99,7 +99,12 @@ export interface DroppedTrack {
   Reason: string
 }
 
-export interface ProbeOptions {
+export interface AbortOptions {
+  /** Abort the in-flight operation (e.g. from an effect cleanup). */
+  signal?: AbortSignal
+}
+
+export interface ProbeOptions extends AbortOptions {
   /** Build the keyframe index (MKV: full scan when the file has no Cues). */
   keyframes?: boolean
   /** Read per-track BPS statistics tags (MKV; head-only via SeekHead→Tags). */
@@ -108,7 +113,7 @@ export interface ProbeOptions {
   inbandColour?: boolean
 }
 
-export interface RemuxOptions {
+export interface RemuxOptions extends AbortOptions {
   /** Put the moov before the mdat (streaming-friendly MP4). */
   fastStart?: boolean
   /** Drop unsupported tracks instead of failing. */
@@ -154,9 +159,9 @@ export interface HLSPlanHandle {
   /** Every resource name a player requests: playlists, init, segments, subtitles. */
   resources: string[]
   /** Build one resource by its player-facing name (e.g. "seg00042.m4s"). */
-  resource(name: string): Promise<HLSResource>
+  resource(name: string, options?: AbortOptions): Promise<HLSResource>
   /** Build the n-th (0-based) media segment. */
-  segment(n: number): Promise<Uint8Array>
+  segment(n: number, options?: AbortOptions): Promise<Uint8Array>
   /** Release the handle's callbacks. */
   close(): void
 }
@@ -250,5 +255,40 @@ function injectScript(url: string): Promise<void> {
     s.onload = () => resolve()
     s.onerror = () => reject(new Error(`mkvgo: failed to load ${url}`))
     document.head.appendChild(s)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Streaming sugar
+// ---------------------------------------------------------------------------
+
+/**
+ * The plan's video rendition as a progressive ReadableStream: the init
+ * segment, then each media segment, built on demand as the consumer pulls —
+ * pipe it to a file, a fetch Response, or an MSE feeder. Cancelling the
+ * stream aborts the in-flight segment build.
+ */
+export function hlsSegmentStream(plan: HLSPlanHandle): ReadableStream<Uint8Array> {
+  let n = -1
+  const ctl = new AbortController()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (n < 0) {
+          controller.enqueue((await plan.resource('init.mp4', { signal: ctl.signal })).data)
+        } else if (n < plan.numSegments) {
+          controller.enqueue(await plan.segment(n, { signal: ctl.signal }))
+        } else {
+          controller.close()
+          return
+        }
+        n++
+      } catch (e) {
+        controller.error(e)
+      }
+    },
+    cancel() {
+      ctl.abort()
+    },
   })
 }

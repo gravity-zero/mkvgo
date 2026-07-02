@@ -62,6 +62,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **WebAssembly ergonomics.** Every wasm method now honours
+  `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
+  reads, remux, segment builds), wired for React effect cleanups.
+  `hlsSegmentStream(plan)` exposes the video rendition as a progressive
+  `ReadableStream`. `web/react.ts` ships copyable hooks: `useMkvGo`,
+  `useProbe` (auto-abort), `useHLSPlayer` (MSE playback of a local File via
+  on-demand demuxed segments, bounded memory).
 - **`validate` streaming-readiness checks.** Beyond the structural checks,
   `validate` now audits what seeking and on-demand serving rely on: missing
   Cues index, cue points referencing a non-video track (error — seeking

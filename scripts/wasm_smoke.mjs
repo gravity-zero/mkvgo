@@ -76,6 +76,17 @@ await plan.resource('nope.bin')
   .catch(() => check(true, 'unknown resource rejects'))
 plan.close(); planBlob.close()
 
+// --- AbortSignal: an aborted call rejects instead of running ---
+const aborted = AbortSignal.abort()
+await MkvGo.probe(new Blob([mkvBytes]), { signal: aborted })
+  .then(() => check(false, 'aborted probe must reject'))
+  .catch(() => check(true, 'aborted probe rejects'))
+const planAb = await MkvGo.openHLS(mkvBytes, { segmentSeconds: 0.5 })
+await planAb.segment(0, { signal: aborted })
+  .then(() => check(false, 'aborted segment must reject'))
+  .catch(() => check(true, 'aborted segment rejects'))
+planAb.close()
+
 // --- errors surface as rejections, not crashes ---
 await MkvGo.probe(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
   .then(() => check(false, 'garbage probe must reject'))

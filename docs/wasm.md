@@ -113,9 +113,41 @@ const probe = await mkvgo.probe(file)                    // File → head-only
 const { data } = await mkvgo.remuxToMP4(bytes, { fastStart: true })
 ```
 
+## Aborting and streaming
+
+Every method takes `{ signal?: AbortSignal }` in its options — an abort
+cancels the in-flight Go work (probe reads, remux, segment builds), which is
+what a React effect cleanup wants. `hlsSegmentStream(plan)` (in `mkvgo.ts`)
+exposes the video rendition as a progressive `ReadableStream<Uint8Array>` —
+init then each segment, built as the consumer pulls; cancelling the stream
+aborts the current build.
+
 ## React
 
-A hook owning the module and a probe component:
+**[`web/react.ts`](../web/react.ts)** ships ready-made hooks (copy both files
+into your project):
+
+- `useMkvGo(loadOptions)` — module loading, null until ready;
+- `useProbe(mkvgo, file)` — head-only probe with automatic abort on change;
+- `useHLSPlayer(mkvgo, videoRef, file)` — plays a local MKV File in a
+  `<video>` through MSE: on-demand demuxed segments from ranged reads
+  (bounded memory, any size), video + audio SourceBuffers, cleanup on
+  unmount.
+
+```tsx
+function Player({ file }: { file: File }) {
+  const mkvgo = useMkvGo({ wasmUrl: '/mkvgo.wasm', wasmExecUrl: '/wasm_exec.js' })
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const { probe } = useProbe(mkvgo, file)
+  const { state, error } = useHLSPlayer(mkvgo, videoRef, file)
+  return <div>
+    <video ref={videoRef} controls />
+    <p>{probe?.info.title} — {state}{error ? `: ${error.message}` : ''}</p>
+  </div>
+}
+```
+
+Or hand-rolled — a hook owning the module and a probe component:
 
 ```tsx
 // useMkvGo.ts
