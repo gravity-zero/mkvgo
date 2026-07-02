@@ -247,13 +247,47 @@ type mergeSource struct {
 	remap map[uint64]uint64
 }
 
+// trackStats accumulates one output track's media statistics while streaming,
+// for the mkvmerge-style statistics tags (BPS/DURATION/NUMBER_OF_FRAMES/…).
+type trackStats struct {
+	bytes   int64
+	frames  int64
+	minTC   int64
+	maxTC   int64
+	lastDur int64
+	seen    bool
+}
+
+func (s *trackStats) add(b *mkv.Block) {
+	s.bytes += int64(len(b.Data))
+	s.frames++
+	if !s.seen || b.Timecode < s.minTC {
+		s.minTC = b.Timecode
+	}
+	if !s.seen || b.Timecode > s.maxTC {
+		s.maxTC = b.Timecode
+		s.lastDur = b.Duration
+	}
+	s.seen = true
+}
+
+// durationMs returns the track's media duration estimate: last frame start −
+// first frame start, plus the last frame's explicit duration when it has one.
+func (s *trackStats) durationMs() int64 {
+	if !s.seen {
+		return 0
+	}
+	return s.maxTC - s.minTC + s.lastDur
+}
+
 // streamMergeToWriter k-way merges the wanted blocks of several sources by
 // timecode and writes them as time-bounded clusters. It holds only one block
 // per source plus the current cluster in memory -- bounded regardless of file
 // size, so it is safe for very large inputs (unlike collecting + sorting every
 // block). Block.Timecode is in milliseconds for every source, so cross-source
-// comparison needs no scale normalisation.
-func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int64, fs *mkv.FS, sources []mergeSource, progress mkv.ProgressFunc) error {
+// comparison needs no scale normalisation. The returned map holds each output
+// track's accumulated statistics (keyed by output track number).
+func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int64, fs *mkv.FS, sources []mergeSource, progress mkv.ProgressFunc) (map[uint64]*trackStats, error) {
 	type state struct {
 		br   *reader.BlockReader
 		f    mkv.ReadSeekCloser
@@ -306,12 +340,12 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 	for i, src := range sources {
 		f, err := fs.DoOpen(src.path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		br, err := reader.NewBlockReader(f, src.scale)
 		if err != nil {
 			f.Close()
-			return err
+			return nil, err
 		}
 		if progress != nil {
 			idx := i
@@ -326,7 +360,7 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		}
 		states[i] = &state{br: br, f: f}
 		if err := advance(i); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -341,9 +375,10 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		return err
 	}
 
+	stats := make(map[uint64]*trackStats)
 	for {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		// Pick the source whose head block has the smallest timecode. Each
 		// source is read in file order; for the common single-track-per-source
@@ -362,19 +397,25 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		}
 		blk := states[mi].head
 		if err := advance(mi); err != nil {
-			return err
+			return nil, err
 		}
+		ts := stats[blk.TrackNumber]
+		if ts == nil {
+			ts = &trackStats{}
+			stats[blk.TrackNumber] = ts
+		}
+		ts.add(&blk)
 
 		if clusterTS < 0 {
 			clusterTS = blk.Timecode
 		}
 		if blk.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
 			if err := flush(); err != nil {
-				return err
+				return nil, err
 			}
 			clusterTS = blk.Timecode
 		}
 		cluster = append(cluster, blk)
 	}
-	return flush()
+	return stats, flush()
 }

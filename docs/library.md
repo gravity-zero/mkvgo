@@ -308,7 +308,9 @@ err := matroska.Mux(ctx, matroska.MuxOptions{
 
 Mux writes the metadata you pass (title/chapters/tags/attachments) as-is; it
 does not read any of it from the sources. `MuxingApp`/`WritingApp` in the
-output are `"mkvgo"`.
+output are `"mkvgo"`. The output also carries mkvmerge-style per-track
+statistics tags (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
+accumulated during the stream — `WithBitrate()` reads them back head-only.
 
 **Demux** -- extract tracks to raw streams:
 

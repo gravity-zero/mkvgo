@@ -104,6 +104,24 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 	return WriteCluster(m.W, clusterTS, timecodeScale, blocks)
 }
 
+// WriteTagsElement writes a Tags element at the current position (typically
+// after the clusters, for tags only known once the media has streamed — e.g.
+// per-track statistics) and records it for the SeekHead, so head-only readers
+// following SeekHead→Tags find it without a cluster scan.
+func (m *MKVWriter) WriteTagsElement(tags []mkv.Tag) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	pos := m.RelPos()
+	if err := WriteTags(m.W, tags); err != nil {
+		return err
+	}
+	if m.TagsPos == 0 {
+		m.TagsPos = pos
+	}
+	return nil
+}
+
 func (m *MKVWriter) Finalize() error {
 	if len(m.Cues) > 0 {
 		m.CuesPos = m.RelPos()

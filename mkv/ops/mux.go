@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -42,7 +43,6 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 		},
 		Tracks:      tracks,
 		Chapters:    opts.Chapters,
-		Tags:        opts.Tags,
 		Attachments: opts.Attachments,
 		DurationMs:  durationMs,
 	}
@@ -54,10 +54,56 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		return err
 	}
-	if err := streamMergeToWriter(ctx, mw, timecodeScale, fs, sources, mkv.ProgressFrom(extra)); err != nil {
+	stats, err := streamMergeToWriter(ctx, mw, timecodeScale, fs, sources, mkv.ProgressFrom(extra))
+	if err != nil {
+		return err
+	}
+	// One Tags element after the clusters: the caller's tags plus the
+	// mkvmerge-style per-track statistics accumulated during the stream. The
+	// SeekHead points to it, so head-only readers (WithBitrate) still find it.
+	tags := append(append([]mkv.Tag{}, opts.Tags...), statsTags(tracks, stats)...)
+	if err := mw.WriteTagsElement(tags); err != nil {
 		return err
 	}
 	return mw.Finalize()
+}
+
+// statsTags builds mkvmerge-style per-track statistics tags (BPS, DURATION,
+// NUMBER_OF_FRAMES, NUMBER_OF_BYTES), keyed by track UID — the values ffprobe
+// surfaces as TAG:BPS etc. and matroska.WithBitrate reads back head-only.
+func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
+	var out []mkv.Tag
+	for _, t := range tracks {
+		s := stats[t.ID]
+		if s == nil || !s.seen {
+			continue
+		}
+		dur := s.durationMs()
+		if dur <= 0 {
+			continue
+		}
+		uid := t.UID
+		if uid == 0 {
+			uid = t.ID // the writer defaults a zero UID to the track ID
+		}
+		out = append(out, mkv.Tag{
+			TargetID: uid,
+			SimpleTags: []mkv.SimpleTag{
+				{Name: "BPS", Value: strconv.FormatInt(s.bytes*8*1000/dur, 10)},
+				{Name: "DURATION", Value: formatStatsDuration(dur)},
+				{Name: "NUMBER_OF_FRAMES", Value: strconv.FormatInt(s.frames, 10)},
+				{Name: "NUMBER_OF_BYTES", Value: strconv.FormatInt(s.bytes, 10)},
+			},
+		})
+	}
+	return out
+}
+
+// formatStatsDuration renders a duration the way mkvmerge's statistics tags
+// do: HH:MM:SS.nnnnnnnnn.
+func formatStatsDuration(ms int64) string {
+	return fmt.Sprintf("%02d:%02d:%02d.%09d",
+		ms/3_600_000, ms/60_000%60, ms/1000%60, ms%1000*1_000_000)
 }
 
 func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([]mkv.Track, map[trackKey]uint64, error) {

@@ -52,6 +52,11 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **Per-track statistics tags on mux.** `Mux`/`Merge` output
+  now carries mkvmerge-style statistics tags — `BPS`, `DURATION`,
+  `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES` per track, keyed by track UID —
+  accumulated while streaming and written in a Tags element the SeekHead points
+  to, so `matroska.WithBitrate()` (and ffprobe's `TAG:BPS`) read them head-only.
 - **VP9 → MP4.** VP9 tracks remux to a `vp09` sample entry (VP9-in-ISOBMFF).
   The `vpcC` configuration record is taken from the Matroska CodecPrivate when
   one is present, and otherwise derived from the first keyframe's uncompressed
