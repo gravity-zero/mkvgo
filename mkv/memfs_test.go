@@ -78,3 +78,44 @@ func TestMemFS(t *testing.T) {
 		t.Errorf("paths after remove = %v", m.Paths())
 	}
 }
+
+// Keys are separator-independent: on Windows the packager writes paths joined
+// with filepath.Join ("hls\\init.mp4"), but consumers read them with forward
+// slashes ("hls/init.mp4"). Both must reach the same file (io/fs convention).
+func TestMemFSSeparatorAgnostic(t *testing.T) {
+	m := NewMemFS()
+	// Store the way a Windows filepath.Join would, read the way a URL-style
+	// consumer does — and vice versa.
+	m.Put("hls\\init.mp4", []byte("INIT"))
+	if got := m.Get("hls/init.mp4"); string(got) != "INIT" {
+		t.Errorf("Get with '/' after Put with '\\\\' = %q, want INIT", got)
+	}
+	fs := m.FS()
+	w, _ := fs.DoCreate("hls\\seg00001.m4s")
+	w.Write([]byte("SEG"))
+	w.Close()
+	r, err := fs.DoOpen("hls/seg00001.m4s")
+	if err != nil {
+		t.Fatalf("open across separators: %v", err)
+	}
+	got, _ := io.ReadAll(r)
+	r.Close()
+	if string(got) != "SEG" {
+		t.Errorf("read across separators = %q, want SEG", got)
+	}
+	// Paths are reported normalised, so a consumer's forward-slash lookup works.
+	for _, p := range m.Paths() {
+		if filepathHasBackslash(p) {
+			t.Errorf("Paths() returned a non-normalised key: %q", p)
+		}
+	}
+}
+
+func filepathHasBackslash(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' {
+			return true
+		}
+	}
+	return false
+}

@@ -67,7 +67,7 @@ func main() {
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Access-Control-Allow-Origin", "*") // let a browser player fetch cross-origin
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(data)
+		_, _ = w.Write(data)
 	})
 
 	// A tiny landing page that plays the output in real players (hls.js and

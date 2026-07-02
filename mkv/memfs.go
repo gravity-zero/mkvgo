@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,6 +27,15 @@ type memFile struct {
 	data []byte
 }
 
+// memKey normalises a path to forward slashes so keys are independent of the
+// host OS separator: a caller writing filepath.Join("hls", "init.mp4") gets
+// "hls\\init.mp4" on Windows and "hls/init.mp4" elsewhere, but both must hit
+// the same virtual file. The replacement is unconditional (not filepath.ToSlash,
+// which only converts the current OS's separator) so MemFS behaves identically
+// on every platform — its keys are URL-style resource paths, never real
+// filenames containing a literal backslash. Matches Go's io/fs convention ("/").
+func memKey(p string) string { return strings.ReplaceAll(p, "\\", "/") }
+
 // NewMemFS returns an empty in-memory filesystem.
 func NewMemFS() *MemFS {
 	return &MemFS{files: map[string]*memFile{}}
@@ -35,14 +45,14 @@ func NewMemFS() *MemFS {
 func (m *MemFS) Put(path string, data []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.files[path] = &memFile{data: append([]byte(nil), data...)}
+	m.files[memKey(path)] = &memFile{data: append([]byte(nil), data...)}
 }
 
 // Get returns the content stored under path, or nil when absent.
 func (m *MemFS) Get(path string) []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if f, ok := m.files[path]; ok {
+	if f, ok := m.files[memKey(path)]; ok {
 		return f.data
 	}
 	return nil
@@ -66,7 +76,7 @@ func (m *MemFS) FS() *FS {
 	return &FS{
 		Open: func(path string) (ReadSeekCloser, error) {
 			m.mu.Lock()
-			f, ok := m.files[path]
+			f, ok := m.files[memKey(path)]
 			m.mu.Unlock()
 			if !ok {
 				return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
@@ -76,13 +86,13 @@ func (m *MemFS) FS() *FS {
 		Create: func(path string) (WriteSeekCloser, error) {
 			f := &memFile{}
 			m.mu.Lock()
-			m.files[path] = f
+			m.files[memKey(path)] = f
 			m.mu.Unlock()
 			return &memWriter{f: f}, nil
 		},
 		OpenFile: func(path string, flag int, perm os.FileMode) (ReadWriteSeekCloser, error) {
 			m.mu.Lock()
-			f, ok := m.files[path]
+			f, ok := m.files[memKey(path)]
 			m.mu.Unlock()
 			if !ok {
 				if flag&os.O_CREATE == 0 {
@@ -90,29 +100,29 @@ func (m *MemFS) FS() *FS {
 				}
 				f = &memFile{}
 				m.mu.Lock()
-				m.files[path] = f
+				m.files[memKey(path)] = f
 				m.mu.Unlock()
 			}
 			return &memRW{f: f}, nil
 		},
 		Stat: func(path string) (os.FileInfo, error) {
 			m.mu.Lock()
-			f, ok := m.files[path]
+			f, ok := m.files[memKey(path)]
 			m.mu.Unlock()
 			if !ok {
 				return nil, &os.PathError{Op: "stat", Path: path, Err: os.ErrNotExist}
 			}
-			return memInfo{name: path, size: int64(len(f.data))}, nil
+			return memInfo{name: memKey(path), size: int64(len(f.data))}, nil
 		},
 		MkdirAll:  func(string, os.FileMode) error { return nil }, // paths are flat keys
 		WriteFile: func(path string, data []byte, _ os.FileMode) error { m.Put(path, data); return nil },
 		Remove: func(path string) error {
 			m.mu.Lock()
 			defer m.mu.Unlock()
-			if _, ok := m.files[path]; !ok {
+			if _, ok := m.files[memKey(path)]; !ok {
 				return &os.PathError{Op: "remove", Path: path, Err: os.ErrNotExist}
 			}
-			delete(m.files, path)
+			delete(m.files, memKey(path))
 			return nil
 		},
 	}
