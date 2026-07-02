@@ -62,6 +62,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism —
+  mkvgo packages VOD files) and multi-period DASH (a discontinuity model
+  that would degrade seeking if used for chapters) were evaluated and
+  deliberately left out; the rationale lives in library.md.
 - **WebAssembly ergonomics.** Every wasm method now honours
   `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
   reads, remux, segment builds), wired for React effect cleanups.

@@ -236,6 +236,24 @@ packaged `Options.VideoOnly`. Every variant gets its real
 combined presentation (per-variant `manifest.mpd` inside each directory);
 sources should share GOP cadence for seamless switching.
 
+### Non-goals of the streaming stack (evaluated)
+
+Two features were evaluated and deliberately not implemented:
+
+- **LL-HLS (low-latency HLS).** Partial segments, blocking playlist reloads
+  and preload hints exist to shave seconds off a *live* glass-to-glass
+  latency. mkvgo packages *files* (VOD): every playlist is `PLAYLIST-TYPE:
+  VOD` with `ENDLIST`, where LL-HLS mechanics add complexity and change
+  nothing for the viewer. A live ingest pipeline (encoder → packager) is a
+  different product; the CMAF fragment builders here would be reusable if
+  one ever existed.
+- **Multi-period DASH.** Periods model *discontinuities* (ad insertion,
+  splicing). Mapping chapters onto periods forces players to tear down and
+  rebuild decoders at every chapter mark — worse seeking for zero viewer
+  benefit. Chapters are already carried in the progressive MP4 remux
+  (`chpl` + QuickTime chapter track); players read chapter UIs from there,
+  and DASH VOD stays single-period.
+
 ### Securing HLS delivery
 
 ```go
