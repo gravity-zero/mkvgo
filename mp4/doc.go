@@ -9,7 +9,7 @@
 // (RemuxFromMP4).
 //
 // Remux, not transcode: compressed samples are copied verbatim. Supported
-// codecs are H.264, HEVC and AV1 (video) and AAC, Opus, AC-3, E-AC-3, FLAC, MP3
+// codecs are H.264, HEVC, AV1 and VP9 (video) and AAC, Opus, AC-3, E-AC-3, FLAC, MP3
 // and DTS (audio); the AC-3/E-AC-3 configuration boxes are derived from the
 // elementary bitstream, which Matroska carries no CodecPrivate for, and DTS
 // (incl. DTS-HD) is carried as mp4a/esds the way ffmpeg's mov muxer does it.

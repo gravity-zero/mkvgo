@@ -93,12 +93,12 @@ func TestEsdsBoxStructure(t *testing.T) {
 }
 
 func TestLookupCodec(t *testing.T) {
-	for _, short := range []string{"h264", "hevc", "av1", "aac", "opus", "ac3", "eac3", "flac", "dts", "A_MPEG/L3", "srt"} {
+	for _, short := range []string{"h264", "hevc", "av1", "vp9", "aac", "opus", "ac3", "eac3", "flac", "dts", "A_MPEG/L3", "srt"} {
 		if _, ok := lookupCodec(short); !ok {
 			t.Errorf("lookupCodec(%q) ok=false, want true", short)
 		}
 	}
-	for _, short := range []string{"vp8", "vp9", "truehd", "pgs", ""} {
+	for _, short := range []string{"vp8", "vorbis", "truehd", "pgs", ""} {
 		if _, ok := lookupCodec(short); ok {
 			t.Errorf("lookupCodec(%q) ok=true, want false", short)
 		}

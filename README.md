@@ -182,7 +182,7 @@ mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 
 **Remux to/from MP4 (no transcode):**
 ```bash
-# MKV/WebM → MP4 (H.264/HEVC/AV1 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS,
+# MKV/WebM → MP4 (H.264/HEVC/AV1/VP9 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS,
 # SRT/WebVTT→tx3g, chapters, colour/HDR preserved)
 mkvgo to-mp4 video.mkv video.mp4
 
@@ -258,7 +258,7 @@ err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 
 **Remux to/from MP4 (no transcode):**
 ```go
-// H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT/WebVTT→tx3g
+// H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT/WebVTT→tx3g
 // (Options{NativeWebVTT:true} keeps WebVTT lossless as wvtt; Options{FlattenStyledSubs:true}
 // carries ASS/SSA as tx3g); chapters, colour/HDR and B-frame ordering preserved.
 // Options{FastStart:true} writes moov first; Options{SkipUnsupported:true} drops tracks.
@@ -297,8 +297,8 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
 - **No transcoding.** Every operation copies compressed samples verbatim; a
   codec the target container cannot carry is rejected or dropped (reported),
   never converted.
-- **MP4 output codec set**: H.264/HEVC/AV1 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
-  audio. VP8/VP9/Vorbis, TrueHD and bitmap subtitles (PGS/VOBSUB) cannot go to
+- **MP4 output codec set**: H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
+  audio. VP8/Vorbis, TrueHD and bitmap subtitles (PGS/VOBSUB) cannot go to
   MP4. WebM output accepts only the WebM subset (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
 - **Elements dropped by remuxes**: `to-webm` drops chapters, attachments and
   tags; `to-mp4` drops non-image attachments (fonts), track-targeted tags and

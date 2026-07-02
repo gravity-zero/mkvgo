@@ -1458,6 +1458,12 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
 		// dav1 is Dolby Vision over AV1: an av1C plus a dvvC box.
 		tr.codec = "av1"
 		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "av1C")
+	case "vp09":
+		// The vpcC (FullBox form) becomes the Matroska CodecPrivate, so the
+		// colour/bit-depth it carries survives into MKV (the reader parses both
+		// forms).
+		tr.codec = "vp9"
+		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "vpcC")
 	case "mp4a":
 		ok, err := parseMP4A(tr, entry.payload, audioHdr)
 		return ok, entry.typ, err

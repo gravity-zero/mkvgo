@@ -49,6 +49,10 @@ var codecTable = map[string]codecSpec{
 	"h264": {handler: "vide", video: true, brand: "avc1", sampleEntry: visualEntry("avc1", "dva1", "avcC")},
 	"hevc": {handler: "vide", video: true, brand: "hvc1", sampleEntry: visualEntry("hvc1", "dvh1", "hvcC")},
 	"av1":  {handler: "vide", video: true, brand: "av01", sampleEntry: visualEntry("av01", "dav1", "av1C")},
+	// VP9 in MP4 (vp09 + vpcC, ISO/IEC 14496-15 style per the VP9-in-ISOBMFF
+	// spec). The vpcC is built from the first keyframe's uncompressed header
+	// when the Matroska track carries no VPCodecConfigurationRecord.
+	"vp9": {handler: "vide", video: true, brand: "vp09", needsFirstFrame: true, sampleEntry: vp9Entry},
 	"aac":  {handler: "soun", video: false, sampleEntry: aacEntry},
 	"opus": {handler: "soun", video: false, sampleEntry: opusEntry},
 	"flac": {handler: "soun", video: false, sampleEntry: flacEntry},
@@ -143,6 +147,113 @@ func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []b
 		config := box(configType, t.CodecPrivate)
 		return visualSampleEntry(et, t, config), nil
 	}
+}
+
+// vp9Entry builds a vp09 VisualSampleEntry. The vpcC configuration record comes
+// from the track's CodecPrivate when it already holds one (some muxers store
+// it), and is otherwise derived from the first keyframe's uncompressed header
+// (profile, bit depth, chroma subsampling, colour range) plus the track's
+// colour code points — the way ffmpeg builds it.
+func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
+	record := vpcCRecord(t.CodecPrivate)
+	if record == nil {
+		h, err := parseVP9FrameHeader(firstFrame)
+		if err != nil {
+			return nil, errf("track %d (vp9): %w", t.ID, err)
+		}
+		fullRange := byte(0)
+		if h.fullRange || (t.ColorRange != nil && *t.ColorRange == 2) {
+			fullRange = 1
+		}
+		record = []byte{
+			h.profile,
+			0, // level: undefined
+			h.bitDepth<<4 | h.chroma<<1 | fullRange,
+			byte(cicp(t.ColorPrimaries)),
+			byte(cicp(t.ColorTransfer)),
+			byte(cicp(t.ColorSpace)),
+			0, 0, // codecInitializationDataSize = 0
+		}
+	}
+	config := fullBox("vpcC", 1, 0, func(w *bw) { w.bytes(record) })
+	return visualSampleEntry("vp09", t, config), nil
+}
+
+// vpcCRecord returns the VPCodecConfigurationRecord fields when the Matroska
+// CodecPrivate already holds one (with or without the 4-byte FullBox prefix —
+// both forms exist in the wild), nil otherwise.
+func vpcCRecord(cp []byte) []byte {
+	switch {
+	case len(cp) >= 12 && cp[0] <= 1: // FullBox: version(1) flags(3) precede the record
+		return cp[4:]
+	case len(cp) >= 8:
+		return cp
+	}
+	return nil
+}
+
+// vp9Header holds the colour-config fields of a VP9 keyframe's uncompressed
+// header (the fields a vpcC needs).
+type vp9Header struct {
+	profile   byte
+	bitDepth  byte
+	chroma    byte // vpcC chromaSubsampling: 0/1 = 4:2:0, 2 = 4:2:2, 3 = 4:4:4
+	fullRange bool
+}
+
+// parseVP9FrameHeader reads the start of a VP9 KEYFRAME's uncompressed header.
+func parseVP9FrameHeader(b []byte) (*vp9Header, error) {
+	r := &bitReader{data: b}
+	if r.bits(2) != 2 {
+		return nil, errf("VP9: bad frame_marker")
+	}
+	profile := byte(r.bits(1)) | byte(r.bits(1))<<1
+	if profile == 3 {
+		r.bits(1) // reserved_zero
+	}
+	if r.bits(1) == 1 {
+		return nil, errf("VP9: show_existing_frame, not a keyframe")
+	}
+	frameType := r.bits(1)
+	r.bits(2) // show_frame, error_resilient_mode
+	if frameType != 0 {
+		return nil, errf("VP9: first sample is not a keyframe")
+	}
+	if r.bits(24) != 0x498342 {
+		return nil, errf("VP9: bad frame sync code")
+	}
+	h := &vp9Header{profile: profile, bitDepth: 8}
+	if profile >= 2 {
+		if r.bits(1) == 1 {
+			h.bitDepth = 12
+		} else {
+			h.bitDepth = 10
+		}
+	}
+	if colorSpace := r.bits(3); colorSpace != 7 { // 7 = CS_RGB
+		h.fullRange = r.bits(1) == 1
+		if profile == 1 || profile == 3 {
+			sx, sy := r.bits(1), r.bits(1)
+			r.bits(1) // reserved_zero
+			switch {
+			case sx == 1 && sy == 1:
+				h.chroma = 0 // 4:2:0
+			case sx == 1:
+				h.chroma = 2 // 4:2:2
+			default:
+				h.chroma = 3 // 4:4:4
+			}
+		} else {
+			h.chroma = 0 // profiles 0 and 2 are always 4:2:0
+		}
+	} else {
+		h.fullRange = true
+		h.chroma = 3 // CS_RGB is 4:4:4
+	}
+	if r.err {
+		return nil, errf("VP9: truncated frame header")
+	}
+	return h, nil
 }
 
 // visualSampleEntry assembles a VisualSampleEntry (ISO/IEC 14496-12 §12.1.3)

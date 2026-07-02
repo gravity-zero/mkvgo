@@ -95,7 +95,7 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, dur int64, sync
 // MP4 to dstPath. It never transcodes: each track's compressed samples are
 // copied verbatim into MP4 sample tables.
 //
-// Supported codecs are H.264, HEVC and AV1 (video) and AAC, Opus, AC-3, E-AC-3,
+// Supported codecs are H.264, HEVC, AV1 and VP9 (video) and AAC, Opus, AC-3, E-AC-3,
 // FLAC, MP3 and DTS (audio), plus SRT subtitles (carried as tx3g timed text).
 // By default a video or audio track in an unsupported codec (e.g. TrueHD)
 // aborts the remux with an error, so the output never silently omits content;

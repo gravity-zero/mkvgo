@@ -151,7 +151,7 @@ err := mp4.RemuxToMP4(ctx, "video.mkv", "video.mp4", mp4.Options{FastStart: true
 err = mp4.RemuxFromMP4(ctx, "video.mp4", "video.mkv")
 ```
 
-Codecs carried: H.264/HEVC/AV1 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio;
+Codecs carried: H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio;
 SRT/WebVTT → tx3g (or lossless `wvtt` with `--webvtt-native`). Chapters,
 colour/HDR and B-frame ordering are preserved.
 

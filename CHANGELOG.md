@@ -52,6 +52,12 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **VP9 → MP4.** VP9 tracks remux to a `vp09` sample entry (VP9-in-ISOBMFF).
+  The `vpcC` configuration record is taken from the Matroska CodecPrivate when
+  one is present, and otherwise derived from the first keyframe's uncompressed
+  header (profile, bit depth, chroma subsampling, colour range) plus the
+  track's colour code points. `from-mp4` reads `vp09` back (the `vpcC` becomes
+  the CodecPrivate, so colour survives). Output verified decodable by ffmpeg.
 - **Cover art across MKV ↔ MP4.** `to-mp4` carries the source's first JPEG/PNG
   image attachment (one named `cover.*` preferred) as the iTunes `covr` atom;
   `from-mp4`/`OpenMeta` bring a `covr` back as a Matroska attachment
