@@ -201,6 +201,15 @@ pass, lazily; cache it if requested often. The remaining difference: the
 master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
 Cues index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Single-file byte-range serving
+
+`Options.SingleFile` packs each rendition into one progressive file (init +
+`sidx` + all CMAF fragments): the HLS playlists reference it with
+`EXT-X-BYTERANGE` and the DASH manifest switches to the on-demand profile
+(`SegmentBase`/`indexRange`). The embedded fragments are byte-identical to
+the segmented mode's `.m4s` files. `RemuxToHLS`/`RemuxToABR` only;
+incompatible with `Encrypt`.
+
 ### ABR light (`mp4.RemuxToABR`)
 
 ```go

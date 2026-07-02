@@ -62,6 +62,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Single-file byte-range serving** (`Options.SingleFile`, CLI
+  `--single-file`). Each rendition becomes one progressive file — init +
+  `sidx` Segment Index + all CMAF fragments, byte-identical to the segmented
+  mode's — served by ranges: `EXT-X-BYTERANGE` playlists and the DASH
+  on-demand profile (`SegmentBase`/`indexRange`). Two media files instead of
+  hundreds; the server only needs HTTP Range support. ffmpeg-verified for
+  both manifests. Incompatible with `Encrypt`.
 - **ABR light** (`mp4.RemuxToABR`, CLI `to-abr`). Packages several
   pre-encoded quality variants of the same content into one multi-variant
   HLS presentation without transcoding: the first source is the reference

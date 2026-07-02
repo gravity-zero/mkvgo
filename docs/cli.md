@@ -702,6 +702,13 @@ mkvgo to-hls video.mkv -o stream/ --aes-key 00112233445566778899aabbccddeeff \
   --aes-key-uri https://api.example.com/key --url-prefix "https://cdn.example.com/v1/"
 ```
 
+`--single-file` packs each rendition into ONE progressive file (`stream.mp4`,
+`stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges — the
+HLS playlists use `EXT-X-BYTERANGE` and the DASH manifest the on-demand
+profile's `SegmentBase`/`indexRange`. Two media files instead of hundreds:
+friendlier to object storage; the server only needs `Range` support.
+Incompatible with `--aes-key`.
+
 Security flags (shared with `hls-segment`; both must use the same values):
 
 - `--aes-key <32 hex>` + `--aes-key-uri <uri>` — encrypt every media segment

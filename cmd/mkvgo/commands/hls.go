@@ -13,11 +13,12 @@ import (
 // hlsFlags holds the flags to-hls and hls-segment share; they must match
 // between the two for byte-identical output.
 type hlsFlags struct {
-	outDir  string
-	segMs   int64
-	encrypt *mp4.HLSEncryption
-	prefix  string
-	rest    []string
+	outDir     string
+	segMs      int64
+	encrypt    *mp4.HLSEncryption
+	prefix     string
+	singleFile bool
+	rest       []string
 }
 
 func parseHLSFlags(args []string) hlsFlags {
@@ -55,6 +56,8 @@ func parseHLSFlags(args []string) hlsFlags {
 			if i < len(args) {
 				f.prefix = args[i]
 			}
+		case "--single-file":
+			f.singleFile = true
 		default:
 			rejectFlagArg(args[i])
 			f.rest = append(f.rest, args[i])
@@ -72,9 +75,10 @@ func parseHLSFlags(args []string) hlsFlags {
 
 func (f hlsFlags) options(src string) mp4.Options {
 	o := mp4.Options{
-		FS:        sourceFS(src),
-		SegmentMs: f.segMs,
-		Encrypt:   f.encrypt,
+		FS:         sourceFS(src),
+		SegmentMs:  f.segMs,
+		Encrypt:    f.encrypt,
+		SingleFile: f.singleFile,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix

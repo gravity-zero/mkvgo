@@ -102,6 +102,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if err := o.Encrypt.validate(); err != nil {
 			return nil, err
 		}
+		if o.SingleFile {
+			return nil, errf("SingleFile and Encrypt cannot be combined (AES-128 byte ranges are not supported)")
+		}
 	}
 
 	c, err := reader.OpenWithFS(ctx, srcPath, fs)
@@ -195,23 +198,34 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	}
 	bounds := segmentBoundaries(video.samples, segMs)
 
-	// One init segment per rendition (demuxed CMAF); the movie metadata
-	// (title, tags, cover art) rides on the video rendition's init.
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
-	for i, ft := range fts {
-		m := movieMeta{}
-		if ft.outTrack.spec.video {
-			m = meta
-		}
-		initData := buildInitSegment([]*fragTrack{ft}, m)
-		if err := fs.DoWriteFile(filepath.Join(outputDir, renditionInit(fts, i)), initData, 0o644); err != nil {
+
+	var segs []segInfo
+	var rends []sfRendition
+	if o.SingleFile {
+		// One progressive file per rendition (init + sidx + fragments); the
+		// playlists reference it by byte ranges.
+		segs, rends, err = writeSingleFileRenditions(ctx, &o, fs, outputDir, fts, bounds, meta)
+		if err != nil {
 			return nil, err
 		}
-	}
-
-	segs, err := writeSegments(ctx, &o, fs, outputDir, fts, bounds)
-	if err != nil {
-		return nil, err
+	} else {
+		// One init segment per rendition (demuxed CMAF); the movie metadata
+		// (title, tags, cover art) rides on the video rendition's init.
+		for i, ft := range fts {
+			m := movieMeta{}
+			if ft.outTrack.spec.video {
+				m = meta
+			}
+			initData := buildInitSegment([]*fragTrack{ft}, m)
+			if err := fs.DoWriteFile(filepath.Join(outputDir, renditionInit(fts, i)), initData, 0o644); err != nil {
+				return nil, err
+			}
+		}
+		segs, err = writeSegments(ctx, &o, fs, outputDir, fts, bounds)
+		if err != nil {
+			return nil, err
+		}
 	}
 	durs := make([]float64, len(segs))
 	for i := range segs {
@@ -219,8 +233,14 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	}
 	for i := range fts {
 		i := i
-		if err := writeMediaPlaylist(&o, fs, filepath.Join(outputDir, renditionPlaylist(fts, i)), durs,
-			renditionInit(fts, i), func(k int) string { return renditionSegment(fts, i, k) }); err != nil {
+		var pl []byte
+		if o.SingleFile {
+			pl = buildByteRangePlaylist(&o, durs, &rends[i])
+		} else {
+			pl = buildMediaPlaylist(&o, durs, renditionInit(fts, i),
+				func(k int) string { return renditionSegment(fts, i, k) })
+		}
+		if err := fs.DoWriteFile(filepath.Join(outputDir, renditionPlaylist(fts, i)), pl, 0o644); err != nil {
 			return nil, err
 		}
 	}
@@ -239,7 +259,12 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// The DASH side of the CMAF packaging: same init + segments, second
 	// manifest. The MPD references each subtitle rendition as one whole file
 	// (subN.vtt), which writeSubtitleRendition also wrote.
-	mpd := buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs))
+	var mpd []byte
+	if o.SingleFile {
+		mpd = buildDASHManifestSingle(&o, fts, subs, durs, peakBandwidth(segs), rends)
+	} else {
+		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs))
+	}
 	return res, fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
 

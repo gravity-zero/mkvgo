@@ -71,6 +71,14 @@ type Options struct {
 	// HLSEncryption.
 	Encrypt *HLSEncryption
 
+	// SingleFile packs each rendition into ONE progressive file (init + sidx
+	// + all fragments) served by byte ranges: the HLS playlists use
+	// EXT-X-BYTERANGE and the DASH manifest SegmentBase (on-demand profile).
+	// Friendlier to object storage — the server only needs Range support.
+	// RemuxToHLS/RemuxToABR only (an on-demand plan has no file to range
+	// into); incompatible with Encrypt.
+	SingleFile bool
+
 	// VideoOnly carries only the (first) video track — no audio, no subtitle
 	// renditions. RemuxToABR packages its non-reference variants with it; it
 	// is also useful for a video-only preview rendition.
