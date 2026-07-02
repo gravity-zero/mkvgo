@@ -52,5 +52,5 @@ func CmdToHLS(args []string) {
 	if err != nil {
 		Fatal(err.Error())
 	}
-	fmt.Printf("HLS written → %s (init.mp4 + segments + playlist.m3u8)\n", outDir)
+	fmt.Printf("HLS written → %s (play master.m3u8; init.mp4 + segments + subtitle renditions)\n", outDir)
 }

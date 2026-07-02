@@ -121,10 +121,15 @@ func buildInitTrak(ft *fragTrack) []byte {
 	if t.mkv.IsForced {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}
-	// Presentation offset (A/V sync): the sample table is rebased so each track's
-	// first DTS is 0, so re-emit the offset as an empty edit like the progressive path.
-	if ft.offsetMs > 0 {
-		trakChildren = append(trakChildren, buildEdts(0, ft.offsetMs, uint32(ft.durMovieMs), ft.timescale))
+	// Edit list, like the progressive path: the presentation offset (A/V sync —
+	// fragment decode times are rebased so each track starts at 0) and the
+	// audio gapless priming (CodecDelay) a decoder must discard.
+	codecDelay := int64(0)
+	if wantsEditList(t.mkv.Codec, t.mp3Delay) {
+		codecDelay = t.mkv.CodecDelay
+	}
+	if ft.offsetMs > 0 || codecDelay > 0 {
+		trakChildren = append(trakChildren, buildEdts(codecDelay, ft.offsetMs, uint32(ft.durMovieMs), ft.timescale))
 	}
 	trakChildren = append(trakChildren, mdia)
 	return container("trak", trakChildren...)
@@ -149,37 +154,34 @@ func buildMvex(tracks []*fragTrack, totalMs uint32) []byte {
 }
 
 // buildMoof assembles a movie-fragment box for one segment: mfhd (sequence
-// number) and one traf per track. dataOffsets is filled with each traf's trun
-// data_offset (relative to the moof start) once the moof size is known, so the
-// caller writes mdat sample data at the matching position.
+// number) and one traf per track. Each trun's data_offset points at its track's
+// sample bytes: past the whole moof, the 16-byte mdat header (the 64-bit
+// largesize form mdatHeader writes) and the preceding tracks' data. The offsets
+// depend on the moof's own size, so the moof is built twice — a trun's
+// data_offset is a fixed-width u32, so the size of pass two equals pass one.
 func buildMoof(seq uint32, segs []trackSegment) []byte {
-	// Build the trafs once with data_offset = 0 to learn the moof size, then patch
-	// each trun's data_offset. The layout is fixed, so the size does not change.
-	mfhd := fullBox("mfhd", 0, 0, func(w *bw) { w.u32(seq) })
-	trafs := make([][]byte, len(segs))
-	for i := range segs {
-		trafs[i] = buildTraf(&segs[i])
+	assemble := func(moofSize int64) []byte {
+		mfhd := fullBox("mfhd", 0, 0, func(w *bw) { w.u32(seq) })
+		children := [][]byte{mfhd}
+		var dataRun int64
+		for i := range segs {
+			offset := int32(0)
+			if moofSize > 0 {
+				offset = int32(moofSize + mdatHeaderLen + dataRun)
+			}
+			children = append(children, buildTraf(&segs[i], offset))
+			dataRun += segs[i].dataLen
+		}
+		return container("moof", children...)
 	}
-	moof := container("moof", append([][]byte{mfhd}, trafs...)...)
-
-	// Patch data_offset in each trun. The sample data starts after the moof and
-	// the 16-byte mdat header (mdatHeader uses the 64-bit largesize form); each
-	// track's data follows the previous track's in traf order.
-	moofSize := int64(len(moof))
-	var dataRun int64
-	pos := int64(8 + len(mfhd)) // into the moof payload, past its header + mfhd
-	for i := range segs {
-		trunOff := pos + trafTrunDataOffsetPos(&segs[i])
-		putU32(moof, trunOff, uint32(moofSize+mdatHeaderLen+dataRun))
-		dataRun += segs[i].dataLen
-		pos += int64(len(trafs[i]))
-	}
-	return moof
+	sized := assemble(0)
+	return assemble(int64(len(sized)))
 }
 
 // buildTraf builds a track-fragment box: tfhd (default-base-is-moof) + tfdt
-// (baseMediaDecodeTime) + trun (per-sample duration/size/flags/cts).
-func buildTraf(s *trackSegment) []byte {
+// (baseMediaDecodeTime) + trun (per-sample duration/size/flags/cts) pointing at
+// the track's sample bytes via dataOffset (relative to the moof start).
+func buildTraf(s *trackSegment, dataOffset int32) []byte {
 	tfhd := fullBox("tfhd", 0, tfhdDefaultBaseIsMoof, func(w *bw) {
 		w.u32(s.trackID)
 	})
@@ -192,7 +194,7 @@ func buildTraf(s *trackSegment) []byte {
 	}
 	trun := fullBox("trun", 1, flags, func(w *bw) {
 		w.u32(uint32(len(s.samples)))
-		w.u32(0) // data_offset placeholder, patched by buildMoof
+		w.i32(dataOffset)
 		for i := range s.samples {
 			sm := &s.samples[i]
 			w.u32(uint32(sm.durTS))
@@ -210,15 +212,6 @@ func buildTraf(s *trackSegment) []byte {
 	return container("traf", tfhd, tfdt, trun)
 }
 
-// trafTrunDataOffsetPos returns the byte offset of the trun's data_offset field
-// within the traf box (built by buildTraf). Layout: traf header(8) + tfhd + tfdt
-// + trun header(8) + version/flags(4) + sample_count(4), then data_offset.
-func trafTrunDataOffsetPos(s *trackSegment) int64 {
-	tfhdLen := 8 + 4 + 4 // header + ver/flags + track_ID
-	tfdtLen := 8 + 4 + 8 // header + ver/flags + baseMediaDecodeTime(64)
-	return int64(8 + tfhdLen + tfdtLen + 8 + 4 + 4)
-}
-
 // trackSegment holds one track's samples for one media segment, ready to frame
 // into a traf.
 type trackSegment struct {
@@ -227,14 +220,6 @@ type trackSegment struct {
 	samples      []fragSample
 	hasCTS       bool
 	dataLen      int64 // total sample bytes for this track in the segment
-}
-
-// putU32 patches a big-endian uint32 at byte offset off in b.
-func putU32(b []byte, off int64, v uint32) {
-	b[off] = byte(v >> 24)
-	b[off+1] = byte(v >> 16)
-	b[off+2] = byte(v >> 8)
-	b[off+3] = byte(v)
 }
 
 // buildStyp is the segment type box: a fMP4 media segment opens with one so a

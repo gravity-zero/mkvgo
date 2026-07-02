@@ -173,7 +173,7 @@ independently decodable.
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ -segment 6
-# serve stream/ over HTTP; play stream/playlist.m3u8 (hls.js / Safari / ffmpeg)
+# serve stream/ over HTTP; play stream/master.m3u8 (hls.js / Safari / ffmpeg)
 ```
 
 ```go

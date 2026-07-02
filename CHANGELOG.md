@@ -41,6 +41,11 @@ All notable changes to mkvgo are documented here. The format is based on
   `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
   and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
   it is now honoured.
+- **`merge-subtitle` kept no cue durations.** The SRT/ASS end times were not
+  written as BlockDurations, so every merged cue's length was lost (readers
+  fell back to guessed durations). The end time now rides as the
+  BlockDuration, so extraction and HLS WebVTT renditions reproduce the exact
+  source timing.
 - **`RemoveTrack` drops orphan tags.** Tags targeting a removed track's UID are
   no longer carried into the output (they pointed at a track that no longer
   exists); global tags and tags on kept tracks survive.
@@ -50,15 +55,22 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Added
 
 - **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
-  an MKV/WebM into an HLS presentation — `init.mp4` (ftyp + moov with `mvex`/`trex`
-  and empty sample tables) plus `styp`/`moof`/`mdat` media segments and a VOD
-  `playlist.m3u8`. No transcoding: samples are copied verbatim into CMAF fragments
-  (H.264/HEVC/AV1/VP9 + AAC/…). Segments are cut on video keyframes at roughly
-  `Options.SegmentMs` (default 6 s) and are independently decodable (random
-  access). Memory is bounded — per-sample metadata in RAM, sample bytes streamed
-  through one temp file per track. This is the CMAF "copy rung" of an HLS ladder;
-  bitrate variants (real ABR) remain a transcoder's job. ffmpeg-verified: exact
-  frame parity with the source and standalone mid-stream segment decode.
+  an MKV/WebM into a complete HLS presentation — `master.m3u8` (multivariant
+  playlist with `BANDWIDTH`/`RESOLUTION` and RFC 6381 `CODECS`), the muxed
+  audio+video media playlist, `init.mp4` (ftyp + moov with `mvex`/`trex` and
+  empty sample tables) and `styp`/`moof`/`mdat` media segments. Text subtitle
+  tracks (SRT, WebVTT, ASS/SSA flattened) ride as segmented WebVTT renditions
+  declared in the master playlist (language/name/default/forced); bitmap
+  subtitles are dropped with a reason. No transcoding: samples are copied
+  verbatim into CMAF fragments (H.264/HEVC/AV1/VP9 + AAC/…). Segments are cut
+  on video keyframes at roughly `Options.SegmentMs` (default 6 s) and are
+  independently decodable (random access); audio gapless priming (CodecDelay)
+  is re-signalled as an edit list in the init segment, like the progressive
+  remux. Memory is bounded — per-sample metadata in RAM, sample bytes streamed
+  through one temp file per track. This is the CMAF "copy rung" of an HLS
+  ladder; bitrate variants (real ABR) remain a transcoder's job.
+  ffmpeg-verified: exact frame parity with the source and standalone
+  mid-stream segment decode.
 - **QuickTime `.mov` support (non-faststart).** The MP4 reader now parses the
   layout raw iPhone/camera QuickTime files use — `wide` + `mdat` first, `moov`
   at the end — which previously failed with `box ... has invalid size`: the

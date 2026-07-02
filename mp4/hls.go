@@ -1,14 +1,16 @@
 package mp4
 
-// hls.go — RemuxToHLS: a fragmented-MP4 / CMAF HLS presentation (init.mp4,
-// segNNNNN.m4s, playlist.m3u8) produced from a Matroska/WebM file without
-// transcoding. This is the "copy rung" of an HLS ladder: mkvgo does the CMAF
-// packaging; bitrate variants (real ABR) remain a transcoder's job.
+// hls.go — RemuxToHLS: a fragmented-MP4 / CMAF HLS presentation (master.m3u8,
+// init.mp4, segNNNNN.m4s, playlist.m3u8, plus one segmented WebVTT playlist per
+// text subtitle track) produced from a Matroska/WebM file without transcoding.
+// This is the "copy rung" of an HLS ladder: mkvgo does the CMAF packaging;
+// bitrate variants (real ABR) remain a transcoder's job.
 //
 // Memory is bounded: per-sample metadata (size/pts/sync — the same order of
 // magnitude the progressive muxer already holds) is kept in RAM, while the
 // sample *bytes* are streamed to one temp file per track and read back
-// sequentially when the segments are written. Nothing holds the whole media.
+// sequentially when the segments are written. Subtitle cues are small text and
+// are held in RAM. Nothing holds the whole media.
 
 import (
 	"context"
@@ -16,9 +18,11 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 const defaultSegmentMs = 6000
@@ -39,16 +43,36 @@ type fragTrack struct {
 	hasCTS     bool
 }
 
+// hlsSubTrack is one text subtitle track carried as a segmented WebVTT
+// playlist (HLS's native subtitle form — text subs are not fragmented as mdat).
+type hlsSubTrack struct {
+	track mkv.Track
+	cues  []subtitle.Cue
+}
+
+// segInfo describes one written media segment, for the playlists: its duration
+// (seconds) and its total byte size (BANDWIDTH computation).
+type segInfo struct {
+	durSec float64
+	bytes  int64
+}
+
 // RemuxToHLS reads the Matroska/WebM file at srcPath and writes a fragmented-MP4
-// HLS presentation into outputDir: an initialisation segment (init.mp4), the
-// media segments (seg00001.m4s …) and a VOD playlist (playlist.m3u8). It never
-// transcodes — samples are copied verbatim into CMAF fragments — so only the
-// codecs RemuxToMP4 supports are carried. Segments are cut on video keyframes at
-// roughly Options.SegmentMs (default 6 s).
+// HLS presentation into outputDir:
 //
-// Only audio and video tracks are segmented; subtitle tracks are dropped
-// (reported via Options.OnDrop) — HLS carries subtitles as separate WebVTT
-// playlists, which this entry point does not yet emit.
+//	master.m3u8            multivariant playlist (BANDWIDTH/RESOLUTION/CODECS,
+//	                       subtitle renditions)
+//	playlist.m3u8          the muxed audio+video media playlist
+//	init.mp4               CMAF initialisation segment
+//	seg00001.m4s …         media segments (styp + moof + mdat)
+//	subN.m3u8, subN_*.vtt  one segmented WebVTT playlist per text subtitle track
+//
+// It never transcodes — samples are copied verbatim into CMAF fragments — so
+// only the codecs RemuxToMP4 supports are carried. Segments are cut on video
+// keyframes at roughly Options.SegmentMs (default 6 s) and are independently
+// decodable. Text subtitles (SRT, WebVTT, ASS/SSA flattened to plain text) ride
+// as WebVTT renditions; bitmap subtitles (PGS/VOBSUB) are dropped and reported
+// via Options.OnDrop.
 func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options) (err error) {
 	o := optionsFrom(opts)
 	fs := o.FS
@@ -65,14 +89,11 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	if err != nil {
 		return err
 	}
-	// Keep only media tracks; a fragmented HLS rendition carries audio+video.
+	// The fragmented rendition carries audio+video; text subtitles become
+	// WebVTT renditions instead of mdat tracks.
 	var media []*outTrack
 	for _, t := range planned {
 		if t.isChapter || t.spec.text {
-			if !t.isChapter {
-				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-					Reason: "subtitles are not carried into HLS fragments (separate WebVTT playlist not yet emitted)"})
-			}
 			continue
 		}
 		media = append(media, t)
@@ -80,6 +101,7 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	if len(media) == 0 {
 		return errf("no audio or video track to segment")
 	}
+	subs := planSubTracks(c, o)
 
 	if err := fs.DoMkdirAll(outputDir, 0o755); err != nil {
 		return err
@@ -106,9 +128,9 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		}
 	}()
 
-	// Phase 1 — stream every block, buffering sample bytes to the per-track temp
-	// files and recording sample metadata.
-	if err := collectFragSamples(ctx, srcPath, fs, c, routing); err != nil {
+	// Phase 1 — stream every block, buffering media sample bytes to the
+	// per-track temp files and collecting subtitle cues.
+	if err := collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress); err != nil {
 		return err
 	}
 	for _, ft := range fts {
@@ -141,17 +163,51 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		return err
 	}
 
-	segDurs, err := writeSegments(ctx, fs, outputDir, fts, bounds)
+	segs, err := writeSegments(ctx, fs, outputDir, fts, bounds)
 	if err != nil {
 		return err
 	}
-	return writePlaylist(fs, outputDir, segMs, segDurs)
+	durs := make([]float64, len(segs))
+	for i := range segs {
+		durs[i] = segs[i].durSec
+	}
+	if err := writeMediaPlaylist(fs, filepath.Join(outputDir, "playlist.m3u8"), durs, "init.mp4",
+		func(i int) string { return fmt.Sprintf("seg%05d.m4s", i+1) }); err != nil {
+		return err
+	}
+	for i := range subs {
+		if err := writeSubtitleRendition(fs, outputDir, i, &subs[i], bounds, durs, fts); err != nil {
+			return err
+		}
+	}
+	return writeMasterPlaylist(fs, outputDir, fts, subs, segs)
+}
+
+// planSubTracks selects the text subtitle tracks carried as WebVTT renditions.
+// Bitmap formats have no text form and are dropped with a reason.
+func planSubTracks(c *mkv.Container, o Options) []hlsSubTrack {
+	var subs []hlsSubTrack
+	for _, t := range c.Tracks {
+		if t.Type != mkv.SubtitleTrack {
+			continue
+		}
+		switch canonicalSubCodec(t.Codec) {
+		case "srt", "webvtt", "ass", "ssa":
+			subs = append(subs, hlsSubTrack{track: t})
+		default:
+			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+				Reason: "subtitle format not representable as WebVTT (bitmap formats cannot be carried)"})
+		}
+	}
+	return subs
 }
 
 // collectFragSamples reads every block once, writing each media sample's bytes to
-// its track's temp file and recording (size, pts, sync). Lazily builds the sample
-// entry for codecs that derive it from the first frame.
-func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container, routing map[uint64]*fragTrack) error {
+// its track's temp file and recording (size, pts, sync); subtitle blocks become
+// WebVTT cues. Lazily builds the sample entry for codecs that derive it from the
+// first frame.
+func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container,
+	routing map[uint64]*fragTrack, subs []hlsSubTrack, progress mkv.ProgressFunc) error {
 	src, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return err
@@ -160,6 +216,15 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 	br, err := reader.NewBlockReader(src, c.Info.TimecodeScale)
 	if err != nil {
 		return err
+	}
+	if progress != nil {
+		if st, _ := fs.DoStat(srcPath); st != nil {
+			br.SetProgress(progress, st.Size())
+		}
+	}
+	subRouting := make(map[uint64]*hlsSubTrack, len(subs))
+	for i := range subs {
+		subRouting[subs[i].track.ID] = &subs[i]
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -171,6 +236,12 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		}
 		if err != nil {
 			return errf("read block: %w", err)
+		}
+		if st, ok := subRouting[b.TrackNumber]; ok {
+			if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+				st.cues = append(st.cues, cue)
+			}
+			continue
 		}
 		ft, ok := routing[b.TrackNumber]
 		if !ok {
@@ -190,6 +261,27 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)), ptsMs: b.Timecode, sync: b.Keyframe})
 	}
 	return nil
+}
+
+// subCueFromBlock converts one Matroska subtitle block into a WebVTT cue. ASS
+// dialogue lines are flattened to their plain text (styling is lost — WebVTT
+// has no ASS form); SRT and WebVTT payloads pass through.
+func subCueFromBlock(codec string, b mkv.Block) (subtitle.Cue, bool) {
+	var text string
+	switch canonicalSubCodec(codec) {
+	case "ass", "ssa":
+		text = subtitle.FlattenASSBlock(b.Data)
+	default: // srt, webvtt: the block payload is the cue text
+		text = strings.TrimRight(string(b.Data), "\n\r\x00")
+	}
+	if strings.TrimSpace(text) == "" {
+		return subtitle.Cue{}, false
+	}
+	cue := subtitle.Cue{StartMs: b.Timecode, Text: text}
+	if b.Duration > 0 {
+		cue.EndMs = b.Timecode + b.Duration
+	}
+	return cue, true
 }
 
 // pickVideoFrag returns the first video track, the one whose keyframes drive the
@@ -222,8 +314,8 @@ func segmentBoundaries(video []fragSample, targetMs int64) []int64 {
 }
 
 // writeSegments writes one .m4s per boundary interval and returns each segment's
-// duration in seconds (from the video track's sample durations) for the playlist.
-func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]float64, error) {
+// duration and byte size, for the playlists.
+func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, error) {
 	// A sequential reader over each track's temp file: samples are stored in
 	// decode order, segments are emitted in order and keyframe-aligned (closed
 	// GOPs), so each segment's bytes are a contiguous forward run.
@@ -244,8 +336,8 @@ func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack
 	}()
 
 	cursors := make([]int, len(fts)) // next unwritten sample index per track
-	var durs []float64
-	for k := 0; k+1 <= len(bounds); k++ {
+	var infos []segInfo
+	for k := 0; k < len(bounds); k++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -295,15 +387,22 @@ func writeSegments(ctx context.Context, fs *mkv.FS, dir string, fts []*fragTrack
 			return nil, werr
 		}
 
-		// EXTINF duration: the video track's covered span, in seconds.
-		durs = append(durs, float64(segEndOrLast(bounds, k, fts)-segStart)/1000)
+		var segBytes int64
+		for i := range segs {
+			segBytes += segs[i].dataLen
+		}
+		segBytes += int64(len(moof)) + int64(len(buildStyp())) + mdatHeaderLen
+		infos = append(infos, segInfo{
+			durSec: float64(segEndOrLast(bounds, k, fts)-segStart) / 1000,
+			bytes:  segBytes,
+		})
 	}
-	return durs, nil
+	return infos, nil
 }
 
 // writeOneSegment writes styp + moof + mdat(sample bytes) for one segment. The
 // mdat sample bytes are read sequentially from each track's temp file in the same
-// order the trafs appear, matching the data_offsets buildMoof patched in.
+// order the trafs appear, matching the data_offsets buildMoof computed.
 func writeOneSegment(out io.Writer, moof []byte, segs []trackSegment, fts []*fragTrack, readers []mkv.ReadSeekCloser) error {
 	if _, err := out.Write(buildStyp()); err != nil {
 		return err
@@ -355,9 +454,9 @@ func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 	return last.ptsMs + durMs
 }
 
-// writePlaylist writes a VOD HLS media playlist referencing the init segment
-// (EXT-X-MAP) and every media segment (EXTINF).
-func writePlaylist(fs *mkv.FS, dir string, targetMs int64, durs []float64) error {
+// writeMediaPlaylist writes a VOD HLS media playlist. mapURI, when non-empty,
+// is emitted as EXT-X-MAP (the fMP4 init segment); WebVTT playlists pass "".
+func writeMediaPlaylist(fs *mkv.FS, path string, durs []float64, mapURI string, segName func(i int) string) error {
 	var max float64
 	for _, d := range durs {
 		if d > max {
@@ -368,10 +467,108 @@ func writePlaylist(fs *mkv.FS, dir string, targetMs int64, durs []float64) error
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
-	b = append(b, "#EXT-X-MAP:URI=\"init.mp4\"\n"...)
+	if mapURI != "" {
+		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", mapURI)...)
+	}
 	for i, d := range durs {
-		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\nseg%05d.m4s\n", d, i+1)...)
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, segName(i))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
-	return fs.DoWriteFile(filepath.Join(dir, "playlist.m3u8"), b, 0o644)
+	return fs.DoWriteFile(path, b, 0o644)
+}
+
+// writeSubtitleRendition writes one subtitle track as segmented WebVTT: one
+// .vtt per media-segment window (cues overlapping the window, absolute
+// timestamps) plus its media playlist.
+func writeSubtitleRendition(fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bounds []int64, durs []float64, fts []*fragTrack) error {
+	subtitle.ResolveCueEnds(st.cues, 2000)
+	for k := range durs {
+		segStart := bounds[k]
+		var segEnd int64 = 1<<63 - 1
+		if k+1 < len(bounds) {
+			segEnd = bounds[k+1]
+		}
+		var window []subtitle.Cue
+		for _, cue := range st.cues {
+			if cue.EndMs > segStart && cue.StartMs < segEnd {
+				window = append(window, cue)
+			}
+		}
+		var buf strings.Builder
+		if err := subtitle.WriteWebVTT(&buf, window); err != nil {
+			return err
+		}
+		name := fmt.Sprintf("sub%d_%05d.vtt", idx+1, k+1)
+		if err := fs.DoWriteFile(filepath.Join(dir, name), []byte(buf.String()), 0o644); err != nil {
+			return err
+		}
+	}
+	return writeMediaPlaylist(fs, filepath.Join(dir, fmt.Sprintf("sub%d.m3u8", idx+1)), durs, "",
+		func(i int) string { return fmt.Sprintf("sub%d_%05d.vtt", idx+1, i+1) })
+}
+
+// writeMasterPlaylist writes the multivariant playlist: the muxed audio+video
+// rendition (BANDWIDTH from the peak segment bitrate, RESOLUTION/FRAME-RATE,
+// CODECS when every track's RFC 6381 string is known) and the subtitle
+// renditions as an EXT-X-MEDIA group.
+func writeMasterPlaylist(fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) error {
+	var b []byte
+	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
+
+	for i := range subs {
+		t := &subs[i].track
+		name := t.Name
+		if name == "" && t.Language != "" {
+			name = t.Language
+		}
+		if name == "" {
+			name = fmt.Sprintf("Subtitles %d", i+1)
+		}
+		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
+		if t.Language != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		}
+		if t.IsDefault {
+			attrs += ",DEFAULT=YES"
+		}
+		if t.IsForced {
+			attrs += ",FORCED=YES"
+		}
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=\"sub%d.m3u8\"\n", attrs, i+1)...)
+	}
+
+	// Peak and average bandwidth over the media segments (bits per second).
+	var peak, totalBits float64
+	var totalSec float64
+	for _, s := range segs {
+		if s.durSec > 0 {
+			if bps := float64(s.bytes) * 8 / s.durSec; bps > peak {
+				peak = bps
+			}
+		}
+		totalBits += float64(s.bytes) * 8
+		totalSec += s.durSec
+	}
+	avg := peak
+	if totalSec > 0 {
+		avg = totalBits / totalSec
+	}
+	inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", int64(peak), int64(avg))
+	if v := pickVideoFrag(fts); v != nil {
+		t := &v.outTrack.mkv
+		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
+			inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
+		}
+		if t.FrameRate != nil && *t.FrameRate > 0 {
+			inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
+		}
+	}
+	if codecs := hlsCodecsAttr(fts); codecs != "" {
+		inf += fmt.Sprintf(",CODECS=%q", codecs)
+	}
+	if len(subs) > 0 {
+		inf += ",SUBTITLES=\"subs\""
+	}
+	b = append(b, (inf + "\nplaylist.m3u8\n")...)
+	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), b, 0o644)
 }

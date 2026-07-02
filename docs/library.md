@@ -150,9 +150,9 @@ Memory use scales with the sample count, not the file size: sample data is strea
 err := mp4.RemuxToHLS(ctx, "in.mkv", "stream/", mp4.Options{SegmentMs: 6000})
 ```
 
-Writes a fragmented-MP4 / CMAF HLS presentation into the output directory: `init.mp4` (ftyp + moov with `mvex`/`trex` and empty sample tables), the media segments (`seg00001.m4s` …, each `styp` + `moof` + `mdat`) and a VOD `playlist.m3u8`. No transcoding — samples are copied verbatim, so the codec set matches `RemuxToMP4`.
+Writes a fragmented-MP4 / CMAF HLS presentation into the output directory: `master.m3u8` (multivariant playlist with `BANDWIDTH`/`RESOLUTION`/`CODECS` and the subtitle renditions), `playlist.m3u8` (the muxed audio+video media playlist), `init.mp4` (ftyp + moov with `mvex`/`trex` and empty sample tables) and the media segments (`seg00001.m4s` …, each `styp` + `moof` + `mdat`). No transcoding — samples are copied verbatim, so the codec set matches `RemuxToMP4`.
 
-Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s) and each is independently decodable, so a player seeks by fetching the segment plus `init.mp4`. This is the CMAF *copy rung* of an HLS ladder — the packaging; bitrate variants (real ABR) remain a transcoder's job. Subtitle tracks are dropped (reported via `Options.OnDrop`).
+Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s) and each is independently decodable, so a player seeks by fetching the segment plus `init.mp4`. Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened) become segmented WebVTT renditions declared in the master playlist; bitmap subtitles are dropped (reported via `Options.OnDrop`). This is the CMAF *copy rung* of an HLS ladder — the packaging; bitrate variants (real ABR) remain a transcoder's job.
 
 Memory is bounded regardless of file size: per-sample metadata is held in RAM (the same order the progressive muxer holds) while sample bytes are streamed through one temp file per track and read back sequentially as the segments are written.
 

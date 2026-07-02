@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,11 +29,17 @@ func TestRemuxToHLS(t *testing.T) {
 		gblocks = append(gblocks, genBlock{track: 2, pts: int64(i) * 20, key: true,
 			data: []byte{0xAA, byte(i)}})
 	}
+	// A text subtitle track: carried as a segmented WebVTT rendition.
+	for i := 0; i < 3; i++ {
+		gblocks = append(gblocks, genBlock{track: 3, pts: int64(i) * 2000, key: true,
+			data: []byte(fmt.Sprintf("cue numero %d", i+1))})
+	}
 	sortGenBlocks(gblocks)
 	src := buildMKV(t,
 		[]mkv.Track{
 			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
 			{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch},
+			{ID: 3, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre", Name: "Français"},
 		},
 		gblocks)
 
@@ -77,6 +84,27 @@ func TestRemuxToHLS(t *testing.T) {
 		if !bytes.Contains(seg1, []byte(want)) {
 			t.Errorf("segment 1 missing %q box", want)
 		}
+	}
+
+	// Subtitle rendition: master playlist declares it, the sub playlist and its
+	// VTT segments exist, and the cue text landed in the right window.
+	master, err := os.ReadFile(filepath.Join(dir, "master.m3u8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"#EXT-X-STREAM-INF:", "BANDWIDTH=", "RESOLUTION=320x240",
+		"CODECS=", "TYPE=SUBTITLES", "NAME=\"Français\"", "LANGUAGE=\"fre\"",
+		"URI=\"sub1.m3u8\"", "SUBTITLES=\"subs\"", "playlist.m3u8"} {
+		if !bytes.Contains(master, []byte(want)) {
+			t.Errorf("master.m3u8 missing %q:\n%s", want, master)
+		}
+	}
+	vtt1, err := os.ReadFile(filepath.Join(dir, "sub1_00001.vtt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(vtt1, []byte("WEBVTT")) || !bytes.Contains(vtt1, []byte("cue numero 1")) {
+		t.Errorf("sub segment 1 content wrong:\n%s", vtt1)
 	}
 
 	// The temp files must be cleaned up.

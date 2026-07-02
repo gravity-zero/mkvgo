@@ -664,9 +664,9 @@ mkvgo to-webm video.mkv video.webm
 
 ### to-hls
 
-Remux an MKV/WebM file to a fragmented-MP4 / CMAF **HLS** presentation in an output directory: an initialisation segment (`init.mp4`), the media segments (`seg00001.m4s` …) and a VOD playlist (`playlist.m3u8`). No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment.
+Remux an MKV/WebM file to a fragmented-MP4 / CMAF **HLS** presentation in an output directory: a multivariant playlist (`master.m3u8`, with `BANDWIDTH`/`RESOLUTION`/`CODECS`), the muxed audio+video media playlist (`playlist.m3u8`), an initialisation segment (`init.mp4`) and the media segments (`seg00001.m4s` …). No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment.
 
-This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder. Subtitle tracks are dropped (HLS carries subtitles as separate WebVTT playlists, not yet emitted).
+Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
 mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
@@ -680,6 +680,6 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
 ```bash
 mkvgo to-hls video.mkv -o stream/
 mkvgo to-hls video.mkv -o stream/ -segment 4
-# serve stream/ over HTTP; play stream/playlist.m3u8 in hls.js / Safari / ffmpeg
+# serve stream/ over HTTP; play stream/master.m3u8 in hls.js / Safari / ffmpeg
 ```
 
