@@ -684,6 +684,10 @@ mkvgo to-webm <input.mkv> <output.webm>
 mkvgo to-webm video.mkv video.webm
 ```
 
+> The streaming commands (`to-hls`, `hls-segment`, `to-abr`) are covered end to
+> end — modes, sources, ABR, security, trick-play — in the
+> **[streaming guide](streaming.md)**. Below is the per-flag reference.
+
 ### to-hls
 
 Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)

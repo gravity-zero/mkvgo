@@ -165,19 +165,51 @@ mkvgo to-webm video.mkv video.webm   # VP8/VP9/AV1 + Vorbis/Opus only
 err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 ```
 
-## Package for HLS (no transcode)
+## Package for streaming (HLS + DASH, no transcode)
 
-Produce a fragmented-MP4 / CMAF HLS presentation — the "copy rung" that lets a
-browser play an MKV without re-encoding. Segments are cut on keyframes and are
-independently decodable.
+Turn a file into a CMAF presentation — one demuxed segment set described by
+**both** an HLS `master.m3u8` and a DASH `manifest.mpd`. Segments are cut on
+keyframes and independently decodable. Works on MKV/WebM **and** MP4/MOV.
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ -segment 6
-# serve stream/ over HTTP; play stream/master.m3u8 (hls.js / Safari / ffmpeg)
+# serve stream/ over HTTP; play master.m3u8 (hls.js/Safari) or manifest.mpd (dash.js)
 ```
 
 ```go
 err := mp4.RemuxToHLS(ctx, "video.mkv", "stream/", mp4.Options{SegmentMs: 6000})
+```
+
+Serve **on demand** instead (zero pre-generation) — each resource built when
+requested, an HTTP handler in one call:
+
+```go
+plan, _ := mp4.PlanHLS(ctx, "video.mkv", mp4.Options{SegmentMs: 6000})
+data, mime, _ := plan.Resource(ctx, "seg00042.m4s") // name = what the player requests
+```
+
+Encrypt (AES-128) and sign URLs:
+
+```bash
+mkvgo to-hls video.mkv -o stream/ --aes-key <32-hex> --aes-key-uri https://…/key
+```
+
+→ The full streaming guide — ABR, single-file, trick-play, remote/S3 sources,
+browser playback — is **[streaming.md](streaming.md)**.
+
+## Thumbnails / scrubbing storyboard
+
+Pull the keyframe nearest a time, decoder-ready, then make the image with ffmpeg
+(mkvgo never decodes):
+
+```bash
+mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264
+ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
+```
+
+```go
+ks, _ := matroska.ExtractKeyframeSample(ctx, "movie.mkv", 750_000) // ms
+// ks.Data is Annex-B (H.264/HEVC) or IVF (VP8/VP9/AV1); ks.Ext, ks.PtsMs
 ```
 
 ---
@@ -283,3 +315,18 @@ err := matroska.EditMetadata(ctx, "s3://bucket/in.mkv", "s3://bucket/out.mkv",
     matroska.Options{FS: fs},
 )
 ```
+
+Ready-made ports: **`mkv.NewMemFS()`** (in-memory — the wasm build's foundation,
+handy in tests) and **`httpfs.New()`** (HTTP Range — probe or package straight
+from a URL, transferring only the bytes you read):
+
+```go
+import "github.com/gravity-zero/mkvgo/httpfs"
+
+f := httpfs.New()
+c, _ := matroska.OpenMetaWithFS(ctx, "https://nas/movie.mkv", f.Port())
+fmt.Println(c.Tracks, f.BytesFetched()) // head-only: a few KB, whatever the size
+```
+
+The CLI accepts `http(s)://` URLs on the inspection commands and as a `to-hls`/
+`hls-segment` source directly.

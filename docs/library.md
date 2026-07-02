@@ -146,6 +146,10 @@ Memory use scales with the sample count, not the file size: sample data is strea
 
 ### MKV/WebM → fragmented-MP4 HLS
 
+> For the full picture — the CMAF model, on-demand serving, ABR, security,
+> trick-play, remote sources — see the **[streaming guide](streaming.md)**.
+> This section is the API reference.
+
 ```go
 err := mp4.RemuxToHLS(ctx, "in.mkv", "stream/", mp4.Options{SegmentMs: 6000})
 ```

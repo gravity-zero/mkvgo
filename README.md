@@ -6,47 +6,116 @@
 [![codecov](https://codecov.io/gh/gravity-zero/mkvgo/branch/master/graph/badge.svg)](https://codecov.io/gh/gravity-zero/mkvgo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-In-process MKV/WebM container toolkit in pure Go. Probe, edit, remux to/from MP4 - no ffmpeg, no cgo, zero dependencies.
+**Pure-Go media toolkit and streaming packager.** Probe, remux and edit
+Matroska/WebM/MP4, then package them for HLS **and** DASH — all in-process, with
+no ffmpeg, no cgo and zero dependencies.
 
-mkvgo is both a **command-line tool** and an **importable Go library** for
-Matroska (`.mkv`/`.webm`) and MP4 (`.mp4`/`.mov`). Use it to read what's inside a
-file (codecs, languages, colour/HDR, chapters, keyframes...), index a media
-library fast, prepare files for streaming, convert between MKV and MP4, extract or
-merge subtitles, or edit metadata - without shelling out to an external tool.
+One ~2 MB static binary (or an imported Go library, or a ~1.3 MB WebAssembly
+module) that inspects media, converts between containers without re-encoding,
+and turns a file into a ready-to-stream CMAF presentation. It never transcodes:
+every operation copies the compressed samples verbatim.
 
-### Supported formats
+---
 
-| Format | Inspect / probe | Edit · mux · split · join | Convert to |
-|---|:---:|:---:|---|
-| **Matroska** `.mkv` | ✅ | ✅ | MP4, WebM |
-| **WebM** `.webm` | ✅ | ✅ (WebM-subset codecs) | MP4, WebM |
-| **MP4 / MOV** `.mp4` `.mov` | ✅ | - (remux only) | MKV |
+## What it does
 
-WebM is read and written as Matroska. MP4/MOV is fully inspected (head-only, like
-ffprobe) and remuxed to/from MKV - with no re-encoding in either direction.
+mkvgo is three things in one tool. Pick the pillar you need:
 
-Editing, muxing, splitting and joining are **Matroska operations**: to do them on
-MP4 content, remux it to MKV first (`from-mp4`), operate, then remux back
-(`to-mp4`) - every step is lossless (`-c copy`).
+### 🔍 1 · Inspect
 
-### Why mkvgo?
+Read what's inside a file — **head-only**, like `ffprobe` but without decoding a
+frame or reading the whole file, so indexing a large library is orders of
+magnitude faster.
 
-- **Zero dependencies.** Stdlib only. A single ~2 MB static binary that
-  cross-compiles to Linux/macOS/Windows; or embed the library directly in your Go
-  service - no subprocess, no ffmpeg to ship.
-- **Fast metadata.** Probing is *head-only*: it reads the container headers, not
-  the whole file, and never decodes a frame - so indexing a large library is
-  orders of magnitude faster than a full demux.
-- **ffprobe-equivalent fields.** Codecs, profile/level, pixel format, colour and
-  HDR (HDR10 static metadata **and** Dolby Vision), aspect ratio, rotation,
-  per-track bitrate, keyframes... mapped to the names ffprobe uses.
-- **A full toolkit, not just a reader.** Write, mux, split, join, remux
-  (MKV↔MP4, →WebM), convert subtitles, and edit metadata - including an *instant*
-  in-place edit that rewrites only the header.
-- **Built for real-world files.** Corruption-tolerant parsing (resyncs past
-  damaged regions), bounded memory on hostile input, and continuously fuzzed.
+- Codecs, profile/level, pixel format, aspect ratio, rotation, frame rate,
+  per-track bitrate, channel layout, keyframes.
+- Colour and **HDR** — HDR10 static metadata **and** Dolby Vision.
+- Chapters, attachments, tags, languages — mapped to the field names `ffprobe`
+  uses, with `-json` output identical to the library's structs.
 
-### See it in action
+```bash
+mkvgo probe video.mkv          # or video.mp4 — same output
+mkvgo probe -json video.mkv | jq '.tracks[]'
+```
+
+### 🔄 2 · Convert & edit
+
+Losslessly move content between containers and rework its metadata.
+
+- **Remux** MKV/WebM ↔ MP4/MOV, and MKV → WebM — `-c copy`, no quality loss.
+- **Mux / split / join / merge** tracks; **add / remove** tracks and attachments.
+- **Subtitles** — extract (SRT/ASS/WebVTT), merge an external sidecar, convert.
+- **Edit metadata** — title, track flags, chapters — including an *instant*
+  in-place edit that rewrites only the header, whatever the file size.
+- **Self-verifying files** — store per-track content hashes, detect bit rot.
+
+```bash
+mkvgo to-mp4 --faststart video.mkv video.mp4    # progressive MP4, no re-encode
+mkvgo edit-inplace video.mkv '{"title":"…"}'    # instant, no rewrite
+```
+
+### 📡 3 · Stream (HLS + DASH)
+
+Turn a file into a **CMAF** presentation — the packaging half of adaptive
+streaming, no transcoder involved. **One segment set, two manifests.**
+
+- **HLS** (`master.m3u8`) **and DASH** (`manifest.mpd`) over the same demuxed
+  fragmented-MP4 segments; native **multi-audio** (VF/VO) and subtitle
+  selection.
+- **On-demand**: build any segment/playlist when requested — zero
+  pre-generation, zero storage — or pre-generate everything. Both modes emit
+  byte-identical output.
+- **ABR** from pre-encoded qualities, **AES-128** encryption + signed URLs,
+  **single-file** byte-range serving, **I-frame** trick-play playlists,
+  **thumbnails** for scrubbing, and **audio-only** (podcasts/music).
+- Sources: MKV/WebM **or** MP4/MOV, local path **or** `http(s)://` URL (S3).
+
+```bash
+mkvgo to-hls video.mkv -o stream/    # → master.m3u8 + manifest.mpd + segments
+# serve stream/ over HTTP; play in hls.js / dash.js / Safari
+```
+
+→ Full guide: **[docs/streaming.md](docs/streaming.md)**
+
+---
+
+## Runs anywhere
+
+The same engine, four ways to reach it:
+
+| Runtime | What | Where |
+|---|---|---|
+| **CLI** | one static binary, no deps | Linux / macOS / Windows |
+| **Go library** | import the `matroska` / `mp4` packages | your service, in-process |
+| **WebAssembly** | probe/remux/package in the browser (bounded memory, any file size) | client-side, no server — [docs/wasm.md](docs/wasm.md) |
+| **Remote (`httpfs`)** | read over HTTP Range — probe a library on S3/HTTP for a few KB/file | any object storage |
+
+Cross-cutting guarantees: **deterministic output** (same input → byte-identical
+bytes, across runs and machines — safe for content-addressed storage), a
+pluggable **FS port** (S3/HTTP/in-memory), corruption-tolerant parsing, bounded
+memory on hostile input, and continuous fuzzing.
+
+---
+
+## Supported formats
+
+| Format | Inspect / probe | Edit · mux · split · join | Remux to | Package (HLS/DASH) |
+|---|:---:|:---:|---|:---:|
+| **Matroska** `.mkv` | ✅ | ✅ | MP4, WebM | ✅ |
+| **WebM** `.webm` | ✅ | ✅ (WebM-subset codecs) | MP4, WebM | ✅ |
+| **MP4 / MOV** `.mp4` `.mov` | ✅ | — (remux only) | MKV | ✅ |
+
+WebM is read and written as Matroska. Editing, muxing, splitting and joining are
+**Matroska operations** — to do them on MP4 content, `from-mp4` → operate →
+`to-mp4` (every step lossless). Inspection and packaging work on MP4/MOV
+directly.
+
+**Codecs carried** (never converted): H.264 · HEVC · AV1 · VP9 video; AAC ·
+Opus · AC-3 · E-AC-3 · FLAC · MP3 · DTS audio; SRT · WebVTT · ASS/SSA subtitles.
+
+---
+
+## See it in action
 
 ```console
 $ mkvgo probe video.mkv
@@ -71,339 +140,162 @@ Chapters (2):
 
 Add `-json` to any inspection command for machine-readable output.
 
-New here? Start with the **[recipes](docs/recipes.md)** - common tasks, copy-paste
-ready. For the full reference see **[docs/cli.md](docs/cli.md)** (CLI) and
-**[docs/library.md](docs/library.md)** (Go library).
+New here? Start with the **[recipes](docs/recipes.md)** — common tasks,
+copy-paste ready, CLI **and** Go side by side.
 
 ## Install
 
 ```bash
-go install github.com/gravity-zero/mkvgo/cmd/mkvgo@latest
+go install github.com/gravity-zero/mkvgo/cmd/mkvgo@latest   # CLI
+go get github.com/gravity-zero/mkvgo                        # library
 ```
 
-Or as a library:
-
-```bash
-go get github.com/gravity-zero/mkvgo
-```
-
-## CLI
+## Command reference
 
 ```
-mkvgo <command> [options]
+mkvgo <command> [options]      # global: -json, -f/--force, --version
 ```
-
-Global flags: `-json` (structured output), `--version`
-
-### Command Reference
 
 | Category | Command | Description |
 |---|---|---|
-| **Inspection** | `info` | Show container info (title, duration, muxing app) - MKV or MP4 |
-| | `tracks` | List all tracks with codec, language, resolution, Dolby Vision - MKV or MP4 |
-| | `chapters` | List chapters with timestamps - MKV or MP4 |
-| | `attachments` | List attachments (fonts, images) |
-| | `tags` | Show all tags |
-| | `probe` | Full dump of all metadata (ffprobe-equivalent stream fields: colour/HDR, Dolby Vision, pix_fmt, aspect ratio, rotation, bitrate, keyframes, dropped tracks…) - MKV or MP4 |
-| | `keyframes` | List video keyframe timestamps (MKV Cues, or a complete structural scan when absent; MP4 sample table) |
-| | `validate` | Check MKV structure for issues |
+| **Inspect** | `info` · `tracks` · `chapters` · `attachments` · `tags` | Show container / track / chapter / attachment / tag info — MKV or MP4 |
+| | `probe` | Full metadata dump: ffprobe-equivalent stream fields (colour/HDR, Dolby Vision, pix_fmt, aspect, rotation, bitrate, keyframes…) |
+| | `keyframes` | Video keyframe timestamps (Cues / sample table, or a structural scan) |
+| | `validate` | Structural **and** streaming-readiness checks (Cues, cue keying, durations…) |
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
-| | `compare` | Diff metadata of two files (MKV or MP4 — verify a remux round-trip) |
-| **Extraction** | `demux` | Extract tracks to raw streams |
-| | `extract-attachment` | Extract an attachment to file |
-| | `add-attachment` / `remove-attachment` | Attach a file (MIME sniffed) / remove one by ID or name |
-| | `extract-subtitle` | Extract subtitle track as SRT, ASS or WebVTT (MKV or MP4) |
-| | `to-vtt` | Convert an external `.srt`/`.ass`/`.vtt` sidecar to WebVTT |
-| **Editing** | `edit` | Edit metadata from JSON (arg or stdin) |
-| | `edit-title` | Change the container title |
-| | `edit-track` | Edit track properties (lang, name, default, forced) |
-| | `edit-inplace` | Edit metadata without rewriting clusters (instant) |
-| | `set-chapters` / `extract-chapters` | Import/export chapters as OGM text (mkvmerge/ffmpeg compatible) |
-| | `remove-track` | Remove tracks from an MKV |
-| | `add-track` | Add a track from another MKV |
-| **Assembly** | `mux` | Combine tracks into a single MKV |
-| | `merge` | Combine all tracks from multiple MKVs |
-| | `merge-subtitle` | Inject an external SRT/ASS into an MKV |
-| | `join` | Concatenate multiple MKVs sequentially |
-| **Splitting** | `split` | Split MKV by time ranges, chapters or fixed duration (`-every`) |
-| **Indexing** | `reindex` | Rebuild the seek index (Cues) of a file |
-| **Remux** | `to-mp4` | Remux MKV/WebM to MP4 (`--faststart`, `--skip-unsupported`) |
-| | `from-mp4` | Remux MP4 to MKV |
-| | `to-webm` | Remux MKV/WebM to WebM (WebM-subset codecs only) |
-| | `to-hls` | Package MKV/WebM as CMAF: HLS (m3u8) + DASH (mpd) over the same demuxed fragmented-MP4 segments |
-| | `hls-segment` | Serve one HLS resource on demand (master/playlist/init/N) — zero pre-generation |
-| | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging, no transcoding) |
-| | `extract-frame` | Keyframe nearest a time, decoder-ready (thumbnail/storyboard pipelines) |
+| | `compare` | Diff metadata (or block content with `-blocks`) of two files — verify a round-trip |
+| **Extract** | `demux` | Extract tracks to raw streams |
+| | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT; external sidecar → WebVTT |
+| | `extract-attachment` · `add-attachment` · `remove-attachment` | Manage attachments (MIME sniffed) |
+| | `extract-frame` | Keyframe nearest a time, decoder-ready — thumbnail/storyboard pipelines |
+| **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) |
+| | `edit-inplace` | Edit metadata without rewriting clusters — instant |
+| | `set-chapters` · `extract-chapters` | Import/export chapters as OGM text (mkvmerge/ffmpeg compatible) |
+| | `remove-track` · `add-track` | Remove / add a track |
+| **Assemble** | `mux` · `merge` · `join` | Combine tracks / files |
+| | `merge-subtitle` | Inject an external SRT/ASS |
+| | `split` | Split by time ranges, chapters or fixed duration (`-every`) |
+| **Index** | `reindex` | Rebuild the seek index (Cues) |
+| **Convert** | `to-mp4` · `from-mp4` · `to-webm` | Remux between containers (no transcode) |
+| **Stream** | `to-hls` | Package as CMAF — HLS + DASH over one demuxed segment set (AES-128, single-file, I-frames, audio-only) |
+| | `hls-segment` | Serve one HLS/DASH resource on demand — zero pre-generation (local file **or** URL) |
+| | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
 
-Full CLI reference: [docs/cli.md](docs/cli.md)
+Full CLI reference: **[docs/cli.md](docs/cli.md)**
 
-### Examples
+## Library
 
-**Probe a file:**
-```bash
-mkvgo probe video.mkv
-mkvgo probe -json video.mkv | jq '.tracks[]'
-```
-
-**Read metadata from stdin (pipe-friendly):**
-
-The inspection commands (`info`, `tracks`, `chapters`, `attachments`, `tags`, `probe`) accept `-` as the input path and read from stdin via the streaming reader.
-
-```bash
-cat video.mkv | mkvgo info -
-cat video.mkv | mkvgo tracks -json -
-```
-
-**Remove a track:**
-```bash
-# Remove track 3 (e.g. commentary audio)
-mkvgo remove-track video.mkv -o clean.mkv -t 3
-```
-
-**Edit metadata with JSON:**
-```bash
-# Via argument
-mkvgo edit video.mkv -o edited.mkv '{"title":"New Title"}'
-
-# Via stdin (pipe from file or another tool)
-cat meta.json | mkvgo edit video.mkv -o edited.mkv -
-```
-
-**Split by time:**
-```bash
-# Split into two parts: 0-5min and 5min-end
-mkvgo split video.mkv -o parts/ -range 0-300000,300000-0
-```
-
-**Merge subtitles:**
-```bash
-mkvgo merge-subtitle video.mkv -o output.mkv subs.srt -lang eng -name "English"
-mkvgo merge-subtitle video.mkv -o output.mkv subs.ass -format ass -lang jpn -name "Japanese"
-```
-
-**Extract subtitles:**
-```bash
-mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
-mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
-```
-
-**Remux to/from MP4 (no transcode):**
-```bash
-# MKV/WebM → MP4 (H.264/HEVC/AV1/VP9 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS,
-# SRT/WebVTT→tx3g, chapters, colour/HDR preserved)
-mkvgo to-mp4 video.mkv video.mp4
-
-# Subtitles: ASS/SSA → tx3g (lossy), or WebVTT → lossless native wvtt (Apple/CMAF)
-mkvgo to-mp4 --flatten-subs anime.mkv anime.mp4
-mkvgo to-mp4 --webvtt-native web.mkv web.mp4
-
-# moov before mdat (progressive HTTP), and drop tracks MP4 can't carry (e.g. TrueHD)
-mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
-
-# MP4 → MKV
-mkvgo from-mp4 video.mp4 video.mkv
-
-# MKV/WebM → WebM (VP8/VP9/AV1 + Vorbis/Opus only; other codecs rejected)
-mkvgo to-webm video.mkv video.webm
-```
-
-## Library Usage
-
-Full library guide: [docs/library.md](docs/library.md)
-
-Import the facade package for convenience, or import sub-packages directly.
-
-**Read metadata:**
 ```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/gravity-zero/mkvgo/matroska"
-)
-
-func main() {
-    c, err := matroska.Open(context.Background(), "video.mkv")
-    if err != nil { panic(err) }
-
-    fmt.Println(c.Info.Title, c.DurationMs, "ms")
-    for _, t := range c.Tracks {
-        fmt.Printf("  #%d %s %s (%s)\n", t.ID, t.Type, t.Codec, t.Language)
-    }
-}
+import "github.com/gravity-zero/mkvgo/matroska" // MKV/WebM facade — stable API
+import "github.com/gravity-zero/mkvgo/mp4"       // MP4 remux/probe + streaming — stable API
 ```
 
-For library indexing, prefer `matroska.OpenMeta` (or `mp4.OpenMeta` for MP4): it returns the same Info + Tracks but stops as soon as both are parsed - never walking Clusters/Cues - so it is orders of magnitude faster than the full `Open`. Use `Open` only when you also need Chapters/Attachments/Tags/Cues. Opt-in read options extend the head-only probe: `WithBitrate()` (per-track BPS bitrate from the Tags element), `WithKeyframeIndex()` (complete keyframe index for a Cues-less file), `WithInBandColourFallback()` (colour from the first sample's SPS).
-
-**Mux tracks from multiple sources:**
+**Probe (head-only, fast for indexing):**
 ```go
-err := matroska.Mux(ctx, matroska.MuxOptions{
-    OutputPath: "output.mkv",
-    Tracks: []matroska.TrackInput{
-        {SourcePath: "video.mkv", TrackID: 1},
-        {SourcePath: "audio.mkv", TrackID: 1, Language: "eng", Name: "Stereo"},
-    },
-})
+c, err := matroska.OpenMeta(ctx, "video.mkv")     // Tracks + Info, stops early
+mc, dropped, err := mp4.OpenMeta(ctx, "video.mp4") // MP4 counterpart
 ```
 
-**Rebuild the seek index of a file:**
+**Remux (no transcode):**
 ```go
-err := ops.Reindex(ctx, "input.mkv", "output.mkv")
-```
-
-**Read or write from a non-seekable stream (pipe, network):**
-
-`reader.ReadStream` parses metadata and returns a `*BlockReader` from an `io.Reader` without ever calling Seek. `writer.NewStreamWriter` writes a live MKV stream to an `io.Writer` using unknown-size Segment and Clusters. See [docs/library.md](docs/library.md) for details.
-
-**Remux a file to WebM:**
-```go
-// Validates the codecs (VP8/VP9/AV1, Vorbis/Opus, WebVTT), copies the media
-// verbatim into a webm-DocType container, rejects non-WebM codecs.
-err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
-```
-
-**Remux to/from MP4 (no transcode):**
-```go
-// H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT/WebVTT→tx3g
-// (Options{NativeWebVTT:true} keeps WebVTT lossless as wvtt; Options{FlattenStyledSubs:true}
-// carries ASS/SSA as tx3g); chapters, colour/HDR and B-frame ordering preserved.
-// Options{FastStart:true} writes moov first; Options{SkipUnsupported:true} drops tracks.
-err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4")
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{FastStart: true})
 err = mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
+err = matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 ```
 
-**Probe an MP4's metadata without remuxing (fast path for indexing):**
+**Package for streaming:**
 ```go
-// Reads only the moov box - the ffprobe-equivalent stream fields (codecs, profile/
-// level, pixel format, colour/HDR, Dolby Vision, aspect ratio, rotation, frame rate,
-// bitrate, channels/layout, per-track duration, file tags…) - never the sample data.
-// Counterpart of matroska.OpenMeta. See docs/library.md for the full field table.
-// The second value lists non-carried tracks (cover art, hint/timecode).
-c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
-fmt.Println(c.DurationMs, len(c.Tracks), "tracks,", len(dropped), "dropped")
+// Pre-generate everything (HLS + DASH):
+err := mp4.RemuxToHLS(ctx, "in.mkv", "stream/", mp4.Options{SegmentMs: 6000})
+
+// …or serve on demand — one call per request, nothing stored:
+plan, _ := mp4.PlanHLS(ctx, "in.mkv", mp4.Options{SegmentMs: 6000})
+data, contentType, _ := plan.Resource(ctx, "seg00042.m4s") // any player-facing name
 ```
 
-**Edit metadata with custom FS (S3, HTTP, etc.):**
+**Custom FS (S3, HTTP, in-memory):**
 ```go
-s3fs := &matroska.FS{
-    Open:   func(p string) (mkv.ReadSeekCloser, error) { /* S3 GetObject */ },
-    Create: func(p string) (mkv.WriteSeekCloser, error) { /* S3 PutObject */ },
-}
-
-err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv",
-    func(c *matroska.Container) {
-        c.Info.Title = "Updated"
-    },
-    matroska.Options{FS: s3fs},
-)
+err := matroska.EditMetadata(ctx, "s3://bucket/in.mkv", "s3://bucket/out.mkv",
+    func(c *matroska.Container) { c.Info.Title = "Updated" },
+    matroska.Options{FS: myFS})
 ```
+
+Full library guide: **[docs/library.md](docs/library.md)**.
+
+## Documentation
+
+| Doc | For |
+|---|---|
+| **[recipes.md](docs/recipes.md)** | Task-first cookbook — pick a goal, copy the snippet (CLI + Go). **Start here.** |
+| **[streaming.md](docs/streaming.md)** | The HLS/DASH/CMAF packager end to end: modes, sources, ABR, security, trick-play. |
+| **[cli.md](docs/cli.md)** | Every command, flag and output field. |
+| **[library.md](docs/library.md)** | The Go API, the head-only probe field table (mapped to ffprobe), streaming, FS port, determinism. |
+| **[wasm.md](docs/wasm.md)** | The browser build: probe/remux/package client-side, TypeScript wrapper, React hooks, MSE demo. |
+| **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** | Generated Go API reference. |
 
 ## Limitations
 
 - **No transcoding.** Every operation copies compressed samples verbatim; a
-  codec the target container cannot carry is rejected or dropped (reported),
-  never converted.
-- **MP4 output codec set**: H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
-  audio. VP8/Vorbis, TrueHD and bitmap subtitles (PGS/VOBSUB) cannot go to
-  MP4. WebM output accepts only the WebM subset (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
-- **Elements dropped by remuxes**: `to-webm` drops chapters, attachments and
-  tags; `to-mp4` drops non-image attachments (fonts), track-targeted tags and
-  unmapped global tags — cover art is carried as `covr` (see
-  [docs/cli.md](docs/cli.md)). The live `StreamWriter` output carries no
-  SeekHead/Cues (impossible without seeking back).
-- **Timing resolution**: operations that rebuild clusters (mux, merge, split,
-  join, edit, remux) work on millisecond-quantised timecodes — exact for the
-  default Matroska `TimecodeScale` (1 ms); finer scales are quantised.
-  `reindex` copies clusters verbatim and is exempt. MP4→MKV→MP4 audio
-  round-trips are sample-exact except Opus/MP3 tail padding.
+  codec the target cannot carry is rejected or dropped (and reported), never
+  converted.
+- **Output codec sets.** MP4: H.264/HEVC/AV1/VP9 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
+  (VP8/Vorbis, TrueHD and bitmap subtitles PGS/VOBSUB cannot go to MP4). WebM:
+  the WebM subset only (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
+- **No DRM.** HLS AES-128 is supported (self-hosted content); CENC/SAMPLE-AES
+  (studio DRM) and LL-HLS (live ingest) are out of scope — see
+  [docs/library.md](docs/library.md).
+- **Timing resolution.** Cluster-rebuilding operations (mux/merge/split/join/
+  edit/remux) use millisecond-quantised timecodes — exact for the default
+  Matroska scale (1 ms). MP4→MKV→MP4 audio round-trips are sample-exact except
+  Opus/MP3 tail padding.
 - **Parser bounds** (anti-DoS, not configurable): 512 MB per EBML element,
-  64 MB per block, 1 GiB of cumulative metadata, 256 MB per cluster on
-  reindex. A legitimate file beyond these limits is rejected with an explicit
-  error.
+  64 MB per block, 1 GiB cumulative metadata, 256 MB per cluster on reindex.
 
 ## Versioning
 
-Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). The `matroska` facade is
-the stable public API: held additive and backward-compatible across 0.x
-releases by policy — and so is the `mp4` package. The `mkv/*` and `ebml`
+Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). The `matroska` facade **and**
+the `mp4` package are the stable public API: held additive and
+backward-compatible across 0.x releases by policy. The `mkv/*` and `ebml`
 sub-packages are lower-level and may change between minor versions.
-
-## Documentation
-
-- **[docs/recipes.md](docs/recipes.md)** - task-oriented cookbook: probe, index a
-  library, keyframes for HLS, HDR, subtitles, remux, split/join, edit… copy-paste
-  ready (CLI **and** Go side by side). Start here.
-- **[docs/cli.md](docs/cli.md)** - full CLI reference: every command, flag and
-  output field.
-- **[docs/library.md](docs/library.md)** - full library guide: the API, the
-  head-only probe field table (mapped to ffprobe), streaming, custom FS, and the
-  capabilities a head-only read cannot reach.
-- **[docs/wasm.md](docs/wasm.md)** - the WebAssembly build (~1.3 MB gzipped):
-  probe/remux/HLS in the browser, the typed `web/mkvgo.ts` wrapper, React/Vue
-  examples, and a runnable MSE-playback demo.
-
-Also: remote `http(s)://` inputs over HTTP Range requests (probe a library on
-S3/HTTP for a few KB per file, remux straight from a URL — see the `httpfs`
-package and cli.md), and **deterministic outputs** — same input, same bytes,
-byte-identical across runs (see docs/library.md).
-- **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** - generated
-  Go API reference.
 
 ## Architecture
 
 ```
-cmd/mkvgo/         CLI binary
-  commands/        one file per command group
+cmd/mkvgo/         CLI binary (one file per command group)
+cmd/mkvgo-wasm/    WebAssembly entry point (global MkvGo object)
 
-matroska/          facade -- stable public API, re-exports everything
+matroska/          facade — stable public API, re-exports everything
+mp4/               MP4 remux + the HLS/DASH/CMAF streaming packager — stable API
+httpfs/            FS port over HTTP Range (remote/S3 sources)
 
-mkv/               core types, FS port, EBML IDs (experimental, may change)
-  reader/          parse MKV → Container
-  writer/          Container → MKV bytes
-  ops/             high-level operations (mux, split, merge, edit, remux-webm...)
+mkv/               core types, FS port, MemFS, EBML IDs (experimental)
+  reader/ writer/  parse / emit MKV
+  ops/             high-level operations (mux, split, merge, edit, thumbnails…)
   subtitle/        SRT/ASS parsing
+ebml/              low-level EBML codec (no Matroska knowledge)
 
-ebml/              low-level EBML encoding/decoding (no Matroska knowledge)
-
-mp4/               MP4 (ISO-BMFF) remux to/from MKV (isolated from EBML core)
+web/               TypeScript wrapper (mkvgo.ts) + React hooks + runnable demo
 ```
 
-Import graph: `cmd/mkvgo` -> `matroska` -> `mkv/*` -> `ebml`; `mp4` -> `mkv/*`
+Import graph: `cmd/mkvgo` → `matroska` → `mkv/*` → `ebml`; `mp4` → `mkv/*`;
+`httpfs` → `mkv`.
 
 ## Build
 
 ```bash
-make build                # build for current platform
-make test                 # run tests with -race
-make vet                  # go vet
-make fuzz                 # run the parser fuzzers locally (30s each)
-make e2e                  # verify remuxes against real ffmpeg (needs ffmpeg,
-                          #   or MKVGO_E2E=docker:<container>)
-make release              # cross-compile all platforms
+make build          # static binary for the current platform (CGO_ENABLED=0)
+make test           # tests with -race
+make wasm           # dist/wasm/mkvgo.wasm + wasm_exec.js
+make wasm-smoke     # build + Node end-to-end smoke test
+make e2e            # verify remux/packaging against real ffmpeg
+                    #   (needs ffmpeg on PATH, or MKVGO_E2E=docker:<container>)
+make fuzz           # run the parser fuzzers locally
+make release        # cross-compile all platforms → dist/
 ```
 
-`make release` produces stripped binaries (~2.3 MB) in `dist/`:
-
-| Platform | Output |
-|---|---|
-| Linux amd64 | `dist/mkvgo-linux-amd64` |
-| Linux arm64 | `dist/mkvgo-linux-arm64` |
-| Windows amd64 | `dist/mkvgo-windows-amd64.exe` |
-| macOS amd64 | `dist/mkvgo-darwin-amd64` |
-| macOS arm64 | `dist/mkvgo-darwin-arm64` |
-
-Build for a specific platform manually:
-
-```bash
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o mkvgo ./cmd/mkvgo/
-```
-
-Version is injected at build time via `-ldflags`:
-
-```bash
-go build -ldflags="-s -w -X main.version=1.0.0" -o mkvgo ./cmd/mkvgo/
-```
+`make release` produces stripped ~2.3 MB binaries for Linux (amd64/arm64),
+Windows (amd64) and macOS (amd64/arm64). Version is injected via
+`-ldflags="-X main.version=…"`.
 
 ## License
 
