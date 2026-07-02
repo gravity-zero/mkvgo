@@ -183,12 +183,15 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-The zero-storage counterpart of `RemuxToHLS`: `PlanHLS` performs a few bounded
-reads (the metadata head with its Cues, the first and last clusters) and each
-`Segment(n)` then seeks straight to its window through the Cues and reads only
-that window — a server answers any HLS request in milliseconds with nothing
-pre-generated. Combined with an `httpfs` source, only the ranges a viewer
-actually watches are ever transferred from remote storage.
+The zero-storage counterpart of `RemuxToHLS`. Sources may be Matroska/WebM or
+MP4/MOV (sniffed). A Matroska plan performs a few bounded reads (the metadata
+head with its Cues, the first and last clusters) and each `Segment(n)` seeks
+its window through the Cues; an MP4 plan is **exact by construction** — the
+moov sample table is the index, so every resource (master, DASH manifest,
+I-frame playlist included) is byte-identical to the full pass, and `Segment`
+reads just its samples' byte ranges. A server answers any HLS request in
+milliseconds with nothing pre-generated; combined with an `httpfs` source,
+only the ranges a viewer actually watches are ever transferred.
 
 The fragments are built by the same code as `RemuxToHLS`, so every resource is
 **byte-identical** to the full pass (regression-tested) — pre-generated and

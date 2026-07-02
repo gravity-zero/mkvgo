@@ -62,6 +62,26 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **MP4/MOV packaging sources.** `to-hls`, `to-abr` and `hls-segment` (and
+  the wasm `openHLS`) now accept MP4/MOV inputs, sniffed from the first
+  bytes — the Bento4-style workflow without a pre-remux. For the on-demand
+  plan the moov sample table IS the index: the plan is exact by
+  construction, so every resource — master playlist, DASH manifest and
+  I-frame playlist included — is byte-identical to the full pass
+  (regression-tested; ffmpeg-verified for both manifests).
+- **Trick-play I-frame playlists.** `to-hls` emits `iframe.m3u8`
+  (`EXT-X-I-FRAMES-ONLY`) declared in the master via
+  `EXT-X-I-FRAME-STREAM-INF`: one keyframe per segment referenced as a byte
+  range into the existing segments (styp + moof + mdat header + the
+  keyframe sample) — zero extra media, decodability of a range verified
+  end to end (range → ffmpeg → JPEG). MP4-source on-demand plans expose it
+  too (ranges computable head-only); not emitted when encrypting. DASH
+  trick mode is not emitted: it requires a derived reduced track
+  (transcoder territory).
+- **Audio-only presentations.** Music/podcast sources (no video track)
+  package fine: the first audio track is the primary rendition (historical
+  file names), segment boundaries follow its sample grid, the master
+  carries no RESOLUTION. ffmpeg-verified for HLS and DASH.
 - **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism —
   mkvgo packages VOD files) and multi-period DASH (a discontinuity model
   that would degrade seeking if used for chapters) were evaluated and

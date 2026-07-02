@@ -686,7 +686,8 @@ mkvgo to-webm video.mkv video.webm
 
 ### to-hls
 
-Remux an MKV/WebM file to a fragmented-MP4 / **CMAF** presentation in an output directory, served through two manifests over the same segments: **HLS** (`master.m3u8` with `BANDWIDTH`/`RESOLUTION`/`CODECS`, plus one media playlist per rendition) and **DASH** (`manifest.mpd`, one AdaptationSet per rendition). Tracks are demuxed — the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) and one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …), declared as an `EXT-X-MEDIA` AUDIO group — so multi-audio sources (VF/VO) get native language selection in hls.js/Safari/dash.js. No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment. Secondary video tracks are dropped with a reason.
+Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
+— as a fragmented-MP4 / **CMAF** presentation in an output directory, served through two manifests over the same segments: **HLS** (`master.m3u8` with `BANDWIDTH`/`RESOLUTION`/`CODECS`, plus one media playlist per rendition) and **DASH** (`manifest.mpd`, one AdaptationSet per rendition). Tracks are demuxed — the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) and one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …), declared as an `EXT-X-MEDIA` AUDIO group — so multi-audio sources (VF/VO) get native language selection in hls.js/Safari/dash.js. No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment. Secondary video tracks are dropped with a reason.
 
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
@@ -708,6 +709,15 @@ mkvgo to-hls video.mkv -o stream/ -segment 4
 mkvgo to-hls video.mkv -o stream/ --aes-key 00112233445566778899aabbccddeeff \
   --aes-key-uri https://api.example.com/key --url-prefix "https://cdn.example.com/v1/"
 ```
+
+An **audio-only** source (music, podcasts) packages fine: the first audio
+track becomes the primary rendition and boundaries follow its sample grid.
+When the source has video, a **trick-play I-frame playlist** (`iframe.m3u8`,
+`EXT-X-I-FRAMES-ONLY`) is emitted and declared in the master
+(`EXT-X-I-FRAME-STREAM-INF`): one keyframe per segment as a byte range into
+the existing segments — zero extra media, what players use for scrubbing
+previews. (Not emitted when encrypting; on-demand plans expose it for MP4
+sources, whose sample table makes the ranges computable head-only.)
 
 `--single-file` packs each rendition into ONE progressive file (`stream.mp4`,
 `stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges — the
@@ -735,8 +745,12 @@ Security flags (shared with `hls-segment`; both must use the same values):
 ### hls-segment
 
 Serve one resource of an HLS presentation **on demand** — nothing is
-pre-generated. `PlanHLS` reads the source's metadata, Cues and first/last
-clusters (a few bounded reads, ranged when the source is a URL), then builds
+pre-generated. For a Matroska source, `PlanHLS` reads the metadata, Cues and
+first/last clusters (a few bounded reads, ranged when the source is a URL);
+for an **MP4/MOV source the moov sample table IS the index**, so the plan is
+exact by construction — every resource including the master playlist, the
+DASH manifest and the I-frame playlist is byte-identical to the full pass.
+It then builds
 just the requested resource: the master or media playlist, the init segment,
 or the N-th media segment (1-based, matching the playlist's `segNNNNN.m4s`).
 A media segment is built by seeking straight to its window through the Cues

@@ -233,3 +233,58 @@ func TestPlanHLSNoCues(t *testing.T) {
 		t.Error("out-of-range segment must error")
 	}
 }
+
+// An MP4 source plans from its sample table — head-only and exact: every
+// resource, INCLUDING the master playlist and the DASH manifest (whose
+// BANDWIDTH the Matroska plan can only estimate), is byte-identical to the
+// full pass.
+func TestPlanHLSFromMP4MatchesFullPass(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	sr, ch := 44100.0, uint8(2)
+	var gblocks []genBlock
+	for i := 0; i < 150; i++ {
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0,
+			data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	}
+	for i := 0; i < 300; i++ {
+		gblocks = append(gblocks, genBlock{track: 2, pts: int64(i) * 20, key: true, data: []byte{0xAA, byte(i)}})
+	}
+	sortGenBlocks(gblocks)
+	mkvSrc := buildMKV(t,
+		[]mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+			{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch},
+		},
+		gblocks)
+	src := filepath.Join(t.TempDir(), "in.mp4")
+	if err := RemuxToMP4(context.Background(), mkvSrc, src, Options{FastStart: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.NumSegments() < 2 {
+		t.Fatalf("plan has %d segments", plan.NumSegments())
+	}
+	for _, name := range plan.Resources() {
+		got, _, err := plan.Resource(context.Background(), name)
+		if err != nil {
+			t.Errorf("Resource(%q): %v", name, err)
+			continue
+		}
+		want, ferr := os.ReadFile(filepath.Join(dir, name))
+		if ferr != nil {
+			t.Errorf("full pass did not write %s", name)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s differs from the full pass (%d vs %d bytes)", name, len(got), len(want))
+		}
+	}
+}

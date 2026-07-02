@@ -116,18 +116,37 @@ func TestRemuxToHLS(t *testing.T) {
 }
 
 // A source with no video track is rejected (HLS needs a video rendition here).
-func TestRemuxToHLS_AudioOnlyRejected(t *testing.T) {
+// An audio-only source (music, podcasts) packages fine: the first audio track
+// is the primary rendition (historical names), boundaries follow its sample
+// grid, and the master carries no RESOLUTION.
+func TestRemuxToHLS_AudioOnly(t *testing.T) {
 	sr := 48000.0
 	ch := uint8(2)
 	var gblocks []genBlock
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 300; i++ {
 		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 20, key: true, data: []byte{0xAA, byte(i)}})
 	}
 	src := buildMKV(t,
 		[]mkv.Track{{ID: 1, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch}},
 		gblocks)
-	if err := RemuxToHLS(context.Background(), src, t.TempDir()); err == nil {
-		t.Fatal("audio-only source: expected an error (no video track)")
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"master.m3u8", "playlist.m3u8", "init.mp4", "seg00001.m4s", "seg00002.m4s", "manifest.mpd"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("missing %s", name)
+		}
+	}
+	master, _ := os.ReadFile(filepath.Join(dir, "master.m3u8"))
+	if bytes.Contains(master, []byte("RESOLUTION")) {
+		t.Errorf("audio-only master must carry no RESOLUTION:\n%s", master)
+	}
+	if !bytes.Contains(master, []byte(`CODECS="mp4a.40.2"`)) || !bytes.Contains(master, []byte("playlist.m3u8")) {
+		t.Errorf("audio-only master wrong:\n%s", master)
+	}
+	if bytes.Contains(master, []byte("TYPE=AUDIO")) {
+		t.Errorf("single audio track must be the variant itself, not an alternate:\n%s", master)
 	}
 }
 

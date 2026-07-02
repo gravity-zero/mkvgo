@@ -51,6 +51,9 @@ type HLSPlan struct {
 	subs     []hlsSubTrack // declared renditions; cues fetched lazily, then cached
 	subOnce  []sync.Once   // one-shot cue loaders (the sequential pass runs once per track)
 	subErr   []error
+	mp4src   bool      // MP4 source: windows sliced from the (fully timed) sample arrays
+	mp4offs  [][]int64 // per track, per sample: absolute file offset (MP4 source)
+	iframe   []byte    // trick-play playlist (MP4 plans; exact byte ranges)
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -71,6 +74,16 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	segMs := o.SegmentMs
 	if segMs <= 0 {
 		segMs = defaultSegmentMs
+	}
+
+	// Source sniff: an MP4's moov IS the index (sample offsets/sizes/sync,
+	// head-only), so its plan is exact by construction; a Matroska source
+	// plans through its Cues.
+	if mp4ps, sniffErr := sniffMP4ForPlan(ctx, srcPath, fs); sniffErr != nil {
+		return nil, sniffErr
+	} else if mp4ps != nil {
+		defer mp4ps.Close()
+		return planHLSFromMP4(ctx, mp4ps, srcPath, fs, &o, segMs)
 	}
 
 	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs,
@@ -208,7 +221,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
 	}
-	p.master = buildMasterPlaylist(&o, fts, p.subs, segs)
+	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, nil)
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs))
 	}
@@ -384,6 +397,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
+	if p.mp4src {
+		return p.mp4SegmentTrack(ctx, ti, n)
+	}
 	pt := p.tracks[ti]
 	segStart := p.bounds[n]
 	var segEnd int64 = 1<<63 - 1
@@ -481,6 +497,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 // Serving a presentation is: answer any of these names through Resource.
 func (p *HLSPlan) Resources() []string {
 	names := []string{"master.m3u8"}
+	if p.iframe != nil {
+		names = append(names, "iframe.m3u8")
+	}
 	if p.mpd != nil {
 		names = append(names, "manifest.mpd")
 	}
@@ -517,6 +536,11 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	switch name {
 	case "master.m3u8":
 		return p.master, mimeM3U8, nil
+	case "iframe.m3u8":
+		if p.iframe == nil {
+			return nil, "", errf("no I-frame playlist for this plan (Matroska plans and encrypted presentations do not expose one)")
+		}
+		return p.iframe, mimeM3U8, nil
 	case "manifest.mpd":
 		if p.mpd == nil {
 			return nil, "", errf("no DASH manifest for an AES-128-encrypted presentation (HLS only)")
@@ -573,6 +597,9 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 // serve from the cached cues. Text blocks carry no cue index, so the first
 // request pays the pass; on a remote source that means transferring it once.
 func (p *HLSPlan) loadSubCues(ctx context.Context, i int) error {
+	if p.mp4src {
+		return nil // decoded at plan time from the sample table
+	}
 	p.subOnce[i].Do(func() {
 		st := &p.subs[i]
 		src, err := p.fs.DoOpen(p.srcPath)
@@ -658,4 +685,194 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 		return nil, err
 	}
 	return []byte(buf.String()), nil
+}
+
+// sniffMP4ForPlan opens srcPath as an MP4 packaging source when it is one,
+// nil when it is Matroska (the caller then takes the Cues path).
+func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagingSource, error) {
+	f, err := fs.DoOpen(srcPath)
+	if err != nil {
+		return nil, err
+	}
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(f, head); err != nil {
+		f.Close()
+		return nil, errf("read head: %w", err)
+	}
+	if head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
+		f.Close()
+		return nil, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		f.Close()
+		return nil, err
+	}
+	st, err := fs.DoStat(srcPath)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	mv, err := parseMP4(f, st.Size(), sampleFull)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &packagingSource{c: containerFromMovie(mv), mv: mv, src: f, size: st.Size()}, nil
+}
+
+// planHLSFromMP4 builds the on-demand plan from an MP4 source's sample table:
+// every window, size and duration is known head-only, so the plan's outputs —
+// including the master's BANDWIDTH — equal the full pass exactly.
+func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs *mkv.FS, o *Options, segMs int64) (*HLSPlan, error) {
+	c := ps.c
+	planned, _, err := planTracks(c, *o)
+	if err != nil {
+		return nil, err
+	}
+	var media []*outTrack
+	var videoSeen bool
+	for _, t := range planned {
+		if t.isChapter || t.spec.text {
+			continue
+		}
+		if t.spec.video {
+			if videoSeen {
+				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
+					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
+				continue
+			}
+			videoSeen = true
+		}
+		media = append(media, t)
+	}
+	if len(media) == 0 {
+		return nil, errf("no audio or video track to segment")
+	}
+
+	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
+	p.subs = planSubTracks(c, *o)
+	p.subOnce = make([]sync.Once, len(p.subs))
+	p.subErr = make([]error, len(p.subs))
+	if err := mp4SubCues(ps, p.subs); err != nil {
+		return nil, err
+	}
+
+	fts, offs, err := mp4PlanSamples(ps, media)
+	if err != nil {
+		return nil, err
+	}
+	p.mp4offs = offs
+	for _, ft := range fts {
+		p.tracks = append(p.tracks, &planTrack{ft: ft, firstPtsMs: ft.offsetMs})
+	}
+
+	p.bounds = segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
+	p.segCount = len(p.bounds)
+
+	// Exact per-boundary aggregates: window sizes are computable without
+	// touching the media (deterministic builders), so BANDWIDTH — and with it
+	// the master playlist and the DASH manifest — equal the full pass.
+	video := pickVideoFrag(fts)
+	cursors := make([]int, len(fts))
+	segs := make([]segInfo, 0, p.segCount)
+	var iframes []iframeRef
+	p.durs = make([]float64, p.segCount)
+	for k := 0; k < p.segCount; k++ {
+		segStart := p.bounds[k]
+		var segEnd int64 = 1<<63 - 1
+		if k+1 < p.segCount {
+			segEnd = p.bounds[k+1]
+		}
+		var segBytes int64
+		for i, ft := range fts {
+			seg := segmentWindow(ft, &cursors[i], segEnd)
+			head := buildSegmentFile(uint32(k+1), seg)
+			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
+				iframes = append(iframes, iframeRef{seg: k, length: int64(len(head)) + int64(seg.samples[0].size)})
+			}
+			segBytes += int64(len(head)) + seg.dataLen
+		}
+		p.durs[k] = float64(segEndOrLast(p.bounds, k, fts)-segStart) / 1000
+		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes})
+	}
+	if video != nil && o.Encrypt == nil && len(iframes) > 0 {
+		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)
+	}
+
+	p.master = buildMasterPlaylist(o, fts, p.subs, segs, iframes)
+	if o.Encrypt == nil {
+		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs))
+	}
+	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
+	for i, ft := range fts {
+		m := movieMeta{}
+		if i == primaryIndex(fts) {
+			m = meta
+		}
+		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m))
+		i := i
+		p.medias = append(p.medias, buildMediaPlaylist(o, p.durs, renditionInit(fts, i),
+			func(k int) string { return renditionSegment(fts, i, k) }))
+	}
+	return p, nil
+}
+
+// mp4SegmentTrack builds one rendition segment from the sample-table plan:
+// the window is a slice of the fully timed sample array (identical values to
+// the full pass) and the bytes are ranged reads at the recorded offsets.
+func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
+	fts := p.fts()
+	ft := fts[ti]
+	// Window bounds under the full pass's cursor semantics: each window
+	// starts where the previous one stopped — at the first sample (decode
+	// order) at/past its boundary.
+	start := 0
+	for k := 1; k <= n; k++ {
+		for start < len(ft.samples) && ft.samples[start].ptsMs < p.bounds[k] {
+			start++
+		}
+	}
+	end := start
+	if n+1 < p.segCount {
+		for end < len(ft.samples) && ft.samples[end].ptsMs < p.bounds[n+1] {
+			end++
+		}
+	} else {
+		end = len(ft.samples)
+	}
+
+	seg := trackSegment{trackID: ft.outTrack.mp4ID, baseDecodeTS: ft.durMediaTS}
+	if end > start {
+		seg.samples = ft.samples[start:end]
+		seg.baseDecodeTS = ft.samples[start].dtsTS
+		seg.hasCTS = windowHasCTS(seg.samples)
+		for x := start; x < end; x++ {
+			seg.dataLen += int64(ft.samples[x].size)
+		}
+	}
+	head := buildSegmentFile(uint32(n+1), seg)
+	out := make([]byte, 0, int64(len(head))+seg.dataLen)
+	out = append(out, head...)
+
+	if end > start {
+		src, err := p.fs.DoOpen(p.srcPath)
+		if err != nil {
+			return nil, err
+		}
+		defer src.Close()
+		for x := start; x < end; x++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			data, err := readSample(src, p.mp4offs[ti][x], ft.samples[x].size)
+			if err != nil {
+				return nil, errf("read sample: %w", err)
+			}
+			out = append(out, data...)
+		}
+	}
+	if p.opts.Encrypt != nil {
+		return p.opts.Encrypt.encryptSegment(out, uint32(n))
+	}
+	return out, nil
 }

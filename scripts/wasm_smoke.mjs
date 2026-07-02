@@ -76,6 +76,14 @@ await plan.resource('nope.bin')
   .catch(() => check(true, 'unknown resource rejects'))
 plan.close(); planBlob.close()
 
+// --- MP4-source on-demand plan: sample-table backend, iframe playlist exposed ---
+const planMp4 = await MkvGo.openHLS(mp4.data, { segmentSeconds: 0.5 })
+check(planMp4.numSegments > 0 && planMp4.resources.includes('iframe.m3u8'),
+  `openHLS(mp4) plans from the sample table (${planMp4.numSegments} segs)`)
+const ifr = await planMp4.resource('iframe.m3u8')
+check(new TextDecoder().decode(ifr.data).includes('#EXT-X-I-FRAMES-ONLY'), 'iframe playlist structure')
+planMp4.close()
+
 // --- AbortSignal: an aborted call rejects instead of running ---
 const aborted = AbortSignal.abort()
 await MkvGo.probe(new Blob([mkvBytes]), { signal: aborted })

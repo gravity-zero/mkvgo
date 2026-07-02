@@ -107,10 +107,12 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}
 
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	ps, err := openPackagingSource(ctx, srcPath, fs)
 	if err != nil {
 		return nil, err
 	}
+	defer ps.Close()
+	c := ps.c
 	planned, _, err := planTracks(c, o)
 	if err != nil {
 		return nil, err
@@ -169,9 +171,14 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}()
 
-	// Phase 1 — stream every block, buffering media sample bytes to the
-	// per-track temp files and collecting subtitle cues.
-	if err := collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress); err != nil {
+	// Phase 1 — stream every sample, buffering media bytes to the per-track
+	// temp files and collecting subtitle cues (source-specific walk).
+	if ps.mv != nil {
+		err = collectFromMP4(ctx, ps, routing, subs, o.Progress)
+	} else {
+		err = collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress)
+	}
+	if err != nil {
 		return nil, err
 	}
 	for _, ft := range fts {
@@ -191,17 +198,16 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		ft.presentMs = off + ft.durMovieMs
 	}
 
-	// Phase 2 — segment boundaries from the video track's keyframes.
-	video := pickVideoFrag(fts)
-	if video == nil {
-		return nil, errf("HLS output requires a video track")
-	}
-	bounds := segmentBoundaries(video.samples, segMs)
+	// Phase 2 — segment boundaries from the primary track: the video's
+	// keyframes, or (audio-only presentation) the first audio's sample grid
+	// (every audio sample is a sync point, so the same cut applies).
+	bounds := segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
 
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
 
 	var segs []segInfo
 	var rends []sfRendition
+	var iframesAll []iframeRef
 	if o.SingleFile {
 		// One progressive file per rendition (init + sidx + fragments); the
 		// playlists reference it by byte ranges.
@@ -214,7 +220,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		// (title, tags, cover art) rides on the video rendition's init.
 		for i, ft := range fts {
 			m := movieMeta{}
-			if ft.outTrack.spec.video {
+			if i == primaryIndex(fts) {
 				m = meta
 			}
 			initData := buildInitSegment([]*fragTrack{ft}, m)
@@ -222,9 +228,19 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 				return nil, err
 			}
 		}
-		segs, err = writeSegments(ctx, &o, fs, outputDir, fts, bounds)
+		segs, iframesAll, err = writeSegments(ctx, &o, fs, outputDir, fts, bounds)
 		if err != nil {
 			return nil, err
+		}
+		// Trick-play: the standard I-frame playlist — one keyframe per
+		// segment, referenced by byte range into the existing segments (no
+		// extra media). Skipped when encrypting (a ciphertext subrange is
+		// not independently decryptable).
+		if v := pickVideoFrag(fts); v != nil && o.Encrypt == nil && len(iframesAll) > 0 {
+			pl := buildIFramePlaylist(&o, fts, dursOf(segs), iframesAll)
+			if err := fs.DoWriteFile(filepath.Join(outputDir, "iframe.m3u8"), pl, 0o644); err != nil {
+				return nil, err
+			}
 		}
 	}
 	durs := make([]float64, len(segs))
@@ -249,7 +265,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			return nil, err
 		}
 	}
-	if err := writeMasterPlaylist(&o, fs, outputDir, fts, subs, segs); err != nil {
+	if err := writeMasterPlaylist(&o, fs, outputDir, fts, subs, segs, iframesAll); err != nil {
 		return nil, err
 	}
 	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs}
@@ -398,36 +414,50 @@ func segmentBoundaries(video []fragSample, targetMs int64) []int64 {
 	return bounds
 }
 
+// primaryIndex returns the index of the presentation's primary track: the
+// video track, or — audio-only presentation — the first track.
+func primaryIndex(fts []*fragTrack) int {
+	for i := range fts {
+		if fts[i].outTrack.spec.video {
+			return i
+		}
+	}
+	return 0
+}
+
 // renditionInit / renditionSegment / renditionPlaylist name track i's demuxed
-// rendition files. The video rendition keeps the historical names (init.mp4,
-// seg%05d.m4s, playlist.m3u8); each audio rendition is suffixed by its 1-based
-// index among the audio tracks (init_a1.mp4, seg_a1_00001.m4s, audio1.m3u8).
+// rendition files. The primary rendition (the video, or the first audio of an
+// audio-only presentation) keeps the historical names (init.mp4, seg%05d.m4s,
+// playlist.m3u8); each other audio rendition is suffixed by its 1-based index
+// (init_a1.mp4, seg_a1_00001.m4s, audio1.m3u8).
 func renditionInit(fts []*fragTrack, i int) string {
-	if fts[i].outTrack.spec.video {
+	if i == primaryIndex(fts) {
 		return "init.mp4"
 	}
 	return fmt.Sprintf("init_a%d.mp4", audioIndex(fts, i))
 }
 
 func renditionSegment(fts []*fragTrack, i, k int) string {
-	if fts[i].outTrack.spec.video {
+	if i == primaryIndex(fts) {
 		return fmt.Sprintf("seg%05d.m4s", k+1)
 	}
 	return fmt.Sprintf("seg_a%d_%05d.m4s", audioIndex(fts, i), k+1)
 }
 
 func renditionPlaylist(fts []*fragTrack, i int) string {
-	if fts[i].outTrack.spec.video {
+	if i == primaryIndex(fts) {
 		return "playlist.m3u8"
 	}
 	return fmt.Sprintf("audio%d.m3u8", audioIndex(fts, i))
 }
 
-// audioIndex returns track i's 1-based position among the audio tracks.
+// audioIndex returns track i's 1-based position among the non-primary audio
+// renditions.
 func audioIndex(fts []*fragTrack, i int) int {
+	p := primaryIndex(fts)
 	n := 0
 	for j := 0; j <= i; j++ {
-		if !fts[j].outTrack.spec.video {
+		if j != p && !fts[j].outTrack.spec.video {
 			n++
 		}
 	}
@@ -461,9 +491,19 @@ func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
 	return seg
 }
 
+// iframeRef locates one I-frame for the trick-play playlist: the containing
+// segment and the byte length from the segment start through the keyframe
+// sample (styp + moof + mdat header + first sample — segments are
+// keyframe-cut, so sample 0 IS the I-frame).
+type iframeRef struct {
+	seg    int   // 0-based segment index
+	length int64 // bytes from offset 0 covering the keyframe
+}
+
 // writeSegments writes each rendition's .m4s per boundary interval and returns
-// the per-boundary aggregate duration/bytes (across renditions), for BANDWIDTH.
-func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, error) {
+// the per-boundary aggregate duration/bytes (across renditions) plus the
+// video I-frame references, for the playlists.
+func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, []iframeRef, error) {
 	// A sequential reader over each track's temp file: samples are stored in
 	// decode order, segments are emitted in order and keyframe-aligned (closed
 	// GOPs), so each segment's bytes are a contiguous forward run.
@@ -471,7 +511,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 	for i, ft := range fts {
 		r, err := fs.DoOpen(ft.tmpPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		readers[i] = r
 	}
@@ -483,11 +523,13 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 		}
 	}()
 
+	video := pickVideoFrag(fts)
 	cursors := make([]int, len(fts)) // next unwritten sample index per track
 	var infos []segInfo
+	var iframes []iframeRef
 	for k := 0; k < len(bounds); k++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		segStart := bounds[k]
 		var segEnd int64 = 1<<63 - 1
@@ -499,6 +541,9 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 		for i, ft := range fts {
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			head := buildSegmentFile(uint32(k+1), seg)
+			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
+				iframes = append(iframes, iframeRef{seg: k, length: int64(len(head)) + int64(seg.samples[0].size)})
+			}
 			var fileBytes int64
 			if o.Encrypt != nil {
 				// Whole-segment AES-128-CBC: assemble in memory (one segment at
@@ -508,29 +553,29 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				if seg.dataLen > 0 {
 					buf := make([]byte, seg.dataLen)
 					if _, err := io.ReadFull(readers[i], buf); err != nil {
-						return nil, errf("read segment media: %w", err)
+						return nil, nil, errf("read segment media: %w", err)
 					}
 					plain = append(plain, buf...)
 				}
 				enc, err := o.Encrypt.encryptSegment(plain, uint32(k))
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if err := fs.DoWriteFile(filepath.Join(dir, renditionSegment(fts, i, k)), enc, 0o644); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				fileBytes = int64(len(enc))
 			} else {
 				out, err := fs.DoCreate(filepath.Join(dir, renditionSegment(fts, i, k)))
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				werr := writeSegmentFile(out, head, seg.dataLen, readers[i])
 				if cerr := out.Close(); werr == nil {
 					werr = cerr
 				}
 				if werr != nil {
-					return nil, werr
+					return nil, nil, werr
 				}
 				fileBytes = int64(len(head)) + seg.dataLen
 			}
@@ -541,7 +586,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 			bytes:  segBytes,
 		})
 	}
-	return infos, nil
+	return infos, iframes, nil
 }
 
 // buildSegmentFile returns one rendition segment's styp + moof + mdat header;
@@ -583,13 +628,13 @@ func windowHasCTS(samples []fragSample) bool {
 }
 
 // segEndOrLast returns the presentation end of segment k: the next boundary, or
-// the video track's last PTS+duration for the final segment.
+// the primary track's last PTS+duration for the final segment.
 func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 	if k+1 < len(bounds) {
 		return bounds[k+1]
 	}
-	v := pickVideoFrag(fts)
-	if v == nil || len(v.samples) == 0 {
+	v := fts[primaryIndex(fts)]
+	if len(v.samples) == 0 {
 		return bounds[len(bounds)-1]
 	}
 	last := v.samples[len(v.samples)-1]
@@ -683,8 +728,8 @@ func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hls
 // (BANDWIDTH from the peak aggregate segment bitrate, RESOLUTION/FRAME-RATE,
 // CODECS when every track's RFC 6381 string is known), each audio track as an
 // EXT-X-MEDIA AUDIO rendition, and the subtitle renditions as another group.
-func writeMasterPlaylist(o *Options, fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) error {
-	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), buildMasterPlaylist(o, fts, subs, segs), 0o644)
+func writeMasterPlaylist(o *Options, fs *mkv.FS, dir string, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo, iframes []iframeRef) error {
+	return fs.DoWriteFile(filepath.Join(dir, "master.m3u8"), buildMasterPlaylist(o, fts, subs, segs, iframes), 0o644)
 }
 
 // peakBandwidth returns the highest per-segment bitrate in bits/s.
@@ -700,20 +745,21 @@ func peakBandwidth(segs []segInfo) int64 {
 	return int64(peak)
 }
 
-func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo) []byte {
+func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs []segInfo, iframes []iframeRef) []byte {
 	rw := urlRewriter(o)
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 
 	// Audio renditions (demuxed): one EXT-X-MEDIA per audio track; the first
 	// (or the flagged default) is DEFAULT=YES so players auto-select it.
+	prim := primaryIndex(fts)
 	nAudio := 0
 	hasDefaultAudio := false
-	for _, ft := range fts {
-		hasDefaultAudio = hasDefaultAudio || (!ft.outTrack.spec.video && ft.outTrack.mkv.IsDefault)
+	for i, ft := range fts {
+		hasDefaultAudio = hasDefaultAudio || (i != prim && !ft.outTrack.spec.video && ft.outTrack.mkv.IsDefault)
 	}
 	for i, ft := range fts {
-		if ft.outTrack.spec.video {
+		if i == prim || ft.outTrack.spec.video {
 			continue
 		}
 		nAudio++
@@ -793,5 +839,67 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		inf += ",SUBTITLES=\"subs\""
 	}
 	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
+	if len(iframes) > 0 && o != nil && o.Encrypt == nil {
+		b = append(b, iframeStreamInf(o, fts, dursOf(segs), iframes)...)
+	}
 	return b
+}
+
+// dursOf extracts the per-segment durations.
+func dursOf(segs []segInfo) []float64 {
+	durs := make([]float64, len(segs))
+	for i := range segs {
+		durs[i] = segs[i].durSec
+	}
+	return durs
+}
+
+// buildIFramePlaylist renders the trick-play playlist (EXT-X-I-FRAMES-ONLY):
+// one entry per segment-leading keyframe, as a byte range from the segment
+// start through the keyframe sample (styp + moof + mdat header + sample 0 —
+// what a player needs to decode just that I-frame).
+func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef) []byte {
+	rw := urlRewriter(o)
+	var max float64
+	for _, d := range durs {
+		if d > max {
+			max = d
+		}
+	}
+	var b []byte
+	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-I-FRAMES-ONLY\n"...)
+	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
+	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
+	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw("init.mp4"))...)
+	for _, ifr := range iframes {
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n#EXT-X-BYTERANGE:%d@0\n%s\n",
+			durs[ifr.seg], ifr.length, rw(fmt.Sprintf("seg%05d.m4s", ifr.seg+1)))...)
+	}
+	b = append(b, "#EXT-X-ENDLIST\n"...)
+	return b
+}
+
+// iframeStreamInf renders the master's EXT-X-I-FRAME-STREAM-INF line: the
+// trick-play variant's BANDWIDTH is its peak I-frame bitrate.
+func iframeStreamInf(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef) string {
+	rw := urlRewriter(o)
+	var peak float64
+	for _, ifr := range iframes {
+		if d := durs[ifr.seg]; d > 0 {
+			if bps := float64(ifr.length) * 8 / d; bps > peak {
+				peak = bps
+			}
+		}
+	}
+	inf := fmt.Sprintf("#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=%d", int64(peak))
+	if v := pickVideoFrag(fts); v != nil {
+		t := &v.outTrack.mkv
+		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
+			inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
+		}
+		if cs := rfc6381Codec(v.outTrack); cs != "" {
+			inf += fmt.Sprintf(",CODECS=%q", cs)
+		}
+	}
+	return inf + fmt.Sprintf(",URI=%q\n", rw("iframe.m3u8"))
 }

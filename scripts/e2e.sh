@@ -134,6 +134,16 @@ else
 fi
 echo "  DASH OK: manifest decode"
 
+echo "== MP4 source -> HLS/DASH packaging + on-demand parity + I-frame playlist"
+"$MKVGO" -f to-hls "$TMP/out.mp4" -o "$TMP/hlsmp4" -segment 1 >/dev/null
+test -f "$TMP/hlsmp4/iframe.m3u8"
+grep -q I-FRAME-STREAM-INF "$TMP/hlsmp4/master.m3u8"
+"$MKVGO" hls-segment "$TMP/out.mp4" master.m3u8 -segment 1 > "$TMP/od-mp4-master.m3u8"
+cmp "$TMP/od-mp4-master.m3u8" "$TMP/hlsmp4/master.m3u8"
+"$MKVGO" hls-segment "$TMP/out.mp4" 2 -segment 1 > "$TMP/od-mp4-seg2.m4s"
+cmp "$TMP/od-mp4-seg2.m4s" "$TMP/hlsmp4/seg00002.m4s"
+echo "  MP4-source OK: packaged + on-demand identical (master included) + iframe playlist"
+
 echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" probe "$TMP/src.mov" >/dev/null
 "$MKVGO" -f from-mp4 "$TMP/src.mov" "$TMP/mov.mkv" >/dev/null
