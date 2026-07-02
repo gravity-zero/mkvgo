@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"syscall/js"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -348,5 +350,107 @@ func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 			return nil, err
 		}
 		return out.String(), nil
+	})
+}
+
+// blobFS adapts a Blob/File to the FS port: every Open returns an independent
+// ranged reader over the same Blob, so PlanHLS's bounded reads and concurrent
+// Segment calls never load the file into memory.
+func blobFS(blob js.Value) *mkv.FS {
+	size := int64(blob.Get("size").Float())
+	return &mkv.FS{
+		Open: func(string) (mkv.ReadSeekCloser, error) { return newBlobReader(blob), nil },
+		Stat: func(p string) (os.FileInfo, error) { return blobInfo{name: p, size: size}, nil },
+	}
+}
+
+type blobInfo struct {
+	name string
+	size int64
+}
+
+func (i blobInfo) Name() string       { return i.name }
+func (i blobInfo) Size() int64        { return i.size }
+func (i blobInfo) Mode() os.FileMode  { return 0o444 }
+func (i blobInfo) ModTime() time.Time { return time.Time{} }
+func (i blobInfo) IsDir() bool        { return false }
+func (i blobInfo) Sys() any           { return nil }
+
+// openHLSJS(input: Uint8Array | Blob, opts?) → Promise<handle>. The handle
+// serves an HLS presentation on demand: `resources` lists every name a player
+// requests, `resource(name)` builds it (data + contentType), `segment(n)` is
+// the 0-based media-segment shortcut, `close()` releases the callbacks. A
+// Blob/File input is read through ranged slices — playing a file far larger
+// than memory stays memory-bounded, only the watched windows are ever read.
+func openHLSJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("openHLS: missing input") })
+	}
+	input := args[0]
+	opts := readRemuxOpts(args, 1)
+	return promise(func() (any, error) {
+		if isBlob(input) {
+			opts.FS = blobFS(input)
+		} else if input.Type() == js.TypeObject && input.Get("byteLength").Type() == js.TypeNumber {
+			m := mkv.NewMemFS()
+			m.Put("in", toGoBytes(input))
+			opts.FS = m.FS()
+		} else {
+			return nil, fmt.Errorf("openHLS: input must be a Uint8Array or a Blob/File")
+		}
+		plan, err := mp4.PlanHLS(context.Background(), "in", opts)
+		if err != nil {
+			return nil, err
+		}
+
+		h := js.Global().Get("Object").New()
+		h.Set("numSegments", plan.NumSegments())
+		names := plan.Resources()
+		arr := js.Global().Get("Array").New(len(names))
+		for i, n := range names {
+			arr.SetIndex(i, n)
+		}
+		h.Set("resources", arr)
+
+		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
+			}
+			name := rargs[0].String()
+			return promise(func() (any, error) {
+				data, mime, err := plan.Resource(context.Background(), name)
+				if err != nil {
+					return nil, err
+				}
+				obj := js.Global().Get("Object").New()
+				obj.Set("data", toUint8Array(data))
+				obj.Set("contentType", mime)
+				return obj, nil
+			})
+		})
+		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
+			}
+			n := rargs[0].Int()
+			return promise(func() (any, error) {
+				data, err := plan.Segment(context.Background(), n)
+				if err != nil {
+					return nil, err
+				}
+				return toUint8Array(data), nil
+			})
+		})
+		var closeFn js.Func
+		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+			resourceFn.Release()
+			segmentFn.Release()
+			closeFn.Release()
+			return nil
+		})
+		h.Set("resource", resourceFn)
+		h.Set("segment", segmentFn)
+		h.Set("close", closeFn)
+		return h, nil
 	})
 }

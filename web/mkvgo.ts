@@ -136,6 +136,31 @@ export interface HLSResult {
   droppedTracks: DroppedTrack[]
 }
 
+/** One on-demand HLS resource: its bytes and the Content-Type to serve it with. */
+export interface HLSResource {
+  data: Uint8Array
+  contentType: string
+}
+
+/**
+ * An on-demand HLS presentation over one source. Nothing is pre-generated:
+ * each resource is built when requested, and a Blob/File source is read
+ * through ranged slices — playing a file far larger than memory stays
+ * memory-bounded.
+ */
+export interface HLSPlanHandle {
+  /** Number of media segments (segNNNNN.m4s). */
+  numSegments: number
+  /** Every resource name a player requests: playlists, init, segments, subtitles. */
+  resources: string[]
+  /** Build one resource by its player-facing name (e.g. "seg00042.m4s"). */
+  resource(name: string): Promise<HLSResource>
+  /** Build the n-th (0-based) media segment. */
+  segment(n: number): Promise<Uint8Array>
+  /** Release the handle's callbacks. */
+  close(): void
+}
+
 export interface MkvGoApi {
   version(): string
   /**
@@ -152,6 +177,13 @@ export interface MkvGoApi {
   remuxToWebM(input: Uint8Array): Promise<RemuxResult>
   /** Package MKV/WebM as fragmented-MP4 HLS (master + media playlists + segments). */
   remuxToHLS(input: Uint8Array, options?: RemuxOptions): Promise<HLSResult>
+  /**
+   * Open an on-demand HLS presentation: resources are built as requested
+   * instead of all at once. A Blob/File input is read through ranged slices,
+   * so even a huge local file plays with bounded memory. The source must
+   * carry a Cues index.
+   */
+  openHLS(input: Uint8Array | Blob, options?: RemuxOptions): Promise<HLSPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
 }

@@ -126,7 +126,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 	p.segStart, p.segEnd = segStart, endPos
 
 	var gotInfo, gotTracks bool
-	var infoOff, tracksOff, cuesOff, tagsOff int64 = -1, -1, -1, -1 // absolute offsets from a SeekHead, if any
+	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1} // absolute offsets from a SeekHead, if any
 
 	for {
 		if ctx.Err() != nil {
@@ -180,54 +180,43 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 				return err
 			}
 		case mkv.IDSeekHead:
-			ioff, toff, coff, tgoff, err := p.parseSeekHeadMeta(eh.Size, segStart, endPos)
+			found, err := p.parseSeekHeadMeta(eh.Size, segStart, endPos)
 			if err != nil {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
-			if ioff >= 0 {
-				infoOff = ioff
-			}
-			if toff >= 0 {
-				tracksOff = toff
-			}
-			if coff >= 0 {
-				cuesOff = coff
-			}
-			if tgoff >= 0 {
-				tagsOff = tgoff
-			}
+			offs.merge(found)
 		case mkv.IDCluster:
 			// Media reached. If Info/Tracks are still missing, the only cheap way
 			// to get them is a SeekHead jump; otherwise skip this cluster and keep
 			// scanning (rare: head metadata after the first cluster, no SeekHead).
 			resume := p.pos() + eh.Size
-			if !gotInfo && infoOff >= 0 {
-				ok, err := p.parseElementAt(infoOff, mkv.IDInfo, c, p.parseInfo)
+			if !gotInfo && offs.info >= 0 {
+				ok, err := p.parseElementAt(offs.info, mkv.IDInfo, c, p.parseInfo)
 				if err != nil {
 					return err
 				}
 				if ok {
 					gotInfo = true
 				} else {
-					infoOff = -1 // stale SeekHead offset: don't retry it on the next cluster
+					offs.info = -1 // stale SeekHead offset: don't retry it on the next cluster
 				}
 			}
-			if !gotTracks && tracksOff >= 0 {
-				ok, err := p.parseElementAt(tracksOff, mkv.IDTracks, c, p.parseTracks)
+			if !gotTracks && offs.tracks >= 0 {
+				ok, err := p.parseElementAt(offs.tracks, mkv.IDTracks, c, p.parseTracks)
 				if err != nil {
 					return err
 				}
 				if ok {
 					gotTracks = true
 				} else {
-					tracksOff = -1
+					offs.tracks = -1
 				}
 			}
 			if gotInfo && gotTracks {
-				return p.finalizeHeadMeta(c, cuesOff, tagsOff, o)
+				return p.finalizeHeadMeta(c, offs, o)
 			}
 			if eh.Size < 0 {
-				return p.finalizeHeadMeta(c, cuesOff, tagsOff, o) // unknown-size cluster: cannot skip
+				return p.finalizeHeadMeta(c, offs, o) // unknown-size cluster: cannot skip
 			}
 			if _, err := p.r.Seek(resume, io.SeekStart); err != nil {
 				return err
@@ -245,7 +234,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			break // early stop — Cues/Tags are pulled by finalizeHeadMeta, no Cluster scan
 		}
 	}
-	return p.finalizeHeadMeta(c, cuesOff, tagsOff, o)
+	return p.finalizeHeadMeta(c, offs, o)
 }
 
 // finalizeHeadMeta derives Container.Keyframes from the Cues seek index, and — when
@@ -254,9 +243,9 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 // one element, no Cluster scan). It then leaves Cues and Tags nil — the metadata
 // path's contract — exposing only the derived Keyframes and Track.Bitrate; with
 // o.cues the raw CuePoints are kept too (WithCues), for cue-driven seeking.
-func (p *parser) finalizeHeadMeta(c *mkv.Container, cuesOff, tagsOff int64, o readOpts) error {
-	if len(c.Cues) == 0 && cuesOff >= 0 {
-		if _, err := p.parseElementAt(cuesOff, mkv.IDCues, c, p.parseCues); err != nil {
+func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts) error {
+	if len(c.Cues) == 0 && offs.cues >= 0 {
+		if _, err := p.parseElementAt(offs.cues, mkv.IDCues, c, p.parseCues); err != nil {
 			return err
 		}
 	}
@@ -264,8 +253,13 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, cuesOff, tagsOff int64, o re
 	if !o.cues {
 		c.Cues = nil
 	}
-	if (o.bitrate || o.tags) && c.Tags == nil && tagsOff >= 0 {
-		if _, err := p.parseElementAt(tagsOff, mkv.IDTags, c, p.parseTags); err != nil {
+	if (o.bitrate || o.tags) && c.Tags == nil && offs.tags >= 0 {
+		if _, err := p.parseElementAt(offs.tags, mkv.IDTags, c, p.parseTags); err != nil {
+			return err
+		}
+	}
+	if o.attachments && c.Attachments == nil && offs.attachments >= 0 {
+		if _, err := p.parseElementAt(offs.attachments, mkv.IDAttachments, c, p.parseAttachments); err != nil {
 			return err
 		}
 	}
@@ -305,29 +299,50 @@ func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(
 	return true, nil
 }
 
-// parseSeekHeadMeta reads a SeekHead and returns the absolute file offsets of the
-// Info, Tracks, Cues and Tags elements it points at (or -1 each if absent).
-// SeekPosition is relative to the Segment's data start (segStart).
-func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (infoOff, tracksOff, cuesOff, tagsOff int64, err error) {
-	infoOff, tracksOff, cuesOff, tagsOff = -1, -1, -1, -1
+// headOffsets holds the absolute file offsets of the head elements a SeekHead
+// points at, -1 each when absent.
+type headOffsets struct {
+	info, tracks, cues, tags, attachments int64
+}
+
+// merge keeps the other SeekHead's entries where this one has none.
+func (h *headOffsets) merge(o headOffsets) {
+	for _, p := range []struct {
+		dst *int64
+		src int64
+	}{
+		{&h.info, o.info}, {&h.tracks, o.tracks}, {&h.cues, o.cues},
+		{&h.tags, o.tags}, {&h.attachments, o.attachments},
+	} {
+		if p.src >= 0 {
+			*p.dst = p.src
+		}
+	}
+}
+
+// parseSeekHeadMeta reads a SeekHead and returns the absolute file offsets of
+// the head elements it points at. SeekPosition is relative to the Segment's
+// data start (segStart).
+func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (headOffsets, error) {
+	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1}
 	end := p.pos() + size
 	for p.pos() < end {
 		eh, _, e := p.readHeader()
 		if e != nil {
-			return infoOff, tracksOff, cuesOff, tagsOff, e
+			return offs, e
 		}
 		if eh.ID != mkv.IDSeek {
 			if eh.Size < 0 {
-				return infoOff, tracksOff, cuesOff, tagsOff, nil
+				return offs, nil
 			}
 			if e := p.skip(eh.Size); e != nil {
-				return infoOff, tracksOff, cuesOff, tagsOff, e
+				return offs, e
 			}
 			continue
 		}
 		id, pos, ok, e := p.parseSeekEntry(eh.Size)
 		if e != nil {
-			return infoOff, tracksOff, cuesOff, tagsOff, e
+			return offs, e
 		}
 		if !ok {
 			continue
@@ -338,16 +353,18 @@ func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (infoOff, track
 		}
 		switch id {
 		case mkv.IDInfo:
-			infoOff = abs
+			offs.info = abs
 		case mkv.IDTracks:
-			tracksOff = abs
+			offs.tracks = abs
 		case mkv.IDCues:
-			cuesOff = abs
+			offs.cues = abs
 		case mkv.IDTags:
-			tagsOff = abs
+			offs.tags = abs
+		case mkv.IDAttachments:
+			offs.attachments = abs
 		}
 	}
-	return infoOff, tracksOff, cuesOff, tagsOff, nil
+	return offs, nil
 }
 
 // parseSeekEntry reads one Seek element, returning the referenced element ID and

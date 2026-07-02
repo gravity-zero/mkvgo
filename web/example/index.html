@@ -6,10 +6,11 @@
        python3 -m http.server 8080
      then open http://localhost:8080/web/example/
 
-     Drop an MKV: it is probed head-only (works on huge files), and — for a
-     file that fits in memory — remuxed to MP4 (downloadable) and played in
-     the <video> below through Media Source Extensions using the fragmented
-     MP4 the HLS packager emits. No transcoding, no server. -->
+     Drop an MKV: it is probed head-only (works on huge files), played in the
+     <video> below through Media Source Extensions — segments are built on
+     demand from ranged reads of the File (openHLS), so even a huge file plays
+     with bounded memory — and, for a file that fits in memory, remuxed to a
+     downloadable MP4. No transcoding, no server. -->
 <html lang="en">
 <meta charset="utf-8">
 <title>mkvgo wasm demo</title>
@@ -50,10 +51,31 @@
     log(probe)
 
     if (probe.format !== 'mkv') return
-    if (file.size > 1.5e9) { $('status').textContent = 'probed head-only (too large to remux in memory)'; return }
-    const bytes = new Uint8Array(await file.arrayBuffer())
 
-    // 2. Remux to a downloadable progressive MP4.
+    // 2. Open the on-demand HLS plan over the File itself: segments are built
+    //    from ranged reads as playback needs them — no size limit, bounded
+    //    memory, no transcoding, no server.
+    const plan = await MkvGo.openHLS(file, { segmentSeconds: 6, skipUnsupported: true })
+    const master = new TextDecoder().decode((await plan.resource('master.m3u8')).data)
+    const codecs = /CODECS="([^"]+)"/.exec(master)?.[1]
+    if (codecs && MediaSource.isTypeSupported(`video/mp4; codecs="${codecs}"`)) {
+      const ms = new MediaSource()
+      $('player').src = URL.createObjectURL(ms)
+      ms.addEventListener('sourceopen', async () => {
+        const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
+        const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
+        await append((await plan.resource('init.mp4')).data)
+        for (let n = 0; n < plan.numSegments; n++) await append(await plan.segment(n))
+        ms.endOfStream()
+      }, { once: true })
+      $('status').textContent = 'playing via MSE — segments built on demand from the file'
+    } else {
+      $('status').textContent = `playback skipped (codecs "${codecs ?? '?'}" unsupported by this browser)`
+    }
+
+    // 3. Remux to a downloadable progressive MP4 (whole file in memory).
+    if (file.size > 1.5e9) return
+    const bytes = new Uint8Array(await file.arrayBuffer())
     const mp4 = await MkvGo.remuxToMP4(bytes, { fastStart: true, skipUnsupported: true })
     $('dl').disabled = false
     $('dl').onclick = () => {
@@ -62,26 +84,6 @@
       a.download = file.name.replace(/\.[^.]+$/, '') + '.mp4'
       a.click()
     }
-
-    // 3. Package as fragmented MP4 and play through MSE: the browser plays
-    //    the MKV's own frames with no transcoding and no server.
-    const hls = await MkvGo.remuxToHLS(bytes, { segmentSeconds: 6, skipUnsupported: true })
-    const codecs = /CODECS="([^"]+)"/.exec(new TextDecoder().decode(hls.files['master.m3u8']))?.[1]
-    if (!codecs || !MediaSource.isTypeSupported(`video/mp4; codecs="${codecs}"`)) {
-      $('status').textContent = `remuxed OK; playback skipped (codecs "${codecs ?? '?'}" unsupported by this browser)`
-      return
-    }
-    const ms = new MediaSource()
-    $('player').src = URL.createObjectURL(ms)
-    ms.addEventListener('sourceopen', async () => {
-      const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
-      const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
-      await append(hls.files['init.mp4'])
-      for (const name of Object.keys(hls.files).filter((n) => n.endsWith('.m4s')).sort())
-        await append(hls.files[name])
-      ms.endOfStream()
-    }, { once: true })
-    $('status').textContent = 'playing the MKV via MSE — remuxed in your browser'
   }
 
   const drop = $('drop')

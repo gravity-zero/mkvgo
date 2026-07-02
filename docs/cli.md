@@ -717,14 +717,19 @@ Without `-o` the resource goes to stdout (pipe it from a server handler).
 `-segment` must match across calls — it defines the boundaries.
 
 The output is **byte-identical** to the corresponding file `to-hls` writes
-(same boundaries, same fragments), so pre-generated and on-demand serving can
-be mixed transparently. Differences from `to-hls`: subtitle tracks are not
-carried (no WebVTT renditions — extract them separately), cover art is not
-read, and the master playlist's `BANDWIDTH` is estimated from the source's
-cluster sizes. The source must carry a Cues index (`mkvgo reindex` adds one).
+(same boundaries, same fragments, cover art and global tags in the init), so
+pre-generated and on-demand serving can be mixed transparently. Text subtitle
+tracks are declared in the master playlist and served as one
+whole-presentation WebVTT rendition each (`subN.m3u8` + `subN.vtt`; text
+blocks have no cue index, so the `.vtt` costs one sequential pass — cache it
+if requested often). The remaining difference from `to-hls`: the master
+playlist's `BANDWIDTH` is estimated from the source's cluster sizes. The
+source must carry a Cues index (`mkvgo reindex` adds one).
 
 ```bash
 mkvgo hls-segment movie.mkv master                 # multivariant playlist → stdout
 mkvgo hls-segment movie.mkv 42 -o seg00042.m4s     # just that segment
+mkvgo hls-segment movie.mkv seg00042.m4s           # same, by player-facing name
+mkvgo hls-segment movie.mkv sub1.vtt               # a subtitle rendition
 mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 3's ranges
 ```

@@ -22,6 +22,7 @@ func main() {
 	api.Set("remuxFromMP4", js.FuncOf(remuxFromMP4JS))
 	api.Set("remuxToWebM", js.FuncOf(remuxToWebMJS))
 	api.Set("remuxToHLS", js.FuncOf(remuxToHLSJS))
+	api.Set("openHLS", js.FuncOf(openHLSJS))
 	api.Set("extractSubtitleVTT", js.FuncOf(extractSubtitleVTTJS))
 	js.Global().Set("MkvGo", api)
 

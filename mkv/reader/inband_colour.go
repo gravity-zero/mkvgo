@@ -17,6 +17,16 @@ type readOpts struct {
 	bitrate          bool // follow the SeekHead to Tags for per-track BPS → Track.Bitrate
 	cues             bool // keep the raw CuePoints on the metadata path (WithCues)
 	tags             bool // keep the Tags element on the metadata path (WithTags)
+	attachments      bool // keep the Attachments on the metadata path (WithAttachments)
+}
+
+// WithAttachments keeps Container.Attachments populated on the metadata-only
+// path (normally left nil), reached through the SeekHead entry — one seek to
+// one element, no Cluster scan. Attachment bodies (cover art, fonts) are read
+// whole, so the cost is their size; files whose SeekHead has no Attachments
+// entry leave the field nil.
+func WithAttachments() ReadOption {
+	return func(o *readOpts) { o.attachments = true }
 }
 
 // WithTags keeps Container.Tags populated on the metadata-only path (normally

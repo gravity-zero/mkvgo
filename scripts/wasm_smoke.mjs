@@ -60,6 +60,22 @@ for (const f of ['master.m3u8', 'playlist.m3u8', 'init.mp4', 'seg00001.m4s'])
 const playlist = new TextDecoder().decode(hls.files['playlist.m3u8'])
 check(playlist.includes('#EXT-X-MAP:URI="init.mp4"') && playlist.includes('#EXT-X-ENDLIST'), 'playlist structure')
 
+// --- on-demand HLS: handle over bytes and over Blob, byte-identical to the full pass ---
+const plan = await MkvGo.openHLS(mkvBytes, { segmentSeconds: 0.5 })
+check(plan.numSegments > 0 && plan.resources.includes('master.m3u8'), `openHLS resources (${plan.resources.length})`)
+const initRes = await plan.resource('init.mp4')
+check(initRes.contentType === 'video/mp4' && Buffer.compare(initRes.data, hls.files['init.mp4']) === 0,
+  'on-demand init byte-identical to remuxToHLS')
+const seg1 = await plan.segment(0)
+check(Buffer.compare(seg1, hls.files['seg00001.m4s']) === 0, 'on-demand segment 1 byte-identical')
+const planBlob = await MkvGo.openHLS(new Blob([mkvBytes]), { segmentSeconds: 0.5 })
+const seg1Blob = await planBlob.segment(0)
+check(Buffer.compare(seg1Blob, seg1) === 0, 'openHLS(Blob) ranged reads produce the same segment')
+await plan.resource('nope.bin')
+  .then(() => check(false, 'unknown resource must reject'))
+  .catch(() => check(true, 'unknown resource rejects'))
+plan.close(); planBlob.close()
+
 // --- errors surface as rejections, not crashes ---
 await MkvGo.probe(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
   .then(() => check(false, 'garbage probe must reject'))

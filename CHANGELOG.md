@@ -71,12 +71,21 @@ All notable changes to mkvgo are documented here. The format is based on
   nothing pre-generated; with an `httpfs` source only the ranges a viewer
   actually watches are transferred. Every resource is byte-identical to what
   the full `to-hls` pass writes (regression-tested on synthetic and real
-  files), so both serving modes mix transparently. Subtitle renditions and
-  cover art are full-pass-only; the master `BANDWIDTH` is estimated from
-  cluster sizes. New reader primitives back it: `WithCues()` and `WithTags()`
-  keep those elements on the head-only path, `Container.SegmentStart`
-  anchors the cue positions, and `NewBlockReaderAt` starts a block reader at
-  a cued cluster.
+  files), so both serving modes mix transparently — including cover art and
+  global tags in the init segment. `plan.Resource(ctx, name)` is the
+  declarative entry point (player-facing name → bytes + Content-Type, an
+  HTTP handler is one call; `Resources()` lists every servable name), and
+  text subtitle tracks are declared in the master playlist and served as one
+  whole-presentation WebVTT rendition each (lazy — one sequential pass on
+  first request). The master `BANDWIDTH` is estimated from cluster sizes.
+  New reader primitives back it: `WithCues()`, `WithTags()` and
+  `WithAttachments()` keep those elements on the head-only path (the latter
+  two through their SeekHead entries), `Container.SegmentStart` anchors the
+  cue positions, and `NewBlockReaderAt` starts a block reader at a cued
+  cluster. In the WebAssembly build the same engine is `openHLS(input)`: a
+  handle `{resources, resource(name), segment(n)}` over a `Uint8Array` or a
+  `Blob`/`File` — the latter read through ranged slices, so a huge local
+  file plays through MSE with bounded memory (the browser demo does).
 - **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
   new `httpfs` package implements the FS port over ranged GETs (cached
   512 KiB windows, configurable client/headers, explicit refusal when a

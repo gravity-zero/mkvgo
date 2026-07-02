@@ -11,9 +11,11 @@ package mp4
 // The fragments are built by the same code as RemuxToHLS, with the same DTS
 // assignment, so Segment(n) is byte-identical to the n-th segment of the full
 // pass (given a source whose Cues index every video keyframe, as real muxers
-// write). Subtitle tracks are not carried in this mode (a text track has no
-// cue index to window it by) and neither is cover art (attachments are not
-// read); the title and global tags ride in the init segment as usual.
+// write). Title, global tags and cover art ride in the init segment as usual.
+// Text subtitle tracks are declared in the master playlist and served as one
+// whole-presentation WebVTT rendition each (subN.m3u8 + subN.vtt) — text
+// blocks have no cue index, so the .vtt is produced by one sequential pass
+// over the source, lazily, on first request.
 
 import (
 	"context"
@@ -21,9 +23,11 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // HLSPlan is the result of PlanHLS: the playlists, the init segment, and the
@@ -41,6 +45,7 @@ type HLSPlan struct {
 	media    []byte
 	master   []byte
 	segCount int
+	subs     []hlsSubTrack // declared renditions; cues fetched lazily per request
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -63,7 +68,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		segMs = defaultSegmentMs
 	}
 
-	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithCues(), reader.WithTags())
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs,
+		reader.WithCues(), reader.WithTags(), reader.WithAttachments())
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +82,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	var media []*outTrack
 	for _, t := range planned {
-		if t.isChapter {
-			continue
-		}
-		if t.spec.text {
-			o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-				Reason: "on-demand HLS does not carry subtitle tracks (use RemuxToHLS for WebVTT renditions)"})
+		if t.isChapter || t.spec.text {
 			continue
 		}
 		media = append(media, t)
@@ -98,6 +99,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale}
+	p.subs = planSubTracks(c, o)
 	for _, t := range media {
 		p.tracks = append(p.tracks, &planTrack{
 			ft:         &fragTrack{outTrack: t, timescale: mediaTimescale(t)},
@@ -196,8 +198,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
 	}
-	p.master = buildMasterPlaylist(fts, nil, segs)
-	p.initSeg = buildInitSegment(fts, movieMeta{title: c.Info.Title, tags: globalTags(c)})
+	p.master = buildMasterPlaylist(fts, p.subs, segs)
+	p.initSeg = buildInitSegment(fts, movieMeta{
+		title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)})
 	return p, nil
 }
 
@@ -218,7 +221,7 @@ func (p *HLSPlan) NumSegments() int { return p.segCount }
 func (p *HLSPlan) SegmentName(n int) string { return fmt.Sprintf("seg%05d.m4s", n+1) }
 
 // MasterPlaylist returns master.m3u8 (BANDWIDTH estimated from the source's
-// cluster sizes; no subtitle renditions in on-demand mode).
+// cluster sizes), including the declared subtitle renditions.
 func (p *HLSPlan) MasterPlaylist() []byte { return p.master }
 
 // MediaPlaylist returns playlist.m3u8.
@@ -460,4 +463,113 @@ func segsDataLen(segs []trackSegment) int64 {
 		n += segs[i].dataLen
 	}
 	return n
+}
+
+// Resources returns every resource name the plan serves — the master and
+// media playlists, the init segment, each media segment and each subtitle
+// rendition (its playlist and its WebVTT). Serving a presentation is: answer
+// any of these names through Resource.
+func (p *HLSPlan) Resources() []string {
+	names := []string{"master.m3u8", "playlist.m3u8", "init.mp4"}
+	for n := 0; n < p.segCount; n++ {
+		names = append(names, p.SegmentName(n))
+	}
+	for i := range p.subs {
+		names = append(names, fmt.Sprintf("sub%d.m3u8", i+1), fmt.Sprintf("sub%d.vtt", i+1))
+	}
+	return names
+}
+
+// Resource builds the named resource and returns its bytes and Content-Type.
+// The name is exactly the URI a player requests relative to the playlist —
+// "master.m3u8", "playlist.m3u8", "init.mp4", "seg00042.m4s", "sub1.m3u8",
+// "sub1.vtt" — so an HTTP handler is a one-liner around this call. Playlists
+// and the init segment are precomputed; media segments read their window;
+// a subtitle .vtt runs one sequential pass over the source (lazily — cache it
+// if requested often).
+func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, error) {
+	const (
+		mimeM3U8 = "application/vnd.apple.mpegurl"
+		mimeMP4  = "video/mp4"
+		mimeSeg  = "video/iso.segment"
+		mimeVTT  = "text/vtt"
+	)
+	switch name {
+	case "master.m3u8":
+		return p.master, mimeM3U8, nil
+	case "playlist.m3u8":
+		return p.media, mimeM3U8, nil
+	case "init.mp4":
+		return p.initSeg, mimeMP4, nil
+	}
+	var n int
+	if _, err := fmt.Sscanf(name, "seg%d.m4s", &n); err == nil && name == fmt.Sprintf("seg%05d.m4s", n) {
+		data, err := p.Segment(ctx, n-1)
+		return data, mimeSeg, err
+	}
+	var i int
+	if _, err := fmt.Sscanf(name, "sub%d.m3u8", &i); err == nil && name == fmt.Sprintf("sub%d.m3u8", i) {
+		if i < 1 || i > len(p.subs) {
+			return nil, "", errf("no subtitle rendition %d (have %d)", i, len(p.subs))
+		}
+		var total float64
+		for _, d := range p.durs {
+			total += d
+		}
+		// One whole-presentation WebVTT segment (spec-legal for VOD).
+		pl := buildMediaPlaylist([]float64{total}, "",
+			func(int) string { return fmt.Sprintf("sub%d.vtt", i) })
+		return pl, mimeM3U8, nil
+	}
+	if _, err := fmt.Sscanf(name, "sub%d.vtt", &i); err == nil && name == fmt.Sprintf("sub%d.vtt", i) {
+		data, err := p.Subtitle(ctx, i-1)
+		return data, mimeVTT, err
+	}
+	return nil, "", errf("unknown HLS resource %q (see Resources())", name)
+}
+
+// Subtitle builds the i-th (0-based) subtitle rendition's WebVTT — the whole
+// track as one file. Text blocks carry no cue index, so this is one
+// sequential pass over the source's blocks; on a remote source that means
+// transferring it once. Generated lazily; callers serving it repeatedly
+// should cache it.
+func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
+	if i < 0 || i >= len(p.subs) {
+		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
+	}
+	st := p.subs[i]
+	src, err := p.fs.DoOpen(p.srcPath)
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
+	if err != nil {
+		return nil, err
+	}
+	var cues []subtitle.Cue
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, errf("read block: %w", err)
+		}
+		if b.TrackNumber != st.track.ID {
+			continue
+		}
+		if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+			cues = append(cues, cue)
+		}
+	}
+	subtitle.ResolveCueEnds(cues, 2000)
+	var buf strings.Builder
+	if err := subtitle.WriteWebVTT(&buf, cues); err != nil {
+		return nil, err
+	}
+	return []byte(buf.String()), nil
 }

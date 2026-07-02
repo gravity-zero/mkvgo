@@ -160,11 +160,27 @@ Memory is bounded regardless of file size: per-sample metadata is held in RAM (t
 
 ```go
 plan, err := mp4.PlanHLS(ctx, "in.mkv", mp4.Options{SegmentMs: 6000})
-plan.MasterPlaylist()               // []byte — multivariant playlist
-plan.MediaPlaylist()                // []byte — playlist.m3u8
-plan.InitSegment()                  // []byte — init.mp4
-data, err := plan.Segment(ctx, n)   // the n-th (0-based) media segment
+
+// The declarative entry point: name → bytes + Content-Type. The name is
+// exactly the URI a player requests, so an HTTP handler is one call:
+data, mime, err := plan.Resource(ctx, "seg00042.m4s")
+plan.Resources()                    // every servable name (playlists, init, segments, subtitles)
+
+// Granular accessors when you want them:
+plan.MasterPlaylist(); plan.MediaPlaylist(); plan.InitSegment()
+data, err = plan.Segment(ctx, n)    // the n-th (0-based) media segment
+vtt, err := plan.Subtitle(ctx, i)   // the i-th subtitle rendition as WebVTT
 plan.NumSegments(); plan.SegmentName(n)
+```
+
+```go
+// A complete HLS server endpoint:
+http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
+    data, mime, err := plan.Resource(r.Context(), path.Base(r.URL.Path))
+    if err != nil { http.NotFound(w, r); return }
+    w.Header().Set("Content-Type", mime)
+    w.Write(data)
+})
 ```
 
 The zero-storage counterpart of `RemuxToHLS`: `PlanHLS` performs a few bounded
@@ -176,11 +192,14 @@ actually watches are ever transferred from remote storage.
 
 The fragments are built by the same code as `RemuxToHLS`, so every resource is
 **byte-identical** to the full pass (regression-tested) — pre-generated and
-on-demand serving mix transparently. On-demand differences: subtitle tracks
-are reported via `OnDrop` instead of becoming WebVTT renditions, cover art is
-not read, and the master `BANDWIDTH` is estimated from cluster sizes. The
-source must carry a Cues index. The plan is immutable and safe for concurrent
-`Segment` calls.
+on-demand serving mix transparently. Cover art and global tags ride in the
+init segment (`WithAttachments`/`WithTags` reach them through the SeekHead,
+still head-only). Text subtitle tracks are declared in the master playlist and
+served as one whole-presentation WebVTT rendition each (`subN.m3u8` +
+`subN.vtt`) — text blocks have no cue index, so a `.vtt` costs one sequential
+pass, lazily; cache it if requested often. The remaining difference: the
+master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
+Cues index. The plan is immutable and safe for concurrent `Segment` calls.
 
 ### MP4 → MKV
 

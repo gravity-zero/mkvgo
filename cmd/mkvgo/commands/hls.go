@@ -58,10 +58,11 @@ func CmdToHLS(args []string) {
 }
 
 // CmdHLSSegment serves one resource of an on-demand HLS plan: the master or
-// media playlist, the init segment, or the n-th media segment — built by
-// reading only that segment's window from the source (seeked through the
-// Cues), so a server can answer HLS requests with no pre-generated files.
-// The source may be a local path or an http(s) URL.
+// media playlist, the init segment, the n-th media segment (built by reading
+// only that segment's window, seeked through the Cues), or any resource name
+// a player requests (seg00042.m4s, sub1.m3u8, sub1.vtt) — so a server answers
+// HLS requests with no pre-generated files. The source may be a local path or
+// an http(s) URL.
 func CmdHLSSegment(args []string) {
 	var outPath string
 	var segMs int64
@@ -112,13 +113,23 @@ func CmdHLSSegment(args []string) {
 	case "init":
 		data = plan.InitSegment()
 	default:
-		n, err := strconv.Atoi(what)
-		if err != nil || n < 1 || n > plan.NumSegments() {
-			Fatal(fmt.Sprintf("segment %q out of range (1..%d, or master/playlist/init)", what, plan.NumSegments()))
+		if n, aerr := strconv.Atoi(what); aerr == nil {
+			if n < 1 || n > plan.NumSegments() {
+				Fatal(fmt.Sprintf("segment %d out of range (1..%d)", n, plan.NumSegments()))
+			}
+			var serr error
+			data, serr = plan.Segment(context.Background(), n-1)
+			if serr != nil {
+				Fatal(serr.Error())
+			}
+			break
 		}
-		data, err = plan.Segment(context.Background(), n-1)
-		if err != nil {
-			Fatal(err.Error())
+		// Any resource name a player would request: seg00042.m4s, sub1.m3u8,
+		// sub1.vtt, master.m3u8, … — the declarative entry point.
+		var rerr error
+		data, _, rerr = plan.Resource(context.Background(), what)
+		if rerr != nil {
+			Fatal(rerr.Error())
 		}
 	}
 

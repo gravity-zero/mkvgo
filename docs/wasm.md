@@ -15,8 +15,11 @@ What it enables:
   that fit in memory — without transcoding: the original frames are copied
   into the new container.
 - **Play an MKV in a `<video>` tag** with no server and no transcoding:
-  `remuxToHLS` emits fragmented MP4, which Media Source Extensions accept
-  directly (see the [runnable demo](../web/example/index.html)).
+  `openHLS(file)` builds fragmented-MP4 segments **on demand from ranged
+  reads of the File** — a huge local file plays through Media Source
+  Extensions with bounded memory (see the [runnable
+  demo](../web/example/index.html)); `remuxToHLS` is the eager, all-at-once
+  variant for files that fit in memory.
 
 ## Build
 
@@ -42,6 +45,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `remuxFromMP4(input, opts?)` | `Uint8Array` (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
 | `remuxToWebM(input)` | `Uint8Array` (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
 | `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` — `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
+| `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
 | `extractSubtitleVTT(input, trackId)` | `Uint8Array` (MKV or MP4) | WebVTT `string` |
 | `version()` | — | version `string` |
 
@@ -52,6 +56,27 @@ the CLI flags ([cli.md](cli.md)).
 
 Input format is sniffed from the first bytes (EBML magic vs ISO-BMFF box), not
 from a file name.
+
+## Playing a local file with bounded memory
+
+```js
+const plan = await MkvGo.openHLS(file, { segmentSeconds: 6 })   // File from an <input>
+const ms = new MediaSource()
+video.src = URL.createObjectURL(ms)
+ms.addEventListener('sourceopen', async () => {
+  const codecs = /CODECS="([^"]+)"/.exec(new TextDecoder().decode((await plan.resource('master.m3u8')).data))[1]
+  const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
+  const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
+  await append((await plan.resource('init.mp4')).data)
+  for (let n = 0; n < plan.numSegments; n++) await append(await plan.segment(n))
+  ms.endOfStream()
+})
+```
+
+`plan.resources` lists every name a player could request — playlists, init,
+segments, and one WebVTT rendition per text subtitle track (`sub1.m3u8` /
+`sub1.vtt`); cover art and global tags ride in the init segment. The source
+must carry a Cues index (real muxers always write one).
 
 ## Quickstart (browser, no bundler)
 

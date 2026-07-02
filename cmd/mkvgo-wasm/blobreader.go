@@ -60,6 +60,9 @@ func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
 	return next, nil
 }
 
+// Close satisfies mkv.ReadSeekCloser; a Blob slice holds no OS resource.
+func (r *blobReader) Close() error { return nil }
+
 // fetch loads the window starting at off. Blocks the calling goroutine on the
 // arrayBuffer promise — legal here because every export runs its work on its
 // own goroutine, leaving the JS event loop free to complete the read.

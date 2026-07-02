@@ -76,7 +76,7 @@ var CmdUsage = map[string]string{
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
 	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] (fragmented-MP4 HLS: init.mp4 + segments + playlist.m3u8)",
-	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] (build one HLS resource on demand)",
+	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N|resource-name> [-o out] [-segment 6] (build one HLS resource on demand)",
 }
 
 func CmdHelp(cmd string) {
