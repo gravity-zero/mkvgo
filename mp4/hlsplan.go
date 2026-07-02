@@ -24,6 +24,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -46,7 +47,9 @@ type HLSPlan struct {
 	master   []byte
 	mpd      []byte
 	segCount int
-	subs     []hlsSubTrack // declared renditions; cues fetched lazily per request
+	subs     []hlsSubTrack // declared renditions; cues fetched lazily, then cached
+	subOnce  []sync.Once   // one-shot cue loaders (the sequential pass runs once per track)
+	subErr   []error
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -101,6 +104,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale}
 	p.subs = planSubTracks(c, o)
+	p.subOnce = make([]sync.Once, len(p.subs))
+	p.subErr = make([]error, len(p.subs))
 	for _, t := range media {
 		p.tracks = append(p.tracks, &planTrack{
 			ft:         &fragTrack{outTrack: t, timescale: mediaTimescale(t)},
@@ -474,6 +479,9 @@ func (p *HLSPlan) Resources() []string {
 	}
 	for i := range p.subs {
 		names = append(names, fmt.Sprintf("sub%d.m3u8", i+1), fmt.Sprintf("sub%d.vtt", i+1))
+		for n := 0; n < p.segCount; n++ {
+			names = append(names, fmt.Sprintf("sub%d_%05d.vtt", i+1, n+1))
+		}
 	}
 	return names
 }
@@ -526,14 +534,15 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		if i < 1 || i > len(p.subs) {
 			return nil, "", errf("no subtitle rendition %d (have %d)", i, len(p.subs))
 		}
-		var total float64
-		for _, d := range p.durs {
-			total += d
-		}
-		// One whole-presentation WebVTT segment (spec-legal for VOD).
-		pl := buildMediaPlaylist([]float64{total}, "",
-			func(int) string { return fmt.Sprintf("sub%d.vtt", i) })
+		// Windowed like the full pass (byte-identical playlist); the cues are
+		// loaded once, so each window is served from the cache.
+		pl := buildMediaPlaylist(p.durs, "",
+			func(k int) string { return fmt.Sprintf("sub%d_%05d.vtt", i, k+1) })
 		return pl, mimeM3U8, nil
+	}
+	if _, err := fmt.Sscanf(name, "sub%d_%d.vtt", &i, &n); err == nil && name == fmt.Sprintf("sub%d_%05d.vtt", i, n) {
+		data, err := p.subtitleSegment(ctx, i-1, n-1)
+		return data, mimeVTT, err
 	}
 	if _, err := fmt.Sscanf(name, "sub%d.vtt", &i); err == nil && name == fmt.Sprintf("sub%d.vtt", i) {
 		data, err := p.Subtitle(ctx, i-1)
@@ -542,47 +551,93 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	return nil, "", errf("unknown HLS resource %q (see Resources())", name)
 }
 
+// loadSubCues runs the one sequential pass collecting the i-th subtitle
+// track's cues, once — subsequent calls (whole file, every windowed segment)
+// serve from the cached cues. Text blocks carry no cue index, so the first
+// request pays the pass; on a remote source that means transferring it once.
+func (p *HLSPlan) loadSubCues(ctx context.Context, i int) error {
+	p.subOnce[i].Do(func() {
+		st := &p.subs[i]
+		src, err := p.fs.DoOpen(p.srcPath)
+		if err != nil {
+			p.subErr[i] = err
+			return
+		}
+		defer src.Close()
+		br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
+		if err != nil {
+			p.subErr[i] = err
+			return
+		}
+		var cues []subtitle.Cue
+		for {
+			if err := ctx.Err(); err != nil {
+				p.subErr[i] = err
+				return
+			}
+			b, err := br.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				p.subErr[i] = errf("read block: %w", err)
+				return
+			}
+			if b.TrackNumber != st.track.ID {
+				continue
+			}
+			if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+				cues = append(cues, cue)
+			}
+		}
+		subtitle.ResolveCueEnds(cues, 2000)
+		st.cues = cues
+	})
+	return p.subErr[i]
+}
+
 // Subtitle builds the i-th (0-based) subtitle rendition's WebVTT — the whole
-// track as one file. Text blocks carry no cue index, so this is one
-// sequential pass over the source's blocks; on a remote source that means
-// transferring it once. Generated lazily; callers serving it repeatedly
-// should cache it.
+// track as one file. The underlying cues are loaded once and cached.
 func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
 		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
 	}
-	st := p.subs[i]
-	src, err := p.fs.DoOpen(p.srcPath)
-	if err != nil {
+	if err := p.loadSubCues(ctx, i); err != nil {
 		return nil, err
 	}
-	defer src.Close()
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
-	if err != nil {
-		return nil, err
-	}
-	var cues []subtitle.Cue
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		b, err := br.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, errf("read block: %w", err)
-		}
-		if b.TrackNumber != st.track.ID {
-			continue
-		}
-		if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
-			cues = append(cues, cue)
-		}
-	}
-	subtitle.ResolveCueEnds(cues, 2000)
 	var buf strings.Builder
-	if err := subtitle.WriteWebVTT(&buf, cues); err != nil {
+	if err := subtitle.WriteWebVTT(&buf, p.subs[i].cues); err != nil {
+		return nil, err
+	}
+	return []byte(buf.String()), nil
+}
+
+// subtitleSegment builds the i-th rendition's n-th windowed WebVTT segment
+// (subN_%05d.vtt) — the same windows the full pass writes, served from the
+// cached cues, so the on-demand subtitle playlists equal the full pass.
+func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error) {
+	if i < 0 || i >= len(p.subs) {
+		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
+	}
+	if n < 0 || n >= p.segCount {
+		return nil, errf("subtitle segment %d out of range (0..%d)", n, p.segCount-1)
+	}
+	if err := p.loadSubCues(ctx, i); err != nil {
+		return nil, err
+	}
+	segStart := p.bounds[n]
+	var segEnd int64 = 1<<63 - 1
+	if n+1 < p.segCount {
+		segEnd = p.bounds[n+1]
+	}
+	var window []subtitle.Cue
+	for _, cue := range p.subs[i].cues {
+		if cue.EndMs > segStart && cue.StartMs < segEnd {
+			window = append(window, cue)
+		}
+	}
+	var buf strings.Builder
+	if err := subtitle.WriteWebVTT(&buf, window); err != nil {
 		return nil, err
 	}
 	return []byte(buf.String()), nil

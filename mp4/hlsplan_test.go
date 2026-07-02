@@ -104,8 +104,9 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 
 	// Resource() is the declarative entry point: every listed name resolves,
 	// with the right payload and MIME type.
-	// master + mpd, then per rendition (video + 1 audio): playlist + init + segments.
-	wantNames := 2 + 2*(2+plan.NumSegments()) + 2
+	// master + mpd, per rendition (video + 1 audio) playlist + init + segments,
+	// then the subtitle rendition: playlist + whole file + windowed segments.
+	wantNames := 2 + 2*(2+plan.NumSegments()) + 2 + plan.NumSegments()
 	if got := plan.Resources(); len(got) != wantNames {
 		t.Errorf("Resources() = %d names, want %d (%v)", len(got), wantNames, got)
 	}
@@ -119,8 +120,8 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 		// audio renditions included. master/manifest differ by the estimated
 		// BANDWIDTH, and the on-demand subtitle playlist is single-segment.
 		switch name {
-		case "master.m3u8", "manifest.mpd", "sub1.m3u8":
-			continue
+		case "master.m3u8", "manifest.mpd":
+			continue // BANDWIDTH is estimated on-demand
 		}
 		want, ferr := os.ReadFile(filepath.Join(dir, name))
 		if ferr != nil {
