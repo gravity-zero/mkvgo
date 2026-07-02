@@ -86,10 +86,10 @@ func TestAudioExtOffset(t *testing.T) {
 // channel count as a 32-bit int; the v0 fields hold placeholder constants.
 func TestParseAudioFieldsV2(t *testing.T) {
 	payload := make([]byte, 64)
-	binary.BigEndian.PutUint16(payload[8:10], 2)                              // version
-	binary.BigEndian.PutUint16(payload[16:18], 3)                             // always3 (v0 channel slot)
-	binary.BigEndian.PutUint64(payload[32:40], math.Float64bits(96000))       // sample rate
-	binary.BigEndian.PutUint32(payload[40:44], 6)                             // channels
+	binary.BigEndian.PutUint16(payload[8:10], 2)                        // version
+	binary.BigEndian.PutUint16(payload[16:18], 3)                       // always3 (v0 channel slot)
+	binary.BigEndian.PutUint64(payload[32:40], math.Float64bits(96000)) // sample rate
+	binary.BigEndian.PutUint32(payload[40:44], 6)                       // channels
 	var tr inTrack
 	parseAudioFields(&tr, payload)
 	if tr.sampleRate != 96000 {

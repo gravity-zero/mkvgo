@@ -52,7 +52,7 @@ var codecTable = map[string]codecSpec{
 	// VP9 in MP4 (vp09 + vpcC, ISO/IEC 14496-15 style per the VP9-in-ISOBMFF
 	// spec). The vpcC is built from the first keyframe's uncompressed header
 	// when the Matroska track carries no VPCodecConfigurationRecord.
-	"vp9": {handler: "vide", video: true, brand: "vp09", needsFirstFrame: true, sampleEntry: vp9Entry},
+	"vp9":  {handler: "vide", video: true, brand: "vp09", needsFirstFrame: true, sampleEntry: vp9Entry},
 	"aac":  {handler: "soun", video: false, sampleEntry: aacEntry},
 	"opus": {handler: "soun", video: false, sampleEntry: opusEntry},
 	"flac": {handler: "soun", video: false, sampleEntry: flacEntry},

@@ -57,6 +57,10 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **The `mp4` package is now stable API**, with the same policy as the
+  `matroska` facade: held additive and backward-compatible across 0.x
+  releases. (It is fuzzed, ffmpeg-verified end to end, and used in
+  production.)
 - **Self-verifying files.** `mkvgo hash` stores each track's content SHA-256
   as a `CONTENT_SHA256` tag (in place on mkvgo-written files, thanks to the
   metadata reserve); `mkvgo verify` recomputes and exits `1` on any mismatch —

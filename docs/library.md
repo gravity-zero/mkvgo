@@ -15,7 +15,7 @@ task-first starting point (CLI and Go side by side).
 | `matroska` | `github.com/gravity-zero/mkvgo/matroska` | Facade -- re-exports everything |
 | `ebml` | `github.com/gravity-zero/mkvgo/ebml` | Low-level EBML codec |
 
-`matroska` is the stable public API -- import it for most use cases. The `mkv`, `mkv/reader`, `mkv/writer`, `mkv/ops` and `mkv/subtitle` packages are lower-level and experimental: their APIs may change between minor versions. Import them directly when you need capabilities the facade does not expose (streaming, `NewWebMStreamWriter`).
+`matroska` and `mp4` are the stable public API -- import them for most use cases; both are held additive and backward-compatible across 0.x releases. The `mkv`, `mkv/reader`, `mkv/writer`, `mkv/ops` and `mkv/subtitle` packages are lower-level and experimental: their APIs may change between minor versions. Import them directly when you need capabilities the facade does not expose (streaming, `NewWebMStreamWriter`).
 
 Operations process the container incrementally -- they read and write block by block (or cluster by cluster) and never hold the whole file in memory, so multi-gigabyte inputs run with bounded memory.
 

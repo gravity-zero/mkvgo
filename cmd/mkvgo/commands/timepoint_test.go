@@ -12,13 +12,13 @@ func TestParseTimePoint(t *testing.T) {
 		want int64
 	}{
 		{"0", 0},
-		{"300000", 300000},   // plain milliseconds
-		{"90.5", 90500},      // fractional seconds
-		{"5:00", 300000},     // MM:SS
-		{"1:30", 90000},      // MM:SS
-		{"1:30.5", 90500},    // MM:SS.fraction
+		{"300000", 300000},    // plain milliseconds
+		{"90.5", 90500},       // fractional seconds
+		{"5:00", 300000},      // MM:SS
+		{"1:30", 90000},       // MM:SS
+		{"1:30.5", 90500},     // MM:SS.fraction
 		{"01:30:00", 5400000}, // HH:MM:SS
-		{" 1:00 ", 60000},    // trimmed
+		{" 1:00 ", 60000},     // trimmed
 	} {
 		got, err := commands.ParseTimePoint(tc.in)
 		if err != nil {

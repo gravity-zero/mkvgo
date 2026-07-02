@@ -31,9 +31,9 @@ type streamOpts struct {
 	// aligns on these: every audio block is flagged keyframe, so aligning on
 	// "any keyframe" would start a segment mid-GOP (corrupt video until the
 	// next real video keyframe). Empty means no video track: any keyframe cuts.
-	videoTracks   map[uint64]bool
-	extraSubs     []mkv.Block
-	progress      mkv.ProgressFunc
+	videoTracks map[uint64]bool
+	extraSubs   []mkv.Block
+	progress    mkv.ProgressFunc
 }
 
 // trackEndState tracks one output track's end while streaming: the last frame's

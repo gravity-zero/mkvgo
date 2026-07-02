@@ -2,11 +2,11 @@ package mp4
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"hash"
-	"context"
 	"errors"
+	"hash"
 	"io"
 	"math"
 

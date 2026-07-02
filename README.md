@@ -322,8 +322,8 @@ err := matroska.EditMetadata(ctx, "s3://bucket/video.mkv", "s3://bucket/out.mkv"
 
 Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). The `matroska` facade is
 the stable public API: held additive and backward-compatible across 0.x
-releases by policy. The `mkv/*`, `mp4` and `ebml` sub-packages are
-experimental and may change between minor versions.
+releases by policy — and so is the `mp4` package. The `mkv/*` and `ebml`
+sub-packages are lower-level and may change between minor versions.
 
 ## Documentation
 

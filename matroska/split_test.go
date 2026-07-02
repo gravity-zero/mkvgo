@@ -2,8 +2,8 @@ package matroska
 
 import (
 	"context"
-	"strings"
 	"os"
+	"strings"
 	"testing"
 )
 

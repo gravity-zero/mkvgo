@@ -104,12 +104,12 @@ type movie struct {
 	tracks     []inTrack
 	chapters   []mkv.Chapter
 	dropped    []DroppedTrack
-	durationMs int64           // from mvhd, used when the sample table was not built
-	tags       []mkv.SimpleTag // file-level metadata from udta/meta/ilst
-	title      string          // ©nam, for Info.Title
-	cover      *mkv.Attachment // covr cover art, carried as an MKV attachment
+	durationMs int64             // from mvhd, used when the sample table was not built
+	tags       []mkv.SimpleTag   // file-level metadata from udta/meta/ilst
+	title      string            // ©nam, for Info.Title
+	cover      *mkv.Attachment   // covr cover art, carried as an MKV attachment
 	hashes     map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
-	fragmented bool            // an mvex box is present → sample data is in moof fragments
+	fragmented bool              // an mvex box is present → sample data is in moof fragments
 }
 
 // memBox is a box parsed from an in-memory buffer.
