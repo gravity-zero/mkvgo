@@ -1,0 +1,352 @@
+//go:build js && wasm
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"syscall/js"
+
+	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mp4"
+)
+
+// promise runs fn on its own goroutine and returns a JS Promise for its
+// result — the only sane calling convention for wasm exports, since fn may
+// block (Blob reads await JS promises).
+func promise(fn func() (any, error)) any {
+	handler := js.FuncOf(func(this js.Value, args []js.Value) any {
+		resolve, reject := args[0], args[1]
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					reject.Invoke(jsError(fmt.Sprintf("mkvgo: panic: %v", r)))
+				}
+			}()
+			v, err := fn()
+			if err != nil {
+				reject.Invoke(jsError(err.Error()))
+				return
+			}
+			resolve.Invoke(v)
+		}()
+		return nil
+	})
+	p := js.Global().Get("Promise").New(handler)
+	handler.Release()
+	return p
+}
+
+func jsError(msg string) js.Value {
+	return js.Global().Get("Error").New(msg)
+}
+
+// toGoBytes copies a Uint8Array into Go memory.
+func toGoBytes(v js.Value) []byte {
+	b := make([]byte, v.Get("length").Int())
+	js.CopyBytesToGo(b, v)
+	return b
+}
+
+// toUint8Array copies Go bytes out to a fresh Uint8Array.
+func toUint8Array(b []byte) js.Value {
+	u8 := js.Global().Get("Uint8Array").New(len(b))
+	js.CopyBytesToJS(u8, b)
+	return u8
+}
+
+func isBlob(v js.Value) bool {
+	blob := js.Global().Get("Blob")
+	return blob.Type() == js.TypeFunction && v.InstanceOf(blob)
+}
+
+// sniffFormat classifies the input from its first bytes: "mkv" for an EBML
+// header (Matroska/WebM), "mp4" for an ISO-BMFF box structure.
+func sniffFormat(head []byte) (string, error) {
+	if len(head) >= 4 && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
+		return "mkv", nil
+	}
+	if len(head) >= 8 {
+		switch string(head[4:8]) {
+		case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
+			return "mp4", nil
+		}
+	}
+	return "", fmt.Errorf("unrecognised container (neither an EBML/Matroska header nor an ISO-BMFF box)")
+}
+
+// probeOpts reads the optional probe options object.
+type probeOpts struct {
+	keyframes    bool
+	bitrate      bool
+	inBandColour bool
+}
+
+func readProbeOpts(args []js.Value, idx int) probeOpts {
+	var o probeOpts
+	if len(args) <= idx || args[idx].Type() != js.TypeObject {
+		return o
+	}
+	v := args[idx]
+	o.keyframes = v.Get("keyframes").Truthy()
+	o.bitrate = v.Get("bitrate").Truthy()
+	o.inBandColour = v.Get("inbandColour").Truthy()
+	return o
+}
+
+// trackJSON mirrors the CLI's -json track shape: the Track fields plus the
+// derived display strings the library exposes as methods.
+type trackJSON struct {
+	matroska.Track
+	CodecLongName string  `json:"codec_long_name,omitempty"`
+	ChannelLayout string  `json:"channel_layout,omitempty"`
+	AvgFrameRate  float64 `json:"avg_frame_rate,omitempty"`
+}
+
+// probeResult is the JSON payload probe resolves with.
+type probeResult struct {
+	*matroska.Container
+	Tracks        []trackJSON        `json:"tracks"`
+	Format        string             `json:"format"` // "mkv" or "mp4"
+	DroppedTracks []mp4.DroppedTrack `json:"dropped_tracks,omitempty"`
+}
+
+// probeJS(input: Uint8Array | Blob, opts?) → Promise<object>
+func probeJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("probe: missing input") })
+	}
+	input := args[0]
+	opts := readProbeOpts(args, 1)
+	return promise(func() (any, error) {
+		rs, err := inputReadSeeker(input)
+		if err != nil {
+			return nil, err
+		}
+		return probeReader(rs, opts)
+	})
+}
+
+// inputReadSeeker adapts the JS input to an io.ReadSeeker: a copied buffer for
+// Uint8Array, a ranged reader for Blob/File (head-only work stays head-only).
+func inputReadSeeker(input js.Value) (io.ReadSeeker, error) {
+	if isBlob(input) {
+		return newBlobReader(input), nil
+	}
+	if input.Type() == js.TypeObject && input.Get("byteLength").Type() == js.TypeNumber {
+		return bytes.NewReader(toGoBytes(input)), nil
+	}
+	return nil, fmt.Errorf("input must be a Uint8Array or a Blob/File")
+}
+
+func probeReader(rs io.ReadSeeker, opts probeOpts) (any, error) {
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(rs, head); err != nil {
+		return nil, fmt.Errorf("read head: %w", err)
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	format, err := sniffFormat(head)
+	if err != nil {
+		return nil, err
+	}
+
+	res := probeResult{Format: format}
+	switch format {
+	case "mkv":
+		var ro []matroska.ReadOption
+		if opts.keyframes {
+			ro = append(ro, matroska.WithKeyframeIndex())
+		}
+		if opts.bitrate {
+			ro = append(ro, matroska.WithBitrate())
+		}
+		if opts.inBandColour {
+			ro = append(ro, matroska.WithInBandColourFallback())
+		}
+		c, err := matroska.ReadMeta(context.Background(), rs, "input", ro...)
+		if err != nil {
+			return nil, err
+		}
+		res.Container = c
+	case "mp4":
+		c, dropped, err := mp4.ReadMeta(context.Background(), rs, "input",
+			mp4.Options{Keyframes: opts.keyframes, InBandColour: opts.inBandColour})
+		if err != nil {
+			return nil, err
+		}
+		res.Container = c
+		res.DroppedTracks = dropped
+	}
+	res.Tracks = make([]trackJSON, len(res.Container.Tracks))
+	for i, t := range res.Container.Tracks {
+		res.Tracks[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(),
+			ChannelLayout: t.ChannelLayout(), AvgFrameRate: t.AvgFrameRate()}
+	}
+	return toJSObject(res)
+}
+
+// toJSObject marshals v to JSON and parses it on the JS side, yielding a plain
+// object (numbers/strings/arrays) the caller uses directly.
+func toJSObject(v any) (any, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return js.Global().Get("JSON").Call("parse", string(raw)), nil
+}
+
+// remuxOpts reads the optional remux options object.
+func readRemuxOpts(args []js.Value, idx int) mp4.Options {
+	var o mp4.Options
+	if len(args) <= idx || args[idx].Type() != js.TypeObject {
+		return o
+	}
+	v := args[idx]
+	o.FastStart = v.Get("fastStart").Truthy()
+	o.SkipUnsupported = v.Get("skipUnsupported").Truthy()
+	o.FlattenStyledSubs = v.Get("flattenSubs").Truthy()
+	o.NativeWebVTT = v.Get("nativeWebVTT").Truthy()
+	o.MP3ContainerDelay = v.Get("mp3ContainerDelay").Truthy()
+	o.ContentHashes = v.Get("contentHashes").Truthy()
+	if s := v.Get("segmentSeconds"); s.Type() == js.TypeNumber {
+		o.SegmentMs = int64(s.Float() * 1000)
+	}
+	return o
+}
+
+// remuxResult bundles the output bytes with the dropped-track reports.
+func remuxResult(data []byte, dropped []mp4.DroppedTrack) (any, error) {
+	obj := js.Global().Get("Object").New()
+	obj.Set("data", toUint8Array(data))
+	dj, err := toJSObject(dropped)
+	if err != nil {
+		return nil, err
+	}
+	obj.Set("droppedTracks", dj)
+	return obj, nil
+}
+
+// remuxToMP4JS(input: Uint8Array, opts?) → Promise<{data, droppedTracks}>
+func remuxToMP4JS(_ js.Value, args []js.Value) any {
+	return remuxCall(args, func(m *mkv.MemFS, o mp4.Options) (string, error) {
+		return "out.mp4", mp4.RemuxToMP4(context.Background(), "in", "out.mp4", o)
+	})
+}
+
+// remuxFromMP4JS(input: Uint8Array, opts?) → Promise<{data, droppedTracks}>
+func remuxFromMP4JS(_ js.Value, args []js.Value) any {
+	return remuxCall(args, func(m *mkv.MemFS, o mp4.Options) (string, error) {
+		return "out.mkv", mp4.RemuxFromMP4(context.Background(), "in", "out.mkv", o)
+	})
+}
+
+// remuxToWebMJS(input: Uint8Array) → Promise<{data, droppedTracks}>
+func remuxToWebMJS(_ js.Value, args []js.Value) any {
+	return remuxCall(args, func(m *mkv.MemFS, o mp4.Options) (string, error) {
+		return "out.webm", matroska.RemuxToWebM(context.Background(), "in", "out.webm",
+			matroska.Options{FS: o.FS})
+	})
+}
+
+// remuxCall factors the shared shape: input bytes into a MemFS as "in", run
+// the operation, return the named output plus the dropped tracks.
+func remuxCall(args []js.Value, run func(*mkv.MemFS, mp4.Options) (string, error)) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("missing input") })
+	}
+	input := args[0]
+	opts := readRemuxOpts(args, 1)
+	return promise(func() (any, error) {
+		if isBlob(input) {
+			return nil, fmt.Errorf("remux needs a Uint8Array (the whole file in memory); Blob input is probe-only")
+		}
+		m := mkv.NewMemFS()
+		m.Put("in", toGoBytes(input))
+		var dropped []mp4.DroppedTrack
+		opts.FS = m.FS()
+		opts.OnDrop = func(d mp4.DroppedTrack) { dropped = append(dropped, d) }
+		out, err := run(m, opts)
+		if err != nil {
+			return nil, err
+		}
+		return remuxResult(m.Get(out), dropped)
+	})
+}
+
+// remuxToHLSJS(input: Uint8Array, opts?) → Promise<{files: {name: Uint8Array}, droppedTracks}>
+func remuxToHLSJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("missing input") })
+	}
+	input := args[0]
+	opts := readRemuxOpts(args, 1)
+	return promise(func() (any, error) {
+		if isBlob(input) {
+			return nil, fmt.Errorf("remuxToHLS needs a Uint8Array; Blob input is probe-only")
+		}
+		m := mkv.NewMemFS()
+		m.Put("in", toGoBytes(input))
+		var dropped []mp4.DroppedTrack
+		opts.FS = m.FS()
+		opts.OnDrop = func(d mp4.DroppedTrack) { dropped = append(dropped, d) }
+		if err := mp4.RemuxToHLS(context.Background(), "in", "hls", opts); err != nil {
+			return nil, err
+		}
+		files := js.Global().Get("Object").New()
+		for _, p := range m.Paths() {
+			if p == "in" {
+				continue
+			}
+			files.Set(strings.TrimPrefix(p, "hls/"), toUint8Array(m.Get(p)))
+		}
+		obj := js.Global().Get("Object").New()
+		obj.Set("files", files)
+		dj, err := toJSObject(dropped)
+		if err != nil {
+			return nil, err
+		}
+		obj.Set("droppedTracks", dj)
+		return obj, nil
+	})
+}
+
+// extractSubtitleVTTJS(input: Uint8Array, trackId: number) → Promise<string>
+func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
+	if len(args) < 2 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("extractSubtitleVTT: need (input, trackId)") })
+	}
+	input := args[0]
+	trackID := uint64(args[1].Int())
+	return promise(func() (any, error) {
+		if isBlob(input) {
+			return nil, fmt.Errorf("extractSubtitleVTT needs a Uint8Array")
+		}
+		data := toGoBytes(input)
+		format, err := sniffFormat(data[:min(8, len(data))])
+		if err != nil {
+			return nil, err
+		}
+		m := mkv.NewMemFS()
+		m.Put("in", data)
+		var out strings.Builder
+		switch format {
+		case "mkv":
+			err = matroska.ExtractSubtitleWebVTT(context.Background(), "in", trackID, &out,
+				matroska.Options{FS: m.FS()})
+		case "mp4":
+			err = mp4.ExtractSubtitleWebVTT(context.Background(), "in", trackID, &out,
+				mp4.Options{FS: m.FS()})
+		}
+		if err != nil {
+			return nil, err
+		}
+		return out.String(), nil
+	})
+}

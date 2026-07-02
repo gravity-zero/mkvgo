@@ -54,6 +54,22 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **WebAssembly build** (`make wasm` → `dist/wasm/mkvgo.wasm`, ~4.7 MB raw /
+  ~1.3 MB gzipped). The probe/remux/HLS engine runs client-side: a global
+  `MkvGo` object exposes `probe`, `remuxToMP4`, `remuxFromMP4`, `remuxToWebM`,
+  `remuxToHLS` and `extractSubtitleVTT`, all Promise-based, with the input
+  format sniffed from its first bytes. `probe` also accepts a `Blob`/`File`
+  read through ranged slices — head-only, so probing a 40 GB file in a file
+  input transfers a few hundred kilobytes without uploading anything. A typed
+  TypeScript wrapper (`web/mkvgo.ts`), a runnable browser demo with MSE
+  playback of the HLS output (`web/example/`), React/Vue integration examples
+  (`docs/wasm.md`) and a Node end-to-end smoke test (`make wasm-smoke`) ship
+  with it.
+- **`mkv.MemFS`** — an in-memory implementation of the `FS` port. Every
+  operation taking `Options{FS: …}` can run without a filesystem (the wasm
+  build's foundation, also useful for tests and servers assembling outputs in
+  memory): `NewMemFS()`, `Put`/`Get`/`Paths`, and `FS()` returning the wired
+  port.
 - **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
   an MKV/WebM into a complete HLS presentation — `master.m3u8` (multivariant
   playlist with `BANDWIDTH`/`RESOLUTION` and RFC 6381 `CODECS`), the muxed

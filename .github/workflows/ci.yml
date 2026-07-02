@@ -27,6 +27,10 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Build (WebAssembly)
+        shell: bash
+        run: GOOS=js GOARCH=wasm go build ./cmd/mkvgo-wasm/
+
       - name: Vet
         run: go vet ./...
 

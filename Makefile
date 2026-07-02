@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 BIN = mkvgo
 
-.PHONY: build test vet fuzz clean release
+.PHONY: build test vet fuzz clean release wasm wasm-smoke
 
 build:
 	go build -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/mkvgo/
@@ -29,6 +29,17 @@ fuzz:
 #   MKVGO_E2E=docker:evey-server make e2e   # ffmpeg inside a container
 e2e:
 	sh scripts/e2e.sh
+
+# WebAssembly build: dist/wasm/mkvgo.wasm + Go's wasm_exec.js runtime.
+# See docs/wasm.md; web/mkvgo.ts is the typed wrapper.
+wasm:
+	mkdir -p dist/wasm
+	GOOS=js GOARCH=wasm go build -trimpath -ldflags="$(LDFLAGS)" -o dist/wasm/mkvgo.wasm ./cmd/mkvgo-wasm/
+	install -m 0644 "$$(go env GOROOT)/lib/wasm/wasm_exec.js" dist/wasm/wasm_exec.js
+
+# Runs the wasm artifact end to end under Node ≥ 18 (probe/remux/HLS + error paths).
+wasm-smoke: wasm
+	node scripts/wasm_smoke.mjs
 
 clean:
 	rm -rf dist/ $(BIN)

@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- Runnable mkvgo-wasm demo (no build step, no dependencies).
+
+     From the repo root:
+       make wasm
+       python3 -m http.server 8080
+     then open http://localhost:8080/web/example/
+
+     Drop an MKV: it is probed head-only (works on huge files), and — for a
+     file that fits in memory — remuxed to MP4 (downloadable) and played in
+     the <video> below through Media Source Extensions using the fragmented
+     MP4 the HLS packager emits. No transcoding, no server. -->
+<html lang="en">
+<meta charset="utf-8">
+<title>mkvgo wasm demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+  #drop { border: 2px dashed #888; border-radius: 8px; padding: 3rem; text-align: center; color: #555; }
+  #drop.over { border-color: #06c; color: #06c; }
+  pre { background: #f6f6f6; padding: 1rem; border-radius: 6px; overflow: auto; max-height: 24rem; }
+  video { width: 100%; margin-top: 1rem; background: #000; }
+  .row { margin: 1rem 0; }
+</style>
+
+<h1>mkvgo · WebAssembly</h1>
+<p id="status">loading wasm…</p>
+<div id="drop">drop an MKV / WebM / MP4 here (or click)</div>
+<input type="file" id="pick" hidden>
+<div class="row">
+  <button id="dl" disabled>download remuxed .mp4</button>
+</div>
+<video id="player" controls muted></video>
+<pre id="out"></pre>
+
+<script src="../../dist/wasm/wasm_exec.js"></script>
+<script type="module">
+  const $ = (id) => document.getElementById(id)
+  const log = (v) => { $('out').textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2) }
+
+  // Inline equivalent of loadMkvGo() from web/mkvgo.ts.
+  const go = new Go()
+  const { instance } = await WebAssembly.instantiateStreaming(fetch('../../dist/wasm/mkvgo.wasm'), go.importObject)
+  go.run(instance)
+  while (!globalThis.MkvGo) await new Promise((r) => setTimeout(r, 5))
+  $('status').textContent = `mkvgo ${MkvGo.version()} ready — files never leave this page`
+
+  async function handle(file) {
+    // 1. Probe the File head-only: no size limit, only a few ranged reads.
+    const probe = await MkvGo.probe(file, { keyframes: false })
+    log(probe)
+
+    if (probe.format !== 'mkv') return
+    if (file.size > 1.5e9) { $('status').textContent = 'probed head-only (too large to remux in memory)'; return }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+
+    // 2. Remux to a downloadable progressive MP4.
+    const mp4 = await MkvGo.remuxToMP4(bytes, { fastStart: true, skipUnsupported: true })
+    $('dl').disabled = false
+    $('dl').onclick = () => {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([mp4.data], { type: 'video/mp4' }))
+      a.download = file.name.replace(/\.[^.]+$/, '') + '.mp4'
+      a.click()
+    }
+
+    // 3. Package as fragmented MP4 and play through MSE: the browser plays
+    //    the MKV's own frames with no transcoding and no server.
+    const hls = await MkvGo.remuxToHLS(bytes, { segmentSeconds: 6, skipUnsupported: true })
+    const codecs = /CODECS="([^"]+)"/.exec(new TextDecoder().decode(hls.files['master.m3u8']))?.[1]
+    if (!codecs || !MediaSource.isTypeSupported(`video/mp4; codecs="${codecs}"`)) {
+      $('status').textContent = `remuxed OK; playback skipped (codecs "${codecs ?? '?'}" unsupported by this browser)`
+      return
+    }
+    const ms = new MediaSource()
+    $('player').src = URL.createObjectURL(ms)
+    ms.addEventListener('sourceopen', async () => {
+      const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
+      const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
+      await append(hls.files['init.mp4'])
+      for (const name of Object.keys(hls.files).filter((n) => n.endsWith('.m4s')).sort())
+        await append(hls.files[name])
+      ms.endOfStream()
+    }, { once: true })
+    $('status').textContent = 'playing the MKV via MSE — remuxed in your browser'
+  }
+
+  const drop = $('drop')
+  drop.onclick = () => $('pick').click()
+  $('pick').onchange = (e) => e.target.files[0] && handle(e.target.files[0])
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over') }
+  drop.ondragleave = () => drop.classList.remove('over')
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && handle(e.dataTransfer.files[0]) }
+</script>
+</html>

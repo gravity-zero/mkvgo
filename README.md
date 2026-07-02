@@ -336,6 +336,9 @@ sub-packages are lower-level and may change between minor versions.
 - **[docs/library.md](docs/library.md)** - full library guide: the API, the
   head-only probe field table (mapped to ffprobe), streaming, custom FS, and the
   capabilities a head-only read cannot reach.
+- **[docs/wasm.md](docs/wasm.md)** - the WebAssembly build (~1.3 MB gzipped):
+  probe/remux/HLS in the browser, the typed `web/mkvgo.ts` wrapper, React/Vue
+  examples, and a runnable MSE-playback demo.
 - **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** - generated
   Go API reference.
 

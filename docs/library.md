@@ -627,6 +627,25 @@ FS methods and their OS fallbacks:
 | `WriteFile` | `os.WriteFile` | Writing small files (attachments) |
 | `Remove` | `os.Remove` | Cleanup on error |
 
+### In-memory FS (`mkv.MemFS`)
+
+A ready-made implementation covering the whole port: every operation runs on
+byte slices with no filesystem at all — the WebAssembly build's foundation
+([docs/wasm.md](wasm.md)), and handy in tests or servers that assemble outputs
+to ship elsewhere.
+
+```go
+m := mkv.NewMemFS()
+m.Put("in.mkv", srcBytes)
+
+err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{FS: m.FS(), FastStart: true})
+mp4Bytes := m.Get("out.mp4")
+
+// Multi-file outputs land in the same map:
+err = mp4.RemuxToHLS(ctx, "in.mkv", "hls", mp4.Options{FS: m.FS()})
+for _, p := range m.Paths() { … }   // hls/master.m3u8, hls/init.mp4, hls/seg00001.m4s, …
+```
+
 ---
 
 ## Progress Callbacks
