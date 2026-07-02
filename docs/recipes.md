@@ -165,6 +165,21 @@ mkvgo to-webm video.mkv video.webm   # VP8/VP9/AV1 + Vorbis/Opus only
 err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 ```
 
+## Package for HLS (no transcode)
+
+Produce a fragmented-MP4 / CMAF HLS presentation — the "copy rung" that lets a
+browser play an MKV without re-encoding. Segments are cut on keyframes and are
+independently decodable.
+
+```bash
+mkvgo to-hls video.mkv -o stream/ -segment 6
+# serve stream/ over HTTP; play stream/playlist.m3u8 (hls.js / Safari / ffmpeg)
+```
+
+```go
+err := mp4.RemuxToHLS(ctx, "video.mkv", "stream/", mp4.Options{SegmentMs: 6000})
+```
+
 ---
 
 > The editing and assembly recipes below (add/remove track, merge, split, join,

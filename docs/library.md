@@ -144,6 +144,18 @@ Other behaviour:
 
 Memory use scales with the sample count, not the file size: sample data is streamed to `mdat` while only the sample tables are held in memory.
 
+### MKV/WebM → fragmented-MP4 HLS
+
+```go
+err := mp4.RemuxToHLS(ctx, "in.mkv", "stream/", mp4.Options{SegmentMs: 6000})
+```
+
+Writes a fragmented-MP4 / CMAF HLS presentation into the output directory: `init.mp4` (ftyp + moov with `mvex`/`trex` and empty sample tables), the media segments (`seg00001.m4s` …, each `styp` + `moof` + `mdat`) and a VOD `playlist.m3u8`. No transcoding — samples are copied verbatim, so the codec set matches `RemuxToMP4`.
+
+Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s) and each is independently decodable, so a player seeks by fetching the segment plus `init.mp4`. This is the CMAF *copy rung* of an HLS ladder — the packaging; bitrate variants (real ABR) remain a transcoder's job. Subtitle tracks are dropped (reported via `Options.OnDrop`).
+
+Memory is bounded regardless of file size: per-sample metadata is held in RAM (the same order the progressive muxer holds) while sample bytes are streamed through one temp file per track and read back sequentially as the segments are written.
+
 ### MP4 → MKV
 
 ```go

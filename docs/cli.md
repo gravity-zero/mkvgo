@@ -662,3 +662,24 @@ mkvgo to-webm <input.mkv> <output.webm>
 mkvgo to-webm video.mkv video.webm
 ```
 
+### to-hls
+
+Remux an MKV/WebM file to a fragmented-MP4 / CMAF **HLS** presentation in an output directory: an initialisation segment (`init.mp4`), the media segments (`seg00001.m4s` …) and a VOD playlist (`playlist.m3u8`). No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment.
+
+This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder. Subtitle tracks are dropped (HLS carries subtitles as separate WebVTT playlists, not yet emitted).
+
+```
+mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
+```
+
+| Flag | Description |
+|---|---|
+| `-o` | Output directory (required) |
+| `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
+
+```bash
+mkvgo to-hls video.mkv -o stream/
+mkvgo to-hls video.mkv -o stream/ -segment 4
+# serve stream/ over HTTP; play stream/playlist.m3u8 in hls.js / Safari / ffmpeg
+```
+

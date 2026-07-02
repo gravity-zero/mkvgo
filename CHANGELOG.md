@@ -49,6 +49,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
+  an MKV/WebM into an HLS presentation — `init.mp4` (ftyp + moov with `mvex`/`trex`
+  and empty sample tables) plus `styp`/`moof`/`mdat` media segments and a VOD
+  `playlist.m3u8`. No transcoding: samples are copied verbatim into CMAF fragments
+  (H.264/HEVC/AV1/VP9 + AAC/…). Segments are cut on video keyframes at roughly
+  `Options.SegmentMs` (default 6 s) and are independently decodable (random
+  access). Memory is bounded — per-sample metadata in RAM, sample bytes streamed
+  through one temp file per track. This is the CMAF "copy rung" of an HLS ladder;
+  bitrate variants (real ABR) remain a transcoder's job. ffmpeg-verified: exact
+  frame parity with the source and standalone mid-stream segment decode.
 - **QuickTime `.mov` support (non-faststart).** The MP4 reader now parses the
   layout raw iPhone/camera QuickTime files use — `wide` + `mdat` first, `moov`
   at the end — which previously failed with `box ... has invalid size`: the

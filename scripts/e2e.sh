@@ -61,14 +61,14 @@ MKVGO="$TMP/mkvgo"
 echo "== generate fixtures with ffmpeg"
 if [ -n "$DOCKER_CONTAINER" ]; then
   ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=440:sample_rate=48000" \
-     -t 2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest -y /tmp/mkvgo-e2e/src.mkv
+     -t 3 -c:v libx264 -preset ultrafast -g 25 -pix_fmt yuv420p -c:a aac -shortest -y /tmp/mkvgo-e2e/src.mkv
   ff -f lavfi -i "testsrc2=size=320x240:rate=25" -t 2 -c:v libvpx-vp9 -deadline realtime -y /tmp/mkvgo-e2e/src.webm
   ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=440:sample_rate=44100" \
      -t 1 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest -y /tmp/mkvgo-e2e/src.mov
   unstage src.mkv "$TMP/src.mkv"; unstage src.webm "$TMP/src.webm"; unstage src.mov "$TMP/src.mov"
 else
   ffmpeg -v error -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=440:sample_rate=48000" \
-     -t 2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest -y "$TMP/src.mkv"
+     -t 3 -c:v libx264 -preset ultrafast -g 25 -pix_fmt yuv420p -c:a aac -shortest -y "$TMP/src.mkv"
   ffmpeg -v error -f lavfi -i "testsrc2=size=320x240:rate=25" -t 2 -c:v libvpx-vp9 -deadline realtime -y "$TMP/src.webm"
   ffmpeg -v error -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=440:sample_rate=44100" \
      -t 1 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest -y "$TMP/src.mov"
@@ -97,6 +97,21 @@ if "$MKVGO" -f to-webm "$TMP/src.mkv" "$TMP/bad.webm" >/dev/null 2>&1; then
 fi
 "$MKVGO" -f to-webm "$TMP/src.webm" "$TMP/out.webm" >/dev/null
 decode_ok "$TMP/out.webm"
+
+echo "== MKV -> fragmented-MP4 HLS -> decode playlist + standalone segment"
+"$MKVGO" to-hls "$TMP/src.mkv" -o "$TMP/hls" -segment 1 >/dev/null
+plist=$(stage "$TMP/hls/init.mp4" >/dev/null; stage "$TMP/hls/playlist.m3u8")
+# stage each segment so the container ffmpeg can resolve the playlist entries.
+for s in "$TMP"/hls/seg*.m4s; do stage "$s" >/dev/null; done
+if [ -n "$DOCKER_CONTAINER" ]; then
+  docker exec "$DOCKER_CONTAINER" ffmpeg -v error -allowed_extensions ALL -i "$plist" -f null - 2>&1
+  docker exec "$DOCKER_CONTAINER" sh -c "cat /tmp/mkvgo-e2e/init.mp4 /tmp/mkvgo-e2e/seg00002.m4s > /tmp/mkvgo-e2e/hls-mid.mp4 && ffmpeg -v error -i /tmp/mkvgo-e2e/hls-mid.mp4 -f null -" 2>&1
+else
+  ffmpeg -v error -allowed_extensions ALL -i "$TMP/hls/playlist.m3u8" -f null - 2>&1
+  cat "$TMP/hls/init.mp4" "$TMP/hls/seg00002.m4s" > "$TMP/hls/mid.mp4"
+  ffmpeg -v error -i "$TMP/hls/mid.mp4" -f null - 2>&1
+fi
+echo "  HLS OK: playlist + standalone segment decode"
 
 echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" probe "$TMP/src.mov" >/dev/null
