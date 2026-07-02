@@ -14,6 +14,12 @@ import (
 // instead of the reserved spot — still valid, but readers discover it later.
 const SeekHeadReserve = 256
 
+// MetadataReserve is the Void padding WriteMetadata leaves after the metadata
+// elements, so a later in-place edit (ops.EditInPlace) that grows the metadata
+// — a longer title, added tags or chapters — still fits without a full
+// rewrite. mkvpropedit reserves space the same way.
+const MetadataReserve = 1024
+
 type MKVWriter struct {
 	W             io.WriteSeeker
 	SegDataStart  int64
@@ -200,5 +206,6 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 			return err
 		}
 	}
-	return nil
+	// Padding for later in-place metadata edits (see MetadataReserve).
+	return WriteVoid(m.W, MetadataReserve)
 }
