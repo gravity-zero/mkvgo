@@ -60,6 +60,11 @@ type Options struct {
 	// hvcC — the MP4 counterpart of reader.WithInBandColourFallback. Off by
 	// default; only a track that needs it reads one bounded sample.
 	InBandColour bool
+	// ContentHashes, on RemuxToMP4, computes each track's content SHA-256 while
+	// the samples stream (no extra I/O) and stores them as freeform ilst atoms
+	// (mean "org.mkvgo", name "CONTENT_SHA256_<track_ID>"), making the output
+	// self-verifying via VerifyContentHashes / `mkvgo verify`.
+	ContentHashes bool
 	// MP3ContainerDelay carries an MP3 track's encoder delay through the container
 	// (the MP4 edit list <-> Matroska CodecDelay), like AAC. Off by default because
 	// MP3's delay is already in its in-band Xing/LAME header, which ffmpeg applies on

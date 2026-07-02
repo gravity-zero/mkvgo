@@ -49,7 +49,7 @@ var CmdUsage = map[string]string{
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",
-	"verify":             "mkvgo verify [-json] <file.mkv> (recompute content hashes, exit 1 on mismatch)",
+	"verify":             "mkvgo verify [-json] <file.mkv|.mp4> (recompute content hashes, exit 1 on mismatch)",
 	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> (-blocks: per-track content hashes, MKV/WebM only)",
 	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)]",
 	"mux":                "mkvgo mux -o <out.mkv> <file:trackID> [<file:trackID> ...]",
@@ -70,7 +70,7 @@ var CmdUsage = map[string]string{
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00] [-pattern part_%03d.mkv ({title} = chapter title)]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
-	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>",
+	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
 }

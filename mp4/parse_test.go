@@ -326,7 +326,7 @@ func TestParseMP4Tags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tags, title, att := parseMP4Tags(udtaBoxes)
+	tags, title, att, _ := parseMP4Tags(udtaBoxes)
 	if title != "My Title" {
 		t.Errorf("title = %q, want My Title", title)
 	}

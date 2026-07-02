@@ -57,6 +57,15 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **Self-verifying files.** `mkvgo hash` stores each track's content SHA-256
+  as a `CONTENT_SHA256` tag (in place on mkvgo-written files, thanks to the
+  metadata reserve); `mkvgo verify` recomputes and exits `1` on any mismatch —
+  bit rot and transfer corruption are detectable with no external checksum
+  file. MP4s are hashed at remux time (`to-mp4 --hash`, computed while the
+  samples stream so it costs no extra I/O; stored as freeform `ilst` atoms)
+  and `verify` reads them back from the sample table. Library:
+  `matroska.WriteContentHashes`/`VerifyContentHashes`,
+  `mp4.Options.ContentHashes`/`mp4.VerifyContentHashes`.
 - **In-place edits that grow.** mkvgo-written files now reserve 1 KB of Void
   after the metadata (`writer.MetadataReserve`, mkvpropedit-style), so
   `edit-inplace` absorbs a longer title or added tags/chapters instantly

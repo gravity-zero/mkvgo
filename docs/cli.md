@@ -160,6 +160,9 @@ no room needs `-o` for a full rewrite). Re-hashing replaces the tags.
 mkvgo hash <file.mkv> [-o <out.mkv>]
 ```
 
+MP4s are hashed at remux time instead (`to-mp4 --hash`): mkvgo does not
+rewrite MP4 metadata in place.
+
 ```bash
 mkvgo hash archive.mkv                # in place
 mkvgo hash video.mkv -o hashed.mkv    # full rewrite
@@ -168,11 +171,12 @@ mkvgo hash video.mkv -o hashed.mkv    # full rewrite
 ### verify
 
 Recompute the per-track content hashes and compare them with the stored
-`CONTENT_SHA256` tags. Exits `0` when every hashed track is intact, `1` on any
-mismatch; errors when the file was never hashed.
+hashes — MKV/WebM: the `CONTENT_SHA256` tags written by `hash`; MP4: the
+freeform atoms written by `to-mp4 --hash`. Exits `0` when every hashed track
+is intact, `1` on any mismatch; errors when the file was never hashed.
 
 ```
-mkvgo verify [-json] <file.mkv>
+mkvgo verify [-json] <file.mkv|.mp4>
 ```
 
 ```bash
@@ -607,13 +611,14 @@ mkvgo reindex source.mkv reindexed.mkv
 Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT and WebVTT subtitles (→ tx3g; WebVTT can also be carried natively, see below). Colour/HDR, chapters and B-frame ordering are preserved, along with the movie title (`©nam`), the other global tags (ARTIST/ALBUM/GENRE/… → iTunes `ilst` atoms), per-track names (`hdlr`/`udta/name`) and language — the symmetric counterpart of `from-mp4`.
 
 ```
-mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>
+mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>
 ```
 
 - `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
 - `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy — all styling, positioning and karaoke is discarded.
 - `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by ffmpeg's MP4 demuxer; leave it off for the widest compatibility.
+- `--hash` computes each track's content SHA-256 while the samples stream (no extra I/O) and stores them as freeform `ilst` atoms — the MP4 becomes self-verifying via `mkvgo verify`.
 - `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header — a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
 
 Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.

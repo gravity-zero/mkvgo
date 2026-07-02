@@ -2,6 +2,9 @@ package mp4
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"hash"
 	"context"
 	"errors"
 	"io"
@@ -38,6 +41,9 @@ type outTrack struct {
 	samples    trackSamples
 	pending    []byte // current chunk's sample bytes, not yet written to mdat
 	pendingCnt int
+	// hasher accumulates the track's content SHA-256 while its samples stream
+	// (Options.ContentHashes); stored as a freeform ilst atom for `verify`.
+	hasher hash.Hash
 
 	// one-cue lookahead state for timed-text tracks.
 	hasPendingCue bool
@@ -83,6 +89,9 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, dur int64, sync
 		return errf("track %d: sample of %d bytes exceeds MP4 sample size limit", t.mkv.ID, len(data))
 	}
 	t.samples.addDur(uint32(len(data)), pts, dur, sync)
+	if t.hasher != nil {
+		t.hasher.Write(data)
+	}
 	t.pending = append(t.pending, data...)
 	t.pendingCnt++
 	if len(t.pending) >= chunkByteThreshold || t.pendingCnt >= chunkSampleThreshold {
@@ -169,6 +178,24 @@ type movieMeta struct {
 	tags     []mkv.SimpleTag
 	chapters []mkv.Chapter
 	cover    *coverArt
+	// hashes maps MP4 track_ID -> hex content SHA-256, filled once the samples
+	// have streamed (Options.ContentHashes).
+	hashes map[uint32]string
+}
+
+// collectHashes finalises the per-track content digests after the sample pass.
+func collectHashes(tracks []*outTrack) map[uint32]string {
+	var out map[uint32]string
+	for _, t := range tracks {
+		if t.hasher == nil || t.isChapter {
+			continue
+		}
+		if out == nil {
+			out = map[uint32]string{}
+		}
+		out[t.mp4ID] = hex.EncodeToString(t.hasher.Sum(nil))
+	}
+	return out
 }
 
 // globalTags collects the file-level (non track-targeted) SimpleTags of a container,
@@ -223,6 +250,9 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			mp4ID:      nextID,
 			frameDurMs: frameDurationMs(t),
 			mp3Delay:   o.MP3ContainerDelay,
+		}
+		if o.ContentHashes {
+			ot.hasher = sha256.New()
 		}
 		// Codecs whose config comes from CodecPrivate are validated now (fail
 		// fast); those needing the first frame are built lazily during streaming.
@@ -295,6 +325,7 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *
 
 	base := int64(len(ftyp)) + mdatHeaderLen
 	co64 := needCo64(dataLen)
+	meta.hashes = collectHashes(tracks)
 	if _, err := buf.Write(buildMoov(tracks, base, co64, meta)); err != nil {
 		return errf("write moov: %w", err)
 	}
@@ -338,6 +369,7 @@ func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string
 	tmpClosed = true
 
 	co64 := needCo64(dataLen)
+	meta.hashes = collectHashes(tracks)
 	moovSize := int64(len(buildMoov(tracks, 0, co64, meta))) // size is base-independent
 	base := int64(len(ftyp)) + moovSize + mdatHeaderLen
 

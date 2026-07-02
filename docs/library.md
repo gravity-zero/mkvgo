@@ -563,6 +563,11 @@ err := matroska.WriteContentHashes(ctx, "archive.mkv", "")
 // Later — detect bit rot / transfer corruption, no external checksum file:
 mismatches, err := matroska.VerifyContentHashes(ctx, "archive.mkv")
 // nil mismatches = every hashed track is byte-intact.
+
+// MP4: hashes are stored at remux time (freeform ilst atoms), verified the
+// same way — mkvgo does not rewrite MP4 metadata in place.
+err = mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{ContentHashes: true})
+mm, err := mp4.VerifyContentHashes(ctx, "out.mp4")
 ```
 
 ---

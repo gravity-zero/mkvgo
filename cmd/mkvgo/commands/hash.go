@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // CmdHash stores each track's content SHA-256 as a CONTENT_SHA256 tag, making
@@ -28,6 +29,9 @@ func CmdHash(args []string) {
 		Fatal("usage: " + CmdUsage["hash"])
 	}
 	source := rest[0]
+	if isMP4Path(source) {
+		Fatal("mkvgo does not rewrite MP4 metadata in place; produce a hashed MP4 at remux time: mkvgo to-mp4 --hash <in.mkv> <out.mp4>")
+	}
 	GuardOverwrite(outPath) // "" (in-place) passes through
 
 	err := matroska.WriteContentHashes(context.Background(), source, outPath,
@@ -43,8 +47,9 @@ func CmdHash(args []string) {
 }
 
 // CmdVerify recomputes the per-track content hashes and compares them with the
-// stored CONTENT_SHA256 tags. Exits 1 on any mismatch (bit rot, truncation,
-// transfer corruption) — scriptable like validate.
+// stored hashes (MKV: CONTENT_SHA256 tags; MP4: the freeform atoms written by
+// `to-mp4 --hash`). Exits 1 on any mismatch (bit rot, truncation, transfer
+// corruption) — scriptable like validate.
 func CmdVerify(args []string) {
 	for _, a := range args {
 		rejectFlagArg(a)
@@ -52,22 +57,51 @@ func CmdVerify(args []string) {
 	if len(args) < 1 {
 		Fatal("usage: " + CmdUsage["verify"])
 	}
-	mismatches, err := matroska.VerifyContentHashes(context.Background(), args[0],
+	path := args[0]
+
+	report := func(n int, print func()) {
+		if JsonOutput || n > 0 {
+			print()
+		} else {
+			fmt.Printf("%s: content OK\n", path)
+		}
+		if n > 0 {
+			osExit(1)
+		}
+	}
+
+	if isMP4Path(path) {
+		mismatches, err := mp4.VerifyContentHashes(context.Background(), path,
+			mp4.Options{Progress: NewProgressBar()})
+		ClearProgress()
+		if err != nil {
+			Fatal(err.Error())
+		}
+		report(len(mismatches), func() {
+			if JsonOutput {
+				PrintJSON(mismatches)
+				return
+			}
+			for _, m := range mismatches {
+				fmt.Println(m)
+			}
+		})
+		return
+	}
+
+	mismatches, err := matroska.VerifyContentHashes(context.Background(), path,
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
-	if JsonOutput {
-		PrintJSON(mismatches)
-	} else if len(mismatches) == 0 {
-		fmt.Printf("%s: content OK\n", args[0])
-	} else {
+	report(len(mismatches), func() {
+		if JsonOutput {
+			PrintJSON(mismatches)
+			return
+		}
 		for _, m := range mismatches {
 			fmt.Println(m)
 		}
-	}
-	if len(mismatches) > 0 {
-		osExit(1)
-	}
+	})
 }

@@ -13,12 +13,14 @@ import (
 // --flatten-subs (carry ASS/SSA as plain tx3g, losing styling), --webvtt-native
 // (carry WebVTT as lossless wvtt instead of tx3g; not read by ffmpeg).
 func CmdToMP4(args []string) {
-	var faststart, skip, flatten, wvtt, mp3delay bool
+	var faststart, skip, flatten, wvtt, mp3delay, hashes bool
 	var rest []string
 	for _, a := range args {
 		switch a {
 		case "--faststart", "-faststart":
 			faststart = true
+		case "--hash", "-hash":
+			hashes = true
 		case "--skip-unsupported", "-skip-unsupported":
 			skip = true
 		case "--flatten-subs", "-flatten-subs":
@@ -33,7 +35,7 @@ func CmdToMP4(args []string) {
 		}
 	}
 	if len(rest) < 2 {
-		Fatal("usage: mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] <input.mkv> <output.mp4>")
+		Fatal("usage: " + CmdUsage["to-mp4"])
 	}
 	src, dst := rest[0], rest[1]
 	GuardOverwrite(dst)
@@ -52,6 +54,7 @@ func CmdToMP4(args []string) {
 		FlattenStyledSubs: flatten,
 		NativeWebVTT:      wvtt,
 		MP3ContainerDelay: mp3delay,
+		ContentHashes:     hashes,
 		OnDrop: func(d mp4.DroppedTrack) {
 			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 		},

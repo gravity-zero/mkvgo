@@ -1,6 +1,8 @@
 package mp4
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -68,7 +70,7 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 	// One moov-level udta carrying the movie title (iTunes meta/ilst, what ffmpeg
 	// writes and ffprobe reads as the format "title") and the chapter list.
 	var udtaKids [][]byte
-	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover); mb != nil {
+	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover, meta.hashes); mb != nil {
 		udtaKids = append(udtaKids, mb)
 	}
 	if chpl := buildChplBox(meta.chapters); chpl != nil {
@@ -132,7 +134,7 @@ func pickCoverArt(atts []mkv.Attachment) *coverArt {
 // ilst atoms (ARTIST→©ART, ALBUM→©alb, …) and the cover art (covr), exactly as
 // ffmpeg writes them and as from-mp4 reads them back. Returns nil when there is
 // nothing to write.
-func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt) []byte {
+func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt, hashes map[uint32]string) []byte {
 	type atom struct{ typ, val string }
 	var atoms []atom
 	seen := map[string]bool{}
@@ -149,7 +151,7 @@ func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt) []byte 
 			add(a, tg.Value)
 		}
 	}
-	if len(atoms) == 0 && cover == nil {
+	if len(atoms) == 0 && cover == nil && len(hashes) == 0 {
 		return nil
 	}
 	ilstChildren := make([][]byte, 0, len(atoms)+1)
@@ -172,6 +174,19 @@ func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt) []byte 
 		})
 		ilstChildren = append(ilstChildren, container("covr", data))
 	}
+	// Per-track content hashes as freeform atoms, in track order so the moov
+	// bytes are deterministic.
+	if len(hashes) > 0 {
+		ids := make([]uint32, 0, len(hashes))
+		for id := range hashes {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(a, b int) bool { return ids[a] < ids[b] })
+		for _, id := range ids {
+			ilstChildren = append(ilstChildren, freeformAtom(
+				fmt.Sprintf("CONTENT_SHA256_%d", id), hashes[id]))
+		}
+	}
 	ilst := container("ilst", ilstChildren...)
 	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {
 		w.u32(0)         // pre_defined
@@ -184,6 +199,18 @@ func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt) []byte 
 		w.bytes(hdlr)
 		w.bytes(ilst)
 	})
+}
+
+// freeformAtom builds an iTunes freeform ilst atom ("----" with mean/name/data),
+// the extension point for tags outside the fixed iTunes vocabulary.
+func freeformAtom(name, value string) []byte {
+	mean := fullBox("mean", 0, 0, func(w *bw) { w.bytes([]byte("org.mkvgo")) })
+	nm := fullBox("name", 0, 0, func(w *bw) { w.bytes([]byte(name)) })
+	data := fullBox("data", 0, 1, func(w *bw) { // type 1 = UTF-8 text
+		w.u32(0) // locale
+		w.bytes([]byte(value))
+	})
+	return container("----", mean, nm, data)
 }
 
 // buildTrackName builds the QuickTime udta/name box carrying a track's name (the

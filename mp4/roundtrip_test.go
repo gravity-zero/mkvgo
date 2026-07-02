@@ -155,7 +155,7 @@ func TestBuildMovieMetaTags(t *testing.T) {
 		{Name: "ALBUM", Value: "Coll"},
 		{Name: "WEIRD_TAG", Value: "ZZUNMAPPEDZZ"},
 		{Name: "ARTIST", Value: "Dup"}, // duplicate name → first wins
-	}, nil)
+	}, nil, nil)
 	if meta == nil {
 		t.Fatal("expected a meta box")
 	}
@@ -170,7 +170,7 @@ func TestBuildMovieMetaTags(t *testing.T) {
 	if bytes.Contains(meta, []byte("Dup")) {
 		t.Error("duplicate atom should keep the first value")
 	}
-	if buildMovieMeta("", nil, nil) != nil {
+	if buildMovieMeta("", nil, nil, nil) != nil {
 		t.Error("no title, no tags and no cover should yield no meta box")
 	}
 }

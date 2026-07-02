@@ -108,6 +108,7 @@ type movie struct {
 	tags       []mkv.SimpleTag // file-level metadata from udta/meta/ilst
 	title      string          // ©nam, for Info.Title
 	cover      *mkv.Attachment // covr cover art, carried as an MKV attachment
+	hashes     map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
 	fragmented bool            // an mvex box is present → sample data is in moof fragments
 }
 
@@ -781,7 +782,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 			if chpl, ok := findMemBox(ub, "chpl"); ok {
 				mv.chapters = parseChpl(chpl.payload)
 			}
-			mv.tags, mv.title, mv.cover = parseMP4Tags(ub)
+			mv.tags, mv.title, mv.cover, mv.hashes = parseMP4Tags(ub)
 		}
 	}
 	return &mv, nil
@@ -828,10 +829,10 @@ var metaAtomNames = map[string]string{
 // iTunes-style tags). It returns the tags as Matroska SimpleTags plus the title
 // (©nam), for Info.Title, and the cover art (covr) as a Matroska-style
 // attachment. Other non-text values are skipped.
-func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment) {
+func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment, hashes map[uint32]string) {
 	meta, ok := findMemBox(udtaBoxes, "meta")
 	if !ok || len(meta.payload) < 4 {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	// meta is a FullBox: 4 bytes of version/flags precede its child boxes. A few
 	// muxers omit them, so fall back to parsing from the start.
@@ -843,16 +844,27 @@ func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover
 	}
 	ilst, ok := findMemBox(metaBoxes, "ilst")
 	if !ok {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	atoms, err := iterBoxes(ilst.payload)
 	if err != nil {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	for _, a := range atoms {
 		if a.typ == "covr" {
 			if att := ilstCoverValue(a.payload); att != nil {
 				cover = att
+			}
+			continue
+		}
+		if a.typ == "----" {
+			// Freeform atom: mkvgo's per-track content hashes live here
+			// (name "CONTENT_SHA256_<track_ID>"). Not imported as text tags.
+			if id, v, ok := freeformContentHash(a.payload); ok {
+				if hashes == nil {
+					hashes = map[uint32]string{}
+				}
+				hashes[id] = v
 			}
 			continue
 		}
@@ -869,7 +881,34 @@ func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover
 			title = val
 		}
 	}
-	return tags, title, cover
+	return tags, title, cover, hashes
+}
+
+// freeformContentHash decodes a freeform ilst atom when it carries one of
+// mkvgo's CONTENT_SHA256_<track_ID> values.
+func freeformContentHash(atomPayload []byte) (uint32, string, bool) {
+	boxes, err := iterBoxes(atomPayload)
+	if err != nil {
+		return 0, "", false
+	}
+	nameBox, ok := findMemBox(boxes, "name")
+	if !ok || len(nameBox.payload) < 4 {
+		return 0, "", false
+	}
+	name := string(nameBox.payload[4:]) // skip the fullbox version/flags
+	const prefix = "CONTENT_SHA256_"
+	if !strings.HasPrefix(name, prefix) {
+		return 0, "", false
+	}
+	id, err := strconv.ParseUint(name[len(prefix):], 10, 32)
+	if err != nil {
+		return 0, "", false
+	}
+	val := ilstDataValue(atomPayload)
+	if val == "" {
+		return 0, "", false
+	}
+	return uint32(id), val, true
 }
 
 // ilstCoverValue extracts a covr atom's image as a Matroska-style attachment.
