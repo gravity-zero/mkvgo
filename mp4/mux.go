@@ -90,7 +90,7 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, dur int64, sync
 	}
 	t.samples.addDur(uint32(len(data)), pts, dur, sync)
 	if t.hasher != nil {
-		t.hasher.Write(data)
+		_, _ = t.hasher.Write(data) // hash.Hash.Write never errors
 	}
 	t.pending = append(t.pending, data...)
 	t.pendingCnt++

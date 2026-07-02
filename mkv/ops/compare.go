@@ -129,7 +129,7 @@ func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.Pro
 		}
 		accs[i].d.blocks++
 		accs[i].d.bytes += int64(len(blk.Data))
-		accs[i].h.Write(blk.Data)
+		_, _ = accs[i].h.Write(blk.Data) // hash.Hash.Write never errors
 	}
 
 	out := make([]trackDigest, len(accs))

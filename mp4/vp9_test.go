@@ -91,7 +91,7 @@ func TestVP9RoundTrip(t *testing.T) {
 // frame parsing).
 func TestVP9EntryFromCodecPrivate(t *testing.T) {
 	w, h := uint32(64), uint32(64)
-	record := []byte{0, 10, 8<<4 | 0<<1 | 0, 1, 1, 1, 0, 0} // profile 0, level 1.0, 8-bit, BT.709
+	record := []byte{0, 10, 8 << 4, 1, 1, 1, 0, 0} // profile 0, level 1.0, 8-bit 4:2:0 studio, BT.709
 	tr := mkv.Track{ID: 1, Codec: "vp9", Width: &w, Height: &h, CodecPrivate: record}
 	entry, err := vp9Entry(&tr, nil) // no first frame needed
 	if err != nil {
