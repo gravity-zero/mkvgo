@@ -114,6 +114,19 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	return reader.ReadMeta(ctx, r, path, opts...)
 }
 
+// KeyframeSample is one extracted video keyframe, decoder-ready. See
+// ExtractKeyframeSample.
+type KeyframeSample = ops.KeyframeSample
+
+// ExtractKeyframeSample returns the video keyframe nearest atMs, seeked
+// through the Cues (a few bounded reads) and packed for a decoder: Annex-B
+// with parameter sets for H.264/HEVC, an IVF wrapper for VP8/VP9/AV1. The
+// building block of thumbnail/storyboard pipelines — decoding the image is
+// the consumer's job (e.g. `ffmpeg -i frame.h264 -frames:v 1 thumb.jpg`).
+func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts ...Options) (*KeyframeSample, error) {
+	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
+}
+
 // ReadOption configures an optional metadata-read behaviour (see
 // WithInBandColourFallback).
 type ReadOption = reader.ReadOption

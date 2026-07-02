@@ -201,6 +201,18 @@ pass, lazily; cache it if requested often. The remaining difference: the
 master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
 Cues index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Thumbnails / storyboards (`matroska.ExtractKeyframeSample`)
+
+```go
+ks, err := matroska.ExtractKeyframeSample(ctx, "movie.mkv", 12*60*1000+30*1000)
+// ks.PtsMs (the actual keyframe time), ks.Codec, ks.Ext (".h264"/".hevc"/".ivf"),
+// ks.Data — Annex-B with parameter sets prepended (H.264/HEVC) or IVF (VP8/VP9/AV1)
+```
+
+Seeked through the Cues (bounded reads — works over `httpfs` too), never
+decoded: pipe `ks.Data` to a decoder (`ffmpeg -i - -frames:v 1 thumb.jpg`) for
+the image. A storyboard is this in a loop over `Container.Keyframes`.
+
 ### Single-file byte-range serving
 
 `Options.SingleFile` packs each rendition into one progressive file (init +

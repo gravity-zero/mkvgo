@@ -84,3 +84,39 @@ func CmdToVTT(args []string) {
 	}
 	fmt.Printf("converted %s → %s\n", src, outPath)
 }
+
+// CmdExtractFrame extracts the video keyframe nearest a timestamp as a
+// decoder-ready file (Annex-B or IVF) — the mkvgo half of a thumbnail
+// pipeline; decode it with e.g. `ffmpeg -i frame.h264 -frames:v 1 thumb.jpg`.
+func CmdExtractFrame(args []string) {
+	var outPath string
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-o" {
+			i++
+			if i < len(args) {
+				outPath = args[i]
+			}
+			continue
+		}
+		rejectFlagArg(args[i])
+		rest = append(rest, args[i])
+	}
+	if len(rest) < 2 || outPath == "" {
+		Fatal("usage: " + CmdUsage["extract-frame"])
+	}
+	atMs, err := ParseTimePoint(rest[1])
+	if err != nil {
+		Fatal(err.Error())
+	}
+	ks, err := matroska.ExtractKeyframeSample(context.Background(), rest[0], atMs)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	GuardOverwrite(outPath)
+	if err := os.WriteFile(outPath, ks.Data, 0o644); err != nil {
+		Fatal(err.Error())
+	}
+	fmt.Fprintf(os.Stderr, "keyframe @ %s (%s) → %s (%d bytes; decode: ffmpeg -i %s -frames:v 1 thumb.jpg)\n",
+		FmtMs(ks.PtsMs), ks.Codec, outPath, len(ks.Data), outPath)
+}

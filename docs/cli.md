@@ -785,3 +785,26 @@ requires aligned timelines); each variant directory carries its own
 ```bash
 mkvgo to-abr -o stream/ movie-1080p.mkv movie-720p.mkv movie-480p.mkv
 ```
+
+### extract-frame
+
+Extract the video keyframe nearest a timestamp, **decoder-ready** — the mkvgo
+half of a thumbnail/storyboard pipeline. The keyframe is seeked through the
+Cues (a few bounded reads, no scan) and packed so a decoder ingests it
+directly: Annex-B with the SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) prepended, or
+a minimal IVF wrapper for VP8/VP9/AV1. mkvgo never decodes — turning the
+sample into an image is one ffmpeg call away.
+
+```
+mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf>
+```
+
+```bash
+mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264
+ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
+
+# storyboard: one thumbnail per keyframe
+for t in $(mkvgo keyframes -json movie.mkv | jq -r '.[]'); do
+  mkvgo extract-frame movie.mkv ${t}ms -o f.h264 -f && ffmpeg -y -i f.h264 -frames:v 1 -vf scale=160:-1 thumb_${t}.jpg
+done
+```

@@ -62,6 +62,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Keyframe extraction for thumbnails/scrubbing**
+  (`matroska.ExtractKeyframeSample`, CLI `extract-frame`). Returns the video
+  keyframe nearest a timestamp, seeked through the Cues (a few bounded
+  reads) and packed decoder-ready — Annex-B with the parameter sets
+  prepended (H.264/HEVC) or an IVF wrapper (VP8/VP9/AV1). mkvgo never
+  decodes: the image is one `ffmpeg -frames:v 1` call away; a scrubbing
+  storyboard is a loop over the keyframe index. Verified end to end
+  (extracted frame → ffmpeg → JPEG).
 - **Single-file byte-range serving** (`Options.SingleFile`, CLI
   `--single-file`). Each rendition becomes one progressive file — init +
   `sidx` Segment Index + all CMAF fragments, byte-identical to the segmented

@@ -127,6 +127,8 @@ func main() {
 		commands.CmdHLSSegment(args)
 	case "to-abr":
 		commands.CmdToABR(args)
+	case "extract-frame":
+		commands.CmdExtractFrame(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -175,6 +177,7 @@ Commands:
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
 hls-segment   Serve one HLS resource on demand (master/playlist/init/N) — no pre-generation
 to-abr        Package pre-encoded quality variants as one multi-variant HLS master (ABR light)
+extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments, tags,
