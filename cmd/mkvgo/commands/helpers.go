@@ -48,7 +48,7 @@ var CmdUsage = map[string]string{
 	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
-	"compare":            "mkvgo compare [-json] <a.mkv> <b.mkv>",
+	"compare":            "mkvgo compare [-json] <a.mkv|.mp4> <b.mkv|.mp4>",
 	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)]",
 	"mux":                "mkvgo mux -o <out.mkv> <file:trackID> [<file:trackID> ...]",
 	"merge":              "mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]",

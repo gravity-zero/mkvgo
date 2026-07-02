@@ -52,6 +52,10 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **Cross-format `compare`.** Either side of `mkvgo compare` may now be an
+  MP4/MOV (read via the head-only MP4 probe), so a remux round-trip can be
+  verified: `mkvgo compare movie.mkv movie.mp4`. The library gains
+  `matroska.CompareContainers` for already-parsed containers.
 - **Per-track statistics tags on mux.** `Mux`/`Merge` output
   now carries mkvmerge-style statistics tags — `BPS`, `DURATION`,
   `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES` per track, keyed by track UID —

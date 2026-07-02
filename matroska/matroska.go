@@ -222,6 +222,13 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff,
 	return ops.Compare(ctx, pathA, pathB, opts...)
 }
 
+// CompareContainers diffs the metadata of two already-parsed containers —
+// format-agnostic, so an MKV can be compared against an mp4.OpenMeta result to
+// verify a remux round-trip. See ops.CompareContainers.
+func CompareContainers(a, b *Container) []Diff {
+	return ops.CompareContainers(a, b)
+}
+
 // Reindex rebuilds the seek index (Cues) of a file. See ops.Reindex.
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
 	return ops.Reindex(ctx, srcPath, dstPath, opts...)

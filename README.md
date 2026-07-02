@@ -107,7 +107,7 @@ Global flags: `-json` (structured output), `--version`
 | | `probe` | Full dump of all metadata (ffprobe-equivalent stream fields: colour/HDR, Dolby Vision, pix_fmt, aspect ratio, rotation, bitrate, keyframes, dropped tracks…) - MKV or MP4 |
 | | `keyframes` | List video keyframe timestamps (MKV Cues, or a complete structural scan when absent; MP4 sample table) |
 | | `validate` | Check MKV structure for issues |
-| | `compare` | Diff metadata of two MKV files |
+| | `compare` | Diff metadata of two files (MKV or MP4 — verify a remux round-trip) |
 | **Extraction** | `demux` | Extract tracks to raw streams |
 | | `extract-attachment` | Extract an attachment to file |
 | | `extract-subtitle` | Extract subtitle track as SRT, ASS or WebVTT (MKV or MP4) |

@@ -53,11 +53,12 @@ func CmdValidate(args []string) {
 }
 
 // CmdCompare exits 0 when the metadata is identical and 1 when it differs.
+// Either side may be an MP4/MOV (read via the head-only MP4 probe), so a
+// remux round-trip can be verified: `mkvgo compare in.mkv out.mp4`.
 func CmdCompare(pathA, pathB string) {
-	diffs, err := matroska.Compare(context.Background(), pathA, pathB)
-	if err != nil {
-		Fatal(err.Error())
-	}
+	a, _ := loadContainer(pathA, false)
+	b, _ := loadContainer(pathB, false)
+	diffs := matroska.CompareContainers(a, b)
 	switch {
 	case JsonOutput:
 		PrintJSON(diffs)

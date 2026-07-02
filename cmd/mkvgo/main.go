@@ -92,7 +92,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
 	case "compare":
-		commands.RequireArgs(args, 2, "mkvgo compare [-json] <a.mkv> <b.mkv>")
+		commands.RequireArgs(args, 2, "mkvgo compare [-json] <a.mkv|.mp4> <b.mkv|.mp4>")
 		commands.CmdCompare(args[0], args[1])
 	case "reindex":
 		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> <output.mkv>")
@@ -143,7 +143,7 @@ Commands:
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
-  compare       Diff metadata of two MKV files
+  compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
   reindex       Rebuild the seek index (Cues) of a file
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)
   from-mp4      Remux an MP4 to MKV (--mp3-container-delay)

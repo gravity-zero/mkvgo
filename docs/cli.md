@@ -150,16 +150,19 @@ mkvgo validate -strict video.mkv && echo "no errors, no warnings"
 
 ### compare
 
-Diff metadata of two MKV files. Shows added, removed, and changed elements.
+Diff metadata of two files. Shows added, removed, and changed elements. Either
+side may be an MP4/MOV (read via the head-only MP4 probe), so a remux
+round-trip can be verified.
 
 ```
-mkvgo compare [-json] <a.mkv> <b.mkv>
+mkvgo compare [-json] <a.mkv|.mp4> <b.mkv|.mp4>
 ```
 
 Exits `0` when the metadata is identical, `1` when it differs (also with `-json`).
 
 ```bash
 mkvgo compare original.mkv reencoded.mkv
+mkvgo compare movie.mkv movie.mp4     # verify a to-mp4 round-trip
 ```
 
 ---

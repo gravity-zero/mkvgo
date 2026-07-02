@@ -18,7 +18,13 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", pathB, err)
 	}
+	return CompareContainers(a, b), nil
+}
 
+// CompareContainers diffs the metadata of two already-parsed containers. It is
+// format-agnostic: either side may come from the Matroska reader or from
+// mp4.OpenMeta, so a remux round-trip can be verified across formats.
+func CompareContainers(a, b *mkv.Container) []mkv.Diff {
 	var diffs []mkv.Diff
 	diffs = append(diffs, compareInfo(&a.Info, &b.Info)...)
 	diffs = append(diffs, compareTracks(a.Tracks, b.Tracks)...)
@@ -28,7 +34,7 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]m
 	if a.DurationMs != b.DurationMs {
 		diffs = append(diffs, mkv.Diff{Type: mkv.DiffChanged, Section: "duration", Detail: fmt.Sprintf("%dms → %dms", a.DurationMs, b.DurationMs)})
 	}
-	return diffs, nil
+	return diffs
 }
 
 func compareInfo(a, b *mkv.SegmentInfo) []mkv.Diff {
