@@ -25,6 +25,11 @@ All notable changes to mkvgo are documented here. The format is based on
   dropped with it), keeps the GOP straddling the end cut (no frame lost across
   chained segments), and a range that contains media but no video keyframe is an
   explicit error instead of a silently empty or corrupt part.
+- **Rebuilt Cues key on video keyframes.** `reindex` and the full-rewrite edits
+  cued the first keyframe-flagged block of each cluster — and every audio block
+  carries that flag, so mixed clusters cued audio and the real video keyframes
+  were never indexed. The cue scan now keys on video tracks (audio-only files
+  keep the throttled first-block cue).
 - **Split rebases chapters.** Each segment now carries only the chapters
   overlapping its range, clipped and shifted to the segment timeline (previously
   every part carried the full source list at absolute timestamps).
