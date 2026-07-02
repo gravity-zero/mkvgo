@@ -12,6 +12,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
@@ -36,7 +37,7 @@ const (
 //
 // Precondition: mw.WriteStart() and mw.WriteMetadata() have been called.
 // Postcondition: caller must call mw.Finalize().
-func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, fs *mkv.FS, progress mkv.ProgressFunc, totalBytes int64) error {
+func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, fs *mkv.FS, progress mkv.ProgressFunc, totalBytes int64, videoTracks map[uint64]bool) error {
 	raw, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return fmt.Errorf("reindex open: %w", err)
@@ -113,7 +114,7 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 			outOff := mw.RelPos()
 
 			// Scan cluster body to produce a cue entry.
-			appendCueFromCluster(mw, body, timecodeScale, outOff)
+			appendCueFromCluster(mw, body, timecodeScale, outOff, videoTracks)
 
 			// Write cluster header + verbatim body.
 			if _, err := ebml.WriteElementID(mw.W, mkv.IDCluster); err != nil {
@@ -147,10 +148,14 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 // appendCueFromCluster scans the raw bytes of a cluster body to find the first
 // keyframe and adds a CuePoint to mw.Cues. outOff is the output-relative byte
 // offset of this cluster's element header (to store in CuePoint.ClusterPos).
+// videoTracks, when non-empty, restricts the keyframe cue to VIDEO tracks:
+// every audio block is flagged keyframe, so cueing "the first keyframe" of a
+// mixed cluster would cue audio and never the real video keyframe. Clusters
+// with no video keyframe fall back to the throttled first-block cue.
 //
 // Errors inside the scan are silently ignored (corrupt/truncated data): in the
 // worst case we emit no cue for this cluster, which is safe.
-func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outOff int64) {
+func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outOff int64, videoTracks map[uint64]bool) {
 	br := bytes.NewReader(body)
 
 	var clusterTS int64
@@ -187,8 +192,8 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 				firstBlockTC = tc
 				firstBlockTrack = track
 			}
-			if keyframe {
-				// Found first keyframe — emit cue and exit.
+			if keyframe && (len(videoTracks) == 0 || videoTracks[track]) {
+				// Found the first cueable keyframe — emit cue and exit.
 				mw.Cues = append(mw.Cues, mkv.CuePoint{
 					TimeMs:     tc,
 					Track:      track,
@@ -211,7 +216,7 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 				firstBlockTC = tc
 				firstBlockTrack = track
 			}
-			if isKey {
+			if isKey && (len(videoTracks) == 0 || videoTracks[track]) {
 				mw.Cues = append(mw.Cues, mkv.CuePoint{
 					TimeMs:     tc,
 					Track:      track,
@@ -336,8 +341,8 @@ func reindexSafeTimecodeMs(v, scale int64) (int64, error) {
 // writeClusterVerbatim writes one cluster (header + body) to mw, appends a cue
 // point, and reports progress. body must be the complete cluster body already
 // read from the source. outOff is mw.RelPos() captured before this call.
-func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, timecodeScale, outOff int64) error {
-	appendCueFromCluster(mw, body, timecodeScale, outOff)
+func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, timecodeScale, outOff int64, videoTracks map[uint64]bool) error {
+	appendCueFromCluster(mw, body, timecodeScale, outOff, videoTracks)
 	if _, err := ebml.WriteElementID(mw.W, mkv.IDCluster); err != nil {
 		return fmt.Errorf("reindex: write cluster ID: %w", err)
 	}
@@ -362,6 +367,13 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	progress := mkv.ProgressFrom(opts)
+
+	// A cheap head-only read of the track list, so the rebuilt cues key on
+	// VIDEO keyframes (every audio block is flagged keyframe).
+	var videoTracks map[uint64]bool
+	if meta, merr := reader.OpenMetaWithFS(ctx, srcPath, fs); merr == nil {
+		videoTracks = videoTrackSet(meta.Tracks)
+	}
 
 	raw, err := fs.DoOpen(srcPath)
 	if err != nil {
@@ -541,7 +553,7 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 			consumed += int64(hdrBytes) + h.Size
 
 			outOff := mw.RelPos()
-			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff); err != nil {
+			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
 				return err
 			}
 

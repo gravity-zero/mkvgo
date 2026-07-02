@@ -180,7 +180,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 			totalBytes = stat.Size()
 		}
 	}
-	fastErr := reindexFastCopy(mw, srcPath, c.Info.TimecodeScale, fs, progress, totalBytes)
+	fastErr := reindexFastCopy(mw, srcPath, c.Info.TimecodeScale, fs, progress, totalBytes, videoTrackSet(c.Tracks))
 	if fastErr == nil {
 		return mw.Finalize()
 	}

@@ -783,7 +783,7 @@ func TestReindex_ProgressNotCalledWhenTotalBytesZero(t *testing.T) {
 	progressFn := mkv.ProgressFunc(func(done, total int64) { called = true })
 	// Pass totalBytes=0: progress must not fire (totalBytes > 0 = false).
 	// Mutation (>= 0): 0 >= 0 = true → progress WOULD fire. Test catches it.
-	if err := reindexFastCopy(mw, src, 1_000_000, nil, progressFn, 0); err != nil {
+	if err := reindexFastCopy(mw, src, 1_000_000, nil, progressFn, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if called {
@@ -826,7 +826,7 @@ func TestReindex_ProgressCalledWhenTotalBytesPositive(t *testing.T) {
 
 	var calls int
 	progressFn := mkv.ProgressFunc(func(done, total int64) { calls++ })
-	if err := reindexFastCopy(mw, src, 1_000_000, nil, progressFn, totalBytes); err != nil {
+	if err := reindexFastCopy(mw, src, 1_000_000, nil, progressFn, totalBytes, nil); err != nil {
 		t.Fatal(err)
 	}
 	if calls == 0 {

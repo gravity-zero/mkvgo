@@ -510,7 +510,7 @@ func TestReindex_UnknownSizeCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = reindexFastCopy(mw, patched, 1000000, nil, nil, 0)
+	err = reindexFastCopy(mw, patched, 1000000, nil, nil, 0, nil)
 	if err != errUnknownSizeCluster {
 		t.Errorf("expected errUnknownSizeCluster, got %v", err)
 	}
@@ -570,7 +570,7 @@ func TestReindex_OversizedCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotErr := reindexFastCopy(mw, patched, 1000000, nil, nil, 0)
+	gotErr := reindexFastCopy(mw, patched, 1000000, nil, nil, 0, nil)
 	if gotErr == nil {
 		t.Fatal("expected error for oversized cluster, got nil")
 	}
@@ -630,7 +630,7 @@ func TestReindex_TruncatedMidCluster(t *testing.T) {
 	}
 
 	// Must not panic; an error is expected (unexpected EOF from io.ReadFull).
-	gotErr := reindexFastCopy(mw, truncated, 1000000, nil, nil, 0)
+	gotErr := reindexFastCopy(mw, truncated, 1000000, nil, nil, 0, nil)
 	if gotErr == nil {
 		t.Fatal("expected error for mid-cluster truncation, got nil")
 	}
