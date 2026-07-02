@@ -84,6 +84,10 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
+> **Runnable example:** [`examples/hls-server`](../examples/hls-server/) is a
+> complete on-demand server (this handler + a landing page that plays the
+> output in hls.js and dash.js). `go run ./examples/hls-server -src movie.mkv`.
+
 Combined with a remote source (see below), only the byte ranges a viewer
 actually watches are ever transferred from storage.
 

@@ -233,6 +233,15 @@ Full library guide: **[docs/library.md](docs/library.md)**.
 | **[wasm.md](docs/wasm.md)** | The browser build: probe/remux/package client-side, TypeScript wrapper, React hooks, MSE demo. |
 | **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** | Generated Go API reference. |
 
+**Runnable examples:**
+
+| Example | What |
+|---|---|
+| [`examples/hls-server/`](examples/hls-server/) | On-demand HLS + DASH server (~90 lines) — `go run ./examples/hls-server -src movie.mkv` |
+| [`web/example/`](web/example/) | Browser WASM demo — drag a file in, probe it, play it via MSE (no server) |
+| [`web/mkvgo.ts`](web/mkvgo.ts) · [`web/react.ts`](web/react.ts) · [`web/vue.ts`](web/vue.ts) | Typed wrapper + React hooks + Vue composables (copy-paste) |
+| [`scripts/wasm_smoke.mjs`](scripts/wasm_smoke.mjs) | Node end-to-end usage of the wasm build |
+
 ## Limitations
 
 - **No transcoding.** Every operation copies compressed samples verbatim; a

@@ -210,7 +210,28 @@ const onRemux = async (file: File) => {
 
 ## Vue 3
 
-A composable and a component:
+**[`web/vue.ts`](../web/vue.ts)** ships ready-made composables mirroring the
+React hooks (copy it and `mkvgo.ts` into your project): `useMkvGo`, `useProbe`
+(auto-abort), and `useHLSPlayer` (MSE playback of a local File, bounded memory).
+
+```vue
+<!-- MediaInspector.vue -->
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useMkvGo, useProbe } from './vue'
+
+const mkvgo = useMkvGo({ wasmUrl: '/mkvgo.wasm', wasmExecUrl: '/wasm_exec.js' })
+const file = ref<File | null>(null)
+const { probe } = useProbe(file)
+</script>
+
+<template>
+  <input type="file" :disabled="!mkvgo" @change="e => file = (e.target as HTMLInputElement).files?.[0] ?? null" />
+  <ul v-if="probe"><li v-for="t in probe.tracks" :key="t.id">#{{ t.id }} {{ t.type }} — {{ t.codec_long_name ?? t.codec }}</li></ul>
+</template>
+```
+
+Or hand-rolled, with just the module loader:
 
 ```ts
 // useMkvGo.ts
@@ -223,33 +244,6 @@ loadMkvGo({ wasmUrl: '/mkvgo.wasm', wasmExecUrl: '/wasm_exec.js' }).then((m) => 
 export function useMkvGo() {
   return api   // shared instance; null until loaded
 }
-```
-
-```vue
-<!-- MediaInspector.vue -->
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useMkvGo } from './useMkvGo'
-import type { ProbeResult } from './mkvgo'
-
-const mkvgo = useMkvGo()
-const probe = ref<ProbeResult | null>(null)
-
-async function onFile(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (file && mkvgo.value) probe.value = await mkvgo.value.probe(file)
-}
-</script>
-
-<template>
-  <input type="file" accept=".mkv,.webm,.mp4,.mov" :disabled="!mkvgo" @change="onFile" />
-  <ul v-if="probe">
-    <li v-for="t in probe.tracks" :key="t.id">
-      #{{ t.id }} {{ t.type }} — {{ t.codec_long_name ?? t.codec }}
-      <template v-if="t.width"> {{ t.width }}×{{ t.height }}</template>
-    </li>
-  </ul>
-</template>
 ```
 
 ## Node

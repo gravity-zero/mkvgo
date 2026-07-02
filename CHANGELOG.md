@@ -86,6 +86,11 @@ All notable changes to mkvgo are documented here. The format is based on
   mkvgo packages VOD files) and multi-period DASH (a discontinuity model
   that would degrade seeking if used for chapters) were evaluated and
   deliberately left out; the rationale lives in library.md.
+- **Runnable examples.** `examples/hls-server/` is a complete ~90-line
+  on-demand HLS + DASH server (`mp4.PlanHLS` + one handler, local file or
+  http(s):// URL source, landing page that plays the output in hls.js and
+  dash.js). `web/vue.ts` adds Vue 3 composables mirroring the React hooks
+  (`web/react.ts`). Both TypeScript files typecheck under `--strict`.
 - **WebAssembly ergonomics.** Every wasm method now honours
   `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
   reads, remux, segment builds), wired for React effect cleanups.
