@@ -155,14 +155,20 @@ side may be an MP4/MOV (read via the head-only MP4 probe), so a remux
 round-trip can be verified.
 
 ```
-mkvgo compare [-json] <a.mkv|.mp4> <b.mkv|.mp4>
+mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>
 ```
 
-Exits `0` when the metadata is identical, `1` when it differs (also with `-json`).
+`-blocks` additionally compares the media CONTENT: per-track block count,
+payload byte total and a SHA-256 over the payloads in stream order (MKV/WebM
+on both sides). An identical result proves a remux/reindex/split+join
+round-trip carried every frame byte-identically.
+
+Exits `0` when identical, `1` when anything differs (also with `-json`).
 
 ```bash
 mkvgo compare original.mkv reencoded.mkv
 mkvgo compare movie.mkv movie.mp4     # verify a to-mp4 round-trip
+mkvgo compare -blocks a.mkv b.mkv     # prove the media content is identical
 ```
 
 ---
@@ -339,6 +345,12 @@ Edit metadata without rewriting the entire file. Only modifies headers -- instan
 ```
 mkvgo edit-inplace <file.mkv> '<json>'
 ```
+
+mkvgo-written files reserve padding after the metadata, so edits that GROW
+the metadata (longer title, added tags/chapters) usually still fit; beyond
+the reserve the command fails and a full rewrite (`edit`) is needed. The
+head SeekHead is rebuilt in place (its Cues entry preserved), and tags kept
+after the clusters (mux statistics) are folded into the head, not duplicated.
 
 ```bash
 mkvgo edit-inplace video.mkv '{"title":"Quick Fix"}'

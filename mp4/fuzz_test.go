@@ -44,6 +44,11 @@ func FuzzParseMP4(f *testing.F) {
 	f.Add([]byte{0x00, 0x00, 0x00, 0x08, 'm', 'o', 'o', 'v'})
 	f.Add([]byte{0x00, 0x00, 0xFF, 0xFF, 'm', 'o', 'o', 'v', 0x01, 0x02})
 	f.Add(sampleMP4(f))
+	// A real QuickTime file (brand "qt  ", wide+mdat first, trailing moov,
+	// SoundDescription v1 with a wave-wrapped esds) seeds the QT-specific paths.
+	if qt, err := os.ReadFile("../internal/testdata/quicktime.mov"); err == nil {
+		f.Add(qt)
+	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Both the full parse and the metadata-only (head-only) parse must be safe.

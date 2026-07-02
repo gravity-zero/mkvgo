@@ -365,6 +365,8 @@ make build                # build for current platform
 make test                 # run tests with -race
 make vet                  # go vet
 make fuzz                 # run the parser fuzzers locally (30s each)
+make e2e                  # verify remuxes against real ffmpeg (needs ffmpeg,
+                          #   or MKVGO_E2E=docker:<container>)
 make release              # cross-compile all platforms
 ```
 

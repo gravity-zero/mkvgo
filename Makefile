@@ -20,7 +20,15 @@ fuzz:
 	go test -fuzz=FuzzReadMeta -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzBlockReader -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzCodecColour -fuzztime=$(FUZZTIME) ./mkv/reader/
+	go test -fuzz=FuzzParseOGMChapters -fuzztime=$(FUZZTIME) ./mkv/
 	go test -fuzz=FuzzParseMP4 -fuzztime=$(FUZZTIME) ./mp4/
+	go test -fuzz=FuzzVP9FrameHeader -fuzztime=$(FUZZTIME) ./mp4/
+
+# End-to-end verification against real ffmpeg/ffprobe (opt-in):
+#   make e2e                            # local ffmpeg on PATH
+#   MKVGO_E2E=docker:evey-server make e2e   # ffmpeg inside a container
+e2e:
+	sh scripts/e2e.sh
 
 clean:
 	rm -rf dist/ $(BIN)

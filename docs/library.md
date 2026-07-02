@@ -362,6 +362,11 @@ err := matroska.EditMetadata(ctx, "input.mkv", "output.mkv",
 
 ### In-place (instant, headers only)
 
+Files written by mkvgo reserve `writer.MetadataReserve` bytes of Void after
+the metadata, so in-place edits that grow it usually fit. The head SeekHead is
+rebuilt (keeping its Cues entry) and a post-cluster Tags element (mux
+statistics) is folded into the head without duplication.
+
 Modifies the file directly without rewriting cluster data. Only safe for metadata changes that fit in the existing header space.
 
 ```go

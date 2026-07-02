@@ -57,6 +57,23 @@ All notable changes to mkvgo are documented here. The format is based on
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
   `OpenMeta` and `RemuxFromMP4` work on such files (real-muxer fixture added);
   output verified decodable by ffmpeg.
+- **In-place edits that grow.** mkvgo-written files now reserve 1 KB of Void
+  after the metadata (`writer.MetadataReserve`, mkvpropedit-style), so
+  `edit-inplace` absorbs a longer title or added tags/chapters instantly
+  instead of demanding a full rewrite. The edit also REBUILDS the head
+  SeekHead in place (it used to be overwritten and lost, degrading head-only
+  reads) keeping its Cues entry, and folds a post-cluster statistics Tags
+  element into the head instead of duplicating it.
+- **`compare -blocks`.** Content-level comparison: per-track block count,
+  payload bytes and payload SHA-256 in stream order (`matroska.CompareBlocks`).
+  An identical result proves a remux/reindex/split+join round-trip carried
+  every frame byte-identically — beyond what the metadata compare shows.
+- **`make e2e`** verifies the remux paths against real ffmpeg/ffprobe (local
+  or `MKVGO_E2E=docker:<container>`): fixture generation, to-mp4/faststart,
+  from-mp4, vp09, seekable WebM, QuickTime `.mov`, `split -every`, decode
+  checks. New fuzzers cover the OGM chapter parser and the VP9 frame header
+  (the OGM one immediately caught non-monotonic chapter times — now an
+  explicit error), and the QuickTime fixture seeds the MP4 fuzzer.
 - **`add-attachment` / `remove-attachment`.** Attach a file (font, cover art —
   MIME sniffed from magic bytes, `-mime` to override) or remove one by ID or
   exact name; removal fails before writing anything when nothing matches.
