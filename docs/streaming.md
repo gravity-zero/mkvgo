@@ -18,7 +18,7 @@ That is the whole idea of CMAF, and what mkvgo delivers:
 ```
 stream/
   master.m3u8        HLS manifest   (hls.js, Safari)   -.
-  manifest.mpd       DASH manifest  (dash.js, Shaka)    |  both describe the
+  manifest.mpd       DASH manifest  (dash.js)           |  both describe the
   init.mp4                                               |  SAME CMAF segments
   seg00001.m4s  seg00002.m4s  ...                       -'
   audio1.m3u8  init_a1.mp4  seg_a1_00001.m4s  ...    each audio track (demuxed)
@@ -246,7 +246,7 @@ mkvgo validate video.mkv        # exits non-zero on error-severity issues
 
 - **Studio DRM (CENC / SAMPLE-AES / FairPlay/Widevine/PlayReady).** mkvgo does
   AES-128 for self-hosted content; multi-DRM signaling and per-sample
-  encryption are a different product (use Shaka Packager).
+  encryption are a separate concern, out of scope here.
 - **LL-HLS (low-latency).** A *live-ingest* mechanism (partial segments,
   blocking reloads) — mkvgo packages VOD files, where it changes nothing for
   the viewer.

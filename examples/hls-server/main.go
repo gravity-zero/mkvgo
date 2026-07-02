@@ -11,7 +11,7 @@
 // client at:
 //
 //	http://localhost:8080/hls/master.m3u8    (HLS  — hls.js, Safari)
-//	http://localhost:8080/hls/manifest.mpd   (DASH — dash.js, Shaka)
+//	http://localhost:8080/hls/manifest.mpd   (DASH — dash.js)
 //
 // The whole server is the plan() helper and one handler around
 // plan.Resource(name). That is the entire integration surface.

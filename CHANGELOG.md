@@ -85,7 +85,7 @@ All notable changes to mkvgo are documented here. The format is based on
   file plays through MSE with bounded memory (the browser demo does).
 - **MP4/MOV packaging sources.** `to-hls`, `to-abr` and `hls-segment` (and
   the wasm `openHLS`) now accept MP4/MOV inputs, sniffed from the first
-  bytes — the Bento4-style workflow without a pre-remux. For the on-demand
+  bytes — no pre-remux step required. For the on-demand
   plan the moov sample table IS the index: the plan is exact by
   construction, so every resource — master playlist, DASH manifest and
   I-frame playlist included — is byte-identical to the full pass

@@ -21,7 +21,7 @@ every operation copies the compressed samples verbatim.
 
 mkvgo is three things in one tool. Pick the pillar you need:
 
-### 🔍 1 · Inspect
+### 1 · Inspect
 
 Read what's inside a file — **head-only**, like `ffprobe` but without decoding a
 frame or reading the whole file, so indexing a large library is orders of
@@ -38,7 +38,7 @@ mkvgo probe video.mkv          # or video.mp4 — same output
 mkvgo probe -json video.mkv | jq '.tracks[]'
 ```
 
-### 🔄 2 · Convert & edit
+### 2 · Convert & edit
 
 Losslessly move content between containers and rework its metadata.
 
@@ -54,7 +54,7 @@ mkvgo to-mp4 --faststart video.mkv video.mp4    # progressive MP4, no re-encode
 mkvgo edit-inplace video.mkv '{"title":"…"}'    # instant, no rewrite
 ```
 
-### 📡 3 · Stream (HLS + DASH)
+### 3 · Stream (HLS + DASH)
 
 Turn a file into a **CMAF** presentation — the packaging half of adaptive
 streaming, no transcoder involved. **One segment set, two manifests.**

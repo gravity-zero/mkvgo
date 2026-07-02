@@ -15,7 +15,7 @@ import "sort"
 
 // mp4 sample_flags (ISO/IEC 14496-12 §8.8.3.1): a sync sample depends on nothing
 // (sample_depends_on = 2); a non-sync sample depends on others and sets
-// sample_is_non_sync_sample. These are the values ffmpeg and Shaka write.
+// sample_is_non_sync_sample. These match what standard fragmented-MP4 muxers write.
 const (
 	sampleFlagsSync    = 0x02000000
 	sampleFlagsNonSync = 0x01010000
