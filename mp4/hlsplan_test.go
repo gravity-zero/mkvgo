@@ -55,7 +55,7 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg*.m4s"))
+	fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s")) // video rendition
 	if plan.NumSegments() != len(fullSegs) {
 		t.Fatalf("plan has %d segments, full pass wrote %d", plan.NumSegments(), len(fullSegs))
 	}
@@ -104,7 +104,8 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 
 	// Resource() is the declarative entry point: every listed name resolves,
 	// with the right payload and MIME type.
-	wantNames := 3 + plan.NumSegments() + 2
+	// master + mpd, then per rendition (video + 1 audio): playlist + init + segments.
+	wantNames := 2 + 2*(2+plan.NumSegments()) + 2
 	if got := plan.Resources(); len(got) != wantNames {
 		t.Errorf("Resources() = %d names, want %d (%v)", len(got), wantNames, got)
 	}
@@ -112,6 +113,22 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 		data, mime, err := plan.Resource(context.Background(), name)
 		if err != nil || len(data) == 0 || mime == "" {
 			t.Errorf("Resource(%q) = %d bytes, %q, %v", name, len(data), mime, err)
+			continue
+		}
+		// Every resource the full pass also wrote must be byte-identical —
+		// audio renditions included. master/manifest differ by the estimated
+		// BANDWIDTH, and the on-demand subtitle playlist is single-segment.
+		switch name {
+		case "master.m3u8", "manifest.mpd", "sub1.m3u8":
+			continue
+		}
+		want, ferr := os.ReadFile(filepath.Join(dir, name))
+		if ferr != nil {
+			t.Errorf("full pass did not write %s: %v", name, ferr)
+			continue
+		}
+		if !bytes.Equal(data, want) {
+			t.Errorf("%s differs from the full pass (%d vs %d bytes)", name, len(data), len(want))
 		}
 	}
 	vtt, mime, err := plan.Resource(context.Background(), "sub1.vtt")
@@ -128,6 +145,20 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 	}
 	if _, _, err := plan.Resource(context.Background(), "nope.bin"); err == nil {
 		t.Error("unknown resource must error")
+	}
+
+	// The DASH manifest rides on the same CMAF segments: structural check,
+	// timeline durations matching the HLS playlist's EXTINFs.
+	mpd, mime, err := plan.Resource(context.Background(), "manifest.mpd")
+	if err != nil || mime != "application/dash+xml" {
+		t.Fatalf("manifest.mpd: %v (%s)", err, mime)
+	}
+	for _, want := range []string{`<MPD `, `type="static"`, `initialization="init.mp4"`,
+		`media="seg$Number%05d$.m4s"`, `<SegmentTimeline>`, `codecs="`, `width="320" height="240"`,
+		`mimeType="text/vtt"`, `lang="fre"`, `<BaseURL>sub1.vtt</BaseURL>`} {
+		if !bytes.Contains(mpd, []byte(want)) {
+			t.Errorf("manifest.mpd missing %q:\n%s", want, mpd)
+		}
 	}
 }
 

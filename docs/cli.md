@@ -679,7 +679,7 @@ mkvgo to-webm video.mkv video.webm
 
 ### to-hls
 
-Remux an MKV/WebM file to a fragmented-MP4 / CMAF **HLS** presentation in an output directory: a multivariant playlist (`master.m3u8`, with `BANDWIDTH`/`RESOLUTION`/`CODECS`), the muxed audio+video media playlist (`playlist.m3u8`), an initialisation segment (`init.mp4`) and the media segments (`seg00001.m4s` …). No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment.
+Remux an MKV/WebM file to a fragmented-MP4 / **CMAF** presentation in an output directory, served through two manifests over the same segments: **HLS** (`master.m3u8` with `BANDWIDTH`/`RESOLUTION`/`CODECS`, plus one media playlist per rendition) and **DASH** (`manifest.mpd`, one AdaptationSet per rendition). Tracks are demuxed — the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) and one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …), declared as an `EXT-X-MEDIA` AUDIO group — so multi-audio sources (VF/VO) get native language selection in hls.js/Safari/dash.js. No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment. Secondary video tracks are dropped with a reason.
 
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
@@ -695,7 +695,7 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
 ```bash
 mkvgo to-hls video.mkv -o stream/
 mkvgo to-hls video.mkv -o stream/ -segment 4
-# serve stream/ over HTTP; play stream/master.m3u8 in hls.js / Safari / ffmpeg
+# serve stream/ over HTTP; play stream/master.m3u8 (hls.js/Safari) or stream/manifest.mpd (dash.js)
 ```
 
 ### hls-segment

@@ -72,7 +72,7 @@ func TestRemuxToHLS(t *testing.T) {
 		}
 	}
 
-	segs, _ := filepath.Glob(filepath.Join(dir, "seg*.m4s"))
+	segs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s")) // video rendition
 	if len(segs) < 3 || len(segs) > 4 {
 		t.Fatalf("segments = %d, want ~3 for 6s @ 2s target", len(segs))
 	}
@@ -93,7 +93,8 @@ func TestRemuxToHLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"#EXT-X-STREAM-INF:", "BANDWIDTH=", "RESOLUTION=320x240",
-		"CODECS=", "TYPE=SUBTITLES", "NAME=\"Français\"", "LANGUAGE=\"fre\"",
+		"CODECS=", "TYPE=AUDIO", "URI=\"audio1.m3u8\"", "AUDIO=\"aud\"",
+		"TYPE=SUBTITLES", "NAME=\"Français\"", "LANGUAGE=\"fre\"",
 		"URI=\"sub1.m3u8\"", "SUBTITLES=\"subs\"", "playlist.m3u8"} {
 		if !bytes.Contains(master, []byte(want)) {
 			t.Errorf("master.m3u8 missing %q:\n%s", want, master)

@@ -57,20 +57,29 @@
     //    memory, no transcoding, no server.
     const plan = await MkvGo.openHLS(file, { segmentSeconds: 6, skipUnsupported: true })
     const master = new TextDecoder().decode((await plan.resource('master.m3u8')).data)
-    const codecs = /CODECS="([^"]+)"/.exec(master)?.[1]
-    if (codecs && MediaSource.isTypeSupported(`video/mp4; codecs="${codecs}"`)) {
+    // Demuxed CMAF: the CODECS list is video first, then the audio renditions.
+    const codecs = (/CODECS="([^"]+)"/.exec(master)?.[1] ?? '').split(',')
+    const vCodec = codecs[0], aCodec = codecs[1]
+    if (vCodec && MediaSource.isTypeSupported(`video/mp4; codecs="${vCodec}"`)) {
       const ms = new MediaSource()
       $('player').src = URL.createObjectURL(ms)
       ms.addEventListener('sourceopen', async () => {
-        const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
-        const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
-        await append((await plan.resource('init.mp4')).data)
-        for (let n = 0; n < plan.numSegments; n++) await append(await plan.segment(n))
+        const feed = async (mime, init, segName) => {
+          const sb = ms.addSourceBuffer(mime)
+          const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
+          await append((await plan.resource(init)).data)
+          for (let n = 0; n < plan.numSegments; n++)
+            await append((await plan.resource(segName(n + 1))).data)
+        }
+        const jobs = [feed(`video/mp4; codecs="${vCodec}"`, 'init.mp4', (n) => `seg${String(n).padStart(5, '0')}.m4s`)]
+        if (aCodec && plan.resources.includes('init_a1.mp4') && MediaSource.isTypeSupported(`audio/mp4; codecs="${aCodec}"`))
+          jobs.push(feed(`audio/mp4; codecs="${aCodec}"`, 'init_a1.mp4', (n) => `seg_a1_${String(n).padStart(5, '0')}.m4s`))
+        await Promise.all(jobs)
         ms.endOfStream()
       }, { once: true })
-      $('status').textContent = 'playing via MSE — segments built on demand from the file'
+      $('status').textContent = 'playing via MSE — demuxed segments built on demand from the file'
     } else {
-      $('status').textContent = `playback skipped (codecs "${codecs ?? '?'}" unsupported by this browser)`
+      $('status').textContent = `playback skipped (codecs "${vCodec ?? '?'}" unsupported by this browser)`
     }
 
     // 3. Remux to a downloadable progressive MP4 (whole file in memory).

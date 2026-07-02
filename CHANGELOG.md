@@ -62,6 +62,20 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **DASH output and demuxed CMAF renditions.** The packaging is CMAF proper:
+  one demuxed rendition per track — the video (`playlist.m3u8`, `init.mp4`,
+  `seg00001.m4s` …) and each audio track (`audio1.m3u8`, `init_a1.mp4`,
+  `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group) — served through two
+  manifests over the same segments: HLS (`master.m3u8`) and **DASH**
+  (`manifest.mpd`, static VOD, one AdaptationSet per rendition with an exact
+  `SegmentTimeline`). Multi-audio sources (VF/VO) get native language
+  selection in hls.js/Safari/dash.js, and DASH players — which reject muxed
+  representations — are first-class. Movie metadata (title, tags, cover art)
+  rides on the video init; a track that ends early keeps its rendition
+  aligned with empty fragments; secondary video tracks are dropped with a
+  reason. Both serving modes (`to-hls` and `hls-segment`/`PlanHLS`) emit the
+  layout byte-identically (regression-tested per rendition, ffmpeg-verified
+  for both manifests).
 - **On-demand HLS** (`mp4.PlanHLS`, CLI `hls-segment`). The zero-storage
   counterpart of `to-hls`: `PlanHLS` reads the metadata head (with its Cues),
   the first and the last cluster — a few bounded reads — and `Segment(n)`

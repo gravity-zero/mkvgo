@@ -73,10 +73,13 @@ ms.addEventListener('sourceopen', async () => {
 })
 ```
 
-`plan.resources` lists every name a player could request — playlists, init,
-segments, and one WebVTT rendition per text subtitle track (`sub1.m3u8` /
-`sub1.vtt`); cover art and global tags ride in the init segment. The source
-must carry a Cues index (real muxers always write one).
+`plan.resources` lists every name a player could request — the HLS master and
+the DASH `manifest.mpd` (same CMAF segments, two manifests), per-rendition
+playlists/init/segments (video: `init.mp4`/`seg*.m4s`; audio track k:
+`init_ak.mp4`/`seg_ak_*.m4s` — demuxed, so multi-audio selection works), and
+one WebVTT rendition per text subtitle track (`sub1.m3u8` / `sub1.vtt`);
+cover art and global tags ride on the video init segment. The source must
+carry a Cues index (real muxers always write one).
 
 ## Quickstart (browser, no bundler)
 

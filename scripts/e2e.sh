@@ -100,7 +100,7 @@ decode_ok "$TMP/out.webm"
 
 echo "== MKV -> fragmented-MP4 HLS -> decode playlist + standalone segment"
 "$MKVGO" to-hls "$TMP/src.mkv" -o "$TMP/hls" -segment 1 >/dev/null
-plist=$(stage "$TMP/hls/init.mp4" >/dev/null; stage "$TMP/hls/playlist.m3u8")
+plist=$(stage "$TMP/hls/init.mp4" >/dev/null; stage "$TMP/hls/master.m3u8" >/dev/null; stage "$TMP/hls/playlist.m3u8" >/dev/null; stage "$TMP/hls/audio1.m3u8" >/dev/null; stage "$TMP/hls/init_a1.mp4" >/dev/null; stage "$TMP/hls/master.m3u8")
 # stage each segment so the container ffmpeg can resolve the playlist entries.
 for s in "$TMP"/hls/seg*.m4s; do stage "$s" >/dev/null; done
 if [ -n "$DOCKER_CONTAINER" ]; then
@@ -120,7 +120,19 @@ cmp "$TMP/od-init.mp4" "$TMP/hls/init.mp4"
 cmp "$TMP/od-playlist.m3u8" "$TMP/hls/playlist.m3u8"
 "$MKVGO" hls-segment "$TMP/src.mkv" 2 -segment 1 > "$TMP/od-seg2.m4s"
 cmp "$TMP/od-seg2.m4s" "$TMP/hls/seg00002.m4s"
-echo "  on-demand OK: init + playlist + mid segment identical"
+"$MKVGO" hls-segment "$TMP/src.mkv" seg_a1_00002.m4s -segment 1 > "$TMP/od-a2.m4s"
+cmp "$TMP/od-a2.m4s" "$TMP/hls/seg_a1_00002.m4s"
+echo "  on-demand OK: init + playlist + mid segment (video & audio) identical"
+
+echo "== DASH manifest over the same CMAF segments -> decode"
+if [ -n "$DOCKER_CONTAINER" ]; then
+  stage "$TMP/hls/manifest.mpd" >/dev/null
+  stage "$TMP/hls/init_a1.mp4" >/dev/null
+  docker exec "$DOCKER_CONTAINER" ffmpeg -v error -allowed_extensions ALL -i /tmp/mkvgo-e2e/manifest.mpd -map 0:v -map 0:a -f null - 2>&1
+else
+  ffmpeg -v error -allowed_extensions ALL -i "$TMP/hls/manifest.mpd" -map 0:v -map 0:a -f null - 2>&1
+fi
+echo "  DASH OK: manifest decode"
 
 echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" probe "$TMP/src.mov" >/dev/null
