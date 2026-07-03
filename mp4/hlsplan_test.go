@@ -355,17 +355,17 @@ func (c countingRSC) Read(p []byte) (int, error) {
 func (c countingRSC) Seek(offset int64, whence int) (int64, error) { return c.f.Seek(offset, whence) }
 func (c countingRSC) Close() error                                 { return c.f.Close() }
 
-// The lazy subtitle-cue pass walks every cluster, but it must not READ the
-// media payloads it walks past — on a large file that is the difference
-// between seconds of I/O and a header-only skim (the window in which a client
-// disconnect used to poison the cue cache). The fixture carries ~11 MB of
-// video payload and a handful of text cues: loading the cues must read a
-// small fraction of the file.
+// The lazy subtitle-cue pass walks every cluster, but when the media
+// payloads it walks past are large enough to seek over it must not READ them
+// — on a big-payload file that is the difference between a full sequential
+// read and a header-only skim. The fixture carries ~30 MB of 256 KiB video
+// frames and a handful of text cues: loading the cues must read a small
+// fraction of the file.
 func TestPlanHLSSubtitleScanSkipsMediaPayloads(t *testing.T) {
 	w, h := uint32(320), uint32(240)
-	frame := append([]byte{0x00, 0x00, 0x00, 0x01, 0x65}, make([]byte, 96<<10)...)
+	frame := append([]byte{0x00, 0x00, 0x00, 0x01, 0x65}, make([]byte, 256<<10)...)
 	var gblocks []genBlock
-	for i := 0; i < 120; i++ { // video, 40ms frames, keyframe every 1s, ~96 KiB each
+	for i := 0; i < 120; i++ { // video, 40ms frames, keyframe every 1s, ~256 KiB each
 		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: frame})
 	}
 	for i := 0; i < 3; i++ {

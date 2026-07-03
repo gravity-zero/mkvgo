@@ -1,7 +1,6 @@
 package reader
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -21,76 +20,126 @@ const (
 	progressInterval = 50
 	maxBlockSize     = 64 * 1024 * 1024 // 64 MB max per block
 
-	bufSize = 256 << 10 // 256 KiB read-ahead
+	bufSize = 256 << 10 // 256 KiB max read-ahead
 
-	// filterBufSize is the read-ahead of a track-filtered reader: skips seek
-	// past the unwanted payloads, so a big buffer would only drag skipped
-	// bytes back in through each refill.
-	filterBufSize = 8 << 10
+	// minChunk is the read-ahead right after a seek-skip: enough for the next
+	// block headers without dragging a skipped payload back in. The chunk then
+	// doubles on every sequential fill up to bufSize, so a walk over payloads
+	// too small to seek past (frame-interleaved video is a few KiB per block)
+	// converges to plain bulk sequential reads — never one read per block,
+	// which is what a network filesystem punishes.
+	minChunk = 16 << 10
 
-	// seekSkipMin is the smallest beyond-buffer skip worth a real seek; below
-	// it, reading forward through the buffer is cheaper than a refill.
-	seekSkipMin = 8 << 10
+	// seekSkipMin is the smallest beyond-window skip worth a real seek. Every
+	// source read costs a fixed round trip on remote-ish filesystems (9p, SMB,
+	// HTTP) on top of the bytes; seeking over a payload only pays when the
+	// bytes saved outweigh the extra round trip the next small read costs —
+	// measured around tens of KiB there, immaterial on local disks. Below the
+	// threshold reading forward through the growing window is cheaper, and the
+	// walk stays a bulk sequential read.
+	seekSkipMin = 64 << 10
 )
 
 // errFilteredBlock is parseBlock's signal that the block belongs to a track
 // outside the filter and its payload was skipped; Next keeps walking.
 var errFilteredBlock = errors.New("block filtered")
 
-// countingReader wraps a bufio.Reader and tracks how many bytes have been
-// consumed since creation. Every Read increments the counter; Seek is only
-// called on the underlying io.ReadSeeker on the hybrid skip path (large
-// forward skips), never for a rewind.
+// countingReader is a forward-only buffered reader with an adaptive window.
+// It tracks the logical position by counting consumed bytes; the invariant is
+// src's file offset == pos + (w - r), i.e. the source sits at the end of the
+// window. Skips drop window bytes for free and Seek past anything beyond —
+// bytes outside kept blocks are never read. The read-ahead starts small after
+// a jump and doubles on every sequential fill (up to bufSize), so the reader
+// behaves like a bulk sequential reader on dense data and like a sparse
+// header-hopper on skippable data, whichever the stream turns out to be.
 type countingReader struct {
-	br  *bufio.Reader
-	src io.ReadSeeker // kept for the hybrid skip path
-	pos int64
-	end int64 // source size, resolved on the first seek-skip; -1 until then
+	src   io.ReadSeeker
+	buf   []byte // window storage, bufSize capacity
+	r, w  int    // valid window is buf[r:w]; buf[r] is the byte at pos
+	pos   int64  // logical position of the next byte the caller consumes
+	end   int64  // source size, resolved on the first seek-skip; -1 until then
+	chunk int    // current read-ahead size; grows sequentially, shrinks on jumps
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
 	return &countingReader{
-		br:  bufio.NewReaderSize(src, bufSize),
-		src: src,
-		pos: startPos,
-		end: -1,
+		src:   src,
+		buf:   make([]byte, bufSize),
+		pos:   startPos,
+		end:   -1,
+		chunk: minChunk,
 	}
+}
+
+// growChunk doubles the read-ahead after a sequential fill, up to bufSize.
+func (c *countingReader) growChunk() {
+	if c.chunk < len(c.buf) {
+		c.chunk *= 2
+		if c.chunk > len(c.buf) {
+			c.chunk = len(c.buf)
+		}
+	}
+}
+
+// fill loads the next chunk into the (empty) window.
+func (c *countingReader) fill() error {
+	n, err := c.src.Read(c.buf[:c.chunk])
+	if n == 0 {
+		if err == nil {
+			err = io.ErrNoProgress
+		}
+		return err
+	}
+	c.growChunk()
+	c.r, c.w = 0, n
+	return nil
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.br.Read(p)
-	c.pos += int64(n)
-	return n, err
-}
-
-// setBufSize replaces the read-ahead buffer. Only effective while nothing is
-// buffered (i.e. before the first Read); a no-op afterwards.
-func (c *countingReader) setBufSize(size int) {
-	if c.br.Buffered() == 0 {
-		c.br = bufio.NewReaderSize(c.src, size)
+	if c.r == c.w {
+		if len(p) >= c.chunk {
+			// Large read with an empty window: straight into p.
+			n, err := c.src.Read(p)
+			c.pos += int64(n)
+			c.growChunk()
+			return n, err
+		}
+		if err := c.fill(); err != nil {
+			return 0, err
+		}
 	}
+	n := copy(p, c.buf[c.r:c.w])
+	c.r += n
+	c.pos += int64(n)
+	return n, nil
 }
 
-// discard advances the reader by exactly n bytes. What the buffer already
-// holds is dropped for free; a remainder worth skipping is seeked past on the
-// source (no read I/O), small remainders are read forward through the buffer.
-// A skip beyond the source's end errors like a truncated read would.
+// discard advances the reader by exactly n bytes without delivering them.
+// The window's bytes are dropped for free. A remainder past the window is
+// seeked over — never read — when it is large enough to beat the fixed
+// round-trip cost of the next read (seekSkipMin); smaller remainders are read
+// forward through the growing window, keeping the walk a bulk sequential
+// read. A skip beyond the source's end errors like a truncated read would.
+// A seek resets the window growth: the walk has proven sparse, keep the next
+// reads small.
 func (c *countingReader) discard(n int64) error {
 	if n <= 0 {
 		return nil
 	}
-	buffered := int64(c.br.Buffered())
-	rest := n - buffered
-	if rest < seekSkipMin {
+	avail := int64(c.w - c.r)
+	if n <= avail {
+		c.r += int(n)
+		c.pos += n
+		return nil
+	}
+	if n-avail <= seekSkipMin {
 		_, err := io.CopyN(io.Discard, c, n)
 		return err
 	}
-	if buffered > 0 {
-		if _, err := c.br.Discard(int(buffered)); err != nil {
-			return err
-		}
-		c.pos += buffered
-	}
+	n -= avail
+	c.pos += avail
+	c.r, c.w = 0, 0
+	// The window is empty, so src's offset == c.pos: seek forward from there.
 	if c.end < 0 {
 		end, err := c.src.Seek(0, io.SeekEnd)
 		if err != nil {
@@ -98,15 +147,15 @@ func (c *countingReader) discard(n int64) error {
 		}
 		c.end = end
 	}
-	target := c.pos + rest
+	target := c.pos + n
 	if target > c.end {
 		return io.ErrUnexpectedEOF
 	}
 	if _, err := c.src.Seek(target, io.SeekStart); err != nil {
 		return err
 	}
-	c.br.Reset(c.src)
 	c.pos = target
+	c.chunk = minChunk
 	return nil
 }
 
@@ -177,16 +226,16 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 }
 
 // KeepTracks restricts Next to blocks of the given tracks. Other tracks'
-// payloads are never read: the walk hops from header to header and seeks past
-// the skipped bytes, so scanning a sparse track (subtitle cues) costs a small
-// fraction of the file's I/O instead of a full sequential read. Call it
-// before the first Next; the read-ahead buffer is shrunk accordingly.
+// payloads are never delivered and, when they are large enough to seek over,
+// never read: the walk hops from header to header. When the payloads are
+// smaller than the adaptive read-ahead (frame-interleaved video is a few KiB
+// per block), the walk degrades gracefully to bulk sequential reads — the
+// same I/O as a plain full pass, never worse.
 func (br *BlockReader) KeepTracks(tracks ...uint64) {
 	br.keep = make(map[uint64]bool, len(tracks))
 	for _, id := range tracks {
 		br.keep[id] = true
 	}
-	br.r.setBufSize(filterBufSize)
 }
 
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
@@ -203,7 +252,7 @@ func (br *BlockReader) reportProgress() {
 
 func (br *BlockReader) init() error {
 	// Phase 1: read EBML header ID+size from the raw (unbuffered) source.
-	// We must consume these bytes before wrapping in bufio so the buffer
+	// We must consume these bytes before wrapping in the buffered reader so it
 	// starts at the right position.
 	h1, n1, err := ebml.ReadElementHeader(br.raw)
 	if err != nil {

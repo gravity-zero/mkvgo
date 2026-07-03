@@ -10,16 +10,20 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// countingSeeker counts the bytes actually read from the source — the probe
-// that proves a filtered walk skips payloads instead of reading them.
+// countingSeeker counts the bytes and the calls actually read from the
+// source — the probes that prove a filtered walk skips payloads instead of
+// reading them, and reads in bulk chunks instead of per block (each source
+// read is a round trip on a network filesystem).
 type countingSeeker struct {
-	r *bytes.Reader
-	n int64
+	r     *bytes.Reader
+	n     int64
+	calls int64
 }
 
 func (c *countingSeeker) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
+	c.calls++
 	return n, err
 }
 func (c *countingSeeker) Seek(offset int64, whence int) (int64, error) {
@@ -49,12 +53,13 @@ func writeBlockGroup(cluster *bytes.Buffer, track byte, relTC int16, data []byte
 	cluster.Write(group.Bytes())
 }
 
-// buildTwoTrackFixture builds a segment mixing a heavy track 1 (64 KiB
-// payloads: SimpleBlocks and a BlockGroup) with a light track 2 (small text
-// payloads: SimpleBlocks, an Xiph-laced block and a BlockGroup with duration).
+// buildTwoTrackFixture builds a segment mixing a heavy track 1 (256 KiB
+// payloads — comfortably above the seek threshold: SimpleBlocks and a
+// BlockGroup) with a light track 2 (small text payloads: SimpleBlocks, an
+// Xiph-laced block and a BlockGroup with duration).
 func buildTwoTrackFixture(t *testing.T) []byte {
 	t.Helper()
-	heavy := make([]byte, 64<<10)
+	heavy := make([]byte, 256<<10)
 	for i := range heavy {
 		heavy[i] = byte(i)
 	}
@@ -144,7 +149,7 @@ func TestBlockReaderKeepTracksParity(t *testing.T) {
 }
 
 // The filtered walk must skip the heavy payloads' bytes, not read them: with
-// ~2 MB of track-1 payload and a few hundred bytes of track 2, reading more
+// ~9 MB of track-1 payload and a few hundred bytes of track 2, reading more
 // than a third of the file means payloads are being dragged through the
 // buffer (the defect that made the subtitle cue pass read whole files).
 func TestBlockReaderKeepTracksBoundedIO(t *testing.T) {
@@ -194,5 +199,64 @@ func TestBlockReaderKeepTracksTruncatedSkip(t *testing.T) {
 	br.KeepTracks(2)
 	if _, err := br.Next(); err == nil || err == io.EOF {
 		t.Errorf("truncated skip: err = %v, want a real error", err)
+	}
+}
+
+// buildSmallFrameFixture interleaves ~7 KiB track-1 payloads (the measured
+// median of a real 1080p x264 encode — SMALLER than any fixed seek threshold)
+// with sparse track-2 cues. This is the regime the first KeepTracks cut
+// missed: per-frame skips fell below the seek threshold and the walk degraded
+// to a full read through a tiny buffer — slower than a plain sequential pass.
+func buildSmallFrameFixture(t *testing.T) []byte {
+	t.Helper()
+	frame := make([]byte, 7*1024)
+	for i := range frame {
+		frame[i] = byte(i)
+	}
+	var seg bytes.Buffer
+	for c := 0; c < 40; c++ {
+		var cluster bytes.Buffer
+		ts := uint64(c * 1000)
+		ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, int64(ebml.UintLen(ts)))
+		ebml.WriteUint(&cluster, ts, ebml.UintLen(ts))
+		for b := 0; b < 25; b++ {
+			writeSimpleBlock(&cluster, 1, int16(b*40), 0x80, frame)
+		}
+		writeSimpleBlock(&cluster, 2, 0, 0x80, []byte("cue"))
+		ebml.WriteElementHeader(&seg, mkv.IDCluster, int64(cluster.Len()))
+		seg.Write(cluster.Bytes())
+	}
+	var full bytes.Buffer
+	ebml.WriteElementHeader(&full, ebml.IDEBMLHeader, 0)
+	ebml.WriteElementHeader(&full, mkv.IDSegment, int64(seg.Len()))
+	full.Write(seg.Bytes())
+	return full.Bytes()
+}
+
+// When payloads are too small to seek over, the filtered walk cannot read
+// less than the file — but it must then behave like a BULK sequential read:
+// few large source reads, not one small read per block. Read-call count is
+// the proxy for per-request cost (network filesystems pay a round trip per
+// call): reading a ~7 MB fixture must take at most size/32KiB calls, and no
+// byte may be read twice.
+func TestBlockReaderKeepTracksSmallFramesBulkReads(t *testing.T) {
+	fixture := buildSmallFrameFixture(t)
+
+	src := &countingSeeker{r: bytes.NewReader(fixture)}
+	br, err := NewBlockReader(src, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.KeepTracks(2)
+	got := drain(t, br)
+	if want := 40; len(got) != want {
+		t.Fatalf("got %d track-2 blocks, want %d", len(got), want)
+	}
+	if maxCalls := int64(len(fixture))/(32<<10) + 8; src.calls > maxCalls {
+		t.Errorf("small-frame walk issued %d source reads for %d bytes (max %d) — must read in bulk chunks, not per block",
+			src.calls, len(fixture), maxCalls)
+	}
+	if limit := int64(len(fixture)) + int64(len(fixture))/10; src.n > limit {
+		t.Errorf("small-frame walk read %d bytes for a %d-byte file — bytes are being re-read", src.n, len(fixture))
 	}
 }

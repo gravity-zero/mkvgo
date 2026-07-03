@@ -8,17 +8,23 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
-- **The on-demand subtitle-cue pass no longer reads the media payloads it
-  walks past.** `HLSPlan`'s lazy cue collection needed one sequential pass
-  over the whole source (~20 s on a multi-GB file — also the window in which
-  a client disconnect used to poison the cue cache, see below). The block
-  reader gained a track filter (`reader.BlockReader.KeepTracks`): the walk
-  hops from block header to block header and seeks past other tracks' payload
-  bytes instead of reading them, so the pass now reads a few percent of the
-  file (measured ~48× faster on a 1 GB source even with a warm page cache;
-  far more on cold NAS reads). Large skips of non-block elements (Cues,
-  Attachments) now also seek instead of reading, and a skip beyond EOF
-  surfaces as an error instead of a silent clean end.
+- **The on-demand subtitle-cue pass skips media payloads it walks past, and
+  the block reader's I/O adapts to the source's block sizes.** `HLSPlan`'s
+  lazy cue collection needed one sequential pass over the whole source (also
+  the window in which a client disconnect used to poison the cue cache, see
+  below). The block reader gained a track filter
+  (`reader.BlockReader.KeepTracks`) built on an adaptive read window: a skip
+  past the window is seeked over — never read — when it is large enough to
+  beat the fixed per-read round trip remote filesystems charge (~64 KiB);
+  smaller skips read forward through a window that doubles on sequential
+  fills, so the walk becomes one bulk chunked read, never one small read per
+  block. In practice: sources with large frames (remuxes) load cues reading a
+  few percent of the file; sources with small interleaved frames (typical
+  1080p/4K encodes, ~7-40 KiB per block) are bounded by one sequential pass —
+  now in large chunks, where a fixed small buffer degraded to per-block round
+  trips and ran slower than a plain full read on 9p/SMB mounts. Large skips
+  of non-block elements (Cues, Attachments) also seek instead of reading, and
+  a skip beyond EOF surfaces as an error instead of a silent clean end.
 
 ### Fixed
 
