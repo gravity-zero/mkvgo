@@ -57,8 +57,10 @@ func TestLacedBlockMalformedNoPanic(t *testing.T) {
 	}
 }
 
-// TestLacedBlockKeyframeFlag verifies that only the FIRST frame of a laced
-// keyframe block carries the keyframe flag (guards parseBlock's `keyframe && i == 0`).
+// TestLacedBlockKeyframeFlag verifies that EVERY frame of a laced keyframe
+// block carries the keyframe flag: the SimpleBlock flag means "the Block
+// contains only keyframes", and there is one flag for the whole lace (lacing
+// carries audio, where each frame is independently decodable).
 func TestLacedBlockKeyframeFlag(t *testing.T) {
 	// track=1, relTC=0, flags=keyframe(0x80)|fixed-lacing(0x04), frameCount byte=1
 	// (=> 2 frames), then 2 bytes of data (1 byte per frame).
@@ -78,8 +80,8 @@ func TestLacedBlockKeyframeFlag(t *testing.T) {
 	if !b0.Keyframe {
 		t.Error("frame 0 of a keyframe laced block should be a keyframe")
 	}
-	if b1.Keyframe {
-		t.Error("frame 1 of a laced block must not be a keyframe")
+	if !b1.Keyframe {
+		t.Error("frame 1 of a keyframe laced block should be a keyframe (the flag covers the whole lace)")
 	}
 	if len(b0.Data) != 1 || b0.Data[0] != 0xAA || len(b1.Data) != 1 || b1.Data[0] != 0xBB {
 		t.Errorf("frame data wrong: b0=%v b1=%v", b0.Data, b1.Data)

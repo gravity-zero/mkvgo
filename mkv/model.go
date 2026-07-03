@@ -126,8 +126,13 @@ type Track struct {
 	// As of v0.6.0 the colour fields and VideoBitDepth are also filled from the
 	// codec bitstream (H.264/HEVC SPS VUI, AV1 color_config, VP9 vpcC) when the
 	// container Colour element is absent — the container value still wins per field.
-	FrameRate     *float64 `json:"frame_rate,omitempty"`      // from DefaultDuration (0x23E383): 1e9/ns
-	VideoBitDepth *uint16  `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
+	FrameRate *float64 `json:"frame_rate,omitempty"` // from DefaultDuration (0x23E383): 1e9/ns
+	// DefaultDurationNs is the raw DefaultDuration (0x23E383) in nanoseconds, kept
+	// for every track type: video derives FrameRate from it, and audio needs it to
+	// time the frames of a laced block (which share a single stored timecode -
+	// frame i plays at blockTS + i*DefaultDuration). 0 when absent.
+	DefaultDurationNs int64   `json:"default_duration_ns,omitempty"`
+	VideoBitDepth     *uint16 `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
 	// Rotation is the clockwise display rotation in degrees (0/90/180/270) from the
 	// MP4 tkhd display matrix; 0 when none/unknown. Phone videos commonly encode 90
 	// or 270 (portrait). ffprobe exposes the same matrix as Display Matrix side data.
@@ -405,6 +410,12 @@ type Block struct {
 	// BlockDuration element. It is 0 when absent (e.g. SimpleBlocks, which never
 	// carry one). Subtitle cues store their on-screen time here.
 	Duration int64
+	// BlockTimecode is the STORED timecode of the enclosing (Simple)Block. For
+	// a frame of a laced block Timecode is the frame's own play time (blockTS +
+	// i×DefaultDuration) while BlockTimecode stays the lace's shared value -
+	// consumers that partition frames (segment windows) key on it so a lace is
+	// never split. Equal to Timecode for unlaced blocks; set by the BlockReader.
+	BlockTimecode int64
 }
 
 // RestoreHeader prepends the stripped header bytes to block data.

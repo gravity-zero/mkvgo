@@ -60,6 +60,10 @@ type HLSPlan struct {
 	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
 	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
 	iframe   []byte         // trick-play playlist (MP4 plans; exact byte ranges)
+	// trackDurs feeds every mid-file BlockReader the tracks' DefaultDurations
+	// (laced frames share one stored timecode; the stride times them) - a
+	// reader seeked to a cluster never sees the Tracks element on its own.
+	trackDurs map[uint64]int64
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -127,7 +131,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, err
 		}
 	}
-	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o}
+	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
+		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
 	p.subs = planSubTracks(c, o)
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
@@ -352,6 +357,7 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, 
 	if err != nil {
 		return err
 	}
+	br.SetTrackDefaultDurations(p.trackDurs)
 	routing := make(map[uint64]*planTrack, len(p.tracks))
 	for _, pt := range p.tracks {
 		routing[pt.ft.outTrack.mkv.ID] = pt
@@ -426,13 +432,15 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 		if wpt != pt {
 			return true, nil
 		}
+		// Window membership keys on the enclosing block's stored timecode -
+		// exactly like the full pass's cursor - so a lace is never split.
 		if !started {
-			if b.Timecode < segStart {
+			if b.BlockTimecode < segStart {
 				return true, nil // interleaved leftovers of the previous window
 			}
 			started = true
 		}
-		if b.Timecode >= segEnd {
+		if b.BlockTimecode >= segEnd {
 			nextPts = b.Timecode
 			return false, nil
 		}
@@ -792,6 +800,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 		st.err = err
 		return err
 	}
+	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(track.track.ID)
 	var local []subtitle.Cue
 	for {
@@ -1050,13 +1059,13 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 	// order) at/past its boundary.
 	start := 0
 	for k := 1; k <= n; k++ {
-		for start < len(ft.samples) && ft.samples[start].ptsMs < p.bounds[k] {
+		for start < len(ft.samples) && ft.samples[start].blockPtsMs < p.bounds[k] {
 			start++
 		}
 	}
 	end := start
 	if n+1 < p.segCount {
-		for end < len(ft.samples) && ft.samples[end].ptsMs < p.bounds[n+1] {
+		for end < len(ft.samples) && ft.samples[end].blockPtsMs < p.bounds[n+1] {
 			end++
 		}
 	} else {

@@ -162,6 +162,16 @@ func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) 
 	return reader.NewBlockReader(r, timecodeScale)
 }
 
+// TrackDefaultDurations builds the BlockReader.SetTrackDefaultDurations
+// argument (track number → DefaultDuration ns) from parsed track metadata. A
+// laced block stores one timecode for its N frames; with the stride set the
+// reader delivers frame i at blockTS + i×duration. A sequential BlockReader
+// picks the durations up on its own when it walks over the Tracks element;
+// set them explicitly when reading from a mid-file offset.
+func TrackDefaultDurations(tracks []mkv.Track) map[uint64]int64 {
+	return reader.TrackDefaultDurations(tracks)
+}
+
 // --- Writer ---
 
 // Write serialises c's METADATA ONLY — EBML header, Info, Tracks, Chapters,

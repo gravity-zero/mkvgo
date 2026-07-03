@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"math"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -582,53 +581,6 @@ func TestBlockLacingFrameCountByte(t *testing.T) {
 	}
 	if count != 3 {
 		t.Errorf("frame count = %d, want 3 (lace byte 0x02 + 1)", count)
-	}
-}
-
-// TestSignedVINTLenExactBiasValues kills signedVINTLen boundary arithmetic.
-// For w=1: bias = 2^(7-1) = 64. diff=63 fits (< 64), diff=64 does not.
-func TestSignedVINTLenExactBiasValues(t *testing.T) {
-	cases := []struct {
-		diff int
-		want int
-	}{
-		{63, 1},  // w=1 bias=64: 63 < 64 fits
-		{-64, 1}, // -64 >= -64 fits
-		{64, 2},  // 64 >= 64 → needs w=2
-		{-65, 2}, // -65 < -64 → needs w=2
-		// w=2: bias = 2^13 = 8192
-		{8191, 2},  // < 8192 fits
-		{-8192, 2}, // >= -8192 fits
-		{8192, 3},  // 8192 >= 8192 → needs w=3
-	}
-	for _, c := range cases {
-		got := signedVINTLen(c.diff)
-		if got != c.want {
-			t.Errorf("signedVINTLen(%d) = %d, want %d", c.diff, got, c.want)
-		}
-	}
-}
-
-// TestVintLenExactBoundaries kills vintLen boundary arithmetic.
-// For w: max val = 2^(7w) - 2.  val at boundary+1 triggers next width.
-func TestVintLenExactBoundaries(t *testing.T) {
-	cases := []struct {
-		val  uint64
-		want int
-	}{
-		{0, 1},
-		{126, 1}, // 2^7-2 = 126: max 1-byte
-		{127, 2}, // 2^7-1 = 127: triggers 2-byte
-		{128, 2},
-		{16382, 2}, // 2^14-2 = 16382: max 2-byte
-		{16383, 3}, // triggers 3-byte
-		{math.MaxUint64, 8},
-	}
-	for _, c := range cases {
-		got := vintLen(c.val)
-		if got != c.want {
-			t.Errorf("vintLen(%d) = %d, want %d", c.val, got, c.want)
-		}
 	}
 }
 

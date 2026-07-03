@@ -145,6 +145,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	if err != nil {
 		return err
 	}
+	br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
 	if o.Progress != nil {
 		total := int64(-1)
 		if fi, e := fs.DoStat(srcPath); e == nil {

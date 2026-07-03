@@ -102,52 +102,6 @@ func TestReadVINTFromBuf(t *testing.T) {
 	}
 }
 
-func TestVintLen(t *testing.T) {
-	tests := []struct {
-		val  uint64
-		want int
-	}{
-		{0, 1},
-		{1, 1},
-		{126, 1}, // max 1-byte: 2^7 - 2 = 126
-		{127, 2}, // 2^7 - 1 triggers width 2
-		{128, 2},
-		{16382, 2}, // max 2-byte: 2^14 - 2
-		{16383, 3},
-		{math.MaxUint64, 8},
-	}
-	for _, tt := range tests {
-		got := vintLen(tt.val)
-		if got != tt.want {
-			t.Errorf("vintLen(%d) = %d, want %d", tt.val, got, tt.want)
-		}
-	}
-}
-
-func TestSignedVINTLen(t *testing.T) {
-	tests := []struct {
-		diff int
-		want int
-	}{
-		{0, 1},
-		{1, 1},
-		{-1, 1},
-		{63, 1}, // bias for w=1 is 2^6 = 64, so 63 < 64 fits
-		{-64, 1},
-		{64, 2},
-		{-65, 2},
-		{8191, 2}, // bias for w=2 is 2^13 = 8192
-		{-8192, 2},
-		{8192, 3},
-	}
-	for _, tt := range tests {
-		got := signedVINTLen(tt.diff)
-		if got != tt.want {
-			t.Errorf("signedVINTLen(%d) = %d, want %d", tt.diff, got, tt.want)
-		}
-	}
-}
-
 func TestSafeTimecodeMsOverflow(t *testing.T) {
 	_, err := safeTimecodeMs(math.MaxInt64, 2)
 	if err == nil {
@@ -282,12 +236,12 @@ func TestFixedLacing(t *testing.T) {
 // count that does not evenly divide the data is malformed and must error rather
 // than silently drop the residual bytes.
 func TestFixedLacingIndivisible(t *testing.T) {
-	if _, err := decodeLacingSizes(lacingFixed, make([]byte, 7), 3); err == nil {
+	if _, _, err := decodeLacingSizes(lacingFixed, make([]byte, 7), 3); err == nil {
 		t.Error("fixed lacing with indivisible data must error")
 	}
-	sizes, err := decodeLacingSizes(lacingFixed, make([]byte, 6), 3)
-	if err != nil || len(sizes) != 3 || sizes[0] != 2 || sizes[2] != 2 {
-		t.Errorf("valid fixed lacing: sizes=%v err=%v, want [2 2 2]/nil", sizes, err)
+	sizes, headerLen, err := decodeLacingSizes(lacingFixed, make([]byte, 6), 3)
+	if err != nil || len(sizes) != 3 || sizes[0] != 2 || sizes[2] != 2 || headerLen != 0 {
+		t.Errorf("valid fixed lacing: sizes=%v headerLen=%d err=%v, want [2 2 2]/0/nil", sizes, headerLen, err)
 	}
 }
 
@@ -319,15 +273,41 @@ func TestZeroDataBlockAccepted(t *testing.T) {
 // with a DECREASING frame size (negative diff), so a flipped-sign mutant (which
 // would size the frame as 140 instead of 60) is caught.
 func TestEBMLLacingNegativeDiff(t *testing.T) {
-	// first size = 100 (VINT 0xE4); diff = -40 (signed VINT 0x98 = bias 64 + (-40));
-	// 200 bytes of frame data → last frame = 200 - 100 - 60 = 40.
-	raw := append([]byte{0xE4, 0x98}, make([]byte, 200)...)
-	sizes, err := decodeLacingSizes(lacingEBML, raw, 3)
+	// first size = 100 (VINT 0xE4); diff = -40 (signed VINT: stripped = diff +
+	// bias 63 = 23 → 0x97); 200 bytes of frame data → last = 200 - 100 - 60 = 40.
+	raw := append([]byte{0xE4, 0x97}, make([]byte, 200)...)
+	sizes, headerLen, err := decodeLacingSizes(lacingEBML, raw, 3)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(sizes) != 3 || sizes[0] != 100 || sizes[1] != 60 || sizes[2] != 40 {
 		t.Errorf("sizes = %v, want [100 60 40] (negative diff)", sizes)
+	}
+	if headerLen != 2 {
+		t.Errorf("headerLen = %d, want 2 (two 1-byte VINTs)", headerLen)
+	}
+}
+
+// TestEBMLLacingBias pins the signed-VINT bias to the spec value 2^(7n-1)-1
+// (RFC 9559): stripped 0x40 = 64 is diff +1, and stripped 0x3E = 62 is diff
+// -1. The off-by-one bias 2^(7n-1) shifted every EBML-laced frame boundary
+// while keeping the block total intact - corrupted audio no size check caught.
+func TestEBMLLacingBias(t *testing.T) {
+	// 4 frames: first = 100 (0xE4), diffs +1 (0x80|64 = 0xC0), -1 (0x80|62 =
+	// 0xBE) → sizes 100, 101, 100; 320 data bytes → last = 19.
+	raw := append([]byte{0xE4, 0xC0, 0xBE}, make([]byte, 320)...)
+	sizes, headerLen, err := decodeLacingSizes(lacingEBML, raw, 4)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []int{100, 101, 100, 19}
+	for i := range want {
+		if sizes[i] != want[i] {
+			t.Fatalf("sizes = %v, want %v (spec bias 2^(7n-1)-1)", sizes, want)
+		}
+	}
+	if headerLen != 3 {
+		t.Errorf("headerLen = %d, want 3", headerLen)
 	}
 }
 
@@ -352,14 +332,6 @@ func TestEBMLLacing(t *testing.T) {
 		frame2[i] = 0xCC
 	}
 
-	// EBML lacing header: frameCount-1=2, first size=100 (VINT: 0xE4 = 0x80|100),
-	// diff for frame 1 = 0 (signed VINT: 0xC0 = 0x40|32+32 = bias at center)
-	var lacingData bytes.Buffer
-	lacingData.WriteByte(0x02)        // frame count = 3 (2+1)
-	lacingData.WriteByte(0x80 | 100)  // first size = 100 (1-byte VINT)
-	lacingData.WriteByte(0x40 | 0x20) // diff = 0 (signed 2-byte VINT center... no)
-
-	// Actually let me just manually construct the raw block data
 	// track=1, tc=0, flags=EBML lacing (0x06), frameCount byte, VINT sizes, data
 	blockPayload := []byte{
 		0x81,       // track 1
@@ -367,24 +339,10 @@ func TestEBMLLacing(t *testing.T) {
 		0x06, // flags: EBML lacing (bits 1-0 = 11 = 3 = EBML)
 		0x02, // frame count = 3 (2+1)
 	}
-	// First frame size = 100 -> VINT: 100 < 127, so 1-byte: 0x80 | 100 = 0xE4
+	// First frame size = 100 → 1-byte VINT: 0x80 | 100 = 0xE4.
 	blockPayload = append(blockPayload, 0x80|100)
-	// Diff for frame 1: 100 - 100 = 0, signed VINT with w=1: bias = 2^6 = 64
-	// encoded = 0 + 64 = 64, with marker: 0x40 | 64 = 0x80... wait.
-	// For w=1, data bits = 7, marker = 1<<6 = 0x40
-	// stripped = diff + bias = 0 + 64 = 64
-	// encoded = 0x40 | 64 = 0x40 | 0x40 = 0x80... that's a valid 1-byte VINT
-	// Actually: the VINT value = marker | stripped = (1<<6) | 64 = 64 | 64 = 0x40 + 0x40
-	// Hmm, let me reconsider. readVINTFromBuf returns (val, width).
-	// For EBML lacing diff decoding:
-	//   dataBits = w * 7
-	//   bias = 1 << (dataBits - 1)
-	//   stripped = val & ^(1 << dataBits)
-	//   diff = stripped - bias
-	// For diff=0, w=1: dataBits=7, bias=64
-	//   stripped = 0 + 64 = 64 = 0x40
-	//   val = (1<<7) | 64 = 128 + 64 = 192 = 0xC0
-	blockPayload = append(blockPayload, 0xC0) // diff = 0
+	// Diff for frame 1 = 0 → signed VINT: stripped = 0 + bias 63 → 0x80|63 = 0xBF.
+	blockPayload = append(blockPayload, 0xBF)
 
 	blockPayload = append(blockPayload, frame0...)
 	blockPayload = append(blockPayload, frame1...)
@@ -465,42 +423,25 @@ func TestXiphLacing(t *testing.T) {
 }
 
 func TestDecodeLacingSizesUnknownType(t *testing.T) {
-	_, err := decodeLacingSizes(0xFF, []byte{0x01}, 2)
+	_, _, err := decodeLacingSizes(0xFF, []byte{0x01}, 2)
 	if err == nil {
 		t.Fatal("expected error for unknown lacing type")
 	}
 }
 
-func TestLacingHeaderLen(t *testing.T) {
-	// Xiph
-	n := lacingHeaderLen(lacingXiph, []int{300, 50})
-	// 300 = 255 + 45: needs 2 bytes
-	if n != 2 {
-		t.Errorf("xiph header len = %d, want 2", n)
+// TestDecodeLacingHeaderLen pins the header length decodeLacingSizes reports -
+// the exact bytes consumed by the size table, which parseBlock slices off
+// before splitting the frames.
+func TestDecodeLacingHeaderLen(t *testing.T) {
+	// Xiph, sizes 300 + rest: 300 = 255 + 45 needs 2 size bytes.
+	raw := append([]byte{0xFF, 45}, make([]byte, 350)...)
+	if _, n, err := decodeLacingSizes(lacingXiph, raw, 2); err != nil || n != 2 {
+		t.Errorf("xiph header len = %d (err %v), want 2", n, err)
 	}
-
-	// Fixed
-	n = lacingHeaderLen(lacingFixed, []int{100, 100})
-	if n != 0 {
-		t.Errorf("fixed header len = %d, want 0", n)
-	}
-
-	// EBML: first size + diffs
-	n = lacingHeaderLen(lacingEBML, []int{100, 100, 50})
-	if n == 0 {
-		t.Error("ebml header len should be > 0")
-	}
-
-	// EBML empty
-	n = lacingHeaderLen(lacingEBML, nil)
-	if n != 0 {
-		t.Errorf("ebml empty header len = %d, want 0", n)
-	}
-
-	// Unknown
-	n = lacingHeaderLen(0xFF, []int{100})
-	if n != 0 {
-		t.Errorf("unknown lacing header len = %d, want 0", n)
+	// EBML, first size 100 (1 byte) + one 1-byte diff.
+	raw = append([]byte{0xE4, 0xBF}, make([]byte, 250)...)
+	if _, n, err := decodeLacingSizes(lacingEBML, raw, 3); err != nil || n != 2 {
+		t.Errorf("ebml header len = %d (err %v), want 2", n, err)
 	}
 }
 
@@ -535,22 +476,6 @@ func TestBlockReaderEmptySegment(t *testing.T) {
 	_, err = br.Next()
 	if err == nil {
 		t.Fatal("expected EOF")
-	}
-}
-
-func TestSignedVINTLenLargeValues(t *testing.T) {
-	got := signedVINTLen(1 << 25)
-	if got < 4 {
-		t.Errorf("signedVINTLen(%d) = %d, expected >= 4", 1<<25, got)
-	}
-	got = signedVINTLen(-(1 << 25))
-	if got < 4 {
-		t.Errorf("signedVINTLen(%d) = %d, expected >= 4", -(1 << 25), got)
-	}
-	// Extremely large value that requires 8 bytes (exceeds all w=1..7 ranges)
-	got = signedVINTLen(math.MaxInt64)
-	if got != 8 {
-		t.Errorf("signedVINTLen(MaxInt64) = %d, want 8", got)
 	}
 }
 

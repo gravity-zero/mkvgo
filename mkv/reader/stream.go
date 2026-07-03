@@ -412,6 +412,7 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 			if v > 0 {
 				fps := 1e9 / float64(v)
 				t.FrameRate = &fps
+				t.DefaultDurationNs = int64(v)
 			}
 		case mkv.IDVideo:
 			return p.parseStreamVideo(h.Size, &t)

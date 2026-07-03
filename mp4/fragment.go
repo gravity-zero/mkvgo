@@ -36,7 +36,12 @@ const (
 type fragSample struct {
 	size  uint32
 	ptsMs int64
-	sync  bool
+	// blockPtsMs is the stored timecode of the sample's source block
+	// (mkv.Block.BlockTimecode): segment windows key on it so the frames of a
+	// laced block - individually timed but sharing one stored timecode - are
+	// never split across two windows. Equal to ptsMs for unlaced sources.
+	blockPtsMs int64
+	sync       bool
 	// filled by fillFragTiming, in the track's media timescale (DTS rebased so
 	// the track's first sample is 0):
 	dtsTS int64

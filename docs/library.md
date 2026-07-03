@@ -61,6 +61,20 @@ for {
 }
 ```
 
+Laced blocks (real muxers pack fixed-rate audio as N frames under ONE stored
+timecode) are delivered one frame at a time; with the track's DefaultDuration
+known, frame i is stamped `blockTS + i×duration` (and `block.BlockTimecode`
+keeps the lace's shared value). A sequential reader picks the durations up on
+its own while walking over the Tracks element; a reader started mid-file
+(`reader.NewBlockReaderAt`) never sees it, so pass them explicitly:
+
+```go
+br.SetTrackDefaultDurations(matroska.TrackDefaultDurations(c.Tracks))
+```
+
+Without a known duration every frame of a lace keeps the block timecode
+(`Track.DefaultDurationNs` is 0 when the source declares none).
+
 ---
 
 ## Writing MKV Files

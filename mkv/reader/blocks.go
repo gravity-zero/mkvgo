@@ -193,11 +193,16 @@ type BlockReader struct {
 	timecodeScale int64
 	pending       []mkv.Block
 	keep          map[uint64]bool // when non-nil, blocks of other tracks are skipped unread
-	peeked        *peekedHeader   // element read in peek-ahead, to be processed next iteration
-	stopMs        int64           // StopBeforeClusterMs limit (only when hasStop)
-	hasStop       bool            // a cluster-timecode limit is set
-	awaitLimit    bool            // stopped at a cluster beyond stopMs; recheck on Next
-	clusterStart  int64           // absolute offset of the current cluster's header
+	// trackDurNs maps track number → DefaultDuration (ns), the per-frame stride
+	// that times the frames of a laced block (they share one stored timecode).
+	// Filled by SetTrackDefaultDurations, or opportunistically from the Tracks
+	// element when the sequential walk passes over it.
+	trackDurNs    map[uint64]int64
+	peeked        *peekedHeader // element read in peek-ahead, to be processed next iteration
+	stopMs        int64         // StopBeforeClusterMs limit (only when hasStop)
+	hasStop       bool          // a cluster-timecode limit is set
+	awaitLimit    bool          // stopped at a cluster beyond stopMs; recheck on Next
+	clusterStart  int64         // absolute offset of the current cluster's header
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -265,6 +270,104 @@ func (br *BlockReader) KeepTracks(tracks ...uint64) {
 	for _, id := range tracks {
 		br.keep[id] = true
 	}
+}
+
+// maxLacedFrameDurNs bounds a plausible per-frame duration (10 s): a larger
+// DefaultDuration is treated as garbage rather than shifting laced frames by
+// absurd offsets.
+const maxLacedFrameDurNs = 10_000_000_000
+
+// SetTrackDefaultDurations supplies each track's DefaultDuration in
+// nanoseconds (track number → ns). A laced block stores ONE timecode for its N
+// frames; with the stride known, frame i is delivered at blockTS +
+// round(i*dur) - without it every frame of the lace keeps the block timecode
+// (collapsed timestamps downstream). A sequential reader picks the durations
+// up on its own when it walks over the Tracks element; a mid-file reader
+// (NewBlockReaderAt) never sees it, so callers holding the track metadata
+// should pass TrackDefaultDurations(c.Tracks).
+func (br *BlockReader) SetTrackDefaultDurations(durs map[uint64]int64) {
+	br.trackDurNs = durs
+}
+
+// TrackDefaultDurations builds the SetTrackDefaultDurations argument from
+// parsed track metadata: track number → DefaultDurationNs, for every track
+// that declares one.
+func TrackDefaultDurations(tracks []mkv.Track) map[uint64]int64 {
+	var m map[uint64]int64
+	for _, t := range tracks {
+		if t.DefaultDurationNs > 0 && t.DefaultDurationNs <= maxLacedFrameDurNs {
+			if m == nil {
+				m = make(map[uint64]int64)
+			}
+			m[t.ID] = t.DefaultDurationNs
+		}
+	}
+	return m
+}
+
+// scanTracksDurations opportunistically reads TrackNumber + DefaultDuration
+// pairs from a Tracks element the sequential walk is passing over, so laced
+// frames get timed even when the caller never supplied the track metadata.
+// Best-effort: structural anomalies skip the rest of the element (as the plain
+// discard did); only I/O errors propagate.
+func (br *BlockReader) scanTracksDurations(size int64) error {
+	end := br.r.tell() + size
+	skipRest := func() error { return br.r.discard(end - br.r.tell()) }
+	for br.r.tell() < end {
+		h, _, err := ebml.ReadElementHeader(br.r)
+		if err != nil {
+			return err
+		}
+		if h.ID != mkv.IDTrackEntry {
+			if h.Size < 0 || br.r.tell()+h.Size > end {
+				return skipRest()
+			}
+			if err := br.r.discard(h.Size); err != nil {
+				return err
+			}
+			continue
+		}
+		teEnd := br.r.tell() + h.Size
+		if h.Size < 0 || teEnd > end {
+			return skipRest()
+		}
+		var num uint64
+		var durNs int64
+		for br.r.tell() < teEnd {
+			eh, _, err := ebml.ReadElementHeader(br.r)
+			if err != nil {
+				return err
+			}
+			if eh.Size < 0 || br.r.tell()+eh.Size > teEnd {
+				return skipRest()
+			}
+			switch eh.ID {
+			case mkv.IDTrackNumber:
+				v, err := ebml.ReadUint(br.r, eh.Size)
+				if err != nil {
+					return err
+				}
+				num = v
+			case mkv.IDDefaultDuration:
+				v, err := ebml.ReadUint(br.r, eh.Size)
+				if err != nil {
+					return err
+				}
+				durNs = int64(v)
+			default:
+				if err := br.r.discard(eh.Size); err != nil {
+					return err
+				}
+			}
+		}
+		if num > 0 && durNs > 0 && durNs <= maxLacedFrameDurNs {
+			if br.trackDurNs == nil {
+				br.trackDurNs = make(map[uint64]int64)
+			}
+			br.trackDurNs[num] = durNs
+		}
+	}
+	return nil
 }
 
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
@@ -461,6 +564,15 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
 		}
+		if h.ID == mkv.IDTracks && br.trackDurNs == nil && h.Size <= 16<<20 {
+			// Walking over the track metadata anyway: pick up the per-track
+			// DefaultDurations so laced frames get individual timecodes even
+			// when the caller never supplied them.
+			if err := br.scanTracksDurations(h.Size); err != nil {
+				return mkv.Block{}, err
+			}
+			continue
+		}
 		if err := br.r.discard(h.Size); err != nil {
 			return mkv.Block{}, err
 		}
@@ -510,7 +622,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 			return mkv.Block{}, err
 		}
 		return mkv.Block{
-			TrackNumber: uint64(trackNum), Timecode: tc,
+			TrackNumber: uint64(trackNum), Timecode: tc, BlockTimecode: tc,
 			Keyframe: keyframe, Data: data,
 		}, nil
 	}
@@ -526,12 +638,10 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	frameCount := int(raw[0]) + 1 // Matroska lace count byte = number of frames minus 1
 	raw = raw[1:]
 
-	frameSizes, err := decodeLacingSizes(lacing, raw, frameCount)
+	frameSizes, headerBytes, err := decodeLacingSizes(lacing, raw, frameCount)
 	if err != nil {
 		return mkv.Block{}, fmt.Errorf("decode lacing: %w", err)
 	}
-
-	headerBytes := lacingHeaderLen(lacing, frameSizes)
 	if headerBytes < 0 || headerBytes > len(raw) {
 		return mkv.Block{}, fmt.Errorf("laced block header (%d bytes) exceeds data (%d bytes)", headerBytes, len(raw))
 	}
@@ -541,6 +651,12 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	if err != nil {
 		return mkv.Block{}, err
 	}
+	// The lace stores ONE timecode: frame i plays at tc + i×DefaultDuration
+	// (rounded to the ms timeline). Without a known stride every frame keeps
+	// the block timecode. The keyframe flag describes the whole block - "the
+	// Block contains only keyframes" - so it applies to every laced frame
+	// (lacing is used for audio, where each frame is independently decodable).
+	durNs := br.trackDurNs[uint64(trackNum)]
 	blocks := make([]mkv.Block, frameCount)
 	offset := 0
 	for i := 0; i < frameCount; i++ {
@@ -548,9 +664,13 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		if end > len(raw) {
 			return mkv.Block{}, fmt.Errorf("laced frame %d overflows: need %d, have %d", i, end, len(raw))
 		}
+		tcI := tc
+		if durNs > 0 && durNs <= maxLacedFrameDurNs {
+			tcI = tc + (int64(i)*durNs+500_000)/1_000_000
+		}
 		blocks[i] = mkv.Block{
-			TrackNumber: uint64(trackNum), Timecode: tc,
-			Keyframe: keyframe && i == 0, Data: append([]byte(nil), raw[offset:end]...),
+			TrackNumber: uint64(trackNum), Timecode: tcI, BlockTimecode: tc,
+			Keyframe: keyframe, Data: append([]byte(nil), raw[offset:end]...),
 		}
 		offset = end
 	}
@@ -607,8 +727,13 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	return block, nil
 }
 
-func decodeLacingSizes(lacing byte, raw []byte, frameCount int) ([]int, error) {
-	sizes := make([]int, frameCount)
+// decodeLacingSizes reads the per-frame sizes from a laced block's lacing
+// header and returns them with the exact number of header bytes consumed -
+// parseBlock slices the frame data right after them. Returning the consumed
+// length (instead of re-deriving it from the sizes) stays correct even when a
+// muxer encoded a size or diff in a wider-than-minimal VINT.
+func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, headerLen int, err error) {
+	sizes = make([]int, frameCount)
 	switch lacing {
 	case lacingXiph:
 		pos := 0
@@ -628,76 +753,60 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) ([]int, error) {
 		}
 		last := len(raw) - pos - total
 		if last < 0 {
-			return nil, fmt.Errorf("xiph lacing: total %d exceeds data %d", total, len(raw)-pos)
+			return nil, 0, fmt.Errorf("xiph lacing: total %d exceeds data %d", total, len(raw)-pos)
 		}
 		sizes[frameCount-1] = last
-		return sizes, nil
+		return sizes, pos, nil
 	case lacingFixed:
 		if len(raw)%frameCount != 0 {
-			return nil, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", len(raw), frameCount)
+			return nil, 0, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", len(raw), frameCount)
 		}
 		sz := len(raw) / frameCount
 		for i := range sizes {
 			sizes[i] = sz
 		}
-		return sizes, nil
+		return sizes, 0, nil
 	case lacingEBML:
 		pos := 0
 		first, width := readVINTFromBuf(raw[pos:])
+		if width == 0 {
+			return nil, 0, fmt.Errorf("ebml lacing: invalid first-size vint")
+		}
 		firstSize := int(first & ^(uint64(1) << uint(width*7)))
 		sizes[0] = firstSize
 		pos += width
 		total := firstSize
 		for i := 1; i < frameCount-1; i++ {
 			if pos > len(raw) {
-				return nil, fmt.Errorf("ebml lacing: header truncated at frame %d", i)
+				return nil, 0, fmt.Errorf("ebml lacing: header truncated at frame %d", i)
 			}
 			val, w := readVINTFromBuf(raw[pos:])
 			if w == 0 {
-				return nil, fmt.Errorf("ebml lacing: invalid size vint at frame %d", i)
+				return nil, 0, fmt.Errorf("ebml lacing: invalid size vint at frame %d", i)
 			}
 			pos += w
+			// The diff is a signed VINT: value − (2^(7·w−1) − 1), per RFC 9559.
+			// (An off-by-one bias - 2^(7·w-1) - shifted every frame boundary by
+			// the frame index and corrupted all EBML-laced audio while keeping
+			// the block's TOTAL intact, so only a decoder noticed.)
 			dataBits := uint(w * 7)
-			bias := int64(1) << (dataBits - 1)
+			bias := int64(1)<<(dataBits-1) - 1
 			stripped := int64(val & ^(uint64(1) << dataBits))
 			diff := stripped - bias
 			sizes[i] = sizes[i-1] + int(diff)
 			if sizes[i] < 0 {
-				return nil, fmt.Errorf("ebml lacing: negative frame size at index %d", i)
+				return nil, 0, fmt.Errorf("ebml lacing: negative frame size at index %d", i)
 			}
 			total += sizes[i]
 		}
 		last := len(raw) - pos - total
 		if last < 0 {
-			return nil, fmt.Errorf("ebml lacing: total %d exceeds data %d", total, len(raw)-pos)
+			return nil, 0, fmt.Errorf("ebml lacing: total %d exceeds data %d", total, len(raw)-pos)
 		}
 		sizes[frameCount-1] = last
-		return sizes, nil
+		return sizes, pos, nil
 	}
-	return nil, fmt.Errorf("unknown lacing type %d", lacing)
-}
-
-func lacingHeaderLen(lacing byte, sizes []int) int {
-	switch lacing {
-	case lacingXiph:
-		n := 0
-		for i := 0; i < len(sizes)-1; i++ {
-			n += sizes[i]/255 + 1
-		}
-		return n
-	case lacingFixed:
-		return 0
-	case lacingEBML:
-		if len(sizes) == 0 {
-			return 0
-		}
-		n := vintLen(uint64(sizes[0]))
-		for i := 1; i < len(sizes)-1; i++ {
-			n += signedVINTLen(sizes[i] - sizes[i-1])
-		}
-		return n
-	}
-	return 0
+	return nil, 0, fmt.Errorf("unknown lacing type %d", lacing)
 }
 
 func readVINTFromBuf(buf []byte) (uint64, int) {
@@ -717,25 +826,6 @@ func readVINTFromBuf(buf []byte) (uint64, int) {
 		val = (val << 8) | uint64(buf[i])
 	}
 	return val, width
-}
-
-func vintLen(val uint64) int {
-	for w := 1; w <= 8; w++ {
-		if val < (uint64(1)<<uint(w*7))-1 {
-			return w
-		}
-	}
-	return 8
-}
-
-func signedVINTLen(diff int) int {
-	for w := 1; w <= 8; w++ {
-		bias := int64(1) << uint(w*7-1)
-		if int64(diff) >= -bias && int64(diff) < bias {
-			return w
-		}
-	}
-	return 8
 }
 
 func safeTimecodeMs(v, scale int64) (int64, error) {

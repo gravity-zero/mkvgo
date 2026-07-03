@@ -118,7 +118,7 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		if _, err := ft.tmp.Write(data); err != nil {
 			return errf("buffer sample: %w", err)
 		}
-		ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, sync: s.sync})
+		ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
 		processed += int64(s.size)
 		if progress != nil {
 			progress(processed, ps.size)
@@ -142,7 +142,8 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 		offs := make([]int64, len(samples))
 		ft.samples = make([]fragSample, len(samples))
 		for i := range samples {
-			ft.samples[i] = fragSample{size: samples[i].size, ptsMs: samples[i].ctsMs, sync: samples[i].sync}
+			ft.samples[i] = fragSample{size: samples[i].size, ptsMs: samples[i].ctsMs,
+				blockPtsMs: samples[i].ctsMs, sync: samples[i].sync}
 			offs[i] = samples[i].offset
 		}
 		if len(ft.samples) == 0 {

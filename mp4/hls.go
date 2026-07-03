@@ -318,6 +318,10 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 	if err != nil {
 		return err
 	}
+	// Explicit (not just the walk-by pickup): the on-demand plan feeds its
+	// mid-file readers the same durations, and full-pass ↔ plan byte parity
+	// must not depend on the source's element order.
+	br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
 	if progress != nil {
 		if st, _ := fs.DoStat(srcPath); st != nil {
 			br.SetProgress(progress, st.Size())
@@ -359,7 +363,8 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if _, err := ft.tmp.Write(data); err != nil {
 			return errf("buffer sample: %w", err)
 		}
-		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)), ptsMs: b.Timecode, sync: b.Keyframe})
+		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)),
+			ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe})
 	}
 	return nil
 }
@@ -406,9 +411,9 @@ func segmentBoundaries(video []fragSample, targetMs int64) []int64 {
 		if !video[i].sync {
 			continue
 		}
-		if video[i].ptsMs >= last+targetMs {
-			bounds = append(bounds, video[i].ptsMs)
-			last = video[i].ptsMs
+		if video[i].blockPtsMs >= last+targetMs {
+			bounds = append(bounds, video[i].blockPtsMs)
+			last = video[i].blockPtsMs
 		}
 	}
 	return bounds
@@ -469,7 +474,7 @@ func audioIndex(fts []*fragTrack, i int) int {
 func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
 	start := *cursor
 	j := start
-	for j < len(ft.samples) && ft.samples[j].ptsMs < segEnd {
+	for j < len(ft.samples) && ft.samples[j].blockPtsMs < segEnd {
 		j++
 	}
 	*cursor = j
