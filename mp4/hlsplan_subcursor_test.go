@@ -285,3 +285,184 @@ func TestPlanHLSSubtitleCancelMidScanStaysExact(t *testing.T) {
 		}
 	}
 }
+
+// buildSeekFixture writes a ~900 s source whose subtitle blocks ALL carry
+// explicit durations (the fast-seek precondition), including the trap: a cue
+// starting 10 s BEFORE a window that a cold seek reaches without ever
+// scanning the prefix — the backward margin must catch it.
+func buildSeekFixture(t testing.TB) string {
+	t.Helper()
+	w, h := uint32(320), uint32(240)
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+		{ID: 2, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre"},
+		{ID: 3, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre", Name: "forcé"},
+	}
+	frame := append([]byte{0x00, 0x00, 0x00, 0x01, 0x65}, make([]byte, 2<<10)...)
+	var blks []mkv.Block
+	for i := 0; i < 4500; i++ { // 200ms frames, keyframe every 1s, 900s total
+		blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: int64(i) * 200,
+			Keyframe: i%5 == 0, Data: frame})
+	}
+	subs := []mkv.Block{
+		{TrackNumber: 2, Timecode: 1000, Duration: 3000, Data: []byte("tête")},
+		{TrackNumber: 2, Timecode: 55_000, Duration: 5000, Data: []byte("dans la sonde")},
+		{TrackNumber: 2, Timecode: 380_000, Duration: 15_000, Data: []byte("X déborde dans la fenêtre seekée")},
+		{TrackNumber: 2, Timecode: 391_000, Duration: 2000, Data: []byte("dans la fenêtre")},
+		{TrackNumber: 2, Timecode: 470_000, Duration: 4000, Data: []byte("après")},
+		{TrackNumber: 2, Timecode: 899_000, Duration: 900, Data: []byte("fin")},
+		{TrackNumber: 3, Timecode: 500_000, Duration: 2000, Data: []byte("piste creuse")},
+	}
+	for _, b := range subs {
+		b.Keyframe = true
+		blks = append(blks, b)
+	}
+	for i := 1; i < len(blks); i++ {
+		for j := i; j > 0 && blks[j].Timecode < blks[j-1].Timecode; j-- {
+			blks[j], blks[j-1] = blks[j-1], blks[j]
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "in.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const scale = 1_000_000
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}}
+	m := writer.NewMKVWriter(f)
+	if err := m.WriteStart(); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(c, tracks, 900_000); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := writeTestClusters(m, scale, blks); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := m.Finalize(); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// segNameFor returns the 1-based subN_%05d.vtt name of the segment holding ms.
+func segNameFor(plan *HLSPlan, track int, ms int64) string {
+	n := 0
+	for k := range plan.bounds {
+		if plan.bounds[k] <= ms {
+			n = k
+		}
+	}
+	return fmt.Sprintf("sub%d_%05d.vtt", track, n+1)
+}
+
+// A cold seek to the middle of the presentation must serve the exact window
+// — including the trap cue that started before the window — and every later
+// request (early segments, other cold jumps, whole track, sparse track) must
+// stay byte-identical to the full pass on the same plan instance.
+func TestPlanHLSSubtitleColdSeekExact(t *testing.T) {
+	src := buildSeekFixture(t)
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Cold jump first: the window at 390s must include the cue started at 380s.
+	trap := segNameFor(plan, 1, 390_000)
+	got, _, err := plan.Resource(context.Background(), trap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("X déborde")) {
+		t.Fatalf("cold-seeked window %s misses the cue that started before it:\n%s", trap, got)
+	}
+
+	// Adversarial order on the same plan: more cold jumps, then the head,
+	// then everything, whole tracks included.
+	order := []string{
+		trap,
+		segNameFor(plan, 1, 392_000), // slide forward after the jump
+		segNameFor(plan, 2, 500_000), // sparse track cold jump
+		segNameFor(plan, 1, 898_000), // last-ish segment
+		"sub1_00001.vtt",             // back to the head (prefix path)
+		"sub1.vtt", "sub2.vtt",       // whole tracks
+	}
+	order = append(order, subResourceNames(plan)...)
+	for _, res := range order {
+		got, _, err := plan.Resource(context.Background(), res)
+		if err != nil {
+			t.Fatalf("Resource(%s): %v", res, err)
+		}
+		want, err := os.ReadFile(filepath.Join(dir, res))
+		if err != nil {
+			t.Fatalf("full pass did not write %s: %v", res, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s differs from the full pass:\n got: %q\nwant: %q", res, got, want)
+		}
+	}
+}
+
+// A cold seek must cost O(window), not O(position): the backward margin plus
+// the window, never the whole prefix. And sliding forward from the seek point
+// must reuse the island — near-zero additional I/O.
+func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
+	src := buildSeekFixture(t)
+	var readBytes int64
+	fs := &mkv.FS{Open: func(path string) (mkv.ReadSeekCloser, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return countingRSC{f: f, n: &readBytes}, nil
+	}}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000, FS: fs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	atomic.StoreInt64(&readBytes, 0)
+	if _, _, err := plan.Resource(context.Background(), segNameFor(plan, 1, 500_000)); err != nil {
+		t.Fatal(err)
+	}
+	if limit := st.Size() / 3; readBytes > limit {
+		t.Errorf("cold seek to 500s read %d of %d bytes (%.0f%%) — must cost O(window), not the whole prefix",
+			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
+	}
+
+	atomic.StoreInt64(&readBytes, 0)
+	if _, _, err := plan.Resource(context.Background(), segNameFor(plan, 1, 502_000)); err != nil {
+		t.Fatal(err)
+	}
+	if limit := st.Size() / 20; readBytes > limit {
+		t.Errorf("sliding to the next segment read %d bytes (%.1f%% of the file) — the island must resume, not re-scan the lookback",
+			readBytes, 100*float64(readBytes)/float64(st.Size()))
+	}
+
+	// A SECOND far jump must re-seek a fresh island, not drag the existing
+	// one across the gap (500s → 850s would otherwise scan the whole span).
+	atomic.StoreInt64(&readBytes, 0)
+	if _, _, err := plan.Resource(context.Background(), segNameFor(plan, 1, 850_000)); err != nil {
+		t.Fatal(err)
+	}
+	if limit := st.Size() / 3; readBytes > limit {
+		t.Errorf("second far jump read %d of %d bytes (%.0f%%) — the island must be re-seeked, not extended across the gap",
+			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
+	}
+}

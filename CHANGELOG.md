@@ -24,6 +24,19 @@ All notable changes to mkvgo are documented here. The format is based on
   cluster timestamp — it also stops a track-filtered walk from skimming to
   EOF hunting a sparse track's next block) and `ResumeOffset` (resume a
   bounded walk exactly where it stopped).
+- **A cold seek into the middle of the presentation costs O(window) too.**
+  The incremental cue scan alone still paid O(position) on the first request
+  after a far jump (it extended the prefix from the track start). A far
+  windowed request now seeks through the segment index to a bounded island:
+  scan from the cluster covering the window start minus a backward margin —
+  the relative-timecode spread plus the longest cue the fast path accounts
+  for (60 s) — forward to the window end, and slide the island on subsequent
+  requests; a later far jump re-seeks a fresh island instead of dragging the
+  old one across the gap. The fast path applies only when the subtitle
+  blocks observed (a one-stride track-head probe, plus every scan) carry
+  explicit durations within the margin — real-world subtitle muxing; tracks
+  with duration-less or over-long cues fall back to the always-exact prefix
+  scan. Windowed outputs stay byte-identical to the full pass on both paths.
 
 ### Changed
 

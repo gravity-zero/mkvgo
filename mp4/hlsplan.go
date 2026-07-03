@@ -14,10 +14,13 @@ package mp4
 // write). Title, global tags and cover art ride in the init segment as usual.
 // Text subtitle tracks are declared in the master playlist and served as a
 // WebVTT rendition each — whole-presentation (subN.vtt) or windowed
-// (subN_%05d.vtt). Text blocks have no cue index, so the cues come from a
-// sequential pass over the source; the pass is incremental (subCursor): each
-// windowed request advances it just far enough, in playback order that is one
-// bounded prefix read per segment, and the whole pass is paid at most once.
+// (subN_%05d.vtt). Text blocks have no cue index, so the cues come from
+// scanning the clusters; the scans are incremental and bounded (subScanState):
+// sequential playback advances an exact prefix cursor stride by stride, and a
+// far seek jumps through the segment index to a sliding bounded island —
+// every request costs O(window), like a video segment. Sources whose subtitle
+// blocks lack explicit durations (or carry over-long cues) drop to the
+// always-exact prefix path.
 
 import (
 	"context"
@@ -50,13 +53,13 @@ type HLSPlan struct {
 	master   []byte
 	mpd      []byte
 	segCount int
-	opts     Options       // Encrypt / RewriteURL ride along for Resource builds
-	subs     []hlsSubTrack // declared renditions; cues fetched lazily, then cached
-	subMu    []sync.Mutex  // serialises each track's cue cursor
-	subCur   []subCursor   // per-track incremental cue scan state
-	mp4src   bool          // MP4 source: windows sliced from the (fully timed) sample arrays
-	mp4offs  [][]int64     // per track, per sample: absolute file offset (MP4 source)
-	iframe   []byte        // trick-play playlist (MP4 plans; exact byte ranges)
+	opts     Options        // Encrypt / RewriteURL ride along for Resource builds
+	subs     []hlsSubTrack  // declared renditions; cues fetched lazily, then cached
+	subMu    []sync.Mutex   // serialises each track's cue scans
+	subScan  []subScanState // per-track incremental cue scan state
+	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
+	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
+	iframe   []byte         // trick-play playlist (MP4 plans; exact byte ranges)
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -127,7 +130,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o}
 	p.subs = planSubTracks(c, o)
 	p.subMu = make([]sync.Mutex, len(p.subs))
-	p.subCur = make([]subCursor, len(p.subs))
+	p.subScan = make([]subScanState, len(p.subs))
 	for _, t := range media {
 		p.tracks = append(p.tracks, &planTrack{
 			ft:         &fragTrack{outTrack: t, timescale: mediaTimescale(t)},
@@ -595,67 +598,177 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	return nil, "", errf("unknown HLS resource %q (see Resources())", name)
 }
 
-// subCursor is one subtitle track's incremental cue scan: the pass over the
-// clusters advances only as far as each request needs and resumes where it
-// stopped — serving windowed segments in playback order costs one bounded
-// prefix read each, and the whole pass is paid at most once in total. Text
-// blocks carry no cue index, which is why a pass exists at all.
+// subCursor is one bounded, resumable cue scan over the clusters: it holds
+// every cue of its track whose block lives in a cluster stamped within
+// [baseMs, scanned]. The prefix cursor (baseMs 0) grows from the track start;
+// a fast-path island starts mid-file after a far seek and slides forward.
 type subCursor struct {
-	cues    []subtitle.Cue // raw cues in block order (ends resolved per request)
+	baseMs  int64          // cluster-timestamp floor the scan started at (0 = track start)
+	cues    []subtitle.Cue // raw cues in block order
 	next    int64          // cluster offset to resume from; 0 = not started
 	scanned int64          // clusters with timestamps up to this ms are consumed
 	done    bool           // scanned to EOF
-	err     error          // permanent (non-context) scan error, replayed
 }
 
-// subScanStrideMs is one scan increment: progress commits and the caller's
-// ctx is honoured at each stride, so a client disconnect keeps the clusters
-// already walked and a later request resumes instead of restarting.
-const subScanStrideMs = 60_000
+// subScanState is one subtitle track's serving state: the exact prefix scan
+// (whole-track .vtt, sequential playback, and the fallback), one sliding
+// island for far seeks, and the flag that gates the island path.
+type subScanState struct {
+	prefix subCursor
+	window *subCursor // fast-seek island; replaced when a jump lands before it
+	noFast bool       // a duration-less or over-cap cue was observed: prefix only
+	err    error      // permanent (non-context) scan error, replayed
+}
+
+const (
+	// subScanStrideMs is one scan increment: progress commits and the
+	// caller's ctx is honoured at each stride, so a client disconnect keeps
+	// the clusters already walked and a later request resumes.
+	subScanStrideMs = 60_000
+
+	// subFastMaxCueDurMs is the longest cue the fast-seek path accounts for:
+	// its backward margin. A cue longer than this observed ANYWHERE (the
+	// track-head probe, a prefix scan, an island scan) — or any cue without
+	// an explicit duration, whose end resolves on an arbitrarily-far
+	// successor — drops the track to the always-exact prefix path. A
+	// violating cue that only lives in never-scanned regions can escape this
+	// net; real subtitle muxing (explicit BlockDurations, cues of seconds)
+	// stays exact.
+	subFastMaxCueDurMs = 60_000
+)
+
+// relTCMaxMs is how far (ms) a block's timecode can sit from its cluster's
+// timestamp: the ±32767-tick relative timecode range at the source's scale.
+func (p *HLSPlan) relTCMaxMs() int64 {
+	if p.tcScale > 0 && p.tcScale < math.MaxInt64/32767 {
+		return 32767 * p.tcScale / 1_000_000
+	}
+	return 32767
+}
 
 // subCuesThrough returns the i-th track's cues, complete and end-resolved for
 // every cue starting before uptoMs (math.MaxInt64 = the whole track),
-// advancing the cursor as far as that requires and no further.
+// advancing the prefix cursor as far as that requires and no further.
 func (p *HLSPlan) subCuesThrough(ctx context.Context, i int, uptoMs int64) ([]subtitle.Cue, error) {
 	if p.mp4src {
 		return p.subs[i].cues, nil // decoded at plan time from the sample table
 	}
 	p.subMu[i].Lock()
-	err := p.extendSubScan(ctx, i, uptoMs)
-	var cues []subtitle.Cue
-	if err == nil {
-		cues = append([]subtitle.Cue(nil), p.subCur[i].cues...)
-	}
+	cues, err := p.subPrefixLocked(ctx, i, uptoMs)
 	p.subMu[i].Unlock()
 	if err != nil {
 		return nil, err
 	}
 	// Resolving on the prefix equals resolving on the full track for every
-	// cue starting before uptoMs: extendSubScan guarantees their successors
+	// cue starting before uptoMs: the scan guarantees their successors
 	// (which duration-less ends resolve on) are in the prefix.
 	subtitle.ResolveCueEnds(cues, 2000)
 	return cues, nil
 }
 
-// extendSubScan advances the i-th cursor until it holds every cue starting
-// before uptoMs with resolvable ends. Two bounds drive the walk: blocks with
-// timecode T live in clusters stamped within the relative-timecode range of T
-// (±32767 raw ticks), and a duration-less cue's end is the NEXT cue's start —
-// so the scan runs to uptoMs plus that margin, then keeps going while the
-// last known cue before uptoMs still awaits a successor. Cancellation between
-// strides keeps the committed progress; only permanent errors are cached.
-func (p *HLSPlan) extendSubScan(ctx context.Context, i int, uptoMs int64) error {
-	cur := &p.subCur[i]
-	if cur.err != nil {
-		return cur.err
-	}
-	relMaxMs := int64(32767)
-	if p.tcScale > 0 && p.tcScale < math.MaxInt64/32767 {
-		relMaxMs = 32767 * p.tcScale / 1_000_000
-	}
+// subPrefixLocked extends the prefix cursor to cover cues starting before
+// uptoMs and returns a copy of it. Caller holds subMu[i].
+func (p *HLSPlan) subPrefixLocked(ctx context.Context, i int, uptoMs int64) ([]subtitle.Cue, error) {
+	st := &p.subScan[i]
 	target := uptoMs
-	if target < math.MaxInt64-relMaxMs {
-		target += relMaxMs
+	if relMax := p.relTCMaxMs(); target < math.MaxInt64-relMax {
+		target += relMax
+	}
+	if err := p.extendCursorLocked(ctx, i, &st.prefix, target, uptoMs); err != nil {
+		return nil, err
+	}
+	return append([]subtitle.Cue(nil), st.prefix.cues...), nil
+}
+
+// subCuesForWindow returns cues sufficient to window [segStart, segEnd):
+// from the prefix when it is the cheaper (or the only exact) vehicle, or
+// from a seeked island when the request jumps far past the prefix — the
+// direct-play property: a cold seek costs O(window), not O(position). The
+// island's backward margin covers cues started before the window
+// (subFastMaxCueDurMs) and the relative-timecode spread of their blocks.
+func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd int64) ([]subtitle.Cue, error) {
+	if p.mp4src {
+		return p.subs[i].cues, nil
+	}
+	relMax := p.relTCMaxMs()
+	target := segEnd
+	if target < math.MaxInt64-relMax {
+		target += relMax
+	}
+	neededFrom := segStart - subFastMaxCueDurMs - relMax
+	if neededFrom < 0 {
+		neededFrom = 0
+	}
+
+	p.subMu[i].Lock()
+	st := &p.subScan[i]
+	prefixCovers := st.prefix.done ||
+		(st.prefix.scanned >= target && !subNeedsNextCue(st.prefix.cues, segEnd))
+	// The prefix serves when it already covers the window, when the window
+	// starts within (or near) it, or when extending it reads no more than a
+	// fresh island would — sequential playback stays on the prefix.
+	usePrefix := prefixCovers || neededFrom <= st.prefix.scanned ||
+		target-st.prefix.scanned <= target-neededFrom
+	if !usePrefix && !st.noFast && st.prefix.scanned == 0 && !st.prefix.done {
+		// Probe the track head once before trusting a jump: the first stride
+		// reveals the track's cue style (explicit durations or not).
+		if err := p.extendCursorLocked(ctx, i, &st.prefix, subScanStrideMs, 0); err != nil {
+			p.subMu[i].Unlock()
+			return nil, err
+		}
+	}
+	if !usePrefix && !st.noFast {
+		cues, err := p.subWindowLocked(ctx, i, neededFrom, target, segEnd)
+		if err != nil {
+			p.subMu[i].Unlock()
+			return nil, err
+		}
+		if !st.noFast {
+			p.subMu[i].Unlock()
+			return cues, nil // island cues all carry explicit ends
+		}
+		st.window = nil // a violation surfaced mid-island: prefix from now on
+	}
+	cues, err := p.subPrefixLocked(ctx, i, segEnd)
+	p.subMu[i].Unlock()
+	if err != nil {
+		return nil, err
+	}
+	subtitle.ResolveCueEnds(cues, 2000)
+	return cues, nil
+}
+
+// subWindowLocked serves through the sliding island: reuse it while its
+// floor covers the needed lookback AND its scan front has reached it —
+// sliding forward is then incremental. A jump landing before the island or
+// far past its front seeks a fresh island through the segment index instead
+// of dragging the old one across the gap. Caller holds subMu[i].
+func (p *HLSPlan) subWindowLocked(ctx context.Context, i int, neededFrom, target, uptoMs int64) ([]subtitle.Cue, error) {
+	st := &p.subScan[i]
+	if st.window == nil || st.window.baseMs > neededFrom || st.window.scanned < neededFrom {
+		k := sort.Search(len(p.bounds), func(k int) bool { return p.bounds[k] > neededFrom }) - 1
+		if k < 0 {
+			k = 0
+		}
+		st.window = &subCursor{baseMs: p.bounds[k], next: p.offsets[k], scanned: p.bounds[k]}
+	}
+	if err := p.extendCursorLocked(ctx, i, st.window, target, uptoMs); err != nil {
+		return nil, err
+	}
+	return append([]subtitle.Cue(nil), st.window.cues...), nil
+}
+
+// extendCursorLocked advances cur until it holds every cue starting before
+// uptoMs (within its floor) with resolvable ends. Two bounds drive the walk:
+// blocks with timecode T live in clusters stamped within the relative-
+// timecode range of T, and a duration-less cue's end is the NEXT cue's start
+// — the scan keeps going while the last known cue before uptoMs awaits a
+// successor. Cancellation between strides keeps the committed progress; only
+// permanent errors are cached. Caller holds subMu[i].
+func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor, target, uptoMs int64) error {
+	st := &p.subScan[i]
+	if st.err != nil {
+		return st.err
 	}
 	if cur.done || (cur.scanned >= target && !subNeedsNextCue(cur.cues, uptoMs)) {
 		return nil
@@ -664,7 +777,7 @@ func (p *HLSPlan) extendSubScan(ctx context.Context, i int, uptoMs int64) error 
 		return err
 	}
 
-	st := &p.subs[i]
+	track := &p.subs[i]
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
 		return err
@@ -676,10 +789,10 @@ func (p *HLSPlan) extendSubScan(ctx context.Context, i int, uptoMs int64) error 
 	}
 	br, err := reader.NewBlockReaderAt(src, p.tcScale, start)
 	if err != nil {
-		cur.err = err
+		st.err = err
 		return err
 	}
-	br.KeepTracks(st.track.ID)
+	br.KeepTracks(track.track.ID)
 	var local []subtitle.Cue
 	for {
 		stopAt := cur.scanned + subScanStrideMs
@@ -702,15 +815,21 @@ func (p *HLSPlan) extendSubScan(ctx context.Context, i int, uptoMs int64) error 
 				return nil
 			}
 			if err != nil {
-				cur.err = errf("read block: %w", err)
-				return cur.err
+				st.err = errf("read block: %w", err)
+				return st.err
 			}
-			if b.TrackNumber != st.track.ID {
+			if b.TrackNumber != track.track.ID {
 				continue
 			}
-			if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+			if cue, ok := subCueFromBlock(track.track.Codec, b); ok {
+				if cue.EndMs <= cue.StartMs || cue.EndMs-cue.StartMs > subFastMaxCueDurMs {
+					st.noFast = true
+				}
 				local = append(local, cue)
 			}
+		}
+		if st.noFast && cur.baseMs > 0 {
+			return nil // the island is doomed; the caller falls back to the prefix
 		}
 		if cur.scanned >= target && !subNeedsNextCue(cur.cues, uptoMs) {
 			return nil
@@ -773,7 +892,7 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	cues, err := p.subCuesThrough(ctx, i, segEnd)
+	cues, err := p.subCuesForWindow(ctx, i, segStart, segEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -855,7 +974,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
 	p.subs = planSubTracks(c, *o)
 	p.subMu = make([]sync.Mutex, len(p.subs))
-	p.subCur = make([]subCursor, len(p.subs))
+	p.subScan = make([]subScanState, len(p.subs))
 	if err := mp4SubCues(ps, p.subs); err != nil {
 		return nil, err
 	}
