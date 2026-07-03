@@ -338,3 +338,118 @@ func TestPlanHLSSubtitleCancelDoesNotPoisonCueCache(t *testing.T) {
 		t.Errorf("sub1_00001.vtt content wrong:\n%s", seg)
 	}
 }
+
+// countingRSC wraps a file and counts the bytes actually read through it —
+// the probe the I/O-bound tests below use to prove a pass skips data instead
+// of dragging it through the reader.
+type countingRSC struct {
+	f mkv.ReadSeekCloser
+	n *int64
+}
+
+func (c countingRSC) Read(p []byte) (int, error) {
+	n, err := c.f.Read(p)
+	*c.n += int64(n)
+	return n, err
+}
+func (c countingRSC) Seek(offset int64, whence int) (int64, error) { return c.f.Seek(offset, whence) }
+func (c countingRSC) Close() error                                 { return c.f.Close() }
+
+// The lazy subtitle-cue pass walks every cluster, but it must not READ the
+// media payloads it walks past — on a large file that is the difference
+// between seconds of I/O and a header-only skim (the window in which a client
+// disconnect used to poison the cue cache). The fixture carries ~11 MB of
+// video payload and a handful of text cues: loading the cues must read a
+// small fraction of the file.
+func TestPlanHLSSubtitleScanSkipsMediaPayloads(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	frame := append([]byte{0x00, 0x00, 0x00, 0x01, 0x65}, make([]byte, 96<<10)...)
+	var gblocks []genBlock
+	for i := 0; i < 120; i++ { // video, 40ms frames, keyframe every 1s, ~96 KiB each
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: frame})
+	}
+	for i := 0; i < 3; i++ {
+		gblocks = append(gblocks, genBlock{track: 2, pts: int64(i) * 2000, key: true,
+			data: []byte(fmt.Sprintf("cue numero %d", i+1))})
+	}
+	sortGenBlocks(gblocks)
+	src := buildPlanFixture(t,
+		[]mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+			{ID: 2, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre"},
+		},
+		gblocks, nil)
+
+	var readBytes int64
+	fs := &mkv.FS{Open: func(path string) (mkv.ReadSeekCloser, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return countingRSC{f: f, n: &readBytes}, nil
+	}}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000, FS: fs})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readBytes = 0 // count the cue pass alone, not the plan's bounded peeks
+	vtt, err := plan.Subtitle(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(vtt, []byte("cue numero 3")) {
+		t.Fatalf("sub cues wrong:\n%s", vtt)
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limit := st.Size() / 4; readBytes > limit {
+		t.Errorf("cue pass read %d of %d bytes (%.0f%%) — media payloads must be skipped, not read",
+			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
+	}
+}
+
+// Every plan resource must survive a first request whose context was
+// cancelled: a transient context error must never be cached anywhere on the
+// Resource path (the bug class behind the subtitle 404 poisoning — this sweep
+// guards the whole surface, not just the cue cache).
+func TestPlanHLSResourcesSurviveCancelledFirstRequest(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	sr, ch := 44100.0, uint8(2)
+	var gblocks []genBlock
+	for i := 0; i < 150; i++ {
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0,
+			data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	}
+	for i := 0; i < 300; i++ {
+		gblocks = append(gblocks, genBlock{track: 2, pts: int64(i) * 20, key: true,
+			data: []byte{0xAA, byte(i)}})
+	}
+	for i := 0; i < 3; i++ {
+		gblocks = append(gblocks, genBlock{track: 3, pts: int64(i) * 2000, key: true,
+			data: []byte(fmt.Sprintf("cue numero %d", i+1))})
+	}
+	sortGenBlocks(gblocks)
+	src := buildPlanFixture(t,
+		[]mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+			{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch},
+			{ID: 3, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre"},
+		},
+		gblocks, nil)
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range plan.Resources() {
+		cctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, _, _ = plan.Resource(cctx, name) // may fail — must not leave state behind
+		if _, _, err := plan.Resource(context.Background(), name); err != nil {
+			t.Errorf("%s: request after a cancelled one failed: %v — a transient context error was cached", name, err)
+		}
+	}
+}

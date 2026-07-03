@@ -22,16 +22,30 @@ const (
 	maxBlockSize     = 64 * 1024 * 1024 // 64 MB max per block
 
 	bufSize = 256 << 10 // 256 KiB read-ahead
+
+	// filterBufSize is the read-ahead of a track-filtered reader: skips seek
+	// past the unwanted payloads, so a big buffer would only drag skipped
+	// bytes back in through each refill.
+	filterBufSize = 8 << 10
+
+	// seekSkipMin is the smallest beyond-buffer skip worth a real seek; below
+	// it, reading forward through the buffer is cheaper than a refill.
+	seekSkipMin = 8 << 10
 )
+
+// errFilteredBlock is parseBlock's signal that the block belongs to a track
+// outside the filter and its payload was skipped; Next keeps walking.
+var errFilteredBlock = errors.New("block filtered")
 
 // countingReader wraps a bufio.Reader and tracks how many bytes have been
 // consumed since creation. Every Read increments the counter; Seek is only
-// called on the underlying io.ReadSeeker when we need a genuine rewind (which
-// BlockReader never needs — skips use discard-forward).
+// called on the underlying io.ReadSeeker on the hybrid skip path (large
+// forward skips), never for a rewind.
 type countingReader struct {
 	br  *bufio.Reader
 	src io.ReadSeeker // kept for the hybrid skip path
 	pos int64
+	end int64 // source size, resolved on the first seek-skip; -1 until then
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
@@ -39,6 +53,7 @@ func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
 		br:  bufio.NewReaderSize(src, bufSize),
 		src: src,
 		pos: startPos,
+		end: -1,
 	}
 }
 
@@ -48,14 +63,51 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// discard advances the reader by exactly n bytes. io.CopyN routes through
-// c.Read which already increments c.pos, so no extra accounting is needed.
+// setBufSize replaces the read-ahead buffer. Only effective while nothing is
+// buffered (i.e. before the first Read); a no-op afterwards.
+func (c *countingReader) setBufSize(size int) {
+	if c.br.Buffered() == 0 {
+		c.br = bufio.NewReaderSize(c.src, size)
+	}
+}
+
+// discard advances the reader by exactly n bytes. What the buffer already
+// holds is dropped for free; a remainder worth skipping is seeked past on the
+// source (no read I/O), small remainders are read forward through the buffer.
+// A skip beyond the source's end errors like a truncated read would.
 func (c *countingReader) discard(n int64) error {
-	if n == 0 {
+	if n <= 0 {
 		return nil
 	}
-	_, err := io.CopyN(io.Discard, c, n)
-	return err
+	buffered := int64(c.br.Buffered())
+	rest := n - buffered
+	if rest < seekSkipMin {
+		_, err := io.CopyN(io.Discard, c, n)
+		return err
+	}
+	if buffered > 0 {
+		if _, err := c.br.Discard(int(buffered)); err != nil {
+			return err
+		}
+		c.pos += buffered
+	}
+	if c.end < 0 {
+		end, err := c.src.Seek(0, io.SeekEnd)
+		if err != nil {
+			return err
+		}
+		c.end = end
+	}
+	target := c.pos + rest
+	if target > c.end {
+		return io.ErrUnexpectedEOF
+	}
+	if _, err := c.src.Seek(target, io.SeekStart); err != nil {
+		return err
+	}
+	c.br.Reset(c.src)
+	c.pos = target
+	return nil
 }
 
 // tell returns the current byte position (offset from file start).
@@ -84,7 +136,8 @@ type BlockReader struct {
 	clusterTS     int64
 	timecodeScale int64
 	pending       []mkv.Block
-	peeked        *peekedHeader // element read in peek-ahead, to be processed next iteration
+	keep          map[uint64]bool // when non-nil, blocks of other tracks are skipped unread
+	peeked        *peekedHeader   // element read in peek-ahead, to be processed next iteration
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -121,6 +174,19 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 	}
 	br.r = newCountingReader(r, offset)
 	return br, nil
+}
+
+// KeepTracks restricts Next to blocks of the given tracks. Other tracks'
+// payloads are never read: the walk hops from header to header and seeks past
+// the skipped bytes, so scanning a sparse track (subtitle cues) costs a small
+// fraction of the file's I/O instead of a full sequential read. Call it
+// before the first Next; the read-ahead buffer is shrunk accordingly.
+func (br *BlockReader) KeepTracks(tracks ...uint64) {
+	br.keep = make(map[uint64]bool, len(tracks))
+	for _, id := range tracks {
+		br.keep[id] = true
+	}
+	br.r.setBufSize(filterBufSize)
 }
 
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
@@ -241,9 +307,17 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 				br.clusterTS = int64(v)
 				continue
 			case mkv.IDSimpleBlock:
-				return br.parseBlock(h.Size, true)
+				b, err := br.parseBlock(h.Size, true)
+				if errors.Is(err, errFilteredBlock) {
+					continue
+				}
+				return b, err
 			case mkv.IDBlockGroup:
-				return br.parseBlockGroup(h.Size)
+				b, err := br.parseBlockGroup(h.Size)
+				if errors.Is(err, errFilteredBlock) {
+					continue
+				}
+				return b, err
 			default:
 				if h.Size < 0 {
 					// Unknown-size non-top-level element inside cluster: skip safely.
@@ -302,6 +376,12 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	trackNum, _, err := ebml.ReadDataSize(br.r)
 	if err != nil {
 		return mkv.Block{}, err
+	}
+	if br.keep != nil && !br.keep[uint64(trackNum)] {
+		if err := br.r.discard(size - (br.r.tell() - start)); err != nil {
+			return mkv.Block{}, err
+		}
+		return mkv.Block{}, errFilteredBlock
 	}
 
 	var tcBuf [2]byte
@@ -397,6 +477,13 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 		switch h.ID {
 		case mkv.IDBlock:
 			block, err = br.parseBlock(h.Size, false)
+			if errors.Is(err, errFilteredBlock) {
+				// The rest of the group (duration, additions) is moot too.
+				if derr := br.r.discard(end - br.r.tell()); derr != nil {
+					return mkv.Block{}, derr
+				}
+				return mkv.Block{}, errFilteredBlock
+			}
 			if err != nil {
 				return mkv.Block{}, err
 			}

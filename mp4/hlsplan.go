@@ -619,8 +619,10 @@ func (p *HLSPlan) loadSubCues(ctx context.Context, i int) error {
 	return err
 }
 
-// scanSubCues is loadSubCues' sequential pass: it walks every block from the
-// first cluster and keeps the i-th subtitle track's cues.
+// scanSubCues is loadSubCues' sequential pass: it walks the clusters from the
+// first one keeping the i-th subtitle track's cues. The walk is track-filtered
+// — the media payloads it hops over are seeked past, not read — so its I/O is
+// a small fraction of the file.
 func (p *HLSPlan) scanSubCues(ctx context.Context, i int) error {
 	st := &p.subs[i]
 	src, err := p.fs.DoOpen(p.srcPath)
@@ -632,6 +634,7 @@ func (p *HLSPlan) scanSubCues(ctx context.Context, i int) error {
 	if err != nil {
 		return err
 	}
+	br.KeepTracks(st.track.ID)
 	var cues []subtitle.Cue
 	for {
 		if err := ctx.Err(); err != nil {
