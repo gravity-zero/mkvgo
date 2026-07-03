@@ -6,6 +6,25 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Windowed subtitle segments are served from an incremental cue scan — the
+  first request is sub-second, like a video segment.** `HLSPlan` used to
+  produce a subtitle rendition's cues in one whole-file pass on the first
+  request (tens of seconds on a multi-GB source — the delay behind the
+  first-hit 404s on slow storage). The pass is now a per-track cursor:
+  serving `subN_%05d.vtt` scans the source only up to that segment's end
+  (plus the relative-timecode margin blocks can be stamped within, and any
+  successor a duration-less cue's end resolves on), commits its progress, and
+  the next request resumes where it stopped. Playback order therefore pays
+  one bounded prefix read per segment and at most one full pass in total;
+  requests in any order, cancellations mid-scan and the whole-track
+  `subN.vtt` stay byte-identical to the full pass. Built on two new
+  `reader.BlockReader` primitives: `StopBeforeClusterMs` (bound a walk by
+  cluster timestamp — it also stops a track-filtered walk from skimming to
+  EOF hunting a sparse track's next block) and `ResumeOffset` (resume a
+  bounded walk exactly where it stopped).
+
 ### Changed
 
 - **The on-demand subtitle-cue pass skips media payloads it walks past, and

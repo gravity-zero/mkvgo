@@ -44,6 +44,12 @@ const (
 // outside the filter and its payload was skipped; Next keeps walking.
 var errFilteredBlock = errors.New("block filtered")
 
+// ErrClusterLimit is returned by Next when the walk reaches a cluster whose
+// timestamp exceeds the StopBeforeClusterMs limit — before delivering any of
+// that cluster's blocks. The walk can continue on the same reader after
+// raising the limit, or be resumed later by a new reader at ResumeOffset.
+var ErrClusterLimit = errors.New("cluster beyond the requested timecode limit")
+
 // countingReader is a forward-only buffered reader with an adaptive window.
 // It tracks the logical position by counting consumed bytes; the invariant is
 // src's file offset == pos + (w - r), i.e. the source sits at the end of the
@@ -166,7 +172,8 @@ func (c *countingReader) tell() int64 {
 
 // peekedHeader is a pre-read element header kept for one iteration of Next().
 type peekedHeader struct {
-	h ebml.ElementHeader
+	h     ebml.ElementHeader
+	start int64 // absolute offset of the header's first byte
 }
 
 // BlockReader reads MKV blocks sequentially from an io.ReadSeeker.
@@ -187,6 +194,10 @@ type BlockReader struct {
 	pending       []mkv.Block
 	keep          map[uint64]bool // when non-nil, blocks of other tracks are skipped unread
 	peeked        *peekedHeader   // element read in peek-ahead, to be processed next iteration
+	stopMs        int64           // StopBeforeClusterMs limit (only when hasStop)
+	hasStop       bool            // a cluster-timecode limit is set
+	awaitLimit    bool            // stopped at a cluster beyond stopMs; recheck on Next
+	clusterStart  int64           // absolute offset of the current cluster's header
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -223,6 +234,24 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 	}
 	br.r = newCountingReader(r, offset)
 	return br, nil
+}
+
+// StopBeforeClusterMs bounds the walk: Next returns ErrClusterLimit instead
+// of entering a cluster whose timestamp exceeds ms — even when a track filter
+// would otherwise skim silently to EOF hunting for a kept block. Clusters are
+// stored in timestamp order, so everything up to ms has been delivered when
+// the limit fires. The limit can be raised afterwards to continue on the same
+// reader; ResumeOffset lets a later reader restart at the held-back cluster.
+func (br *BlockReader) StopBeforeClusterMs(ms int64) {
+	br.stopMs = ms
+	br.hasStop = true
+}
+
+// ResumeOffset is the absolute offset of the cluster the walk stopped before
+// (valid after Next returned ErrClusterLimit): pass it to NewBlockReaderAt to
+// resume the walk exactly where it stopped.
+func (br *BlockReader) ResumeOffset() int64 {
+	return br.clusterStart
 }
 
 // KeepTracks restricts Next to blocks of the given tracks. Other tracks'
@@ -307,6 +336,14 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		br.pending = br.pending[1:]
 		return b, nil
 	}
+	if br.awaitLimit {
+		// Held before a cluster beyond the limit: stay held unless the limit
+		// was raised past the cluster's timestamp.
+		if tsMs, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); br.hasStop && err == nil && tsMs > br.stopMs {
+			return mkv.Block{}, ErrClusterLimit
+		}
+		br.awaitLimit = false
+	}
 
 	br.progressTick++
 	if br.progressTick%progressInterval == 0 {
@@ -325,10 +362,13 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 
 			// Read next element header (or use peeked one).
 			var h ebml.ElementHeader
+			var hdrStart int64
 			if br.peeked != nil {
 				h = br.peeked.h
+				hdrStart = br.peeked.start
 				br.peeked = nil
 			} else {
+				hdrStart = br.r.tell()
 				var err error
 				h, _, err = ebml.ReadElementHeader(br.r)
 				if err != nil {
@@ -343,7 +383,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			if br.clusterEnd < 0 && isSegmentLevelID(h.ID) {
 				br.inCluster = false
 				br.clusterEnd = -1
-				br.peeked = &peekedHeader{h: h}
+				br.peeked = &peekedHeader{h: h, start: hdrStart}
 				continue
 			}
 
@@ -354,6 +394,10 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 					return mkv.Block{}, err
 				}
 				br.clusterTS = int64(v)
+				if tsMs, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); br.hasStop && err == nil && tsMs > br.stopMs {
+					br.awaitLimit = true
+					return mkv.Block{}, ErrClusterLimit
+				}
 				continue
 			case mkv.IDSimpleBlock:
 				b, err := br.parseBlock(h.Size, true)
@@ -387,10 +431,13 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		}
 
 		var h ebml.ElementHeader
+		var hdrStart int64
 		if br.peeked != nil {
 			h = br.peeked.h
+			hdrStart = br.peeked.start
 			br.peeked = nil
 		} else {
+			hdrStart = br.r.tell()
 			var err error
 			h, _, err = ebml.ReadElementHeader(br.r)
 			if err != nil {
@@ -402,6 +449,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		}
 
 		if h.ID == mkv.IDCluster {
+			br.clusterStart = hdrStart
 			br.inCluster = true
 			if h.Size >= 0 {
 				br.clusterEnd = br.r.tell() + h.Size

@@ -2,6 +2,7 @@ package reader
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"reflect"
 	"testing"
@@ -258,5 +259,131 @@ func TestBlockReaderKeepTracksSmallFramesBulkReads(t *testing.T) {
 	}
 	if limit := int64(len(fixture)) + int64(len(fixture))/10; src.n > limit {
 		t.Errorf("small-frame walk read %d bytes for a %d-byte file — bytes are being re-read", src.n, len(fixture))
+	}
+}
+
+// buildTimedClusterFixture builds numClusters known-size clusters (TS 0,
+// 1000, 2000…), each holding track-1 blocks; track 2 appears only in the
+// first cluster (the sparse-track case).
+func buildTimedClusterFixture(t *testing.T, numClusters int) []byte {
+	t.Helper()
+	var seg bytes.Buffer
+	for c := 0; c < numClusters; c++ {
+		var cluster bytes.Buffer
+		ts := uint64(c * 1000)
+		ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, int64(ebml.UintLen(ts)))
+		ebml.WriteUint(&cluster, ts, ebml.UintLen(ts))
+		for b := 0; b < 3; b++ {
+			data := append(make([]byte, 2<<10), byte(c), byte(b))
+			writeSimpleBlock(&cluster, 1, int16(b*10), 0x80, data)
+		}
+		if c == 0 {
+			writeSimpleBlock(&cluster, 2, 5, 0x80, []byte("piste2"))
+		}
+		ebml.WriteElementHeader(&seg, mkv.IDCluster, int64(cluster.Len()))
+		seg.Write(cluster.Bytes())
+	}
+	var full bytes.Buffer
+	ebml.WriteElementHeader(&full, ebml.IDEBMLHeader, 0)
+	ebml.WriteElementHeader(&full, mkv.IDSegment, int64(seg.Len()))
+	full.Write(seg.Bytes())
+	return full.Bytes()
+}
+
+// StopBeforeClusterMs must stop the walk before delivering anything from the
+// first cluster whose timestamp exceeds the limit; the limit can be raised on
+// the same reader to continue, and ResumeOffset must allow a NEW reader to
+// pick up exactly where the walk stopped — concatenation equals a full walk.
+func TestBlockReaderStopBeforeClusterMs(t *testing.T) {
+	fixture := buildTimedClusterFixture(t, 5)
+
+	full, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := drain(t, full)
+
+	br, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.StopBeforeClusterMs(1500)
+	var got []mkv.Block
+	for {
+		b, err := br.Next()
+		if errors.Is(err, ErrClusterLimit) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got = append(got, b)
+	}
+	if len(got) != 7 { // cluster TS 0 (3 track-1 + 1 track-2) + cluster TS 1000 (3)
+		t.Fatalf("stopped walk returned %d blocks, want 7 (clusters 0 and 1000)", len(got))
+	}
+	for _, b := range got {
+		if b.Timecode >= 2000 {
+			t.Errorf("block at %dms delivered past the 1500ms cluster limit", b.Timecode)
+		}
+	}
+
+	// Raising the limit on the SAME reader continues into the held cluster.
+	br.StopBeforeClusterMs(3500)
+	for {
+		b, err := br.Next()
+		if errors.Is(err, ErrClusterLimit) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next after raise: %v", err)
+		}
+		got = append(got, b)
+	}
+
+	// Resuming with a fresh reader at ResumeOffset yields the tail exactly.
+	resume := br.ResumeOffset()
+	br2, err := NewBlockReaderAt(bytes.NewReader(fixture), 1_000_000, resume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, drain(t, br2)...)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("stop+raise+resume walk differs from full walk:\n got %d blocks\nwant %d blocks", len(got), len(want))
+	}
+}
+
+// On a sparse filtered track the limit is what bounds the walk: with track 2
+// present only in the first cluster, a filtered walk with a limit must stop
+// at the limit — NOT silently scan every remaining cluster hunting for a
+// block that never comes.
+func TestBlockReaderStopBoundsSparseFilteredWalk(t *testing.T) {
+	fixture := buildTimedClusterFixture(t, 50)
+	src := &countingSeeker{r: bytes.NewReader(fixture)}
+	br, err := NewBlockReader(src, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.KeepTracks(2)
+	br.StopBeforeClusterMs(1500)
+	var got []mkv.Block
+	for {
+		b, err := br.Next()
+		if errors.Is(err, ErrClusterLimit) {
+			break
+		}
+		if err == io.EOF {
+			t.Fatal("filtered walk ran to EOF — the cluster limit did not bound it")
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got = append(got, b)
+	}
+	if len(got) != 1 || string(got[0].Data) != "piste2" {
+		t.Fatalf("got %d blocks, want the single track-2 cue", len(got))
+	}
+	if limit := int64(len(fixture)) / 2; src.n > limit {
+		t.Errorf("bounded filtered walk read %d of %d bytes — it should stop at the limit", src.n, len(fixture))
 	}
 }
