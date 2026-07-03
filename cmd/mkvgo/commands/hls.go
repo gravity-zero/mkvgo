@@ -162,7 +162,7 @@ func CmdHLSSegment(args []string) {
 		}
 	}
 
-	if outPath == "" {
+	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
 			Fatal(err.Error())
 		}

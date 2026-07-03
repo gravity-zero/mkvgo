@@ -76,6 +76,28 @@ await plan.resource('nope.bin')
   .catch(() => check(true, 'unknown resource rejects'))
 plan.close(); planBlob.close()
 
+// --- on-demand subtitles: the windowed WebVTT rendition over Blob ranged
+// reads, byte-identical to the full pass (prefix scan, whole track, and the
+// declarative resource surface a player actually hits) ---
+const subBytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/sample_subs.mkv')))
+const hlsSub = await MkvGo.remuxToHLS(subBytes, { segmentSeconds: 2 })
+check(hlsSub.files['sub1.m3u8']?.length > 0 && hlsSub.files['sub1_00001.vtt']?.length > 0,
+  'HLS emits the subtitle rendition')
+const planSub = await MkvGo.openHLS(new Blob([subBytes]), { segmentSeconds: 2 })
+check(planSub.resources.includes('sub1.m3u8') && planSub.resources.includes('sub1_00001.vtt'),
+  'openHLS lists the windowed subtitle segments')
+const w1 = await planSub.resource('sub1_00001.vtt')
+check(w1.contentType === 'text/vtt' && Buffer.compare(w1.data, hlsSub.files['sub1_00001.vtt']) === 0,
+  'windowed subtitle segment byte-identical over Blob ranged reads')
+const lastSub = `sub1_${String(planSub.numSegments).padStart(5, '0')}.vtt`
+const wLast = await planSub.resource(lastSub)
+check(Buffer.compare(wLast.data, hlsSub.files[lastSub]) === 0,
+  `out-of-order subtitle window byte-identical (${lastSub})`)
+const wholeSub = await planSub.resource('sub1.vtt')
+check(Buffer.compare(wholeSub.data, hlsSub.files['sub1.vtt']) === 0,
+  'whole-track subtitle byte-identical')
+planSub.close()
+
 // --- MP4-source on-demand plan: sample-table backend, iframe playlist exposed ---
 const planMp4 = await MkvGo.openHLS(mp4.data, { segmentSeconds: 0.5 })
 check(planMp4.numSegments > 0 && planMp4.resources.includes('iframe.m3u8'),

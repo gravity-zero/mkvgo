@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -464,5 +465,65 @@ func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 	if limit := st.Size() / 3; readBytes > limit {
 		t.Errorf("second far jump read %d of %d bytes (%.0f%%) — the island must be re-seeked, not extended across the gap",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
+	}
+}
+
+// Concurrent players on one plan: subtitle windows (prefix, island and
+// whole-track paths racing on the same track), video segments and playlists
+// served simultaneously must all succeed and stay byte-identical to the full
+// pass. This is the locking contract of the per-track scan state — run under
+// the race detector in CI.
+func TestPlanHLSSubtitleConcurrentRequests(t *testing.T) {
+	src := buildSeekFixture(t)
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqs := []string{
+		segNameFor(plan, 1, 390_000), // island
+		segNameFor(plan, 1, 392_000), // island slide
+		"sub1_00001.vtt",             // prefix
+		"sub1_00002.vtt",
+		segNameFor(plan, 2, 500_000), // second track island
+		"sub1.vtt", "sub2.vtt",       // whole tracks (prefix to EOF)
+		"master.m3u8", "sub1.m3u8",
+		plan.SegmentName(0), plan.SegmentName(plan.NumSegments() - 1),
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(reqs)*4)
+	for round := 0; round < 4; round++ {
+		for _, res := range reqs {
+			wg.Add(1)
+			go func(res string) {
+				defer wg.Done()
+				got, _, err := plan.Resource(context.Background(), res)
+				if err != nil {
+					errs <- fmt.Errorf("%s: %w", res, err)
+					return
+				}
+				switch res {
+				case "master.m3u8": // BANDWIDTH is estimated on-demand
+					return
+				}
+				want, err := os.ReadFile(filepath.Join(dir, res))
+				if err != nil {
+					errs <- err
+					return
+				}
+				if !bytes.Equal(got, want) {
+					errs <- fmt.Errorf("%s differs from the full pass under concurrency", res)
+				}
+			}(res)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }

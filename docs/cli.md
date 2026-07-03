@@ -771,10 +771,12 @@ Without `-o` the resource goes to stdout (pipe it from a server handler).
 The output is **byte-identical** to the corresponding file `to-hls` writes
 (same boundaries, same fragments, cover art and global tags in the init), so
 pre-generated and on-demand serving can be mixed transparently. Text subtitle
-tracks are declared in the master playlist and served as one
-whole-presentation WebVTT rendition each (`subN.m3u8` + `subN.vtt`; text
-blocks have no cue index, so the `.vtt` costs one sequential pass — cache it
-if requested often). The remaining difference from `to-hls`: the master
+tracks are declared in the master playlist and served as segmented WebVTT
+renditions (`subN.m3u8` + windowed `subN_00001.vtt`…, plus the whole track as
+`subN.vtt`); text blocks have no cue index, so the cues come from scanning
+the clusters — incremental, bounded and cached: a windowed request costs one
+bounded read whether playback is sequential or seeking, only the whole-track
+`subN.vtt` costs a full pass. The remaining difference from `to-hls`: the master
 playlist's `BANDWIDTH` is estimated from the source's cluster sizes. The
 source must carry a Cues index (`mkvgo reindex` adds one).
 

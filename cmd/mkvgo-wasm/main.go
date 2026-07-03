@@ -2,10 +2,12 @@
 
 // Command mkvgo-wasm builds mkvgo for WebAssembly (GOOS=js GOARCH=wasm). It
 // registers a global `MkvGo` object whose methods mirror the library: probe,
-// remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, extractSubtitleVTT. Every
-// method returns a Promise; inputs are Uint8Array (whole file in memory) or,
-// for probe, a Blob/File — read head-only through ranged slices, so probing a
-// 40 GB file in the browser touches only a few hundred kilobytes.
+// remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, openHLS,
+// extractSubtitleVTT. Every method returns a Promise; inputs are Uint8Array
+// (whole file in memory) or, for probe and openHLS, a Blob/File — read
+// through ranged slices, so probing a 40 GB file in the browser touches only
+// a few hundred kilobytes, and an on-demand plan (media segments and windowed
+// subtitle renditions alike) reads only the windows a player watches.
 //
 // Build: make wasm (dist/wasm/mkvgo.wasm + wasm_exec.js). See docs/wasm.md.
 package main

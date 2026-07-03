@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.14.0] - 2026-07-03
 
 ### Added
 
@@ -60,6 +60,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`hls-segment -o -` wrote a file literally named `-`.** The output flag
+  now treats `-` as stdout, like the other commands.
 - **A cancelled request poisoned an on-demand subtitle track for the plan's
   lifetime.** `HLSPlan`'s lazy subtitle-cue pass ran under the requesting
   client's context and cached its result through a `sync.Once` — if the client

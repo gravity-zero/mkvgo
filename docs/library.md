@@ -202,11 +202,18 @@ The fragments are built by the same code as `RemuxToHLS`, so every resource is
 on-demand serving mix transparently. Cover art and global tags ride in the
 init segment (`WithAttachments`/`WithTags` reach them through the SeekHead,
 still head-only). Text subtitle tracks are declared in the master playlist and
-served as one whole-presentation WebVTT rendition each (`subN.m3u8` +
-`subN.vtt`) — text blocks have no cue index, so a `.vtt` costs one sequential
-pass, lazily; cache it if requested often. The remaining difference: the
-master `BANDWIDTH` is estimated from cluster sizes. The source must carry a
-Cues index. The plan is immutable and safe for concurrent `Segment` calls.
+served as segmented WebVTT renditions (`subN.m3u8` + windowed `subN_00001.vtt`…,
+plus the whole track as `subN.vtt`). Text blocks carry no cue index, so the
+cues come from scanning the clusters — incrementally and bounded, with the
+results cached in the plan: sequential playback advances a resumable prefix
+scan (one bounded read per segment), and a far seek jumps through the segment
+index to a bounded window, so any windowed request costs O(window) like a
+video segment; only the whole-track `subN.vtt` costs a full pass. The seek
+fast path assumes self-contained cues (explicit block durations, as real
+muxers write); tracks with duration-less or over-long cues are served through
+the always-exact prefix scan. The remaining difference: the master
+`BANDWIDTH` is estimated from cluster sizes. The source must carry a Cues
+index. The plan is immutable and safe for concurrent `Segment` calls.
 
 ### Thumbnails / storyboards (`matroska.ExtractKeyframeSample`)
 
