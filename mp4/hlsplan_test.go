@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -286,5 +287,54 @@ func TestPlanHLSFromMP4MatchesFullPass(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s differs from the full pass (%d vs %d bytes)", name, len(got), len(want))
 		}
+	}
+}
+
+// A cancelled request must not poison the lazy cue cache: the sequential cue
+// pass runs under the requesting client's context, and caching its
+// cancellation would make every later request on that subtitle track fail
+// instantly for the plan's lifetime (a player that gives up on the first,
+// slow request would 404 the track forever). Context errors are transient —
+// the next request with a live context re-scans and succeeds.
+func TestPlanHLSSubtitleCancelDoesNotPoisonCueCache(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var gblocks []genBlock
+	for i := 0; i < 150; i++ { // video, 40ms frames, keyframe every 1s
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0,
+			data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	}
+	for i := 0; i < 3; i++ {
+		gblocks = append(gblocks, genBlock{track: 2, pts: int64(i) * 2000, key: true,
+			data: []byte(fmt.Sprintf("cue numero %d", i+1))})
+	}
+	sortGenBlocks(gblocks)
+	src := buildPlanFixture(t,
+		[]mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+			{ID: 2, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre"},
+		},
+		gblocks, nil)
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := plan.Resource(cancelled, "sub1.vtt"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled request: err = %v, want context.Canceled", err)
+	}
+
+	vtt, mime, err := plan.Resource(context.Background(), "sub1.vtt")
+	if err != nil || mime != "text/vtt" {
+		t.Fatalf("request after cancellation: %v (%s) — cancellation was cached", err, mime)
+	}
+	if !bytes.Contains(vtt, []byte("cue numero 3")) {
+		t.Errorf("sub1.vtt content wrong after re-scan:\n%s", vtt)
+	}
+	if seg, _, err := plan.Resource(context.Background(), "sub1_00001.vtt"); err != nil {
+		t.Errorf("windowed segment after cancellation: %v", err)
+	} else if !bytes.Contains(seg, []byte("cue numero 1")) {
+		t.Errorf("sub1_00001.vtt content wrong:\n%s", seg)
 	}
 }

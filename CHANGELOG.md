@@ -4,6 +4,20 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A cancelled request poisoned an on-demand subtitle track for the plan's
+  lifetime.** `HLSPlan`'s lazy subtitle-cue pass ran under the requesting
+  client's context and cached its result through a `sync.Once` — if the client
+  disconnected mid-scan (the pass reads the whole source, seconds on a large
+  file), `context.Canceled` was cached and every later request on that track
+  failed instantly, which a server maps to a deterministic 404. Context
+  cancellation and deadline errors are now treated as transient: only success
+  and permanent errors are cached, and the next request with a live context
+  re-runs the scan.
+
 ## [0.13.0] - 2026-07-02
 
 ### Fixed

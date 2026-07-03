@@ -49,7 +49,8 @@ type HLSPlan struct {
 	segCount int
 	opts     Options       // Encrypt / RewriteURL ride along for Resource builds
 	subs     []hlsSubTrack // declared renditions; cues fetched lazily, then cached
-	subOnce  []sync.Once   // one-shot cue loaders (the sequential pass runs once per track)
+	subMu    []sync.Mutex  // serialises each track's cue loader
+	subDone  []bool        // cues (or a permanent error) cached; ctx errors are not
 	subErr   []error
 	mp4src   bool      // MP4 source: windows sliced from the (fully timed) sample arrays
 	mp4offs  [][]int64 // per track, per sample: absolute file offset (MP4 source)
@@ -123,7 +124,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o}
 	p.subs = planSubTracks(c, o)
-	p.subOnce = make([]sync.Once, len(p.subs))
+	p.subMu = make([]sync.Mutex, len(p.subs))
+	p.subDone = make([]bool, len(p.subs))
 	p.subErr = make([]error, len(p.subs))
 	for _, t := range media {
 		p.tracks = append(p.tracks, &planTrack{
@@ -596,48 +598,62 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 // track's cues, once — subsequent calls (whole file, every windowed segment)
 // serve from the cached cues. Text blocks carry no cue index, so the first
 // request pays the pass; on a remote source that means transferring it once.
+// The pass runs under the requesting caller's ctx: if that caller vanishes
+// mid-scan the cancellation is returned but NOT cached, so the next request
+// with a live context re-scans instead of replaying the stale error forever.
 func (p *HLSPlan) loadSubCues(ctx context.Context, i int) error {
 	if p.mp4src {
 		return nil // decoded at plan time from the sample table
 	}
-	p.subOnce[i].Do(func() {
-		st := &p.subs[i]
-		src, err := p.fs.DoOpen(p.srcPath)
+	p.subMu[i].Lock()
+	defer p.subMu[i].Unlock()
+	if p.subDone[i] {
+		return p.subErr[i]
+	}
+	err := p.scanSubCues(ctx, i)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	p.subDone[i] = true
+	p.subErr[i] = err
+	return err
+}
+
+// scanSubCues is loadSubCues' sequential pass: it walks every block from the
+// first cluster and keeps the i-th subtitle track's cues.
+func (p *HLSPlan) scanSubCues(ctx context.Context, i int) error {
+	st := &p.subs[i]
+	src, err := p.fs.DoOpen(p.srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
+	if err != nil {
+		return err
+	}
+	var cues []subtitle.Cue
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
-			p.subErr[i] = err
-			return
+			return errf("read block: %w", err)
 		}
-		defer src.Close()
-		br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
-		if err != nil {
-			p.subErr[i] = err
-			return
+		if b.TrackNumber != st.track.ID {
+			continue
 		}
-		var cues []subtitle.Cue
-		for {
-			if err := ctx.Err(); err != nil {
-				p.subErr[i] = err
-				return
-			}
-			b, err := br.Next()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				p.subErr[i] = errf("read block: %w", err)
-				return
-			}
-			if b.TrackNumber != st.track.ID {
-				continue
-			}
-			if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
-				cues = append(cues, cue)
-			}
+		if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+			cues = append(cues, cue)
 		}
-		subtitle.ResolveCueEnds(cues, 2000)
-		st.cues = cues
-	})
-	return p.subErr[i]
+	}
+	subtitle.ResolveCueEnds(cues, 2000)
+	st.cues = cues
+	return nil
 }
 
 // Subtitle builds the i-th (0-based) subtitle rendition's WebVTT — the whole
@@ -751,7 +767,8 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
 	p.subs = planSubTracks(c, *o)
-	p.subOnce = make([]sync.Once, len(p.subs))
+	p.subMu = make([]sync.Mutex, len(p.subs))
+	p.subDone = make([]bool, len(p.subs))
 	p.subErr = make([]error, len(p.subs))
 	if err := mp4SubCues(ps, p.subs); err != nil {
 		return nil, err
