@@ -166,6 +166,25 @@ export interface HLSPlanHandle {
   close(): void
 }
 
+/**
+ * An on-demand multi-variant (ABR) HLS presentation over several pre-encoded
+ * quality variants of one title. The reference variant (v1) supplies the shared
+ * audio and subtitles; every variant contributes its video rendition. Resource
+ * names are "master.m3u8" for the top manifest and "v{k}/<name>" for a
+ * variant's resource. Blob variants are read through ranged slices, so a
+ * client-side ABR ladder of huge local files stays memory-bounded.
+ */
+export interface ABRPlanHandle {
+  /** Number of quality variants. */
+  numVariants: number
+  /** Every resource name: "master.m3u8" and each variant's "v{k}/<name>". */
+  resources: string[]
+  /** Build one resource (e.g. "master.m3u8" or "v2/seg00007.m4s"). */
+  resource(name: string, options?: AbortOptions): Promise<HLSResource>
+  /** Release the handle's callbacks. */
+  close(): void
+}
+
 export interface MkvGoApi {
   version(): string
   /**
@@ -189,6 +208,13 @@ export interface MkvGoApi {
    * carry a Cues index.
    */
   openHLS(input: Uint8Array | Blob, options?: RemuxOptions): Promise<HLSPlanHandle>
+  /**
+   * Open an on-demand multi-variant (ABR) HLS presentation from several
+   * pre-encoded quality variants of one title, best first. One handle serves
+   * the whole ladder — master plus every variant's resources — built on demand.
+   * Blob/File variants are read through ranged slices (memory-bounded).
+   */
+  openABR(inputs: (Uint8Array | Blob)[], options?: RemuxOptions): Promise<ABRPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
 }

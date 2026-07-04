@@ -76,6 +76,25 @@ await plan.resource('nope.bin')
   .catch(() => check(true, 'unknown resource rejects'))
 plan.close(); planBlob.close()
 
+// --- on-demand ABR: one multi-variant plan over two pre-encoded qualities ---
+const abr = await MkvGo.openABR([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
+check(abr.numVariants === 2 && abr.resources.includes('master.m3u8'), `openABR ${abr.numVariants} variants`)
+const abrMaster = new TextDecoder().decode((await abr.resource('master.m3u8')).data)
+check((abrMaster.match(/EXT-X-STREAM-INF/g) || []).length === 2 && abrMaster.includes('TYPE=AUDIO'),
+  'ABR master declares both variants and the shared audio group')
+const v1seg = await abr.resource('v1/seg00001.m4s')
+check(Buffer.compare(v1seg.data, hls.files['seg00001.m4s']) === 0,
+  'ABR v1 segment byte-identical to the single-source full pass')
+const v2init = await abr.resource('v2/init.mp4')
+check(v2init.data.length > 0, 'ABR v2 (video-only) init served')
+const abrBlob = await MkvGo.openABR([new Blob([mkvBytes]), new Blob([mkvBytes])], { segmentSeconds: 0.5 })
+const v1segBlob = await abrBlob.resource('v1/seg00001.m4s')
+check(Buffer.compare(v1segBlob.data, v1seg.data) === 0, 'openABR(Blob[]) ranged reads produce the same segment')
+await abr.resource('v9/init.mp4')
+  .then(() => check(false, 'out-of-range variant must reject'))
+  .catch(() => check(true, 'out-of-range ABR variant rejects'))
+abr.close(); abrBlob.close()
+
 // --- on-demand subtitles: the windowed WebVTT rendition over Blob ranged
 // reads, byte-identical to the full pass (prefix scan, whole track, and the
 // declarative resource surface a player actually hits) ---

@@ -500,3 +500,123 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 		return h, nil
 	})
 }
+
+// isUint8 reports whether v is a typed array / ArrayBuffer-like (has byteLength).
+func isUint8(v js.Value) bool {
+	return v.Type() == js.TypeObject && v.Get("byteLength").Type() == js.TypeNumber
+}
+
+// multiSourceFS maps each input (Uint8Array or Blob/File) to a distinct source
+// path "src{i}" so PlanABR reads the right variant per path: Uint8Arrays live in
+// a MemFS, Blobs are served through independent ranged readers (memory-bounded).
+func multiSourceFS(inputs []js.Value) (*mkv.FS, []string, error) {
+	paths := make([]string, len(inputs))
+	blobs := map[string]js.Value{}
+	mem := mkv.NewMemFS()
+	for i, in := range inputs {
+		p := fmt.Sprintf("src%d", i)
+		paths[i] = p
+		switch {
+		case isBlob(in):
+			blobs[p] = in
+		case isUint8(in):
+			mem.Put(p, toGoBytes(in))
+		default:
+			return nil, nil, fmt.Errorf("openABR: input %d must be a Uint8Array or a Blob/File", i)
+		}
+	}
+	memFS := mem.FS()
+	if len(blobs) == 0 {
+		return memFS, paths, nil
+	}
+	fs := &mkv.FS{
+		Open: func(p string) (mkv.ReadSeekCloser, error) {
+			if b, ok := blobs[p]; ok {
+				return newBlobReader(b), nil
+			}
+			return memFS.Open(p)
+		},
+		Stat: func(p string) (os.FileInfo, error) {
+			if b, ok := blobs[p]; ok {
+				return blobInfo{name: p, size: int64(b.Get("size").Float())}, nil
+			}
+			return memFS.Stat(p)
+		},
+	}
+	return fs, paths, nil
+}
+
+// openABRJS(inputs: Array<Uint8Array | Blob>, opts?) → Promise<handle>. inputs
+// are the pre-encoded quality variants of one title, best first. The handle
+// serves the whole multi-variant presentation on demand: `numVariants`,
+// `resources` (every name a player requests — "master.m3u8", "v1/init.mp4",
+// "v2/seg00007.m4s", …), `resource(name)` builds it (data + contentType),
+// `close()` releases the callbacks. Blob variants are read through ranged
+// slices, so a client-side ABR ladder of huge local files stays memory-bounded.
+func openABRJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("openABR: missing inputs") })
+	}
+	inputsVal := args[0]
+	if inputsVal.Type() != js.TypeObject || inputsVal.Get("length").Type() != js.TypeNumber {
+		return promise(func() (any, error) {
+			return nil, fmt.Errorf("openABR: first argument must be an array of Uint8Array|Blob (best quality first)")
+		})
+	}
+	n := inputsVal.Get("length").Int()
+	inputs := make([]js.Value, n)
+	for i := 0; i < n; i++ {
+		inputs[i] = inputsVal.Index(i)
+	}
+	opts := readRemuxOpts(args, 1)
+	openCtx, openRelease := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer openRelease()
+		fs, paths, err := multiSourceFS(inputs)
+		if err != nil {
+			return nil, err
+		}
+		opts.FS = fs
+		plan, err := mp4.PlanABR(openCtx, paths, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		h := js.Global().Get("Object").New()
+		h.Set("numVariants", plan.NumVariants())
+		names := plan.Resources()
+		arr := js.Global().Get("Array").New(len(names))
+		for i, nm := range names {
+			arr.SetIndex(i, nm)
+		}
+		h.Set("resources", arr)
+
+		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
+			}
+			name := rargs[0].String()
+			ctx, release := signalContext(optArg(rargs, 1))
+			return promise(func() (any, error) {
+				defer release()
+				data, mime, err := plan.Resource(ctx, name)
+				if err != nil {
+					return nil, err
+				}
+				obj := js.Global().Get("Object").New()
+				obj.Set("data", toUint8Array(data))
+				obj.Set("contentType", mime)
+				return obj, nil
+			})
+		})
+		var closeFn js.Func
+		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+			resourceFn.Release()
+			closeFn.Release()
+			return nil
+		})
+		h.Set("resource", resourceFn)
+		h.Set("close", closeFn)
+		return h, nil
+	})
+}
