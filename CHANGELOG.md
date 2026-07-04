@@ -42,7 +42,15 @@ All notable changes to mkvgo are documented here. The format is based on
   nothing pre-generated: one `Resource()` resolves "master.m3u8" or any
   "v{k}/<name>", byte-identical to `RemuxToABR`. The WASM `openABR(inputs[])`
   exposes the same over Uint8Array or Blob variants (ranged reads, so a
-  client-side ladder of huge local files stays memory-bounded).
+  client-side ladder of huge local files stays memory-bounded). The `abr-segment`
+  CLI serves one ABR resource on demand; the ABR master advertises per-variant
+  I-frame (trick-play) streams for CMAF/MP4 ladders.
+- **In-browser HLS origin (Service Worker).** A small fetch router turns
+  `openHLS`/`openABR` into an origin, so a plain `<video>`/hls.js streams a
+  local file — even one far larger than memory — with no server and no upload
+  (`web/example/hls-sw.html`). Each on-demand resource now carries a
+  deterministic content `sha256`, a ready-made `ETag` for HTTP caching / CDN
+  dedup.
 - **Fragmented-MP4 / CMAF input.** A fragmented source (streaming fMP4, DASH/HLS
   CMAF — the shape most pre-encoded ladders take) is now read by walking its
   moof/traf/trun fragments into a full sample table, so `from-mp4`, `to-hls`,
