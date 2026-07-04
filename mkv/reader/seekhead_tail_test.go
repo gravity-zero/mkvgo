@@ -230,8 +230,8 @@ func buildNoCuesMKV(t *testing.T, nClusters, clusterSize int) []byte {
 
 // TestFullReadStaleSeekHeadFallsBack poisons the SeekHead's Cues offset so it
 // points inside a cluster. The reader must reject it (the header there does not
-// decode to a segment-level element) and fall back to walking, still recovering
-// the real tail Cues and Tags rather than parsing garbage.
+// decode to a segment-level element) and recover the real tail Cues and Tags
+// (via the bounded EOF scan) rather than parsing garbage or missing them.
 func TestFullReadStaleSeekHeadFallsBack(t *testing.T) {
 	data := buildTailMKV(t, true, 30, 64<<10, true)
 	c, err := Read(context.Background(), bytes.NewReader(data), "stale.mkv")
@@ -239,6 +239,62 @@ func TestFullReadStaleSeekHeadFallsBack(t *testing.T) {
 		t.Fatalf("Read with stale SeekHead: %v", err)
 	}
 	assertTailParsed(t, c)
+}
+
+// TestFullReadPhantomCuesNoWalk covers a real corpus shape: a SeekHead lists a
+// Cues element the muxer never wrote (its offset lands mid-cluster) and there is
+// no tail metadata at all. The reader must reject the phantom pointer and stop
+// without walking every cluster - so the read-call count must NOT grow with the
+// cluster count (the bug made these files take seconds over a network mount).
+func TestFullReadPhantomCuesNoWalk(t *testing.T) {
+	const clusterSize = 128 << 10 // > fullReadBufSize, so walking one costs a read
+	build := func(nClusters int) []byte {
+		info, tracks := infoElem(), tracksElem()
+		cluster := bigCluster(clusterSize)
+		clusters := make([]byte, 0, nClusters*len(cluster))
+		for i := 0; i < nClusters; i++ {
+			clusters = append(clusters, cluster...)
+		}
+		sh := func(infoP, tracksP, cuesP uint64) []byte {
+			return seekHeadElem(
+				seekEntry(mkv.IDInfo, infoP),
+				seekEntry(mkv.IDTracks, tracksP),
+				seekEntry(mkv.IDCues, cuesP),
+			)
+		}
+		shLen := uint64(len(sh(0, 0, 0)))
+		infoPos := shLen
+		tracksPos := infoPos + uint64(len(info))
+		clustersStart := tracksPos + uint64(len(tracks))
+		phantomCues := clustersStart + uint64(len(cluster)/2) // points into a cluster
+		head := sh(infoPos, tracksPos, phantomCues)
+		if uint64(len(head)) != shLen {
+			t.Fatalf("SeekHead length not fixed-width")
+		}
+		return segmentMKV(head, info, tracks, clusters) // no tail Cues/Tags
+	}
+
+	small := &callCountingReadSeeker{rs: bytes.NewReader(build(20))}
+	cSmall, err := Read(context.Background(), small, "small.mkv")
+	if err != nil {
+		t.Fatalf("Read(20, phantom cues): %v", err)
+	}
+	large := &callCountingReadSeeker{rs: bytes.NewReader(build(200))}
+	cLarge, err := Read(context.Background(), large, "large.mkv")
+	if err != nil {
+		t.Fatalf("Read(200, phantom cues): %v", err)
+	}
+	for _, c := range []*mkv.Container{cSmall, cLarge} {
+		if len(c.Tracks) != 2 {
+			t.Errorf("Tracks = %d, want 2", len(c.Tracks))
+		}
+		if len(c.Cues) != 0 {
+			t.Errorf("Cues = %d, want 0 (the Cues element was never written)", len(c.Cues))
+		}
+	}
+	if small.calls != large.calls {
+		t.Errorf("read calls grew with cluster count: 20=%d, 200=%d (the phantom Cues must not force a full cluster walk)", small.calls, large.calls)
+	}
 }
 
 // TestFullReadSeekHeadParity asserts the SeekHead fast path and the no-SeekHead

@@ -314,7 +314,32 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 						}
 						continue
 					}
-					seekOffsets = nil // stale SeekHead: stop trusting it, walk the clusters
+					// A SeekHead entry that does not resolve to a real element -
+					// commonly a Cues pointer for a Cues index the muxer never
+					// wrote (cues=0 files still list one), or one whose position
+					// is stale. The SeekHead is no longer trustworthy for the
+					// tail: jumping to another of its entries could skip a real
+					// element it mis-references. Recover the actual contiguous
+					// tail with ONE bounded scan back from EOF (the real Cues +
+					// any following Tags/Chapters that tile to the file end)
+					// instead of distrusting it and walking every cluster. If
+					// there is no such tail (cues=0, nothing past the clusters),
+					// the head elements are all parsed, so stop without the walk.
+					if !triedTailScan {
+						triedTailScan = true
+						bodyPos := p.pos()
+						done, err := p.scanTailForCues(c)
+						if err != nil {
+							return err
+						}
+						if done {
+							return nil
+						}
+						if _, err := p.r.Seek(bodyPos, io.SeekStart); err != nil {
+							return err
+						}
+					}
+					return nil
 				} else if len(seekOffsets) > 0 {
 					// A SeekHead gave us valid offsets and NONE lie past the clusters:
 					// everything it indexes (Info/Tracks/Cues/…) is at the head and
