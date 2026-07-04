@@ -72,6 +72,10 @@ type planTrack struct {
 	ft         *fragTrack
 	firstPtsMs int64 // the track's first sample PTS — the global DTS origin
 	lastDurTS  int64 // the track's final sample duration (fillFragTiming's rule)
+	// gridTS is the sample-exact frame stride of a constant-rate audio track
+	// (audioGridTS); windows are then timed on the grid, exactly like
+	// fillFragTiming's grid branch, instead of on the ms-rounded timecodes.
+	gridTS int64
 }
 
 // PlanHLS reads the source's metadata, Cues, first and last clusters — a few
@@ -144,11 +148,30 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 
 	// Segment boundaries from the cue times (the video keyframes), like
-	// segmentBoundaries does from the sample flags.
-	p.bounds = []int64{0}
-	p.offsets = []int64{c.SegmentStart + c.Cues[0].ClusterPos}
-	last := int64(0)
+	// segmentBoundaries does from the sample flags. Only the VIDEO track's cue
+	// points qualify: real files cue subtitle/audio tracks too, and a boundary
+	// on another track's cue time would start a video segment mid-GOP (broken
+	// random access) and diverge from the full pass's keyframe cuts.
+	var vidID uint64
+	for _, t := range media {
+		if t.spec.video {
+			vidID = t.mkv.ID
+			break
+		}
+	}
+	cues := make([]mkv.CuePoint, 0, len(c.Cues))
 	for _, cue := range c.Cues {
+		if cue.Track == vidID {
+			cues = append(cues, cue)
+		}
+	}
+	if len(cues) == 0 {
+		return nil, errf("%s: the Cues index no video keyframes — on-demand HLS seeks through them (run `mkvgo reindex` first)", srcPath)
+	}
+	p.bounds = []int64{0}
+	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
+	last := int64(0)
+	for _, cue := range cues {
 		if cue.TimeMs >= last+segMs {
 			p.bounds = append(p.bounds, cue.TimeMs)
 			p.offsets = append(p.offsets, c.SegmentStart+cue.ClusterPos)
@@ -163,7 +186,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if err := p.peekHead(ctx); err != nil {
 		return nil, err
 	}
-	lastPts, prevPts, err := p.peekTail(ctx, c.SegmentStart+c.Cues[len(c.Cues)-1].ClusterPos)
+	lastPts, prevPts, lastFrames, err := p.peekTail(ctx, c.SegmentStart+cues[len(cues)-1].ClusterPos)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +199,14 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, errf("track %d produced no samples", ft.outTrack.mp4ID)
 		}
 		scale := tsScale(ft.timescale)
+		if pt.gridTS <= 0 { // peekHead may already have recovered a no-DefaultDuration stride
+			pt.gridTS = audioGridTS(ft.outTrack, ft.timescale)
+		}
 		switch {
+		case pt.gridTS > 0:
+			// Grid-timed audio: the final frame's index recovers its exact
+			// slot from the ms timecode (fillFragTiming's grid rule).
+			pt.lastDurTS = pt.gridTS
 		case ft.outTrack.frameDurMs > 0:
 			pt.lastDurTS = scale(ft.outTrack.frameDurMs)
 		case prevPts[i] >= 0 && lastPts[i] > prevPts[i]:
@@ -185,7 +215,19 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			pt.lastDurTS = 1
 		}
 		ft.offsetMs = pt.firstPtsMs
-		ft.durMediaTS = scale(lastPts[i]) - scale(pt.firstPtsMs) + pt.lastDurTS
+		if pt.gridTS > 0 {
+			kLast := gridIndex(scale(lastPts[i])-scale(pt.firstPtsMs), pt.gridTS)
+			// A collapsed no-DefaultDuration lace reports the final block's
+			// timecode for every frame it holds, so lastPts lands on the block,
+			// not its last frame: advance kLast across the block's frames, as
+			// the full pass counts them.
+			if ft.outTrack.mkv.DefaultDurationNs <= 0 && lastFrames[i] > 1 {
+				kLast += lastFrames[i] - 1
+			}
+			ft.durMediaTS = (kLast + 1) * pt.gridTS
+		} else {
+			ft.durMediaTS = scale(lastPts[i]) - scale(pt.firstPtsMs) + pt.lastDurTS
+		}
 		ft.durMovieMs = ft.durMediaTS
 		if ft.timescale != movieTimescale {
 			ft.durMovieMs = ft.durMediaTS * int64(movieTimescale) / int64(ft.timescale)
@@ -301,32 +343,79 @@ func (p *HLSPlan) InitSegment() []byte { return p.inits[p.videoIndex()] }
 // sample: the first PTS anchors the DTS timeline, and the sample entry is
 // built for codecs that derive it from the first frame.
 func (p *HLSPlan) peekHead(ctx context.Context) error {
-	need := len(p.tracks)
-	return p.walkBlocks(ctx, p.offsets[0], func(b mkv.Block, pt *planTrack) (bool, error) {
-		if pt.firstPtsMs >= 0 {
-			return need > 0, nil
+	// Grid probe for laced audio with no DefaultDuration: the reader collapses a
+	// lace onto its block timecode, so the plan recovers the stride the same way
+	// the full pass does - from the first two distinct block timecodes and the
+	// first block's frame count - and the init's total duration matches.
+	type gridProbe struct {
+		firstTC, frames, secondTC int64
+		haveFirst, haveSecond     bool
+	}
+	probes := map[*planTrack]*gridProbe{}
+	needFirst := len(p.tracks)
+	needGrid := 0
+	for _, pt := range p.tracks {
+		mk := &pt.ft.outTrack.mkv
+		if mk.Type == mkv.AudioTrack && mk.DefaultDurationNs <= 0 {
+			probes[pt] = &gridProbe{}
+			needGrid++
 		}
-		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
-		if pt.ft.outTrack.sampleEntry == nil {
-			entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
-			if err != nil {
-				return false, err
+	}
+	err := p.walkBlocks(ctx, p.offsets[0], func(b mkv.Block, pt *planTrack) (bool, error) {
+		if pt.firstPtsMs < 0 {
+			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+			if pt.ft.outTrack.sampleEntry == nil {
+				entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
+				if err != nil {
+					return false, err
+				}
+				pt.ft.outTrack.sampleEntry = entry
 			}
-			pt.ft.outTrack.sampleEntry = entry
+			pt.firstPtsMs = b.Timecode
+			needFirst--
 		}
-		pt.firstPtsMs = b.Timecode
-		need--
-		return need > 0, nil
+		if pr := probes[pt]; pr != nil && !pr.haveSecond {
+			switch {
+			case !pr.haveFirst:
+				pr.firstTC, pr.frames, pr.haveFirst = b.BlockTimecode, 1, true
+			case b.BlockTimecode == pr.firstTC:
+				pr.frames++
+			default:
+				pr.secondTC, pr.haveSecond = b.BlockTimecode, true
+				needGrid--
+			}
+		}
+		return needFirst > 0 || needGrid > 0, nil
 	})
+	if err != nil {
+		return err
+	}
+	for pt, pr := range probes {
+		if !pr.haveSecond {
+			continue
+		}
+		pt.gridTS = deriveGridTS(int(pr.frames)+1, func(i int) int64 {
+			if int64(i) < pr.frames {
+				return pr.firstTC
+			}
+			return pr.secondTC
+		}, pt.ft.timescale)
+	}
+	return nil
 }
 
 // peekTail reads from the last cued cluster to EOF and returns each track's
-// two largest PTS (the final sample and its predecessor), -1 when unseen.
-func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts []int64, err error) {
+// two largest PTS (the final sample and its predecessor), -1 when unseen, plus
+// the frame count of the final Block (frames sharing the largest block
+// timecode). lastFrames lets the grid duration correct a collapsed no-
+// DefaultDuration lace, whose frames all report the block timecode as their PTS.
+func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts, lastFrames []int64, err error) {
 	lastPts = make([]int64, len(p.tracks))
 	prevPts = make([]int64, len(p.tracks))
+	lastFrames = make([]int64, len(p.tracks))
+	lastBlockTC := make([]int64, len(p.tracks))
 	for i := range lastPts {
-		lastPts[i], prevPts[i] = -1, -1
+		lastPts[i], prevPts[i], lastBlockTC[i] = -1, -1, -1
 	}
 	idx := map[*planTrack]int{}
 	for i, pt := range p.tracks {
@@ -340,9 +429,15 @@ func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts []i
 		case b.Timecode > prevPts[i]:
 			prevPts[i] = b.Timecode
 		}
+		switch {
+		case b.BlockTimecode > lastBlockTC[i]:
+			lastBlockTC[i], lastFrames[i] = b.BlockTimecode, 1
+		case b.BlockTimecode == lastBlockTC[i]:
+			lastFrames[i]++
+		}
 		return true, nil
 	})
-	return lastPts, prevPts, err
+	return lastPts, prevPts, lastFrames, err
 }
 
 // walkBlocks runs fn over the media-track blocks from the cluster at off until
@@ -367,7 +462,7 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, 
 			return err
 		}
 		b, err := br.Next()
-		if errors.Is(err, io.EOF) {
+		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			return nil
 		}
 		if err != nil {
@@ -446,8 +541,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 		}
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
 		window = append(window, segSample{
-			fragSample: fragSample{size: uint32(len(data)), ptsMs: b.Timecode, sync: b.Keyframe},
-			data:       data,
+			fragSample: fragSample{size: uint32(len(data)),
+				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
+			data: data,
 		})
 		return true, nil
 	})
@@ -461,7 +557,56 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	// ended before the presentation) becomes an empty trun with the decode
 	// time parked at the stream end, keeping the rendition's segments aligned.
 	seg := trackSegment{trackID: pt.ft.outTrack.mp4ID, baseDecodeTS: pt.ft.durMediaTS}
-	if len(window) > 0 {
+	// gridTS from the DefaultDuration, else recovered from the window's own
+	// collapsed laces (the stride is uniform, so every window measures the same
+	// value the full pass derives from all samples — parity by construction).
+	gridTS := pt.gridTS
+	if gridTS <= 0 {
+		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
+	}
+	if len(window) > 0 && gridTS > 0 {
+		// Grid-timed audio: each frame's index re-derived from its block's
+		// stored timecode (then +1 within a lace) — fillFragTiming's grid
+		// branch applied to the window, window-local by construction.
+		scale := tsScale(pt.ft.timescale)
+		anchor := scale(pt.firstPtsMs)
+		k := int64(0)
+		for x := range window {
+			switch {
+			case x == 0:
+				k = gridIndex(scale(window[0].blockPtsMs)-anchor, gridTS)
+			case window[x].blockPtsMs != window[x-1].blockPtsMs:
+				nk := gridIndex(scale(window[x].blockPtsMs)-anchor, gridTS)
+				if nk <= k {
+					nk = k + 1
+				}
+				k = nk
+			default:
+				k++
+			}
+			window[x].dtsTS = k * gridTS
+			window[x].ctsTS = 0
+			if x > 0 {
+				window[x-1].durTS = window[x].dtsTS - window[x-1].dtsTS
+			}
+		}
+		if nextPts >= 0 {
+			nk := gridIndex(scale(nextPts)-anchor, gridTS)
+			if nk <= k {
+				nk = k + 1
+			}
+			window[len(window)-1].durTS = nk*gridTS - k*gridTS
+		} else { // the track's final sample (fillFragTiming's grid rule)
+			window[len(window)-1].durTS = gridTS
+		}
+		samples := make([]fragSample, len(window))
+		for x := range window {
+			samples[x] = window[x].fragSample
+			seg.dataLen += int64(window[x].size)
+		}
+		seg.baseDecodeTS = window[0].dtsTS
+		seg.samples = samples
+	} else if len(window) > 0 {
 		scale := tsScale(pt.ft.timescale)
 		base := scale(pt.firstPtsMs)
 		dts := make([]int64, len(window))
@@ -818,7 +963,9 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 				cur.scanned = stopAt
 				break
 			}
-			if errors.Is(err, io.EOF) {
+			// Clean end (incl. a truncated/over-declared tail); all cues to this
+			// point are collected, so finish cleanly.
+			if isBlockWalkEnd(err) {
 				cur.cues = append(cur.cues, local...)
 				cur.done = true
 				return nil
@@ -947,6 +1094,13 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 	if err != nil {
 		f.Close()
 		return nil, err
+	}
+	if mv.fragmented {
+		f.Close()
+		// A fragmented MP4's moov sample tables are empty (samples live in the
+		// moof fragments), so the HLS packager would find no samples. Reject with
+		// a clear message instead of the downstream "track N produced no samples".
+		return nil, errf("fragmented MP4 input is not supported for HLS packaging (samples live in moof fragments, not the moov sample tables); remux to a progressive MP4 or MKV first")
 	}
 	return &packagingSource{c: containerFromMovie(mv), mv: mv, src: f, size: st.Size()}, nil
 }

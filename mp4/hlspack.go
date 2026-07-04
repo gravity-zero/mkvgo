@@ -161,7 +161,8 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 			}
 			t.sampleEntry = entry
 		}
-		off, hasCTS, totalTS := fillFragTiming(ft.samples, t.frameDurMs, ft.timescale)
+		off, hasCTS, totalTS := fillFragTiming(ft.samples, t.frameDurMs, ft.timescale,
+			audioGridTS(t, ft.timescale))
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.durMovieMs = totalTS
 		if ft.timescale != movieTimescale {

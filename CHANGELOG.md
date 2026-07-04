@@ -8,30 +8,30 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
-- **Laced audio frames are now individually timed.** A laced block stores N
-  frames under ONE timecode; the reader used to give every frame the block's
-  timecode, so every consumer deriving durations from timestamp deltas got
-  runs of zeros: fMP4/HLS audio segments carried collapsed timestamps
-  (stuttering or broken sound, players freezing after a few seeks),
-  progressive MP4 remuxes wrote collapsed composition times, and rewrites
-  (split/join/merge, WebM) re-emitted the collapsed values. Frame i of a lace
-  is now stamped `blockTS + i×DefaultDuration`. A sequential `BlockReader`
-  picks the per-track durations up while walking over the Tracks element;
-  mid-file readers take them via the new `SetTrackDefaultDurations` (the
-  on-demand HLS plan wires this, keeping `PlanHLS` byte-identical to the full
-  pass - verified per resource on laced sources). The lace's keyframe flag now
-  also applies to every frame of the lace (the SimpleBlock flag means "the
-  block contains only keyframes"), so laced audio samples are all sync
-  samples, as they should be.
-- **EBML lacing used an off-by-one signed-VINT bias, corrupting the frames of
-  every EBML-laced block.** The inter-frame size diff is
-  `value − (2^(7·n−1) − 1)` (RFC 9559); the reader subtracted `2^(7·n−1)`,
-  making every decoded diff one short. The per-block TOTAL stayed intact (the
-  last frame absorbed the drift), so size checks passed while every frame
-  boundary after the first was shifted - audio bitstreams in EBML-laced files
-  were undecodable after any remux. Frame sizes now match the source exactly;
-  the lacing-header length is returned by the decoder (bytes actually
-  consumed) instead of being re-derived under a minimal-width assumption.
+- **Packaging tolerates a source that runs past the physical end of file.** A
+  truncated or unfinalised file whose Segment/final cluster over-declares its
+  size made `to-hls`/`to-mp4`/`PlanHLS` abort with a fatal `unexpected EOF`. The
+  packaging walks now treat a short read at the true EOF as a clean end (every
+  complete block delivered, only the truncated tail dropped); the strict
+  `BlockReader` still reports it so `validate`/`compare` can flag it.
+- **`PlanHLS` rejects fragmented-MP4 input with a clear message** instead of the
+  misleading "track N produced no samples" (its moov sample tables are empty -
+  samples live in the moof fragments; remux to a progressive MP4/MKV first).
+- **Laced audio frames are individually timed.** A laced block stores N frames
+  under one timecode; the reader gave every frame that timecode, so consumers
+  deriving durations from timestamp deltas got collapsed, non-monotonic times
+  (broken fMP4/HLS/MP4 audio, players freezing after a seek). Frame i is now
+  stamped `blockTS + i×DefaultDuration`, and constant-rate audio rides its exact
+  sample grid (fixed stride, no ±1 ms jitter, no drift). When the source
+  declares no DefaultDuration (common for E-AC-3/AC-3 rips) the packager
+  recovers the stride from the block timecodes themselves - exact for the
+  whole-millisecond frames of AC-3/E-AC-3 - across MP4, HLS and the on-demand
+  plan. The lace keyframe flag now applies to every frame of the lace.
+- **EBML lacing had an off-by-one signed-VINT bias corrupting every EBML-laced
+  block.** The inter-frame diff is `value − (2^(7·n−1) − 1)` (RFC 9559); the
+  reader subtracted `2^(7·n−1)`, shifting every frame boundary after the first
+  (total intact, so size checks passed - but the audio was undecodable after a
+  remux). Frame sizes now match the source exactly.
 
 ### Added
 

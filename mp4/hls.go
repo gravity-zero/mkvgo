@@ -27,6 +27,21 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
+// isBlockWalkEnd reports whether a BlockReader.Next error ends the walk cleanly.
+// io.EOF is the normal end. io.ErrUnexpectedEOF means the source declared more
+// bytes than the file physically holds - a truncated download, or an
+// unfinalised/over-declared Segment (both seen in real libraries: a Segment or
+// final cluster whose size runs past the real end of file). A forward block walk
+// can never recover data past the file end, and only the final element can
+// extend past the single EOF, so the packaging paths deliver every complete
+// block read so far and stop here, instead of failing the whole remux - exactly
+// as the metadata reader tolerates an over-declared tail. The strict BlockReader
+// still returns the raw error, so integrity paths (validate/compare) can report
+// the truncation.
+func isBlockWalkEnd(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 const defaultSegmentMs = 6000
 
 // fragTrack augments an outTrack with the fragmented-writer state: the media
@@ -189,7 +204,8 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			return nil, cerr
 		}
 		ft.tmp = nil
-		off, hasCTS, totalTS := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale)
+		off, hasCTS, totalTS := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale,
+			audioGridTS(ft.outTrack, ft.timescale))
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.durMovieMs = totalTS
 		if ft.timescale != movieTimescale {
@@ -336,7 +352,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 			return err
 		}
 		b, err := br.Next()
-		if errors.Is(err, io.EOF) {
+		if isBlockWalkEnd(err) {
 			break
 		}
 		if err != nil {

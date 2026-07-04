@@ -245,7 +245,7 @@ func buildStyp() []byte {
 // DTS is the sorted PTS in decode order, durations are the diffs, ctts = PTS - DTS.
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
-func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32) (offsetMs int64, hasCTS bool, totalTS int64) {
+func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64) {
 	n := len(samples)
 	if n == 0 {
 		return 0, false, 0
@@ -255,6 +255,44 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32) (offsetMs
 			return ms
 		}
 		return ms * int64(mts) / int64(movieTimescale)
+	}
+	if gridTS <= 0 { // laced audio with no DefaultDuration: recover the stride
+		gridTS = deriveGridTS(n, func(i int) int64 { return samples[i].blockPtsMs }, mts)
+	}
+
+	// Constant-rate audio rides the sample-exact grid (see audioGridTS): frame
+	// k decodes at k×gridTS, k re-derived from each block's stored timecode
+	// (then +1 within a lace). Millisecond rounding never reaches the trun —
+	// no ±1 ms duration jitter, no duplicated DTS at a lace boundary, no
+	// one-frame drift per segment — while a real gap still moves k.
+	if gridTS > 0 {
+		anchor := scale(samples[0].blockPtsMs)
+		offsetMs = samples[0].ptsMs
+		k := int64(0)
+		for i := range samples {
+			if i > 0 {
+				if samples[i].blockPtsMs != samples[i-1].blockPtsMs {
+					nk := gridIndex(scale(samples[i].blockPtsMs)-anchor, gridTS)
+					if nk <= k {
+						nk = k + 1
+					}
+					k = nk
+				} else {
+					k++
+				}
+				samples[i-1].durTS = k*gridTS - samples[i-1].dtsTS
+			}
+			samples[i].dtsTS = k * gridTS
+			samples[i].ctsTS = 0
+			if samples[i].ptsMs < offsetMs {
+				offsetMs = samples[i].ptsMs
+			}
+		}
+		samples[n-1].durTS = gridTS
+		for i := range samples {
+			totalTS += samples[i].durTS
+		}
+		return offsetMs, false, totalTS
 	}
 	// DTS = sorted PTS: the i-th stored sample (decode order) gets the i-th
 	// smallest presentation time. Rebase to 0.

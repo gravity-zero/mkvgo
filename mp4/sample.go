@@ -1,6 +1,10 @@
 package mp4
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
 
 // sample.go — per-track sample bookkeeping and the Sample Table (stbl) child
 // boxes derived from it. The muxer streams sample *data* straight to mdat; this
@@ -11,8 +15,13 @@ import "sort"
 type sample struct {
 	size uint32
 	pts  int64 // composition time in the track timescale (milliseconds)
-	sync bool  // keyframe / sync sample
-	dur  int64 // explicit duration (text tracks); 0 = derive from PTS deltas
+	// blockPts is the stored timecode of the source block (mkv.Block
+	// .BlockTimecode; equal to pts for unlaced sources): grid timing derives
+	// each audio frame's index from it, so the millisecond rounding of the
+	// container timeline never reaches the sample table.
+	blockPts int64
+	sync     bool  // keyframe / sync sample
+	dur      int64 // explicit duration (text tracks); 0 = derive from PTS deltas
 }
 
 // chunk records one run of samples written contiguously into mdat.
@@ -29,9 +38,10 @@ type trackSamples struct {
 
 // addDur appends one sample's metadata in decode (file) order. dur is the
 // sample's explicit duration (timed-text/chapter tracks); pass 0 for media
-// tracks, whose durations are derived from PTS deltas.
-func (ts *trackSamples) addDur(size uint32, pts, dur int64, sync bool) {
-	ts.samples = append(ts.samples, sample{size: size, pts: pts, sync: sync, dur: dur})
+// tracks, whose durations are derived from PTS deltas. blockPts is the source
+// block's stored timecode (pts itself for unlaced/synthetic samples).
+func (ts *trackSamples) addDur(size uint32, pts, blockPts, dur int64, sync bool) {
+	ts.samples = append(ts.samples, sample{size: size, pts: pts, blockPts: blockPts, sync: sync, dur: dur})
 }
 
 // addChunk records a flushed chunk of count samples starting at offset.
@@ -39,6 +49,68 @@ func (ts *trackSamples) addChunk(offset uint64, count int) {
 	if count > 0 {
 		ts.chunks = append(ts.chunks, chunk{offset: offset, count: count})
 	}
+}
+
+// audioGridTS returns the sample-exact frame stride of a constant-rate audio
+// track in its media timescale — round(DefaultDuration × mts / 1e9), e.g.
+// exactly 1024 for AAC-LC at 48 kHz — or 0 when the track is not grid-timed
+// (video/text, or no declared frame duration). Grid-timed tracks ignore the
+// millisecond rounding of the container timeline: anchoring each frame on the
+// stored (ms-quantised) block timecodes would jitter the durations by ±1 ms,
+// duplicate a DTS whenever a lace's last frame rounds onto the next block's
+// timecode, and drift one frame short per segment.
+func audioGridTS(t *outTrack, mts uint32) int64 {
+	if t.mkv.Type != mkv.AudioTrack || t.mkv.DefaultDurationNs <= 0 {
+		return 0
+	}
+	return (t.mkv.DefaultDurationNs*int64(mts) + 500_000_000) / 1_000_000_000
+}
+
+// gridIndex maps a scaled block timestamp (relative to the track's first
+// block) to its frame index on the grid. True frame positions are exact
+// multiples of gridTS and the stored timecodes carry sub-millisecond rounding
+// only — far less than half a frame — so the nearest slot is unambiguous.
+// A real gap in the audio lands on the slot nearest its true position, which
+// preserves the gap (the decode timeline jumps with it).
+func gridIndex(rel, gridTS int64) int64 {
+	if rel <= 0 {
+		return 0
+	}
+	return (rel + gridTS/2) / gridTS
+}
+
+// deriveGridTS recovers a grid stride for laced audio that collapsed onto its
+// block timecodes: when the source declares no DefaultDuration, the reader has
+// no stride to spread a lace's frames and gives every frame of the block the
+// same play time (so a bare PTS→DTS mapping would hand consecutive frames an
+// identical, non-monotonic decode time — rejected by players). The stride is the
+// media-scaled gap between the first two distinct block timecodes divided by the
+// number of frames the first block held; constant-rate audio is uniform, so it
+// is the per-frame duration and applies to every frame. blockPtsAt reads the
+// stored (Block, not per-frame) timecode of sample i. It returns 0 — leaving the
+// caller on its ordinary timing path — unless the samples actually show a
+// collapsed lace (a run of two or more identical block timecodes then a larger
+// one), which video and unlaced audio never produce. AC-3/E-AC-3 (whole-ms
+// frames) recover exactly; a fractional-ms codec (AAC) lands within a tick,
+// which the grid's forced per-frame increment keeps strictly monotonic.
+func deriveGridTS(count int, blockPtsAt func(int) int64, mts uint32) int64 {
+	if count < 2 {
+		return 0
+	}
+	first := blockPtsAt(0)
+	n := 0
+	for n < count && blockPtsAt(n) == first {
+		n++
+	}
+	if n < 2 || n >= count {
+		return 0 // no lace collapse, or only one block to measure the stride
+	}
+	scale := tsScale(mts)
+	span := scale(blockPtsAt(n)) - scale(first)
+	if span <= 0 {
+		return 0
+	}
+	return (span + int64(n)/2) / int64(n)
 }
 
 // timing holds the decode-time/composition-time information derived from the
@@ -85,7 +157,7 @@ func textTiming(samples []sample) timing {
 // derived from CodecDelay — sample-exact. For mts == movieTimescale this is the
 // identity (video/text are unaffected). Scaling the cumulative pts and then diffing
 // keeps the rounding error bounded (it does not accumulate across samples).
-func reconstructTiming(samples []sample, lastDurMs int64, mts uint32) timing {
+func reconstructTiming(samples []sample, lastDurMs int64, mts uint32, gridTS int64) timing {
 	n := len(samples)
 	if n == 0 {
 		return timing{}
@@ -95,6 +167,40 @@ func reconstructTiming(samples []sample, lastDurMs int64, mts uint32) timing {
 			return ptsMs
 		}
 		return ptsMs * int64(mts) / int64(movieTimescale)
+	}
+	if gridTS <= 0 { // laced audio with no DefaultDuration: recover the stride
+		gridTS = deriveGridTS(n, func(i int) int64 { return samples[i].blockPts }, mts)
+	}
+
+	// Constant-rate audio rides the sample-exact grid (see audioGridTS): frame
+	// k decodes at k×gridTS, k re-derived from each block's stored timecode
+	// (then +1 within a lace), so millisecond rounding never reaches the table
+	// while a real gap still moves k. No reordering → no ctts.
+	if gridTS > 0 {
+		t := timing{durations: make([]int64, n), ctts: make([]int32, n)}
+		anchor := scale(samples[0].blockPts)
+		k := int64(0)
+		prev := int64(0)
+		for i := range samples {
+			if i > 0 {
+				if samples[i].blockPts != samples[i-1].blockPts {
+					nk := gridIndex(scale(samples[i].blockPts)-anchor, gridTS)
+					if nk <= k {
+						nk = k + 1
+					}
+					k = nk
+				} else {
+					k++
+				}
+				t.durations[i-1] = k*gridTS - prev
+			}
+			prev = k * gridTS
+		}
+		t.durations[n-1] = gridTS
+		for i := range t.durations {
+			t.total += t.durations[i]
+		}
+		return t
 	}
 
 	dts := make([]int64, n)

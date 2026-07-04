@@ -54,6 +54,7 @@ type inTrack struct {
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
 	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
+	frameDurNs       int64   // constant frame duration (audio, single-entry stts); 0 when not constant
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
 	frameCount       int64   // sample count from stsz (ffprobe nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
@@ -1162,6 +1163,12 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		tr.frameCount = headerFrameCount(stblBoxes)
 		tr.firstSampleOffset, tr.firstSampleSize = firstSampleLoc(stblBoxes)
 	}
+	if tr.trackType == mkv.AudioTrack {
+		// A single-entry stts is a strictly constant frame duration: exported as
+		// the Matroska DefaultDuration, which downstream grid-times the audio
+		// (sample-exact fMP4/HLS timing survives the millisecond timeline).
+		tr.frameDurNs = headerConstantFrameDurNs(stblBoxes, tr.timescale)
+	}
 
 	switch mode {
 	case sampleKeyframes:
@@ -1205,6 +1212,27 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 		return 0
 	}
 	return float64(timescale) / float64(delta)
+}
+
+// headerConstantFrameDurNs returns the constant per-frame duration in
+// nanoseconds when the stts declares exactly one entry (every sample the same
+// delta), 0 otherwise. Head-only, like headerFrameRate.
+func headerConstantFrameDurNs(stblBoxes []memBox, timescale uint32) int64 {
+	if timescale == 0 {
+		return 0
+	}
+	stts, ok := findMemBox(stblBoxes, "stts")
+	if !ok || len(stts.payload) < 16 {
+		return 0
+	}
+	if binary.BigEndian.Uint32(stts.payload[4:8]) != 1 { // entry_count
+		return 0
+	}
+	delta := binary.BigEndian.Uint32(stts.payload[12:16])
+	if delta == 0 {
+		return 0
+	}
+	return (int64(delta)*1_000_000_000 + int64(timescale)/2) / int64(timescale)
 }
 
 // headerFrameCount returns the sample count (= frame count for a video track)

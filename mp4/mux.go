@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"hash"
 	"io"
 	"math"
@@ -74,7 +73,7 @@ func (t *outTrack) emitChapterSamples(cw *countWriter) error {
 		if dur <= 0 {
 			dur = 1
 		}
-		if err := t.emitSample(cw, encodeChapterSample(ch.Title), ch.StartMs, dur, true); err != nil {
+		if err := t.emitSample(cw, encodeChapterSample(ch.Title), ch.StartMs, ch.StartMs, dur, true); err != nil {
 			return err
 		}
 	}
@@ -83,12 +82,13 @@ func (t *outTrack) emitChapterSamples(cw *countWriter) error {
 
 // emitSample records one sample's metadata and buffers its bytes for the next
 // chunk flush. It is the shared low-level append used by both the media and the
-// timed-text paths.
-func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, dur int64, sync bool) error {
+// timed-text paths. blockPts is the source block's stored timecode (pts for
+// synthetic/timed-text samples).
+func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, blockPts, dur int64, sync bool) error {
 	if len(data) > math.MaxUint32 {
 		return errf("track %d: sample of %d bytes exceeds MP4 sample size limit", t.mkv.ID, len(data))
 	}
-	t.samples.addDur(uint32(len(data)), pts, dur, sync)
+	t.samples.addDur(uint32(len(data)), pts, blockPts, dur, sync)
 	if t.hasher != nil {
 		_, _ = t.hasher.Write(data) // hash.Hash.Write never errors
 	}
@@ -404,7 +404,7 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 			return 0, err
 		}
 		b, err := br.Next()
-		if errors.Is(err, io.EOF) {
+		if isBlockWalkEnd(err) {
 			break
 		}
 		if err != nil {
@@ -429,7 +429,7 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 			}
 			t.sampleEntry = entry
 		}
-		if err := t.emitSample(cw, data, b.Timecode, 0, b.Keyframe); err != nil {
+		if err := t.emitSample(cw, data, b.Timecode, b.BlockTimecode, 0, b.Keyframe); err != nil {
 			return 0, err
 		}
 	}

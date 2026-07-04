@@ -125,7 +125,7 @@ func (t *outTrack) addTextBlock(cw *countWriter, b mkv.Block) error {
 func (t *outTrack) flushPendingCue(cw *countWriter, nextStart int64) error {
 	// Empty sample covering the lead-in before the first cue.
 	if len(t.samples.samples) == 0 && t.pendCuePTS > 0 {
-		if err := t.emitSample(cw, t.spec.emptySample, 0, t.pendCuePTS, true); err != nil {
+		if err := t.emitSample(cw, t.spec.emptySample, 0, 0, t.pendCuePTS, true); err != nil {
 			return err
 		}
 	}
@@ -139,13 +139,13 @@ func (t *outTrack) flushPendingCue(cw *countWriter, nextStart int64) error {
 	if dur <= 0 {
 		dur = defaultCueDurMs
 	}
-	if err := t.emitSample(cw, t.spec.cueSample(t.pendCueText), t.pendCuePTS, dur, true); err != nil {
+	if err := t.emitSample(cw, t.spec.cueSample(t.pendCueText), t.pendCuePTS, t.pendCuePTS, dur, true); err != nil {
 		return err
 	}
 
 	// Empty sample bridging the gap to the next cue.
 	if end := t.pendCuePTS + dur; nextStart > end {
-		if err := t.emitSample(cw, t.spec.emptySample, end, nextStart-end, true); err != nil {
+		if err := t.emitSample(cw, t.spec.emptySample, end, end, nextStart-end, true); err != nil {
 			return err
 		}
 	}

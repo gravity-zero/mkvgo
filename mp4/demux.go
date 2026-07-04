@@ -144,6 +144,9 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 				osr := t.outputSampleRate
 				mt.OutputSampleRate = &osr
 			}
+			// Constant frame duration (single-entry stts) → DefaultDuration, so
+			// MKV outputs declare it and packaging grid-times the audio.
+			mt.DefaultDurationNs = t.frameDurNs
 		}
 		if t.bitrate > 0 {
 			br := t.bitrate

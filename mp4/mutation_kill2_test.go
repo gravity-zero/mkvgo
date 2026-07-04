@@ -946,7 +946,7 @@ func TestReconstructTimingBFrameOffsets(t *testing.T) {
 		{pts: 20},
 		{pts: 60},
 	}
-	tim := reconstructTiming(s, 20, movieTimescale)
+	tim := reconstructTiming(s, 20, movieTimescale, 0)
 	if len(tim.durations) != 4 {
 		t.Fatalf("durations len = %d, want 4", len(tim.durations))
 	}
@@ -1486,7 +1486,7 @@ func makeOutTrackForMoov(mp4ID uint32, durMs int64) *outTrack {
 		sampleEntry: make([]byte, 8),
 	}
 	// sample.dur == durMs → textTiming produces total == durMs.
-	t.samples.addDur(1, 0, durMs, true)
+	t.samples.addDur(1, 0, 0, durMs, true)
 	t.samples.addChunk(0, 1)
 	return t
 }

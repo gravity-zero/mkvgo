@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -55,6 +56,14 @@ func writeRawBlock(cl *bytes.Buffer, track byte, relTC int16, key bool, data []b
 // SimpleBlocks with DefaultDuration declared - the shape of real-world files.
 // Returns the path and the total number of audio frames.
 func buildLacedFixture(t testing.TB) (string, int) {
+	return buildLacedFixtureOpt(t, true)
+}
+
+// buildLacedFixtureOpt is buildLacedFixture with a switch to drop the audio
+// DefaultDuration: real libraries carry laced audio with no declared stride
+// (e.g. many E-AC-3 rips), so the reader cannot spread a lace's frames and the
+// packager must recover the grid from the block timecodes themselves.
+func buildLacedFixtureOpt(t testing.TB, declareDur bool) (string, int) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "laced.mkv")
 	f, err := os.Create(path)
@@ -67,10 +76,13 @@ func buildLacedFixture(t testing.TB) (string, int) {
 	sr := 48000.0
 	ch := uint8(2)
 	w, h := uint32(320), uint32(240)
+	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch}
+	if declareDur {
+		audio.DefaultDurationNs = lacedFixtureDurNs
+	}
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
-		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch,
-			DefaultDurationNs: lacedFixtureDurNs},
+		audio,
 	}
 	m := writer.NewMKVWriter(f)
 	if err := m.WriteStart(); err != nil {
@@ -182,10 +194,11 @@ func fragTiming(t *testing.T, seg []byte) (tfdt uint64, durs []uint32) {
 	return tfdt, durs
 }
 
-// The audio rendition of a laced source must play on the uniform frame grid:
-// every trun duration is one frame (1024 samples ±ms rounding, never zero)
-// and each segment's tfdt continues exactly where the previous one ended -
-// no gap, no overlap, monotonic DTS across seeks.
+// The audio rendition of a laced source must play on the sample-exact frame
+// grid: every trun duration is EXACTLY one frame (1024 samples at 48 kHz -
+// never zero, never the ±1 ms jitter of the block timecodes) and each
+// segment's tfdt continues exactly where the previous one ended - no
+// duplicated DTS, no gap, no drift across seeks.
 func TestHLSLacedAudioFrameGrid(t *testing.T) {
 	src, wantFrames := buildLacedFixture(t)
 	dir := t.TempDir()
@@ -217,10 +230,10 @@ func TestHLSLacedAudioFrameGrid(t *testing.T) {
 		}
 		sum := uint64(0)
 		for i, d := range durs {
-			// 1024 samples/frame at 48 kHz; the ms-rounded block grid makes a
-			// frame 21 or 22 ms → 1008 or 1056 ticks. Zero = the collapse bug.
-			if d != 1008 && d != 1056 {
-				t.Errorf("%s sample %d: duration %d ticks, want one AAC frame (1008 or 1056)", p, i, d)
+			// Sample-exact grid: 1024 samples per AAC frame at 48 kHz. 1008 or
+			// 1056 = the ms-rounding jitter regression; 0 = the collapse bug.
+			if d != 1024 {
+				t.Errorf("%s sample %d: duration %d ticks, want exactly 1024", p, i, d)
 			}
 			sum += uint64(d)
 		}
@@ -229,6 +242,10 @@ func TestHLSLacedAudioFrameGrid(t *testing.T) {
 	}
 	if total != wantFrames {
 		t.Errorf("audio samples across segments = %d, want %d (every laced frame carried)", total, wantFrames)
+	}
+	// Zero drift: the decode timeline ends exactly at frames × 1024.
+	if want := uint64(wantFrames) * 1024; next != want {
+		t.Errorf("decode timeline ends at %d, want %d (drift)", next, want)
 	}
 }
 
@@ -311,5 +328,127 @@ func TestRemuxToMP4LacedAudioMonotonic(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no audio track in the remux")
+	}
+}
+
+// A laced source with NO DefaultDuration is the real-world collapse: the reader
+// hands every frame of a block the block timecode, so a bare PTS→DTS mapping
+// produces runs of identical, non-monotonic decode times (players reject them).
+// The packager must recover the stride from the block timecodes and restore a
+// strictly increasing timeline - across the progressive MP4, the HLS segments,
+// and the on-demand plan (which must stay byte-identical to the full pass).
+func TestLacedAudioNoDefaultDurationRecoversGrid(t *testing.T) {
+	src, wantFrames := buildLacedFixtureOpt(t, false)
+
+	// Progressive MP4: strictly increasing audio cts, every frame carried.
+	out := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), src, out); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv, err := parseMP4(f, st.Size(), sampleFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i := range mv.tracks {
+		tk := &mv.tracks[i]
+		if tk.trackType != mkv.AudioTrack {
+			continue
+		}
+		found = true
+		if len(tk.samples) != wantFrames {
+			t.Errorf("MP4 audio samples = %d, want %d", len(tk.samples), wantFrames)
+		}
+		prev := int64(-1)
+		for si, s := range tk.samples {
+			if s.ctsMs <= prev {
+				t.Fatalf("MP4 audio cts not strictly increasing at sample %d: %d after %d (no-DefaultDuration collapse)", si, s.ctsMs, prev)
+			}
+			prev = s.ctsMs
+		}
+	}
+	if !found {
+		t.Fatal("no audio track in the remux")
+	}
+
+	// HLS: contiguous, strictly increasing decode timeline (no duplicated DTS).
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := filepath.Glob(filepath.Join(dir, "seg_a1_*.m4s"))
+	if err != nil || len(segs) == 0 {
+		t.Fatalf("no audio segments written (%v)", err)
+	}
+	sort.Strings(segs)
+	var next uint64
+	total := 0
+	for si, p := range segs {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tfdt, durs := fragTiming(t, data)
+		if len(durs) == 0 {
+			t.Fatalf("%s: no trun durations", p)
+		}
+		if si > 0 && tfdt != next {
+			t.Errorf("segment %d tfdt = %d, want %d (decode timeline must be contiguous)", si, tfdt, next)
+		}
+		sum := uint64(0)
+		for i, d := range durs {
+			if d == 0 {
+				t.Errorf("%s sample %d: zero duration (collapse)", p, i)
+			}
+			sum += uint64(d)
+		}
+		next = tfdt + sum
+		total += len(durs)
+	}
+	if total != wantFrames {
+		t.Errorf("HLS audio samples = %d, want %d", total, wantFrames)
+	}
+
+	// On-demand plan serves byte-identical media segments with the recovered
+	// grid. (Only the segment m4s are checked: for a fractional-millisecond
+	// frame - AAC's 21.333 ms here - the plan's closed-form last-frame index
+	// and the full pass's incremental one round the init's total duration
+	// apart by at most a frame. Integer-ms laced codecs, i.e. the real case,
+	// AC-3/E-AC-3 at 32 ms, are exact both ways; the audio bytes always match.)
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, name := range plan.Resources() {
+		if !strings.HasPrefix(name, "seg_a1_") && !strings.HasPrefix(name, "seg00") {
+			continue // media segments only (see note above)
+		}
+		got, _, err := plan.Resource(context.Background(), name)
+		if err != nil {
+			t.Errorf("Resource(%q): %v", name, err)
+			continue
+		}
+		want, ferr := os.ReadFile(filepath.Join(dir, name))
+		if ferr != nil {
+			t.Errorf("full pass did not write %s", name)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s differs from the full pass (%d vs %d bytes) - recovered grid diverged", name, len(got), len(want))
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("no media segments compared")
 	}
 }
