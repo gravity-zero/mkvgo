@@ -12,15 +12,17 @@ package mp4
 // with its real BANDWIDTH/RESOLUTION/CODECS, all sharing v1's audio and
 // subtitle groups. For seamless quality switching the sources should share
 // the keyframe cadence (same GOP length); mismatched cadences still play,
-// switches just realign on the next keyframe. The combined presentation is
-// HLS-only — DASH multi-Representation requires aligned segment timelines,
-// which independently encoded sources do not guarantee; each variant
-// directory still carries its own manifest.mpd.
+// switches just realign on the next keyframe. The combined HLS master is always
+// emitted. A combined DASH manifest.mpd (one AdaptationSet, a Representation per
+// variant) is emitted too WHEN the variants are segment-aligned — DASH shares
+// one SegmentTimeline across a switch set, so it is only valid then; otherwise
+// only each variant's own manifest.mpd is written.
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // RemuxToABR packages the sources — quality variants of the same content,
@@ -49,7 +51,16 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 		results[i] = res
 	}
 
-	return fs.DoWriteFile(filepath.Join(outputDir, "master.m3u8"), buildABRMaster(o, results), 0o644)
+	if err := fs.DoWriteFile(filepath.Join(outputDir, "master.m3u8"), buildABRMaster(o, results), 0o644); err != nil {
+		return err
+	}
+	// Combined DASH only when the variants line up (see combinedDASH).
+	if mpd := combinedDASH(o, results); mpd != nil {
+		if err := fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // buildABRMaster assembles the multi-variant master.m3u8 from the packaging
@@ -164,4 +175,140 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	}
 
 	return b
+}
+
+// abrVariantsAligned reports whether every variant shares the same segment
+// timeline — identical segment count and per-segment millisecond durations.
+// Only then is a combined DASH multi-Representation manifest valid: DASH puts
+// every Representation of an AdaptationSet on ONE shared SegmentTimeline, so a
+// player switching quality fetches segment N of the new variant expecting it at
+// the timeline's time N; misaligned variants would hand it the wrong-timed
+// segment. HLS carries a separate playlist per variant and has no such
+// constraint, so the combined HLS master is always emitted; the combined MPD
+// only when the encodes line up (fixed GOP, keyframes at the same times).
+func abrVariantsAligned(results []*hlsResult) bool {
+	if len(results) < 2 || len(results[0].durs) == 0 {
+		return false
+	}
+	ref := results[0].durs
+	msDur := func(d float64) int64 { return int64(d*1000 + 0.5) }
+	for _, r := range results[1:] {
+		if len(r.durs) != len(ref) {
+			return false
+		}
+		for i := range ref {
+			if msDur(r.durs[i]) != msDur(ref[i]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// combinedDASH builds one DASH manifest for segment-aligned ABR variants: a
+// single video AdaptationSet with a Representation per variant (adaptive
+// switching in one manifest), plus the reference variant's audio and subtitles,
+// all on the shared SegmentTimeline. Returns nil for an encrypted presentation
+// (DASH is not emitted) or when the variants are not aligned. Byte-identical for
+// the full pass (RemuxToABR) and the on-demand plan (PlanABR).
+func combinedDASH(o Options, results []*hlsResult) []byte {
+	if o.Encrypt != nil || !abrVariantsAligned(results) {
+		return nil
+	}
+	rw := urlRewriter(&o)
+	durs := results[0].durs
+	var totalSec, maxDur float64
+	for _, d := range durs {
+		totalSec += d
+		if d > maxDur {
+			maxDur = d
+		}
+	}
+	timeline := dashTimeline(durs)
+
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" profiles="urn:mpeg:dash:profile:isoff-live:2011" mediaPresentationDuration="%s" minBufferTime="%s">`+"\n",
+		dashDuration(totalSec), dashDuration(maxDur))
+	b.WriteString("  <Period>\n")
+
+	// Video: one AdaptationSet, one Representation per variant (the switch set).
+	b.WriteString(`    <AdaptationSet mimeType="video/mp4" contentType="video">` + "\n")
+	for vi, res := range results {
+		v := pickVideoFrag(res.fts)
+		if v == nil {
+			continue
+		}
+		vidx := 0
+		for i, ft := range res.fts {
+			if ft == v {
+				vidx = i
+				break
+			}
+		}
+		t := &v.outTrack.mkv
+		rep := fmt.Sprintf(`id="v%d" bandwidth="%d"`, vi+1, peakBandwidth(res.segs))
+		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
+			rep += fmt.Sprintf(` width="%d" height="%d"`, *t.Width, *t.Height)
+		}
+		if t.FrameRate != nil && *t.FrameRate > 0 {
+			rep += fmt.Sprintf(` frameRate="%s"`, dashFrameRate(*t.FrameRate))
+		}
+		if codecs := rfc6381Codec(v.outTrack); codecs != "" {
+			rep += fmt.Sprintf(" codecs=%q", codecs)
+		}
+		prefix := fmt.Sprintf("v%d/", vi+1)
+		media := prefix + strings.Replace(renditionSegment(res.fts, vidx, 0), "00001", "$Number%05d$", 1)
+		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
+			rw(prefix+renditionInit(res.fts, vidx)), rw(media))
+		b.WriteString(timeline)
+		b.WriteString("        </SegmentTemplate>\n")
+		b.WriteString("      </Representation>\n")
+	}
+	b.WriteString("    </AdaptationSet>\n")
+
+	// Audio and subtitles ride on the reference variant (v1/), shared by all.
+	ref := results[0]
+	for i, ft := range ref.fts {
+		if ft.outTrack.spec.video {
+			continue
+		}
+		t := &ft.outTrack.mkv
+		as := `mimeType="audio/mp4" contentType="audio"`
+		if t.Language != "" {
+			as += fmt.Sprintf(" lang=%q", t.Language)
+		}
+		rep := fmt.Sprintf(`id="a%d" bandwidth="0"`, audioIndex(ref.fts, i))
+		if t.SampleRate != nil && *t.SampleRate > 0 {
+			rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
+		}
+		if codecs := rfc6381Codec(ft.outTrack); codecs != "" {
+			rep += fmt.Sprintf(" codecs=%q", codecs)
+		}
+		media := "v1/" + strings.Replace(renditionSegment(ref.fts, i, 0), "00001", "$Number%05d$", 1)
+		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
+			rw("v1/"+renditionInit(ref.fts, i)), rw(media))
+		b.WriteString(timeline)
+		b.WriteString("        </SegmentTemplate>\n")
+		b.WriteString("      </Representation>\n")
+		b.WriteString("    </AdaptationSet>\n")
+	}
+	for i := range ref.subs {
+		t := &ref.subs[i].track
+		as := `mimeType="text/vtt" contentType="text"`
+		if t.Language != "" {
+			as += fmt.Sprintf(" lang=%q", t.Language)
+		}
+		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("v1/sub%d.vtt", i+1)))
+		b.WriteString("      </Representation>\n")
+		b.WriteString("    </AdaptationSet>\n")
+	}
+
+	b.WriteString("  </Period>\n</MPD>\n")
+	return []byte(b.String())
 }

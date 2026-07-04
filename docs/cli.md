@@ -804,10 +804,15 @@ mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--aes-key … -
 ```
 
 For seamless switching the sources should share the keyframe cadence (same
-GOP length); mismatched cadences still play, switches realign on the next
-keyframe. The combined presentation is HLS-only (DASH multi-Representation
-requires aligned timelines); each variant directory carries its own
-`manifest.mpd`.
+GOP length, keyframes at the same times — encode each variant with a fixed GOP
+and forced keyframes). The combined **HLS** master always plays; a mismatched
+cadence still switches, just realigning on the next keyframe.
+
+A combined **DASH** `manifest.mpd` (one video AdaptationSet, a Representation
+per variant) is written at the top level **only when the variants are
+segment-aligned** — DASH shares one SegmentTimeline across a switch set, so it
+is unsafe otherwise. When they are not aligned, only each variant's own
+`v{k}/manifest.mpd` is written.
 
 ```bash
 mkvgo to-abr -o stream/ movie-1080p.mkv movie-720p.mkv movie-480p.mkv

@@ -31,7 +31,7 @@ func TestPlanABRMatchesFullPass(t *testing.T) {
 
 	checked := 0
 	for _, name := range plan.Resources() {
-		if name == "master.m3u8" || strings.HasSuffix(name, "/manifest.mpd") {
+		if name == "master.m3u8" || name == "manifest.mpd" || strings.HasSuffix(name, "/manifest.mpd") {
 			continue // estimated BANDWIDTH on Matroska plans
 		}
 		got, _, err := plan.Resource(context.Background(), name)
@@ -58,6 +58,43 @@ func TestPlanABRMatchesFullPass(t *testing.T) {
 	}
 	if !bytes.Contains(plan.MasterPlaylist(), []byte("TYPE=AUDIO")) {
 		t.Error("master is missing the shared audio group")
+	}
+}
+
+// Segment-aligned variants get a combined DASH manifest: one video
+// AdaptationSet with a Representation per variant on a shared SegmentTimeline.
+// Misaligned variants get none (only the per-variant manifests remain valid).
+func TestPlanABRCombinedDASH(t *testing.T) {
+	src, _ := buildLacedFixture(t)
+	plan, err := PlanABR(context.Background(), []string{src, src}, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mpd, ct, err := plan.Resource(context.Background(), "manifest.mpd")
+	if err != nil {
+		t.Fatalf("aligned variants should expose a combined manifest.mpd: %v", err)
+	}
+	if ct != "application/dash+xml" {
+		t.Errorf("content-type = %q", ct)
+	}
+	// One video AdaptationSet, two video Representations (v1, v2).
+	if n := bytes.Count(mpd, []byte(`contentType="video"`)); n != 1 {
+		t.Errorf("video AdaptationSets = %d, want 1 (combined switch set)", n)
+	}
+	for _, id := range []string{`id="v1"`, `id="v2"`} {
+		if !bytes.Contains(mpd, []byte(id)) {
+			t.Errorf("combined manifest missing Representation %s", id)
+		}
+	}
+	// The alignment check itself: identical timelines align, a shifted one does not.
+	base := &hlsResult{durs: []float64{2, 2, 1.5}}
+	same := &hlsResult{durs: []float64{2, 2, 1.5}}
+	diff := &hlsResult{durs: []float64{2, 1.5, 2}}
+	if !abrVariantsAligned([]*hlsResult{base, same}) {
+		t.Error("identical timelines must be reported aligned")
+	}
+	if abrVariantsAligned([]*hlsResult{base, diff}) {
+		t.Error("differing timelines must be reported misaligned")
 	}
 }
 

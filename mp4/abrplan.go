@@ -24,6 +24,7 @@ import (
 type ABRPlan struct {
 	variants []*HLSPlan
 	master   []byte
+	mpd      []byte // combined DASH manifest, when the variants are segment-aligned
 }
 
 // PlanABR plans the sources — quality variants of the same content, best first
@@ -49,7 +50,7 @@ func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, 
 		variants[i] = pl
 		results[i] = pl.hlsResult()
 	}
-	return &ABRPlan{variants: variants, master: buildABRMaster(o, results)}, nil
+	return &ABRPlan{variants: variants, master: buildABRMaster(o, results), mpd: combinedDASH(o, results)}, nil
 }
 
 // MasterPlaylist returns the multi-variant master.m3u8.
@@ -69,6 +70,12 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	if name == "master.m3u8" {
 		return a.master, "application/vnd.apple.mpegurl", nil
 	}
+	if name == "manifest.mpd" {
+		if a.mpd == nil {
+			return nil, "", errf("no combined DASH manifest (the variants are not segment-aligned, or the presentation is encrypted); use master.m3u8, or each v{k}/manifest.mpd")
+		}
+		return a.mpd, "application/dash+xml", nil
+	}
 	k, rest, ok := parseVariantPath(name)
 	if !ok || k < 1 || k > len(a.variants) {
 		return nil, "", errf("unknown ABR resource %q", name)
@@ -82,6 +89,9 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 // is not emitted — independently encoded variants have unaligned timelines).
 func (a *ABRPlan) Resources() []string {
 	names := []string{"master.m3u8"}
+	if a.mpd != nil {
+		names = append(names, "manifest.mpd")
+	}
 	for i, v := range a.variants {
 		for _, r := range v.Resources() {
 			if r == "master.m3u8" || r == "manifest.mpd" {

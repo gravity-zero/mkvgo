@@ -44,7 +44,10 @@ All notable changes to mkvgo are documented here. The format is based on
   exposes the same over Uint8Array or Blob variants (ranged reads, so a
   client-side ladder of huge local files stays memory-bounded). The `abr-segment`
   CLI serves one ABR resource on demand; the ABR master advertises per-variant
-  I-frame (trick-play) streams for CMAF/MP4 ladders.
+  I-frame (trick-play) streams for CMAF/MP4 ladders. When the variants are
+  segment-aligned, a combined DASH `manifest.mpd` (one AdaptationSet, a
+  Representation per variant) is emitted so a single manifest switches quality;
+  misaligned variants keep their own per-variant manifests.
 - **In-browser HLS origin (Service Worker).** A small fetch router turns
   `openHLS`/`openABR` into an origin, so a plain `<video>`/hls.js streams a
   local file — even one far larger than memory — with no server and no upload

@@ -260,11 +260,13 @@ Packages pre-encoded quality variants (best first) into one multi-variant HLS
 master — the packaging half of ABR, no transcoding. The first source is the
 reference (audio + subtitles for every variant, from `v1/`); the others are
 packaged `Options.VideoOnly`. Every variant gets its real
-`BANDWIDTH`/`RESOLUTION`/`CODECS` in the top `master.m3u8`. HLS-only as a
-combined presentation (per-variant `manifest.mpd` inside each directory);
-sources should share GOP cadence for seamless switching. Variants may be
-Matroska/WebM or progressive/**fragmented** (CMAF) MP4 — a pre-encoded ladder
-already in fragmented MP4 is read directly.
+`BANDWIDTH`/`RESOLUTION`/`CODECS` in the top `master.m3u8`. Sources should share
+GOP cadence for seamless switching. A combined **DASH** `manifest.mpd` (one
+video AdaptationSet, a Representation per variant) is written at the top level
+too **when the variants are segment-aligned** (DASH shares one SegmentTimeline
+across a switch set); otherwise only each variant's own `v{k}/manifest.mpd` is
+written. Variants may be Matroska/WebM or progressive/**fragmented** (CMAF)
+MP4 — a pre-encoded ladder already in fragmented MP4 is read directly.
 
 ### On-demand ABR (`mp4.PlanABR`)
 
@@ -274,9 +276,10 @@ data, contentType, err := plan.Resource(ctx, "v2/seg00042.m4s")
 ```
 
 The on-demand counterpart of `RemuxToABR` (as `PlanHLS` is to `RemuxToHLS`):
-nothing is pre-generated. `plan.Resource(ctx, name)` builds `"master.m3u8"` or
-any `"v{k}/<name>"` when asked, byte-identical to the file `RemuxToABR` would
-have written; `plan.Resources()` lists them all. One handler serves the whole
+nothing is pre-generated. `plan.Resource(ctx, name)` builds `"master.m3u8"`,
+`"manifest.mpd"` (the combined DASH manifest, present only for segment-aligned
+variants) or any `"v{k}/<name>"` when asked, byte-identical to the file
+`RemuxToABR` would have written; `plan.Resources()` lists them all. One handler serves the whole
 ladder — ideal for a per-request media server, and with an httpfs source each
 variant transfers only the ranges a viewer watches. In the browser, the WASM
 `openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
