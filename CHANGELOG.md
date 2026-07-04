@@ -19,9 +19,6 @@ All notable changes to mkvgo are documented here. The format is based on
   packaging walks now treat a short read at the true EOF as a clean end (every
   complete block delivered, only the truncated tail dropped); the strict
   `BlockReader` still reports it so `validate`/`compare` can flag it.
-- **`PlanHLS` rejects fragmented-MP4 input with a clear message** instead of the
-  misleading "track N produced no samples" (its moov sample tables are empty -
-  samples live in the moof fragments; remux to a progressive MP4/MKV first).
 - **Laced audio frames are individually timed.** A laced block stores N frames
   under one timecode; the reader gave every frame that timecode, so consumers
   deriving durations from timestamp deltas got collapsed, non-monotonic times
@@ -40,6 +37,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Multi-quality (ABR) on demand and in the browser.** `mp4.PlanABR` serves a
+  multi-variant HLS presentation from several pre-encoded quality variants with
+  nothing pre-generated: one `Resource()` resolves "master.m3u8" or any
+  "v{k}/<name>", byte-identical to `RemuxToABR`. The WASM `openABR(inputs[])`
+  exposes the same over Uint8Array or Blob variants (ranged reads, so a
+  client-side ladder of huge local files stays memory-bounded).
+- **Fragmented-MP4 / CMAF input.** A fragmented source (streaming fMP4, DASH/HLS
+  CMAF — the shape most pre-encoded ladders take) is now read by walking its
+  moof/traf/trun fragments into a full sample table, so `from-mp4`, `to-hls`,
+  `to-abr` and the plans treat it like a progressive file (previously rejected).
 - `Track.DefaultDurationNs`: the raw DefaultDuration in nanoseconds, kept for
   every track type (previously only exposed as the video `FrameRate`). The
   writer round-trips it verbatim, so rewrites no longer drop an audio track's

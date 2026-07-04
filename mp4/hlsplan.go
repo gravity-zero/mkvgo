@@ -1115,17 +1115,12 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 		f.Close()
 		return nil, err
 	}
+	// sampleFull builds the sample table from the moof fragments for a
+	// fragmented/CMAF source, so the packager reads it like a progressive file.
 	mv, err := parseMP4(f, st.Size(), sampleFull)
 	if err != nil {
 		f.Close()
 		return nil, err
-	}
-	if mv.fragmented {
-		f.Close()
-		// A fragmented MP4's moov sample tables are empty (samples live in the
-		// moof fragments), so the HLS packager would find no samples. Reject with
-		// a clear message instead of the downstream "track N produced no samples".
-		return nil, errf("fragmented MP4 input is not supported for HLS packaging (samples live in moof fragments, not the moov sample tables); remux to a progressive MP4 or MKV first")
 	}
 	return &packagingSource{c: containerFromMovie(mv), mv: mv, src: f, size: st.Size()}, nil
 }

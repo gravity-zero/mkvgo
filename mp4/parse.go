@@ -459,6 +459,18 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 			readSidxKeyframes(r, size, mv)
 		}
 	}
+	if mode == sampleFull && mv.fragmented {
+		// The sample tables are empty (samples live in the moof fragments); walk
+		// them to build the full table so every downstream path reads a CMAF
+		// source like a progressive one.
+		moovBoxes, berr := iterBoxes(moovPayload)
+		if berr != nil {
+			return nil, berr
+		}
+		if err := readFragmentSamples(r, size, mv, moovBoxes); err != nil {
+			return nil, errf("fragmented MP4: %w", err)
+		}
+	}
 	return mv, nil
 }
 
