@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,17 +163,38 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 		return loadRemote(path, keyframes)
 	}
 	if path != "-" && isMP4Path(path) {
-		var opts []mp4.Options
-		if keyframes {
-			opts = append(opts, mp4.Options{Keyframes: true})
-		}
-		c, dropped, err := mp4.OpenMeta(context.Background(), path, opts...)
-		if err != nil {
-			Fatal(err.Error())
-		}
-		return c, dropped
+		return loadMP4Meta(path, keyframes)
 	}
-	return openInput(path), nil
+	if path == "-" {
+		return openInput(path), nil
+	}
+	// A local path with a non-MP4 extension. Try Matroska first; if the bytes
+	// are actually ISO base media (a .mkv that is really an MP4/MOV - mislabeled
+	// rips happen), route to the mp4 reader transparently instead of failing
+	// with a cryptic EBML error.
+	c, err := matroska.Open(context.Background(), path)
+	if err != nil {
+		if errors.Is(err, matroska.ErrNotMatroska) {
+			return loadMP4Meta(path, keyframes)
+		}
+		Fatal(err.Error())
+	}
+	return c, nil
+}
+
+// loadMP4Meta reads MP4/MOV metadata (mp4.OpenMeta), optionally building the
+// keyframe index. Shared by the extension dispatch and the mislabeled-container
+// fallback in loadContainer.
+func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
+	var opts []mp4.Options
+	if keyframes {
+		opts = append(opts, mp4.Options{Keyframes: true})
+	}
+	c, dropped, err := mp4.OpenMeta(context.Background(), path, opts...)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	return c, dropped
 }
 
 // sourceFS returns the FS for a remux whose source may be an http(s) URL:

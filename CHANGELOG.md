@@ -8,6 +8,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Inspection commands read a mislabeled container.** A `.mkv` that is actually
+  an MP4/MOV (mislabeled rips happen) failed `info`/`tracks`/`probe`/… with a
+  cryptic EBML-header error; they now route to the mp4 reader transparently when
+  the bytes are ISO base media.
+
 - **Packaging tolerates a source that runs past the physical end of file.** A
   truncated or unfinalised file whose Segment/final cluster over-declares its
   size made `to-hls`/`to-mp4`/`PlanHLS` abort with a fatal `unexpected EOF`. The
