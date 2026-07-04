@@ -151,5 +151,17 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		b = append(b, (inf + "\n" + rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1)) + "\n")...)
 	}
 
+	// Trick-play: one I-frame stream per variant that exposes an I-frame
+	// playlist (progressive/CMAF MP4 sources, unencrypted). Players use these
+	// for fast scrubbing; a variant without one (Matroska plan, encryption) is
+	// simply omitted.
+	for vi, res := range results {
+		if len(res.iframes) == 0 {
+			continue
+		}
+		uri := fmt.Sprintf("v%d/iframe.m3u8", vi+1)
+		b = append(b, iframeStreamInfURI(&o, res.fts, res.durs, res.iframes, uri)...)
+	}
+
 	return b
 }

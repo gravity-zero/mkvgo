@@ -99,10 +99,11 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 // hlsResult carries what a packaging pass established — the ABR packager
 // builds its top-level master from these.
 type hlsResult struct {
-	fts  []*fragTrack
-	subs []hlsSubTrack
-	segs []segInfo
-	durs []float64
+	fts     []*fragTrack
+	subs    []hlsSubTrack
+	segs    []segInfo
+	durs    []float64
+	iframes []iframeRef // trick-play I-frames (MP4 sources, unencrypted); nil otherwise
 }
 
 // remuxToHLSInto is RemuxToHLS's body, returning the packaging facts.
@@ -285,6 +286,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		return nil, err
 	}
 	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs}
+	if o.Encrypt == nil {
+		res.iframes = iframesAll
+	}
 	if o.Encrypt != nil {
 		return res, nil // AES-128 is HLS-only; no DASH manifest for an encrypted presentation
 	}
@@ -903,6 +907,12 @@ func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes [
 // iframeStreamInf renders the master's EXT-X-I-FRAME-STREAM-INF line: the
 // trick-play variant's BANDWIDTH is its peak I-frame bitrate.
 func iframeStreamInf(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef) string {
+	return iframeStreamInfURI(o, fts, durs, iframes, "iframe.m3u8")
+}
+
+// iframeStreamInfURI is iframeStreamInf with an explicit playlist URI, so the
+// ABR master can point trick-play at a variant's v{k}/iframe.m3u8.
+func iframeStreamInfURI(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef, uri string) string {
 	rw := urlRewriter(o)
 	var peak float64
 	for _, ifr := range iframes {
@@ -922,5 +932,5 @@ func iframeStreamInf(o *Options, fts []*fragTrack, durs []float64, iframes []ifr
 			inf += fmt.Sprintf(",CODECS=%q", cs)
 		}
 	}
-	return inf + fmt.Sprintf(",URI=%q\n", rw("iframe.m3u8"))
+	return inf + fmt.Sprintf(",URI=%q\n", rw(uri))
 }

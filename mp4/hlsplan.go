@@ -61,6 +61,7 @@ type HLSPlan struct {
 	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
 	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
 	iframe   []byte         // trick-play playlist (MP4 plans; exact byte ranges)
+	iframes  []iframeRef    // the I-frames behind p.iframe, for the ABR master's trick-play stream
 	// trackDurs feeds every mid-file BlockReader the tracks' DefaultDurations
 	// (laced frames share one stored timecode; the stride times them) - a
 	// reader seeked to a cluster never sees the Tracks element on its own.
@@ -323,7 +324,7 @@ func (p *HLSPlan) fts() []*fragTrack {
 // hlsResult exposes the plan's packaging facts in the shape RemuxToHLS returns,
 // so the ABR master builder treats a plan and a full pass identically.
 func (p *HLSPlan) hlsResult() *hlsResult {
-	return &hlsResult{fts: p.fts(), subs: p.subs, segs: p.segs, durs: p.durs}
+	return &hlsResult{fts: p.fts(), subs: p.subs, segs: p.segs, durs: p.durs, iframes: p.iframes}
 }
 
 // videoIndex returns the index of the video track in p.tracks.
@@ -1206,6 +1207,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	}
 	if video != nil && o.Encrypt == nil && len(iframes) > 0 {
 		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)
+		p.iframes = iframes
 	}
 
 	p.segs = segs
