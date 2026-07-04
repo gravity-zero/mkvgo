@@ -57,6 +57,7 @@ type HLSPlan struct {
 	subs     []hlsSubTrack  // declared renditions; cues fetched lazily, then cached
 	subMu    []sync.Mutex   // serialises each track's cue scans
 	subScan  []subScanState // per-track incremental cue scan state
+	segs     []segInfo      // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
 	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
 	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
 	iframe   []byte         // trick-play playlist (MP4 plans; exact byte ranges)
@@ -112,9 +113,24 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if err != nil {
 		return nil, err
 	}
+	// Track selection mirrors remuxToHLSInto exactly so a variant's plan stays
+	// byte-identical to its full pass: one video rendition (secondary video
+	// dropped), each audio, and — unless VideoOnly (an ABR variant carries only
+	// its video) — the subtitle renditions.
 	var media []*outTrack
+	var videoSeen bool
 	for _, t := range planned {
 		if t.isChapter || t.spec.text {
+			continue
+		}
+		if t.spec.video {
+			if videoSeen {
+				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
+					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
+				continue
+			}
+			videoSeen = true
+		} else if o.VideoOnly {
 			continue
 		}
 		media = append(media, t)
@@ -137,7 +153,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
-	p.subs = planSubTracks(c, o)
+	if !o.VideoOnly {
+		p.subs = planSubTracks(c, o)
+	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
 	for _, t := range media {
@@ -270,6 +288,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		segs = append(segs, segInfo{durSec: p.durs[k], bytes: end - p.offsets[k]})
 	}
+	p.segs = segs
 	fts := make([]*fragTrack, len(p.tracks))
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
@@ -299,6 +318,12 @@ func (p *HLSPlan) fts() []*fragTrack {
 		out[i] = pt.ft
 	}
 	return out
+}
+
+// hlsResult exposes the plan's packaging facts in the shape RemuxToHLS returns,
+// so the ABR master builder treats a plan and a full pass identically.
+func (p *HLSPlan) hlsResult() *hlsResult {
+	return &hlsResult{fts: p.fts(), subs: p.subs, segs: p.segs, durs: p.durs}
 }
 
 // videoIndex returns the index of the video track in p.tracks.
@@ -1127,6 +1152,8 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 				continue
 			}
 			videoSeen = true
+		} else if o.VideoOnly {
+			continue
 		}
 		media = append(media, t)
 	}
@@ -1135,7 +1162,9 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	}
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
-	p.subs = planSubTracks(c, *o)
+	if !o.VideoOnly {
+		p.subs = planSubTracks(c, *o)
+	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
 	if err := mp4SubCues(ps, p.subs); err != nil {
@@ -1184,6 +1213,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)
 	}
 
+	p.segs = segs
 	p.master = buildMasterPlaylist(o, fts, p.subs, segs, iframes)
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs))

@@ -49,6 +49,16 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 		results[i] = res
 	}
 
+	return fs.DoWriteFile(filepath.Join(outputDir, "master.m3u8"), buildABRMaster(o, results), 0o644)
+}
+
+// buildABRMaster assembles the multi-variant master.m3u8 from the packaging
+// facts of each quality variant (best first). The reference variant (v1)
+// supplies the shared audio and subtitle groups; every variant contributes one
+// EXT-X-STREAM-INF with its real BANDWIDTH/RESOLUTION/CODECS pointing at
+// v{i}/playlist.m3u8. Identical for the full pass (RemuxToABR) and the
+// on-demand plan (PlanABR), so their masters are byte-for-byte the same.
+func buildABRMaster(o Options, results []*hlsResult) []byte {
 	rw := urlRewriter(&o)
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
@@ -141,5 +151,5 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 		b = append(b, (inf + "\n" + rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1)) + "\n")...)
 	}
 
-	return fs.DoWriteFile(filepath.Join(outputDir, "master.m3u8"), b, 0o644)
+	return b
 }
