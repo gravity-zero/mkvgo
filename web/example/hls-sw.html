@@ -1,0 +1,86 @@
+<!doctype html>
+<!-- mkvgo Service Worker HLS origin demo (no build step).
+
+     From the repo root:
+       make wasm
+       python3 -m http.server 8080
+     then open http://localhost:8080/web/example/hls-sw.html
+
+     Pick ONE file to stream it, or SEVERAL pre-encoded quality variants (best
+     first) for adaptive bitrate. The file(s) never leave the page: a Service
+     Worker serves a virtual HLS presentation (master.m3u8 + CMAF segments)
+     straight from the mkvgo WASM, built on demand from ranged reads — so even a
+     file far larger than memory plays, with no server, no upload, no transcode.
+
+     hls.js is loaded from a CDN only to drive playback in non-Safari browsers;
+     everything mkvgo does is local. -->
+<html lang="en">
+<meta charset="utf-8">
+<title>mkvgo · Service Worker HLS origin</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+  #drop { border: 2px dashed #888; border-radius: 8px; padding: 2.5rem; text-align: center; color: #555; }
+  video { width: 100%; margin-top: 1rem; background: #000; }
+  pre { background: #f6f6f6; padding: 1rem; border-radius: 6px; overflow: auto; }
+  .hint { color: #666; font-size: 0.9rem; }
+</style>
+
+<h1>mkvgo · in-browser HLS origin</h1>
+<p id="status">registering service worker…</p>
+<div id="drop">
+  pick a media file — or several quality variants for ABR (best first)
+  <input type="file" id="pick" multiple>
+</div>
+<p class="hint">One file → single-quality stream. Several → adaptive bitrate ladder.</p>
+<video id="player" controls></video>
+<pre id="out"></pre>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script type="module">
+  const $ = (id) => document.getElementById(id)
+  const log = (v) => { $('out').textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2) }
+  const scope = new URL('.', location.href).href // this directory, the SW scope
+  const virtual = (id, name) => `${scope}__mkvgo__/${id}/${name}`
+
+  const reg = await navigator.serviceWorker.register('./mkvgo-sw.js', { type: 'classic' })
+  await navigator.serviceWorker.ready
+  // Make sure a controller is in place (first load activates without one).
+  if (!navigator.serviceWorker.controller) location.reload()
+  $('status').textContent = 'ready — pick a file (nothing is uploaded)'
+
+  let seq = 0
+  $('pick').addEventListener('change', async (e) => {
+    const files = [...e.target.files]
+    if (!files.length) return
+    const id = 'sess' + seq++
+    log(`opening ${files.length === 1 ? 'single-quality' : files.length + '-variant ABR'} session…`)
+
+    // Hand the File(s) to the worker and wait until its plan is ready.
+    await new Promise((resolve) => {
+      const onMsg = (ev) => {
+        if (ev.data && ev.data.type === 'ready' && ev.data.id === id) {
+          navigator.serviceWorker.removeEventListener('message', onMsg)
+          resolve()
+        }
+      }
+      navigator.serviceWorker.addEventListener('message', onMsg)
+      navigator.serviceWorker.controller.postMessage(
+        { type: 'open', id, inputs: files, opts: { segmentSeconds: 6, skipUnsupported: true } })
+    })
+
+    const master = virtual(id, 'master.m3u8')
+    log('streaming ' + master)
+    const video = $('player')
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = master // Safari: native HLS
+    } else if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls()
+      hls.loadSource(master)
+      hls.attachMedia(video)
+    } else {
+      log('this browser cannot play HLS')
+      return
+    }
+    video.play().catch(() => {})
+  })
+</script>

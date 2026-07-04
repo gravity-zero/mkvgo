@@ -46,6 +46,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `remuxToWebM(input)` | `Uint8Array` (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
 | `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` — `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
 | `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
+| `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` — pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` — `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
 | `extractSubtitleVTT(input, trackId)` | `Uint8Array` (MKV or MP4) | WebVTT `string` |
 | `version()` | — | version `string` |
 
@@ -80,6 +81,61 @@ playlists/init/segments (video: `init.mp4`/`seg*.m4s`; audio track k:
 one WebVTT rendition per text subtitle track (`sub1.m3u8` / `sub1.vtt`);
 cover art and global tags ride on the video init segment. The source must
 carry a Cues index (real muxers always write one).
+
+## In-browser HLS origin (Service Worker)
+
+Instead of driving MediaSource by hand, a Service Worker can make the WASM an
+**HLS origin**: it intercepts requests under a virtual path and answers them
+from `openHLS`/`openABR`, so a plain `<video>` (Safari) or hls.js (elsewhere)
+streams a local file — even one far larger than memory — with no server and no
+upload. The worker is just the fetch router; the `resource(name)` work is all
+WASM.
+
+```js
+// mkvgo-sw.js (Service Worker)
+importScripts('/wasm_exec.js')
+const ready = (async () => {
+  const go = new Go()
+  const { instance } = await WebAssembly.instantiateStreaming(fetch('/mkvgo.wasm'), go.importObject)
+  go.run(instance)
+  while (!self.MkvGo) await new Promise(r => setTimeout(r, 5))
+})()
+const plans = new Map()
+
+self.addEventListener('message', (e) => {          // page hands over the File(s)
+  const { id, inputs, opts } = e.data
+  e.waitUntil(ready.then(async () => {
+    plans.set(id, inputs.length > 1 ? await MkvGo.openABR(inputs, opts) : await MkvGo.openHLS(inputs[0], opts))
+    e.source.postMessage({ type: 'ready', id })
+  }))
+})
+
+self.addEventListener('fetch', (e) => {            // serve __mkvgo__/<id>/<resource>
+  const m = new URL(e.request.url).pathname.match(/\/__mkvgo__\/([^/]+)\/(.+)$/)
+  if (!m) return
+  e.respondWith(ready.then(async () => {
+    const plan = plans.get(m[1])
+    if (!plan) return new Response('no session', { status: 404 })
+    const { data, contentType } = await plan.resource(m[2])
+    return new Response(data, { headers: { 'Content-Type': contentType } })
+  }))
+})
+```
+
+```js
+// page: register, hand over the File(s), point the player at the virtual master
+await navigator.serviceWorker.register('/mkvgo-sw.js')
+await navigator.serviceWorker.ready
+const id = 'sess1'
+navigator.serviceWorker.controller.postMessage({ type: 'open', id, inputs: files, opts: { segmentSeconds: 6 } })
+// on the { type:'ready', id } reply:
+video.src = `/__mkvgo__/${id}/master.m3u8`   // Safari; else hls.js.loadSource(...)
+```
+
+A complete runnable page is [`web/example/hls-sw.html`](../web/example/hls-sw.html)
+with [`web/example/mkvgo-sw.js`](../web/example/mkvgo-sw.js). (A Service Worker's
+lifecycle can evict it between events; a production origin re-opens the plan on
+demand rather than holding it in a `Map`.)
 
 ## Quickstart (browser, no bundler)
 

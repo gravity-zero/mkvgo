@@ -93,6 +93,25 @@ check(Buffer.compare(v1segBlob.data, v1seg.data) === 0, 'openABR(Blob[]) ranged 
 await abr.resource('v9/init.mp4')
   .then(() => check(false, 'out-of-range variant must reject'))
   .catch(() => check(true, 'out-of-range ABR variant rejects'))
+
+// --- Service Worker serve contract (the routing the browser SW does): a
+// virtual URL __mkvgo__/<id>/<resource> maps to plan.resource(resource) ---
+const VIRTUAL = '__mkvgo__'
+const parseVirtualURL = (pathname) => {
+  const i = pathname.indexOf('/' + VIRTUAL + '/')
+  if (i < 0) return null
+  const rest = pathname.slice(i + VIRTUAL.length + 2)
+  const slash = rest.indexOf('/')
+  if (slash < 1) return null
+  return { id: rest.slice(0, slash), name: rest.slice(slash + 1) }
+}
+const route = parseVirtualURL('/web/example/__mkvgo__/sess0/v2/seg00001.m4s')
+check(route && route.id === 'sess0' && route.name === 'v2/seg00001.m4s', 'SW virtual URL routes to the resource name')
+check(parseVirtualURL('/favicon.ico') === null, 'SW ignores non-mkvgo requests')
+const served = await abr.resource(route.name)
+const direct = await abr.resource('v2/seg00001.m4s')
+check(Buffer.compare(served.data, direct.data) === 0 && served.contentType.length > 0,
+  'SW serves the ABR resource the router resolved (bytes + Content-Type)')
 abr.close(); abrBlob.close()
 
 // --- on-demand subtitles: the windowed WebVTT rendition over Blob ranged
