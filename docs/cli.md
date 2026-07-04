@@ -813,6 +813,30 @@ requires aligned timelines); each variant directory carries its own
 mkvgo to-abr -o stream/ movie-1080p.mkv movie-720p.mkv movie-480p.mkv
 ```
 
+The variants may be Matroska/WebM **or** progressive/fragmented (CMAF) MP4 — a
+pre-encoded ladder that is already fragmented MP4 is read directly.
+
+### abr-segment
+
+Serve one resource of the multi-variant presentation **on demand** — the
+on-demand counterpart of `to-abr` (as `hls-segment` is to `to-hls`). Nothing is
+pre-generated: each resource is built when requested, and a remote variant
+(httpfs) transfers only the ranges a viewer watches. The first argument is the
+resource name (`master.m3u8`, or `v{k}/<name>` such as `v2/seg00042.m4s`), the
+rest are the quality variants best first.
+
+```
+mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6]
+```
+
+```bash
+mkvgo abr-segment master.m3u8 movie-1080p.mp4 movie-720p.mp4     # top manifest
+mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
+```
+
+Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
+The library equivalent is `mp4.PlanABR` (see library.md).
+
 ### extract-frame
 
 Extract the video keyframe nearest a timestamp, **decoder-ready** — the mkvgo

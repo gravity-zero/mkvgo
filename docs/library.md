@@ -262,7 +262,25 @@ reference (audio + subtitles for every variant, from `v1/`); the others are
 packaged `Options.VideoOnly`. Every variant gets its real
 `BANDWIDTH`/`RESOLUTION`/`CODECS` in the top `master.m3u8`. HLS-only as a
 combined presentation (per-variant `manifest.mpd` inside each directory);
-sources should share GOP cadence for seamless switching.
+sources should share GOP cadence for seamless switching. Variants may be
+Matroska/WebM or progressive/**fragmented** (CMAF) MP4 — a pre-encoded ladder
+already in fragmented MP4 is read directly.
+
+### On-demand ABR (`mp4.PlanABR`)
+
+```go
+plan, err := mp4.PlanABR(ctx, []string{"1080p.mp4", "720p.mp4"}, mp4.Options{SegmentMs: 6000})
+data, contentType, err := plan.Resource(ctx, "v2/seg00042.m4s")
+```
+
+The on-demand counterpart of `RemuxToABR` (as `PlanHLS` is to `RemuxToHLS`):
+nothing is pre-generated. `plan.Resource(ctx, name)` builds `"master.m3u8"` or
+any `"v{k}/<name>"` when asked, byte-identical to the file `RemuxToABR` would
+have written; `plan.Resources()` lists them all. One handler serves the whole
+ladder — ideal for a per-request media server, and with an httpfs source each
+variant transfers only the ranges a viewer watches. In the browser, the WASM
+`openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
+wasm.md).
 
 ### Non-goals of the streaming stack (evaluated)
 

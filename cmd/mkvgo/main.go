@@ -127,6 +127,8 @@ func main() {
 		commands.CmdHLSSegment(args)
 	case "to-abr":
 		commands.CmdToABR(args)
+	case "abr-segment":
+		commands.CmdABRSegment(args)
 	case "extract-frame":
 		commands.CmdExtractFrame(args)
 	default:

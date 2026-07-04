@@ -195,3 +195,42 @@ func CmdToABR(args []string) {
 	}
 	fmt.Printf("ABR presentation written → %s (play master.m3u8; %d variants)\n", f.outDir, len(f.rest))
 }
+
+// CmdABRSegment serves one resource of a multi-variant ABR presentation on
+// demand (the on-demand counterpart of to-abr): nothing is pre-generated, each
+// resource is built when asked. The first positional is the resource name
+// ("master.m3u8" or "v{k}/<name>"), the rest are the quality variants best
+// first.
+func CmdABRSegment(args []string) {
+	f := parseHLSFlags(args)
+	outPath, rest := f.outDir, f.rest
+	if len(rest) < 3 { // resource + at least two variants
+		Fatal("usage: " + CmdUsage["abr-segment"])
+	}
+	what, sources := rest[0], rest[1:]
+
+	opts := f.options(sources[0])
+	opts.OnDrop = func(d mp4.DroppedTrack) {
+		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+	}
+	plan, err := mp4.PlanABR(context.Background(), sources, opts)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	data, _, rerr := plan.Resource(context.Background(), what)
+	if rerr != nil {
+		Fatal(rerr.Error())
+	}
+
+	if outPath == "" || outPath == "-" {
+		if _, err := os.Stdout.Write(data); err != nil {
+			Fatal(err.Error())
+		}
+		return
+	}
+	GuardOverwrite(outPath)
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		Fatal(err.Error())
+	}
+	fmt.Fprintf(os.Stderr, "%s → %s (%d bytes, %d variants)\n", what, outPath, len(data), plan.NumVariants())
+}

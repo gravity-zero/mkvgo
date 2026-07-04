@@ -79,6 +79,7 @@ var CmdUsage = map[string]string{
 	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] (fragmented-MP4 HLS: init.mp4 + segments + playlist.m3u8)",
 	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N|resource-name> [-o out] [-segment 6] (build one HLS resource on demand)",
 	"to-abr":             "mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] (multi-variant HLS master from pre-encoded qualities)",
+	"abr-segment":        "mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] (build one ABR resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",
 }
 
