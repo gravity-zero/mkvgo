@@ -326,7 +326,6 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					// there is no such tail (cues=0, nothing past the clusters),
 					// the head elements are all parsed, so stop without the walk.
 					if !triedTailScan {
-						triedTailScan = true
 						bodyPos := p.pos()
 						done, err := p.scanTailForCues(c)
 						if err != nil {
