@@ -57,9 +57,13 @@ self.addEventListener('fetch', (e) => {
     const plan = plans.get(route.id)
     if (!plan) return new Response('no such mkvgo session', { status: 404 })
     try {
-      const { data, contentType } = await plan.resource(route.name)
+      const { data, contentType, sha256 } = await plan.resource(route.name)
+      // Deterministic bytes → a stable ETag straight from the content hash.
+      if (e.request.headers.get('if-none-match') === `"${sha256}"`) {
+        return new Response(null, { status: 304 })
+      }
       return new Response(data, {
-        headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store' },
+        headers: { 'Content-Type': contentType, 'ETag': `"${sha256}"`, 'Cache-Control': 'no-cache' },
       })
     } catch (err) {
       return new Response(String(err), { status: 404 })

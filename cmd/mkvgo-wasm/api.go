@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +19,16 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
+
+// sha256Hex is the lowercase hex SHA-256 of b — a stable content ETag for a
+// resource. Because mkvgo's outputs are deterministic, the same resource always
+// hashes the same, so a server/Service Worker can set ETag/If-None-Match and a
+// CDN can dedup on it. Computed over bytes already in hand, so it is cheap
+// relative to building the segment.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
 // promise runs fn on its own goroutine and returns a JS Promise for its
 // result — the only sane calling convention for wasm exports, since fn may
@@ -469,6 +481,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 				obj := js.Global().Get("Object").New()
 				obj.Set("data", toUint8Array(data))
 				obj.Set("contentType", mime)
+				obj.Set("sha256", sha256Hex(data))
 				return obj, nil
 			})
 		})
@@ -606,6 +619,7 @@ func openABRJS(_ js.Value, args []js.Value) any {
 				obj := js.Global().Get("Object").New()
 				obj.Set("data", toUint8Array(data))
 				obj.Set("contentType", mime)
+				obj.Set("sha256", sha256Hex(data))
 				return obj, nil
 			})
 		})

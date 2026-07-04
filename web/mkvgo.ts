@@ -141,10 +141,13 @@ export interface HLSResult {
   droppedTracks: DroppedTrack[]
 }
 
-/** One on-demand HLS resource: its bytes and the Content-Type to serve it with. */
+/** One on-demand HLS resource: its bytes, the Content-Type to serve it with,
+ * and a stable content SHA-256 (hex) — mkvgo's outputs are deterministic, so
+ * this is a ready-made `ETag` for HTTP caching / CDN dedup. */
 export interface HLSResource {
   data: Uint8Array
   contentType: string
+  sha256: string
 }
 
 /**

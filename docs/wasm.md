@@ -116,8 +116,9 @@ self.addEventListener('fetch', (e) => {            // serve __mkvgo__/<id>/<reso
   e.respondWith(ready.then(async () => {
     const plan = plans.get(m[1])
     if (!plan) return new Response('no session', { status: 404 })
-    const { data, contentType } = await plan.resource(m[2])
-    return new Response(data, { headers: { 'Content-Type': contentType } })
+    const { data, contentType, sha256 } = await plan.resource(m[2])
+    // sha256 is a stable content ETag (deterministic output) — HTTP caching for free.
+    return new Response(data, { headers: { 'Content-Type': contentType, 'ETag': `"${sha256}"` } })
   }))
 })
 ```
