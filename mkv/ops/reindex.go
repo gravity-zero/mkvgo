@@ -235,8 +235,14 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 		}
 	}
 
-	// No keyframe found (audio-only): throttle to 1 cue per reindexCueMinGapMs.
-	if !firstBlockSeen {
+	// No video keyframe in this cluster. For a file WITH video, emit nothing: a
+	// Cues index only needs entries at seekable video keyframes (real muxers cue
+	// exactly those), and a cue landing mid-GOP on an audio block both misdirects
+	// a seek and trips Validate's "seeking lands on audio" error — the two would
+	// otherwise contradict, so a time-based repack (many keyframeless clusters)
+	// could never pass its own reindex+validate. The audio fallback below is only
+	// for a genuinely audio-only file, where there is no video keyframe to key on.
+	if len(videoTracks) > 0 || !firstBlockSeen {
 		return
 	}
 	lastCueTime := int64(-reindexCueMinGapMs - 1)

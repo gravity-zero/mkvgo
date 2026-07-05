@@ -4,6 +4,19 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A reindexed file no longer fails its own `validate`.** `reindex` emitted a
+  fallback cue on the first (often audio) block of any cluster that held no video
+  keyframe — common in time-based cluster splits (~38% of clusters on some
+  repacks) — while `validate` flags a cue on a non-video track as a blocking
+  error ("seeking lands on audio"). The two contradicted, so such a rebuild could
+  never pass validation. reindex now cues only real video keyframes for a file
+  with video (a Cues index needs no per-cluster entry); the throttled fallback
+  remains for genuinely audio-only files, where there is no keyframe to key on.
+
 ## [0.15.0] - 2026-07-04
 
 ### Fixed

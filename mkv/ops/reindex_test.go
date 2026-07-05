@@ -430,7 +430,9 @@ func TestReindex_BlockGroup_Keyframe(t *testing.T) {
 }
 
 // TestReindex_BlockGroup_WithRef verifies that a BlockGroup with a ReferenceBlock
-// is NOT treated as a keyframe (no cue from keyframe path; audio throttle applies).
+// is NOT treated as a keyframe: a keyframeless cluster of a VIDEO file receives no
+// cue at all (a Cues index holds only seekable video keyframes), rather than a
+// mid-GOP fallback cue that would later fail Validate.
 func TestReindex_BlockGroup_WithRef(t *testing.T) {
 	dir := t.TempDir()
 	// BlockGroup with ReferenceBlock → not a keyframe.
@@ -446,11 +448,96 @@ func TestReindex_BlockGroup_WithRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Should have exactly 1 cue via audio throttle (only 1 cluster, ts=0).
-	if len(c.Cues) == 0 {
-		t.Fatal("expected at least 1 cue (audio throttle) for BlockGroup with ReferenceBlock")
+	if len(c.Cues) != 0 {
+		t.Fatalf("a keyframeless cluster of a video file must get no cue, got %d", len(c.Cues))
 	}
-	assertCuesPointToClusters(t, dst, c.Cues)
+}
+
+// TestReindex_TimeBasedClusters_NoAudioCue is the Avatar-class regression: a
+// mixed video+audio file cut into time-based clusters (ffmpeg style) has clusters
+// with no video keyframe. reindex must NOT emit a fallback cue on the audio there
+// — such a cue misdirects a seek and makes the rebuilt file fail its own Validate
+// ("seeking lands on audio, not a keyframe"). Every cue must key on the video.
+func TestReindex_TimeBasedClusters_NoAudioCue(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "timebased.mkv")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mw := writer.NewMKVWriter(f)
+	if err := mw.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	c := &mkv.Container{
+		Info:   mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"},
+		Tracks: []mkv.Track{videoTrack(1), audioTrack(2)},
+	}
+	if err := mw.WriteMetadata(c, c.Tracks, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	// One SimpleBlock cluster; returns its start position (relative to segment
+	// data) so a source cue can be written for Finalize.
+	writeCluster := func(tsRaw, track byte, key bool) int64 {
+		pos := mw.RelPos()
+		flags := byte(0x00)
+		if key {
+			flags = 0x80
+		}
+		block := []byte{0x80 | track, 0x00, 0x00, flags, 0x01, 0x02, 0x03}
+		var sb bytes.Buffer
+		ebml.WriteElementID(&sb, mkv.IDSimpleBlock)
+		ebml.WriteDataSize(&sb, int64(len(block)))
+		sb.Write(block)
+		var ts bytes.Buffer
+		ebml.WriteElementID(&ts, mkv.IDTimestamp)
+		ebml.WriteDataSize(&ts, 1)
+		ts.WriteByte(tsRaw)
+		body := append(ts.Bytes(), sb.Bytes()...)
+		ebml.WriteElementID(mw.W, mkv.IDCluster)
+		ebml.WriteDataSize(mw.W, int64(len(body)))
+		mw.W.(io.Writer).Write(body)
+		return pos
+	}
+	p0 := writeCluster(0, 1, true)  // video keyframe → gets a cue
+	writeCluster(10, 2, true)       // audio only (no video keyframe) → must get NO cue
+	p2 := writeCluster(20, 1, true) // video keyframe → gets a cue
+	mw.Cues = append(mw.Cues,
+		mkv.CuePoint{TimeMs: 0, Track: 1, ClusterPos: p0},
+		mkv.CuePoint{TimeMs: 20, Track: 1, ClusterPos: p2})
+	if err := mw.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	dst := filepath.Join(dir, "dst.mkv")
+	ctx := context.Background()
+	if err := EditMetadata(ctx, src, dst, func(c *mkv.Container) {}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cue := range out.Cues {
+		if cue.Track != 1 {
+			t.Errorf("cue on track %d — reindex must cue only video keyframes, never the audio fallback", cue.Track)
+		}
+	}
+	if len(out.Cues) != 2 {
+		t.Errorf("cues = %d, want 2 (only the two video-keyframe clusters)", len(out.Cues))
+	}
+	// The rebuilt file must pass its own Validate — no blocking "lands on audio".
+	issues, err := Validate(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, is := range issues {
+		if is.Severity == mkv.SeverityError {
+			t.Errorf("reindexed file fails its own Validate: %s", is.Message)
+		}
+	}
 }
 
 // TestReindex_UnknownSizeCluster verifies that reindexFastCopy returns
