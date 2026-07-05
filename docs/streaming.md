@@ -161,6 +161,38 @@ The embedded fragments are byte-identical to the segmented mode's.
 
 ---
 
+## Virtual versions — `--keep-tracks` / `--keep-lang`
+
+Serve many **virtual versions of one file** — no copy, no re-mux, just a
+different track subset per request. `KeepTracks` restricts the presentation to a
+set of Matroska track IDs; the dropped renditions are simply never built.
+
+```bash
+# "VF only": keep the video and the French audio, drop everything else
+mkvgo to-hls movie.mkv -o vf/ --keep-tracks 1,2
+
+# by language (CLI sugar; keeps video + every track matching the codes):
+mkvgo to-hls movie.mkv -o vo/  --keep-lang eng          # VO: video + English audio/subs
+mkvgo to-hls movie.mkv -o clean/ --keep-tracks 1,2,6    # "clean": drop a forced/logo subtitle track
+
+# on demand, same subset, nothing pre-generated:
+mkvgo hls-segment movie.mkv master --keep-lang fre
+```
+
+A self-hosted server offers "VF / VO / clean / director's cut / camera angle N"
+from a single stored file at **zero extra storage**, and switching versions is
+just a different plan (near-zero latency). At least one video track must be kept
+(HLS needs video). The on-demand plan applies the subset **byte-identically** to
+the full pass, so pre-generated and on-demand serving still mix transparently.
+
+`--keep-lang` is CLI convenience: a language can map to several tracks (e.g.
+VFF + VFQ, both `fre`) and then all are kept — use `--keep-tracks` for exact
+control. A library caller (Go, WASM) already has the track metadata from
+`probe`, so it builds the ID list itself and passes `Options.KeepTracks`
+(`{ keepTracks: [...] }` in WASM) — no ambiguity.
+
+---
+
 ## Securing delivery
 
 ### AES-128 encryption

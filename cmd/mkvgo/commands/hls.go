@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -20,6 +21,7 @@ type hlsFlags struct {
 	prefix     string
 	singleFile bool
 	keepTracks []uint64
+	keepLangs  []string
 	rest       []string
 }
 
@@ -71,6 +73,15 @@ func parseHLSFlags(args []string) hlsFlags {
 					f.keepTracks = append(f.keepTracks, id)
 				}
 			}
+		case "--keep-lang", "--audio-lang":
+			i++
+			if i < len(args) {
+				for _, l := range strings.Split(args[i], ",") {
+					if l = strings.TrimSpace(l); l != "" {
+						f.keepLangs = append(f.keepLangs, strings.ToLower(l))
+					}
+				}
+			}
 		default:
 			rejectFlagArg(args[i])
 			f.rest = append(f.rest, args[i])
@@ -87,18 +98,43 @@ func parseHLSFlags(args []string) hlsFlags {
 }
 
 func (f hlsFlags) options(src string) mp4.Options {
+	keep := f.keepTracks
+	if len(keep) == 0 && len(f.keepLangs) > 0 {
+		keep = resolveKeepLangs(src, f.keepLangs)
+	}
 	o := mp4.Options{
 		FS:         sourceFS(src),
 		SegmentMs:  f.segMs,
 		Encrypt:    f.encrypt,
 		SingleFile: f.singleFile,
-		KeepTracks: f.keepTracks,
+		KeepTracks: keep,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix
 		o.RewriteURL = func(name string) string { return prefix + name }
 	}
 	return o
+}
+
+// resolveKeepLangs turns --keep-lang codes into a KeepTracks ID list: every
+// video track (HLS needs video) plus every audio/subtitle track whose language
+// matches. It is CLI sugar over KeepTracks — a library caller that already has
+// the track metadata builds the ID list itself. When a language maps to several
+// tracks (e.g. VFF + VFQ, both "fre") all are kept; use --keep-tracks for exact
+// control.
+func resolveKeepLangs(src string, langs []string) []uint64 {
+	c, _ := loadContainer(src, false)
+	want := make(map[string]bool, len(langs))
+	for _, l := range langs {
+		want[l] = true
+	}
+	var ids []uint64
+	for _, t := range c.Tracks {
+		if t.Type == mkv.VideoTrack || want[strings.ToLower(t.Language)] {
+			ids = append(ids, t.ID)
+		}
+	}
+	return ids
 }
 
 // CmdToHLS remuxes an MKV/WebM file to a fragmented-MP4 HLS presentation
