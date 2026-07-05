@@ -6,6 +6,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+**Highlights**
+
+- **Virtual Edit Layer** — serve "VF only" / "VO + English subs" / "clean"
+  versions from one file, no copy (`--keep-tracks` / `--keep-lang`).
+- A `reindex` output now passes its own `validate` on time-based repacks (the
+  Avatar class of files).
+
 ### Added
 
 - **Virtual Edit Layer (`Options.KeepTracks`).** Serve many virtual versions of
@@ -14,7 +21,9 @@ All notable changes to mkvgo are documented here. The format is based on
   `KeepTracks` restricts the presentation to a subset of Matroska track IDs, so
   `PlanHLS`/`RemuxToHLS`/`RemuxToABR` package only those renditions (the on-demand
   plan applies the subset byte-identically to the full pass). Wired through the
-  CLI (`to-hls`/`hls-segment --keep-tracks 1,2`) and WASM (`{ keepTracks: [...] }`).
+  CLI — by ID (`--keep-tracks 1,2`) or by language (`--keep-lang fre`, CLI sugar
+  that keeps the video plus every track matching the codes) — and WASM
+  (`{ keepTracks: [...] }`).
 
 ### Fixed
 
@@ -28,6 +37,17 @@ All notable changes to mkvgo are documented here. The format is based on
   remains for genuinely audio-only files, where there is no keyframe to key on.
 
 ## [0.15.0] - 2026-07-04
+
+**Highlights**
+
+- **Multi-quality ABR** — on demand (`PlanABR`), in the browser (WASM `openABR`),
+  with per-variant trick-play and a combined DASH manifest for aligned variants.
+- **Fragmented-MP4 / CMAF input** — a pre-encoded/streaming fMP4 ladder is read
+  like a progressive file.
+- **In-browser HLS origin (Service Worker)** — stream a local file far larger
+  than memory in a plain `<video>`/hls.js, no server, no upload.
+- **Laced-audio timing fixes** — E-AC-3/AC-3 rips no longer decode with broken,
+  non-monotonic audio after a remux.
 
 ### Fixed
 
