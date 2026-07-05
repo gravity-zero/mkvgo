@@ -42,6 +42,34 @@ func isBlockWalkEnd(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
+// keepTrackSet returns Options.KeepTracks as a lookup set (the Virtual Edit
+// Layer's track filter), or nil when empty — meaning keep every track.
+func keepTrackSet(o *Options) map[uint64]bool {
+	if len(o.KeepTracks) == 0 {
+		return nil
+	}
+	m := make(map[uint64]bool, len(o.KeepTracks))
+	for _, id := range o.KeepTracks {
+		m[id] = true
+	}
+	return m
+}
+
+// filterSubTracks drops subtitle renditions whose track is not in keep (nil keep
+// keeps all), so a virtual version carries only its selected subtitles.
+func filterSubTracks(subs []hlsSubTrack, keep map[uint64]bool) []hlsSubTrack {
+	if keep == nil {
+		return subs
+	}
+	out := subs[:0:0]
+	for _, s := range subs {
+		if keep[s.track.ID] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 const defaultSegmentMs = 6000
 
 // fragTrack augments an outTrack with the fragmented-writer state: the media
@@ -136,11 +164,15 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// One demuxed rendition per track: the video, each audio, and the text
 	// subtitles as WebVTT renditions. Secondary video tracks have no HLS/DASH
 	// form here (they would be camera angles) and are dropped with a reason.
+	keep := keepTrackSet(&o)
 	var media []*outTrack
 	var videoSeen bool
 	for _, t := range planned {
 		if t.isChapter || t.spec.text {
 			continue
+		}
+		if keep != nil && !keep[t.mkv.ID] {
+			continue // Virtual Edit Layer: this track is not in the kept subset
 		}
 		if t.spec.video {
 			if videoSeen {
@@ -159,7 +191,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	}
 	var subs []hlsSubTrack
 	if !o.VideoOnly {
-		subs = planSubTracks(c, o)
+		subs = filterSubTracks(planSubTracks(c, o), keep)
 	}
 
 	if err := fs.DoMkdirAll(outputDir, 0o755); err != nil {

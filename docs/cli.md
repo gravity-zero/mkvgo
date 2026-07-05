@@ -703,10 +703,13 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
 |---|---|
 | `-o` | Output directory (required) |
 | `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
+| `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy — just a different track subset. Video is required |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
 mkvgo to-hls video.mkv -o stream/ -segment 4
+mkvgo to-hls multi.mkv -o vf/    --keep-tracks 1,2      # "VF only": video + French audio, no other tracks
+mkvgo hls-segment multi.mkv master --keep-tracks 1,2,5  # same subset, on demand
 # serve stream/ over HTTP; play stream/master.m3u8 (hls.js/Safari) or stream/manifest.mpd (dash.js)
 
 # AES-128 encryption + signed URLs:

@@ -52,8 +52,10 @@ dependencies). Every method returns a Promise and every error is a rejection.
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
 `{ fastStart?, skipUnsupported?, flattenSubs?, nativeWebVTT?,
-mp3ContainerDelay?, contentHashes?, segmentSeconds? }` — the same semantics as
-the CLI flags ([cli.md](cli.md)).
+mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks? }` — the same
+semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an array of track
+IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1, 2] })` serves a
+"VF only" version from one file, no copy.
 
 Input format is sniffed from the first bytes (EBML magic vs ISO-BMFF box), not
 from a file name.

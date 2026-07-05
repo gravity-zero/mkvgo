@@ -268,6 +268,13 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 	if s := v.Get("segmentSeconds"); s.Type() == js.TypeNumber {
 		o.SegmentMs = int64(s.Float() * 1000)
 	}
+	if k := v.Get("keepTracks"); k.Type() == js.TypeObject && k.Get("length").Type() == js.TypeNumber {
+		n := k.Get("length").Int()
+		o.KeepTracks = make([]uint64, 0, n)
+		for i := 0; i < n; i++ {
+			o.KeepTracks = append(o.KeepTracks, uint64(k.Index(i).Int()))
+		}
+	}
 	return o
 }
 

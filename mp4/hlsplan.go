@@ -118,11 +118,15 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// byte-identical to its full pass: one video rendition (secondary video
 	// dropped), each audio, and — unless VideoOnly (an ABR variant carries only
 	// its video) — the subtitle renditions.
+	keep := keepTrackSet(&o)
 	var media []*outTrack
 	var videoSeen bool
 	for _, t := range planned {
 		if t.isChapter || t.spec.text {
 			continue
+		}
+		if keep != nil && !keep[t.mkv.ID] {
+			continue // Virtual Edit Layer: this track is not in the kept subset
 		}
 		if t.spec.video {
 			if videoSeen {
@@ -139,11 +143,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if len(media) == 0 {
 		return nil, errf("no audio or video track to segment")
 	}
-	var hasVideo bool
-	for _, t := range media {
-		hasVideo = hasVideo || t.spec.video
-	}
-	if !hasVideo {
+	if !videoSeen {
 		return nil, errf("HLS output requires a video track")
 	}
 
@@ -155,7 +155,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
 	if !o.VideoOnly {
-		p.subs = planSubTracks(c, o)
+		p.subs = filterSubTracks(planSubTracks(c, o), keep)
 	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
@@ -1135,11 +1135,15 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	if err != nil {
 		return nil, err
 	}
+	keep := keepTrackSet(o)
 	var media []*outTrack
 	var videoSeen bool
 	for _, t := range planned {
 		if t.isChapter || t.spec.text {
 			continue
+		}
+		if keep != nil && !keep[t.mkv.ID] {
+			continue // Virtual Edit Layer: this track is not in the kept subset
 		}
 		if t.spec.video {
 			if videoSeen {
@@ -1159,7 +1163,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
 	if !o.VideoOnly {
-		p.subs = planSubTracks(c, *o)
+		p.subs = filterSubTracks(planSubTracks(c, *o), keep)
 	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))

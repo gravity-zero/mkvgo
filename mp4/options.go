@@ -84,6 +84,15 @@ type Options struct {
 	// is also useful for a video-only preview rendition.
 	VideoOnly bool
 
+	// KeepTracks, when non-empty, restricts the presentation to these Matroska
+	// track IDs (a Virtual Edit Layer): one source file serves many virtual
+	// versions — "VF only", "VO + English subs", "clean" (drop a logo/forced
+	// track), a specific camera angle — with no copy and no re-mux, just a
+	// different track subset per plan. At least one video track must be kept
+	// (HLS needs video); other IDs are ignored. Composes with VideoOnly (which
+	// then narrows the kept set to its video). nil = every track, as before.
+	KeepTracks []uint64
+
 	// RewriteURL, when set, rewrites every URI the HLS playlists and the DASH
 	// manifest reference (segments, inits, playlists, subtitles) — the hook
 	// for URL templating: prepending a CDN base, appending a signed token

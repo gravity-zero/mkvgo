@@ -6,6 +6,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Virtual Edit Layer (`Options.KeepTracks`).** Serve many virtual versions of
+  one source — "VF only", "VO + English subs", "clean" (drop a logo/forced
+  track), a chosen camera angle — from a single file with no copy and no re-mux:
+  `KeepTracks` restricts the presentation to a subset of Matroska track IDs, so
+  `PlanHLS`/`RemuxToHLS`/`RemuxToABR` package only those renditions (the on-demand
+  plan applies the subset byte-identically to the full pass). Wired through the
+  CLI (`to-hls`/`hls-segment --keep-tracks 1,2`) and WASM (`{ keepTracks: [...] }`).
+
 ### Fixed
 
 - **A reindexed file no longer fails its own `validate`.** `reindex` emitted a

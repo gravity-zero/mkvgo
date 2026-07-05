@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -18,6 +19,7 @@ type hlsFlags struct {
 	encrypt    *mp4.HLSEncryption
 	prefix     string
 	singleFile bool
+	keepTracks []uint64
 	rest       []string
 }
 
@@ -58,6 +60,17 @@ func parseHLSFlags(args []string) hlsFlags {
 			}
 		case "--single-file":
 			f.singleFile = true
+		case "--keep-tracks":
+			i++
+			if i < len(args) {
+				for _, p := range strings.Split(args[i], ",") {
+					id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
+					if err != nil {
+						Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
+					}
+					f.keepTracks = append(f.keepTracks, id)
+				}
+			}
 		default:
 			rejectFlagArg(args[i])
 			f.rest = append(f.rest, args[i])
@@ -79,6 +92,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		SegmentMs:  f.segMs,
 		Encrypt:    f.encrypt,
 		SingleFile: f.singleFile,
+		KeepTracks: f.keepTracks,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix

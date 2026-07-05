@@ -229,6 +229,24 @@ the always-exact prefix scan. The remaining difference: the master
 `BANDWIDTH` is estimated from cluster sizes. The source must carry a Cues
 index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Virtual Edit Layer (`Options.KeepTracks`)
+
+```go
+// One source file → many virtual versions, no copy, no re-mux:
+vf,  _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000, KeepTracks: []uint64{1, 2}})    // "VF only"
+vo,  _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000, KeepTracks: []uint64{1, 4, 9}}) // VO + English subs
+```
+
+`KeepTracks` restricts a presentation to a subset of the source's Matroska track
+IDs. `PlanHLS`/`RemuxToHLS`/`RemuxToABR` then package only those tracks — the
+dropped renditions are simply never built, so a self-hosted server serves "VF
+only", "VO + English subs", "clean" (drop a logo/forced track) or a chosen
+camera angle from one file, at zero storage and near-zero latency to switch
+versions (just a different plan). At least one video track must be kept (HLS
+needs video); the on-demand plan applies the same subset byte-identically to the
+full pass. It composes with `VideoOnly` and rides through `RemuxToABR` per
+variant.
+
 ### Thumbnails / storyboards (`matroska.ExtractKeyframeSample`)
 
 ```go
