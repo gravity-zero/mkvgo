@@ -303,6 +303,55 @@ variant transfers only the ranges a viewer watches. In the browser, the WASM
 `openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
 wasm.md).
 
+### Gapless multi-file sessions (`mp4.RemuxConcatToHLS` / `mp4.PlanConcat`)
+
+```go
+err := mp4.RemuxConcatToHLS(ctx, []string{"ep01.mkv", "ep02.mkv", "ep03.mkv"}, "stream/", mp4.Options{SegmentMs: 6000})
+
+plan, err := mp4.PlanConcat(ctx, []string{"ep01.mkv", "ep02.mkv", "ep03.mkv"}, mp4.Options{SegmentMs: 6000})
+data, contentType, err := plan.Resource(ctx, "p1/seg00042.m4s")
+```
+
+Plays several sources - e.g. consecutive episodes - as one continuous HLS
+session: a single `master.m3u8`/`playlist.m3u8`/`audioN.m3u8`[/`subN.m3u8`]
+spanning every source, with no player reload and no session boundary. This is
+the concatenation twin of `RemuxToABR`/`PlanABR`: a composition of per-source
+`HLSPlan`s, not quality variants of the same content.
+
+Each source packages into its own `p0/`, `p1/`, `p2/` … exactly like
+`RemuxToHLS`/`PlanHLS` would on its own: no re-timestamping, no copy. The
+concatenated playlists reference those parts' segments directly, with
+`EXT-X-DISCONTINUITY` marking each boundary - HLS's own "new timeline starts
+here" signal, and the reason a part's segments stay byte-identical to its own
+standalone packaging whether played concatenated or alone.
+
+**Compatibility contract.** Every source must share the same video codec
+family (same RFC 6381 codec string prefix) and the same kept-audio layout
+(count, codec, language, in order); `RemuxConcatToHLS`/`PlanConcat` check this
+from track metadata alone, before anything is written or planned, and refuse
+with a precise error listing every mismatch otherwise. Subtitles are softer:
+they ride along only when every source exposes the same rendition layout
+(count/language/name/forced) - checked via `Options.OnDrop` otherwise, leaving
+the video/audio concatenation intact. Where subtitles do ride along, their
+cue times are shifted onto the concatenated timeline by the cumulative
+duration of the sources before them - the one place concat rewrites content,
+since WebVTT cue times (unlike the CMAF fragments) are not reset by
+`EXT-X-DISCONTINUITY`.
+
+`ConcatPlan.Resource(ctx, name)` builds `"master.m3u8"`, `"playlist.m3u8"`,
+`"audio{j}.m3u8"`, `"sub{j}.m3u8"`/`"sub{j}.vtt"`, or any `"p{k}/<name>"`
+(`k` 0-based) for a specific part's own resource, byte-identical to the file
+`RemuxConcatToHLS` would have written; `ConcatPlan.Resources()` lists them
+all. `ConcatPlan.NumParts()`/`ConcatPlan.Part(k)` expose the underlying
+per-source `HLSPlan`s directly.
+
+**v1 limits.** `Options.Encrypt` and `Options.SingleFile` are refused
+explicitly. No combined DASH manifest is emitted: DASH shares one
+`SegmentTimeline` per AdaptationSet, and independent per-part timelines have
+nothing to share it over (the same non-aligned rationale as `RemuxToABR`'s
+combined manifest). No combined I-frame playlist either; each part's own
+trick-play, if any, is not carried forward into the concatenated session.
+
 ### Non-goals of the streaming stack (evaluated)
 
 Two features were evaluated and deliberately not implemented:

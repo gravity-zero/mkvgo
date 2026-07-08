@@ -145,6 +145,55 @@ share the keyframe cadence (same GOP length).
 
 ---
 
+## Gapless multi-file sessions (concat) - `concat-hls`
+
+Play several files as **one continuous HLS session** instead of one
+presentation per file: consecutive episodes, or any ordered set of sources,
+served under a single `master.m3u8`/`playlist.m3u8` with no player reload and
+no session boundary. This is not ABR (the sources are not quality variants of
+the same content); it is a different presentation entirely, concatenated in
+playback order.
+
+```bash
+mkvgo concat-hls -o stream/ ep01.mkv ep02.mkv ep03.mkv
+```
+
+Each source packages into its own `p0/`, `p1/`, `p2/` … exactly like `to-hls`
+would on its own: no re-timestamping, no copy. The top-level playlists stitch
+the parts together with `EXT-X-DISCONTINUITY` at each boundary, HLS's own
+"new timeline starts here" signal: the mechanism that lets a player carry on
+playing into the next part without reloading, and the reason each part's
+segments stay byte-identical to its own standalone packaging.
+
+**Compatibility.** Every source must share the same video codec family and
+the same kept-audio layout (count, codec, language, in order); otherwise
+`concat-hls`/`PlanConcat` refuse up front, before anything is written, with a
+precise list of what differs. Subtitles are softer: they ride along only when
+every source exposes the same rendition layout (count/language/name/forced);
+otherwise they are dropped from the session (`Options.OnDrop`) while the
+video/audio concatenation still plays. Where subtitles do ride along, their
+cue times (unlike the CMAF fragments) are not reset by the discontinuity, so
+each part's cues are shifted onto the concatenated timeline by the cumulative
+duration of the parts before it.
+
+```bash
+mkvgo concat-segment master.m3u8 ep01.mkv ep02.mkv ep03.mkv   # → stdout, nothing pre-generated
+```
+
+`concat-segment` is the on-demand twin (`mp4.PlanConcat`), built the same way
+`hls-segment`/`PlanHLS` are: a resource name in, its bytes out, nothing
+pre-generated. Resource names are `master.m3u8`, `playlist.m3u8`,
+`audioN.m3u8`, `subN.m3u8`/`subN.vtt` at the top, and `p{k}/<name>` (`p0/`,
+`p1/`, …) for a specific part's own resource: the same names `concat-hls`'s
+directories use.
+
+v1 does not support `--aes-key`/`--single-file`, and emits no combined DASH
+manifest (DASH shares one `SegmentTimeline` per AdaptationSet; independent
+per-part timelines have nothing to share it over, exactly the `to-abr`
+non-aligned rationale) and no combined I-frame playlist.
+
+---
+
 ## Single-file byte-range — `--single-file`
 
 Instead of hundreds of segment files, pack each rendition into **one**

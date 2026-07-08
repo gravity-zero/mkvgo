@@ -132,6 +132,10 @@ func main() {
 		commands.CmdToABR(args)
 	case "abr-segment":
 		commands.CmdABRSegment(args)
+	case "concat-hls":
+		commands.CmdConcatHLS(args)
+	case "concat-segment":
+		commands.CmdConcatSegment(args)
 	case "extract-frame":
 		commands.CmdExtractFrame(args)
 	default:
@@ -183,6 +187,8 @@ Commands:
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
 hls-segment   Serve one HLS resource on demand (master/playlist/init/N) — no pre-generation
 to-abr        Package pre-encoded quality variants as one multi-variant HLS master (ABR light)
+concat-hls    Package several sources as ONE continuous HLS session (no player reload)
+concat-segment  Serve one concat-hls resource on demand, no pre-generation
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
 
 Global flags:

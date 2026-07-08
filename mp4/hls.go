@@ -125,12 +125,14 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 }
 
 // hlsResult carries what a packaging pass established — the ABR packager
-// builds its top-level master from these.
+// builds its top-level master from these, and the concat packager (concat.go)
+// additionally uses bounds to window subtitle cues per part.
 type hlsResult struct {
 	fts     []*fragTrack
 	subs    []hlsSubTrack
 	segs    []segInfo
 	durs    []float64
+	bounds  []int64     // segment start times (ms), same length as durs
 	iframes []iframeRef // trick-play I-frames (MP4 sources, unencrypted); nil otherwise
 }
 
@@ -317,7 +319,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if err := writeMasterPlaylist(&o, fs, outputDir, fts, subs, segs, iframesAll); err != nil {
 		return nil, err
 	}
-	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs}
+	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs, bounds: bounds}
 	if o.Encrypt == nil {
 		res.iframes = iframesAll
 	}

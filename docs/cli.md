@@ -715,9 +715,9 @@ mkvgo to-webm <input.mkv> <output.webm>
 mkvgo to-webm video.mkv video.webm
 ```
 
-> The streaming commands (`to-hls`, `hls-segment`, `to-abr`) are covered end to
-> end — modes, sources, ABR, security, trick-play — in the
-> **[streaming guide](streaming.md)**. Below is the per-flag reference.
+> The streaming commands (`to-hls`, `hls-segment`, `to-abr`, `concat-hls`) are
+> covered end to end — modes, sources, ABR, concat, security, trick-play — in
+> the **[streaming guide](streaming.md)**. Below is the per-flag reference.
 
 ### to-hls
 
@@ -875,6 +875,62 @@ mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
 
 Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
 The library equivalent is `mp4.PlanABR` (see library.md).
+
+### concat-hls
+
+Package several sources - e.g. consecutive episodes - as **one continuous HLS
+session**: a single `master.m3u8`/`playlist.m3u8`/`audioN.m3u8`[/`subN.m3u8`]
+spanning every source, so a player never reloads and never sees a session
+boundary. This is not ABR (the sources are not quality variants of the same
+content); it concatenates different content in playback order.
+
+```
+mkvgo concat-hls <in1> <in2> [...] -o <dir> [-segment 6]
+```
+
+```bash
+mkvgo concat-hls -o stream/ ep01.mkv ep02.mkv ep03.mkv
+```
+
+Each source packages into its own `p0/`, `p1/`, `p2/` … exactly like `to-hls`
+would on its own: no re-timestamping, no copy. The concatenated playlists
+reference those parts' segments directly, with `EXT-X-DISCONTINUITY` marking
+each boundary (`EXT-X-VERSION:6`, the version an `EXT-X-MAP` in a media
+playlist needs).
+
+Every source must share the same video codec family and the same kept-audio
+layout (count, codec, language, in order); otherwise `concat-hls` refuses up
+front, before anything is written, listing every mismatch. Subtitles ride
+along only when every source exposes the same rendition layout
+(count/language/name/forced); otherwise they are dropped (reported the same
+way `--skip-unsupported` drops a track) and the video/audio concatenation
+still plays. A surviving subtitle's cue times are shifted onto the
+concatenated timeline by the cumulative duration of the sources before it (the
+one place concat rewrites content - WebVTT cue times are not reset by
+`EXT-X-DISCONTINUITY` the way the CMAF fragments are).
+
+v1 does not support `--aes-key`/`--single-file`, and emits no combined DASH
+manifest and no combined I-frame playlist (see streaming.md for why).
+
+### concat-segment
+
+Serve one resource of a concatenated session **on demand** - the on-demand
+counterpart of `concat-hls` (as `hls-segment` is to `to-hls`). Nothing is
+pre-generated. The first argument is the resource name (`master.m3u8`, or
+`p{k}/<name>` such as `p1/seg00042.m4s`, `k` 0-based), the rest are the sources
+in playback order.
+
+```
+mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6]
+```
+
+```bash
+mkvgo concat-segment master.m3u8 ep01.mkv ep02.mkv ep03.mkv          # top manifest
+mkvgo concat-segment p1/seg00042.m4s ep01.mkv ep02.mkv ep03.mkv -o s.m4s  # one segment
+```
+
+Every `p{k}/<name>` is byte-identical to the file `concat-hls` would have
+written. The library equivalent is `mp4.PlanConcat` (see library.md).
 
 ### extract-frame
 

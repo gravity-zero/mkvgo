@@ -324,7 +324,7 @@ func (p *HLSPlan) fts() []*fragTrack {
 // hlsResult exposes the plan's packaging facts in the shape RemuxToHLS returns,
 // so the ABR master builder treats a plan and a full pass identically.
 func (p *HLSPlan) hlsResult() *hlsResult {
-	return &hlsResult{fts: p.fts(), subs: p.subs, segs: p.segs, durs: p.durs, iframes: p.iframes}
+	return &hlsResult{fts: p.fts(), subs: p.subs, segs: p.segs, durs: p.durs, bounds: p.bounds, iframes: p.iframes}
 }
 
 // videoIndex returns the index of the video track in p.tracks.
