@@ -616,12 +616,21 @@ mkvgo split video.mkv -o chapters/ -chapters -pattern "{title}.mkv"
 
 Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clusters verbatim and emits a new index derived from their content. Use this on files muxed without a usable seek index to restore fast seeking.
 
+The result is always reopened and its Cues checked against the index built during the copy (a light, millisecond-cost verification). `--deep-verify` additionally runs a full-read validation of the output and a byte-level comparison of the cluster payloads against the source, at the cost of reading both files in full.
+
 ```
-mkvgo reindex <input.mkv> <output.mkv>
+mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup]
 ```
+
+- Without `--replace`, `<output.mkv>` is required: the rebuilt file is written there, the source is untouched.
+- `--replace` rebuilds `<input.mkv>` in place: no output path is given (supplying one is a usage error). The rebuild happens in a temporary file in the same directory, is verified, and only then atomically replaces the original -- the source is never touched until every check has passed. This needs write permission on the directory (temp file + rename), not just on the file itself.
+- `--keep-backup` (only with `--replace`) preserves the pre-op original as `<input.mkv>.bak` instead of discarding it.
 
 ```bash
 mkvgo reindex source.mkv reindexed.mkv
+
+# Rebuild the index in place, keeping the pre-op file as source.mkv.bak
+mkvgo reindex source.mkv --replace --keep-backup --deep-verify
 ```
 
 ---

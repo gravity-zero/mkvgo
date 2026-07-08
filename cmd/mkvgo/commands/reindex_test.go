@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/cmd/mkvgo/commands"
 	"github.com/gravity-zero/mkvgo/mkv/ops"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -36,4 +37,23 @@ func TestCmdReindex_ReindexRoundTrip(t *testing.T) {
 	if len(c.Cues) == 0 {
 		t.Fatal("expected non-empty Cues in reindexed output")
 	}
+}
+
+// TestCmdReindex_ReplaceWithTwoPaths verifies that --replace refuses a
+// separate output path: it rebuilds the source in place, so a second
+// positional argument is a usage error.
+func TestCmdReindex_ReplaceWithTwoPaths(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	mustFatal(t, func() {
+		commands.CmdReindex([]string{regfixMKV, dst, "--replace"})
+	})
+}
+
+// TestCmdReindex_KeepBackupWithoutReplace verifies that --keep-backup only
+// makes sense together with --replace.
+func TestCmdReindex_KeepBackupWithoutReplace(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	mustFatal(t, func() {
+		commands.CmdReindex([]string{regfixMKV, dst, "--keep-backup"})
+	})
 }

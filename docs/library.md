@@ -622,21 +622,40 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 
 `ops.Reindex` copies every cluster from `srcPath` to `dstPath` verbatim and writes a new SeekHead and Cues index derived from the cluster contents. All other elements (Info, Tracks, Tags, Chapters, Attachments) are also copied verbatim.
 
+The result is always reopened afterwards and its Cues checked against the index built during the copy -- a light, head-only verification costing a few milliseconds. `Options.DeepVerify` additionally runs a full-read `Validate` on the output and a byte-level payload comparison (`CompareBlocks`) against the source, proving the copy verbatim rather than merely well-formed -- at the cost of a full read of the output (and of both files, for the comparison). A failed verification returns an error; `dstPath` is left as written.
+
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/ops"
 
 err := ops.Reindex(ctx, "input.mkv", "output.mkv")
 ```
 
-With a progress callback:
+With a progress callback and the deep verification pass:
 
 ```go
 err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
+    DeepVerify: true,
     Progress: func(processed, total int64) {
         fmt.Printf("\r%.1f%%", float64(processed)/float64(total)*100)
     },
 })
 ```
+
+### ReindexReplace
+
+`ops.ReindexReplace` rebuilds `path`'s seek index through a temporary copy in the same directory, runs the same verification chain as `Reindex` (light always, plus the deep pass when `Options.DeepVerify` is set), and only then atomically renames the copy over the original. The original is never touched until every check has passed. Needs write permission on the directory (temp file + rename), not just on the file itself.
+
+```go
+err := ops.ReindexReplace(ctx, "video.mkv")
+```
+
+`Options.KeepBackup` preserves the pre-op original as `path+".bak"` instead of discarding it:
+
+```go
+err := ops.ReindexReplace(ctx, "video.mkv", mkv.Options{KeepBackup: true, DeepVerify: true})
+```
+
+If a leftover `path+".mkvgo.tmp"` already exists (a previous run crashed mid-copy), `ReindexReplace` refuses to run rather than silently overwrite it -- remove the file first if it is safe to discard.
 
 ---
 

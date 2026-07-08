@@ -310,6 +310,13 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) erro
 	return ops.Reindex(ctx, srcPath, dstPath, opts...)
 }
 
+// ReindexReplace rebuilds path's seek index through a verified temporary copy,
+// then atomically replaces the original (optionally keeping it as path+".bak"
+// via Options.KeepBackup). See ops.ReindexReplace.
+func ReindexReplace(ctx context.Context, path string, opts ...Options) error {
+	return ops.ReindexReplace(ctx, path, opts...)
+}
+
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	return ops.RemoveTrack(ctx, srcPath, dstPath, removeIDs, opts...)
 }

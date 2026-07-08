@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -370,10 +371,54 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // Use this instead of EditMetadata when the only goal is to add a seek index to
 // a file that lacks one or has a stale one, and fidelity to the original
 // metadata encoding matters.
-func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (err error) {
+//
+// The result is always re-opened afterwards and its Cues index checked against
+// the cues built during the copy (light verification, a few milliseconds).
+// When Options.DeepVerify is set, Reindex additionally runs a full-read
+// Validate on dstPath and a byte-level payload comparison (CompareBlocks)
+// against srcPath, proving the copy verbatim rather than merely well-formed.
+// A failed verification returns an error and dstPath is left as written (the
+// caller decides whether to discard it) - see ReindexReplace for a variant
+// that only replaces the original after every check has passed. A
+// file-only-permission variant with no output copy (ReindexInPlace) exists
+// separately.
+func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
-	progress := mkv.ProgressFrom(opts)
 
+	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts))
+	if err != nil {
+		return err
+	}
+
+	if err := verifyReindexedCues(ctx, dstPath, fs, cues, timecodeScale); err != nil {
+		return err
+	}
+
+	if mkv.DeepVerifyFrom(opts) {
+		if err := deepVerifyValidate(ctx, dstPath, fs); err != nil {
+			return err
+		}
+		diffs, err := CompareBlocks(ctx, srcPath, dstPath, mkv.Options{FS: fs})
+		if err != nil {
+			return fmt.Errorf("reindex deep verify: compare blocks: %w", err)
+		}
+		if len(diffs) > 0 {
+			msgs := make([]string, len(diffs))
+			for i, d := range diffs {
+				msgs[i] = d.String()
+			}
+			return fmt.Errorf("reindex deep verify: copy is not verbatim: %s", strings.Join(msgs, "; "))
+		}
+	}
+
+	return nil
+}
+
+// reindexCopy performs the actual byte-faithful copy from srcPath to dstPath,
+// rebuilding only the seek index (SeekHead + Cues). It returns the cue points
+// built during the walk and the timecode scale used to derive them, so the
+// caller can verify the result against them. See Reindex for the full contract.
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc) (cues []mkv.CuePoint, timecodeScale int64, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks map[uint64]bool
@@ -383,13 +428,13 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 
 	raw, err := fs.DoOpen(srcPath)
 	if err != nil {
-		return fmt.Errorf("reindex open src: %w", err)
+		return nil, 0, fmt.Errorf("reindex open src: %w", err)
 	}
 	defer raw.Close()
 
 	out, err := fs.DoCreate(dstPath)
 	if err != nil {
-		return fmt.Errorf("reindex create dst: %w", err)
+		return nil, 0, fmt.Errorf("reindex create dst: %w", err)
 	}
 	defer closeWithErr(out, &err)
 
@@ -400,66 +445,66 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	// Read the source EBML header and copy it verbatim so DocType is preserved.
 	ebmlHdr, _, err := ebml.ReadElementHeader(r)
 	if err != nil {
-		return fmt.Errorf("reindex: read EBML header: %w", err)
+		return nil, 0, fmt.Errorf("reindex: read EBML header: %w", err)
 	}
 	if ebmlHdr.ID != ebml.IDEBMLHeader {
-		return fmt.Errorf("reindex: expected EBML header, got 0x%X", ebmlHdr.ID)
+		return nil, 0, fmt.Errorf("reindex: expected EBML header, got 0x%X", ebmlHdr.ID)
 	}
 	if ebmlHdr.Size < 0 {
-		return fmt.Errorf("reindex: EBML header has unknown size")
+		return nil, 0, fmt.Errorf("reindex: EBML header has unknown size")
 	}
 	if ebmlHdr.Size > maxReindexClusterSize {
-		return fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
+		return nil, 0, fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
 	}
 	ebmlBody := make([]byte, ebmlHdr.Size)
 	if _, err := io.ReadFull(r, ebmlBody); err != nil {
-		return fmt.Errorf("reindex: read EBML body: %w", err)
+		return nil, 0, fmt.Errorf("reindex: read EBML body: %w", err)
 	}
 	// Write the EBML element verbatim: ID header + body.
 	if _, err := ebml.WriteElementID(out, ebmlHdr.ID); err != nil {
-		return fmt.Errorf("reindex: write EBML ID: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write EBML ID: %w", err)
 	}
 	if _, err := ebml.WriteDataSize(out, ebmlHdr.Size); err != nil {
-		return fmt.Errorf("reindex: write EBML size: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write EBML size: %w", err)
 	}
 	if _, err := out.Write(ebmlBody); err != nil {
-		return fmt.Errorf("reindex: write EBML body: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write EBML body: %w", err)
 	}
 
 	// ── Segment ───────────────────────────────────────────────────────────────
 	// Read source Segment header (we don't need its size; we write unknown-size).
 	segHdr, _, err := ebml.ReadElementHeader(r)
 	if err != nil {
-		return fmt.Errorf("reindex: read Segment header: %w", err)
+		return nil, 0, fmt.Errorf("reindex: read Segment header: %w", err)
 	}
 	if segHdr.ID != mkv.IDSegment {
-		return fmt.Errorf("reindex: expected Segment, got 0x%X", segHdr.ID)
+		return nil, 0, fmt.Errorf("reindex: expected Segment, got 0x%X", segHdr.ID)
 	}
 	// Emit a new Segment with unknown size (same as MKVWriter.WriteStart does).
 	if _, err := ebml.WriteElementID(out, mkv.IDSegment); err != nil {
-		return fmt.Errorf("reindex: write Segment ID: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write Segment ID: %w", err)
 	}
 	if _, err := ebml.WriteDataSize(out, -1); err != nil {
-		return fmt.Errorf("reindex: write Segment size: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write Segment size: %w", err)
 	}
 	// Record where segment data starts (needed for RelPos() arithmetic).
 	segDataStart, err := out.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return fmt.Errorf("reindex: seek Segment data start: %w", err)
+		return nil, 0, fmt.Errorf("reindex: seek Segment data start: %w", err)
 	}
 	mw.SegDataStart = segDataStart
 	mw.SeekHeadPos = 0 // will be filled at the front
 	if err := writer.WriteVoid(out, writer.SeekHeadReserve); err != nil {
-		return fmt.Errorf("reindex: write SeekHead placeholder: %w", err)
+		return nil, 0, fmt.Errorf("reindex: write SeekHead placeholder: %w", err)
 	}
 
 	// ── Walk source Segment elements ──────────────────────────────────────────
 	var (
-		clusterBuf    []byte
-		firstCluster  = true
-		consumed      int64
-		timecodeScale int64 = 1_000_000 // default; overridden when Info is copied
+		clusterBuf   []byte
+		firstCluster = true
+		consumed     int64
 	)
+	timecodeScale = 1_000_000 // default; overridden when Info is copied
 
 	var totalBytes int64
 	if progress != nil {
@@ -470,40 +515,40 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 
 	for {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, 0, ctx.Err()
 		}
 		h, hdrBytes, err := ebml.ReadElementHeader(r)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return fmt.Errorf("reindex: top-level element: %w", err)
+			return nil, 0, fmt.Errorf("reindex: top-level element: %w", err)
 		}
 
 		switch h.ID {
 		case mkv.IDSeekHead, mkv.IDCues, mkv.IDVoid:
 			// Drop old index elements — they will be rebuilt by Finalize.
 			if h.Size < 0 {
-				return fmt.Errorf("reindex: unknown-size index element 0x%X", h.ID)
+				return nil, 0, fmt.Errorf("reindex: unknown-size index element 0x%X", h.ID)
 			}
 			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-				return fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 
 		case mkv.IDInfo, mkv.IDTracks, mkv.IDTags, mkv.IDChapters, mkv.IDAttachments:
 			// Copy verbatim; record position so Finalize's SeekHead points here.
 			if h.Size < 0 {
-				return fmt.Errorf("reindex: unknown-size metadata element 0x%X", h.ID)
+				return nil, 0, fmt.Errorf("reindex: unknown-size metadata element 0x%X", h.ID)
 			}
 			if h.Size > maxReindexClusterSize {
-				return fmt.Errorf("reindex: metadata element 0x%X size %d exceeds limit (%d bytes)", h.ID, h.Size, maxReindexClusterSize)
+				return nil, 0, fmt.Errorf("reindex: metadata element 0x%X size %d exceeds limit (%d bytes)", h.ID, h.Size, maxReindexClusterSize)
 			}
 			// Buffer the body so we can (a) scan Info for timecodeScale and
 			// (b) write it out verbatim in one step.
 			metaBuf := make([]byte, h.Size)
 			if _, err := io.ReadFull(r, metaBuf); err != nil {
-				return fmt.Errorf("reindex: read 0x%X body: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: read 0x%X body: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 			// Extract timecodeScale from Info before writing.
@@ -528,24 +573,24 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 			}
 			// Write element header (same ID, same size) then verbatim body.
 			if _, err := ebml.WriteElementID(out, h.ID); err != nil {
-				return fmt.Errorf("reindex: write 0x%X ID: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: write 0x%X ID: %w", h.ID, err)
 			}
 			if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
-				return fmt.Errorf("reindex: write 0x%X size: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: write 0x%X size: %w", h.ID, err)
 			}
 			if _, err := out.Write(metaBuf); err != nil {
-				return fmt.Errorf("reindex: write 0x%X body: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: write 0x%X body: %w", h.ID, err)
 			}
 
 		case mkv.IDCluster:
 			if h.Size < 0 {
 				if firstCluster {
-					return fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
+					return nil, 0, fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
 				}
-				return fmt.Errorf("reindex: unknown-size cluster after first")
+				return nil, 0, fmt.Errorf("reindex: unknown-size cluster after first")
 			}
 			if h.Size > maxReindexClusterSize {
-				return fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
+				return nil, 0, fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
 			}
 			firstCluster = false
 
@@ -554,13 +599,13 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 			}
 			body := clusterBuf[:h.Size]
 			if _, err := io.ReadFull(r, body); err != nil {
-				return fmt.Errorf("reindex: read cluster body: %w", err)
+				return nil, 0, fmt.Errorf("reindex: read cluster body: %w", err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 
 			outOff := mw.RelPos()
 			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
-				return err
+				return nil, 0, err
 			}
 
 			if progress != nil && totalBytes > 0 {
@@ -570,22 +615,25 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		default:
 			// Unknown top-level element: copy verbatim to preserve any extensions.
 			if h.Size < 0 {
-				return fmt.Errorf("reindex: unknown-size element 0x%X", h.ID)
+				return nil, 0, fmt.Errorf("reindex: unknown-size element 0x%X", h.ID)
 			}
 			if _, err := ebml.WriteElementID(out, h.ID); err != nil {
-				return fmt.Errorf("reindex: write unknown 0x%X ID: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: write unknown 0x%X ID: %w", h.ID, err)
 			}
 			if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
-				return fmt.Errorf("reindex: write unknown 0x%X size: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: write unknown 0x%X size: %w", h.ID, err)
 			}
 			if _, err := io.CopyN(out, r, h.Size); err != nil {
-				return fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
+				return nil, 0, fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 		}
 	}
 
-	return mw.Finalize()
+	if err := mw.Finalize(); err != nil {
+		return nil, 0, err
+	}
+	return mw.Cues, timecodeScale, nil
 }
 
 // reindexScanTimecodeScale scans the raw bytes of an Info element body for the
