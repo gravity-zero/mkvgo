@@ -109,6 +109,9 @@ func main() {
 	case "reindex":
 		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup]")
 		commands.CmdReindex(args)
+	case "reindex-inplace":
+		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback]")
+		commands.CmdReindexInPlace(args)
 	case "merge":
 		commands.CmdMerge(args)
 	case "merge-subtitle":
@@ -172,7 +175,8 @@ Commands:
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption
   compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
-  reindex       Rebuild the seek index (Cues) of a file, verified; --replace edits it in place
+  reindex       Rebuild the seek index (Cues) into a new file, verified; --replace swaps it in after the checks
+  reindex-inplace  Rebuild the seek index by patching the file itself (no copy, crash-safe journal, auto-rollback)
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)
   from-mp4      Remux an MP4 to MKV (--mp3-container-delay)
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)

@@ -633,6 +633,28 @@ mkvgo reindex source.mkv reindexed.mkv
 mkvgo reindex source.mkv --replace --keep-backup --deep-verify
 ```
 
+### reindex-inplace
+
+Rebuild the seek index by patching the file itself: the new Cues element is appended inside the Segment, the head SeekHead repointed and any stale Cues voided. Cluster bytes are never moved, no copy of the file is created -- write permission on the file is enough (no temp file in the directory), and no transient disk space is used beyond the new index itself. On large files this takes seconds where a copy takes minutes.
+
+The operation is crash-safe: the bytes about to be overwritten are journaled inside the file (fsynced) before any patch, the result is verified while a rollback is still possible (light check always, full-read validation with `--deep-verify`), and the journal is removed only after the checks pass. Any failure restores the original bytes automatically; a run interrupted by a crash is repaired automatically by the next run, or explicitly with `--rollback`.
+
+```
+mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback]
+```
+
+- `--deep-verify` runs the full-read validation (every cue checked against real video keyframes) before committing the patch; a failure rolls the patch back.
+- `--rollback` only restores a file left mid-operation by a crash (no reindexing); it reports when the file carries no journal.
+- Streamed files (unknown-size clusters), truncated files, and files with no head SeekHead or Void to hold the rebuilt SeekHead are refused with an explicit message -- use `mkvgo reindex` (copy) for those.
+- Once the command has succeeded there is no undo: the journal exists only during the operation. Use `reindex --replace --keep-backup` when you want to keep the pre-op file.
+
+```bash
+mkvgo reindex-inplace movie.mkv --deep-verify
+
+# After a crash mid-operation: restore the original bytes
+mkvgo reindex-inplace movie.mkv --rollback
+```
+
 ---
 
 ## Remux

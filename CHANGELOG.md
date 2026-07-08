@@ -4,6 +4,42 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+**Highlights**
+
+- **In-place reindex** - `reindex-inplace` patches the seek index directly into
+  the file: no copy, no temp file, write permission on the file is enough, and
+  a crash-safety journal inside the file makes any failure roll back to the
+  original bytes.
+- **Verified reindex** - every reindex now re-opens and checks its own result;
+  `--deep-verify` adds a full-read validation plus a byte-level payload proof,
+  and `reindex --replace` swaps the verified copy over the original atomically.
+
+### Added
+
+- **`ReindexInPlace` / `reindex-inplace`.** Surgical index repair: the new Cues
+  element is appended inside the Segment, the Segment size extended, the head
+  SeekHead repointed and any stale Cues voided - cluster bytes never move and
+  no second copy of the file is created. Crash-safe by design: the bytes about
+  to be overwritten are journaled inside the file (fsynced) before any patch,
+  the result is verified while a rollback is still possible, and the journal is
+  truncated away only after the checks pass. An interrupted run is repaired
+  automatically by the next one, or explicitly via `RecoverInPlace` /
+  `--rollback`. Streamed (unknown-size-cluster), truncated and
+  no-SeekHead-slot files are refused with a pointer at `reindex` (copy).
+- **`ReindexReplace` / `reindex --replace [--keep-backup]`.** Rebuild through a
+  temporary copy in the same directory, verify, then atomically rename it over
+  the original - the source is never touched until every check has passed.
+  `--keep-backup` keeps the pre-op file as `.bak`.
+- **Reindex verification built in.** Every `Reindex` re-opens its output and
+  checks the written Cues against the index built during the copy (head-only,
+  milliseconds). `Options.DeepVerify` / `--deep-verify` adds a full-read
+  `Validate` (every cue checked against real video keyframes) and a byte-level
+  payload comparison against the source (`CompareBlocks`).
+- **FS port: `Rename` hook and MemFS `Truncate`** so the new operations run on
+  any filesystem port, in-memory included.
+
 ## [0.16.0] - 2026-07-05
 
 **Highlights**

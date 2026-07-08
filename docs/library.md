@@ -657,6 +657,23 @@ err := ops.ReindexReplace(ctx, "video.mkv", mkv.Options{KeepBackup: true, DeepVe
 
 If a leftover `path+".mkvgo.tmp"` already exists (a previous run crashed mid-copy), `ReindexReplace` refuses to run rather than silently overwrite it -- remove the file first if it is safe to discard.
 
+### ReindexInPlace
+
+`ops.ReindexInPlace` rebuilds the seek index by patching the file itself: the new Cues element is appended inside the Segment, the Segment size extended, the head SeekHead repointed and any stale Cues element voided. Cluster bytes are never moved and no copy of the file is created, so the operation needs write access to the file only (not the directory) and uses no transient disk space beyond the new index itself.
+
+It is crash-safe: every byte about to be overwritten is captured into a small journal appended inside the file (fsynced before any patch), the result is verified while the journal still allows a rollback -- the light head-only check always, plus the full-read `Validate` pass with `Options.DeepVerify` -- and the journal is truncated away only once the checks pass. Any failure (including a failed verification) restores the original bytes; a crash mid-operation is repaired by the automatic recovery the next run performs, or explicitly:
+
+```go
+err := ops.ReindexInPlace(ctx, "video.mkv", mkv.Options{DeepVerify: true})
+
+// After a crash mid-operation: restore the original bytes without reindexing.
+recovered, err := ops.RecoverInPlace(ctx, "video.mkv")
+```
+
+Once `ReindexInPlace` has returned successfully there is no undo -- the journal only exists during the operation. Streamed files (unknown-size clusters), truncated files and files whose head has no SeekHead or Void large enough for the rebuilt SeekHead are refused with an explicit error pointing at `Reindex`, which copies and can therefore rebuild anything readable.
+
+Choosing a variant: `Reindex` never touches the source (safest, needs a second path), `ReindexReplace` swaps a verified copy over the original (atomic, needs directory permission and transient double disk), `ReindexInPlace` patches the file (file-only permission, no disk duplication, seconds instead of a full copy on large files).
+
 ---
 
 ## Stream I/O (non-seekable io.Reader / io.Writer)

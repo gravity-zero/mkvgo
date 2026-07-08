@@ -312,9 +312,31 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) erro
 
 // ReindexReplace rebuilds path's seek index through a verified temporary copy,
 // then atomically replaces the original (optionally keeping it as path+".bak"
-// via Options.KeepBackup). See ops.ReindexReplace.
+// via Options.KeepBackup). Needs write permission on the directory; see
+// ReindexInPlace for the file-only-permission variant. See ops.ReindexReplace.
 func ReindexReplace(ctx context.Context, path string, opts ...Options) error {
 	return ops.ReindexReplace(ctx, path, opts...)
+}
+
+// ReindexInPlace rebuilds path's seek index by patching the file itself: the
+// new Cues element is appended inside the Segment, the head SeekHead repointed
+// and any stale Cues voided. Cluster bytes are never moved and no copy of the
+// file is created, so it only needs write access to the file (not the
+// directory). Crash-safe: every byte about to be overwritten is journaled
+// inside the file first, the result is verified (head-only always, full-read
+// with Options.DeepVerify) while the journal still allows a rollback, and the
+// journal is truncated away only after the checks pass. Any failure restores
+// the original bytes. See ops.ReindexInPlace.
+func ReindexInPlace(ctx context.Context, path string, opts ...Options) error {
+	return ops.ReindexInPlace(ctx, path, opts...)
+}
+
+// RecoverInPlace rolls back an interrupted ReindexInPlace: if path still
+// carries the in-file journal (the process died mid-operation), the original
+// bytes are restored and the journal removed. Returns false when the file
+// carries no journal (nothing to do). See ops.RecoverInPlace.
+func RecoverInPlace(ctx context.Context, path string, opts ...Options) (bool, error) {
+	return ops.RecoverInPlace(ctx, path, opts...)
 }
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {

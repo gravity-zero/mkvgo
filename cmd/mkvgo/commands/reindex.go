@@ -41,7 +41,7 @@ func CmdReindex(args []string) {
 		if err != nil {
 			Fatal(err.Error())
 		}
-		fmt.Printf("reindexed %s in place (replaced after verification)\n", src)
+		fmt.Printf("reindexed %s (original replaced after verification)\n", src)
 		return
 	}
 
