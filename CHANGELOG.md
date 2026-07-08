@@ -8,6 +8,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
+- **Play while downloading** - `serve-growing` streams a still-downloading file
+  as HLS: an EVENT playlist that grows with the file and finalizes to VOD, with
+  every already-covered segment byte-identical to the finished file.
 - **Gapless multi-file sessions** - `concat-hls` packages several sources (a
   season of episodes) as ONE continuous HLS session: the player never reloads
   across boundaries.
@@ -31,6 +34,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Play while downloading (`PlanGrowingHLS` / `serve-growing`).** Serve a
+  still-growing (downloading) MKV as an EVENT-type HLS playlist that lengthens
+  as data lands: a cursor scans only whole clusters (a partial trailing cluster
+  is held back until complete, so a truncated segment is never served), each
+  published segment is byte-identical to the finished-file `PlanHLS` build and
+  keeps a stable number, and the playlist switches to VOD + `EXT-X-ENDLIST` on
+  completion (explicit `Complete()` or an auto-detected finalized file).
+  `Refresh` is safe to call concurrently with `Resource`. Encrypted growing
+  plans are refused in this version.
 - **Gapless concatenation (`PlanConcat` / `RemuxConcatToHLS` / `concat-hls` /
   `concat-segment`).** Package several MKV/MP4 sources as one continuous HLS
   session: each part keeps its own byte-identical segments, joined by
