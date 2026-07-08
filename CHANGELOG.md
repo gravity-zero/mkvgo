@@ -8,6 +8,19 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
+- **Gapless multi-file sessions** - `concat-hls` packages several sources (a
+  season of episodes) as ONE continuous HLS session: the player never reloads
+  across boundaries.
+- **Common Encryption (CENC)** - `cenc` (AES-CTR) and `cbcs` (AES-CBC pattern)
+  sample-level packaging with `SAMPLE-AES`/`SAMPLE-AES-CTR` signaling and DASH
+  `ContentProtection`, ready for EME/DRM playback (keys stay the caller's job).
+- **Virtual subtitle resync** - `--sub-offset` shifts every cue by a chosen
+  delay, served on the fly, no file rewritten.
+- **Damaged-file recovery** - `salvage` copies what is readable out of a
+  corrupt MKV, skipping dead regions and reporting the damaged time ranges.
+- **Serve over HTTP** - the `mkvhttp` handler and `mkvgo serve` expose an
+  on-demand HLS/DASH plan (ETag, Range, caching) in a few lines; the `s3fs`
+  port streams a source straight from an S3 bucket, no download.
 - **In-place reindex** - `reindex-inplace` patches the seek index directly into
   the file: no copy, no temp file, write permission on the file is enough, and
   a crash-safety journal inside the file makes any failure roll back to the
@@ -18,6 +31,52 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Gapless concatenation (`PlanConcat` / `RemuxConcatToHLS` / `concat-hls` /
+  `concat-segment`).** Package several MKV/MP4 sources as one continuous HLS
+  session: each part keeps its own byte-identical segments, joined by
+  `EXT-X-DISCONTINUITY` and a per-part `EXT-X-MAP` (playlist version 6), so a
+  binge session plays across episodes with no player reload. Subtitles are
+  concatenated with each part's cues shifted by the cumulative prior duration
+  when every part shares the same subtitle layout, otherwise dropped with a
+  reason. Sources must share a compatible video codec and audio layout (an
+  explicit error lists any mismatch before anything is written); combined DASH
+  and per-concat I-frame playlists are out of scope in this version.
+- **Common Encryption (`Options.CENC` / `CENCOptions` / `--cenc-*`).**
+  Sample-level `cenc` (AES-CTR) and `cbcs` (AES-CBC 1:9 pattern) encryption of
+  the fMP4/HLS/DASH output with caller-supplied keys: `encv`/`enca` sample
+  entries, `tenc`/`senc`/`saiz`/`saio` boxes, subsample encryption for H.264 /
+  HEVC (NAL length + header left clear), whole-sample for audio, `EXT-X-KEY`
+  (`SAMPLE-AES` / `SAMPLE-AES-CTR`) and DASH `ContentProtection` signaling, and
+  optional `pssh` passthrough. The per-sample IV derivation is byte-identical
+  between the full pass and the on-demand plan. Packaging only - no license
+  server; key delivery is the caller's. AV1/VP9 and `SingleFile` are refused in
+  this version.
+- **Virtual subtitle resync (`Options.SubtitleOffsetMs` / `--sub-offset`).**
+  Shift every WebVTT cue by a positive or negative millisecond offset in the
+  served renditions (full pass and on-demand plan alike), with cues clamped or
+  dropped at zero. Nothing is written to the source: a server re-plans with a
+  new offset instantly. Zero offset is byte-identical to before.
+- **I-frame trick-play for Matroska sources.** On-demand `PlanHLS` now serves
+  `iframe.m3u8` for MKV/WebM sources too (previously MP4 only), built lazily on
+  first request from a bounded header-only pass over the video track so plan
+  construction stays cheap; byte-identical to the full pass.
+- **Damaged-file recovery (`Salvage` / `salvage`).** A separate, explicitly
+  lossy-tolerant copy: it walks clusters like `reindex` but on structural
+  corruption (garbage, zeroed regions, a truncated tail) it resyncs forward to
+  the next valid cluster (bounded scan), skips the dead range and resumes,
+  rebuilding the index from what survives. Returns a report of the damaged byte
+  and time ranges; the strict `reindex`/`validate`/`BlockReader` contracts are
+  untouched. A clean file yields zero damaged ranges.
+- **HTTP serving (`mkvhttp` package / `mkvgo serve`).** A drop-in
+  `http.Handler` around any plan's `Resource` method: GET/HEAD, strong SHA-256
+  ETag with conditional `304`, `Range` via `http.ServeContent`, per-class
+  `Cache-Control` (playlists `no-cache`, immutable segments cached), optional
+  CORS. `mkvgo serve <file>` plans a file and serves it with graceful shutdown.
+- **S3 source port (`s3fs` package).** A read-only, range-backed FS port that
+  signs each request with AWS Signature V4 (standard library crypto only) over
+  the existing `httpfs` windowing, so any command reading `http(s)://` now also
+  reads `s3://bucket/key` (virtual-host or path style, credentials/region from
+  the environment) without downloading the whole object.
 - **`ReindexInPlace` / `reindex-inplace`.** Surgical index repair: the new Cues
   element is appended inside the Segment, the Segment size extended, the head
   SeekHead repointed and any stale Cues voided - cluster bytes never move and
