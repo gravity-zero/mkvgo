@@ -113,7 +113,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		if ft.outTrack.spec.video {
 			m = meta
 		}
-		initData := buildInitSegment([]*fragTrack{ft}, m)
+		initData := buildInitSegment([]*fragTrack{ft}, m, nil) // CENC + SingleFile is refused up front
 		sizes := make([]int64, len(plans[i].heads))
 		for k := range plans[i].heads {
 			sizes[k] = int64(len(plans[i].heads[k])) + plans[i].segs[k].dataLen

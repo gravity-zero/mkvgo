@@ -18,6 +18,7 @@ type hlsFlags struct {
 	outDir     string
 	segMs      int64
 	encrypt    *mp4.HLSEncryption
+	cenc       *mp4.CENCOptions
 	prefix     string
 	singleFile bool
 	keepTracks []uint64
@@ -28,6 +29,7 @@ type hlsFlags struct {
 func parseHLSFlags(args []string) hlsFlags {
 	var f hlsFlags
 	var keyHex, keyURI string
+	var cencScheme, cencKeyHex, cencKIDHex, cencIVHex, cencKeyURI string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
@@ -54,6 +56,31 @@ func parseHLSFlags(args []string) hlsFlags {
 			i++
 			if i < len(args) {
 				keyURI = args[i]
+			}
+		case "--cenc-scheme":
+			i++
+			if i < len(args) {
+				cencScheme = args[i]
+			}
+		case "--cenc-key":
+			i++
+			if i < len(args) {
+				cencKeyHex = args[i]
+			}
+		case "--cenc-kid":
+			i++
+			if i < len(args) {
+				cencKIDHex = args[i]
+			}
+		case "--cenc-iv":
+			i++
+			if i < len(args) {
+				cencIVHex = args[i]
+			}
+		case "--cenc-key-uri":
+			i++
+			if i < len(args) {
+				cencKeyURI = args[i]
 			}
 		case "--url-prefix":
 			i++
@@ -94,7 +121,27 @@ func parseHLSFlags(args []string) hlsFlags {
 		}
 		f.encrypt = &mp4.HLSEncryption{Key: key, KeyURI: keyURI}
 	}
+	if cencScheme != "" || cencKeyHex != "" || cencKIDHex != "" || cencIVHex != "" {
+		key := mustHex(cencKeyHex, "--cenc-key (expected 32 hex chars)")
+		kid := mustHex(cencKIDHex, "--cenc-kid (expected 32 hex chars)")
+		iv := mustHex(cencIVHex, "--cenc-iv (expected 16 or 32 hex chars)")
+		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI}
+	}
 	return f
+}
+
+// mustHex decodes a hex-encoded flag value, exiting with a clear error on
+// malformed input (odd length, non-hex characters) - validated up front
+// rather than surfacing as a confusing key/IV-length error from mp4.CENCOptions.
+func mustHex(s, what string) []byte {
+	if s == "" {
+		return nil
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		Fatal("invalid " + what + ": " + err.Error())
+	}
+	return b
 }
 
 func (f hlsFlags) options(src string) mp4.Options {
@@ -106,6 +153,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		FS:         sourceFS(src),
 		SegmentMs:  f.segMs,
 		Encrypt:    f.encrypt,
+		CENC:       f.cenc,
 		SingleFile: f.singleFile,
 		KeepTracks: keep,
 	}

@@ -210,9 +210,12 @@ func abrVariantsAligned(results []*hlsResult) bool {
 // switching in one manifest), plus the reference variant's audio and subtitles,
 // all on the shared SegmentTimeline. Returns nil for an encrypted presentation
 // (DASH is not emitted) or when the variants are not aligned. Byte-identical for
-// the full pass (RemuxToABR) and the on-demand plan (PlanABR).
+// the full pass (RemuxToABR) and the on-demand plan (PlanABR). CENC also opts
+// out of the combined manifest in this version (it does not yet carry a
+// ContentProtection element here) - each variant's own v{k}/manifest.mpd,
+// built through buildDASHManifest, does.
 func combinedDASH(o Options, results []*hlsResult) []byte {
-	if o.Encrypt != nil || !abrVariantsAligned(results) {
+	if o.Encrypt != nil || o.CENC != nil || !abrVariantsAligned(results) {
 		return nil
 	}
 	rw := urlRewriter(&o)

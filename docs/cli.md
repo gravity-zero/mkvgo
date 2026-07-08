@@ -762,7 +762,7 @@ sources, whose sample table makes the ranges computable head-only.)
 HLS playlists use `EXT-X-BYTERANGE` and the DASH manifest the on-demand
 profile's `SegmentBase`/`indexRange`. Two media files instead of hundreds:
 friendlier to object storage; the server only needs `Range` support.
-Incompatible with `--aes-key`.
+Incompatible with `--aes-key` and `--cenc-*`.
 
 Security flags (shared with `hls-segment`; both must use the same values):
 
@@ -771,10 +771,25 @@ Security flags (shared with `hls-segment`; both must use the same values):
   8216) and write the `EXT-X-KEY` line. The key itself is never written to the
   output — serving it (with authentication) is the server's job. Init segments
   and subtitles stay clear. AES-128 is HLS-only: no `manifest.mpd` is emitted
-  for an encrypted presentation (DASH uses CENC, not implemented). Supported
-  by hls.js; Safari/FairPlay requires SAMPLE-AES (DRM territory, out of
-  scope). ffmpeg's own HLS demuxer does not decrypt whole-segment fMP4 —
-  verified spec-conformant by openssl round-trip.
+  for an encrypted presentation. Supported by hls.js; Safari/FairPlay requires
+  SAMPLE-AES (see `--cenc-*` below). ffmpeg's own HLS demuxer does not decrypt
+  whole-segment fMP4 — verified spec-conformant by openssl round-trip.
+  Incompatible with `--cenc-*` (pick one scheme).
+- `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> [--cenc-key-uri <uri>]` --
+  sample-level Common Encryption (ISO/IEC 23001-7): `cenc` is AES-CTR (a
+  per-sample IV, `--cenc-iv` 8 or 16 bytes hex); `cbcs` is AES-CBC with a
+  1-encrypted:9-clear 16-byte-block pattern on video (`--cenc-iv` must be 16
+  bytes, used as a constant IV). Unlike `--aes-key`, a CENC presentation still
+  gets a `manifest.mpd` (`ContentProtection` with the key ID). Media playlists
+  (video and audio) carry `EXT-X-KEY` (`METHOD=SAMPLE-AES-CTR` for cenc,
+  `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is
+  emitted (a ciphertext byte range is not independently decryptable). Packaging
+  only -- no license server: `--cenc-key-uri` is what an EME-capable player's
+  DRM path resolves through its own CDM; left unset it falls back to a `data:`
+  URI embedding the key (fine for local testing, never for production). Video
+  must be H.264 or HEVC (AV1/VP9 have different subsample rules, not
+  implemented). See [streaming.md](streaming.md#securing-delivery) for the
+  library form (`mp4.CENCOptions`) and the exact clear/protected byte rules.
 - `--url-prefix <prefix>` — prepend a base to every URI the playlists and the
   MPD reference (CDN base, or a token route). The library form is
   `Options.RewriteURL func(name) string`, which can append per-resource signed

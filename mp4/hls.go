@@ -191,6 +191,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if len(media) == 0 {
 		return nil, errf("no audio or video track to segment")
 	}
+	if err := cencPreflight(&o, videoCodecOf(media)); err != nil {
+		return nil, err
+	}
 	var subs []hlsSubTrack
 	if !o.VideoOnly {
 		subs = filterSubTracks(planSubTracks(c, o), keep)
@@ -274,7 +277,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			if i == primaryIndex(fts) {
 				m = meta
 			}
-			initData := buildInitSegment([]*fragTrack{ft}, m)
+			initData := buildInitSegment([]*fragTrack{ft}, m, o.CENC)
 			if err := fs.DoWriteFile(filepath.Join(outputDir, renditionInit(fts, i)), initData, 0o644); err != nil {
 				return nil, err
 			}
@@ -287,7 +290,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		// segment, referenced by byte range into the existing segments (no
 		// extra media). Skipped when encrypting (a ciphertext subrange is
 		// not independently decryptable).
-		if v := pickVideoFrag(fts); v != nil && o.Encrypt == nil && len(iframesAll) > 0 {
+		if v := pickVideoFrag(fts); v != nil && o.Encrypt == nil && o.CENC == nil && len(iframesAll) > 0 {
 			pl := buildIFramePlaylist(&o, fts, dursOf(segs), iframesAll)
 			if err := fs.DoWriteFile(filepath.Join(outputDir, "iframe.m3u8"), pl, 0o644); err != nil {
 				return nil, err
@@ -320,7 +323,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		return nil, err
 	}
 	res = &hlsResult{fts: fts, subs: subs, segs: segs, durs: durs, bounds: bounds}
-	if o.Encrypt == nil {
+	if o.Encrypt == nil && o.CENC == nil {
 		res.iframes = iframesAll
 	}
 	if o.Encrypt != nil {
@@ -453,6 +456,17 @@ func pickVideoFrag(fts []*fragTrack) *fragTrack {
 		}
 	}
 	return nil
+}
+
+// videoCodecOf returns the video track's mkvgo short codec name among media,
+// or "" for an audio-only presentation - cencPreflight's codec check.
+func videoCodecOf(media []*outTrack) string {
+	for _, t := range media {
+		if t.spec.video {
+			return t.mkv.Codec
+		}
+	}
+	return ""
 }
 
 // segmentBoundaries returns the presentation times (ms) at which segments start:
@@ -599,12 +613,33 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 		var segBytes int64
 		for i, ft := range fts {
 			seg := segmentWindow(ft, &cursors[i], segEnd)
+			var cipherData []byte
+			if o.CENC != nil {
+				// CENC needs the plaintext bytes before the head is built: the
+				// segment's moof carries per-sample senc/saiz (sized from the
+				// samples themselves), computed here - the same "know the size
+				// before the size is needed" two-pass principle buildMoof
+				// already applies to trun's data_offset.
+				plain := make([]byte, seg.dataLen)
+				if seg.dataLen > 0 {
+					if _, err := io.ReadFull(readers[i], plain); err != nil {
+						return nil, nil, errf("read segment media: %w", err)
+					}
+				}
+				td, cipher, err := prepareCENCSegment(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
+				if err != nil {
+					return nil, nil, err
+				}
+				seg.cenc = td
+				cipherData = cipher
+			}
 			head := buildSegmentFile(uint32(k+1), seg)
 			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
 				iframes = append(iframes, iframeRef{seg: k, length: int64(len(head)) + int64(seg.samples[0].size)})
 			}
 			var fileBytes int64
-			if o.Encrypt != nil {
+			switch {
+			case o.Encrypt != nil:
 				// Whole-segment AES-128-CBC: assemble in memory (one segment at
 				// a time), encrypt, write.
 				plain := make([]byte, 0, int64(len(head))+seg.dataLen)
@@ -624,7 +659,15 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 					return nil, nil, err
 				}
 				fileBytes = int64(len(enc))
-			} else {
+			case o.CENC != nil:
+				out := make([]byte, 0, int64(len(head))+int64(len(cipherData)))
+				out = append(out, head...)
+				out = append(out, cipherData...)
+				if err := fs.DoWriteFile(filepath.Join(dir, renditionSegment(fts, i, k)), out, 0o644); err != nil {
+					return nil, nil, err
+				}
+				fileBytes = int64(len(out))
+			default:
 				out, err := fs.DoCreate(filepath.Join(dir, renditionSegment(fts, i, k)))
 				if err != nil {
 					return nil, nil, err
@@ -722,10 +765,15 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
-	if o != nil && o.Encrypt != nil && mapURI != "" {
+	if o != nil && mapURI != "" {
 		// Media segments only (fMP4 renditions); the init and subtitle files
 		// stay clear, so subtitle playlists (mapURI == "") carry no key line.
-		b = append(b, o.Encrypt.keyLine()...)
+		switch {
+		case o.Encrypt != nil:
+			b = append(b, o.Encrypt.keyLine()...)
+		case o.CENC != nil:
+			b = append(b, o.CENC.keyLine()...)
+		}
 	}
 	if mapURI != "" {
 		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
@@ -898,7 +946,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		inf += ",SUBTITLES=\"subs\""
 	}
 	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
-	if len(iframes) > 0 && o != nil && o.Encrypt == nil {
+	if len(iframes) > 0 && o != nil && o.Encrypt == nil && o.CENC == nil {
 		b = append(b, iframeStreamInf(o, fts, dursOf(segs), iframes)...)
 	}
 	return b

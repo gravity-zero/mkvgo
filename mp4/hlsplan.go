@@ -152,6 +152,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, err
 		}
 	}
+	if err := cencPreflight(&o, videoCodecOf(media)); err != nil {
+		return nil, err
+	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
 	if !o.VideoOnly {
@@ -304,7 +307,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		if ft.outTrack.spec.video {
 			m = meta
 		}
-		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m))
+		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m, o.CENC))
 		i := i
 		p.medias = append(p.medias, buildMediaPlaylist(&o, p.durs, renditionInit(fts, i),
 			func(k int) string { return renditionSegment(fts, i, k) }))
@@ -663,11 +666,31 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 		seg.hasCTS = windowHasCTS(samples)
 	}
 
+	var cipherData []byte
+	if p.opts.CENC != nil {
+		// Same requirement as the full pass (hls.go's writeSegments): CENC needs
+		// the plaintext bytes before the head is built, so the moof's senc/saiz
+		// (sized from the samples) are ready when buildSegmentFile frames it.
+		plain := make([]byte, 0, seg.dataLen)
+		for x := range window {
+			plain = append(plain, window[x].data...)
+		}
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, seg.samples, plain)
+		if err != nil {
+			return nil, err
+		}
+		seg.cenc = td
+		cipherData = cipher
+	}
 	head := buildSegmentFile(uint32(n+1), seg)
 	out := make([]byte, 0, int64(len(head))+seg.dataLen)
 	out = append(out, head...)
-	for x := range window {
-		out = append(out, window[x].data...)
+	if p.opts.CENC != nil {
+		out = append(out, cipherData...)
+	} else {
+		for x := range window {
+			out = append(out, window[x].data...)
+		}
 	}
 	if p.opts.Encrypt != nil {
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
@@ -1160,6 +1183,9 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	if len(media) == 0 {
 		return nil, errf("no audio or video track to segment")
 	}
+	if err := cencPreflight(o, videoCodecOf(media)); err != nil {
+		return nil, err
+	}
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
 	if !o.VideoOnly {
@@ -1209,7 +1235,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		p.durs[k] = float64(segEndOrLast(p.bounds, k, fts)-segStart) / 1000
 		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes})
 	}
-	if video != nil && o.Encrypt == nil && len(iframes) > 0 {
+	if video != nil && o.Encrypt == nil && o.CENC == nil && len(iframes) > 0 {
 		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)
 		p.iframes = iframes
 	}
@@ -1225,7 +1251,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		if i == primaryIndex(fts) {
 			m = meta
 		}
-		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m))
+		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m, o.CENC))
 		i := i
 		p.medias = append(p.medias, buildMediaPlaylist(o, p.durs, renditionInit(fts, i),
 			func(k int) string { return renditionSegment(fts, i, k) }))
@@ -1266,11 +1292,10 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 			seg.dataLen += int64(ft.samples[x].size)
 		}
 	}
-	head := buildSegmentFile(uint32(n+1), seg)
-	out := make([]byte, 0, int64(len(head))+seg.dataLen)
-	out = append(out, head...)
 
+	var plain []byte
 	if end > start {
+		plain = make([]byte, 0, seg.dataLen)
 		src, err := p.fs.DoOpen(p.srcPath)
 		if err != nil {
 			return nil, err
@@ -1284,9 +1309,26 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 			if err != nil {
 				return nil, errf("read sample: %w", err)
 			}
-			out = append(out, data...)
+			plain = append(plain, data...)
 		}
 	}
+
+	cipherData := plain
+	if p.opts.CENC != nil {
+		// Same requirement as the full pass and the Matroska on-demand path:
+		// CENC needs the plaintext bytes before the head is built.
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
+		if err != nil {
+			return nil, err
+		}
+		seg.cenc = td
+		cipherData = cipher
+	}
+	head := buildSegmentFile(uint32(n+1), seg)
+	out := make([]byte, 0, int64(len(head))+int64(len(cipherData)))
+	out = append(out, head...)
+	out = append(out, cipherData...)
+
 	if p.opts.Encrypt != nil {
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
 	}

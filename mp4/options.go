@@ -71,6 +71,16 @@ type Options struct {
 	// HLSEncryption.
 	Encrypt *HLSEncryption
 
+	// CENC, when set, packages every media segment under Common Encryption
+	// (ISO/IEC 23001-7): sample-level AES-CTR ("cenc") or AES-CBC pattern
+	// ("cbcs"), with caller-supplied key/IV - packaging only, no license
+	// server. HLS media playlists advertise it via EXT-X-KEY (SAMPLE-AES-CTR
+	// / SAMPLE-AES); the DASH manifest carries a ContentProtection element
+	// (unlike Options.Encrypt, a CENC presentation still gets a DASH
+	// manifest). See CENCOptions. Mutually exclusive with Encrypt and (in
+	// this version) SingleFile.
+	CENC *CENCOptions
+
 	// SingleFile packs each rendition into ONE progressive file (init + sidx
 	// + all fragments) served by byte ranges: the HLS playlists use
 	// EXT-X-BYTERANGE and the DASH manifest SegmentBase (on-demand profile).

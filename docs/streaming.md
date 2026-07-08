@@ -263,6 +263,34 @@ Read by hls.js. (This is self-hosted-content encryption, not studio DRM — see
 *Non-goals* below.) AES-128 is HLS-only, so no DASH manifest is emitted for an
 encrypted presentation.
 
+### Common Encryption (CENC)
+
+Sample-level encryption (ISO/IEC 23001-7), the packaging an EME-capable
+player's own DRM path (Widevine/PlayReady/FairPlay CDM) consumes -- mkvgo does
+the packaging only: no license server, no DRM handshake, the caller supplies
+the key. Two schemes: `cenc` (AES-CTR, a per-sample IV) and `cbcs` (AES-CBC, a
+constant IV, 1-encrypted:9-clear pattern on video). Unlike AES-128 above, a
+CENC presentation still gets a DASH manifest (with a `ContentProtection`
+element), and both HLS renditions (video and audio) carry `EXT-X-KEY`.
+
+```bash
+mkvgo to-hls video.mkv -o stream/ \
+  --cenc-scheme cenc --cenc-key 00112233445566778899aabbccddeeff \
+  --cenc-kid 00000000000000000000000000000001 --cenc-iv 0000000000000001 \
+  --cenc-key-uri https://api.example.com/key
+```
+```go
+mp4.Options{CENC: &mp4.CENCOptions{
+    Scheme: "cenc", Key: key16, KeyID: kid16, IV: iv8, KeyURI: "https://…/key",
+}}
+```
+
+Video must be H.264 or HEVC (subsample encryption: the 4-byte NAL length plus
+the NAL header stay clear, the rest is protected). No I-frame playlist is
+emitted (a ciphertext byte range is not independently decryptable). Full detail
+-- exact clear/protected rules, IV derivation, key delivery -- in
+[library.md](library.md#common-encryption-cenc).
+
 ### Signed / templated URLs
 
 `RewriteURL` (CLI `--url-prefix`) rewrites every URI the playlists and the MPD
@@ -325,9 +353,12 @@ mkvgo validate video.mkv        # exits non-zero on error-severity issues
 
 ## Non-goals (evaluated, deliberately out of scope)
 
-- **Studio DRM (CENC / SAMPLE-AES / FairPlay/Widevine/PlayReady).** mkvgo does
-  AES-128 for self-hosted content; multi-DRM signaling and per-sample
-  encryption are a separate concern, out of scope here.
+- **DRM license servers / multi-DRM key management (Widevine/PlayReady/
+  FairPlay).** mkvgo packages sample-level Common Encryption (CENC, see above)
+  with a caller-supplied key -- the box format an EME-capable player's own DRM
+  CDM consumes. It does not talk to a license server or manage per-title keys;
+  that integration (and any DRM system's own license-acquisition protocol)
+  stays the deploying application's job.
 - **LL-HLS (low-latency).** A *live-ingest* mechanism (partial segments,
   blocking reloads) — mkvgo packages VOD files, where it changes nothing for
   the viewer.

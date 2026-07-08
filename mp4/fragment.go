@@ -53,7 +53,7 @@ type fragSample struct {
 // fragmented/CMAF brands) followed by a moov whose every track has an EMPTY
 // sample table and a movie-extends (mvex) box declaring the tracks will be
 // fragmented. meta carries the title/tags/cover, like the progressive moov.
-func buildInitSegment(tracks []*fragTrack, meta movieMeta) []byte {
+func buildInitSegment(tracks []*fragTrack, meta movieMeta, cenc *CENCOptions) []byte {
 	ftyp := boxf("ftyp", func(w *bw) {
 		w.fourcc("iso5") // fragmented-capable major brand
 		w.u32(512)       // minor_version
@@ -68,7 +68,7 @@ func buildInitSegment(tracks []*fragTrack, meta movieMeta) []byte {
 	)
 	traks := make([][]byte, 0, len(tracks))
 	for _, ft := range tracks {
-		traks = append(traks, buildInitTrak(ft))
+		traks = append(traks, buildInitTrak(ft, cenc))
 		if ft.outTrack.mp4ID > maxID {
 			maxID = ft.outTrack.mp4ID
 		}
@@ -77,20 +77,21 @@ func buildInitSegment(tracks []*fragTrack, meta movieMeta) []byte {
 		}
 	}
 
-	children := make([][]byte, 0, len(traks)+3)
+	children := make([][]byte, 0, len(traks)+4)
 	children = append(children, buildMvhd(uint32(totalMs), maxID+1))
 	children = append(children, traks...)
 	children = append(children, buildMvex(tracks, uint32(totalMs)))
 	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover, meta.hashes); mb != nil {
 		children = append(children, container("udta", mb))
 	}
+	children = append(children, buildPsshBoxes(cenc)...)
 	return append(ftyp, container("moov", children...)...)
 }
 
 // buildInitTrak builds a track box with an EMPTY sample table (stsd carrying the
 // sample entry, then zero-entry stts/stsc/stsz/stco). Everything else mirrors the
 // progressive trak: header, media header, handler, edit list for A/V offset.
-func buildInitTrak(ft *fragTrack) []byte {
+func buildInitTrak(ft *fragTrack, cenc *CENCOptions) []byte {
 	t := ft.outTrack
 
 	var mediaHeader []byte
@@ -102,8 +103,12 @@ func buildInitTrak(ft *fragTrack) []byte {
 	default:
 		mediaHeader = smhd()
 	}
+	sampleEntry := t.sampleEntry
+	if cenc != nil {
+		sampleEntry = wrapProtectedSampleEntry(t.sampleEntry, t.spec.video, cenc)
+	}
 	emptyStbl := container("stbl",
-		fullBox("stsd", 0, 0, func(w *bw) { w.u32(1); w.bytes(t.sampleEntry) }),
+		fullBox("stsd", 0, 0, func(w *bw) { w.u32(1); w.bytes(sampleEntry) }),
 		fullBox("stts", 0, 0, func(w *bw) { w.u32(0) }),
 		fullBox("stsc", 0, 0, func(w *bw) { w.u32(0) }),
 		fullBox("stsz", 0, 0, func(w *bw) { w.u32(0); w.u32(0) }),
@@ -169,12 +174,19 @@ func buildMoof(seq uint32, segs []trackSegment) []byte {
 		mfhd := fullBox("mfhd", 0, 0, func(w *bw) { w.u32(seq) })
 		children := [][]byte{mfhd}
 		var dataRun int64
+		// trafStart is the byte offset, from the moof box's own first byte, of
+		// the next traf's box (header included) - the same anchor trun's
+		// data_offset uses (tfhdDefaultBaseIsMoof), so a CENC traf's saio value
+		// (computed inside buildTraf) resolves against the same origin.
+		trafStart := int64(smallBoxHeaderLen + len(mfhd))
 		for i := range segs {
 			offset := int32(0)
 			if moofSize > 0 {
 				offset = int32(moofSize + mdatHeaderLen + dataRun)
 			}
-			children = append(children, buildTraf(&segs[i], offset))
+			traf := buildTraf(&segs[i], offset, trafStart)
+			children = append(children, traf)
+			trafStart += int64(len(traf))
 			dataRun += segs[i].dataLen
 		}
 		return container("moof", children...)
@@ -185,8 +197,12 @@ func buildMoof(seq uint32, segs []trackSegment) []byte {
 
 // buildTraf builds a track-fragment box: tfhd (default-base-is-moof) + tfdt
 // (baseMediaDecodeTime) + trun (per-sample duration/size/flags/cts) pointing at
-// the track's sample bytes via dataOffset (relative to the moof start).
-func buildTraf(s *trackSegment, dataOffset int32) []byte {
+// the track's sample bytes via dataOffset (relative to the moof start), plus -
+// when s.cenc is set - senc/saiz/saio describing the track's per-sample CENC
+// auxiliary information (see cenc.go). trafStart is this traf's own offset
+// from the moof's first byte (buildMoof's running total), needed to compute
+// saio's value.
+func buildTraf(s *trackSegment, dataOffset int32, trafStart int64) []byte {
 	tfhd := fullBox("tfhd", 0, tfhdDefaultBaseIsMoof, func(w *bw) {
 		w.u32(s.trackID)
 	})
@@ -214,7 +230,12 @@ func buildTraf(s *trackSegment, dataOffset int32) []byte {
 			}
 		}
 	})
-	return container("traf", tfhd, tfdt, trun)
+	children := [][]byte{tfhd, tfdt, trun}
+	if s.cenc != nil {
+		aux := sencAuxOffset(trafStart, tfhd, tfdt, trun)
+		children = append(children, buildSenc(s.cenc), buildSaiz(s.cenc), buildSaio(aux))
+	}
+	return container("traf", children...)
 }
 
 // trackSegment holds one track's samples for one media segment, ready to frame
@@ -225,6 +246,10 @@ type trackSegment struct {
 	samples      []fragSample
 	hasCTS       bool
 	dataLen      int64 // total sample bytes for this track in the segment
+	// cenc holds this segment's CENC auxiliary data (senc/saiz), built from
+	// the plaintext samples before the moof is framed; nil when the segment
+	// is not CENC-protected.
+	cenc *cencTrafData
 }
 
 // buildStyp is the segment type box: a fMP4 media segment opens with one so a

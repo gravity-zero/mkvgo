@@ -32,8 +32,12 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" profiles="urn:mpeg:dash:profile:isoff-live:2011" mediaPresentationDuration="%s" minBufferTime="%s">`+"\n",
-		dashDuration(totalSec), dashDuration(maxDur))
+	mpdAttrs := `xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" profiles="urn:mpeg:dash:profile:isoff-live:2011"`
+	if o.CENC != nil {
+		mpdAttrs = `xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:cenc="urn:mpeg:cenc:2013" type="static" profiles="urn:mpeg:dash:profile:isoff-live:2011"`
+	}
+	fmt.Fprintf(&b, `<MPD %s mediaPresentationDuration="%s" minBufferTime="%s">`+"\n",
+		mpdAttrs, dashDuration(totalSec), dashDuration(maxDur))
 	b.WriteString("  <Period>\n")
 
 	// One AdaptationSet per demuxed rendition, all sharing the same timeline.
@@ -64,6 +68,9 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 			rep += fmt.Sprintf(" codecs=%q", codecs)
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		if o.CENC != nil {
+			b.WriteString(cencContentProtection(o.CENC))
+		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		media := strings.Replace(renditionSegment(fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",

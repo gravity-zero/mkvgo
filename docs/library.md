@@ -266,7 +266,7 @@ the image. A storyboard is this in a loop over `Container.Keyframes`.
 `EXT-X-BYTERANGE` and the DASH manifest switches to the on-demand profile
 (`SegmentBase`/`indexRange`). The embedded fragments are byte-identical to
 the segmented mode's `.m4s` files. `RemuxToHLS`/`RemuxToABR` only;
-incompatible with `Encrypt`.
+incompatible with `Encrypt` and `CENC`.
 
 ### ABR light (`mp4.RemuxToABR`)
 
@@ -397,6 +397,55 @@ server's access control.
 names stay canonical: the server strips its decoration (query token, prefix)
 before calling `plan.Resource(ctx, name)`, and verifies the signature — the
 hook makes every segment URL individually signed and expirable.
+
+### Common Encryption (CENC)
+
+```go
+opts := mp4.Options{
+    CENC: &mp4.CENCOptions{
+        Scheme: "cenc",                        // or "cbcs"
+        Key:    key,                            // 16 bytes; never written to the output
+        KeyID:  kid,                            // 16 bytes; tenc's default_KID
+        IV:     iv,                             // cenc: 8 or 16 bytes; cbcs: 16 (a full AES block)
+        KeyURI: "https://api.example.com/key",  // what an EME-capable player resolves via its DRM path
+        PSSH:   [][]byte{myPSSHBox},            // optional, copied verbatim into the init's moov
+    },
+}
+```
+
+Sample-level Common Encryption (ISO/IEC 23001-7) for the fMP4/HLS/DASH
+pipeline: packaging only, with a caller-supplied key -- no license server, no
+DRM handshake. Two schemes:
+
+- **`"cenc"`** -- AES-CTR, a per-sample Initialization Vector (the caller's base
+  IV plus the sample's absolute decode timestamp -- computed identically by
+  `RemuxToHLS` and `PlanHLS`, so the ciphertext is byte-identical between the
+  two). No pattern: every protected byte is encrypted.
+- **`"cbcs"`** -- AES-CBC with a constant IV and, on video, a
+  1-encrypted:9-clear 16-byte-block pattern per NAL unit's protected region
+  (CBC state resets at each NAL); audio has no pattern (whole sample
+  encrypted). A trailing partial block (< 16 bytes) is always left clear.
+
+Subsample encryption (video, H.264/HEVC only -- AV1/VP9 are refused, their
+subsample rules differ): per NAL unit, the clear region is the 4-byte length
+field plus the NAL header (1 byte H.264, 2 bytes HEVC); the rest is protected.
+Audio (and any non-NAL codec) is encrypted whole-sample. The init segment's
+sample entry is wrapped `avc1`/`hvc1`/`mp4a`/… → `encv`/`enca` with a `sinf`
+box (`frma`/`schm`/`schi`>`tenc`); each fragment carries `senc`/`saiz`/`saio`
+describing the per-sample auxiliary information.
+
+Signaling: HLS media playlists (video and audio) carry `EXT-X-KEY`
+(`METHOD=SAMPLE-AES-CTR` for cenc, `METHOD=SAMPLE-AES` for cbcs,
+`KEYFORMAT="identity"`); no I-frame playlist is emitted (a ciphertext byte
+range is not independently decryptable). Unlike `Encrypt`, a CENC presentation
+still gets a `manifest.mpd`, with a `ContentProtection` element
+(`urn:mpeg:dash:mp4protection:2011`, carrying `cenc:default_KID`) on the video
+and audio AdaptationSets.
+
+Mutually exclusive with `Encrypt` and (in this version) `SingleFile`.
+`KeyURI` left empty falls back to a `data:` URI embedding `Key` directly --
+convenient for local testing, but it puts the raw key in the playlist text;
+production deployments should always set a real `KeyURI`.
 
 ### MP4 → MKV
 
