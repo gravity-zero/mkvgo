@@ -323,7 +323,14 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 	if _, err := io.ReadFull(f, body); err != nil {
 		return nil, nil
 	}
+	return parseSeekHeadBody(body), nil
+}
 
+// parseSeekHeadBody parses a SeekHead element's raw body into SeekEntry pairs
+// (SeekID + SeekPosition). A malformed or truncated entry simply stops the
+// scan and returns whatever was parsed so far, rather than erroring: callers
+// treat a partial/empty result as "no preserved entries", not a hard failure.
+func parseSeekHeadBody(body []byte) []writer.SeekEntry {
 	var out []writer.SeekEntry
 	br := bytes.NewReader(body)
 	for {
@@ -333,16 +340,16 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 		}
 		if eh.ID != mkv.IDSeek || eh.Size < 0 {
 			if eh.Size < 0 {
-				return out, nil
+				return out
 			}
 			if _, err := br.Seek(eh.Size, io.SeekCurrent); err != nil {
-				return out, nil
+				return out
 			}
 			continue
 		}
 		inner := make([]byte, eh.Size)
 		if _, err := io.ReadFull(br, inner); err != nil {
-			return out, nil
+			return out
 		}
 		ir := bytes.NewReader(inner)
 		var entry writer.SeekEntry
@@ -355,7 +362,7 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 			case mkv.IDSeekID:
 				raw, err := ebml.ReadBytes(ir, ih.Size)
 				if err != nil {
-					return out, nil
+					return out
 				}
 				var id uint32
 				for _, b := range raw {
@@ -365,15 +372,15 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 			case mkv.IDSeekPosition:
 				v, err := ebml.ReadUint(ir, ih.Size)
 				if err != nil {
-					return out, nil
+					return out
 				}
 				entry.Pos = int64(v)
 			default:
 				if ih.Size < 0 {
-					return out, nil
+					return out
 				}
 				if _, err := ir.Seek(ih.Size, io.SeekCurrent); err != nil {
-					return out, nil
+					return out
 				}
 			}
 		}
@@ -381,5 +388,5 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 			out = append(out, entry)
 		}
 	}
-	return out, nil
+	return out
 }
