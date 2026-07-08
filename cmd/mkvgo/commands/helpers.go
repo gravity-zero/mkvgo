@@ -76,6 +76,7 @@ var CmdUsage = map[string]string{
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
 	"salvage":            "mkvgo salvage <in.mkv> <out.mkv> [--json] (best-effort recovery copy of a damaged file)",
 	"serve":              "mkvgo serve <file.mkv> [-addr :8478] (serve one file's on-demand HLS plan over HTTP)",
+	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",

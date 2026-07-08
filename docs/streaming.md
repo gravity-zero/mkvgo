@@ -101,6 +101,74 @@ actually watches are ever transferred from storage.
 
 ---
 
+## Play while downloading (growing files) -- `serve-growing` / `mp4.PlanGrowingHLS`
+
+A file that is still being **written** -- a download landing on disk, streamed
+in from another service -- can be served as HLS before it finishes: the media
+playlist lengthens as new whole clusters arrive, then finalizes to a normal
+VOD playlist once the source is complete. This is VOD-to-live, not live
+ingest: there is no chunked transfer and no LL-HLS, only a regular,
+progressively-written file.
+
+The motivating case: a viewer opens an episode that a background job is still
+downloading from a remote library. Instead of waiting for the whole file,
+`PlanGrowingHLS` serves whatever has landed so far and keeps extending the
+playlist as more of the file arrives, exactly like a live channel that happens
+to have a known, finite end.
+
+```bash
+mkvgo serve-growing downloading.mkv -addr :8478 -segment 6
+```
+```go
+plan, err := mp4.PlanGrowingHLS(ctx, "downloading.mkv", mp4.Options{SegmentMs: 6000})
+for range time.Tick(time.Second) {
+    added, err := plan.Refresh(ctx)   // scan whatever whole clusters landed
+    if added > 0 {
+        // NumSegments() grew; player poll picks the new EXTINF lines up
+    }
+}
+// once the downloader signals "done" (or Refresh auto-detects it: a Cues
+// index now parses, or a known-size Segment element's declared end is
+// reached with its last cluster whole):
+plan.Complete()
+```
+
+**Mechanics.**
+- **Cursor, not an index.** A growing source rarely has a Cues index yet, so
+  segment boundaries are discovered by scanning forward from the last
+  confirmed cluster, cutting on video keyframes at `Options.SegmentMs` -
+  the same rule `PlanHLS` applies to its Cues, just discovered live.
+- **Partial-cluster rule.** A cluster whose header declares N bytes with only
+  M<N present on disk is never scanned; the cursor stops before it and
+  retries on the next `Refresh`. A segment is only published once its
+  underlying clusters are each confirmed **whole**.
+- **Byte-identity.** A published segment's bytes are guaranteed identical to
+  what `PlanHLS`/`RemuxToHLS` would produce for the finished file - segment
+  building is not reimplemented, the same code path runs against the same
+  byte range. Segment numbering is stable: once published, a segment's byte
+  range never changes.
+- **EVENT, not a sliding window.** While growing, the media playlist carries
+  `#EXT-X-PLAYLIST-TYPE:EVENT` and no `#EXT-X-ENDLIST` - append-only, the
+  whole presentation retained from media sequence 0. This is deliberately
+  **not** a live sliding window (which would evict old segments): the source
+  will finish, so nothing here is actually unbounded.
+- **Finalization.** `Complete()` (an explicit "the download is done" signal)
+  or auto-detection during `Refresh` (a Cues index now parses, or a
+  known-size Segment element's declared end has been reached with its last
+  cluster whole) closes the final segment and switches the playlist to
+  `#EXT-X-PLAYLIST-TYPE:VOD` + `#EXT-X-ENDLIST`.
+- **v1 limits**, explicit rather than silent: Matroska/WebM sources only (no
+  growing MP4 yet); a video track is required (an audio-only growing plan is
+  refused, matching `PlanHLS`'s own Matroska path); no subtitle renditions, no
+  DASH manifest, no I-frame trick-play playlist; `Options.Encrypt`/`CENC` are
+  refused; only known-size clusters are supported (an unknown-size/streaming
+  cluster is reported as an explicit error).
+
+See `docs/library.md` for the full `GrowingHLSPlan` API and `docs/cli.md` for
+`serve-growing`'s flags.
+
+---
+
 ## Sources
 
 The packager accepts, transparently (format sniffed from the first bytes):

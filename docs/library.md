@@ -229,6 +229,81 @@ the always-exact prefix scan. The remaining difference: the master
 `BANDWIDTH` is estimated from cluster sizes. The source must carry a Cues
 index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Play while downloading (`mp4.PlanGrowingHLS`)
+
+```go
+plan, err := mp4.PlanGrowingHLS(ctx, "downloading.mkv", mp4.Options{SegmentMs: 6000})
+
+added, err := plan.Refresh(ctx)   // scan any whole new clusters that landed
+plan.NumSegments()                // grows as segments close
+plan.MediaPlaylist()              // EVENT, no ENDLIST, until finalized
+
+plan.Complete()                   // or let Refresh auto-detect completion
+plan.MediaPlaylist()              // now VOD + ENDLIST
+
+// Resource/Segment/MasterPlaylist/InitSegment/NumSegments/Resources mirror
+// HLSPlan, serving only segments fully covered by data seen so far.
+data, mime, err := plan.Resource(ctx, "seg00003.m4s")
+```
+
+HLS over a Matroska/WebM source that may still be being **written** (a
+download landing on disk): the media playlist is `EVENT`-typed and lengthens
+as new whole clusters arrive, then finalizes to `VOD`+`ENDLIST` once the
+source completes. This is VOD-to-live, not live ingest - no chunked transfer,
+no LL-HLS, just a resumable cursor over a regular file.
+
+**The EVENT->VOD contract.**
+`#EXT-X-PLAYLIST-TYPE:EVENT` and no `#EXT-X-ENDLIST` while growing (append-
+only, media sequence 0 forever - this is **not** a live sliding window: the
+whole presentation is retained since the source is known to be finite).
+`Complete()` - an explicit "the download finished" signal, since the source
+itself may never write a trailer - or auto-detection during `Refresh` (a
+Cues index now parses, or a known-size Segment element's declared end is
+reached with its last cluster whole) switches to
+`#EXT-X-PLAYLIST-TYPE:VOD` + `#EXT-X-ENDLIST` and fixes every duration
+exactly (a tail peek over the last, previously-open segment, the same
+derivation `PlanHLS` performs over a complete file).
+
+**The partial-cluster rule.** A cluster whose header declares N bytes with
+only M<N currently on disk is a partial trailing cluster: it is never
+scanned, and the cursor stops right before it, retrying on the next
+`Refresh`. A segment is only published once every cluster it draws from is
+confirmed **whole** - this is the correctness-critical rule that makes the
+byte-identity guarantee possible.
+
+**Byte-identity guarantee.** A published segment's bytes are guaranteed
+identical to what `PlanHLS`/`RemuxToHLS` would produce for the finished file:
+`GrowingHLSPlan` does not reimplement segment building - it keeps an internal
+`HLSPlan` whose bounds/offsets/tracks are extended in place as the cursor
+scans further, and `Segment`/`Resource` delegate straight to the same
+`HLSPlan.Segment`/internal segment builder `PlanHLS` uses. Segment numbering
+is stable: a published segment's byte range never changes across later
+`Refresh` calls or finalization. The init segment's duration fields
+(mvhd/tkhd/mdhd/mehd) read 0 (the standard "unknown duration" live-HLS
+convention - players time playback off each fragment, never off the init)
+while growing, and the exact totals once finalized, at which point the init
+is byte-identical to a `PlanHLS` build of the same, now-finished file.
+
+**v1 limits**, explicit rather than silent:
+- Matroska/WebM sources only (no growing MP4 yet).
+- A video track is required - an audio-only growing plan is refused, matching
+  `PlanHLS`'s own Matroska path.
+- No subtitle renditions, no DASH manifest, no I-frame trick-play playlist.
+- `Options.Encrypt`/`Options.CENC` are refused.
+- Only known-size clusters are supported; an unknown-size (streamed) cluster
+  is reported as an explicit error rather than mishandled.
+- The source must already carry its EBML+Segment head and a Tracks element
+  when `PlanGrowingHLS` is called (the downloader writes those first).
+
+**Concurrency.** `Refresh` and `Resource`/`Segment` may run on different
+goroutines (a server polling `Refresh` while requests hit `Resource`); every
+exported method takes the plan's own lock for its whole body, so this is
+safe by construction, at some cost to concurrent-request throughput.
+
+`mkvgo serve-growing <file.mkv>` is this wired up as a CLI command (see
+`docs/cli.md`); see `docs/streaming.md` for the "play while downloading" use
+case in more depth.
+
 ### Trick-play (I-frame playlists)
 
 `RemuxToHLS` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`, declared in the master

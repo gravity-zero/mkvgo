@@ -899,6 +899,28 @@ mkvgo serve movie.mkv -addr :8080
 
 See `docs/library.md` (`mkvhttp.Handler`) for the full caching/ETag/Range semantics table, and `docs/streaming.md` for a short pointer on serving over HTTP from library code.
 
+### serve-growing
+
+Play while downloading: serve a file that may still be growing (a download landing on disk) as HLS -- `mp4.PlanGrowingHLS` wrapped in the same long-running server `serve` uses. The media playlist is `EVENT`-typed and lengthens as new whole clusters land; once the source finishes (a Cues index appears, or the file simply stops growing and `Complete()` is signalled), it switches to `VOD` + `ENDLIST`.
+
+```
+mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6]
+```
+
+- `-addr` sets the listen address (default `:8478`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
+- Polls the source once a second for new whole clusters (a stat plus, at most, a bounded read of what's new) and extends the playlist as they land; a partial trailing cluster (still being written) is never served from.
+- A published segment's bytes are byte-identical to what `to-hls`/`hls-segment` would produce for the finished file, and never change once served (stable numbering).
+- Encrypted/CENC presentations, subtitle renditions, the DASH manifest and the I-frame trick-play playlist are not available in this version (see `docs/library.md` for the full list of v1 limits).
+- Ctrl-C shuts the server down gracefully.
+
+```bash
+mkvgo serve-growing downloading.mkv -addr :8080
+# serving downloading.mkv (play while downloading)
+#   http://localhost:8080/master.m3u8
+```
+
+See `docs/streaming.md` ("Play while downloading") for the mechanics (cursor, partial-cluster rule, byte-identity) and `docs/library.md` (`mp4.PlanGrowingHLS`) for the full API.
+
 ### to-abr
 
 Package several **pre-encoded quality variants** of the same content into one
