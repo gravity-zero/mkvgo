@@ -105,9 +105,10 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 
 	// Resource() is the declarative entry point: every listed name resolves,
 	// with the right payload and MIME type.
-	// master + mpd, per rendition (video + 1 audio) playlist + init + segments,
-	// then the subtitle rendition: playlist + whole file + windowed segments.
-	wantNames := 2 + 2*(2+plan.NumSegments()) + 2 + plan.NumSegments()
+	// master + iframe + mpd, per rendition (video + 1 audio) playlist + init +
+	// segments, then the subtitle rendition: playlist + whole file + windowed
+	// segments.
+	wantNames := 3 + 2*(2+plan.NumSegments()) + 2 + plan.NumSegments()
 	if got := plan.Resources(); len(got) != wantNames {
 		t.Errorf("Resources() = %d names, want %d (%v)", len(got), wantNames, got)
 	}

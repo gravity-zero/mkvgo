@@ -23,6 +23,7 @@ type hlsFlags struct {
 	singleFile bool
 	keepTracks []uint64
 	keepLangs  []string
+	subOffset  int64
 	rest       []string
 }
 
@@ -109,6 +110,15 @@ func parseHLSFlags(args []string) hlsFlags {
 					}
 				}
 			}
+		case "--sub-offset":
+			i++
+			if i < len(args) {
+				ms, err := strconv.ParseInt(args[i], 10, 64)
+				if err != nil {
+					Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", args[i]))
+				}
+				f.subOffset = ms
+			}
 		default:
 			rejectFlagArg(args[i])
 			f.rest = append(f.rest, args[i])
@@ -150,12 +160,13 @@ func (f hlsFlags) options(src string) mp4.Options {
 		keep = resolveKeepLangs(src, f.keepLangs)
 	}
 	o := mp4.Options{
-		FS:         sourceFS(src),
-		SegmentMs:  f.segMs,
-		Encrypt:    f.encrypt,
-		CENC:       f.cenc,
-		SingleFile: f.singleFile,
-		KeepTracks: keep,
+		FS:               sourceFS(src),
+		SegmentMs:        f.segMs,
+		Encrypt:          f.encrypt,
+		CENC:             f.cenc,
+		SingleFile:       f.singleFile,
+		KeepTracks:       keep,
+		SubtitleOffsetMs: f.subOffset,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix

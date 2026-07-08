@@ -99,6 +99,54 @@ func TestFileToWebVTT(t *testing.T) {
 	}
 }
 
+func TestShiftCues(t *testing.T) {
+	in := []Cue{
+		{StartMs: 1000, EndMs: 2000, Text: "a"},
+		{StartMs: 3000, EndMs: 4000, Text: "b"},
+	}
+	// Zero offset: same slice, unchanged (regression guard for byte-identical
+	// output when the feature is unused).
+	if got := ShiftCues(in, 0); &got[0] != &in[0] {
+		t.Error("ShiftCues(0) must return the same slice")
+	}
+
+	// Positive shift: every timestamp moves forward exactly.
+	pos := ShiftCues(in, 500)
+	want := []Cue{{StartMs: 1500, EndMs: 2500, Text: "a"}, {StartMs: 3500, EndMs: 4500, Text: "b"}}
+	if len(pos) != 2 || pos[0] != want[0] || pos[1] != want[1] {
+		t.Errorf("ShiftCues(+500) = %+v, want %+v", pos, want)
+	}
+	// The input must not be mutated.
+	if in[0].StartMs != 1000 || in[0].EndMs != 2000 {
+		t.Errorf("ShiftCues mutated its input: %+v", in)
+	}
+
+	// Negative shift: every timestamp moves back exactly.
+	neg := ShiftCues(in, -500)
+	want = []Cue{{StartMs: 500, EndMs: 1500, Text: "a"}, {StartMs: 2500, EndMs: 3500, Text: "b"}}
+	if len(neg) != 2 || neg[0] != want[0] || neg[1] != want[1] {
+		t.Errorf("ShiftCues(-500) = %+v, want %+v", neg, want)
+	}
+}
+
+func TestShiftCues_DropAndClamp(t *testing.T) {
+	cues := []Cue{
+		{StartMs: 0, EndMs: 400, Text: "dropped"},      // shifted end -100 <= 0 → dropped
+		{StartMs: 400, EndMs: 1000, Text: "clamped"},   // shifted start -100 < 0 <= end 500 → clamped to 0
+		{StartMs: 1000, EndMs: 2000, Text: "survives"}, // shifted 500..1500, untouched otherwise
+	}
+	got := ShiftCues(cues, -500)
+	if len(got) != 2 {
+		t.Fatalf("ShiftCues drop/clamp = %+v, want 2 cues", got)
+	}
+	if got[0].Text != "clamped" || got[0].StartMs != 0 || got[0].EndMs != 500 {
+		t.Errorf("clamped cue = %+v, want StartMs=0 EndMs=500", got[0])
+	}
+	if got[1].Text != "survives" || got[1].StartMs != 500 || got[1].EndMs != 1500 {
+		t.Errorf("surviving cue = %+v, want StartMs=500 EndMs=1500", got[1])
+	}
+}
+
 func TestResolveCueEnds(t *testing.T) {
 	cues := []Cue{
 		{StartMs: 0, Text: "a"},                 // no end → next start 1000

@@ -229,6 +229,34 @@ the always-exact prefix scan. The remaining difference: the master
 `BANDWIDTH` is estimated from cluster sizes. The source must carry a Cues
 index. The plan is immutable and safe for concurrent `Segment` calls.
 
+### Trick-play (I-frame playlists)
+
+`RemuxToHLS` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`, declared in the master
+as `EXT-X-I-FRAME-STREAM-INF`) whenever the presentation has video and is not
+encrypted: one keyframe per segment, referenced by `EXT-X-BYTERANGE` into the
+**existing** segment files -- no extra media. Both MKV/WebM and MP4/MOV sources
+get it, full pass and on-demand plan alike.
+
+```go
+plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000})
+data, mime, err := plan.Resource(ctx, "iframe.m3u8")
+```
+
+**Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
+time: the moov sample table already has every segment's exact sample count,
+sizes and sync flags, so it costs nothing extra. A Matroska plan instead
+builds it **lazily** -- the first `Resource(ctx, "iframe.m3u8")` call performs
+a one-time, cached pass over the video track and every later call is served
+from that cache -- so `PlanHLS` itself keeps its usual few bounded reads
+regardless of whether trick-play is ever requested. The lazy pass walks the
+video track's block headers only (size, timecode, sync flag) via a
+structure-only `BlockReader` mode (`SetHeaderOnly`) that seek-skips an
+unlaced block's payload instead of reading it -- real muxers never lace
+video, so this is the effective cost for real content: bounded by the
+video track's block *count*, never by any payload volume. The result is
+byte-identical to `RemuxToHLS`'s `iframe.m3u8` for the same source and
+`SegmentMs`.
+
 ### Virtual Edit Layer (`Options.KeepTracks`)
 
 ```go
@@ -246,6 +274,30 @@ versions (just a different plan). At least one video track must be kept (HLS
 needs video); the on-demand plan applies the same subset byte-identically to the
 full pass. It composes with `VideoOnly` and rides through `RemuxToABR` per
 variant.
+
+### Subtitle resync (`Options.SubtitleOffsetMs`)
+
+```go
+mp4.Options{SubtitleOffsetMs: -350} // subtitles 350ms earlier, no file rewritten
+```
+
+Shifts every text-subtitle cue's timing by this many milliseconds (negative
+allowed) in every WebVTT output `RemuxToHLS`/`PlanHLS` emit -- full pass
+(`subN_*.vtt` files and playlists) and on-demand plan resources alike, MKV and
+MP4 sources alike. A cue whose shifted end lands at or before 0 is dropped; a
+cue straddling 0 is clamped to start at 0. Segment/window boundaries for the
+windowed `subN_%05d.vtt` playlists are evaluated **after** the shift, so a cue
+lands in whichever segment its new timing puts it in and the on-demand plan
+stays byte-identical to the full pass for the same offset. `0` (the default)
+reproduces today's output exactly -- a pure regression guard.
+
+This is a per-session, virtual resync: no file is touched, and a server can
+re-plan with a different offset instantly (e.g. per-viewer subtitle delay
+preference). It only affects the WebVTT rendition pipeline `RemuxToHLS`/
+`PlanHLS` build; `RemuxToMP4`/`RemuxFromMP4`'s native `tx3g`/`wvtt` subtitle
+tracks are a separate, muxed-into-the-container code path this option does
+not touch -- and HLS itself never takes that path, since it always carries
+subtitles as their own WebVTT rendition.
 
 ### Thumbnails / storyboards (`matroska.ExtractKeyframeSample`)
 

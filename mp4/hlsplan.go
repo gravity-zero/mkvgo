@@ -60,8 +60,20 @@ type HLSPlan struct {
 	segs     []segInfo      // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
 	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
 	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
-	iframe   []byte         // trick-play playlist (MP4 plans; exact byte ranges)
-	iframes  []iframeRef    // the I-frames behind p.iframe, for the ABR master's trick-play stream
+	iframe   []byte         // trick-play playlist: MP4 plans build it eagerly (free, head-only);
+	// Matroska plans build it lazily (see hasIframe/iframeMu/iframeErr) - the
+	// exact byte ranges need every segment's sample count/flags, which only a
+	// full pass over the video track's block headers can give.
+	iframes []iframeRef // the I-frames behind p.iframe, for the ABR master's trick-play stream
+	// hasIframe is decided cheaply at construction (a video track, not
+	// encrypted): it says whether iframe.m3u8 is a valid resource name for a
+	// Matroska plan, independent of whether the lazy pass has run yet.
+	hasIframe bool
+	iframeMu  sync.Mutex
+	// iframeErr caches a PERMANENT build error only (never a context
+	// cancellation - see the subtitle-cue scan's poisoning fix): a transient
+	// error must not stick around and fail every later request.
+	iframeErr error
 	// trackDurs feeds every mid-file BlockReader the tracks' DefaultDurations
 	// (laced frames share one stored timecode; the stride times them) - a
 	// reader seeked to a cluster never sees the Tracks element on its own.
@@ -156,7 +168,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, err
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
-		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
+		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil}
 	if !o.VideoOnly {
 		p.subs = filterSubTracks(planSubTracks(c, o), keep)
 	}
@@ -511,11 +523,230 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, 
 	}
 }
 
+// walkVideoHeadersOnly walks the video track's blocks from the presentation
+// start to EOF, structure only: SetHeaderOnly skips the payload of every
+// (real-world universal) unlaced block instead of reading it, and KeepTracks
+// seek-skips every other track's blocks entirely - so the cost is bounded by
+// the video track's block-header count, never by any payload bytes.
+func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (bool, error)) error {
+	vid := p.tracks[p.videoIndex()].ft.outTrack.mkv.ID
+	src, err := p.fs.DoOpen(p.srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
+	if err != nil {
+		return err
+	}
+	br.SetTrackDefaultDurations(p.trackDurs)
+	br.KeepTracks(vid)
+	br.SetHeaderOnly(true)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b, err := br.Next()
+		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
+			return nil
+		}
+		if err != nil {
+			return errf("read block: %w", err)
+		}
+		more, err := fn(b)
+		if err != nil {
+			return err
+		}
+		if !more {
+			return nil
+		}
+	}
+}
+
+// iframePlaylist returns the trick-play playlist, built once and cached. MP4
+// plans build it eagerly at PlanHLS time (the sample table makes it free);
+// Matroska plans build it lazily, on whichever request needs it first, from
+// a structure-only pass over the video track (walkVideoHeadersOnly - no
+// sample bytes read for the unlaced case), so PlanHLS's construction stays
+// the bounded few reads it always was. Only a PERMANENT error is cached (a
+// cancelled first request must not poison every later one - the same fix as
+// the subtitle-cue scan's).
+func (p *HLSPlan) iframePlaylist(ctx context.Context) ([]byte, error) {
+	if p.mp4src {
+		if p.iframe == nil {
+			return nil, errf("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
+		}
+		return p.iframe, nil
+	}
+	if !p.hasIframe {
+		return nil, errf("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
+	}
+	p.iframeMu.Lock()
+	defer p.iframeMu.Unlock()
+	if p.iframe != nil {
+		return p.iframe, nil
+	}
+	if p.iframeErr != nil {
+		return nil, p.iframeErr
+	}
+	pl, iframes, err := p.buildMatroskaIframePlaylist(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err // transient - never cached
+		}
+		p.iframeErr = err
+		return nil, err
+	}
+	p.iframe = pl
+	p.iframes = iframes
+	return pl, nil
+}
+
+// buildMatroskaIframePlaylist performs the one-time structure-only walk: for
+// every segment it collects the video track's samples (size/pts/blockPts/
+// sync, never the bytes) and feeds them to timeSegmentWindow - the very
+// derivation Segment(n) uses - to build the SAME trun/moof RemuxToHLS and
+// Segment(n) would write, byte for byte, since that derivation never touches
+// sample content. Each segment's I-frame byte range is then the moof's exact
+// length plus its leading (keyframe) sample's exact size.
+func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []iframeRef, error) {
+	vi := p.videoIndex()
+	pt := p.tracks[vi]
+	windows := make([][]fragSample, p.segCount)
+
+	k := 0
+	err := p.walkVideoHeadersOnly(ctx, func(b mkv.Block) (bool, error) {
+		for k+1 < p.segCount && b.BlockTimecode >= p.bounds[k+1] {
+			k++
+		}
+		windows[k] = append(windows[k], fragSample{
+			size:       uint32(int64(len(pt.ft.outTrack.mkv.HeaderStripping)) + b.Size),
+			ptsMs:      b.Timecode,
+			blockPtsMs: b.BlockTimecode,
+			sync:       b.Keyframe,
+		})
+		return true, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var iframes []iframeRef
+	for seg := range windows {
+		window := windows[seg]
+		nextPts := int64(-1)
+		for next := seg + 1; next < len(windows); next++ {
+			if len(windows[next]) > 0 {
+				nextPts = windows[next][0].ptsMs
+				break
+			}
+		}
+		ts := trackSegment{trackID: pt.ft.outTrack.mp4ID}
+		ts.baseDecodeTS, ts.hasCTS = timeSegmentWindow(window, pt, nextPts)
+		if len(window) > 0 {
+			ts.samples = window
+			for _, s := range window {
+				ts.dataLen += int64(s.size)
+			}
+		}
+		head := buildSegmentFile(uint32(seg+1), ts)
+		if len(window) > 0 && window[0].sync {
+			iframes = append(iframes, iframeRef{seg: seg, length: int64(len(head)) + int64(window[0].size)})
+		}
+	}
+	if len(iframes) == 0 {
+		return nil, nil, errf("no I-frame available for this presentation")
+	}
+	fts := p.fts()
+	return buildIFramePlaylist(&p.opts, fts, p.durs, iframes), iframes, nil
+}
+
 // segSample is one sample of an on-demand window: the fragment metadata plus
 // its bytes (a single segment's data is held in memory — a few MB).
 type segSample struct {
 	fragSample
 	data []byte
+}
+
+// timeSegmentWindow derives one segment window's per-sample dtsTS/ctsTS/durTS
+// (mutating window in place) purely from metadata - size, ptsMs, blockPtsMs,
+// sync - never the sample bytes, applying fillFragTiming's rule window-local:
+// grid-timed audio re-derives each frame's index from its block's stored
+// timecode, otherwise samples are DTS-sorted and CTS is the PTS/DTS gap.
+// nextPts is the first sample of the window that follows (-1 for the
+// presentation's last window, which closes on pt.lastDurTS instead). It
+// returns the window's base decode time and whether any sample carries a
+// non-zero CTS. Shared by segmentTrack (the window's bytes ride along in a
+// parallel slice) and the structure-only I-frame builder (bytes never read
+// at all), so both derive byte-identical segment heads from the same math.
+func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseDecodeTS int64, hasCTS bool) {
+	if len(window) == 0 {
+		return pt.ft.durMediaTS, false
+	}
+	// gridTS from the DefaultDuration, else recovered from the window's own
+	// collapsed laces (the stride is uniform, so every window measures the same
+	// value the full pass derives from all samples - parity by construction).
+	gridTS := pt.gridTS
+	if gridTS <= 0 {
+		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
+	}
+	if gridTS > 0 {
+		// Grid-timed audio: each frame's index re-derived from its block's
+		// stored timecode (then +1 within a lace) - fillFragTiming's grid
+		// branch applied to the window, window-local by construction.
+		scale := tsScale(pt.ft.timescale)
+		anchor := scale(pt.firstPtsMs)
+		k := int64(0)
+		for x := range window {
+			switch {
+			case x == 0:
+				k = gridIndex(scale(window[0].blockPtsMs)-anchor, gridTS)
+			case window[x].blockPtsMs != window[x-1].blockPtsMs:
+				nk := gridIndex(scale(window[x].blockPtsMs)-anchor, gridTS)
+				if nk <= k {
+					nk = k + 1
+				}
+				k = nk
+			default:
+				k++
+			}
+			window[x].dtsTS = k * gridTS
+			window[x].ctsTS = 0
+			if x > 0 {
+				window[x-1].durTS = window[x].dtsTS - window[x-1].dtsTS
+			}
+		}
+		if nextPts >= 0 {
+			nk := gridIndex(scale(nextPts)-anchor, gridTS)
+			if nk <= k {
+				nk = k + 1
+			}
+			window[len(window)-1].durTS = nk*gridTS - k*gridTS
+		} else { // the track's final sample (fillFragTiming's grid rule)
+			window[len(window)-1].durTS = gridTS
+		}
+		return window[0].dtsTS, false
+	}
+	scale := tsScale(pt.ft.timescale)
+	base := scale(pt.firstPtsMs)
+	dts := make([]int64, len(window))
+	for x := range window {
+		dts[x] = scale(window[x].ptsMs)
+	}
+	sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
+	for x := range window {
+		window[x].dtsTS = dts[x] - base
+		window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x])
+	}
+	for x := 0; x < len(window)-1; x++ {
+		window[x].durTS = dts[x+1] - dts[x]
+	}
+	if nextPts >= 0 {
+		window[len(window)-1].durTS = scale(nextPts) - dts[len(window)-1]
+	} else { // the track's final sample (fillFragTiming's rule)
+		window[len(window)-1].durTS = pt.lastDurTS
+	}
+	return dts[0] - base, windowHasCTS(window)
 }
 
 // Segment builds the n-th (0-based) VIDEO media segment (segNNNNN.m4s) —
@@ -585,85 +816,21 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	// supplying the window's final sample duration. An empty window (the track
 	// ended before the presentation) becomes an empty trun with the decode
 	// time parked at the stream end, keeping the rendition's segments aligned.
-	seg := trackSegment{trackID: pt.ft.outTrack.mp4ID, baseDecodeTS: pt.ft.durMediaTS}
-	// gridTS from the DefaultDuration, else recovered from the window's own
-	// collapsed laces (the stride is uniform, so every window measures the same
-	// value the full pass derives from all samples — parity by construction).
-	gridTS := pt.gridTS
-	if gridTS <= 0 {
-		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
+	// timeSegmentWindow derives this from metadata alone (size/pts/blockPts/
+	// sync), so it is shared verbatim with the structure-only I-frame builder,
+	// which never reads the window's sample bytes at all.
+	seg := trackSegment{trackID: pt.ft.outTrack.mp4ID}
+	metas := make([]fragSample, len(window))
+	for x := range window {
+		metas[x] = window[x].fragSample
 	}
-	if len(window) > 0 && gridTS > 0 {
-		// Grid-timed audio: each frame's index re-derived from its block's
-		// stored timecode (then +1 within a lace) — fillFragTiming's grid
-		// branch applied to the window, window-local by construction.
-		scale := tsScale(pt.ft.timescale)
-		anchor := scale(pt.firstPtsMs)
-		k := int64(0)
+	seg.baseDecodeTS, seg.hasCTS = timeSegmentWindow(metas, pt, nextPts)
+	if len(window) > 0 {
 		for x := range window {
-			switch {
-			case x == 0:
-				k = gridIndex(scale(window[0].blockPtsMs)-anchor, gridTS)
-			case window[x].blockPtsMs != window[x-1].blockPtsMs:
-				nk := gridIndex(scale(window[x].blockPtsMs)-anchor, gridTS)
-				if nk <= k {
-					nk = k + 1
-				}
-				k = nk
-			default:
-				k++
-			}
-			window[x].dtsTS = k * gridTS
-			window[x].ctsTS = 0
-			if x > 0 {
-				window[x-1].durTS = window[x].dtsTS - window[x-1].dtsTS
-			}
-		}
-		if nextPts >= 0 {
-			nk := gridIndex(scale(nextPts)-anchor, gridTS)
-			if nk <= k {
-				nk = k + 1
-			}
-			window[len(window)-1].durTS = nk*gridTS - k*gridTS
-		} else { // the track's final sample (fillFragTiming's grid rule)
-			window[len(window)-1].durTS = gridTS
-		}
-		samples := make([]fragSample, len(window))
-		for x := range window {
-			samples[x] = window[x].fragSample
+			window[x].fragSample = metas[x]
 			seg.dataLen += int64(window[x].size)
 		}
-		seg.baseDecodeTS = window[0].dtsTS
-		seg.samples = samples
-	} else if len(window) > 0 {
-		scale := tsScale(pt.ft.timescale)
-		base := scale(pt.firstPtsMs)
-		dts := make([]int64, len(window))
-		for x := range window {
-			dts[x] = scale(window[x].ptsMs)
-		}
-		sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
-		for x := range window {
-			window[x].dtsTS = dts[x] - base
-			window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x])
-		}
-		for x := 0; x < len(window)-1; x++ {
-			window[x].durTS = dts[x+1] - dts[x]
-		}
-		if nextPts >= 0 {
-			window[len(window)-1].durTS = scale(nextPts) - dts[len(window)-1]
-		} else { // the track's final sample (fillFragTiming's rule)
-			window[len(window)-1].durTS = pt.lastDurTS
-		}
-
-		samples := make([]fragSample, len(window))
-		for x := range window {
-			samples[x] = window[x].fragSample
-			seg.dataLen += int64(window[x].size)
-		}
-		seg.baseDecodeTS = dts[0] - base
-		seg.samples = samples
-		seg.hasCTS = windowHasCTS(samples)
+		seg.samples = metas
 	}
 
 	var cipherData []byte
@@ -705,7 +872,7 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 // Serving a presentation is: answer any of these names through Resource.
 func (p *HLSPlan) Resources() []string {
 	names := []string{"master.m3u8"}
-	if p.iframe != nil {
+	if p.iframe != nil || p.hasIframe {
 		names = append(names, "iframe.m3u8")
 	}
 	if p.mpd != nil {
@@ -745,10 +912,11 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	case "master.m3u8":
 		return p.master, mimeM3U8, nil
 	case "iframe.m3u8":
-		if p.iframe == nil {
-			return nil, "", errf("no I-frame playlist for this plan (Matroska plans and encrypted presentations do not expose one)")
+		pl, err := p.iframePlaylist(ctx)
+		if err != nil {
+			return nil, "", err
 		}
-		return p.iframe, mimeM3U8, nil
+		return pl, mimeM3U8, nil
 	case "manifest.mpd":
 		if p.mpd == nil {
 			return nil, "", errf("no DASH manifest for an AES-128-encrypted presentation (HLS only)")
@@ -1065,6 +1233,8 @@ func subNeedsNextCue(cues []subtitle.Cue, uptoMs int64) bool {
 // Subtitle builds the i-th (0-based) subtitle rendition's WebVTT — the whole
 // track as one file. It drives the cue cursor to the end of the source; the
 // cues collected stay cached for the windowed segments (and vice versa).
+// Options.SubtitleOffsetMs shifts every cue (see subtitle.ShiftCues) before
+// it is written.
 func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
 		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
@@ -1073,6 +1243,7 @@ func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	cues = subtitle.ShiftCues(cues, p.opts.SubtitleOffsetMs)
 	var buf strings.Builder
 	if err := subtitle.WriteWebVTT(&buf, cues); err != nil {
 		return nil, err
@@ -1085,6 +1256,12 @@ func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 // Only the prefix of the source the window can draw cues from is scanned, so
 // serving segments in playback order reads the source once, incrementally —
 // the first hit costs one bounded window, like a video segment.
+//
+// Options.SubtitleOffsetMs shifts every cue before windowing (segment
+// boundaries apply AFTER the shift, matching the full pass): the fetch range
+// is the shift's pre-image (a cue's SOURCE time that will land in [segStart,
+// segEnd) once shifted is [segStart-offset, segEnd-offset)), so the right
+// source cues are pulled in for any offset, however large.
 func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
 		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
@@ -1097,10 +1274,22 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	cues, err := p.subCuesForWindow(ctx, i, segStart, segEnd)
+	off := p.opts.SubtitleOffsetMs
+	srcStart, srcEnd := segStart, segEnd
+	if off != 0 {
+		srcStart = segStart - off
+		if srcStart < 0 {
+			srcStart = 0 // subCuesForWindow clamps its own lookback to 0 too
+		}
+		if segEnd != math.MaxInt64 {
+			srcEnd = segEnd - off
+		}
+	}
+	cues, err := p.subCuesForWindow(ctx, i, srcStart, srcEnd)
 	if err != nil {
 		return nil, err
 	}
+	cues = subtitle.ShiftCues(cues, off)
 	var window []subtitle.Cue
 	for _, cue := range cues {
 		if cue.EndMs > segStart && cue.StartMs < segEnd {

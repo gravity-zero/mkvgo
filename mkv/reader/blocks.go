@@ -193,6 +193,12 @@ type BlockReader struct {
 	timecodeScale int64
 	pending       []mkv.Block
 	keep          map[uint64]bool // when non-nil, blocks of other tracks are skipped unread
+	// headerOnly, when set, discards the payload of an unlaced kept block
+	// instead of reading it: Block.Data stays nil and Block.Size reports the
+	// byte length alone. A laced block still needs its lacing header decoded
+	// to size its frames, so it is read normally and the bytes dropped right
+	// after (real muxers do not lace video, the track this mode targets).
+	headerOnly bool
 	// trackDurNs maps track number → DefaultDuration (ns), the per-frame stride
 	// that times the frames of a laced block (they share one stored timecode).
 	// Filled by SetTrackDefaultDurations, or opportunistically from the Tracks
@@ -270,6 +276,15 @@ func (br *BlockReader) KeepTracks(tracks ...uint64) {
 	for _, id := range tracks {
 		br.keep[id] = true
 	}
+}
+
+// SetHeaderOnly enables a structure-only walk: an unlaced kept block's
+// payload is seek-skipped instead of read, and Next reports its size on
+// Block.Size with Block.Data left nil. Combined with KeepTracks (other
+// tracks' blocks are already skipped unread), the walk's cost is bounded by
+// the kept track's block-header count, never by any payload bytes.
+func (br *BlockReader) SetHeaderOnly(on bool) {
+	br.headerOnly = on
 }
 
 // maxLacedFrameDurNs bounds a plausible per-frame duration (10 s): a larger
@@ -613,17 +628,26 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	}
 
 	if lacing == lacingNone {
-		data := make([]byte, dataSize)
-		if _, err := io.ReadFull(br.r, data); err != nil {
-			return mkv.Block{}, err
-		}
 		tc, err := safeTimecodeMs(br.clusterTS+int64(relTC), br.timecodeScale)
 		if err != nil {
 			return mkv.Block{}, err
 		}
+		if br.headerOnly {
+			if err := br.r.discard(dataSize); err != nil {
+				return mkv.Block{}, err
+			}
+			return mkv.Block{
+				TrackNumber: uint64(trackNum), Timecode: tc, BlockTimecode: tc,
+				Keyframe: keyframe, Size: dataSize,
+			}, nil
+		}
+		data := make([]byte, dataSize)
+		if _, err := io.ReadFull(br.r, data); err != nil {
+			return mkv.Block{}, err
+		}
 		return mkv.Block{
 			TrackNumber: uint64(trackNum), Timecode: tc, BlockTimecode: tc,
-			Keyframe: keyframe, Data: data,
+			Keyframe: keyframe, Data: data, Size: dataSize,
 		}, nil
 	}
 
@@ -670,7 +694,15 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		}
 		blocks[i] = mkv.Block{
 			TrackNumber: uint64(trackNum), Timecode: tcI, BlockTimecode: tc,
-			Keyframe: keyframe, Data: append([]byte(nil), raw[offset:end]...),
+			Keyframe: keyframe, Size: int64(frameSizes[i]),
+		}
+		if !br.headerOnly {
+			// A laced block's frames still needed the payload read to decode
+			// their sizes (the lacing header sits ahead of them): header-only
+			// mode still transiently held it above, but drops the bytes here
+			// rather than keeping them - real muxers do not lace video, the
+			// only track this mode targets, so this path is not the hot one.
+			blocks[i].Data = append([]byte(nil), raw[offset:end]...)
 		}
 		offset = end
 	}

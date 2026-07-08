@@ -252,6 +252,35 @@ control. A library caller (Go, WASM) already has the track metadata from
 
 ---
 
+## Subtitle resync (virtual) -- `--sub-offset`
+
+A viewer's subtitle drifts out of sync (a common re-encode/re-cut symptom);
+`Options.SubtitleOffsetMs` (CLI `--sub-offset <ms>`) shifts every WebVTT cue by
+that many milliseconds -- negative allowed -- with **no file rewritten**: a
+re-plan with a new offset serves a different sync instantly.
+
+```bash
+mkvgo to-hls movie.mkv -o stream/ --sub-offset -350   # subtitles 350ms earlier
+mkvgo hls-segment movie.mkv sub1_00003.vtt --sub-offset 500 -o -   # on demand
+```
+```go
+mp4.Options{SubtitleOffsetMs: -350}
+```
+
+A cue whose shifted end lands at or before 0 is dropped; a cue straddling 0 is
+clamped to start at 0. The windowed `subN_%05d.vtt` segment boundaries are
+evaluated **after** the shift, so a cue lands in whichever segment its new
+timing puts it in, and the on-demand plan stays byte-identical to the full
+pass for the same offset. A zero offset (the default) reproduces today's
+output exactly.
+
+This only affects the WebVTT rendition pipeline (`subN.m3u8`/`subN.vtt`) that
+`to-hls`/`PlanHLS` build; it has no effect on `to-mp4`'s native `tx3g`/`wvtt`
+subtitle tracks -- a separate, muxed-into-the-container code path this option
+does not touch.
+
+---
+
 ## Securing delivery
 
 ### AES-128 encryption
@@ -322,10 +351,19 @@ Two complementary tools:
 - **I-frame playlist** — `to-hls` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`,
   declared in the master), one keyframe per segment as a byte range into the
   **existing** segments. Zero extra media; what hls.js/Safari use for smooth
-  scrubbing previews. (MP4-source on-demand plans expose it too.)
+  scrubbing previews. Both MKV/WebM and MP4/MOV sources get it, full pass and
+  on-demand plan alike.
 - **`extract-frame`** — pull the keyframe nearest any timestamp as a
   decoder-ready file (Annex-B / IVF); decode it to an image with one ffmpeg
   call. A storyboard is a loop over the keyframe index.
+
+**On-demand cost.** An MP4 plan builds `iframe.m3u8` eagerly at `PlanHLS` time
+-- the sample table already has every segment's exact sample count/size, so it
+is free. A Matroska plan builds it **lazily**, on the first request for
+`iframe.m3u8` (cached after that): `PlanHLS` itself still does only its usual
+few bounded reads. The lazy pass walks the video track's block headers only --
+sizes, timecodes, sync flags -- never the sample bytes, so its cost is bounded
+by the video track's block *count*, not by any payload volume.
 
 ```bash
 mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264

@@ -121,6 +121,23 @@ type Options struct {
 	// Opt in only to round-trip an MP3 that originated in an MP4 (rare) back to MP4.
 	// Both RemuxFromMP4 and RemuxToMP4 must enable it for a full round trip.
 	MP3ContainerDelay bool
+
+	// SubtitleOffsetMs shifts every text-subtitle cue's timing by this many
+	// milliseconds (negative allowed) in every WebVTT output RemuxToHLS/
+	// PlanHLS emit (subN_%05d.vtt / subN.vtt, full pass and on-demand alike)
+	// - a virtual per-session resync served with no file rewritten: re-plan
+	// with a new offset and the same source serves a different sync
+	// instantly. A cue whose shifted end lands at or before 0 is dropped; a
+	// cue straddling 0 is clamped to start at 0. Segment/window boundaries
+	// for the windowed subN_%05d.vtt playlists are evaluated AFTER the
+	// shift, so full-pass and on-demand plan stay byte-identical for the
+	// same offset. 0 (the default) reproduces today's output exactly. Only
+	// RemuxToHLS/PlanHLS honour it: it has no effect on RemuxToMP4/
+	// RemuxFromMP4's native tx3g/wvtt subtitle tracks (a separate, muxed-
+	// into-the-container path this option does not touch), and HLS itself
+	// never muxes subtitles into the fMP4 segments - they always ride as
+	// their own WebVTT rendition.
+	SubtitleOffsetMs int64
 }
 
 // wantsEditList reports whether a codec's container delay should be carried as an

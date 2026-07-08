@@ -416,6 +416,11 @@ type Block struct {
 	// consumers that partition frames (segment windows) key on it so a lace is
 	// never split. Equal to Timecode for unlaced blocks; set by the BlockReader.
 	BlockTimecode int64
+	// Size is the frame's payload byte length. It always equals len(Data) when
+	// Data was read; a structure-only walk (BlockReader.SetHeaderOnly) leaves
+	// Data nil and reports the size here alone, so a caller that only needs
+	// sample sizes (not bytes) never pays for the payload read.
+	Size int64
 }
 
 // RestoreHeader prepends the stripped header bytes to block data.

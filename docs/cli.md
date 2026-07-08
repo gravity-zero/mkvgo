@@ -762,7 +762,7 @@ Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
-mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
+mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>]
 ```
 
 | Flag | Description |
@@ -770,12 +770,14 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6]
 | `-o` | Output directory (required) |
 | `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
 | `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy — just a different track subset. Video is required |
+| `--sub-offset` | Shift every WebVTT subtitle cue by this many milliseconds (negative allowed) -- a virtual resync, no file rewritten. A cue whose shifted end is at or before 0 is dropped; one straddling 0 is clamped to start at 0 |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
 mkvgo to-hls video.mkv -o stream/ -segment 4
 mkvgo to-hls multi.mkv -o vf/    --keep-tracks 1,2      # "VF only": video + French audio, no other tracks
 mkvgo hls-segment multi.mkv master --keep-tracks 1,2,5  # same subset, on demand
+mkvgo to-hls video.mkv -o stream/ --sub-offset -350     # subtitles resynced 350ms earlier
 # serve stream/ over HTTP; play stream/master.m3u8 (hls.js/Safari) or stream/manifest.mpd (dash.js)
 
 # AES-128 encryption + signed URLs:
@@ -789,8 +791,10 @@ When the source has video, a **trick-play I-frame playlist** (`iframe.m3u8`,
 `EXT-X-I-FRAMES-ONLY`) is emitted and declared in the master
 (`EXT-X-I-FRAME-STREAM-INF`): one keyframe per segment as a byte range into
 the existing segments — zero extra media, what players use for scrubbing
-previews. (Not emitted when encrypting; on-demand plans expose it for MP4
-sources, whose sample table makes the ranges computable head-only.)
+previews. Not emitted when encrypting. Both MKV/WebM and MP4/MOV sources get
+it, full pass and on-demand plan alike -- see [streaming.md](streaming.md#trick-play-scrubbing)
+for the on-demand cost model (MP4 is free at plan time; Matroska builds it
+lazily, on the first `iframe.m3u8` request, from block headers only).
 
 `--single-file` packs each rendition into ONE progressive file (`stream.mp4`,
 `stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges — the
@@ -846,11 +850,13 @@ and reading only that window — first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
-mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6]
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>]
 ```
 
 Without `-o` the resource goes to stdout (pipe it from a server handler).
-`-segment` must match across calls — it defines the boundaries.
+`-segment` must match across calls -- it defines the boundaries. `--sub-offset`
+(see `to-hls`) resyncs the WebVTT renditions virtually; it must match `to-hls`'s
+value for the two modes to stay byte-identical.
 
 The output is **byte-identical** to the corresponding file `to-hls` writes
 (same boundaries, same fragments, cover art and global tags in the init), so
@@ -905,7 +911,7 @@ declares one variant per source with its real `BANDWIDTH`/`RESOLUTION`/
 `CODECS` over the shared audio/subtitle groups.
 
 ```
-mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--aes-key … --aes-key-uri …] [--url-prefix …]
+mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--sub-offset <ms>] [--aes-key … --aes-key-uri …] [--url-prefix …]
 ```
 
 For seamless switching the sources should share the keyframe cadence (same
@@ -936,7 +942,7 @@ resource name (`master.m3u8`, or `v{k}/<name>` such as `v2/seg00042.m4s`), the
 rest are the quality variants best first.
 
 ```
-mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6]
+mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--sub-offset <ms>]
 ```
 
 ```bash

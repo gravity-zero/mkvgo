@@ -795,9 +795,12 @@ func urlRewriter(o *Options) func(string) string {
 
 // writeSubtitleRendition writes one subtitle track as segmented WebVTT: one
 // .vtt per media-segment window (cues overlapping the window, absolute
-// timestamps) plus its media playlist.
+// timestamps) plus its media playlist. Options.SubtitleOffsetMs shifts every
+// cue (see subtitle.ShiftCues) before windowing, so a re-synced track lands
+// in the right segment and, for a zero offset, is byte-identical to before.
 func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bounds []int64, durs []float64, fts []*fragTrack) error {
 	subtitle.ResolveCueEnds(st.cues, 2000)
+	cues := subtitle.ShiftCues(st.cues, o.SubtitleOffsetMs)
 	for k := range durs {
 		segStart := bounds[k]
 		var segEnd int64 = 1<<63 - 1
@@ -805,7 +808,7 @@ func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hls
 			segEnd = bounds[k+1]
 		}
 		var window []subtitle.Cue
-		for _, cue := range st.cues {
+		for _, cue := range cues {
 			if cue.EndMs > segStart && cue.StartMs < segEnd {
 				window = append(window, cue)
 			}
@@ -821,7 +824,7 @@ func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hls
 	}
 	// The whole rendition as one file too — what the DASH manifest references.
 	var whole strings.Builder
-	if err := subtitle.WriteWebVTT(&whole, st.cues); err != nil {
+	if err := subtitle.WriteWebVTT(&whole, cues); err != nil {
 		return err
 	}
 	if err := fs.DoWriteFile(filepath.Join(dir, fmt.Sprintf("sub%d.vtt", idx+1)), []byte(whole.String()), 0o644); err != nil {

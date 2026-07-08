@@ -136,6 +136,32 @@ func stripASSOverride(s string) string {
 	return b.String()
 }
 
+// ShiftCues returns cues with every timestamp shifted by offsetMs (positive or
+// negative) - a virtual subtitle resync: no source is rewritten, the shift is
+// applied wherever cues are about to be rendered or windowed. A cue whose
+// shifted end lands at or before 0 is dropped (it would never appear on
+// screen); a cue straddling 0 is clamped to start at 0 (some of it still
+// airs). offsetMs == 0 returns cues unchanged (same slice, same order), so
+// the zero-offset path stays byte-identical to before this existed.
+func ShiftCues(cues []Cue, offsetMs int64) []Cue {
+	if offsetMs == 0 {
+		return cues
+	}
+	out := make([]Cue, 0, len(cues))
+	for _, c := range cues {
+		c.StartMs += offsetMs
+		c.EndMs += offsetMs
+		if c.EndMs <= 0 {
+			continue
+		}
+		if c.StartMs < 0 {
+			c.StartMs = 0
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // ResolveCueEnds fills any cue whose end is unset (<= its start, e.g. no source
 // duration) from the next cue's start, falling back to defaultDurMs for the last
 // cue. Cues must already be in start order.
