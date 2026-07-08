@@ -77,6 +77,11 @@ All notable changes to mkvgo are documented here. The format is based on
   the existing `httpfs` windowing, so any command reading `http(s)://` now also
   reads `s3://bucket/key` (virtual-host or path style, credentials/region from
   the environment) without downloading the whole object.
+- **WASM bindings for the new streaming features.** `MkvGo.openConcat(inputs,
+  opts)` packages several in-browser sources into one continuous HLS session;
+  `subOffsetMs` (virtual subtitle resync) is honoured by `openHLS`/`openABR`/
+  `openConcat`; and a `cenc` option ({scheme, key, keyId, iv, keyURI}) drives
+  Common Encryption from `openHLS`/`openABR`. TypeScript types updated.
 - **`ReindexInPlace` / `reindex-inplace`.** Surgical index repair: the new Cues
   element is appended inside the Segment, the Segment size extended, the head
   SeekHead repointed and any stale Cues voided - cluster bytes never move and
