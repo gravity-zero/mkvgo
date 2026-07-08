@@ -140,7 +140,7 @@ func TestCovScanBlockGroup_DefaultBranch(t *testing.T) {
 func TestCovAppendCueFromCluster_EmptyBody(t *testing.T) {
 	// Nil body → ReadElementHeader returns EOF on first iteration → no firstBlockSeen → early return.
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, nil, 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, nil, 1_000_000, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatalf("expected no cues, got %d", len(mw.Cues))
 	}
@@ -150,7 +150,7 @@ func TestCovAppendCueFromCluster_DefaultUnknownSize(t *testing.T) {
 	// IDVoid with unknown size → default branch h.Size < 0 → return (stop scanning).
 	body := elemUnknownSize(mkv.IDVoid) // IDVoid + unknown-size VINT
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body, 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, body, 1_000_000, 0, nil)
 	// No panic; no cues added (scan aborted before any blocks).
 	if len(mw.Cues) != 0 {
 		t.Fatalf("expected no cues, got %d", len(mw.Cues))
@@ -903,7 +903,7 @@ func TestCovAppendCueFromCluster_AudioOnlyCue(t *testing.T) {
 	body.Write(elemBytes(mkv.IDSimpleBlock, sbData))
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 100, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 100, nil)
 	// lastCueTime = -reindexCueMinGapMs-1 = -501; firstBlockTC=0; 0-(-501)=501 >= 500 → cue added.
 	if len(mw.Cues) == 0 {
 		t.Fatal("expected audio-only cue to be appended")
@@ -919,7 +919,7 @@ func TestCovAppendCueFromCluster_AudioOnlyWithExistingCues(t *testing.T) {
 
 	mw := writer.NewMKVWriter(&seekBuf{})
 	mw.Cues = []mkv.CuePoint{{TimeMs: -600}} // existing cue; lastCueTime = -600
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 200, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 200, nil)
 	// firstBlockTC=0; 0-(-600)=600 >= 500 → new cue appended.
 	if len(mw.Cues) != 2 {
 		t.Fatalf("expected 2 cues, got %d", len(mw.Cues))
@@ -1047,7 +1047,7 @@ func TestCovAppendCueFromCluster_TimestampReadError(t *testing.T) {
 	body.WriteByte(0x01)                        // only 1 byte (not 4) → ReadUint gets EOF
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after IDTimestamp ReadUint error")
 	}
@@ -1062,7 +1062,7 @@ func TestCovAppendCueFromCluster_SimpleBlockReadHeaderError(t *testing.T) {
 	body.Write([]byte{0x00, 0x01, 0x02, 0x03, 0x04}) // 0x00 = invalid ReadDataSize VINT
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after SimpleBlock read error")
 	}
@@ -1077,7 +1077,7 @@ func TestCovAppendCueFromCluster_SimpleBlockTimecodeOverflow(t *testing.T) {
 	body.Write(elemBytes(mkv.IDSimpleBlock, sbData))
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), math.MaxInt64, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), math.MaxInt64, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after timecode overflow")
 	}
@@ -1094,7 +1094,7 @@ func TestCovAppendCueFromCluster_BlockGroupScanError(t *testing.T) {
 	body.Write(elemBytes(mkv.IDBlockGroup, bgBody.Bytes()))
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after BlockGroup scan error")
 	}
@@ -1112,7 +1112,7 @@ func TestCovAppendCueFromCluster_BlockGroupTimecodeOverflow(t *testing.T) {
 	body.Write(elemBytes(mkv.IDBlockGroup, bgBody.Bytes()))
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), math.MaxInt64, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), math.MaxInt64, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after BlockGroup timecode overflow")
 	}
@@ -1126,7 +1126,7 @@ func TestCovAppendCueFromCluster_DefaultCopyNError(t *testing.T) {
 	body.Write([]byte{0x01, 0x02})         // only 2 bytes → CopyN fails
 
 	mw := writer.NewMKVWriter(&seekBuf{})
-	appendCueFromCluster(mw, body.Bytes(), 1_000_000, 0, nil)
+	appendCueFromCluster(&mw.Cues, body.Bytes(), 1_000_000, 0, nil)
 	if len(mw.Cues) != 0 {
 		t.Fatal("expected no cue after CopyN error in default case")
 	}

@@ -125,6 +125,17 @@ func (m *MemFS) FS() *FS {
 			delete(m.files, memKey(path))
 			return nil
 		},
+		Rename: func(oldpath, newpath string) error {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			f, ok := m.files[memKey(oldpath)]
+			if !ok {
+				return &os.PathError{Op: "rename", Path: oldpath, Err: os.ErrNotExist}
+			}
+			m.files[memKey(newpath)] = f
+			delete(m.files, memKey(oldpath))
+			return nil
+		},
 	}
 }
 
@@ -208,6 +219,22 @@ func (rw *memRW) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (rw *memRW) Close() error { return nil }
+
+// Truncate resizes the file, mirroring os.File.Truncate so in-place operations
+// (journal cleanup, rollback) work on MemFS too.
+func (rw *memRW) Truncate(size int64) error {
+	if size < 0 {
+		return fmt.Errorf("memfs: negative truncate %d", size)
+	}
+	if size <= int64(len(rw.f.data)) {
+		rw.f.data = rw.f.data[:size]
+		return nil
+	}
+	grown := make([]byte, size)
+	copy(grown, rw.f.data)
+	rw.f.data = grown
+	return nil
+}
 
 // memInfo is the minimal os.FileInfo Stat returns.
 type memInfo struct {

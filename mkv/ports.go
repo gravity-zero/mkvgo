@@ -34,6 +34,7 @@ type FS struct {
 	MkdirAll  func(path string, perm os.FileMode) error
 	WriteFile func(path string, data []byte, perm os.FileMode) error
 	Remove    func(path string) error
+	Rename    func(oldpath, newpath string) error
 }
 
 // Default FS operations — fallback to os package.
@@ -85,4 +86,11 @@ func (fs *FS) DoRemove(path string) error {
 		return fs.Remove(path)
 	}
 	return os.Remove(path)
+}
+
+func (fs *FS) DoRename(oldpath, newpath string) error {
+	if fs != nil && fs.Rename != nil {
+		return fs.Rename(oldpath, newpath)
+	}
+	return os.Rename(oldpath, newpath)
 }

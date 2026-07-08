@@ -114,7 +114,7 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 			outOff := mw.RelPos()
 
 			// Scan cluster body to produce a cue entry.
-			appendCueFromCluster(mw, body, timecodeScale, outOff, videoTracks)
+			appendCueFromCluster(&mw.Cues, body, timecodeScale, outOff, videoTracks)
 
 			// Write cluster header + verbatim body.
 			if _, err := ebml.WriteElementID(mw.W, mkv.IDCluster); err != nil {
@@ -146,7 +146,7 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 }
 
 // appendCueFromCluster scans the raw bytes of a cluster body to find the first
-// keyframe and adds a CuePoint to mw.Cues. outOff is the output-relative byte
+// keyframe and adds a CuePoint to cues. outOff is the Segment-data-relative byte
 // offset of this cluster's element header (to store in CuePoint.ClusterPos).
 // videoTracks, when non-empty, restricts the keyframe cue to VIDEO tracks:
 // every audio block is flagged keyframe, so cueing "the first keyframe" of a
@@ -155,7 +155,7 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 //
 // Errors inside the scan are silently ignored (corrupt/truncated data): in the
 // worst case we emit no cue for this cluster, which is safe.
-func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outOff int64, videoTracks map[uint64]bool) {
+func appendCueFromCluster(cues *[]mkv.CuePoint, body []byte, timecodeScale, outOff int64, videoTracks map[uint64]bool) {
 	br := bytes.NewReader(body)
 
 	var clusterTS int64
@@ -193,8 +193,8 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 				firstBlockTrack = track
 			}
 			if keyframe && (len(videoTracks) == 0 || videoTracks[track]) {
-				// Found the first cueable keyframe — emit cue and exit.
-				mw.Cues = append(mw.Cues, mkv.CuePoint{
+				// Found the first cueable keyframe - emit cue and exit.
+				*cues = append(*cues, mkv.CuePoint{
 					TimeMs:     tc,
 					Track:      track,
 					ClusterPos: outOff,
@@ -217,7 +217,7 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 				firstBlockTrack = track
 			}
 			if isKey && (len(videoTracks) == 0 || videoTracks[track]) {
-				mw.Cues = append(mw.Cues, mkv.CuePoint{
+				*cues = append(*cues, mkv.CuePoint{
 					TimeMs:     tc,
 					Track:      track,
 					ClusterPos: outOff,
@@ -246,11 +246,11 @@ func appendCueFromCluster(mw *writer.MKVWriter, body []byte, timecodeScale, outO
 		return
 	}
 	lastCueTime := int64(-reindexCueMinGapMs - 1)
-	if len(mw.Cues) > 0 {
-		lastCueTime = mw.Cues[len(mw.Cues)-1].TimeMs
+	if len(*cues) > 0 {
+		lastCueTime = (*cues)[len(*cues)-1].TimeMs
 	}
 	if firstBlockTC-lastCueTime >= reindexCueMinGapMs {
-		mw.Cues = append(mw.Cues, mkv.CuePoint{
+		*cues = append(*cues, mkv.CuePoint{
 			TimeMs:     firstBlockTC,
 			Track:      firstBlockTrack,
 			ClusterPos: outOff,
@@ -348,7 +348,7 @@ func reindexSafeTimecodeMs(v, scale int64) (int64, error) {
 // point, and reports progress. body must be the complete cluster body already
 // read from the source. outOff is mw.RelPos() captured before this call.
 func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, timecodeScale, outOff int64, videoTracks map[uint64]bool) error {
-	appendCueFromCluster(mw, body, timecodeScale, outOff, videoTracks)
+	appendCueFromCluster(&mw.Cues, body, timecodeScale, outOff, videoTracks)
 	if _, err := ebml.WriteElementID(mw.W, mkv.IDCluster); err != nil {
 		return fmt.Errorf("reindex: write cluster ID: %w", err)
 	}
