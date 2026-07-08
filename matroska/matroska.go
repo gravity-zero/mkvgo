@@ -339,6 +339,25 @@ func RecoverInPlace(ctx context.Context, path string, opts ...Options) (bool, er
 	return ops.RecoverInPlace(ctx, path, opts...)
 }
 
+// DamagedRange is one span of srcPath a Salvage run could not carry over
+// verbatim. See ops.DamagedRange.
+type DamagedRange = ops.DamagedRange
+
+// SalvageReport summarises one Salvage run. See ops.SalvageReport.
+type SalvageReport = ops.SalvageReport
+
+// Salvage produces a best-effort copy of a damaged Matroska/WebM file:
+// metadata and cluster payloads are carried over verbatim and the Cues index
+// is rebuilt, exactly like Reindex, but a structural failure inside the
+// cluster stream is NOT fatal - Salvage scans forward for the next valid
+// Cluster and resumes, recording the skipped span in the returned report
+// instead of aborting. Prefer Reindex (which refuses mid-file corruption by
+// design) whenever the source is expected to be intact; reach for Salvage
+// only once Reindex/Validate have confirmed damage. See ops.Salvage.
+func Salvage(ctx context.Context, srcPath, dstPath string, opts ...Options) (*SalvageReport, error) {
+	return ops.Salvage(ctx, srcPath, dstPath, opts...)
+}
+
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	return ops.RemoveTrack(ctx, srcPath, dstPath, removeIDs, opts...)
 }

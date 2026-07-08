@@ -88,6 +88,14 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 > complete on-demand server (this handler + a landing page that plays the
 > output in hls.js and dash.js). `go run ./examples/hls-server -src movie.mkv`.
 
+**Serving over HTTP.** The hand-rolled handler above is the idea in five
+lines; `mkvhttp.Handler(plan)` (package `github.com/gravity-zero/mkvgo/mkvhttp`)
+is the batteries-included version -- strong ETag, conditional GET, Range,
+per-resource `Cache-Control`, CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already
+satisfy its `Resolver` interface as-is. See `docs/library.md` for the full
+semantics table. `mkvgo serve <file.mkv>` is this wired up as a CLI command
+(see `docs/cli.md`).
+
 Combined with a remote source (see below), only the byte ranges a viewer
 actually watches are ever transferred from storage.
 
@@ -101,11 +109,13 @@ The packager accepts, transparently (format sniffed from the first bytes):
 |---|:---:|---|
 | **MKV / WebM** | ✅ | Plans through the **Cues** seek index — needs one (`mkvgo reindex` adds it). |
 | **MP4 / MOV** | ✅ | The moov **sample table is the index** — the plan is *exact by construction*: every resource, master and MPD included, is byte-identical to the full pass. |
-| **`http(s)://` URL** | ✅ (`hls-segment`) | Read over HTTP Range (`httpfs`) — package straight from S3, only the needed ranges transferred. |
+| **`http(s)://` URL** | ✅ (`hls-segment`) | Read over HTTP Range (`httpfs`) -- package straight from a web/CDN origin, only the needed ranges transferred. |
+| **`s3://bucket/key`** | ✅ (`hls-segment`) | Read via SigV4-signed Range requests (`s3fs`) -- same ranged behaviour, straight from S3 or an S3-compatible service. |
 
 ```bash
 mkvgo to-hls movie.mp4 -o stream/                 # MP4 source
 mkvgo hls-segment https://nas/movie.mkv seg00003.m4s -o -   # remote, ranged
+mkvgo hls-segment s3://my-bucket/movie.mkv seg00003.m4s -o - # remote, ranged, S3
 ```
 
 **Audio-only** sources (music, podcasts — no video track) package fine: the

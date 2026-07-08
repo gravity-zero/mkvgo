@@ -17,6 +17,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
+	"github.com/gravity-zero/mkvgo/s3fs"
 )
 
 var JsonOutput bool
@@ -73,6 +74,8 @@ var CmdUsage = map[string]string{
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00] [-pattern part_%03d.mkv ({title} = chapter title)]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> <output.mkv>",
+	"salvage":            "mkvgo salvage <in.mkv> <out.mkv> [--json] (best-effort recovery copy of a damaged file)",
+	"serve":              "mkvgo serve <file.mkv> [-addr :8478] (serve one file's on-demand HLS plan over HTTP)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
@@ -118,9 +121,47 @@ func RequireArgs(args []string, n int, usage string) {
 	}
 }
 
+// isRemoteURL reports whether path is a remote source this CLI can read
+// directly without downloading it first: an http(s) URL (httpfs) or an
+// s3://bucket/key reference (s3fs).
+func isRemoteURL(path string) bool {
+	return httpfs.IsURL(path) || s3fs.IsURL(path)
+}
+
+// remotePort returns the mkv.FS port for a remote URL (http(s) or s3://).
+// s3:// credentials/region/endpoint come from the standard AWS environment
+// variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+// AWS_REGION or AWS_DEFAULT_REGION, AWS_ENDPOINT_URL) - see s3fs.Options.
+func remotePort(url string) *mkv.FS {
+	if s3fs.IsURL(url) {
+		return s3fs.New(s3fs.Options{}).Port()
+	}
+	return httpfs.New().Port()
+}
+
+// s3Hybrid mirrors httpfs.Hybrid for s3:// sources: reads go through s3fs,
+// every other path (including all writes) goes to the operating system.
+func s3Hybrid() *mkv.FS {
+	remote := s3fs.New(s3fs.Options{}).Port()
+	return &mkv.FS{
+		Open: func(path string) (mkv.ReadSeekCloser, error) {
+			if s3fs.IsURL(path) {
+				return remote.DoOpen(path)
+			}
+			return os.Open(path)
+		},
+		Stat: func(path string) (os.FileInfo, error) {
+			if s3fs.IsURL(path) {
+				return remote.DoStat(path)
+			}
+			return os.Stat(path)
+		},
+	}
+}
+
 func OpenMKV(path string) *matroska.Container {
-	if httpfs.IsURL(path) {
-		Fatal("this command needs the full local file; http(s) URLs are supported by the inspection commands (info, tracks, probe, keyframes — and chapters/tags on MP4)")
+	if isRemoteURL(path) {
+		Fatal("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes - and chapters/tags on MP4)")
 	}
 	c, err := matroska.Open(context.Background(), path)
 	if err != nil {
@@ -162,7 +203,7 @@ func isMP4Path(path string) bool {
 // sample table); for MKV the keyframe index is filled from the Cues regardless.
 // The second return is any non-carried MP4 tracks (cover art, hint/timecode).
 func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	if httpfs.IsURL(path) {
+	if isRemoteURL(path) {
 		return loadRemote(path, keyframes)
 	}
 	if path != "-" && isMP4Path(path) {
@@ -200,27 +241,33 @@ func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.Droppe
 	return c, dropped
 }
 
-// sourceFS returns the FS for a remux whose source may be an http(s) URL:
-// the hybrid port (URLs ranged over HTTP, local paths and all writes on the
-// OS), or nil (pure OS) for a local source. A remux reads sequentially, so a
-// remote source amounts to a streamed download.
+// sourceFS returns the FS for a remux whose source may be a remote URL: the
+// hybrid port (remote reads ranged, local paths and all writes on the OS), or
+// nil (pure OS) for a local source. A remux reads sequentially, so a remote
+// source amounts to a streamed download. Supports both http(s):// (httpfs)
+// and s3:// (s3fs; credentials/region/endpoint from the AWS environment).
 func sourceFS(src string) *mkv.FS {
-	if httpfs.IsURL(src) {
+	switch {
+	case s3fs.IsURL(src):
+		return s3Hybrid()
+	case httpfs.IsURL(src):
 		return httpfs.Hybrid()
+	default:
+		return nil
 	}
-	return nil
 }
 
-// loadRemote reads a remote file's metadata over HTTP Range requests — the
-// head-only probe, so only a few ranged kilobytes are transferred whatever the
-// file size. The MP4 probe is fully head-only (chapters/tags included); a
-// remote Matroska read is metadata-only (Info/Tracks/keyframes — chapters,
-// attachments and tags live in a full read, which stays local).
+// loadRemote reads a remote file's metadata over ranged reads - the head-only
+// probe, so only a few ranged kilobytes are transferred whatever the file
+// size. The MP4 probe is fully head-only (chapters/tags included); a remote
+// Matroska read is metadata-only (Info/Tracks/keyframes - chapters,
+// attachments and tags live in a full read, which stays local). url may be an
+// http(s):// or an s3://bucket/key reference.
 func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	hfs := httpfs.New()
+	fs := remotePort(url)
 	if isMP4Path(url) {
 		c, dropped, err := mp4.OpenMeta(context.Background(), url,
-			mp4.Options{Keyframes: keyframes, FS: hfs.Port()})
+			mp4.Options{Keyframes: keyframes, FS: fs})
 		if err != nil {
 			Fatal(err.Error())
 		}
@@ -230,7 +277,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 	if keyframes {
 		ro = append(ro, matroska.WithKeyframeIndex())
 	}
-	c, err := matroska.OpenMetaWithFS(context.Background(), url, hfs.Port(), ro...)
+	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, ro...)
 	if err != nil {
 		Fatal(err.Error())
 	}

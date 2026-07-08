@@ -772,6 +772,41 @@ Once `ReindexInPlace` has returned successfully there is no undo -- the journal 
 
 Choosing a variant: `Reindex` never touches the source (safest, needs a second path), `ReindexReplace` swaps a verified copy over the original (atomic, needs directory permission and transient double disk), `ReindexInPlace` patches the file (file-only permission, no disk duplication, seconds instead of a full copy on large files).
 
+### Salvage (damaged files)
+
+`Reindex`/`Validate`/`BlockReader` refuse mid-file corruption by design -- that stays. `ops.Salvage` is the separate, explicitly lossy-tolerant operation: it walks `srcPath` exactly like `Reindex` (metadata elements and cluster payloads copied verbatim, the Cues index rebuilt from real video keyframes), but a structural failure inside the cluster stream -- a header that will not decode, a declared size that overflows, a cluster body whose children do not parse to its end -- is not fatal. It scans forward, bounded, for the next structurally valid Cluster and resumes there, recording the skipped span. A truncated source yields exactly one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `Reindex`.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/ops"
+
+report, err := ops.Salvage(ctx, "damaged.mkv", "recovered.mkv")
+if err != nil {
+    // A hard failure: the bounded resync scan gave up without reaching a
+    // valid Cluster or real EOF, or a genuine I/O error. No output on failure.
+    return err
+}
+for _, dr := range report.DamagedRanges {
+    fmt.Printf("lost bytes [%d,%d), approx %dms-%dms\n", dr.StartOffset, dr.EndOffset, dr.ApproxStartMs, dr.ApproxEndMs)
+}
+fmt.Printf("%d clusters copied, %d bytes recovered, %d bytes skipped\n",
+    report.ClustersCopied, report.BytesCopied, report.BytesSkipped)
+```
+
+`SalvageReport`:
+
+| Field | Meaning |
+| --- | --- |
+| `ClustersCopied` | Number of clusters carried over verbatim into the output. |
+| `BytesCopied` | Total source bytes (metadata elements + cluster payloads) successfully carried over. |
+| `BytesSkipped` | Total source bytes lost to damage (sum of every `DamagedRange`'s span). |
+| `DamagedRanges` | `[]DamagedRange{StartOffset, EndOffset, ApproxStartMs, ApproxEndMs}`, one entry per skipped span, in file order. |
+
+Never in-place: `dstPath` is always a separate file. The result is reopened afterwards and its Cues checked against the ones built during the walk -- the same light verification `Reindex` always runs -- so a bug in `Salvage` itself (not the source's damage) still surfaces as an error.
+
+Prefer `Reindex` whenever the source is expected to be intact -- it fails loudly on any corruption instead of silently accepting data loss. Reach for `Salvage` only once `Reindex`/`Validate` have confirmed damage and the goal is the best possible recovery, not proof of fidelity.
+
+The facade re-exports the type and function: `matroska.Salvage`, `matroska.SalvageReport`, `matroska.DamagedRange`.
+
 ---
 
 ## Stream I/O (non-seekable io.Reader / io.Writer)
@@ -998,6 +1033,62 @@ everything else (including writes) to the OS:
 err := mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4",
     mp4.Options{FS: httpfs.Hybrid(), FastStart: true})   // a streamed download
 ```
+
+### Remote files over S3 (`s3fs`)
+
+`github.com/gravity-zero/mkvgo/s3fs` is a read-only `mkv.FS` port for S3 (or an S3-compatible service): it reuses `httpfs` for the actual Range/window mechanics, wiring an `*http.Client` whose `http.RoundTripper` signs every request with AWS Signature Version 4 -- `crypto/hmac` + `crypto/sha256` only, no AWS SDK dependency.
+
+```go
+import "github.com/gravity-zero/mkvgo/s3fs"
+
+fs := s3fs.New(s3fs.Options{Region: "us-east-1"}) // creds/region/endpoint fall back to the AWS env
+c, err := matroska.OpenMetaWithFS(ctx, "s3://my-bucket/movies/one.mkv", fs.Port())
+fmt.Println(c.Tracks, fs.BytesFetched()) // a window or two, whatever the file size
+```
+
+`s3fs.Options`:
+
+| Field | Meaning |
+| --- | --- |
+| `Region` | AWS region. Falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `"us-east-1"`. |
+| `Endpoint` | Overrides the S3 host (S3-compatible services). Empty means `https://s3.<region>.amazonaws.com`. Falls back to `AWS_ENDPOINT_URL`. May include a scheme; a bare `host:port` is treated as `https`. |
+| `AccessKey`, `SecretKey`, `SessionToken` | SigV4 credentials. Fall back to `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`. |
+| `PathStyle` | `https://<host>/<bucket>/<key>` instead of the default virtual-hosted `https://<bucket>.<host>/<key>`. Needed by some S3-compatible services and by bucket names containing dots. |
+| `WindowSize` | Ranged-fetch granularity in bytes, passed through to `httpfs.Options.WindowSize`. |
+
+Signing covers GET/HEAD with an unsigned payload (`x-amz-content-sha256: UNSIGNED-PAYLOAD` -- this package never needs to sign a request body, only Range reads), the host, date, session token (when present) and `Range` header, with the S3 URI-encoding rule for the key (each `/`-separated segment percent-encoded, slashes kept literal). The FS is read-only, like `httpfs`.
+
+---
+
+## HTTP serving (`mkvhttp`)
+
+`github.com/gravity-zero/mkvgo/mkvhttp` is a drop-in `http.Handler` for the on-demand plans (`mp4.PlanHLS`, `mp4.PlanABR`): nothing is pre-generated on disk, every resource a player requests is built the first time it is asked for, and static-VOD HTTP semantics come for free.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkvhttp"
+
+plan, err := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{})
+http.Handle("/hls/", http.StripPrefix("/hls/", mkvhttp.Handler(plan)))
+http.ListenAndServe(":8478", nil)
+```
+
+`mp4.HLSPlan` and `mp4.ABRPlan` already satisfy `mkvhttp.Resolver` as-is -- both declare `func (p *T) Resource(ctx context.Context, name string) ([]byte, string, error)`, matching the interface exactly -- so `Handler(plan)` works directly with either; no adapter is needed. A `Resolver` backed by anything else can be written by hand, or wrapped with `mkvhttp.ResolverFunc` for a plain function.
+
+Semantics:
+
+| Aspect | Behaviour |
+| --- | --- |
+| Methods | `GET`/`HEAD` only; `405` (with `Allow`) otherwise. `OPTIONS` gets a `204` CORS preflight response when `Options.AllowCORS` is set. |
+| Resource name | The request path with its leading slash trimmed. Mount under a prefix with `http.StripPrefix`. |
+| ETag | Strong: the SHA-256 of the resource's bytes, quoted. Deterministic -- two independent handlers over the same plan produce the identical ETag. |
+| Conditional GET | A matching `If-None-Match` gets a bare `304`. |
+| Content-Type | From the `Resolver`, set on the response before `http.ServeContent` runs, so its own name-extension sniffing never overrides it. |
+| Range | Served by `http.ServeContent` over a `bytes.Reader` (no modtime -- the ETag already identifies the exact bytes). |
+| Cache-Control | `.m3u8`/`.mpd` get `no-cache` (their bytes name segments that can be re-derived); every other resource gets `public, max-age=31536000, immutable` -- safe because a segment/init name always maps to the same bytes for a given source (see "Deterministic outputs" below). |
+| Errors | A `Resolver` error that is (or wraps, via `%w`) `mkvhttp.ErrNotFound` answers `404`; any other error answers `502` with a terse body. |
+| CORS | `Options{AllowCORS: true}` adds `Access-Control-Allow-Origin: *` and exposes the headers a player needs (`Content-Length`, `Content-Range`, `ETag`, `Accept-Ranges`), plus the `OPTIONS` preflight response above. |
+
+The CLI's `mkvgo serve` (see `docs/cli.md`) is this package wired to `mp4.PlanHLS` with a graceful-shutdown `net/http.Server`.
 
 ---
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -16,8 +15,8 @@ import (
 // Matroska builds the complete keyframe index from a sequential structural pass.
 func CmdKeyframes(path string) {
 	var fs *mkv.FS
-	if httpfs.IsURL(path) {
-		fs = httpfs.New().Port() // head-only over HTTP Range requests
+	if isRemoteURL(path) {
+		fs = remotePort(path) // head-only over HTTP Range requests / s3 SigV4
 	}
 	var ks []int64
 	if isMP4Path(path) {

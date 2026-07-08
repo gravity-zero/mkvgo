@@ -18,19 +18,29 @@ operation). `validate` also exits `1` when error-severity issues are found
 (`-strict` makes warnings fail too) and `compare` when the files differ, so
 they can gate scripts (`mkvgo validate f.mkv && ...`).
 
-**Remote files.** An `http://`/`https://` URL is accepted as the input by the
-inspection commands (`info`, `tracks`, `probe`, `keyframes` — and `chapters`/
-`tags`/`attachments` on MP4, whose probe is fully head-only) and as the
-**source** of `to-mp4`, `from-mp4` and `to-hls`. Reads go through HTTP Range
-requests: inspection transfers a few ranged kilobytes whatever the file size;
-a remux reads sequentially (a streamed download). The server must honour
-`Range` (S3, nginx, caddy… do); one that ignores it gets an explicit error,
-never a silent full download. Remote Matroska metadata is head-only
-(Info/Tracks/keyframes) — chapters, attachments and tags need the local file.
+**Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
+is accepted as the input by the inspection commands (`info`, `tracks`,
+`probe`, `keyframes` -- and `chapters`/`tags`/`attachments` on MP4, whose probe
+is fully head-only) and as the **source** of `to-mp4`, `from-mp4` and
+`to-hls`. Reads go through ranged requests: inspection transfers a few ranged
+kilobytes whatever the file size; a remux reads sequentially (a streamed
+download). The server must honour `Range` (S3, nginx, caddy… do); one that
+ignores it gets an explicit error, never a silent full download. Remote
+Matroska metadata is head-only (Info/Tracks/keyframes) -- chapters,
+attachments and tags need the local file.
+
+`s3://` sources are signed with AWS Signature Version 4 (stdlib
+`crypto/hmac`/`crypto/sha256` only, no SDK). Credentials, region and endpoint
+come from the standard AWS environment variables:
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`,
+`AWS_REGION` (or `AWS_DEFAULT_REGION`, defaulting to `us-east-1` if neither is
+set), and `AWS_ENDPOINT_URL` for S3-compatible services (path-style vs
+virtual-hosted-style is a library-only option -- see `docs/library.md`).
 
 ```bash
 mkvgo probe https://nas.local/library/movie.mkv     # a few KB transferred
 mkvgo to-mp4 https://nas.local/movie.mkv local.mp4  # remux while downloading
+AWS_REGION=eu-west-1 mkvgo probe s3://my-bucket/movies/one.mkv
 ```
 
 ---
@@ -655,6 +665,31 @@ mkvgo reindex-inplace movie.mkv --deep-verify
 mkvgo reindex-inplace movie.mkv --rollback
 ```
 
+### salvage
+
+Best-effort recovery copy of a damaged MKV or WebM file. `reindex` and `validate` refuse mid-file corruption by design; `salvage` is the explicitly lossy-tolerant counterpart: metadata elements and cluster payloads are copied verbatim and the Cues index is rebuilt, exactly like `reindex`, but a structural failure inside the cluster stream (a corrupt element header, a zeroed region, a size that overflows) is not fatal. `salvage` scans forward for the next structurally valid Cluster and resumes there, recording the skipped byte range instead of aborting the whole file. A truncated source yields one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `reindex`.
+
+```
+mkvgo salvage <in.mkv> <out.mkv> [--json]
+```
+
+- `--json` prints the report (`SalvageReport`) as JSON instead of the human summary.
+- Never in-place: `<out.mkv>` is always a separate file.
+- Exit contract: exit 0 whenever an output file was written, damage or not. Exit 1 with no output only on a hard failure -- the bounded resync scan giving up without reaching a valid Cluster or real EOF (garbage longer than the internal cap), or a genuine I/O error.
+
+```bash
+mkvgo salvage damaged.mkv recovered.mkv
+```
+
+```
+salvaged damaged.mkv -> recovered.mkv
+  41 cluster(s) copied, 812.4 MB recovered
+  damaged range 1: offset 933184-941312 (7.9 KB), approx 00:04:12-00:04:15
+  recovered ~99.9% of the media (7.9 KB skipped across 1 damaged range(s))
+```
+
+A clean source prints `no damage found (equivalent to reindex)` and reports zero damaged ranges.
+
 ---
 
 ## Remux
@@ -836,6 +871,27 @@ mkvgo hls-segment movie.mkv seg00042.m4s           # same, by player-facing name
 mkvgo hls-segment movie.mkv sub1.vtt               # a subtitle rendition
 mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 3's ranges
 ```
+
+### serve
+
+Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wrapped in a long-running `net/http` server (`mkvhttp.Handler`), so a player can be pointed straight at it: nothing is written to disk, every resource is built the first time it is requested.
+
+```
+mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre]
+```
+
+- `-addr` sets the listen address (default `:8478`); the command prints the playable master playlist URL on startup.
+- Accepts the same shared HLS flags as `to-hls`/`hls-segment` (`-segment`, `--keep-tracks`, `--keep-lang`, ...).
+- Responses carry a strong ETag (SHA-256 of the bytes), support `Range` (206 partial content) and conditional `If-None-Match` (304), and set `Cache-Control` per resource class: `no-cache` for playlists/manifests (`.m3u8`/`.mpd`), `public, max-age=31536000, immutable` for everything else (segments and init segments are a deterministic function of the source, so caching them forever is safe). CORS headers are enabled, for a browser-based player on another origin.
+- Ctrl-C shuts the server down gracefully.
+
+```bash
+mkvgo serve movie.mkv -addr :8080
+# serving movie.mkv
+#   http://localhost:8080/master.m3u8
+```
+
+See `docs/library.md` (`mkvhttp.Handler`) for the full caching/ETag/Range semantics table, and `docs/streaming.md` for a short pointer on serving over HTTP from library code.
 
 ### to-abr
 

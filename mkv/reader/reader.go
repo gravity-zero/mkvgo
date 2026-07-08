@@ -637,21 +637,41 @@ var clusterChildIDs = map[uint32]bool{
 // at the Cluster ID and returns its offset; it returns -1 (with a nil error)
 // when no valid Cluster remains before limit. Only genuine I/O errors are returned.
 func (p *parser) resyncToCluster(limit int64) (int64, error) {
-	from, err := p.r.Seek(0, io.SeekCurrent)
+	return ResyncToCluster(p.r, limit)
+}
+
+// ResyncToCluster scans r forward from its current position for the next
+// structurally valid Cluster (element ID 0x1F43B675 followed by a recognizable
+// first child), bounded by limit (an absolute offset, or -1 to scan until
+// EOF). A candidate is accepted only when its declared size (when known) fits
+// within limit and its first child decodes as a real cluster-level element, so
+// a clusterMagic byte sequence occurring by chance inside corrupted data is
+// skipped rather than trusted. On success it leaves r positioned at the
+// Cluster's element ID and returns that offset; it returns -1 with a nil error
+// when no valid Cluster is found before limit (including a genuine EOF). Only
+// a real I/O failure is returned as an error.
+//
+// This is the same bounded, validated resync parseSegment falls back to on a
+// corrupted or zero-padded region; it is exported so an out-of-parser
+// recovery tool (ops.Salvage) can reuse it without pulling in the full
+// parser/Container machinery. A caller wanting a hard cap on the scan
+// distance (rather than "until segment end") passes limit = currentOffset+cap.
+func ResyncToCluster(r io.ReadSeeker, limit int64) (int64, error) {
+	from, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return -1, err
 	}
 	for {
-		off, err := p.scanForMagic(from, limit)
+		off, err := scanForClusterMagic(r, from, limit)
 		if err != nil || off < 0 {
 			return -1, err
 		}
-		valid, err := p.isClusterAt(off, limit)
+		valid, err := isClusterAt(r, off, limit)
 		if err != nil {
 			return -1, err
 		}
 		if valid {
-			if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+			if _, err := r.Seek(off, io.SeekStart); err != nil {
 				return -1, err
 			}
 			return off, nil
@@ -660,12 +680,12 @@ func (p *parser) resyncToCluster(limit int64) (int64, error) {
 	}
 }
 
-// scanForMagic returns the absolute offset of the next clusterMagic at or after
-// `from` and before `limit` (-1 = until EOF), or -1 if none. It reads forward in
-// windows, carrying the last few bytes so a magic split across a read boundary
-// is still found.
-func (p *parser) scanForMagic(from, limit int64) (int64, error) {
-	if _, err := p.r.Seek(from, io.SeekStart); err != nil {
+// scanForClusterMagic returns the absolute offset of the next clusterMagic at
+// or after `from` and before `limit` (-1 = until EOF), or -1 if none. It reads
+// forward in windows, carrying the last few bytes so a magic split across a
+// read boundary is still found.
+func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
+	if _, err := r.Seek(from, io.SeekStart); err != nil {
 		return -1, err
 	}
 	const window = 64 << 10
@@ -674,7 +694,7 @@ func (p *parser) scanForMagic(from, limit int64) (int64, error) {
 	next := from
 	for {
 		base := next - int64(tail) // absolute offset of buf[0]
-		n, rerr := p.r.Read(buf[tail : tail+window])
+		n, rerr := r.Read(buf[tail : tail+window])
 		end := tail + n
 
 		search := buf[:end]
@@ -706,19 +726,19 @@ func (p *parser) scanForMagic(from, limit int64) (int64, error) {
 // isClusterAt reports whether a real Cluster begins at off: the element ID must
 // be Cluster, its declared size must decode and (when known) fit within limit,
 // and its first child must be a recognizable cluster-level element.
-func (p *parser) isClusterAt(off, limit int64) (bool, error) {
-	if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+func isClusterAt(r io.ReadSeeker, off, limit int64) (bool, error) {
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
 		return false, err
 	}
-	h, _, err := p.readHeader()
+	h, _, err := ebml.ReadElementHeader(r)
 	if err != nil || h.ID != mkv.IDCluster {
 		return false, nil
 	}
-	bodyStart, _ := p.r.Seek(0, io.SeekCurrent)
+	bodyStart, _ := r.Seek(0, io.SeekCurrent)
 	if h.Size >= 0 && limit >= 0 && bodyStart+h.Size > limit {
 		return false, nil // declared size overruns the segment — not a real cluster
 	}
-	child, _, err := p.readHeader()
+	child, _, err := ebml.ReadElementHeader(r)
 	if err != nil {
 		return false, nil
 	}
