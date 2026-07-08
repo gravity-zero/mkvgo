@@ -128,6 +128,56 @@ export interface RemuxOptions extends AbortOptions {
   contentHashes?: boolean
   /** HLS only: target segment duration in seconds (default 6). */
   segmentSeconds?: number
+  /**
+   * HLS/PlanHLS only: shift every subtitle cue's timing by this many
+   * milliseconds (negative allowed) - a virtual per-session resync, no file
+   * rewritten: re-open with a new offset and the same source serves a
+   * different sync instantly. 0 (the default) leaves cues untouched.
+   */
+  subOffsetMs?: number
+}
+
+/**
+ * Common Encryption (CENC, ISO/IEC 23001-7) packaging: sample-level AES-CTR
+ * ("cenc") or AES-CBC pattern ("cbcs"), with a caller-supplied key/IV.
+ * Packaging only - no license server, no DRM handshake; the caller owns key
+ * delivery (keyURI, or a real license server for an EME-capable player).
+ * PSSH boxes are not exposed by this wasm build (v1); build them
+ * server-side and inject them if a DRM system needs one.
+ */
+export interface CENCOptions {
+  /** "cenc" (AES-CTR) or "cbcs" (AES-CBC, 1:9 pattern on video). */
+  scheme: 'cenc' | 'cbcs'
+  /** The 16-byte AES key. Never written to the output. */
+  key: Uint8Array
+  /** The 16-byte key identifier (tenc's default_KID). */
+  keyId: Uint8Array
+  /** Base IV: 8 or 16 bytes for "cenc", 16 bytes (a full AES block) for "cbcs". */
+  iv: Uint8Array
+  /**
+   * What the HLS EXT-X-KEY line advertises as URI="..." and what an
+   * EME-capable player's license request ultimately needs to resolve. Left
+   * empty, it defaults to a data: URI embedding key directly - convenient for
+   * local testing, but it puts the raw key in the playlist text; production
+   * deployments should always set a real keyURI.
+   */
+  keyURI?: string
+}
+
+/** Options shared by openHLS and openABR: RemuxOptions plus CENC packaging. */
+export interface HLSOptions extends RemuxOptions {
+  /** Package every media segment under Common Encryption. */
+  cenc?: CENCOptions
+}
+
+/** Options for openConcat: RemuxOptions plus language-based track selection. */
+export interface ConcatOptions extends RemuxOptions {
+  /**
+   * Keep only the video track(s) plus audio/subtitle tracks whose language
+   * matches, resolved from the first source's metadata - the wasm
+   * counterpart of the CLI's --keep-lang. Ignored when keepTracks is set.
+   */
+  keepLangs?: string[]
 }
 
 export interface RemuxResult {
@@ -188,6 +238,26 @@ export interface ABRPlanHandle {
   close(): void
 }
 
+/**
+ * An on-demand concatenated HLS presentation over several sources played as
+ * ONE continuous session (e.g. consecutive episodes), no player reload.
+ * Resource names are "master.m3u8"/"playlist.m3u8"/"audio{j}.m3u8"/
+ * "sub{j}.m3u8"/"sub{j}.vtt" for the top-level (concatenated) presentation,
+ * and "p{k}/<name>" (k 0-based) for a resource of part k. Blob sources are
+ * read through ranged slices, so a concatenated session over huge local
+ * files stays memory-bounded.
+ */
+export interface ConcatPlanHandle {
+  /** Number of parts (sources) the session carries. */
+  numParts: number
+  /** Every resource name: top-level playlists/subtitles plus each part's "p{k}/<name>". */
+  resources: string[]
+  /** Build one resource (e.g. "master.m3u8" or "p1/seg00007.m4s"). */
+  resource(name: string, options?: AbortOptions): Promise<HLSResource>
+  /** Release the handle's callbacks. */
+  close(): void
+}
+
 export interface MkvGoApi {
   version(): string
   /**
@@ -210,14 +280,22 @@ export interface MkvGoApi {
    * so even a huge local file plays with bounded memory. The source must
    * carry a Cues index.
    */
-  openHLS(input: Uint8Array | Blob, options?: RemuxOptions): Promise<HLSPlanHandle>
+  openHLS(input: Uint8Array | Blob, options?: HLSOptions): Promise<HLSPlanHandle>
   /**
    * Open an on-demand multi-variant (ABR) HLS presentation from several
    * pre-encoded quality variants of one title, best first. One handle serves
    * the whole ladder — master plus every variant's resources — built on demand.
    * Blob/File variants are read through ranged slices (memory-bounded).
    */
-  openABR(inputs: (Uint8Array | Blob)[], options?: RemuxOptions): Promise<ABRPlanHandle>
+  openABR(inputs: (Uint8Array | Blob)[], options?: HLSOptions): Promise<ABRPlanHandle>
+  /**
+   * Open an on-demand concatenated HLS presentation over several sources
+   * played as ONE continuous session, in playback order. One handle serves
+   * the whole concatenation - top-level playlists plus every part's own
+   * resources - built on demand. Blob/File sources are read through ranged
+   * slices (memory-bounded).
+   */
+  openConcat(inputs: (Uint8Array | Blob)[], options?: ConcatOptions): Promise<ConcatPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
 }

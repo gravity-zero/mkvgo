@@ -47,15 +47,18 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` — `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
 | `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
 | `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` — pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` — `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
+| `openConcat(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - sources in playback order | on-demand concatenated handle: `{ numParts, resources, resource(name) → {data, contentType}, close() }` - one continuous HLS session over several sources, `resource("master.m3u8")` or `resource("p1/seg00007.m4s")` |
 | `extractSubtitleVTT(input, trackId)` | `Uint8Array` (MKV or MP4) | WebVTT `string` |
 | `version()` | — | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
 `{ fastStart?, skipUnsupported?, flattenSubs?, nativeWebVTT?,
-mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks? }` — the same
-semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an array of track
-IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1, 2] })` serves a
-"VF only" version from one file, no copy.
+mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs? }`
+- the same semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an
+array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
+2] })` serves a "VF only" version from one file, no copy. `openHLS`/`openABR`
+additionally accept a `cenc` option (Common Encryption); `openConcat`
+additionally accepts `keepLangs`. See below for both.
 
 Input format is sniffed from the first bytes (EBML magic vs ISO-BMFF box), not
 from a file name.
@@ -83,6 +86,91 @@ playlists/init/segments (video: `init.mp4`/`seg*.m4s`; audio track k:
 one WebVTT rendition per text subtitle track (`sub1.m3u8` / `sub1.vtt`);
 cover art and global tags ride on the video init segment. The source must
 carry a Cues index (real muxers always write one).
+
+## Virtual subtitle resync (`subOffsetMs`)
+
+A viewer's subtitle drifts out of sync; `subOffsetMs` shifts every WebVTT cue
+by that many milliseconds (negative allowed), with **no file rewritten** -
+re-open with a new offset and the same source serves a different sync
+instantly:
+
+```js
+const synced = await MkvGo.openHLS(file, { segmentSeconds: 6, subOffsetMs: -350 })   // subtitles 350ms earlier
+```
+
+A cue whose shifted end lands at or before 0 is dropped; a cue straddling 0 is
+clamped to start at 0. Only the subtitle WebVTT renditions shift - video/audio
+segments are byte-identical to a plan opened without the option. `subOffsetMs`
+is also honoured by `openABR` and `openConcat`, and by the eager
+`remuxToHLS` (same option object).
+
+## Common Encryption (`cenc`)
+
+`openHLS`/`openABR` accept a `cenc` option to package every media segment
+under Common Encryption (ISO/IEC 23001-7) - the sample-level encryption an
+EME-capable player's own DRM path (Widevine/PlayReady/FairPlay CDM) consumes.
+This is **packaging only**: no license server, no DRM handshake - the caller
+supplies the key and its delivery (`keyURI`).
+
+```js
+const plan = await MkvGo.openHLS(file, {
+  segmentSeconds: 6,
+  cenc: {
+    scheme: 'cenc',                 // or 'cbcs' (AES-CBC, 1:9 pattern on video)
+    key: key16,                     // 16-byte Uint8Array, never written to the output
+    keyId: kid16,                   // 16-byte Uint8Array (tenc default_KID)
+    iv: iv8,                        // 8 or 16 bytes for "cenc", 16 for "cbcs"
+    keyURI: 'https://api.example.com/key',
+  },
+})
+```
+
+Video must be H.264 or HEVC (subsample encryption: the NAL length + header
+stay clear, the rest is protected); a bad key/keyId/IV length or an
+unsupported codec rejects the returned Promise with the same error the CLI's
+`--cenc-*` flags surface. Unlike `Options.Encrypt` (AES-128, HLS-only), a CENC
+presentation still gets a DASH manifest (with a `ContentProtection` element).
+**PSSH boxes are not exposed by this wasm build** (v1) - build them
+server-side and inject them into the init segment yourself if a DRM system
+needs one; see [library.md](library.md#common-encryption-cenc) for the full
+detail (clear/protected split, IV derivation).
+
+## Gapless multi-file sessions (`openConcat`)
+
+`openConcat` plays several sources - e.g. consecutive episodes - as ONE
+continuous HLS session: a single `master.m3u8`/`playlist.m3u8`/`audioN.m3u8`,
+so a player never reloads and never sees a session boundary. Nothing is
+pre-generated: each part packages into its own `p{k}/` resources on demand,
+exactly as `openHLS` would standalone, and the top-level playlists stitch them
+together with `EXT-X-DISCONTINUITY`.
+
+```js
+// binge-play: one continuous <video> across several episode files, no reload
+const plan = await MkvGo.openConcat(episodeFiles, { segmentSeconds: 6 })
+const ms = new MediaSource()
+video.src = URL.createObjectURL(ms)
+ms.addEventListener('sourceopen', async () => {
+  const codecs = /CODECS="([^"]+)"/.exec(new TextDecoder().decode((await plan.resource('master.m3u8')).data))[1]
+  const sb = ms.addSourceBuffer(`video/mp4; codecs="${codecs}"`)
+  const append = (b) => new Promise((r) => { sb.addEventListener('updateend', r, { once: true }); sb.appendBuffer(b) })
+  for (let k = 0; k < plan.numParts; k++) {
+    await append((await plan.resource(`p${k}/init.mp4`)).data)
+    const segs = plan.resources.filter((n) => new RegExp(`^p${k}/seg\\d+\\.m4s$`).test(n)).sort()
+    for (const name of segs) await append((await plan.resource(name)).data)
+  }
+  ms.endOfStream()
+})
+```
+
+Sources must be compatible: same video codec family, same kept-audio layout
+(count, codec, language, order) - checked from track metadata alone before any
+part is packaged, so an incompatible set fails fast. Subtitles ride along only
+when every part's rendition layout aligns (count/language/name/forced);
+otherwise they are dropped from the concatenated presentation, and the
+video/audio concatenation still plays. `opts.keepLangs` (an array of language
+codes, e.g. `['fre']`) resolves a language-based track subset from the
+**first** source's metadata - video is always kept - the wasm equivalent of
+the CLI's `--keep-lang`; ignored when `keepTracks` is set.
 
 ## In-browser HLS origin (Service Worker)
 

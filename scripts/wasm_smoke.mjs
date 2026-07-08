@@ -120,6 +120,16 @@ check(served.sha256 === want && served.sha256 === direct.sha256,
   'resource sha256 is the content hash (stable ETag)')
 abr.close(); abrBlob.close()
 
+// --- on-demand concat: two identical sources played as one continuous session ---
+const concat = await MkvGo.openConcat([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
+check(concat.numParts === 2 && concat.resources.includes('master.m3u8') && concat.resources.length > 0,
+  `openConcat ${concat.numParts} parts, ${concat.resources.length} resources`)
+const concatMaster = new TextDecoder().decode((await concat.resource('master.m3u8')).data)
+check(concatMaster.includes('#EXT-X-STREAM-INF'), 'concat master declares a rendition')
+const p1Seg = await concat.resource('p1/seg00001.m4s')
+check(p1Seg.data.length > 0, 'concat part 1 segment served')
+concat.close()
+
 // --- on-demand subtitles: the windowed WebVTT rendition over Blob ranged
 // reads, byte-identical to the full pass (prefix scan, whole track, and the
 // declarative resource surface a player actually hits) ---
@@ -142,6 +152,17 @@ check(Buffer.compare(wholeSub.data, hlsSub.files['sub1.vtt']) === 0,
   'whole-track subtitle byte-identical')
 planSub.close()
 
+// --- subOffsetMs: virtual per-session subtitle resync, media untouched ---
+const planSub0 = await MkvGo.openHLS(subBytes, { segmentSeconds: 2, subOffsetMs: 0 })
+const planSub5000 = await MkvGo.openHLS(subBytes, { segmentSeconds: 2, subOffsetMs: 5000 })
+const vtt0 = (await planSub0.resource('sub1.vtt')).data
+const vtt5000 = (await planSub5000.resource('sub1.vtt')).data
+check(Buffer.compare(vtt0, vtt5000) !== 0, 'subOffsetMs shifts the subtitle VTT cue timestamps')
+const vseg0 = await planSub0.segment(0)
+const vseg5000 = await planSub5000.segment(0)
+check(Buffer.compare(vseg0, vseg5000) === 0, 'subOffsetMs does not touch the video media segment')
+planSub0.close(); planSub5000.close()
+
 // --- MP4-source on-demand plan: sample-table backend, iframe playlist exposed ---
 const planMp4 = await MkvGo.openHLS(mp4.data, { segmentSeconds: 0.5 })
 check(planMp4.numSegments > 0 && planMp4.resources.includes('iframe.m3u8'),
@@ -149,6 +170,23 @@ check(planMp4.numSegments > 0 && planMp4.resources.includes('iframe.m3u8'),
 const ifr = await planMp4.resource('iframe.m3u8')
 check(new TextDecoder().decode(ifr.data).includes('#EXT-X-I-FRAMES-ONLY'), 'iframe playlist structure')
 planMp4.close()
+
+// --- CENC: sample-level Common Encryption packaging (structure only; the
+// decrypt round-trip itself is proven in the Go tests) ---
+const cencKey = new TextEncoder().encode('0123456789abcdef') // 16 bytes
+const cencKeyId = new TextEncoder().encode('KEYID-0123456789') // 16 bytes
+const cencIv = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]) // 8 bytes
+const planCenc = await MkvGo.openHLS(mkvBytes,
+  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: cencKey, keyId: cencKeyId, iv: cencIv } })
+const cencInit = await planCenc.resource('init.mp4')
+check(cencInit.data.length > 0, 'CENC init.mp4 served')
+const cencSeg = await planCenc.segment(0)
+check(cencSeg.length > 0, 'CENC segment served')
+planCenc.close()
+await MkvGo.openHLS(mkvBytes,
+  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: new Uint8Array(4), keyId: cencKeyId, iv: cencIv } })
+  .then(() => check(false, 'invalid CENC key length must reject'))
+  .catch(() => check(true, 'invalid CENC key length rejects'))
 
 // --- AbortSignal: an aborted call rejects instead of running ---
 const aborted = AbortSignal.abort()

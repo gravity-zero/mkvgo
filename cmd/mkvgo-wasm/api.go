@@ -275,7 +275,109 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 			o.KeepTracks = append(o.KeepTracks, uint64(k.Index(i).Int()))
 		}
 	}
+	if s := v.Get("subOffsetMs"); s.Type() == js.TypeNumber {
+		o.SubtitleOffsetMs = int64(s.Float())
+	}
 	return o
+}
+
+// readKeepLangs reads the optional `keepLangs` array of language codes from
+// the given opts object (openConcat's CLI-equivalent --keep-lang).
+func readKeepLangs(v js.Value) []string {
+	if v.Type() != js.TypeObject {
+		return nil
+	}
+	k := v.Get("keepLangs")
+	if k.Type() != js.TypeObject || k.Get("length").Type() != js.TypeNumber {
+		return nil
+	}
+	n := k.Get("length").Int()
+	langs := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		if l := k.Index(i).String(); l != "" {
+			langs = append(langs, strings.ToLower(l))
+		}
+	}
+	return langs
+}
+
+// resolveKeepLangs turns language codes into a KeepTracks ID list, resolved
+// from the first source's track metadata: every video track (HLS needs
+// video) plus every audio/subtitle track whose language matches - the wasm
+// counterpart of the CLI's resolveKeepLangs (cmd/mkvgo/commands/hls.go).
+// Concat requires every part's kept track layout to align, so the IDs
+// resolved from part 0 apply uniformly to every source.
+func resolveKeepLangs(ctx context.Context, fs *mkv.FS, path string, langs []string) ([]uint64, error) {
+	rs, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer rs.Close()
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(rs, head); err != nil {
+		return nil, fmt.Errorf("read head: %w", err)
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	format, err := sniffFormat(head)
+	if err != nil {
+		return nil, err
+	}
+	var tracks []mkv.Track
+	switch format {
+	case "mkv":
+		c, err := matroska.ReadMeta(ctx, rs, path)
+		if err != nil {
+			return nil, err
+		}
+		tracks = c.Tracks
+	case "mp4":
+		c, _, err := mp4.ReadMeta(ctx, rs, path)
+		if err != nil {
+			return nil, err
+		}
+		tracks = c.Tracks
+	}
+	want := make(map[string]bool, len(langs))
+	for _, l := range langs {
+		want[l] = true
+	}
+	var ids []uint64
+	for _, t := range tracks {
+		if t.Type == mkv.VideoTrack || want[strings.ToLower(t.Language)] {
+			ids = append(ids, t.ID)
+		}
+	}
+	return ids, nil
+}
+
+// readCENCOpts reads an optional `cenc` object from the given opts object:
+// { scheme: "cenc"|"cbcs", key: Uint8Array(16), keyId: Uint8Array(16),
+// iv: Uint8Array(8|16), keyURI?: string }. Length/scheme validation happens
+// on the Go side (mp4.CENCOptions.validate, via PlanHLS/PlanABR), so a bad
+// shape surfaces as the same rejected-promise error every other option does.
+// PSSH boxes are not exposed in this wasm build (see docs/wasm.md).
+func readCENCOpts(v js.Value) (*mp4.CENCOptions, error) {
+	if v.Type() != js.TypeObject {
+		return nil, nil
+	}
+	c := v.Get("cenc")
+	if c.Type() != js.TypeObject {
+		return nil, nil
+	}
+	key, keyID, iv := c.Get("key"), c.Get("keyId"), c.Get("iv")
+	if !isUint8(key) || !isUint8(keyID) || !isUint8(iv) {
+		return nil, fmt.Errorf("cenc: key, keyId and iv must be Uint8Array")
+	}
+	out := &mp4.CENCOptions{Key: toGoBytes(key), KeyID: toGoBytes(keyID), IV: toGoBytes(iv)}
+	if s := c.Get("scheme"); s.Type() == js.TypeString {
+		out.Scheme = s.String()
+	}
+	if u := c.Get("keyURI"); u.Type() == js.TypeString {
+		out.KeyURI = u.String()
+	}
+	return out, nil
 }
 
 // remuxResult bundles the output bytes with the dropped-track reports.
@@ -447,9 +549,14 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 	}
 	input := args[0]
 	opts := readRemuxOpts(args, 1)
+	cenc, cencErr := readCENCOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer openRelease()
+		if cencErr != nil {
+			return nil, cencErr
+		}
+		opts.CENC = cenc
 		if isBlob(input) {
 			opts.FS = blobFS(input)
 		} else if input.Type() == js.TypeObject && input.Get("byteLength").Type() == js.TypeNumber {
@@ -589,9 +696,14 @@ func openABRJS(_ js.Value, args []js.Value) any {
 		inputs[i] = inputsVal.Index(i)
 	}
 	opts := readRemuxOpts(args, 1)
+	cenc, cencErr := readCENCOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer openRelease()
+		if cencErr != nil {
+			return nil, cencErr
+		}
+		opts.CENC = cenc
 		fs, paths, err := multiSourceFS(inputs)
 		if err != nil {
 			return nil, err
@@ -604,6 +716,93 @@ func openABRJS(_ js.Value, args []js.Value) any {
 
 		h := js.Global().Get("Object").New()
 		h.Set("numVariants", plan.NumVariants())
+		names := plan.Resources()
+		arr := js.Global().Get("Array").New(len(names))
+		for i, nm := range names {
+			arr.SetIndex(i, nm)
+		}
+		h.Set("resources", arr)
+
+		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
+			}
+			name := rargs[0].String()
+			ctx, release := signalContext(optArg(rargs, 1))
+			return promise(func() (any, error) {
+				defer release()
+				data, mime, err := plan.Resource(ctx, name)
+				if err != nil {
+					return nil, err
+				}
+				obj := js.Global().Get("Object").New()
+				obj.Set("data", toUint8Array(data))
+				obj.Set("contentType", mime)
+				obj.Set("sha256", sha256Hex(data))
+				return obj, nil
+			})
+		})
+		var closeFn js.Func
+		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+			resourceFn.Release()
+			closeFn.Release()
+			return nil
+		})
+		h.Set("resource", resourceFn)
+		h.Set("close", closeFn)
+		return h, nil
+	})
+}
+
+// openConcatJS(inputs: Array<Uint8Array | Blob>, opts?) → Promise<handle>.
+// inputs are the sources to play as ONE continuous session, in playback
+// order (see mp4.PlanConcat). The handle serves the whole concatenated
+// presentation on demand: `numParts`, `resources` (every name a player
+// requests - "master.m3u8", "playlist.m3u8", "p0/init.mp4", "p1/seg00007.m4s",
+// …), `resource(name)` builds it (data + contentType), `close()` releases the
+// callbacks. Blob sources are read through ranged slices, so a concatenated
+// session over huge local files stays memory-bounded. `opts.keepLangs`
+// resolves a language-based track subset (video always kept) from the first
+// source's metadata, mirroring the CLI's --keep-lang.
+func openConcatJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("openConcat: missing inputs") })
+	}
+	inputsVal := args[0]
+	if inputsVal.Type() != js.TypeObject || inputsVal.Get("length").Type() != js.TypeNumber {
+		return promise(func() (any, error) {
+			return nil, fmt.Errorf("openConcat: first argument must be an array of Uint8Array|Blob (playback order)")
+		})
+	}
+	n := inputsVal.Get("length").Int()
+	inputs := make([]js.Value, n)
+	for i := 0; i < n; i++ {
+		inputs[i] = inputsVal.Index(i)
+	}
+	opts := readRemuxOpts(args, 1)
+	keepLangs := readKeepLangs(optArg(args, 1))
+	openCtx, openRelease := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer openRelease()
+		fs, paths, err := multiSourceFS(inputs)
+		if err != nil {
+			return nil, err
+		}
+		if len(opts.KeepTracks) == 0 && len(keepLangs) > 0 {
+			ids, err := resolveKeepLangs(openCtx, fs, paths[0], keepLangs)
+			if err != nil {
+				return nil, err
+			}
+			opts.KeepTracks = ids
+		}
+		opts.FS = fs
+		plan, err := mp4.PlanConcat(openCtx, paths, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		h := js.Global().Get("Object").New()
+		h.Set("numParts", plan.NumParts())
 		names := plan.Resources()
 		arr := js.Global().Get("Array").New(len(names))
 		for i, nm := range names {
