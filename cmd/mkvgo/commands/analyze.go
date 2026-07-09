@@ -52,8 +52,12 @@ func printAnalyzeReport(r *matroska.AnalyzeReport) {
 	for _, ts := range r.Tracks {
 		fmt.Printf("\nTrack %d (%s, %s): %d frames (%d packets), %d keyframes, %d bytes\n",
 			ts.TrackID, ts.Type, ts.Codec, ts.Frames, ts.Packets, ts.Keyframes, ts.Bytes)
-		fmt.Printf("  avg %d kb/s, peak %d kb/s, duration %s, %.3f fps\n",
-			ts.AvgBitrateBps/1000, ts.PeakBitrateBps/1000, FmtMs(ts.DurationMs), ts.FrameRateAvg)
+		fps := fmt.Sprintf("%.3f fps", ts.FrameRateAvg)
+		if ts.FrameRateMode != "" {
+			fps += " " + ts.FrameRateMode
+		}
+		fmt.Printf("  avg %d kb/s, peak %d kb/s, duration %s, %s\n",
+			ts.AvgBitrateBps/1000, ts.PeakBitrateBps/1000, FmtMs(ts.DurationMs), fps)
 		if ts.Type == string(mkv.VideoTrack) && ts.MaxGopFrames > 0 {
 			fmt.Printf("  GOP: min %d, max %d, avg %.1f frames; keyframe every ~%dms; reordered=%v\n",
 				ts.MinGopFrames, ts.MaxGopFrames, ts.AvgGopFrames, ts.KeyframeEveryMsAvg, ts.Reordered)

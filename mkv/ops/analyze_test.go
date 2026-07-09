@@ -417,6 +417,85 @@ func TestAnalyze_MemFS(t *testing.T) {
 	}
 }
 
+// --- Test 10: CFR - equal frame durations classify as constant ---
+
+func TestAnalyze_CFR(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	var blocks []mkv.Block
+	for i := int64(0); i < 10; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: i * 40, Keyframe: i == 0, Data: []byte{0x01}})
+	}
+	path := buildMultiClusterMKV(t, dir, "cfr.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, 400)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "cfr" {
+		t.Errorf("FrameRateMode = %q, want cfr", ts.FrameRateMode)
+	}
+	if ts.FrameDurationVarianceNs != 0 {
+		t.Errorf("FrameDurationVarianceNs = %d, want 0", ts.FrameDurationVarianceNs)
+	}
+	if warningsContain(report.Warnings, "variable frame rate") {
+		t.Errorf("Warnings = %v, want no VFR warning for a CFR track", report.Warnings)
+	}
+}
+
+// --- Test 11: VFR - deliberately uneven block timecodes classify as variable ---
+
+func TestAnalyze_VFR(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	times := []int64{0, 33, 100, 133, 300, 333}
+	var blocks []mkv.Block
+	for i, ms := range times {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: ms, Keyframe: i == 0, Data: []byte{0x01}})
+	}
+	path := buildMultiClusterMKV(t, dir, "vfr.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, 400)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "vfr" {
+		t.Errorf("FrameRateMode = %q, want vfr", ts.FrameRateMode)
+	}
+	if ts.FrameDurationVarianceNs <= 0 {
+		t.Errorf("FrameDurationVarianceNs = %d, want > 0", ts.FrameDurationVarianceNs)
+	}
+	if !warningsContain(report.Warnings, "variable frame rate") {
+		t.Errorf("Warnings = %v, want a VFR warning", report.Warnings)
+	}
+}
+
+// --- Test 12: a single-frame track has no measurable frame rate mode ---
+
+func TestAnalyze_FrameRateMode_SingleFrame(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	blocks := []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte{0x01}}}
+	path := buildMultiClusterMKV(t, dir, "oneframe.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, 100)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "" {
+		t.Errorf("FrameRateMode = %q, want empty (fewer than 2 frames)", ts.FrameRateMode)
+	}
+	if ts.FrameDurationVarianceNs != 0 {
+		t.Errorf("FrameDurationVarianceNs = %d, want 0", ts.FrameDurationVarianceNs)
+	}
+}
+
 func warningsContain(warnings []string, substr string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, substr) {

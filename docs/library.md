@@ -974,6 +974,10 @@ for _, w := range report.Warnings {
 | `KeyframeEveryMsAvg` | Average milliseconds between consecutive video keyframes. |
 | `Reordered` | Video-only, a decode-free HEURISTIC: a presentation timecode (`Block.Timecode`) that goes backwards in decode order (the order `Next` delivers blocks) is consistent with B-frame reordering, but is not a certainty from headers alone - treat it as a hint, not a decoded fact. |
 | `FrameRateAvg` | `Frames*1000/DurationMs`. |
+| `FrameRateMode` | Video-only: `"cfr"` (constant frame rate) or `"vfr"` (variable), derived decode-free from consecutive frame-timecode deltas (min/max spread within +-1ms counts as CFR - Matroska timecodes are millisecond-scale, so exact-equal deltas would be too strict). `""` when unknown (fewer than 2 frames) or for a non-video track. |
+| `FrameDurationVarianceNs` | The spread (max delta - min delta) between consecutive video frame timecodes, in nanoseconds - 0 for a perfect CFR track, a diagnostic magnitude for VFR. |
+
+A VFR video track (`FrameRateMode == "vfr"`) adds a Warning: some downstream pipelines (fixed-segment HLS, certain hardware decoders) assume constant frame rate and can misbehave on true VFR content.
 
 `AnalyzeReport`:
 
@@ -991,6 +995,54 @@ Supports the FS port like every other operation (`mkv.Options{FS: ...}`), so a r
 The facade re-exports it: `matroska.Analyze`, `matroska.AnalyzeReport`, `matroska.TrackStats`.
 
 MP4 support is a follow-up: an MP4's sample table (`stsz`/`stss`/`stts`) already carries most of the per-sample data `Analyze` needs, but wiring it through the same report shape is not done yet.
+
+---
+
+## Fingerprint (Content Identity / Dedup)
+
+`ops.Fingerprint` computes a container-independent content identity for a file: a per-track payload SHA-256 (the same digest `CompareBlocks` uses to prove a round-trip byte-identical), plus a single `Presentation` hash over all of them. Two files carrying the same audio/video/subtitle streams fingerprint identically even when their container metadata differs (title, muxing app) or their tracks are stored in a different order - the use case is cross-container dedup in a media library: detect that a re-encode-free remux, or a re-mux with reordered tracks, is really the same content, without a byte-for-byte comparison of the containers themselves.
+
+Unlike `Analyze`, this is a FULL read: every track's frame payload is read and hashed, so the cost is proportional to the media volume, not just the block-header count.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/ops"
+
+fp, err := ops.Fingerprint(ctx, "video.mkv")
+if err != nil { return err }
+
+fmt.Println("presentation:", fp.Presentation)
+for _, tf := range fp.Tracks {
+    fmt.Printf("track %d (%s/%s): %s\n", tf.TrackID, tf.Type, tf.Codec, tf.SHA256)
+}
+```
+
+`FingerprintReport`:
+
+| Field | Meaning |
+| --- | --- |
+| `Presentation` | Hex SHA-256 identity for the whole file's content - see the recipe below. |
+| `Tracks` | `[]TrackFingerprint`, one per track, in `Container.Tracks` order. |
+
+`TrackFingerprint`:
+
+| Field | Meaning |
+| --- | --- |
+| `TrackID` | The track's ID (matches `Track.ID`, `TrackStats.TrackID`). |
+| `Type` / `Codec` | The track's type and codec string. |
+| `SHA256` | Hex SHA-256 over the track's frame payloads in decode order - the exact digest `CompareBlocks` computes to prove a lossless round-trip. |
+
+**Presentation recipe** (reproducible independently of this implementation):
+
+1. For each track, take `hex(SHA-256 over its frame payloads in decode order)` - `TrackFingerprint.SHA256`.
+2. Build a sort key `"type|codec|sha256hex"` for each track and sort the tracks by that key, ascending, byte-wise. Sorting by content (not by `TrackID` or file order) means a remux that reorders tracks produces the same sorted sequence.
+3. Concatenate the sorted tracks' raw 32-byte SHA-256 sums (not their hex form) in that order, and take the SHA-256 of the concatenation.
+4. `Presentation` is that final hash, hex-encoded.
+
+Supports the FS port like every other operation (`mkv.Options{FS: ...}`).
+
+The facade re-exports it: `matroska.Fingerprint`, `matroska.FingerprintReport`, `matroska.TrackFingerprint`.
+
+MP4 support is a follow-up (the same constraint as `CompareBlocks`, whose `digestTracks` helper this reuses): Matroska/WebM only for now.
 
 ---
 

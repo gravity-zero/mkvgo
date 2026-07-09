@@ -331,6 +331,23 @@ func Analyze(ctx context.Context, path string, opts ...Options) (*AnalyzeReport,
 	return ops.Analyze(ctx, path, opts...)
 }
 
+// FingerprintReport is the result of Fingerprint. See ops.FingerprintReport.
+type FingerprintReport = ops.FingerprintReport
+
+// TrackFingerprint is one track's content identity within a FingerprintReport.
+// See ops.TrackFingerprint.
+type TrackFingerprint = ops.TrackFingerprint
+
+// Fingerprint computes a container-independent content identity for path: a
+// per-track payload SHA-256 (decode order, the same digest CompareBlocks
+// proves round-trips with) plus a Presentation hash over all of them, stable
+// across container metadata and track-order changes - so a media library can
+// dedup re-muxes of identical content. Unlike Analyze, this is a full read of
+// every track's frame payload. See ops.Fingerprint.
+func Fingerprint(ctx context.Context, path string, opts ...Options) (*FingerprintReport, error) {
+	return ops.Fingerprint(ctx, path, opts...)
+}
+
 // AddAttachment rewrites srcPath to dstPath with att appended to the
 // attachments (ID auto-assigned when 0). See ops.AddAttachment.
 func AddAttachment(ctx context.Context, srcPath, dstPath string, att Attachment, opts ...Options) error {

@@ -21,6 +21,12 @@ const durationMismatchWarnMs = 1000
 // instead by TrackStats.Reordered) from a real backward jump worth a Warning.
 const backwardTimecodeWarnMs = 1000
 
+// frameDurationToleranceMs is the +-1ms slack allowed between consecutive
+// video frame-timecode deltas before TrackStats.FrameRateMode reports "vfr":
+// Matroska timecodes are millisecond-scale, so exact-equal deltas would be
+// too strict a test for a genuinely constant frame rate.
+const frameDurationToleranceMs = 1
+
 // TrackStats summarises one track's block-header walk: exact frame/keyframe
 // counts, byte totals and derived rates, computed from (Simple)Block headers
 // alone, never a decoded sample. See Analyze.
@@ -59,6 +65,16 @@ type TrackStats struct {
 	// is not a certainty - treat it as a hint, not a decoded fact.
 	Reordered    bool    `json:"reordered,omitempty"`
 	FrameRateAvg float64 `json:"frame_rate_avg,omitempty"`
+	// FrameRateMode classifies a VIDEO track as "cfr" (constant frame rate) or
+	// "vfr" (variable), derived decode-free from consecutive frame-timecode
+	// deltas (see frameDurationToleranceMs). "" when unknown: fewer than 2
+	// frames, or a non-video track (CFR/VFR is a video concept here).
+	FrameRateMode string `json:"frame_rate_mode,omitempty"`
+	// FrameDurationVarianceNs is the spread (max delta - min delta) between
+	// consecutive video frame timecodes, in nanoseconds: 0 for a perfect CFR
+	// track, a diagnostic magnitude for VFR. 0 alongside FrameRateMode == ""
+	// simply means no measurement was possible.
+	FrameDurationVarianceNs int64 `json:"frame_duration_variance_ns,omitempty"`
 }
 
 // AnalyzeReport is the result of a structural, no-decode stream-statistics
@@ -123,6 +139,15 @@ type trackAcc struct {
 	haveTimecode   bool
 	reordered      bool
 	backwardWarned bool
+
+	// Frame-duration variance tracking (video only): the delta between this
+	// and the previous frame's Timecode, min/max seen so far - never the
+	// deltas themselves, keeping memory bounded.
+	fdPrevTC    int64
+	fdHavePrev  bool
+	fdMinDelta  int64
+	fdMaxDelta  int64
+	fdHaveDelta bool
 }
 
 // closeGOP records the just-finished GOP's frame count (the frames from the
@@ -251,6 +276,23 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		acc.haveTimecode = true
 
 		if acc.track.Type == mkv.VideoTrack {
+			if acc.fdHavePrev {
+				delta := blk.Timecode - acc.fdPrevTC
+				if !acc.fdHaveDelta {
+					acc.fdMinDelta, acc.fdMaxDelta = delta, delta
+					acc.fdHaveDelta = true
+				} else {
+					if delta < acc.fdMinDelta {
+						acc.fdMinDelta = delta
+					}
+					if delta > acc.fdMaxDelta {
+						acc.fdMaxDelta = delta
+					}
+				}
+			}
+			acc.fdPrevTC = blk.Timecode
+			acc.fdHavePrev = true
+
 			if blk.Keyframe {
 				acc.closeGOP()
 				acc.haveGOP = true
@@ -293,6 +335,18 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 				ts.KeyframeEveryMsAvg = acc.kfGapSum / acc.kfGapCount
 			}
 			ts.Reordered = acc.reordered
+
+			if acc.fdHaveDelta {
+				spreadMs := acc.fdMaxDelta - acc.fdMinDelta
+				ts.FrameDurationVarianceNs = spreadMs * 1_000_000
+				if spreadMs <= frameDurationToleranceMs {
+					ts.FrameRateMode = "cfr"
+				} else {
+					ts.FrameRateMode = "vfr"
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("track %d (video): variable frame rate (vfr) detected, some pipelines assume constant frame rate", t.ID))
+				}
+			}
 		}
 		report.Tracks = append(report.Tracks, ts)
 		report.BlockCount += acc.packets

@@ -158,7 +158,9 @@ mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 
 ### analyze
 
-Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and a declared-vs-true duration reconciliation - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. The walk is head-only: cost is proportional to the block-header count, not the media volume. Matroska/WebM only for now; MP4 is a follow-up.
+Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans, a declared-vs-true duration reconciliation, and a per-video-track constant/variable frame rate (cfr/vfr) classification - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. The walk is head-only: cost is proportional to the block-header count, not the media volume. Matroska/WebM only for now; MP4 is a follow-up.
+
+The cfr/vfr column comes from the spread between consecutive video frame-timecode deltas: within +-1ms counts as constant (Matroska timecodes are millisecond-scale, so exact-equal deltas would be too strict a test), a wider spread is reported as variable, with a warning (some pipelines assume constant frame rate).
 
 ```
 mkvgo analyze [-json] <file.mkv|url>
@@ -171,13 +173,30 @@ mkvgo analyze video.mkv
 # Clusters: 431, blocks: 25920
 #
 # Track 1 (video, h264): 20736 frames (20736 packets), 173 keyframes, 41821440 bytes
-#   avg 3877 kb/s, peak 5210 kb/s, duration 00:14:23, 24.000 fps
+#   avg 3877 kb/s, peak 5210 kb/s, duration 00:14:23, 24.000 fps cfr
 #   GOP: min 120, max 120, avg 120.0 frames; keyframe every ~5000ms; reordered=true
 #
 # Track 2 (audio, aac): 40448 frames (10112 packets), 40448 keyframes, 6469120 bytes
 #   avg 60 kb/s, peak 62 kb/s, duration 00:14:23, 46.865 fps
 
 mkvgo analyze -json video.mkv    # AnalyzeReport
+```
+
+### fingerprint
+
+Container-independent content identity: a `Presentation` hash over every track's payload content, plus one SHA-256 digest per track (decode order) - the same digest `compare -blocks` uses to prove a round-trip byte-identical. Two files carrying the same audio/video/subtitle streams fingerprint identically even with different container metadata (title, muxing app) or a different track order - the use case is cross-container dedup in a media library. Unlike `analyze` this is a FULL read: every track's frame payload is read and hashed. Matroska/WebM only for now.
+
+```
+mkvgo fingerprint [-json] <file.mkv|url>
+```
+
+```bash
+mkvgo fingerprint video.mkv
+# Presentation: 7e1c9a4f...
+#   track 1 (video, h264): 9f2b7e...
+#   track 2 (audio, aac): 3a0d5c...
+
+mkvgo fingerprint -json video.mkv    # FingerprintReport
 ```
 
 ### validate

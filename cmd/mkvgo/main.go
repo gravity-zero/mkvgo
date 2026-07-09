@@ -150,6 +150,9 @@ func main() {
 	case "analyze":
 		commands.RequireArgs(args, 1, "mkvgo analyze [-json] <file.mkv|url>")
 		commands.CmdAnalyze(args)
+	case "fingerprint":
+		commands.RequireArgs(args, 1, "mkvgo fingerprint [-json] <file.mkv|url>")
+		commands.CmdFingerprint(args)
 	case "playability":
 		commands.RequireArgs(args, 1, "mkvgo playability [-target name] [-json] <file.mkv|.mp4|url>")
 		commands.CmdPlayability(args)
@@ -214,7 +217,8 @@ to-abr        Package pre-encoded quality variants as one multi-variant HLS mast
 concat-hls    Package several sources as ONE continuous HLS session (no player reload)
 concat-segment  Serve one concat-hls resource on demand, no pre-generation
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
-analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration (head-only, no decode; Matroska/WebM only)
+analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr (head-only, no decode; Matroska/WebM only)
+fingerprint   Container-independent content identity hash for cross-format dedup (full read of every track's payload; Matroska/WebM only)
 playability   Per-track and overall direct-play/remux/transcode verdict against a target (no probe, no decode)
 ladder        Recommend an ABR ladder from the source's resolution/bitrate/codec (guidance, not a guarantee)
 ingest        One-call serving plan: direct-play, remux-hls (optionally reindexing), or transcode with a ladder
