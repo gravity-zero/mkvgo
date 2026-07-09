@@ -8,6 +8,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
+- **One-call onboarding** - `ingest` composes analysis, the playability verdict
+  and an in-place reindex into a single serving plan (direct-play / remux-HLS /
+  transcode), so a media server decides how to serve a file in one call instead
+  of stitching the steps together.
+- **Direct-play serving** - `mkvhttp.FileHandler` and `serve --direct/--auto`
+  stream the raw file over HTTP byte-range for clients that play it as-is, so the
+  same server does direct-play and on-demand HLS, chosen by playability.
+- **Chapter markers** - opt-in `--chapter-markers` exposes source chapters as HLS
+  `EXT-X-DATERANGE` and DASH `EventStream` for chapter navigation and ad-insertion
+  points, with the media segments byte-identical whether it is on or off.
 - **Stream analysis without decoding** - `analyze` reports exact per-track frame,
   packet and keyframe counts, GOP structure, windowed bitrate and true duration
   from a header-only walk (payloads are seek-skipped), so the cost scales with
@@ -43,6 +53,40 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **One-call serving plan (`Ingest` / `ingest`).** Composes the building blocks
+  into a per-file decision for a media server: it runs the playability verdict
+  against a target and returns a `ServingPlan` - `direct-play` (serve the source
+  as-is), `remux-hls` (package on-demand HLS without transcoding; it also reports
+  whether the source already has a usable seek index and, with `-reindex`,
+  repairs one in place, falling back to a copy reindex via
+  `ErrIndexNotHeadDiscoverable` when the layout does not allow it), or
+  `transcode` (with a recommended `ladder`). Optionally attaches the full
+  `analyze` report. Head-only unless a reindex or analysis is requested. CLI
+  `mkvgo ingest [-target <name>] [-reindex] [-analyze] [-json]`.
+- **Direct-play HTTP serving (`mkvhttp.FileHandler`, `serve --direct` /
+  `--auto`).** A handler that streams a single local file over HTTP with full
+  byte-range support (seeking/scrubbing), a strong O(1) ETag (from size and
+  mtime, never the file content), the right Content-Type, and an immutable cache
+  header - for clients that direct-play the source. `serve --direct` serves the
+  raw file; `serve --auto` runs the playability verdict and picks direct-play or
+  the on-demand HLS plan automatically, printing which it chose.
+- **Chapter markers in HLS/DASH (`Options.ChapterMarkers` / `--chapter-markers`).**
+  Opt-in: exposes the source's chapters as one HLS `EXT-X-DATERANGE` per chapter
+  (title, start, duration) and a DASH `EventStream`, for chapter navigation and
+  ad-insertion points. Off by default and byte-identical to before when off; when
+  on, only the manifest/playlist text gains marker lines - the media segments are
+  byte-identical either way, and the markers are emitted identically by the full
+  pass and the on-demand plan.
+- **Frame-rate mode in `analyze` (CFR/VFR).** Each video track now reports
+  `FrameRateMode` (`cfr`/`vfr`) and a frame-duration variance, detected from the
+  timecodes the header-only walk already reads (no decode, memory-bounded); a
+  variable-frame-rate track also raises a warning.
+- **Content fingerprint (`Fingerprint` / `fingerprint`).** A container-independent
+  content identity: a stable hash over every track's payload digest (in decode
+  order, tracks sorted by a content key so track reordering does not change it),
+  so a library can dedup re-muxes of identical content across MKV/WebM containers.
+  Reuses the per-track digest the block comparison relies on; this reads payloads
+  (unlike the head-only `analyze`). CLI `mkvgo fingerprint [-json]`.
 - **Stream analysis (`Analyze` / `analyze`).** A single header-only walk that
   reports, per track, exact frame and packet counts (lacing expanded), keyframe
   count and GOP structure (min/max/avg frames between video keyframes, average
