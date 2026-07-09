@@ -17,6 +17,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/ops"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -633,6 +634,23 @@ func isUint8(v js.Value) bool {
 	return v.Type() == js.TypeObject && v.Get("byteLength").Type() == js.TypeNumber
 }
 
+// singleSourceFS adapts one JS input (Uint8Array or Blob/File) to an mkv.FS
+// serving it at path "in": a MemFS for a Uint8Array (already in memory), a
+// ranged blobFS for a Blob/File (memory-bounded). Shared by analyze (full
+// block-header walk) and playability/ladder (head-only), same input handling
+// as the other single-source bindings.
+func singleSourceFS(input js.Value) (*mkv.FS, error) {
+	if isBlob(input) {
+		return blobFS(input), nil
+	}
+	if isUint8(input) {
+		m := mkv.NewMemFS()
+		m.Put("in", toGoBytes(input))
+		return m.FS(), nil
+	}
+	return nil, fmt.Errorf("input must be a Uint8Array or a Blob/File")
+}
+
 // multiSourceFS maps each input (Uint8Array or Blob/File) to a distinct source
 // path "src{i}" so PlanABR reads the right variant per path: Uint8Arrays live in
 // a MemFS, Blobs are served through independent ranged readers (memory-bounded).
@@ -838,5 +856,84 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 		h.Set("resource", resourceFn)
 		h.Set("close", closeFn)
 		return h, nil
+	})
+}
+
+// analyzeJS(input: Uint8Array | Blob, opts?) → Promise<object (AnalyzeReport)>.
+// Unlike probe, this needs a FULL block-header walk (frame/keyframe counts,
+// GOP spans, bitrate), never just the head - so the input handling matches
+// remux/openHLS: a Uint8Array is read in place, a Blob/File through ranged
+// slices, so a large file stays memory-bounded even though every block
+// header is visited.
+func analyzeJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("analyze: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("analyze: %w", err)
+		}
+		report, err := ops.Analyze(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}
+
+// playabilityJS(input: Uint8Array | Blob, target?: string, opts?) →
+// Promise<object (PlayabilityReport)>. target defaults to "mse-generic";
+// an unrecognised name rejects. Head-only, like probe.
+func playabilityJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("playability: missing input") })
+	}
+	input := args[0]
+	targetName := "mse-generic"
+	if len(args) > 1 && args[1].Type() == js.TypeString {
+		targetName = args[1].String()
+	}
+	ctx, release := signalContext(optArg(args, 2))
+	return promise(func() (any, error) {
+		defer release()
+		target, ok := ops.TargetByName(targetName)
+		if !ok {
+			return nil, fmt.Errorf("playability: unknown target %q", targetName)
+		}
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("playability: %w", err)
+		}
+		report, err := ops.Playability(ctx, "in", target, mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}
+
+// ladderJS(input: Uint8Array | Blob, opts?) → Promise<Array (Rung[])>.
+// Head-only, like probe.
+func ladderJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("ladder: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("ladder: %w", err)
+		}
+		rungs, err := ops.RecommendLadderFor(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(rungs)
 	})
 }

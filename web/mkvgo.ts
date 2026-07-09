@@ -104,6 +104,86 @@ export interface AbortOptions {
   signal?: AbortSignal
 }
 
+/** One track's block-header stats from analyze(); see AnalyzeReport. */
+export interface TrackStats {
+  track_id: number
+  type: TrackType
+  codec: string
+  /** Exact frame count, lacing expanded (a laced audio block counts as several frames). */
+  frames: number
+  /** Stored (Simple)Block/BlockGroup count; equals frames on an unlaced track. */
+  packets: number
+  keyframes: number
+  bytes: number
+  duration_ms: number
+  avg_bitrate_bps: number
+  peak_bitrate_bps: number
+  /** Video only: frame-count spans between consecutive keyframes. */
+  min_gop_frames?: number
+  max_gop_frames?: number
+  avg_gop_frames?: number
+  keyframe_every_ms_avg?: number
+  /** Video only: a decode-free heuristic hinting at B-frame reordering. */
+  reordered?: boolean
+  frame_rate_avg?: number
+}
+
+/**
+ * Result of analyze(): a structural, no-decode stream-statistics pass over a
+ * Matroska/WebM file (exact frame/keyframe counts, bitrate, GOP spans, a
+ * duration reconciliation) - the mkvgo equivalent of a frame-accurate stream
+ * stats probe, computed from block headers alone, never a decoded sample.
+ */
+export interface AnalyzeReport {
+  /** The container's TRUE duration: the latest track end seen during the walk. */
+  duration_ms: number
+  /** The Segment Info Duration element, for comparison against duration_ms. */
+  declared_duration_ms: number
+  overall_bitrate_bps: number
+  cluster_count: number
+  block_count: number
+  tracks: TrackStats[]
+  /** Timing sanity issues found during the walk (duration mismatch, backward
+   * timecode jump, a track with zero frames, ...). */
+  warnings?: string[]
+}
+
+export type Verdict = 'direct-play' | 'remux' | 'transcode'
+
+/** One track's playability verdict against a target; see PlayabilityReport. */
+export interface TrackVerdict {
+  TrackID: number
+  Type: TrackType
+  Verdict: Verdict
+  /** Why remux or transcode; empty for direct-play. */
+  Reasons?: string[] | null
+}
+
+/**
+ * Result of playability(): the whole-file verdict against a playback target,
+ * decided from head-only track metadata alone (codec, profile, level, pixel
+ * format, resolution, colour/HDR/Dolby Vision, audio channels/sample rate) -
+ * no block walk, no decode.
+ */
+export interface PlayabilityReport {
+  Target: string
+  OverallVerdict: Verdict
+  /** The cheapest container that would make every track direct-play, when
+   * OverallVerdict is "remux"; empty otherwise. */
+  RemuxContainer: string
+  Tracks: TrackVerdict[]
+}
+
+/** One ABR ladder rung recommended by ladder(). Guidance, not a guarantee -
+ * mkvgo never transcodes; the actual encode is always an external step. */
+export interface Rung {
+  Width: number
+  Height: number
+  BitrateKbps: number
+  /** "2160p", "1080p", "720p", "480p", "360p". */
+  Label: string
+}
+
 export interface ProbeOptions extends AbortOptions {
   /** Build the keyframe index (MKV: full scan when the file has no Cues). */
   keyframes?: boolean
@@ -298,6 +378,27 @@ export interface MkvGoApi {
   openConcat(inputs: (Uint8Array | Blob)[], options?: ConcatOptions): Promise<ConcatPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
+  /**
+   * Structural, no-decode stream-statistics pass (exact frame/keyframe
+   * counts, bitrate, GOP spans, duration reconciliation). Unlike probe this
+   * needs a full block-header walk, so a Blob/File is read through ranged
+   * slices to stay memory-bounded rather than head-only.
+   */
+  analyze(input: Uint8Array | Blob, options?: AbortOptions): Promise<AnalyzeReport>
+  /**
+   * Whole-file playability verdict against a playback target - "direct-play",
+   * "remux" (with the cheapest container that would work), or "transcode" -
+   * decided from head-only metadata alone. target defaults to "mse-generic";
+   * see docs/wasm.md for the full list of built-in target names. An unknown
+   * target rejects.
+   */
+  playability(input: Uint8Array | Blob, target?: string, options?: AbortOptions): Promise<PlayabilityReport>
+  /**
+   * Recommends an ABR ladder (resolution/bitrate rungs) from the source's
+   * video track, head-only. Never upscales and never exceeds the source
+   * bitrate; guidance only, mkvgo never transcodes.
+   */
+  ladder(input: Uint8Array | Blob, options?: AbortOptions): Promise<Rung[]>
 }
 
 // ---------------------------------------------------------------------------

@@ -3,12 +3,14 @@
 // Command mkvgo-wasm builds mkvgo for WebAssembly (GOOS=js GOARCH=wasm). It
 // registers a global `MkvGo` object whose methods mirror the library: probe,
 // remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, openHLS, openABR,
-// openConcat, extractSubtitleVTT. Every method returns a Promise; inputs are
-// Uint8Array (whole file in memory) or, for probe/openHLS/openABR/
-// openConcat, a Blob/File - read through ranged slices, so probing a 40 GB
-// file in the browser touches only a few hundred kilobytes, and an on-demand
-// plan (media segments and windowed subtitle renditions alike) reads only
-// the windows a player watches.
+// openConcat, extractSubtitleVTT, analyze, playability, ladder. Every method
+// returns a Promise; inputs are Uint8Array (whole file in memory) or, for
+// probe/openHLS/openABR/openConcat/analyze/playability/ladder, a Blob/File -
+// read through ranged slices, so probing a 40 GB file in the browser touches
+// only a few hundred kilobytes, and an on-demand plan (media segments and
+// windowed subtitle renditions alike) reads only the windows a player
+// watches. analyze reads the whole file (a full block-header walk, no
+// decode); playability and ladder are head-only, like probe.
 //
 // Build: make wasm (dist/wasm/mkvgo.wasm + wasm_exec.js). See docs/wasm.md.
 package main
@@ -29,6 +31,9 @@ func main() {
 	api.Set("openABR", js.FuncOf(openABRJS))
 	api.Set("openConcat", js.FuncOf(openConcatJS))
 	api.Set("extractSubtitleVTT", js.FuncOf(extractSubtitleVTTJS))
+	api.Set("analyze", js.FuncOf(analyzeJS))
+	api.Set("playability", js.FuncOf(playabilityJS))
+	api.Set("ladder", js.FuncOf(ladderJS))
 	js.Global().Set("MkvGo", api)
 
 	// Keep the Go runtime alive; work happens in the exported callbacks.

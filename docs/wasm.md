@@ -49,6 +49,9 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` — pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` — `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
 | `openConcat(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - sources in playback order | on-demand concatenated handle: `{ numParts, resources, resource(name) → {data, contentType}, close() }` - one continuous HLS session over several sources, `resource("master.m3u8")` or `resource("p1/seg00007.m4s")` |
 | `extractSubtitleVTT(input, trackId)` | `Uint8Array` (MKV or MP4) | WebVTT `string` |
+| `analyze(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full block-header walk, not head-only) | `AnalyzeReport` — frame/keyframe counts, bitrate, GOP spans, duration reconciliation |
+| `playability(input, target?, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `PlayabilityReport` — per-track and overall verdict (`"direct-play"`\|`"remux"`\|`"transcode"`) against `target` (default `"mse-generic"`) |
+| `ladder(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `Rung[]` — recommended ABR ladder capped at the source resolution/bitrate |
 | `version()` | — | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
@@ -58,10 +61,64 @@ mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs? }
 array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
 2] })` serves a "VF only" version from one file, no copy. `openHLS`/`openABR`
 additionally accept a `cenc` option (Common Encryption); `openConcat`
-additionally accepts `keepLangs`. See below for both.
+additionally accepts `keepLangs`. See below for both. `analyze`/`playability`/
+`ladder` take just `{ signal? }` (abort only) - see [Stream analysis,
+playability and ABR ladder](#stream-analysis-playability-and-abr-ladder).
 
 Input format is sniffed from the first bytes (EBML magic vs ISO-BMFF box), not
 from a file name.
+
+## Stream analysis, playability and ABR ladder
+
+Three metadata-only additions alongside probe - no upload, everything runs
+client-side.
+
+**`analyze(input, opts?)`** is a structural, no-decode stream-statistics pass:
+exact frame/keyframe counts (lacing expanded - a laced audio block's frames are
+counted individually), byte totals, average/peak bitrate, GOP spans (video)
+and a duration reconciliation (the container's declared duration vs. the true
+end-of-track timecode), all read from Matroska/WebM block headers - never a
+decoded sample. Unlike `probe`, this needs a FULL walk of the file (every
+block header, not just the head), so a `Blob`/`File` is read through ranged
+slices to stay memory-bounded rather than head-only.
+
+```js
+const report = await MkvGo.analyze(file)   // File/Blob: ranged reads, full walk
+console.log(report.duration_ms, report.overall_bitrate_bps, report.warnings)
+for (const t of report.tracks)
+  console.log(t.track_id, t.type, t.frames, t.keyframes, t.avg_bitrate_bps)
+```
+
+**`playability(input, target?, opts?)`** decides, from head-only metadata
+alone (codec, profile, level, resolution, pixel format/bit depth,
+colour/HDR/Dolby Vision, audio channels/sample rate - no block walk, no
+decode), whether a file plays on `target` as-is (`"direct-play"`), needs only
+a container remux (`"remux"`, with the cheapest container that would work in
+`RemuxContainer`), or needs a real transcode (`"transcode"`) - both per track
+and overall (the worst of any track). `target` defaults to `"mse-generic"`.
+Built-in target names: `"safari"`, `"chrome"` (alias `"chromium-generic"`,
+shared verbatim by `"brave"`, `"opera"`, `"vivaldi"`, `"samsung-internet"` -
+same Chromium media pipeline), `"edge"` (the one Chromium browser with native
+HEVC), `"firefox"`, `"chromecast-gen3"`, `"mse-generic"` (a conservative
+H.264 + AAC baseline for a generic MSE player). An unrecognised target name
+rejects the returned Promise.
+
+```js
+const p = await MkvGo.playability(file, 'safari')
+console.log(p.OverallVerdict, p.RemuxContainer)         // e.g. "remux", "mp4"
+for (const t of p.Tracks) console.log(t.TrackID, t.Type, t.Verdict, t.Reasons)
+```
+
+**`ladder(input, opts?)`** recommends a sensible ABR ladder (resolution +
+bitrate rungs, tallest first) from the source's video track, head-only: it
+never upscales (no rung wider/taller than the source) and never recommends a
+bitrate above the source's own. This is guidance, not a guarantee - mkvgo
+never transcodes, so the actual encode is always an external step.
+
+```js
+const rungs = await MkvGo.ladder(file)
+for (const r of rungs) console.log(r.Label, `${r.Width}x${r.Height}`, `${r.BitrateKbps}kbps`)
+```
 
 ## Playing a local file with bounded memory
 
@@ -422,8 +479,11 @@ in a worker (`importScripts('/wasm_exec.js')` or a module worker), and
 ## Limits
 
 - **Remux needs the whole file in memory** (input + output simultaneously —
-  wasm32 addresses 4 GB; in practice keep inputs under ~1.5 GB). `probe`
-  accepts a `Blob`/`File` and has **no size limit** — it reads head-only.
+  wasm32 addresses 4 GB; in practice keep inputs under ~1.5 GB). `probe`,
+  `playability` and `ladder` accept a `Blob`/`File` and have **no size
+  limit** — they read head-only. `analyze` also accepts a `Blob`/`File` (it
+  walks every block header, so the input itself stays memory-bounded even on
+  a huge file, unlike remux).
 - **No transcoding**, by design: only the codecs the native remuxers support
   are carried (see [cli.md](cli.md)); unsupported tracks fail or are dropped
   with `skipUnsupported`/reported in `droppedTracks`.

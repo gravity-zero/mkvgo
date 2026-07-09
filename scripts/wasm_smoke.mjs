@@ -171,6 +171,39 @@ const ifr = await planMp4.resource('iframe.m3u8')
 check(new TextDecoder().decode(ifr.data).includes('#EXT-X-I-FRAMES-ONLY'), 'iframe playlist structure')
 planMp4.close()
 
+// --- analyze: no-decode stream stats (full block-header walk) ---
+const analyzeReport = await MkvGo.analyze(mkvBytes)
+check(Array.isArray(analyzeReport.tracks) && analyzeReport.tracks.length > 0,
+  `analyze tracks (${analyzeReport.tracks?.length})`)
+const analyzeVideo = analyzeReport.tracks.find((t) => t.type === 'video')
+check(analyzeVideo && analyzeVideo.frames > 0 && analyzeVideo.keyframes > 0,
+  `analyze video track frames=${analyzeVideo?.frames} keyframes=${analyzeVideo?.keyframes}`)
+check(analyzeReport.duration_ms > 0, `analyze duration_ms (${analyzeReport.duration_ms})`)
+const analyzeBlob = await MkvGo.analyze(new Blob([mkvBytes]))
+check(analyzeBlob.duration_ms === analyzeReport.duration_ms && analyzeBlob.tracks.length === analyzeReport.tracks.length,
+  'analyze(Blob) ranged reads match analyze(Uint8Array)')
+
+// --- playability: verdict model against a target (default mse-generic, plus safari) ---
+const playMse = await MkvGo.playability(mkvBytes, 'mse-generic')
+check(['direct-play', 'remux', 'transcode'].includes(playMse.OverallVerdict),
+  `playability mse-generic overall verdict (${playMse.OverallVerdict})`)
+check(Array.isArray(playMse.Tracks) && playMse.Tracks.length > 0 &&
+  playMse.Tracks.every((t) => ['direct-play', 'remux', 'transcode'].includes(t.Verdict)),
+  'playability per-track verdicts')
+const playSafari = await MkvGo.playability(mkvBytes, 'safari')
+check(['direct-play', 'remux', 'transcode'].includes(playSafari.OverallVerdict),
+  `playability safari overall verdict (${playSafari.OverallVerdict})`)
+await MkvGo.playability(mkvBytes, 'not-a-real-target')
+  .then(() => check(false, 'unknown playability target must reject'))
+  .catch(() => check(true, 'unknown playability target rejects'))
+
+// --- ladder: recommended ABR rungs, capped at the source resolution ---
+const sourceVideo = probe.tracks.find((t) => t.type === 'video')
+const rungs = await MkvGo.ladder(mkvBytes)
+check(Array.isArray(rungs) && rungs.length > 0, `ladder rungs (${rungs.length})`)
+check(rungs.every((r) => r.Width <= sourceVideo.width && r.Height <= sourceVideo.height && r.BitrateKbps > 0),
+  'ladder rungs stay within the source resolution with a positive bitrate')
+
 // --- CENC: sample-level Common Encryption packaging (structure only; the
 // decrypt round-trip itself is proven in the Go tests) ---
 const cencKey = new TextEncoder().encode('0123456789abcdef') // 16 bytes
