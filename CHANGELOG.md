@@ -8,6 +8,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
+- **Stream analysis without decoding** - `analyze` reports exact per-track frame,
+  packet and keyframe counts, GOP structure, windowed bitrate and true duration
+  from a header-only walk (payloads are seek-skipped), so the cost scales with
+  the block count, not the media size.
+- **Playability verdicts** - `playability` decides, from head-only metadata,
+  whether a file direct-plays, needs only a container remux, or needs a
+  transcode on a given target (Safari, the Chromium family incl. Chrome / Edge /
+  Brave / Opera / Vivaldi, Firefox, Chromecast, generic MSE), and `ladder`
+  recommends an ABR rung set - all without decoding.
 - **Play while downloading** - `serve-growing` streams a still-downloading file
   as HLS: an EVENT playlist that grows with the file and finalizes to VOD, with
   every already-covered segment byte-identical to the finished file.
@@ -34,6 +43,34 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Stream analysis (`Analyze` / `analyze`).** A single header-only walk that
+  reports, per track, exact frame and packet counts (lacing expanded), keyframe
+  count and GOP structure (min/max/avg frames between video keyframes, average
+  keyframe interval), average and peak bitrate (over a one-second sliding
+  window), total bytes, and the true duration from the last frame; plus
+  container totals (cluster and block counts, overall bitrate) and timing
+  sanity warnings (declared vs true duration mismatch, non-monotonic timecodes,
+  zero-frame or duration-less tracks). Payload bytes are seek-skipped, so it
+  never decodes and its cost is proportional to the block-header count rather
+  than the media size. Memory stays bounded (counters plus a one-second window).
+  Matroska/WebM sources in this version. CLI `mkvgo analyze [-json]`.
+- **Playability verdicts (`Playability` / `playability`).** From head-only
+  metadata alone, a per-track and overall verdict - `direct-play`, `remux`
+  (with the cheapest container that would play), or `transcode` (with the
+  reason) - for a target device or browser. Built-in targets: `safari`,
+  `chrome` / `chromium-generic` / `brave` / `opera` / `vivaldi` /
+  `samsung-internet` (shared Chromium baseline), `edge` (Chromium plus HEVC via
+  the OS extension), `firefox`, `chromecast-gen3`, `mse-generic` (the default,
+  the universal H.264 High@4.1 + AAC bar). The capability table is plain data a
+  caller can override with a custom `Target`. Codec, profile, level, bit depth,
+  resolution, HDR and Dolby Vision are all read head-only; a missing field with
+  a matching constraint yields a conservative `transcode`, never a guessed
+  direct-play. CLI `mkvgo playability [-target <name>] [-json]`.
+- **ABR ladder recommendation (`RecommendLadder` / `ladder`).** Suggests a
+  bitrate-ladder rung set from a source's resolution, bitrate and codec, capped
+  at the source (never upscales, never exceeds the source bitrate) and scaled by
+  a per-codec efficiency factor. Guidance for configuring an encode, computed
+  from metadata only. CLI `mkvgo ladder [-json]`.
 - **Play while downloading (`PlanGrowingHLS` / `serve-growing`).** Serve a
   still-growing (downloading) MKV as an EVENT-type HLS playlist that lengthens
   as data lands: a cursor scans only whole clusters (a partial trailing cluster
