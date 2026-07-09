@@ -704,3 +704,53 @@ func TestCENCSampleIVCounterRangesDisjoint(t *testing.T) {
 		}
 	}
 }
+
+// TestEncryptedPlaylistMapBeforeKey guards the RFC 8216 tag ordering that a
+// prior version got wrong: an EXT-X-KEY applies to every EXT-X-MAP that FOLLOWS
+// it, but the init segment (moov) is always in the clear even when the media
+// samples are encrypted. Emitting the key before the map made hls.js try to
+// decrypt the clear init and loop on fragDecryptError. The map must come first
+// in every keyed playlist (video and audio), for AES-128 and both CENC schemes.
+func TestEncryptedPlaylistMapBeforeKey(t *testing.T) {
+	src := buildCENCFixture(t)
+	cases := []struct {
+		name string
+		opts Options
+	}{
+		{"aes-128", Options{SegmentMs: 1000, Encrypt: &HLSEncryption{Key: cencKey, KeyURI: "https://example.test/key"}}},
+		{"cenc", Options{SegmentMs: 1000, CENC: &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), KeyURI: "https://example.test/key"}}},
+		{"cbcs", Options{SegmentMs: 1000, CENC: &CENCOptions{Scheme: "cbcs", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cbcs"), KeyURI: "https://example.test/key"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := RemuxToHLS(context.Background(), src, dir, c.opts); err != nil {
+				t.Fatal(err)
+			}
+			checked := 0
+			for _, name := range []string{"playlist.m3u8", "audio1.m3u8"} {
+				pl, err := os.ReadFile(filepath.Join(dir, name))
+				if err != nil {
+					continue // rendition may not exist
+				}
+				keyIdx := bytes.Index(pl, []byte("#EXT-X-KEY"))
+				mapIdx := bytes.Index(pl, []byte("#EXT-X-MAP"))
+				if keyIdx < 0 {
+					t.Errorf("%s: no EXT-X-KEY (expected an encrypted rendition):\n%s", name, pl)
+					continue
+				}
+				if mapIdx < 0 {
+					t.Errorf("%s: EXT-X-KEY present but no EXT-X-MAP", name)
+					continue
+				}
+				if mapIdx > keyIdx {
+					t.Errorf("%s: EXT-X-MAP (at %d) must precede EXT-X-KEY (at %d) so the clear init is not decrypted:\n%s", name, mapIdx, keyIdx, pl)
+				}
+				checked++
+			}
+			if checked == 0 {
+				t.Fatal("no keyed playlist found to check")
+			}
+		})
+	}
+}

@@ -781,18 +781,21 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 	if len(chapters) > 0 {
 		b = append(b, buildChapterDateRanges(chapters)...)
 	}
-	if o != nil && mapURI != "" {
-		// Media segments only (fMP4 renditions); the init and subtitle files
-		// stay clear, so subtitle playlists (mapURI == "") carry no key line.
+	if mapURI != "" {
+		// EXT-X-MAP MUST precede any EXT-X-KEY: per RFC 8216 a key applies to
+		// every EXT-X-MAP that follows it, but the init segment (moov) is always
+		// in the clear even when the media samples are encrypted. Emitting the
+		// key first made players (hls.js) try to decrypt the clear init and fail
+		// in a retry loop. With the map first, the init carries no key and the
+		// key below applies only to the media segments that follow it. Subtitle
+		// playlists (mapURI == "") carry neither a map nor a key.
+		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
 		switch {
-		case o.Encrypt != nil:
+		case o != nil && o.Encrypt != nil:
 			b = append(b, o.Encrypt.keyLine()...)
-		case o.CENC != nil:
+		case o != nil && o.CENC != nil:
 			b = append(b, o.CENC.keyLine()...)
 		}
-	}
-	if mapURI != "" {
-		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
 	}
 	for i, d := range durs {
 		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(i)))...)
