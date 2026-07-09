@@ -1356,6 +1356,102 @@ err := matroska.MergeASS(ctx, "video.mkv", "subs.ass", "out.mkv", "jpn", "Japane
 
 ---
 
+## Playability and ABR Ladder
+
+### Playability (`matroska.Playability`)
+
+A decision over head-only metadata: whether a file direct-plays on a given
+target, needs only a container remux, or needs a transcode - without probing
+an external tool and without decoding. It reads the same head-only metadata
+`probe` prints (codec, profile, level, pixel format, bit depth, resolution,
+colour/HDR/Dolby Vision, audio channels/sample rate); no block walk.
+
+```go
+target, _ := matroska.TargetByName("safari")
+report, err := matroska.Playability(ctx, "movie.mkv", target)
+// report.OverallVerdict: "direct-play" | "remux" | "transcode"
+// report.RemuxContainer: set when OverallVerdict is "remux" (e.g. "mp4")
+// report.Tracks[i]: TrackID, Type, Verdict, Reasons (why remux/transcode)
+```
+
+Per track: the codec/profile/level/resolution/bit-depth/HDR are checked
+against the target first - any unsupported one is a hard "transcode" (with
+the specific reason, e.g. `level 5.1 exceeds target max 4.1`). Only when the
+codec itself is fine does the source **container** matter: already accepted
+by the target -> "direct-play"; carried by a different container the target
+also accepts -> "remux" (`RemuxContainer` names the cheapest one - mkvgo can
+do that remux without a transcode); carried by none -> "transcode". The
+overall verdict is the worst of every track's verdict. A track whose codec
+level is absent from the source metadata (e.g. `Track.Level == nil`) is
+treated conservatively as unsupported rather than guessed, and the reason
+says so.
+
+`Target` is a plain, overridable capability table:
+
+```go
+type Target struct {
+    Name        string
+    Container   []string // cheapest first: "mp4", "webm", "hls", "dash", "mkv" (rare)
+    VideoCodecs []string
+    AudioCodecs []string
+    MaxWidth, MaxHeight         int
+    MaxLevelH264, MaxLevelHEVC  int // Track.Level encoding: H.264 10x, HEVC 30x; 0 = no limit
+    HDR, DolbyVision            bool
+    HEVCMain10, VP9Profile2     bool // 10-bit support
+}
+```
+
+`TargetByName` returns a built-in, reviewable profile - a plain data table, no
+logic - for `"safari"`, `"chrome"`, `"firefox"`, `"chromecast-gen3"`,
+`"mse-generic"`, `"chromium-generic"`, `"brave"`, `"opera"`, `"vivaldi"`,
+`"samsung-internet"` and `"edge"`. It is deliberately conservative wherever
+real-world support is hardware/OS-dependent: HEVC is unsupported by default on
+every Chromium-family target except Edge (which decodes it through the
+Windows HEVC Video Extension); Safari's VP9/AV1 support is left out for the
+same reason. Brave/Opera/Vivaldi/Samsung Internet share Chrome's table
+unchanged (`chrome == chromium-generic` in every field but `Name`). A caller
+who knows better - a newer OS release, a device with hardware HEVC decoding -
+builds its own `Target` instead; see `mkv/ops/targets.go` for the full,
+line-commented baseline table and its stated assumptions.
+
+### ABR ladder (`matroska.RecommendLadder` / `RecommendLadderFor`)
+
+A deterministic, capped rung recommendation - guidance for an external
+encoder, not a guarantee (mkvgo never transcodes):
+
+```go
+rungs, err := matroska.RecommendLadderFor(ctx, "movie.mkv")
+// []matroska.Rung{Width, Height, BitrateKbps, Label}, tallest first
+
+rungs = matroska.RecommendLadder(matroska.LadderInput{
+    SourceWidth: 1920, SourceHeight: 1080, SourceBitrateKbps: 6000,
+    Codec: "h264", FrameRate: 24,
+})
+```
+
+Rungs come from a standard H.264-baseline ladder (2160p/1080p/720p/480p/360p,
+each with an editorial bitrate) filtered and scaled:
+
+- **never upscale**: a rung taller or wider than the source is dropped;
+- **never exceed the source bitrate**: every rung's bitrate is capped at
+  `SourceBitrateKbps` when known (the cap is applied uniformly across rungs,
+  so the ladder stays monotonically non-decreasing with resolution even when
+  the cap clips several rungs to the same value);
+- **codec efficiency**: the baseline bitrate is scaled by a documented,
+  approximate multiplier for codecs more efficient than H.264 at the same
+  quality (HEVC 0.6x, AV1 0.5x, VP9 0.65x; anything else, including an unknown
+  codec, gets 1.0x - no assumed gain);
+  - content above 30fps gets an additional 1.3x bump (more motion to encode
+    per second for the same quality);
+- when the source is shorter than every standard rung, a single rung at the
+  source's own resolution is returned instead of an empty ladder.
+
+`RecommendLadderFor` derives `LadderInput` from the file's video track
+(head-only metadata, Matroska/WebM or MP4/MOV) - width/height, `Track.Bitrate`
+when present, codec, and frame rate.
+
+---
+
 ## Error Handling
 
 All functions return `error`. No panics, no logging.

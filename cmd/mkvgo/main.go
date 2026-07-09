@@ -150,6 +150,12 @@ func main() {
 	case "analyze":
 		commands.RequireArgs(args, 1, "mkvgo analyze [-json] <file.mkv|url>")
 		commands.CmdAnalyze(args)
+	case "playability":
+		commands.RequireArgs(args, 1, "mkvgo playability [-target name] [-json] <file.mkv|.mp4|url>")
+		commands.CmdPlayability(args)
+	case "ladder":
+		commands.RequireArgs(args, 1, "mkvgo ladder [-json] <file.mkv|.mp4|url>")
+		commands.CmdLadder(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -206,6 +212,8 @@ concat-hls    Package several sources as ONE continuous HLS session (no player r
 concat-segment  Serve one concat-hls resource on demand, no pre-generation
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
 analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration (head-only, no decode; Matroska/WebM only)
+playability   Per-track and overall direct-play/remux/transcode verdict against a target (no probe, no decode)
+ladder        Recommend an ABR ladder from the source's resolution/bitrate/codec (guidance, not a guarantee)
 
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments, tags,

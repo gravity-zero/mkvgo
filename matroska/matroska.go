@@ -127,6 +127,48 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
 }
 
+// --- Playability / ABR ladder ---
+
+// Target, TrackVerdict and PlayabilityReport are the playability decision
+// model — see ops.Target for the capability fields and TargetByName for the
+// built-in profiles.
+type Target = ops.Target
+type TrackVerdict = ops.TrackVerdict
+type PlayabilityReport = ops.PlayabilityReport
+
+// Playability evaluates every track of the file at path against target
+// (head-only metadata only — no decode) and returns the per-track and
+// overall direct-play/remux/transcode verdicts. See ops.Playability.
+func Playability(ctx context.Context, path string, target Target, opts ...Options) (*PlayabilityReport, error) {
+	return ops.Playability(ctx, path, target, opts...)
+}
+
+// TargetByName returns one of the built-in playability capability profiles
+// ("safari", "chrome", "firefox", "chromecast-gen3", "mse-generic",
+// "chromium-generic", "brave", "opera", "vivaldi", "samsung-internet",
+// "edge"), or (Target{}, false) for an unknown name.
+func TargetByName(name string) (Target, bool) {
+	return ops.TargetByName(name)
+}
+
+// Rung and LadderInput are the ABR ladder recommendation model — see
+// ops.RecommendLadder.
+type Rung = ops.Rung
+type LadderInput = ops.LadderInput
+
+// RecommendLadder returns a sensible ABR ladder capped at the source
+// resolution/bitrate: guidance, not a guarantee — mkvgo never transcodes.
+// See ops.RecommendLadder.
+func RecommendLadder(in LadderInput) []Rung {
+	return ops.RecommendLadder(in)
+}
+
+// RecommendLadderFor derives a LadderInput from a file's video track
+// (head-only metadata) and returns RecommendLadder's result.
+func RecommendLadderFor(ctx context.Context, path string, opts ...Options) ([]Rung, error) {
+	return ops.RecommendLadderFor(ctx, path, opts...)
+}
+
 // ReadOption configures an optional metadata-read behaviour (see
 // WithInBandColourFallback).
 type ReadOption = reader.ReadOption

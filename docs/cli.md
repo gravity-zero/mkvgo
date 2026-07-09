@@ -1077,3 +1077,60 @@ for t in $(mkvgo keyframes -json movie.mkv | jq -r '.[]'); do
   mkvgo extract-frame movie.mkv ${t}ms -o f.h264 -f && ffmpeg -y -i f.h264 -frames:v 1 -vf scale=160:-1 thumb_${t}.jpg
 done
 ```
+
+## Playability and ABR Ladder
+
+### playability
+
+Per-track and overall verdict for whether a file plays on a given target
+directly, needs only a container remux, or needs a transcode - from
+head-only metadata, no external probe, no decode.
+
+```
+mkvgo playability [-target safari|chrome|firefox|chromecast-gen3|mse-generic|chromium-generic|brave|opera|vivaldi|samsung-internet|edge] [-json] <file.mkv|.mp4|url>
+```
+
+Default target is `mse-generic` (plain H.264/AAC, capped at High@4.1 - the
+safe universal bar for a generic MediaSource Extensions player). `-json`
+prints the full `PlayabilityReport` (per-track `Verdict`/`Reasons`, overall
+verdict, suggested `RemuxContainer`); without it, one line per track plus the
+overall line.
+
+```bash
+mkvgo playability movie.mkv
+# Target: mse-generic
+#   #1  video     remux  (source container "mkv" does not carry this codec on target "mse-generic"; remux to mp4 carries it without a transcode)
+#   #2  audio     remux  (source container "mkv" does not carry this codec on target "mse-generic"; remux to mp4 carries it without a transcode)
+# Overall: remux
+# Suggested remux container: mp4
+
+mkvgo playability -target safari -json movie.mkv | jq .OverallVerdict
+```
+
+The library equivalent is `matroska.Playability` / `matroska.TargetByName`
+(see library.md for the full capability table and how to override it with a
+custom `Target`).
+
+### ladder
+
+Recommend an ABR ladder from the source's own resolution/bitrate/codec:
+capped at the source (never upscales, never exceeds the source bitrate),
+scaled by a documented codec efficiency factor. Guidance for an external
+encoder, not a guarantee - mkvgo never transcodes.
+
+```
+mkvgo ladder [-json] <file.mkv|.mp4|url>
+```
+
+```bash
+mkvgo ladder movie.mkv
+#   1080p    1920x1080     6000 kb/s
+#   720p     1280x720      3000 kb/s
+#   480p      854x480      1200 kb/s
+#   360p      640x360       700 kb/s
+
+mkvgo ladder -json movie.mkv | jq -r '.[] | "\(.Label) \(.BitrateKbps)k"'
+```
+
+The library equivalent is `matroska.RecommendLadderFor` / `RecommendLadder`
+(see library.md).
