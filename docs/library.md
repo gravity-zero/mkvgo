@@ -1475,6 +1475,62 @@ when present, codec, and frame rate.
 
 ---
 
+## Ingest (One-Call Serving Plan)
+
+`matroska.Ingest` composes `Playability`, `RecommendLadderFor` and
+`ReindexInPlace` into a single decision for a media server's per-file
+onboarding, so the caller does not hand-roll "check playability, then check
+the seek index, then maybe reindex, then maybe recommend a ladder" for every
+file. Like everything else in this package: no decode, no transcode - a
+"transcode" verdict only returns a recommended ladder for an external encoder
+to act on.
+
+```go
+plan, err := matroska.Ingest(ctx, "movie.mkv", matroska.IngestOptions{
+    Target:  "safari",       // default "mse-generic" when empty
+    Reindex: true,           // patch in a seek index if a remux decision needs one and none exists
+})
+if err != nil { return err }
+
+switch plan.Strategy {
+case matroska.StrategyDirectPlay:
+    // serve the source file as-is (byte-range)
+case matroska.StrategyRemuxHLS:
+    // package on-demand HLS/CMAF from the source; plan.RemuxContainer names the container
+case matroska.StrategyTranscode:
+    // plan.Ladder holds the recommended rungs for an external encoder
+}
+```
+
+`ServingPlan` fields:
+
+- `Strategy`: `"direct-play"` | `"remux-hls"` | `"transcode"` (the constants
+  `StrategyDirectPlay`/`StrategyRemuxHLS`/`StrategyTranscode`).
+- `Target`, `SourceContainer` (`"mkv"` or `"mp4"`, as mkvgo's own head-only
+  sniffing resolves it - see `Playability`), `RemuxContainer` (set only for
+  `remux-hls`).
+- `HasSeekIndex`, `NeedsReindex`: whether the source already carries a
+  head-discoverable Cues index (`reader.WithCues`), checked only when the
+  strategy is `remux-hls` (on-demand HLS needs to seek into the source).
+- `Reindexed`: true when `Ingest` itself performed an in-place reindex during
+  this call (`opts.Reindex` was set and it succeeded).
+- `ReindexInPlacePossible`: false means the file's layout cannot hold a
+  head-discoverable seek index in place (see `ErrIndexNotHeadDiscoverable`) -
+  the caller falls back to a copy reindex (`Reindex`/`ReindexReplace`).
+  `Ingest` does not fail in that case: the plan is still returned, with a
+  `Reasons` entry pointing at the fallback.
+- `Playability`: the full per-track report.
+- `Analysis`: populated only when `IngestOptions.IncludeAnalysis` is set.
+- `Ladder`: populated only when `Strategy` is `transcode`.
+- `Reasons`: a short, human-readable decision trail - one line per decision
+  `Ingest` made, in order (target/container resolved, why remux or transcode,
+  seek-index status, reindex outcome).
+
+`IngestOptions` embeds `Options` (the `FS`/`Progress` port), plus `Target`,
+`IncludeAnalysis` and `Reindex`.
+
+---
+
 ## Error Handling
 
 All functions return `error`. No panics, no logging.

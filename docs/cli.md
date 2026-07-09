@@ -1091,7 +1091,7 @@ for t in $(mkvgo keyframes -json movie.mkv | jq -r '.[]'); do
 done
 ```
 
-## Playability and ABR Ladder
+## Playability, ABR Ladder and Ingest
 
 ### playability
 
@@ -1147,3 +1147,72 @@ mkvgo ladder -json movie.mkv | jq -r '.[] | "\(.Label) \(.BitrateKbps)k"'
 
 The library equivalent is `matroska.RecommendLadderFor` / `RecommendLadder`
 (see library.md).
+
+### ingest
+
+One-call serving decision for a media server's per-file onboarding: composes
+`playability`, `ladder` and a reindex into a single plan, so a caller does not
+have to chain "check playability, then check the seek index, then maybe
+reindex, then maybe recommend a ladder" by hand. No decode, no transcode - a
+`transcode` strategy only returns a recommended ladder for an external
+encoder to run.
+
+```
+mkvgo ingest [-target name] [-reindex] [-analyze] [-json] <file.mkv|.mp4|url>
+```
+
+| Flag | Description |
+|---|---|
+| `-target` | Playback target (same names as `playability`; default `mse-generic`) |
+| `-reindex` | Patch in a seek index (in-place) if a remux decision needs one and none exists |
+| `-analyze` | Also run `analyze` and attach its report to the plan |
+
+Sample output for each strategy:
+
+```bash
+# direct-play: source already plays as-is on the target
+mkvgo ingest -target mse-generic already-mp4-h264-aac.mp4
+# Target: mse-generic
+# Source container: mp4
+# Strategy: direct-play
+# Reasons:
+#   - target "mse-generic", source container "mp4"
+#   - every track direct-plays on "mse-generic" from container "mp4"; serving the source as-is
+
+# remux-hls: codec is fine, container needs to change; a seek index is missing
+mkvgo ingest -target safari -reindex movie.mkv
+# Target: safari
+# Source container: mkv
+# Strategy: remux-hls
+# Remux container: mp4
+# Seek index present: true
+# Reindexed in place: yes
+# Reasons:
+#   - target "safari", source container "mkv"
+#   - source container "mkv" does not carry every track's codec on "safari"; remux to mp4 keeps every codec, no transcode
+#   - source has no head-discoverable seek index; a reindex is required before on-demand HLS packaging
+#   - in-place reindex succeeded; seek index is now head-discoverable
+
+# transcode: codec/profile/level unsupported on the target
+mkvgo ingest -target chrome hevc-main10.mkv
+# Target: chrome
+# Source container: mkv
+# Strategy: transcode
+# Recommended ladder:
+#   1080p    1920x1080     3600 kb/s
+#   720p     1280x720      1800 kb/s
+#   480p      854x480       720 kb/s
+#   360p      640x360       420 kb/s
+# Reasons:
+#   - target "chrome", source container "mkv"
+#   - at least one track's codec/profile/level is not carried by any container "chrome" accepts; transcode required, recommended ladder has 4 rung(s)
+
+mkvgo ingest -json movie.mkv    # ServingPlan
+```
+
+When `-reindex` is set but the file's layout cannot hold a head-discoverable
+seek index in place (see `ErrIndexNotHeadDiscoverable` in library.md), the
+plan is still returned - not an error - with `ReindexInPlacePossible: false`
+and a `Reasons` entry pointing at a copy reindex (`mkvgo reindex`) instead.
+
+The library equivalent is `matroska.Ingest` (see library.md).

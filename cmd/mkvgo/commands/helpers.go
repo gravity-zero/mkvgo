@@ -90,6 +90,7 @@ var CmdUsage = map[string]string{
 	"analyze":            "mkvgo analyze [-json] <file.mkv|url> (per-track frame/keyframe counts, bitrate, GOP, duration - head-only, no decode)",
 	"playability":        "mkvgo playability [-target safari|chrome|firefox|chromecast-gen3|mse-generic|chromium-generic|brave|opera|vivaldi|samsung-internet|edge] [-json] <file.mkv|.mp4|url> (default target: mse-generic)",
 	"ladder":             "mkvgo ladder [-json] <file.mkv|.mp4|url> (recommended ABR rungs, capped at the source resolution/bitrate)",
+	"ingest":             "mkvgo ingest [-target name] [-reindex] [-analyze] [-json] <file.mkv|.mp4|url> (one-call serving plan: direct-play/remux-hls/transcode, default target: mse-generic)",
 }
 
 func CmdHelp(cmd string) {

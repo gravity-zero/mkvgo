@@ -169,6 +169,34 @@ func RecommendLadderFor(ctx context.Context, path string, opts ...Options) ([]Ru
 	return ops.RecommendLadderFor(ctx, path, opts...)
 }
 
+// --- Ingest ---
+
+// ServingStrategy is Ingest's top-level serving recommendation. See
+// ops.ServingStrategy.
+type ServingStrategy = ops.ServingStrategy
+
+const (
+	StrategyDirectPlay = ops.StrategyDirectPlay
+	StrategyRemuxHLS   = ops.StrategyRemuxHLS
+	StrategyTranscode  = ops.StrategyTranscode
+)
+
+// ServingPlan is Ingest's result. See ops.ServingPlan.
+type ServingPlan = ops.ServingPlan
+
+// IngestOptions configures Ingest. See ops.IngestOptions.
+type IngestOptions = ops.IngestOptions
+
+// Ingest composes Playability, RecommendLadderFor and (optionally)
+// ReindexInPlace into a single per-file "serving plan" decision for a media
+// server's onboarding: whether to direct-play the source, remux it to
+// on-demand HLS (patching in a seek index first when opts.Reindex is set and
+// none exists), or recommend an ABR ladder for an external transcode. Ingest
+// itself never decodes or transcodes anything. See ops.Ingest.
+func Ingest(ctx context.Context, path string, opts IngestOptions) (*ServingPlan, error) {
+	return ops.Ingest(ctx, path, opts)
+}
+
 // ReadOption configures an optional metadata-read behaviour (see
 // WithInBandColourFallback).
 type ReadOption = reader.ReadOption
