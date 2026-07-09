@@ -24,7 +24,7 @@ func TestCmdIngest_JSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &plan); err != nil {
 		t.Fatalf("CmdIngest JSON parse: %v\n%s", err, out)
 	}
-	if plan["Strategy"] == nil {
+	if plan["strategy"] == nil {
 		t.Errorf("CmdIngest JSON: expected a Strategy field, got %v", plan)
 	}
 }

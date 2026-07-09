@@ -37,41 +37,41 @@ const (
 // ServingPlan is the result of Ingest: the serving decision, plus whatever
 // repair (a seek-index reindex) that decision called for.
 type ServingPlan struct {
-	Strategy ServingStrategy
-	Target   string
+	Strategy ServingStrategy `json:"strategy"`
+	Target   string          `json:"target"`
 	// SourceContainer is the source's on-disk container as mkvgo's own
 	// head-only sniffing resolves it: "mkv" (also covers WebM - see
 	// openAnyMeta) or "mp4".
-	SourceContainer string
+	SourceContainer string `json:"source_container"`
 	// RemuxContainer is the cheapest container the target accepts that keeps
 	// every kept track's codec, populated only when Strategy is
 	// StrategyRemuxHLS.
-	RemuxContainer string
+	RemuxContainer string `json:"remux_container,omitempty"`
 	// HasSeekIndex reports whether the source already carries a
 	// head-discoverable Cues index (reader.WithCues, len(Cues) > 0) - ready
 	// for on-demand HLS packaging without any repair.
-	HasSeekIndex bool
+	HasSeekIndex bool `json:"has_seek_index"`
 	// NeedsReindex is true when Strategy is StrategyRemuxHLS and the source
 	// has no head-discoverable seek index yet: a reindex is required before
 	// on-demand HLS can seek into it.
-	NeedsReindex bool
+	NeedsReindex bool `json:"needs_reindex"`
 	// Reindexed is true when Ingest itself performed an in-place reindex
 	// during this call (opts.Reindex was set and it succeeded).
-	Reindexed bool
+	Reindexed bool `json:"reindexed"`
 	// ReindexInPlacePossible reports whether an in-place reindex works for
 	// this file's layout. False means the caller must fall back to a copy
 	// reindex (ops.Reindex/ReindexReplace) to get a head-discoverable index.
 	// Only meaningful once a reindex was attempted (Ingest sets it either
 	// way when opts.Reindex triggers an attempt).
-	ReindexInPlacePossible bool
-	Playability            *PlayabilityReport
+	ReindexInPlacePossible bool               `json:"reindex_in_place_possible"`
+	Playability            *PlayabilityReport `json:"playability,omitempty"`
 	// Analysis is populated only when IngestOptions.IncludeAnalysis is set.
-	Analysis *AnalyzeReport
+	Analysis *AnalyzeReport `json:"analysis,omitempty"`
 	// Ladder is populated only when Strategy is StrategyTranscode.
-	Ladder []Rung
+	Ladder []Rung `json:"ladder,omitempty"`
 	// Reasons is the human-readable decision trail: one short line per
 	// decision Ingest made, in order.
-	Reasons []string
+	Reasons []string `json:"reasons"`
 }
 
 // IngestOptions configures Ingest.

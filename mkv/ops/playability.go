@@ -57,20 +57,20 @@ type Target struct {
 
 // TrackVerdict is one track's playability verdict.
 type TrackVerdict struct {
-	TrackID uint64
-	Type    string   // "video", "audio", "subtitle"
-	Verdict string   // "direct-play" | "remux" | "transcode"
-	Reasons []string // why remux or transcode; empty for direct-play
+	TrackID uint64   `json:"track_id"`
+	Type    string   `json:"type"`              // "video", "audio", "subtitle"
+	Verdict string   `json:"verdict"`           // "direct-play" | "remux" | "transcode"
+	Reasons []string `json:"reasons,omitempty"` // why remux or transcode; empty for direct-play
 }
 
 // PlayabilityReport is the whole-file verdict: per track, plus the overall
 // (worst of all tracks) and, when the overall is "remux", the cheapest
 // container that would make every track direct-play.
 type PlayabilityReport struct {
-	Target         string
-	OverallVerdict string
-	RemuxContainer string
-	Tracks         []TrackVerdict
+	Target         string         `json:"target"`
+	OverallVerdict string         `json:"overall_verdict"`
+	RemuxContainer string         `json:"remux_container,omitempty"`
+	Tracks         []TrackVerdict `json:"tracks"`
 }
 
 const (

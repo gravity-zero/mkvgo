@@ -18,10 +18,10 @@ import (
 
 // Rung is one ABR ladder step.
 type Rung struct {
-	Width       int
-	Height      int
-	BitrateKbps int
-	Label       string // "2160p", "1080p", "720p", "480p", "360p"
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	BitrateKbps int    `json:"bitrate_kbps"`
+	Label       string `json:"label"` // "2160p", "1080p", "720p", "480p", "360p"
 }
 
 // LadderInput is the source facts RecommendLadder needs. SourceBitrateKbps

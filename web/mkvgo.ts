@@ -152,11 +152,11 @@ export type Verdict = 'direct-play' | 'remux' | 'transcode'
 
 /** One track's playability verdict against a target; see PlayabilityReport. */
 export interface TrackVerdict {
-  TrackID: number
-  Type: TrackType
-  Verdict: Verdict
+  track_id: number
+  type: TrackType
+  verdict: Verdict
   /** Why remux or transcode; empty for direct-play. */
-  Reasons?: string[] | null
+  reasons?: string[] | null
 }
 
 /**
@@ -166,58 +166,57 @@ export interface TrackVerdict {
  * no block walk, no decode.
  */
 export interface PlayabilityReport {
-  Target: string
-  OverallVerdict: Verdict
+  target: string
+  overall_verdict: Verdict
   /** The cheapest container that would make every track direct-play, when
-   * OverallVerdict is "remux"; empty otherwise. */
-  RemuxContainer: string
-  Tracks: TrackVerdict[]
+   * overall_verdict is "remux"; empty otherwise. */
+  remux_container?: string
+  tracks: TrackVerdict[]
 }
 
 /** One ABR ladder rung recommended by ladder(). Guidance, not a guarantee -
  * mkvgo never transcodes; the actual encode is always an external step. */
 export interface Rung {
-  Width: number
-  Height: number
-  BitrateKbps: number
+  width: number
+  height: number
+  bitrate_kbps: number
   /** "2160p", "1080p", "720p", "480p", "360p". */
-  Label: string
+  label: string
 }
 
 export type ServingStrategy = 'direct-play' | 'remux-hls' | 'transcode'
 
 /**
  * Result of ingest(): a whole-file serving decision (see ServingPlan below).
- * Field names mirror the Go struct verbatim (no `json:` tags on ServingPlan,
- * like PlayabilityReport/Rung), not the snake_case of probe/analyze.
+ * Field names are the snake_case JSON keys the Go struct emits.
  */
 export interface ServingPlan {
-  Strategy: ServingStrategy
-  Target: string
+  strategy: ServingStrategy
+  target: string
   /** Sniffed source container: 'mkv' (also covers WebM) or 'mp4'. */
-  SourceContainer: string
+  source_container: string
   /** Cheapest container that keeps every kept track's codec; set only when
-   * Strategy is 'remux-hls'. */
-  RemuxContainer: string
+   * strategy is 'remux-hls'. */
+  remux_container?: string
   /** Whether the source already carries a head-discoverable Cues index. */
-  HasSeekIndex: boolean
-  /** Set when Strategy is 'remux-hls' and the source has no head-discoverable
+  has_seek_index: boolean
+  /** Set when strategy is 'remux-hls' and the source has no head-discoverable
    * seek index yet - a reindex is required before on-demand HLS can seek
    * into it. This wasm binding never performs that reindex itself (see
    * docs/wasm.md); a server/CLI runs it out of band. */
-  NeedsReindex: boolean
+  needs_reindex: boolean
   /** Always false in wasm: reindex is never performed by this binding. */
-  Reindexed: boolean
+  reindexed: boolean
   /** Whether an in-place reindex would work for this file's layout, once one
-   * was attempted; meaningless here since Reindex never runs in wasm. */
-  ReindexInPlacePossible: boolean
-  Playability: PlayabilityReport
+   * was attempted; meaningless here since reindex never runs in wasm. */
+  reindex_in_place_possible: boolean
+  playability?: PlayabilityReport
   /** Populated only when options.analyze was set. */
-  Analysis?: AnalyzeReport
-  /** Populated only when Strategy is 'transcode'. */
-  Ladder?: Rung[]
+  analysis?: AnalyzeReport
+  /** Populated only when strategy is 'transcode'. */
+  ladder?: Rung[]
   /** Human-readable decision trail, one short line per decision made, in order. */
-  Reasons: string[]
+  reasons: string[]
 }
 
 export interface IngestOptions extends AbortOptions {

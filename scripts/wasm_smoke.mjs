@@ -185,14 +185,14 @@ check(analyzeBlob.duration_ms === analyzeReport.duration_ms && analyzeBlob.track
 
 // --- playability: verdict model against a target (default mse-generic, plus safari) ---
 const playMse = await MkvGo.playability(mkvBytes, 'mse-generic')
-check(['direct-play', 'remux', 'transcode'].includes(playMse.OverallVerdict),
-  `playability mse-generic overall verdict (${playMse.OverallVerdict})`)
-check(Array.isArray(playMse.Tracks) && playMse.Tracks.length > 0 &&
-  playMse.Tracks.every((t) => ['direct-play', 'remux', 'transcode'].includes(t.Verdict)),
+check(['direct-play', 'remux', 'transcode'].includes(playMse.overall_verdict),
+  `playability mse-generic overall verdict (${playMse.overall_verdict})`)
+check(Array.isArray(playMse.tracks) && playMse.tracks.length > 0 &&
+  playMse.tracks.every((t) => ['direct-play', 'remux', 'transcode'].includes(t.verdict)),
   'playability per-track verdicts')
 const playSafari = await MkvGo.playability(mkvBytes, 'safari')
-check(['direct-play', 'remux', 'transcode'].includes(playSafari.OverallVerdict),
-  `playability safari overall verdict (${playSafari.OverallVerdict})`)
+check(['direct-play', 'remux', 'transcode'].includes(playSafari.overall_verdict),
+  `playability safari overall verdict (${playSafari.overall_verdict})`)
 await MkvGo.playability(mkvBytes, 'not-a-real-target')
   .then(() => check(false, 'unknown playability target must reject'))
   .catch(() => check(true, 'unknown playability target rejects'))
@@ -201,7 +201,7 @@ await MkvGo.playability(mkvBytes, 'not-a-real-target')
 const sourceVideo = probe.tracks.find((t) => t.type === 'video')
 const rungs = await MkvGo.ladder(mkvBytes)
 check(Array.isArray(rungs) && rungs.length > 0, `ladder rungs (${rungs.length})`)
-check(rungs.every((r) => r.Width <= sourceVideo.width && r.Height <= sourceVideo.height && r.BitrateKbps > 0),
+check(rungs.every((r) => r.width <= sourceVideo.width && r.height <= sourceVideo.height && r.bitrate_kbps > 0),
   'ladder rungs stay within the source resolution with a positive bitrate')
 
 // --- CENC: sample-level Common Encryption packaging (structure only; the
@@ -242,15 +242,15 @@ await MkvGo.remuxToWebM(mkvBytes) // h264/aac is not WebM-eligible
 
 // --- ingest: read-only serving-plan decision (playability + ladder + seek-index check) ---
 const ingestPlain = await MkvGo.ingest(mkvBytes, { target: 'mse-generic' })
-check(['direct-play', 'remux-hls', 'transcode'].includes(ingestPlain.Strategy),
-  `ingest strategy (${ingestPlain.Strategy})`)
-check(ingestPlain.Target === 'mse-generic', `ingest target (${ingestPlain.Target})`)
-check(Array.isArray(ingestPlain.Reasons) && ingestPlain.Reasons.length > 0,
-  `ingest reasons (${ingestPlain.Reasons?.length})`)
-check(!ingestPlain.Reindexed, 'ingest never reindexes in wasm')
+check(['direct-play', 'remux-hls', 'transcode'].includes(ingestPlain.strategy),
+  `ingest strategy (${ingestPlain.strategy})`)
+check(ingestPlain.target === 'mse-generic', `ingest target (${ingestPlain.target})`)
+check(Array.isArray(ingestPlain.reasons) && ingestPlain.reasons.length > 0,
+  `ingest reasons (${ingestPlain.reasons?.length})`)
+check(!ingestPlain.reindexed, 'ingest never reindexes in wasm')
 const ingestAnalyzed = await MkvGo.ingest(mkvBytes, { target: 'mse-generic', analyze: true })
-check(ingestAnalyzed.Analysis && Array.isArray(ingestAnalyzed.Analysis.tracks) && ingestAnalyzed.Analysis.tracks.length > 0,
-  `ingest({analyze:true}) attaches analysis (${ingestAnalyzed.Analysis?.tracks?.length})`)
+check(ingestAnalyzed.analysis && Array.isArray(ingestAnalyzed.analysis.tracks) && ingestAnalyzed.analysis.tracks.length > 0,
+  `ingest({analyze:true}) attaches analysis (${ingestAnalyzed.analysis?.tracks?.length})`)
 await MkvGo.ingest(mkvBytes, { target: 'not-a-real-target' })
   .then(() => check(false, 'ingest unknown target must reject'))
   .catch(() => check(true, 'ingest unknown target rejects'))
