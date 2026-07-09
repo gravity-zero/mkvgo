@@ -4,6 +4,33 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.17.1] - 2026-07-09
+
+### Changed
+
+- **Box and index payloads read incrementally.** When a source declares an
+  element larger than it actually delivers - notably a hostile remote
+  Content-Length, where the "declared size fits the file" guard is only as
+  trustworthy as the server's reported length - the MP4 moov/box and Matroska
+  Cues reads now grow the buffer as bytes arrive rather than allocating the
+  declared size up front, so the read fails at I/O time without a large
+  single-shot allocation.
+
+### Documentation
+
+- Corrected the binary and WebAssembly size figures (the static binary is about
+  8 MB; the WebAssembly module gzips to about 1.6 MB) and removed unverified
+  comparative claims.
+- Documented that Common Encryption key/IV uniqueness across separate encodings
+  is the caller's responsibility: mkvgo validates the key/IV lengths, not their
+  global uniqueness, and reusing a key with the same base IV across encodings
+  reuses the keystream.
+
+### Internal
+
+- Raised `matroska` facade test coverage to 100% and factored two long reindex
+  functions into smaller behavior-preserving helpers.
+
 ## [0.17.0] - 2026-07-09
 
 **Highlights**
