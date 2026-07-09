@@ -908,20 +908,33 @@ Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wra
 
 ```
 mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre]
+mkvgo serve <file.mkv|url> [-addr :8478] --direct
+mkvgo serve <file.mkv|url> [-addr :8478] --auto [-target mse-generic]
 ```
 
-- `-addr` sets the listen address (default `:8478`); the command prints the playable master playlist URL on startup.
-- Accepts the same shared HLS flags as `to-hls`/`hls-segment` (`-segment`, `--keep-tracks`, `--keep-lang`, ...).
+- `-addr` sets the listen address (default `:8478`); the command prints the playable URL on startup.
+- Accepts the same shared HLS flags as `to-hls`/`hls-segment` (`-segment`, `--keep-tracks`, `--keep-lang`, ...) when packaging (the default mode, and the mode `--auto` falls back to).
 - Responses carry a strong ETag (SHA-256 of the bytes), support `Range` (206 partial content) and conditional `If-None-Match` (304), and set `Cache-Control` per resource class: `no-cache` for playlists/manifests (`.m3u8`/`.mpd`), `public, max-age=31536000, immutable` for everything else (segments and init segments are a deterministic function of the source, so caching them forever is safe). CORS headers are enabled, for a browser-based player on another origin.
+- `--direct`: skip packaging entirely and serve the raw file byte-range (`mkvhttp.FileHandler`) -- direct-play: serve the file as-is when the client supports it, no packaging.
+- `--auto`: run `mkvgo playability` (target `-target`, default `mse-generic`) and pick `--direct` when the overall verdict is direct-play, or the on-demand HLS plan otherwise; prints which mode it chose. `--direct` and `--auto` are mutually exclusive.
 - Ctrl-C shuts the server down gracefully.
 
 ```bash
 mkvgo serve movie.mkv -addr :8080
 # serving movie.mkv
 #   http://localhost:8080/master.m3u8
+
+mkvgo serve movie.mkv -addr :8080 --direct
+# serving movie.mkv (direct-play, no packaging)
+#   http://localhost:8080/movie.mkv
+
+mkvgo serve movie.mkv -addr :8080 --auto
+# auto: direct-play verdict for target "mse-generic" -> direct file (no packaging)
+# serving movie.mkv (direct-play, no packaging)
+#   http://localhost:8080/movie.mkv
 ```
 
-See `docs/library.md` (`mkvhttp.Handler`) for the full caching/ETag/Range semantics table, and `docs/streaming.md` for a short pointer on serving over HTTP from library code.
+See `docs/library.md` (`mkvhttp.Handler`, `mkvhttp.FileHandler`) for the full caching/ETag/Range semantics tables, and `docs/streaming.md` for a short pointer on serving over HTTP from library code.
 
 ### serve-growing
 

@@ -99,6 +99,15 @@ semantics table. `mkvgo serve <file.mkv>` is this wired up as a CLI command
 Combined with a remote source (see below), only the byte ranges a viewer
 actually watches are ever transferred from storage.
 
+**Direct-play: serve the file as-is when the client supports it, no
+packaging.** `mkvhttp.FileHandler(path)` serves one local file straight over
+HTTP byte-range (streamed from an `*os.File`, no packaging, no decode) -- the
+counterpart to `Handler`'s on-demand plans, for a client that can play the
+source container/codecs natively. `mkvgo serve <file.mkv> --direct` wires
+this up as a CLI command; `--auto` runs a `Playability` check first and picks
+`--direct` or the HLS plan for you. See `docs/library.md` for the semantics
+table.
+
 ---
 
 ## Play while downloading (growing files) -- `serve-growing` / `mp4.PlanGrowingHLS`

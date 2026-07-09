@@ -1275,6 +1275,29 @@ Semantics:
 
 The CLI's `mkvgo serve` (see `docs/cli.md`) is this package wired to `mp4.PlanHLS` with a graceful-shutdown `net/http.Server`.
 
+### Direct-play (`mkvhttp.FileHandler`)
+
+`mkvhttp.FileHandler` serves one local file as-is, for a client that can direct-play it (no packaging, no decode/transcode) -- the counterpart to `Handler`'s on-demand plans:
+
+```go
+http.Handle("/play/movie.mkv", mkvhttp.FileHandler("movie.mkv"))
+```
+
+It streams straight from an `*os.File` via `http.ServeContent` -- the file is never read into memory.
+
+| Aspect | Behaviour |
+| --- | --- |
+| Methods | `GET`/`HEAD` only; `405` (with `Allow`) otherwise. `OPTIONS` gets a `204` CORS preflight response when `Options.AllowCORS` is set. |
+| Range | Full support (seeking/scrubbing), served by `http.ServeContent` directly over the open file. |
+| ETag | Strong, but O(1) in file size: the SHA-256 of `"<size>-<mtime-unix-nano>"` from a single `os.Stat`, never the file's content -- hashing a multi-gigabyte source on every request would defeat the point of a fast direct-play handler. |
+| Conditional GET | A matching `If-None-Match` gets a bare `304`. |
+| Content-Type | From the extension, set before `http.ServeContent` runs so its own sniffing never overrides it: `.mkv` &rarr; `video/x-matroska`, `.webm` &rarr; `video/webm`, `.mp4`/`.m4v` &rarr; `video/mp4`, else `application/octet-stream`. |
+| Cache-Control | `public, max-age=31536000, immutable` -- the bytes at a given path never change. |
+| Errors | Missing file answers `404`; any other open/stat error answers `500`. |
+| CORS | Same as `Handler`: `Options{AllowCORS: true}`. |
+
+The CLI's `mkvgo serve --direct`/`--auto` (see `docs/cli.md`) wires this to a graceful-shutdown `net/http.Server`.
+
 ---
 
 ## Deterministic outputs

@@ -96,7 +96,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if req.Method == http.MethodOptions {
 		if !h.opts.AllowCORS {
-			h.methodNotAllowed(w)
+			methodNotAllowed(w)
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
@@ -105,7 +105,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
-		h.methodNotAllowed(w)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -141,7 +141,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.ServeContent(w, req, name, time.Time{}, bytes.NewReader(data))
 }
 
-func (h *handler) methodNotAllowed(w http.ResponseWriter) {
+// methodNotAllowed answers a non-GET/HEAD/OPTIONS request; shared by Handler
+// and FileHandler, whose method-not-allowed responses are identical.
+func methodNotAllowed(w http.ResponseWriter) {
 	w.Header().Set("Allow", "GET, HEAD")
 	http.Error(w, "mkvhttp: method not allowed", http.StatusMethodNotAllowed)
 }
