@@ -6,12 +6,25 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/cmd/mkvgo/commands"
 )
+
+// skipIfNoInterrupt skips a test that shuts the server down by sending
+// os.Interrupt to the process: Windows only supports os.Kill for
+// Process.Signal, not os.Interrupt, so the signal path cannot be exercised
+// there. The HTTP serving itself is covered by the platform-independent
+// mkvhttp package tests; the production shutdown path (signal.Notify receiving
+// Ctrl-C) still works on Windows, only this test's way of triggering it does not.
+func skipIfNoInterrupt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sending os.Interrupt to a process is not supported on Windows")
+	}
+}
 
 // TestCmdServe_UsageError checks a missing source path exits via Fatal.
 func TestCmdServe_UsageError(t *testing.T) {
@@ -25,6 +38,7 @@ func TestCmdServe_UsageError(t *testing.T) {
 // SIGINT (what Ctrl-C delivers) and checks CmdServe shuts down gracefully
 // instead of hanging.
 func TestCmdServe_EndToEnd(t *testing.T) {
+	skipIfNoInterrupt(t)
 	src := sampleMKV(t)
 	const addr = "127.0.0.1:18479"
 
@@ -77,6 +91,7 @@ func TestCmdServe_EndToEnd(t *testing.T) {
 // byte (no HLS packaging) at a URL named after the source file, and still
 // shuts down cleanly on SIGINT.
 func TestCmdServe_DirectEndToEnd(t *testing.T) {
+	skipIfNoInterrupt(t)
 	src := sampleMKV(t)
 	want, err := os.ReadFile(src)
 	if err != nil {
