@@ -8,7 +8,7 @@ mkvgo <command> [options]
 ```
 
 Global flags:
-- `-json` -- structured JSON output (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare; accepted but ignored by writing commands)
+- `-json` -- structured JSON output (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare, analyze; accepted but ignored by writing commands)
 - `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`). `edit-inplace` is the exception: it modifies its input file by design.
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
@@ -20,7 +20,7 @@ they can gate scripts (`mkvgo validate f.mkv && ...`).
 
 **Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
 is accepted as the input by the inspection commands (`info`, `tracks`,
-`probe`, `keyframes` -- and `chapters`/`tags`/`attachments` on MP4, whose probe
+`probe`, `keyframes`, `analyze` -- and `chapters`/`tags`/`attachments` on MP4, whose probe
 is fully head-only) and as the **source** of `to-mp4`, `from-mp4` and
 `to-hls`. Reads go through ranged requests: inspection transfers a few ranged
 kilobytes whatever the file size; a remux reads sequentially (a streamed
@@ -154,6 +154,30 @@ mkvgo keyframes [-json] <file.mkv|.mp4>
 ```bash
 mkvgo keyframes video.mkv            # HH:MM:SS  <ms>  per line
 mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
+```
+
+### analyze
+
+Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and a declared-vs-true duration reconciliation - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. The walk is head-only: cost is proportional to the block-header count, not the media volume. Matroska/WebM only for now; MP4 is a follow-up.
+
+```
+mkvgo analyze [-json] <file.mkv|url>
+```
+
+```bash
+mkvgo analyze video.mkv
+# Duration: 00:14:23 (declared 00:14:23)
+# Overall bitrate: 4213 kb/s
+# Clusters: 431, blocks: 25920
+#
+# Track 1 (video, h264): 20736 frames (20736 packets), 173 keyframes, 41821440 bytes
+#   avg 3877 kb/s, peak 5210 kb/s, duration 00:14:23, 24.000 fps
+#   GOP: min 120, max 120, avg 120.0 frames; keyframe every ~5000ms; reordered=true
+#
+# Track 2 (audio, aac): 40448 frames (10112 packets), 40448 keyframes, 6469120 bytes
+#   avg 60 kb/s, peak 62 kb/s, duration 00:14:23, 46.865 fps
+
+mkvgo analyze -json video.mkv    # AnalyzeReport
 ```
 
 ### validate

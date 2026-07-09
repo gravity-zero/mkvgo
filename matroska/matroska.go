@@ -245,6 +245,22 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff,
 	return ops.Compare(ctx, pathA, pathB, opts...)
 }
 
+// TrackStats is one track's result from Analyze. See ops.TrackStats.
+type TrackStats = ops.TrackStats
+
+// AnalyzeReport is the result of Analyze. See ops.AnalyzeReport.
+type AnalyzeReport = ops.AnalyzeReport
+
+// Analyze walks path's block headers - never a decoded sample - to compute
+// per-track and container-wide stream statistics: exact frame/keyframe
+// counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and
+// a declared-vs-true duration reconciliation. The walk is head-only: a
+// block's payload is seek-skipped, so the cost is proportional to the
+// block-header count, never the media volume. See ops.Analyze.
+func Analyze(ctx context.Context, path string, opts ...Options) (*AnalyzeReport, error) {
+	return ops.Analyze(ctx, path, opts...)
+}
+
 // AddAttachment rewrites srcPath to dstPath with att appended to the
 // attachments (ID auto-assigned when 0). See ops.AddAttachment.
 func AddAttachment(ctx context.Context, srcPath, dstPath string, att Attachment, opts ...Options) error {

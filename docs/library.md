@@ -936,6 +936,64 @@ The facade re-exports the type and function: `matroska.Salvage`, `matroska.Salva
 
 ---
 
+## Analyze (Stream Statistics)
+
+`ops.Analyze` walks a Matroska/WebM file's block HEADERS - track, timecode, keyframe flag, byte size, duration - to compute the frame-accurate stream statistics a `-count_frames`/`-show_packets`-style probe reports, without ever decoding a sample: no pixel or audio decoding happens anywhere in the walk.
+
+The walk is head-only: `BlockReader.SetHeaderOnly` discards each unlaced block's payload instead of reading it (`Block.Size` is still reported), so the cost is proportional to the block-HEADER count, never the media volume - a two-hour 4K file and a two-hour 480p file with the same frame count cost the same to analyze. A laced block's lacing header still has to be decoded to size its frames, but the payload is dropped right after, never held. Memory stays bounded: only small per-track counters and a trailing-1-second bitrate window are kept, never the blocks themselves - `Analyze` scales to files with millions of blocks.
+
+```go
+import "github.com/gravity-zero/mkvgo/mkv/ops"
+
+report, err := ops.Analyze(ctx, "video.mkv")
+if err != nil { return err }
+
+fmt.Printf("duration %dms (declared %dms), %d clusters, %d blocks\n",
+    report.DurationMs, report.DeclaredDurationMs, report.ClusterCount, report.BlockCount)
+
+for _, ts := range report.Tracks {
+    fmt.Printf("track %d (%s/%s): %d frames (%d packets), %d keyframes, avg %d bps, peak %d bps\n",
+        ts.TrackID, ts.Type, ts.Codec, ts.Frames, ts.Packets, ts.Keyframes, ts.AvgBitrateBps, ts.PeakBitrateBps)
+}
+for _, w := range report.Warnings {
+    fmt.Println("warning:", w)
+}
+```
+
+`TrackStats` (one per track):
+
+| Field | Meaning |
+| --- | --- |
+| `Frames` | Exact frame count, lacing expanded: a laced audio block stores several frames under one stored (Simple)Block, and each is counted individually. |
+| `Packets` | Count of STORED (Simple)Block/BlockGroup elements - what a laced track's `Frames` divides among. `Packets == Frames` for an unlaced track (real-world video is never laced). |
+| `Keyframes` | Count of frames carrying the keyframe flag. |
+| `Bytes` | Sum of frame payload sizes seen (`Block.Size`, populated even in the header-only walk). |
+| `DurationMs` | This track's last frame's end time (timecode + duration), the maximum seen over every frame. |
+| `AvgBitrateBps` / `PeakBitrateBps` | Average over the whole track; peak over the densest trailing 1-second window of frame bytes. |
+| `MinGopFrames` / `MaxGopFrames` / `AvgGopFrames` | Frame-count spans between consecutive VIDEO keyframes. Zero for non-video tracks - audio has no GOP structure, every frame is independently decodable. |
+| `KeyframeEveryMsAvg` | Average milliseconds between consecutive video keyframes. |
+| `Reordered` | Video-only, a decode-free HEURISTIC: a presentation timecode (`Block.Timecode`) that goes backwards in decode order (the order `Next` delivers blocks) is consistent with B-frame reordering, but is not a certainty from headers alone - treat it as a hint, not a decoded fact. |
+| `FrameRateAvg` | `Frames*1000/DurationMs`. |
+
+`AnalyzeReport`:
+
+| Field | Meaning |
+| --- | --- |
+| `DurationMs` | The container's TRUE duration - the latest track end seen during the walk. |
+| `DeclaredDurationMs` | The Segment `Info` `Duration` element, before the walk confirms it. |
+| `OverallBitrateBps` | Total bytes across every track, over `DurationMs`. |
+| `ClusterCount` / `BlockCount` | Number of Cluster elements entered, and stored (Simple)Block/BlockGroup elements seen. |
+| `Tracks` | `[]TrackStats`, one per track, in `Container.Tracks` order. |
+| `Warnings` | Timing sanity issues: a declared-vs-true duration mismatch over 1 second, a track's timecode jumping backwards by more than a second, a track with zero frames, or a track whose frame durations could not be determined (no `BlockDuration`, no usable `DefaultDuration`). |
+
+Supports the FS port like every other operation (`mkv.Options{FS: ...}`), so a remote file can be analyzed the same way `Validate` and `Reindex` do.
+
+The facade re-exports it: `matroska.Analyze`, `matroska.AnalyzeReport`, `matroska.TrackStats`.
+
+MP4 support is a follow-up: an MP4's sample table (`stsz`/`stss`/`stts`) already carries most of the per-sample data `Analyze` needs, but wiring it through the same report shape is not done yet.
+
+---
+
 ## Stream I/O (non-seekable io.Reader / io.Writer)
 
 ### Reading from a stream

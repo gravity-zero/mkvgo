@@ -87,6 +87,7 @@ var CmdUsage = map[string]string{
 	"concat-hls":         "mkvgo concat-hls <in1> <in2> [...] -o <dir> [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (concatenate sources into one continuous HLS session)",
 	"concat-segment":     "mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (build one concat resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",
+	"analyze":            "mkvgo analyze [-json] <file.mkv|url> (per-track frame/keyframe counts, bitrate, GOP, duration - head-only, no decode)",
 }
 
 func CmdHelp(cmd string) {

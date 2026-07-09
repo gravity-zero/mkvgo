@@ -209,6 +209,7 @@ type BlockReader struct {
 	hasStop       bool          // a cluster-timecode limit is set
 	awaitLimit    bool          // stopped at a cluster beyond stopMs; recheck on Next
 	clusterStart  int64         // absolute offset of the current cluster's header
+	clusterCount  int64         // number of Cluster elements entered so far
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -263,6 +264,13 @@ func (br *BlockReader) StopBeforeClusterMs(ms int64) {
 // resume the walk exactly where it stopped.
 func (br *BlockReader) ResumeOffset() int64 {
 	return br.clusterStart
+}
+
+// ClusterCount returns the number of Cluster elements the walk has entered so
+// far (a structural count, from element headers alone - it costs nothing
+// beyond what Next already reads).
+func (br *BlockReader) ClusterCount() int64 {
+	return br.clusterCount
 }
 
 // KeepTracks restricts Next to blocks of the given tracks. Other tracks'
@@ -568,6 +576,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 
 		if h.ID == mkv.IDCluster {
 			br.clusterStart = hdrStart
+			br.clusterCount++
 			br.inCluster = true
 			if h.Size >= 0 {
 				br.clusterEnd = br.r.tell() + h.Size
