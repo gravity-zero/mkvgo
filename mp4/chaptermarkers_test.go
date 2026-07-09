@@ -130,7 +130,7 @@ func TestChapterMarkersHLS(t *testing.T) {
 	i1 := strings.Index(s, `ID="chapter-1"`)
 	i2 := strings.Index(s, `ID="chapter-2"`)
 	i3 := strings.Index(s, `ID="chapter-3"`)
-	if i1 < 0 || i2 < 0 || i3 < 0 || !(i1 < i2 && i2 < i3) {
+	if i1 < 0 || i2 < 0 || i3 < 0 || i1 >= i2 || i2 >= i3 {
 		t.Errorf("chapters not in playlist order: %d, %d, %d", i1, i2, i3)
 	}
 	// The audio rendition must carry no chapter markers (video only).
