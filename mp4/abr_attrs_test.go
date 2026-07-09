@@ -29,7 +29,7 @@ func buildABRVariant(t *testing.T, video mkv.Track, audios ...mkv.Track) string 
 	return buildMKV(t, tracks, blocks)
 }
 
-func u32(v uint32) *uint32    { return &v }
+func u32(v uint32) *uint32 { return &v }
 
 // TestABRMasterAndDASHAttributes_Present exercises the branches that emit each
 // optional attribute (audio name/language/DEFAULT, DASH width/height/frameRate/
