@@ -100,8 +100,8 @@ func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []mem
 			if boxSize-headerLen > maxFragMoofBytes {
 				return errf("moof at offset %d is %d bytes (exceeds limit)", off, boxSize-headerLen)
 			}
-			payload := make([]byte, boxSize-headerLen)
-			if _, err := io.ReadFull(r, payload); err != nil {
+			payload, err := readExact(r, boxSize-headerLen)
+			if err != nil {
 				return err
 			}
 			if err := parseMoofSamples(payload, off, trex, mv); err != nil {

@@ -226,11 +226,11 @@ func findMoovBackward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64
 		if start <= 0 {
 			start, atStart = 0, true
 		}
-		buf := make([]byte, size-start)
 		if _, err := r.Seek(start, io.SeekStart); err != nil {
 			return 0, 0, err
 		}
-		if _, err := io.ReadFull(r, buf); err != nil {
+		buf, err := readExact(r, size-start)
+		if err != nil {
 			return 0, 0, err
 		}
 		for end := len(buf); ; {
@@ -282,11 +282,11 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	payload := make([]byte, payloadLen)
 	if _, err := r.Seek(dataOff, io.SeekStart); err != nil {
 		return nil, err
 	}
-	if _, err := io.ReadFull(r, payload); err != nil {
+	payload, err := readExact(r, payloadLen)
+	if err != nil {
 		return nil, errf("read moov: %w", err)
 	}
 	return payload, nil
@@ -327,6 +327,14 @@ func readMoovLazy(r io.ReadSeeker, size int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// This buffer is the real moov size and is filled sparsely (large sample
+	// tables are seeked over, not read), so unlike readMoov it cannot grow
+	// incrementally - the boxes must sit at their true offsets. payloadLen is a
+	// legitimate value here (a very large movie's moov genuinely runs to
+	// hundreds of MB), so it is bounded by the source's declared size rather
+	// than a fixed cap. On a remote FS that declared size is the server's
+	// reported length; this single allocation is the one spot where the parser
+	// trusts it (bounded, and you already trust the server to stream the file).
 	m := &lazyMoov{r: r, base: dataOff, buf: make([]byte, payloadLen)}
 	if err := m.parse(0, len(m.buf)); err != nil {
 		return nil, err
@@ -649,8 +657,8 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 		}
 		switch typ {
 		case "sidx":
-			payload := make([]byte, boxSize-headerLen)
-			if _, err := io.ReadFull(r, payload); err != nil {
+			payload, err := readExact(r, boxSize-headerLen)
+			if err != nil {
 				return out
 			}
 			out = append(out, payload)

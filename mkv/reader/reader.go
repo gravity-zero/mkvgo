@@ -1894,13 +1894,17 @@ func (p *parser) parseCues(size int64, c *mkv.Container) error {
 	if size < 0 || size > maxCuesBuffer {
 		return p.parseCuesFrom(size, c)
 	}
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(p.r, buf); err != nil {
+	// readExact rather than make([]byte, size): size comes from the Cues
+	// element header, which on a remote FS is only as trustworthy as the
+	// server's reported length, so a hostile declared size must not be
+	// allocated up front (it grows as bytes actually arrive).
+	buf, err := readExact(p.r, size)
+	if err != nil {
 		return err
 	}
 	saved := p.r
 	p.r = bytes.NewReader(buf)
-	err := p.parseCuesFrom(int64(len(buf)), c)
+	err = p.parseCuesFrom(int64(len(buf)), c)
 	p.r = saved // the real reader is already positioned past the Cues body
 	return err
 }

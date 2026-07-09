@@ -332,8 +332,8 @@ func readSample(r io.ReadSeeker, off int64, size uint32) ([]byte, error) {
 	if _, err := r.Seek(off, io.SeekStart); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(r, buf); err != nil {
+	buf, err := readExact(r, int64(size))
+	if err != nil {
 		return nil, err
 	}
 	return buf, nil
