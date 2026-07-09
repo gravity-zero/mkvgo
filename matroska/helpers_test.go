@@ -14,6 +14,7 @@ import (
 )
 
 const fixturePath = "../internal/testdata/sample.mkv"
+const subsFixturePath = "../internal/testdata/sample_subs.mkv"
 
 func assertNoErr(t *testing.T, err error) {
 	t.Helper()
