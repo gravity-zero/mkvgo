@@ -461,6 +461,14 @@ emitted (a ciphertext byte range is not independently decryptable). Full detail
 -- exact clear/protected rules, IV derivation, key delivery -- in
 [library.md](library.md#common-encryption-cenc).
 
+**Key/IV uniqueness is yours to guarantee.** mkvgo validates the key/IV lengths,
+not their global uniqueness. It derives a distinct per-sample IV within one
+`cenc` pass, but across separate encodings you must use a fresh key or a fresh
+base IV: two files encrypted with the same key and the same base IV reuse the
+AES-CTR keystream wherever their decode timestamps overlap, which leaks
+plaintext. (`cbcs` uses the scheme's constant IV by design; the same
+per-encoding uniqueness rule applies.)
+
 ### Signed / templated URLs
 
 `RewriteURL` (CLI `--url-prefix`) rewrites every URI the playlists and the MPD

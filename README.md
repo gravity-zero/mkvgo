@@ -10,10 +10,11 @@
 Matroska/WebM/MP4, then package them for HLS **and** DASH — all in-process, with
 no ffmpeg, no cgo and zero dependencies.
 
-One ~2 MB static binary (or an imported Go library, or a ~1.3 MB WebAssembly
-module) that inspects media, converts between containers without re-encoding,
-and turns a file into a ready-to-stream CMAF presentation. It never transcodes:
-every operation copies the compressed samples verbatim.
+One static binary (about 8 MB, or an imported Go library, or a WebAssembly
+module that gzips to about 1.6 MB) that inspects media, converts between
+containers without re-encoding, and turns a file into a ready-to-stream CMAF
+presentation. It never transcodes: every operation copies the compressed
+samples verbatim.
 
 ---
 
@@ -23,9 +24,10 @@ mkvgo is three things in one tool. Pick the pillar you need:
 
 ### 1 · Inspect
 
-Read what's inside a file — **head-only**, like `ffprobe` but without decoding a
-frame or reading the whole file, so indexing a large library is orders of
-magnitude faster.
+Read what's inside a file — **head-only**: the metadata comes from the header,
+without decoding a frame or reading the whole file, so the work is proportional
+to the metadata rather than the file size and indexing a large library stays
+fast even on multi-gigabyte sources.
 
 - Codecs, profile/level, pixel format, aspect ratio, rotation, frame rate,
   per-track bitrate, channel layout, keyframes.
