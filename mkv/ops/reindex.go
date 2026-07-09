@@ -442,33 +442,8 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	mw := writer.NewMKVWriter(out)
 
 	// ── EBML header ──────────────────────────────────────────────────────────
-	// Read the source EBML header and copy it verbatim so DocType is preserved.
-	ebmlHdr, _, err := ebml.ReadElementHeader(r)
-	if err != nil {
-		return nil, 0, fmt.Errorf("reindex: read EBML header: %w", err)
-	}
-	if ebmlHdr.ID != ebml.IDEBMLHeader {
-		return nil, 0, fmt.Errorf("reindex: expected EBML header, got 0x%X", ebmlHdr.ID)
-	}
-	if ebmlHdr.Size < 0 {
-		return nil, 0, fmt.Errorf("reindex: EBML header has unknown size")
-	}
-	if ebmlHdr.Size > maxReindexClusterSize {
-		return nil, 0, fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
-	}
-	ebmlBody := make([]byte, ebmlHdr.Size)
-	if _, err := io.ReadFull(r, ebmlBody); err != nil {
-		return nil, 0, fmt.Errorf("reindex: read EBML body: %w", err)
-	}
-	// Write the EBML element verbatim: ID header + body.
-	if _, err := ebml.WriteElementID(out, ebmlHdr.ID); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write EBML ID: %w", err)
-	}
-	if _, err := ebml.WriteDataSize(out, ebmlHdr.Size); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write EBML size: %w", err)
-	}
-	if _, err := out.Write(ebmlBody); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write EBML body: %w", err)
+	if err := copyEBMLHeaderVerbatim(r, out); err != nil {
+		return nil, 0, err
 	}
 
 	// ── Segment ───────────────────────────────────────────────────────────────
@@ -634,6 +609,39 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		return nil, 0, err
 	}
 	return mw.Cues, timecodeScale, nil
+}
+
+// copyEBMLHeaderVerbatim reads the source EBML header from r and writes it byte
+// for byte to out, so the DocType (e.g. "webm") is preserved across a reindex.
+func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) error {
+	ebmlHdr, _, err := ebml.ReadElementHeader(r)
+	if err != nil {
+		return fmt.Errorf("reindex: read EBML header: %w", err)
+	}
+	if ebmlHdr.ID != ebml.IDEBMLHeader {
+		return fmt.Errorf("reindex: expected EBML header, got 0x%X", ebmlHdr.ID)
+	}
+	if ebmlHdr.Size < 0 {
+		return fmt.Errorf("reindex: EBML header has unknown size")
+	}
+	if ebmlHdr.Size > maxReindexClusterSize {
+		return fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
+	}
+	ebmlBody := make([]byte, ebmlHdr.Size)
+	if _, err := io.ReadFull(r, ebmlBody); err != nil {
+		return fmt.Errorf("reindex: read EBML body: %w", err)
+	}
+	// Write the EBML element verbatim: ID header + body.
+	if _, err := ebml.WriteElementID(out, ebmlHdr.ID); err != nil {
+		return fmt.Errorf("reindex: write EBML ID: %w", err)
+	}
+	if _, err := ebml.WriteDataSize(out, ebmlHdr.Size); err != nil {
+		return fmt.Errorf("reindex: write EBML size: %w", err)
+	}
+	if _, err := out.Write(ebmlBody); err != nil {
+		return fmt.Errorf("reindex: write EBML body: %w", err)
+	}
+	return nil
 }
 
 // reindexScanTimecodeScale scans the raw bytes of an Info element body for the

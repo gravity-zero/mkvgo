@@ -120,93 +120,15 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		return fmt.Errorf("reindex inplace: no cueable keyframes found")
 	}
 
-	// Build the patch set in memory; nothing is written until this is done
-	var cuesBuf bytes.Buffer
-	if err := writer.WriteCues(&cuesBuf, scan.cues, timecodeScale); err != nil {
-		return fmt.Errorf("reindex inplace: encode cues: %w", err)
-	}
-	cuesBytes := cuesBuf.Bytes()
-
-	newCuesPosRel := size - scan.segDataStart
-	newSegSize := size + int64(len(cuesBytes)) - scan.segDataStart
-
-	segSizePatch, err := encodeDataSizeFixed(newSegSize, scan.segSizeLen)
+	// Build the patch set in memory; nothing is written until this is done.
+	patch, err := buildInPlacePatch(scan, size, timecodeScale)
 	if err != nil {
-		return fmt.Errorf("reindex inplace: %w, use mkvgo reindex instead", err)
+		return err
 	}
-
-	// New head SeekHead: keep every preserved entry that does not point at the
-	// Cues element type, does not land inside a stale Cues span, and stays
-	// within the new Segment bounds; then append the fresh Cues entry.
-	var newEntries []writer.SeekEntry
-	for _, e := range scan.seekEntries {
-		if e.ID == mkv.IDCues {
-			continue
-		}
-		abs := scan.segDataStart + e.Pos
-		stale := false
-		for _, oc := range scan.oldCues {
-			if abs >= oc.off && abs < oc.off+oc.len {
-				stale = true
-				break
-			}
-		}
-		if stale || e.Pos < 0 || e.Pos >= newSegSize {
-			continue
-		}
-		newEntries = append(newEntries, e)
-	}
-	newEntries = append(newEntries, writer.SeekEntry{ID: mkv.IDCues, Pos: newCuesPosRel})
-
-	var shBuf bytes.Buffer
-	if err := writer.WriteSeekHead(&shBuf, newEntries); err != nil {
-		return fmt.Errorf("reindex inplace: encode SeekHead: %w", err)
-	}
-	shBytes := shBuf.Bytes()
-
-	// Slot fit: the existing head SeekHead span, or (when there is none) the
-	// first head Void that is big enough.
-	var slotOff, slotLen int64
-	if scan.seekHeadSlot != nil {
-		slotOff, slotLen = scan.seekHeadSlot.off, scan.seekHeadSlot.len
-		if r := slotLen - int64(len(shBytes)); r != 0 && r < 2 {
-			return fmt.Errorf("reindex inplace: head SeekHead too small for the Cues entry, use mkvgo reindex")
-		}
-	} else {
-		found := false
-		for _, cand := range scan.voidCandidates {
-			if r := cand.len - int64(len(shBytes)); r == 0 || r >= 2 {
-				slotOff, slotLen = cand.off, cand.len
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("reindex inplace: no head SeekHead or Void space, use mkvgo reindex")
-		}
-	}
-	remainder := slotLen - int64(len(shBytes))
-
-	slotPatch := append([]byte(nil), shBytes...)
-	if remainder >= 2 {
-		voidHdr, err := voidHeaderBytes(int(remainder))
-		if err != nil {
-			return fmt.Errorf("reindex inplace: %w", err)
-		}
-		slotPatch = append(slotPatch, voidHdr...)
-	}
-
-	// Stale Cues spans become a Void header only: the old cue bytes underneath
-	// stay put as the Void's ignored payload, so the journal entry for this
-	// zone is a few bytes, not the whole span.
-	oldCuesHdrs := make([][]byte, len(scan.oldCues))
-	for i, oc := range scan.oldCues {
-		hdr, err := voidHeaderBytes(int(oc.len))
-		if err != nil {
-			return fmt.Errorf("reindex inplace: %w", err)
-		}
-		oldCuesHdrs[i] = hdr
-	}
+	cuesBytes := patch.cuesBytes
+	segSizePatch := patch.segSizePatch
+	slotOff, slotPatch := patch.slotOff, patch.slotPatch
+	oldCuesHdrs := patch.oldCuesHdrs
 
 	// Capture the ORIGINAL bytes of every region about to be overwritten.
 	readOrig := func(off int64, n int) ([]byte, error) {
@@ -345,6 +267,120 @@ func RecoverInPlace(ctx context.Context, path string, opts ...mkv.Options) (reco
 	}
 	_ = ctx // no cancellation point in a bounded, in-memory rollback
 	return true, nil
+}
+
+// inplacePatch is the set of in-place edits ReindexInPlace computes before it
+// touches the file: the new Cues bytes to append, and three overwrite patches
+// (the Segment size, the head SeekHead slot, and a Void header over each stale
+// Cues element). It is pure - computed from the scan, no I/O - so the write
+// orchestration (journal, apply, verify, rollback) stays separate.
+type inplacePatch struct {
+	cuesBytes    []byte   // appended at the old EOF
+	segSizePatch []byte   // written at scan.segSizeOff (same VINT width)
+	slotOff      int64    // where slotPatch goes (head SeekHead or a head Void)
+	slotPatch    []byte   // rebuilt SeekHead + any trailing Void header
+	oldCuesHdrs  [][]byte // parallel to scan.oldCues; a Void header per stale Cues
+}
+
+// buildInPlacePatch computes the in-place edit set from a completed scan. Any
+// layout that cannot be patched in place (a size that will not fit the Segment
+// size VINT, a head SeekHead slot too small, no SeekHead or Void to hold the
+// rebuilt SeekHead) returns an error pointing at the copy reindex.
+func buildInPlacePatch(scan *inplaceScan, size, timecodeScale int64) (*inplacePatch, error) {
+	var cuesBuf bytes.Buffer
+	if err := writer.WriteCues(&cuesBuf, scan.cues, timecodeScale); err != nil {
+		return nil, fmt.Errorf("reindex inplace: encode cues: %w", err)
+	}
+	cuesBytes := cuesBuf.Bytes()
+
+	newCuesPosRel := size - scan.segDataStart
+	newSegSize := size + int64(len(cuesBytes)) - scan.segDataStart
+
+	segSizePatch, err := encodeDataSizeFixed(newSegSize, scan.segSizeLen)
+	if err != nil {
+		return nil, fmt.Errorf("reindex inplace: %w, use mkvgo reindex instead", err)
+	}
+
+	// New head SeekHead: keep every preserved entry that does not point at the
+	// Cues element type, does not land inside a stale Cues span, and stays
+	// within the new Segment bounds; then append the fresh Cues entry.
+	var newEntries []writer.SeekEntry
+	for _, e := range scan.seekEntries {
+		if e.ID == mkv.IDCues {
+			continue
+		}
+		abs := scan.segDataStart + e.Pos
+		stale := false
+		for _, oc := range scan.oldCues {
+			if abs >= oc.off && abs < oc.off+oc.len {
+				stale = true
+				break
+			}
+		}
+		if stale || e.Pos < 0 || e.Pos >= newSegSize {
+			continue
+		}
+		newEntries = append(newEntries, e)
+	}
+	newEntries = append(newEntries, writer.SeekEntry{ID: mkv.IDCues, Pos: newCuesPosRel})
+
+	var shBuf bytes.Buffer
+	if err := writer.WriteSeekHead(&shBuf, newEntries); err != nil {
+		return nil, fmt.Errorf("reindex inplace: encode SeekHead: %w", err)
+	}
+	shBytes := shBuf.Bytes()
+
+	// Slot fit: the existing head SeekHead span, or (when there is none) the
+	// first head Void that is big enough.
+	var slotOff, slotLen int64
+	if scan.seekHeadSlot != nil {
+		slotOff, slotLen = scan.seekHeadSlot.off, scan.seekHeadSlot.len
+		if r := slotLen - int64(len(shBytes)); r != 0 && r < 2 {
+			return nil, fmt.Errorf("reindex inplace: head SeekHead too small for the Cues entry, use mkvgo reindex")
+		}
+	} else {
+		found := false
+		for _, cand := range scan.voidCandidates {
+			if r := cand.len - int64(len(shBytes)); r == 0 || r >= 2 {
+				slotOff, slotLen = cand.off, cand.len
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("reindex inplace: no head SeekHead or Void space, use mkvgo reindex")
+		}
+	}
+	remainder := slotLen - int64(len(shBytes))
+
+	slotPatch := append([]byte(nil), shBytes...)
+	if remainder >= 2 {
+		voidHdr, err := voidHeaderBytes(int(remainder))
+		if err != nil {
+			return nil, fmt.Errorf("reindex inplace: %w", err)
+		}
+		slotPatch = append(slotPatch, voidHdr...)
+	}
+
+	// Stale Cues spans become a Void header only: the old cue bytes underneath
+	// stay put as the Void's ignored payload, so the journal entry for this
+	// zone is a few bytes, not the whole span.
+	oldCuesHdrs := make([][]byte, len(scan.oldCues))
+	for i, oc := range scan.oldCues {
+		hdr, err := voidHeaderBytes(int(oc.len))
+		if err != nil {
+			return nil, fmt.Errorf("reindex inplace: %w", err)
+		}
+		oldCuesHdrs[i] = hdr
+	}
+
+	return &inplacePatch{
+		cuesBytes:    cuesBytes,
+		segSizePatch: segSizePatch,
+		slotOff:      slotOff,
+		slotPatch:    slotPatch,
+		oldCuesHdrs:  oldCuesHdrs,
+	}, nil
 }
 
 // Read-only scan pass
