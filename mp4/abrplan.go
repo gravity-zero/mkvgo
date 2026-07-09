@@ -8,7 +8,7 @@ package mp4
 // Resource names are the ABR layout: "master.m3u8" for the top manifest, and
 // "v{k}/<name>" for any resource of variant k (playlist.m3u8, init.mp4,
 // seg00007.m4s, audioN.m3u8, subN.vtt, …) — exactly the URIs the master and
-// RemuxToABR's directories use, so an Evey handler is one call to Resource. Each
+// RemuxToABR's directories use, so a serving handler is one call to Resource. Each
 // v{k}/<name> is byte-identical to the file RemuxToABR would have written.
 
 import (

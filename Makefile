@@ -28,7 +28,7 @@ fuzz:
 
 # End-to-end verification against real ffmpeg/ffprobe (opt-in):
 #   make e2e                            # local ffmpeg on PATH
-#   MKVGO_E2E=docker:evey-server make e2e   # ffmpeg inside a container
+#   MKVGO_E2E=docker:<image> make e2e       # a container image with the tools on PATH
 e2e:
 	sh scripts/e2e.sh
 
