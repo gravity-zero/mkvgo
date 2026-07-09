@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 BIN = mkvgo
 
-.PHONY: build test vet fuzz clean release wasm wasm-smoke
+.PHONY: build test vet fuzz clean release wasm wasm-smoke preflight ci-status
 
 # CGO_ENABLED=0: mkvgo is pure Go; keep the binaries static (and buildable
 # without a C toolchain — net/http would otherwise link the cgo resolver).
@@ -42,6 +42,29 @@ wasm:
 # Runs the wasm artifact end to end under Node ≥ 18 (probe/remux/HLS + error paths).
 wasm-smoke: wasm
 	node scripts/wasm_smoke.mjs
+
+# preflight: the pre-push gate. Everything CI can check locally, INCLUDING a
+# cross-compile for every OS the CI matrix builds on - a Linux build alone does
+# NOT catch a Windows/macOS break. Run before tagging a release.
+preflight:
+	@echo "== gofmt =="; \
+	  bad="$$(gofmt -l . | grep -v '^\.' || true)"; \
+	  [ -z "$$bad" ] || { echo "$$bad"; echo "gofmt: files need formatting"; exit 1; }
+	@for os in linux windows darwin; do \
+	  echo "== GOOS=$$os build+vet =="; \
+	  GOOS=$$os CGO_ENABLED=0 go build ./... || exit 1; \
+	  GOOS=$$os CGO_ENABLED=0 go vet ./...   || exit 1; \
+	done
+	@echo "== wasm build =="; GOOS=js GOARCH=wasm CGO_ENABLED=0 go build ./cmd/mkvgo-wasm/
+	@echo "== tests =="; CGO_ENABLED=0 go test ./...
+	@echo "preflight OK - cross-platform compile + tests pass locally; confirm the real matrix with 'make ci-status' after pushing"
+
+# ci-status: report the real GitHub Actions matrix result (all OSes) for the
+# current HEAD. The compile-level preflight cannot catch a RUNTIME platform
+# difference (e.g. a signal unsupported on Windows) - only the actual matrix
+# can, so verify it before declaring a release done.
+ci-status:
+	@sh scripts/ci-status.sh
 
 clean:
 	rm -rf dist/ $(BIN)
