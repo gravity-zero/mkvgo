@@ -184,6 +184,73 @@ export interface Rung {
   Label: string
 }
 
+export type ServingStrategy = 'direct-play' | 'remux-hls' | 'transcode'
+
+/**
+ * Result of ingest(): a whole-file serving decision (see ServingPlan below).
+ * Field names mirror the Go struct verbatim (no `json:` tags on ServingPlan,
+ * like PlayabilityReport/Rung), not the snake_case of probe/analyze.
+ */
+export interface ServingPlan {
+  Strategy: ServingStrategy
+  Target: string
+  /** Sniffed source container: 'mkv' (also covers WebM) or 'mp4'. */
+  SourceContainer: string
+  /** Cheapest container that keeps every kept track's codec; set only when
+   * Strategy is 'remux-hls'. */
+  RemuxContainer: string
+  /** Whether the source already carries a head-discoverable Cues index. */
+  HasSeekIndex: boolean
+  /** Set when Strategy is 'remux-hls' and the source has no head-discoverable
+   * seek index yet - a reindex is required before on-demand HLS can seek
+   * into it. This wasm binding never performs that reindex itself (see
+   * docs/wasm.md); a server/CLI runs it out of band. */
+  NeedsReindex: boolean
+  /** Always false in wasm: reindex is never performed by this binding. */
+  Reindexed: boolean
+  /** Whether an in-place reindex would work for this file's layout, once one
+   * was attempted; meaningless here since Reindex never runs in wasm. */
+  ReindexInPlacePossible: boolean
+  Playability: PlayabilityReport
+  /** Populated only when options.analyze was set. */
+  Analysis?: AnalyzeReport
+  /** Populated only when Strategy is 'transcode'. */
+  Ladder?: Rung[]
+  /** Human-readable decision trail, one short line per decision made, in order. */
+  Reasons: string[]
+}
+
+export interface IngestOptions extends AbortOptions {
+  /** Playback target name (see playability's target); defaults to "mse-generic". */
+  target?: string
+  /** Also run analyze() and attach its report (Analysis), regardless of the
+   * decided strategy - forces a full block-header walk instead of head-only. */
+  analyze?: boolean
+}
+
+/** One track's content-identity digest from fingerprint(); see FingerprintReport. */
+export interface TrackFingerprint {
+  track_id: number
+  type: TrackType
+  codec: string
+  /** Hex SHA-256 over the track's frame payloads, in decode order. */
+  sha256: string
+}
+
+/**
+ * Result of fingerprint(): a container-independent content identity - the
+ * same audio/video/subtitle payloads produce the same `presentation` hash
+ * whether the source is Matroska or WebM, independent of track order or
+ * container metadata, so a media library can detect re-muxes of the same
+ * content without a byte-for-byte container comparison.
+ */
+export interface FingerprintReport {
+  /** Stable hex SHA-256 identity for the whole file's content. */
+  presentation: string
+  /** One digest per track, in Container.Tracks order. */
+  tracks: TrackFingerprint[]
+}
+
 export interface ProbeOptions extends AbortOptions {
   /** Build the keyframe index (MKV: full scan when the file has no Cues). */
   keyframes?: boolean
@@ -399,6 +466,23 @@ export interface MkvGoApi {
    * bitrate; guidance only, mkvgo never transcodes.
    */
   ladder(input: Uint8Array | Blob, options?: AbortOptions): Promise<Rung[]>
+  /**
+   * One-call onboarding decision for how a source should be served to a
+   * target: composes playability, ladder and a seek-index check into a
+   * single ServingPlan. Read-only in wasm - the `Reindex` repair step never
+   * runs here (see ServingPlan.NeedsReindex / docs/wasm.md); a server/CLI
+   * performs that out of band. `options.analyze` also attaches a full
+   * AnalyzeReport. An unknown `options.target` rejects.
+   */
+  ingest(input: Uint8Array | Blob, options?: IngestOptions): Promise<ServingPlan>
+  /**
+   * Container-independent content identity: a per-track SHA-256 over frame
+   * payloads (decode order) plus a Presentation hash for whole-file dedup of
+   * re-muxed content, regardless of track order or container metadata. This
+   * is a FULL read (every frame payload is hashed), like analyze; Matroska/
+   * WebM sources only.
+   */
+  fingerprint(input: Uint8Array | Blob, options?: AbortOptions): Promise<FingerprintReport>
 }
 
 // ---------------------------------------------------------------------------

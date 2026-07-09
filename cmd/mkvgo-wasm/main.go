@@ -3,14 +3,18 @@
 // Command mkvgo-wasm builds mkvgo for WebAssembly (GOOS=js GOARCH=wasm). It
 // registers a global `MkvGo` object whose methods mirror the library: probe,
 // remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, openHLS, openABR,
-// openConcat, extractSubtitleVTT, analyze, playability, ladder. Every method
-// returns a Promise; inputs are Uint8Array (whole file in memory) or, for
-// probe/openHLS/openABR/openConcat/analyze/playability/ladder, a Blob/File -
-// read through ranged slices, so probing a 40 GB file in the browser touches
-// only a few hundred kilobytes, and an on-demand plan (media segments and
-// windowed subtitle renditions alike) reads only the windows a player
-// watches. analyze reads the whole file (a full block-header walk, no
-// decode); playability and ladder are head-only, like probe.
+// openConcat, extractSubtitleVTT, analyze, playability, ladder, ingest,
+// fingerprint. Every method returns a Promise; inputs are Uint8Array (whole
+// file in memory) or, for probe/openHLS/openABR/openConcat/analyze/
+// playability/ladder/ingest/fingerprint, a Blob/File - read through ranged
+// slices, so probing a 40 GB file in the browser touches only a few hundred
+// kilobytes, and an on-demand plan (media segments and windowed subtitle
+// renditions alike) reads only the windows a player watches. analyze and
+// fingerprint read the whole file (a full block-header walk / a full payload
+// hash respectively, neither ever decodes); playability and ladder are
+// head-only, like probe; ingest is head-only unless its analyze option is
+// set, and its reindex step is never performed in wasm (read-only decision
+// client - see docs/wasm.md).
 //
 // Build: make wasm (dist/wasm/mkvgo.wasm + wasm_exec.js). See docs/wasm.md.
 package main
@@ -34,6 +38,8 @@ func main() {
 	api.Set("analyze", js.FuncOf(analyzeJS))
 	api.Set("playability", js.FuncOf(playabilityJS))
 	api.Set("ladder", js.FuncOf(ladderJS))
+	api.Set("ingest", js.FuncOf(ingestJS))
+	api.Set("fingerprint", js.FuncOf(fingerprintJS))
 	js.Global().Set("MkvGo", api)
 
 	// Keep the Go runtime alive; work happens in the exported callbacks.

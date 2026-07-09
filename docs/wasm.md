@@ -52,6 +52,8 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `analyze(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full block-header walk, not head-only) | `AnalyzeReport` — frame/keyframe counts, bitrate, GOP spans, duration reconciliation |
 | `playability(input, target?, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `PlayabilityReport` — per-track and overall verdict (`"direct-play"`\|`"remux"`\|`"transcode"`) against `target` (default `"mse-generic"`) |
 | `ladder(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `Rung[]` — recommended ABR ladder capped at the source resolution/bitrate |
+| `ingest(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, unless `opts.analyze`) | `ServingPlan` — one-call onboarding decision: strategy, seek-index check, ladder when transcode is needed; read-only (never reindexes) |
+| `fingerprint(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full payload read, not head-only) | `FingerprintReport` — container-independent content identity (per-track + whole-file digests) |
 | `version()` | — | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
@@ -119,6 +121,63 @@ never transcodes, so the actual encode is always an external step.
 const rungs = await MkvGo.ladder(file)
 for (const r of rungs) console.log(r.Label, `${r.Width}x${r.Height}`, `${r.BitrateKbps}kbps`)
 ```
+
+## Onboarding a file (`ingest`)
+
+**`ingest(input, opts?)`** is the one-call onboarding decision: it composes
+`playability`, `ladder` and a seek-index check into a single `ServingPlan` -
+`Strategy` is `"direct-play"` (serve the source as-is), `"remux-hls"` (package
+on-demand HLS, no transcode - every track's codec is kept) or `"transcode"`
+(at least one track needs a real re-encode; `Ladder` carries the recommended
+rungs for an external encoder). `Reasons` is a short, ordered, human-readable
+trail of every decision it made.
+
+```js
+const plan = await MkvGo.ingest(file, { target: 'safari' })
+console.log(plan.Strategy, plan.SourceContainer, plan.Reasons)
+if (plan.Strategy === 'remux-hls' && plan.NeedsReindex) {
+  // no head-discoverable Cues index yet - see below
+}
+```
+
+`opts.target` defaults to `"mse-generic"` (same target names as
+`playability`); an unrecognised name rejects. `opts.analyze` also runs
+`analyze` and attaches its report as `plan.Analysis` (forcing a full
+block-header walk instead of head-only), regardless of the decided strategy.
+
+**This binding is read-only: `Reindex` is always `false`.** When a
+`"remux-hls"` decision finds no head-discoverable seek index, the plan sets
+`NeedsReindex: true` and stops there - it never performs the in-place patch
+itself, because a browser `MemFS`/`Blob` has nothing durable to write the
+result back to. In the browser that only ever matters for a `File` picked
+from local disk (nothing else gets ingested this way), so the practical
+answer is: fall back to `remuxToHLS`/`openHLS` as usual, which build the
+seek index they need on the fly without touching the source. A server or the
+CLI - which own real files - run `ops.Ingest(Reindex: true)` (library) or the
+`ingest` CLI command for the repairing path.
+
+## Content identity for dedup (`fingerprint`)
+
+**`fingerprint(input, opts?)`** computes a container-independent content
+identity: a per-track SHA-256 over that track's frame payloads in decode
+order, plus a `presentation` hash over all of them - the same
+audio/video/subtitle content produces the same `presentation` hash whether
+the source is Matroska or WebM, independent of track order or container
+metadata, so a client-side media library can detect that two files are
+re-muxes of the same content (different title, muxing app, or track order)
+without a byte-for-byte comparison of the containers themselves.
+
+```js
+const fp = await MkvGo.fingerprint(file)
+console.log(fp.presentation)                 // stable hex sha256, whole-file identity
+for (const t of fp.tracks) console.log(t.track_id, t.type, t.codec, t.sha256)
+```
+
+Unlike `playability`/`ladder`, this is a **FULL read** - every frame payload
+is read and hashed, like `analyze` - so a `Blob`/`File` is read through
+ranged slices to stay memory-bounded rather than head-only, but the cost is
+proportional to the media volume, not just the block-header count.
+Matroska/WebM sources only for now (MP4 support is a follow-up).
 
 ## Playing a local file with bounded memory
 
@@ -480,10 +539,14 @@ in a worker (`importScripts('/wasm_exec.js')` or a module worker), and
 
 - **Remux needs the whole file in memory** (input + output simultaneously —
   wasm32 addresses 4 GB; in practice keep inputs under ~1.5 GB). `probe`,
-  `playability` and `ladder` accept a `Blob`/`File` and have **no size
-  limit** — they read head-only. `analyze` also accepts a `Blob`/`File` (it
-  walks every block header, so the input itself stays memory-bounded even on
-  a huge file, unlike remux).
+  `playability`, `ladder` and `ingest` (unless `opts.analyze` is set) accept a
+  `Blob`/`File` and have **no size limit** — they read head-only. `analyze`
+  and `fingerprint` also accept a `Blob`/`File` (they walk every block header
+  / read every payload respectively, so the input itself stays
+  memory-bounded even on a huge file, unlike remux).
+- **`ingest` never reindexes in wasm** - it is a read-only decision client;
+  see [Onboarding a file](#onboarding-a-file-ingest). `fingerprint` is
+  Matroska/WebM only for now.
 - **No transcoding**, by design: only the codecs the native remuxers support
   are carried (see [cli.md](cli.md)); unsupported tracks fail or are dropped
   with `skipUnsupported`/reported in `droppedTracks`.

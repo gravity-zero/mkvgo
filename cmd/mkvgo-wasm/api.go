@@ -937,3 +937,82 @@ func ladderJS(_ js.Value, args []js.Value) any {
 		return toJSObject(rungs)
 	})
 }
+
+// ingestOpts reads the optional ingest options object: { target?, analyze? }.
+func readIngestOpts(args []js.Value, idx int) (target string, analyze bool) {
+	target = "mse-generic"
+	if len(args) <= idx || args[idx].Type() != js.TypeObject {
+		return target, analyze
+	}
+	v := args[idx]
+	if t := v.Get("target"); t.Type() == js.TypeString {
+		target = t.String()
+	}
+	analyze = v.Get("analyze").Truthy()
+	return target, analyze
+}
+
+// ingestJS(input: Uint8Array | Blob, opts?) → Promise<object (ServingPlan)>.
+// Read-only decision client: Reindex is always false here - a browser MemFS
+// write is not the use case a wasm caller has (there is nothing durable to
+// write back to). A server/CLI that needs the repairing path calls
+// ops.Ingest(Reindex: true) directly (or the CLI's own ingest command); this
+// binding only ever reports NeedsReindex/ReindexInPlacePossible for the
+// caller to act on out of band. opts.analyze also runs the full
+// block-header walk (ops.Analyze) and attaches it to the plan, regardless of
+// the decided strategy - see IngestOptions.IncludeAnalysis. Input handling
+// is head-only-capable but works the same whether or not analyze forces a
+// full walk: singleSourceFS's ranged Blob reader serves either.
+func ingestJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("ingest: missing input") })
+	}
+	input := args[0]
+	target, analyze := readIngestOpts(args, 1)
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("ingest: %w", err)
+		}
+		plan, err := ops.Ingest(ctx, "in", ops.IngestOptions{
+			Options:         mkv.Options{FS: fs},
+			Target:          target,
+			IncludeAnalysis: analyze,
+			Reindex:         false,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(plan)
+	})
+}
+
+// fingerprintJS(input: Uint8Array | Blob, opts?) → Promise<object (FingerprintReport)>.
+// Container-independent content identity: a per-track SHA-256 over frame
+// payloads in decode order, plus a Presentation hash a media library can use
+// to dedup re-muxes of identical content regardless of container metadata or
+// track order. This is a FULL read - every frame payload is read and hashed -
+// so the input handling matches analyze: a Uint8Array is read in place, a
+// Blob/File through ranged slices, staying memory-bounded even though every
+// payload byte is visited. Matroska/WebM only (see ops.Fingerprint).
+func fingerprintJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("fingerprint: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("fingerprint: %w", err)
+		}
+		report, err := ops.Fingerprint(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}

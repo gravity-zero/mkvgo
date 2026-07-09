@@ -240,6 +240,30 @@ await MkvGo.remuxToWebM(mkvBytes) // h264/aac is not WebM-eligible
   .then(() => check(false, 'h264 remuxToWebM must reject'))
   .catch(() => check(true, 'h264 remuxToWebM rejects'))
 
+// --- ingest: read-only serving-plan decision (playability + ladder + seek-index check) ---
+const ingestPlain = await MkvGo.ingest(mkvBytes, { target: 'mse-generic' })
+check(['direct-play', 'remux-hls', 'transcode'].includes(ingestPlain.Strategy),
+  `ingest strategy (${ingestPlain.Strategy})`)
+check(ingestPlain.Target === 'mse-generic', `ingest target (${ingestPlain.Target})`)
+check(Array.isArray(ingestPlain.Reasons) && ingestPlain.Reasons.length > 0,
+  `ingest reasons (${ingestPlain.Reasons?.length})`)
+check(!ingestPlain.Reindexed, 'ingest never reindexes in wasm')
+const ingestAnalyzed = await MkvGo.ingest(mkvBytes, { target: 'mse-generic', analyze: true })
+check(ingestAnalyzed.Analysis && Array.isArray(ingestAnalyzed.Analysis.tracks) && ingestAnalyzed.Analysis.tracks.length > 0,
+  `ingest({analyze:true}) attaches analysis (${ingestAnalyzed.Analysis?.tracks?.length})`)
+await MkvGo.ingest(mkvBytes, { target: 'not-a-real-target' })
+  .then(() => check(false, 'ingest unknown target must reject'))
+  .catch(() => check(true, 'ingest unknown target rejects'))
+
+// --- fingerprint: container-independent content identity (full read) ---
+const fp = await MkvGo.fingerprint(mkvBytes)
+check(/^[0-9a-f]{64}$/.test(fp.presentation), `fingerprint presentation is hex sha256 (${fp.presentation})`)
+check(Array.isArray(fp.tracks) && fp.tracks.length > 0 &&
+  fp.tracks.every((t) => /^[0-9a-f]{64}$/.test(t.sha256)),
+  `fingerprint per-track digests (${fp.tracks?.length})`)
+const fp2 = await MkvGo.fingerprint(new Uint8Array(mkvBytes))
+check(fp2.presentation === fp.presentation, 'fingerprint is deterministic over the same bytes')
+
 if (failures) { console.error(`wasm smoke: ${failures} FAILURE(S)`); process.exit(1) }
 console.log('wasm smoke: ALL PASS')
 process.exit(0)
