@@ -18,6 +18,7 @@ type readOpts struct {
 	cues             bool // keep the raw CuePoints on the metadata path (WithCues)
 	tags             bool // keep the Tags element on the metadata path (WithTags)
 	attachments      bool // keep the Attachments on the metadata path (WithAttachments)
+	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
 }
 
 // WithAttachments keeps Container.Attachments populated on the metadata-only
@@ -34,6 +35,14 @@ func WithAttachments() ReadOption {
 // to one element, no Cluster scan — so the read stays head-only.
 func WithTags() ReadOption {
 	return func(o *readOpts) { o.tags = true }
+}
+
+// WithChapters keeps Container.Chapters populated on the metadata-only path
+// (normally left nil), reached through the SeekHead entry - one seek to one
+// element, no Cluster scan. Files whose SeekHead has no Chapters entry (or
+// carry no SeekHead) leave the field nil.
+func WithChapters() ReadOption {
+	return func(o *readOpts) { o.chapters = true }
 }
 
 // WithCues keeps Container.Cues populated on the metadata-only path (they are

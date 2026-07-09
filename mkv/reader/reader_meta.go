@@ -126,7 +126,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 	p.segStart, p.segEnd = segStart, endPos
 
 	var gotInfo, gotTracks bool
-	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1} // absolute offsets from a SeekHead, if any
+	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1, chapters: -1} // absolute offsets from a SeekHead, if any
 
 	for {
 		if ctx.Err() != nil {
@@ -263,6 +263,11 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 			return err
 		}
 	}
+	if o.chapters && c.Chapters == nil && offs.chapters >= 0 {
+		if _, err := p.parseElementAt(offs.chapters, mkv.IDChapters, c, p.parseChapters); err != nil {
+			return err
+		}
+	}
 	if o.bitrate {
 		promoteTrackBitrate(c)
 	}
@@ -302,7 +307,7 @@ func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(
 // headOffsets holds the absolute file offsets of the head elements a SeekHead
 // points at, -1 each when absent.
 type headOffsets struct {
-	info, tracks, cues, tags, attachments int64
+	info, tracks, cues, tags, attachments, chapters int64
 }
 
 // merge keeps the other SeekHead's entries where this one has none.
@@ -312,7 +317,7 @@ func (h *headOffsets) merge(o headOffsets) {
 		src int64
 	}{
 		{&h.info, o.info}, {&h.tracks, o.tracks}, {&h.cues, o.cues},
-		{&h.tags, o.tags}, {&h.attachments, o.attachments},
+		{&h.tags, o.tags}, {&h.attachments, o.attachments}, {&h.chapters, o.chapters},
 	} {
 		if p.src >= 0 {
 			*p.dst = p.src
@@ -324,7 +329,7 @@ func (h *headOffsets) merge(o headOffsets) {
 // the head elements it points at. SeekPosition is relative to the Segment's
 // data start (segStart).
 func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (headOffsets, error) {
-	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1}
+	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1, chapters: -1}
 	end := p.pos() + size
 	for p.pos() < end {
 		eh, _, e := p.readHeader()
@@ -362,6 +367,8 @@ func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (headOffsets, e
 			offs.tags = abs
 		case mkv.IDAttachments:
 			offs.attachments = abs
+		case mkv.IDChapters:
+			offs.chapters = abs
 		}
 	}
 	return offs, nil

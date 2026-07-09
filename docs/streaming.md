@@ -358,6 +358,60 @@ does not touch.
 
 ---
 
+## Chapter markers and ad-insertion points
+
+`Options.ChapterMarkers` (CLI `--chapter-markers`) exposes the source's
+Matroska/MP4 chapters as navigable markers in the HLS and DASH manifests --
+**opt-in**, off by default. It never decodes, transcodes or re-segments the
+media: only the playlist/manifest *text* gains lines, so the segments
+(`.m4s`, `init.mp4`) are byte-identical whether the option is on or off.
+
+```bash
+mkvgo to-hls movie.mkv -o stream/ --chapter-markers
+mkvgo hls-segment movie.mkv playlist --chapter-markers -o -
+```
+```go
+mp4.Options{ChapterMarkers: true}
+```
+
+**HLS** -- the video media playlist (`playlist.m3u8`) gets one
+`#EXT-X-DATERANGE` per chapter, in playlist order, right after
+`#EXT-X-PLAYLIST-TYPE:VOD`:
+
+```
+#EXT-X-DATERANGE:ID="chapter-1",START-DATE="1970-01-01T00:00:00.000Z",DURATION=245.000,X-CHAPTER-TITLE="Intro"
+```
+
+`START-DATE` is computed from a fixed zero epoch (1970-01-01T00:00:00Z) plus
+the chapter's start offset, so the same source always renders the same dates
+-- there is no wall-clock dependency and no real "date" claim being made; it
+is EXT-X-DATERANGE's required ISO-8601 timestamp used as a reproducible
+timeline marker, exactly the mechanism players already use for chapter
+navigation and mid-roll ad-insertion cue points. `DURATION` is the chapter's
+length in seconds (the next chapter's start, or the presentation's end for
+the last one, when the source leaves `ChapterTimeEnd` unset -- the common
+case). Audio and subtitle renditions carry no DATERANGE lines.
+
+**DASH** -- a `<EventStream>` on the `<Period>` (per ISO/IEC 23009-1 5.3.9,
+EventStream is a Period child, not an AdaptationSet child), one `<Event>` per
+chapter, millisecond timescale, the title as the event's text body:
+
+```xml
+<EventStream schemeIdUri="urn:mkvgo:dash:chapter:2024" timescale="1000">
+  <Event id="1" presentationTime="0" duration="245000">Intro</Event>
+</EventStream>
+```
+
+`schemeIdUri` is this package's own -- no chapter EventStream scheme is
+IANA-registered; ISO/IEC 23009-1 leaves it application-defined. Both forms
+are byte-identical between the full pass (`RemuxToHLS`, which writes
+`manifest.mpd` alongside the HLS playlists) and the on-demand plan
+(`PlanHLS`) for the same source and option, the same
+byte-parity invariant every other packaging fact in this document holds to.
+A source with no chapters emits nothing extra either way, option on or off.
+
+---
+
 ## Securing delivery
 
 ### AES-128 encryption

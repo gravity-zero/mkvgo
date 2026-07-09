@@ -805,7 +805,7 @@ Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
-mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>]
+mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--chapter-markers]
 ```
 
 | Flag | Description |
@@ -814,6 +814,7 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>]
 | `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
 | `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy — just a different track subset. Video is required |
 | `--sub-offset` | Shift every WebVTT subtitle cue by this many milliseconds (negative allowed) -- a virtual resync, no file rewritten. A cue whose shifted end is at or before 0 is dropped; one straddling 0 is clamped to start at 0 |
+| `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
@@ -893,7 +894,7 @@ and reading only that window — first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
-mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>]
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--chapter-markers]
 ```
 
 Without `-o` the resource goes to stdout (pipe it from a server handler).
@@ -989,7 +990,7 @@ declares one variant per source with its real `BANDWIDTH`/`RESOLUTION`/
 `CODECS` over the shared audio/subtitle groups.
 
 ```
-mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--sub-offset <ms>] [--aes-key … --aes-key-uri …] [--url-prefix …]
+mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--sub-offset <ms>] [--chapter-markers] [--aes-key … --aes-key-uri …] [--url-prefix …]
 ```
 
 For seamless switching the sources should share the keyframe cadence (same
@@ -1020,7 +1021,7 @@ resource name (`master.m3u8`, or `v{k}/<name>` such as `v2/seg00042.m4s`), the
 rest are the quality variants best first.
 
 ```
-mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--sub-offset <ms>]
+mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--sub-offset <ms>] [--chapter-markers]
 ```
 
 ```bash

@@ -114,8 +114,13 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return planHLSFromMP4(ctx, mp4ps, srcPath, fs, &o, segMs)
 	}
 
-	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs,
-		reader.WithCues(), reader.WithTags(), reader.WithAttachments())
+	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments()}
+	if o.ChapterMarkers {
+		// Only fetched when the opt-in is set: an extra bounded SeekHead ->
+		// Chapters read a plan otherwise has no use for.
+		metaOpts = append(metaOpts, reader.WithChapters())
+	}
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, metaOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +314,13 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
 	}
+	// Options.ChapterMarkers: video.ft.presentMs is derived exactly as the
+	// full pass derives fts[primaryIndex(fts)].presentMs, so the same source
+	// and option yield the same chapters (byte parity full-pass <-> plan).
+	chapters := chapterMarkers(&o, c.Chapters, video.ft.presentMs)
 	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, nil)
 	if o.Encrypt == nil {
-		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs))
+		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
 	}
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
 	for i, ft := range fts {
@@ -321,8 +330,12 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m, o.CENC))
 		i := i
+		var chs []mkv.Chapter
+		if ft.outTrack.spec.video {
+			chs = chapters
+		}
 		p.medias = append(p.medias, buildMediaPlaylist(&o, p.durs, renditionInit(fts, i),
-			func(k int) string { return renditionSegment(fts, i, k) }))
+			func(k int) string { return renditionSegment(fts, i, k) }, chs))
 	}
 	return p, nil
 }
@@ -954,7 +967,7 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		// Windowed like the full pass (byte-identical playlist); the cues are
 		// loaded once, so each window is served from the cache.
 		pl := buildMediaPlaylist(&p.opts, p.durs, "",
-			func(k int) string { return fmt.Sprintf("sub%d_%05d.vtt", i, k+1) })
+			func(k int) string { return fmt.Sprintf("sub%d_%05d.vtt", i, k+1) }, nil)
 		return pl, mimeM3U8, nil
 	}
 	if _, err := fmt.Sscanf(name, "sub%d_%d.vtt", &i, &n); err == nil && name == fmt.Sprintf("sub%d_%05d.vtt", i, n) {
@@ -1430,9 +1443,13 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	}
 
 	p.segs = segs
+	// Options.ChapterMarkers: chapters ride in Container.Chapters already
+	// (containerFromMovie carries the MP4 chpl box head-only, same as the
+	// full pass's ps.c.Chapters - no extra read needed for an MP4 source).
+	chapters := chapterMarkers(o, c.Chapters, fts[primaryIndex(fts)].presentMs)
 	p.master = buildMasterPlaylist(o, fts, p.subs, segs, iframes)
 	if o.Encrypt == nil {
-		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs))
+		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
 	}
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
 	for i, ft := range fts {
@@ -1442,8 +1459,12 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		}
 		p.inits = append(p.inits, buildInitSegment([]*fragTrack{ft}, m, o.CENC))
 		i := i
+		var chs []mkv.Chapter
+		if i == primaryIndex(fts) && pickVideoFrag(fts) != nil {
+			chs = chapters
+		}
 		p.medias = append(p.medias, buildMediaPlaylist(o, p.durs, renditionInit(fts, i),
-			func(k int) string { return renditionSegment(fts, i, k) }))
+			func(k int) string { return renditionSegment(fts, i, k) }, chs))
 	}
 	return p, nil
 }

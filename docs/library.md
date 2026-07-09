@@ -374,6 +374,23 @@ tracks are a separate, muxed-into-the-container code path this option does
 not touch -- and HLS itself never takes that path, since it always carries
 subtitles as their own WebVTT rendition.
 
+### Chapter markers (`Options.ChapterMarkers`)
+
+```go
+mp4.Options{ChapterMarkers: true}
+```
+
+Opt-in (off by default). When the source carries chapters, `RemuxToHLS`/
+`PlanHLS` expose them as navigable markers: one `#EXT-X-DATERANGE` per
+chapter in the video media playlist (`START-DATE` from a fixed zero epoch +
+the chapter's start offset, `DURATION` in seconds, `X-CHAPTER-TITLE` the
+escaped title), and one `<Event>` per chapter in a `<EventStream>` on the DASH
+manifest's `<Period>` (millisecond `presentationTime`/`duration`, the title as
+the event body). Neither form touches the media: segments are byte-identical
+whether the option is on or off, and both forms are byte-identical between
+`RemuxToHLS` and `PlanHLS` for the same source and option. A source with no
+chapters emits nothing extra either way.
+
 ### Thumbnails / storyboards (`matroska.ExtractKeyframeSample`)
 
 ```go

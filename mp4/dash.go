@@ -10,14 +10,19 @@ package mp4
 import (
 	"fmt"
 	"strings"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // buildDASHManifest renders manifest.mpd for the presentation: one
 // AdaptationSet per demuxed rendition (video, each audio with its language,
 // each subtitle as a whole-file WebVTT) over the same CMAF segments the HLS
 // playlists reference. durs are the segment durations in seconds; bandwidth
-// is the peak aggregate segment bitrate in bits/s.
-func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64) []byte {
+// is the peak aggregate segment bitrate in bits/s. chapters, when non-nil
+// (Options.ChapterMarkers), adds a Period-level EventStream - one Event per
+// chapter (see buildChapterEventStream); nil leaves the manifest unchanged
+// from before the option existed.
+func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64, chapters []mkv.Chapter) []byte {
 	rw := urlRewriter(o)
 	var totalSec float64
 	for _, d := range durs {
@@ -39,6 +44,9 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 	fmt.Fprintf(&b, `<MPD %s mediaPresentationDuration="%s" minBufferTime="%s">`+"\n",
 		mpdAttrs, dashDuration(totalSec), dashDuration(maxDur))
 	b.WriteString("  <Period>\n")
+	if len(chapters) > 0 {
+		b.WriteString(buildChapterEventStream(chapters))
+	}
 
 	// One AdaptationSet per demuxed rendition, all sharing the same timeline.
 	timeline := dashTimeline(durs)

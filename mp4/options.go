@@ -138,6 +138,16 @@ type Options struct {
 	// never muxes subtitles into the fMP4 segments - they always ride as
 	// their own WebVTT rendition.
 	SubtitleOffsetMs int64
+
+	// ChapterMarkers exposes the source's chapters as navigable markers in the
+	// HLS/DASH manifests (RemuxToHLS/PlanHLS): one EXT-X-DATERANGE per chapter
+	// in the video media playlist, and one Event per chapter in a DASH
+	// EventStream - the standard mechanism players use for chapter navigation
+	// and ad-insertion cue points. Opt-in and additive: off by default, the
+	// media segments are never touched (no re-cut, no decode) whether it is on
+	// or off, and full-pass/on-demand-plan output stays byte-identical for the
+	// same setting. A source with no chapters emits nothing extra either way.
+	ChapterMarkers bool
 }
 
 // wantsEditList reports whether a codec's container delay should be carried as an

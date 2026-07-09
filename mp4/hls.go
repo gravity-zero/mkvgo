@@ -301,14 +301,21 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	for i := range segs {
 		durs[i] = segs[i].durSec
 	}
+	// Options.ChapterMarkers: the video rendition's playlist only (SingleFile
+	// carries no chapter markers in this version - see buildByteRangePlaylist).
+	chapters := chapterMarkers(&o, c.Chapters, fts[primaryIndex(fts)].presentMs)
 	for i := range fts {
 		i := i
 		var pl []byte
 		if o.SingleFile {
 			pl = buildByteRangePlaylist(&o, durs, &rends[i])
 		} else {
+			var chs []mkv.Chapter
+			if i == primaryIndex(fts) && pickVideoFrag(fts) != nil {
+				chs = chapters
+			}
 			pl = buildMediaPlaylist(&o, durs, renditionInit(fts, i),
-				func(k int) string { return renditionSegment(fts, i, k) })
+				func(k int) string { return renditionSegment(fts, i, k) }, chs)
 		}
 		if err := fs.DoWriteFile(filepath.Join(outputDir, renditionPlaylist(fts, i)), pl, 0o644); err != nil {
 			return nil, err
@@ -336,7 +343,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if o.SingleFile {
 		mpd = buildDASHManifestSingle(&o, fts, subs, durs, peakBandwidth(segs), rends)
 	} else {
-		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs))
+		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs), chapters)
 	}
 	return res, fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
@@ -750,10 +757,16 @@ func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 // writeMediaPlaylist writes a VOD HLS media playlist. mapURI, when non-empty,
 // is emitted as EXT-X-MAP (the fMP4 init segment); WebVTT playlists pass "".
 func writeMediaPlaylist(o *Options, fs *mkv.FS, path string, durs []float64, mapURI string, segName func(i int) string) error {
-	return fs.DoWriteFile(path, buildMediaPlaylist(o, durs, mapURI, segName), 0o644)
+	return fs.DoWriteFile(path, buildMediaPlaylist(o, durs, mapURI, segName, nil), 0o644)
 }
 
-func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(i int) string) []byte {
+// buildMediaPlaylist renders a VOD HLS media playlist. chapters, when
+// non-nil (Options.ChapterMarkers, video rendition only), adds one
+// #EXT-X-DATERANGE per chapter right after EXT-X-PLAYLIST-TYPE - every
+// caller that has no chapters to carry (audio/subtitle renditions, or the
+// option off) passes nil and the playlist is unchanged from before the
+// option existed.
+func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(i int) string, chapters []mkv.Chapter) []byte {
 	rw := urlRewriter(o)
 	var max float64
 	for _, d := range durs {
@@ -765,6 +778,9 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
+	if len(chapters) > 0 {
+		b = append(b, buildChapterDateRanges(chapters)...)
+	}
 	if o != nil && mapURI != "" {
 		// Media segments only (fMP4 renditions); the init and subtitle files
 		// stay clear, so subtitle playlists (mapURI == "") carry no key line.
