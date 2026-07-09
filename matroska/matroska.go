@@ -318,6 +318,12 @@ func ReindexReplace(ctx context.Context, path string, opts ...Options) error {
 	return ops.ReindexReplace(ctx, path, opts...)
 }
 
+// ErrIndexNotHeadDiscoverable is wrapped into a ReindexInPlace error when the
+// file's layout cannot hold a head-discoverable SeekHead, so the patched index
+// would not be reachable head-only. The file is rolled back byte-identical.
+// errors.Is this to fall back to a full reindex (copy). See ops.ReindexInPlace.
+var ErrIndexNotHeadDiscoverable = ops.ErrIndexNotHeadDiscoverable
+
 // ReindexInPlace rebuilds path's seek index by patching the file itself: the
 // new Cues element is appended inside the Segment, the head SeekHead repointed
 // and any stale Cues voided. Cluster bytes are never moved and no copy of the

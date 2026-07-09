@@ -2,12 +2,22 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
+
+// ErrIndexNotHeadDiscoverable is wrapped into the ReindexInPlace error when the
+// patched file's Cues index cannot be reached head-only by following the head
+// SeekHead - the file's layout leaves no slot for a head-discoverable SeekHead
+// (e.g. a source with no head SeekHead, where an in-place SeekHead could only
+// land after Info/Tracks). The file is rolled back byte-identical. Callers can
+// errors.Is this to fall back to a full reindex (copy), which always writes a
+// head-discoverable index.
+var ErrIndexNotHeadDiscoverable = errors.New("reindex: seek index not discoverable head-only for this file layout")
 
 // verifyReindexedCues re-opens path head-only and checks that the Cues index
 // the reader sees matches exactly the cue points built during the reindex
@@ -41,6 +51,21 @@ func verifyReindexedCues(ctx context.Context, path string, fs *mkv.FS, want []mk
 			return fmt.Errorf("reindex verify: cue %d time %dms goes backwards (previous %dms)", i, got.TimeMs, prev)
 		}
 		prev = got.TimeMs
+	}
+
+	// Head-only readability: a seek index is only useful if it is discoverable
+	// the way seekers actually consume it - head-only, by following the head
+	// SeekHead to the Cues (reader.WithCues), without a full-segment walk. A
+	// full Open above can recover a tail Cues by scanning back from EOF even
+	// when the SeekHead does not point at it, so it alone would pass an index
+	// that no head-only reader can find. Require the head-only path to resolve
+	// the same cues; otherwise the index is present but not usable for seeking.
+	head, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues())
+	if err != nil {
+		return fmt.Errorf("reindex verify: head-only reopen: %w", err)
+	}
+	if len(head.Cues) != len(want) {
+		return fmt.Errorf("reindex verify: %d cues via SeekHead, %d written - the index would not be usable for seeking; use a full reindex (copy) for this file layout: %w", len(head.Cues), len(want), ErrIndexNotHeadDiscoverable)
 	}
 	return nil
 }

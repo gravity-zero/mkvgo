@@ -139,6 +139,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`ReindexInPlace` no longer reports success with a seek index that is not
+  usable for seeking.** On a file whose only in-place patch slot forced the
+  rebuilt SeekHead after the Info/Tracks elements (a source with no head
+  SeekHead), the appended Cues were recoverable by a full read (which scans
+  back from the file end) but not by a head-only seeker following the SeekHead -
+  yet the operation reported success. The built-in verification now also checks
+  that the index is discoverable head-only; when it is not, the in-place patch
+  is rolled back (the file is left byte-identical) and the caller is pointed at
+  a full reindex (copy), which always writes a head-discoverable index.
 - **A reindexed file no longer fails its own `validate`.** `reindex` emitted a
   fallback cue on the first (often audio) block of any cluster that held no video
   keyframe — common in time-based cluster splits (~38% of clusters on some

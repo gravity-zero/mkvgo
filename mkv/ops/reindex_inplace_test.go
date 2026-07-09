@@ -651,3 +651,81 @@ func TestReindexInPlace_Idempotent(t *testing.T) {
 		}
 	}
 }
+
+// buildNoSeekHeadNoCuesMKV writes a raw MKV with NO head SeekHead and NO Cues:
+// EBML, Segment(known size), Info, Tracks, a head Void, then clusters. This is
+// the field shape where an in-place SeekHead could only land AFTER Info/Tracks
+// (inside the Void), where a head-only reader - which stops once it has Info
+// and Tracks - would never discover it.
+func buildNoSeekHeadNoCuesMKV(t *testing.T, dir string) string {
+	t.Helper()
+	var seg bytes.Buffer
+	var info bytes.Buffer
+	if err := writer.WriteSegmentInfo(&info, &mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "t", WritingApp: "t"}, 3000); err != nil {
+		t.Fatal(err)
+	}
+	seg.Write(info.Bytes())
+	var trk bytes.Buffer
+	if err := writer.WriteTracks(&trk, []mkv.Track{videoTrack(1)}); err != nil {
+		t.Fatal(err)
+	}
+	seg.Write(trk.Bytes())
+	writer.WriteVoid(&seg, 300) // the only patch slot, after Info/Tracks
+	for k := 0; k < 3; k++ {
+		var body bytes.Buffer
+		ebml.WriteElementID(&body, mkv.IDTimestamp)
+		ebml.WriteDataSize(&body, 2)
+		body.Write([]byte{byte((k * 1000) >> 8), byte(k * 1000)})
+		blk := []byte{0x81, 0x00, 0x00, 0x80, 0x01, 0x02, 0x03}
+		ebml.WriteElementID(&body, mkv.IDSimpleBlock)
+		ebml.WriteDataSize(&body, int64(len(blk)))
+		body.Write(blk)
+		ebml.WriteElementID(&seg, mkv.IDCluster)
+		ebml.WriteDataSize(&seg, int64(body.Len()))
+		seg.Write(body.Bytes())
+	}
+	var out bytes.Buffer
+	ebmlBody := []byte{0x42, 0x82, 0x88, 'm', 'a', 't', 'r', 'o', 's', 'k', 'a'}
+	ebml.WriteElementID(&out, ebml.IDEBMLHeader)
+	ebml.WriteDataSize(&out, int64(len(ebmlBody)))
+	out.Write(ebmlBody)
+	ebml.WriteElementID(&out, mkv.IDSegment)
+	ebml.WriteDataSize(&out, int64(seg.Len()))
+	out.Write(seg.Bytes())
+	path := filepath.Join(dir, "noseekhead.mkv")
+	if err := os.WriteFile(path, out.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestReindexInPlace_HeadOnlyDiscoverableOrRefuse is the regression guard for a
+// field bug: ReindexInPlace succeeded on a file whose only patch slot forced
+// the rebuilt SeekHead after Info/Tracks, producing a Cues index a full read
+// could recover (by scanning back from EOF) but a head-only seeker could not
+// follow via the SeekHead. The verify now checks head-only discoverability, so
+// the op must EITHER produce a head-only-readable index OR refuse and roll the
+// file back intact - never silently succeed with an unusable index.
+func TestReindexInPlace_HeadOnlyDiscoverableOrRefuse(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := buildNoSeekHeadNoCuesMKV(t, dir)
+	before := sha256File(t, path)
+
+	err := ReindexInPlace(ctx, path)
+	if err != nil {
+		// Clean refusal: the file must be byte-identical to the original.
+		if got := sha256File(t, path); got != before {
+			t.Fatalf("ReindexInPlace refused (%v) but the file was modified (rollback incomplete)", err)
+		}
+		return
+	}
+	// If it succeeded, the index MUST be readable head-only (the way seekers use it).
+	head, err := reader.OpenMeta(ctx, path, reader.WithCues())
+	if err != nil {
+		t.Fatalf("head-only OpenMeta: %v", err)
+	}
+	if len(head.Cues) == 0 {
+		t.Fatalf("ReindexInPlace succeeded but the Cues index is not discoverable head-only (0 cues via SeekHead)")
+	}
+}
