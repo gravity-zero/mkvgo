@@ -76,6 +76,20 @@ await plan.resource('nope.bin')
   .catch(() => check(true, 'unknown resource rejects'))
 plan.close(); planBlob.close()
 
+// --- AES-128 whole-segment HLS (encrypt): the media playlist carries EXT-X-KEY ---
+const aesKey = new Uint8Array(16).fill(7)
+const planEnc = await MkvGo.openHLS(mkvBytes, {
+  segmentSeconds: 0.5,
+  encrypt: { key: aesKey, keyURI: 'https://example.test/k' },
+})
+const encPlaylist = new TextDecoder().decode((await planEnc.resource('playlist.m3u8')).data)
+check(encPlaylist.includes('#EXT-X-KEY:METHOD=AES-128') && encPlaylist.includes('URI="https://example.test/k"'),
+  'openHLS encrypt emits EXT-X-KEY in the media playlist')
+const encSeg = await planEnc.segment(0)
+check(encSeg.length > 0 && Buffer.compare(Buffer.from(encSeg), Buffer.from(seg1)) !== 0,
+  'encrypted segment differs from the clear segment')
+planEnc.close()
+
 // --- on-demand ABR: one multi-variant plan over two pre-encoded qualities ---
 const abr = await MkvGo.openABR([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
 check(abr.numVariants === 2 && abr.resources.includes('master.m3u8'), `openABR ${abr.numVariants} variants`)

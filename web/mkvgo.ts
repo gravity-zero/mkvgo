@@ -310,8 +310,38 @@ export interface CENCOptions {
   keyURI?: string
 }
 
-/** Options shared by openHLS and openABR: RemuxOptions plus CENC packaging. */
+/**
+ * AES-128 whole-segment HLS encryption (RFC 8216): every media segment is
+ * encrypted as one AES-CBC blob and the playlists carry an EXT-X-KEY line. The
+ * counterpart of the CLI --aes-key/--aes-key-uri flags. Simpler than CENC (no
+ * per-sample subsamples, no EME) and played by any HLS client that fetches the
+ * key from keyURI. Packaging only - the caller owns key delivery and access
+ * control around keyURI.
+ */
+export interface HLSEncryption {
+  /** The 16-byte AES-128 key. Never written to the output. */
+  key: Uint8Array
+  /**
+   * What the EXT-X-KEY line advertises as URI="..." - typically an
+   * authenticated endpoint returning the 16 key bytes.
+   */
+  keyURI?: string
+  /**
+   * A fixed 16-byte IV used for every segment and advertised as the IV
+   * attribute. Leave unset for the spec default: each segment's media sequence
+   * number is the IV and no IV attribute is written.
+   */
+  iv?: Uint8Array
+}
+
+/**
+ * Options shared by openHLS and openABR: RemuxOptions plus one encryption
+ * scheme. Set at most one of `encrypt` (AES-128 whole-segment) or `cenc`
+ * (Common Encryption); setting both is rejected.
+ */
 export interface HLSOptions extends RemuxOptions {
+  /** Package every media segment under AES-128 whole-segment encryption. */
+  encrypt?: HLSEncryption
   /** Package every media segment under Common Encryption. */
   cenc?: CENCOptions
 }

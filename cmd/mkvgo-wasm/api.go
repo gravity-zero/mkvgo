@@ -381,6 +381,38 @@ func readCENCOpts(v js.Value) (*mp4.CENCOptions, error) {
 	return out, nil
 }
 
+// readEncryptOpts reads an optional `encrypt` object for AES-128 whole-segment
+// HLS encryption (RFC 8216), the counterpart of the CLI --aes-key/--aes-key-uri
+// flags and mp4.Options.Encrypt: { key: Uint8Array(16), keyURI?: string,
+// iv?: Uint8Array(16) }. Length validation happens on the Go side
+// (mp4.HLSEncryption.validate, via PlanHLS/PlanABR), so a bad shape surfaces as
+// the same rejected-promise error every other option does. Leaving iv unset
+// uses the spec default (the per-segment media sequence number).
+func readEncryptOpts(v js.Value) (*mp4.HLSEncryption, error) {
+	if v.Type() != js.TypeObject {
+		return nil, nil
+	}
+	e := v.Get("encrypt")
+	if e.Type() != js.TypeObject {
+		return nil, nil
+	}
+	key := e.Get("key")
+	if !isUint8(key) {
+		return nil, fmt.Errorf("encrypt: key must be a Uint8Array")
+	}
+	out := &mp4.HLSEncryption{Key: toGoBytes(key)}
+	if u := e.Get("keyURI"); u.Type() == js.TypeString {
+		out.KeyURI = u.String()
+	}
+	if iv := e.Get("iv"); iv.Type() != js.TypeUndefined && iv.Type() != js.TypeNull {
+		if !isUint8(iv) {
+			return nil, fmt.Errorf("encrypt: iv must be a Uint8Array")
+		}
+		out.IV = toGoBytes(iv)
+	}
+	return out, nil
+}
+
 // remuxResult bundles the output bytes with the dropped-track reports.
 func remuxResult(data []byte, dropped []mp4.DroppedTrack) (any, error) {
 	obj := js.Global().Get("Object").New()
@@ -551,13 +583,18 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 	input := args[0]
 	opts := readRemuxOpts(args, 1)
 	cenc, cencErr := readCENCOpts(optArg(args, 1))
+	enc, encErr := readEncryptOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer openRelease()
 		if cencErr != nil {
 			return nil, cencErr
 		}
+		if encErr != nil {
+			return nil, encErr
+		}
 		opts.CENC = cenc
+		opts.Encrypt = enc
 		if isBlob(input) {
 			opts.FS = blobFS(input)
 		} else if input.Type() == js.TypeObject && input.Get("byteLength").Type() == js.TypeNumber {
@@ -715,13 +752,18 @@ func openABRJS(_ js.Value, args []js.Value) any {
 	}
 	opts := readRemuxOpts(args, 1)
 	cenc, cencErr := readCENCOpts(optArg(args, 1))
+	enc, encErr := readEncryptOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer openRelease()
 		if cencErr != nil {
 			return nil, cencErr
 		}
+		if encErr != nil {
+			return nil, encErr
+		}
 		opts.CENC = cenc
+		opts.Encrypt = enc
 		fs, paths, err := multiSourceFS(inputs)
 		if err != nil {
 			return nil, err

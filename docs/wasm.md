@@ -62,7 +62,8 @@ mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs? }
 - the same semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an
 array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
 2] })` serves a "VF only" version from one file, no copy. `openHLS`/`openABR`
-additionally accept a `cenc` option (Common Encryption); `openConcat`
+additionally accept an `encrypt` option (AES-128 whole-segment) or a `cenc`
+option (Common Encryption); `openConcat`
 additionally accepts `keepLangs`. See below for both. `analyze`/`playability`/
 `ladder` take just `{ signal? }` (abort only) - see [Stream analysis,
 playability and ABR ladder](#stream-analysis-playability-and-abr-ladder).
@@ -219,6 +220,31 @@ clamped to start at 0. Only the subtitle WebVTT renditions shift - video/audio
 segments are byte-identical to a plan opened without the option. `subOffsetMs`
 is also honoured by `openABR` and `openConcat`, and by the eager
 `remuxToHLS` (same option object).
+
+## AES-128 whole-segment HLS (`encrypt`)
+
+`openHLS`/`openABR` accept an `encrypt` option for AES-128 whole-segment
+encryption (RFC 8216): every media segment is encrypted as one AES-CBC blob and
+the playlists carry an `EXT-X-KEY` line pointing at `keyURI`. This is the WASM
+counterpart of the CLI `--aes-key`/`--aes-key-uri` flags and
+`mp4.Options.Encrypt`. It is simpler than CENC (no per-sample subsamples, no
+EME, any codec) and any HLS client that can fetch the key plays it.
+
+```js
+const plan = await MkvGo.openHLS(file, {
+  segmentSeconds: 6,
+  encrypt: {
+    key: key16,                     // 16-byte Uint8Array, never written to the output
+    keyURI: 'https://api.example.com/key',
+    // iv: iv16,                    // optional; unset = each segment's media sequence number
+  },
+})
+```
+
+Set at most one of `encrypt` or `cenc`; setting both rejects the Promise (they
+are different encryption schemes). A bad key length surfaces the same error the
+CLI's `--aes-key` flag does. AES-128 is HLS-only - unlike CENC it produces no
+DASH manifest.
 
 ## Common Encryption (`cenc`)
 
