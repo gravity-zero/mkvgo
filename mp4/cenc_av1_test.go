@@ -23,12 +23,13 @@ func obuLenPrefixed(obuType byte, payload []byte) []byte {
 	return append(b, payload...)
 }
 
-// av1TemporalDelimiter, av1SequenceHeader, av1TileGroup and av1FrameOBU build
-// the fixture OBUs used below.
+// av1TemporalDelimiter, av1SequenceHeader and av1TileGroup build the fixture
+// OBUs used below (av1MinimalSequenceHeaderPayload and the combined-OBU_FRAME
+// fixtures live in cenc_av1_frame_test.go).
 func av1TemporalDelimiter() []byte { return obuLenPrefixed(obuTemporalDelimiter, nil) }
 
 func av1SequenceHeader() []byte {
-	return obuLenPrefixed(obuSeqHeader, []byte{0xAA, 0xBB, 0xCC, 0xDD})
+	return obuLenPrefixed(obuSeqHeader, av1MinimalSequenceHeaderPayload())
 }
 
 func av1TileGroup(payloadLen int) []byte {
@@ -37,14 +38,6 @@ func av1TileGroup(payloadLen int) []byte {
 		payload[i] = byte(i + 1)
 	}
 	return obuLenPrefixed(obuTileGroup, payload)
-}
-
-func av1FrameOBU(payloadLen int) []byte {
-	payload := make([]byte, payloadLen)
-	for i := range payload {
-		payload[i] = byte(0x80 + i)
-	}
-	return obuLenPrefixed(obuFrame, payload)
 }
 
 // av1TemporalUnit concatenates a temporal_delimiter, a sequence_header and a
@@ -178,18 +171,5 @@ func TestAV1CENCNonTileOBUsFullyClear(t *testing.T) {
 	}
 }
 
-// TestAV1CENCFrameOBUConservativelyClear documents and locks in the
-// deliberate conservative choice for OBU_FRAME: since this package cannot
-// parse the AV1 uncompressed frame header, it leaves the entire OBU_FRAME
-// payload clear rather than guess the tile-data boundary (see cenc_av1.go's
-// doc comment). Content requiring encryption of coded frame data must be
-// produced with OBU_FRAME_HEADER + OBU_TILE_GROUP instead of a combined
-// OBU_FRAME.
-func TestAV1CENCFrameOBURejected(t *testing.T) {
-	// A combined OBU_FRAME cannot be split without a stateful frame_header
-	// parse, so it must be refused (never served clear-but-signalled-protected).
-	sample := av1TemporalUnit(av1FrameOBU(40))
-	if _, err := splitAV1Subsamples(sample); err == nil {
-		t.Fatal("combined OBU_FRAME must be rejected for subsample encryption, not silently left clear")
-	}
-}
+// Combined OBU_FRAME splitting (frame_header_obu() parsed against a
+// preceding sequence header) is covered by cenc_av1_frame_test.go.
