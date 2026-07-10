@@ -11,7 +11,7 @@ Matroska/WebM/MP4, then package them for HLS **and** DASH — all in-process, wi
 no ffmpeg, no cgo and zero dependencies.
 
 One static binary (about 8 MB, or an imported Go library, or a WebAssembly
-module that gzips to about 1.6 MB) that inspects media, converts between
+module of about 6 MB that gzips to about 1.6 MB) that inspects media, converts between
 containers without re-encoding, and turns a file into a ready-to-stream CMAF
 presentation. It never transcodes: every operation copies the compressed
 samples verbatim.
