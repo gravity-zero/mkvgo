@@ -13,13 +13,14 @@ package mp4
 // owns the key and its delivery (KeyURI / a real license server for a
 // EME-capable player); mkvgo only produces spec-correct boxes and ciphertext.
 //
-// Clear/protected split (subsample encryption), video (H.264/HEVC, whose MKV
-// samples are already length-prefixed NALs, matching AVCC/HVCC): per NAL unit,
-// the clear region is the 4-byte length field plus the NAL header (1 byte for
-// H.264, 2 for HEVC); everything after is protected. Audio (and any non-NAL
-// codec) is encrypted whole-sample, no subsamples. AV1/VP9 are refused for
-// CENC in this version - their subsample conventions differ and are not
-// implemented.
+// Clear/protected split (subsample encryption), video: for H.264/HEVC (MKV
+// samples are length-prefixed NALs, matching AVCC/HVCC) the clear region per
+// NAL is the 4-byte length field plus the NAL header (1 byte for H.264, 2 for
+// HEVC), everything after is protected - see splitNALSubsamples. AV1 (see
+// cenc_av1.go) and VP9 (cenc_vp9.go) follow their own codec conventions and
+// handle the tractable frame structures, failing loud on the cases that need a
+// stateful parser rather than mis-protecting. Audio (and any non-NAL codec) is
+// encrypted whole-sample, no subsamples.
 //
 // IV derivation (the part that must hold plan ↔ full-pass byte parity, see
 // hlsplan.go's doc comment): the per-sample 'cenc' IV is the caller's base IV
@@ -147,25 +148,39 @@ func cencPreflight(o *Options, videoCodec string) error {
 	if err := o.CENC.validate(); err != nil {
 		return err
 	}
-	if videoCodec != "" && videoNALHeaderLen(videoCodec) == 0 {
-		return errf("Options.CENC: video codec %q has no subsample encryption rule in this version (h264/hevc only; AV1/VP9 are refused)", videoCodec)
+	if videoCodec != "" && !cencSupportsCodec(videoCodec) {
+		return errf("Options.CENC: video codec %q has no subsample encryption rule in this version (h264, hevc, av1, vp9)", videoCodec)
 	}
 	return nil
 }
 
-// videoNALHeaderLen returns the length-prefixed NAL unit header size CENC
-// subsample encryption must leave clear (with the 4-byte length field) for a
-// video codec, or 0 for a codec CENC does not support (AV1/VP9: their
-// subsample conventions differ and are not implemented here).
-func videoNALHeaderLen(codec string) int {
+// cencSupportsCodec reports whether CENC subsample encryption has a rule for a
+// video codec. h264/hevc are complete; av1/vp9 handle the tractable frame
+// structures (AV1 split OBU_FRAME_HEADER+OBU_TILE_GROUP; VP9 keyframes and
+// intra-resolvable frames) and fail loud on the rest (combined OBU_FRAME, VP9
+// inter frames that reuse a reference frame's size) rather than mis-protect.
+func cencSupportsCodec(codec string) bool {
+	switch codec {
+	case "h264", "hevc", "av1", "vp9":
+		return true
+	}
+	return false
+}
+
+// videoSubsampleSplit computes one video sample's clear/protected subsample
+// layout for its codec.
+func videoSubsampleSplit(codec string, sample []byte) ([]cencSubsample, error) {
 	switch codec {
 	case "h264":
-		return 1
+		return splitNALSubsamples(sample, 1)
 	case "hevc":
-		return 2
-	default:
-		return 0
+		return splitNALSubsamples(sample, 2)
+	case "av1":
+		return splitAV1Subsamples(sample)
+	case "vp9":
+		return splitVP9Subsamples(sample)
 	}
+	return nil, errf("cenc: video codec %q not supported for subsample encryption", codec)
 }
 
 // --- init segment: encv/enca sample entry + sinf (frma/schm/schi>tenc) -----
@@ -500,12 +515,8 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fr
 	if err != nil {
 		return nil, nil, err
 	}
-	nalHeaderLen := 0
-	if isVideo {
-		nalHeaderLen = videoNALHeaderLen(codec)
-		if nalHeaderLen == 0 {
-			return nil, nil, errf("cenc: video codec %q does not support subsample encryption (h264/hevc only)", codec)
-		}
+	if isVideo && !cencSupportsCodec(codec) {
+		return nil, nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
 	}
 	out := append([]byte(nil), data...)
 	td := &cencTrafData{hasSubsample: isVideo}
@@ -515,7 +526,7 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fr
 		sample := out[pos : pos+size]
 		var subs []cencSubsample
 		if isVideo {
-			subs, err = splitNALSubsamples(sample, nalHeaderLen)
+			subs, err = videoSubsampleSplit(codec, sample)
 			if err != nil {
 				return nil, nil, err
 			}

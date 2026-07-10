@@ -129,13 +129,22 @@ func splitAV1Subsamples(sample []byte) ([]cencSubsample, error) {
 			// Single-tile assumption (tile_group_header == 0 bits): the
 			// whole payload is coded tile data, protected.
 			clearRun += clearHeaderBytes
+			if clearRun > 0xffff {
+				return nil, errf("cenc: av1: clear region %d exceeds the 16-bit subsample limit", clearRun)
+			}
 			protectedLen := payloadLen / 16 * 16
 			trailing := payloadLen - protectedLen
 			subs = append(subs, cencSubsample{clear: uint16(clearRun), protected: uint32(protectedLen)})
 			clearRun = trailing
 		case obuFrame:
-			// Conservative fallback: see this file's doc comment.
-			clearRun += clearHeaderBytes + payloadLen
+			// Combined OBU_FRAME carries frame_header + tile data in one payload;
+			// locating the tile-data boundary needs a stateful frame_header parse
+			// (sequence-header context) this version does not do. Rather than
+			// leave the tile data clear while the container signals it protected
+			// - a silent false-protection footgun - we refuse it. Encoders that
+			// target CENC emit separate OBU_FRAME_HEADER + OBU_TILE_GROUP, which
+			// are handled exactly above.
+			return nil, errf("cenc: av1: combined OBU_FRAME is not supported for subsample encryption in this version (encode with separate OBU_FRAME_HEADER + OBU_TILE_GROUP)")
 		case obuSeqHeader, obuTemporalDelimiter, obuFrameHeader, obuMetadata, obuRedundantFrameHdr, obuTileList, obuPadding:
 			clearRun += clearHeaderBytes + payloadLen
 		default:
@@ -146,6 +155,9 @@ func splitAV1Subsamples(sample []byte) ([]cencSubsample, error) {
 		i += payloadLen
 	}
 	if clearRun > 0 || len(subs) == 0 {
+		if clearRun > 0xffff {
+			return nil, errf("cenc: av1: clear region %d exceeds the 16-bit subsample limit", clearRun)
+		}
 		subs = append(subs, cencSubsample{clear: uint16(clearRun), protected: 0})
 	}
 	return subs, nil

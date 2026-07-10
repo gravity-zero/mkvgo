@@ -185,24 +185,11 @@ func TestAV1CENCNonTileOBUsFullyClear(t *testing.T) {
 // doc comment). Content requiring encryption of coded frame data must be
 // produced with OBU_FRAME_HEADER + OBU_TILE_GROUP instead of a combined
 // OBU_FRAME.
-func TestAV1CENCFrameOBUConservativelyClear(t *testing.T) {
-	frame := av1FrameOBU(40)
-	sample := av1TemporalUnit(frame)
-
-	subs, err := splitAV1Subsamples(sample)
-	if err != nil {
-		t.Fatalf("splitAV1Subsamples: %v", err)
-	}
-
-	var total, protected int
-	for _, s := range subs {
-		total += int(s.clear) + int(s.protected)
-		protected += int(s.protected)
-	}
-	if total != len(sample) {
-		t.Fatalf("subsample sizes sum to %d, want %d", total, len(sample))
-	}
-	if protected != 0 {
-		t.Fatalf("OBU_FRAME must be treated entirely clear in this version, got %d protected bytes", protected)
+func TestAV1CENCFrameOBURejected(t *testing.T) {
+	// A combined OBU_FRAME cannot be split without a stateful frame_header
+	// parse, so it must be refused (never served clear-but-signalled-protected).
+	sample := av1TemporalUnit(av1FrameOBU(40))
+	if _, err := splitAV1Subsamples(sample); err == nil {
+		t.Fatal("combined OBU_FRAME must be rejected for subsample encryption, not silently left clear")
 	}
 }
