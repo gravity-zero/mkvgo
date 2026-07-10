@@ -67,9 +67,11 @@ streaming, no transcoder involved. **One segment set, two manifests.**
 - **On-demand**: build any segment/playlist when requested — zero
   pre-generation, zero storage — or pre-generate everything. Both modes emit
   byte-identical output.
-- **ABR** from pre-encoded qualities, **AES-128** encryption + signed URLs,
-  **single-file** byte-range serving, **I-frame** trick-play playlists,
-  **thumbnails** for scrubbing, and **audio-only** (podcasts/music).
+- **ABR** from pre-encoded qualities, **AES-128** encryption (with **key
+  rotation**) + signed URLs, **CENC** for the DRM/EME path (AV1/VP9 included),
+  **A/B forensic watermarking**, **single-file** byte-range serving, **I-frame**
+  trick-play playlists, **thumbnails** for scrubbing, and **audio-only**
+  (podcasts/music).
 - Sources: MKV/WebM **or** MP4/MOV, local path **or** `http(s)://` URL (S3).
 
 ```bash
@@ -179,9 +181,10 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `split` | Split by time ranges, chapters or fixed duration (`-every`) |
 | **Index** | `reindex` | Rebuild the seek index (Cues) |
 | **Convert** | `to-mp4` · `from-mp4` · `to-webm` | Remux between containers (no transcode) |
-| **Stream** | `to-hls` | Package as CMAF — HLS + DASH over one demuxed segment set (AES-128, single-file, I-frames, audio-only) |
+| **Stream** | `to-hls` | Package as CMAF - HLS + DASH over one demuxed segment set (AES-128 + key rotation, CENC AV1/VP9, single-file, I-frames, audio-only) |
 | | `hls-segment` | Serve one HLS/DASH resource on demand — zero pre-generation (local file **or** URL) |
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
+| | `watermark-segment` | Serve one segment of an A/B forensic-watermarked stream (per-viewer bit routing, no re-encode) |
 
 Full CLI reference: **[docs/cli.md](docs/cli.md)**
 
@@ -252,8 +255,11 @@ Full library guide: **[docs/library.md](docs/library.md)**.
 - **Output codec sets.** MP4: H.264/HEVC/AV1/VP9 + AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS
   (VP8/Vorbis, TrueHD and bitmap subtitles PGS/VOBSUB cannot go to MP4). WebM:
   the WebM subset only (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
-- **No DRM.** HLS AES-128 is supported (self-hosted content); CENC/SAMPLE-AES
-  (studio DRM) and LL-HLS (live ingest) are out of scope — see
+- **Encryption, packaging only.** HLS AES-128 (whole-segment, with mid-stream
+  **key rotation**) and Common Encryption (**CENC** `cenc`/`cbcs`, for the
+  EME/DASH path, H.264/HEVC/AV1/VP9 - validated decrypting and decoding in a
+  Clear Key player) are supported: mkvgo produces the ciphertext and boxes, you
+  run the license server. LL-HLS (live ingest) is out of scope - see
   [docs/library.md](docs/library.md).
 - **Timing resolution.** Cluster-rebuilding operations (mux/merge/split/join/
   edit/remux) use millisecond-quantised timecodes — exact for the default
