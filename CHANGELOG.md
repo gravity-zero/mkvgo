@@ -4,6 +4,58 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] - 2026-07-10
+
+**Highlights**
+
+- **AES-128 key rotation** - `Options.Encrypt` can rotate the key every N
+  segments (forward secrecy: a captured key decrypts only its period, not the
+  whole video), emitting a fresh `EXT-X-KEY` at each boundary. The schedule is a
+  pure function of the segment index, so `RemuxToHLS` and `PlanHLS` stay
+  byte-identical. CLI `--aes-rotate-segments`, WASM `encrypt.keys`.
+- **Common Encryption for AV1 and VP9** - CENC subsample encryption now covers
+  AV1 and VP9 alongside H.264/HEVC, opening the DRM/EME (DASH) path to all-AV1
+  and VP9 audiences. AV1 parses `frame_header_obu()` against the segment
+  sequence header (combined `OBU_FRAME`); VP9 keeps each frame's uncompressed
+  header clear, resolving inter frames' reference dimensions from the segment
+  keyframe. Both were validated decrypting and decoding in a Clear Key player,
+  and refuse (rather than mis-protect) frame constructs their parsers do not yet
+  cover.
+- **Forensic A/B session watermarking** - `PlanWatermark` serves one HLS
+  presentation whose per-segment bytes are drawn from one of two GOP-aligned
+  encodes by a per-viewer bit pattern, so a leaked copy carries a signature
+  identifying the session. No re-encode; the manifest is shared. CLI
+  `watermark-segment`, WASM `openWatermark`. The code assignment stays the
+  caller's policy.
+- **AES-128 whole-segment encryption in WebAssembly** - `openHLS`/`openABR`
+  accept an `encrypt` option (the counterpart of the CLI `--aes-key` flags), so
+  browser packaging can produce encrypted HLS.
+- **Cross-container content fingerprint** - `fingerprint` now accepts MP4/MOV
+  and yields per-track digests identical to the same encode as MKV/WebM, for
+  upload deduplication across formats.
+
+### Fixed
+
+- **`EXT-X-MAP` now precedes `EXT-X-KEY` in the media playlist.** Per RFC 8216 a
+  key applies to every `EXT-X-MAP` that follows it, but the init segment is
+  always clear; emitting the key first made players retry-loop trying to decrypt
+  the clear init (an `hls.js` `fragDecryptError`). A regression test and a
+  structural no-dangling-reference guard were added.
+- **VP9 RFC 6381 codec string.** A VP9 stream with no CodecPrivate (the common
+  WebM case) emitted an empty or level-0 `CODECS`, which players reject; the
+  record is now derived from the first-frame sample entry and the level computed
+  from the picture size.
+
+### Internal
+
+- Serving load/capacity anti-regression suite: a machine-independent proof that
+  serving a segment is O(segment) not O(source) (allocations do not grow with
+  source length), the retained memory per idle stream, and byte-identical output
+  under concurrent serving. `make bench` runs the throughput benchmarks.
+- Raised `mp4` mutation-test efficacy to 100% on covered mutants, added real
+  (synthetic-pattern) AV1/VP9 bitstream fixtures that exercise the codec parsers
+  end to end, and a cross-platform preflight gate (`make preflight`).
+
 ## [0.17.1] - 2026-07-09
 
 ### Changed
