@@ -167,20 +167,36 @@ func cencSupportsCodec(codec string) bool {
 	return false
 }
 
-// videoSubsampleSplit computes one video sample's clear/protected subsample
-// layout for its codec.
-func videoSubsampleSplit(codec string, sample []byte) ([]cencSubsample, error) {
+// videoSubsampleSplitter computes the clear/protected subsample layout for the
+// successive video samples of ONE segment, in decode order. It is created per
+// segment (newVideoSubsampleSplitter) so a codec that needs cross-sample state
+// - VP9's reference-frame dimensions, AV1's active sequence header - can carry
+// it: the segment opens on a keyframe, so that state is self-contained within
+// the segment. H.264/HEVC are stateless (length-prefixed NALs are
+// self-describing).
+type videoSubsampleSplitter interface {
+	split(sample []byte) ([]cencSubsample, error)
+}
+
+func newVideoSubsampleSplitter(codec string) (videoSubsampleSplitter, error) {
 	switch codec {
 	case "h264":
-		return splitNALSubsamples(sample, 1)
+		return nalSplitter{nalHeaderLen: 1}, nil
 	case "hevc":
-		return splitNALSubsamples(sample, 2)
+		return nalSplitter{nalHeaderLen: 2}, nil
 	case "av1":
-		return splitAV1Subsamples(sample)
+		return &av1Splitter{}, nil
 	case "vp9":
-		return splitVP9Subsamples(sample)
+		return &vp9Splitter{}, nil
 	}
 	return nil, errf("cenc: video codec %q not supported for subsample encryption", codec)
+}
+
+// nalSplitter is the stateless H.264/HEVC splitter (length-prefixed NAL units).
+type nalSplitter struct{ nalHeaderLen int }
+
+func (n nalSplitter) split(sample []byte) ([]cencSubsample, error) {
+	return splitNALSubsamples(sample, n.nalHeaderLen)
 }
 
 // --- init segment: encv/enca sample entry + sinf (frma/schm/schi>tenc) -----
@@ -518,6 +534,12 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fr
 	if isVideo && !cencSupportsCodec(codec) {
 		return nil, nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
 	}
+	var splitter videoSubsampleSplitter
+	if isVideo {
+		if splitter, err = newVideoSubsampleSplitter(codec); err != nil {
+			return nil, nil, err
+		}
+	}
 	out := append([]byte(nil), data...)
 	td := &cencTrafData{hasSubsample: isVideo}
 	pos := 0
@@ -526,7 +548,7 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fr
 		sample := out[pos : pos+size]
 		var subs []cencSubsample
 		if isVideo {
-			subs, err = videoSubsampleSplit(codec, sample)
+			subs, err = splitter.split(sample)
 			if err != nil {
 				return nil, nil, err
 			}

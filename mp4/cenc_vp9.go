@@ -18,10 +18,44 @@ package mp4
 
 import "encoding/binary"
 
+// vp9Splitter is the stateful VP9 subsample splitter. It carries the last
+// frame width across a segment's samples, so an inter frame that reuses a
+// reference frame's dimensions (found_ref==1, the common case) resolves them
+// from an earlier frame - within CENC each segment opens on a keyframe that
+// sets the width, so the state is self-contained per segment. Resolution
+// changes mid-segment (rare) still fall back to the last width.
+type vp9Splitter struct{ lastWidth int }
+
+func (s *vp9Splitter) split(sample []byte) ([]cencSubsample, error) {
+	if len(sample) == 0 {
+		return nil, errf("VP9 CENC: empty sample")
+	}
+	frames, indexLen, err := vp9SplitSuperframe(sample)
+	if err != nil {
+		return nil, err
+	}
+	subs := make([]cencSubsample, 0, len(frames)+1)
+	for _, fr := range frames {
+		sub, w, err := vp9FrameSubsample(sample[fr[0]:fr[1]], s.lastWidth)
+		if err != nil {
+			return nil, err
+		}
+		if w > 0 {
+			s.lastWidth = w
+		}
+		subs = append(subs, sub)
+	}
+	if indexLen > 0 {
+		subs = append(subs, vp9ClampSubsample(indexLen, indexLen))
+	}
+	return subs, nil
+}
+
 // splitVP9Subsamples returns the clear/protected subsample layout for one
-// VP9 coded sample: one cencSubsample per frame (clear = the frame's
-// uncompressed header, protected = the rest), plus - for a superframe - a
-// final clear-only subsample covering the trailing superframe index.
+// standalone VP9 coded sample (no cross-sample state): one cencSubsample per
+// frame (clear = the frame's uncompressed header, protected = the rest), plus -
+// for a superframe - a final clear-only subsample covering the trailing index.
+// Segment encryption uses vp9Splitter instead, which threads the width.
 func splitVP9Subsamples(sample []byte) ([]cencSubsample, error) {
 	if len(sample) == 0 {
 		return nil, errf("VP9 CENC: empty sample")

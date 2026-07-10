@@ -85,6 +85,16 @@ func readLEB128(b []byte) (value uint64, n int, err error) {
 	return 0, 0, errf("cenc: av1: leb128 exceeds the 8-byte maximum")
 }
 
+// av1Splitter is the AV1 subsample splitter. It will carry the active sequence
+// header across a segment's samples once combined OBU_FRAME parsing lands; for
+// now it wraps the stateless OBU walk (which handles OBU_TILE_GROUP and refuses
+// combined OBU_FRAME rather than mis-protecting).
+type av1Splitter struct{}
+
+func (av1Splitter) split(sample []byte) ([]cencSubsample, error) {
+	return splitAV1Subsamples(sample)
+}
+
 // splitAV1Subsamples parses one AV1 coded sample (a temporal unit) into its
 // CENC clear/protected subsample layout. See this file's doc comment for the
 // exact per-OBU-type rule, the OBU_FRAME caveat and the 16-byte remainder
