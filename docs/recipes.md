@@ -194,8 +194,55 @@ Encrypt (AES-128) and sign URLs:
 mkvgo to-hls video.mkv -o stream/ --aes-key <32-hex> --aes-key-uri https://…/key
 ```
 
+**Rotate the key** for forward secrecy (a captured key decrypts only its
+period, not the whole video):
+
+```bash
+mkvgo to-hls video.mkv -o stream/ --aes-rotate-segments 10 \
+  --aes-key <hexA>,<hexB> --aes-key-uri https://…/key/a,https://…/key/b
+```
+
+**Common Encryption** for the EME/DASH path (Widevine/PlayReady/FairPlay CDMs),
+H.264/HEVC/AV1/VP9:
+
+```bash
+mkvgo to-hls video.mkv -o stream/ --cenc-scheme cenc \
+  --cenc-key <32-hex> --cenc-kid <32-hex> --cenc-iv <16-hex> --cenc-key-uri https://…/key
+```
+
 → The full streaming guide — ABR, single-file, trick-play, remote/S3 sources,
 browser playback — is **[streaming.md](streaming.md)**.
+
+## Forensic A/B watermarking (trace a leak)
+
+Serve one stream whose per-segment bytes are drawn from one of two GOP-aligned
+encodes by a per-viewer bit pattern, so a leaked copy carries a signature
+identifying the session. No re-encode; the manifest is shared, only the
+per-segment A/B choice differs.
+
+```bash
+# serve segment 7 from variant B for this viewer (or route by --pattern <hex>)
+mkvgo watermark-segment a.mkv b.mkv 7 --variant B -o seg.m4s
+```
+
+```go
+wm, _ := mp4.PlanWatermark(ctx, "a.mkv", "b.mkv", mp4.Options{SegmentMs: 6000})
+seg, _ := wm.Segment(ctx, n, sessionBit(n)) // A or B for this viewer's code
+```
+
+The code assignment (which session gets which bits, collusion-resistant codes)
+is the caller's policy. WASM: `openWatermark(a, b)`.
+
+## Deduplicate uploads (content fingerprint)
+
+Per-track digests of the compressed samples, identical across containers, so
+the same encode fingerprints the same whether it arrives as MKV, WebM or MP4 -
+an "you already uploaded this" check.
+
+```bash
+mkvgo fingerprint movie.mkv     # same digests as the equivalent movie.mp4
+mkvgo fingerprint movie.mp4
+```
 
 ## Thumbnails / scrubbing storyboard
 
