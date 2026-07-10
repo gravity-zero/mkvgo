@@ -447,6 +447,32 @@ variant transfers only the ranges a viewer watches. In the browser, the WASM
 `openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
 wasm.md).
 
+### Forensic A/B session watermarking (`mp4.PlanWatermark`)
+
+```go
+wm, err := mp4.PlanWatermark(ctx, "titleA.mkv", "titleB.mkv", mp4.Options{SegmentMs: 6000})
+seg, err := wm.Segment(ctx, n, sessionBit(n)) // A or B for this viewer
+```
+
+Two GOP-aligned encodes of one title (A and B, encoded so their segment
+boundaries, timeline and decoder config match but their samples differ
+imperceptibly) are served as ONE ordinary HLS presentation whose per-segment
+bytes are drawn from A or B according to a per-viewer bit pattern. A leaked
+copy - even re-recorded off a screen and re-compressed - then carries a binary
+signature identifying the session that played it. No re-encode: `PlanWatermark`
+verifies the two variants are spliceable (identical init, same segment count and
+durations) and routes each segment to A or B; the manifest is identical for
+every viewer, so one plan serves everyone and only the per-segment A/B bit
+differs. `wm.SegmentForPattern(ctx, n, pattern)` reads bit n of a session's code
+directly (LSB-first per byte).
+
+mkvgo supplies the mechanism; the **code assignment** - which session gets which
+pattern, and collusion-resistant codes (e.g. Tardos) so colluding leakers cannot
+erase or frame - is policy the caller owns and passes in at serve time. The WASM
+`openWatermark(a, b)` and the CLI `watermark-segment` expose the same. Encryption
+is not combined with watermarking in this version (encrypt the served bytes at
+the edge).
+
 ### Gapless multi-file sessions (`mp4.RemuxConcatToHLS` / `mp4.PlanConcat`)
 
 ```go

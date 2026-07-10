@@ -448,6 +448,33 @@ export interface ConcatPlanHandle {
   close(): void
 }
 
+/**
+ * A forensic A/B session-watermarking presentation: two GOP-aligned encodes of
+ * one title served as one HLS stream whose per-segment bytes are drawn from
+ * variant A or B by a per-viewer bit pattern. The manifest is shared across
+ * every viewer; the watermark is which variant each segment carries. The caller
+ * owns the code assignment (which session gets which bits).
+ */
+export interface WatermarkPlanHandle {
+  /** Number of media segments (shared by both variants). */
+  numSegments: number
+  /** The shared master playlist. */
+  masterPlaylist: Uint8Array
+  /** The shared media playlist (identical for every session). */
+  mediaPlaylist: Uint8Array
+  /** The shared init segment. */
+  init: Uint8Array
+  /** Build segment n from variant B when fromB is true, else variant A. */
+  segment(n: number, fromB?: boolean, options?: AbortOptions): Promise<Uint8Array>
+  /**
+   * Build segment n routed by the session's bit code: bit n of pattern
+   * (LSB-first within each byte) selects B when set, A when clear.
+   */
+  segmentForPattern(n: number, pattern: Uint8Array, options?: AbortOptions): Promise<Uint8Array>
+  /** Release the handle's callbacks. */
+  close(): void
+}
+
 export interface MkvGoApi {
   version(): string
   /**
@@ -486,6 +513,14 @@ export interface MkvGoApi {
    * slices (memory-bounded).
    */
   openConcat(inputs: (Uint8Array | Blob)[], options?: ConcatOptions): Promise<ConcatPlanHandle>
+  /**
+   * Open a forensic A/B session-watermarking presentation from two GOP-aligned
+   * encodes (a, b) of one title. The handle serves shared playlists plus
+   * per-segment bytes routed to A or B by a per-viewer bit, so a leaked copy
+   * carries a signature identifying the session. No re-encode; the code
+   * assignment (which session gets which bits) is the caller's.
+   */
+  openWatermark(a: Uint8Array | Blob, b: Uint8Array | Blob, options?: HLSOptions): Promise<WatermarkPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
   /**

@@ -84,6 +84,7 @@ var CmdUsage = map[string]string{
 	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N|resource-name> [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--chapter-markers] (build one HLS resource on demand)",
 	"to-abr":             "mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--chapter-markers] (multi-variant HLS master from pre-encoded qualities)",
 	"abr-segment":        "mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--chapter-markers] (build one ABR resource on demand)",
+	"watermark-segment":  "mkvgo watermark-segment <a.mkv> <b.mkv> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [-o out] [-segment 6] (serve one resource of an A/B session-watermarked stream; segment N drawn from A/B per --variant or bit N of --pattern)",
 	"concat-hls":         "mkvgo concat-hls <in1> <in2> [...] -o <dir> [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (concatenate sources into one continuous HLS session)",
 	"concat-segment":     "mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (build one concat resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",

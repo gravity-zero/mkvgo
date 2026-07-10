@@ -1087,3 +1087,83 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 		return toJSObject(report)
 	})
 }
+
+// openWatermarkJS(a, b, opts?) -> Promise<WatermarkHandle> for forensic A/B
+// session watermarking. a and b are two GOP-aligned encodes of one title
+// (Uint8Array or Blob/File). The handle serves shared playlists plus per-segment
+// bytes routed to variant A or B by a per-viewer bit: segment(n, fromB) or
+// segmentForPattern(n, patternBytes). The caller owns the code assignment.
+func openWatermarkJS(_ js.Value, args []js.Value) any {
+	if len(args) < 2 {
+		return promise(func() (any, error) {
+			return nil, fmt.Errorf("openWatermark: needs two inputs (variant A, variant B)")
+		})
+	}
+	inputs := []js.Value{args[0], args[1]}
+	opts := readRemuxOpts(args, 2)
+	openCtx, openRelease := signalContext(optArg(args, 2))
+	return promise(func() (any, error) {
+		defer openRelease()
+		fs, paths, err := multiSourceFS(inputs)
+		if err != nil {
+			return nil, err
+		}
+		opts.FS = fs
+		wm, err := mp4.PlanWatermark(openCtx, paths[0], paths[1], opts)
+		if err != nil {
+			return nil, err
+		}
+
+		h := js.Global().Get("Object").New()
+		h.Set("numSegments", wm.NumSegments())
+		h.Set("masterPlaylist", toUint8Array(wm.MasterPlaylist()))
+		h.Set("mediaPlaylist", toUint8Array(wm.MediaPlaylist()))
+		h.Set("init", toUint8Array(wm.InitSegment()))
+
+		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
+			}
+			n := rargs[0].Int()
+			fromB := len(rargs) > 1 && rargs[1].Truthy()
+			ctx, release := signalContext(optArg(rargs, 2))
+			return promise(func() (any, error) {
+				defer release()
+				data, err := wm.Segment(ctx, n, fromB)
+				if err != nil {
+					return nil, err
+				}
+				return toUint8Array(data), nil
+			})
+		})
+		patternFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 2 || !isUint8(rargs[1]) {
+				return promise(func() (any, error) {
+					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
+				})
+			}
+			n := rargs[0].Int()
+			pattern := toGoBytes(rargs[1])
+			ctx, release := signalContext(optArg(rargs, 2))
+			return promise(func() (any, error) {
+				defer release()
+				data, err := wm.SegmentForPattern(ctx, n, pattern)
+				if err != nil {
+					return nil, err
+				}
+				return toUint8Array(data), nil
+			})
+		})
+		var closeFn js.Func
+		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+			segmentFn.Release()
+			patternFn.Release()
+			closeFn.Release()
+			return nil
+		})
+		h.Set("segment", segmentFn)
+		h.Set("segmentForPattern", patternFn)
+		h.Set("close", closeFn)
+		return h, nil
+	})
+}

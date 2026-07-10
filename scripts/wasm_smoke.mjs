@@ -109,6 +109,18 @@ check(rotPlaylist.includes('#EXT-X-KEY:METHOD=AES-128,URI="https://k/a"'),
   'openHLS accepts a rotation schedule and applies the first period key')
 planRot.close()
 
+// --- forensic A/B watermarking: two aligned variants serve one shared manifest,
+// per-segment bytes routed by an A/B bit. (Here a === b, so alignment trivially
+// holds and the routing is exercised; real variants differ imperceptibly.) ---
+const wm = await MkvGo.openWatermark(mkvBytes, mkvBytes, { segmentSeconds: 0.5 })
+check(wm.numSegments > 0 && wm.mediaPlaylist.length > 0 && wm.init.length > 0, 'openWatermark shared manifest')
+const segA = await wm.segment(0, false)
+const segB = await wm.segment(0, true)
+const segP = await wm.segmentForPattern(0, new Uint8Array([0x01])) // bit0 set -> B
+check(segA.length > 0 && Buffer.compare(Buffer.from(segB), Buffer.from(segP)) === 0,
+  'openWatermark routes segments by A/B bit and by pattern')
+wm.close()
+
 // --- on-demand ABR: one multi-variant plan over two pre-encoded qualities ---
 const abr = await MkvGo.openABR([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
 check(abr.numVariants === 2 && abr.resources.includes('master.m3u8'), `openABR ${abr.numVariants} variants`)

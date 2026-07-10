@@ -1037,6 +1037,26 @@ mkvgo abr-segment master.m3u8 movie-1080p.mp4 movie-720p.mp4     # top manifest
 mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
 ```
 
+### watermark-segment
+
+Serve one resource of a forensic A/B session-watermarked stream. Two GOP-aligned
+encodes of one title (variant A and B, imperceptibly different) are served as one
+HLS presentation whose per-segment bytes come from A or B by a per-viewer bit, so
+a leaked copy carries a signature identifying the session. The manifest
+(`master`/`playlist`/`init`) is shared; a media segment `N` is drawn from A by
+default, from B with `--variant B`, or routed by bit `N` of `--pattern` (hex,
+LSB-first per byte). No re-encode. The session-to-code assignment (and
+collusion-resistant codes) is the caller's policy.
+
+```
+mkvgo watermark-segment <a.mkv> <b.mkv> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [-o out] [-segment 6]
+```
+
+```bash
+mkvgo watermark-segment a.mkv b.mkv playlist -segment 6           # shared media playlist
+mkvgo watermark-segment a.mkv b.mkv 7 --pattern 4b -o s.m4s       # segment 7, routed by bit 7 of 0x4b
+```
+
 Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
 The library equivalent is `mp4.PlanABR` (see library.md).
 

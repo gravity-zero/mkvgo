@@ -300,6 +300,29 @@ server-side and inject them into the init segment yourself if a DRM system
 needs one; see [library.md](library.md#common-encryption-cenc) for the full
 detail (clear/protected split, IV derivation).
 
+## Forensic A/B session watermarking (`openWatermark`)
+
+`openWatermark(a, b, opts?)` serves two GOP-aligned encodes of one title as ONE
+HLS presentation whose per-segment bytes are drawn from variant A or B by a
+per-viewer bit pattern. A leaked copy then carries a binary signature
+identifying the session. No re-encode: the manifest is shared across every
+viewer (A and B are aligned), and only the per-segment A/B choice differs.
+
+```js
+const wm = await MkvGo.openWatermark(titleA, titleB, { segmentSeconds: 6 })
+// serve the shared manifest to every viewer:
+const playlist = wm.mediaPlaylist            // Uint8Array, identical for all sessions
+// per session, route each segment by the viewer's code bit:
+const seg = await wm.segment(n, sessionBit)                 // A (false) or B (true)
+const seg2 = await wm.segmentForPattern(n, sessionCodeBytes) // bit n of the code
+```
+
+The two encodes must be spliceable (identical init, same segment count and
+durations) or `openWatermark` rejects them. mkvgo supplies the mechanism; the
+**code assignment** - which session gets which pattern, and collusion-resistant
+codes - is the caller's policy, applied when serving each segment. Not combined
+with `encrypt`/`cenc` in this version.
+
 ## Gapless multi-file sessions (`openConcat`)
 
 `openConcat` plays several sources - e.g. consecutive episodes - as ONE
