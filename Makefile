@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 BIN = mkvgo
 
-.PHONY: build test vet fuzz clean release wasm wasm-smoke preflight ci-status
+.PHONY: build test vet fuzz bench clean release wasm wasm-smoke preflight ci-status
 
 # CGO_ENABLED=0: mkvgo is pure Go; keep the binaries static (and buildable
 # without a C toolchain — net/http would otherwise link the cgo resolver).
@@ -14,6 +14,13 @@ test:
 
 vet:
 	go vet ./...
+
+# Serving benchmarks: segment/manifest serve cost, plan construction, and
+# concurrent throughput. allocs/op and B/op are the machine-independent capacity
+# signal; the deterministic anti-regression gates run in the normal test suite
+# (TestServeAllocDoesNotScaleWithSourceSize, TestServingMemoryPerStream, ...).
+bench:
+	CGO_ENABLED=0 go test ./mp4/ -run '^$$' -bench 'Benchmark(Serve|PlanHLS)' -benchmem
 
 # Runs each parser fuzzer briefly; CI fuzzes continuously (.github/workflows/fuzz.yml).
 FUZZTIME ?= 30s
