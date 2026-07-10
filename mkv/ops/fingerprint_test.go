@@ -9,6 +9,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // buildFingerprintMKV writes a minimal two-track (video+audio) MKV whose
@@ -183,5 +184,99 @@ func TestFingerprint_MemFS(t *testing.T) {
 	}
 	if len(fp.Tracks) != 1 || fp.Presentation == "" {
 		t.Fatalf("unexpected fingerprint from MemFS: %+v", fp)
+	}
+}
+
+// TestFingerprint_MP4MatchesMKV proves the container-independent contract:
+// an MKV remuxed to MP4 (RemuxToMP4 copies sample bytes verbatim) produces
+// the SAME Presentation hash and the same set of per-track SHA-256 digests
+// as fingerprinting the source MKV directly, so a media library can dedup an
+// MP4 and an MKV that carry the same encode.
+func TestFingerprint_MP4MatchesMKV(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32(320), Height: u32(240), FrameRate: f64(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: []byte{0x12, 0x10},
+			Channels: u8(2), SampleRate: f64(48000)},
+	}
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("keyframe-payload-0")},
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Data: []byte("audio-frame-0")},
+		{TrackNumber: 1, Timecode: 40, Data: []byte("interframe-payload-1")},
+		{TrackNumber: 2, Timecode: 21, Data: []byte("audio-frame-1")},
+	}
+	srcMKV := buildFingerprintMKV(t, dir, "src.mkv", "Same Content", tracks, blocks)
+
+	mp4Path := filepath.Join(dir, "src.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+
+	fpMKV, err := Fingerprint(context.Background(), srcMKV)
+	if err != nil {
+		t.Fatalf("Fingerprint(mkv): %v", err)
+	}
+	fpMP4, err := Fingerprint(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatalf("Fingerprint(mp4): %v", err)
+	}
+
+	if fpMKV.Presentation != fpMP4.Presentation {
+		t.Fatalf("Presentation differs across containers: mkv=%s mp4=%s", fpMKV.Presentation, fpMP4.Presentation)
+	}
+	if len(fpMKV.Tracks) != len(fpMP4.Tracks) {
+		t.Fatalf("track count differs: mkv=%d mp4=%d", len(fpMKV.Tracks), len(fpMP4.Tracks))
+	}
+	mkvShas := map[string]bool{}
+	for _, tr := range fpMKV.Tracks {
+		mkvShas[tr.SHA256] = true
+	}
+	for _, tr := range fpMP4.Tracks {
+		if !mkvShas[tr.SHA256] {
+			t.Errorf("MP4 track %d (%s/%s) sha %s has no matching MKV track digest", tr.TrackID, tr.Type, tr.Codec, tr.SHA256)
+		}
+	}
+}
+
+// TestFingerprint_MP4Extensionless proves the content-sniffing fallback: an
+// MP4 file with no recognized extension still fingerprints via the MP4 path
+// (reader.ErrNotMatroska triggers digestTracksMP4), matching openAnyMeta's
+// dispatch in playability.go.
+func TestFingerprint_MP4Extensionless(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32(64), Height: u32(64), FrameRate: f64(25)},
+	}
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("frame-0")},
+		{TrackNumber: 1, Timecode: 40, Data: []byte("frame-1")},
+	}
+	srcMKV := buildFingerprintMKV(t, dir, "src.mkv", "T", tracks, blocks)
+
+	mp4Path := filepath.Join(dir, "src.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
+		t.Fatalf("RemuxToMP4: %v", err)
+	}
+	noExtPath := filepath.Join(dir, "src_noext")
+	data, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(noExtPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fpExt, err := Fingerprint(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatalf("Fingerprint(.mp4): %v", err)
+	}
+	fpNoExt, err := Fingerprint(context.Background(), noExtPath)
+	if err != nil {
+		t.Fatalf("Fingerprint(no extension): %v", err)
+	}
+	if fpExt.Presentation != fpNoExt.Presentation {
+		t.Errorf("Presentation differs with/without extension: ext=%s noext=%s", fpExt.Presentation, fpNoExt.Presentation)
 	}
 }

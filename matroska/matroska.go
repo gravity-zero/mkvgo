@@ -341,9 +341,10 @@ type TrackFingerprint = ops.TrackFingerprint
 // Fingerprint computes a container-independent content identity for path: a
 // per-track payload SHA-256 (decode order, the same digest CompareBlocks
 // proves round-trips with) plus a Presentation hash over all of them, stable
-// across container metadata and track-order changes - so a media library can
-// dedup re-muxes of identical content. Unlike Analyze, this is a full read of
-// every track's frame payload. See ops.Fingerprint.
+// across container metadata, track-order changes, and container format
+// (Matroska/WebM/MP4/MOV) - so a media library can dedup re-muxes of
+// identical content regardless of container. Unlike Analyze, this is a full
+// read of every track's frame payload. See ops.Fingerprint.
 func Fingerprint(ctx context.Context, path string, opts ...Options) (*FingerprintReport, error) {
 	return ops.Fingerprint(ctx, path, opts...)
 }

@@ -151,7 +151,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo analyze [-json] <file.mkv|url>")
 		commands.CmdAnalyze(args)
 	case "fingerprint":
-		commands.RequireArgs(args, 1, "mkvgo fingerprint [-json] <file.mkv|url>")
+		commands.RequireArgs(args, 1, "mkvgo fingerprint [-json] <file.mkv|.mp4|url>")
 		commands.CmdFingerprint(args)
 	case "playability":
 		commands.RequireArgs(args, 1, "mkvgo playability [-target name] [-json] <file.mkv|.mp4|url>")

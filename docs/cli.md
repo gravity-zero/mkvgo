@@ -184,10 +184,10 @@ mkvgo analyze -json video.mkv    # AnalyzeReport
 
 ### fingerprint
 
-Container-independent content identity: a `Presentation` hash over every track's payload content, plus one SHA-256 digest per track (decode order) - the same digest `compare -blocks` uses to prove a round-trip byte-identical. Two files carrying the same audio/video/subtitle streams fingerprint identically even with different container metadata (title, muxing app) or a different track order - the use case is cross-container dedup in a media library. Unlike `analyze` this is a FULL read: every track's frame payload is read and hashed. Matroska/WebM only for now.
+Container-independent content identity: a `Presentation` hash over every track's payload content, plus one SHA-256 digest per track (decode order) - the same digest `compare -blocks` uses to prove a round-trip byte-identical. Two files carrying the same audio/video/subtitle streams fingerprint identically even with different container metadata (title, muxing app), a different track order, or a different container (Matroska/WebM vs MP4/MOV) - the use case is cross-container dedup in a media library. Unlike `analyze` this is a FULL read: every track's frame payload is read and hashed. MP4/MOV sources are hashed by remuxing to a temporary Matroska file first (sample bytes are copied verbatim), so an MP4 and an MKV carrying the same encode fingerprint identically.
 
 ```
-mkvgo fingerprint [-json] <file.mkv|url>
+mkvgo fingerprint [-json] <file.mkv|.mp4|url>
 ```
 
 ```bash

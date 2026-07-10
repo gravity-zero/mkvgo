@@ -88,7 +88,7 @@ var CmdUsage = map[string]string{
 	"concat-segment":     "mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (build one concat resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",
 	"analyze":            "mkvgo analyze [-json] <file.mkv|url> (per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr - head-only, no decode)",
-	"fingerprint":        "mkvgo fingerprint [-json] <file.mkv|url> (container-independent content identity: Presentation hash + per-track payload SHA-256, Matroska/WebM only, full read)",
+	"fingerprint":        "mkvgo fingerprint [-json] <file.mkv|.mp4|url> (container-independent content identity: Presentation hash + per-track payload SHA-256, full read)",
 	"playability":        "mkvgo playability [-target safari|chrome|firefox|chromecast-gen3|mse-generic|chromium-generic|brave|opera|vivaldi|samsung-internet|edge] [-json] <file.mkv|.mp4|url> (default target: mse-generic)",
 	"ladder":             "mkvgo ladder [-json] <file.mkv|.mp4|url> (recommended ABR rungs, capped at the source resolution/bitrate)",
 	"ingest":             "mkvgo ingest [-target name] [-reindex] [-analyze] [-json] <file.mkv|.mp4|url> (one-call serving plan: direct-play/remux-hls/transcode, default target: mse-generic)",

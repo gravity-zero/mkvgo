@@ -1035,7 +1035,9 @@ MP4 support is a follow-up: an MP4's sample table (`stsz`/`stss`/`stts`) already
 
 ## Fingerprint (Content Identity / Dedup)
 
-`ops.Fingerprint` computes a container-independent content identity for a file: a per-track payload SHA-256 (the same digest `CompareBlocks` uses to prove a round-trip byte-identical), plus a single `Presentation` hash over all of them. Two files carrying the same audio/video/subtitle streams fingerprint identically even when their container metadata differs (title, muxing app) or their tracks are stored in a different order - the use case is cross-container dedup in a media library: detect that a re-encode-free remux, or a re-mux with reordered tracks, is really the same content, without a byte-for-byte comparison of the containers themselves.
+`ops.Fingerprint` computes a container-independent content identity for a file: a per-track payload SHA-256 (the same digest `CompareBlocks` uses to prove a round-trip byte-identical), plus a single `Presentation` hash over all of them. Two files carrying the same audio/video/subtitle streams fingerprint identically even when their container metadata differs (title, muxing app), their tracks are stored in a different order, or one is Matroska/WebM and the other MP4/MOV - the use case is cross-container dedup in a media library: detect that a re-encode-free remux, or a re-mux with reordered tracks or a different container, is really the same content, without a byte-for-byte comparison of the containers themselves.
+
+MP4/MOV sources are hashed by remuxing to a temporary Matroska file first (`RemuxFromMP4` copies every audio/video sample's compressed bytes verbatim), then running the exact same digest engine on that file - so an MP4 and an MKV carrying the same encode fingerprint identically. The one normalization: subtitle tracks are decoded to plain UTF-8 text (tx3g/WebVTT) rather than digesting the raw MP4 sample framing, so a subtitle track's digest reflects its decoded text, not its MP4 container bytes. A track in a codec `RemuxFromMP4` cannot carry is absent from the report.
 
 Unlike `Analyze`, this is a FULL read: every track's frame payload is read and hashed, so the cost is proportional to the media volume, not just the block-header count.
 
@@ -1076,8 +1078,6 @@ for _, tf := range fp.Tracks {
 Supports the FS port like every other operation (`mkv.Options{FS: ...}`).
 
 The facade re-exports it: `matroska.Fingerprint`, `matroska.FingerprintReport`, `matroska.TrackFingerprint`.
-
-MP4 support is a follow-up (the same constraint as `CompareBlocks`, whose `digestTracks` helper this reuses): Matroska/WebM only for now.
 
 ---
 
