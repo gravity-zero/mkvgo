@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -123,20 +123,24 @@ func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 // space, not the caller's data; only the read of the MP4 source goes through
 // fs (so a remote MP4 fingerprints like a remote MKV).
 func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
-	tmp, err := os.CreateTemp("", "mkvgo-fingerprint-*.mkv")
+	// Remux the MP4 to an in-memory Matroska, then digest that - the same engine
+	// and byte-for-byte samples as the native path, but with no local
+	// filesystem, so this also works under WASM (GOOS=js, where os temp files
+	// are unavailable). Fingerprinting reads the whole file regardless, so the
+	// in-memory intermediate does not change the asymptotic cost.
+	r, err := fs.DoOpen(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	tmpPath := tmp.Name()
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpPath)
-		return nil, nil, cerr
+	data, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		return nil, nil, err
 	}
-	defer os.Remove(tmpPath)
-
-	srcFS := &mkv.FS{Open: fs.DoOpen, Stat: fs.DoStat}
-	if err := mp4.RemuxFromMP4(ctx, path, tmpPath, mp4.Options{FS: srcFS, Progress: progress}); err != nil {
-		return nil, nil, fmt.Errorf("remux to temporary matroska: %w", err)
+	mem := mkv.NewMemFS()
+	mem.Put("src.mp4", data)
+	if err := mp4.RemuxFromMP4(ctx, "src.mp4", "out.mkv", mp4.Options{FS: mem.FS(), Progress: progress}); err != nil {
+		return nil, nil, fmt.Errorf("remux to in-memory matroska: %w", err)
 	}
-	return digestTracks(ctx, tmpPath, nil, nil)
+	return digestTracks(ctx, "out.mkv", mem.FS(), nil)
 }

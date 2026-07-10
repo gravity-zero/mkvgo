@@ -308,6 +308,11 @@ check(Array.isArray(fp.tracks) && fp.tracks.length > 0 &&
   `fingerprint per-track digests (${fp.tracks?.length})`)
 const fp2 = await MkvGo.fingerprint(new Uint8Array(mkvBytes))
 check(fp2.presentation === fp.presentation, 'fingerprint is deterministic over the same bytes')
+// Cross-container: the same encode fingerprints identically as MP4 (no local
+// filesystem in WASM - the MP4 path remuxes in memory).
+const fpMp4 = await MkvGo.fingerprint(mp4.data)
+check(fpMp4.tracks.every((t) => fp.tracks.some((m) => m.sha256 === t.sha256)),
+  'MP4 fingerprint matches the MKV digests (cross-container, in-memory)')
 
 if (failures) { console.error(`wasm smoke: ${failures} FAILURE(S)`); process.exit(1) }
 console.log('wasm smoke: ALL PASS')
