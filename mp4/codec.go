@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"bytes"
 	"encoding/binary"
 	"strings"
 
@@ -167,7 +168,7 @@ func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 		}
 		record = []byte{
 			h.profile,
-			0, // level: undefined
+			vp9Level(t.Width, t.Height),
 			h.bitDepth<<4 | h.chroma<<1 | fullRange,
 			byte(cicp(t.ColorPrimaries)),
 			byte(cicp(t.ColorTransfer)),
@@ -177,6 +178,46 @@ func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	}
 	config := fullBox("vpcC", 1, 0, func(w *bw) { w.bytes(record) })
 	return visualSampleEntry("vp09", t, config), nil
+}
+
+// vp9Level returns the VP9 level code (10*major + minor, e.g. 21 = level 2.1)
+// for a w*h picture, the smallest level whose MaxLumaPictureSize (VP9 spec
+// Annex A) fits. A valid level is mandatory in the vpcC and the codec string:
+// players reject level 0. Picture size is the dominant constraint; a
+// frame-rate-based bump would only ever raise the level, so this conservative
+// choice stays a valid, decodable declaration. nil dimensions default to
+// level 1.0.
+func vp9Level(w, h *uint32) byte {
+	var size uint64
+	if w != nil && h != nil {
+		size = uint64(*w) * uint64(*h)
+	}
+	for _, e := range []struct {
+		code   byte
+		maxPic uint64
+	}{
+		{10, 36864}, {11, 73728}, {20, 122880}, {21, 245760},
+		{30, 552960}, {31, 983040}, {40, 2228224}, {41, 2228224},
+		{50, 8912896}, {51, 8912896}, {52, 8912896},
+		{60, 35651584}, {61, 35651584},
+	} {
+		if size <= e.maxPic {
+			return e.code
+		}
+	}
+	return 62
+}
+
+// vp9RecordFromSampleEntry pulls the VPCodecConfigurationRecord out of a built
+// vp09 sample entry (its vpcC FullBox child): [size][vpcC][version+flags(4)]
+// [record]. Used for the codec string when the source has no CodecPrivate and
+// vp9Entry derived the record from the first frame.
+func vp9RecordFromSampleEntry(entry []byte) []byte {
+	i := bytes.Index(entry, []byte("vpcC"))
+	if i < 0 || i+8 > len(entry) {
+		return nil
+	}
+	return entry[i+8:] // skip the fourcc and the FullBox version/flags
 }
 
 // vpcCRecord returns the VPCodecConfigurationRecord fields when the Matroska

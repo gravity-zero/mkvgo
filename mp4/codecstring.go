@@ -23,7 +23,16 @@ func rfc6381Codec(t *outTrack) string {
 	case "av1":
 		return av1CodecString(cp)
 	case "vp9":
-		if rec := vpcCRecord(cp); len(rec) >= 3 {
+		// The codec string needs the vpcC record. WebM VP9 usually carries no
+		// CodecPrivate, so fall back to the record vp9Entry derived from the
+		// first keyframe and stored in the built sample entry - otherwise the
+		// CODECS attribute is empty and a player rejects the stream with a
+		// buffer/codec error.
+		rec := vpcCRecord(cp)
+		if rec == nil {
+			rec = vp9RecordFromSampleEntry(t.sampleEntry)
+		}
+		if len(rec) >= 3 {
 			// vp09.PP.LL.DD (profile, level, bit depth), zero-padded.
 			return fmt.Sprintf("vp09.%02d.%02d.%02d", rec[0], rec[1], rec[2]>>4)
 		}
