@@ -257,7 +257,9 @@ func TestSingleFileCloseErrorPropagates(t *testing.T) {
 			if cerr != nil {
 				return nil, cerr
 			}
-			if p == "hls/stream.mp4" {
+			// Match by base name so the injection also fires on Windows, where
+			// the FS path uses backslashes (hls\stream.mp4).
+			if filepath.Base(p) == "stream.mp4" {
 				return &singlefileFailClose{w}, nil
 			}
 			return w, nil
