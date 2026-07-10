@@ -878,9 +878,12 @@ Security flags (shared with `hls-segment`; both must use the same values):
   only -- no license server: `--cenc-key-uri` is what an EME-capable player's
   DRM path resolves through its own CDM; left unset it falls back to a `data:`
   URI embedding the key (fine for local testing, never for production). Video
-  must be H.264 or HEVC (AV1/VP9 have different subsample rules, not
-  implemented). See [streaming.md](streaming.md#securing-delivery) for the
-  library form (`mp4.CENCOptions`) and the exact clear/protected byte rules.
+  may be H.264, HEVC, AV1 or VP9 - each codec's decoder-visible header bytes
+  stay clear and the coded data is protected (verified decrypting and decoding
+  in a real Clear Key player); AV1/VP9 refuse rather than mis-protect the frame
+  constructs their parsers do not yet cover. See
+  [streaming.md](streaming.md#securing-delivery) for the library form
+  (`mp4.CENCOptions`) and the exact clear/protected byte rules.
 - `--url-prefix <prefix>` — prepend a base to every URI the playlists and the
   MPD reference (CDN base, or a token route). The library form is
   `Options.RewriteURL func(name) string`, which can append per-resource signed

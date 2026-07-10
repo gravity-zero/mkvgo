@@ -455,11 +455,13 @@ mp4.Options{CENC: &mp4.CENCOptions{
 }}
 ```
 
-Video must be H.264 or HEVC (subsample encryption: the 4-byte NAL length plus
-the NAL header stay clear, the rest is protected). No I-frame playlist is
-emitted (a ciphertext byte range is not independently decryptable). Full detail
--- exact clear/protected rules, IV derivation, key delivery -- in
-[library.md](library.md#common-encryption-cenc).
+Video may be H.264, HEVC, AV1 or VP9: subsample encryption keeps each codec's
+decoder-visible header bytes clear (NAL length+header for H.264/HEVC, the
+`frame_header_obu()` for AV1, the uncompressed header for VP9) and protects the
+coded data - verified decrypting and decoding in a real Clear Key player. No
+I-frame playlist is emitted (a ciphertext byte range is not independently
+decryptable). Full detail -- exact clear/protected rules, IV derivation, key
+delivery -- in [library.md](library.md#common-encryption-cenc).
 
 **Key/IV uniqueness is yours to guarantee.** mkvgo validates the key/IV lengths,
 not their global uniqueness. It derives a distinct per-sample IV within one

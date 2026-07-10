@@ -614,10 +614,29 @@ DRM handshake. Two schemes:
   (CBC state resets at each NAL); audio has no pattern (whole sample
   encrypted). A trailing partial block (< 16 bytes) is always left clear.
 
-Subsample encryption (video, H.264/HEVC only -- AV1/VP9 are refused, their
-subsample rules differ): per NAL unit, the clear region is the 4-byte length
-field plus the NAL header (1 byte H.264, 2 bytes HEVC); the rest is protected.
-Audio (and any non-NAL codec) is encrypted whole-sample. The init segment's
+Subsample encryption (video) keeps the bytes a decoder/CDM must read in the
+clear and protects the rest, per each codec's convention:
+
+- **H.264/HEVC** (length-prefixed NALs): per NAL unit the clear region is the
+  4-byte length field plus the NAL header (1 byte H.264, 2 bytes HEVC); the
+  rest is protected.
+- **AV1**: the OBU header, its leb128 size and the `frame_header_obu()` bits
+  (rounded up to a byte) stay clear, the tile data is protected. Combined
+  `OBU_FRAME` is handled by parsing `frame_header_obu()` against the segment's
+  sequence header (a per-segment stateful parse - the segment opens on a
+  keyframe carrying the sequence header). `OBU_TILE_GROUP` payloads are
+  protected whole (single-tile assumption).
+- **VP9**: each frame's uncompressed header stays clear, the compressed header
+  and tile data are protected; a superframe index is clear. Inter frames that
+  reuse a reference frame's dimensions are resolved from the segment keyframe
+  (per-segment stateful parse).
+
+All four decrypt and decode in a real EME player (verified with Shaka Player +
+Clear Key in headless Chromium). AV1/VP9 fail loud rather than mis-protect on
+the frame constructs the parsers do not yet cover (e.g. multi-tile tile groups,
+some AV1 short-signalled reference frames), so a stream that cannot be split
+correctly is refused, never served clear-but-signalled-protected. Audio (and
+any non-subsample codec) is encrypted whole-sample. The init segment's
 sample entry is wrapped `avc1`/`hvc1`/`mp4a`/… → `encv`/`enca` with a `sinf`
 box (`frma`/`schm`/`schi`>`tenc`); each fragment carries `senc`/`saiz`/`saio`
 describing the per-sample auxiliary information.

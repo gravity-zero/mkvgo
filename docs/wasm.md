@@ -290,11 +290,14 @@ const plan = await MkvGo.openHLS(file, {
 })
 ```
 
-Video must be H.264 or HEVC (subsample encryption: the NAL length + header
-stay clear, the rest is protected); a bad key/keyId/IV length or an
-unsupported codec rejects the returned Promise with the same error the CLI's
-`--cenc-*` flags surface. Unlike `Options.Encrypt` (AES-128, HLS-only), a CENC
-presentation still gets a DASH manifest (with a `ContentProtection` element).
+Video may be H.264, HEVC, AV1 or VP9 (subsample encryption keeps each codec's
+decoder-visible header bytes clear and protects the coded data, verified in a
+real Clear Key player); a bad key/keyId/IV length or a frame construct the
+AV1/VP9 parsers do not yet cover rejects the returned Promise with the same
+error the CLI's `--cenc-*` flags surface. Unlike `Options.Encrypt` (AES-128,
+HLS-only), a CENC presentation still gets a DASH manifest (with a
+`ContentProtection` element) - the AV1/VP9 path exists precisely to give all-AV1
+and iOS/DASH audiences protected playback.
 **PSSH boxes are not exposed by this wasm build** (v1) - build them
 server-side and inject them into the init segment yourself if a DRM system
 needs one; see [library.md](library.md#common-encryption-cenc) for the full
