@@ -858,6 +858,14 @@ Security flags (shared with `hls-segment`; both must use the same values):
   SAMPLE-AES (see `--cenc-*` below). ffmpeg's own HLS demuxer does not decrypt
   whole-segment fMP4 — verified spec-conformant by openssl round-trip.
   Incompatible with `--cenc-*` (pick one scheme).
+- `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
+  forward secrecy (a captured key decrypts only its own period). Pass
+  comma-separated lists to `--aes-key` and `--aes-key-uri` (at least two,
+  matching in count); the keys cycle every N segments, key *i* served at URI
+  *i*, and the media playlist carries a fresh `EXT-X-KEY` at each boundary. The
+  schedule is a pure function of the segment index, so `hls-segment` serves the
+  same bytes on demand. Example: `--aes-rotate-segments 10 --aes-key
+  <hexA>,<hexB> --aes-key-uri https://k/a,https://k/b`.
 - `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> [--cenc-key-uri <uri>]` --
   sample-level Common Encryption (ISO/IEC 23001-7): `cenc` is AES-CTR (a
   per-sample IV, `--cenc-iv` 8 or 16 bytes hex); `cbcs` is AES-CBC with a

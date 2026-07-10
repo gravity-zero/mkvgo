@@ -31,6 +31,7 @@ type hlsFlags struct {
 func parseHLSFlags(args []string) hlsFlags {
 	var f hlsFlags
 	var keyHex, keyURI string
+	var rotateSegs int
 	var cencScheme, cencKeyHex, cencKIDHex, cencIVHex, cencKeyURI string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -58,6 +59,15 @@ func parseHLSFlags(args []string) hlsFlags {
 			i++
 			if i < len(args) {
 				keyURI = args[i]
+			}
+		case "--aes-rotate-segments":
+			i++
+			if i < len(args) {
+				n, err := strconv.Atoi(args[i])
+				if err != nil || n < 1 {
+					Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", args[i]))
+				}
+				rotateSegs = n
 			}
 		case "--cenc-scheme":
 			i++
@@ -128,11 +138,31 @@ func parseHLSFlags(args []string) hlsFlags {
 		}
 	}
 	if keyHex != "" || keyURI != "" {
-		key, err := hex.DecodeString(keyHex)
-		if err != nil {
-			Fatal("invalid --aes-key (expected 32 hex chars): " + err.Error())
+		// --aes-key and --aes-key-uri take a single value, or a comma-separated
+		// list when rotating (--aes-rotate-segments N): the keys cycle every N
+		// segments, key i served at URI i, so a captured key expires mid-video.
+		if rotateSegs > 0 {
+			keys := splitCSV(keyHex)
+			uris := splitCSV(keyURI)
+			if len(keys) < 2 || len(keys) != len(uris) {
+				Fatal("--aes-rotate-segments needs matching comma-separated --aes-key and --aes-key-uri lists of at least 2 entries")
+			}
+			var ks []mp4.HLSKey
+			for j := range keys {
+				k, err := hex.DecodeString(keys[j])
+				if err != nil {
+					Fatal(fmt.Sprintf("invalid --aes-key entry %d (expected 32 hex chars): %s", j+1, err.Error()))
+				}
+				ks = append(ks, mp4.HLSKey{Key: k, KeyURI: uris[j]})
+			}
+			f.encrypt = &mp4.HLSEncryption{RotateEverySegments: rotateSegs, Keys: ks}
+		} else {
+			key, err := hex.DecodeString(keyHex)
+			if err != nil {
+				Fatal("invalid --aes-key (expected 32 hex chars): " + err.Error())
+			}
+			f.encrypt = &mp4.HLSEncryption{Key: key, KeyURI: keyURI}
 		}
-		f.encrypt = &mp4.HLSEncryption{Key: key, KeyURI: keyURI}
 	}
 	if cencScheme != "" || cencKeyHex != "" || cencKIDHex != "" || cencIVHex != "" {
 		key := mustHex(cencKeyHex, "--cenc-key (expected 32 hex chars)")
@@ -141,6 +171,17 @@ func parseHLSFlags(args []string) hlsFlags {
 		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI}
 	}
 	return f
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty parts.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // mustHex decodes a hex-encoded flag value, exiting with a clear error on

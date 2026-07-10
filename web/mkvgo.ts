@@ -318,7 +318,8 @@ export interface CENCOptions {
  * key from keyURI. Packaging only - the caller owns key delivery and access
  * control around keyURI.
  */
-export interface HLSEncryption {
+/** One AES-128 key and its advertised delivery (single key or one rotation period). */
+export interface HLSKey {
   /** The 16-byte AES-128 key. Never written to the output. */
   key: Uint8Array
   /**
@@ -327,11 +328,24 @@ export interface HLSEncryption {
    */
   keyURI?: string
   /**
-   * A fixed 16-byte IV used for every segment and advertised as the IV
-   * attribute. Leave unset for the spec default: each segment's media sequence
-   * number is the IV and no IV attribute is written.
+   * A fixed 16-byte IV used for every segment in this key's periods and
+   * advertised as the IV attribute. Leave unset for the spec default: each
+   * segment's media sequence number is the IV and no IV attribute is written.
    */
   iv?: Uint8Array
+}
+
+export interface HLSEncryption extends HLSKey {
+  /**
+   * Rotate the key every N media segments through `keys`, cycling back to the
+   * first once the last is used (forward secrecy: a captured key decrypts only
+   * its own period, not the whole video). The media playlist then carries a
+   * fresh EXT-X-KEY at each period boundary. Leave unset for a single key (the
+   * `key`/`keyURI`/`iv` fields above). Needs at least two `keys`.
+   */
+  rotateEverySegments?: number
+  /** The rotation period keys, in order. Required when rotateEverySegments is set. */
+  keys?: HLSKey[]
 }
 
 /**

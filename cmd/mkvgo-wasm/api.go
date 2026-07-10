@@ -396,17 +396,46 @@ func readEncryptOpts(v js.Value) (*mp4.HLSEncryption, error) {
 	if e.Type() != js.TypeObject {
 		return nil, nil
 	}
-	key := e.Get("key")
-	if !isUint8(key) {
-		return nil, fmt.Errorf("encrypt: key must be a Uint8Array")
+	// Rotating schedule: { rotateEverySegments: N, keys: [{ key, keyURI, iv? }] }.
+	// A leaked key then decrypts only its period. Length/count validation happens
+	// on the Go side (HLSEncryption.validate, via PlanHLS/PlanABR).
+	if rot := e.Get("rotateEverySegments"); rot.Type() == js.TypeNumber {
+		out := &mp4.HLSEncryption{RotateEverySegments: rot.Int()}
+		keys := e.Get("keys")
+		if keys.Type() != js.TypeObject || keys.Get("length").Type() != js.TypeNumber {
+			return nil, fmt.Errorf("encrypt: rotateEverySegments needs a keys array")
+		}
+		for i := 0; i < keys.Get("length").Int(); i++ {
+			kv := keys.Index(i)
+			k, err := readHLSKey(kv, fmt.Sprintf("encrypt.keys[%d]", i))
+			if err != nil {
+				return nil, err
+			}
+			out.Keys = append(out.Keys, k)
+		}
+		return out, nil
 	}
-	out := &mp4.HLSEncryption{Key: toGoBytes(key)}
-	if u := e.Get("keyURI"); u.Type() == js.TypeString {
+
+	k, err := readHLSKey(e, "encrypt")
+	if err != nil {
+		return nil, err
+	}
+	return &mp4.HLSEncryption{Key: k.Key, KeyURI: k.KeyURI, IV: k.IV}, nil
+}
+
+// readHLSKey reads { key: Uint8Array, keyURI?: string, iv?: Uint8Array }.
+func readHLSKey(v js.Value, what string) (mp4.HLSKey, error) {
+	key := v.Get("key")
+	if !isUint8(key) {
+		return mp4.HLSKey{}, fmt.Errorf("%s: key must be a Uint8Array", what)
+	}
+	out := mp4.HLSKey{Key: toGoBytes(key)}
+	if u := v.Get("keyURI"); u.Type() == js.TypeString {
 		out.KeyURI = u.String()
 	}
-	if iv := e.Get("iv"); iv.Type() != js.TypeUndefined && iv.Type() != js.TypeNull {
+	if iv := v.Get("iv"); iv.Type() != js.TypeUndefined && iv.Type() != js.TypeNull {
 		if !isUint8(iv) {
-			return nil, fmt.Errorf("encrypt: iv must be a Uint8Array")
+			return mp4.HLSKey{}, fmt.Errorf("%s: iv must be a Uint8Array", what)
 		}
 		out.IV = toGoBytes(iv)
 	}

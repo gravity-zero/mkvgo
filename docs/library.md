@@ -537,6 +537,24 @@ the DASH manifest is withheld (AES-128 is an HLS mechanism). The key is only
 ever advertised (`KeyURI`), never stored — authenticating that endpoint is the
 server's access control.
 
+**Key rotation** (forward secrecy). Set `RotateEverySegments` and a `Keys`
+`[]HLSKey` list instead of the single `Key`: the key changes every N segments,
+cycling through `Keys`, so a captured key decrypts only its own period rather
+than the whole video. The media playlist then carries a fresh `EXT-X-KEY` at
+each boundary and each segment is encrypted with its period's key. The schedule
+is a pure function of the segment index, so `RemuxToHLS` and `PlanHLS` still
+agree byte for byte.
+
+```go
+Encrypt: &mp4.HLSEncryption{
+    RotateEverySegments: 10, // new key every 10 segments, cycling through Keys
+    Keys: []mp4.HLSKey{
+        {Key: keyA, KeyURI: "https://api.example.com/key/a"},
+        {Key: keyB, KeyURI: "https://api.example.com/key/b"},
+    },
+},
+```
+
 `RewriteURL` rewrites every URI the playlists and the MPD reference. Resource
 names stay canonical: the server strips its decoration (query token, prefix)
 before calling `plan.Resource(ctx, name)`, and verifies the signature — the

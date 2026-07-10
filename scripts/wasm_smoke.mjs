@@ -90,6 +90,25 @@ check(encSeg.length > 0 && Buffer.compare(Buffer.from(encSeg), Buffer.from(seg1)
   'encrypted segment differs from the clear segment')
 planEnc.close()
 
+// --- AES-128 key rotation: the { rotateEverySegments, keys } shape is accepted
+// and the first period's key is applied. (This fixture has a single video
+// segment, so it cannot show a mid-playlist key change; the byte-level
+// multi-period rotation is proven by the Go test TestHLSKeyRotation.) ---
+const planRot = await MkvGo.openHLS(mkvBytes, {
+  segmentSeconds: 0.5,
+  encrypt: {
+    rotateEverySegments: 1,
+    keys: [
+      { key: new Uint8Array(16).fill(1), keyURI: 'https://k/a' },
+      { key: new Uint8Array(16).fill(2), keyURI: 'https://k/b' },
+    ],
+  },
+})
+const rotPlaylist = new TextDecoder().decode((await planRot.resource('playlist.m3u8')).data)
+check(rotPlaylist.includes('#EXT-X-KEY:METHOD=AES-128,URI="https://k/a"'),
+  'openHLS accepts a rotation schedule and applies the first period key')
+planRot.close()
+
 // --- on-demand ABR: one multi-variant plan over two pre-encoded qualities ---
 const abr = await MkvGo.openABR([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
 check(abr.numVariants === 2 && abr.resources.includes('master.m3u8'), `openABR ${abr.numVariants} variants`)

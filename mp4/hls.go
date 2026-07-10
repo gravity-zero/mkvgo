@@ -790,14 +790,29 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 		// key below applies only to the media segments that follow it. Subtitle
 		// playlists (mapURI == "") carry neither a map nor a key.
 		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
+	}
+	// keyLineFor returns the EXT-X-KEY governing segment i, or "" for a clear /
+	// subtitle playlist. AES-128 may rotate the key across the presentation, so
+	// this is evaluated per segment and emitted only when it changes (below):
+	// one key prints once, a rotating schedule prints at each period boundary.
+	keyLineFor := func(i int) string {
+		if mapURI == "" {
+			return ""
+		}
 		switch {
 		case o != nil && o.Encrypt != nil:
-			b = append(b, o.Encrypt.keyLine()...)
+			return o.Encrypt.keyLineForSegment(i)
 		case o != nil && o.CENC != nil:
-			b = append(b, o.CENC.keyLine()...)
+			return o.CENC.keyLine()
 		}
+		return ""
 	}
+	var lastKey string
 	for i, d := range durs {
+		if kl := keyLineFor(i); kl != "" && kl != lastKey {
+			b = append(b, kl...)
+			lastKey = kl
+		}
 		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(i)))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
