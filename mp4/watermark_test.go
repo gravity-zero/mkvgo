@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -132,5 +133,42 @@ func TestWatermarkRejectsMisaligned(t *testing.T) {
 
 	if _, err := PlanWatermark(ctx, srcA, srcShort, Options{SegmentMs: 1000}); err == nil {
 		t.Error("misaligned variants (different segment count / init) must be rejected")
+	}
+}
+
+func TestWatermarkRejectsEncryption(t *testing.T) {
+	ctx := context.Background()
+	src := buildWatermarkVariant(t, 0x01)
+	key := []byte("0123456789abcdef")
+	if _, err := PlanWatermark(ctx, src, src, Options{SegmentMs: 1000,
+		Encrypt: &HLSEncryption{Key: key, KeyURI: "https://k/x"}}); err == nil {
+		t.Error("watermark planning must refuse Options.Encrypt in this version")
+	}
+	if _, err := PlanWatermark(ctx, src, src, Options{SegmentMs: 1000,
+		CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: make([]byte, 16), IV: make([]byte, 8)}}); err == nil {
+		t.Error("watermark planning must refuse Options.CENC in this version")
+	}
+}
+
+func TestWatermarkRejectsBadSource(t *testing.T) {
+	ctx := context.Background()
+	good := buildWatermarkVariant(t, 0x01)
+	missing := filepath.Join(t.TempDir(), "nope.mkv")
+	if _, err := PlanWatermark(ctx, missing, good, Options{SegmentMs: 1000}); err == nil {
+		t.Error("a missing variant A must fail")
+	}
+	if _, err := PlanWatermark(ctx, good, missing, Options{SegmentMs: 1000}); err == nil {
+		t.Error("a missing variant B must fail")
+	}
+}
+
+func TestWatermarkSegmentNameShared(t *testing.T) {
+	ctx := context.Background()
+	wm, err := PlanWatermark(ctx, buildWatermarkVariant(t, 0x01), buildWatermarkVariant(t, 0x02), Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wm.SegmentName(0) == "" || wm.MasterPlaylist() == nil {
+		t.Error("watermark plan must expose the shared segment name and master playlist")
 	}
 }
