@@ -99,6 +99,9 @@ func main() {
 	case "validate":
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
+	case "cue-health":
+		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json]")
+		commands.CmdCueHealth(args)
 	case "hash":
 		commands.CmdHash(args)
 	case "verify":
@@ -210,6 +213,7 @@ Commands:
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
+  cue-health    Head-only seek-index triage: which tracks the cues reference (spots indexes that seek wrong)
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption
   compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)

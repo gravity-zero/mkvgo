@@ -486,6 +486,18 @@ func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageRe
 // Options.RollbackSink. See mkv.RollbackInfo.
 type RollbackInfo = mkv.RollbackInfo
 
+// CueHealthReport classifies a file's CuePoints by referenced track.
+// See ops.CueHealthReport.
+type CueHealthReport = ops.CueHealthReport
+
+// CueHealth classifies the seek index head-only (no cluster walk): which
+// tracks the CuePoints reference, spotting an index that exists but keys on
+// the wrong tracks - present, non-empty, useless for seeking. The scan-time
+// complement of Validate. See ops.CueHealth.
+func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthReport, error) {
+	return ops.CueHealth(ctx, path, opts...)
+}
+
 // RetimeTracks shifts the block timecodes of the given tracks (track number
 // -> shift in nanoseconds, negative = earlier) in place, under the same
 // crash-safe journal as ReindexInPlace - the fix for a constant A/V desync

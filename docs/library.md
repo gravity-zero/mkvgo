@@ -954,6 +954,19 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 
 ---
 
+## CueHealth (head-only seek-index triage)
+
+`ops.CueHealth` classifies a file's CuePoints by the track they reference, from the SeekHead, Tracks and Cues alone - no cluster walk, milliseconds even on a remote file. It is the scan-time complement of `Validate` (which proves cue times against real keyframes at the cost of a full read): it spots an index that is present and non-empty yet keyed on the wrong tracks, so seeking lands mid-GOP while every "has an index?" check passes.
+
+```go
+r, err := ops.CueHealth(ctx, "movie.mkv")
+if !r.Healthy {
+    fmt.Println(r.Reason) // e.g. "57% of cues reference non-video tracks - ... run mkvgo reindex"
+}
+```
+
+`CueHealthReport`: `TotalCues`, `VideoCues`, `NonVideoCues`, `UnknownTrackCues` (references to tracks absent from the Tracks element - a stale index), `NonVideoPct`, `PerTrack`, `FirstCueMs`/`LastCueMs`, `HasVideoTrack`, `Healthy`, `Reason`. A video file is healthy when every cue references a video track; an audio-only file legitimately cues audio. The facade re-exports `matroska.CueHealth`; the CLI is `cue-health` (exit 1 when unhealthy).
+
 ## Reindex
 
 `ops.Reindex` copies every cluster from `srcPath` to `dstPath` verbatim and writes a new SeekHead and Cues index derived from the cluster contents. All other elements (Info, Tracks, Tags, Chapters, Attachments) are also copied verbatim.

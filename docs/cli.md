@@ -665,6 +665,25 @@ mkvgo split video.mkv -o chapters/ -chapters -pattern "{title}.mkv"
 
 ## Indexing
 
+### cue-health
+
+Head-only triage of the seek index: which tracks the CuePoints reference. `validate` proves cue times against real keyframes but reads the whole file; `cue-health` answers the earlier, cheaper question a library scan needs - "is this index even pointing at the right tracks?" - from the SeekHead, Tracks and Cues alone, in milliseconds. It spots the dormant defect where a video file's index exists and is non-empty, so everything reports the file as "indexed", yet the cues key on audio and every seek lands mid-GOP.
+
+```
+mkvgo cue-health <file.mkv> [-json]
+```
+
+- Exit 0 when healthy, 1 when not (scriptable, like `validate`); the reason names the remedy (`mkvgo reindex`).
+- A video file is healthy when every cue references a video track; an audio-only file legitimately cues audio. No index at all, or cues referencing tracks that do not exist (a stale index), is unhealthy.
+
+```bash
+mkvgo cue-health movie.mkv
+# movie.mkv: 1247 cue(s) (531 video, 716 non-video, 0 unknown-track), 0:00:00 to 2:01:14
+#   index UNHEALTHY: 57% of cues reference non-video tracks - seeking lands mid-GOP: run mkvgo reindex
+```
+
+The library equivalent is `ops.CueHealth` / `matroska.CueHealth` (see library.md).
+
 ### reindex
 
 Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clusters verbatim and emits a new index derived from their content. Use this on files muxed without a usable seek index to restore fast seeking.
