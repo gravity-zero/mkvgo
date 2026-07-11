@@ -574,8 +574,15 @@ func voidHeaderBytes(totalSize int) ([]byte, error) {
 
 // beginInPlacePatch is the shared prologue of every in-place patch operation
 // (ReindexInPlace, RetimeTracks): open the file read-write, require Truncate
-// support, and auto-recover a journal left by a crashed previous run before
-// touching anything else. On success the caller owns closing f.
+// AND Sync support, and auto-recover a journal left by a crashed previous
+// run before touching anything else. On success the caller owns closing f.
+//
+// Sync is a hard requirement, not best-effort: the crash-safety guarantee IS
+// the write barrier (journal durable before any patch lands). A handle that
+// cannot sync would degrade that guarantee silently - worse than not
+// patching at all - so it is refused the same way a Truncate-less handle is.
+// A port whose medium has nothing to flush (an in-memory FS) declares that
+// by implementing Sync as an explicit no-op.
 func beginInPlacePatch(path string, fs *mkv.FS, op string) (f mkv.ReadWriteSeekCloser, trunc interface{ Truncate(size int64) error }, sync func() error, size int64, err error) {
 	f, err = fs.DoOpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -591,12 +598,11 @@ func beginInPlacePatch(path string, fs *mkv.FS, op string) (f mkv.ReadWriteSeekC
 	if !ok {
 		return closeOnErr(fmt.Errorf("%s: file handle for %s does not support Truncate, cannot patch in place", op, path))
 	}
-	sync = func() error {
-		if s, ok := f.(interface{ Sync() error }); ok {
-			return s.Sync()
-		}
-		return nil
+	syncer, ok := f.(interface{ Sync() error })
+	if !ok {
+		return closeOnErr(fmt.Errorf("%s: file handle for %s does not support Sync, cannot make the in-place journal crash-safe; refusing to patch without the write barrier", op, path))
 	}
+	sync = syncer.Sync
 
 	stat, err := fs.DoStat(path)
 	if err != nil {
@@ -751,8 +757,20 @@ func parseInplaceJournalPayload(payload []byte) (*inplaceJournal, error) {
 }
 
 // rollbackInPlaceJournal restores every zone's original bytes and truncates
-// the file back to origSize, undoing an interrupted (or failed) patch.
+// the file back to origSize, undoing an interrupted (or failed) patch. Both
+// capabilities are checked before the first write, so a handle that cannot
+// finish the restore durably never starts it.
 func rollbackInPlaceJournal(f mkv.ReadWriteSeekCloser, j *inplaceJournal) error {
+	trunc, ok := f.(interface{ Truncate(size int64) error })
+	if !ok {
+		return fmt.Errorf("rollback: handle does not support Truncate")
+	}
+	syncer, ok := f.(interface{ Sync() error })
+	if !ok {
+		// Same hard requirement as beginInPlacePatch: a recovery whose final
+		// state is not durable could be silently lost to the next crash.
+		return fmt.Errorf("rollback: handle does not support Sync, restored bytes would not be durable")
+	}
 	for _, z := range j.zones {
 		if _, err := f.Seek(z.off, io.SeekStart); err != nil {
 			return fmt.Errorf("rollback seek: %w", err)
@@ -761,17 +779,11 @@ func rollbackInPlaceJournal(f mkv.ReadWriteSeekCloser, j *inplaceJournal) error 
 			return fmt.Errorf("rollback write: %w", err)
 		}
 	}
-	trunc, ok := f.(interface{ Truncate(size int64) error })
-	if !ok {
-		return fmt.Errorf("rollback: handle does not support Truncate")
-	}
 	if err := trunc.Truncate(j.origSize); err != nil {
 		return fmt.Errorf("rollback truncate: %w", err)
 	}
-	if s, ok := f.(interface{ Sync() error }); ok {
-		if err := s.Sync(); err != nil {
-			return fmt.Errorf("rollback sync: %w", err)
-		}
+	if err := syncer.Sync(); err != nil {
+		return fmt.Errorf("rollback sync: %w", err)
 	}
 	return nil
 }

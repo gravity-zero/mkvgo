@@ -48,6 +48,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **In-place operations now require a sync-capable file handle.** The
+  crash-safety journal's guarantee is its write barrier (journal durable
+  before any patch lands), but the barrier used to degrade to a silent no-op
+  on an FS-port handle without `Sync() error` - while the less
+  safety-critical `Truncate` was a hard requirement. The criticality is now
+  the right way up: `ReindexInPlace`, `RetimeTracks` and the journal
+  recovery refuse a handle that cannot sync, before touching anything.
+  `mkv.MemFS` declares its semantics with an explicit no-op `Sync` (writes
+  hit the backing slice immediately; there is no more durable medium).
 - **Finished files now declare their Segment size.** `MKVWriter.Finalize`
   seals the Segment's size (previously left as the unknown-size marker), so
   every output - mux, merge, reindex, salvage, WebM - states its extent the

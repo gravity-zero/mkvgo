@@ -1035,6 +1035,8 @@ recovered, err := ops.RecoverInPlace(ctx, "video.mkv")
 
 Once `ReindexInPlace` has returned successfully there is no undo -- the journal only exists during the operation. Streamed files (unknown-size clusters), truncated files and files whose head has no SeekHead or Void large enough for the rebuilt SeekHead are refused with an explicit error pointing at `Reindex`, which copies and can therefore rebuild anything readable.
 
+FS port contract: the in-place operations (`ReindexInPlace`, `RetimeTracks`, `RecoverInPlace`) require the `OpenFile` handle to implement both `Truncate(int64) error` and `Sync() error`, and refuse to patch otherwise. Sync is not best-effort: the crash-safety guarantee IS the write barrier (journal made durable before any patch lands), so a handle that cannot sync would degrade it silently. A port whose medium has nothing to flush declares that with an explicit no-op `Sync` (as `mkv.MemFS` does); `os.File` provides both natively.
+
 Choosing a variant: `Reindex` never touches the source (safest, needs a second path), `ReindexReplace` swaps a verified copy over the original (atomic, needs directory permission and transient double disk), `ReindexInPlace` patches the file (file-only permission, no disk duplication, seconds instead of a full copy on large files).
 
 ### RetimeTracks (cancel a constant A/V desync in place)

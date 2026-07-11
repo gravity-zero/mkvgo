@@ -195,6 +195,50 @@ func TestRetime_Refusals(t *testing.T) {
 	}
 }
 
+// noSyncFile hides a handle's Sync method while keeping Truncate: the shape
+// of a port whose durability semantics are undeclared.
+type noSyncFile struct {
+	mkv.ReadWriteSeekCloser
+	trunc interface{ Truncate(size int64) error }
+}
+
+func (n *noSyncFile) Truncate(size int64) error { return n.trunc.Truncate(size) }
+
+// TestInPlaceRequiresSync: a handle that cannot Sync must be refused BEFORE
+// any patch - the crash-safety journal is worthless without the write
+// barrier, and degrading silently would be worse than not patching at all.
+// Covers both in-place operations (shared prologue) and the journal rollback.
+func TestInPlaceRequiresSync(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	target := delayedAudioFixture(t, dir, "nosync.mkv", 4, 900)
+	before := readAll(t, target)
+
+	fs := &mkv.FS{
+		OpenFile: func(path string, flag int, perm os.FileMode) (mkv.ReadWriteSeekCloser, error) {
+			f, err := os.OpenFile(path, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			return &noSyncFile{ReadWriteSeekCloser: f, trunc: f}, nil
+		},
+	}
+
+	err := RetimeTracks(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{FS: fs})
+	if err == nil {
+		t.Fatal("RetimeTracks must refuse a handle without Sync")
+	}
+	if !strings.Contains(err.Error(), "Sync") {
+		t.Errorf("refusal should name the missing capability, got: %v", err)
+	}
+	if err := ReindexInPlace(ctx, target, mkv.Options{FS: fs}); err == nil || !strings.Contains(err.Error(), "Sync") {
+		t.Errorf("ReindexInPlace must refuse a handle without Sync, got: %v", err)
+	}
+	if !bytes.Equal(before, readAll(t, target)) {
+		t.Error("the refusal must leave the file untouched")
+	}
+}
+
 // TestRetime_CrashRecovery: an interrupted run (journal landed, patches
 // half-applied, no truncate) must be rolled back byte-identical by the
 // auto-recovery of the next in-place operation.

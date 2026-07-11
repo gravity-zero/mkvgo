@@ -220,6 +220,13 @@ func (rw *memRW) Seek(offset int64, whence int) (int64, error) {
 
 func (rw *memRW) Close() error { return nil }
 
+// Sync is the explicit no-op declaration of MemFS's durability semantics:
+// writes land in the backing slice immediately and there is no more durable
+// medium to flush to. The in-place operations REQUIRE a sync-capable handle
+// (their crash-safety journal is worthless without the write barrier), and
+// they must not guess - a port states its semantics by implementing this.
+func (rw *memRW) Sync() error { return nil }
+
 // Truncate resizes the file, mirroring os.File.Truncate so in-place operations
 // (journal cleanup, rollback) work on MemFS too.
 func (rw *memRW) Truncate(size int64) error {
