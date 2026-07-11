@@ -447,36 +447,12 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	r := bufio.NewReaderSize(raw, reindexBufSize)
 	mw := writer.NewMKVWriter(out)
 
-	// ── EBML header ──────────────────────────────────────────────────────────
-	if err := copyEBMLHeaderVerbatim(r, out); err != nil {
-		return nil, 0, err
+	// ── EBML header + Segment open ────────────────────────────────────────────
+	if _, err := copyEBMLHeaderVerbatim(r, out); err != nil {
+		return nil, 0, fmt.Errorf("reindex: %w", err)
 	}
-
-	// ── Segment ───────────────────────────────────────────────────────────────
-	// Read source Segment header (we don't need its size; we write unknown-size).
-	segHdr, _, err := ebml.ReadElementHeader(r)
-	if err != nil {
-		return nil, 0, fmt.Errorf("reindex: read Segment header: %w", err)
-	}
-	if segHdr.ID != mkv.IDSegment {
-		return nil, 0, fmt.Errorf("reindex: expected Segment, got 0x%X", segHdr.ID)
-	}
-	// Emit a new Segment with unknown size (same as MKVWriter.WriteStart does).
-	if _, err := ebml.WriteElementID(out, mkv.IDSegment); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write Segment ID: %w", err)
-	}
-	if _, err := ebml.WriteDataSize(out, -1); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write Segment size: %w", err)
-	}
-	// Record where segment data starts (needed for RelPos() arithmetic).
-	segDataStart, err := out.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return nil, 0, fmt.Errorf("reindex: seek Segment data start: %w", err)
-	}
-	mw.SegDataStart = segDataStart
-	mw.SeekHeadPos = 0 // will be filled at the front
-	if err := writer.WriteVoid(out, writer.SeekHeadReserve); err != nil {
-		return nil, 0, fmt.Errorf("reindex: write SeekHead placeholder: %w", err)
+	if _, err := beginSegmentRewrite(r, out, mw); err != nil {
+		return nil, 0, fmt.Errorf("reindex: %w", err)
 	}
 
 	// ── Walk source Segment elements ──────────────────────────────────────────
@@ -539,28 +515,8 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				}
 				mw.TimecodeScale = timecodeScale
 			}
-			pos := mw.RelPos()
-			switch h.ID {
-			case mkv.IDInfo:
-				mw.InfoPos = pos
-			case mkv.IDTracks:
-				mw.TracksPos = pos
-			case mkv.IDTags:
-				mw.TagsPos = pos
-			case mkv.IDChapters:
-				mw.ChaptersPos = pos
-			case mkv.IDAttachments:
-				mw.AttachPos = pos
-			}
-			// Write element header (same ID, same size) then verbatim body.
-			if _, err := ebml.WriteElementID(out, h.ID); err != nil {
-				return nil, 0, fmt.Errorf("reindex: write 0x%X ID: %w", h.ID, err)
-			}
-			if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
-				return nil, 0, fmt.Errorf("reindex: write 0x%X size: %w", h.ID, err)
-			}
-			if _, err := out.Write(metaBuf); err != nil {
-				return nil, 0, fmt.Errorf("reindex: write 0x%X body: %w", h.ID, err)
+			if err := writeMetaElementVerbatim(mw, out, h, metaBuf); err != nil {
+				return nil, 0, fmt.Errorf("reindex: %w", err)
 			}
 
 		case mkv.IDCluster:
@@ -618,34 +574,96 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 }
 
 // copyEBMLHeaderVerbatim reads the source EBML header from r and writes it byte
-// for byte to out, so the DocType (e.g. "webm") is preserved across a reindex.
-func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) error {
-	ebmlHdr, _, err := ebml.ReadElementHeader(r)
+// for byte to out, so the DocType (e.g. "webm") is preserved across a rewrite.
+// Returns the source bytes consumed. Shared by reindexCopy and salvageCopy.
+func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) (int64, error) {
+	ebmlHdr, hdrBytes, err := ebml.ReadElementHeader(r)
 	if err != nil {
-		return fmt.Errorf("reindex: read EBML header: %w", err)
+		return 0, fmt.Errorf("read EBML header: %w", err)
 	}
 	if ebmlHdr.ID != ebml.IDEBMLHeader {
-		return fmt.Errorf("reindex: expected EBML header, got 0x%X", ebmlHdr.ID)
+		return 0, fmt.Errorf("expected EBML header, got 0x%X", ebmlHdr.ID)
 	}
 	if ebmlHdr.Size < 0 {
-		return fmt.Errorf("reindex: EBML header has unknown size")
+		return 0, fmt.Errorf("EBML header has unknown size")
 	}
 	if ebmlHdr.Size > maxReindexClusterSize {
-		return fmt.Errorf("reindex: EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
+		return 0, fmt.Errorf("EBML header size %d exceeds limit (%d bytes)", ebmlHdr.Size, maxReindexClusterSize)
 	}
 	ebmlBody := make([]byte, ebmlHdr.Size)
 	if _, err := io.ReadFull(r, ebmlBody); err != nil {
-		return fmt.Errorf("reindex: read EBML body: %w", err)
+		return 0, fmt.Errorf("read EBML body: %w", err)
 	}
 	// Write the EBML element verbatim: ID header + body.
 	if _, err := ebml.WriteElementID(out, ebmlHdr.ID); err != nil {
-		return fmt.Errorf("reindex: write EBML ID: %w", err)
+		return 0, fmt.Errorf("write EBML ID: %w", err)
 	}
 	if _, err := ebml.WriteDataSize(out, ebmlHdr.Size); err != nil {
-		return fmt.Errorf("reindex: write EBML size: %w", err)
+		return 0, fmt.Errorf("write EBML size: %w", err)
 	}
 	if _, err := out.Write(ebmlBody); err != nil {
-		return fmt.Errorf("reindex: write EBML body: %w", err)
+		return 0, fmt.Errorf("write EBML body: %w", err)
+	}
+	return int64(hdrBytes) + ebmlHdr.Size, nil
+}
+
+// beginSegmentRewrite reads the source Segment header from r and opens the
+// output Segment the way every index rewrite does: unknown size, a Void
+// placeholder where Finalize will patch the rebuilt SeekHead, and the
+// writer's position bookkeeping primed. Returns the source bytes consumed
+// (the Segment header itself). Shared by reindexCopy and salvageCopy.
+func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter) (int64, error) {
+	segHdr, segHdrBytes, err := ebml.ReadElementHeader(r)
+	if err != nil {
+		return 0, fmt.Errorf("read Segment header: %w", err)
+	}
+	if segHdr.ID != mkv.IDSegment {
+		return 0, fmt.Errorf("expected Segment, got 0x%X", segHdr.ID)
+	}
+	if _, err := ebml.WriteElementID(out, mkv.IDSegment); err != nil {
+		return 0, fmt.Errorf("write Segment ID: %w", err)
+	}
+	if _, err := ebml.WriteDataSize(out, -1); err != nil {
+		return 0, fmt.Errorf("write Segment size: %w", err)
+	}
+	segDataStart, err := out.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, fmt.Errorf("seek Segment data start: %w", err)
+	}
+	mw.SegDataStart = segDataStart
+	mw.SeekHeadPos = 0
+	if err := writer.WriteVoid(out, writer.SeekHeadReserve); err != nil {
+		return 0, fmt.Errorf("write SeekHead placeholder: %w", err)
+	}
+	return int64(segHdrBytes), nil
+}
+
+// writeMetaElementVerbatim records the metadata element's output position on
+// mw (so Finalize's SeekHead points at it) and writes the element verbatim.
+// Shared by reindexCopy and salvageCopy; the caller extracts TimecodeScale
+// from an Info body before calling.
+func writeMetaElementVerbatim(mw *writer.MKVWriter, out io.Writer, h ebml.ElementHeader, body []byte) error {
+	pos := mw.RelPos()
+	switch h.ID {
+	case mkv.IDInfo:
+		mw.InfoPos = pos
+	case mkv.IDTracks:
+		mw.TracksPos = pos
+	case mkv.IDTags:
+		mw.TagsPos = pos
+	case mkv.IDChapters:
+		mw.ChaptersPos = pos
+	case mkv.IDAttachments:
+		mw.AttachPos = pos
+	}
+	if _, err := ebml.WriteElementID(out, h.ID); err != nil {
+		return fmt.Errorf("write 0x%X ID: %w", h.ID, err)
+	}
+	if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
+		return fmt.Errorf("write 0x%X size: %w", h.ID, err)
+	}
+	if _, err := out.Write(body); err != nil {
+		return fmt.Errorf("write 0x%X body: %w", h.ID, err)
 	}
 	return nil
 }

@@ -80,6 +80,7 @@ type surgicalRun struct {
 	// to the cluster Timestamp), for the cross-gap continuity gate.
 	firstRelTC, lastRelTC int64
 	hasBlocks             bool
+	children              int // child elements walked, for the solidity gate
 }
 
 // surgicalOutcome maps one damaged cluster region.
@@ -152,6 +153,7 @@ func chainWalkChildren(raw io.ReadSeeker, pos, fileSize int64, tracks map[uint64
 			}
 		}
 		run.end += int64(n) + h.Size
+		run.children++
 	}
 }
 
@@ -219,7 +221,7 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 				if perr != nil {
 					return 0, -1, perr
 				}
-				solid := run.hasBlocks && (countChainChildren(raw, cand, run.end) >= 3 ||
+				solid := run.hasBlocks && (run.children >= 3 ||
 					stop == surgicalStopAnchor || stop == surgicalStopEOF)
 				if !solid {
 					continue
@@ -232,29 +234,6 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 		}
 	}
 	return 0, -1, nil
-}
-
-// countChainChildren re-walks [start,end) counting the children, so the
-// solidity gate ("at least K consecutive valid children") does not have to be
-// threaded through chainWalkChildren.
-func countChainChildren(raw io.ReadSeeker, start, end int64) int {
-	if _, err := raw.Seek(start, io.SeekStart); err != nil {
-		return 0
-	}
-	r := bufio.NewReaderSize(raw, 64<<10)
-	pos, count := start, 0
-	for pos < end {
-		h, n, err := ebml.ReadElementHeader(r)
-		if err != nil || h.Size < 0 {
-			return count
-		}
-		if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-			return count
-		}
-		pos += int64(n) + h.Size
-		count++
-	}
-	return count
 }
 
 // surgicalScanCluster maps the region of one damaged cluster starting at
