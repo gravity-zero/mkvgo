@@ -680,6 +680,7 @@ mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backu
 - `--keep-backup` (only with `--replace`) preserves the pre-op original as `<input.mkv>.bak` instead of discarding it.
 - `--resync` (opt-in; works with and without `--replace`) tolerates corrupted regions in the cluster stream -- an element header that does not decode, a declared size that does not match the element's real extent, damaged bytes inside a cluster body, raw junk between clusters. Instead of refusing the file, the walk repairs surgically: a lying size over an intact payload is corrected with zero loss, and damage inside a cluster is cut around (the valid blocks on both sides are kept, chain-validated against the file's real track numbers and timecodes) rather than dropping the whole cluster. Only what cannot be recovered is skipped. Every repaired region and every dropped range is printed (byte offsets + approximate presentation time), so the operator knows exactly what happened -- the loss is usually a few KB, a fraction of a second of one track. The repair is still refused when no valid resume point is found within the scan window (64 MiB), when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub (use `mkvgo salvage` for best-effort recovery without that cap). Without the flag the strict refusal stays the contract, and the refusal message points at `--resync` when a corrupted region is what stopped it.
 - `--clean-cut` (only with `--resync`) resumes video after each damage gap at the next video keyframe instead of the first recovered frame: post-gap P/B frames reference lost pictures and decode with artifacts until the keyframe. Audio resumes immediately (its frames are independent). Preview the cost with `mkvgo salvage --dry-run --clean-cut`.
+- `--rollback-delta <file>` writes the inverse delta alongside the repair: the recipe to reconstruct the pre-repair original from the repaired output (see the `rollback` command), typically well under 0.1% of the source size where a backup copy would be the whole file. With the flag set, a repair whose delta cannot be written fails rather than leaving you without the safety net.
 
 ```bash
 mkvgo reindex source.mkv reindexed.mkv
@@ -752,6 +753,21 @@ salvaged damaged.mkv -> recovered.mkv
 A clean source prints `no damage found (equivalent to reindex)` and reports zero damaged ranges.
 
 One honest limit: the recovery is structural, not decode-level. A block whose framing is intact but whose payload tail was overwritten is kept as-is (detecting it would require decoding the codec bitstream, which mkvgo never does) -- expect at worst one glitched frame at a damage boundary.
+
+### rollback
+
+Reconstruct the pre-repair original from a repaired file and the delta written by `--rollback-delta` (available on `reindex`, `reindex-inplace` and `salvage`). The delta replaces a full backup copy: it contains "copy this range of the repaired file" instructions for everything the repair carried over verbatim (~99.99% of a typical file) plus the literal bytes the repair dropped or rewrote, so it is typically well under 0.1% of the source size.
+
+```
+mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>
+```
+
+The reconstruction is hash-gated twice: it refuses to run when the repaired file changed since the repair was taken (its sha256 no longer matches the delta entry), and it never delivers an output that does not hash back to the original exactly. A torn or corrupted delta entry (per-entry crc32c) is refused the same way. On any refusal no output file is left behind.
+
+```bash
+mkvgo reindex damaged.mkv repaired.mkv --resync --rollback-delta damaged.rbd
+mkvgo rollback repaired.mkv damaged.rbd original-restored.mkv
+```
 
 ---
 

@@ -59,6 +59,23 @@ All notable changes to mkvgo are documented here. The format is based on
   repair ("this file would lose 3.9 KB at 00:00-00:02"), with repaired
   ranges, damaged ranges and clean-cut cost, identical to what the real run
   would report.
+- **Rollback delta** (`Options.RollbackSink` / `--rollback-delta <file>`,
+  `mkvgo rollback`, `ops.ApplyRollback`): a repair can now emit the recipe to
+  reconstruct the pre-repair original from the repaired output - typically
+  well under 0.1% of the source where a backup copy would be the whole file.
+  The writer already knows the src->dst mapping of every verbatim run it
+  copies, so the delta (framed entry: COPY ranges of the repaired file,
+  literals for what the repair dropped or re-encoded, crc32c per entry) costs
+  no diff pass; only the repaired file's sha256 adds one sequential read.
+  Supported by `reindex` (strict and `--resync`), `reindex-inplace` (the
+  crash journal persisted as a delta, emitted while it can still be rolled
+  back) and `salvage`. Application is hash-gated twice: `mkvgo rollback`
+  refuses when the repaired file changed since the repair, and never
+  delivers a reconstruction that does not hash back to the original.
+  `Options.RollbackRequired` decides whether a sink failure fails the repair
+  (the CLI flag implies it); the default is best-effort. The summary comes
+  back through `Options.OnRollback` (`mkv.RollbackInfo`). Fuzz target on the
+  entry parser.
 
 ## [0.18.0] - 2026-07-10
 

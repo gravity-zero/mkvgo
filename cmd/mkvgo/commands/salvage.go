@@ -7,7 +7,7 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const salvageUsage = "usage: mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-cut] | mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]"
+const salvageUsage = "usage: mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-cut] [--rollback-delta <file>] | mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]"
 
 // CmdSalvage runs a best-effort recovery copy of a damaged Matroska/WebM
 // file (ops.Salvage): metadata and cluster payloads are carried over
@@ -27,22 +27,38 @@ const salvageUsage = "usage: mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-
 // valid Cluster or real EOF, or a genuine I/O error.
 func CmdSalvage(args []string) {
 	var jsonOut, dryRun, cleanCut bool
+	var deltaPath string
 	var rest []string
-	for _, a := range args {
-		switch a {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
 		case "--json":
 			jsonOut = true
 		case "--dry-run":
 			dryRun = true
 		case "--clean-cut":
 			cleanCut = true
+		case "--rollback-delta":
+			if i+1 >= len(args) {
+				Fatal("--rollback-delta needs a file path")
+			}
+			i++
+			deltaPath = args[i]
 		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
+			rejectFlagArg(args[i])
+			rest = append(rest, args[i])
 		}
+	}
+	if dryRun && deltaPath != "" {
+		Fatal("--rollback-delta does not apply to --dry-run (nothing is written, nothing to roll back)")
 	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), CleanCut: cleanCut}
+	printDelta := func() {}
+	if deltaPath != "" {
+		var closeDelta func()
+		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath)
+		defer closeDelta()
+	}
 
 	if dryRun {
 		if len(rest) != 1 {
@@ -77,10 +93,12 @@ func CmdSalvage(args []string) {
 
 	if jsonOut || JsonOutput {
 		PrintJSON(report)
+		printDelta()
 		return
 	}
 	fmt.Printf("salvaged %s -> %s\n", src, dst)
 	printSalvageDetail(report)
+	printDelta()
 }
 
 func printSalvageDetail(r *matroska.SalvageReport) {

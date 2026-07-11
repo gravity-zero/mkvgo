@@ -399,7 +399,12 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		return reindexResync(ctx, srcPath, dstPath, fs, opts)
 	}
 
-	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts))
+	var rb *rollbackBuilder
+	if mkv.RollbackSinkFrom(opts) != nil {
+		rb = newRollbackBuilder()
+	}
+
+	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb)
 	if err != nil {
 		return err
 	}
@@ -417,14 +422,17 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		}
 	}
 
-	return nil
+	return emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts)
 }
 
 // reindexCopy performs the actual byte-faithful copy from srcPath to dstPath,
 // rebuilding only the seek index (SeekHead + Cues). It returns the cue points
 // built during the walk and the timecode scale used to derive them, so the
 // caller can verify the result against them. See Reindex for the full contract.
-func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc) (cues []mkv.CuePoint, timecodeScale int64, err error) {
+// A non-nil rb collects the inverse rollback delta along the way: COPY ops for
+// the verbatim bodies, literals for the re-encoded headers and dropped index
+// elements.
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder) (cues []mkv.CuePoint, timecodeScale int64, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks map[uint64]bool
@@ -448,10 +456,10 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	mw := writer.NewMKVWriter(out)
 
 	// ── EBML header + Segment open ────────────────────────────────────────────
-	if _, err := copyEBMLHeaderVerbatim(r, out); err != nil {
+	if _, err := copyEBMLHeaderVerbatim(r, out, rb); err != nil {
 		return nil, 0, fmt.Errorf("reindex: %w", err)
 	}
-	if _, err := beginSegmentRewrite(r, out, mw); err != nil {
+	if _, err := beginSegmentRewrite(r, out, mw, rb); err != nil {
 		return nil, 0, fmt.Errorf("reindex: %w", err)
 	}
 
@@ -488,7 +496,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			if h.Size < 0 {
 				return nil, 0, fmt.Errorf("reindex: unknown-size index element 0x%X", h.ID)
 			}
-			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
+			litDst := io.Discard
+			if rb != nil {
+				// The output has no trace of these: whole element to literals.
+				rb.literalHeader(h, hdrBytes)
+				litDst = rb.literalWriter(h.Size)
+			}
+			if _, err := io.CopyN(litDst, r, h.Size); err != nil {
 				return nil, 0, fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
@@ -515,8 +529,21 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				}
 				mw.TimecodeScale = timecodeScale
 			}
+			if rb != nil {
+				rb.literalHeader(h, hdrBytes)
+			}
 			if err := writeMetaElementVerbatim(mw, out, h, metaBuf); err != nil {
 				return nil, 0, fmt.Errorf("reindex: %w", err)
+			}
+			if rb != nil {
+				// The body was just written verbatim, ending at the current
+				// output position: that position minus the body length is the
+				// COPY source, with no assumption about the header encoding.
+				after, serr := out.Seek(0, io.SeekCurrent)
+				if serr != nil {
+					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+				}
+				rb.copyRun(after-h.Size, metaBuf)
 			}
 
 		case mkv.IDCluster:
@@ -540,9 +567,19 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			}
 			consumed += int64(hdrBytes) + h.Size
 
+			if rb != nil {
+				rb.literalHeader(h, hdrBytes)
+			}
 			outOff := mw.RelPos()
 			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
 				return nil, 0, err
+			}
+			if rb != nil {
+				after, serr := out.Seek(0, io.SeekCurrent)
+				if serr != nil {
+					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+				}
+				rb.copyRun(after-h.Size, body)
 			}
 
 			if progress != nil && totalBytes > 0 {
@@ -560,7 +597,16 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
 				return nil, 0, fmt.Errorf("reindex: write unknown 0x%X size: %w", h.ID, err)
 			}
-			if _, err := io.CopyN(out, r, h.Size); err != nil {
+			bodyDst := io.Writer(out)
+			if rb != nil {
+				rb.literalHeader(h, hdrBytes)
+				bodyOff, serr := out.Seek(0, io.SeekCurrent)
+				if serr != nil {
+					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+				}
+				bodyDst = io.MultiWriter(out, rb.copyRunStreamed(bodyOff, h.Size))
+			}
+			if _, err := io.CopyN(bodyDst, r, h.Size); err != nil {
 				return nil, 0, fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
@@ -576,7 +622,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 // copyEBMLHeaderVerbatim reads the source EBML header from r and writes it byte
 // for byte to out, so the DocType (e.g. "webm") is preserved across a rewrite.
 // Returns the source bytes consumed. Shared by reindexCopy and salvageCopy.
-func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) (int64, error) {
+func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer, rb *rollbackBuilder) (int64, error) {
 	ebmlHdr, hdrBytes, err := ebml.ReadElementHeader(r)
 	if err != nil {
 		return 0, fmt.Errorf("read EBML header: %w", err)
@@ -593,6 +639,10 @@ func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) (int64, error) {
 	ebmlBody := make([]byte, ebmlHdr.Size)
 	if _, err := io.ReadFull(r, ebmlBody); err != nil {
 		return 0, fmt.Errorf("read EBML body: %w", err)
+	}
+	if rb != nil {
+		rb.literalHeader(ebmlHdr, hdrBytes)
+		rb.literal(ebmlBody)
 	}
 	// Write the EBML element verbatim: ID header + body.
 	if _, err := ebml.WriteElementID(out, ebmlHdr.ID); err != nil {
@@ -612,13 +662,18 @@ func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer) (int64, error) {
 // placeholder where Finalize will patch the rebuilt SeekHead, and the
 // writer's position bookkeeping primed. Returns the source bytes consumed
 // (the Segment header itself). Shared by reindexCopy and salvageCopy.
-func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter) (int64, error) {
+func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter, rb *rollbackBuilder) (int64, error) {
 	segHdr, segHdrBytes, err := ebml.ReadElementHeader(r)
 	if err != nil {
 		return 0, fmt.Errorf("read Segment header: %w", err)
 	}
 	if segHdr.ID != mkv.IDSegment {
 		return 0, fmt.Errorf("expected Segment, got 0x%X", segHdr.ID)
+	}
+	if rb != nil {
+		// The output Segment header is re-encoded (unknown size): the source
+		// one is delta material, whatever size it declared.
+		rb.literalHeader(segHdr, segHdrBytes)
 	}
 	if _, err := ebml.WriteElementID(out, mkv.IDSegment); err != nil {
 		return 0, fmt.Errorf("write Segment ID: %w", err)

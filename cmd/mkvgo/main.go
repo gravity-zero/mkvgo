@@ -113,8 +113,11 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback]")
 		commands.CmdReindexInPlace(args)
 	case "salvage":
-		commands.RequireArgs(args, 2, "mkvgo salvage <in.mkv> <out.mkv> [--json]")
+		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] | mkvgo salvage <in.mkv> --dry-run")
 		commands.CmdSalvage(args)
+	case "rollback":
+		commands.RequireArgs(args, 3, "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>")
+		commands.CmdRollback(args)
 	case "serve":
 		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]]")
 		commands.CmdServe(args)
@@ -207,7 +210,8 @@ Commands:
   compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
   reindex       Rebuild the seek index (Cues) into a new file, verified; --replace swaps it in after the checks
   reindex-inplace  Rebuild the seek index by patching the file itself (no copy, crash-safe journal, auto-rollback)
-  salvage       Best-effort recovery copy of a damaged file (skips/reports unreadable clusters instead of aborting)
+  salvage       Best-effort recovery copy of a damaged file (surgical repair, --dry-run damage map)
+  rollback      Reconstruct the pre-repair original from a repaired file + its --rollback-delta entry
   serve         Serve one file's on-demand HLS plan over HTTP (ETag/Range/Cache-Control), no pre-generation; --direct/--auto serve the raw file for a direct-play client
   serve-growing Play while downloading: serve a still-growing file as HLS (EVENT playlist, VOD once it finishes)
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)

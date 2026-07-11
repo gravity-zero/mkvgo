@@ -224,6 +224,13 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		}
 	}
 
+	// 5. Rollback delta, while the journal still allows undoing everything:
+	// the final file is the [0, size+cues) prefix of the current one, so the
+	// entry can be emitted before the truncate commits the repair.
+	if err := emitInPlaceRollback(ctx, f, size, size+int64(len(cuesBytes)), zones, opts); err != nil {
+		return rollback(err)
+	}
+
 	// 6. Success: drop the journal
 	if err := trunc.Truncate(size + int64(len(cuesBytes))); err != nil {
 		return fmt.Errorf("reindex inplace: truncate away journal: %w", err)

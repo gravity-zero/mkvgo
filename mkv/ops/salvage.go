@@ -74,7 +74,12 @@ type SalvageReport struct {
 func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (*SalvageReport, error) {
 	fs := mkv.FSFrom(opts)
 
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
+	var rb *rollbackBuilder
+	if mkv.RollbackSinkFrom(opts) != nil {
+		rb = newRollbackBuilder()
+	}
+
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +88,9 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		return nil, err
 	}
 
+	if err := emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts); err != nil {
+		return nil, err
+	}
 	return report, nil
 }
 
@@ -100,7 +108,10 @@ func MapDamage(ctx context.Context, srcPath string, opts ...mkv.Options) (*Salva
 		OpenFile: fs.DoOpenFile,
 		Create:   func(string) (mkv.WriteSeekCloser, error) { return &discardWriteSeeker{}, nil },
 	}
-	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
+	// Options.RollbackSink is deliberately ignored: nothing is written, so
+	// there is nothing to roll back (and COPY ops would reference a
+	// discarded output).
+	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +155,7 @@ func (d *discardWriteSeeker) Close() error { return nil }
 // verification pass) and the timecode scale used to derive them. cleanCut
 // resumes video only at the next keyframe after each damage gap. The walk
 // itself lives on salvageWalker, one method per element class.
-func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
+func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool, rb *rollbackBuilder) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
 	stat, err := fs.DoStat(srcPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: stat src: %w", err)
@@ -179,11 +190,11 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	r := bufio.NewReaderSize(raw, reindexBufSize)
 	mw := writer.NewMKVWriter(out)
 
-	ebmlBytes, err := copyEBMLHeaderVerbatim(r, out)
+	ebmlBytes, err := copyEBMLHeaderVerbatim(r, out, rb)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: %w", err)
 	}
-	segBytes, err := beginSegmentRewrite(r, out, mw)
+	segBytes, err := beginSegmentRewrite(r, out, mw, rb)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: %w", err)
 	}
@@ -201,6 +212,7 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		allTracks:   allTracks,
 		cleanCut:    cleanCut,
 		progress:    progress,
+		rb:          rb,
 	}
 	if err := w.walk(ctx); err != nil {
 		return nil, nil, 0, err
@@ -229,7 +241,8 @@ type salvageWalker struct {
 	cleanCut    bool
 	awaitKF     bool // armed after each damage gap when cleanCut is on
 	progress    mkv.ProgressFunc
-	clusterBuf  []byte // reused cluster body buffer
+	clusterBuf  []byte           // reused cluster body buffer
+	rb          *rollbackBuilder // nil = no rollback delta requested
 }
 
 // walk drives the top-level element loop. Every handler returns
@@ -271,10 +284,16 @@ func (w *salvageWalker) walk(ctx context.Context) error {
 }
 
 // recordDamage appends one damaged range to the report and arms the
-// clean-cut filter when enabled. Zero-length ranges are ignored.
+// clean-cut filter when enabled. Zero-length ranges are ignored. The dropped
+// source bytes go to the rollback delta as a literal: this one hook covers
+// every loss path, in walk (= original) order. It seeks raw; every caller
+// re-seeks before its next read.
 func (w *salvageWalker) recordDamage(start, end, startMs, endMs int64) {
 	if end <= start {
 		return
+	}
+	if w.rb != nil {
+		w.rb.literalFrom(w.raw, start, end-start)
 	}
 	w.report.DamagedRanges = append(w.report.DamagedRanges, DamagedRange{
 		StartOffset: start, EndOffset: end, ApproxStartMs: startMs, ApproxEndMs: endMs,
@@ -336,13 +355,29 @@ func (w *salvageWalker) dropIndexElement(h ebml.ElementHeader, elemStart int64, 
 	if h.Size < 0 || h.Size > maxReindexClusterSize {
 		return w.skipToNextCluster()
 	}
-	if _, err := io.CopyN(io.Discard, w.r, h.Size); err != nil {
+	if w.rb == nil {
+		if _, err := io.CopyN(io.Discard, w.r, h.Size); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				w.recordTailDamage(elemStart)
+				return true, nil
+			}
+			return false, fmt.Errorf("salvage: skip 0x%X: %w", h.ID, err)
+		}
+		w.consumed += int64(hdrBytes) + h.Size
+		return false, nil
+	}
+	// The output has no trace of these: whole element to literals. Captured
+	// after a full read so a truncated tail emits nothing partial.
+	buf := make([]byte, h.Size)
+	if _, err := io.ReadFull(w.r, buf); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			w.recordTailDamage(elemStart)
 			return true, nil
 		}
 		return false, fmt.Errorf("salvage: skip 0x%X: %w", h.ID, err)
 	}
+	w.rb.literalHeader(h, hdrBytes)
+	w.rb.literal(buf)
 	w.consumed += int64(hdrBytes) + h.Size
 	return false, nil
 }
@@ -368,8 +403,18 @@ func (w *salvageWalker) copyMetaElement(h ebml.ElementHeader, elemStart int64, h
 		}
 		w.mw.TimecodeScale = w.scale
 	}
+	if w.rb != nil {
+		w.rb.literalHeader(h, hdrBytes)
+	}
 	if err := writeMetaElementVerbatim(w.mw, w.out, h, metaBuf); err != nil {
 		return false, fmt.Errorf("salvage: %w", err)
+	}
+	if w.rb != nil {
+		after, serr := w.out.Seek(0, io.SeekCurrent)
+		if serr != nil {
+			return false, fmt.Errorf("salvage: rollback offset: %w", serr)
+		}
+		w.rb.copyRun(after-h.Size, metaBuf)
 	}
 	w.report.BytesCopied += int64(hdrBytes) + h.Size
 	return false, nil
@@ -437,7 +482,7 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		return false, nil
 	}
 
-	if err := w.emitCluster(body); err != nil {
+	if err := w.emitClusterWithRollback(h, hdrBytes, body); err != nil {
 		return false, err
 	}
 	w.consumed = clusterEnd
@@ -445,6 +490,31 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		w.progress(w.consumed, w.fileSize)
 	}
 	return false, nil
+}
+
+// emitClusterWithRollback emits a fast-path cluster and records its delta
+// ops: the source header as a literal, the body as a COPY of the output when
+// written verbatim, or as a literal when the clean-cut filter is about to
+// rewrite it.
+func (w *salvageWalker) emitClusterWithRollback(h ebml.ElementHeader, hdrBytes int, body []byte) error {
+	filtered := w.awaitKF // the filter runs inside emitCluster iff armed now
+	if w.rb != nil {
+		w.rb.literalHeader(h, hdrBytes)
+		if filtered {
+			w.rb.literal(body)
+		}
+	}
+	if err := w.emitCluster(body); err != nil {
+		return err
+	}
+	if w.rb != nil && !filtered {
+		after, serr := w.out.Seek(0, io.SeekCurrent)
+		if serr != nil {
+			return fmt.Errorf("salvage: rollback offset: %w", serr)
+		}
+		w.rb.copyRun(after-int64(len(body)), body)
+	}
+	return nil
 }
 
 // copyUnknownElement copies an unknown top-level element verbatim - but only
@@ -471,8 +541,22 @@ func (w *salvageWalker) copyUnknownElement(h ebml.ElementHeader, elemStart int64
 	if _, err := ebml.WriteDataSize(w.out, h.Size); err != nil {
 		return false, fmt.Errorf("salvage: write unknown 0x%X size: %w", h.ID, err)
 	}
-	if _, err := io.CopyN(w.out, w.r, h.Size); err != nil {
+	bodyDst := io.Writer(w.out)
+	if w.rb != nil {
+		w.rb.literalHeader(h, hdrBytes)
+		bodyOff, serr := w.out.Seek(0, io.SeekCurrent)
+		if serr != nil {
+			return false, fmt.Errorf("salvage: rollback offset: %w", serr)
+		}
+		bodyDst = io.MultiWriter(w.out, w.rb.copyRunStreamed(bodyOff, h.Size))
+	}
+	if _, err := io.CopyN(bodyDst, w.r, h.Size); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if w.rb != nil {
+				// Ops were already reserved for the full element: the delta
+				// cannot tile a source that ends mid-element.
+				w.rb.fail(fmt.Errorf("rollback: source truncated inside element 0x%X", h.ID))
+			}
 			w.recordTailDamage(elemStart)
 			return true, nil
 		}
@@ -528,6 +612,11 @@ func (w *salvageWalker) surgical(elemStart, bodyStart int64) (recovered, ended b
 		return false, false, nil
 	}
 
+	if w.rb != nil {
+		// The original cluster header (its size may be the lying kind, or
+		// implausible): raw source bytes, straight to a literal.
+		w.rb.literalFrom(w.raw, elemStart, bodyStart-elemStart)
+	}
 	bytesKept, err := w.emitSurgicalRuns(outcome)
 	if err != nil {
 		return false, false, err
@@ -554,8 +643,14 @@ func (w *salvageWalker) emitSurgicalRuns(outcome *surgicalOutcome) (bytesKept in
 	emitted := 0
 	for i, run := range outcome.runs {
 		// A run with no blocks (a lone Timestamp/CRC prefix) is not worth a
-		// cluster; the gap that follows it is still recorded.
-		if run.hasBlocks {
+		// cluster, but its bytes are still original bytes: literal them so
+		// the delta tiles the source. The gap that follows it is recorded
+		// either way.
+		if !run.hasBlocks {
+			if w.rb != nil {
+				w.rb.literalFrom(w.raw, run.start, run.end-run.start)
+			}
+		} else {
 			n := run.end - run.start
 			bytesKept += n
 			prefix := []byte(nil)
@@ -575,8 +670,21 @@ func (w *salvageWalker) emitSurgicalRuns(outcome *surgicalOutcome) (bytesKept in
 			if _, err := io.ReadFull(w.raw, body[len(prefix):]); err != nil {
 				return bytesKept, fmt.Errorf("salvage: read surgical run: %w", err)
 			}
+			filtered := w.awaitKF
+			if w.rb != nil && filtered {
+				w.rb.literal(body[len(prefix):])
+			}
 			if err := w.emitCluster(body); err != nil {
 				return bytesKept, err
+			}
+			if w.rb != nil && !filtered {
+				// The run's bytes sit verbatim in the output right after the
+				// synthesized Timestamp prefix.
+				after, serr := w.out.Seek(0, io.SeekCurrent)
+				if serr != nil {
+					return bytesKept, fmt.Errorf("salvage: rollback offset: %w", serr)
+				}
+				w.rb.copyRun(after-n, body[len(prefix):])
 			}
 			emitted++
 		}

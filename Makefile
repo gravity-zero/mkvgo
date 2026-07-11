@@ -31,6 +31,7 @@ fuzz:
 	go test -fuzz=FuzzCodecColour -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzResyncToCluster -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzSurgicalScanCluster -fuzztime=$(FUZZTIME) ./mkv/ops/
+	go test -fuzz=FuzzApplyRollback -fuzztime=$(FUZZTIME) ./mkv/ops/
 	go test -fuzz=FuzzParseOGMChapters -fuzztime=$(FUZZTIME) ./mkv/
 	go test -fuzz=FuzzParseMP4 -fuzztime=$(FUZZTIME) ./mp4/
 	go test -fuzz=FuzzVP9FrameHeader -fuzztime=$(FUZZTIME) ./mp4/

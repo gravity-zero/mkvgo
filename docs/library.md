@@ -1058,6 +1058,33 @@ for _, dr := range report.DamagedRanges {
 
 The facade re-exports the types and functions: `matroska.Salvage`, `matroska.MapDamage`, `matroska.SalvageReport`, `matroska.DamagedRange`, `matroska.RepairedRange`.
 
+### Rollback delta (undo a repair without a backup copy)
+
+Every repair that rewrites a file (`Reindex` strict or with `Resync`, `ReindexReplace`, `Salvage`, `ReindexInPlace`) can emit the inverse delta - the recipe to reconstruct the pre-repair ORIGINAL from the repaired output - instead of forcing the caller to keep a full backup copy. The repair copies cluster payloads verbatim and already knows where each run lands, so the delta is mostly "copy this range of the repaired file" plus literals for what was dropped or re-encoded: typically well under 0.1% of the source size. Emitting it costs one extra sequential read of the repaired file (its sha256 gates the rollback); the in-place path persists its crash journal as the entry and emits it while the journal still allows undoing a failure.
+
+```go
+delta, _ := os.Create("movie.rbd")
+defer delta.Close()
+
+err := ops.Reindex(ctx, "movie.mkv", "repaired.mkv", mkv.Options{
+    Resync:           true,
+    RollbackSink:     delta,
+    RollbackRequired: true, // a failed delta fails the repair; default false = best-effort
+    OnRollback: func(i mkv.RollbackInfo) {
+        fmt.Printf("delta: %d bytes, original sha256 %x\n", i.Bytes, i.SrcSHA256)
+    },
+})
+
+// Later, to undo the repair:
+d, _ := os.Open("movie.rbd")
+defer d.Close()
+err = ops.ApplyRollback(ctx, "repaired.mkv", d, "restored.mkv")
+```
+
+`ApplyRollback` is hash-gated twice: it refuses to reconstruct when the repaired file no longer matches the entry (it changed since the repair), and it never delivers an output whose sha256 does not match the original's. A torn or corrupted entry (per-entry crc32c) is refused, and no output file survives a refusal. The entry format is framed and append-friendly, so a caller can pack many entries into one ledger file and hand `ApplyRollback` a reader positioned at the right one. `MapDamage` ignores the sink (a dry-run writes nothing, so there is nothing to roll back); a remux-class operation (re-laced payloads, no byte mapping) never emits a delta - the absence of an entry tells the caller to fall back to a full copy.
+
+The facade re-exports `matroska.ApplyRollback` and `matroska.RollbackInfo`.
+
 ---
 
 ## Analyze (Stream Statistics)

@@ -20,7 +20,12 @@ const reindexResyncMaxSkipPercent = 50
 // source ranges are reported through Options.OnSkip and Options.OnRepair only
 // after every check passed.
 func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opts []mkv.Options) error {
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
+	var rb *rollbackBuilder
+	if mkv.RollbackSinkFrom(opts) != nil {
+		rb = newRollbackBuilder()
+	}
+
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb)
 	if err != nil {
 		return fmt.Errorf("reindex resync: %w", err)
 	}
@@ -51,6 +56,10 @@ func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opt
 				return err
 			}
 		}
+	}
+
+	if err := emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts); err != nil {
+		return err
 	}
 
 	if onSkip := mkv.OnSkipFrom(opts); onSkip != nil {

@@ -7,13 +7,14 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const reindexUsage = "usage: mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut]"
+const reindexUsage = "usage: mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--rollback-delta <file>]"
 
 func CmdReindex(args []string) {
 	var deepVerify, replace, keepBackup, resync, cleanCut bool
+	var deltaPath string
 	var rest []string
-	for _, a := range args {
-		switch a {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
 		case "--deep-verify":
 			deepVerify = true
 		case "--replace":
@@ -24,9 +25,15 @@ func CmdReindex(args []string) {
 			resync = true
 		case "--clean-cut":
 			cleanCut = true
+		case "--rollback-delta":
+			if i+1 >= len(args) {
+				Fatal("--rollback-delta needs a file path")
+			}
+			i++
+			deltaPath = args[i]
 		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
+			rejectFlagArg(args[i])
+			rest = append(rest, args[i])
 		}
 	}
 	if len(rest) < 1 {
@@ -43,6 +50,12 @@ func CmdReindex(args []string) {
 		opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
 		opts.OnRepair = func(r matroska.RepairedRange) { repaired = append(repaired, r) }
 	}
+	printDelta := func() {}
+	if deltaPath != "" {
+		var closeDelta func()
+		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath)
+		defer closeDelta()
+	}
 
 	if replace {
 		if len(rest) != 1 {
@@ -56,6 +69,7 @@ func CmdReindex(args []string) {
 		}
 		fmt.Printf("reindexed %s (original replaced after verification)\n", src)
 		printResyncOutcome(resync, skipped, repaired)
+		printDelta()
 		return
 	}
 
@@ -75,6 +89,7 @@ func CmdReindex(args []string) {
 	}
 	fmt.Printf("reindexed %s → %s\n", src, dst)
 	printResyncOutcome(resync, skipped, repaired)
+	printDelta()
 }
 
 // printResyncOutcome reports what a --resync run repaired and dropped, so the

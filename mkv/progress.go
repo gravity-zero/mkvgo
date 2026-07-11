@@ -1,5 +1,7 @@
 package mkv
 
+import "io"
+
 // ProgressFunc is called during long operations with bytes processed and total.
 // Total is -1 if unknown.
 type ProgressFunc func(processed, total int64)
@@ -30,6 +32,15 @@ type RepairedRange struct {
 	StartOffset int64
 	EndOffset   int64
 	BytesKept   int64
+}
+
+// RollbackInfo summarises the delta entry a repair wrote to
+// Options.RollbackSink: its size and the sha256 of the original (pre-repair)
+// and repaired files that gate its application.
+type RollbackInfo struct {
+	Bytes     int64
+	SrcSHA256 [32]byte
+	DstSHA256 [32]byte
 }
 
 // Options holds optional parameters for long-running operations.
@@ -75,6 +86,23 @@ type Options struct {
 	// The dropped video bytes are counted in the report (CleanCutBytes) and
 	// the damaged range's approximate end time extends to the keyframe.
 	CleanCut bool
+	// RollbackSink, when non-nil, receives one framed delta entry during the
+	// repair: the recipe to reconstruct the pre-repair ORIGINAL from the
+	// repaired output (see ops.ApplyRollback), typically under a MB where a
+	// full backup copy would be the whole file. Supported by Reindex and
+	// ReindexReplace (strict and Resync paths), Salvage, and ReindexInPlace;
+	// ignored by MapDamage (nothing is written to roll back). Emitting the
+	// entry costs one extra sequential read of the repaired file (its
+	// sha256, which gates the rollback). Nil = no delta.
+	RollbackSink io.Writer
+	// RollbackRequired makes a RollbackSink failure (write error, delta
+	// bigger than its buffer cap) fail the whole repair. Default false: the
+	// delta is best-effort and the repair proceeds without it (OnRollback is
+	// then never called; the caller keeps its full-copy fallback).
+	RollbackRequired bool
+	// OnRollback, when non-nil, is called once with the written delta
+	// entry's summary after the repair and all its verifications passed.
+	OnRollback func(RollbackInfo)
 }
 
 func ProgressFrom(opts []Options) ProgressFunc {
@@ -119,4 +147,22 @@ func OnRepairFrom(opts []Options) func(RepairedRange) {
 
 func CleanCutFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].CleanCut
+}
+
+func RollbackSinkFrom(opts []Options) io.Writer {
+	if len(opts) > 0 {
+		return opts[0].RollbackSink
+	}
+	return nil
+}
+
+func RollbackRequiredFrom(opts []Options) bool {
+	return len(opts) > 0 && opts[0].RollbackRequired
+}
+
+func OnRollbackFrom(opts []Options) func(RollbackInfo) {
+	if len(opts) > 0 && opts[0].OnRollback != nil {
+		return opts[0].OnRollback
+	}
+	return nil
 }

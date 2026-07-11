@@ -482,6 +482,19 @@ func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageRe
 	return ops.MapDamage(ctx, srcPath, opts...)
 }
 
+// RollbackInfo summarises the delta entry a repair wrote to
+// Options.RollbackSink. See mkv.RollbackInfo.
+type RollbackInfo = mkv.RollbackInfo
+
+// ApplyRollback reconstructs the pre-repair original from a repaired file
+// and the delta entry the repair wrote to Options.RollbackSink. It refuses
+// to reconstruct when the repaired file changed since the repair, and never
+// delivers a reconstruction that does not hash back to the original.
+// See ops.ApplyRollback.
+func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, dstPath string, opts ...Options) error {
+	return ops.ApplyRollback(ctx, repairedPath, delta, dstPath, opts...)
+}
+
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	return ops.RemoveTrack(ctx, srcPath, dstPath, removeIDs, opts...)
 }
