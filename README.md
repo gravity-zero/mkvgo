@@ -179,7 +179,9 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | **Assemble** | `mux` · `merge` · `join` | Combine tracks / files |
 | | `merge-subtitle` | Inject an external SRT/ASS |
 | | `split` | Split by time ranges, chapters or fixed duration (`-every`) |
-| **Index** | `reindex` | Rebuild the seek index (Cues) |
+| **Index & repair** | `reindex` · `reindex-inplace` | Rebuild the seek index (Cues) - verified copy, or in-place patch (crash-safe journal, file-only permission) |
+| | `salvage` | Surgical recovery of a damaged file - lying sizes fixed lossless, valid blocks around a gap kept; `--dry-run` maps the damage first |
+| | `rollback` | Undo any repair from its inverse delta (`--rollback-delta`, typically <0.1% of the file) - no full backup copy needed |
 | **Convert** | `to-mp4` · `from-mp4` · `to-webm` | Remux between containers (no transcode) |
 | **Stream** | `to-hls` | Package as CMAF - HLS + DASH over one demuxed segment set (AES-128 + key rotation, CENC AV1/VP9, single-file, I-frames, audio-only) |
 | | `hls-segment` | Serve one HLS/DASH resource on demand — zero pre-generation (local file **or** URL) |

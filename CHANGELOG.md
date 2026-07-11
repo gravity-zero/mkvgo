@@ -4,7 +4,28 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.19.0] - 2026-07-11
+
+**Highlights**
+
+- **Repair, not refuse** - `reindex --resync` (opt-in) repairs a file whose
+  cluster stream is corrupted instead of refusing it: lying size fields over
+  intact payloads are corrected with zero loss, and damage inside a cluster
+  is cut around block by block (chain-validated against the file's real
+  tracks and timecodes), so a repair typically loses a few KB where a plain
+  skip-to-next-cluster would lose seconds of media. The strict default is
+  unchanged.
+- **Decide before you touch anything** - `salvage --dry-run` maps the damage
+  without writing: repaired ranges, lost ranges with byte offsets and
+  approximate presentation times, clean-cut cost - exactly what the real
+  repair would report.
+- **Undo without a backup copy** - every repair can emit its inverse delta
+  (`--rollback-delta`, `Options.RollbackSink`): the recipe to reconstruct
+  the pre-repair original from the repaired file, typically well under 0.1%
+  of its size. `mkvgo rollback` applies it, hash-gated twice.
+- **Clean cuts** - `--clean-cut` resumes video at the next keyframe after a
+  damage gap (audio immediately), trading a short freeze for
+  reference-broken artifacts.
 
 ### Added
 

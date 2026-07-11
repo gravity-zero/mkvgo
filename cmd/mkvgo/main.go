@@ -107,10 +107,10 @@ func main() {
 		commands.RequireArgs(args, 2, "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>")
 		commands.CmdCompare(args)
 	case "reindex":
-		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup]")
+		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--rollback-delta <file>]")
 		commands.CmdReindex(args)
 	case "reindex-inplace":
-		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback]")
+		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--rollback-delta <file>]")
 		commands.CmdReindexInPlace(args)
 	case "salvage":
 		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] | mkvgo salvage <in.mkv> --dry-run")
@@ -208,7 +208,7 @@ Commands:
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption
   compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
-  reindex       Rebuild the seek index (Cues) into a new file, verified; --replace swaps it in after the checks
+  reindex       Rebuild the seek index (Cues) into a new file, verified; --replace swaps it in, --resync repairs corrupted regions
   reindex-inplace  Rebuild the seek index by patching the file itself (no copy, crash-safe journal, auto-rollback)
   salvage       Best-effort recovery copy of a damaged file (surgical repair, --dry-run damage map)
   rollback      Reconstruct the pre-repair original from a repaired file + its --rollback-delta entry
