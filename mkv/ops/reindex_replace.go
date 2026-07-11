@@ -13,7 +13,8 @@ import (
 // pass when Options.DeepVerify is set), and only then atomically renames the
 // copy over the original. The original is never touched until every check has
 // passed. Options.KeepBackup preserves it as path+".bak". Needs write
-// permission on the directory (temp file + rename).
+// permission on the directory (temp file + rename). Options.Resync (tolerate
+// and skip corrupted regions) applies here too - see Reindex.
 func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
 	tmp := path + ".mkvgo.tmp"

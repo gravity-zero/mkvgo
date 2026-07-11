@@ -409,7 +409,9 @@ func CompareContainers(a, b *Container) []Diff {
 	return ops.CompareContainers(a, b)
 }
 
-// Reindex rebuilds the seek index (Cues) of a file. See ops.Reindex.
+// Reindex rebuilds the seek index (Cues) of a file. Options.Resync makes it
+// tolerate corrupted regions (bounded skip-and-resume, each dropped span
+// reported via Options.OnSkip) instead of refusing the file. See ops.Reindex.
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
 	return ops.Reindex(ctx, srcPath, dstPath, opts...)
 }

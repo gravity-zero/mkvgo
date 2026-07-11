@@ -4,6 +4,32 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Resync option for `reindex`** (`Options.Resync` / `--resync`, opt-in). Some
+  files play everywhere yet were refused by `reindex`: a corrupted region in
+  the cluster stream (a declared size that does not match the element's real
+  extent, raw junk between clusters) makes the strict top-level walk land
+  mid-payload and read garbage as an element ID, where players simply
+  resynchronize on the next Cluster ID and carry on. With `Resync` set,
+  `Reindex` and `ReindexReplace` do the same: scan forward (bounded, 64 MiB)
+  for the next structurally valid Cluster, resume there, and drop the skipped
+  bytes from the output, rebuilding SeekHead and Cues from the surviving
+  clusters only. Every dropped source range is reported (byte offsets plus
+  approximate presentation time) through `Options.OnSkip` and the CLI summary.
+  The repair is still refused when no valid Cluster is found within the scan
+  window, when no cluster survives, or when more than half of the walked
+  payload would be dropped - a mostly-damaged file must not silently "repair"
+  into a stub (`salvage` remains the uncapped best-effort path). A clean
+  source produces output byte-identical to a strict reindex; the strict
+  default is unchanged and its refusal message now points at the option.
+  `ReindexInPlace` refuses the option (skipped bytes cannot be dropped from
+  the file itself). `DamagedRange` now lives in the `mkv` package
+  (`ops.DamagedRange` is a compatible alias), and the resync scanner gained a
+  fuzz target.
+
 ## [0.18.0] - 2026-07-10
 
 **Highlights**

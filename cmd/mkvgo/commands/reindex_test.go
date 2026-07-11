@@ -1,6 +1,7 @@
 package commands_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -56,4 +57,42 @@ func TestCmdReindex_KeepBackupWithoutReplace(t *testing.T) {
 	mustFatal(t, func() {
 		commands.CmdReindex([]string{regfixMKV, dst, "--keep-backup"})
 	})
+}
+
+// TestCmdReindex_ResyncOnDamagedFile splices junk between two clusters of the
+// real fixture: plain reindex must fatal on it, --resync must produce a
+// parseable output with a populated Cues index.
+func TestCmdReindex_ResyncOnDamagedFile(t *testing.T) {
+	data, err := os.ReadFile(regfixMKV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	magic := []byte{0x1F, 0x43, 0xB6, 0x75}
+	second := bytes.Index(data[bytes.Index(data, magic)+1:], magic)
+	if second < 0 {
+		t.Fatal("fixture has fewer than 2 clusters")
+	}
+	at := bytes.Index(data, magic) + 1 + second
+	junk := bytes.Repeat([]byte{0x00, 0xFF, 0x51}, 33)
+	corrupted := append(append(append([]byte(nil), data[:at]...), junk...), data[at:]...)
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "damaged.mkv")
+	if err := os.WriteFile(src, corrupted, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mustFatal(t, func() {
+		commands.CmdReindex([]string{src, filepath.Join(dir, "strict.mkv")})
+	})
+
+	dst := filepath.Join(dir, "repaired.mkv")
+	commands.CmdReindex([]string{src, dst, "--resync"})
+	c, err := reader.Open(context.Background(), dst)
+	if err != nil {
+		t.Fatalf("open repaired output: %v", err)
+	}
+	if len(c.Cues) == 0 {
+		t.Fatal("expected non-empty Cues in repaired output")
+	}
 }

@@ -60,6 +60,10 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 	deep := mkv.DeepVerifyFrom(opts)
 	progress := mkv.ProgressFrom(opts)
 
+	if mkv.ResyncFrom(opts) {
+		return fmt.Errorf("reindex inplace: Options.Resync is not supported in place (skipped corrupt bytes cannot be dropped from the file itself); use Reindex or ReindexReplace")
+	}
+
 	f, err := fs.DoOpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("reindex inplace: open %s: %w", path, err)

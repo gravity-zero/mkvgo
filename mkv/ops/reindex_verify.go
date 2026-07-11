@@ -70,6 +70,23 @@ func verifyReindexedCues(ctx context.Context, path string, fs *mkv.FS, want []mk
 	return nil
 }
 
+// deepVerifyVerbatim proves the reindexed copy carries the source's cluster
+// payloads byte-identical, via CompareBlocks. Costs a full read of both files.
+func deepVerifyVerbatim(ctx context.Context, srcPath, dstPath string, fs *mkv.FS) error {
+	diffs, err := CompareBlocks(ctx, srcPath, dstPath, mkv.Options{FS: fs})
+	if err != nil {
+		return fmt.Errorf("reindex deep verify: compare blocks: %w", err)
+	}
+	if len(diffs) > 0 {
+		msgs := make([]string, len(diffs))
+		for i, d := range diffs {
+			msgs[i] = d.String()
+		}
+		return fmt.Errorf("reindex deep verify: copy is not verbatim: %s", strings.Join(msgs, "; "))
+	}
+	return nil
+}
+
 // deepVerifyValidate runs the full-read Validate on path and fails on any
 // error-severity issue (including the cue-to-real-keyframe ground truth
 // check). Warnings are not failures: many valid sources carry them.

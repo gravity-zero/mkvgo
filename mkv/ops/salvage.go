@@ -22,19 +22,10 @@ import (
 var salvageResyncCap int64 = 64 << 20 // 64 MiB
 
 // DamagedRange records one span of the source that Salvage could not carry
-// over verbatim - either because the byte range itself failed a structural
-// check, or because a resync scan had to jump over it to reach the next good
-// Cluster. Offsets are absolute byte offsets into srcPath. ApproxStartMs and
-// ApproxEndMs bracket the presentation time lost: the last known-good
-// cluster's timestamp before the gap and the first known-good cluster's
-// timestamp after it (or, for a truncated tail, the last known-good
-// timestamp repeated, since there is no "after").
-type DamagedRange struct {
-	StartOffset   int64
-	EndOffset     int64
-	ApproxStartMs int64
-	ApproxEndMs   int64
-}
+// over verbatim. The definition lives in the mkv package (mkv.DamagedRange)
+// so Reindex with Options.Resync can report the same ranges through
+// Options.OnSkip; this alias preserves the original ops.DamagedRange name.
+type DamagedRange = mkv.DamagedRange
 
 // SalvageReport summarises one Salvage run.
 type SalvageReport struct {

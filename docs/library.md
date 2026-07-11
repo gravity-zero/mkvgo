@@ -946,6 +946,24 @@ err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
 })
 ```
 
+### Resync (tolerate corrupted regions)
+
+By default `Reindex` refuses a file whose top-level walk hits a corrupted region (an element whose declared size does not match its real extent, raw junk between clusters -- typical of old repacks and interrupted writes): the walker lands mid-payload and the garbage does not decode as an element. Such files often still play everywhere, because players resynchronize on the next Cluster ID and carry on. `Options.Resync` opts the reindex into the same tolerance:
+
+```go
+err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
+    Resync: true,
+    OnSkip: func(r mkv.DamagedRange) {
+        fmt.Printf("dropped bytes [%d,%d), approx %dms-%dms\n",
+            r.StartOffset, r.EndOffset, r.ApproxStartMs, r.ApproxEndMs)
+    },
+})
+```
+
+On a structural failure in the cluster stream the walk scans forward (bounded, 64 MiB) for the next structurally valid Cluster and resumes there, dropping the skipped bytes from the output; the SeekHead and Cues are rebuilt from the surviving clusters only, and the usual verification chain still runs on the result. Each dropped source range is reported through `Options.OnSkip` (byte offsets plus the approximate presentation time lost -- usually a fraction of a second of media), called only after every check has passed. The repair is still refused when no valid Cluster is found within the scan window, when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub.
+
+A clean source produces output byte-identical to a strict `Reindex` and zero `OnSkip` calls, so the option is free when no damage exists. `Options.Resync` applies to `Reindex` and `ReindexReplace`; `ReindexInPlace` refuses it (the skipped bytes cannot be dropped from the file itself). Under `Resync`, `Options.DeepVerify`'s byte-comparison against the source only runs when nothing was skipped (a damaged source cannot be walked for a verbatim proof); the full-read `Validate` of the output always runs. For best-effort recovery of a file too damaged for these caps, see `Salvage` below.
+
 ### ReindexReplace
 
 `ops.ReindexReplace` rebuilds `path`'s seek index through a temporary copy in the same directory, runs the same verification chain as `Reindex` (light always, plus the deep pass when `Options.DeepVerify` is set), and only then atomically renames the copy over the original. The original is never touched until every check has passed. Needs write permission on the directory (temp file + rename), not just on the file itself.
@@ -1010,7 +1028,7 @@ fmt.Printf("%d clusters copied, %d bytes recovered, %d bytes skipped\n",
 
 Never in-place: `dstPath` is always a separate file. The result is reopened afterwards and its Cues checked against the ones built during the walk -- the same light verification `Reindex` always runs -- so a bug in `Salvage` itself (not the source's damage) still surfaces as an error.
 
-Prefer `Reindex` whenever the source is expected to be intact -- it fails loudly on any corruption instead of silently accepting data loss. Reach for `Salvage` only once `Reindex`/`Validate` have confirmed damage and the goal is the best possible recovery, not proof of fidelity.
+Prefer `Reindex` whenever the source is expected to be intact -- it fails loudly on any corruption instead of silently accepting data loss. `Reindex` with `Options.Resync` covers the middle ground: tolerant like `Salvage`, but capped (refuses a mostly-damaged source) and running the full reindex verification chain. Reach for `Salvage` only when even that refuses and the goal is the best possible recovery, not proof of fidelity.
 
 The facade re-exports the type and function: `matroska.Salvage`, `matroska.SalvageReport`, `matroska.DamagedRange`.
 

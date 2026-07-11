@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -382,8 +381,23 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // that only replaces the original after every check has passed. A
 // file-only-permission variant with no output copy (ReindexInPlace) exists
 // separately.
+//
+// With Options.Resync set, a corrupted region in the cluster stream no longer
+// aborts the copy: the walk scans forward (bounded, 64 MiB) for the next
+// structurally valid Cluster and resumes, dropping the skipped bytes from the
+// output and reporting each dropped span through Options.OnSkip. The repair
+// is refused when no valid Cluster is found within the scan window, when no
+// cluster survives, or when more than half of the walked payload would be
+// dropped. Under Resync the DeepVerify byte-comparison against the source
+// only runs when nothing was skipped (a source that lost ranges cannot be
+// walked for a verbatim proof); the full-read Validate of the output always
+// runs.
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
+
+	if mkv.ResyncFrom(opts) {
+		return reindexResync(ctx, srcPath, dstPath, fs, opts)
+	}
 
 	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts))
 	if err != nil {
@@ -398,16 +412,8 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		if err := deepVerifyValidate(ctx, dstPath, fs); err != nil {
 			return err
 		}
-		diffs, err := CompareBlocks(ctx, srcPath, dstPath, mkv.Options{FS: fs})
-		if err != nil {
-			return fmt.Errorf("reindex deep verify: compare blocks: %w", err)
-		}
-		if len(diffs) > 0 {
-			msgs := make([]string, len(diffs))
-			for i, d := range diffs {
-				msgs[i] = d.String()
-			}
-			return fmt.Errorf("reindex deep verify: copy is not verbatim: %s", strings.Join(msgs, "; "))
+		if err := deepVerifyVerbatim(ctx, srcPath, dstPath, fs); err != nil {
+			return err
 		}
 	}
 
@@ -497,7 +503,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, 0, fmt.Errorf("reindex: top-level element: %w", err)
+			return nil, 0, fmt.Errorf("reindex: top-level element: %w (a corrupted region can be skipped with Options.Resync / --resync)", err)
 		}
 
 		switch h.ID {

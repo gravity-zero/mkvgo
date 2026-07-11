@@ -29,6 +29,7 @@ fuzz:
 	go test -fuzz=FuzzReadMeta -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzBlockReader -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzCodecColour -fuzztime=$(FUZZTIME) ./mkv/reader/
+	go test -fuzz=FuzzResyncToCluster -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzParseOGMChapters -fuzztime=$(FUZZTIME) ./mkv/
 	go test -fuzz=FuzzParseMP4 -fuzztime=$(FUZZTIME) ./mp4/
 	go test -fuzz=FuzzVP9FrameHeader -fuzztime=$(FUZZTIME) ./mp4/

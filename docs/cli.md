@@ -672,18 +672,29 @@ Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clus
 The result is always reopened and its Cues checked against the index built during the copy (a light, millisecond-cost verification). `--deep-verify` additionally runs a full-read validation of the output and a byte-level comparison of the cluster payloads against the source, at the cost of reading both files in full.
 
 ```
-mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup]
+mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync]
 ```
 
 - Without `--replace`, `<output.mkv>` is required: the rebuilt file is written there, the source is untouched.
 - `--replace` rebuilds `<input.mkv>` in place: no output path is given (supplying one is a usage error). The rebuild happens in a temporary file in the same directory, is verified, and only then atomically replaces the original -- the source is never touched until every check has passed. This needs write permission on the directory (temp file + rename), not just on the file itself.
 - `--keep-backup` (only with `--replace`) preserves the pre-op original as `<input.mkv>.bak` instead of discarding it.
+- `--resync` (opt-in; works with and without `--replace`) tolerates corrupted regions in the cluster stream -- an element header that does not decode, a declared size that does not match the element's real extent, raw junk between clusters. Instead of refusing the file, the walk scans forward (bounded, 64 MiB) for the next structurally valid Cluster and resumes, dropping the skipped bytes from the output; every dropped range is printed (byte offsets + approximate presentation time), so the operator knows exactly what was lost -- usually a fraction of a second of media. The repair is still refused when no valid Cluster is found within the scan window, when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub (use `mkvgo salvage` for best-effort recovery without that cap). Without the flag the strict refusal stays the contract, and the refusal message points at `--resync` when a corrupted region is what stopped it.
 
 ```bash
 mkvgo reindex source.mkv reindexed.mkv
 
 # Rebuild the index in place, keeping the pre-op file as source.mkv.bak
 mkvgo reindex source.mkv --replace --keep-backup --deep-verify
+
+# A file that plays fine but is refused by reindex (players resynchronize
+# over its damaged region): skip the corruption, report what was dropped
+mkvgo reindex source.mkv repaired.mkv --resync
+```
+
+```
+reindexed source.mkv → repaired.mkv
+  skipped range 1: offset 933184-941312 (7.9 KB), approx 00:04:12-00:04:15
+  7.9 KB of corrupted data skipped across 1 range(s)
 ```
 
 ### reindex-inplace
