@@ -512,6 +512,33 @@ export interface WatermarkPlanHandle {
   close(): void
 }
 
+/**
+ * Handle returned by openForensic(): single-source A/B session watermarking.
+ * Variant A segments are the source's ordinary segments; variant B segments
+ * have one disposable H.264 frame dropped, timing-compensated, so the
+ * manifest, init and durations are shared. distinct(n) reports whether
+ * segment n carries a watermark bit at all (a segment with no disposable
+ * frame has identical variants).
+ */
+export interface ForensicPlanHandle {
+  /** Number of media segments (shared by both variants). */
+  numSegments: number
+  /** The shared master playlist. */
+  masterPlaylist: Uint8Array
+  /** The shared media playlist (identical for every session). */
+  mediaPlaylist: Uint8Array
+  /** The shared init segment. */
+  init: Uint8Array
+  /** Build segment n: variant B (one frame dropped) when fromB, else A. */
+  segment(n: number, fromB?: boolean, options?: AbortOptions): Promise<Uint8Array>
+  /** Build segment n routed by bit n of the session's code (LSB-first). */
+  segmentForPattern(n: number, pattern: Uint8Array, options?: AbortOptions): Promise<Uint8Array>
+  /** Whether segment n's variants differ (the segment carries a bit). */
+  distinct(n: number, options?: AbortOptions): Promise<boolean>
+  /** Release the handle's callbacks. */
+  close(): void
+}
+
 export interface MkvGoApi {
   version(): string
   /**
@@ -558,6 +585,13 @@ export interface MkvGoApi {
    * assignment (which session gets which bits) is the caller's.
    */
   openWatermark(a: Uint8Array | Blob, b: Uint8Array | Blob, options?: HLSOptions): Promise<WatermarkPlanHandle>
+
+  /**
+   * Single-source forensic A/B watermarking: variant B is derived from the
+   * one source by dropping a disposable H.264 frame per segment (no second
+   * encode needed). Same serve surface as openWatermark, plus distinct(n).
+   */
+  openForensic(input: Uint8Array | Blob, options?: HLSOptions): Promise<ForensicPlanHandle>
   /** Extract one subtitle track as a WebVTT string (MKV or MP4 input). */
   extractSubtitleVTT(input: Uint8Array, trackId: number): Promise<string>
   /**

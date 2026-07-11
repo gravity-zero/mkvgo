@@ -121,6 +121,22 @@ check(segA.length > 0 && Buffer.compare(Buffer.from(segB), Buffer.from(segP)) ==
   'openWatermark routes segments by A/B bit and by pattern')
 wm.close()
 
+// --- single-source forensic: variant B derived from ONE source by dropping a
+// disposable H.264 frame per segment (no second encode). Whether a given
+// fixture segment carries a bit depends on its frames; both outcomes are valid
+// and the contract differs: distinct -> B is strictly smaller, else B === A. ---
+const fo = await MkvGo.openForensic(mkvBytes, { segmentSeconds: 0.5 })
+check(fo.numSegments > 0 && fo.mediaPlaylist.length > 0 && fo.init.length > 0, 'openForensic shared manifest')
+const foA = await fo.segment(0, false)
+const foB = await fo.segment(0, true)
+const foD = await fo.distinct(0)
+check(typeof foD === 'boolean' &&
+  (foD ? foB.length < foA.length : Buffer.compare(Buffer.from(foA), Buffer.from(foB)) === 0),
+  `openForensic variant B ${foD ? 'drops one frame' : 'equals A (no disposable frame in segment 0)'}`)
+const foP = await fo.segmentForPattern(0, new Uint8Array([0x01]))
+check(Buffer.compare(Buffer.from(foB), Buffer.from(foP)) === 0, 'openForensic pattern routing selects B')
+fo.close()
+
 // --- on-demand ABR: one multi-variant plan over two pre-encoded qualities ---
 const abr = await MkvGo.openABR([mkvBytes, mkvBytes], { segmentSeconds: 0.5 })
 check(abr.numVariants === 2 && abr.resources.includes('master.m3u8'), `openABR ${abr.numVariants} variants`)

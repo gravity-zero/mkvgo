@@ -1088,6 +1088,103 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 	})
 }
 
+// openForensicJS(input, opts?) -> Promise<ForensicHandle>: single-source
+// forensic A/B session watermarking. Where openWatermark needs TWO
+// pre-encoded variants, this derives variant B from ONE source by dropping a
+// disposable H.264 frame per segment (timing-compensated: the manifest and
+// durations are shared). The handle mirrors openWatermark's - numSegments,
+// masterPlaylist, mediaPlaylist, init, segment(n, fromB), segmentForPattern -
+// plus distinct(n): whether segment n carries a watermark bit at all.
+func openForensicJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("openForensic: missing input") })
+	}
+	input := args[0]
+	opts := readRemuxOpts(args, 1)
+	openCtx, openRelease := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer openRelease()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("openForensic: %w", err)
+		}
+		opts.FS = fs
+		fp, err := mp4.PlanForensic(openCtx, "in", opts)
+		if err != nil {
+			return nil, err
+		}
+
+		h := js.Global().Get("Object").New()
+		h.Set("numSegments", fp.NumSegments())
+		h.Set("masterPlaylist", toUint8Array(fp.MasterPlaylist()))
+		h.Set("mediaPlaylist", toUint8Array(fp.MediaPlaylist()))
+		h.Set("init", toUint8Array(fp.InitSegment()))
+
+		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
+			}
+			n := rargs[0].Int()
+			fromB := len(rargs) > 1 && rargs[1].Truthy()
+			ctx, release := signalContext(optArg(rargs, 2))
+			return promise(func() (any, error) {
+				defer release()
+				data, err := fp.Segment(ctx, n, fromB)
+				if err != nil {
+					return nil, err
+				}
+				return toUint8Array(data), nil
+			})
+		})
+		patternFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 2 || !isUint8(rargs[1]) {
+				return promise(func() (any, error) {
+					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
+				})
+			}
+			n := rargs[0].Int()
+			pattern := toGoBytes(rargs[1])
+			ctx, release := signalContext(optArg(rargs, 2))
+			return promise(func() (any, error) {
+				defer release()
+				data, err := fp.SegmentForPattern(ctx, n, pattern)
+				if err != nil {
+					return nil, err
+				}
+				return toUint8Array(data), nil
+			})
+		})
+		distinctFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+			if len(rargs) < 1 {
+				return promise(func() (any, error) { return nil, fmt.Errorf("distinct: missing index") })
+			}
+			n := rargs[0].Int()
+			ctx, release := signalContext(optArg(rargs, 1))
+			return promise(func() (any, error) {
+				defer release()
+				d, err := fp.Distinct(ctx, n)
+				if err != nil {
+					return nil, err
+				}
+				return d, nil
+			})
+		})
+		var closeFn js.Func
+		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+			segmentFn.Release()
+			patternFn.Release()
+			distinctFn.Release()
+			closeFn.Release()
+			return nil
+		})
+		h.Set("segment", segmentFn)
+		h.Set("segmentForPattern", patternFn)
+		h.Set("distinct", distinctFn)
+		h.Set("close", closeFn)
+		return h, nil
+	})
+}
+
 // mapDamageJS(input, opts?) -> Promise<SalvageReport>: the read-only damage
 // map (the browser twin of `mkvgo salvage --dry-run`). It walks the file the
 // way a repair would - surgical recovery, damaged ranges with byte offsets

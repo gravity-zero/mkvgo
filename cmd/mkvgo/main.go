@@ -149,6 +149,8 @@ func main() {
 		commands.CmdABRSegment(args)
 	case "watermark-segment":
 		commands.CmdWatermarkSegment(args)
+	case "forensic-segment":
+		commands.CmdForensicSegment(args)
 	case "concat-hls":
 		commands.CmdConcatHLS(args)
 	case "concat-segment":

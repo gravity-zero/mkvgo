@@ -188,6 +188,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `hls-segment` | Serve one HLS/DASH resource on demand — zero pre-generation (local file **or** URL) |
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
 | | `watermark-segment` | Serve one segment of an A/B forensic-watermarked stream (per-viewer bit routing, no re-encode) |
+| | `forensic-segment` | Single-source A/B watermark - variant B derived by dropping one disposable H.264 frame per segment, timing-compensated |
 
 Full CLI reference: **[docs/cli.md](docs/cli.md)**
 

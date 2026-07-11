@@ -1115,6 +1115,26 @@ mkvgo watermark-segment a.mkv b.mkv playlist -segment 6           # shared media
 mkvgo watermark-segment a.mkv b.mkv 7 --pattern 4b -o s.m4s       # segment 7, routed by bit 7 of 0x4b
 ```
 
+### forensic-segment
+
+The single-source flavor of `watermark-segment`: variant B is DERIVED from the one source, with no second encode - each variant-B segment has one disposable H.264 frame removed at the sample level (a frame no other frame references, `nal_ref_idc == 0`), timing-compensated so the manifest, `#EXTINF` durations and the decode timeline of every following segment are identical to variant A's. The difference lives in the coded samples, so it survives a remux; it does not survive a re-encode. A viewer of variant B sees at most a one-frame hold (~40 ms).
+
+Not every segment carries a bit: a segment with no disposable frame (all-intra, or every frame referenced) has identical variants - `--distinct` reports whether segment `N` is a carrier. A reliable session signature wants a healthy number of carrier segments (~12+); if most segments report `false`, prefer the two-encode `watermark-segment`.
+
+```
+mkvgo forensic-segment <src.mkv|mp4> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [--distinct] [-o out] [-segment 6]
+```
+
+- H.264 video only in this version (HEVC signals disposability differently); encryption is refused - encrypt the served bytes at the edge.
+- `--distinct N` prints whether segment N differs across variants instead of emitting bytes.
+
+```bash
+mkvgo forensic-segment movie.mkv 7 --distinct                     # does segment 7 carry a bit?
+mkvgo forensic-segment movie.mkv 7 --variant B -o segB00007.m4s   # the derived variant
+```
+
+The library equivalent is `mp4.PlanForensic` + `mp4.DropNonRefSample` (see library.md).
+
 Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
 The library equivalent is `mp4.PlanABR` (see library.md).
 

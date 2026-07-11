@@ -473,6 +473,37 @@ erase or frame - is policy the caller owns and passes in at serve time. The WASM
 is not combined with watermarking in this version (encrypt the served bytes at
 the edge).
 
+### Single-source forensic watermarking (`mp4.PlanForensic`)
+
+```go
+fp, err := mp4.PlanForensic(ctx, "title.mkv", mp4.Options{SegmentMs: 6000})
+seg, err := fp.Segment(ctx, n, sessionBit(n)) // A, or the derived B
+carrier, err := fp.Distinct(ctx, n)           // does segment n carry a bit?
+```
+
+`PlanWatermark` needs two encodes; `PlanForensic` derives variant B from ONE
+source, with no encoder: each variant-B segment has a single disposable H.264
+frame removed at the sample level (`nal_ref_idc == 0` - a frame nothing
+references, so decoding stays clean and the viewer sees at most a one-frame
+hold). The removal is timing-compensated - the dropped sample's duration is
+absorbed by its predecessor - so the manifest, the `#EXTINF` durations and the
+decode timeline of every following segment are byte-identical to variant A's.
+The difference lives in the coded samples and survives a remux; it does not
+survive a re-encode (that robustness class needs a perceptual watermark, out
+of scope for a muxer).
+
+Not every segment is a carrier: `Distinct(ctx, n)` reports whether segment n's
+variants differ (a segment with no disposable frame yields no bit); a reliable
+signature wants a healthy number of carriers, so fall back to the two-encode
+`PlanWatermark` when a source reports few. H.264 only in this version.
+The serve surface mirrors `WatermarkPlan` (`Segment`, `SegmentForPattern`), so
+swapping between the two is a construction-site change. The WASM
+`openForensic(input)` and the CLI `forensic-segment` expose the same.
+
+The building block is exported for callers with their own segments:
+`mp4.DropNonRefSample(segment)` returns the derived bytes and whether a frame
+was dropped, for any video segment this package produced.
+
 ### Gapless multi-file sessions (`mp4.RemuxConcatToHLS` / `mp4.PlanConcat`)
 
 ```go

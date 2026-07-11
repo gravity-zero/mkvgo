@@ -24,6 +24,20 @@ All notable changes to mkvgo are documented here. The format is based on
   tracks, cues mixing shifted and unshifted tracks, streamed Segments.
   `Options.DeepVerify` re-walks the result and checks every shifted track's
   first block moved by exactly the requested shift.
+- **Single-source forensic watermarking** (`mp4.PlanForensic`,
+  `mp4.DropNonRefSample`, CLI `forensic-segment`, WASM `openForensic`).
+  A/B session watermarking used to need two pre-encoded variants
+  (`PlanWatermark`); a ForensicPlan derives variant B from ONE source with no
+  encoder: each variant-B segment has a single disposable H.264 frame
+  (`nal_ref_idc == 0` - referenced by nothing, so decoding stays clean)
+  removed at the sample level, timing-compensated so the manifest, `#EXTINF`
+  durations and the decode timeline of the following segments are
+  byte-identical to variant A's. The difference lives in the coded samples
+  and survives a remux. `Distinct(n)` reports whether a segment carries a
+  bit at all (no disposable frame means identical variants); the serve
+  surface mirrors `WatermarkPlan`, so switching between the one-source and
+  two-encode flavors is a construction-site change. H.264 only in this
+  version.
 - **WASM `mapDamage(input, opts?)`**: the read-only damage map (the browser
   twin of `salvage --dry-run`) - diagnose a local, possibly corrupted file
   before uploading it: repaired and lost ranges with byte offsets and

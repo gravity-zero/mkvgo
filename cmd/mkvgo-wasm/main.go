@@ -37,6 +37,7 @@ func main() {
 	api.Set("openABR", js.FuncOf(openABRJS))
 	api.Set("openConcat", js.FuncOf(openConcatJS))
 	api.Set("openWatermark", js.FuncOf(openWatermarkJS))
+	api.Set("openForensic", js.FuncOf(openForensicJS))
 	api.Set("extractSubtitleVTT", js.FuncOf(extractSubtitleVTTJS))
 	api.Set("analyze", js.FuncOf(analyzeJS))
 	api.Set("playability", js.FuncOf(playabilityJS))
