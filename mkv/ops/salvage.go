@@ -27,12 +27,25 @@ var salvageResyncCap int64 = 64 << 20 // 64 MiB
 // Options.OnSkip; this alias preserves the original ops.DamagedRange name.
 type DamagedRange = mkv.DamagedRange
 
+// RepairedRange records one region the tolerant walk reconstructed instead of
+// copying verbatim. The definition lives in the mkv package; this alias
+// mirrors DamagedRange.
+type RepairedRange = mkv.RepairedRange
+
 // SalvageReport summarises one Salvage run.
 type SalvageReport struct {
 	ClustersCopied int
 	BytesCopied    int64
 	BytesSkipped   int64
 	DamagedRanges  []DamagedRange
+	// RepairedRanges lists the regions where cluster framing was re-derived
+	// from the bytes (corrected sizes, continuation headers around a gap)
+	// instead of dropping the whole declared extent; the media inside is
+	// verbatim. Empty on a clean source.
+	RepairedRanges []RepairedRange
+	// CleanCutBytes counts video bytes intentionally dropped after damage
+	// gaps because they precede the next video keyframe (Options.CleanCut).
+	CleanCutBytes int64
 }
 
 // Salvage produces a best-effort copy of a damaged Matroska/WebM file: unlike
@@ -61,7 +74,7 @@ type SalvageReport struct {
 func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (*SalvageReport, error) {
 	fs := mkv.FSFrom(opts)
 
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts))
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -73,10 +86,64 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	return report, nil
 }
 
+// MapDamage runs the exact walk Salvage runs - surgical recovery, damage
+// ranges, repairs, optional clean-cut accounting - but writes nothing: a
+// dry-run that maps what a repair WOULD lose and keep, so an operator can
+// decide with the numbers in hand ("this file would lose 0.8s at 12:34")
+// before touching anything. The returned report is the one the equivalent
+// Salvage (or Reindex with Options.Resync) run would produce.
+func MapDamage(ctx context.Context, srcPath string, opts ...mkv.Options) (*SalvageReport, error) {
+	fs := mkv.FSFrom(opts)
+	dry := &mkv.FS{
+		Open:     fs.DoOpen,
+		Stat:     fs.DoStat,
+		OpenFile: fs.DoOpenFile,
+		Create:   func(string) (mkv.WriteSeekCloser, error) { return &discardWriteSeeker{}, nil },
+	}
+	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+// discardWriteSeeker swallows writes while tracking position and size, so the
+// full salvage walk (including the writer's Finalize seeks) can run without
+// producing output.
+type discardWriteSeeker struct {
+	pos, size int64
+}
+
+func (d *discardWriteSeeker) Write(p []byte) (int, error) {
+	d.pos += int64(len(p))
+	if d.pos > d.size {
+		d.size = d.pos
+	}
+	return len(p), nil
+}
+
+func (d *discardWriteSeeker) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+		d.pos = offset
+	case io.SeekCurrent:
+		d.pos += offset
+	case io.SeekEnd:
+		d.pos = d.size + offset
+	}
+	if d.pos < 0 {
+		return 0, fmt.Errorf("discard sink: negative position")
+	}
+	return d.pos, nil
+}
+
+func (d *discardWriteSeeker) Close() error { return nil }
+
 // salvageCopy performs the tolerant copy from srcPath to dstPath, returning
 // the report plus the cue points built along the way (for the caller's
-// verification pass) and the timecode scale used to derive them.
-func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
+// verification pass) and the timecode scale used to derive them. cleanCut
+// resumes video only at the next keyframe after each damage gap.
+func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
 	report = &SalvageReport{}
 
 	stat, err := fs.DoStat(srcPath)
@@ -87,11 +154,16 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe) - mirrors
-	// reindexCopy. Best-effort: a source too damaged for even this succeeds
-	// with videoTracks == nil (falls back to the audio-cue path).
-	var videoTracks map[uint64]bool
+	// reindexCopy - and so the surgical block recovery can require valid
+	// track numbers in its chain validation. Best-effort: a source too
+	// damaged for even this succeeds with nil sets (weaker gates).
+	var videoTracks, allTracks map[uint64]bool
 	if meta, merr := reader.OpenMetaWithFS(ctx, srcPath, fs); merr == nil {
 		videoTracks = videoTrackSet(meta.Tracks)
+		allTracks = make(map[uint64]bool, len(meta.Tracks))
+		for _, t := range meta.Tracks {
+			allTracks[t.ID] = true
+		}
 	}
 
 	raw, err := fs.DoOpen(srcPath)
@@ -166,6 +238,11 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		lastGoodMs int64 // timestamp of the last successfully copied cluster
 	)
 
+	// awaitKF is set after each damage gap when cleanCut is on: video blocks
+	// are dropped until the next video keyframe so playback resumes with a
+	// clean cut instead of reference-less P/B frames.
+	awaitKF := false
+
 	// truncatedTail records the pending damage span opened when a resync
 	// discovers the source ends before a new valid Cluster; the walk stops
 	// right after recording it.
@@ -177,6 +254,9 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			StartOffset: start, EndOffset: end, ApproxStartMs: startMs, ApproxEndMs: endMs,
 		})
 		report.BytesSkipped += end - start
+		if cleanCut && len(videoTracks) > 0 {
+			awaitKF = true
+		}
 	}
 
 	// resync scans forward from `consumed` for the next valid Cluster,
@@ -207,6 +287,123 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			return nil, 0, false, fmt.Errorf("salvage: no valid cluster found within %d-byte resync scan from offset %d", salvageResyncCap, consumed)
 		}
 		return bufio.NewReaderSize(raw, reindexBufSize), off, true, nil
+	}
+
+	// emitCluster writes one cluster body (applying the clean-cut filter when
+	// armed) and updates the report.
+	emitCluster := func(body []byte) error {
+		if awaitKF {
+			kept, dropped, kfMs, found := cleanCutFilterBody(body, videoTracks, timecodeScale)
+			report.CleanCutBytes += dropped
+			body = kept
+			if found {
+				awaitKF = false
+				if n := len(report.DamagedRanges); n > 0 && report.DamagedRanges[n-1].ApproxEndMs < kfMs {
+					report.DamagedRanges[n-1].ApproxEndMs = kfMs
+				}
+			}
+		}
+		outOff := mw.RelPos()
+		if err := writeClusterVerbatim(mw, body, int64(len(body)), timecodeScale, outOff, videoTracks); err != nil {
+			return err
+		}
+		if ms, ok := clusterTimestampMs(body, timecodeScale); ok {
+			lastGoodMs = ms
+		}
+		report.ClustersCopied++
+		report.BytesCopied += int64(len(body))
+		return nil
+	}
+
+	// surgical attempts block-level recovery of a damaged cluster whose
+	// element header starts at elemStart (body at bodyStart): re-derive the
+	// child runs from the bytes, emit each run as a cluster carrying the
+	// original Timestamp, and record only the gaps as damage. Returns
+	// recovered=false (with the walk state untouched) when the region does
+	// not qualify - the caller falls back to the skip/resync behavior.
+	// walkEnded=true means the episode ran to EOF and the walk should stop.
+	surgical := func(elemStart, bodyStart int64) (recovered, walkEnded bool, serr error) {
+		toleranceTC := int64(0)
+		if timecodeScale > 0 {
+			toleranceTC = surgicalContinuityToleranceNs / timecodeScale
+		}
+		outcome, err := surgicalScanCluster(raw, bodyStart, fileSize, allTracks, toleranceTC)
+		if err != nil || outcome == nil || !anyRunHasBlocks(outcome.runs) {
+			// Unreadable timestamp, scan failure, or nothing solid to keep.
+			// The caller restores its own stream position.
+			return false, false, nil
+		}
+
+		tsMs, _ := reindexSafeTimecodeMs(outcome.tsUnits, timecodeScale)
+		var bytesKept int64
+		emitted := 0
+		runBuf := make([]byte, 0)
+		for i, run := range outcome.runs {
+			// A run with no blocks (a lone Timestamp/CRC prefix) is not worth
+			// a cluster; its gap below is still recorded.
+			if run.hasBlocks {
+				n := run.end - run.start
+				bytesKept += n
+				prefix := []byte(nil)
+				if emitted > 0 || i > 0 {
+					// Continuation (or the original Timestamp was in a
+					// skipped blockless prefix): synthesize the base.
+					prefix = synthesizeTimestamp(outcome.tsUnits)
+				}
+				if int64(len(prefix))+n > int64(cap(runBuf)) {
+					runBuf = make([]byte, int64(len(prefix))+n)
+				}
+				body := runBuf[:int64(len(prefix))+n]
+				copy(body, prefix)
+				if _, err := raw.Seek(run.start, io.SeekStart); err != nil {
+					return false, false, fmt.Errorf("salvage: seek surgical run: %w", err)
+				}
+				if _, err := io.ReadFull(raw, body[len(prefix):]); err != nil {
+					return false, false, fmt.Errorf("salvage: read surgical run: %w", err)
+				}
+				if err := emitCluster(body); err != nil {
+					return false, false, err
+				}
+				emitted++
+			}
+
+			// Record the gap that follows this run, bracketing it with the
+			// block times on each side when known.
+			if i < len(outcome.gaps) {
+				g := outcome.gaps[i]
+				startMs, endMs := tsMs, tsMs
+				if run.hasBlocks {
+					if ms, e := reindexSafeTimecodeMs(outcome.tsUnits+run.lastRelTC, timecodeScale); e == nil {
+						startMs = ms
+					}
+				}
+				if i+1 < len(outcome.runs) && outcome.runs[i+1].hasBlocks {
+					if ms, e := reindexSafeTimecodeMs(outcome.tsUnits+outcome.runs[i+1].firstRelTC, timecodeScale); e == nil {
+						endMs = ms
+					}
+				} else if i+1 >= len(outcome.runs) {
+					endMs = peekClusterTimestampMs(raw, outcome.end, timecodeScale)
+					if endMs == 0 {
+						endMs = startMs
+					}
+				}
+				recordDamage(g.StartOffset, g.EndOffset, startMs, endMs)
+			}
+		}
+		report.RepairedRanges = append(report.RepairedRanges, RepairedRange{
+			StartOffset: elemStart, EndOffset: outcome.end, BytesKept: bytesKept,
+		})
+		lastGoodMs = tsMs
+
+		consumed = outcome.end
+		if outcome.atEOF || consumed >= fileSize {
+			return true, true, nil
+		}
+		if _, err := raw.Seek(consumed, io.SeekStart); err != nil {
+			return false, false, fmt.Errorf("salvage: seek after surgical: %w", err)
+		}
+		r = bufio.NewReaderSize(raw, reindexBufSize)
+		return true, false, nil
 	}
 
 walk:
@@ -308,7 +505,20 @@ walk:
 			report.BytesCopied += int64(hdrBytes) + h.Size
 
 		case mkv.IDCluster:
+			bodyStart := elemStart + int64(hdrBytes)
 			if h.Size < 0 || h.Size > maxReindexClusterSize {
+				// Implausible declared size: re-derive the truth from the
+				// bytes before giving up on the region.
+				ok, done, serr := surgical(elemStart, bodyStart)
+				if serr != nil {
+					return nil, nil, 0, serr
+				}
+				if done {
+					break walk
+				}
+				if ok {
+					continue
+				}
 				nr, off, ok, rerr := resync()
 				if rerr != nil {
 					return nil, nil, 0, rerr
@@ -327,7 +537,18 @@ walk:
 			body := clusterBuf[:h.Size]
 			if _, err := io.ReadFull(r, body); err != nil {
 				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-					recordDamage(elemStart, fileSize, lastGoodMs, lastGoodMs)
+					// Truncated tail: recover the complete blocks before the
+					// cut when there are any.
+					ok, done, serr := surgical(elemStart, bodyStart)
+					if serr != nil {
+						return nil, nil, 0, serr
+					}
+					if ok && !done {
+						continue
+					}
+					if !ok {
+						recordDamage(elemStart, fileSize, lastGoodMs, lastGoodMs)
+					}
 					break walk
 				}
 				return nil, nil, 0, fmt.Errorf("salvage: read cluster body: %w", err)
@@ -335,23 +556,34 @@ walk:
 			clusterEnd := elemStart + int64(hdrBytes) + h.Size
 
 			if verr := validateClusterBody(body); verr != nil {
-				// Framing (ID + size) is intact - the corruption is inside
-				// the declared bounds, so the next element is known exactly:
-				// no resync needed, just skip this cluster's bytes.
+				// Framing (ID + size) is intact but the body does not parse
+				// to its declared end: either the size lies (intact payload
+				// behind it) or bytes inside are damaged. The surgical scan
+				// re-derives the child runs and keeps everything that
+				// chain-validates, splitting the cluster around the damage.
+				ok, done, serr := surgical(elemStart, bodyStart)
+				if serr != nil {
+					return nil, nil, 0, serr
+				}
+				if done {
+					break walk
+				}
+				if ok {
+					continue
+				}
+				// Nothing recoverable: skip the declared extent as before.
+				if _, err := raw.Seek(clusterEnd, io.SeekStart); err != nil {
+					return nil, nil, 0, fmt.Errorf("salvage: reseek after surgical probe: %w", err)
+				}
+				r = bufio.NewReaderSize(raw, reindexBufSize)
 				recordDamage(elemStart, clusterEnd, lastGoodMs, lastGoodMs)
 				consumed = clusterEnd
 				continue
 			}
 
-			outOff := mw.RelPos()
-			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
+			if err := emitCluster(body); err != nil {
 				return nil, nil, 0, err
 			}
-			if ms, ok := clusterTimestampMs(body, timecodeScale); ok {
-				lastGoodMs = ms
-			}
-			report.ClustersCopied++
-			report.BytesCopied += int64(hdrBytes) + h.Size
 			consumed = clusterEnd
 
 			if progress != nil && fileSize > 0 {
@@ -359,7 +591,23 @@ walk:
 			}
 
 		default:
-			if h.Size < 0 || h.Size > maxReindexClusterSize {
+			// An unknown top-level ID that decodes is indistinguishable from
+			// garbage that happens to decode (the Matroska top-level set is
+			// closed): only trust it when a validated known element - or EOF -
+			// starts exactly where it claims to end. Without this gate a
+			// damaged region can masquerade as a chain of "unknown elements"
+			// and be copied verbatim into the repaired output.
+			trusted := h.Size >= 0 && h.Size <= maxReindexClusterSize
+			if trusted {
+				claimedEnd := elemStart + int64(hdrBytes) + h.Size
+				trusted = claimedEnd == fileSize || validTopLevelAt(raw, claimedEnd, fileSize)
+				// The trust probe moved raw: restore the stream at the body.
+				if _, err := raw.Seek(elemStart+int64(hdrBytes), io.SeekStart); err != nil {
+					return nil, nil, 0, fmt.Errorf("salvage: reseek after trust probe: %w", err)
+				}
+				r = bufio.NewReaderSize(raw, reindexBufSize)
+			}
+			if !trusted {
 				nr, off, ok, rerr := resync()
 				if rerr != nil {
 					return nil, nil, 0, rerr

@@ -7,10 +7,10 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const reindexUsage = "usage: mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync]"
+const reindexUsage = "usage: mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut]"
 
 func CmdReindex(args []string) {
-	var deepVerify, replace, keepBackup, resync bool
+	var deepVerify, replace, keepBackup, resync, cleanCut bool
 	var rest []string
 	for _, a := range args {
 		switch a {
@@ -22,6 +22,8 @@ func CmdReindex(args []string) {
 			keepBackup = true
 		case "--resync":
 			resync = true
+		case "--clean-cut":
+			cleanCut = true
 		default:
 			rejectFlagArg(a)
 			rest = append(rest, a)
@@ -30,11 +32,16 @@ func CmdReindex(args []string) {
 	if len(rest) < 1 {
 		Fatal(reindexUsage)
 	}
+	if cleanCut && !resync {
+		Fatal("--clean-cut only applies together with --resync")
+	}
 
 	var skipped []matroska.DamagedRange
-	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync}
+	var repaired []matroska.RepairedRange
+	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync, CleanCut: cleanCut}
 	if resync {
 		opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
+		opts.OnRepair = func(r matroska.RepairedRange) { repaired = append(repaired, r) }
 	}
 
 	if replace {
@@ -48,7 +55,7 @@ func CmdReindex(args []string) {
 			Fatal(err.Error())
 		}
 		fmt.Printf("reindexed %s (original replaced after verification)\n", src)
-		printSkippedRanges(resync, skipped)
+		printResyncOutcome(resync, skipped, repaired)
 		return
 	}
 
@@ -67,18 +74,26 @@ func CmdReindex(args []string) {
 		Fatal(err.Error())
 	}
 	fmt.Printf("reindexed %s → %s\n", src, dst)
-	printSkippedRanges(resync, skipped)
+	printResyncOutcome(resync, skipped, repaired)
 }
 
-// printSkippedRanges reports what a --resync run dropped, so the operator
-// knows exactly which byte ranges (and roughly which presentation times) the
-// repaired file no longer carries. No-op without --resync.
-func printSkippedRanges(resync bool, skipped []matroska.DamagedRange) {
+// printResyncOutcome reports what a --resync run repaired and dropped, so the
+// operator knows exactly which byte ranges (and roughly which presentation
+// times) were reconstructed or lost. No-op without --resync.
+func printResyncOutcome(resync bool, skipped []matroska.DamagedRange, repaired []matroska.RepairedRange) {
 	if !resync {
 		return
 	}
+	for i, r := range repaired {
+		fmt.Printf("  repaired range %d: offset %d-%d, %s of media kept that a plain resync would have dropped\n",
+			i+1, r.StartOffset, r.EndOffset, FormatBytes(r.BytesKept))
+	}
 	if len(skipped) == 0 {
-		fmt.Println("  no corrupted region found (resync was not needed)")
+		if len(repaired) > 0 {
+			fmt.Println("  nothing lost (repairs were lossless)")
+		} else {
+			fmt.Println("  no corrupted region found (resync was not needed)")
+		}
 		return
 	}
 	var total int64

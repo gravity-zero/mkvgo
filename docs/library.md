@@ -946,13 +946,16 @@ err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
 })
 ```
 
-### Resync (tolerate corrupted regions)
+### Resync (repair corrupted regions)
 
-By default `Reindex` refuses a file whose top-level walk hits a corrupted region (an element whose declared size does not match its real extent, raw junk between clusters -- typical of old repacks and interrupted writes): the walker lands mid-payload and the garbage does not decode as an element. Such files often still play everywhere, because players resynchronize on the next Cluster ID and carry on. `Options.Resync` opts the reindex into the same tolerance:
+By default `Reindex` refuses a file whose top-level walk hits a corrupted region (an element whose declared size does not match its real extent, damaged bytes inside a cluster body, raw junk between clusters -- typical of old repacks and interrupted writes): the walker lands mid-payload and the garbage does not decode as an element. Such files often still play everywhere, because players resynchronize and carry on. `Options.Resync` opts the reindex into repairing them:
 
 ```go
 err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
     Resync: true,
+    OnRepair: func(r mkv.RepairedRange) {
+        fmt.Printf("reconstructed [%d,%d), %d bytes kept\n", r.StartOffset, r.EndOffset, r.BytesKept)
+    },
     OnSkip: func(r mkv.DamagedRange) {
         fmt.Printf("dropped bytes [%d,%d), approx %dms-%dms\n",
             r.StartOffset, r.EndOffset, r.ApproxStartMs, r.ApproxEndMs)
@@ -960,9 +963,15 @@ err := ops.Reindex(ctx, "input.mkv", "output.mkv", mkv.Options{
 })
 ```
 
-On a structural failure in the cluster stream the walk scans forward (bounded, 64 MiB) for the next structurally valid Cluster and resumes there, dropping the skipped bytes from the output; the SeekHead and Cues are rebuilt from the surviving clusters only, and the usual verification chain still runs on the result. Each dropped source range is reported through `Options.OnSkip` (byte offsets plus the approximate presentation time lost -- usually a fraction of a second of media), called only after every check has passed. The repair is still refused when no valid Cluster is found within the scan window, when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub.
+The repair is surgical. On a damaged cluster the walk re-derives the truth from the bytes: it parses cluster children from the body start ignoring the declared size, and on a break scans forward for the next chain-validated block (known child IDs, in-bounds sizes, track numbers from the file's real track set, timecode continuity across the gap), splitting the cluster around the damage instead of dropping its whole declared extent. A lying size field over an intact payload is corrected with zero media loss; damage inside a body loses only the unrecoverable bytes. Recovery never guesses timing: continuation runs are emitted under the original cluster's own Timestamp, and a region whose Timestamp cannot be read is not block-recovered at all. The SeekHead and Cues are rebuilt from what survives, and the usual verification chain still runs on the result.
 
-A clean source produces output byte-identical to a strict `Reindex` and zero `OnSkip` calls, so the option is free when no damage exists. `Options.Resync` applies to `Reindex` and `ReindexReplace`; `ReindexInPlace` refuses it (the skipped bytes cannot be dropped from the file itself). Under `Resync`, `Options.DeepVerify`'s byte-comparison against the source only runs when nothing was skipped (a damaged source cannot be walked for a verbatim proof); the full-read `Validate` of the output always runs. For best-effort recovery of a file too damaged for these caps, see `Salvage` below.
+Reconstructed regions are reported through `Options.OnRepair` and dropped ranges through `Options.OnSkip` (byte offsets plus the approximate presentation time lost), both called only after every check has passed. The repair is still refused when no valid resume point is found within the scan window (bounded, 64 MiB), when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub.
+
+`Options.CleanCut` additionally resumes video after each gap at the next video keyframe: the first recovered video frames after a gap are often P/B frames that reference lost pictures and decode with artifacts until the keyframe. Audio resumes immediately (its frames are independent). The dropped bytes are counted in the salvage report (`CleanCutBytes`) and the damaged range's end time extends to the resume keyframe.
+
+A clean source produces output byte-identical to a strict `Reindex` and zero callback calls, so the option is free when no damage exists. `Options.Resync` applies to `Reindex` and `ReindexReplace`; `ReindexInPlace` refuses it (repairs cannot be patched into the file itself). Under `Resync`, `Options.DeepVerify`'s byte-comparison against the source only runs when nothing was skipped, repaired or clean-cut (a damaged source cannot be walked for a verbatim proof); the full-read `Validate` of the output always runs. For best-effort recovery of a file too damaged for these caps, see `Salvage` below; to see what a repair would do before running one, see `MapDamage`.
+
+One honest limit: the recovery is structural, not decode-level. A block whose framing is intact but whose payload tail was overwritten is kept as-is (detecting it would require decoding the codec bitstream, which mkvgo never does) -- expect at worst one glitched frame at a damage boundary.
 
 ### ReindexReplace
 
@@ -999,7 +1008,7 @@ Choosing a variant: `Reindex` never touches the source (safest, needs a second p
 
 ### Salvage (damaged files)
 
-`Reindex`/`Validate`/`BlockReader` refuse mid-file corruption by design -- that stays. `ops.Salvage` is the separate, explicitly lossy-tolerant operation: it walks `srcPath` exactly like `Reindex` (metadata elements and cluster payloads copied verbatim, the Cues index rebuilt from real video keyframes), but a structural failure inside the cluster stream -- a header that will not decode, a declared size that overflows, a cluster body whose children do not parse to its end -- is not fatal. It scans forward, bounded, for the next structurally valid Cluster and resumes there, recording the skipped span. A truncated source yields exactly one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `Reindex`.
+`Reindex`/`Validate`/`BlockReader` refuse mid-file corruption by design -- that stays. `ops.Salvage` is the separate, explicitly lossy-tolerant operation: it walks `srcPath` exactly like `Reindex` (metadata elements and cluster payloads copied verbatim, the Cues index rebuilt from real video keyframes), but a structural failure inside the cluster stream -- a header that will not decode, a declared size that overflows, a cluster body whose children do not parse to its end -- is not fatal. The damaged region is repaired surgically when the bytes allow it (the same mechanism as `Reindex` with `Options.Resync` above: lying sizes corrected losslessly, chain-validated blocks around a gap kept, `Options.CleanCut` honored) and only what cannot be recovered is skipped and recorded. A truncated source yields a damaged range running to EOF (complete blocks before the cut are kept); a clean source yields zero damaged ranges and a result equivalent to `Reindex`.
 
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/ops"
@@ -1021,16 +1030,33 @@ fmt.Printf("%d clusters copied, %d bytes recovered, %d bytes skipped\n",
 
 | Field | Meaning |
 | --- | --- |
-| `ClustersCopied` | Number of clusters carried over verbatim into the output. |
+| `ClustersCopied` | Number of clusters carried over into the output (including clusters rebuilt around damage). |
 | `BytesCopied` | Total source bytes (metadata elements + cluster payloads) successfully carried over. |
 | `BytesSkipped` | Total source bytes lost to damage (sum of every `DamagedRange`'s span). |
 | `DamagedRanges` | `[]DamagedRange{StartOffset, EndOffset, ApproxStartMs, ApproxEndMs}`, one entry per skipped span, in file order. |
+| `RepairedRanges` | `[]RepairedRange{StartOffset, EndOffset, BytesKept}`, one entry per region reconstructed around damage (media kept that a plain skip would have dropped). |
+| `CleanCutBytes` | Video bytes intentionally dropped after gaps up to the next keyframe (`Options.CleanCut`). |
 
 Never in-place: `dstPath` is always a separate file. The result is reopened afterwards and its Cues checked against the ones built during the walk -- the same light verification `Reindex` always runs -- so a bug in `Salvage` itself (not the source's damage) still surfaces as an error.
 
 Prefer `Reindex` whenever the source is expected to be intact -- it fails loudly on any corruption instead of silently accepting data loss. `Reindex` with `Options.Resync` covers the middle ground: tolerant like `Salvage`, but capped (refuses a mostly-damaged source) and running the full reindex verification chain. Reach for `Salvage` only when even that refuses and the goal is the best possible recovery, not proof of fidelity.
 
-The facade re-exports the type and function: `matroska.Salvage`, `matroska.SalvageReport`, `matroska.DamagedRange`.
+### MapDamage (dry-run)
+
+`ops.MapDamage` runs the exact walk `Salvage` runs - surgical recovery, damage ranges, repairs, optional clean-cut accounting - but writes nothing. The returned report is the one the equivalent `Salvage` (or `Reindex` with `Options.Resync`) would produce, so the decision to repair can be made with the numbers in hand:
+
+```go
+report, err := ops.MapDamage(ctx, "suspect.mkv")
+if err != nil {
+    return err
+}
+for _, dr := range report.DamagedRanges {
+    fmt.Printf("a repair would lose [%d,%d), approx %dms-%dms\n",
+        dr.StartOffset, dr.EndOffset, dr.ApproxStartMs, dr.ApproxEndMs)
+}
+```
+
+The facade re-exports the types and functions: `matroska.Salvage`, `matroska.MapDamage`, `matroska.SalvageReport`, `matroska.DamagedRange`, `matroska.RepairedRange`.
 
 ---
 

@@ -74,7 +74,9 @@ func TestReindexResync_SplicedGarbage(t *testing.T) {
 
 // TestReindexResync_OverdeclaredClusterSize corrupts a cluster's declared
 // size so it overshoots its real extent (the walker would land mid-payload):
-// the resync walk must drop the damaged span and still produce a valid file.
+// the payload behind the lying size is intact, so the surgical scan must
+// re-derive the true extent and repair with ZERO media loss - no skipped
+// range at all, only a repaired one.
 func TestReindexResync_OverdeclaredClusterSize(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -98,22 +100,27 @@ func TestReindexResync_OverdeclaredClusterSize(t *testing.T) {
 	writeAll(t, corrupted, data)
 
 	var skipped []mkv.DamagedRange
+	var repaired []mkv.RepairedRange
 	dst := filepath.Join(dir, "overdecl.out.mkv")
 	err := Reindex(ctx, corrupted, dst, mkv.Options{
-		Resync: true,
-		OnSkip: func(r mkv.DamagedRange) { skipped = append(skipped, r) },
+		Resync:   true,
+		OnSkip:   func(r mkv.DamagedRange) { skipped = append(skipped, r) },
+		OnRepair: func(r mkv.RepairedRange) { repaired = append(repaired, r) },
 	})
 	if err != nil {
 		t.Fatalf("Reindex with Resync: %v", err)
 	}
-	if len(skipped) == 0 {
-		t.Fatal("expected at least one skipped range")
+	if len(skipped) != 0 {
+		t.Errorf("a lying size over an intact payload must lose nothing, got skipped ranges: %+v", skipped)
 	}
-	if skipped[0].StartOffset != offsets[1] {
-		t.Errorf("first skipped range starts at %d, want the corrupted cluster at %d", skipped[0].StartOffset, offsets[1])
+	if len(repaired) != 1 {
+		t.Fatalf("expected exactly 1 repaired range, got %d: %+v", len(repaired), repaired)
 	}
-	if n := blockReaderIteratesCleanly(t, dst); n == 0 {
-		t.Error("expected surviving blocks")
+	if repaired[0].StartOffset != offsets[1] {
+		t.Errorf("repaired range starts at %d, want the corrupted cluster at %d", repaired[0].StartOffset, offsets[1])
+	}
+	if n := blockReaderIteratesCleanly(t, dst); n != 12*2 {
+		t.Errorf("expected all 24 blocks to survive (size repair is lossless), got %d", n)
 	}
 	validateErrorFree(t, dst)
 }

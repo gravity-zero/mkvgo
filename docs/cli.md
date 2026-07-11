@@ -678,7 +678,8 @@ mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backu
 - Without `--replace`, `<output.mkv>` is required: the rebuilt file is written there, the source is untouched.
 - `--replace` rebuilds `<input.mkv>` in place: no output path is given (supplying one is a usage error). The rebuild happens in a temporary file in the same directory, is verified, and only then atomically replaces the original -- the source is never touched until every check has passed. This needs write permission on the directory (temp file + rename), not just on the file itself.
 - `--keep-backup` (only with `--replace`) preserves the pre-op original as `<input.mkv>.bak` instead of discarding it.
-- `--resync` (opt-in; works with and without `--replace`) tolerates corrupted regions in the cluster stream -- an element header that does not decode, a declared size that does not match the element's real extent, raw junk between clusters. Instead of refusing the file, the walk scans forward (bounded, 64 MiB) for the next structurally valid Cluster and resumes, dropping the skipped bytes from the output; every dropped range is printed (byte offsets + approximate presentation time), so the operator knows exactly what was lost -- usually a fraction of a second of media. The repair is still refused when no valid Cluster is found within the scan window, when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub (use `mkvgo salvage` for best-effort recovery without that cap). Without the flag the strict refusal stays the contract, and the refusal message points at `--resync` when a corrupted region is what stopped it.
+- `--resync` (opt-in; works with and without `--replace`) tolerates corrupted regions in the cluster stream -- an element header that does not decode, a declared size that does not match the element's real extent, damaged bytes inside a cluster body, raw junk between clusters. Instead of refusing the file, the walk repairs surgically: a lying size over an intact payload is corrected with zero loss, and damage inside a cluster is cut around (the valid blocks on both sides are kept, chain-validated against the file's real track numbers and timecodes) rather than dropping the whole cluster. Only what cannot be recovered is skipped. Every repaired region and every dropped range is printed (byte offsets + approximate presentation time), so the operator knows exactly what happened -- the loss is usually a few KB, a fraction of a second of one track. The repair is still refused when no valid resume point is found within the scan window (64 MiB), when no cluster survives, or when more than half of the walked payload would be dropped: a mostly-damaged file must not silently "repair" into a stub (use `mkvgo salvage` for best-effort recovery without that cap). Without the flag the strict refusal stays the contract, and the refusal message points at `--resync` when a corrupted region is what stopped it.
+- `--clean-cut` (only with `--resync`) resumes video after each damage gap at the next video keyframe instead of the first recovered frame: post-gap P/B frames reference lost pictures and decode with artifacts until the keyframe. Audio resumes immediately (its frames are independent). Preview the cost with `mkvgo salvage --dry-run --clean-cut`.
 
 ```bash
 mkvgo reindex source.mkv reindexed.mkv
@@ -687,14 +688,15 @@ mkvgo reindex source.mkv reindexed.mkv
 mkvgo reindex source.mkv --replace --keep-backup --deep-verify
 
 # A file that plays fine but is refused by reindex (players resynchronize
-# over its damaged region): skip the corruption, report what was dropped
+# over its damaged region): repair it, report what was kept and lost
 mkvgo reindex source.mkv repaired.mkv --resync
 ```
 
 ```
 reindexed source.mkv → repaired.mkv
-  skipped range 1: offset 933184-941312 (7.9 KB), approx 00:04:12-00:04:15
-  7.9 KB of corrupted data skipped across 1 range(s)
+  repaired range 1: offset 5514-982060, 949.8 KB of media kept that a plain resync would have dropped
+  skipped range 1: offset 295912-299899 (3.9 KB), approx 00:00:00-00:00:02
+  3.9 KB of corrupted data skipped across 1 range(s)
 ```
 
 ### reindex-inplace
@@ -721,28 +723,35 @@ mkvgo reindex-inplace movie.mkv --rollback
 
 ### salvage
 
-Best-effort recovery copy of a damaged MKV or WebM file. `reindex` and `validate` refuse mid-file corruption by design; `salvage` is the explicitly lossy-tolerant counterpart: metadata elements and cluster payloads are copied verbatim and the Cues index is rebuilt, exactly like `reindex`, but a structural failure inside the cluster stream (a corrupt element header, a zeroed region, a size that overflows) is not fatal. `salvage` scans forward for the next structurally valid Cluster and resumes there, recording the skipped byte range instead of aborting the whole file. A truncated source yields one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `reindex`.
+Best-effort recovery copy of a damaged MKV or WebM file. `reindex` and `validate` refuse mid-file corruption by design; `salvage` is the explicitly lossy-tolerant counterpart: metadata elements and cluster payloads are copied verbatim and the Cues index is rebuilt, exactly like `reindex`, but a structural failure inside the cluster stream (a corrupt element header, a zeroed region, a size that overflows) is not fatal. The damaged region is repaired surgically when the bytes allow it -- a lying size field over an intact payload is corrected with zero loss, valid blocks around a gap inside a cluster are kept (chain-validated) -- and only what cannot be recovered is skipped and reported. A truncated source yields one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `reindex`.
 
 ```
-mkvgo salvage <in.mkv> <out.mkv> [--json]
+mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-cut]
+mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]
 ```
 
+- `--dry-run` maps the damage without writing anything: the report printed is the one the real salvage would produce (repaired ranges, damaged ranges, clean-cut cost), so the decision to repair can be made with the numbers in hand.
+- `--clean-cut` resumes video after each damage gap at the next video keyframe (audio resumes immediately); the dropped video bytes are reported.
 - `--json` prints the report (`SalvageReport`) as JSON instead of the human summary.
 - Never in-place: `<out.mkv>` is always a separate file.
-- Exit contract: exit 0 whenever an output file was written, damage or not. Exit 1 with no output only on a hard failure -- the bounded resync scan giving up without reaching a valid Cluster or real EOF (garbage longer than the internal cap), or a genuine I/O error.
+- Exit contract: exit 0 whenever an output file was written (or the dry-run completed), damage or not. Exit 1 with no output only on a hard failure -- the bounded resync scan giving up without reaching a valid resume point or real EOF (garbage longer than the internal cap), or a genuine I/O error.
 
 ```bash
+mkvgo salvage damaged.mkv --dry-run
 mkvgo salvage damaged.mkv recovered.mkv
 ```
 
 ```
 salvaged damaged.mkv -> recovered.mkv
-  41 cluster(s) copied, 812.4 MB recovered
-  damaged range 1: offset 933184-941312 (7.9 KB), approx 00:04:12-00:04:15
-  recovered ~99.9% of the media (7.9 KB skipped across 1 damaged range(s))
+  905 cluster(s) copied, 893.1 MB recovered
+  repaired range 1: offset 5514-982060, 949.8 KB of media kept that a plain resync would have dropped
+  damaged range 1: offset 295912-299899 (3.9 KB), approx 00:00:00-00:00:02
+  recovered ~100.0% of the media (3.9 KB skipped across 1 damaged range(s))
 ```
 
 A clean source prints `no damage found (equivalent to reindex)` and reports zero damaged ranges.
+
+One honest limit: the recovery is structural, not decode-level. A block whose framing is intact but whose payload tail was overwritten is kept as-is (detecting it would require decoding the codec bitstream, which mkvgo never does) -- expect at worst one glitched frame at a damage boundary.
 
 ---
 

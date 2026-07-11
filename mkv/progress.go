@@ -20,6 +20,18 @@ type DamagedRange struct {
 	ApproxEndMs   int64
 }
 
+// RepairedRange records one region that a tolerant walk (ops.Salvage, or
+// Reindex with Options.Resync) reconstructed instead of copying verbatim: the
+// cluster framing there was re-derived from the bytes (corrected sizes,
+// synthesized continuation headers around a gap), while the media bytes
+// inside the kept runs remain verbatim. BytesKept counts the media bytes
+// preserved that a plain skip-to-next-cluster resync would have dropped.
+type RepairedRange struct {
+	StartOffset int64
+	EndOffset   int64
+	BytesKept   int64
+}
+
 // Options holds optional parameters for long-running operations.
 type Options struct {
 	Progress ProgressFunc
@@ -51,6 +63,18 @@ type Options struct {
 	// reindex dropped, after the copy and all its verifications have passed.
 	// It is never called when Resync is unset or when the source was clean.
 	OnSkip func(DamagedRange)
+	// OnRepair, when non-nil, is called once per region a Resync reindex
+	// reconstructed with zero or partial loss (see RepairedRange), after all
+	// verifications have passed. Never called when Resync is unset.
+	OnRepair func(RepairedRange)
+	// CleanCut makes the tolerant walks (Salvage, Reindex with Resync)
+	// resume video only at the next video keyframe after a damage gap: the
+	// first recovered video blocks after a gap are often P/B frames that
+	// reference lost frames and decode with artifacts until the next
+	// keyframe. Audio blocks resume immediately (each frame is independent).
+	// The dropped video bytes are counted in the report (CleanCutBytes) and
+	// the damaged range's approximate end time extends to the keyframe.
+	CleanCut bool
 }
 
 func ProgressFrom(opts []Options) ProgressFunc {
@@ -84,4 +108,15 @@ func OnSkipFrom(opts []Options) func(DamagedRange) {
 		return opts[0].OnSkip
 	}
 	return nil
+}
+
+func OnRepairFrom(opts []Options) func(RepairedRange) {
+	if len(opts) > 0 && opts[0].OnRepair != nil {
+		return opts[0].OnRepair
+	}
+	return nil
+}
+
+func CleanCutFrom(opts []Options) bool {
+	return len(opts) > 0 && opts[0].CleanCut
 }

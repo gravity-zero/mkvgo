@@ -455,6 +455,11 @@ func RecoverInPlace(ctx context.Context, path string, opts ...Options) (bool, er
 // verbatim. See ops.DamagedRange.
 type DamagedRange = ops.DamagedRange
 
+// RepairedRange is one region a tolerant walk reconstructed instead of
+// copying verbatim (corrected sizes, continuation headers around a gap),
+// with the media inside kept verbatim. See ops.RepairedRange.
+type RepairedRange = ops.RepairedRange
+
 // SalvageReport summarises one Salvage run. See ops.SalvageReport.
 type SalvageReport = ops.SalvageReport
 
@@ -468,6 +473,13 @@ type SalvageReport = ops.SalvageReport
 // only once Reindex/Validate have confirmed damage. See ops.Salvage.
 func Salvage(ctx context.Context, srcPath, dstPath string, opts ...Options) (*SalvageReport, error) {
 	return ops.Salvage(ctx, srcPath, dstPath, opts...)
+}
+
+// MapDamage runs the exact walk Salvage runs but writes nothing: a dry-run
+// that reports what a repair would keep, reconstruct, and lose, so the
+// decision to repair can be made with the numbers in hand. See ops.MapDamage.
+func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageReport, error) {
+	return ops.MapDamage(ctx, srcPath, opts...)
 }
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {

@@ -207,9 +207,9 @@ func findFirstSimpleBlockOffset(t *testing.T, data []byte, clusterAt int64) int6
 
 // TestSalvage_GarbageInsideCluster corrupts the element ID byte of a
 // SimpleBlock strictly inside one cluster's body (the Cluster's own ID/size
-// untouched) and checks Salvage skips exactly that cluster's bytes - no
-// resync needed, since the outer framing still tells it exactly where the
-// next element begins.
+// untouched) and checks the surgical recovery keeps everything except that
+// one dead block: the cluster is split around it, its second block survives,
+// and the damage reported is the block's bytes - not the whole cluster.
 func TestSalvage_GarbageInsideCluster(t *testing.T) {
 	dir := t.TempDir()
 	src := salvageFixture(t, dir, "garbage.mkv", 8)
@@ -231,17 +231,27 @@ func TestSalvage_GarbageInsideCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Salvage: %v", err)
 	}
-	if report.ClustersCopied != 7 {
-		t.Errorf("ClustersCopied = %d, want 7 (one of 8 clusters dropped)", report.ClustersCopied)
+	if report.ClustersCopied != 8 {
+		t.Errorf("ClustersCopied = %d, want 8 (the damaged cluster is recovered, minus one block)", report.ClustersCopied)
 	}
 	if len(report.DamagedRanges) != 1 {
 		t.Fatalf("expected exactly 1 damaged range, got %d", len(report.DamagedRanges))
 	}
 	dr := report.DamagedRanges[0]
-	if dr.StartOffset != offsets[2] || dr.EndOffset != offsets[3] {
-		t.Errorf("damaged range = [%d,%d), want exactly the corrupted cluster [%d,%d)", dr.StartOffset, dr.EndOffset, offsets[2], offsets[3])
+	if dr.StartOffset != blockAt || dr.EndOffset >= offsets[3] {
+		t.Errorf("damaged range = [%d,%d), want just the dead block starting at %d (well before the next cluster at %d)",
+			dr.StartOffset, dr.EndOffset, blockAt, offsets[3])
 	}
-	blockReaderIteratesCleanly(t, dst)
+	if len(report.RepairedRanges) != 1 {
+		t.Fatalf("expected exactly 1 repaired range, got %d", len(report.RepairedRanges))
+	}
+	if rr := report.RepairedRanges[0]; rr.StartOffset != offsets[2] || rr.EndOffset != offsets[3] {
+		t.Errorf("repaired range = [%d,%d), want the whole cluster region [%d,%d)", rr.StartOffset, rr.EndOffset, offsets[2], offsets[3])
+	}
+	// 8 clusters x 2 blocks, minus the one dead block.
+	if n := blockReaderIteratesCleanly(t, dst); n != 8*2-1 {
+		t.Errorf("surviving blocks = %d, want 15", n)
+	}
 	validateErrorFree(t, dst)
 }
 

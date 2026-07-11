@@ -11,24 +11,54 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Resync option for `reindex`** (`Options.Resync` / `--resync`, opt-in). Some
   files play everywhere yet were refused by `reindex`: a corrupted region in
   the cluster stream (a declared size that does not match the element's real
-  extent, raw junk between clusters) makes the strict top-level walk land
-  mid-payload and read garbage as an element ID, where players simply
-  resynchronize on the next Cluster ID and carry on. With `Resync` set,
-  `Reindex` and `ReindexReplace` do the same: scan forward (bounded, 64 MiB)
-  for the next structurally valid Cluster, resume there, and drop the skipped
-  bytes from the output, rebuilding SeekHead and Cues from the surviving
-  clusters only. Every dropped source range is reported (byte offsets plus
-  approximate presentation time) through `Options.OnSkip` and the CLI summary.
-  The repair is still refused when no valid Cluster is found within the scan
-  window, when no cluster survives, or when more than half of the walked
-  payload would be dropped - a mostly-damaged file must not silently "repair"
-  into a stub (`salvage` remains the uncapped best-effort path). A clean
-  source produces output byte-identical to a strict reindex; the strict
+  extent, damaged bytes inside a cluster body, raw junk between clusters)
+  makes the strict top-level walk land mid-payload and read garbage as an
+  element ID, where players simply resynchronize and carry on. With `Resync`
+  set, `Reindex` and `ReindexReplace` tolerate the damage, rebuilding SeekHead
+  and Cues from what survives. Every dropped source range is reported (byte
+  offsets plus approximate presentation time) through `Options.OnSkip` and
+  the CLI summary; every reconstructed region through `Options.OnRepair`.
+  The repair is refused when no anchor is found within the bounded scan
+  window (64 MiB), when no cluster survives, or when more than half of the
+  walked payload would be dropped - a mostly-damaged file must not silently
+  "repair" into a stub (`salvage` remains the uncapped best-effort path). A
+  clean source produces output byte-identical to a strict reindex; the strict
   default is unchanged and its refusal message now points at the option.
   `ReindexInPlace` refuses the option (skipped bytes cannot be dropped from
   the file itself). `DamagedRange` now lives in the `mkv` package
-  (`ops.DamagedRange` is a compatible alias), and the resync scanner gained a
-  fuzz target.
+  (`ops.DamagedRange` is a compatible alias).
+- **Surgical recovery inside damaged clusters** (shared by `salvage` and
+  `reindex --resync`). A damaged cluster used to be dropped whole - its
+  declared extent, up to hundreds of KB or more, for what is typically a few
+  KB of real damage. The tolerant walk now re-derives the truth from the
+  bytes: it walks cluster children from the body start ignoring the declared
+  size, and on a break scans forward for the next chain-validated block
+  (known child IDs, in-bounds sizes, track numbers from the file's real
+  track set, timecode continuity across the gap), splitting the cluster
+  around the damage instead of discarding it. A lying size field over an
+  intact payload is repaired with zero loss; damage inside a body loses only
+  the unrecoverable bytes. Continuation runs are emitted as clusters
+  carrying the original cluster's Timestamp, so recovery never guesses
+  timing - a region whose Timestamp cannot be read is not block-recovered at
+  all. Reconstructed regions are reported as `RepairedRanges` (with the
+  bytes a plain skip would have lost). An unknown top-level element is now
+  copied only when a validated known element (or EOF) starts exactly where
+  it claims to end - garbage can no longer masquerade as a chain of
+  "unknown elements" and ride verbatim into a repaired output. Fuzz target
+  on the surgical scanner.
+- **`Options.CleanCut` / `--clean-cut`** (opt-in, `salvage` and
+  `reindex --resync`): after a damage gap, the first recovered video frames
+  are often P/B frames referencing lost pictures - they decode with
+  artifacts until the next keyframe. Clean cut drops video until that
+  keyframe (audio resumes immediately; its frames are independent), turning
+  "it glitches for a while" into a clean jump. The dropped bytes are
+  reported (`CleanCutBytes`) and the damaged range's end time extends to the
+  resume keyframe.
+- **`salvage --dry-run` / `ops.MapDamage`**: the exact salvage walk with
+  nothing written - a damage map an operator can read before deciding to
+  repair ("this file would lose 3.9 KB at 00:00-00:02"), with repaired
+  ranges, damaged ranges and clean-cut cost, identical to what the real run
+  would report.
 
 ## [0.18.0] - 2026-07-10
 

@@ -14,12 +14,13 @@ import (
 const reindexResyncMaxSkipPercent = 50
 
 // reindexResync is the Options.Resync path of Reindex: a tolerant copy that
-// skips corrupted regions (the same bounded resync walk Salvage uses), then
-// enforces the reindex guarantees on top - a surviving-payload cap, the
-// always-on cue verification and the optional deep pass. Skipped source
-// ranges are reported through Options.OnSkip only after every check passed.
+// surgically repairs or skips corrupted regions (the same walk Salvage uses),
+// then enforces the reindex guarantees on top - a surviving-payload cap, the
+// always-on cue verification and the optional deep pass. Skipped and repaired
+// source ranges are reported through Options.OnSkip and Options.OnRepair only
+// after every check passed.
 func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opts []mkv.Options) error {
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts))
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts))
 	if err != nil {
 		return fmt.Errorf("reindex resync: %w", err)
 	}
@@ -43,8 +44,9 @@ func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opt
 		}
 		// The verbatim proof compares every block against the source, which
 		// cannot be walked past its damage (and the output legitimately lacks
-		// the dropped blocks) - it is only meaningful when nothing was skipped.
-		if len(report.DamagedRanges) == 0 {
+		// the dropped blocks) - it is only meaningful when nothing was
+		// skipped, repaired, or clean-cut.
+		if len(report.DamagedRanges) == 0 && len(report.RepairedRanges) == 0 && report.CleanCutBytes == 0 {
 			if err := deepVerifyVerbatim(ctx, srcPath, dstPath, fs); err != nil {
 				return err
 			}
@@ -54,6 +56,11 @@ func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opt
 	if onSkip := mkv.OnSkipFrom(opts); onSkip != nil {
 		for _, r := range report.DamagedRanges {
 			onSkip(r)
+		}
+	}
+	if onRepair := mkv.OnRepairFrom(opts); onRepair != nil {
+		for _, r := range report.RepairedRanges {
+			onRepair(r)
 		}
 	}
 	return nil
