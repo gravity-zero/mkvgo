@@ -973,6 +973,8 @@ if !r.Healthy {
 
 The result is always reopened afterwards and its Cues checked against the index built during the copy -- a light, head-only verification costing a few milliseconds. `Options.DeepVerify` additionally runs a full-read `Validate` on the output and a byte-level payload comparison (`CompareBlocks`) against the source, proving the copy verbatim rather than merely well-formed -- at the cost of a full read of the output (and of both files, for the comparison). A failed verification returns an error; `dstPath` is left as written.
 
+DeepVerify diffs, it does not gatekeep: the result's error-severity issues are compared against the source's by stable identity (`Issue.Code` + `Issue.Track`, immune to messages whose numbers legitimately move), and only an issue the operation ADDED refuses it. Defects the file already carried are delivered through `Options.OnPreexisting` - they have their own remedy (typically a reindex) - so a correct repair of a file with heritage defects is never refused for them. `Options.StrictVerify` restores the absolute behavior. This applies uniformly to `Reindex` (strict and `Resync`), `ReindexReplace`, `ReindexInPlace` and `RetimeTracks`.
+
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/ops"
 

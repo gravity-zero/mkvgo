@@ -195,6 +195,65 @@ func TestRetime_Refusals(t *testing.T) {
 	}
 }
 
+// TestRetime_DeepVerifyPreexistingDefect: a file whose index was ALREADY
+// defective (audio-keyed cues, the ffmpeg-muxer heritage) must not have a
+// correct retime refused for it - the deep verify diffs the issue sets and
+// only an ADDED error blocks. The preexisting defect is reported through
+// OnPreexisting; StrictVerify restores the absolute refusal.
+func TestRetime_DeepVerifyPreexistingDefect(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 4)
+	for i := 0; i < 4; i++ {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: []byte{0xAA}},
+			{TrackNumber: 2, Timecode: ts + 500, Keyframe: true, Data: []byte{0x01}},
+		})
+	}
+	// Cues keyed on the AUDIO track: validate reports the error-severity
+	// "cues-non-video" defect before the retime ever runs.
+	build := func(name string) string {
+		return buildMKVWithCues(t, dir, name, tracks, sets, []mkv.CuePoint{
+			{TimeMs: 500, Track: 2, ClusterPos: 100},
+			{TimeMs: 1500, Track: 2, ClusterPos: 200},
+		})
+	}
+
+	target := build("preexisting.mkv")
+	var preexisting []mkv.Issue
+	err := RetimeTracks(ctx, target, map[uint64]int64{2: -500_000_000}, mkv.Options{
+		DeepVerify:    true,
+		OnPreexisting: func(is mkv.Issue) { preexisting = append(preexisting, is) },
+	})
+	if err != nil {
+		t.Fatalf("a correct retime must not be refused for a PREEXISTING defect: %v", err)
+	}
+	found := false
+	for _, is := range preexisting {
+		if is.Code == "cues-non-video" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the preexisting defect must be reported through OnPreexisting, got %+v", preexisting)
+	}
+
+	strictTarget := build("strict.mkv")
+	before := readAll(t, strictTarget)
+	err = RetimeTracks(ctx, strictTarget, map[uint64]int64{2: -500_000_000}, mkv.Options{
+		DeepVerify:   true,
+		StrictVerify: true,
+	})
+	if err == nil {
+		t.Fatal("StrictVerify must refuse on any error-severity issue, preexisting included")
+	}
+	if !bytes.Equal(before, readAll(t, strictTarget)) {
+		t.Error("the strict refusal must roll the file back byte-identical")
+	}
+}
+
 // noSyncFile hides a handle's Sync method while keeping Truncate: the shape
 // of a port whose durability semantics are undeclared.
 type noSyncFile struct {

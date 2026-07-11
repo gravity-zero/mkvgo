@@ -103,6 +103,16 @@ type Options struct {
 	// OnRollback, when non-nil, is called once with the written delta
 	// entry's summary after the repair and all its verifications passed.
 	OnRollback func(RollbackInfo)
+	// StrictVerify makes DeepVerify refuse on ANY error-severity validation
+	// issue in the result. The default compares against the source: only
+	// issues the operation ADDED refuse it; defects the file already carried
+	// are reported through OnPreexisting (they have their own remedy,
+	// typically a reindex) without blocking a correct repair.
+	StrictVerify bool
+	// OnPreexisting, when non-nil, receives each error-severity validation
+	// issue that predates the operation (present before and after), as seen
+	// by a non-strict DeepVerify.
+	OnPreexisting func(Issue)
 }
 
 func ProgressFrom(opts []Options) ProgressFunc {
@@ -163,6 +173,17 @@ func RollbackRequiredFrom(opts []Options) bool {
 func OnRollbackFrom(opts []Options) func(RollbackInfo) {
 	if len(opts) > 0 && opts[0].OnRollback != nil {
 		return opts[0].OnRollback
+	}
+	return nil
+}
+
+func StrictVerifyFrom(opts []Options) bool {
+	return len(opts) > 0 && opts[0].StrictVerify
+}
+
+func OnPreexistingFrom(opts []Options) func(Issue) {
+	if len(opts) > 0 && opts[0].OnPreexisting != nil {
+		return opts[0].OnPreexisting
 	}
 	return nil
 }

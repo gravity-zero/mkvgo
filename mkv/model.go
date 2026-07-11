@@ -510,6 +510,20 @@ const (
 type Issue struct {
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
+	// Code is the issue's stable kebab-case identity (e.g. "cues-non-video"),
+	// independent of the message's specifics (counts, offsets, timecodes).
+	// Together with Track it lets a caller diff two validation runs: the
+	// deep-verify of the repair operations refuses only when an operation
+	// ADDED an issue, and message text alone cannot tell "the same defect,
+	// its numbers shifted" from "a new defect".
+	Code string `json:"code,omitempty"`
+	// Track is the track number the issue is about, 0 when not track-scoped.
+	Track uint64 `json:"track,omitempty"`
+}
+
+// Key is the identity used to compare issues across validation runs.
+func (i Issue) Key() string {
+	return fmt.Sprintf("%s/%d", i.Code, i.Track)
 }
 
 func (i Issue) String() string {

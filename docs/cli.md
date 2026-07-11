@@ -690,6 +690,8 @@ Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clus
 
 The result is always reopened and its Cues checked against the index built during the copy (a light, millisecond-cost verification). `--deep-verify` additionally runs a full-read validation of the output and a byte-level comparison of the cluster payloads against the source, at the cost of reading both files in full.
 
+The deep validation compares the result against the source and refuses only when the operation ADDED an error: defects the file already carried (a heritage muxer's mis-keyed cues, subtitles without durations) are printed as `preexisting issue (not from this operation)` with their remedy, without blocking a correct repair. `--strict` restores the absolute behavior - any error-severity issue in the result refuses. This applies to `reindex`, `reindex-inplace` and `retime` alike.
+
 ```
 mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync]
 ```

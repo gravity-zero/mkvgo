@@ -44,7 +44,10 @@ func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opt
 	}
 
 	if mkv.DeepVerifyFrom(opts) {
-		if err := deepVerifyValidate(ctx, dstPath, fs); err != nil {
+		// preValidate on a damaged source usually fails outright and yields
+		// nil - the diff then treats every error as added, i.e. strict.
+		before := preValidate(ctx, srcPath, fs)
+		if err := deepVerifyValidate(ctx, dstPath, fs, before, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return err
 		}
 		// The verbatim proof compares every block against the source, which

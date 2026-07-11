@@ -38,6 +38,20 @@ func CmdRollback(args []string) {
 	fmt.Printf("restored %s from %s + %s (verified against the original's sha256)\n", out, repaired, deltaPath)
 }
 
+// armPreexisting wires the deep-verify diff's preexisting-issue reporting
+// into opts and returns the printer to call after ClearProgress on success:
+// defects the file already carried do not block a correct operation, but the
+// operator must see them (they have their own remedy).
+func armPreexisting(opts *matroska.Options) (printPreexisting func()) {
+	var seen []matroska.Issue
+	opts.OnPreexisting = func(is matroska.Issue) { seen = append(seen, is) }
+	return func() {
+		for _, is := range seen {
+			fmt.Printf("  preexisting issue (not from this operation): %s\n", is.Message)
+		}
+	}
+}
+
 // armRollbackDelta wires a --rollback-delta flag into opts: the delta file is
 // created up front and the repair is made to FAIL if the delta cannot be
 // written (a user asking for the file must not get a silent empty one).

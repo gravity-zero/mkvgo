@@ -110,10 +110,10 @@ func main() {
 		commands.RequireArgs(args, 2, "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>")
 		commands.CmdCompare(args)
 	case "reindex":
-		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--strict] [--rollback-delta <file>]")
 		commands.CmdReindex(args)
 	case "reindex-inplace":
-		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--strict] [--rollback-delta <file>]")
 		commands.CmdReindexInPlace(args)
 	case "salvage":
 		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] | mkvgo salvage <in.mkv> --dry-run")
@@ -122,7 +122,7 @@ func main() {
 		commands.RequireArgs(args, 3, "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>")
 		commands.CmdRollback(args)
 	case "retime":
-		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv> --shift <track>=<ms> [--shift ...] [--deep-verify] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv> --shift <track>=<ms> [--shift ...] [--deep-verify] [--strict] [--rollback-delta <file>]")
 		commands.CmdRetime(args)
 	case "serve":
 		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]]")

@@ -194,8 +194,8 @@ func TestIssue_String(t *testing.T) {
 		issue Issue
 		want  string
 	}{
-		{Issue{SeverityError, "bad track"}, "[error] bad track"},
-		{Issue{SeverityWarning, "no cues"}, "[warning] no cues"},
+		{Issue{Severity: SeverityError, Message: "bad track"}, "[error] bad track"},
+		{Issue{Severity: SeverityWarning, Message: "no cues"}, "[warning] no cues"},
 	} {
 		if got := tt.issue.String(); got != tt.want {
 			t.Errorf("Issue.String() = %q, want %q", got, tt.want)

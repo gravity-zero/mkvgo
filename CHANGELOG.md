@@ -46,8 +46,26 @@ All notable changes to mkvgo are documented here. The format is based on
   (`SalvageReport`, `DamagedRange`, `RepairedRange`) included. The repair
   operations themselves stay out of wasm: browser inputs are read-only.
 
+- **`cue-health` / `ops.CueHealth`**: head-only triage of the seek index -
+  which tracks the CuePoints reference - from the SeekHead, Tracks and Cues
+  alone, in milliseconds. It spots the dormant defect where a video file's
+  index exists and is non-empty (every "indexed?" check passes) yet keys on
+  audio, so every seek lands mid-GOP. The scan-time complement of
+  `validate`, which proves cue times against real keyframes at the cost of
+  a full read. Exit 1 when unhealthy; the reason names the remedy.
+
 ### Changed
 
+- **DeepVerify now diffs instead of gatekeeping.** The result's
+  error-severity validation issues are compared against the source's by
+  stable identity (`mkv.Issue` gained `Code` and `Track` fields), and only
+  an issue the operation ADDED refuses it: a correct repair is no longer
+  refused because the file already carried a heritage defect (a muxer's
+  mis-keyed cues, subtitles without durations). Preexisting errors are
+  reported through `Options.OnPreexisting` / printed by the CLI with their
+  remedy; `Options.StrictVerify` / `--strict` restores the absolute
+  behavior. Applies to `reindex`, `reindex --resync`, `reindex-inplace` and
+  `retime`.
 - **In-place operations now require a sync-capable file handle.** The
   crash-safety journal's guarantee is its write barrier (journal durable
   before any patch lands), but the barrier used to degrade to a silent no-op

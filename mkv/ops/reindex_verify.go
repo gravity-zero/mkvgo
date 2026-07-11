@@ -87,22 +87,56 @@ func deepVerifyVerbatim(ctx context.Context, srcPath, dstPath string, fs *mkv.FS
 	return nil
 }
 
-// deepVerifyValidate runs the full-read Validate on path and fails on any
-// error-severity issue (including the cue-to-real-keyframe ground truth
-// check). Warnings are not failures: many valid sources carry them.
-func deepVerifyValidate(ctx context.Context, path string, fs *mkv.FS) error {
+// preValidate captures the source's error-severity issues before an
+// operation, for the deep-verify diff. A source that cannot even be
+// validated yields nil - the diff then treats every error in the result as
+// added (the strict behavior), which is the safe reading of "we could not
+// know what was already broken".
+func preValidate(ctx context.Context, path string, fs *mkv.FS) []mkv.Issue {
+	issues, err := Validate(ctx, path, mkv.Options{FS: fs})
+	if err != nil {
+		return nil
+	}
+	return issues
+}
+
+// deepVerifyValidate runs the full-read Validate on path. By default it
+// fails only on error-severity issues the operation ADDED (an issue with the
+// same Code+Track identity in `before` is preexisting): refusing a correct
+// repair because the source already carried, say, mis-keyed cues would make
+// the tool unusable on exactly the files that need it. Preexisting errors
+// are reported through onPreexisting - they have their own remedy - and
+// warnings are never failures. strict restores the absolute behavior: any
+// error-severity issue in the result refuses, preexisting or not.
+func deepVerifyValidate(ctx context.Context, path string, fs *mkv.FS, before []mkv.Issue, strict bool, onPreexisting func(mkv.Issue)) error {
 	issues, err := Validate(ctx, path, mkv.Options{FS: fs})
 	if err != nil {
 		return fmt.Errorf("deep verify: %w", err)
 	}
-	var errs []string
-	for _, is := range issues {
+	beforeKeys := make(map[string]bool, len(before))
+	for _, is := range before {
 		if is.Severity == mkv.SeverityError {
-			errs = append(errs, is.Message)
+			beforeKeys[is.Key()] = true
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("deep verify: result does not validate: %s", strings.Join(errs, "; "))
+	var added []string
+	for _, is := range issues {
+		if is.Severity != mkv.SeverityError {
+			continue
+		}
+		if !strict && beforeKeys[is.Key()] {
+			if onPreexisting != nil {
+				onPreexisting(is)
+			}
+			continue
+		}
+		added = append(added, is.Message)
 	}
-	return nil
+	if len(added) == 0 {
+		return nil
+	}
+	if strict {
+		return fmt.Errorf("deep verify: result does not validate: %s", strings.Join(added, "; "))
+	}
+	return fmt.Errorf("deep verify: the operation introduced validation errors: %s", strings.Join(added, "; "))
 }

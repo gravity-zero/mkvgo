@@ -113,6 +113,13 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 		return fmt.Errorf("retime: %w (original file restored)", cause)
 	}
 
+	// The deep-verify diff needs the pre-patch issue set, captured before any
+	// byte moves (a full read, but DeepVerify is expensive by contract).
+	var beforeIssues []mkv.Issue
+	if mkv.DeepVerifyFrom(opts) {
+		beforeIssues = preValidate(ctx, path, fs)
+	}
+
 	// 1. Land the crash-safety journal past the end of the file.
 	if _, err := f.Seek(size, io.SeekStart); err != nil {
 		return fmt.Errorf("retime: seek to end of file: %w", err)
@@ -155,7 +162,7 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	// 4. Optional deep verify: full-read validation, and every shifted
 	// track's first block moved by exactly the requested shift.
 	if mkv.DeepVerifyFrom(opts) {
-		if err := deepVerifyValidate(ctx, path, fs); err != nil {
+		if err := deepVerifyValidate(ctx, path, fs, beforeIssues, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return rollback(err)
 		}
 		_, after, err := retimeScan(ctx, f, size, nil, nil)

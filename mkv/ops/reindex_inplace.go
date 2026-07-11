@@ -139,6 +139,13 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		return fmt.Errorf("reindex inplace: %w (original file restored)", cause)
 	}
 
+	// The deep-verify diff needs the pre-patch issue set, captured before any
+	// byte moves (a full read, but DeepVerify is expensive by contract).
+	var beforeIssues []mkv.Issue
+	if deep {
+		beforeIssues = preValidate(ctx, path, fs)
+	}
+
 	// 1. Land the crash-safety journal past the current end of file
 	// The Segment size is not extended yet, so no reader can see cuesBytes or
 	// the journal that follows it.
@@ -185,7 +192,7 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 
 	// 4. Optional deep verify
 	if deep {
-		if err := deepVerifyValidate(ctx, path, fs); err != nil {
+		if err := deepVerifyValidate(ctx, path, fs, beforeIssues, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return rollback(err)
 		}
 	}

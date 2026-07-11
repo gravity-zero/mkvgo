@@ -9,14 +9,14 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const retimeUsage = "usage: mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--deep-verify] [--rollback-delta <file>]"
+const retimeUsage = "usage: mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--deep-verify] [--strict] [--rollback-delta <file>]"
 
 // CmdRetime cancels a constant A/V desync by shifting the block timecodes of
 // the given tracks in place (2 bytes per block, crash-safe journal, no
 // rewrite, no temp file). The classic use is the repack defect where audio
 // content starts late: `--shift 2=-900` moves track 2 earlier by 900 ms.
 func CmdRetime(args []string) {
-	var deepVerify bool
+	var deepVerify, strict bool
 	var deltaPath string
 	shift := map[uint64]int64{}
 	var rest []string
@@ -24,6 +24,8 @@ func CmdRetime(args []string) {
 		switch args[i] {
 		case "--deep-verify":
 			deepVerify = true
+		case "--strict":
+			strict = true
 		case "--shift":
 			if i+1 >= len(args) {
 				Fatal("--shift needs a <track>=<ms> value")
@@ -53,7 +55,8 @@ func CmdRetime(args []string) {
 	}
 	path := rest[0]
 
-	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify}
+	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict}
+	printPreexisting := armPreexisting(&opts)
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
@@ -66,6 +69,7 @@ func CmdRetime(args []string) {
 	if err != nil {
 		Fatal(err.Error())
 	}
+	printPreexisting()
 	fmt.Printf("retimed %s in place:\n", path)
 	for track, ns := range shift {
 		fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)

@@ -24,27 +24,27 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 	}
 
 	if c.Info.TimecodeScale == 0 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: "missing TimecodeScale"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "no-timecodescale", Message: "missing TimecodeScale"})
 	}
 	if c.Info.Duration == 0 && c.DurationMs == 0 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "no duration set"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-duration", Message: "no duration set"})
 	}
 	if c.Info.MuxingApp == "" {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "missing MuxingApp"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-muxing-app", Message: "missing MuxingApp"})
 	}
 	if c.Info.WritingApp == "" {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "missing WritingApp"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-writing-app", Message: "missing WritingApp"})
 	}
 
 	if len(c.Tracks) == 0 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: "no tracks"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "no-tracks", Message: "no tracks"})
 	}
 
 	hasVideo := false
 	trackIDs := map[uint64]bool{}
 	for _, t := range c.Tracks {
 		if trackIDs[t.ID] {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: fmt.Sprintf("duplicate track ID %d", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "duplicate-track-id", Track: t.ID, Message: fmt.Sprintf("duplicate track ID %d", t.ID)})
 		}
 		trackIDs[t.ID] = true
 
@@ -52,23 +52,23 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			hasVideo = true
 		}
 		if t.Codec == "" {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: fmt.Sprintf("track %d: no codec", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "track-no-codec", Track: t.ID, Message: fmt.Sprintf("track %d: no codec", t.ID)})
 		}
 		if t.Type == mkv.VideoTrack && (t.Width == nil || t.Height == nil) {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("track %d: video without dimensions", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-dimensions", Track: t.ID, Message: fmt.Sprintf("track %d: video without dimensions", t.ID)})
 		}
 		if t.Type == mkv.VideoTrack && len(t.CodecPrivate) == 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("track %d: video without CodecPrivate", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-codecprivate", Track: t.ID, Message: fmt.Sprintf("track %d: video without CodecPrivate", t.ID)})
 		}
 		if t.Type == mkv.AudioTrack && t.SampleRate == nil {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("track %d: audio without sample rate", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "audio-no-samplerate", Track: t.ID, Message: fmt.Sprintf("track %d: audio without sample rate", t.ID)})
 		}
 		if t.Language == "" {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("track %d: no language set", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "track-no-language", Track: t.ID, Message: fmt.Sprintf("track %d: no language set", t.ID)})
 		}
 	}
 	if !hasVideo {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "no video track"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-video-track", Message: "no video track"})
 	}
 
 	f, err := fs.DoOpen(path)
@@ -79,7 +79,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 
 	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
 	if err != nil {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: fmt.Sprintf("cannot read clusters: %v", err)})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "clusters-unreadable", Message: fmt.Sprintf("cannot read clusters: %v", err)})
 		return issues, nil
 	}
 
@@ -108,7 +108,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			break
 		}
 		if err != nil {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Message: fmt.Sprintf("cluster read error at block %d: %v", blockTotal, err)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cluster-read-error", Message: fmt.Sprintf("cluster read error at block %d: %v", blockTotal, err)})
 			break
 		}
 		blockCounts[blk.TrackNumber]++
@@ -123,21 +123,21 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			subNoDuration++
 		}
 		if blk.Timecode < lastTC-1000 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("timecode went backwards: %dms → %dms at block %d", lastTC, blk.Timecode, blockTotal)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "timecode-backwards", Message: fmt.Sprintf("timecode went backwards: %dms → %dms at block %d", lastTC, blk.Timecode, blockTotal)})
 		}
 		lastTC = blk.Timecode
 	}
 
 	if blockTotal == 0 && stat.Size() > 1024 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "no blocks found (metadata-only file?)"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-blocks", Message: "no blocks found (metadata-only file?)"})
 	}
 	if !hasKeyframe && blockTotal > 0 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: "no keyframes found"})
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-keyframes", Message: "no keyframes found"})
 	}
 
 	for _, t := range c.Tracks {
 		if blockCounts[t.ID] == 0 && blockTotal > 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Message: fmt.Sprintf("track %d (%s): no blocks", t.ID, t.Type)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "track-no-blocks", Track: t.ID, Message: fmt.Sprintf("track %d (%s): no blocks", t.ID, t.Type)})
 		}
 	}
 
@@ -146,7 +146,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 	switch {
 	case blockTotal == 0:
 	case len(c.Cues) == 0:
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-cues",
 			Message: "no Cues index — seeking, on-demand HLS and keyframe extraction need one (run `mkvgo reindex`)"})
 	case len(videoIDs) > 0:
 		misKeyed, stale := 0, 0
@@ -158,31 +158,31 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			}
 		}
 		if misKeyed > 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError,
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cues-non-video",
 				Message: fmt.Sprintf("%d/%d cue points reference a non-video track — seeking lands on audio, not a keyframe (rewrite with `mkvgo reindex`)", misKeyed, len(c.Cues))})
 		}
 		if stale > 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-stale",
 				Message: fmt.Sprintf("%d/%d cue times match no video keyframe — stale or rounded cue index (rewrite with `mkvgo reindex`)", stale, len(c.Cues))})
 		}
 	}
 	if subNoDuration > 0 {
-		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "subs-no-blockduration",
 			Message: fmt.Sprintf("%d subtitle blocks carry no BlockDuration — cue end times are lost (readers fall back to guesses)", subNoDuration)})
 	}
 	for _, t := range c.Tracks {
 		if t.Type == mkv.VideoTrack && t.FrameRate == nil && blockCounts[t.ID] > 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-defaultduration", Track: t.ID,
 				Message: fmt.Sprintf("track %d: video without DefaultDuration — frame rate and last-sample durations must be guessed downstream", t.ID)})
 		}
 		if t.Type == mkv.AudioTrack && t.Codec == "aac" && len(t.CodecPrivate) == 0 {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "aac-no-asc", Track: t.ID,
 				Message: fmt.Sprintf("track %d: AAC without an AudioSpecificConfig (CodecPrivate) — remuxing to MP4/HLS needs it", t.ID)})
 		}
 	}
 	for _, a := range c.Attachments {
 		if a.MIMEType == "" {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning,
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "attachment-no-mime",
 				Message: fmt.Sprintf("attachment %d (%s): no MIME type", a.ID, a.Name)})
 		}
 	}

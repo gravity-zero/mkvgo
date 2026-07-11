@@ -7,7 +7,7 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const reindexInPlaceUsage = "usage: mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--rollback-delta <file>]"
+const reindexInPlaceUsage = "usage: mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--strict] [--rollback-delta <file>]"
 
 // CmdReindexInPlace rebuilds the Cues index by patching the file directly
 // (crash-safe in-file journal, automatic rollback on any failed check).
@@ -15,13 +15,15 @@ const reindexInPlaceUsage = "usage: mkvgo reindex-inplace <file.mkv> [--deep-ver
 // --rollback-delta persists the journal as an inverse delta so the repair
 // stays reversible after it commits (see the rollback command).
 func CmdReindexInPlace(args []string) {
-	var deepVerify, rollback bool
+	var deepVerify, rollback, strict bool
 	var deltaPath string
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--deep-verify":
 			deepVerify = true
+		case "--strict":
+			strict = true
 		case "--rollback":
 			rollback = true
 		case "--rollback-delta":
@@ -56,7 +58,8 @@ func CmdReindexInPlace(args []string) {
 		return
 	}
 
-	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify}
+	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict}
+	printPreexisting := armPreexisting(&opts)
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
@@ -69,5 +72,6 @@ func CmdReindexInPlace(args []string) {
 		Fatal(err.Error())
 	}
 	fmt.Printf("reindexed %s in place (index patched, clusters untouched)\n", path)
+	printPreexisting()
 	printDelta()
 }

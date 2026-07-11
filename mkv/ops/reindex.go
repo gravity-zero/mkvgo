@@ -414,7 +414,8 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	}
 
 	if mkv.DeepVerifyFrom(opts) {
-		if err := deepVerifyValidate(ctx, dstPath, fs); err != nil {
+		before := preValidate(ctx, srcPath, fs)
+		if err := deepVerifyValidate(ctx, dstPath, fs, before, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return err
 		}
 		if err := deepVerifyVerbatim(ctx, srcPath, dstPath, fs); err != nil {
