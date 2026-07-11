@@ -1,7 +1,9 @@
 package matroska
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -75,6 +77,70 @@ func TestFacadeSalvage(t *testing.T) {
 	if len(c.Cues) == 0 {
 		t.Error("expected cues in the salvaged output")
 	}
+}
+
+// TestFacadeMapDamageAndRollback proves the MapDamage dry-run and the
+// ApplyRollback reconstruction delegate through the facade: map an intact
+// source, reindex it with a rollback delta, apply the delta back.
+func TestFacadeMapDamageAndRollback(t *testing.T) {
+	requireFixture(t)
+	dir := t.TempDir()
+
+	report, err := MapDamage(context.Background(), fixturePath)
+	assertNoErr(t, err)
+	if report.ClustersCopied == 0 || len(report.DamagedRanges) != 0 {
+		t.Errorf("intact source: clusters=%d damaged=%+v", report.ClustersCopied, report.DamagedRanges)
+	}
+
+	var delta bytes.Buffer
+	var infos []RollbackInfo
+	dst := filepath.Join(dir, "reindexed.mkv")
+	err = Reindex(context.Background(), fixturePath, dst, Options{
+		RollbackSink: &delta,
+		OnRollback:   func(i RollbackInfo) { infos = append(infos, i) },
+	})
+	assertNoErr(t, err)
+	if len(infos) != 1 || infos[0].Bytes != int64(delta.Len()) {
+		t.Fatalf("OnRollback infos = %+v (delta %d bytes)", infos, delta.Len())
+	}
+
+	restored := filepath.Join(dir, "restored.mkv")
+	err = ApplyRollback(context.Background(), dst, bytes.NewReader(delta.Bytes()), restored)
+	assertNoErr(t, err)
+	orig, err := os.ReadFile(fixturePath)
+	assertNoErr(t, err)
+	got, err := os.ReadFile(restored)
+	assertNoErr(t, err)
+	if !bytes.Equal(orig, got) {
+		t.Error("facade rollback did not reconstruct the original byte for byte")
+	}
+}
+
+// TestFacadeRetimeTracks proves RetimeTracks delegates: shift the fixture's
+// audio track later by 200ms and check the block times moved.
+func TestFacadeRetimeTracks(t *testing.T) {
+	requireFixture(t)
+	dir := t.TempDir()
+	work := filepath.Join(dir, "retime.mkv")
+	data, err := os.ReadFile(fixturePath)
+	assertNoErr(t, err)
+	assertNoErr(t, os.WriteFile(work, data, 0o644))
+
+	c, err := Open(context.Background(), work)
+	assertNoErr(t, err)
+	var audio uint64
+	for _, tr := range c.Tracks {
+		if tr.Type == AudioTrack {
+			audio = tr.ID
+			break
+		}
+	}
+	if audio == 0 {
+		t.Skip("fixture has no audio track")
+	}
+
+	err = RetimeTracks(context.Background(), work, map[uint64]int64{audio: 200_000_000}, Options{DeepVerify: true})
+	assertNoErr(t, err)
 }
 
 // TestFacadeContentHashes proves WriteContentHashes + VerifyContentHashes

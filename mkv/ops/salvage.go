@@ -34,18 +34,18 @@ type RepairedRange = mkv.RepairedRange
 
 // SalvageReport summarises one Salvage run.
 type SalvageReport struct {
-	ClustersCopied int
-	BytesCopied    int64
-	BytesSkipped   int64
-	DamagedRanges  []DamagedRange
+	ClustersCopied int            `json:"clusters_copied"`
+	BytesCopied    int64          `json:"bytes_copied"`
+	BytesSkipped   int64          `json:"bytes_skipped"`
+	DamagedRanges  []DamagedRange `json:"damaged_ranges"`
 	// RepairedRanges lists the regions where cluster framing was re-derived
 	// from the bytes (corrected sizes, continuation headers around a gap)
 	// instead of dropping the whole declared extent; the media inside is
 	// verbatim. Empty on a clean source.
-	RepairedRanges []RepairedRange
+	RepairedRanges []RepairedRange `json:"repaired_ranges"`
 	// CleanCutBytes counts video bytes intentionally dropped after damage
 	// gaps because they precede the next video keyframe (Options.CleanCut).
-	CleanCutBytes int64
+	CleanCutBytes int64 `json:"clean_cut_bytes"`
 }
 
 // Salvage produces a best-effort copy of a damaged Matroska/WebM file: unlike

@@ -250,6 +250,43 @@ export interface FingerprintReport {
   tracks: TrackFingerprint[]
 }
 
+/** One span of the source a repair could not carry over; see SalvageReport. */
+export interface DamagedRange {
+  start_offset: number
+  end_offset: number
+  approx_start_ms: number
+  approx_end_ms: number
+}
+
+/** One region a repair would reconstruct around damage; see SalvageReport. */
+export interface RepairedRange {
+  start_offset: number
+  end_offset: number
+  /** Media bytes preserved that a plain skip-to-next-cluster would drop. */
+  bytes_kept: number
+}
+
+/**
+ * Result of mapDamage(): the damage map a repair WOULD produce - what it
+ * keeps, reconstructs and loses, with byte offsets and approximate
+ * presentation times - computed without writing anything. The browser twin
+ * of `mkvgo salvage --dry-run`: diagnose a local file before uploading it.
+ */
+export interface SalvageReport {
+  clusters_copied: number
+  bytes_copied: number
+  bytes_skipped: number
+  damaged_ranges: DamagedRange[] | null
+  repaired_ranges: RepairedRange[] | null
+  /** Video bytes a clean-cut repair would drop after gaps (cleanCut option). */
+  clean_cut_bytes: number
+}
+
+export interface MapDamageOptions extends AbortOptions {
+  /** Account for resuming video only at the next keyframe after each gap. */
+  cleanCut?: boolean
+}
+
 export interface ProbeOptions extends AbortOptions {
   /** Build the keyframe index (MKV: full scan when the file has no Cues). */
   keyframes?: boolean
@@ -561,6 +598,15 @@ export interface MkvGoApi {
    * WebM sources only.
    */
   fingerprint(input: Uint8Array | Blob, options?: AbortOptions): Promise<FingerprintReport>
+
+  /**
+   * Map the damage of a (possibly corrupted) MKV/WebM without writing
+   * anything: the report a repair would produce - repaired ranges, lost
+   * ranges with byte offsets and approximate presentation times. Full
+   * tolerant walk of the file (no decoding). The repair operations
+   * themselves are not available in wasm (browser inputs are read-only).
+   */
+  mapDamage(input: Uint8Array | Blob, options?: MapDamageOptions): Promise<SalvageReport>
 }
 
 // ---------------------------------------------------------------------------

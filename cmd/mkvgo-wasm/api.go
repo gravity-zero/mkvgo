@@ -1088,6 +1088,36 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 	})
 }
 
+// mapDamageJS(input, opts?) -> Promise<SalvageReport>: the read-only damage
+// map (the browser twin of `mkvgo salvage --dry-run`). It walks the file the
+// way a repair would - surgical recovery, damaged ranges with byte offsets
+// and approximate presentation times, clean-cut cost when opts.cleanCut is
+// set - and writes nothing, so a local file can be diagnosed before any
+// upload. The repair operations themselves (salvage, reindex, retime,
+// rollback) stay out of WASM by design: they rewrite or patch files, and
+// browser inputs are read-only Blobs.
+func mapDamageJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("mapDamage: missing input") })
+	}
+	input := args[0]
+	opts := optArg(args, 1)
+	ctx, release := signalContext(opts)
+	cleanCut := opts.Truthy() && opts.Get("cleanCut").Truthy()
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("mapDamage: %w", err)
+		}
+		report, err := ops.MapDamage(ctx, "in", mkv.Options{FS: fs, CleanCut: cleanCut})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}
+
 // openWatermarkJS(a, b, opts?) -> Promise<WatermarkHandle> for forensic A/B
 // session watermarking. a and b are two GOP-aligned encodes of one title
 // (Uint8Array or Blob/File). The handle serves shared playlists plus per-segment

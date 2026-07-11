@@ -16,10 +16,10 @@ type ProgressFunc func(processed, total int64)
 // timestamp after it (or, for a truncated tail, the last known-good
 // timestamp repeated, since there is no "after").
 type DamagedRange struct {
-	StartOffset   int64
-	EndOffset     int64
-	ApproxStartMs int64
-	ApproxEndMs   int64
+	StartOffset   int64 `json:"start_offset"`
+	EndOffset     int64 `json:"end_offset"`
+	ApproxStartMs int64 `json:"approx_start_ms"`
+	ApproxEndMs   int64 `json:"approx_end_ms"`
 }
 
 // RepairedRange records one region that a tolerant walk (ops.Salvage, or
@@ -29,18 +29,18 @@ type DamagedRange struct {
 // inside the kept runs remain verbatim. BytesKept counts the media bytes
 // preserved that a plain skip-to-next-cluster resync would have dropped.
 type RepairedRange struct {
-	StartOffset int64
-	EndOffset   int64
-	BytesKept   int64
+	StartOffset int64 `json:"start_offset"`
+	EndOffset   int64 `json:"end_offset"`
+	BytesKept   int64 `json:"bytes_kept"`
 }
 
 // RollbackInfo summarises the delta entry a repair wrote to
 // Options.RollbackSink: its size and the sha256 of the original (pre-repair)
 // and repaired files that gate its application.
 type RollbackInfo struct {
-	Bytes     int64
-	SrcSHA256 [32]byte
-	DstSHA256 [32]byte
+	Bytes     int64    `json:"bytes"`
+	SrcSHA256 [32]byte `json:"src_sha256"`
+	DstSHA256 [32]byte `json:"dst_sha256"`
 }
 
 // Options holds optional parameters for long-running operations.

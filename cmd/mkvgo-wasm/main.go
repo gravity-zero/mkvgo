@@ -4,17 +4,19 @@
 // registers a global `MkvGo` object whose methods mirror the library: probe,
 // remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, openHLS, openABR,
 // openConcat, extractSubtitleVTT, analyze, playability, ladder, ingest,
-// fingerprint. Every method returns a Promise; inputs are Uint8Array (whole
-// file in memory) or, for probe/openHLS/openABR/openConcat/analyze/
-// playability/ladder/ingest/fingerprint, a Blob/File - read through ranged
-// slices, so probing a 40 GB file in the browser touches only a few hundred
-// kilobytes, and an on-demand plan (media segments and windowed subtitle
-// renditions alike) reads only the windows a player watches. analyze and
-// fingerprint read the whole file (a full block-header walk / a full payload
-// hash respectively, neither ever decodes); playability and ladder are
-// head-only, like probe; ingest is head-only unless its analyze option is
-// set, and its reindex step is never performed in wasm (read-only decision
-// client - see docs/wasm.md).
+// fingerprint, mapDamage. Every method returns a Promise; inputs are
+// Uint8Array (whole file in memory) or, for probe/openHLS/openABR/openConcat/
+// analyze/playability/ladder/ingest/fingerprint/mapDamage, a Blob/File - read
+// through ranged slices, so probing a 40 GB file in the browser touches only
+// a few hundred kilobytes, and an on-demand plan (media segments and windowed
+// subtitle renditions alike) reads only the windows a player watches. analyze,
+// fingerprint and mapDamage read the whole file (a full block-header walk / a
+// full payload hash / a full tolerant walk respectively, none ever decodes);
+// playability and ladder are head-only, like probe; ingest is head-only
+// unless its analyze option is set. The repair and patch operations (reindex,
+// salvage, retime, rollback) are never performed in wasm - browser inputs are
+// read-only Blobs; mapDamage is their read-only decision half (see
+// docs/wasm.md).
 //
 // Build: make wasm (dist/wasm/mkvgo.wasm + wasm_exec.js). See docs/wasm.md.
 package main
@@ -41,6 +43,7 @@ func main() {
 	api.Set("ladder", js.FuncOf(ladderJS))
 	api.Set("ingest", js.FuncOf(ingestJS))
 	api.Set("fingerprint", js.FuncOf(fingerprintJS))
+	api.Set("mapDamage", js.FuncOf(mapDamageJS))
 	js.Global().Set("MkvGo", api)
 
 	// Keep the Go runtime alive; work happens in the exported callbacks.

@@ -54,6 +54,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `ladder(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `Rung[]` — recommended ABR ladder capped at the source resolution/bitrate |
 | `ingest(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, unless `opts.analyze`) | `ServingPlan` — one-call onboarding decision: strategy, seek-index check, ladder when transcode is needed; read-only (never reindexes) |
 | `fingerprint(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full payload read, not head-only) | `FingerprintReport` — container-independent content identity (per-track + whole-file digests) |
+| `mapDamage(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - full tolerant walk, writes nothing) | `SalvageReport` - the damage map a repair would produce: repaired/lost ranges with byte offsets and approximate times; `opts.cleanCut` accounts for keyframe-aligned resume. The twin of `mkvgo salvage --dry-run`; the repair operations themselves are not in wasm (browser inputs are read-only) |
 | `version()` | — | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:

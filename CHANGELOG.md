@@ -24,6 +24,26 @@ All notable changes to mkvgo are documented here. The format is based on
   tracks, cues mixing shifted and unshifted tracks, streamed Segments.
   `Options.DeepVerify` re-walks the result and checks every shifted track's
   first block moved by exactly the requested shift.
+- **WASM `mapDamage(input, opts?)`**: the read-only damage map (the browser
+  twin of `salvage --dry-run`) - diagnose a local, possibly corrupted file
+  before uploading it: repaired and lost ranges with byte offsets and
+  approximate presentation times, clean-cut cost with `opts.cleanCut`.
+  Accepts `Uint8Array` or `Blob`/`File` (ranged reads). TypeScript types
+  (`SalvageReport`, `DamagedRange`, `RepairedRange`) included. The repair
+  operations themselves stay out of wasm: browser inputs are read-only.
+
+### Changed
+
+- **Finished files now declare their Segment size.** `MKVWriter.Finalize`
+  seals the Segment's size (previously left as the unknown-size marker), so
+  every output - mux, merge, reindex, salvage, WebM - states its extent the
+  way mainstream muxers do. This is what lets the in-place operations hide
+  their transient journal past the declared end; files written by earlier
+  versions are still read fine, but `retime` refuses them (unknown size)
+  until they are reindexed once.
+- **`SalvageReport` JSON keys are now snake_case** (`clusters_copied`,
+  `damaged_ranges`, ...), aligned with `analyze`/`ingest`/`fingerprint` for
+  one consistent JSON surface across CLI `--json` and wasm.
 
 ## [0.19.0] - 2026-07-11
 

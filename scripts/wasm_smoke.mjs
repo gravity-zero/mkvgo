@@ -314,6 +314,37 @@ const fpMp4 = await MkvGo.fingerprint(mp4.data)
 check(fpMp4.tracks.every((t) => fp.tracks.some((m) => m.sha256 === t.sha256)),
   'MP4 fingerprint matches the MKV digests (cross-container, in-memory)')
 
+// --- mapDamage: read-only damage map (salvage --dry-run twin) ---
+const dmClean = await MkvGo.mapDamage(mkvBytes)
+check(dmClean.clusters_copied > 0 && dmClean.bytes_skipped === 0 &&
+  (dmClean.damaged_ranges ?? []).length === 0,
+  `mapDamage on a clean file reports zero damage (${dmClean.clusters_copied} clusters)`)
+// Splice junk right before the first cluster: the map must localize it
+// exactly (the walk breaks on the junk and resyncs on the cluster), still
+// writing nothing.
+{
+  const magic = [0x1f, 0x43, 0xb6, 0x75]
+  let at = -1
+  for (let i = 0; i + 4 <= mkvBytes.length; i++) {
+    if (mkvBytes[i] === magic[0] && mkvBytes[i + 1] === magic[1] &&
+        mkvBytes[i + 2] === magic[2] && mkvBytes[i + 3] === magic[3]) { at = i; break }
+  }
+  if (at > 0) {
+    const junk = new Uint8Array(99).fill(0x51)
+    const damaged = new Uint8Array(mkvBytes.length + junk.length)
+    damaged.set(mkvBytes.subarray(0, at), 0)
+    damaged.set(junk, at)
+    damaged.set(mkvBytes.subarray(at), at + junk.length)
+    const dm = await MkvGo.mapDamage(damaged)
+    check((dm.damaged_ranges ?? []).length === 1 &&
+      dm.damaged_ranges[0].start_offset === at &&
+      dm.damaged_ranges[0].end_offset === at + junk.length,
+      `mapDamage localizes spliced junk exactly (${JSON.stringify(dm.damaged_ranges)})`)
+  } else {
+    check(false, 'mapDamage splice: fixture has no cluster')
+  }
+}
+
 if (failures) { console.error(`wasm smoke: ${failures} FAILURE(S)`); process.exit(1) }
 console.log('wasm smoke: ALL PASS')
 process.exit(0)
