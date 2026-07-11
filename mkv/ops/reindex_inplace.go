@@ -64,45 +64,11 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		return fmt.Errorf("reindex inplace: Options.Resync is not supported in place (skipped corrupt bytes cannot be dropped from the file itself); use Reindex or ReindexReplace")
 	}
 
-	f, err := fs.DoOpenFile(path, os.O_RDWR, 0)
+	f, trunc, sync, size, err := beginInPlacePatch(path, fs, "reindex inplace")
 	if err != nil {
-		return fmt.Errorf("reindex inplace: open %s: %w", path, err)
+		return err
 	}
 	defer f.Close()
-
-	trunc, ok := f.(interface{ Truncate(size int64) error })
-	if !ok {
-		return fmt.Errorf("reindex inplace: file handle for %s does not support Truncate, cannot patch in place", path)
-	}
-	sync := func() error {
-		if s, ok := f.(interface{ Sync() error }); ok {
-			return s.Sync()
-		}
-		return nil
-	}
-
-	stat, err := fs.DoStat(path)
-	if err != nil {
-		return fmt.Errorf("reindex inplace: stat %s: %w", path, err)
-	}
-	size := stat.Size()
-
-	// Auto-recovery: a previous run may have crashed after landing its journal
-	// but before removing it. Roll that back before touching anything else.
-	journal, err := readInPlaceJournal(f, size)
-	if err != nil {
-		return fmt.Errorf("reindex inplace: %w", err)
-	}
-	if journal != nil {
-		if err := rollbackInPlaceJournal(f, journal); err != nil {
-			return fmt.Errorf("reindex inplace: auto-recovery: %w", err)
-		}
-		stat, err = fs.DoStat(path)
-		if err != nil {
-			return fmt.Errorf("reindex inplace: re-stat after auto-recovery: %w", err)
-		}
-		size = stat.Size()
-	}
 
 	// Head-only metadata: which track IDs are video, and the timecode scale
 	// cue times are stored in.
@@ -604,6 +570,57 @@ func voidHeaderBytes(totalSize int) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// beginInPlacePatch is the shared prologue of every in-place patch operation
+// (ReindexInPlace, RetimeTracks): open the file read-write, require Truncate
+// support, and auto-recover a journal left by a crashed previous run before
+// touching anything else. On success the caller owns closing f.
+func beginInPlacePatch(path string, fs *mkv.FS, op string) (f mkv.ReadWriteSeekCloser, trunc interface{ Truncate(size int64) error }, sync func() error, size int64, err error) {
+	f, err = fs.DoOpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, nil, nil, 0, fmt.Errorf("%s: open %s: %w", op, path, err)
+	}
+	closeOnErr := func(e error) (mkv.ReadWriteSeekCloser, interface{ Truncate(size int64) error }, func() error, int64, error) {
+		f.Close() //nolint:errcheck
+		return nil, nil, nil, 0, e
+	}
+
+	var ok bool
+	trunc, ok = f.(interface{ Truncate(size int64) error })
+	if !ok {
+		return closeOnErr(fmt.Errorf("%s: file handle for %s does not support Truncate, cannot patch in place", op, path))
+	}
+	sync = func() error {
+		if s, ok := f.(interface{ Sync() error }); ok {
+			return s.Sync()
+		}
+		return nil
+	}
+
+	stat, err := fs.DoStat(path)
+	if err != nil {
+		return closeOnErr(fmt.Errorf("%s: stat %s: %w", op, path, err))
+	}
+	size = stat.Size()
+
+	// Auto-recovery: a previous run may have crashed after landing its journal
+	// but before removing it. Roll that back before touching anything else.
+	journal, err := readInPlaceJournal(f, size)
+	if err != nil {
+		return closeOnErr(fmt.Errorf("%s: %w", op, err))
+	}
+	if journal != nil {
+		if err := rollbackInPlaceJournal(f, journal); err != nil {
+			return closeOnErr(fmt.Errorf("%s: auto-recovery: %w", op, err))
+		}
+		stat, err = fs.DoStat(path)
+		if err != nil {
+			return closeOnErr(fmt.Errorf("%s: re-stat after auto-recovery: %w", op, err))
+		}
+		size = stat.Size()
+	}
+	return f, trunc, sync, size, nil
 }
 
 // Crash-safety journal

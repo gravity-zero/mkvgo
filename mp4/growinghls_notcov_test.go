@@ -282,8 +282,8 @@ func growncovPatchKnownSegmentSize(t *testing.T, data []byte) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h2.ID != mkv.IDSegment || h2.Size >= 0 || n2 != 12 {
-		t.Fatalf("fixture's Segment header is not the writer's usual 12-byte unknown-size form (n2=%d, size=%d)", n2, h2.Size)
+	if h2.ID != mkv.IDSegment || n2 != 12 {
+		t.Fatalf("fixture's Segment header is not the writer's 12-byte (8-byte size VINT) form (n2=%d, size=%d)", n2, h2.Size)
 	}
 	segStart := pos + int64(n2)
 	known := int64(len(data)) - segStart

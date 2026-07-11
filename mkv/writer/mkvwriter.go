@@ -2,6 +2,8 @@ package writer
 
 import (
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -163,10 +165,15 @@ func (m *MKVWriter) Finalize() error {
 
 	seekData := buf.Bytes()
 	if len(seekData) > SeekHeadReserve {
-		_, err := m.W.Write(seekData)
-		return err
+		if _, err := m.W.Write(seekData); err != nil {
+			return err
+		}
+		return m.sealSegmentSize(m.RelPos())
 	}
 
+	// Capture the segment's final extent BEFORE seeking back into the file:
+	// everything below writes inside already-written regions.
+	segSize := m.RelPos()
 	if _, err := m.W.Seek(m.SegDataStart+m.SeekHeadPos, io.SeekStart); err != nil {
 		return err
 	}
@@ -175,9 +182,30 @@ func (m *MKVWriter) Finalize() error {
 	}
 	remaining := SeekHeadReserve - len(seekData)
 	if remaining >= 2 {
-		return WriteVoid(m.W, remaining)
+		if err := WriteVoid(m.W, remaining); err != nil {
+			return err
+		}
 	}
-	return nil
+	return m.sealSegmentSize(segSize)
+}
+
+// sealSegmentSize replaces the Segment's unknown-size marker (written by
+// startSegment as an 8-byte all-ones VINT) with the real segment data size,
+// at the same 8-byte width, so finished files declare their extent the way
+// every mainstream muxer does. Readers stop at the declared end - which is
+// what lets the in-place operations (ReindexInPlace, RetimeTracks) hide
+// their transient journal past it.
+func (m *MKVWriter) sealSegmentSize(segSize int64) error {
+	if _, err := m.W.Seek(m.SegDataStart-8, io.SeekStart); err != nil {
+		return err
+	}
+	if segSize >= int64(1)<<56-1 {
+		return fmt.Errorf("segment size %d does not fit an 8-byte VINT", segSize)
+	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(segSize)|uint64(1)<<56)
+	_, err := m.W.Write(buf[:])
+	return err
 }
 
 func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, durationMs int64) error {

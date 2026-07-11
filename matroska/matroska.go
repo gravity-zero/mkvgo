@@ -486,6 +486,16 @@ func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageRe
 // Options.RollbackSink. See mkv.RollbackInfo.
 type RollbackInfo = mkv.RollbackInfo
 
+// RetimeTracks shifts the block timecodes of the given tracks (track number
+// -> shift in nanoseconds, negative = earlier) in place, under the same
+// crash-safe journal as ReindexInPlace - the fix for a constant A/V desync
+// (audio content starting late) without rewriting the file. Cluster CRC-32
+// elements are recomputed and cues keyed on shifted tracks move along.
+// See ops.RetimeTracks.
+func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	return ops.RetimeTracks(ctx, path, shift, opts...)
+}
+
 // ApplyRollback reconstructs the pre-repair original from a repaired file
 // and the delta entry the repair wrote to Options.RollbackSink. It refuses
 // to reconstruct when the repaired file changed since the repair, and never

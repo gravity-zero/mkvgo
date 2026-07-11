@@ -93,8 +93,9 @@ type GrowingHLSPlan struct {
 	segStart int64 // Container.SegmentStart
 
 	// segDeclaredEnd is the Segment element's declared end offset (segStart +
-	// its size), or -1 when the Segment size is unknown (the common case: this
-	// repo's own writer never backpatches it). One of the two auto-finalize
+	// its size), or -1 when the Segment size is unknown (the shape a file
+	// still being written typically has: a size only becomes trustworthy once
+	// the muxer finished and sealed it). One of the two auto-finalize
 	// signals: the other is a non-Cluster trailing element (typically Cues).
 	segDeclaredEnd int64
 
@@ -824,9 +825,10 @@ func (p *GrowingHLSPlan) firstClusterOffset(src io.ReadSeeker) (int64, bool, err
 }
 
 // segmentDeclaredEnd reads the EBML+Segment headers and returns the Segment
-// element's declared end offset, or -1 when its size is unknown (the common
-// case - this repo's own writer never backpatches it, leaving the Segment
-// growable forever, which is exactly the shape a growing file has anyway).
+// element's declared end offset, or -1 when its size is unknown - the shape
+// a file still being written typically has (a finished muxer seals the size;
+// an in-progress download of one carries the final value early, which is why
+// reaching the declared end is an auto-finalize signal).
 func segmentDeclaredEnd(fs *mkv.FS, path string) (int64, error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {

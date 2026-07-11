@@ -4,6 +4,27 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`retime` / `ops.RetimeTracks`**: cancel a constant A/V desync (the repack
+  defect where audio content starts N ms after the video) by shifting the
+  block timecodes of the given tracks in place. Block timecodes are relative
+  to their cluster - signed int16, +-32.7 s at the standard 1 ms scale - so
+  cancelling a delay of hundreds of ms is a 2-byte patch per block: no
+  payload byte moves, no rewrite, no temp file, no disk duplication. The
+  patches run under the same crash-safe journal as `reindex-inplace`
+  (rollback on any failed check, auto-recovery after a crash) and
+  `--rollback-delta` captures them as an undo delta of a few hundred bytes.
+  Cluster CRC-32 elements covering patched blocks are recomputed; cues keyed
+  on shifted tracks move along. Per-track shifts fix several tracks with
+  different delays in one pass. Explicit refusals: sub-resolution shifts,
+  int16 overflow, negative absolute timestamps, unknown or block-less
+  tracks, cues mixing shifted and unshifted tracks, streamed Segments.
+  `Options.DeepVerify` re-walks the result and checks every shifted track's
+  first block moved by exactly the requested shift.
+
 ## [0.19.0] - 2026-07-11
 
 **Highlights**

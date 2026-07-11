@@ -1006,6 +1006,21 @@ Once `ReindexInPlace` has returned successfully there is no undo -- the journal 
 
 Choosing a variant: `Reindex` never touches the source (safest, needs a second path), `ReindexReplace` swaps a verified copy over the original (atomic, needs directory permission and transient double disk), `ReindexInPlace` patches the file (file-only permission, no disk duplication, seconds instead of a full copy on large files).
 
+### RetimeTracks (cancel a constant A/V desync in place)
+
+`ops.RetimeTracks` fixes the repack defect where a track's content starts late (a constant audio delay) by shifting its block timecodes in place. Block timecodes are relative to their cluster's Timestamp - signed int16, +-32.7 s at the standard 1 ms scale - so cancelling a delay of hundreds of ms is a 2-byte patch per block: no payload byte moves, no rewrite, no temp file.
+
+```go
+// Track 2's audio starts 900ms late: move it earlier. Negative = earlier.
+err := ops.RetimeTracks(ctx, "movie.mkv", map[uint64]int64{2: -900_000_000})
+```
+
+The patches run under the same crash-safety journal as `ReindexInPlace` (rollback on any failed check, auto-recovery after a crash), and `Options.RollbackSink` captures them as a rollback delta of a few hundred bytes. Cluster CRC-32 elements covering patched blocks are recomputed; CuePoints keyed on shifted tracks move by the same shift (an audio-only file cues audio blocks; a mixed file cues video keyframes, which stay put unless the video track itself is shifted). Several tracks can be fixed with different shifts in one pass - the map is per track.
+
+Refusals are explicit: a shift that does not resolve to a whole number of timecode ticks, a relative timecode that would leave int16 range, an absolute timestamp that would become negative, an unknown or block-less track, a cue that mixes shifted and unshifted tracks, and streamed (unknown-size) Segments. `Options.DeepVerify` re-walks the file afterwards and checks every shifted track's first block moved by exactly the requested shift, on top of the always-on read-back verification of every patch.
+
+The facade re-exports it: `matroska.RetimeTracks`.
+
 ### Salvage (damaged files)
 
 `Reindex`/`Validate`/`BlockReader` refuse mid-file corruption by design -- that stays. `ops.Salvage` is the separate, explicitly lossy-tolerant operation: it walks `srcPath` exactly like `Reindex` (metadata elements and cluster payloads copied verbatim, the Cues index rebuilt from real video keyframes), but a structural failure inside the cluster stream -- a header that will not decode, a declared size that overflows, a cluster body whose children do not parse to its end -- is not fatal. The damaged region is repaired surgically when the bytes allow it (the same mechanism as `Reindex` with `Options.Resync` above: lying sizes corrected losslessly, chain-validated blocks around a gap kept, `Options.CleanCut` honored) and only what cannot be recovered is skipped and recorded. A truncated source yields a damaged range running to EOF (complete blocks before the cut are kept); a clean source yields zero damaged ranges and a result equivalent to `Reindex`.

@@ -722,6 +722,25 @@ mkvgo reindex-inplace movie.mkv --deep-verify
 mkvgo reindex-inplace movie.mkv --rollback
 ```
 
+### retime
+
+Cancel a constant A/V desync - the repack defect where audio content starts N ms after the video - by shifting the block timecodes of the given tracks in place. Matroska block timecodes are relative to their cluster (signed 16-bit, a range of +-32.7 s at the standard 1 ms timecode scale), so cancelling a delay of hundreds of ms is a 2-byte patch per block: no payload byte moves, no rewrite, no temp file, no disk duplication. Cluster CRC-32 elements covering patched blocks are recomputed, and cues keyed on shifted tracks move by the same amount.
+
+```
+mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--deep-verify] [--rollback-delta <file>]
+```
+
+- `--shift 2=-900` moves track 2's blocks 900 ms earlier (positive values move later). Repeat the flag to fix several tracks with different delays in one pass.
+- The patches run under the same crash-safe in-file journal as `reindex-inplace`: any failed check rolls the file back byte-identical, and a run interrupted by a crash is repaired automatically by the next in-place operation (or `reindex-inplace --rollback`).
+- `--deep-verify` re-walks the whole file afterwards and checks every shifted track's first block moved by exactly the requested amount, on top of the always-on patch verification.
+- `--rollback-delta <file>` captures the patches as a rollback delta of a few hundred bytes (see the `rollback` command).
+- Refused with an explicit message: a shift finer than the file's timecode resolution, a resulting relative timecode outside int16, an absolute timestamp that would go negative, an unknown track or one with no blocks, a cue mixing shifted and unshifted tracks, and streamed (unknown-size) files - repair those with `reindex` first.
+
+```bash
+# Audio (track 2) starts 900 ms late: pull it back into sync, keep an undo delta
+mkvgo retime movie.mkv --shift 2=-900 --deep-verify --rollback-delta movie.rbd
+```
+
 ### salvage
 
 Best-effort recovery copy of a damaged MKV or WebM file. `reindex` and `validate` refuse mid-file corruption by design; `salvage` is the explicitly lossy-tolerant counterpart: metadata elements and cluster payloads are copied verbatim and the Cues index is rebuilt, exactly like `reindex`, but a structural failure inside the cluster stream (a corrupt element header, a zeroed region, a size that overflows) is not fatal. The damaged region is repaired surgically when the bytes allow it -- a lying size field over an intact payload is corrected with zero loss, valid blocks around a gap inside a cluster are kept (chain-validated) -- and only what cannot be recovered is skipped and reported. A truncated source yields one damaged range running to EOF; a clean source yields zero damaged ranges and a result equivalent to `reindex`.
