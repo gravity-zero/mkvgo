@@ -27,13 +27,16 @@ import (
 // or created, and the track/movie durations follow. Track numbers are the
 // 1-based positions the probe reports.
 //
-// The write is moov-only and needs write permission on the file alone:
-//   - the rewritten moov has the same size -> patched in place;
-//   - the moov is the last top-level box -> the tail is rewritten;
-//   - otherwise (moov at the head, faststart) the new moov is appended and
-//     the old one is renamed to a free box - 4 bytes patched, crash-ordered
-//     (the new moov is synced to disk before the flip, so an interrupted run
-//     leaves the original semantics intact).
+// The write is moov-only, needs write permission on the file alone, and is
+// crash-ordered whatever the layout: the new moov is appended at the end of
+// the file and synced to disk FIRST, then the old moov is retired to a free
+// box - a single 4-byte type flip. At every instant the file carries one
+// intact, authoritative moov: before the flip the original one, after it the
+// new one; an interrupted run keeps the original semantics. The retired moov
+// stays behind as a free box (a repair is rare and a moov is small - the
+// growth is bounded and harmless); note that a faststart source is no longer
+// faststart afterwards, since the live moov now sits at the tail - re-run
+// `to-mp4 --faststart` if progressive HTTP serving needs it back.
 //
 // Explicit refusals: a shift that would present a track before the
 // presentation start (MP4 cannot - that would trim media content), zero or
@@ -213,18 +216,22 @@ func rewriteMoovEditShifts(payload []byte, shift map[uint64]int64) ([]byte, erro
 		}
 	}
 
-	// The movie duration is the longest track's presentation.
-	var maxDur int64
-	for _, d := range trakDurs {
-		if d > maxDur {
-			maxDur = d
+	// The movie duration is the longest track's presentation - recomputed
+	// only when every trak's duration was readable, so a foreign trak whose
+	// tkhd does not parse can never shrink the movie duration by absence.
+	if int64(len(trakDurs)) == int64(trakNum) {
+		var maxDur int64
+		for _, d := range trakDurs {
+			if d > maxDur {
+				maxDur = d
+			}
 		}
+		patched, err := patchMvhdDuration(mvhd.payload, maxDur)
+		if err != nil {
+			return nil, err
+		}
+		children[mvhdIdx] = box("mvhd", patched)
 	}
-	patched, err := patchMvhdDuration(mvhd.payload, maxDur)
-	if err != nil {
-		return nil, err
-	}
-	children[mvhdIdx] = box("mvhd", patched)
 
 	var w bw
 	for _, c := range children {
@@ -473,61 +480,39 @@ func roundTicks(ns int64, ts uint32) int64 {
 	return -((-prod + 500_000_000) / 1_000_000_000)
 }
 
-// writeMoovInPlace lands the rewritten moov with file-only permission:
-// same-size overwrite, tail rewrite, or append-and-retire (the old moov
-// becomes a free box AFTER the new one is on disk, so a crash at any point
-// leaves a readable file - the first surviving moov wins).
+// writeMoovInPlace lands the rewritten moov with the one write order that is
+// crash-safe on every layout: append the new moov at the end of the file,
+// sync it to disk, THEN retire the old moov to a free box with a single
+// 4-byte type flip (and sync again). Until the flip the original moov is the
+// file's only authoritative one; after it the appended moov is - so a crash
+// at any instant leaves a readable file with exactly one live moov. No
+// in-place overwrite of the only moov ever happens (a torn write there would
+// destroy the file), which is why the same-size and moov-at-tail layouts
+// take this path too, at the cost of one retired free block.
 func writeMoovInPlace(f mkv.ReadWriteSeekCloser, lay *topLayout, newMoov []byte) error {
-	syncer, canSync := f.(interface{ Sync() error })
-	switch {
-	case int64(len(newMoov)) == lay.moovSize:
-		if _, err := f.Seek(lay.moovOff, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := f.Write(newMoov); err != nil {
-			return errf("retime: patch moov: %w", err)
-		}
-	case lay.moovOff+lay.moovSize == lay.fileSize:
-		// The moov is the tail: rewrite it there.
-		truncer, ok := f.(interface{ Truncate(int64) error })
-		if !ok {
-			return errf("retime: the file handle does not support Truncate (required to rewrite the trailing moov)")
-		}
-		if _, err := f.Seek(lay.moovOff, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := f.Write(newMoov); err != nil {
-			return errf("retime: write moov: %w", err)
-		}
-		if err := truncer.Truncate(lay.moovOff + int64(len(newMoov))); err != nil {
-			return errf("retime: truncate: %w", err)
-		}
-	default:
-		// moov at the head (faststart): append the new moov, sync it to disk,
-		// THEN retire the old one to a free box - the crash-safe order.
-		if !canSync {
-			return errf("retime: the file handle does not support Sync (required for the crash-safe moov swap)")
-		}
-		if _, err := f.Seek(lay.fileSize, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := f.Write(newMoov); err != nil {
-			return errf("retime: append moov: %w", err)
-		}
-		if err := syncer.Sync(); err != nil {
-			return errf("retime: sync appended moov: %w", err)
-		}
-		if _, err := f.Seek(lay.moovOff+4, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := f.Write([]byte("free")); err != nil {
-			return errf("retime: retire old moov: %w", err)
-		}
+	syncer, ok := f.(interface{ Sync() error })
+	if !ok {
+		return errf("retime: the file handle does not support Sync (required for the crash-safe moov swap)")
 	}
-	if canSync {
-		if err := syncer.Sync(); err != nil {
-			return errf("retime: sync: %w", err)
-		}
+	if _, err := f.Seek(lay.fileSize, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write(newMoov); err != nil {
+		return errf("retime: append moov: %w", err)
+	}
+	if err := syncer.Sync(); err != nil {
+		return errf("retime: sync appended moov: %w", err)
+	}
+	// The box type sits at offset+4 in both header forms (the 64-bit form
+	// keeps size=1 at 0-3, the type at 4-7, the largesize after).
+	if _, err := f.Seek(lay.moovOff+4, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("free")); err != nil {
+		return errf("retime: retire old moov: %w", err)
+	}
+	if err := syncer.Sync(); err != nil {
+		return errf("retime: sync: %w", err)
 	}
 	return nil
 }

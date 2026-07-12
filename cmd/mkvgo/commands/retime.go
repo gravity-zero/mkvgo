@@ -70,8 +70,9 @@ func CmdRetime(args []string) {
 
 	// MP4/MOV routes to the edit-list engine: same flag, same sign, but the
 	// repair is a moov-only rewrite (no per-block patching, hence none of the
-	// Matroska engine's mode flags).
-	if isMP4Path(path) {
+	// Matroska engine's mode flags). Routed by the file's FIRST BYTES, never
+	// its name, like the library router - a mislabeled file lands right.
+	if isMP4Content(path) {
 		if inPlace || replace || keepBackup || deepVerify || strict || deltaPath != "" {
 			Fatal("retime on an MP4 edits the moov only; --in-place/--replace/--keep-backup/--deep-verify/--strict/--rollback-delta do not apply")
 		}

@@ -71,13 +71,13 @@ func measuredAudioDelayMs(t *testing.T, mp4Path string) int64 {
 }
 
 // TestMP4RetimeTracks: delaying then cancelling a track's presentation
-// round-trips through real parsers, on both moov layouts (tail rewrite and
-// the faststart append-and-retire path).
+// round-trips through real parsers, on both moov layouts (moov at the tail
+// and faststart) - both land through the same crash-ordered append-and-retire.
 func TestMP4RetimeTracks(t *testing.T) {
 	for _, fastStart := range []bool{false, true} {
 		name := "moov-at-tail"
 		if fastStart {
-			name = "faststart-append-retire"
+			name = "faststart"
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -136,35 +136,43 @@ func TestMP4RetimeTracksRefusals(t *testing.T) {
 	}
 }
 
-// TestMP4RetimeTracksFastStartRetiresOldMoov: the faststart path appends the
-// new moov and retires the old one to a free box, growing the file by
-// exactly the new moov.
-func TestMP4RetimeTracksFastStartRetiresOldMoov(t *testing.T) {
-	ctx := context.Background()
-	path := editShiftFixture(t, true)
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := RetimeTracks(ctx, path, map[uint64]int64{2: 250_000_000}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) <= len(before) {
-		t.Fatalf("faststart repair must append the new moov (size %d -> %d)", len(before), len(after))
-	}
-	// The prefix is untouched except the old moov's 4-byte type flip.
-	diffs := 0
-	for i := range before {
-		if before[i] != after[i] {
-			diffs++
+// TestMP4RetimeTracksRetiresOldMoov: EVERY layout lands through the
+// crash-ordered append-and-retire - the file grows by the new moov and the
+// only pre-existing bytes that change are the old moov's 4-byte type flip
+// (no in-place overwrite of the only moov can ever tear it).
+func TestMP4RetimeTracksRetiresOldMoov(t *testing.T) {
+	for _, fastStart := range []bool{false, true} {
+		name := "moov-at-tail"
+		if fastStart {
+			name = "faststart"
 		}
-	}
-	if diffs != 4 {
-		t.Errorf("the existing bytes must change by exactly the 4-byte moov->free flip, got %d differing bytes", diffs)
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			path := editShiftFixture(t, fastStart)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := RetimeTracks(ctx, path, map[uint64]int64{2: 250_000_000}); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(after) <= len(before) {
+				t.Fatalf("the repair must append the new moov (size %d -> %d)", len(before), len(after))
+			}
+			diffs := 0
+			for i := range before {
+				if before[i] != after[i] {
+					diffs++
+				}
+			}
+			if diffs != 4 {
+				t.Errorf("the existing bytes must change by exactly the 4-byte moov->free flip, got %d differing bytes", diffs)
+			}
+		})
 	}
 }
 

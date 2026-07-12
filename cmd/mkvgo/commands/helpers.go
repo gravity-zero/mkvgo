@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -79,7 +80,7 @@ var CmdUsage = map[string]string{
 	"rollback":           "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv> (reconstruct the pre-repair original from its --rollback-delta entry)",
 	"retime":             "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>] (cancel a constant A/V desync; MP4 = moov edit list only, mode flags do not apply)",
 	"cue-health":         "mkvgo cue-health <file.mkv> [-json] (head-only seek-index triage: which tracks the cues reference; exit 1 when unhealthy)",
-	"diagnose":           "mkvgo diagnose <file.mkv> [-json] (one-call triage: index health + per-track audio delay + size coherence, each finding with its remedy; exit 1 on findings)",
+	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
 	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
 	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
@@ -206,6 +207,27 @@ func isMP4Path(path string) bool {
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp4", ".m4v", ".m4a", ".mov":
+		return true
+	}
+	return false
+}
+
+// isMP4Content sniffs the file's first bytes for an ISO-BMFF box structure -
+// the extension never decides, so a mislabeled file routes correctly. Used by
+// the commands whose two engines write differently (retime, diagnose); read
+// errors return false and let the Matroska engine report them.
+func isMP4Content(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false
+	}
+	switch string(head[4:8]) {
+	case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
 		return true
 	}
 	return false
