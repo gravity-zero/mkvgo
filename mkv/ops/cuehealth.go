@@ -17,28 +17,9 @@ import (
 // so a video file's index exists, readers call the file "indexed", and every
 // seek still lands mid-GOP.
 
-// CueHealthReport classifies a file's CuePoints by referenced track.
-type CueHealthReport struct {
-	TotalCues    int `json:"total_cues"`
-	VideoCues    int `json:"video_cues"`
-	NonVideoCues int `json:"non_video_cues"`
-	// UnknownTrackCues counts cues referencing a track number absent from
-	// the Tracks element (a stale or foreign index).
-	UnknownTrackCues int `json:"unknown_track_cues"`
-	// NonVideoPct is NonVideoCues+UnknownTrackCues over TotalCues, in percent.
-	NonVideoPct float64 `json:"non_video_pct"`
-	// PerTrack counts cues per referenced track number.
-	PerTrack map[uint64]int `json:"per_track"`
-	// FirstCueMs/LastCueMs bracket the index's time coverage.
-	FirstCueMs int64 `json:"first_cue_ms"`
-	LastCueMs  int64 `json:"last_cue_ms"`
-	// HasVideoTrack tells which rule applied: a video file's cues must key
-	// on video keyframes; an audio-only file legitimately cues audio.
-	HasVideoTrack bool `json:"has_video_track"`
-	// Healthy is the verdict; Reason says why not, with the remedy.
-	Healthy bool   `json:"healthy"`
-	Reason  string `json:"reason,omitempty"`
-}
+// CueHealthReport classifies a file's CuePoints by referenced track. The
+// definition lives in the mkv package (see mkv/reports.go).
+type CueHealthReport = mkv.CueHealthReport
 
 // CueHealth reads path's Tracks and Cues head-only (SeekHead-guided, no
 // cluster walk) and classifies every CuePoint by the track it references.

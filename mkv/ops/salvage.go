@@ -32,26 +32,9 @@ type DamagedRange = mkv.DamagedRange
 // mirrors DamagedRange.
 type RepairedRange = mkv.RepairedRange
 
-// SalvageReport summarises one Salvage run.
-type SalvageReport struct {
-	ClustersCopied int            `json:"clusters_copied"`
-	BytesCopied    int64          `json:"bytes_copied"`
-	BytesSkipped   int64          `json:"bytes_skipped"`
-	DamagedRanges  []DamagedRange `json:"damaged_ranges"`
-	// RepairedRanges lists the regions where cluster framing was re-derived
-	// from the bytes (corrected sizes, continuation headers around a gap)
-	// instead of dropping the whole declared extent; the media inside is
-	// verbatim. Empty on a clean source.
-	RepairedRanges []RepairedRange `json:"repaired_ranges"`
-	// CleanCutBytes counts video bytes intentionally dropped after damage
-	// gaps because they precede the next video keyframe (Options.CleanCut).
-	CleanCutBytes int64 `json:"clean_cut_bytes"`
-	// TruncatedTail is the first-class "incomplete download" verdict: the
-	// final damaged range runs to the end of the file - the missing tail is
-	// not recoverable by ANY tool, only by re-acquiring the source. Mid-file
-	// damage without this flag is repairable in full (resync).
-	TruncatedTail bool `json:"truncated_tail"`
-}
+// SalvageReport summarises one Salvage run. The definition lives in the mkv
+// package (see mkv/reports.go); this alias mirrors DamagedRange.
+type SalvageReport = mkv.SalvageReport
 
 // Salvage produces a best-effort copy of a damaged Matroska/WebM file: unlike
 // Reindex (which refuses mid-file corruption by design, the same as Validate

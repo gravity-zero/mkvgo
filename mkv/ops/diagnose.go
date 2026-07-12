@@ -23,31 +23,14 @@ import (
 // report for callers with their own threshold).
 const audioDelayFindingThresholdNs = 100_000_000 // 100ms
 
-// Finding is one diagnosed defect with its remedy.
-type Finding struct {
-	// Kind: "no-index" | "index-misskeyed" | "index-stale-tracks" |
-	// "audio-delay" | "truncated" | "damaged" | "trailing-junk" |
-	// "streamed-size".
-	Kind    string `json:"kind"`
-	Detail  string `json:"detail"`
-	Remedy  string `json:"remedy"`
-	Track   uint64 `json:"track,omitempty"`
-	DelayNs int64  `json:"delay_ns,omitempty"`
-}
+// Finding is one diagnosed defect with its remedy. The definition lives in
+// the mkv package (see mkv/reports.go), shared with the mp4 triage.
+type Finding = mkv.Finding
 
-// Diagnosis is the full triage verdict for one file.
-type Diagnosis struct {
-	Healthy  bool      `json:"healthy"`
-	Findings []Finding `json:"findings"`
-	// CueHealth is the index classification behind the index findings.
-	CueHealth *CueHealthReport `json:"cue_health"`
-	// AudioDelaysNs holds every audio track's start delay (see
-	// AudioStartDelays), whether or not it crossed the finding threshold.
-	AudioDelaysNs map[uint64]int64 `json:"audio_delays_ns"`
-	// Damage is the tolerant-walk report, present only when the size check
-	// warranted the walk (truncation or trailing bytes suspected).
-	Damage *SalvageReport `json:"damage,omitempty"`
-}
+// Diagnosis is the full triage verdict for one file - the same shape
+// mp4.Diagnose returns, so one scan loop covers a mixed library. The
+// definition lives in the mkv package (see mkv/reports.go).
+type Diagnosis = mkv.Diagnosis
 
 // Diagnose classifies path in one call: seek-index health (head-only), audio
 // start delays (first clusters), declared-size coherence (head-only), and -
