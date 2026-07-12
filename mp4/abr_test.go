@@ -69,7 +69,7 @@ func TestRemuxToABR(t *testing.T) {
 		t.Error("v2 video segments missing")
 	}
 
-	// One source is rejected — RemuxToHLS is the tool for that.
+	// One source is rejected - RemuxToHLS is the tool for that.
 	if err := RemuxToABR(context.Background(), []string{hi}, t.TempDir()); err == nil {
 		t.Error("single source must be rejected")
 	}

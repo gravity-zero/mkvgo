@@ -86,7 +86,7 @@ func TestCmdMux(t *testing.T) {
 }
 
 // TestCmdMux_ColonInPath guards the file:trackID parser against paths that
-// themselves contain a colon — most importantly Windows drive-letter paths
+// themselves contain a colon - most importantly Windows drive-letter paths
 // (C:\dir\file.mkv:1). The spec must split on the LAST colon, keeping the path
 // intact. A colon in the filename is legal on Linux, so it stands in for the
 // Windows case in CI.

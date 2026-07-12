@@ -2,7 +2,7 @@ package mkv
 
 import "fmt"
 
-// codec_names.go — display-only derivations that ffprobe reports but the mkvgo
+// codec_names.go - display-only derivations that ffprobe reports but the mkvgo
 // fast path otherwise omits: codec_long_name and channel_layout. Both are pure
 // functions of fields already read (Codec, Channels), exposed as methods like the
 // colour name helpers so a consumer can match ffprobe's strings.

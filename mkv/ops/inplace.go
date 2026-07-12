@@ -18,7 +18,7 @@ import (
 // cluster copy). It writes directly over the source via Seek+Write, so it is
 // NOT crash-safe: a crash mid-write can corrupt the file, and it fails if the
 // new metadata does not fit the existing region (adjacent Void space counts as
-// room — files written by mkvgo reserve some on purpose). For precious or
+// room - files written by mkvgo reserve some on purpose). For precious or
 // untrusted data, prefer EditMetadata, which writes a fresh file the caller
 // can atomically rename.
 //
@@ -101,7 +101,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	}
 
 	if newSize+reserve > available {
-		return fmt.Errorf("new metadata (%d bytes) exceeds available space (%d bytes) — use full rewrite instead", newSize+reserve, available)
+		return fmt.Errorf("new metadata (%d bytes) exceeds available space (%d bytes) - use full rewrite instead", newSize+reserve, available)
 	}
 
 	f, err := fs.DoOpenFile(path, os.O_RDWR, 0)
@@ -149,7 +149,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 
-	// Flush to stable storage. NOTE: the write above is in-place and NOT atomic —
+	// Flush to stable storage. NOTE: the write above is in-place and NOT atomic  -
 	// a crash mid-write can corrupt the source file. Use EditMetadata (full
 	// rewrite to a new file) when crash safety matters.
 	if s, ok := f.(interface{ Sync() error }); ok {
@@ -272,7 +272,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 }
 
 // classifyTailEntries re-reads the old SeekHead and sorts its entries: those
-// pointing outside the head region are preserved for the rebuilt SeekHead —
+// pointing outside the head region are preserved for the rebuilt SeekHead  -
 // except a post-cluster Tags element, which the in-place edit folds into the
 // head (its location and full size are recorded so it can be voided).
 func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *metadataRegion) error {

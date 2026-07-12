@@ -1,11 +1,11 @@
 package reader
 
-// codec_colour.go — derive colour/HDR metadata from the codec bitstream stored in
+// codec_colour.go - derive colour/HDR metadata from the codec bitstream stored in
 // Track.CodecPrivate, as a FALLBACK for when the Matroska container Colour element
 // (0x55B0) did not supply a field. The container value always wins per field; this
 // only fills gaps. It is pure in-memory parsing of bytes the reader already holds
 // (no extra I/O) and is defensive: any malformed/truncated input leaves the colour
-// fields untouched (nil) — it never errors or panics, so ReadMeta/Read never fail
+// fields untouched (nil) - it never errors or panics, so ReadMeta/Read never fail
 // because of bitstream parsing.
 //
 // Codecs: H.264 (avcC → SPS VUI), HEVC (hvcC header + SPS VUI), AV1 (av1C header +
@@ -68,7 +68,7 @@ func pixelFormat(chroma, bitDepth *uint16) string {
 	return ""
 }
 
-// avcSAR is H.264/HEVC Table E-1: aspect_ratio_idc (1–16) → sample aspect ratio
+// avcSAR is H.264/HEVC Table E-1: aspect_ratio_idc (1-16) → sample aspect ratio
 // width:height. Index 0 is unspecified; 255 is Extended_SAR (read inline).
 var avcSAR = [17][2]uint16{
 	{}, {1, 1}, {12, 11}, {10, 11}, {16, 11}, {40, 33}, {24, 11}, {20, 11},
@@ -100,7 +100,7 @@ func validBitDepth(d uint32) *uint16 {
 }
 
 // cicpOrNil returns nil for CICP code 2 ("unspecified"), which carries no colour
-// information — ffprobe omits the field in that case, and leaving it nil keeps the
+// information - ffprobe omits the field in that case, and leaving it nil keeps the
 // "nil means fall back" contract. Other code points (including 0 = identity/GBR)
 // are real and returned as-is.
 func cicpOrNil(v uint32) *uint16 {
@@ -143,7 +143,7 @@ func fillColourFromCodecPrivate(t *mkv.Track) {
 }
 
 // mergeBitstreamColour fills any track field the container left nil from a
-// bitstream-derived colour — a codec-private SPS, or an in-band SPS read from the
+// bitstream-derived colour - a codec-private SPS, or an in-band SPS read from the
 // first sample. Container values always win; the bitstream only fills gaps.
 func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
 	if bc.determined {
@@ -269,7 +269,7 @@ func (r *bitReader) ue() uint32 {
 
 // ueMax reads a ue(v) and flags err (returning 0) when it exceeds max. Loop
 // counts read from the bitstream go through this so a forged huge value cannot
-// make a parse loop spin billions of times — the classic bitstream hang/DoS.
+// make a parse loop spin billions of times - the classic bitstream hang/DoS.
 func (r *bitReader) ueMax(max uint32) uint32 {
 	v := r.ue()
 	if v > max {
@@ -424,7 +424,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 		parseAVCVUI(r, bc)
 	}
 	// AVC colour and bit depth come from the bitstream itself, so a parse error
-	// makes the whole result untrustworthy — discard it and fall back to nil.
+	// makes the whole result untrustworthy - discard it and fall back to nil.
 	if r.err || !bc.nonEmpty() {
 		return nil
 	}
@@ -454,7 +454,7 @@ func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 }
 
 // readVUIAspectRatio reads aspect_ratio_idc (after aspect_ratio_info_present_flag)
-// and records the sample aspect ratio: Table E-1 for idc 1–16, or the inline
+// and records the sample aspect ratio: Table E-1 for idc 1-16, or the inline
 // sar_width:sar_height for Extended_SAR (255). This is the most common way H.264
 // signals SAR, and it lives in the avcC's SPS, so it is read head-only.
 func readVUIAspectRatio(r *bitReader, bc *bitstreamColour) {

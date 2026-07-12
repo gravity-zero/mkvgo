@@ -6,7 +6,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// chapters.go — MP4 chapter markers, written as a Nero "chpl" box inside
+// chapters.go - MP4 chapter markers, written as a Nero "chpl" box inside
 // moov/udta. This is the most widely read chapter format on desktop players
 // (VLC, mpv, MediaInfo, ffprobe). It carries only a start time and a title per
 // chapter, which is exactly what Matroska's ChapterAtom provides.
@@ -25,7 +25,7 @@ func buildChplBox(chapters []mkv.Chapter) []byte {
 }
 
 // flattenChapters returns the top-level chapters with a title (sub-chapters and
-// untitled entries are ignored — chpl is a flat list).
+// untitled entries are ignored - chpl is a flat list).
 func flattenChapters(chapters []mkv.Chapter) []mkv.Chapter {
 	out := chapters[:0:0]
 	for _, c := range chapters {

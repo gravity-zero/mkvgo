@@ -1,6 +1,6 @@
 package mp4
 
-// mutation_kill_test.go — targeted tests for surviving gremlins mutants.
+// mutation_kill_test.go - targeted tests for surviving gremlins mutants.
 // Each test exercises an exact boundary value or asserts an exact arithmetic
 // result so that the specific operator the mutant flips produces a clearly
 // different observable output.
@@ -215,7 +215,7 @@ func TestMdhdDurationMsSentinelsAndArithmetic(t *testing.T) {
 // TestTicksToMsArithmeticDistinct kills ARITHMETIC_BASE mutants (* → +, etc.)
 // by asserting the exact integer-division result for non-trivial inputs.
 func TestTicksToMsArithmeticDistinct(t *testing.T) {
-	// 3001 * 1000 / 1001 = 2998 (integer division — distinguishes +, -, /)
+	// 3001 * 1000 / 1001 = 2998 (integer division - distinguishes +, -, /)
 	if got := ticksToMs(3001, 1001); got != 2998 {
 		t.Errorf("ticksToMs(3001,1001) = %d, want 2998", got)
 	}

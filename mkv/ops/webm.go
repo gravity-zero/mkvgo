@@ -15,7 +15,7 @@ import (
 // file to dstPath: it validates that every track uses a WebM-compatible codec,
 // then copies the media (every block, verbatim) into a "webm"-DocType container
 // with time-bounded clusters, a Cues seek index and a SeekHead. It does NOT
-// transcode — a source whose codecs fall outside the WebM subset is rejected
+// transcode - a source whose codecs fall outside the WebM subset is rejected
 // with an error and no output is produced.
 //
 // Elements NOT carried into the output: Chapters, Attachments and Tags are

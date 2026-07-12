@@ -100,8 +100,8 @@ func subResourceNames(plan *HLSPlan) []string {
 	return names
 }
 
-// Whatever order the subtitle resources are requested in — sequential,
-// reverse, middle-out — each response must be byte-identical to the file the
+// Whatever order the subtitle resources are requested in - sequential,
+// reverse, middle-out - each response must be byte-identical to the file the
 // full pass writes. This is the exactness contract the incremental cursor
 // must uphold (boundary-crossing cues, duration-less cues resolved on far
 // successors, sparse tracks).
@@ -150,7 +150,7 @@ func TestPlanHLSSubtitleWindowsExactAnyOrder(t *testing.T) {
 	}
 }
 
-// The first windowed request must cost a bounded prefix read — the direct-
+// The first windowed request must cost a bounded prefix read - the direct-
 // play property. The exact bound is the segment end plus the relative-
 // timecode margin (~33 s at the standard scale): on this 300 s fixture that
 // is well under a third of the file, where the previous whole-track scan
@@ -182,7 +182,7 @@ func TestPlanHLSSubtitleFirstSegmentBoundedIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() / 3; readBytes > limit {
-		t.Errorf("first windowed request read %d of %d bytes (%.0f%%) — must be a bounded prefix, not a whole-track scan",
+		t.Errorf("first windowed request read %d of %d bytes (%.0f%%) - must be a bounded prefix, not a whole-track scan",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
 	}
 }
@@ -217,12 +217,12 @@ func TestPlanHLSSubtitleScanIncremental(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() + st.Size()/3; readBytes > limit {
-		t.Errorf("serving all windows sequentially read %d bytes for a %d-byte file (%.1fx) — the cursor must not rescan the prefix",
+		t.Errorf("serving all windows sequentially read %d bytes for a %d-byte file (%.1fx) - the cursor must not rescan the prefix",
 			readBytes, st.Size(), float64(readBytes)/float64(st.Size()))
 	}
 }
 
-// cancelAfterRSC cancels a context after a fixed number of reads — a
+// cancelAfterRSC cancels a context after a fixed number of reads - a
 // deterministic mid-scan client disconnect.
 type cancelAfterRSC struct {
 	f      mkv.ReadSeekCloser
@@ -245,7 +245,7 @@ func (c cancelAfterRSC) Seek(offset int64, whence int) (int64, error) {
 func (c cancelAfterRSC) Close() error { return c.f.Close() }
 
 // A client vanishing mid-scan must leave the cursor consistent: the next
-// live request serves output byte-identical to the full pass — committed
+// live request serves output byte-identical to the full pass - committed
 // progress is kept, nothing is duplicated, nothing is lost.
 func TestPlanHLSSubtitleCancelMidScanStaysExact(t *testing.T) {
 	src := buildSubCursorFixture(t)
@@ -290,7 +290,7 @@ func TestPlanHLSSubtitleCancelMidScanStaysExact(t *testing.T) {
 // buildSeekFixture writes a ~900 s source whose subtitle blocks ALL carry
 // explicit durations (the fast-seek precondition), including the trap: a cue
 // starting 10 s BEFORE a window that a cold seek reaches without ever
-// scanning the prefix — the backward margin must catch it.
+// scanning the prefix - the backward margin must catch it.
 func buildSeekFixture(t testing.TB) string {
 	t.Helper()
 	w, h := uint32(320), uint32(240)
@@ -366,7 +366,7 @@ func segNameFor(plan *HLSPlan, track int, ms int64) string {
 }
 
 // A cold seek to the middle of the presentation must serve the exact window
-// — including the trap cue that started before the window — and every later
+// - including the trap cue that started before the window - and every later
 // request (early segments, other cold jumps, whole track, sparse track) must
 // stay byte-identical to the full pass on the same plan instance.
 func TestPlanHLSSubtitleColdSeekExact(t *testing.T) {
@@ -418,7 +418,7 @@ func TestPlanHLSSubtitleColdSeekExact(t *testing.T) {
 
 // A cold seek must cost O(window), not O(position): the backward margin plus
 // the window, never the whole prefix. And sliding forward from the seek point
-// must reuse the island — near-zero additional I/O.
+// must reuse the island - near-zero additional I/O.
 func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 	src := buildSeekFixture(t)
 	var readBytes int64
@@ -443,7 +443,7 @@ func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() / 3; readBytes > limit {
-		t.Errorf("cold seek to 500s read %d of %d bytes (%.0f%%) — must cost O(window), not the whole prefix",
+		t.Errorf("cold seek to 500s read %d of %d bytes (%.0f%%) - must cost O(window), not the whole prefix",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
 	}
 
@@ -452,7 +452,7 @@ func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() / 20; readBytes > limit {
-		t.Errorf("sliding to the next segment read %d bytes (%.1f%% of the file) — the island must resume, not re-scan the lookback",
+		t.Errorf("sliding to the next segment read %d bytes (%.1f%% of the file) - the island must resume, not re-scan the lookback",
 			readBytes, 100*float64(readBytes)/float64(st.Size()))
 	}
 
@@ -463,7 +463,7 @@ func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() / 3; readBytes > limit {
-		t.Errorf("second far jump read %d of %d bytes (%.0f%%) — the island must be re-seeked, not extended across the gap",
+		t.Errorf("second far jump read %d of %d bytes (%.0f%%) - the island must be re-seeked, not extended across the gap",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
 	}
 }
@@ -471,7 +471,7 @@ func TestPlanHLSSubtitleColdSeekBoundedIO(t *testing.T) {
 // Concurrent players on one plan: subtitle windows (prefix, island and
 // whole-track paths racing on the same track), video segments and playlists
 // served simultaneously must all succeed and stay byte-identical to the full
-// pass. This is the locking contract of the per-track scan state — run under
+// pass. This is the locking contract of the per-track scan state - run under
 // the race detector in CI.
 func TestPlanHLSSubtitleConcurrentRequests(t *testing.T) {
 	src := buildSeekFixture(t)

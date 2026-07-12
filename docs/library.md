@@ -160,17 +160,17 @@ Memory use scales with the sample count, not the file size: sample data is strea
 
 ### MKV/WebM → fragmented-MP4 HLS
 
-> For the full picture — the CMAF model, on-demand serving, ABR, security,
-> trick-play, remote sources — see the **[streaming guide](streaming.md)**.
+> For the full picture - the CMAF model, on-demand serving, ABR, security,
+> trick-play, remote sources - see the **[streaming guide](streaming.md)**.
 > This section is the API reference.
 
 ```go
 err := mp4.RemuxToHLS(ctx, "in.mkv", "stream/", mp4.Options{SegmentMs: 6000})
 ```
 
-Writes a fragmented-MP4 / CMAF presentation into the output directory, served through two manifests over the same segments: HLS (`master.m3u8` + per-rendition media playlists) and DASH (`manifest.mpd`). Tracks are demuxed — the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) plus one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group / one MPD AdaptationSet each) — so multi-audio sources get native language selection. Each `.m4s` is `styp` + `moof` + `mdat`; each init is ftyp + moov with `mvex`/`trex` and empty sample tables (movie metadata — title, tags, cover art — rides on the video init). No transcoding — samples are copied verbatim, so the codec set matches `RemuxToMP4`.
+Writes a fragmented-MP4 / CMAF presentation into the output directory, served through two manifests over the same segments: HLS (`master.m3u8` + per-rendition media playlists) and DASH (`manifest.mpd`). Tracks are demuxed - the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) plus one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group / one MPD AdaptationSet each) - so multi-audio sources get native language selection. Each `.m4s` is `styp` + `moof` + `mdat`; each init is ftyp + moov with `mvex`/`trex` and empty sample tables (movie metadata - title, tags, cover art - rides on the video init). No transcoding - samples are copied verbatim, so the codec set matches `RemuxToMP4`.
 
-Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s) and each is independently decodable, so a player seeks by fetching the segment plus `init.mp4`. Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened) become segmented WebVTT renditions declared in the master playlist; bitmap subtitles are dropped (reported via `Options.OnDrop`). This is the CMAF *copy rung* of an HLS ladder — the packaging; bitrate variants (real ABR) remain a transcoder's job.
+Segments are cut on video keyframes at roughly `Options.SegmentMs` (default 6 s) and each is independently decodable, so a player seeks by fetching the segment plus `init.mp4`. Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened) become segmented WebVTT renditions declared in the master playlist; bitmap subtitles are dropped (reported via `Options.OnDrop`). This is the CMAF *copy rung* of an HLS ladder - the packaging; bitrate variants (real ABR) remain a transcoder's job.
 
 Memory is bounded regardless of file size: per-sample metadata is held in RAM (the same order the progressive muxer holds) while sample bytes are streamed through one temp file per track and read back sequentially as the segments are written.
 
@@ -204,7 +204,7 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 The zero-storage counterpart of `RemuxToHLS`. Sources may be Matroska/WebM or
 MP4/MOV (sniffed). A Matroska plan performs a few bounded reads (the metadata
 head with its Cues, the first and last clusters) and each `Segment(n)` seeks
-its window through the Cues; an MP4 plan is **exact by construction** — the
+its window through the Cues; an MP4 plan is **exact by construction** - the
 moov sample table is the index, so every resource (master, DASH manifest,
 I-frame playlist included) is byte-identical to the full pass, and `Segment`
 reads just its samples' byte ranges. A server answers any HLS request in
@@ -212,13 +212,13 @@ milliseconds with nothing pre-generated; combined with an `httpfs` source,
 only the ranges a viewer actually watches are ever transferred.
 
 The fragments are built by the same code as `RemuxToHLS`, so every resource is
-**byte-identical** to the full pass (regression-tested) — pre-generated and
+**byte-identical** to the full pass (regression-tested) - pre-generated and
 on-demand serving mix transparently. Cover art and global tags ride in the
 init segment (`WithAttachments`/`WithTags` reach them through the SeekHead,
 still head-only). Text subtitle tracks are declared in the master playlist and
 served as segmented WebVTT renditions (`subN.m3u8` + windowed `subN_00001.vtt`…,
 plus the whole track as `subN.vtt`). Text blocks carry no cue index, so the
-cues come from scanning the clusters — incrementally and bounded, with the
+cues come from scanning the clusters - incrementally and bounded, with the
 results cached in the plan: sequential playback advances a resumable prefix
 scan (one bounded read per segment), and a far seek jumps through the segment
 index to a bounded window, so any windowed request costs O(window) like a
@@ -363,7 +363,7 @@ vo,  _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000, KeepTracks:
 ```
 
 `KeepTracks` restricts a presentation to a subset of the source's Matroska track
-IDs. `PlanHLS`/`RemuxToHLS`/`RemuxToABR` then package only those tracks — the
+IDs. `PlanHLS`/`RemuxToHLS`/`RemuxToABR` then package only those tracks - the
 dropped renditions are simply never built, so a self-hosted server serves "VF
 only", "VO + English subs", "clean" (drop a logo/forced track) or a chosen
 camera angle from one file, at zero storage and near-zero latency to switch
@@ -418,10 +418,10 @@ chapters emits nothing extra either way.
 ```go
 ks, err := matroska.ExtractKeyframeSample(ctx, "movie.mkv", 12*60*1000+30*1000)
 // ks.PtsMs (the actual keyframe time), ks.Codec, ks.Ext (".h264"/".hevc"/".ivf"),
-// ks.Data — Annex-B with parameter sets prepended (H.264/HEVC) or IVF (VP8/VP9/AV1)
+// ks.Data - Annex-B with parameter sets prepended (H.264/HEVC) or IVF (VP8/VP9/AV1)
 ```
 
-Seeked through the Cues (bounded reads — works over `httpfs` too), never
+Seeked through the Cues (bounded reads - works over `httpfs` too), never
 decoded: pipe `ks.Data` to a decoder (`ffmpeg -i - -frames:v 1 thumb.jpg`) for
 the image. A storyboard is this in a loop over `Container.Keyframes`.
 
@@ -441,7 +441,7 @@ err := mp4.RemuxToABR(ctx, []string{"1080p.mkv", "720p.mkv"}, "stream/", mp4.Opt
 ```
 
 Packages pre-encoded quality variants (best first) into one multi-variant HLS
-master — the packaging half of ABR, no transcoding. The first source is the
+master - the packaging half of ABR, no transcoding. The first source is the
 reference (audio + subtitles for every variant, from `v1/`); the others are
 packaged `Options.VideoOnly`. Every variant gets its real
 `BANDWIDTH`/`RESOLUTION`/`CODECS` in the top `master.m3u8`. Sources should share
@@ -450,7 +450,7 @@ video AdaptationSet, a Representation per variant) is written at the top level
 too **when the variants are segment-aligned** (DASH shares one SegmentTimeline
 across a switch set); otherwise only each variant's own `v{k}/manifest.mpd` is
 written. Variants may be Matroska/WebM or progressive/**fragmented** (CMAF)
-MP4 — a pre-encoded ladder already in fragmented MP4 is read directly.
+MP4 - a pre-encoded ladder already in fragmented MP4 is read directly.
 
 ### On-demand ABR (`mp4.PlanABR`)
 
@@ -464,7 +464,7 @@ nothing is pre-generated. `plan.Resource(ctx, name)` builds `"master.m3u8"`,
 `"manifest.mpd"` (the combined DASH manifest, present only for segment-aligned
 variants) or any `"v{k}/<name>"` when asked, byte-identical to the file
 `RemuxToABR` would have written; `plan.Resources()` lists them all. One handler serves the whole
-ladder — ideal for a per-request media server, and with an httpfs source each
+ladder - ideal for a per-request media server, and with an httpfs source each
 variant transfers only the ranges a viewer watches. In the browser, the WASM
 `openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
 wasm.md).
@@ -588,7 +588,7 @@ Two features were evaluated and deliberately not implemented:
   one ever existed.
 - **Multi-period DASH.** Periods model *discontinuities* (ad insertion,
   splicing). Mapping chapters onto periods forces players to tear down and
-  rebuild decoders at every chapter mark — worse seeking for zero viewer
+  rebuild decoders at every chapter mark - worse seeking for zero viewer
   benefit. Chapters are already carried in the progressive MP4 remux
   (`chpl` + QuickTime chapter track); players read chapter UIs from there,
   and DASH VOD stays single-period.
@@ -610,10 +610,10 @@ opts := mp4.Options{
 ```
 
 `Encrypt` AES-128-encrypts every media segment (whole-segment CBC, PKCS#7,
-IV = segment sequence — RFC 8216) in both `RemuxToHLS` and `PlanHLS`; the two
+IV = segment sequence - RFC 8216) in both `RemuxToHLS` and `PlanHLS`; the two
 modes produce identical ciphertext. Init segments and subtitles stay clear;
 the DASH manifest is withheld (AES-128 is an HLS mechanism). The key is only
-ever advertised (`KeyURI`), never stored — authenticating that endpoint is the
+ever advertised (`KeyURI`), never stored - authenticating that endpoint is the
 server's access control.
 
 **Key rotation** (forward secrecy). Set `RotateEverySegments` and a `Keys`
@@ -636,7 +636,7 @@ Encrypt: &mp4.HLSEncryption{
 
 `RewriteURL` rewrites every URI the playlists and the MPD reference. Resource
 names stay canonical: the server strips its decoration (query token, prefix)
-before calling `plan.Resource(ctx, name)`, and verifies the signature — the
+before calling `plan.Resource(ctx, name)`, and verifies the signature - the
 hook makes every segment URL individually signed and expirable.
 
 ### Common Encryption (CENC)
@@ -713,14 +713,14 @@ production deployments should always set a real `KeyURI`.
 err := mp4.RemuxFromMP4(ctx, "in.mp4", "out.mkv")
 ```
 
-Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `vp09`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points, chapters, the movie title (`udta/meta/ilst/©nam` → `Info.Title`), the other global tags (`©ART`/`©alb`/`©gen`/… → `Tags`) and per-track names (`udta/name`/`hdlr` → `Track.Name`) round-trip back to Matroska — and back out to MP4 with `RemuxToMP4`. Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (delay handled by the decoder from the bitstream). Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
+Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `vp09`, `mp4a` (AAC, MP3 or DTS, by `esds` object type), `Opus`, `ac-3`, `ec-3`, `fLaC`, `tx3g` (→ SRT) and `wvtt` (→ WebVTT). Colour code points, chapters, the movie title (`udta/meta/ilst/©nam` → `Info.Title`), the other global tags (`©ART`/`©alb`/`©gen`/… → `Tags`) and per-track names (`udta/name`/`hdlr` → `Track.Name`) round-trip back to Matroska - and back out to MP4 with `RemuxToMP4`. Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (delay handled by the decoder from the bitstream). Tracks with any other sample entry, and non-audio/video/subtitle tracks, are dropped.
 
 #### Subtitles
 
 `RemuxToMP4` never lets a subtitle block the remux:
 
-- **SRT** (`S_TEXT/UTF8`) and **WebVTT** (`S_TEXT/WEBVTT`, and the WebM-era `D_WEBVTT/*` ids) are carried as `tx3g` timed text by default — the only MP4 subtitle form read universally (ffmpeg included). Inline markup is stripped.
-- **`Options.NativeWebVTT`** carries WebVTT losslessly as native `wvtt` (ISO/IEC 14496-30) instead: cue settings and markup are preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not — so it is opt-in.
+- **SRT** (`S_TEXT/UTF8`) and **WebVTT** (`S_TEXT/WEBVTT`, and the WebM-era `D_WEBVTT/*` ids) are carried as `tx3g` timed text by default - the only MP4 subtitle form read universally (ffmpeg included). Inline markup is stripped.
+- **`Options.NativeWebVTT`** carries WebVTT losslessly as native `wvtt` (ISO/IEC 14496-30) instead: cue settings and markup are preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not - so it is opt-in.
 - **`Options.FlattenStyledSubs`** carries ASS/SSA (no native MP4 form) as `tx3g`, stripping the dialogue framing and override tags. Lossy: styling/positioning/karaoke is discarded. Without it, ASS/SSA are dropped (reported via `OnDrop`).
 - Bitmap subtitles (PGS/VOBSUB) have no MP4 timed-text form and are dropped.
 
@@ -744,7 +744,7 @@ The same two operations are exposed on the CLI as `mkvgo to-mp4` and
 
 ### Probe MP4 metadata (no remux)
 
-To read an MP4's codecs, colour, chapters and duration without converting it, use the metadata-only probe — the counterpart of `matroska.OpenMeta` for MKV. It parses only the `moov` box and never reads sample data (`mdat`) or writes an output file, so it is fast and bounded regardless of file size — the path to use when indexing or scanning a library.
+To read an MP4's codecs, colour, chapters and duration without converting it, use the metadata-only probe - the counterpart of `matroska.OpenMeta` for MKV. It parses only the `moov` box and never reads sample data (`mdat`) or writes an output file, so it is fast and bounded regardless of file size - the path to use when indexing or scanning a library.
 
 ```go
 c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")  // *mkv.Container, []mp4.DroppedTrack
@@ -757,7 +757,7 @@ for _, d := range dropped { // cover art / non-media tracks not in c.Tracks
 }
 ```
 
-The second return value lists tracks present in the file but not in `c.Tracks` — cover art / attached pictures and non-media tracks (hint, timecode, metadata) — so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
+The second return value lists tracks present in the file but not in `c.Tracks` - cover art / attached pictures and non-media tracks (hint, timecode, metadata) - so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
 
 `OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters, DurationMs and (for MP4) file-level Tags / `Info.Title` are populated; Attachments and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
 
@@ -794,11 +794,11 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 
 A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo, and colour carried only in an in-band SPS. In those the probe reports the header value (e.g. the AAC core rate) rather than guessing. See the [CHANGELOG notes](../CHANGELOG.md).
 
-**Colour determinacy.** `Track.ColourDetermined` reports whether the colour was actually read from a source — the container Colour element, an MP4 `colr` box, or the codec bitstream's colour signalling (H.264/HEVC VUI, AV1 `color_config`, VP9 `vpcC`) — *even when it resolves to "unspecified"* (every `Color*` left nil). It lets a caller tell a confirmed-SDR/unspecified stream (`true`, no colour values) from one whose colour could not be read at all (`false`): only the latter warrants a fallback. A 10-bit SDR stream whose SPS says `colour_description_present_flag = 0` is `ColourDetermined == true` with nil `Color*` — confirmed SDR, not "unread".
+**Colour determinacy.** `Track.ColourDetermined` reports whether the colour was actually read from a source - the container Colour element, an MP4 `colr` box, or the codec bitstream's colour signalling (H.264/HEVC VUI, AV1 `color_config`, VP9 `vpcC`) - *even when it resolves to "unspecified"* (every `Color*` left nil). It lets a caller tell a confirmed-SDR/unspecified stream (`true`, no colour values) from one whose colour could not be read at all (`false`): only the latter warrants a fallback. A 10-bit SDR stream whose SPS says `colour_description_present_flag = 0` is `ColourDetermined == true` with nil `Color*` - confirmed SDR, not "unread".
 
-**HDR10 static metadata.** `Track.HDR` (`*HDRStaticMetadata`) carries the Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931 chromaticities and the luminance range) — the side data ffprobe reports for HDR10. Read head-only from the Matroska Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/`mdcv` boxes (whose fixed-point, G,B,R-ordered values are normalised to the Matroska units), nil when absent. Independent of `IsHDR()` (transfer-based detection) and `DolbyVision`.
+**HDR10 static metadata.** `Track.HDR` (`*HDRStaticMetadata`) carries the Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931 chromaticities and the luminance range) - the side data ffprobe reports for HDR10. Read head-only from the Matroska Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/`mdcv` boxes (whose fixed-point, G,B,R-ordered values are normalised to the Matroska units), nil when absent. Independent of `IsHDR()` (transfer-based detection) and `DolbyVision`.
 
-**In-band colour fallback (opt-in).** Some streaming-style HEVC muxes keep the SPS in-band (a bare hvcC with no parameter sets) and write no container colour, so a head-only probe sees no colour at all. Passing the in-band option makes the probe — only for such a track — read its first sample, parse the SPS VUI, and apply an Alternative Transfer Characteristics SEI override (HLG's `bt2020-10` → `arib-std-b67` compatibility signal). It is off by default; tracks that already carry colour in the header read no frame.
+**In-band colour fallback (opt-in).** Some streaming-style HEVC muxes keep the SPS in-band (a bare hvcC with no parameter sets) and write no container colour, so a head-only probe sees no colour at all. Passing the in-band option makes the probe - only for such a track - read its first sample, parse the SPS VUI, and apply an Alternative Transfer Characteristics SEI override (HLG's `bt2020-10` → `arib-std-b67` compatibility signal). It is off by default; tracks that already carry colour in the header read no frame.
 
 ```go
 // MKV
@@ -807,7 +807,7 @@ c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithInBandColourFallback())
 c, _, _ := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{InBandColour: true})
 ```
 
-**Per-track bitrate (opt-in).** ffmpeg/mkvmerge write a per-track `BPS` tag — the per-track bitrate ffprobe surfaces as `TAG:BPS` (ffprobe's own `bit_rate` field stays `N/A` for Matroska, so this gives *more* than ffprobe; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and *does* equal ffprobe's `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV. Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element — one seek, no Cluster scan, since the muxer references `Tags` from the head — and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
+**Per-track bitrate (opt-in).** ffmpeg/mkvmerge write a per-track `BPS` tag - the per-track bitrate ffprobe surfaces as `TAG:BPS` (ffprobe's own `bit_rate` field stays `N/A` for Matroska, so this gives *more* than ffprobe; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and *does* equal ffprobe's `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV. Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element - one seek, no Cluster scan, since the muxer references `Tags` from the head - and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
 
 ```go
 c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
@@ -815,7 +815,7 @@ c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
 
 ### Keyframe index (head-only)
 
-To align `-c copy` HLS/DASH segments on source keyframes without a full packet scan, read `Container.Keyframes` — the metadata probe fills it in the same pass, no separate call or second open:
+To align `-c copy` HLS/DASH segments on source keyframes without a full packet scan, read `Container.Keyframes` - the metadata probe fills it in the same pass, no separate call or second open:
 
 ```go
 // MKV/WebM: filled from the Cues index in the normal metadata pass.
@@ -831,9 +831,9 @@ c, _, err := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{Keyframes: true})
 ks = c.Keyframes
 ```
 
-`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does — but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index.
+`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does - but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index.
 
-**Cues-less Matroska.** Some muxers ship MKV/WebM with no `Cues`, so `Keyframes` is nil after the head-only pass. Rather than fall back to an external probe, two opt-in options recover it: `WithKeyframeIndex()` builds the **complete** index (every keyframe, equal to `ffprobe -skip_frame nokey`) in one sequential read-ahead pass over the Segment — header-only, no demux/decode, video keyframes only (SimpleBlock keyframe flag, or a BlockGroup with no `ReferenceBlock`); `WithSampledKeyframes(n)` is the cheaper coarse variant (one keyframe per sampled interval). Files that already carry `Cues` are never scanned. The CLI `keyframes` command uses `WithKeyframeIndex()` automatically.
+**Cues-less Matroska.** Some muxers ship MKV/WebM with no `Cues`, so `Keyframes` is nil after the head-only pass. Rather than fall back to an external probe, two opt-in options recover it: `WithKeyframeIndex()` builds the **complete** index (every keyframe, equal to `ffprobe -skip_frame nokey`) in one sequential read-ahead pass over the Segment - header-only, no demux/decode, video keyframes only (SimpleBlock keyframe flag, or a BlockGroup with no `ReferenceBlock`); `WithSampledKeyframes(n)` is the cheaper coarse variant (one keyframe per sampled interval). Files that already carry `Cues` are never scanned. The CLI `keyframes` command uses `WithKeyframeIndex()` automatically.
 
 ### Subtitles to WebVTT
 
@@ -848,7 +848,7 @@ err = mp4.ExtractSubtitleWebVTT(ctx, "movie.mp4", trackID, w)
 err = subtitle.FileToWebVTT("subs.fr.srt", w)
 ```
 
-S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces — `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` — are exported for custom pipelines.
+S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` - are exported for custom pipelines.
 
 ---
 
@@ -874,7 +874,7 @@ Mux writes the metadata you pass (title/chapters/tags/attachments) as-is; it
 does not read any of it from the sources. `MuxingApp`/`WritingApp` in the
 output are `"mkvgo"`. The output also carries mkvmerge-style per-track
 statistics tags (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
-accumulated during the stream — `WithBitrate()` reads them back head-only.
+accumulated during the stream - `WithBitrate()` reads them back head-only.
 
 **Demux** -- extract tracks to raw streams:
 
@@ -1455,12 +1455,12 @@ chapters keep their original timestamps.
 // in place, instant on mkvgo-written files thanks to the metadata reserve).
 err := matroska.WriteContentHashes(ctx, "archive.mkv", "")
 
-// Later — detect bit rot / transfer corruption, no external checksum file:
+// Later - detect bit rot / transfer corruption, no external checksum file:
 mismatches, err := matroska.VerifyContentHashes(ctx, "archive.mkv")
 // nil mismatches = every hashed track is byte-intact.
 
 // MP4: hashes are stored at remux time (freeform ilst atoms), verified the
-// same way — mkvgo does not rewrite MP4 metadata in place.
+// same way - mkvgo does not rewrite MP4 metadata in place.
 err = mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{ContentHashes: true})
 mm, err := mp4.VerifyContentHashes(ctx, "out.mp4")
 ```
@@ -1513,7 +1513,7 @@ FS methods and their OS fallbacks:
 ### In-memory FS (`mkv.MemFS`)
 
 A ready-made implementation covering the whole port: every operation runs on
-byte slices with no filesystem at all — the WebAssembly build's foundation
+byte slices with no filesystem at all - the WebAssembly build's foundation
 ([docs/wasm.md](wasm.md)), and handy in tests or servers that assemble outputs
 to ship elsewhere.
 
@@ -1532,7 +1532,7 @@ for _, p := range m.Paths() { … }   // hls/master.m3u8, hls/init.mp4, hls/seg0
 ### Remote files over HTTP Range (`httpfs`)
 
 `github.com/gravity-zero/mkvgo/httpfs` implements the port over HTTP(S) Range
-requests (a separate package, so builds that don't need it — the wasm binary —
+requests (a separate package, so builds that don't need it - the wasm binary  - 
 don't link `net/http`). Combined with the head-only probe, indexing a media
 library on S3/HTTP transfers a few ranged kilobytes per file:
 
@@ -1546,7 +1546,7 @@ fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file s
 
 Reads are cached in 512 KiB windows (configurable). The server must answer
 `206 Partial Content`; one that ignores `Range` gets an explicit error rather
-than a silent full download. The FS is read-only — for a remux whose source is
+than a silent full download. The FS is read-only - for a remux whose source is
 remote and destination local, `httpfs.Hybrid()` routes URLs to HTTP and
 everything else (including writes) to the OS:
 
@@ -1642,7 +1642,7 @@ mkvgo's writers never stamp wall-clock times or random IDs: `MuxingApp`/
 `WritingApp` default to the fixed string `"mkvgo"`, `DateUTC` is only ever
 copied from the source, MP4 `creation_time`/`modification_time` are written as
 zero, and element order is fixed. **The same input and options produce
-byte-identical output**, across runs and machines — verified by a regression
+byte-identical output**, across runs and machines - verified by a regression
 test over the in-memory FS (MKV rewrite, MP4 remux, HLS segments). This makes
 outputs safe for content-addressed storage and dedup (the file hash is a
 stable key) and for golden-file tests.

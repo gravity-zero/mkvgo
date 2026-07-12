@@ -98,7 +98,7 @@ func seekEntry(id uint32, pos uint64) []byte {
 func seekHeadElem(entries ...[]byte) []byte { return masterElem(mkv.IDSeekHead, entries...) }
 
 // buildSeekHeadMKV builds [SeekHead][Info][Tracks][Cluster], or, when
-// tracksAfterCluster, [SeekHead][Info][Cluster][Tracks] — the case that REQUIRES
+// tracksAfterCluster, [SeekHead][Info][Cluster][Tracks] - the case that REQUIRES
 // the SeekHead to locate Tracks. SeekPositions are relative to the Segment data.
 func buildSeekHeadMKV(t *testing.T, tracksAfterCluster bool) []byte {
 	t.Helper()
@@ -203,7 +203,7 @@ func cuesElem(n int) []byte {
 }
 
 // TestReadMetaStopsEarly proves ReadMeta skips the body: with a large Cues index
-// after Info+Tracks (the element a full Read parses point-by-point — the bench's
+// after Info+Tracks (the element a full Read parses point-by-point - the bench's
 // main time sink), ReadMeta stops before it, reading a small buffer-bounded
 // amount, while the full Read pulls the whole Cues index.
 func TestReadMetaStopsEarly(t *testing.T) {
@@ -231,7 +231,7 @@ func TestReadMetaStopsEarly(t *testing.T) {
 		t.Errorf("ReadMeta read %d bytes, want <= %d (must not reach Cues)", metaCR.read, 4*metaBufSize)
 	}
 	if metaCR.read*4 > fullCR.read {
-		t.Errorf("ReadMeta read %d bytes vs full %d — expected meta to read far less by skipping Cues", metaCR.read, fullCR.read)
+		t.Errorf("ReadMeta read %d bytes vs full %d - expected meta to read far less by skipping Cues", metaCR.read, fullCR.read)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestReadMetaBoundsOversizedSeekID(t *testing.T) {
 		t.Fatalf("tracks = %d, want 2 (inline Info+Tracks past the bad SeekHead)", len(c.Tracks))
 	}
 	if cr.read > 8<<10 {
-		t.Errorf("ReadMeta read %d B — the 64 KiB SeekID must be seeked over, not read", cr.read)
+		t.Errorf("ReadMeta read %d B - the 64 KiB SeekID must be seeked over, not read", cr.read)
 	}
 }
 
@@ -325,7 +325,7 @@ func TestReadMetaRealFileParity(t *testing.T) {
 }
 
 // TestReadMetaConcurrent runs ReadMeta from many goroutines (each on its own
-// reader over the shared, read-only bytes) — the exact shape of a library
+// reader over the shared, read-only bytes) - the exact shape of a library
 // indexer. Run with -race; ReadMeta holds no shared mutable state, so this must
 // be race-free and every call must return the same 2 tracks.
 func TestReadMetaConcurrent(t *testing.T) {

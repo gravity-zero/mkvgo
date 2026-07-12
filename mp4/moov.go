@@ -8,7 +8,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// moov.go — assembles the movie box (moov) and its sub-tree from the sample
+// moov.go - assembles the movie box (moov) and its sub-tree from the sample
 // tables collected during the mdat pass. All timing is in the movie timescale
 // (milliseconds), which is lossless for the default Matroska TimecodeScale of
 // 1 ms; finer Matroska scales are rounded by the block reader before reaching
@@ -83,7 +83,7 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 }
 
 // mp4MetaAtoms maps mkvgo/Matroska global tag names to the iTunes ilst atom that
-// carries them in MP4 — the inverse of parse.go's metaAtomNames. TITLE is omitted:
+// carries them in MP4 - the inverse of parse.go's metaAtomNames. TITLE is omitted:
 // the movie title is written as ©nam from Info.Title (see buildMovieMeta).
 var mp4MetaAtoms = map[string]string{
 	"ARTIST":        "\xa9ART",
@@ -214,7 +214,7 @@ func freeformAtom(name, value string) []byte {
 }
 
 // buildTrackName builds the QuickTime udta/name box carrying a track's name (the
-// Matroska TrackEntry Name) — the form ffmpeg writes for a per-track title. The box
+// Matroska TrackEntry Name) - the form ffmpeg writes for a per-track title. The box
 // payload is the raw UTF-8 string. Returns nil for an empty name.
 func buildTrackName(name string) []byte {
 	if name == "" {
@@ -251,7 +251,7 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 //   - Opus, Vorbis, MP3: the delay is intrinsic to the bitstream (Opus pre-skip in
 //     the OpusHead, MP3 encoder delay in the in-band Xing/LAME header) and ffmpeg's
 //     decoder applies it regardless of the container. A derived edit list ADDS to
-//     that, over-trimming and desyncing the head — a native-MKV MP3 lost ~20 ms of
+//     that, over-trimming and desyncing the head - a native-MKV MP3 lost ~20 ms of
 //     real audio at the start before this. ffmpeg likewise writes no useful edit
 //     list when copying a native MP3/Opus to MP4.
 //   - FLAC/DTS/PCM: no encoder priming.
@@ -265,7 +265,7 @@ func hasContainerPriming(codec string) bool {
 
 // mediaTimescale returns the mdia/mdhd timescale for a track. Audio tracks use their
 // sample rate (as ffmpeg does), making the sample table and the CodecDelay-derived
-// edit list sample-exact — required for ffmpeg to trim a codec's priming precisely
+// edit list sample-exact - required for ffmpeg to trim a codec's priming precisely
 // (notably AC-3, whose decoder delay it ignores from a millisecond-quantised edit
 // list). Everything else uses the movie timescale.
 func mediaTimescale(t *outTrack) uint32 {
@@ -277,7 +277,7 @@ func mediaTimescale(t *outTrack) uint32 {
 
 // buildEdts writes a track's edit list. Up to two entries, the way ffmpeg writes
 // them: an optional leading empty edit (media_time -1) carrying a presentation
-// offset — the A/V sync gap, since the sample table is rebased to 0 — followed by
+// offset - the A/V sync gap, since the sample table is rebased to 0 - followed by
 // the media edit, whose media_time re-signals an audio track's gapless priming
 // (Matroska CodecDelay) as the MP4 encoder delay so a decoder discards it.
 func buildEdts(codecDelayNs, offsetMovieMs int64, durMovieMs, mts uint32) []byte {
@@ -315,7 +315,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	// and the CodecDelay-derived edit list are sample-exact (see mediaTimescale);
 	// text/video stay on the movie timescale. tim.total is then in the media
 	// timescale, while tkhd/mvhd and the edit list's segment_duration need the movie
-	// timescale (ms) — durMovie.
+	// timescale (ms) - durMovie.
 	mts := mediaTimescale(t)
 	var tim timing
 	if t.spec.text || t.isChapter {
@@ -377,7 +377,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
 	// One track-level udta: the track name (QuickTime name box, the way ffmpeg writes
-	// a per-track title) and — MP4 having no native forced flag — the forced marker as
+	// a per-track title) and - MP4 having no native forced flag - the forced marker as
 	// a kind box with the DASH role scheme, the way ffmpeg records it.
 	var trakUdta [][]byte
 	if nm := buildTrackName(t.mkv.Name); nm != nil {
@@ -424,7 +424,7 @@ func buildKind(scheme, value string) []byte {
 }
 
 func buildTkhd(t *outTrack, durationMs uint32) []byte {
-	// in_movie | in_preview, plus track_enabled when the track is the default —
+	// in_movie | in_preview, plus track_enabled when the track is the default  -
 	// ffmpeg maps track_enabled back to the "default" disposition.
 	flags := uint32(0x000006)
 	if t.mkv.IsDefault {

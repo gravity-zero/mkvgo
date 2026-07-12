@@ -3,7 +3,7 @@ package ops
 // playability_test.go tests the decision model in two layers:
 //   - unit tests directly against evaluateTrack/evaluatePlayability (this
 //     package), which exercise Profile/Level/HDR/DolbyVision fields set
-//     directly on a synthetic mkv.Track — the codec bitstream parsing that
+//     directly on a synthetic mkv.Track - the codec bitstream parsing that
 //     fills those fields from a real file is mkv/reader's own responsibility
 //     and is covered by its tests there;
 //   - full-pipeline tests through Playability() against the real sample.mkv

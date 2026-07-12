@@ -129,7 +129,7 @@ cat video.mkv | mkvgo tags -
 
 ### probe
 
-Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyframe index, and — for MP4 — any dropped (non-carried) tracks such as cover art. Per track it prints the ffprobe-equivalent stream fields read head-only: codec long name, profile/level, pixel format, colour code points, HDR10 static metadata (MaxCLL/MaxFALL + mastering display), Dolby Vision, display rotation, sample/display aspect ratio, frame rate, frame count, per-track duration, bitrate, field order, channel count/layout, sample rate (with the SBR output rate), and bit depth. `-json` carries the same fields plus every derived string as its own key, so a scanner consumes the shape directly with no post-processing: `codec_long_name`, `channel_layout`, `avg_frame_rate`, `sample_aspect_ratio`/`display_aspect_ratio`, the colour code points as conventional names (`color_space_name` "bt2020nc", `color_transfer_name` "smpte2084", `color_primaries_name`, `color_range_name`), `stereo_mode_name`, `resolved_language` (BCP-47 when present, else the legacy tag), `effective_sample_rate` (the decoder's rate, SBR applied), and **`hdr_format`** - the one-word dynamic-range classification a tonemap-or-direct-play decision keys on: `dolby-vision` | `hdr10` | `hlg` | `sdr` (absent when unknown). Dolby Vision profile 8 (the cross-compatible flavour) classifies by its BASE layer - `bl_signal_compatibility_id` 1/2/4 → `hdr10`/`sdr`/`hlg`, since that layer plays without a DoVi decoder; only a stream that genuinely needs the DoVi rendering path reports `dolby-vision`, and the raw `dolby_vision` fields ride alongside for consumers applying their own policy. Both MKV/WebM and MP4/MOV, one JSON shape.
+Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyframe index, and - for MP4 - any dropped (non-carried) tracks such as cover art. Per track it prints the ffprobe-equivalent stream fields read head-only: codec long name, profile/level, pixel format, colour code points, HDR10 static metadata (MaxCLL/MaxFALL + mastering display), Dolby Vision, display rotation, sample/display aspect ratio, frame rate, frame count, per-track duration, bitrate, field order, channel count/layout, sample rate (with the SBR output rate), and bit depth. `-json` carries the same fields plus every derived string as its own key, so a scanner consumes the shape directly with no post-processing: `codec_long_name`, `channel_layout`, `avg_frame_rate`, `sample_aspect_ratio`/`display_aspect_ratio`, the colour code points as conventional names (`color_space_name` "bt2020nc", `color_transfer_name` "smpte2084", `color_primaries_name`, `color_range_name`), `stereo_mode_name`, `resolved_language` (BCP-47 when present, else the legacy tag), `effective_sample_rate` (the decoder's rate, SBR applied), and **`hdr_format`** - the one-word dynamic-range classification a tonemap-or-direct-play decision keys on: `dolby-vision` | `hdr10` | `hlg` | `sdr` (absent when unknown). Dolby Vision profile 8 (the cross-compatible flavour) classifies by its BASE layer - `bl_signal_compatibility_id` 1/2/4 → `hdr10`/`sdr`/`hlg`, since that layer plays without a DoVi decoder; only a stream that genuinely needs the DoVi rendering path reports `dolby-vision`, and the raw `dolby_vision` fields ride alongside for consumers applying their own policy. Both MKV/WebM and MP4/MOV, one JSON shape.
 
 ```
 mkvgo probe [-json] <file.mkv|.mp4|->
@@ -145,7 +145,7 @@ cat video.mkv | mkvgo probe -
 
 ### keyframes
 
-List the video track's keyframe timestamps — MKV/WebM from the Cues seek index (head-only), or, when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, equal to `ffprobe -skip_frame nokey`, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
+List the video track's keyframe timestamps - MKV/WebM from the Cues seek index (head-only), or, when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, equal to `ffprobe -skip_frame nokey`, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
 
 ```
 mkvgo keyframes [-json] <file.mkv|.mp4>
@@ -201,10 +201,10 @@ mkvgo fingerprint -json video.mkv    # FingerprintReport
 
 ### validate
 
-Check MKV structure for issues. Reports errors and warnings — structural
+Check MKV structure for issues. Reports errors and warnings - structural
 (TimecodeScale, duplicate track IDs, missing codec data, backwards
 timecodes…) and **streaming readiness**: a missing Cues index, cue points
-referencing a non-video track (seeking would land on audio — an error),
+referencing a non-video track (seeking would land on audio - an error),
 cue times matching no actual video keyframe (stale index), subtitle blocks
 without BlockDuration (cue end times lost), video without DefaultDuration,
 AAC without its AudioSpecificConfig. Every finding names the fix
@@ -215,7 +215,7 @@ mkvgo validate [-json] [-strict] <file.mkv>
 ```
 
 Exits `0` when no error-severity issue is found (warnings are printed but do
-not fail), `1` otherwise — also with `-json` — so it is scriptable. `-strict`
+not fail), `1` otherwise - also with `-json` - so it is scriptable. `-strict`
 makes warnings fail too.
 
 ```bash
@@ -226,7 +226,7 @@ mkvgo validate -strict video.mkv && echo "no errors, no warnings"
 ### hash
 
 Store each track's content SHA-256 as a `CONTENT_SHA256` tag, making the file
-self-verifying (`mkvgo verify`) — bit rot or transfer corruption is detectable
+self-verifying (`mkvgo verify`) - bit rot or transfer corruption is detectable
 with no external checksum file. Without `-o` the tags are written in place
 (instant on mkvgo-written files, which reserve metadata padding; a file with
 no room needs `-o` for a full rewrite). Re-hashing replaces the tags.
@@ -246,7 +246,7 @@ mkvgo hash video.mkv -o hashed.mkv    # full rewrite
 ### verify
 
 Recompute the per-track content hashes and compare them with the stored
-hashes — MKV/WebM: the `CONTENT_SHA256` tags written by `hash`; MP4: the
+hashes - MKV/WebM: the `CONTENT_SHA256` tags written by `hash`; MP4: the
 freeform atoms written by `to-mp4 --hash`. Exits `0` when every hashed track
 is intact, `1` on any mismatch; errors when the file was never hashed.
 
@@ -842,7 +842,7 @@ mkvgo rollback repaired.mkv damaged.rbd original-restored.mkv
 
 ### to-mp4
 
-Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT and WebVTT subtitles (→ tx3g; WebVTT can also be carried natively, see below). Colour/HDR, chapters and B-frame ordering are preserved, along with the movie title (`©nam`), the other global tags (ARTIST/ALBUM/GENRE/… → iTunes `ilst` atoms), per-track names (`hdlr`/`udta/name`) and language — the symmetric counterpart of `from-mp4`.
+Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied verbatim. Supported codecs: H.264/HEVC/AV1/VP9 video; AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio; SRT and WebVTT subtitles (→ tx3g; WebVTT can also be carried natively, see below). Colour/HDR, chapters and B-frame ordering are preserved, along with the movie title (`©nam`), the other global tags (ARTIST/ALBUM/GENRE/… → iTunes `ilst` atoms), per-track names (`hdlr`/`udta/name`) and language - the symmetric counterpart of `from-mp4`.
 
 ```
 mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>
@@ -850,16 +850,16 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-nativ
 
 - `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
-- `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy — all styling, positioning and karaoke is discarded.
+- `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy - all styling, positioning and karaoke is discarded.
 - `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by ffmpeg's MP4 demuxer; leave it off for the widest compatibility.
-- `--hash` computes each track's content SHA-256 while the samples stream (no extra I/O) and stores them as freeform `ilst` atoms — the MP4 becomes self-verifying via `mkvgo verify`.
-- `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header — a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
+- `--hash` computes each track's content SHA-256 while the samples stream (no extra I/O) and stores them as freeform `ilst` atoms - the MP4 becomes self-verifying via `mkvgo verify`.
+- `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header - a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
 
 Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.
 
 Cover art IS carried: the first JPEG/PNG image attachment (one named `cover.*` preferred) becomes the iTunes `covr` atom, and `from-mp4` brings it back as an attachment.
 
-Not carried into MP4: **other attachments** (fonts — note an ASS track flattened with `--flatten-subs` loses its attached fonts), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
+Not carried into MP4: **other attachments** (fonts - note an ASS track flattened with `--flatten-subs` loses its attached fonts), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
 
 ```bash
 mkvgo to-mp4 video.mkv video.mp4
@@ -897,15 +897,15 @@ mkvgo to-webm video.mkv video.webm
 ```
 
 > The streaming commands (`to-hls`, `hls-segment`, `to-abr`, `concat-hls`) are
-> covered end to end — modes, sources, ABR, concat, security, trick-play — in
+> covered end to end - modes, sources, ABR, concat, security, trick-play - in
 > the **[streaming guide](streaming.md)**. Below is the per-flag reference.
 
 ### to-hls
 
-Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
-— as a fragmented-MP4 / **CMAF** presentation in an output directory, served through two manifests over the same segments: **HLS** (`master.m3u8` with `BANDWIDTH`/`RESOLUTION`/`CODECS`, plus one media playlist per rendition) and **DASH** (`manifest.mpd`, one AdaptationSet per rendition). Tracks are demuxed — the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) and one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …), declared as an `EXT-X-MEDIA` AUDIO group — so multi-audio sources (VF/VO) get native language selection in hls.js/Safari/dash.js. No transcoding — samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment. Secondary video tracks are dropped with a reason.
+Package a media file - **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
+ - as a fragmented-MP4 / **CMAF** presentation in an output directory, served through two manifests over the same segments: **HLS** (`master.m3u8` with `BANDWIDTH`/`RESOLUTION`/`CODECS`, plus one media playlist per rendition) and **DASH** (`manifest.mpd`, one AdaptationSet per rendition). Tracks are demuxed - the video rendition (`playlist.m3u8`, `init.mp4`, `seg00001.m4s` …) and one rendition per audio track (`audio1.m3u8`, `init_a1.mp4`, `seg_a1_00001.m4s` …), declared as an `EXT-X-MEDIA` AUDIO group - so multi-audio sources (VF/VO) get native language selection in hls.js/Safari/dash.js. No transcoding - samples are copied verbatim into CMAF fragments, so only the codecs `to-mp4` supports are carried (H.264/HEVC/AV1/VP9 video, AAC/Opus/AC-3/E-AC-3/FLAC/MP3/DTS audio). Segments are cut on video keyframes and are independently decodable, so a player can start at any segment. Secondary video tracks are dropped with a reason.
 
-Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
+Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder - the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
 mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--chapter-markers]
@@ -915,7 +915,7 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--audio-shif
 |---|---|
 | `-o` | Output directory (required) |
 | `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
-| `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy — just a different track subset. Video is required |
+| `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy - just a different track subset. Video is required |
 | `--sub-offset` | Shift every WebVTT subtitle cue by this many milliseconds (negative allowed) -- a virtual resync, no file rewritten. A cue whose shifted end is at or before 0 is dropped; one straddling 0 is clamped to start at 0 |
 | `--audio-shift` | Re-base an audio track in presentation (`track=ms`, repeatable; positive = the track's content starts late and is presented earlier - feed it `diagnose`'s per-track delay). The samples are copied verbatim and the media segments are byte-identical with or without the shift: only the init segment's edit list moves, so a constant A/V desync is cancelled in the served stream without touching the source. Over-shifts clamp to the presentation start. The persistent repair remains `mkvgo retime` |
 | `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
@@ -938,14 +938,14 @@ track becomes the primary rendition and boundaries follow its sample grid.
 When the source has video, a **trick-play I-frame playlist** (`iframe.m3u8`,
 `EXT-X-I-FRAMES-ONLY`) is emitted and declared in the master
 (`EXT-X-I-FRAME-STREAM-INF`): one keyframe per segment as a byte range into
-the existing segments — zero extra media, what players use for scrubbing
+the existing segments - zero extra media, what players use for scrubbing
 previews. Not emitted when encrypting. Both MKV/WebM and MP4/MOV sources get
 it, full pass and on-demand plan alike -- see [streaming.md](streaming.md#trick-play-scrubbing)
 for the on-demand cost model (MP4 is free at plan time; Matroska builds it
 lazily, on the first `iframe.m3u8` request, from block headers only).
 
 `--single-file` packs each rendition into ONE progressive file (`stream.mp4`,
-`stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges — the
+`stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges - the
 HLS playlists use `EXT-X-BYTERANGE` and the DASH manifest the on-demand
 profile's `SegmentBase`/`indexRange`. Two media files instead of hundreds:
 friendlier to object storage; the server only needs `Range` support.
@@ -953,14 +953,14 @@ Incompatible with `--aes-key` and `--cenc-*`.
 
 Security flags (shared with `hls-segment`; both must use the same values):
 
-- `--aes-key <32 hex>` + `--aes-key-uri <uri>` — encrypt every media segment
+- `--aes-key <32 hex>` + `--aes-key-uri <uri>` - encrypt every media segment
   with AES-128-CBC (whole-segment, PKCS#7, IV = segment sequence, per RFC
   8216) and write the `EXT-X-KEY` line. The key itself is never written to the
-  output — serving it (with authentication) is the server's job. Init segments
+  output - serving it (with authentication) is the server's job. Init segments
   and subtitles stay clear. AES-128 is HLS-only: no `manifest.mpd` is emitted
   for an encrypted presentation. Supported by hls.js; Safari/FairPlay requires
   SAMPLE-AES (see `--cenc-*` below). ffmpeg's own HLS demuxer does not decrypt
-  whole-segment fMP4 — verified spec-conformant by openssl round-trip.
+  whole-segment fMP4 - verified spec-conformant by openssl round-trip.
   Incompatible with `--cenc-*` (pick one scheme).
 - `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
   forward secrecy (a captured key decrypts only its own period). Pass
@@ -988,24 +988,24 @@ Security flags (shared with `hls-segment`; both must use the same values):
   constructs their parsers do not yet cover. See
   [streaming.md](streaming.md#securing-delivery) for the library form
   (`mp4.CENCOptions`) and the exact clear/protected byte rules.
-- `--url-prefix <prefix>` — prepend a base to every URI the playlists and the
+- `--url-prefix <prefix>` - prepend a base to every URI the playlists and the
   MPD reference (CDN base, or a token route). The library form is
   `Options.RewriteURL func(name) string`, which can append per-resource signed
   tokens instead.
 
 ### hls-segment
 
-Serve one resource of an HLS presentation **on demand** — nothing is
+Serve one resource of an HLS presentation **on demand** - nothing is
 pre-generated. For a Matroska source, `PlanHLS` reads the metadata, Cues and
 first/last clusters (a few bounded reads, ranged when the source is a URL);
 for an **MP4/MOV source the moov sample table IS the index**, so the plan is
-exact by construction — every resource including the master playlist, the
+exact by construction - every resource including the master playlist, the
 DASH manifest and the I-frame playlist is byte-identical to the full pass.
 It then builds
 just the requested resource: the master or media playlist, the init segment,
 or the N-th media segment (1-based, matching the playlist's `segNNNNN.m4s`).
 A media segment is built by seeking straight to its window through the Cues
-and reading only that window — first-play latency is milliseconds and storage
+and reading only that window - first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
@@ -1025,7 +1025,7 @@ pre-generated and on-demand serving can be mixed transparently. Text subtitle
 tracks are declared in the master playlist and served as segmented WebVTT
 renditions (`subN.m3u8` + windowed `subN_00001.vtt`…, plus the whole track as
 `subN.vtt`); text blocks have no cue index, so the cues come from scanning
-the clusters — incremental, bounded and cached: a windowed request costs one
+the clusters - incremental, bounded and cached: a windowed request costs one
 bounded read whether playback is sequential or seeking, only the whole-track
 `subN.vtt` costs a full pass. The remaining difference from `to-hls`: the master
 playlist's `BANDWIDTH` is estimated from the source's cluster sizes. The
@@ -1105,7 +1105,7 @@ See `docs/streaming.md` ("Play while downloading") for the mechanics (cursor, pa
 ### to-abr
 
 Package several **pre-encoded quality variants** of the same content into one
-multi-variant HLS presentation — "ABR light": mkvgo does the packaging (no
+multi-variant HLS presentation - "ABR light": mkvgo does the packaging (no
 transcoding; producing the encodes remains a transcoder's job). The first
 source is the reference: its audio tracks and subtitles serve every variant;
 the other sources contribute only their video rendition (packaged
@@ -1118,13 +1118,13 @@ mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--sub-offset <m
 ```
 
 For seamless switching the sources should share the keyframe cadence (same
-GOP length, keyframes at the same times — encode each variant with a fixed GOP
+GOP length, keyframes at the same times - encode each variant with a fixed GOP
 and forced keyframes). The combined **HLS** master always plays; a mismatched
 cadence still switches, just realigning on the next keyframe.
 
 A combined **DASH** `manifest.mpd` (one video AdaptationSet, a Representation
 per variant) is written at the top level **only when the variants are
-segment-aligned** — DASH shares one SegmentTimeline across a switch set, so it
+segment-aligned** - DASH shares one SegmentTimeline across a switch set, so it
 is unsafe otherwise. When they are not aligned, only each variant's own
 `v{k}/manifest.mpd` is written.
 
@@ -1132,12 +1132,12 @@ is unsafe otherwise. When they are not aligned, only each variant's own
 mkvgo to-abr -o stream/ movie-1080p.mkv movie-720p.mkv movie-480p.mkv
 ```
 
-The variants may be Matroska/WebM **or** progressive/fragmented (CMAF) MP4 — a
+The variants may be Matroska/WebM **or** progressive/fragmented (CMAF) MP4 - a
 pre-encoded ladder that is already fragmented MP4 is read directly.
 
 ### abr-segment
 
-Serve one resource of the multi-variant presentation **on demand** — the
+Serve one resource of the multi-variant presentation **on demand** - the
 on-demand counterpart of `to-abr` (as `hls-segment` is to `to-hls`). Nothing is
 pre-generated: each resource is built when requested, and a remote variant
 (httpfs) transfers only the ranges a viewer watches. The first argument is the
@@ -1254,11 +1254,11 @@ written. The library equivalent is `mp4.PlanConcat` (see library.md).
 
 ### extract-frame
 
-Extract the video keyframe nearest a timestamp, **decoder-ready** — the mkvgo
+Extract the video keyframe nearest a timestamp, **decoder-ready** - the mkvgo
 half of a thumbnail/storyboard pipeline. The keyframe is seeked through the
 Cues (a few bounded reads, no scan) and packed so a decoder ingests it
 directly: Annex-B with the SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) prepended, or
-a minimal IVF wrapper for VP8/VP9/AV1. mkvgo never decodes — turning the
+a minimal IVF wrapper for VP8/VP9/AV1. mkvgo never decodes - turning the
 sample into an image is one ffmpeg call away.
 
 ```

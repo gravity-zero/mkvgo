@@ -1,6 +1,6 @@
 # mkvgo in the browser (WebAssembly)
 
-mkvgo compiles to WebAssembly — the whole probe/remux/HLS engine runs
+mkvgo compiles to WebAssembly - the whole probe/remux/HLS engine runs
 client-side, in browsers, web workers and Node. Zero dependencies carries over:
 the artifact is **~6 MB raw, ~1.6 MB gzipped**, and nothing ever leaves the
 user's machine.
@@ -8,15 +8,15 @@ user's machine.
 What it enables:
 
 - **Probe any file instantly, whatever its size.** A `File`/`Blob` is read
-  through ranged slices, and mkvgo's probe is head-only — inspecting a 40 GB
+  through ranged slices, and mkvgo's probe is head-only - inspecting a 40 GB
   MKV in a `<input type=file>` transfers a few hundred kilobytes and takes
   milliseconds. No upload, no server.
-- **Remux MKV → MP4 (and back), package HLS, extract subtitles** — for files
-  that fit in memory — without transcoding: the original frames are copied
+- **Remux MKV → MP4 (and back), package HLS, extract subtitles** - for files
+  that fit in memory - without transcoding: the original frames are copied
   into the new container.
 - **Play an MKV in a `<video>` tag** with no server and no transcoding:
   `openHLS(file)` builds fragmented-MP4 segments **on demand from ranged
-  reads of the File** — a huge local file plays through Media Source
+  reads of the File** - a huge local file plays through Media Source
   Extensions with bounded memory (see the [runnable
   demo](../web/example/index.html)); `remuxToHLS` is the eager, all-at-once
   variant for files that fit in memory.
@@ -35,30 +35,30 @@ module. Serving `mkvgo.wasm` with `Content-Encoding: gzip`/`br` and
 ## API
 
 The module registers a global `MkvGo`; **[`web/mkvgo.ts`](../web/mkvgo.ts)**
-is the typed wrapper around it (copy the file into your project — it has no
+is the typed wrapper around it (copy the file into your project - it has no
 dependencies). Every method returns a Promise and every error is a rejection.
 
 | Method | Input | Result |
 |---|---|---|
-| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object — same shape as the CLI `-json` output, plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`) |
+| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object - same shape as the CLI `-json` output, plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`) |
 | `remuxToMP4(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ data: Uint8Array, droppedTracks }` |
 | `remuxFromMP4(input, opts?)` | `Uint8Array` (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
 | `remuxToWebM(input)` | `Uint8Array` (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
-| `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` — `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
-| `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
-| `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` — pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` — `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
+| `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` - `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
+| `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
+| `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` - `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
 | `openConcat(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - sources in playback order | on-demand concatenated handle: `{ numParts, resources, resource(name) → {data, contentType}, close() }` - one continuous HLS session over several sources, `resource("master.m3u8")` or `resource("p1/seg00007.m4s")` |
 | `extractSubtitleVTT(input, trackId)` | `Uint8Array` (MKV or MP4) | WebVTT `string` |
-| `analyze(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full block-header walk, not head-only) | `AnalyzeReport` — frame/keyframe counts, bitrate, GOP spans, duration reconciliation |
-| `playability(input, target?, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `PlayabilityReport` — per-track and overall verdict (`"direct-play"`\|`"remux"`\|`"transcode"`) against `target` (default `"mse-generic"`) |
-| `ladder(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `Rung[]` — recommended ABR ladder capped at the source resolution/bitrate |
-| `ingest(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, unless `opts.analyze`) | `ServingPlan` — one-call onboarding decision: strategy, seek-index check, ladder when transcode is needed; read-only (never reindexes) |
-| `fingerprint(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full payload read, not head-only) | `FingerprintReport` — container-independent content identity (per-track + whole-file digests) |
+| `analyze(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - full block-header walk, not head-only) | `AnalyzeReport` - frame/keyframe counts, bitrate, GOP spans, duration reconciliation |
+| `playability(input, target?, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `PlayabilityReport` - per-track and overall verdict (`"direct-play"`\|`"remux"`\|`"transcode"`) against `target` (default `"mse-generic"`) |
+| `ladder(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only) | `Rung[]` - recommended ABR ladder capped at the source resolution/bitrate |
+| `ingest(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, unless `opts.analyze`) | `ServingPlan` - one-call onboarding decision: strategy, seek-index check, ladder when transcode is needed; read-only (never reindexes) |
+| `fingerprint(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - full payload read, not head-only) | `FingerprintReport` - container-independent content identity (per-track + whole-file digests) |
 | `mapDamage(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - full tolerant walk, writes nothing) | `SalvageReport` - the damage map a repair would produce: repaired/lost ranges with byte offsets and approximate times; `opts.cleanCut` accounts for keyframe-aligned resume. The twin of `mkvgo salvage --dry-run`; the repair operations themselves are not in wasm (browser inputs are read-only) |
 | `cueHealth(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, no cluster walk) | `CueHealthReport` - which tracks the CuePoints reference: spots a seek-broken index (non-empty but keyed on audio) in milliseconds, with the remedy |
 | `diagnose(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-mostly: the tolerant walk runs only when the declared size and the real size disagree) | `Diagnosis` - one-call triage: index health + per-track audio start delays + size coherence, each finding with its remedy (reindex / retime / resync / re-download); flags a truncated download as such instead of an opaque parse failure |
 | `openForensic(input, opts?)` | `Uint8Array` **or `Blob`/`File`** | single-source A/B watermark handle: `{ numSegments, masterPlaylist, mediaPlaylist, init, segment(n, fromB), segmentForPattern(n, pattern), distinct(n), close() }` - variant B derives from the one source by dropping a disposable H.264 frame per segment, timing-compensated (shared manifest); `distinct(n)` says whether segment n carries a bit |
-| `version()` | — | version `string` |
+| `version()` | - | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
 `{ fastStart?, skipUnsupported?, flattenSubs?, nativeWebVTT?,
@@ -206,10 +206,10 @@ ms.addEventListener('sourceopen', async () => {
 })
 ```
 
-`plan.resources` lists every name a player could request — the HLS master and
+`plan.resources` lists every name a player could request - the HLS master and
 the DASH `manifest.mpd` (same CMAF segments, two manifests), per-rendition
 playlists/init/segments (video: `init.mp4`/`seg*.m4s`; audio track k:
-`init_ak.mp4`/`seg_ak_*.m4s` — demuxed, so multi-audio selection works), and
+`init_ak.mp4`/`seg_ak_*.m4s` - demuxed, so multi-audio selection works), and
 one WebVTT rendition per text subtitle track (`sub1.m3u8` / `sub1.vtt`);
 cover art and global tags ride on the video init segment. The source must
 carry a Cues index (real muxers always write one).
@@ -378,7 +378,7 @@ the CLI's `--keep-lang`; ignored when `keepTracks` is set.
 Instead of driving MediaSource by hand, a Service Worker can make the WASM an
 **HLS origin**: it intercepts requests under a virtual path and answers them
 from `openHLS`/`openABR`, so a plain `<video>` (Safari) or hls.js (elsewhere)
-streams a local file — even one far larger than memory — with no server and no
+streams a local file - even one far larger than memory - with no server and no
 upload. The worker is just the fetch router; the `resource(name)` work is all
 WASM.
 
@@ -408,7 +408,7 @@ self.addEventListener('fetch', (e) => {            // serve __mkvgo__/<id>/<reso
     const plan = plans.get(m[1])
     if (!plan) return new Response('no session', { status: 404 })
     const { data, contentType, sha256 } = await plan.resource(m[2])
-    // sha256 is a stable content ETag (deterministic output) — HTTP caching for free.
+    // sha256 is a stable content ETag (deterministic output) - HTTP caching for free.
     return new Response(data, { headers: { 'Content-Type': contentType, 'ETag': `"${sha256}"` } })
   }))
 })
@@ -463,10 +463,10 @@ const { data } = await mkvgo.remuxToMP4(bytes, { fastStart: true })
 
 ## Aborting and streaming
 
-Every method takes `{ signal?: AbortSignal }` in its options — an abort
+Every method takes `{ signal?: AbortSignal }` in its options - an abort
 cancels the in-flight Go work (probe reads, remux, segment builds), which is
 what a React effect cleanup wants. `hlsSegmentStream(plan)` (in `mkvgo.ts`)
-exposes the video rendition as a progressive `ReadableStream<Uint8Array>` —
+exposes the video rendition as a progressive `ReadableStream<Uint8Array>`  - 
 init then each segment, built as the consumer pulls; cancelling the stream
 aborts the current build.
 
@@ -475,9 +475,9 @@ aborts the current build.
 **[`web/react.ts`](../web/react.ts)** ships ready-made hooks (copy both files
 into your project):
 
-- `useMkvGo(loadOptions)` — module loading, null until ready;
-- `useProbe(mkvgo, file)` — head-only probe with automatic abort on change;
-- `useHLSPlayer(mkvgo, videoRef, file)` — plays a local MKV File in a
+- `useMkvGo(loadOptions)` - module loading, null until ready;
+- `useProbe(mkvgo, file)` - head-only probe with automatic abort on change;
+- `useHLSPlayer(mkvgo, videoRef, file)` - plays a local MKV File in a
   `<video>` through MSE: on-demand demuxed segments from ranged reads
   (bounded memory, any size), video + audio SourceBuffers, cleanup on
   unmount.
@@ -490,12 +490,12 @@ function Player({ file }: { file: File }) {
   const { state, error } = useHLSPlayer(mkvgo, videoRef, file)
   return <div>
     <video ref={videoRef} controls />
-    <p>{probe?.info.title} — {state}{error ? `: ${error.message}` : ''}</p>
+    <p>{probe?.info.title} - {state}{error ? `: ${error.message}` : ''}</p>
   </div>
 }
 ```
 
-Or hand-rolled — a hook owning the module and a probe component:
+Or hand-rolled - a hook owning the module and a probe component:
 
 ```tsx
 // useMkvGo.ts
@@ -532,7 +532,7 @@ export function MediaInspector() {
         <ul>
           {probe.tracks.map((t) => (
             <li key={t.id}>
-              #{t.id} {t.type} — {t.codec_long_name ?? t.codec}
+              #{t.id} {t.type} - {t.codec_long_name ?? t.codec}
               {t.width ? ` ${t.width}×${t.height}` : ''}
               {t.channel_layout ? ` ${t.channel_layout}` : ''}
             </li>
@@ -575,7 +575,7 @@ const { probe } = useProbe(file)
 
 <template>
   <input type="file" :disabled="!mkvgo" @change="e => file = (e.target as HTMLInputElement).files?.[0] ?? null" />
-  <ul v-if="probe"><li v-for="t in probe.tracks" :key="t.id">#{{ t.id }} {{ t.type }} — {{ t.codec_long_name ?? t.codec }}</li></ul>
+  <ul v-if="probe"><li v-for="t in probe.tracks" :key="t.id">#{{ t.id }} {{ t.type }} - {{ t.codec_long_name ?? t.codec }}</li></ul>
 </template>
 ```
 
@@ -622,10 +622,10 @@ in a worker (`importScripts('/wasm_exec.js')` or a module worker), and
 
 ## Limits
 
-- **Remux needs the whole file in memory** (input + output simultaneously —
+- **Remux needs the whole file in memory** (input + output simultaneously  - 
   wasm32 addresses 4 GB; in practice keep inputs under ~1.5 GB). `probe`,
   `playability`, `ladder` and `ingest` (unless `opts.analyze` is set) accept a
-  `Blob`/`File` and have **no size limit** — they read head-only. `analyze`
+  `Blob`/`File` and have **no size limit** - they read head-only. `analyze`
   and `fingerprint` also accept a `Blob`/`File` (they walk every block header
   / read every payload respectively, so the input itself stays
   memory-bounded even on a huge file, unlike remux).

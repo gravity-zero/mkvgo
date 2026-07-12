@@ -22,7 +22,7 @@ type readOpts struct {
 }
 
 // WithAttachments keeps Container.Attachments populated on the metadata-only
-// path (normally left nil), reached through the SeekHead entry — one seek to
+// path (normally left nil), reached through the SeekHead entry - one seek to
 // one element, no Cluster scan. Attachment bodies (cover art, fonts) are read
 // whole, so the cost is their size; files whose SeekHead has no Attachments
 // entry leave the field nil.
@@ -31,8 +31,8 @@ func WithAttachments() ReadOption {
 }
 
 // WithTags keeps Container.Tags populated on the metadata-only path (normally
-// left nil). The Tags element is reached through its SeekHead entry — one seek
-// to one element, no Cluster scan — so the read stays head-only.
+// left nil). The Tags element is reached through its SeekHead entry - one seek
+// to one element, no Cluster scan - so the read stays head-only.
 func WithTags() ReadOption {
 	return func(o *readOpts) { o.tags = true }
 }
@@ -47,7 +47,7 @@ func WithChapters() ReadOption {
 
 // WithCues keeps Container.Cues populated on the metadata-only path (they are
 // normally consumed into Keyframes and dropped). Each CuePoint's ClusterPos is
-// relative to Container.SegmentStart — together they let a caller seek straight
+// relative to Container.SegmentStart - together they let a caller seek straight
 // to the cluster holding a given time, which is what cue-driven readers (e.g.
 // on-demand HLS segmenting) need. The read stays head-only.
 func WithCues() ReadOption {
@@ -55,11 +55,11 @@ func WithCues() ReadOption {
 }
 
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track
-// bitrate ffmpeg/mkvmerge write, which ffprobe shows as TAG:BPS — ffprobe leaves its
+// bitrate ffmpeg/mkvmerge write, which ffprobe shows as TAG:BPS - ffprobe leaves its
 // own bit_rate field N/A for Matroska, so this gives more than ffprobe) on the
 // metadata-only path. The default OpenMeta/ReadMeta stops before Tags, so
 // Track.Bitrate is nil for Matroska; this option follows the head SeekHead straight
-// to the Tags element (one seek, no Cluster scan — the muxer references Tags from the
+// to the Tags element (one seek, no Cluster scan - the muxer references Tags from the
 // SeekHead near the head) and reads only it. The raw Tags stay nil, exactly the
 // metadata contract; a full Read sets Bitrate regardless. No effect on MP4, whose
 // Bitrate comes from btrt/esds and does equal ffprobe's bit_rate.
@@ -68,10 +68,10 @@ func WithBitrate() ReadOption {
 }
 
 // WithKeyframeIndex builds a COMPLETE video keyframe index for a Matroska that
-// carries no Cues — every keyframe, equal to `ffprobe -skip_frame nokey`, not a
+// carries no Cues - every keyframe, equal to `ffprobe -skip_frame nokey`, not a
 // sample. AFTER the head parse, and only when no Cues were found, it makes a
 // single sequential structural pass over the Segment (cluster by cluster, no
-// per-block seek), reading element headers and skipping block payloads by size —
+// per-block seek), reading element headers and skipping block payloads by size  -
 // no demux, no decode. Use it for the "no external fallback" path; use the
 // cheaper WithSampledKeyframes when a coarse index suffices. Files with Cues are
 // never scanned (the head-only Cues index is used).
@@ -88,7 +88,7 @@ const defaultKeyframeSamples = 200
 // that carries no Cues (so the head-only keyframe index would be empty). AFTER
 // the head parse, and only when no Cues were found, it probes n evenly-spaced
 // byte offsets in the Segment body, resyncing to the next Cluster at each and
-// reading that Cluster's Timestamp — every Cluster start being a real seek point.
+// reading that Cluster's Timestamp - every Cluster start being a real seek point.
 // n ≤ 0 uses defaultKeyframeSamples. The result is coarse-but-valid (one keyframe
 // per sampled interval, deduplicated), bounded to about n seeks; it spares the
 // caller an external ffprobe fallback. Files that already carry Cues never sample.
@@ -102,8 +102,8 @@ func WithSampledKeyframes(n int) ReadOption {
 // WithInBandColourFallback enables a bounded colour fallback. By default a read
 // is head-only and never touches a cluster. With this option, AFTER the head
 // parse, any video track whose colour is absent from BOTH the container and the
-// codec-private SPS — a bare hvcC with no NAL arrays, as streaming-style muxes
-// write when they keep the parameter sets in-band — triggers a read of the first
+// codec-private SPS - a bare hvcC with no NAL arrays, as streaming-style muxes
+// write when they keep the parameter sets in-band - triggers a read of the first
 // video sample to recover the SPS and parse its colour VUI.
 //
 // The cost is paid only for those tracks (≈the HDR files a header-only probe

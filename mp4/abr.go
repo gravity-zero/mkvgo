@@ -1,8 +1,8 @@
 package mp4
 
-// abr.go — RemuxToABR: package several pre-encoded quality variants of the
+// abr.go - RemuxToABR: package several pre-encoded quality variants of the
 // same content (e.g. a 1080p and a 720p file) into one multi-variant HLS
-// presentation, without transcoding — "ABR light": mkvgo does the packaging,
+// presentation, without transcoding - "ABR light": mkvgo does the packaging,
 // producing the encodes remains a transcoder's job. The first source is the
 // reference: its audio tracks and subtitles serve every variant; the other
 // sources contribute only their video rendition.
@@ -14,7 +14,7 @@ package mp4
 // the keyframe cadence (same GOP length); mismatched cadences still play,
 // switches just realign on the next keyframe. The combined HLS master is always
 // emitted. A combined DASH manifest.mpd (one AdaptationSet, a Representation per
-// variant) is emitted too WHEN the variants are segment-aligned — DASH shares
+// variant) is emitted too WHEN the variants are segment-aligned - DASH shares
 // one SegmentTimeline across a switch set, so it is only valid then; otherwise
 // only each variant's own manifest.mpd is written.
 
@@ -25,13 +25,13 @@ import (
 	"strings"
 )
 
-// RemuxToABR packages the sources — quality variants of the same content,
-// best first — into outputDir as one multi-variant HLS presentation. See the
+// RemuxToABR packages the sources - quality variants of the same content,
+// best first - into outputDir as one multi-variant HLS presentation. See the
 // package layout above. Options apply to every variant (same SegmentMs,
 // Encrypt, RewriteURL…).
 func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ...Options) error {
 	if len(sources) < 2 {
-		return errf("ABR packaging needs at least two sources (got %d) — use RemuxToHLS for one", len(sources))
+		return errf("ABR packaging needs at least two sources (got %d) - use RemuxToHLS for one", len(sources))
 	}
 	o := optionsFrom(opts)
 	fs := o.FS
@@ -178,7 +178,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 }
 
 // abrVariantsAligned reports whether every variant shares the same segment
-// timeline — identical segment count and per-segment millisecond durations.
+// timeline - identical segment count and per-segment millisecond durations.
 // Only then is a combined DASH multi-Representation manifest valid: DASH puts
 // every Representation of an AdaptationSet on ONE shared SegmentTimeline, so a
 // player switching quality fetches segment N of the new variant expecting it at

@@ -13,7 +13,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
-// mux.go — RemuxToMP4: read a Matroska/WebM source and write a progressive
+// mux.go - RemuxToMP4: read a Matroska/WebM source and write a progressive
 // (non-fragmented) MP4. Media data is streamed into mdat in a single pass; the
 // moov, whose size depends on the final sample tables, is written afterwards.
 // Only the per-sample metadata is held in memory, so the working set scales with

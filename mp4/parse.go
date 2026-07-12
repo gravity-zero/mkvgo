@@ -15,7 +15,7 @@ import (
 // that ffmpeg uses to record an MP4 track's "forced" disposition.
 const dashRoleScheme = "urn:mpeg:dash:role:2011"
 
-// parse.go — a minimal, defensive ISO-BMFF reader for the boxes RemuxFromMP4
+// parse.go - a minimal, defensive ISO-BMFF reader for the boxes RemuxFromMP4
 // needs: ftyp is ignored, moov is parsed for track configuration and sample
 // tables, and mdat is left in place (samples are read from it on demand by their
 // recorded offsets). It parses untrusted input, so every length is bounds-checked
@@ -168,9 +168,9 @@ func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 }
 
 // findMoov returns the file offset and length of the moov box payload. It walks
-// the top-level boxes by header; if that walk desyncs — a box whose declared
+// the top-level boxes by header; if that walk desyncs - a box whose declared
 // size is wrong sends it into the mdat (some real files have a slightly-off mdat
-// size) — it falls back to a bounded backward scan for the moov, which sits near
+// size) - it falls back to a bounded backward scan for the moov, which sits near
 // the end in those files. That tolerance matches ffprobe, which still reads them.
 func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
 	if dataOff, plen, ferr := findMoovForward(r, size); ferr == nil {
@@ -275,7 +275,7 @@ func validMoovAt(r io.ReadSeeker, boxStart, boxSize, size int64) bool {
 	return false
 }
 
-// readMoov returns the full moov box payload — every sample-table byte included.
+// readMoov returns the full moov box payload - every sample-table byte included.
 // Used by the remux/extract path, which needs the complete tables.
 func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 	dataOff, payloadLen, err := findMoov(r, size)
@@ -303,7 +303,7 @@ var lazySkipBody = map[string]bool{
 }
 
 // lazyKeepHead is how much of a skipped box's body is still read: its
-// version/flags + count + first entry — enough for headerFrameCount and
+// version/flags + count + first entry - enough for headerFrameCount and
 // firstSampleLoc, which are all the metadata/keyframe path reads from them.
 const lazyKeepHead = 16
 
@@ -316,7 +316,7 @@ const lazyChunk = 64 << 10
 // disk only the small boxes plus the header and first entry of the large
 // sample-table boxes (stsz/stco/co64/stsc/stz2); their bodies are left zeroed and
 // never fetched. The buffer is structurally identical to a full moov read (same
-// box headers at the same offsets), so iterBoxes/parseTrak treat it the same —
+// box headers at the same offsets), so iterBoxes/parseTrak treat it the same  -
 // the metadata/keyframe path never reads the skipped bodies. Reads are coalesced
 // into lazyChunk-sized runs and only the large bodies are seeked over, so it is
 // both I/O-light and round-trip-light on a network mount, where those sample
@@ -434,7 +434,7 @@ func (m *lazyMoov) parse(start, end int) error {
 // sampleMode selects how much per-sample work parseMP4 does:
 //   - sampleNone: head-only, no per-sample table (the cheapest probe).
 //   - sampleKeyframes: only the sync-sample presentation times (stss + stts/ctts),
-//     for the metadata keyframe index — no byte offsets, so far cheaper than a
+//     for the metadata keyframe index - no byte offsets, so far cheaper than a
 //     full table on a long movie.
 //   - sampleFull: the full table (offsets + sizes + timing), which a remux or a
 //     subtitle/sample extract needs to read sample bytes.
@@ -628,7 +628,7 @@ func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 }
 
 // scanSidxBoxes returns the payloads of the sidx boxes that precede the first
-// fragment (moof) — a bounded head scan of the top-level boxes.
+// fragment (moof) - a bounded head scan of the top-level boxes.
 func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 	var out [][]byte
 	var hdr [16]byte
@@ -787,7 +787,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	if mv.fragmented {
 		// The moov's sample tables are empty, so headerFrameRate gave 0. The
 		// per-fragment default sample duration in mvex>trex yields the (CFR) frame
-		// rate head-only — what ffprobe reports for a constant-rate fragmented stream.
+		// rate head-only - what ffprobe reports for a constant-rate fragmented stream.
 		defDur := trexDefaultDurations(moovBoxes)
 		for i := range mv.tracks {
 			t := &mv.tracks[i]
@@ -810,7 +810,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 }
 
 // trexDefaultDurations reads mvex>trex and returns each track's
-// default_sample_duration — the per-fragment default a CFR fragmented stream
+// default_sample_duration - the per-fragment default a CFR fragmented stream
 // uses for samples that do not carry their own duration.
 func trexDefaultDurations(moovBoxes []memBox) map[uint32]uint32 {
 	mvex, ok := findMemBox(moovBoxes, "mvex")
@@ -1017,8 +1017,8 @@ func chapterTrackRefs(moovBoxes []memBox) map[uint32]bool {
 
 // parseTrak parses one trak box. On success it returns the track and a nil
 // *DroppedTrack. When the track has a recognised structure but cannot be carried
-// — a non-media handler (hint/timecode/metadata) or an unsupported sample entry
-// (e.g. cover art / attached picture) — it returns a zero track and a non-nil
+// - a non-media handler (hint/timecode/metadata) or an unsupported sample entry
+// (e.g. cover art / attached picture) - it returns a zero track and a non-nil
 // *DroppedTrack describing it, so the caller can surface it instead of dropping it
 // silently. An error is returned only for malformed structure.
 func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) (inTrack, *DroppedTrack, error) {
@@ -1040,7 +1040,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	}
 	// MP4 has no native "forced" flag; ffmpeg records it as a track-level kind box
 	// with the DASH role scheme (e.g. value "forced-subtitle"), which its demuxer
-	// reads back as AV_DISPOSITION_FORCED — regardless of the track's media type.
+	// reads back as AV_DISPOSITION_FORCED - regardless of the track's media type.
 	if udta, ok := findMemBox(trakBoxes, "udta"); ok {
 		if ub, err := iterBoxes(udta.payload); err == nil {
 			for _, kb := range ub {
@@ -1126,7 +1126,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	case "text", "sbtl":
 		tr.trackType = mkv.SubtitleTrack
 	default:
-		// hint/timecode/metadata — not media; surface it rather than dropping it.
+		// hint/timecode/metadata - not media; surface it rather than dropping it.
 		return tr, &DroppedTrack{ID: trackID, Codec: handler,
 			Reason: "non-media handler " + quoteFourcc(handler)}, nil
 	}
@@ -1170,14 +1170,14 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		return tr, nil, err
 	}
 	if !codecOK {
-		// Recognised media handler but an unsupported sample entry — typically cover
+		// Recognised media handler but an unsupported sample entry - typically cover
 		// art (an attached picture in a jpeg/png/… video track). Surface it.
 		return tr, &DroppedTrack{ID: trackID, Type: tr.trackType, Codec: fourcc,
 			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
 	}
 
 	// The nominal frame rate (stts) and the frame count (stsz) are in the header, so
-	// derive them head-only — no need to expand the sample table.
+	// derive them head-only - no need to expand the sample table.
 	if tr.trackType == mkv.VideoTrack {
 		tr.frameRate = headerFrameRate(stblBoxes, tr.timescale)
 		tr.frameCount = headerFrameCount(stblBoxes)
@@ -1313,7 +1313,7 @@ func parseMdhd(payload []byte) (timescale uint32, lang string) {
 }
 
 // mdhdDurationMs returns the track's duration in milliseconds from an mdhd box
-// (duration ÷ media timescale), or 0 when absent/unset. Read head-only — the
+// (duration ÷ media timescale), or 0 when absent/unset. Read head-only - the
 // per-track counterpart of the movie duration in mvhd.
 func mdhdDurationMs(payload []byte) int64 {
 	if len(payload) < 4 {
@@ -1346,7 +1346,7 @@ func mdhdDurationMs(payload []byte) int64 {
 // media_time (media timescale) together with the total duration of any leading
 // empty edits (movie timescale). ok is false when the box carries no edit that
 // shifts the presentation timeline. Later edits (multi-segment timelines) are not
-// modelled — only the leading delay and the start trim, which is what shifts the
+// modelled - only the leading delay and the start trim, which is what shifts the
 // keyframe times.
 func parseElst(payload []byte) (mediaTime, emptyDuration int64, ok bool) {
 	if len(payload) < 8 {
@@ -1389,7 +1389,7 @@ func parseElst(payload []byte) (mediaTime, emptyDuration int64, ok bool) {
 // origin files instead store a small Macintosh language code: the two forms are
 // unambiguous because the smallest valid packed code ("aaa") is 0x421, so any
 // value below 0x400 is a Mac code. Returns "" for an unknown/zero/"und" value and
-// for anything that is not three a–z letters.
+// for anything that is not three a-z letters.
 func decodeMdhdLanguage(packed uint16) string {
 	if packed < 0x400 {
 		return macLanguageToISO(packed)
@@ -1630,7 +1630,7 @@ func parseMP4A(tr *inTrack, payload []byte, headerLen int) (bool, error) {
 		tr.codec = "dts"
 		return true, nil
 	default:
-		return false, nil // unsupported audio object type — skip the track
+		return false, nil // unsupported audio object type - skip the track
 	}
 }
 
@@ -1699,7 +1699,7 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 }
 
 // parseBitrate reads a btrt box (BitRateBox: bufferSizeDB, maxBitrate, avgBitrate)
-// from a sample entry and records the average bitrate — what ffprobe reports as
+// from a sample entry and records the average bitrate - what ffprobe reports as
 // bit_rate. It falls back to maxBitrate when the average is zero (some muxers
 // only fill the max).
 func parseBitrate(tr *inTrack, payload []byte, headerLen int) {
@@ -1754,7 +1754,7 @@ func parsePasp(tr *inTrack, payload []byte, headerLen int) {
 }
 
 // parseHDRStatic reads the HDR10 static-metadata boxes from a visual sample entry:
-// clli (Content Light Level — MaxCLL/MaxFALL in cd/m²) and mdcv (Mastering Display
+// clli (Content Light Level - MaxCLL/MaxFALL in cd/m²) and mdcv (Mastering Display
 // Colour Volume, SMPTE ST 2086). mdcv stores its primaries in G,B,R order with
 // chromaticities in units of 0.00002 and luminances in 0.0001 cd/m²; those are
 // converted to the units MasteringDisplay holds. Absent boxes leave tr.hdr nil.
@@ -1875,7 +1875,7 @@ func parseDolbyVision(tr *inTrack, payload []byte, headerLen int) {
 
 // parseColr reads a colr box from a visual sample entry and records the colour
 // code points. Two on-screen colour types are read: 'nclx' (CICP primaries /
-// transfer / matrix plus a full-range flag) and 'nclc' (the QuickTime form —
+// transfer / matrix plus a full-range flag) and 'nclc' (the QuickTime form  -
 // identical but without the range byte). ICC-profile types ('rICC', 'prof') are
 // ignored. Each CICP field is taken independently, so an SDR stream that
 // specifies only the matrix (e.g. BT.709) while leaving primaries/transfer
@@ -1932,7 +1932,7 @@ func extractOpus(tr *inTrack, payload []byte, headerLen int) error {
 // sample entry payload. ISO and QuickTime version 0 entries have a 28-byte
 // fixed part; a QuickTime SoundDescription version 1 adds 16 bytes of
 // per-packet compression fields, and version 2 is a 64-byte struct with its
-// own float64 sample rate. The version field sits at payload[8:10] — reserved
+// own float64 sample rate. The version field sits at payload[8:10] - reserved
 // (zero) in ISO files, so version 0 keeps the ISO layout.
 func audioExtOffset(payload []byte) int {
 	if len(payload) < 10 {

@@ -1,5 +1,5 @@
 /**
- * react.ts — copyable React hooks over the mkvgo wasm module. Zero
+ * react.ts - copyable React hooks over the mkvgo wasm module. Zero
  * dependencies beyond react and ./mkvgo. See docs/wasm.md.
  */
 import { useEffect, useRef, useState } from 'react'

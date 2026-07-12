@@ -2,7 +2,7 @@
 // EBML is the binary format underlying Matroska (.mkv) and WebM containers.
 package ebml
 
-// Element IDs — EBML header
+// Element IDs - EBML header
 const (
 	IDEBMLHeader         = 0x1A45DFA3
 	IDEBMLVersion        = 0x4286

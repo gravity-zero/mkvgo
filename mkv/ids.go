@@ -228,7 +228,7 @@ var CodecShortName = map[string]string{
 // codec_name FFmpeg's ffprobe reports for the same stream, for the cases where
 // the two diverge. mkvgo does NOT rename its own values (existing consumers rely
 // on them); this lookup lets a consumer normalize to ffprobe vocabulary when it
-// wants probe equivalence. Only divergent names are listed — anything absent is
+// wants probe equivalence. Only divergent names are listed - anything absent is
 // identical in both tools (e.g. h264, hevc, aac, opus, ass).
 var ffprobeCodecName = map[string]string{
 	"srt":    "subrip",            // S_TEXT/UTF8

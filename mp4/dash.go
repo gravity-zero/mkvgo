@@ -1,6 +1,6 @@
 package mp4
 
-// dash.go — the DASH side of the CMAF packaging. The segments RemuxToHLS and
+// dash.go - the DASH side of the CMAF packaging. The segments RemuxToHLS and
 // HLSPlan emit are CMAF fragments (cmfc/cmfs brands), which is the point of
 // CMAF: one segment set, two manifests. buildDASHManifest writes the static
 // VOD MPD referencing the same init.mp4 + segNNNNN.m4s (SegmentTemplate with

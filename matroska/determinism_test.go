@@ -12,7 +12,7 @@ import (
 )
 
 // mkvgo's outputs are deterministic: no wall-clock timestamps, no random IDs,
-// no map-ordered elements — the same input and options produce byte-identical
+// no map-ordered elements - the same input and options produce byte-identical
 // files. This is a guarantee (content-addressed storage, dedup and golden
 // tests rely on it), so a run that stops being reproducible is a regression.
 func TestDeterministicOutputs(t *testing.T) {

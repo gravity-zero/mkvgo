@@ -20,7 +20,7 @@ func TestSplitByTime(t *testing.T) {
 		OutputDir:  dir,
 		Ranges: []TimeRange{
 			{StartMs: 0, EndMs: 500},
-			{StartMs: 500, EndMs: 0}, // until EOF — no keyframe in range
+			{StartMs: 500, EndMs: 0}, // until EOF - no keyframe in range
 		},
 	})
 	if err == nil {
@@ -57,7 +57,7 @@ func TestSplitByChapters(t *testing.T) {
 	assertNoErr(t, Write(f, src))
 	f.Close()
 
-	// Now split with actual blocks — use the original fixture
+	// Now split with actual blocks - use the original fixture
 	// (the Write above has no clusters, so use the real fixture)
 	origC, _ := Open(context.Background(), fixturePath)
 	origC.Chapters = []Chapter{
@@ -70,7 +70,7 @@ func TestSplitByChapters(t *testing.T) {
 		OutputDir:  dir,
 		ByChapters: true,
 	})
-	// fixture has no chapters — this should error
+	// fixture has no chapters - this should error
 	if err != nil {
 		t.Logf("expected error (no chapters in fixture): %v", err)
 		return

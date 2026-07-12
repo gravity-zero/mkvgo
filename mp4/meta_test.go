@@ -91,7 +91,7 @@ func TestOpenMetaMatchesRemux(t *testing.T) {
 	}
 
 	// Language and the default flag must be read from the ISO-BMFF boxes (mdhd /
-	// tkhd), not left at their zero values — they drive track selection.
+	// tkhd), not left at their zero values - they drive track selection.
 	for _, tk := range []*mkv.Track{video, audio} {
 		if !tk.LanguagePresent || tk.Language != "fre" {
 			t.Errorf("%s language = %q (present=%v), want fre", tk.Type, tk.Language, tk.LanguagePresent)

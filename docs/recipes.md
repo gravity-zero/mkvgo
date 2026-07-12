@@ -20,9 +20,9 @@ ctx := context.Background()
 
 ## Inspect a file
 
-See everything inside a container — works on MKV/WebM **and** MP4.
+See everything inside a container - works on MKV/WebM **and** MP4.
 
-**CLI** — `-json` works on any inspection command (`probe`, `tracks`, `info`,
+**CLI** - `-json` works on any inspection command (`probe`, `tracks`, `info`,
 `keyframes`…):
 
 ```bash
@@ -49,7 +49,7 @@ One track in the `-json` output:
 }
 ```
 
-**Library** — the same data, as typed structs:
+**Library** - the same data, as typed structs:
 
 ```go
 c, err := matroska.Open(ctx, "video.mkv")
@@ -61,17 +61,17 @@ for _, t := range c.Tracks {
 ```
 
 > **CLI and library are equivalent.** The `-json` output is exactly
-> `json.Marshal` of the library's `*matroska.Container` — same field names and
+> `json.Marshal` of the library's `*matroska.Container` - same field names and
 > json tags. The CLI only adds three convenience fields the library exposes as
 > *methods* instead of struct fields: `codec_long_name` (`Track.CodecLongName()`),
 > `channel_layout` (`Track.ChannelLayout()`) and `avg_frame_rate`
 > (`Track.AvgFrameRate()`). So `json.Marshal(c)` in your own code yields the
 > identical structure, minus those three derived fields.
 
-## Index a media library — fast, head-only
+## Index a media library - fast, head-only
 
 For library indexing you usually want stream metadata, not chapters/attachments
-or a cluster walk. `OpenMeta` reads only the header and stops — orders of
+or a cluster walk. `OpenMeta` reads only the header and stops - orders of
 magnitude faster than a full `Open` on a large file.
 
 ```go
@@ -79,7 +79,7 @@ c, err := matroska.OpenMeta(ctx, "video.mkv") // Tracks + Info only
 // Per-track bitrate (the TAG:BPS ffprobe shows) stays head-only with the opt-in:
 c, err = matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
 // MP4 counterpart (second value lists non-carried tracks like cover art;
-// bitrate needs no opt-in there — MP4 carries it in btrt/esds):
+// bitrate needs no opt-in there - MP4 carries it in btrt/esds):
 mc, dropped, err := mp4.OpenMeta(ctx, "video.mp4")
 ```
 
@@ -94,7 +94,7 @@ mkvgo keyframes -json movie.mp4    # [0, 2000, 4000, ...]
 
 ```go
 c, _ := matroska.OpenMeta(ctx, "video.mkv")
-ks := c.Keyframes // []int64 ms, ascending — from the Cues index, head-only
+ks := c.Keyframes // []int64 ms, ascending - from the Cues index, head-only
 
 // No Cues? Build the complete index from one sequential pass (no external probe):
 c, _ = matroska.OpenMeta(ctx, "no-cues.mkv", matroska.WithKeyframeIndex())
@@ -138,7 +138,7 @@ err := matroska.ExtractSubtitle(ctx, "video.mkv", 3, "subs.srt")
 
 ## Convert MKV ↔ MP4 (no re-encode)
 
-Remux copies the media verbatim — no quality loss, no transcode.
+Remux copies the media verbatim - no quality loss, no transcode.
 
 ```bash
 mkvgo to-mp4 --faststart video.mkv video.mp4   # moov first → progressive HTTP
@@ -167,7 +167,7 @@ err := matroska.RemuxToWebM(ctx, "in.mkv", "out.webm")
 
 ## Package for streaming (HLS + DASH, no transcode)
 
-Turn a file into a CMAF presentation — one demuxed segment set described by
+Turn a file into a CMAF presentation - one demuxed segment set described by
 **both** an HLS `master.m3u8` and a DASH `manifest.mpd`. Segments are cut on
 keyframes and independently decodable. Works on MKV/WebM **and** MP4/MOV.
 
@@ -180,7 +180,7 @@ mkvgo to-hls video.mkv -o stream/ -segment 6
 err := mp4.RemuxToHLS(ctx, "video.mkv", "stream/", mp4.Options{SegmentMs: 6000})
 ```
 
-Serve **on demand** instead (zero pre-generation) — each resource built when
+Serve **on demand** instead (zero pre-generation) - each resource built when
 requested, an HTTP handler in one call:
 
 ```go
@@ -210,8 +210,8 @@ mkvgo to-hls video.mkv -o stream/ --cenc-scheme cenc \
   --cenc-key <32-hex> --cenc-kid <32-hex> --cenc-iv <16-hex> --cenc-key-uri https://…/key
 ```
 
-→ The full streaming guide — ABR, single-file, trick-play, remote/S3 sources,
-browser playback — is **[streaming.md](streaming.md)**.
+→ The full streaming guide - ABR, single-file, trick-play, remote/S3 sources,
+browser playback - is **[streaming.md](streaming.md)**.
 
 ## Forensic A/B watermarking (trace a leak)
 
@@ -263,7 +263,7 @@ ks, _ := matroska.ExtractKeyframeSample(ctx, "movie.mkv", 750_000) // ms
 
 > The editing and assembly recipes below (add/remove track, merge, split, join,
 > edit) operate on **Matroska**. To apply them to MP4 content, remux it to MKV
-> first (`from-mp4`), operate, then remux back (`to-mp4`) — every step is lossless.
+> first (`from-mp4`), operate, then remux back (`to-mp4`) - every step is lossless.
 
 ## Add or remove a track
 
@@ -289,7 +289,7 @@ err := matroska.MergeSubtitle(ctx, "video.mkv", "subs.srt", "out.mkv", "eng", "E
 ## Split by time or chapters
 
 ```bash
-mkvgo split video.mkv -o parts/ -range 0-300000,300000-0  # 0–5 min, then 5 min–end (ms)
+mkvgo split video.mkv -o parts/ -range 0-300000,300000-0  # 0-5 min, then 5 min-end (ms)
 mkvgo split video.mkv -o parts/ -chapters                  # one part per chapter
 ```
 
@@ -314,7 +314,7 @@ mkvgo join part1.mkv part2.mkv part3.mkv -o full.mkv
 err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
 ```
 
-## Edit metadata — including instant in-place
+## Edit metadata - including instant in-place
 
 A full edit rewrites the file (copying clusters). An *in-place* edit rewrites only
 the header region, so it is instant regardless of file size.
@@ -338,7 +338,7 @@ err = matroska.EditInPlace(ctx, "video.mkv", func(c *matroska.Container) {
 ## Read from a pipe / non-seekable stream
 
 ```bash
-cat video.mkv | mkvgo probe -    # '-' reads stdin via the streaming reader
+cat video.mkv | mkvgo probe -   # '-' reads stdin via the streaming reader
 ```
 
 ```go
@@ -363,8 +363,8 @@ err := matroska.EditMetadata(ctx, "s3://bucket/in.mkv", "s3://bucket/out.mkv",
 )
 ```
 
-Ready-made ports: **`mkv.NewMemFS()`** (in-memory — the wasm build's foundation,
-handy in tests) and **`httpfs.New()`** (HTTP Range — probe or package straight
+Ready-made ports: **`mkv.NewMemFS()`** (in-memory - the wasm build's foundation,
+handy in tests) and **`httpfs.New()`** (HTTP Range - probe or package straight
 from a URL, transferring only the bytes you read):
 
 ```go

@@ -13,7 +13,7 @@ import (
 // quicktimeFixture is a real ffmpeg-muxed QuickTime file (brand "qt  ") with
 // the classic non-faststart layout: ftyp + wide + mdat FIRST, moov at the END
 // of the file, and an mp4a SoundDescription VERSION 1 whose esds is wrapped in
-// a 'wave' extension — the layout every raw iPhone/camera .mov uses.
+// a 'wave' extension - the layout every raw iPhone/camera .mov uses.
 const quicktimeFixture = "../internal/testdata/quicktime.mov"
 
 func TestOpenMetaQuickTimeMov(t *testing.T) {

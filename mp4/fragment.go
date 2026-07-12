@@ -1,11 +1,11 @@
 package mp4
 
-// fragment.go — fragmented MP4 (fMP4 / CMAF) output: an init segment
+// fragment.go - fragmented MP4 (fMP4 / CMAF) output: an init segment
 // (ftyp + moov with empty sample tables + mvex/trex) followed by media segments
 // (styp + moof + mdat), the container form HLS and DASH stream. Unlike the
 // progressive writer (moov after mdat, whole-file sample tables), a fragmented
-// presentation is written strictly forward — each segment is self-describing via
-// its moof — so it can be produced and served segment by segment.
+// presentation is written strictly forward - each segment is self-describing via
+// its moof - so it can be produced and served segment by segment.
 //
 // It reuses the progressive muxer's track planning and sample-entry builders
 // (planTracks, codec.go) and the decode-timing reconstruction (sample.go); only
@@ -131,7 +131,7 @@ func buildInitTrak(ft *fragTrack, cenc *CENCOptions) []byte {
 	if t.mkv.IsForced {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}
-	// Edit list, like the progressive path: the presentation offset (A/V sync —
+	// Edit list, like the progressive path: the presentation offset (A/V sync  -
 	// fragment decode times are rebased so each track starts at 0) and the
 	// audio gapless priming (CodecDelay) a decoder must discard.
 	codecDelay := int64(0)
@@ -167,7 +167,7 @@ func buildMvex(tracks []*fragTrack, totalMs uint32) []byte {
 // number) and one traf per track. Each trun's data_offset points at its track's
 // sample bytes: past the whole moof, the 16-byte mdat header (the 64-bit
 // largesize form mdatHeader writes) and the preceding tracks' data. The offsets
-// depend on the moof's own size, so the moof is built twice — a trun's
+// depend on the moof's own size, so the moof is built twice - a trun's
 // data_offset is a fixed-width u32, so the size of pass two equals pass one.
 func buildMoof(seq uint32, segs []trackSegment) []byte {
 	assemble := func(moofSize int64) []byte {
@@ -265,7 +265,7 @@ func buildStyp() []byte {
 }
 
 // fillFragTiming assigns each sample its decode time, duration and composition
-// offset (in the track's media timescale), from the presentation timestamps —
+// offset (in the track's media timescale), from the presentation timestamps  -
 // the same reconstruction the progressive path uses (sample.go reconstructTiming):
 // DTS is the sorted PTS in decode order, durations are the diffs, ctts = PTS - DTS.
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
@@ -287,9 +287,9 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 
 	// Constant-rate audio rides the sample-exact grid (see audioGridTS): frame
 	// k decodes at k×gridTS, k re-derived from each block's stored timecode
-	// (then +1 within a lace). Millisecond rounding never reaches the trun —
+	// (then +1 within a lace). Millisecond rounding never reaches the trun  -
 	// no ±1 ms duration jitter, no duplicated DTS at a lace boundary, no
-	// one-frame drift per segment — while a real gap still moves k.
+	// one-frame drift per segment - while a real gap still moves k.
 	if gridTS > 0 {
 		anchor := scale(samples[0].blockPtsMs)
 		offsetMs = samples[0].ptsMs

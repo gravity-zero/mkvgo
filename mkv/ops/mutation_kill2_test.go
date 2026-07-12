@@ -1,6 +1,6 @@
 package ops
 
-// mutation_kill2_test.go — second-pass targeted tests for the remaining survivors
+// mutation_kill2_test.go - second-pass targeted tests for the remaining survivors
 // in ops2.txt. Each test is annotated with the exact survivor(s) it kills and WHY
 // the mutated operator produces a different observable result.
 
@@ -17,10 +17,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// ── inplace.go:45 NEGATION/BOUNDARY — len(c.Chapters) > 0 ───────────────────
+// ── inplace.go:45 NEGATION/BOUNDARY - len(c.Chapters) > 0 ───────────────────
 
 // TestEditInPlace_PreservesChapters kills inplace.go:45 NEGATION.
-// Negation: len > 0 → len <= 0 — chapters not written → zero chapters after edit.
+// Negation: len > 0 → len <= 0 - chapters not written → zero chapters after edit.
 func TestEditInPlace_PreservesChapters(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chapters.mkv")
@@ -57,7 +57,7 @@ func TestEditInPlace_PreservesChapters(t *testing.T) {
 	}
 }
 
-// ── inplace.go:50 NEGATION/BOUNDARY — len(c.Attachments) > 0 ────────────────
+// ── inplace.go:50 NEGATION/BOUNDARY - len(c.Attachments) > 0 ────────────────
 
 // TestEditInPlace_PreservesAttachments kills inplace.go:50 NEGATION.
 func TestEditInPlace_PreservesAttachments(t *testing.T) {
@@ -93,7 +93,7 @@ func TestEditInPlace_PreservesAttachments(t *testing.T) {
 	}
 }
 
-// ── inplace.go:55 NEGATION/BOUNDARY — len(c.Tags) > 0 ───────────────────────
+// ── inplace.go:55 NEGATION/BOUNDARY - len(c.Tags) > 0 ───────────────────────
 
 // TestEditInPlace_PreservesTags kills inplace.go:55 NEGATION.
 func TestEditInPlace_PreservesTags(t *testing.T) {
@@ -137,10 +137,10 @@ func TestEditInPlace_PreservesTags(t *testing.T) {
 	}
 }
 
-// ── validate.go:57:43 NEGATION — t.Width == nil ──────────────────────────────
+// ── validate.go:57:43 NEGATION - t.Width == nil ──────────────────────────────
 
 // TestValidate_VideoNilWidthFlagged kills validate.go:57:43 NEGATION.
-// Negation: Width==nil → Width!=nil — a track with nil Width is NOT flagged.
+// Negation: Width==nil → Width!=nil - a track with nil Width is NOT flagged.
 // We use nil Width + non-nil Height; original flags it, mutation does not.
 func TestValidate_VideoNilWidthFlagged(t *testing.T) {
 	dir := t.TempDir()
@@ -167,10 +167,10 @@ func TestValidate_VideoNilWidthFlagged(t *testing.T) {
 	}
 }
 
-// ── validate.go:57:62 NEGATION — t.Height == nil ─────────────────────────────
+// ── validate.go:57:62 NEGATION - t.Height == nil ─────────────────────────────
 
 // TestValidate_VideoNilHeightFlagged kills validate.go:57:62 NEGATION.
-// non-nil Width, nil Height — original flags it; Height==nil→Height!=nil mutation does not.
+// non-nil Width, nil Height - original flags it; Height==nil→Height!=nil mutation does not.
 func TestValidate_VideoNilHeightFlagged(t *testing.T) {
 	dir := t.TempDir()
 	w := uint32(1920)
@@ -196,10 +196,10 @@ func TestValidate_VideoNilHeightFlagged(t *testing.T) {
 	}
 }
 
-// ── validate.go:66:17 NEGATION — t.SampleRate == nil ─────────────────────────
+// ── validate.go:66:17 NEGATION - t.SampleRate == nil ─────────────────────────
 
 // TestValidate_AudioWithSampleRateNoWarning kills validate.go:66:17 NEGATION.
-// Negation: SampleRate==nil → SampleRate!=nil — audio WITH sample rate would be
+// Negation: SampleRate==nil → SampleRate!=nil - audio WITH sample rate would be
 // wrongly flagged. Original: no warning. Mutation: warning emitted.
 func TestValidate_AudioWithSampleRateNoWarning(t *testing.T) {
 	dir := t.TempDir()
@@ -218,7 +218,7 @@ func TestValidate_AudioWithSampleRateNoWarning(t *testing.T) {
 	}
 }
 
-// ── validate.go:102:31 INCREMENT_DECREMENT — blockCounts[blk.TrackNumber]++ ──
+// ── validate.go:102:31 INCREMENT_DECREMENT - blockCounts[blk.TrackNumber]++ ──
 
 // TestValidate_BlockCountsNotDecremented kills validate.go:102:31.
 // If ++ becomes -- (or no-op), blockCounts stays at 0 for all tracks, triggering
@@ -245,10 +245,10 @@ func TestValidate_BlockCountsNotDecremented(t *testing.T) {
 	}
 }
 
-// ── validate.go:121:24 NEGATION — blockCounts[t.ID] == 0 ─────────────────────
+// ── validate.go:121:24 NEGATION - blockCounts[t.ID] == 0 ─────────────────────
 
 // TestValidate_TrackWithBlocksNoNoBlocksWarning kills validate.go:121:24 NEGATION.
-// Negation: == 0 → != 0 — tracks WITH blocks trigger "no blocks" warning.
+// Negation: == 0 → != 0 - tracks WITH blocks trigger "no blocks" warning.
 func TestValidate_TrackWithBlocksNoNoBlocksWarning(t *testing.T) {
 	dir := t.TempDir()
 	src := buildMinimalMKV(t, dir, "hasblocks.mkv", []mkv.Track{videoTrack(1)},
@@ -268,10 +268,10 @@ func TestValidate_TrackWithBlocksNoNoBlocksWarning(t *testing.T) {
 	}
 }
 
-// ── validate.go:121:43 BOUNDARY — blockTotal > 0 ─────────────────────────────
+// ── validate.go:121:43 BOUNDARY - blockTotal > 0 ─────────────────────────────
 
 // TestValidate_ZeroBlockFileProdNoPerTrackWarning kills validate.go:121:43 BOUNDARY.
-// Boundary: > 0 → >= 0 — with blockTotal=0, all tracks get spurious "no blocks" warnings.
+// Boundary: > 0 → >= 0 - with blockTotal=0, all tracks get spurious "no blocks" warnings.
 func TestValidate_ZeroBlockFileProdNoPerTrackWarning(t *testing.T) {
 	dir := t.TempDir()
 	// No blocks written; blockTotal stays 0 after the loop.
@@ -289,7 +289,7 @@ func TestValidate_ZeroBlockFileProdNoPerTrackWarning(t *testing.T) {
 	}
 }
 
-// ── ass.go:30:32 ARITHMETIC_BASE — newID = len(c.Tracks) + 1 ─────────────────
+// ── ass.go:30:32 ARITHMETIC_BASE - newID = len(c.Tracks) + 1 ─────────────────
 
 // TestMergeASS_SubtitleTrackIDDistinct kills ass.go:30:32 ARITHMETIC_BASE.
 // With +1 → -1: for a 2-track source, newID=1 (conflicts with existing track 1).
@@ -321,10 +321,10 @@ func TestMergeASS_SubtitleTrackIDDistinct(t *testing.T) {
 	}
 }
 
-// ── ass.go:60:59 NEGATION — WriteMetadata err != nil ─────────────────────────
+// ── ass.go:60:59 NEGATION - WriteMetadata err != nil ─────────────────────────
 
 // TestMergeASS_OutputContainsSubBlocks kills ass.go:60:59 NEGATION.
-// Negation: err != nil → err == nil — when WriteMetadata succeeds (err=nil),
+// Negation: err != nil → err == nil - when WriteMetadata succeeds (err=nil),
 // the function returns immediately without calling streamToWriter. No blocks written.
 func TestMergeASS_OutputContainsSubBlocks(t *testing.T) {
 	dir := t.TempDir()
@@ -346,16 +346,16 @@ func TestMergeASS_OutputContainsSubBlocks(t *testing.T) {
 	}
 }
 
-// ── ass.go:109:29 BOUNDARY — len(track.CodecPrivate) > 0 ─────────────────────
+// ── ass.go:109:29 BOUNDARY - len(track.CodecPrivate) > 0 ─────────────────────
 
 // TestExtractASS_EmptyCodecPrivateNoHeader kills ass.go:109:29 BOUNDARY.
-// Boundary: > 0 → >= 0 — always true, so even an empty CodecPrivate writes a blank line.
+// Boundary: > 0 → >= 0 - always true, so even an empty CodecPrivate writes a blank line.
 // Original: empty CodecPrivate → no header written. Mutation: "\n" is prepended.
 func TestExtractASS_EmptyCodecPrivateNoHeader(t *testing.T) {
 	dir := t.TempDir()
 	assTrack := mkv.Track{
 		ID: 1, Type: mkv.SubtitleTrack, Codec: "ass", Language: "eng",
-		CodecPrivate: nil, // empty — should not produce a header line
+		CodecPrivate: nil, // empty - should not produce a header line
 	}
 	src := buildMinimalMKV(t, dir, "ass_nocp.mkv", []mkv.Track{assTrack},
 		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Data: []byte("0,0,Default,,0,0,0,,Text")}}, 1000)
@@ -375,7 +375,7 @@ func TestExtractASS_EmptyCodecPrivateNoHeader(t *testing.T) {
 	}
 }
 
-// ── ass.go:138:51 ARITHMETIC_BASE — blk.Timecode + defaultSubDurationMs ──────
+// ── ass.go:138:51 ARITHMETIC_BASE - blk.Timecode + defaultSubDurationMs ──────
 
 // TestExtractASS_EndAfterStart kills ass.go:138:51 ARITHMETIC_BASE.
 // Arithmetic: + → - gives end = TC - 3000. For TC=5000ms: end=2000ms < start=5000ms.
@@ -418,7 +418,7 @@ func TestExtractASS_EndAfterStart(t *testing.T) {
 	}
 }
 
-// ── stream.go:97:31 INVERT_NEGATIVES — blk.Timecode - opts.timeStart ─────────
+// ── stream.go:97:31 INVERT_NEGATIVES - blk.Timecode - opts.timeStart ─────────
 
 // TestStreamToWriter_TimecodeAdjustedByTimeStart kills stream.go:97:31 INVERT_NEGATIVES.
 // INVERT_NEGATIVES: -timeStart → +timeStart, so output TC = TC + timeStart + offset
@@ -456,7 +456,7 @@ func TestStreamToWriter_TimecodeAdjustedByTimeStart(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:72:25 ARITHMETIC_BASE — blk.Timecode + defaultSubDurationMs ──
+// ── subtitle.go:72:25 ARITHMETIC_BASE - blk.Timecode + defaultSubDurationMs ──
 
 // TestExtractSubtitle_EndTimestampAfterStart kills subtitle.go:72 ARITHMETIC_BASE.
 // With + → -: endMs = TC - 3000. For TC=5000ms: end=2000ms < start=5000ms.
@@ -501,7 +501,7 @@ func TestExtractSubtitle_EndTimestampAfterStart(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:82:6 INCREMENT_DECREMENT — seq++ ─────────────────────────────
+// ── subtitle.go:82:6 INCREMENT_DECREMENT - seq++ ─────────────────────────────
 
 // TestExtractSubtitle_SequenceNumbersIncrement kills subtitle.go:82 INCREMENT_DECREMENT.
 // If seq stays 1 (no increment), all entries share sequence number 1.
@@ -541,10 +541,10 @@ func TestExtractSubtitle_SequenceNumbersIncrement(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:145:19 BOUNDARY — blk.Duration > 0 ───────────────────────────
+// ── subtitle.go:145:19 BOUNDARY - blk.Duration > 0 ───────────────────────────
 
 // TestExtractSubtitleWebVTT_ZeroDurationBlockGetsDefaultEnd kills subtitle.go:145 BOUNDARY.
-// Boundary: > 0 → >= 0 — Duration=0 would set end=blk.TC+0=blk.TC, producing zero-duration cue.
+// Boundary: > 0 → >= 0 - Duration=0 would set end=blk.TC+0=blk.TC, producing zero-duration cue.
 // Original: Duration=0 → end=0 (unset) → ResolveCueEnds fills in default.
 func TestExtractSubtitleWebVTT_ZeroDurationBlockGetsDefaultEnd(t *testing.T) {
 	dir := t.TempDir()
@@ -582,10 +582,10 @@ func TestExtractSubtitleWebVTT_ZeroDurationBlockGetsDefaultEnd(t *testing.T) {
 	}
 }
 
-// ── webm.go:74:50 BOUNDARY — b.Timecode-clusterStart >= clusterDurationMs ─────
+// ── webm.go:74:50 BOUNDARY - b.Timecode-clusterStart >= clusterDurationMs ─────
 
 // TestRemuxToWebM_ExactClusterBoundaryFlush kills webm.go:74:50 BOUNDARY.
-// Boundary: >= → > — a block at exactly clusterStart+1000ms does NOT flush a new cluster.
+// Boundary: >= → > - a block at exactly clusterStart+1000ms does NOT flush a new cluster.
 // Two blocks exactly 1000ms apart must produce 2 clusters (original >=) not 1 (mutation >).
 func TestRemuxToWebM_ExactClusterBoundaryFlush(t *testing.T) {
 	dir := t.TempDir()
@@ -610,10 +610,10 @@ func TestRemuxToWebM_ExactClusterBoundaryFlush(t *testing.T) {
 	}
 }
 
-// ── webm.go:74:19 BOUNDARY — clusterStart < 0 ────────────────────────────────
+// ── webm.go:74:19 BOUNDARY - clusterStart < 0 ────────────────────────────────
 
 // TestRemuxToWebM_NegativeClusterStartCheck kills webm.go:74:19 BOUNDARY.
-// Boundary: < 0 → <= 0 — after first block sets clusterStart=0, the SECOND block
+// Boundary: < 0 → <= 0 - after first block sets clusterStart=0, the SECOND block
 // sees clusterStart=0 <=0 =true → extra flush. 3 clusters instead of 2.
 func TestRemuxToWebM_NegativeClusterStartCheck(t *testing.T) {
 	dir := t.TempDir()
@@ -664,11 +664,11 @@ func buildWebMFixture(t *testing.T, path string, timecodes []int64) {
 	mustNil(t, os.WriteFile(path, buf.Bytes(), 0o644))
 }
 
-// ── join.go:82 — timeOffset += c.DurationMs ──────────────────────────────────
+// ── join.go:82 - timeOffset += c.DurationMs ──────────────────────────────────
 
 // TestJoin_SecondSourceTimecodeShifted kills join.go:82 (timeOffset arithmetic).
 // If timeOffset is not incremented (or negated), blocks from the second source
-// would have wrong timecodes — overlapping with the first source instead of following it.
+// would have wrong timecodes - overlapping with the first source instead of following it.
 func TestJoin_SecondSourceTimecodeShifted(t *testing.T) {
 	dir := t.TempDir()
 	src1 := buildMinimalMKV(t, dir, "a.mkv", []mkv.Track{videoTrack(1)},
@@ -700,10 +700,10 @@ func TestJoin_SecondSourceTimecodeShifted(t *testing.T) {
 	}
 }
 
-// ── merge.go:65:23 NEGATION — len(extraSources) == 0 ─────────────────────────
+// ── merge.go:65:23 NEGATION - len(extraSources) == 0 ─────────────────────────
 
 // TestMergeWithSubtitles_ExtraTracksIncluded kills merge.go:65:23 NEGATION.
-// Negation: == 0 → != 0 — with non-empty extraSources, MergeSubtitle is called
+// Negation: == 0 → != 0 - with non-empty extraSources, MergeSubtitle is called
 // directly (skipping the extra sources). Output would lack the extra-source tracks.
 func TestMergeWithSubtitles_ExtraTracksIncluded(t *testing.T) {
 	dir := t.TempDir()
@@ -730,10 +730,10 @@ func TestMergeWithSubtitles_ExtraTracksIncluded(t *testing.T) {
 	}
 }
 
-// ── merge.go:73:92 NEGATION — MergeSubtitle error check ──────────────────────
+// ── merge.go:73:92 NEGATION - MergeSubtitle error check ──────────────────────
 
 // TestMergeWithSubtitles_SubtitleTrackPresent kills merge.go:73:92 NEGATION.
-// Negation: err != nil → err == nil — when Merge succeeds (err=nil), returns nil
+// Negation: err != nil → err == nil - when Merge succeeds (err=nil), returns nil
 // immediately without calling MergeSubtitle. Output has no subtitle track.
 func TestMergeWithSubtitles_SubtitleTrackPresent(t *testing.T) {
 	dir := t.TempDir()
@@ -764,7 +764,7 @@ func TestMergeWithSubtitles_SubtitleTrackPresent(t *testing.T) {
 	}
 }
 
-// ── reindex.go:277:56 NEGATION — readBlockHeader discard error ───────────────
+// ── reindex.go:277:56 NEGATION - readBlockHeader discard error ───────────────
 
 // TestReindex_CueTrackMatchesFirstVideoTrack kills reindex.go:277 NEGATION.
 // With negation: readBlockHeader returns (track=0, relTC=0, keyframe=false, nil)
@@ -797,7 +797,7 @@ func TestReindex_CueTrackMatchesFirstVideoTrack(t *testing.T) {
 	assertCuesPointToClusters(t, dst, c.Cues)
 }
 
-// ── reindex.go:330 — audio-only cue throttle arithmetic ──────────────────────
+// ── reindex.go:330 - audio-only cue throttle arithmetic ──────────────────────
 
 // TestReindex_AudioCueThrottleExactBoundaryBothSides kills reindex.go:330 variants.
 // Three audio clusters at 0, 499, 500ms:
@@ -837,7 +837,7 @@ func TestReindex_AudioCueThrottleExactBoundaryBothSides(t *testing.T) {
 	assertCuesPointToClusters(t, dst, c.Cues)
 }
 
-// ── reindex.go:255/300/318 — Reindex() cue positions are valid ───────────────
+// ── reindex.go:255/300/318 - Reindex() cue positions are valid ───────────────
 
 // TestReindex_DirectCallCuesPointToClusters kills reindex.go:255,300,318 survivors
 // by verifying that the Reindex() function (not EditMetadata) produces valid cues.
@@ -876,10 +876,10 @@ func TestReindex_DirectCallCuesPointToClusters(t *testing.T) {
 	}
 }
 
-// ── reindex.go:583 NEGATION — reindexScanTimecodeScale h.ID == IDTimecodeScale
+// ── reindex.go:583 NEGATION - reindexScanTimecodeScale h.ID == IDTimecodeScale
 
 // TestReindex_DirectCallPreservesTimecodeScale kills reindex.go:583 NEGATION.
-// Negation: h.ID==IDTimecodeScale → h.ID!=IDTimecodeScale — every OTHER element
+// Negation: h.ID==IDTimecodeScale → h.ID!=IDTimecodeScale - every OTHER element
 // is treated as TimecodeScale, returning garbage. Cue timecodes would be wrong.
 // We use a non-default TimecodeScale=2_000_000 so default fallback is distinguishable.
 func TestReindex_DirectCallPreservesTimecodeScale(t *testing.T) {
@@ -925,10 +925,10 @@ func TestReindex_DirectCallPreservesTimecodeScale(t *testing.T) {
 	assertCuesPointToClusters(t, dst, c.Cues)
 }
 
-// ── reindex.go:548:37 CONDITIONALS_BOUNDARY — progress guard in Reindex() ────
+// ── reindex.go:548:37 CONDITIONALS_BOUNDARY - progress guard in Reindex() ────
 
 // TestReindex_ProgressNotFiredWithZeroTotalInReindex kills reindex.go:548 BOUNDARY.
-// Boundary: > 0 → >= 0 — with totalBytes=0, progress WOULD be called.
+// Boundary: > 0 → >= 0 - with totalBytes=0, progress WOULD be called.
 // This mirrors the reindexFastCopy test but for the Reindex() function path.
 func TestReindex_ProgressNotFiredWithZeroTotalInReindex(t *testing.T) {
 	dir := t.TempDir()

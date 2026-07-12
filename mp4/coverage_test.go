@@ -1,8 +1,8 @@
 package mp4
 
-// coverage_test.go — targeted statement coverage tests.
+// coverage_test.go - targeted statement coverage tests.
 // Focus: reach lines missed by existing tests, assert a sensible result.
-// No mutations testing here — see mutation_kill_test.go.
+// No mutations testing here - see mutation_kill_test.go.
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// ── meta.go:45 — OpenMetaWithFS ───────────────────────────────────────────────
+// ── meta.go:45 - OpenMetaWithFS ───────────────────────────────────────────────
 
 // TestOpenMetaWithFS covers the OpenMetaWithFS convenience wrapper.
 func TestOpenMetaWithFS(t *testing.T) {
@@ -33,7 +33,7 @@ func TestOpenMetaWithFS(t *testing.T) {
 	_ = dropped
 }
 
-// ── codec.go:110 — canonicalSubCodec D_WEBVTT/ variants ──────────────────────
+// ── codec.go:110 - canonicalSubCodec D_WEBVTT/ variants ──────────────────────
 
 // TestCanonicalSubCodecDWebVTT covers the D_WEBVTT/ prefix mapping path.
 func TestCanonicalSubCodecDWebVTT(t *testing.T) {
@@ -44,7 +44,7 @@ func TestCanonicalSubCodecDWebVTT(t *testing.T) {
 	}
 }
 
-// ── box.go:105 — descLen with n<0 ────────────────────────────────────────────
+// ── box.go:105 - descLen with n<0 ────────────────────────────────────────────
 
 // TestDescLenNegativeClampsToZero covers the `if n < 0 { n = 0 }` guard.
 func TestDescLenNegativeClampsToZero(t *testing.T) {
@@ -59,7 +59,7 @@ func TestDescLenNegativeClampsToZero(t *testing.T) {
 	}
 }
 
-// ── audio.go:219 — getAudioObjectType escape code ────────────────────────────
+// ── audio.go:219 - getAudioObjectType escape code ────────────────────────────
 
 // TestGetAudioObjectTypeEscape covers the aot==31 escape path (reads 6 extra bits).
 func TestGetAudioObjectTypeEscape(t *testing.T) {
@@ -79,7 +79,7 @@ func TestGetAudioObjectTypeEscape(t *testing.T) {
 	}
 }
 
-// ── audio.go:189 — readSamplingFrequency explicit (idx==0xF) ─────────────────
+// ── audio.go:189 - readSamplingFrequency explicit (idx==0xF) ─────────────────
 
 // TestReadSamplingFrequencyExplicit covers the 24-bit explicit frequency branch.
 func TestReadSamplingFrequencyExplicit(t *testing.T) {
@@ -92,7 +92,7 @@ func TestReadSamplingFrequencyExplicit(t *testing.T) {
 	}
 }
 
-// ── audio.go:244 — skipGASpecificConfig paths ─────────────────────────────────
+// ── audio.go:244 - skipGASpecificConfig paths ─────────────────────────────────
 
 // TestSkipGASpecificConfigPaths covers the dependsOnCoreCoder, aot-specific
 // layerNr, extensionFlag+aot=22 (numOfSubFrame/layer_length), and
@@ -171,7 +171,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 	}
 }
 
-// ── parse.go:538 — parseMovieHeader version=1 ────────────────────────────────
+// ── parse.go:538 - parseMovieHeader version=1 ────────────────────────────────
 
 // TestParseMovieHeaderV1 covers the version-1 path (64-bit timing fields).
 func TestParseMovieHeaderV1(t *testing.T) {
@@ -192,7 +192,7 @@ func TestParseMovieHeaderV1(t *testing.T) {
 	}
 }
 
-// ── parse.go:526 — headerFrameCount stz2 fallback ────────────────────────────
+// ── parse.go:526 - headerFrameCount stz2 fallback ────────────────────────────
 
 // TestHeaderFrameCountStz2 covers the stz2 (compact size) box path.
 func TestHeaderFrameCountStz2(t *testing.T) {
@@ -214,7 +214,7 @@ func TestHeaderFrameCountStz2(t *testing.T) {
 	}
 }
 
-// ── parse.go:725 — tkhdRotation version=1 ────────────────────────────────────
+// ── parse.go:725 - tkhdRotation version=1 ────────────────────────────────────
 
 // TestTkhdRotationV1 covers the version=1 path (matOff=52).
 func TestTkhdRotationV1(t *testing.T) {
@@ -240,7 +240,7 @@ func TestTkhdRotationV1(t *testing.T) {
 	}
 }
 
-// ── chapters.go:155 — buildChpl negative start and long title ─────────────────
+// ── chapters.go:155 - buildChpl negative start and long title ─────────────────
 
 // TestBuildChplEdgeCases covers start<0 (clamped to 0) and title>255 (truncated).
 func TestBuildChplEdgeCases(t *testing.T) {
@@ -264,7 +264,7 @@ func TestBuildChplEdgeCases(t *testing.T) {
 	}
 }
 
-// ── parse.go:390 — parseTrak structural error paths ──────────────────────────
+// ── parse.go:390 - parseTrak structural error paths ──────────────────────────
 
 // TestParseTrakStructuralErrors covers the error paths for missing/malformed
 // sub-boxes inside a trak (no mdia, no hdlr, hdlr too short, no minf, no stbl,
@@ -334,7 +334,7 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 	}
 }
 
-// ── parse.go:779 — parseSampleEntry error paths ───────────────────────────────
+// ── parse.go:779 - parseSampleEntry error paths ───────────────────────────────
 
 // TestParseSampleEntryErrors covers stsd too short and zero-entry stsd.
 func TestParseSampleEntryErrors(t *testing.T) {
@@ -350,10 +350,10 @@ func TestParseSampleEntryErrors(t *testing.T) {
 	}
 }
 
-// ── parse.go:886 — parseMP4A unknown objectType ───────────────────────────────
+// ── parse.go:886 - parseMP4A unknown objectType ───────────────────────────────
 
 // TestParseMP4AUnknownObjType covers the default case (objType not recognised)
-// which returns ok=false, nil error — signals "skip this track".
+// which returns ok=false, nil error - signals "skip this track".
 func TestParseMP4AUnknownObjType(t *testing.T) {
 	// objType 0x01 is not AAC, MP3, or DTS → ok=false.
 	esds := esdsBox(0x01, nil)
@@ -369,7 +369,7 @@ func TestParseMP4AUnknownObjType(t *testing.T) {
 	}
 }
 
-// ── parse.go:900 — extractFLAC dfLa too short ─────────────────────────────────
+// ── parse.go:900 - extractFLAC dfLa too short ─────────────────────────────────
 
 // TestExtractFLACDflaPayloadTooShort covers the "dfLa too short" error path.
 func TestExtractFLACDflaPayloadTooShort(t *testing.T) {
@@ -383,7 +383,7 @@ func TestExtractFLACDflaPayloadTooShort(t *testing.T) {
 	}
 }
 
-// ── parse.go:1088 — parseESDS ES_Descriptor flag paths ───────────────────────
+// ── parse.go:1088 - parseESDS ES_Descriptor flag paths ───────────────────────
 
 // TestParseESDSWithDependencyFlags covers the dependsOn_ES_ID (0x80) and
 // OCR (0x20) flag paths in parseESDS.
@@ -439,7 +439,7 @@ func TestParseESDSWithDependencyFlags(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:16 — buildSampleTable error paths ─────────────────────────
+// ── sampletable.go:16 - buildSampleTable error paths ─────────────────────────
 
 // TestBuildSampleTableMissingBoxErrors covers the "stbl without stsz" and
 // "stbl without stsc" errors.
@@ -462,7 +462,7 @@ func TestBuildSampleTableMissingBoxErrors(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:164 — parseStsc too short ──────────────────────────────────
+// ── sampletable.go:164 - parseStsc too short ──────────────────────────────────
 
 // TestParseStscErrors covers the "stsc too short" and "too few entries" errors.
 func TestParseStscErrors(t *testing.T) {
@@ -482,7 +482,7 @@ func TestParseStscErrors(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:133 — parseChunkOffsets stco/co64 too short ───────────────
+// ── sampletable.go:133 - parseChunkOffsets stco/co64 too short ───────────────
 
 // TestParseChunkOffsetsTooShort covers the "stco too short" and "co64 too short"
 // early-return error paths (payload < 8 bytes).
@@ -497,7 +497,7 @@ func TestParseChunkOffsetsTooShort(t *testing.T) {
 	}
 }
 
-// ── parse.go:302 — ilstDataValue edge cases ───────────────────────────────────
+// ── parse.go:302 - ilstDataValue edge cases ───────────────────────────────────
 
 // TestIlstDataValueEdgeCases covers the "no data box" and "short data payload"
 // branches that return empty string.
@@ -514,7 +514,7 @@ func TestIlstDataValueEdgeCases(t *testing.T) {
 	}
 }
 
-// ── parse.go:138 — readMoov 64-bit largesize and size=0 ──────────────────────
+// ── parse.go:138 - readMoov 64-bit largesize and size=0 ──────────────────────
 
 // TestReadMoovLargesizeAndSize0 covers the boxSize==1 (64-bit largesize) and
 // boxSize==0 (extends to EOF) paths in readMoov.
@@ -562,7 +562,7 @@ func TestReadMoovLargesizeAndSize0(t *testing.T) {
 	}
 }
 
-// ── parse.go:257 — parseMP4Tags missing/malformed meta ───────────────────────
+// ── parse.go:257 - parseMP4Tags missing/malformed meta ───────────────────────
 
 // TestParseMP4TagsMissingMeta covers the case where udta has no meta child.
 func TestParseMP4TagsMissingMeta(t *testing.T) {
@@ -575,7 +575,7 @@ func TestParseMP4TagsMissingMeta(t *testing.T) {
 	}
 }
 
-// ── mux.go:132 — RemuxToMP4 progress callback ────────────────────────────────
+// ── mux.go:132 - RemuxToMP4 progress callback ────────────────────────────────
 
 // TestRemuxToMP4ProgressCallback covers the `if o.Progress != nil` branch.
 // Progress fires every 50 blocks so with a tiny input we just verify that
@@ -597,7 +597,7 @@ func TestRemuxToMP4ProgressCallback(t *testing.T) {
 	}
 }
 
-// ── mux.go:112 — RemuxToMP4 non-existent source ───────────────────────────────
+// ── mux.go:112 - RemuxToMP4 non-existent source ───────────────────────────────
 
 // TestRemuxToMP4NonExistentSrc covers the reader.OpenWithFS error path.
 func TestRemuxToMP4NonExistentSrc(t *testing.T) {
@@ -608,10 +608,10 @@ func TestRemuxToMP4NonExistentSrc(t *testing.T) {
 	}
 }
 
-// ── mux.go:62 — emitChapterSamples EndMs > StartMs ────────────────────────────
+// ── mux.go:62 - emitChapterSamples EndMs > StartMs ────────────────────────────
 
 // TestChapterWithEndMs covers the `case ch.EndMs > ch.StartMs` branch in
-// emitChapterSamples — the last chapter having an explicit end time.
+// emitChapterSamples - the last chapter having an explicit end time.
 func TestChapterWithEndMs(t *testing.T) {
 	chapters := []mkv.Chapter{
 		{StartMs: 0, Title: "Part 1"},
@@ -642,7 +642,7 @@ func TestChapterWithEndMs(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:128,148 — flushPendingCue lead-in and gap ────────────────────
+// ── subtitle.go:128,148 - flushPendingCue lead-in and gap ────────────────────
 
 // TestSubtitleLeadInAndGap exercises the lead-in empty sample (pendCuePTS > 0
 // with no prior samples) and the gap-filling empty sample between two cues.
@@ -676,7 +676,7 @@ func TestSubtitleLeadInAndGap(t *testing.T) {
 	}
 }
 
-// ── subtitle_webvtt.go:54 — ExtractSubtitleWebVTT cancelled context ───────────
+// ── subtitle_webvtt.go:54 - ExtractSubtitleWebVTT cancelled context ───────────
 
 // TestExtractSubtitleWebVTTCancelledContext covers the ctx.Err() check in the
 // sample-decoding loop.
@@ -691,7 +691,7 @@ func TestExtractSubtitleWebVTTCancelledContext(t *testing.T) {
 	}
 }
 
-// ── subtitle_webvtt.go:48 — ExtractSubtitleWebVTT non-subtitle track ──────────
+// ── subtitle_webvtt.go:48 - ExtractSubtitleWebVTT non-subtitle track ──────────
 
 // TestExtractSubtitleWebVTTNonSubTrack covers the "not a subtitle track" error.
 func TestExtractSubtitleWebVTTNonSubTrack(t *testing.T) {
@@ -703,7 +703,7 @@ func TestExtractSubtitleWebVTTNonSubTrack(t *testing.T) {
 	}
 }
 
-// ── meta.go:102 — containerFromMovie with iTunes tags ────────────────────────
+// ── meta.go:102 - containerFromMovie with iTunes tags ────────────────────────
 
 // TestContainerFromMovieWithTags covers the `if len(mv.tags) > 0` path that
 // builds a Tags field in the Container.
@@ -732,10 +732,10 @@ func TestContainerFromMovieWithTags(t *testing.T) {
 	}
 }
 
-// ── demux.go:120 — buildMKVTracks subtitle track fields ───────────────────────
+// ── demux.go:120 - buildMKVTracks subtitle track fields ───────────────────────
 
 // TestBuildMKVTracksSubtitleField covers the subtitle branch in buildMKVTracks
-// — the code that falls through to the default (non-video/audio) handler.
+// - the code that falls through to the default (non-video/audio) handler.
 func TestBuildMKVTracksSubtitleField(t *testing.T) {
 	mv := &movie{
 		tracks: []inTrack{
@@ -761,7 +761,7 @@ func TestBuildMKVTracksSubtitleField(t *testing.T) {
 	}
 }
 
-// ── parse.go:1061 — extractOpus round-trip via Opus track ─────────────────────
+// ── parse.go:1061 - extractOpus round-trip via Opus track ─────────────────────
 
 // TestOpusRoundTrip exercises opusEntry (build) and extractOpus (parse).
 func TestOpusRoundTrip(t *testing.T) {
@@ -809,7 +809,7 @@ func TestOpusRoundTrip(t *testing.T) {
 	}
 }
 
-// ── codec.go:318 — opusEntry error path ───────────────────────────────────────
+// ── codec.go:318 - opusEntry error path ───────────────────────────────────────
 
 // TestOpusEntryInvalidHead covers the error path when opusEntry receives a
 // CodecPrivate that is not a valid OpusHead.
@@ -820,7 +820,7 @@ func TestOpusEntryInvalidHead(t *testing.T) {
 	}
 }
 
-// ── codec.go:279 — aacEntry no CodecPrivate ───────────────────────────────────
+// ── codec.go:279 - aacEntry no CodecPrivate ───────────────────────────────────
 
 // TestAACEntryMissingASC covers the error path when aacEntry has no CodecPrivate.
 func TestAACEntryMissingASC(t *testing.T) {
@@ -830,7 +830,7 @@ func TestAACEntryMissingASC(t *testing.T) {
 	}
 }
 
-// ── codec.go:246 — cicp nil pointer ──────────────────────────────────────────
+// ── codec.go:246 - cicp nil pointer ──────────────────────────────────────────
 
 // TestCICPNilPointer covers the nil-pointer branch of cicp (returns 2=unspecified).
 func TestCICPNilPointer(t *testing.T) {
@@ -843,7 +843,7 @@ func TestCICPNilPointer(t *testing.T) {
 	}
 }
 
-// ── parse.go:949 — parseBitrate short entry ───────────────────────────────────
+// ── parse.go:949 - parseBitrate short entry ───────────────────────────────────
 
 // TestParseBitrateShortEntry covers the early return when entry is shorter than
 // headerLen.
@@ -856,7 +856,7 @@ func TestParseBitrateShortEntry(t *testing.T) {
 	}
 }
 
-// ── parse.go:976 — parsePasp zero dimensions ─────────────────────────────────
+// ── parse.go:976 - parsePasp zero dimensions ─────────────────────────────────
 
 // TestParsePaspZeroDimensions covers the early return when tr.width or
 // tr.height is zero (the `tr.width == 0 || tr.height == 0` guard).
@@ -872,7 +872,7 @@ func TestParsePaspZeroDimensions(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:57 — buildSampleTable sample outside file ─────────────────
+// ── sampletable.go:57 - buildSampleTable sample outside file ─────────────────
 
 // TestBuildSampleTableSampleOutsideFile covers the `pos < 0 || end > fileSize`
 // error when a chunk offset places a sample past the file boundary.
@@ -895,7 +895,7 @@ func TestBuildSampleTableSampleOutsideFile(t *testing.T) {
 	}
 }
 
-// ── webvtt.go:93 — extractWVTTConfig no vttC child ───────────────────────────
+// ── webvtt.go:93 - extractWVTTConfig no vttC child ───────────────────────────
 
 // TestExtractWVTTConfigNoVttC covers the case where the wvtt entry has no vttC
 // box → CodecPrivate stays nil.
@@ -909,7 +909,7 @@ func TestExtractWVTTConfigNoVttC(t *testing.T) {
 	}
 }
 
-// ── parse.go:1028 — parseColr short payload ───────────────────────────────────
+// ── parse.go:1028 - parseColr short payload ───────────────────────────────────
 
 // TestParseColrShortPayload covers the `!ok || len(colr.payload) < 10` guard.
 func TestParseColrShortPayload(t *testing.T) {
@@ -923,7 +923,7 @@ func TestParseColrShortPayload(t *testing.T) {
 	}
 }
 
-// ── demux.go:317 — readSample seek error ─────────────────────────────────────
+// ── demux.go:317 - readSample seek error ─────────────────────────────────────
 
 // TestReadSampleSeekError covers the `r.Seek` error path by using a ReadSeeker
 // whose Seek always returns an error.
@@ -940,7 +940,7 @@ type alwaysErrSeeker struct{}
 func (alwaysErrSeeker) Read(p []byte) (int, error)         { return 0, io.ErrUnexpectedEOF }
 func (alwaysErrSeeker) Seek(_ int64, _ int) (int64, error) { return 0, io.ErrNoProgress }
 
-// ── remux.go — RemuxToMP4 SkipUnsupported with bad CodecPrivate ───────────────
+// ── remux.go - RemuxToMP4 SkipUnsupported with bad CodecPrivate ───────────────
 
 // TestSkipUnsupportedBadCodecPrivate covers the path where a codec is known but
 // its sample entry cannot be built (e.g. zero-length avcC).
@@ -978,7 +978,7 @@ func TestSkipUnsupportedBadCodecPrivate(t *testing.T) {
 	}
 }
 
-// ── remux.go — buildMKVTracks outputSampleRate ────────────────────────────────
+// ── remux.go - buildMKVTracks outputSampleRate ────────────────────────────────
 
 // TestBuildMKVTracksOutputSampleRate covers the `t.outputSampleRate > 0` branch
 // for HE-AAC that sets OutputSampleRate on the track.
@@ -1002,7 +1002,7 @@ func TestBuildMKVTracksOutputSampleRate(t *testing.T) {
 	}
 }
 
-// ── parse.go — parseStts not enough entries in payload ───────────────────────
+// ── parse.go - parseStts not enough entries in payload ───────────────────────
 
 // TestParseSttsPayloadTooShort covers the `len(payload) < 8+int(count)*8` error.
 func TestParseSttsPayloadTooShort(t *testing.T) {
@@ -1016,7 +1016,7 @@ func TestParseSttsPayloadTooShort(t *testing.T) {
 	}
 }
 
-// ── chapters.go:88 — encodeChapterSample empty title ─────────────────────────
+// ── chapters.go:88 - encodeChapterSample empty title ─────────────────────────
 
 // TestEncodeChapterSampleEmpty covers the len=0 edge case of encodeChapterSample.
 func TestEncodeChapterSampleEmpty(t *testing.T) {
@@ -1070,7 +1070,7 @@ func TestEAC3RoundTrip(t *testing.T) {
 	}
 }
 
-// ── codec.go:316 — opusEntry channel-mapping truncated ────────────────────────
+// ── codec.go:316 - opusEntry channel-mapping truncated ────────────────────────
 
 // TestEAC3EntryParseChannels covers the eac3Entry build followed by ec-3 sample
 // entry parsing (the parse.go "ec-3" case that calls eac3Channels).
@@ -1100,7 +1100,7 @@ func TestEAC3EntryAndParseSampleEntry(t *testing.T) {
 	}
 }
 
-// ── parse.go:819 — parseSampleEntry ac-3 ──────────────────────────────────────
+// ── parse.go:819 - parseSampleEntry ac-3 ──────────────────────────────────────
 
 // TestAC3EntryAndParseSampleEntry covers the ac-3 sample entry parse path.
 func TestAC3EntryAndParseSampleEntry(t *testing.T) {
@@ -1155,7 +1155,7 @@ func TestDWebVTTSubtitleCarried(t *testing.T) {
 	}
 }
 
-// ── parse.go — eac3Entry round-trip via sample entry ─────────────────────────
+// ── parse.go - eac3Entry round-trip via sample entry ─────────────────────────
 
 // TestEAC3EntryNoFirstFrame covers the planTracks code path where eac3 needs a
 // first frame (needsFirstFrame=true) and the first block fills it lazily.
@@ -1170,9 +1170,9 @@ func TestEAC3EntryNeedsFirstFrame(t *testing.T) {
 	}
 }
 
-// ── parse.go:1003 — parseDolbyVision none present ────────────────────────────
+// ── parse.go:1003 - parseDolbyVision none present ────────────────────────────
 
-// TestParseDolbyVisionAbsent covers the path where no dvcC/dvvC box exists —
+// TestParseDolbyVisionAbsent covers the path where no dvcC/dvvC box exists  -
 // function returns without setting dolbyVision.
 func TestParseDolbyVisionAbsent(t *testing.T) {
 	// Visual entry with no Dolby Vision config box.
@@ -1184,7 +1184,7 @@ func TestParseDolbyVisionAbsent(t *testing.T) {
 	}
 }
 
-// ── parse.go — readMoov invalid box size ─────────────────────────────────────
+// ── parse.go - readMoov invalid box size ─────────────────────────────────────
 
 // TestReadMoovInvalidBoxSize covers the `boxSize < headerLen || off+boxSize > size`
 // error path that rejects a box with a nonsensical size field.
@@ -1197,17 +1197,17 @@ func TestReadMoovInvalidBoxSize(t *testing.T) {
 	}
 }
 
-// ── parse.go — stz2 absent, headerFrameCount returns 0 ───────────────────────
+// ── parse.go - stz2 absent, headerFrameCount returns 0 ───────────────────────
 
 // TestHeaderFrameCountNoBoxes covers the case where neither stsz nor stz2 is
-// present — returns 0.
+// present - returns 0.
 func TestHeaderFrameCountNoBoxes(t *testing.T) {
 	if got := headerFrameCount([]memBox{{typ: "stco", payload: nil}}); got != 0 {
 		t.Errorf("no stsz/stz2: count = %d, want 0", got)
 	}
 }
 
-// ── OpenMeta/ReadMeta — cancelled context ────────────────────────────────────
+// ── OpenMeta/ReadMeta - cancelled context ────────────────────────────────────
 
 // TestReadMetaCancelledBeforeSeek covers the ctx.Err() check at the start of
 // readMeta.

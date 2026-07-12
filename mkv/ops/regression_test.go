@@ -1,4 +1,4 @@
-// Package ops — non-regression suite against the real ffmpeg-muxed fixture at
+// Package ops - non-regression suite against the real ffmpeg-muxed fixture at
 // internal/testdata/regfix.mkv (H.264 + 2×AAC laced, 2 chapters, track-UID
 // tags, ~6.023 s, ~258 KB).
 //
@@ -225,7 +225,7 @@ func TestRegfix_ReindexFidelity(t *testing.T) {
 
 	// Byte-identical raw element comparison for Tags, Chapters, Tracks.
 	// IDInfo will differ only in TimecodeScale (verbatim copy), so we check it
-	// too — it must be identical because Reindex copies Info verbatim.
+	// too - it must be identical because Reindex copies Info verbatim.
 	for _, id := range []uint32{mkv.IDTags, mkv.IDChapters, mkv.IDTracks, mkv.IDInfo} {
 		srcRaw := extractRawElement(t, regfixPath, id)
 		dstRaw := extractRawElement(t, dst, id)
@@ -332,7 +332,7 @@ func TestRegfix_EditMetadata_TitleChange(t *testing.T) {
 	dst := filepath.Join(dir, "titled.mkv")
 	ctx := context.Background()
 
-	const newTitle = "Regression Fixture — reindexed"
+	const newTitle = "Regression Fixture - reindexed"
 	if err := EditMetadata(ctx, regfixPath, dst, func(c *mkv.Container) {
 		c.Info.Title = newTitle
 	}); err != nil {

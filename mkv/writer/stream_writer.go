@@ -1,15 +1,15 @@
 package writer
 
-// stream_writer.go — live streaming write to a plain io.Writer.
+// stream_writer.go - live streaming write to a plain io.Writer.
 //
 // StreamWriter writes a valid MKV/WebM stream to any io.Writer (pipe, network
 // socket, HTTP response body…) without ever seeking back. The layout is:
 //
 //   EBML header (known size)
-//   Segment (unknown size — 0x01FF…FF)
+//   Segment (unknown size - 0x01FF…FF)
 //     Info (known size)
 //     Tracks (known size)
-//     Cluster (unknown size — repeated per cluster)
+//     Cluster (unknown size - repeated per cluster)
 //       Timestamp
 //       SimpleBlock …
 //     Cluster (unknown size)
@@ -56,8 +56,8 @@ func NewStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track) (*St
 // NewWebMStreamWriter is like NewStreamWriter but produces a complete WebM
 // stream: it first validates that every track uses a WebM-compatible codec
 // (mkv.ValidateWebM), then writes the "webm" DocType header at the right version
-// (4 if AV1, else 2). The streaming layout it emits — Info + Tracks + Clusters,
-// with no chapters/attachments/tags/SeekHead — is already within the WebM
+// (4 if AV1, else 2). The streaming layout it emits - Info + Tracks + Clusters,
+// with no chapters/attachments/tags/SeekHead - is already within the WebM
 // element subset, so the result is a real, playable .webm (frames included),
 // unlike the metadata-only writer.WriteWebM.
 func NewWebMStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track) (*StreamWriter, error) {
@@ -90,7 +90,7 @@ func newStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track, writ
 		return nil, fmt.Errorf("stream writer: Segment size: %w", err)
 	}
 
-	// Info — clear Duration so we do not write a wrong value.
+	// Info - clear Duration so we do not write a wrong value.
 	infoCopy := info
 	infoCopy.Duration = 0
 	if err := WriteSegmentInfo(w, &infoCopy, 0); err != nil {
@@ -130,7 +130,7 @@ func (s *StreamWriter) openCluster(tsMs int64) error {
 
 // FlushCluster closes the current cluster without writing anything (unknown-size
 // clusters are terminated by the next cluster's header or by EOF/Close). This
-// is a no-op in terms of bytes — it simply resets the internal state so that
+// is a no-op in terms of bytes - it simply resets the internal state so that
 // the NEXT WriteBlock call opens a new cluster.
 //
 // Callers should use FlushCluster when they want to force a cluster boundary

@@ -46,7 +46,7 @@ func TestMP4ContentHashesRoundTrip(t *testing.T) {
 		t.Fatalf("pristine MP4 reported mismatches: %+v", mismatches)
 	}
 
-	// Corrupt one sample byte inside the mdat — verify must flag track 1.
+	// Corrupt one sample byte inside the mdat - verify must flag track 1.
 	i := bytes.Index(raw, marker)
 	if i < 0 {
 		t.Fatal("marker not found in mdat")

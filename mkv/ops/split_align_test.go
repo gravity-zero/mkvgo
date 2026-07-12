@@ -52,7 +52,7 @@ func TestSplit_KeyframeAlignGatesOnVideoTrack(t *testing.T) {
 	video := collectTimecodes(t, files[0], 1_000_000, 1)
 	audio := collectTimecodes(t, files[0], 1_000_000, 2)
 
-	// Start: nothing before the first video keyframe >= 1000 (at 2000) — in
+	// Start: nothing before the first video keyframe >= 1000 (at 2000) - in
 	// particular no leading audio, and no mid-GOP video from 1000/1500.
 	// End: the GOP straddling 3000 is kept up to (excluding) the next video
 	// keyframe at 4000. Output timecodes are rebased to the segment timeline
@@ -86,7 +86,7 @@ func TestSplit_KeyframeAlignAudioOnly(t *testing.T) {
 }
 
 // Each split segment must carry only the chapters overlapping its range,
-// rebased to the segment's own timeline — not the source's full list at
+// rebased to the segment's own timeline - not the source's full list at
 // absolute timestamps.
 func TestSplit_ChaptersClippedAndRebased(t *testing.T) {
 	dir := t.TempDir()

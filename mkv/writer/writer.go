@@ -63,7 +63,7 @@ func (e *ew) flush(w io.Writer, id uint32) error {
 	return WriteMasterElement(w, id, e.Bytes())
 }
 
-// Write serialises c's METADATA ONLY — EBML header, Info, Tracks, Chapters,
+// Write serialises c's METADATA ONLY - EBML header, Info, Tracks, Chapters,
 // Attachments, Tags. It writes NO Clusters (a Container holds no block data)
 // and no Cues/SeekHead, so the result is not a playable media file. For a
 // complete file, write blocks through MKVWriter or NewStreamWriter, or remux
@@ -78,7 +78,7 @@ func Write(w io.Writer, c *mkv.Container) error {
 // WriteWebM writes c as a WebM file: it first verifies that every track uses a
 // WebM-compatible codec (mkv.ValidateWebM), then writes the container with the
 // "webm" DocType. If any track is incompatible it returns an error without
-// writing anything — mkvgo cannot transcode, so this is a hard failure.
+// writing anything - mkvgo cannot transcode, so this is a hard failure.
 func WriteWebM(w io.Writer, c *mkv.Container) error {
 	if err := mkv.ValidateWebM(c); err != nil {
 		return err
@@ -88,7 +88,7 @@ func WriteWebM(w io.Writer, c *mkv.Container) error {
 	}
 	// WebM permits only a restricted element set, so write just Info + Tracks
 	// (no chapters/attachments/tags). NOTE: like writer.Write, this writes
-	// metadata only — NO clusters. For a complete, playable .webm use
+	// metadata only - NO clusters. For a complete, playable .webm use
 	// writer.NewWebMStreamWriter or ops.RemuxToWebM.
 	var seg bytes.Buffer
 	if err := WriteSegmentInfo(&seg, &c.Info, c.DurationMs); err != nil {

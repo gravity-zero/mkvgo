@@ -1,6 +1,6 @@
 package ops
 
-// mutation_kill_test.go — boundary / negation tests that kill surviving mutants
+// mutation_kill_test.go - boundary / negation tests that kill surviving mutants
 // reported by the gremlins run. Each test exercises the EXACT operator boundary
 // so the mutated operator produces a different observable result.
 
@@ -261,7 +261,7 @@ func TestStreamMergeToWriter_ClusterFlushAtExactBoundary(t *testing.T) {
 // Clusters exactly 500ms apart must all produce cues.
 func TestReindex_AudioCueThrottleExactBoundary(t *testing.T) {
 	dir := t.TempDir()
-	// Three audio-only clusters at 0, 500, 1000ms — each exactly 500ms apart.
+	// Three audio-only clusters at 0, 500, 1000ms - each exactly 500ms apart.
 	// Original (>=): 500-0=500 >= 500 → cue; 1000-500=500 >= 500 → cue → 3 cues.
 	// Mutation (>): 500-0=500 > 500 = false → skip 500ms cue → only 2 cues.
 	src := buildMultiClusterMKV(t, dir, "audio.mkv",
@@ -590,7 +590,7 @@ func TestChaptersToRanges_LastChapterNoPanic(t *testing.T) {
 // When the source has a non-zero TimecodeScale, the output must use that scale.
 func TestMux_TimecodeScalePreservedFromSource(t *testing.T) {
 	dir := t.TempDir()
-	const distinctScale = int64(500_000) // 0.5ms per tick — not the 1000000 default
+	const distinctScale = int64(500_000) // 0.5ms per tick - not the 1000000 default
 	src := buildCustomTimecodeScaleMKV(t, dir, "scaled.mkv", distinctScale)
 	dst := filepath.Join(dir, "out.mkv")
 	ctx := context.Background()

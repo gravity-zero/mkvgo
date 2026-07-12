@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// boxwalk_test.go — a small, self-contained MP4 box reader used only by the
+// boxwalk_test.go - a small, self-contained MP4 box reader used only by the
 // tests in this package to validate RemuxToMP4 output. It is intentionally
 // independent of any production parser so the tests check the writer against a
 // second implementation, not against itself.

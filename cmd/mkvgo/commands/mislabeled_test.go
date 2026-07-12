@@ -23,6 +23,6 @@ func TestLoadContainerRoutesMislabeledMOV(t *testing.T) {
 
 	c, _ := loadContainer(dst, false)
 	if len(c.Tracks) == 0 {
-		t.Fatal("a MOV saved as .mkv produced no tracks — the mp4 fallback did not fire")
+		t.Fatal("a MOV saved as .mkv produced no tracks - the mp4 fallback did not fire")
 	}
 }

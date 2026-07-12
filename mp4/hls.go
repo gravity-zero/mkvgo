@@ -1,14 +1,14 @@
 package mp4
 
-// hls.go — RemuxToHLS: a fragmented-MP4 / CMAF presentation produced from a
+// hls.go - RemuxToHLS: a fragmented-MP4 / CMAF presentation produced from a
 // Matroska/WebM file without transcoding, served through two manifests over
 // the SAME segments (the point of CMAF): HLS (master.m3u8 + media playlists)
-// and DASH (manifest.mpd). Tracks are demuxed — one rendition per track, as
-// Apple recommends for HLS and as DASH players require — which also gives
+// and DASH (manifest.mpd). Tracks are demuxed - one rendition per track, as
+// Apple recommends for HLS and as DASH players require - which also gives
 // multi-audio (VF/VO) selection for free. This is the "copy rung" of an ABR
 // ladder: mkvgo does the packaging; bitrate variants remain a transcoder's job.
 //
-// Memory is bounded: per-sample metadata (size/pts/sync — the same order of
+// Memory is bounded: per-sample metadata (size/pts/sync - the same order of
 // magnitude the progressive muxer already holds) is kept in RAM, while the
 // sample *bytes* are streamed to one temp file per track and read back
 // sequentially when the segments are written. Subtitle cues are small text and
@@ -43,7 +43,7 @@ func isBlockWalkEnd(err error) bool {
 }
 
 // keepTrackSet returns Options.KeepTracks as a lookup set (the Virtual Edit
-// Layer's track filter), or nil when empty — meaning keep every track.
+// Layer's track filter), or nil when empty - meaning keep every track.
 func keepTrackSet(o *Options) map[uint64]bool {
 	if len(o.KeepTracks) == 0 {
 		return nil
@@ -89,7 +89,7 @@ type fragTrack struct {
 }
 
 // hlsSubTrack is one text subtitle track carried as a segmented WebVTT
-// playlist (HLS's native subtitle form — text subs are not fragmented as mdat).
+// playlist (HLS's native subtitle form - text subs are not fragmented as mdat).
 type hlsSubTrack struct {
 	track mkv.Track
 	cues  []subtitle.Cue
@@ -112,7 +112,7 @@ type segInfo struct {
 //	seg00001.m4s …         media segments (styp + moof + mdat)
 //	subN.m3u8, subN_*.vtt  one segmented WebVTT playlist per text subtitle track
 //
-// It never transcodes — samples are copied verbatim into CMAF fragments — so
+// It never transcodes - samples are copied verbatim into CMAF fragments - so
 // only the codecs RemuxToMP4 supports are carried. Segments are cut on video
 // keyframes at roughly Options.SegmentMs (default 6 s) and are independently
 // decodable. Text subtitles (SRT, WebVTT, ASS/SSA flattened to plain text) ride
@@ -124,7 +124,7 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 	return err
 }
 
-// hlsResult carries what a packaging pass established — the ABR packager
+// hlsResult carries what a packaging pass established - the ABR packager
 // builds its top-level master from these, and the concat packager (concat.go)
 // additionally uses bounds to window subtitle cues per part.
 type hlsResult struct {
@@ -224,7 +224,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}()
 
-	// Phase 1 — stream every sample, buffering media bytes to the per-track
+	// Phase 1 - stream every sample, buffering media bytes to the per-track
 	// temp files and collecting subtitle cues (source-specific walk).
 	if ps.mv != nil {
 		err = collectFromMP4(ctx, ps, routing, subs, o.Progress)
@@ -258,7 +258,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// byte-identical for the same shift).
 	applyAudioPresentationShift(&o, fts)
 
-	// Phase 2 — segment boundaries from the primary track: the video's
+	// Phase 2 - segment boundaries from the primary track: the video's
 	// keyframes, or (audio-only presentation) the first audio's sample grid
 	// (every audio sample is a sync point, so the same cut applies).
 	bounds := segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
@@ -292,7 +292,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if err != nil {
 			return nil, err
 		}
-		// Trick-play: the standard I-frame playlist — one keyframe per
+		// Trick-play: the standard I-frame playlist - one keyframe per
 		// segment, referenced by byte range into the existing segments (no
 		// extra media). Skipped when encrypting (a ciphertext subrange is
 		// not independently decryptable).
@@ -440,7 +440,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 }
 
 // subCueFromBlock converts one Matroska subtitle block into a WebVTT cue. ASS
-// dialogue lines are flattened to their plain text (styling is lost — WebVTT
+// dialogue lines are flattened to their plain text (styling is lost - WebVTT
 // has no ASS form); SRT and WebVTT payloads pass through.
 func subCueFromBlock(codec string, b mkv.Block) (subtitle.Cue, bool) {
 	var text string
@@ -501,7 +501,7 @@ func segmentBoundaries(video []fragSample, targetMs int64) []int64 {
 }
 
 // primaryIndex returns the index of the presentation's primary track: the
-// video track, or — audio-only presentation — the first track.
+// video track, or - audio-only presentation - the first track.
 // applyAudioPresentationShift re-bases each shifted audio track's edit-list
 // presentation offset (Options.AudioPresentationShift, ns; positive = the
 // track's content starts late and is presented earlier). It runs AFTER the
@@ -616,7 +616,7 @@ func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
 
 // iframeRef locates one I-frame for the trick-play playlist: the containing
 // segment and the byte length from the segment start through the keyframe
-// sample (styp + moof + mdat header + first sample — segments are
+// sample (styp + moof + mdat header + first sample - segments are
 // keyframe-cut, so sample 0 IS the I-frame).
 type iframeRef struct {
 	seg    int   // 0-based segment index
@@ -767,7 +767,7 @@ func writeSegmentFile(out io.Writer, head []byte, dataLen int64, r io.Reader) er
 }
 
 // windowHasCTS reports whether any sample in the window carries a non-zero
-// composition offset — the trun writes its CTS column only then. Window-local
+// composition offset - the trun writes its CTS column only then. Window-local
 // (not track-global) so the full pass and the on-demand path (hlsplan.go)
 // produce identical fragments.
 func windowHasCTS(samples []fragSample) bool {
@@ -899,7 +899,7 @@ func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hls
 			return err
 		}
 	}
-	// The whole rendition as one file too — what the DASH manifest references.
+	// The whole rendition as one file too - what the DASH manifest references.
 	var whole strings.Builder
 	if err := subtitle.WriteWebVTT(&whole, cues); err != nil {
 		return err
@@ -1043,7 +1043,7 @@ func dursOf(segs []segInfo) []float64 {
 
 // buildIFramePlaylist renders the trick-play playlist (EXT-X-I-FRAMES-ONLY):
 // one entry per segment-leading keyframe, as a byte range from the segment
-// start through the keyframe sample (styp + moof + mdat header + sample 0 —
+// start through the keyframe sample (styp + moof + mdat header + sample 0  -
 // what a player needs to decode just that I-frame).
 func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef) []byte {
 	rw := urlRewriter(o)

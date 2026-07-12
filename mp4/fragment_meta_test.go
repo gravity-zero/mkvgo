@@ -106,7 +106,7 @@ func TestSidxKeyframeMs(t *testing.T) {
 		{dur: 2000, sap: true, sapType: 1}, // keyframe @0
 		{dur: 2000, sap: false},            // not a SAP; start advances to 2000
 		{dur: 2000, sap: true, sapType: 2}, // keyframe @4000 (closed-GOP CRA)
-		{dur: 2000, sap: true, sapType: 3}, // open-GOP SAP — excluded; start @6000
+		{dur: 2000, sap: true, sapType: 3}, // open-GOP SAP - excluded; start @6000
 	})
 	got, ok := sidxKeyframeMs(p, 1)
 	if !ok {

@@ -22,7 +22,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-// sha256Hex is the lowercase hex SHA-256 of b — a stable content ETag for a
+// sha256Hex is the lowercase hex SHA-256 of b - a stable content ETag for a
 // resource. Because mkvgo's outputs are deterministic, the same resource always
 // hashes the same, so a server/Service Worker can set ETag/If-None-Match and a
 // CDN can dedup on it. Computed over bytes already in hand, so it is cheap
@@ -33,7 +33,7 @@ func sha256Hex(b []byte) string {
 }
 
 // promise runs fn on its own goroutine and returns a JS Promise for its
-// result — the only sane calling convention for wasm exports, since fn may
+// result - the only sane calling convention for wasm exports, since fn may
 // block (Blob reads await JS promises).
 func promise(fn func() (any, error)) any {
 	handler := js.FuncOf(func(this js.Value, args []js.Value) any {
@@ -63,7 +63,7 @@ func jsError(msg string) js.Value {
 }
 
 // signalContext derives a context from opts.signal (an AbortSignal), so any
-// in-flight probe/remux/segment build cancels when the caller aborts —
+// in-flight probe/remux/segment build cancels when the caller aborts  -
 // e.g. a React effect cleanup. Returns the context and a release function.
 func signalContext(opts js.Value) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -652,7 +652,7 @@ func (i blobInfo) Sys() any           { return nil }
 // serves an HLS presentation on demand: `resources` lists every name a player
 // requests, `resource(name)` builds it (data + contentType), `segment(n)` is
 // the 0-based media-segment shortcut, `close()` releases the callbacks. A
-// Blob/File input is read through ranged slices — playing a file far larger
+// Blob/File input is read through ranged slices - playing a file far larger
 // than memory stays memory-bounded, only the watched windows are ever read.
 func openHLSJS(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
@@ -809,7 +809,7 @@ func multiSourceFS(inputs []js.Value) (*mkv.FS, []string, error) {
 // openABRJS(inputs: Array<Uint8Array | Blob>, opts?) → Promise<handle>. inputs
 // are the pre-encoded quality variants of one title, best first. The handle
 // serves the whole multi-variant presentation on demand: `numVariants`,
-// `resources` (every name a player requests — "master.m3u8", "v1/init.mp4",
+// `resources` (every name a player requests - "master.m3u8", "v1/init.mp4",
 // "v2/seg00007.m4s", …), `resource(name)` builds it (data + contentType),
 // `close()` releases the callbacks. Blob variants are read through ranged
 // slices, so a client-side ABR ladder of huge local files stays memory-bounded.

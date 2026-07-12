@@ -35,7 +35,7 @@ type trackDigest struct {
 // track (matched by position, like the metadata compare): block count, total
 // payload bytes, and a SHA-256 over the payloads in stream order. An empty
 // result proves a remux/reindex/split+join round-trip carried every frame
-// byte-identically — beyond what the metadata compare can show.
+// byte-identically - beyond what the metadata compare can show.
 func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
 	fs := mkv.FSFrom(opts)
 	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts))

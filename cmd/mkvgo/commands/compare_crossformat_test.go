@@ -22,7 +22,7 @@ func TestCmdCompare_CrossFormat(t *testing.T) {
 	stdout := capture(t, func() { commands.CmdCompare([]string{regfixMKV, out}) })
 
 	// The remux changes the muxing/writing app ("mkvgo"), so the compare must
-	// run cross-format and report that — not fail to open the MP4.
+	// run cross-format and report that - not fail to open the MP4.
 	if !strings.Contains(stdout, "muxing_app") && !strings.Contains(stdout, "identical metadata") {
 		t.Errorf("cross-format compare output unexpected:\n%s", stdout)
 	}

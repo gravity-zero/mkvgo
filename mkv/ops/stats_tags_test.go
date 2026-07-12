@@ -11,7 +11,7 @@ import (
 
 // Mux writes mkvmerge-style per-track statistics tags (BPS, DURATION,
 // NUMBER_OF_FRAMES, NUMBER_OF_BYTES) accumulated during the stream, in a Tags
-// element the SeekHead points to — so the head-only WithBitrate probe reads
+// element the SeekHead points to - so the head-only WithBitrate probe reads
 // the bitrate back without a cluster scan.
 func TestMuxWritesStatisticsTags(t *testing.T) {
 	dir := t.TempDir()

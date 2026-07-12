@@ -85,7 +85,7 @@ func CmdToVTT(args []string) {
 }
 
 // CmdExtractFrame extracts the video keyframe nearest a timestamp as a
-// decoder-ready file (Annex-B or IVF) — the mkvgo half of a thumbnail
+// decoder-ready file (Annex-B or IVF) - the mkvgo half of a thumbnail
 // pipeline; decode it with e.g. `ffmpeg -i frame.h264 -frames:v 1 thumb.jpg`.
 func CmdExtractFrame(args []string) {
 	var outPath string

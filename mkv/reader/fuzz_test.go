@@ -7,7 +7,7 @@ import (
 )
 
 // FuzzRead exercises the metadata parser against arbitrary bytes. Its only
-// contract: Read must never panic or hang on malformed input — it may only
+// contract: Read must never panic or hang on malformed input - it may only
 // return a Container or an error. Allocations are bounded by ebml.MaxElementSize,
 // so the fuzzer cannot OOM the process. The seed corpus covers valid files and
 // the corruption shapes the resync handles.

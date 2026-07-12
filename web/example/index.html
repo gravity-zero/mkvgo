@@ -7,9 +7,9 @@
      then open http://localhost:8080/web/example/
 
      Drop an MKV: it is probed head-only (works on huge files), played in the
-     <video> below through Media Source Extensions — segments are built on
+     <video> below through Media Source Extensions - segments are built on
      demand from ranged reads of the File (openHLS), so even a huge file plays
-     with bounded memory — and, for a file that fits in memory, remuxed to a
+     with bounded memory - and, for a file that fits in memory, remuxed to a
      downloadable MP4. No transcoding, no server. -->
 <html lang="en">
 <meta charset="utf-8">
@@ -43,7 +43,7 @@
   const { instance } = await WebAssembly.instantiateStreaming(fetch('../../dist/wasm/mkvgo.wasm'), go.importObject)
   go.run(instance)
   while (!globalThis.MkvGo) await new Promise((r) => setTimeout(r, 5))
-  $('status').textContent = `mkvgo ${MkvGo.version()} ready — files never leave this page`
+  $('status').textContent = `mkvgo ${MkvGo.version()} ready - files never leave this page`
 
   async function handle(file) {
     // 1. Probe the File head-only: no size limit, only a few ranged reads.
@@ -53,7 +53,7 @@
     if (probe.format !== 'mkv') return
 
     // 2. Open the on-demand HLS plan over the File itself: segments are built
-    //    from ranged reads as playback needs them — no size limit, bounded
+    //    from ranged reads as playback needs them - no size limit, bounded
     //    memory, no transcoding, no server.
     const plan = await MkvGo.openHLS(file, { segmentSeconds: 6, skipUnsupported: true })
     const master = new TextDecoder().decode((await plan.resource('master.m3u8')).data)
@@ -77,7 +77,7 @@
         await Promise.all(jobs)
         ms.endOfStream()
       }, { once: true })
-      $('status').textContent = 'playing via MSE — demuxed segments built on demand from the file'
+      $('status').textContent = 'playing via MSE - demuxed segments built on demand from the file'
     } else {
       $('status').textContent = `playback skipped (codecs "${vCodec ?? '?'}" unsupported by this browser)`
     }

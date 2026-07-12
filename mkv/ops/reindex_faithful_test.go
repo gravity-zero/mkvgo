@@ -347,7 +347,7 @@ func TestReindex_WebMDocTypePreserved(t *testing.T) {
 
 	// Locate "matroska" inside the EBML header and replace with "webm\x00\x00\x00".
 	// The EBML header is the very first element; "matroska" appears within it.
-	// We patch the DocType string in-place — same length as "matroska" (8 bytes).
+	// We patch the DocType string in-place - same length as "matroska" (8 bytes).
 	// "webm" is 4 bytes: pad to same length by extending to "webm\x00\x00\x00\x00"
 	// but that changes the size field. Instead, replace with "webmtest" (8 chars).
 	const orig = "matroska"

@@ -9,7 +9,7 @@
      Pick ONE file to stream it, or SEVERAL pre-encoded quality variants (best
      first) for adaptive bitrate. The file(s) never leave the page: a Service
      Worker serves a virtual HLS presentation (master.m3u8 + CMAF segments)
-     straight from the mkvgo WASM, built on demand from ranged reads — so even a
+     straight from the mkvgo WASM, built on demand from ranged reads - so even a
      file far larger than memory plays, with no server, no upload, no transcode.
 
      hls.js is loaded from a CDN only to drive playback in non-Safari browsers;
@@ -28,7 +28,7 @@
 <h1>mkvgo · in-browser HLS origin</h1>
 <p id="status">registering service worker…</p>
 <div id="drop">
-  pick a media file — or several quality variants for ABR (best first)
+  pick a media file - or several quality variants for ABR (best first)
   <input type="file" id="pick" multiple>
 </div>
 <p class="hint">One file → single-quality stream. Several → adaptive bitrate ladder.</p>
@@ -46,7 +46,7 @@
   await navigator.serviceWorker.ready
   // Make sure a controller is in place (first load activates without one).
   if (!navigator.serviceWorker.controller) location.reload()
-  $('status').textContent = 'ready — pick a file (nothing is uploaded)'
+  $('status').textContent = 'ready - pick a file (nothing is uploaded)'
 
   let seq = 0
   $('pick').addEventListener('change', async (e) => {

@@ -241,7 +241,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 
 // resolveKeepLangs turns --keep-lang codes into a KeepTracks ID list: every
 // video track (HLS needs video) plus every audio/subtitle track whose language
-// matches. It is CLI sugar over KeepTracks — a library caller that already has
+// matches. It is CLI sugar over KeepTracks - a library caller that already has
 // the track metadata builds the ID list itself. When a language maps to several
 // tracks (e.g. VFF + VFQ, both "fre") all are kept; use --keep-tracks for exact
 // control.
@@ -286,7 +286,7 @@ func CmdToHLS(args []string) {
 // CmdHLSSegment serves one resource of an on-demand HLS plan: the master or
 // media playlist, the init segment, the n-th media segment (built by reading
 // only that segment's window, seeked through the Cues), or any resource name
-// a player requests (seg00042.m4s, sub1.m3u8, sub1.vtt) — so a server answers
+// a player requests (seg00042.m4s, sub1.m3u8, sub1.vtt) - so a server answers
 // HLS requests with no pre-generated files. The source may be a local path or
 // an http(s) URL.
 func CmdHLSSegment(args []string) {
@@ -327,7 +327,7 @@ func CmdHLSSegment(args []string) {
 			break
 		}
 		// Any resource name a player would request: seg00042.m4s, sub1.m3u8,
-		// sub1.vtt, master.m3u8, … — the declarative entry point.
+		// sub1.vtt, master.m3u8, … - the declarative entry point.
 		var rerr error
 		data, _, rerr = plan.Resource(context.Background(), what)
 		if rerr != nil {

@@ -10,8 +10,8 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// buildCuedMKV writes a real MKV (SeekHead + Cues + clusters) with one cluster —
-// and thus one cue point — at each of the given timecodes (ms, default scale).
+// buildCuedMKV writes a real MKV (SeekHead + Cues + clusters) with one cluster  -
+// and thus one cue point - at each of the given timecodes (ms, default scale).
 func buildCuedMKV(t *testing.T, clusterTimecodes []int64) []byte {
 	t.Helper()
 	f, err := createTempFile(t)

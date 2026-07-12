@@ -1,12 +1,12 @@
 package reader
 
-// stream.go — seekless streaming read from a plain io.Reader.
+// stream.go - seekless streaming read from a plain io.Reader.
 //
 // Design:
 //   - NewStreamBlockReader wraps an io.Reader in a thin readOnlySeeker shim so
 //     the existing countingReader machinery works without modification. The shim
 //     handles Seek(0, SeekCurrent) (position query) but returns an error for
-//     any real movement — which never occurs after BlockReader.init().
+//     any real movement - which never occurs after BlockReader.init().
 //   - ReadStream does a single forward pass: EBML header → Segment →
 //     front-loaded metadata (Info, Tracks, Tags, Chapters, Attachments). Cues
 //     and SeekHead are silently skipped because they are unusable on a
@@ -65,7 +65,7 @@ type streamParser struct {
 
 // chargeMeta debits the cumulative metadata budget, bounding the TOTAL bytes a
 // stream read pulls into memory (codec-private, attachments, binary tags). Without
-// it a forged stream with many large metadata elements could exhaust memory — the
+// it a forged stream with many large metadata elements could exhaust memory - the
 // streaming counterpart of the seekable parser's guard.
 func (p *streamParser) chargeMeta(n int64) error {
 	p.metaBudget -= n
@@ -176,7 +176,7 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 	if h.ID != mkv.IDSegment {
 		return nil, nil, fmt.Errorf("segment: expected 0x%X got 0x%X", mkv.IDSegment, h.ID)
 	}
-	// h.Size may be -1 (unknown-size segment) — fine for streaming.
+	// h.Size may be -1 (unknown-size segment) - fine for streaming.
 
 	c := &mkv.Container{}
 	c.Info.TimecodeScale = 1_000_000 // EBML default

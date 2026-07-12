@@ -34,7 +34,7 @@ func buildMinimalMKV() *bytes.Buffer {
 }
 
 func TestTruncatedEBMLHeader(t *testing.T) {
-	// single byte — not enough for a full EBML header
+	// single byte - not enough for a full EBML header
 	r := bytes.NewReader([]byte{0x1A})
 	_, err := Read(context.Background(), r, "trunc.mkv")
 	if err == nil {
@@ -116,7 +116,7 @@ func oneCuePoint() []byte {
 }
 
 // buildGappedMKV builds a valid MKV whose body contains a run of zero bytes
-// between two clusters — the corruption pattern seen in some real-world rips,
+// between two clusters - the corruption pattern seen in some real-world rips,
 // where a multi-MB region is zeroed out. If postCluster is true a recoverable
 // Cluster (followed by a Cues element) is placed after the gap.
 func buildGappedMKV(gap int, postCluster bool) []byte {
@@ -171,7 +171,7 @@ func TestRecoverFromZeroPaddingGap(t *testing.T) {
 // the guard, the candidate is rejected (its declared size overruns the segment)
 // and recovery lands on the real cluster, so the Cues survive.
 func TestResyncSkipsFalseClusterMagic(t *testing.T) {
-	// Cluster magic + a 3-byte size VINT encoding 65535 — far past segment end.
+	// Cluster magic + a 3-byte size VINT encoding 65535 - far past segment end.
 	falseAnchor := []byte{0x1F, 0x43, 0xB6, 0x75, 0x20, 0xFF, 0xFF}
 
 	var gap bytes.Buffer
@@ -192,7 +192,7 @@ func TestResyncSkipsFalseClusterMagic(t *testing.T) {
 		t.Fatalf("Read errored instead of skipping the false magic: %v", err)
 	}
 	if len(c.Cues) != 1 {
-		t.Fatalf("expected recovery at the genuine cluster (1 cue), got %d — false magic was likely trusted", len(c.Cues))
+		t.Fatalf("expected recovery at the genuine cluster (1 cue), got %d - false magic was likely trusted", len(c.Cues))
 	}
 }
 
@@ -229,7 +229,7 @@ func TestRecoveryTruncatedInGap(t *testing.T) {
 	var inner bytes.Buffer
 	inner.Write(gappedInfo())
 	inner.Write(realCluster())
-	inner.Write(make([]byte, 8192)) // gap — then the file just stops here
+	inner.Write(make([]byte, 8192)) // gap - then the file just stops here
 
 	var buf bytes.Buffer
 	writeEBMLHeader(&buf)
@@ -247,7 +247,7 @@ func TestRecoveryTruncatedInGap(t *testing.T) {
 
 // TestReadCorruptionNoPanic feeds many deliberately-corrupted variants of a real
 // muxer fixture (truncations, zeroed regions, garbage injection, header
-// byte-flips) to Read. The contract under any corruption: never panic — only
+// byte-flips) to Read. The contract under any corruption: never panic - only
 // return data or an error. (A real-corpus complement to FuzzRead.)
 func TestReadCorruptionNoPanic(t *testing.T) {
 	orig, err := os.ReadFile("../../internal/testdata/sample.mkv")
@@ -1453,7 +1453,7 @@ func TestTruncatedParsers(t *testing.T) {
 	fullBuf.Write(seg.Bytes())
 	fullData := fullBuf.Bytes()
 
-	// Truncate at every byte and try to read — should not panic
+	// Truncate at every byte and try to read - should not panic
 	for limit := 1; limit < len(fullData); limit++ {
 		tr := &truncReader{data: fullData[:limit]}
 		Read(context.Background(), tr, "trunc.mkv")

@@ -99,7 +99,7 @@ func TestAvReduce(t *testing.T) {
 	}
 
 	// Property test: for several ratios that exceed the bound, avReduce must return
-	// terms within the bound AND the best rational approximation achievable there —
+	// terms within the bound AND the best rational approximation achievable there  -
 	// verified against a brute-force search. This pins the internal arithmetic: any
 	// mutation either over-shoots the bound or yields a worse approximation.
 	for _, c := range []struct{ num, den, max uint64 }{
@@ -124,7 +124,7 @@ func TestAvReduce(t *testing.T) {
 	}
 }
 
-// bestRationalError returns the smallest |p/q - target| over all p,q in [1,max] —
+// bestRationalError returns the smallest |p/q - target| over all p,q in [1,max]  -
 // a brute-force reference for the best bounded rational approximation.
 func bestRationalError(target float64, max uint64) float64 {
 	best := math.MaxFloat64
@@ -180,7 +180,7 @@ func TestEffectiveSampleRate(t *testing.T) {
 	if got := (&Track{SampleRate: f(44100)}).EffectiveSampleRate(); got != 44100 {
 		t.Errorf("plain effective rate = %v, want 44100", got)
 	}
-	// A zero OutputSampleRate must NOT win — it falls through to the base rate.
+	// A zero OutputSampleRate must NOT win - it falls through to the base rate.
 	if got := (&Track{SampleRate: f(44100), OutputSampleRate: f(0)}).EffectiveSampleRate(); got != 44100 {
 		t.Errorf("zero output rate should fall through to base, got %v", got)
 	}

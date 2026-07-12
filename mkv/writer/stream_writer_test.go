@@ -512,7 +512,7 @@ func TestStreamWriterLargeClusters(t *testing.T) {
 // TestStreamWriterBlockReaderCanReadStream verifies the seekable BlockReader
 // (which only processes Cluster elements) can read blocks from a stream output.
 // reader.Read (the metadata parser) cannot handle unknown-size Clusters in its
-// segment-level loop — that is expected. stream output targets ReadStream.
+// segment-level loop - that is expected. stream output targets ReadStream.
 // NewBlockReader works because it uses inCluster/peeked to handle them.
 func TestStreamWriterBlockReaderCanReadStream(t *testing.T) {
 	w := uint32(1280)
@@ -609,7 +609,7 @@ func TestStreamWriterVerifyUnknownSizeSegmentAndClusters(t *testing.T) {
 func TestStreamWriterTimecodeOverflow(t *testing.T) {
 	info := mkv.SegmentInfo{TimecodeScale: 1_000_000}
 	// Audio-only stream: no keyframes, so WriteBlock never reopens a cluster and
-	// the relative timecode grows without bound — the exact at-risk case.
+	// the relative timecode grows without bound - the exact at-risk case.
 	tracks := []mkv.Track{{ID: 1, Type: mkv.AudioTrack, Codec: "opus", IsDefault: true}}
 
 	newSW := func() *StreamWriter {
@@ -633,7 +633,7 @@ func TestStreamWriterTimecodeOverflow(t *testing.T) {
 		}
 	})
 
-	// Exactly +32767 ms is the largest offset that still fits — must succeed.
+	// Exactly +32767 ms is the largest offset that still fits - must succeed.
 	t.Run("WriteBlock at int16 max", func(t *testing.T) {
 		sw := newSW()
 		if err := sw.WriteBlock(mkv.Block{TrackNumber: 1, Timecode: 0, Data: []byte{0xAA}}); err != nil {

@@ -95,7 +95,7 @@ func looksLikeISOBMFF(r io.ReadSeeker) bool {
 }
 
 // tolerableTailError reports whether a segment-parse error is just a truncated
-// tail — the file was cut mid-element after the head metadata was already read.
+// tail - the file was cut mid-element after the head metadata was already read.
 // It surfaces as an unexpected EOF; with the tracks in hand there is nothing more
 // to gain by failing the whole read, so return what was parsed, as ffprobe does.
 func tolerableTailError(err error, c *mkv.Container) bool {
@@ -168,7 +168,7 @@ func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
 func (p *parser) skip(size int64) error {
 	// Reject an unknown size (-1): only Segment and Cluster may be unknown-size, so
 	// inside a leaf element it is malformed. Skipping it as Seek(-1) would seek a
-	// byte backwards and desync the framing — a clean error is better than garbage.
+	// byte backwards and desync the framing - a clean error is better than garbage.
 	// Top-level loops guard size<0 before reaching here (they resync instead).
 	if size < 0 {
 		return fmt.Errorf("cannot skip element with unknown size")
@@ -294,7 +294,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 		case mkv.IDCluster:
 			// Reaching the media is where a sequential walk gets expensive: the
 			// Cues/Tags/Attachments that sit AFTER the clusters are only found by
-			// reading one header per cluster — thousands on a long file, each a
+			// reading one header per cluster - thousands on a long file, each a
 			// round-trip on a network FS. If a head SeekHead told us where the
 			// post-cluster metadata begins, Seek straight to it ONCE and resume the
 			// normal walk from there, skipping the whole cluster region. Resuming
@@ -343,7 +343,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					// A SeekHead gave us valid offsets and NONE lie past the clusters:
 					// everything it indexes (Info/Tracks/Cues/…) is at the head and
 					// already parsed, so there is nothing to find by walking the
-					// clusters to EOF — stop. A trailing element listed in a nested
+					// clusters to EOF - stop. A trailing element listed in a nested
 					// tail SeekHead would have an offset past the clusters and taken
 					// the jump branch above, so it is not missed here.
 					return nil
@@ -353,7 +353,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					// Cues at the very end. Rather than walk every cluster to reach
 					// them, scan back from EOF for a Cues element that tiles exactly to
 					// the file end, and parse the tail straight from that one read. Done
-					// at most once — a file with no tail Cues falls through to the walk.
+					// at most once - a file with no tail Cues falls through to the walk.
 					triedTailScan = true
 					bodyPos := p.pos()
 					done, err := p.scanTailForCues(c)
@@ -370,7 +370,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			}
 			// Fallback walk: no usable SeekHead and no tail Cues found, so every
 			// cluster header must be read to reach whatever follows. Drop to the raw
-			// reader first — keeping the buffer here would refill (and immediately
+			// reader first - keeping the buffer here would refill (and immediately
 			// discard) a full window per cluster body-skip, ballooning a 0.3 MB walk
 			// into one window per cluster.
 			if err := p.unbuffer(); err != nil {
@@ -431,8 +431,8 @@ func (p *parser) parseSeekHeadOffsets(size, segStart, endPos int64) ([]int64, er
 	return offs, nil
 }
 
-// minOffsetAtOrAfter returns the smallest offset in offs that is >= floor — the
-// start of the post-cluster metadata region — or ok=false if none qualifies.
+// minOffsetAtOrAfter returns the smallest offset in offs that is >= floor - the
+// start of the post-cluster metadata region - or ok=false if none qualifies.
 func minOffsetAtOrAfter(offs []int64, floor int64) (int64, bool) {
 	best := int64(-1)
 	for _, o := range offs {
@@ -494,13 +494,13 @@ const tailScanWindow = 512 << 10
 // scanTailForCues locates a SeekHead-less file's trailing Cues by reading one
 // window at the real end of the file and scanning it for a Cues element whose
 // top-level elements tile exactly to EOF. On a hit it parses the whole tail
-// (Cues plus any following Tags/Chapters/…) straight from that buffer — no
-// re-read — and returns true; the caller is then done. On a miss it returns
+// (Cues plus any following Tags/Chapters/…) straight from that buffer - no
+// re-read - and returns true; the caller is then done. On a miss it returns
 // false and the caller walks the clusters. Using the real EOF (not the declared
 // segment size) keeps it safe on truncated files: a short read or a tail that
 // does not tile simply misses and defers to the resync-tolerant walk.
 func (p *parser) scanTailForCues(c *mkv.Container) (bool, error) {
-	start := p.pos() // current cluster body — never scan before here
+	start := p.pos() // current cluster body - never scan before here
 	end, err := p.r.Seek(0, io.SeekEnd)
 	if err != nil {
 		return false, err
@@ -736,7 +736,7 @@ func isClusterAt(r io.ReadSeeker, off, limit int64) (bool, error) {
 	}
 	bodyStart, _ := r.Seek(0, io.SeekCurrent)
 	if h.Size >= 0 && limit >= 0 && bodyStart+h.Size > limit {
-		return false, nil // declared size overruns the segment — not a real cluster
+		return false, nil // declared size overruns the segment - not a real cluster
 	}
 	child, _, err := ebml.ReadElementHeader(r)
 	if err != nil {
@@ -1048,7 +1048,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 		t.IsDefault = true
 	}
 	// DefaultDuration exists on audio tracks too (block duration), but exposing it
-	// as FrameRate is only meaningful for video — and matches ffprobe, which only
+	// as FrameRate is only meaningful for video - and matches ffprobe, which only
 	// reports r_frame_rate for video streams.
 	if t.Type != mkv.VideoTrack {
 		t.FrameRate = nil

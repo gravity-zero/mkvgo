@@ -293,7 +293,7 @@ func TestChannelCountsFromConfig(t *testing.T) {
 		w.write(4, 4) // samplingFrequencyIndex
 		w.write(1, 4) // channelConfiguration = mono
 		// GASpecificConfig (AAC-LC, cc!=0): frameLengthFlag, dependsOnCoreCoder,
-		// extensionFlag — all zero.
+		// extensionFlag - all zero.
 		w.write(0, 3)
 		w.write(0x2b7, 11) // syncExtensionType: SBR
 		w.write(5, 5)      // extension audioObjectType = SBR

@@ -6,7 +6,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// sample.go — per-track sample bookkeeping and the Sample Table (stbl) child
+// sample.go - per-track sample bookkeeping and the Sample Table (stbl) child
 // boxes derived from it. The muxer streams sample *data* straight to mdat; this
 // file only ever holds the small per-sample metadata (size, timestamp, sync
 // flag) and the chunk index, so memory stays O(number of samples), not O(bytes).
@@ -52,8 +52,8 @@ func (ts *trackSamples) addChunk(offset uint64, count int) {
 }
 
 // audioGridTS returns the sample-exact frame stride of a constant-rate audio
-// track in its media timescale — round(DefaultDuration × mts / 1e9), e.g.
-// exactly 1024 for AAC-LC at 48 kHz — or 0 when the track is not grid-timed
+// track in its media timescale - round(DefaultDuration × mts / 1e9), e.g.
+// exactly 1024 for AAC-LC at 48 kHz - or 0 when the track is not grid-timed
 // (video/text, or no declared frame duration). Grid-timed tracks ignore the
 // millisecond rounding of the container timeline: anchoring each frame on the
 // stored (ms-quantised) block timecodes would jitter the durations by ±1 ms,
@@ -69,7 +69,7 @@ func audioGridTS(t *outTrack, mts uint32) int64 {
 // gridIndex maps a scaled block timestamp (relative to the track's first
 // block) to its frame index on the grid. True frame positions are exact
 // multiples of gridTS and the stored timecodes carry sub-millisecond rounding
-// only — far less than half a frame — so the nearest slot is unambiguous.
+// only - far less than half a frame - so the nearest slot is unambiguous.
 // A real gap in the audio lands on the slot nearest its true position, which
 // preserves the gap (the decode timeline jumps with it).
 func gridIndex(rel, gridTS int64) int64 {
@@ -83,12 +83,12 @@ func gridIndex(rel, gridTS int64) int64 {
 // block timecodes: when the source declares no DefaultDuration, the reader has
 // no stride to spread a lace's frames and gives every frame of the block the
 // same play time (so a bare PTS→DTS mapping would hand consecutive frames an
-// identical, non-monotonic decode time — rejected by players). The stride is the
+// identical, non-monotonic decode time - rejected by players). The stride is the
 // media-scaled gap between the first two distinct block timecodes divided by the
 // number of frames the first block held; constant-rate audio is uniform, so it
 // is the per-frame duration and applies to every frame. blockPtsAt reads the
-// stored (Block, not per-frame) timecode of sample i. It returns 0 — leaving the
-// caller on its ordinary timing path — unless the samples actually show a
+// stored (Block, not per-frame) timecode of sample i. It returns 0 - leaving the
+// caller on its ordinary timing path - unless the samples actually show a
 // collapsed lace (a run of two or more identical block timecodes then a larger
 // one), which video and unlaced audio never produce. AC-3/E-AC-3 (whole-ms
 // frames) recover exactly; a fractional-ms codec (AAC) lands within a tick,
@@ -144,7 +144,7 @@ func textTiming(samples []sample) timing {
 // (CTS-DTS, via ctts). We assign DTS as the sorted PTS values in decode order:
 // this yields a strictly non-decreasing decode clock whose durations match the
 // real cadence (so it is correct for variable frame rate too), and composition
-// offsets CTS-DTS that may be negative — which is why the ctts box is emitted as
+// offsets CTS-DTS that may be negative - which is why the ctts box is emitted as
 // version 1 (signed). With no B-frames every offset is zero and ctts is omitted.
 //
 // lastDurMs is the duration assigned to the final sample (which has no following
@@ -153,8 +153,8 @@ func textTiming(samples []sample) timing {
 //
 // mts is the target media timescale. Sample pts are in the movie timescale (ms);
 // they are scaled to mts so the table is expressed in the track's own units. Audio
-// tracks pass their sample rate, which makes the durations — and the edit list
-// derived from CodecDelay — sample-exact. For mts == movieTimescale this is the
+// tracks pass their sample rate, which makes the durations - and the edit list
+// derived from CodecDelay - sample-exact. For mts == movieTimescale this is the
 // identity (video/text are unaffected). Scaling the cumulative pts and then diffing
 // keeps the rounding error bounded (it does not accumulate across samples).
 func reconstructTiming(samples []sample, lastDurMs int64, mts uint32, gridTS int64) timing {

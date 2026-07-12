@@ -36,7 +36,7 @@ func trackByID(t *testing.T, c *matroska.Container, id uint64) matroska.Track {
 }
 
 // -------------------------------------------------------------------
-// applyPatch — exercised via CmdEdit (table-driven JSON round-trips)
+// applyPatch - exercised via CmdEdit (table-driven JSON round-trips)
 // -------------------------------------------------------------------
 
 // TestApplyPatch_ViaEdit exercises every code path of applyPatch through CmdEdit:
@@ -321,7 +321,7 @@ func TestCmdExtractAttachment(t *testing.T) {
 
 // TestCmdExtractSubtitle_SRT verifies that SRT extraction succeeds on richMKV.
 // richMKV carries a subtitle track (ID=3, codec="srt") but no media blocks, so
-// the output is an empty SRT file — this tests the no-cue success path.
+// the output is an empty SRT file - this tests the no-cue success path.
 func TestCmdExtractSubtitle_SRT(t *testing.T) {
 	src := richMKV(t)
 	out := filepath.Join(t.TempDir(), "sub.srt")

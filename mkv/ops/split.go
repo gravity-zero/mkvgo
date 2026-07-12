@@ -162,7 +162,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	}
 	// Only the first segment starts with the original encoder priming. A later
 	// segment begins on real audio, so its CodecDelay (which a decoder/remux uses to
-	// trim the priming) must be dropped — otherwise one frame of real audio is
+	// trim the priming) must be dropped - otherwise one frame of real audio is
 	// trimmed at the segment start (the -1 AAC frame seen at a split seam).
 	tracks := c.Tracks
 	if r.StartMs > 0 {
@@ -173,7 +173,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 		}
 	}
 	// Each segment gets only the chapters that overlap its range, shifted to
-	// its own timeline — not the source's full list at absolute timestamps.
+	// its own timeline - not the source's full list at absolute timestamps.
 	segMeta := *c
 	segMeta.Chapters = clipChapters(c.Chapters, r.StartMs, r.EndMs)
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {

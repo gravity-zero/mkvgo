@@ -80,7 +80,7 @@ func TestFacadeMetaAndReindex(t *testing.T) {
 }
 
 func TestFacadeRemuxToWebMRejectsNonWebM(t *testing.T) {
-	// The fixture is H.264/AAC — outside the WebM subset — so the remux must
+	// The fixture is H.264/AAC - outside the WebM subset - so the remux must
 	// reject it (this also exercises the facade wrapper).
 	dst := filepath.Join(t.TempDir(), "out.webm")
 	if err := RemuxToWebM(context.Background(), fixturePath, dst); err == nil {

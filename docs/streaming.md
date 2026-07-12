@@ -1,6 +1,6 @@
 # Streaming with mkvgo (HLS + DASH / CMAF)
 
-mkvgo turns a media file into an adaptive-streaming presentation — **the
+mkvgo turns a media file into an adaptive-streaming presentation - **the
 packaging, not the encoding**. It never transcodes: the compressed samples are
 copied verbatim into fragmented-MP4 (CMAF) segments. Producing the encodes
 (bitrate ladders, codec choices) remains a transcoder's job; mkvgo does
@@ -26,7 +26,7 @@ stream/
   iframe.m3u8                                        trick-play (video keyframes)
 ```
 
-Tracks are **demuxed** — one rendition per track, as Apple recommends for HLS
+Tracks are **demuxed** - one rendition per track, as Apple recommends for HLS
 and as DASH players require. A player picks its video, its audio language, and
 its subtitles independently. Segments are cut on video keyframes so each is
 independently decodable (a player starts at any segment).
@@ -39,10 +39,10 @@ mkvgo to-hls video.mkv -o stream/ -segment 6
 
 ## Two ways to serve it
 
-Same output, two operating modes — and they emit **byte-identical** files, so
+Same output, two operating modes - and they emit **byte-identical** files, so
 you can mix them freely (pre-generate popular titles, serve the rest on demand).
 
-### Pre-generate everything — `to-hls`
+### Pre-generate everything - `to-hls`
 
 Writes the whole presentation to a directory. Serve it with any static file
 server. Simple, cacheable, CDN-friendly.
@@ -54,7 +54,7 @@ mkvgo to-hls video.mkv -o stream/
 err := mp4.RemuxToHLS(ctx, "video.mkv", "stream/", mp4.Options{SegmentMs: 6000})
 ```
 
-### On demand — `hls-segment` / `mp4.PlanHLS`
+### On demand - `hls-segment` / `mp4.PlanHLS`
 
 Nothing is pre-generated: each resource is built **when a player requests it**.
 First-play latency is milliseconds, storage cost is zero. A plan does a few
@@ -63,7 +63,7 @@ only its own window.
 
 ```bash
 mkvgo hls-segment video.mkv master.m3u8        # → stdout
-mkvgo hls-segment video.mkv seg00042.m4s -o -  # just that segment
+mkvgo hls-segment video.mkv seg00042.m4s -o - # just that segment
 ```
 ```go
 plan, _ := mp4.PlanHLS(ctx, "video.mkv", mp4.Options{SegmentMs: 6000})
@@ -184,18 +184,18 @@ The packager accepts, transparently (format sniffed from the first bytes):
 
 | Source | HLS/DASH | On-demand notes |
 |---|:---:|---|
-| **MKV / WebM** | ✅ | Plans through the **Cues** seek index — needs one (`mkvgo reindex` adds it). |
-| **MP4 / MOV** | ✅ | The moov **sample table is the index** — the plan is *exact by construction*: every resource, master and MPD included, is byte-identical to the full pass. |
+| **MKV / WebM** | ✅ | Plans through the **Cues** seek index - needs one (`mkvgo reindex` adds it). |
+| **MP4 / MOV** | ✅ | The moov **sample table is the index** - the plan is *exact by construction*: every resource, master and MPD included, is byte-identical to the full pass. |
 | **`http(s)://` URL** | ✅ (`hls-segment`) | Read over HTTP Range (`httpfs`) -- package straight from a web/CDN origin, only the needed ranges transferred. |
 | **`s3://bucket/key`** | ✅ (`hls-segment`) | Read via SigV4-signed Range requests (`s3fs`) -- same ranged behaviour, straight from S3 or an S3-compatible service. |
 
 ```bash
 mkvgo to-hls movie.mp4 -o stream/                 # MP4 source
-mkvgo hls-segment https://nas/movie.mkv seg00003.m4s -o -   # remote, ranged
+mkvgo hls-segment https://nas/movie.mkv seg00003.m4s -o -  # remote, ranged
 mkvgo hls-segment s3://my-bucket/movie.mkv seg00003.m4s -o - # remote, ranged, S3
 ```
 
-**Audio-only** sources (music, podcasts — no video track) package fine: the
+**Audio-only** sources (music, podcasts - no video track) package fine: the
 first audio track becomes the primary rendition, boundaries follow its sample
 grid, and the master carries no `RESOLUTION`.
 
@@ -203,18 +203,18 @@ grid, and the master carries no `RESOLUTION`.
 
 ## What's in a presentation
 
-- **Video** — the primary rendition (`playlist.m3u8` / `init.mp4` / `seg*.m4s`),
+- **Video** - the primary rendition (`playlist.m3u8` / `init.mp4` / `seg*.m4s`),
   with the movie title, tags and **cover art** on its init segment.
-- **Each audio track** — its own rendition (`audioN.m3u8` …), declared as an
-  HLS `EXT-X-MEDIA` group and a DASH AdaptationSet, with language — so a VF/VO
+- **Each audio track** - its own rendition (`audioN.m3u8` …), declared as an
+  HLS `EXT-X-MEDIA` group and a DASH AdaptationSet, with language - so a VF/VO
   file gets native language selection.
-- **Each text subtitle track** — a segmented **WebVTT** rendition
+- **Each text subtitle track** - a segmented **WebVTT** rendition
   (`subN.m3u8` + `subN.vtt`); SRT, WebVTT and ASS/SSA (flattened to plain text)
   are carried, bitmap subtitles are dropped with a reason.
 
 ---
 
-## Adaptive bitrate — `to-abr`
+## Adaptive bitrate - `to-abr`
 
 Package several **pre-encoded** qualities of the same content into one
 multi-variant master. mkvgo does not create the qualities (no transcode); it
@@ -281,12 +281,12 @@ non-aligned rationale) and no combined I-frame playlist.
 
 ---
 
-## Single-file byte-range — `--single-file`
+## Single-file byte-range - `--single-file`
 
 Instead of hundreds of segment files, pack each rendition into **one**
 progressive file (init + `sidx` index + all fragments) served by byte ranges:
 HLS `EXT-X-BYTERANGE`, DASH on-demand `SegmentBase`. Friendlier to object
-storage — the server only needs HTTP Range support.
+storage - the server only needs HTTP Range support.
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ --single-file
@@ -297,9 +297,9 @@ The embedded fragments are byte-identical to the segmented mode's.
 
 ---
 
-## Virtual versions — `--keep-tracks` / `--keep-lang`
+## Virtual versions - `--keep-tracks` / `--keep-lang`
 
-Serve many **virtual versions of one file** — no copy, no re-mux, just a
+Serve many **virtual versions of one file** - no copy, no re-mux, just a
 different track subset per request. `KeepTracks` restricts the presentation to a
 set of Matroska track IDs; the dropped renditions are simply never built.
 
@@ -322,10 +322,10 @@ just a different plan (near-zero latency). At least one video track must be kept
 the full pass, so pre-generated and on-demand serving still mix transparently.
 
 `--keep-lang` is CLI convenience: a language can map to several tracks (e.g.
-VFF + VFQ, both `fre`) and then all are kept — use `--keep-tracks` for exact
+VFF + VFQ, both `fre`) and then all are kept - use `--keep-tracks` for exact
 control. A library caller (Go, WASM) already has the track metadata from
 `probe`, so it builds the ID list itself and passes `Options.KeepTracks`
-(`{ keepTracks: [...] }` in WASM) — no ambiguity.
+(`{ keepTracks: [...] }` in WASM) - no ambiguity.
 
 ---
 
@@ -338,7 +338,7 @@ re-plan with a new offset serves a different sync instantly.
 
 ```bash
 mkvgo to-hls movie.mkv -o stream/ --sub-offset -350   # subtitles 350ms earlier
-mkvgo hls-segment movie.mkv sub1_00003.vtt --sub-offset 500 -o -   # on demand
+mkvgo hls-segment movie.mkv sub1_00003.vtt --sub-offset 500 -o -  # on demand
 ```
 ```go
 mp4.Options{SubtitleOffsetMs: -350}
@@ -429,7 +429,7 @@ mkvgo to-hls video.mkv -o stream/ \
 mp4.Options{Encrypt: &mp4.HLSEncryption{Key: key16, KeyURI: "https://…/key"}}
 ```
 
-Read by hls.js. (This is self-hosted-content encryption, not studio DRM — see
+Read by hls.js. (This is self-hosted-content encryption, not studio DRM - see
 *Non-goals* below.) AES-128 is HLS-only, so no DASH manifest is emitted for an
 encrypted presentation.
 
@@ -474,7 +474,7 @@ per-encoding uniqueness rule applies.)
 ### Signed / templated URLs
 
 `RewriteURL` (CLI `--url-prefix`) rewrites every URI the playlists and the MPD
-reference — a CDN base, or a per-URL signed token. Resource names stay
+reference - a CDN base, or a per-URL signed token. Resource names stay
 canonical: your server strips the decoration before calling `Resource`.
 
 ```go
@@ -489,12 +489,12 @@ mp4.Options{RewriteURL: func(name string) string {
 
 Two complementary tools:
 
-- **I-frame playlist** — `to-hls` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`,
+- **I-frame playlist** - `to-hls` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`,
   declared in the master), one keyframe per segment as a byte range into the
   **existing** segments. Zero extra media; what hls.js/Safari use for smooth
   scrubbing previews. Both MKV/WebM and MP4/MOV sources get it, full pass and
   on-demand plan alike.
-- **`extract-frame`** — pull the keyframe nearest any timestamp as a
+- **`extract-frame`** - pull the keyframe nearest any timestamp as a
   decoder-ready file (Annex-B / IVF); decode it to an image with one ffmpeg
   call. A storyboard is a loop over the keyframe index.
 
@@ -516,7 +516,7 @@ ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
 ## Playing it in the browser
 
 The WebAssembly build runs the same packager client-side. `openHLS(file)` opens
-an on-demand plan over ranged reads of a local `File` — a huge file plays
+an on-demand plan over ranged reads of a local `File` - a huge file plays
 through Media Source Extensions with **bounded memory**, no server, no upload.
 
 ```js
@@ -530,7 +530,7 @@ Full browser guide, TypeScript wrapper and React hooks: **[wasm.md](wasm.md)**.
 
 ## Readiness check
 
-Before serving, `validate` audits what streaming relies on — a present Cues
+Before serving, `validate` audits what streaming relies on - a present Cues
 index, cues keyed on real video keyframes (not audio), subtitle durations,
 frame-rate metadata:
 
@@ -549,7 +549,7 @@ mkvgo validate video.mkv        # exits non-zero on error-severity issues
   that integration (and any DRM system's own license-acquisition protocol)
   stays the deploying application's job.
 - **LL-HLS (low-latency).** A *live-ingest* mechanism (partial segments,
-  blocking reloads) — mkvgo packages VOD files, where it changes nothing for
+  blocking reloads) - mkvgo packages VOD files, where it changes nothing for
   the viewer.
 - **Multi-period DASH.** Periods model *discontinuities* (ad insertion); using
   them for chapters would force decoder rebuilds at every mark and degrade

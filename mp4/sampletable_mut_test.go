@@ -137,7 +137,7 @@ func TestParseChunkOffsetsCo64Sequence(t *testing.T) {
 // TestParseChunkOffsetsCo64ExactBoundary kills the CONDITIONALS_BOUNDARY on
 // `len(co64.payload) < 8` (sampletable.go:253): a co64 box carrying exactly
 // the 8-byte header (version/flags + a zero entry_count) is a valid, empty
-// table — not an error — while one byte short is rejected.
+// table - not an error - while one byte short is rejected.
 func TestParseChunkOffsetsCo64ExactBoundary(t *testing.T) {
 	empty := bytesU32(0, 0) // version/flags=0, count=0, exactly 8 bytes
 	off, err := parseChunkOffsets([]memBox{{typ: "co64", payload: empty}})
@@ -183,7 +183,7 @@ func TestParseCttsIdxCapped(t *testing.T) {
 // TestParseStssEmptyBoxIsNotAbsent kills the CONDITIONALS_BOUNDARY on
 // `len(stss.payload) < 8` (sampletable.go:360): an stss box present with a
 // declared entry_count of 0 means "no sample is a sync sample" (a non-nil,
-// empty set) — semantically different from an ABSENT stss (nil, meaning every
+// empty set) - semantically different from an ABSENT stss (nil, meaning every
 // sample is sync). The exact-8-byte box must reach that empty-set path, not be
 // rejected as if it were missing.
 func TestParseStssEmptyBoxIsNotAbsent(t *testing.T) {

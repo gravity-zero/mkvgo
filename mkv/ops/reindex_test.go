@@ -359,7 +359,7 @@ func extractClusterBodies(t *testing.T, path string) [][]byte {
 func TestReindex_AudioOnly(t *testing.T) {
 	dir := t.TempDir()
 
-	// Build 6 clusters at 0, 200, 400, 600, 800, 1000ms — audio only.
+	// Build 6 clusters at 0, 200, 400, 600, 800, 1000ms - audio only.
 	// Cues should be emitted at most at 0ms and 600ms (500ms apart).
 	clusters := make([][]mkv.Block, 6)
 	for i := range clusters {
@@ -456,7 +456,7 @@ func TestReindex_BlockGroup_WithRef(t *testing.T) {
 // TestReindex_TimeBasedClusters_NoAudioCue is the Avatar-class regression: a
 // mixed video+audio file cut into time-based clusters (ffmpeg style) has clusters
 // with no video keyframe. reindex must NOT emit a fallback cue on the audio there
-// — such a cue misdirects a seek and makes the rebuilt file fail its own Validate
+// - such a cue misdirects a seek and makes the rebuilt file fail its own Validate
 // ("seeking lands on audio, not a keyframe"). Every cue must key on the video.
 func TestReindex_TimeBasedClusters_NoAudioCue(t *testing.T) {
 	dir := t.TempDir()
@@ -522,13 +522,13 @@ func TestReindex_TimeBasedClusters_NoAudioCue(t *testing.T) {
 	}
 	for _, cue := range out.Cues {
 		if cue.Track != 1 {
-			t.Errorf("cue on track %d — reindex must cue only video keyframes, never the audio fallback", cue.Track)
+			t.Errorf("cue on track %d - reindex must cue only video keyframes, never the audio fallback", cue.Track)
 		}
 	}
 	if len(out.Cues) != 2 {
 		t.Errorf("cues = %d, want 2 (only the two video-keyframe clusters)", len(out.Cues))
 	}
-	// The rebuilt file must pass its own Validate — no blocking "lands on audio".
+	// The rebuilt file must pass its own Validate - no blocking "lands on audio".
 	issues, err := Validate(ctx, dst)
 	if err != nil {
 		t.Fatal(err)
@@ -661,7 +661,7 @@ func TestReindex_OversizedCluster(t *testing.T) {
 	if gotErr == nil {
 		t.Fatal("expected error for oversized cluster, got nil")
 	}
-	// Must NOT be the unknown-size sentinel — it must be the size-limit error.
+	// Must NOT be the unknown-size sentinel - it must be the size-limit error.
 	if gotErr == errUnknownSizeCluster {
 		t.Fatalf("got errUnknownSizeCluster, want size-limit error")
 	}
@@ -802,7 +802,7 @@ func TestReindex_Equivalence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Output with progress callback — also takes the fast path, and must invoke
+	// Output with progress callback - also takes the fast path, and must invoke
 	// the callback at least once per cluster.
 	var progressCalls int
 	dstSlow := filepath.Join(dir, "with_progress.mkv")

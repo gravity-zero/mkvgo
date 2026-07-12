@@ -41,7 +41,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 		return nil, err
 	}
 	if len(mv.hashes) == 0 {
-		return nil, errf("no CONTENT_SHA256 atoms in %s — produce a hashed MP4 with `to-mp4 --hash`", path)
+		return nil, errf("no CONTENT_SHA256 atoms in %s - produce a hashed MP4 with `to-mp4 --hash`", path)
 	}
 
 	var mismatches []HashMismatch

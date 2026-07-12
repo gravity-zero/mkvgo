@@ -64,7 +64,7 @@ func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
 func (r *blobReader) Close() error { return nil }
 
 // fetch loads the window starting at off. Blocks the calling goroutine on the
-// arrayBuffer promise — legal here because every export runs its work on its
+// arrayBuffer promise - legal here because every export runs its work on its
 // own goroutine, leaving the JS event loop free to complete the read.
 func (r *blobReader) fetch(off int64) error {
 	end := off + blobWindow

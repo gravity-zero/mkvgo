@@ -1,5 +1,5 @@
 /**
- * mkvgo.ts — typed wrapper around the mkvgo WebAssembly build.
+ * mkvgo.ts - typed wrapper around the mkvgo WebAssembly build.
  *
  * The wasm module (built with `make wasm` → dist/wasm/mkvgo.wasm +
  * wasm_exec.js) registers a global `MkvGo` object; this wrapper loads it and
@@ -17,7 +17,7 @@
  */
 
 // ---------------------------------------------------------------------------
-// Result types — property names mirror the JSON the Go side emits (the same
+// Result types - property names mirror the JSON the Go side emits (the same
 // `json:` tags the CLI's -json output uses, so shapes are interchangeable).
 // ---------------------------------------------------------------------------
 
@@ -512,7 +512,7 @@ export interface HLSResult {
 }
 
 /** One on-demand HLS resource: its bytes, the Content-Type to serve it with,
- * and a stable content SHA-256 (hex) — mkvgo's outputs are deterministic, so
+ * and a stable content SHA-256 (hex) - mkvgo's outputs are deterministic, so
  * this is a ready-made `ETag` for HTTP caching / CDN dedup. */
 export interface HLSResource {
   data: Uint8Array
@@ -523,7 +523,7 @@ export interface HLSResource {
 /**
  * An on-demand HLS presentation over one source. Nothing is pre-generated:
  * each resource is built when requested, and a Blob/File source is read
- * through ranged slices — playing a file far larger than memory stays
+ * through ranged slices - playing a file far larger than memory stays
  * memory-bounded.
  */
 export interface HLSPlanHandle {
@@ -636,7 +636,7 @@ export interface MkvGoApi {
   version(): string
   /**
    * Read a file's full metadata. A Uint8Array is read in place; a Blob/File is
-   * read through ranged slices — head-only, so probing works on files far
+   * read through ranged slices - head-only, so probing works on files far
    * larger than memory (a 40 GB File transfers a few hundred kilobytes).
    */
   probe(input: Uint8Array | Blob, options?: ProbeOptions): Promise<ProbeResult>
@@ -658,7 +658,7 @@ export interface MkvGoApi {
   /**
    * Open an on-demand multi-variant (ABR) HLS presentation from several
    * pre-encoded quality variants of one title, best first. One handle serves
-   * the whole ladder — master plus every variant's resources — built on demand.
+   * the whole ladder - master plus every variant's resources - built on demand.
    * Blob/File variants are read through ranged slices (memory-bounded).
    */
   openABR(inputs: (Uint8Array | Blob)[], options?: HLSOptions): Promise<ABRPlanHandle>
@@ -776,7 +776,7 @@ declare global {
 let loaded: Promise<MkvGoApi> | null = null
 
 /**
- * Load the mkvgo wasm module (idempotent — subsequent calls return the same
+ * Load the mkvgo wasm module (idempotent - subsequent calls return the same
  * instance). Provide either wasmUrl (browser) or wasmBytes (Node).
  */
 export function loadMkvGo(options: LoadOptions): Promise<MkvGoApi> {
@@ -806,7 +806,7 @@ async function doLoad(options: LoadOptions): Promise<MkvGoApi> {
 function injectScript(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof document === 'undefined')
-      return reject(new Error('mkvgo: no document — load wasm_exec.js manually in this environment'))
+      return reject(new Error('mkvgo: no document - load wasm_exec.js manually in this environment'))
     const s = document.createElement('script')
     s.src = url
     s.onload = () => resolve()
@@ -821,7 +821,7 @@ function injectScript(url: string): Promise<void> {
 
 /**
  * The plan's video rendition as a progressive ReadableStream: the init
- * segment, then each media segment, built on demand as the consumer pulls —
+ * segment, then each media segment, built on demand as the consumer pulls  - 
  * pipe it to a file, a fetch Response, or an MSE feeder. Cancelling the
  * stream aborts the in-flight segment build.
  */

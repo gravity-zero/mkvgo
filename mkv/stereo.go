@@ -1,6 +1,6 @@
 package mkv
 
-// stereo.go — names for the 3D stereo arrangement and the video projection.
+// stereo.go - names for the 3D stereo arrangement and the video projection.
 
 // StereoModeName maps the track's StereoMode to a human-readable arrangement
 // (the wording ffprobe uses for its Stereo 3D side data), or "" for mono / no

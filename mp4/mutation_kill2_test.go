@@ -1,6 +1,6 @@
 package mp4
 
-// mutation_kill2_test.go — second-pass targeted tests killing remaining gremlins
+// mutation_kill2_test.go - second-pass targeted tests killing remaining gremlins
 // survivors. Each test applies the boundary/arithmetic exactly at the mutated
 // operator and asserts the observable difference.
 
@@ -15,7 +15,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// ── audio.go:55 — bitWriter.bytes() nbits > 0 guard ──────────────────────────
+// ── audio.go:55 - bitWriter.bytes() nbits > 0 guard ──────────────────────────
 
 // TestBitWriterBytesNoExtraFlushWhenEmpty kills the CONDITIONALS_BOUNDARY
 // mutant (> 0 → >= 0). When nbits==0 the mutation appends a zero byte; the
@@ -29,7 +29,7 @@ func TestBitWriterBytesNoExtraFlushWhenEmpty(t *testing.T) {
 	}
 }
 
-// ── audio.go:68 — findSync maxScan capping ───────────────────────────────────
+// ── audio.go:68 - findSync maxScan capping ───────────────────────────────────
 
 // TestFindSyncMaxScanCapLenMinus2 kills the CONDITIONALS_BOUNDARY mutant
 // (> → >=).  With maxScan == len(frame)-2 the mutation would cap it one lower,
@@ -58,7 +58,7 @@ func TestFindSyncArithmeticMinus2(t *testing.T) {
 	}
 }
 
-// ── audio.go:299 — eac3Channels numDepSub boundary ───────────────────────────
+// ── audio.go:299 - eac3Channels numDepSub boundary ───────────────────────────
 
 // TestEAC3ChannelsNumDepSubZero kills the CONDITIONALS_BOUNDARY mutant
 // (> 0 → >= 0).  With numDepSub=0 the mutation reads a chanLoc field from
@@ -87,7 +87,7 @@ func TestEAC3ChannelsNumDepSubZero(t *testing.T) {
 	}
 }
 
-// ── audio.go:410-411 — parseEAC3 dataRate arithmetic ─────────────────────────
+// ── audio.go:410-411 - parseEAC3 dataRate arithmetic ─────────────────────────
 
 // TestParseEAC3DataRateArithmetic kills ARITHMETIC_BASE mutants on the
 // `frameBytes * 8 * sr / (samples * 1000)` expression by asserting the exact
@@ -123,7 +123,7 @@ func TestParseEAC3DataRateArithmetic(t *testing.T) {
 	}
 }
 
-// ── audio.go:441 — flacEntry CodecPrivate stripping >=4 ──────────────────────
+// ── audio.go:441 - flacEntry CodecPrivate stripping >=4 ──────────────────────
 
 // TestFlacEntryStripsFLaCMarkerExactly4 kills the CONDITIONALS_BOUNDARY mutant
 // (>= 4 → > 4).  A CodecPrivate of exactly "fLaC" (4 bytes) must be stripped;
@@ -160,7 +160,7 @@ func TestFlacEntryStripsFLaCMarkerExactly4(t *testing.T) {
 	t.Error("dfLa box not found in flacEntry output")
 }
 
-// ── box.go:143 — packLanguage arithmetic ─────────────────────────────────────
+// ── box.go:143 - packLanguage arithmetic ─────────────────────────────────────
 
 // TestPackLanguageRoundTrip kills the INVERT_NEGATIVES and ARITHMETIC_BASE
 // mutants on the `-0x60` shift in packLanguage by asserting an exact value
@@ -182,7 +182,7 @@ func TestPackLanguageRoundTrip(t *testing.T) {
 	}
 }
 
-// ── parse.go:567,570 — parseMdhd exact boundary ──────────────────────────────
+// ── parse.go:567,570 - parseMdhd exact boundary ──────────────────────────────
 
 // TestParseMdhdTsOffExactBoundary kills the CONDITIONALS_BOUNDARY mutant
 // (>= → >) on `len(payload) >= tsOff+4` and ARITHMETIC_BASE on the `4`.
@@ -234,7 +234,7 @@ func TestParseMdhdLangOffExactBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:587:44 — mdhdDurationMs durOff+durSize exact boundary ────────────
+// ── parse.go:587:44 - mdhdDurationMs durOff+durSize exact boundary ────────────
 
 // TestMdhdDurationMsDurOffBoundary kills the CONDITIONALS_BOUNDARY mutant
 // (<  → <=) on `len(payload) < durOff+durSize`.
@@ -255,7 +255,7 @@ func TestMdhdDurationMsDurOffBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:619 — parseElst loop boundary ───────────────────────────────────
+// ── parse.go:619 - parseElst loop boundary ───────────────────────────────────
 
 // TestParseElstV0ExactEntry kills the CONDITIONALS_BOUNDARY mutant (> → >=)
 // on `off+12 > len(payload)` for v0 entries.  An elst with exactly one 12-byte
@@ -315,7 +315,7 @@ func TestParseElstNegativeMtBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:655,664 — decodeMdhdLanguage boundaries ─────────────────────────
+// ── parse.go:655,664 - decodeMdhdLanguage boundaries ─────────────────────────
 
 // TestDecodeMdhdLanguageMacCodeBoundary kills the CONDITIONALS_BOUNDARY mutant
 // (< 0x400 → <= 0x400).  packed=0x400 is the smallest valid ISO-packed code
@@ -355,7 +355,7 @@ func TestDecodeMdhdLanguageCharBoundaries(t *testing.T) {
 	}
 }
 
-// ── parse.go:708,720 — tkhdTrackID boundaries ────────────────────────────────
+// ── parse.go:708,720 - tkhdTrackID boundaries ────────────────────────────────
 
 // TestTkhdTrackIDBoundary kills the CONDITIONALS_BOUNDARY mutant on
 // `len(payload) < off+4`.  v0: off=12 → boundary at 16 bytes.
@@ -381,7 +381,7 @@ func TestTkhdTrackIDBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:727 — tkhdRotation ARITHMETIC_BASE ───────────────────────────────
+// ── parse.go:727 - tkhdRotation ARITHMETIC_BASE ───────────────────────────────
 
 // TestTkhdRotationExactOffset kills the ARITHMETIC_BASE mutant on the
 // arithmetic in `matOff+8`.  We verify the matrix is read from the exact right
@@ -405,7 +405,7 @@ func TestTkhdRotationExactOffset(t *testing.T) {
 	}
 }
 
-// ── parse.go:746-780 — parseElng / parseKind boundaries ─────────────────────
+// ── parse.go:746-780 - parseElng / parseKind boundaries ─────────────────────
 
 // TestParseElngMinBoundary kills the CONDITIONALS_BOUNDARY on `len(payload) < 4`.
 func TestParseElngMinBoundary(t *testing.T) {
@@ -439,7 +439,7 @@ func TestParseKindBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:900,914,929 — opusHeadFromDOps boundaries ───────────────────────
+// ── parse.go:900,914,929 - opusHeadFromDOps boundaries ───────────────────────
 
 // TestOpusHeadFromDOpsMinBoundary kills the CONDITIONALS_BOUNDARY mutant on
 // `len(dops) < 11`.
@@ -481,7 +481,7 @@ func TestOpusHeadChannelMappingTruncation(t *testing.T) {
 	}
 }
 
-// ── parse.go:1077,1089 — parseESDS boundaries ────────────────────────────────
+// ── parse.go:1077,1089 - parseESDS boundaries ────────────────────────────────
 
 // TestParseESDSMinBoundary kills the CONDITIONALS_BOUNDARY on `len(esds) < 4`.
 func TestParseESDSMinBoundary(t *testing.T) {
@@ -523,7 +523,7 @@ func TestParseESDSDecoderConfigLen(t *testing.T) {
 	}
 }
 
-// ── parse.go:1126,1132 — parseESDS DecoderConfigDescriptor length ─────────────
+// ── parse.go:1126,1132 - parseESDS DecoderConfigDescriptor length ─────────────
 
 // TestParseESDSDcfgMinBoundary kills the CONDITIONALS_BOUNDARY on
 // `len(dcfg) < 1`.  An empty DecoderConfigDescriptor must error.
@@ -540,7 +540,7 @@ func TestParseESDSDcfgMinBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:1181 — descReader.skip ──────────────────────────────────────────
+// ── parse.go:1181 - descReader.skip ──────────────────────────────────────────
 
 // TestDescReaderSkipBoundary kills the CONDITIONALS_BOUNDARY on
 // `n < 0 || d.pos+n > len(d.buf)`.
@@ -561,7 +561,7 @@ func TestDescReaderSkipBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:1195-1206 — descReader.next ─────────────────────────────────────
+// ── parse.go:1195-1206 - descReader.next ─────────────────────────────────────
 
 // TestDescReaderNextBoundary kills CONDITIONALS_BOUNDARY on `size < 0` and
 // `d.pos+size > len(d.buf)`, and INCREMENT_DECREMENT on the loop counter.
@@ -589,7 +589,7 @@ func TestDescReaderNextBoundary(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:52 — buildSampleTable ci+1 arithmetic ────────────────────
+// ── sampletable.go:52 - buildSampleTable ci+1 arithmetic ────────────────────
 
 // TestBuildSampleTableCiPlusOne kills the ARITHMETIC_BASE mutant on `ci+1` in
 // `samplesForChunk(uint32(ci+1), stscEntries)`.  With ci starting at 0, the
@@ -617,7 +617,7 @@ func TestBuildSampleTableCiPlusOne(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:54 — k < perChunk loop boundary ──────────────────────────
+// ── sampletable.go:54 - k < perChunk loop boundary ──────────────────────────
 
 // TestBuildSampleTablePerChunkBoundary kills the CONDITIONALS_BOUNDARY mutant
 // (< → <=) on `k < perChunk`.  With perChunk=2 and 2 samples per chunk, the
@@ -647,7 +647,7 @@ func TestBuildSampleTablePerChunkBoundary(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:57 — pos < 0 boundary for sample at offset 0 ─────────────
+// ── sampletable.go:57 - pos < 0 boundary for sample at offset 0 ─────────────
 
 // TestBuildSampleTableChunkAtOffset0 kills the CONDITIONALS_BOUNDARY mutant
 // (< 0 → <= 0) on `pos < 0`.  A legitimate sample at file offset 0 must be
@@ -672,7 +672,7 @@ func TestBuildSampleTableChunkAtOffset0(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:79 — si != n mismatch error ──────────────────────────────
+// ── sampletable.go:79 - si != n mismatch error ──────────────────────────────
 
 // TestBuildSampleTableSiMismatchError kills the CONDITIONALS_BOUNDARY mutant
 // (si != n → si == n) on the post-loop check.  When the chunk table covers
@@ -695,7 +695,7 @@ func TestBuildSampleTableSiMismatchError(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:122 — parseStsz variable-size index arithmetic ──────────
+// ── sampletable.go:122 - parseStsz variable-size index arithmetic ──────────
 
 // TestParseStszVariableSizeIndexBoundary kills the ARITHMETIC_BASE mutant on
 // `12+i*4` in the per-sample size loop.  Provide exactly the minimum required
@@ -719,7 +719,7 @@ func TestParseStszVariableSizeIndexBoundary(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:133-137 — parseChunkOffsets stco boundaries ───────────────
+// ── sampletable.go:133-137 - parseChunkOffsets stco boundaries ───────────────
 
 // TestParseChunkOffsetsStcoBoundary kills CONDITIONALS_BOUNDARY mutants on
 // `len(stco.payload) < 8` and `< 8+int(count)*4`.
@@ -757,7 +757,7 @@ func TestParseChunkOffsetsCo64Boundary(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:147-156 — parseStts boundaries and arithmetic ─────────────
+// ── sampletable.go:147-156 - parseStts boundaries and arithmetic ─────────────
 
 // TestParseSttsEntryBoundary kills CONDITIONALS_BOUNDARY on
 // `len(payload) < 8+int(count)*8`.
@@ -840,7 +840,7 @@ func TestParseSttsIdxArithmetic(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:164-173 — parseCtts boundaries and arithmetic ─────────────
+// ── sampletable.go:164-173 - parseCtts boundaries and arithmetic ─────────────
 
 // TestParseCttsExactBoundary kills CONDITIONALS_BOUNDARY on the entry length
 // check in parseCtts.
@@ -877,7 +877,7 @@ func TestParseCttsIdxAndArithmetic(t *testing.T) {
 	}
 }
 
-// ── sampletable.go:202-254 — parseStss boundaries ───────────────────────────
+// ── sampletable.go:202-254 - parseStss boundaries ───────────────────────────
 
 // TestParseStssMinBoundary kills CONDITIONALS_BOUNDARY on `len < 8+count*4`.
 func TestParseStssMinBoundary(t *testing.T) {
@@ -899,7 +899,7 @@ func TestParseStssMinBoundary(t *testing.T) {
 	}
 }
 
-// ── sample.go:39 — addChunk count > 0 ────────────────────────────────────────
+// ── sample.go:39 - addChunk count > 0 ────────────────────────────────────────
 
 // TestAddChunkCountZeroNotAdded kills the CONDITIONALS_BOUNDARY mutant
 // (> 0 → >= 0).  count=0 must not append a chunk; count=1 must append.
@@ -915,7 +915,7 @@ func TestAddChunkCountZeroNotAdded(t *testing.T) {
 	}
 }
 
-// ── sample.go:59 — textTiming d <= 0 guard ───────────────────────────────────
+// ── sample.go:59 - textTiming d <= 0 guard ───────────────────────────────────
 
 // TestTextTimingDurationGuard kills the CONDITIONALS_BOUNDARY mutant
 // (d <= 0 → d < 0).  A sample with dur=0 must be clamped to 1.
@@ -933,7 +933,7 @@ func TestTextTimingDurationGuard(t *testing.T) {
 	}
 }
 
-// ── sample.go:91 — reconstructTiming sort and dts[i+1]-dts[i] arithmetic ─────
+// ── sample.go:91 - reconstructTiming sort and dts[i+1]-dts[i] arithmetic ─────
 
 // TestReconstructTimingBFrameOffsets kills ARITHMETIC_BASE mutants on
 // `dts[i+1]-dts[i]` and `samples[i].pts-dts[i]`.
@@ -967,7 +967,7 @@ func TestReconstructTimingBFrameOffsets(t *testing.T) {
 	}
 }
 
-// ── chapters.go:90-94 — encodeChapterSample boundary and arithmetic ──────────
+// ── chapters.go:90-94 - encodeChapterSample boundary and arithmetic ──────────
 
 // TestEncodeChapterSampleLen kills CONDITIONALS_BOUNDARY (> 0xFFFF → >= 0xFFFF)
 // and ARITHMETIC_BASE on `len(b)>>8`.
@@ -998,7 +998,7 @@ func TestEncodeChapterSampleLenArithmetic(t *testing.T) {
 	}
 }
 
-// ── chapters.go:111-124 — parseChpl entry boundaries ────────────────────────
+// ── chapters.go:111-124 - parseChpl entry boundaries ────────────────────────
 
 // TestParseChplTitleLenBoundary kills the CONDITIONALS_BOUNDARY mutant
 // `pos+titleLen > len(payload)`.  A titleLen that would overrun must stop.
@@ -1042,7 +1042,7 @@ func TestParseChplStart100nsArithmeticDirect(t *testing.T) {
 	}
 }
 
-// ── moov.go:54,57 — buildMoov dur/maxID comparisons ─────────────────────────
+// ── moov.go:54,57 - buildMoov dur/maxID comparisons ─────────────────────────
 
 // TestBuildMoovPicksMaxDurAndMaxID kills CONDITIONALS_BOUNDARY mutants on
 // `dur > movieDur` and `t.mp4ID > maxID`.  Two tracks with different durations
@@ -1071,7 +1071,7 @@ func TestBuildMoovPicksMaxDurAndMaxID(t *testing.T) {
 	}
 }
 
-// ── moov.go:62 — buildMvhd maxID+1 arithmetic ───────────────────────────────
+// ── moov.go:62 - buildMvhd maxID+1 arithmetic ───────────────────────────────
 
 // TestBuildMvhdNextTrackIDArithmetic kills ARITHMETIC_BASE on `maxID+1`.
 // nextTrackID must be one more than the largest track ID.
@@ -1089,7 +1089,7 @@ func TestBuildMvhdNextTrackIDArithmetic(t *testing.T) {
 	}
 }
 
-// ── moov.go:118 — buildTrak LanguageBCP47 ────────────────────────────────────
+// ── moov.go:118 - buildTrak LanguageBCP47 ────────────────────────────────────
 
 // TestBuildTrakElngPresent kills the CONDITIONALS_BOUNDARY (implied != "")
 // on `t.mkv.LanguageBCP47 != ""`.  A non-empty BCP47 must produce an elng box.
@@ -1108,7 +1108,7 @@ func TestBuildTrakElngPresent(t *testing.T) {
 	}
 }
 
-// ── meta.go:86 — containerFromMovie durationMs fallback ──────────────────────
+// ── meta.go:86 - containerFromMovie durationMs fallback ──────────────────────
 
 // TestContainerFromMovieDurationFallback kills the CONDITIONALS_NEGATION mutant
 // (durMs == 0 → durMs != 0).  When there are no samples (movieDurationMs=0),
@@ -1127,7 +1127,7 @@ func TestContainerFromMovieDurationFallback(t *testing.T) {
 	}
 }
 
-// ── meta.go:118-128 — videoKeyframesMs dedup ─────────────────────────────────
+// ── meta.go:118-128 - videoKeyframesMs dedup ─────────────────────────────────
 
 // TestVideoKeyframeMsDedupArithmetic kills ARITHMETIC_BASE on `/8+1` in the
 // capacity allocation, and CONDITIONALS_BOUNDARY on `v != out[len(out)-1]`.
@@ -1155,7 +1155,7 @@ func TestVideoKeyframesMsDedup(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:62 — flushPendingCue nextStart > pendCuePTS ─────────────────
+// ── subtitle.go:62 - flushPendingCue nextStart > pendCuePTS ─────────────────
 
 // TestFlushPendingCueNextStartGap kills CONDITIONALS_BOUNDARY mutants on
 // `nextStart >= 0 && nextStart > t.pendCuePTS` (lines 134-135).
@@ -1170,7 +1170,7 @@ func TestFlushPendingCueDurClamp(t *testing.T) {
 	}
 }
 
-// ── demux.go:237 — writeMKV cluster window arithmetic ────────────────────────
+// ── demux.go:237 - writeMKV cluster window arithmetic ────────────────────────
 
 // TestWriteMKVClusterWindowArithmetic kills ARITHMETIC_BASE mutants on
 // `s.dtsMs-groupStart >= clusterWindowMs` via a roundtrip that verifies the
@@ -1198,10 +1198,10 @@ func TestWriteMKVClusterWindowRoundTrip(t *testing.T) {
 	}
 }
 
-// ── subtitle.go:37 — truncateRunes INVERT_NEGATIVES / ARITHMETIC_BASE ─────────
+// ── subtitle.go:37 - truncateRunes INVERT_NEGATIVES / ARITHMETIC_BASE ─────────
 
 // TestTruncateRunesArithmeticBase kills ARITHMETIC_BASE and INVERT_NEGATIVES
-// on `b[max]&0xC0 == 0x80` — the continuation byte check.  The `0xC0` mask
+// on `b[max]&0xC0 == 0x80` - the continuation byte check.  The `0xC0` mask
 // and `0x80` sentinel are both targets; we verify the exact byte that triggers
 // back-off.
 func TestTruncateRunesContinuationByteExact(t *testing.T) {
@@ -1219,7 +1219,7 @@ func TestTruncateRunesContinuationByteExact(t *testing.T) {
 	// Our test asserts 1, killing that mutation.
 }
 
-// ── subtitle_webvtt.go:44 — ExtractSubtitleWebVTT boundary ───────────────────
+// ── subtitle_webvtt.go:44 - ExtractSubtitleWebVTT boundary ───────────────────
 
 // TestExtractSubtitleWebVTTDurPositive kills the CONDITIONALS_BOUNDARY mutant
 // on `s.durMs > 0` (subtitle_webvtt.go:67).  A cue with positive duration must
@@ -1249,7 +1249,7 @@ func TestExtractSubtitleWebVTTDurMsPositive(t *testing.T) {
 	}
 }
 
-// ── webvtt.go:89 — decodeWVTT len(out)==0 boundary ───────────────────────────
+// ── webvtt.go:89 - decodeWVTT len(out)==0 boundary ───────────────────────────
 
 // TestDecodeWVTTEmptyVttcPayload kills the CONDITIONALS_BOUNDARY on
 // `len(out) == 0`.  A sample with only empty vttc (no payl) must return false.
@@ -1282,7 +1282,7 @@ func TestDecodeWVTTNewlineSeparation(t *testing.T) {
 	}
 }
 
-// ── mux.go:67 — emitChapterSamples dur <= 0 guard ────────────────────────────
+// ── mux.go:67 - emitChapterSamples dur <= 0 guard ────────────────────────────
 
 // TestEmitChapterSamplesDurNotNegative kills the CONDITIONALS_BOUNDARY mutant
 // (dur <= 0 → dur < 0).  A chapter with exactly zero computed dur must still
@@ -1316,7 +1316,7 @@ func TestChapterRoundTripDuration(t *testing.T) {
 	}
 }
 
-// ── mux.go:391 — frameDurationMs > 0 ─────────────────────────────────────────
+// ── mux.go:391 - frameDurationMs > 0 ─────────────────────────────────────────
 
 // TestFrameDurationMsPositiveFR kills the CONDITIONALS_BOUNDARY mutant
 // (> 0 → >= 0).  FrameRate > 0 must return a non-zero duration.
@@ -1335,7 +1335,7 @@ func TestFrameDurationMsPositiveFR(t *testing.T) {
 	}
 }
 
-// ── codec.go:296 — audioSampleEntry channels/rate guards ─────────────────────
+// ── codec.go:296 - audioSampleEntry channels/rate guards ─────────────────────
 
 // TestAudioSampleEntryChannelRateGuards kills CONDITIONALS_BOUNDARY mutants on
 // `*t.Channels > 0` and `*t.SampleRate > 0`.
@@ -1365,7 +1365,7 @@ func TestAudioSampleEntryChannelRateGuards(t *testing.T) {
 	}
 }
 
-// ── codec.go:257-261 — paspBox anamorphic conditions ─────────────────────────
+// ── codec.go:257-261 - paspBox anamorphic conditions ─────────────────────────
 
 // TestPaspBoxNilDimensions kills the CONDITIONALS_BOUNDARY mutants (> 0 → >= 0)
 // on Width/Height/DisplayWidth/DisplayHeight guards.
@@ -1385,7 +1385,7 @@ func TestPaspBoxZeroDimensions(t *testing.T) {
 	}
 }
 
-// ── parse.go:1166 — opusHeadFromDOps preSkip little-endian ───────────────────
+// ── parse.go:1166 - opusHeadFromDOps preSkip little-endian ───────────────────
 
 // TestOpusHeadFromDOpsFull kills ARITHMETIC_BASE on the field offsets.
 // Build a complete dOps and verify every field in the reconstructed OpusHead.

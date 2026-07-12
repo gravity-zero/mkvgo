@@ -1,9 +1,9 @@
 package mp4
 
-// hlsplan.go — on-demand HLS: PlanHLS derives everything a server needs to
+// hlsplan.go - on-demand HLS: PlanHLS derives everything a server needs to
 // answer playlist/init requests from three bounded reads (the metadata head
 // with its Cues, the first cluster, the last cued cluster), and Segment(n)
-// then builds any single media segment by reading only that segment's window —
+// then builds any single media segment by reading only that segment's window  -
 // seeking straight to its cluster through the Cues. Nothing is pre-generated:
 // first-play latency is one window read, storage cost is zero, and a remote
 // source (httpfs) transfers only the ranges a viewer actually watches.
@@ -13,11 +13,11 @@ package mp4
 // pass (given a source whose Cues index every video keyframe, as real muxers
 // write). Title, global tags and cover art ride in the init segment as usual.
 // Text subtitle tracks are declared in the master playlist and served as a
-// WebVTT rendition each — whole-presentation (subN.vtt) or windowed
+// WebVTT rendition each - whole-presentation (subN.vtt) or windowed
 // (subN_%05d.vtt). Text blocks have no cue index, so the cues come from
 // scanning the clusters; the scans are incremental and bounded (subScanState):
 // sequential playback advances an exact prefix cursor stride by stride, and a
-// far seek jumps through the segment index to a sliding bounded island —
+// far seek jumps through the segment index to a sliding bounded island  -
 // every request costs O(window), like a video segment. Sources whose subtitle
 // blocks lack explicit durations (or carry over-long cues) drop to the
 // always-exact prefix path.
@@ -84,7 +84,7 @@ type HLSPlan struct {
 // plus the timing anchors the per-segment DTS derivation needs.
 type planTrack struct {
 	ft         *fragTrack
-	firstPtsMs int64 // the track's first sample PTS — the global DTS origin
+	firstPtsMs int64 // the track's first sample PTS - the global DTS origin
 	lastDurTS  int64 // the track's final sample duration (fillFragTiming's rule)
 	// gridTS is the sample-exact frame stride of a constant-rate audio track
 	// (audioGridTS); windows are then timed on the grid, exactly like
@@ -92,8 +92,8 @@ type planTrack struct {
 	gridTS int64
 }
 
-// PlanHLS reads the source's metadata, Cues, first and last clusters — a few
-// bounded reads, head-only in spirit — and returns a plan that serves an HLS
+// PlanHLS reads the source's metadata, Cues, first and last clusters - a few
+// bounded reads, head-only in spirit - and returns a plan that serves an HLS
 // presentation segment by segment. The source must carry a Cues index (every
 // real muxer writes one; `mkvgo reindex` adds one). See HLSPlan.Segment.
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
@@ -133,8 +133,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	// Track selection mirrors remuxToHLSInto exactly so a variant's plan stays
 	// byte-identical to its full pass: one video rendition (secondary video
-	// dropped), each audio, and — unless VideoOnly (an ABR variant carries only
-	// its video) — the subtitle renditions.
+	// dropped), each audio, and - unless VideoOnly (an ABR variant carries only
+	// its video) - the subtitle renditions.
 	keep := keepTrackSet(&o)
 	var media []*outTrack
 	var videoSeen bool
@@ -308,7 +308,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		p.durs[k] = float64(end-p.bounds[k]) / 1000
 	}
 
-	// Master playlist with BANDWIDTH estimated from the cue cluster offsets —
+	// Master playlist with BANDWIDTH estimated from the cue cluster offsets  -
 	// the source bytes between two boundaries approximate the fragment size.
 	var segs []segInfo
 	srcSize := int64(0)
@@ -403,11 +403,11 @@ func (p *HLSPlan) SegmentName(n int) string { return fmt.Sprintf("seg%05d.m4s", 
 // cluster sizes), including the declared subtitle renditions.
 func (p *HLSPlan) MasterPlaylist() []byte { return p.master }
 
-// MediaPlaylist returns playlist.m3u8 — the video rendition's playlist
+// MediaPlaylist returns playlist.m3u8 - the video rendition's playlist
 // (audio renditions have their own, audioK.m3u8, served via Resource).
 func (p *HLSPlan) MediaPlaylist() []byte { return p.medias[p.videoIndex()] }
 
-// InitSegment returns init.mp4 — the video rendition's init segment, which
+// InitSegment returns init.mp4 - the video rendition's init segment, which
 // also carries the movie metadata (title, tags, cover art).
 func (p *HLSPlan) InitSegment() []byte { return p.inits[p.videoIndex()] }
 
@@ -743,7 +743,7 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 }
 
 // segSample is one sample of an on-demand window: the fragment metadata plus
-// its bytes (a single segment's data is held in memory — a few MB).
+// its bytes (a single segment's data is held in memory - a few MB).
 type segSample struct {
 	fragSample
 	data []byte
@@ -830,15 +830,15 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseD
 	return dts[0] - base, windowHasCTS(window)
 }
 
-// Segment builds the n-th (0-based) VIDEO media segment (segNNNNN.m4s) —
+// Segment builds the n-th (0-based) VIDEO media segment (segNNNNN.m4s)  -
 // audio renditions' segments are served through Resource by name. The bytes
 // equal the corresponding segment RemuxToHLS writes.
 func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 	return p.segmentTrack(ctx, p.videoIndex(), n)
 }
 
-// segmentTrack builds the n-th segment of the ti-th track — styp + moof +
-// mdat — reading only that segment's window from the source: it seeks to the
+// segmentTrack builds the n-th segment of the ti-th track - styp + moof +
+// mdat - reading only that segment's window from the source: it seeks to the
 // window's cluster through the Cues and stops once the track crosses the
 // window's end.
 func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
@@ -858,7 +858,7 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	// Cursor semantics, exactly like the full pass: the track's window starts
 	// at its first sample (decode order) with PTS >= segStart and ends just
 	// before its first sample with PTS >= segEnd. Everything in between
-	// belongs to the window whatever its PTS — open-GOP leading B-frames ride
+	// belongs to the window whatever its PTS - open-GOP leading B-frames ride
 	// with the keyframe that follows them in presentation but precedes them
 	// in decode.
 	var window []segSample
@@ -892,7 +892,7 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 		return nil, err
 	}
 
-	// Fragment timing — fillFragTiming's DTS derivation applied to the window,
+	// Fragment timing - fillFragTiming's DTS derivation applied to the window,
 	// anchored on the track's global first PTS, with the boundary lookahead
 	// supplying the window's final sample duration. An empty window (the track
 	// ended before the presentation) becomes an empty trun with the decode
@@ -946,7 +946,7 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	return out, nil
 }
 
-// Resources returns every resource name the plan serves — the HLS master, the
+// Resources returns every resource name the plan serves - the HLS master, the
 // DASH manifest (same CMAF segments, second manifest), then per rendition its
 // media playlist, init segment and media segments (video first, then each
 // audio track), and each subtitle rendition (its HLS playlist and its WebVTT).
@@ -976,11 +976,11 @@ func (p *HLSPlan) Resources() []string {
 }
 
 // Resource builds the named resource and returns its bytes and Content-Type.
-// The name is exactly the URI a player requests relative to the playlist —
+// The name is exactly the URI a player requests relative to the playlist  -
 // "master.m3u8", "playlist.m3u8", "init.mp4", "seg00042.m4s", "sub1.m3u8",
-// "sub1.vtt" — so an HTTP handler is a one-liner around this call. Playlists
+// "sub1.vtt" - so an HTTP handler is a one-liner around this call. Playlists
 // and the init segment are precomputed; media segments read their window;
-// a subtitle .vtt runs one sequential pass over the source (lazily — cache it
+// a subtitle .vtt runs one sequential pass over the source (lazily - cache it
 // if requested often).
 func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, error) {
 	const (
@@ -1079,9 +1079,9 @@ const (
 
 	// subFastMaxCueDurMs is the longest cue the fast-seek path accounts for:
 	// its backward margin. A cue longer than this observed ANYWHERE (the
-	// track-head probe, a prefix scan, an island scan) — or any cue without
+	// track-head probe, a prefix scan, an island scan) - or any cue without
 	// an explicit duration, whose end resolves on an arbitrarily-far
-	// successor — drops the track to the always-exact prefix path. A
+	// successor - drops the track to the always-exact prefix path. A
 	// violating cue that only lives in never-scanned regions can escape this
 	// net; real subtitle muxing (explicit BlockDurations, cues of seconds)
 	// stays exact.
@@ -1133,7 +1133,7 @@ func (p *HLSPlan) subPrefixLocked(ctx context.Context, i int, uptoMs int64) ([]s
 
 // subCuesForWindow returns cues sufficient to window [segStart, segEnd):
 // from the prefix when it is the cheaper (or the only exact) vehicle, or
-// from a seeked island when the request jumps far past the prefix — the
+// from a seeked island when the request jumps far past the prefix - the
 // direct-play property: a cold seek costs O(window), not O(position). The
 // island's backward margin covers cues started before the window
 // (subFastMaxCueDurMs) and the relative-timecode spread of their blocks.
@@ -1157,7 +1157,7 @@ func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd 
 		(st.prefix.scanned >= target && !subNeedsNextCue(st.prefix.cues, segEnd))
 	// The prefix serves when it already covers the window, when the window
 	// starts within (or near) it, or when extending it reads no more than a
-	// fresh island would — sequential playback stays on the prefix.
+	// fresh island would - sequential playback stays on the prefix.
 	usePrefix := prefixCovers || neededFrom <= st.prefix.scanned ||
 		target-st.prefix.scanned <= target-neededFrom
 	if !usePrefix && !st.noFast && st.prefix.scanned == 0 && !st.prefix.done {
@@ -1190,7 +1190,7 @@ func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd 
 }
 
 // subWindowLocked serves through the sliding island: reuse it while its
-// floor covers the needed lookback AND its scan front has reached it —
+// floor covers the needed lookback AND its scan front has reached it  -
 // sliding forward is then incremental. A jump landing before the island or
 // far past its front seeks a fresh island through the segment index instead
 // of dragging the old one across the gap. Caller holds subMu[i].
@@ -1213,7 +1213,7 @@ func (p *HLSPlan) subWindowLocked(ctx context.Context, i int, neededFrom, target
 // uptoMs (within its floor) with resolvable ends. Two bounds drive the walk:
 // blocks with timecode T live in clusters stamped within the relative-
 // timecode range of T, and a duration-less cue's end is the NEXT cue's start
-// — the scan keeps going while the last known cue before uptoMs awaits a
+// - the scan keeps going while the last known cue before uptoMs awaits a
 // successor. Cancellation between strides keeps the committed progress; only
 // permanent errors are cached. Caller holds subMu[i].
 func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor, target, uptoMs int64) error {
@@ -1311,7 +1311,7 @@ func subNeedsNextCue(cues []subtitle.Cue, uptoMs int64) bool {
 	return false
 }
 
-// Subtitle builds the i-th (0-based) subtitle rendition's WebVTT — the whole
+// Subtitle builds the i-th (0-based) subtitle rendition's WebVTT - the whole
 // track as one file. It drives the cue cursor to the end of the source; the
 // cues collected stay cached for the windowed segments (and vice versa).
 // Options.SubtitleOffsetMs shifts every cue (see subtitle.ShiftCues) before
@@ -1333,9 +1333,9 @@ func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 }
 
 // subtitleSegment builds the i-th rendition's n-th windowed WebVTT segment
-// (subN_%05d.vtt) — the same windows the full pass writes, byte-identical.
+// (subN_%05d.vtt) - the same windows the full pass writes, byte-identical.
 // Only the prefix of the source the window can draw cues from is scanned, so
-// serving segments in playback order reads the source once, incrementally —
+// serving segments in playback order reads the source once, incrementally  -
 // the first hit costs one bounded window, like a video segment.
 //
 // Options.SubtitleOffsetMs shifts every cue before windowing (segment
@@ -1420,8 +1420,8 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 }
 
 // planHLSFromMP4 builds the on-demand plan from an MP4 source's sample table:
-// every window, size and duration is known head-only, so the plan's outputs —
-// including the master's BANDWIDTH — equal the full pass exactly.
+// every window, size and duration is known head-only, so the plan's outputs  -
+// including the master's BANDWIDTH - equal the full pass exactly.
 func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs *mkv.FS, o *Options, segMs int64) (*HLSPlan, error) {
 	c := ps.c
 	planned, _, err := planTracks(c, *o)
@@ -1484,8 +1484,8 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	p.segCount = len(p.bounds)
 
 	// Exact per-boundary aggregates: window sizes are computable without
-	// touching the media (deterministic builders), so BANDWIDTH — and with it
-	// the master playlist and the DASH manifest — equal the full pass.
+	// touching the media (deterministic builders), so BANDWIDTH - and with it
+	// the master playlist and the DASH manifest - equal the full pass.
 	video := pickVideoFrag(fts)
 	cursors := make([]int, len(fts))
 	segs := make([]segInfo, 0, p.segCount)
@@ -1548,7 +1548,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 	fts := p.fts()
 	ft := fts[ti]
 	// Window bounds under the full pass's cursor semantics: each window
-	// starts where the previous one stopped — at the first sample (decode
+	// starts where the previous one stopped - at the first sample (decode
 	// order) at/past its boundary.
 	start := 0
 	for k := 1; k <= n; k++ {

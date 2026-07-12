@@ -224,7 +224,7 @@ func TestReadStreamRoundTripRegfix(t *testing.T) {
 		seekBlocks = append(seekBlocks, b)
 	}
 
-	// Streaming path — same file, wrapped in readerOnly.
+	// Streaming path - same file, wrapped in readerOnly.
 	streamC, streamBR, err := ReadStream(ctx, &readerOnly{r: bytes.NewReader(fileData)})
 	if err != nil {
 		t.Fatalf("ReadStream: %v", err)

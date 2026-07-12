@@ -15,7 +15,7 @@ import (
 
 // largeMoovMP4 builds an MP4 whose moov exceeds the lazy reader's chunk (large
 // stsz/stco from many samples), so the lazy path makes several reads and seeks
-// over the skipped bodies — the case the small fixture cannot exercise.
+// over the skipped bodies - the case the small fixture cannot exercise.
 func largeMoovMP4(t *testing.T) string {
 	t.Helper()
 	const n = 30000
@@ -80,7 +80,7 @@ func assertLazyFullParity(t *testing.T, path string) {
 }
 
 // TestLazyMoovMetaParity proves the lazy moov read yields a Container identical
-// to a full read — on a small metadata-rich file and on a large file where the
+// to a full read - on a small metadata-rich file and on a large file where the
 // big sample-table bodies are actually skipped.
 func TestLazyMoovMetaParity(t *testing.T) {
 	assertLazyFullParity(t, buildTestMP4(t))
@@ -105,7 +105,7 @@ func (f *failSeekBeyond) Seek(off int64, whence int) (int64, error) {
 
 // TestLazyMoovFallback proves the mandatory safety net: when the lazy read cannot
 // complete (a reader that refuses the deep per-chunk seeks), parseMP4 falls back
-// to the full read and parses correctly — never an error, same metadata.
+// to the full read and parses correctly - never an error, same metadata.
 func TestLazyMoovFallback(t *testing.T) {
 	data, err := os.ReadFile(largeMoovMP4(t))
 	if err != nil {

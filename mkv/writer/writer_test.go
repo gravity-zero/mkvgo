@@ -698,7 +698,7 @@ func TestWriteClusterWithCuesAudioOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Blocks without keyframe — audio-only fallback adds cue for first block
+	// Blocks without keyframe - audio-only fallback adds cue for first block
 	blocks := []mkv.Block{
 		{TrackNumber: 2, Timecode: 0, Keyframe: false, Data: []byte{0x01}},
 	}
@@ -709,7 +709,7 @@ func TestWriteClusterWithCuesAudioOnly(t *testing.T) {
 		t.Errorf("cues = %d, want 1 (audio-only fallback)", len(m.Cues))
 	}
 
-	// Second cluster within 500ms — no additional cue
+	// Second cluster within 500ms - no additional cue
 	blocks2 := []mkv.Block{
 		{TrackNumber: 2, Timecode: 100, Keyframe: false, Data: []byte{0x02}},
 	}
@@ -720,7 +720,7 @@ func TestWriteClusterWithCuesAudioOnly(t *testing.T) {
 		t.Errorf("cues = %d, want 1 (within interval)", len(m.Cues))
 	}
 
-	// Third cluster at 600ms — should add a cue
+	// Third cluster at 600ms - should add a cue
 	blocks3 := []mkv.Block{
 		{TrackNumber: 2, Timecode: 600, Keyframe: false, Data: []byte{0x03}},
 	}

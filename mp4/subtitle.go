@@ -6,7 +6,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// subtitle.go — SRT (S_TEXT/UTF8) subtitles carried as MP4 timed text (tx3g,
+// subtitle.go - SRT (S_TEXT/UTF8) subtitles carried as MP4 timed text (tx3g,
 // a.k.a. mov_text). Each Matroska subtitle cue becomes one tx3g sample whose
 // payload is a 16-bit length followed by UTF-8 text; the gaps between cues are
 // filled with empty samples so the text track is continuous, as players expect.

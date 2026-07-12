@@ -1,9 +1,9 @@
 package mp4
 
-// hlspack.go — MP4/MOV sources for the CMAF packager. The packaging pipeline
+// hlspack.go - MP4/MOV sources for the CMAF packager. The packaging pipeline
 // (RemuxToHLS / RemuxToABR / PlanHLS) is source-agnostic past its collect
 // phase; this file supplies the MP4 side: the source is sniffed from its
-// first bytes, its moov gives the complete sample table (head-only — offsets,
+// first bytes, its moov gives the complete sample table (head-only - offsets,
 // sizes, sync flags, timing), and samples are read straight from the mdat.
 // An MP4 source therefore needs no Cues equivalent: the sample table IS the
 // index, which makes the on-demand plan exact by construction.
@@ -176,7 +176,7 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 }
 
 // mp4SubCues decodes every subtitle sample of the plan's text tracks (small
-// text, held in RAM — the MP4 plan has no lazy pass to defer to).
+// text, held in RAM - the MP4 plan has no lazy pass to defer to).
 func mp4SubCues(ps *packagingSource, subs []hlsSubTrack) error {
 	for i := range subs {
 		ti := int(subs[i].track.ID) - 1

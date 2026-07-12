@@ -1,8 +1,8 @@
-// mkvgo-sw.js — a Service Worker that turns the mkvgo WASM into an in-browser
+// mkvgo-sw.js - a Service Worker that turns the mkvgo WASM into an in-browser
 // HLS origin. It intercepts requests under __mkvgo__/<id>/<resource> and answers
 // them from an on-demand plan (openHLS for one file, openABR for a ladder), so a
-// plain <video>/hls.js can stream a local file — even one far larger than memory
-// — with zero server and zero upload. The "resource(name)" work is all Go/WASM
+// plain <video>/hls.js can stream a local file - even one far larger than memory
+// - with zero server and zero upload. The "resource(name)" work is all Go/WASM
 // (covered by wasm_smoke); this file is just the fetch router around it, and the
 // serve contract it implements is exercised in Node by that smoke.
 

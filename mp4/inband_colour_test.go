@@ -10,7 +10,7 @@ import (
 )
 
 // A real HEVC HDR hvcC (Main 10, bt2020nc / PQ / 10-bit) WITH its SPS in the NAL
-// arrays — the SPS is lifted out of it and replanted in-band for these tests.
+// arrays - the SPS is lifted out of it and replanted in-band for these tests.
 const hevcHDRPrivateHex = "0102200000009000000000001ef000fcfdfafa00000f03200001001840010c01ffff02200000030090000003000003001e959809210001002d42010102200000030090000003000003001ea0208104d96566924caf016a12201208000003000800000300c04022000100074401c172b42240"
 
 func mustHex(t *testing.T, s string) []byte {

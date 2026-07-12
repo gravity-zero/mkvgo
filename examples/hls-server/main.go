@@ -1,6 +1,6 @@
 // Command hls-server is a complete, runnable example: an on-demand HLS + DASH
 // streaming server built on mp4.PlanHLS. It packages a Matroska/WebM or MP4/MOV
-// file — local path or http(s):// URL (S3) — into CMAF on the fly. Nothing is
+// file - local path or http(s):// URL (S3) - into CMAF on the fly. Nothing is
 // pre-generated: every playlist, manifest and segment is built when a player
 // requests it, so first-play latency is milliseconds and storage cost is zero.
 //
@@ -10,8 +10,8 @@
 // Then open http://localhost:8080/ and pick a player, or point any HLS/DASH
 // client at:
 //
-//	http://localhost:8080/hls/master.m3u8    (HLS  — hls.js, Safari)
-//	http://localhost:8080/hls/manifest.mpd   (DASH — dash.js)
+//	http://localhost:8080/hls/master.m3u8    (HLS  - hls.js, Safari)
+//	http://localhost:8080/hls/manifest.mpd   (DASH - dash.js)
 //
 // The whole server is the plan() helper and one handler around
 // plan.Resource(name). That is the entire integration surface.
@@ -31,7 +31,7 @@ import (
 )
 
 func main() {
-	src := flag.String("src", "", "source file (path or http(s):// URL) — MKV/WebM or MP4/MOV")
+	src := flag.String("src", "", "source file (path or http(s):// URL) - MKV/WebM or MP4/MOV")
 	addr := flag.String("addr", ":8080", "listen address")
 	segment := flag.Float64("segment", 6, "target segment duration, seconds")
 	flag.Parse()
@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("plan %q: %v", *src, err)
 	}
-	log.Printf("packaging %q — %d segments, %d resources", *src, plan.NumSegments(), len(plan.Resources()))
+	log.Printf("packaging %q - %d segments, %d resources", *src, plan.NumSegments(), len(plan.Resources()))
 
 	mux := http.NewServeMux()
 
@@ -71,7 +71,7 @@ func main() {
 	})
 
 	// A tiny landing page that plays the output in real players (hls.js and
-	// dash.js from a CDN) — proof both manifests work end to end.
+	// dash.js from a CDN) - proof both manifests work end to end.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -96,7 +96,7 @@ const landingPage = `<!doctype html>
   code { background: #f3f3f3; padding: .1rem .3rem; border-radius: 3px; }
 </style>
 <h1>mkvgo · on-demand HLS + DASH</h1>
-<p>Segments are built on demand by <code>mp4.PlanHLS</code> — nothing is pre-generated.</p>
+<p>Segments are built on demand by <code>mp4.PlanHLS</code> - nothing is pre-generated.</p>
 <p>
   <button onclick="playHLS()">Play HLS (hls.js)</button>
   <button onclick="playDASH()">Play DASH (dash.js)</button>

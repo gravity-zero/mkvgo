@@ -10,7 +10,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// voidElem is a Void element with n zero payload bytes — cheap filler for a
+// voidElem is a Void element with n zero payload bytes - cheap filler for a
 // cluster body the parser skips by size.
 func voidElem(n int) []byte {
 	var b bytes.Buffer
@@ -83,7 +83,7 @@ func buildTailMKV(t *testing.T, withSeekHead bool, nClusters, clusterSize int, s
 }
 
 // assertTailParsed checks the post-cluster Cues and Tags were both collected and
-// the keyframe index was derived — i.e. no tail element was missed.
+// the keyframe index was derived - i.e. no tail element was missed.
 func assertTailParsed(t *testing.T, c *mkv.Container) {
 	t.Helper()
 	if len(c.Cues) != tailCueCount {
@@ -103,7 +103,7 @@ func assertTailParsed(t *testing.T, c *mkv.Container) {
 // TestFullReadSeekHeadSkipsClusterRegion proves a full Read with a SeekHead jumps
 // over the whole cluster region in one seek: the number of underlying Read calls
 // is identical whether there are 20 clusters or 200, because none of them are
-// read. Correctness is checked too — the tail Cues and Tags are still parsed.
+// read. Correctness is checked too - the tail Cues and Tags are still parsed.
 func TestFullReadSeekHeadSkipsClusterRegion(t *testing.T) {
 	const clusterSize = 128 << 10 // > fullReadBufSize, so walking one costs a read
 
@@ -130,7 +130,7 @@ func TestFullReadSeekHeadSkipsClusterRegion(t *testing.T) {
 }
 
 // buildHeadCuesMKV assembles [SeekHead(Info,Tracks,Cues)][Info][Tracks][Cues]
-// [Cluster×n] — the Cues sit BEFORE the clusters (a real muxer layout, e.g. some
+// [Cluster×n] - the Cues sit BEFORE the clusters (a real muxer layout, e.g. some
 // Blu-ray remuxes). The SeekHead indexes only head elements, so nothing lies
 // past the clusters and a full Read must STOP at the first cluster rather than
 // walk all of them to EOF looking for something that is not there.
@@ -216,7 +216,7 @@ func TestFullReadNoSeekHeadTailCuesScan(t *testing.T) {
 }
 
 // buildNoCuesMKV assembles [Info][Tracks][Cluster×n] with no SeekHead and no
-// Cues — the only layout that still forces a full cluster walk to EOF, since
+// Cues - the only layout that still forces a full cluster walk to EOF, since
 // there is nothing at the tail to scan for.
 func buildNoCuesMKV(t *testing.T, nClusters, clusterSize int) []byte {
 	t.Helper()

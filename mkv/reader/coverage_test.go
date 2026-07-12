@@ -1,6 +1,6 @@
 package reader
 
-// coverage_test.go — statement coverage booster targeting functions that were
+// coverage_test.go - statement coverage booster targeting functions that were
 // at 0-85% after the main test suite. All tests are in package reader (internal)
 // so unexported helpers (bitReader, skipAVCScalingList, etc.) are accessible.
 
@@ -17,7 +17,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// FillColourFromCodecPrivate — exported wrapper that was 0%
+// FillColourFromCodecPrivate - exported wrapper that was 0%
 // ---------------------------------------------------------------------------
 
 func TestCoverFillColourFromCodecPrivate(t *testing.T) {
@@ -43,7 +43,7 @@ func TestCoverFillColourFromCodecPrivate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// OpenMeta / OpenMetaWithFS — both were 0% (file-based entry points)
+// OpenMeta / OpenMetaWithFS - both were 0% (file-based entry points)
 // ---------------------------------------------------------------------------
 
 func writeTempMKV(t *testing.T) string {
@@ -154,7 +154,7 @@ func (w *tbwCov) bytes() []byte {
 }
 
 // ---------------------------------------------------------------------------
-// skipAVCScalingList — was 0%
+// skipAVCScalingList - was 0%
 // Exercises via parseAVCSPS on a High-profile SPS with seq_scaling_matrix_present_flag=1.
 // ---------------------------------------------------------------------------
 
@@ -189,7 +189,7 @@ func buildHighSPSWithScalingMatrix() []byte {
 		b.se(0)  // entry 0: delta=0, next=8, inner if true
 		b.se(-8) // entry 1: delta=-8, next=0, inner if false
 		for j := 2; j < size; j++ {
-			// next==0 so outer if is false — no bits needed
+			// next==0 so outer if is false - no bits needed
 			_ = j
 		}
 	}
@@ -257,7 +257,7 @@ func TestCoverSkipAVCScalingListDirect(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// skipHEVCScalingListData — was 0%
+// skipHEVCScalingListData - was 0%
 // ---------------------------------------------------------------------------
 
 func TestCoverSkipHEVCScalingListDataDirect(t *testing.T) {
@@ -319,7 +319,7 @@ func TestCoverSkipHEVCScalingListDataError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// skipHEVCShortTermRPS — was 0%
+// skipHEVCShortTermRPS - was 0%
 // ---------------------------------------------------------------------------
 
 func TestCoverSkipHEVCShortTermRPSDirect(t *testing.T) {
@@ -394,7 +394,7 @@ func TestCoverSkipHEVCShortTermRPSNegOverflow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// uvlc — was 0%
+// uvlc - was 0%
 // ---------------------------------------------------------------------------
 
 func TestCoverUvlc(t *testing.T) {
@@ -695,7 +695,7 @@ func TestCoverReadStreamFullFields(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// interlacedName value 2 (progressive) — was at 75%
+// interlacedName value 2 (progressive) - was at 75%
 // ---------------------------------------------------------------------------
 
 func TestCoverInterlacedNameProgressive(t *testing.T) {
@@ -744,7 +744,7 @@ func TestCoverInterlacedNameInterlaced(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parseColour ColourBitsPerChannel — covers the uncovered IDColourBitsPerChannel branch
+// parseColour ColourBitsPerChannel - covers the uncovered IDColourBitsPerChannel branch
 // ---------------------------------------------------------------------------
 
 func TestCoverParseColourBitsPerChannel(t *testing.T) {
@@ -775,7 +775,7 @@ func TestCoverParseColourBitsPerChannel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parseAudioSettings OutputSampleRate — covers the uncovered branch
+// parseAudioSettings OutputSampleRate - covers the uncovered branch
 // ---------------------------------------------------------------------------
 
 func TestCoverParseAudioOutputSampleRate(t *testing.T) {
@@ -806,7 +806,7 @@ func TestCoverParseAudioOutputSampleRate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parseBlockAdditionMapping — covers the uncovered IDBlockAddIDExtraData branch
+// parseBlockAdditionMapping - covers the uncovered IDBlockAddIDExtraData branch
 // ---------------------------------------------------------------------------
 
 func TestCoverParseBlockAdditionMappingUnknown(t *testing.T) {
@@ -1168,7 +1168,7 @@ func TestCoverHEVCProfileNames(t *testing.T) {
 func TestCoverAVCPOCType1(t *testing.T) {
 	// Build a Baseline SPS with poc_type=1 (not 0) to hit the se()/loop in parseAVCSPS.
 	b := &tbwCov{}
-	b.u(66, 8) // profile_idc = Baseline (66) — NOT a high profile, no scaling matrix
+	b.u(66, 8) // profile_idc = Baseline (66) - NOT a high profile, no scaling matrix
 	b.u(0, 8)  // constraint flags
 	b.u(30, 8) // level_idc
 	b.ue(0)    // seq_parameter_set_id
@@ -1258,7 +1258,7 @@ func TestCoverAVCOverscanPresentFlag(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // skipHEVCProfileTierLevel with maxSub > 0 and sub-layer profile/level flags
-// (lines 626-644 were 50% — the sub-layer loop was never executed)
+// (lines 626-644 were 50% - the sub-layer loop was never executed)
 // ---------------------------------------------------------------------------
 
 func TestCoverSkipHEVCProfileTierLevelSubLayers(t *testing.T) {
@@ -1300,7 +1300,7 @@ func TestCoverSkipHEVCProfileTierLevelSubLayers(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // parseAV1ColorConfig: monochrome, sRGB, profile 1 (4:4:4), profile 2 non-12-bit
-// These were at 52.3% — most branch paths uncovered.
+// These were at 52.3% - most branch paths uncovered.
 // ---------------------------------------------------------------------------
 
 func TestCoverAV1ColorConfigMonochrome(t *testing.T) {
@@ -1391,7 +1391,7 @@ func TestCoverAV1ColorConfigProfile2NonTwelveBit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// interlacedName default return ("") — was missing at 75%
+// interlacedName default return ("") - was missing at 75%
 // ---------------------------------------------------------------------------
 
 func TestCoverInterlacedNameDefault(t *testing.T) {
@@ -1404,7 +1404,7 @@ func TestCoverInterlacedNameDefault(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// readColourDescription flag=0 path (was at 66.7% — the return nil,nil,nil was missing)
+// readColourDescription flag=0 path (was at 66.7% - the return nil,nil,nil was missing)
 // ---------------------------------------------------------------------------
 
 func TestCoverReadColourDescriptionFlagZero(t *testing.T) {

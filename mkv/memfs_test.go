@@ -85,7 +85,7 @@ func TestMemFS(t *testing.T) {
 func TestMemFSSeparatorAgnostic(t *testing.T) {
 	m := NewMemFS()
 	// Store the way a Windows filepath.Join would, read the way a URL-style
-	// consumer does — and vice versa.
+	// consumer does - and vice versa.
 	m.Put("hls\\init.mp4", []byte("INIT"))
 	if got := m.Get("hls/init.mp4"); string(got) != "INIT" {
 		t.Errorf("Get with '/' after Put with '\\\\' = %q, want INIT", got)

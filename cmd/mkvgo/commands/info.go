@@ -251,7 +251,7 @@ func CmdProbe(path string) {
 			fmt.Printf("        colour: space=%s transfer=%s primaries=%s range=%s\n",
 				t.ColorSpaceName(), t.ColorTransferName(), t.ColorPrimariesName(), t.ColorRangeName())
 		} else if t.ColourDetermined {
-			fmt.Printf("        colour: unspecified (determined — SDR)\n")
+			fmt.Printf("        colour: unspecified (determined - SDR)\n")
 		}
 		if hdr := t.HDR; hdr != nil {
 			fmt.Print("        hdr10:")

@@ -25,7 +25,7 @@ func hlsmutFT(isVideo bool, tr mkv.Track) *fragTrack {
 // TestHLSMutSegmentMsDefaultFallback proves hls.go:144 (segMs <= 0 -> default):
 // with SegmentMs 0 explicitly, the presentation must be cut at the default 6s
 // cadence, not at every keyframe (which is what happens if the zero value
-// slips through uncorrected — the boundary test `segMs >= 0` would leave segMs
+// slips through uncorrected - the boundary test `segMs >= 0` would leave segMs
 // at 0, and segmentBoundaries cuts at every keyframe once the target is 0).
 func TestHLSMutSegmentMsDefaultFallback(t *testing.T) {
 	// 3 keyframes at 0/1000/2000ms, 2400ms total: well under the 6s default,
@@ -138,7 +138,7 @@ func TestHLSMutMasterSubtitleName(t *testing.T) {
 // negations), hls.go:944 (totalBits arithmetic) and hls.go:949 (division):
 // BANDWIDTH must be the peak per-segment bitrate and AVERAGE-BANDWIDTH the
 // true total-bits-over-total-seconds average, which differs from the peak
-// here (1200 vs 1600) — any of those mutations produces a different number.
+// here (1200 vs 1600) - any of those mutations produces a different number.
 func TestHLSMutMasterBandwidth(t *testing.T) {
 	video := hlsmutFT(true, mkv.Track{ID: 1, Type: mkv.VideoTrack})
 	segs := []segInfo{
@@ -232,7 +232,7 @@ func TestHLSMutIFrameStreamInfZeroDuration(t *testing.T) {
 }
 
 // TestHLSMutIFrameStreamInfResolutionGuards proves hls.go:1032's three
-// conditions: t.Width != nil (col 14, negation — a nil Width must not be
+// conditions: t.Width != nil (col 14, negation - a nil Width must not be
 // dereferenced), *t.Width > 0 (col 52, boundary/negation) and *t.Height > 0
 // (col 69, boundary/negation). A nil or zero Width/Height must omit
 // RESOLUTION, never panic and never render "…=0…".

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// memfs.go — an in-memory FS implementation. Every operation the FS port
+// memfs.go - an in-memory FS implementation. Every operation the FS port
 // exposes works on byte slices held in a map, so any mkvgo operation can run
 // without touching a real filesystem: WebAssembly (no filesystem at all),
 // tests, or servers assembling outputs to ship elsewhere.
@@ -32,7 +32,7 @@ type memFile struct {
 // "hls\\init.mp4" on Windows and "hls/init.mp4" elsewhere, but both must hit
 // the same virtual file. The replacement is unconditional (not filepath.ToSlash,
 // which only converts the current OS's separator) so MemFS behaves identically
-// on every platform — its keys are URL-style resource paths, never real
+// on every platform - its keys are URL-style resource paths, never real
 // filenames containing a literal backslash. Matches Go's io/fs convention ("/").
 func memKey(p string) string { return strings.ReplaceAll(p, "\\", "/") }
 

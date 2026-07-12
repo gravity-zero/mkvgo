@@ -101,7 +101,7 @@ func TestParseMoofSamplesPropagatesTrafError(t *testing.T) {
 
 // TestParseTrafSamplesDefaultsFromTfhd kills the CONDITIONALS_NEGATION on the
 // tfhd default_sample_duration/default_sample_size flag checks (fragparse.go:
-// 192, 195): when the flags are set, the defaults they carry must be used —
+// 192, 195): when the flags are set, the defaults they carry must be used  -
 // not the (here, zero) trex fallback.
 func TestParseTrafSamplesDefaultsFromTfhd(t *testing.T) {
 	tfhd := fullBox("tfhd", 0, tfhdDefaultDuration|tfhdDefaultSize|tfhdDefaultFlags, func(w *bw) {

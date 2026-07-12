@@ -72,7 +72,7 @@ func TestBuildSampleTableLinear(t *testing.T) {
 		t.Fatalf("samples = %d, want %d", len(tr.samples), N)
 	}
 	if d := time.Since(start); d > 3*time.Second {
-		t.Errorf("buildSampleTable took %v for %d chunks×entries — quadratic regression", d, N)
+		t.Errorf("buildSampleTable took %v for %d chunks×entries - quadratic regression", d, N)
 	}
 }
 

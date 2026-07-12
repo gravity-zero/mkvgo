@@ -13,7 +13,7 @@ import (
 
 // Merge's metadata policy is first-wins: title, chapters, tags AND attachments
 // of the first input must survive into the output (attachments used to be
-// dropped entirely — MuxOptions had no field for them).
+// dropped entirely - MuxOptions had no field for them).
 func TestMerge_CarriesFirstInputMetadata(t *testing.T) {
 	dir := t.TempDir()
 

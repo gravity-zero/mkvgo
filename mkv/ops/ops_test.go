@@ -568,7 +568,7 @@ func TestSplit_DropsCodecDelayOnLaterSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The first segment starts at the original priming and keeps CodecDelay; a later
-	// segment begins on real audio, so it must drop it — else a decoder/remux trims
+	// segment begins on real audio, so it must drop it - else a decoder/remux trims
 	// one frame of real audio at the seam.
 	if d := audioCodecDelay(t, files[0]); d == 0 {
 		t.Error("first segment should keep CodecDelay")
@@ -2536,7 +2536,7 @@ func TestEditInPlace_SingleBytePadding(t *testing.T) {
 	f.Close()
 
 	ctx := context.Background()
-	// Shrink title slightly — remaining space should be filled with void
+	// Shrink title slightly - remaining space should be filled with void
 	if err := EditInPlace(ctx, path, func(c *mkv.Container) {
 		c.Info.Title = "AB"
 	}); err != nil {
@@ -2569,7 +2569,7 @@ func TestEditInPlace_ExactFit(t *testing.T) {
 	f.Close()
 
 	ctx := context.Background()
-	// No-op edit — same metadata, should be exact or near-exact fit
+	// No-op edit - same metadata, should be exact or near-exact fit
 	if err := EditInPlace(ctx, path, func(c *mkv.Container) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -3086,7 +3086,7 @@ func TestFindMetadataRegion_NoMetadata(t *testing.T) {
 	f, _ := os.Create(path)
 	// Write just an EBML header and Segment with known size 0
 	writer.WriteEBMLHeader(f)
-	// Write Segment element with size 0 — no children
+	// Write Segment element with size 0 - no children
 	var buf bytes.Buffer
 	writer.WriteMasterElement(&buf, mkv.IDSegment, nil)
 	f.Write(buf.Bytes())
@@ -4618,7 +4618,7 @@ func TestValidate_ContextCancelDuringBlocks(t *testing.T) {
 
 	_, err := Validate(ctx, src, mkv.Options{FS: fs})
 	if err == nil {
-		// Not necessarily an error — might complete before cancel takes effect
+		// Not necessarily an error - might complete before cancel takes effect
 		t.Log("validate completed before cancel")
 	}
 }

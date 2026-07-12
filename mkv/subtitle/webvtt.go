@@ -11,7 +11,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// webvtt.go — WebVTT serialization. A Cue is the timed-text unit; WriteWebVTT
+// webvtt.go - WebVTT serialization. A Cue is the timed-text unit; WriteWebVTT
 // emits a valid WebVTT file from cues, and the converters turn the package's
 // parsed SRT/ASS into cues. FileToWebVTT is the file-level entry point that
 // replaces an `ffmpeg -f webvtt` fork for external subtitle sidecars.
@@ -38,7 +38,7 @@ func FormatVTTTime(ms int64) string {
 
 // WriteWebVTT writes cues as a WebVTT file. Cues with empty text are skipped; the
 // rest are written in order with a "WEBVTT" header. Inline markup (<i>, <b>, …) is
-// kept verbatim — it is valid in both SRT and WebVTT.
+// kept verbatim - it is valid in both SRT and WebVTT.
 func WriteWebVTT(w io.Writer, cues []Cue) error {
 	bw := bufio.NewWriter(w)
 	if _, err := bw.WriteString("WEBVTT\n\n"); err != nil {

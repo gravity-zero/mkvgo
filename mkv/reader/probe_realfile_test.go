@@ -43,7 +43,7 @@ func readFixture(t *testing.T) *mkv.Container {
 }
 
 // TestProbeRealFileGolden reads the real ffmpeg-muxed fixture and asserts the
-// values mkvgo extracts — each one cross-checked against ffprobe 7.1
+// values mkvgo extracts - each one cross-checked against ffprobe 7.1
 // (see TestProbeFFprobeEquivalence for the live comparison). Hermetic: runs in
 // CI without ffmpeg/ffprobe.
 func TestProbeRealFileGolden(t *testing.T) {
@@ -53,7 +53,7 @@ func TestProbeRealFileGolden(t *testing.T) {
 	}
 	v, a0, a1, s := c.Tracks[0], c.Tracks[1], c.Tracks[2], c.Tracks[3]
 
-	// Video — ffprobe: hevc 320x240 color_space=bt2020nc color_range=tv Main 10
+	// Video - ffprobe: hevc 320x240 color_space=bt2020nc color_range=tv Main 10
 	// 10-bit, r_frame_rate=24000/1001. ffmpeg's mkv muxer wrote only
 	// MatrixCoefficients+Range in the container Colour; the SPS VUI carries CICP 2
 	// (unspecified) for transfer/primaries, so those stay nil (matching ffprobe,
@@ -158,12 +158,12 @@ func TestProbeFFprobeEquivalence(t *testing.T) {
 	for i, fs := range probe.Streams {
 		tr := c.Tracks[i]
 
-		// codec_name — compare via the documented mkvgo→ffprobe mapping.
+		// codec_name - compare via the documented mkvgo→ffprobe mapping.
 		if got := mkv.FFprobeCodecName(tr.Codec); got != fs.CodecName {
 			t.Errorf("stream %d codec: mkvgo=%q(→%q) ffprobe=%q", i, tr.Codec, got, fs.CodecName)
 		}
 
-		// language — ffprobe drops the tag for "und"; normalize both sides.
+		// language - ffprobe drops the tag for "und"; normalize both sides.
 		if normLang(tr.ResolvedLanguage()) != normLang(fs.Tags["language"]) {
 			t.Errorf("stream %d language: mkvgo=%q ffprobe=%q", i, tr.ResolvedLanguage(), fs.Tags["language"])
 		}

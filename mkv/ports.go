@@ -37,7 +37,7 @@ type FS struct {
 	Rename    func(oldpath, newpath string) error
 }
 
-// Default FS operations — fallback to os package.
+// Default FS operations - fallback to os package.
 
 func (fs *FS) DoOpen(path string) (ReadSeekCloser, error) {
 	if fs != nil && fs.Open != nil {

@@ -5,7 +5,7 @@ BIN = mkvgo
 .PHONY: build test vet fuzz bench clean release wasm wasm-smoke preflight ci-status
 
 # CGO_ENABLED=0: mkvgo is pure Go; keep the binaries static (and buildable
-# without a C toolchain — net/http would otherwise link the cgo resolver).
+# without a C toolchain - net/http would otherwise link the cgo resolver).
 build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/mkvgo/
 

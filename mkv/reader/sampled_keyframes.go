@@ -9,7 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// sampled_keyframes.go — a coarse keyframe index for a Cues-less Matroska. Some
+// sampled_keyframes.go - a coarse keyframe index for a Cues-less Matroska. Some
 // muxers ship files with no Cues seek index, so the head-only keyframe index is
 // empty and a caller would fall back to an external probe. Sampling recovers a
 // usable (coarse) index with a bounded number of seeks, never a block-by-block
@@ -17,8 +17,8 @@ import (
 //
 // Each sampled position is a GUARANTEED video keyframe: a Cluster start is NOT
 // assumed to be one (it is not, for muxers that don't align Clusters to
-// keyframes), so within each Cluster the block headers are read — payloads
-// skipped by element size — to find the first real video keyframe (SimpleBlock
+// keyframes), so within each Cluster the block headers are read - payloads
+// skipped by element size - to find the first real video keyframe (SimpleBlock
 // keyframe flag, or a BlockGroup with no ReferenceBlock) and emit its exact
 // presentation time. A Cluster with no such keyframe is skipped (bounded).
 
@@ -100,7 +100,7 @@ func (p *parser) nextKeyframeFrom(limit int64, videoTrack uint64, scale int64) (
 
 // clusterFirstKeyframeMs reads the Cluster at the current reader position (which
 // must sit at the Cluster ID, where resyncToCluster leaves it) and returns the
-// presentation time in ms of its first keyframe on the video track — the Cluster
+// presentation time in ms of its first keyframe on the video track - the Cluster
 // Timestamp plus that block's relative timecode. ok is false when the Cluster
 // carries no such keyframe or on a malformed read.
 func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale int64) (int64, bool) {
@@ -159,8 +159,8 @@ func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale in
 	return 0, false
 }
 
-// peekBlockHeader reads a (Simple)Block header — track number, relative timecode,
-// flags — then skips the remaining payload, leaving the reader at the next
+// peekBlockHeader reads a (Simple)Block header - track number, relative timecode,
+// flags - then skips the remaining payload, leaving the reader at the next
 // element. For a SimpleBlock the keyframe bit (0x80) is read; a Block inside a
 // BlockGroup carries no usable keyframe bit, so simple=false reports key=false
 // and the caller derives keyframe from the absence of a ReferenceBlock.
@@ -225,7 +225,7 @@ func (p *parser) blockGroupKeyframe(size int64) (relTC int16, track uint64, key,
 }
 
 // videoTrackID returns the TrackNumber of the first video track, or 0 when there
-// is none — used to keep the sampled keyframes to the video stream (audio frames
+// is none - used to keep the sampled keyframes to the video stream (audio frames
 // are all "keyframes" and would otherwise be emitted as seek points).
 func videoTrackID(c *mkv.Container) uint64 {
 	for i := range c.Tracks {

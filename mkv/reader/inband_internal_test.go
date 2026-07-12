@@ -285,7 +285,7 @@ func TestInBandColourErrorPaths(t *testing.T) {
 		t.Errorf("offsetIsSegmentElement with failing seek = (%v,%v), want (false,err)", ok, err)
 	}
 
-	// fillColourFromFirstSample: a track needs it but the rewind seek fails — must
+	// fillColourFromFirstSample: a track needs it but the rewind seek fails - must
 	// leave colour nil without panicking.
 	vid := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC()}
 	c := &mkv.Container{Tracks: []mkv.Track{vid}}
@@ -295,7 +295,7 @@ func TestInBandColourErrorPaths(t *testing.T) {
 	}
 
 	// fillColourFromFirstSample: rewind succeeds but the file is not a valid MKV,
-	// so NewBlockReader fails — same graceful no-op.
+	// so NewBlockReader fails - same graceful no-op.
 	c2 := &mkv.Container{Tracks: []mkv.Track{vid}}
 	fillColourFromFirstSample(context.Background(), bytes.NewReader([]byte{0, 0, 0, 0}), c2)
 	if c2.Tracks[0].ColorTransfer != nil {

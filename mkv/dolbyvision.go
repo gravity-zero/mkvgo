@@ -1,10 +1,10 @@
 package mkv
 
-// dolbyvision.go — the Dolby Vision configuration shared by the MP4 (dvcC/dvvC
+// dolbyvision.go - the Dolby Vision configuration shared by the MP4 (dvcC/dvvC
 // box) and Matroska (dvcC/dvvC BlockAddIDExtraData) readers. Both carry the same
 // DOVIDecoderConfigurationRecord, so a single decoder serves both and a probe can
 // report dovi_profile / bl_signal_compatibility_id without falling back to
-// ffprobe — the fields a player needs to pick a Dolby Vision rendering path.
+// ffprobe - the fields a player needs to pick a Dolby Vision rendering path.
 
 // DolbyVision is a decoded DOVIDecoderConfigurationRecord. Profile and
 // BLSignalCompatID are what a remux/playback decision keys on: profile selects the
@@ -22,7 +22,7 @@ type DolbyVision struct {
 	BLSignalCompatID uint8 `json:"bl_signal_compatibility_id"` // dv_bl_signal_compatibility_id
 }
 
-// ParseDolbyVisionConfig decodes a DOVIDecoderConfigurationRecord — the payload of
+// ParseDolbyVisionConfig decodes a DOVIDecoderConfigurationRecord - the payload of
 // an MP4 dvcC/dvvC box or a Matroska dvcC/dvvC BlockAddIDExtraData. The fields it
 // reads occupy the first five bytes:
 //
@@ -49,7 +49,7 @@ func ParseDolbyVisionConfig(b []byte) *DolbyVision {
 
 // EncodeDolbyVisionConfig builds a 24-byte DOVIDecoderConfigurationRecord from dv
 // (the inverse of ParseDolbyVisionConfig), so the configuration can be carried
-// through a remux — into an MP4 dvcC/dvvC box or a Matroska BlockAddIDExtraData.
+// through a remux - into an MP4 dvcC/dvvC box or a Matroska BlockAddIDExtraData.
 func EncodeDolbyVisionConfig(dv *DolbyVision) []byte {
 	b := make([]byte, 24)
 	b[0] = dv.VersionMajor

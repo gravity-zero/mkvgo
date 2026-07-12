@@ -29,14 +29,14 @@ type Container struct {
 	Cues        []CuePoint   `json:"cues,omitempty"`
 	DurationMs  int64        `json:"duration_ms"`
 
-	// SegmentStart is the absolute file offset of the Segment body — the origin
+	// SegmentStart is the absolute file offset of the Segment body - the origin
 	// CuePoint.ClusterPos values are relative to. Filled by the seekable readers
 	// (Read/ReadMeta); 0 is a valid value only for a file with no EBML header,
 	// so treat it together with Cues presence.
 	SegmentStart int64 `json:"-"`
 
 	// Keyframes holds the video track's keyframe presentation timestamps in
-	// milliseconds (ascending, de-duplicated) — the points an "-c copy" segmenter
+	// milliseconds (ascending, de-duplicated) - the points an "-c copy" segmenter
 	// must cut on. It is filled in the same pass as the rest of the metadata: from
 	// the MP4 sync-sample table, or the Matroska Cues seek index. nil when the
 	// source carries no usable keyframe index.
@@ -45,9 +45,9 @@ type Container struct {
 	// Fragmented is true for a fragmented MP4 (an mvex box in the moov), whose
 	// per-sample metadata lives in the moof fragments rather than the moov. The
 	// probe still recovers the frame rate from the fragment defaults (mvex>trex)
-	// and the keyframe index from a random-access index — the mfra/tfra at the
+	// and the keyframe index from a random-access index - the mfra/tfra at the
 	// file tail, or the sidx Segment Index at the head that streaming fMP4 carries
-	// — both bounded and head-only, so a fragmented file usually still reports
+	// - both bounded and head-only, so a fragmented file usually still reports
 	// FrameRate and Keyframes. They stay unset only when no such index is present;
 	// a caller should fall back to a full demux when a Fragmented file leaves them
 	// empty. Always false for Matroska.
@@ -79,9 +79,9 @@ type Track struct {
 	UID   uint64    `json:"uid,omitempty"`
 	Type  TrackType `json:"type"`
 	Codec string    `json:"codec"`
-	// Language is the legacy ISO 639-2 code (0x22B59C); "" when absent — see
+	// Language is the legacy ISO 639-2 code (0x22B59C); "" when absent - see
 	// LanguagePresent. NOTE: at write time an empty Language writes no element,
-	// and the Matroska spec default is "eng" — other tools will report such a
+	// and the Matroska spec default is "eng" - other tools will report such a
 	// track as English. Write "und" explicitly for "undetermined".
 	Language string `json:"language"`
 	Name     string `json:"name"`
@@ -104,9 +104,9 @@ type Track struct {
 	Height           *uint32  `json:"height,omitempty"`
 	Channels         *uint8   `json:"channels,omitempty"`
 	SampleRate       *float64 `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
-	OutputSampleRate *float64 `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) — see EffectiveSampleRate
+	OutputSampleRate *float64 `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
 	BitDepth         *uint8   `json:"bit_depth,omitempty"`          // audio bits/sample (0x6264); video uses VideoBitDepth
-	// CodecDelay is the codec's built-in delay in NANOSECONDS (Matroska 0x56AA) —
+	// CodecDelay is the codec's built-in delay in NANOSECONDS (Matroska 0x56AA)  -
 	// the gapless/encoder priming a decoder must discard from the start. It is the
 	// portable home for an MP4 audio track's edit-list priming (AAC/AC-3), so the
 	// MP4↔MKV round-trip preserves it instead of silently shifting the audio. 0 when
@@ -125,7 +125,7 @@ type Track struct {
 	// Video metadata (added v0.4.0). All nil when the source omits the element.
 	// As of v0.6.0 the colour fields and VideoBitDepth are also filled from the
 	// codec bitstream (H.264/HEVC SPS VUI, AV1 color_config, VP9 vpcC) when the
-	// container Colour element is absent — the container value still wins per field.
+	// container Colour element is absent - the container value still wins per field.
 	FrameRate *float64 `json:"frame_rate,omitempty"` // from DefaultDuration (0x23E383): 1e9/ns
 	// DefaultDurationNs is the raw DefaultDuration (0x23E383) in nanoseconds, kept
 	// for every track type: video derives FrameRate from it, and audio needs it to
@@ -146,13 +146,13 @@ type Track struct {
 	DisplayHeight *uint32 `json:"display_height,omitempty"`
 	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings
 	// ffprobe reports with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
-	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) — ffprobe color_space
+	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) - ffprobe color_space
 	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
 	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
 	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
-	// ColourDetermined reports that the colour was actually read from a source — the
+	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour
-	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) — even when it resolves
+	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) - even when it resolves
 	// to "unspecified" (all Color* nil). It distinguishes a confirmed-SDR/unspecified
 	// stream (true, Color* nil) from one whose colour could not be read at all
 	// (false): a caller should treat the latter, not the former, as "fall back".
@@ -167,8 +167,8 @@ type Track struct {
 	// StereoMode is the 3D stereo arrangement (Matroska StereoMode, or the MP4 st3d
 	// box mapped to the same values); nil for ordinary 2D video. See StereoModeName.
 	StereoMode *uint16 `json:"stereo_mode,omitempty"`
-	// Projection names a 360/spherical video projection — "equirectangular",
-	// "cubemap", "mesh" or "rectangular" — from the Matroska Projection element or
+	// Projection names a 360/spherical video projection - "equirectangular",
+	// "cubemap", "mesh" or "rectangular" - from the Matroska Projection element or
 	// the MP4 sv3d box; "" for ordinary flat video.
 	Projection string `json:"projection,omitempty"`
 
@@ -214,7 +214,7 @@ type MasteringDisplay struct {
 
 // ResolvedLanguage returns the track's effective language per the Matroska spec:
 // LanguageBCP47 (0x22B59D) takes precedence over the legacy Language (0x22B59C)
-// element when both are present. It returns "" when neither was in the file —
+// element when both are present. It returns "" when neither was in the file  -
 // check LanguagePresent to tell that apart from an explicit empty value.
 //
 // The two elements use different vocabularies: BCP47 is e.g. "fr" / "pt-BR",
@@ -227,7 +227,7 @@ func (t *Track) ResolvedLanguage() string {
 	return t.Language
 }
 
-// EffectiveSampleRate returns the audio sample rate a decoder produces — the
+// EffectiveSampleRate returns the audio sample rate a decoder produces - the
 // value ffprobe reports as sample_rate. For SBR streams (HE-AAC / HE-AACv2) the
 // coded core runs at half rate and the decoder doubles it, so OutputSampleRate
 // (the Matroska OutputSamplingFrequency, or the AAC AudioSpecificConfig SBR
@@ -245,7 +245,7 @@ func (t *Track) EffectiveSampleRate() float64 {
 
 // AvgFrameRate returns the average frame rate (ffprobe avg_frame_rate): the total
 // frame count over the track's duration. It is non-zero only when both FrameCount
-// and DurationMs are known — MP4 video, head-only — and differs from FrameRate
+// and DurationMs are known - MP4 video, head-only - and differs from FrameRate
 // (the nominal rate) for variable-frame-rate content. It returns 0 for Matroska,
 // whose header carries no frame count, so a caller falls back to FrameRate.
 func (t *Track) AvgFrameRate() float64 {
@@ -290,7 +290,7 @@ func (t *Track) DisplayAspectRatio() string {
 //
 // On pathological near-square ratios this can differ from ffprobe, which
 // re-derives the SAR from the dimension-reduced DAR (so the same VUI SAR prints
-// differently at different resolutions). mkvgo reports the exact ratio instead —
+// differently at different resolutions). mkvgo reports the exact ratio instead  -
 // display-only and imperceptible. See CHANGELOG 0.9.0 Notes.
 func (t *Track) SampleAspectRatio() string {
 	if t.Width == nil || t.Height == nil || *t.Width == 0 || *t.Height == 0 {
@@ -322,8 +322,8 @@ func gcd(a, b uint64) uint64 {
 	return a
 }
 
-// avReduce reduces num/den to lowest terms, then — if either part still exceeds
-// max — to the best rational approximation whose numerator and denominator are
+// avReduce reduces num/den to lowest terms, then - if either part still exceeds
+// max - to the best rational approximation whose numerator and denominator are
 // both ≤ max. It is a port of ffmpeg's av_reduce (non-negative inputs), so the
 // SAR/DAR strings match ffprobe, including how it tames absurd near-square ratios.
 func avReduce(num, den, max uint64) (uint64, uint64) {
@@ -485,7 +485,7 @@ type SplitOptions struct {
 	ByChapters bool
 	// EveryMs splits into keyframe-aligned segments of roughly this duration:
 	// each boundary is the first video keyframe at/after the previous boundary
-	// plus EveryMs (from the Cues index — a file without one must be reindexed
+	// plus EveryMs (from the Cues index - a file without one must be reindexed
 	// first). Mutually exclusive with Ranges/ByChapters.
 	EveryMs int64
 	// Pattern names the output parts (default "part_%03d.mkv"; %d gets the

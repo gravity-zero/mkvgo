@@ -26,14 +26,14 @@ const (
 	// block headers without dragging a skipped payload back in. The chunk then
 	// doubles on every sequential fill up to bufSize, so a walk over payloads
 	// too small to seek past (frame-interleaved video is a few KiB per block)
-	// converges to plain bulk sequential reads — never one read per block,
+	// converges to plain bulk sequential reads - never one read per block,
 	// which is what a network filesystem punishes.
 	minChunk = 16 << 10
 
 	// seekSkipMin is the smallest beyond-window skip worth a real seek. Every
 	// source read costs a fixed round trip on remote-ish filesystems (9p, SMB,
 	// HTTP) on top of the bytes; seeking over a payload only pays when the
-	// bytes saved outweigh the extra round trip the next small read costs —
+	// bytes saved outweigh the extra round trip the next small read costs  -
 	// measured around tens of KiB there, immaterial on local disks. Below the
 	// threshold reading forward through the growing window is cheaper, and the
 	// walk stays a bulk sequential read.
@@ -45,7 +45,7 @@ const (
 var errFilteredBlock = errors.New("block filtered")
 
 // ErrClusterLimit is returned by Next when the walk reaches a cluster whose
-// timestamp exceeds the StopBeforeClusterMs limit — before delivering any of
+// timestamp exceeds the StopBeforeClusterMs limit - before delivering any of
 // that cluster's blocks. The walk can continue on the same reader after
 // raising the limit, or be resumed later by a new reader at ResumeOffset.
 var ErrClusterLimit = errors.New("cluster beyond the requested timecode limit")
@@ -53,7 +53,7 @@ var ErrClusterLimit = errors.New("cluster beyond the requested timecode limit")
 // countingReader is a forward-only buffered reader with an adaptive window.
 // It tracks the logical position by counting consumed bytes; the invariant is
 // src's file offset == pos + (w - r), i.e. the source sits at the end of the
-// window. Skips drop window bytes for free and Seek past anything beyond —
+// window. Skips drop window bytes for free and Seek past anything beyond  -
 // bytes outside kept blocks are never read. The read-ahead starts small after
 // a jump and doubles on every sequential fill (up to bufSize), so the reader
 // behaves like a bulk sequential reader on dense data and like a sparse
@@ -122,7 +122,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 
 // discard advances the reader by exactly n bytes without delivering them.
 // The window's bytes are dropped for free. A remainder past the window is
-// seeked over — never read — when it is large enough to beat the fixed
+// seeked over - never read - when it is large enough to beat the fixed
 // round-trip cost of the next read (seekSkipMin); smaller remainders are read
 // forward through the growing window, keeping the walk a bulk sequential
 // read. A skip beyond the source's end errors like a truncated read would.
@@ -229,8 +229,8 @@ func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) 
 }
 
 // NewBlockReaderAt is NewBlockReader starting mid-file: r is positioned at
-// offset — the absolute file offset of a Cluster element (e.g. a CuePoint's
-// Container.SegmentStart + ClusterPos) — and blocks are read from that cluster
+// offset - the absolute file offset of a Cluster element (e.g. a CuePoint's
+// Container.SegmentStart + ClusterPos) - and blocks are read from that cluster
 // on. The caller supplies the TimecodeScale (from a prior metadata read); the
 // EBML/Segment headers are not re-parsed. The segment end is unknown, so
 // reading stops at EOF or at a non-cluster top-level element.
@@ -249,7 +249,7 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 }
 
 // StopBeforeClusterMs bounds the walk: Next returns ErrClusterLimit instead
-// of entering a cluster whose timestamp exceeds ms — even when a track filter
+// of entering a cluster whose timestamp exceeds ms - even when a track filter
 // would otherwise skim silently to EOF hunting for a kept block. Clusters are
 // stored in timestamp order, so everything up to ms has been delivered when
 // the limit fires. The limit can be raised afterwards to continue on the same
@@ -284,7 +284,7 @@ func (br *BlockReader) ClusterOffset() int64 {
 // payloads are never delivered and, when they are large enough to seek over,
 // never read: the walk hops from header to header. When the payloads are
 // smaller than the adaptive read-ahead (frame-interleaved video is a few KiB
-// per block), the walk degrades gracefully to bulk sequential reads — the
+// per block), the walk degrades gracefully to bulk sequential reads - the
 // same I/O as a plain full pass, never worse.
 func (br *BlockReader) KeepTracks(tracks ...uint64) {
 	br.keep = make(map[uint64]bool, len(tracks))

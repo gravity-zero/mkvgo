@@ -41,7 +41,7 @@ check(probe.tracks[0].codec_long_name?.length > 0, `derived codec_long_name (${p
     `derived probe fields (sar=${v?.sample_aspect_ratio} dar=${v?.display_aspect_ratio} hdr=${v?.hdr_format ?? 'n/a'})`)
 }
 
-// --- probe (Blob) — the ranged-read path used for large browser files ---
+// --- probe (Blob) - the ranged-read path used for large browser files ---
 const probeBlob = await MkvGo.probe(new Blob([mkvBytes]))
 check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.length,
   'probe(Blob) matches probe(Uint8Array)')
@@ -180,7 +180,7 @@ const direct = await abr.resource('v2/seg00001.m4s')
 check(Buffer.compare(served.data, direct.data) === 0 && served.contentType.length > 0,
   'SW serves the ABR resource the router resolved (bytes + Content-Type)')
 // Deterministic content ETag: the resource's sha256 matches its bytes and is
-// stable across calls — a Service Worker/server sets ETag from it directly.
+// stable across calls - a Service Worker/server sets ETag from it directly.
 const crypto = await import('node:crypto')
 const want = crypto.createHash('sha256').update(served.data).digest('hex')
 check(served.sha256 === want && served.sha256 === direct.sha256,

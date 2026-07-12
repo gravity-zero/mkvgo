@@ -74,7 +74,7 @@ func editStbl() []memBox {
 }
 
 // TestBuildSampleTableEditShift checks the edit-list shift is folded into the
-// composition times — so both the remux and the keyframe index see it — and that a
+// composition times - so both the remux and the keyframe index see it - and that a
 // presentation time before the edit start is clamped to 0.
 func TestBuildSampleTableEditShift(t *testing.T) {
 	// media_time 83 ms trimmed: cts 83/1083/2083 → 0/1000/2000.

@@ -25,7 +25,7 @@ func buildBlockReaderInput(clusterPayload []byte) *bytes.Reader {
 
 func TestBlockNegativeDataSize(t *testing.T) {
 	// SimpleBlock with trackNum=1, timecode=0, flags=0x80, but element size
-	// is too small to hold even the header — resulting in negative dataSize.
+	// is too small to hold even the header - resulting in negative dataSize.
 	var cluster bytes.Buffer
 	// timestamp = 0
 	ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, 1)
@@ -246,7 +246,7 @@ func TestFixedLacingIndivisible(t *testing.T) {
 }
 
 // TestZeroDataBlockAccepted covers the `dataSize < 0` bound: a block with a valid
-// header but no frame data (dataSize == 0) must parse, not be rejected — kills the
+// header but no frame data (dataSize == 0) must parse, not be rejected - kills the
 // `<= 0` mutant.
 func TestZeroDataBlockAccepted(t *testing.T) {
 	var cluster bytes.Buffer

@@ -1,5 +1,5 @@
 /**
- * vue.ts — copyable Vue 3 composables over the mkvgo wasm module, mirroring
+ * vue.ts - copyable Vue 3 composables over the mkvgo wasm module, mirroring
  * web/react.ts. Zero dependencies beyond vue and ./mkvgo. See docs/wasm.md.
  */
 import { onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'

@@ -9,12 +9,12 @@ import (
 
 // moov_mut_test.go kills mutation-testing survivors in moov.go: the edit-list
 // arithmetic, the udta emission guard, and the audio-track media-timescale
-// scaling — checked by inspecting the built boxes' actual bytes/fields.
+// scaling - checked by inspecting the built boxes' actual bytes/fields.
 
 // TestBuildMoovNoUdtaWhenEmpty kills the CONDITIONALS_BOUNDARY on
 // `len(udtaKids) > 0` (moov.go:79): with no title/tags/cover/chapters, no udta
 // box must be emitted at all (an empty udta box is a real, observable
-// difference — unlike a for-loop over an empty slice, `container("udta")`
+// difference - unlike a for-loop over an empty slice, `container("udta")`
 // still produces a real box).
 func TestBuildMoovNoUdtaWhenEmpty(t *testing.T) {
 	tr := makeOutTrackForMoov(1, 100)

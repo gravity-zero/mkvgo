@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// chapters_ogm.go — the OGM "simple chapter" text format, the lingua franca
+// chapters_ogm.go - the OGM "simple chapter" text format, the lingua franca
 // mkvmerge (--chapters) and ffmpeg understand:
 //
 //	CHAPTER01=00:00:00.000
@@ -77,7 +77,7 @@ func ParseOGMChapters(r io.Reader) ([]Chapter, error) {
 		chapters[i] = Chapter{ID: uint64(i + 1), Title: names[n], StartMs: starts[n]}
 		if i > 0 {
 			if starts[n] < chapters[i-1].StartMs {
-				return nil, fmt.Errorf("CHAPTER%02d starts at %dms, before CHAPTER%02d — chapter times must not decrease", n, starts[n], nums[i-1])
+				return nil, fmt.Errorf("CHAPTER%02d starts at %dms, before CHAPTER%02d - chapter times must not decrease", n, starts[n], nums[i-1])
 			}
 			chapters[i-1].EndMs = starts[n]
 		}

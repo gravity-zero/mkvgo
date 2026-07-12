@@ -9,7 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// A full remux over the in-memory FS — no disk access at all. This is the
+// A full remux over the in-memory FS - no disk access at all. This is the
 // exact path the WebAssembly build uses (browsers have no filesystem).
 func TestRemuxToMP4OverMemFS(t *testing.T) {
 	src, err := os.ReadFile("../internal/testdata/sample.mkv")

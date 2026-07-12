@@ -8,10 +8,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// codec.go — maps a Matroska track's codec to an ISO-BMFF sample entry plus its
+// codec.go - maps a Matroska track's codec to an ISO-BMFF sample entry plus its
 // codec configuration box. mkvgo only remuxes (never transcodes), so a codec is
 // supported here only when its MP4 configuration can be produced from the data
-// already present in the Matroska track — almost always the CodecPrivate, which
+// already present in the Matroska track - almost always the CodecPrivate, which
 // for the modern codecs IS the MP4 config record verbatim.
 
 // codecSpec describes how one codec is carried in MP4.
@@ -64,7 +64,7 @@ var codecTable = map[string]codecSpec{
 	// raw codec ID.
 	"A_MPEG/L3": {handler: "soun", video: false, sampleEntry: mp3Entry},
 	// SRT (S_TEXT/UTF8) becomes tx3g timed text. This entry is also the carriage
-	// used by default for WebVTT and for flattened ASS/SSA — tx3g is the only
+	// used by default for WebVTT and for flattened ASS/SSA - tx3g is the only
 	// MP4 subtitle form universally read by players (ffmpeg included).
 	"srt": {handler: "text", text: true, sampleEntry: srtEntry, cueSample: encodeCue, emptySample: emptyCue},
 }
@@ -78,7 +78,7 @@ var wvttSpec = codecSpec{handler: "text", text: true, sampleEntry: wvttEntry,
 
 // subtitleCarriage returns how a Matroska subtitle codec is carried into MP4.
 //
-//   - SRT and WebVTT are carried as tx3g by default — the only MP4 subtitle form
+//   - SRT and WebVTT are carried as tx3g by default - the only MP4 subtitle form
 //     read universally (ffmpeg included). WebVTT uses native lossless wvtt instead
 //     when nativeWebVTT is set (Apple/CMAF; ffmpeg cannot read it).
 //   - ASS/SSA have no plain-text-safe default and are dropped unless flatten is
@@ -108,7 +108,7 @@ func subtitleCarriage(codec string, flatten, nativeWebVTT bool) (codecSpec, bool
 }
 
 // canonicalSubCodec folds the WebM-era WebVTT codec IDs (D_WEBVTT/SUBTITLES,
-// /CAPTIONS, /DESCRIPTIONS, /METADATA — written by some muxers, including ffmpeg)
+// /CAPTIONS, /DESCRIPTIONS, /METADATA - written by some muxers, including ffmpeg)
 // into the canonical "webvtt" short name, so they are carried like S_TEXT/WEBVTT
 // rather than dropped.
 func canonicalSubCodec(codec string) string {
@@ -139,7 +139,7 @@ func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []b
 		}
 		et := entryType
 		// A non-cross-compatible Dolby Vision stream (bl_signal_compatibility_id 0,
-		// e.g. profile 5/7) needs the Dolby sample entry type — its base layer is not
+		// e.g. profile 5/7) needs the Dolby sample entry type - its base layer is not
 		// a standard HEVC/AVC/AV1 stream, so a plain hvc1/avc1/av01 tag would mislead
 		// a non-DV decoder. Cross-compatible profiles (profile 8) keep the plain tag.
 		if t.DolbyVision != nil && t.DolbyVision.BLSignalCompatID == 0 {
@@ -154,7 +154,7 @@ func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []b
 // from the track's CodecPrivate when it already holds one (some muxers store
 // it), and is otherwise derived from the first keyframe's uncompressed header
 // (profile, bit depth, chroma subsampling, colour range) plus the track's
-// colour code points — the way ffmpeg builds it.
+// colour code points - the way ffmpeg builds it.
 func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	record := vpcCRecord(t.CodecPrivate)
 	if record == nil {
@@ -221,7 +221,7 @@ func vp9RecordFromSampleEntry(entry []byte) []byte {
 }
 
 // vpcCRecord returns the VPCodecConfigurationRecord fields when the Matroska
-// CodecPrivate already holds one (with or without the 4-byte FullBox prefix —
+// CodecPrivate already holds one (with or without the 4-byte FullBox prefix  -
 // both forms exist in the wild), nil otherwise.
 func vpcCRecord(cp []byte) []byte {
 	switch {
@@ -343,7 +343,7 @@ func paspBox(t *mkv.Track) []byte {
 	num := uint64(*t.DisplayWidth) * uint64(*t.Height)
 	den := uint64(*t.DisplayHeight) * uint64(*t.Width)
 	if num == 0 || den == 0 || num == den {
-		return nil // square pixels — no pasp needed
+		return nil // square pixels - no pasp needed
 	}
 	g := gcdU64(num, den)
 	return boxf("pasp", func(w *bw) {

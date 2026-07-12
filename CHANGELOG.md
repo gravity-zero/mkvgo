@@ -608,7 +608,7 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
-- **Virtual Edit Layer** — serve "VF only" / "VO + English subs" / "clean"
+- **Virtual Edit Layer** - serve "VF only" / "VO + English subs" / "clean"
   versions from one file, no copy (`--keep-tracks` / `--keep-lang`).
 - A `reindex` output now passes its own `validate` on time-based repacks (the
   Avatar class of files).
@@ -616,13 +616,13 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Added
 
 - **Virtual Edit Layer (`Options.KeepTracks`).** Serve many virtual versions of
-  one source — "VF only", "VO + English subs", "clean" (drop a logo/forced
-  track), a chosen camera angle — from a single file with no copy and no re-mux:
+  one source - "VF only", "VO + English subs", "clean" (drop a logo/forced
+  track), a chosen camera angle - from a single file with no copy and no re-mux:
   `KeepTracks` restricts the presentation to a subset of Matroska track IDs, so
   `PlanHLS`/`RemuxToHLS`/`RemuxToABR` package only those renditions (the on-demand
   plan applies the subset byte-identically to the full pass). Wired through the
-  CLI — by ID (`--keep-tracks 1,2`) or by language (`--keep-lang fre`, CLI sugar
-  that keeps the video plus every track matching the codes) — and WASM
+  CLI - by ID (`--keep-tracks 1,2`) or by language (`--keep-lang fre`, CLI sugar
+  that keeps the video plus every track matching the codes) - and WASM
   (`{ keepTracks: [...] }`).
 
 ### Fixed
@@ -638,8 +638,8 @@ All notable changes to mkvgo are documented here. The format is based on
   a full reindex (copy), which always writes a head-discoverable index.
 - **A reindexed file no longer fails its own `validate`.** `reindex` emitted a
   fallback cue on the first (often audio) block of any cluster that held no video
-  keyframe — common in time-based cluster splits (~38% of clusters on some
-  repacks) — while `validate` flags a cue on a non-video track as a blocking
+  keyframe - common in time-based cluster splits (~38% of clusters on some
+  repacks) - while `validate` flags a cue on a non-video track as a blocking
   error ("seeking lands on audio"). The two contradicted, so such a rebuild could
   never pass validation. reindex now cues only real video keyframes for a file
   with video (a Cues index needs no per-cluster entry); the throttled fallback
@@ -649,13 +649,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 **Highlights**
 
-- **Multi-quality ABR** — on demand (`PlanABR`), in the browser (WASM `openABR`),
+- **Multi-quality ABR** - on demand (`PlanABR`), in the browser (WASM `openABR`),
   with per-variant trick-play and a combined DASH manifest for aligned variants.
-- **Fragmented-MP4 / CMAF input** — a pre-encoded/streaming fMP4 ladder is read
+- **Fragmented-MP4 / CMAF input** - a pre-encoded/streaming fMP4 ladder is read
   like a progressive file.
-- **In-browser HLS origin (Service Worker)** — stream a local file far larger
+- **In-browser HLS origin (Service Worker)** - stream a local file far larger
   than memory in a plain `<video>`/hls.js, no server, no upload.
-- **Laced-audio timing fixes** — E-AC-3/AC-3 rips no longer decode with broken,
+- **Laced-audio timing fixes** - E-AC-3/AC-3 rips no longer decode with broken,
   non-monotonic audio after a remux.
 
 ### Fixed
@@ -702,12 +702,12 @@ All notable changes to mkvgo are documented here. The format is based on
   misaligned variants keep their own per-variant manifests.
 - **In-browser HLS origin (Service Worker).** A small fetch router turns
   `openHLS`/`openABR` into an origin, so a plain `<video>`/hls.js streams a
-  local file — even one far larger than memory — with no server and no upload
+  local file - even one far larger than memory - with no server and no upload
   (`web/example/hls-sw.html`). Each on-demand resource now carries a
   deterministic content `sha256`, a ready-made `ETag` for HTTP caching / CDN
   dedup.
 - **Fragmented-MP4 / CMAF input.** A fragmented source (streaming fMP4, DASH/HLS
-  CMAF — the shape most pre-encoded ladders take) is now read by walking its
+  CMAF - the shape most pre-encoded ladders take) is now read by walking its
   moof/traf/trun fragments into a full sample table, so `from-mp4`, `to-hls`,
   `to-abr` and the plans treat it like a progressive file (previously rejected).
 - `Track.DefaultDurationNs`: the raw DefaultDuration in nanoseconds, kept for
@@ -724,10 +724,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
-- **Windowed subtitle segments are served from an incremental cue scan — the
+- **Windowed subtitle segments are served from an incremental cue scan - the
   first request is sub-second, like a video segment.** `HLSPlan` used to
   produce a subtitle rendition's cues in one whole-file pass on the first
-  request (tens of seconds on a multi-GB source — the delay behind the
+  request (tens of seconds on a multi-GB source - the delay behind the
   first-hit 404s on slow storage). The pass is now a per-track cursor:
   serving `subN_%05d.vtt` scans the source only up to that segment's end
   (plus the relative-timecode margin blocks can be stamped within, and any
@@ -737,20 +737,20 @@ All notable changes to mkvgo are documented here. The format is based on
   requests in any order, cancellations mid-scan and the whole-track
   `subN.vtt` stay byte-identical to the full pass. Built on two new
   `reader.BlockReader` primitives: `StopBeforeClusterMs` (bound a walk by
-  cluster timestamp — it also stops a track-filtered walk from skimming to
+  cluster timestamp - it also stops a track-filtered walk from skimming to
   EOF hunting a sparse track's next block) and `ResumeOffset` (resume a
   bounded walk exactly where it stopped).
 - **A cold seek into the middle of the presentation costs O(window) too.**
   The incremental cue scan alone still paid O(position) on the first request
   after a far jump (it extended the prefix from the track start). A far
   windowed request now seeks through the segment index to a bounded island:
-  scan from the cluster covering the window start minus a backward margin —
+  scan from the cluster covering the window start minus a backward margin  - 
   the relative-timecode spread plus the longest cue the fast path accounts
-  for (60 s) — forward to the window end, and slide the island on subsequent
+  for (60 s) - forward to the window end, and slide the island on subsequent
   requests; a later far jump re-seeks a fresh island instead of dragging the
   old one across the gap. The fast path applies only when the subtitle
   blocks observed (a one-stride track-head probe, plus every scan) carry
-  explicit durations within the margin — real-world subtitle muxing; tracks
+  explicit durations within the margin - real-world subtitle muxing; tracks
   with duration-less or over-long cues fall back to the always-exact prefix
   scan. Windowed outputs stay byte-identical to the full pass on both paths.
 
@@ -762,13 +762,13 @@ All notable changes to mkvgo are documented here. The format is based on
   the window in which a client disconnect used to poison the cue cache, see
   below). The block reader gained a track filter
   (`reader.BlockReader.KeepTracks`) built on an adaptive read window: a skip
-  past the window is seeked over — never read — when it is large enough to
+  past the window is seeked over - never read - when it is large enough to
   beat the fixed per-read round trip remote filesystems charge (~64 KiB);
   smaller skips read forward through a window that doubles on sequential
   fills, so the walk becomes one bulk chunked read, never one small read per
   block. In practice: sources with large frames (remuxes) load cues reading a
   few percent of the file; sources with small interleaved frames (typical
-  1080p/4K encodes, ~7-40 KiB per block) are bounded by one sequential pass —
+  1080p/4K encodes, ~7-40 KiB per block) are bounded by one sequential pass  - 
   now in large chunks, where a fixed small buffer degraded to per-block round
   trips and ran slower than a plain full read on 9p/SMB mounts. Large skips
   of non-block elements (Cues, Attachments) also seek instead of reading, and
@@ -780,7 +780,7 @@ All notable changes to mkvgo are documented here. The format is based on
   now treats `-` as stdout, like the other commands.
 - **A cancelled request poisoned an on-demand subtitle track for the plan's
   lifetime.** `HLSPlan`'s lazy subtitle-cue pass ran under the requesting
-  client's context and cached its result through a `sync.Once` — if the client
+  client's context and cached its result through a `sync.Once` - if the client
   disconnected mid-scan (the pass reads the whole source, seconds on a large
   file), `context.Canceled` was cached and every later request on that track
   failed instantly, which a server maps to a deterministic 404. Context
@@ -797,7 +797,7 @@ All notable changes to mkvgo are documented here. The format is based on
   lost the source's nominal frame rate; it now round-trips via
   `Track.FrameRate`. Surfaced by the new `validate` streaming-readiness check.
 - **The writer cued audio in mixed clusters.** `WriteClusterWithCues` keyed
-  the Cues on the cluster's first keyframe-flagged block — and every audio
+  the Cues on the cluster's first keyframe-flagged block - and every audio
   block carries that flag, so files written by mux/merge/edit carried cue
   times naming an audio block instead of the video keyframe (the same bug
   class as the 0.12.0 reindex fix, here on the write side). Cues now key on
@@ -813,21 +813,21 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Added
 
 - **DASH output and demuxed CMAF renditions.** The packaging is CMAF proper:
-  one demuxed rendition per track — the video (`playlist.m3u8`, `init.mp4`,
+  one demuxed rendition per track - the video (`playlist.m3u8`, `init.mp4`,
   `seg00001.m4s` …) and each audio track (`audio1.m3u8`, `init_a1.mp4`,
-  `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group) — served through two
+  `seg_a1_00001.m4s` …, an `EXT-X-MEDIA` AUDIO group) - served through two
   manifests over the same segments: HLS (`master.m3u8`) and **DASH**
   (`manifest.mpd`, static VOD, one AdaptationSet per rendition with an exact
   `SegmentTimeline`). Multi-audio sources (VF/VO) get native language
-  selection in hls.js/Safari/dash.js, and DASH players — which reject muxed
-  representations — are first-class. Movie metadata (title, tags, cover art)
+  selection in hls.js/Safari/dash.js, and DASH players - which reject muxed
+  representations - are first-class. Movie metadata (title, tags, cover art)
   rides on the video init; a track that ends early keeps its rendition
   aligned with empty fragments; secondary video tracks are dropped with a
   reason. Both serving modes (`to-hls` and `hls-segment`/`PlanHLS`) emit the
   layout byte-identically (regression-tested per rendition, ffmpeg-verified
   for both manifests).
 - **Fragmented-MP4 / CMAF HLS output** (`mp4.RemuxToHLS`, CLI `to-hls`). Remuxes
-  an MKV/WebM into a complete HLS presentation — `master.m3u8` (multivariant
+  an MKV/WebM into a complete HLS presentation - `master.m3u8` (multivariant
   playlist with `BANDWIDTH`/`RESOLUTION` and RFC 6381 `CODECS`), the muxed
   audio+video media playlist, `init.mp4` (ftyp + moov with `mvex`/`trex` and
   empty sample tables) and `styp`/`moof`/`mdat` media segments. Text subtitle
@@ -838,26 +838,26 @@ All notable changes to mkvgo are documented here. The format is based on
   on video keyframes at roughly `Options.SegmentMs` (default 6 s) and are
   independently decodable (random access); audio gapless priming (CodecDelay)
   is re-signalled as an edit list in the init segment, like the progressive
-  remux. Memory is bounded — per-sample metadata in RAM, sample bytes streamed
+  remux. Memory is bounded - per-sample metadata in RAM, sample bytes streamed
   through one temp file per track. This is the CMAF "copy rung" of an HLS
   ladder; bitrate variants (real ABR) remain a transcoder's job.
   ffmpeg-verified: exact frame parity with the source and standalone
   mid-stream segment decode.
 - **On-demand HLS** (`mp4.PlanHLS`, CLI `hls-segment`). The zero-storage
   counterpart of `to-hls`: `PlanHLS` reads the metadata head (with its Cues),
-  the first and the last cluster — a few bounded reads — and `Segment(n)`
+  the first and the last cluster - a few bounded reads - and `Segment(n)`
   then builds any single media segment by seeking straight to its window
   through the Cues and reading only that window. A server answers HLS
   requests (master/media playlist, init, any segment) in milliseconds with
   nothing pre-generated; with an `httpfs` source only the ranges a viewer
   actually watches are transferred. Every resource is byte-identical to what
   the full `to-hls` pass writes (regression-tested on synthetic and real
-  files), so both serving modes mix transparently — including cover art and
+  files), so both serving modes mix transparently - including cover art and
   global tags in the init segment. `plan.Resource(ctx, name)` is the
   declarative entry point (player-facing name → bytes + Content-Type, an
   HTTP handler is one call; `Resources()` lists every servable name), and
   text subtitle tracks are declared in the master playlist and served as one
-  whole-presentation WebVTT rendition each (lazy — one sequential pass on
+  whole-presentation WebVTT rendition each (lazy - one sequential pass on
   first request). The master `BANDWIDTH` is estimated from cluster sizes.
   New reader primitives back it: `WithCues()`, `WithTags()` and
   `WithAttachments()` keep those elements on the head-only path (the latter
@@ -865,14 +865,14 @@ All notable changes to mkvgo are documented here. The format is based on
   cue positions, and `NewBlockReaderAt` starts a block reader at a cued
   cluster. In the WebAssembly build the same engine is `openHLS(input)`: a
   handle `{resources, resource(name), segment(n)}` over a `Uint8Array` or a
-  `Blob`/`File` — the latter read through ranged slices, so a huge local
+  `Blob`/`File` - the latter read through ranged slices, so a huge local
   file plays through MSE with bounded memory (the browser demo does).
 - **MP4/MOV packaging sources.** `to-hls`, `to-abr` and `hls-segment` (and
   the wasm `openHLS`) now accept MP4/MOV inputs, sniffed from the first
-  bytes — no pre-remux step required. For the on-demand
+  bytes - no pre-remux step required. For the on-demand
   plan the moov sample table IS the index: the plan is exact by
-  construction, so every resource — master playlist, DASH manifest and
-  I-frame playlist included — is byte-identical to the full pass
+  construction, so every resource - master playlist, DASH manifest and
+  I-frame playlist included - is byte-identical to the full pass
   (regression-tested; ffmpeg-verified for both manifests).
 - **ABR light** (`mp4.RemuxToABR`, CLI `to-abr`). Packages several
   pre-encoded quality variants of the same content into one multi-variant
@@ -884,9 +884,9 @@ All notable changes to mkvgo are documented here. The format is based on
   security options (AES-128, `RewriteURL`) apply to every variant.
   ffmpeg-verified end to end on a two-quality set.
 - **Single-file byte-range serving** (`Options.SingleFile`, CLI
-  `--single-file`). Each rendition becomes one progressive file — init +
+  `--single-file`). Each rendition becomes one progressive file - init +
   `sidx` Segment Index + all CMAF fragments, byte-identical to the segmented
-  mode's — served by ranges: `EXT-X-BYTERANGE` playlists and the DASH
+  mode's - served by ranges: `EXT-X-BYTERANGE` playlists and the DASH
   on-demand profile (`SegmentBase`/`indexRange`). Two media files instead of
   hundreds; the server only needs HTTP Range support. ffmpeg-verified for
   both manifests. Incompatible with `Encrypt`.
@@ -894,7 +894,7 @@ All notable changes to mkvgo are documented here. The format is based on
   (`EXT-X-I-FRAMES-ONLY`) declared in the master via
   `EXT-X-I-FRAME-STREAM-INF`: one keyframe per segment referenced as a byte
   range into the existing segments (styp + moof + mdat header + the
-  keyframe sample) — zero extra media, decodability of a range verified
+  keyframe sample) - zero extra media, decodability of a range verified
   end to end (range → ffmpeg → JPEG). MP4-source on-demand plans expose it
   too (ranges computable head-only); not emitted when encrypting. DASH
   trick mode is not emitted: it requires a derived reduced track
@@ -904,8 +904,8 @@ All notable changes to mkvgo are documented here. The format is based on
   file names), segment boundaries follow its sample grid, the master
   carries no RESOLUTION. ffmpeg-verified for HLS and DASH.
 - **HLS delivery security.** `Options.Encrypt` (`HLSEncryption{Key, KeyURI,
-  IV?}`) AES-128-encrypts every media segment — whole-segment CBC with PKCS#7
-  and IV = media sequence per RFC 8216 — and writes the `EXT-X-KEY` line;
+  IV?}`) AES-128-encrypts every media segment - whole-segment CBC with PKCS#7
+  and IV = media sequence per RFC 8216 - and writes the `EXT-X-KEY` line;
   `to-hls`/`hls-segment` expose it as `--aes-key`/`--aes-key-uri`. Both
   serving modes produce identical ciphertext; init segments and subtitles
   stay clear; the key is only advertised, never stored. Verified by an
@@ -913,14 +913,14 @@ All notable changes to mkvgo are documented here. The format is based on
   demuxer does not decrypt whole-segment fMP4; hls.js does). AES-128 is
   HLS-only, so no DASH manifest is emitted when encrypting. Alongside it,
   `Options.RewriteURL func(name) string` (CLI `--url-prefix`) rewrites every
-  URI the playlists/MPD reference — the hook for CDN prefixes and per-URL
+  URI the playlists/MPD reference - the hook for CDN prefixes and per-URL
   signed tokens (HMAC example in library.md). On-demand subtitle cues are
   now loaded once and cached, and the windowed `subN_*.vtt` resources make
   the on-demand subtitle playlists byte-identical to the full pass.
 - **Keyframe extraction for thumbnails/scrubbing**
   (`matroska.ExtractKeyframeSample`, CLI `extract-frame`). Returns the video
   keyframe nearest a timestamp, seeked through the Cues (a few bounded
-  reads) and packed decoder-ready — Annex-B with the parameter sets
+  reads) and packed decoder-ready - Annex-B with the parameter sets
   prepended (H.264/HEVC) or an IVF wrapper (VP8/VP9/AV1). mkvgo never
   decodes: the image is one `ffmpeg -frames:v 1` call away; a scrubbing
   storyboard is a loop over the keyframe index. Verified end to end
@@ -928,18 +928,18 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Remote files over HTTP Range** (`httpfs` package, CLI URL support). The
   new `httpfs` package implements the FS port over ranged GETs (cached
   512 KiB windows, configurable client/headers, explicit refusal when a
-  server ignores `Range` — never a silent full download; `BytesFetched()`
+  server ignores `Range` - never a silent full download; `BytesFetched()`
   reports the transfer cost). Combined with the head-only probe, indexing a
   remote media library transfers a few kilobytes per file. The CLI accepts
   `http(s)://` URLs on the inspection commands (`info`/`tracks`/`probe`/
   `keyframes`, plus `chapters`/`tags`/`attachments` for MP4) and as the
   source of `to-mp4`/`from-mp4`/`to-hls` via `httpfs.Hybrid()` (URLs read
-  over HTTP, writes on the OS) — remuxing straight from a NAS/S3 URL is a
+  over HTTP, writes on the OS) - remuxing straight from a NAS/S3 URL is a
   streamed download. Verified byte-identical to a local remux.
 - **Deterministic outputs, guaranteed.** The writers never stamp wall-clock
   times or random IDs (fixed `MuxingApp`/`WritingApp`, `DateUTC` only copied
   from the source, MP4 timestamps zero), so the same input and options
-  produce byte-identical files — now documented as a guarantee and locked by
+  produce byte-identical files - now documented as a guarantee and locked by
   a regression test (MKV rewrite, MP4 remux, HLS segments over the in-memory
   FS). Safe for content-addressed storage, dedup and golden tests. `make
   build`/`make release` now set `CGO_ENABLED=0` (pure-Go static binaries).
@@ -948,14 +948,14 @@ All notable changes to mkvgo are documented here. The format is based on
   `MkvGo` object exposes `probe`, `remuxToMP4`, `remuxFromMP4`, `remuxToWebM`,
   `remuxToHLS` and `extractSubtitleVTT`, all Promise-based, with the input
   format sniffed from its first bytes. `probe` also accepts a `Blob`/`File`
-  read through ranged slices — head-only, so probing a 40 GB file in a file
+  read through ranged slices - head-only, so probing a 40 GB file in a file
   input transfers a few hundred kilobytes without uploading anything. A typed
   TypeScript wrapper (`web/mkvgo.ts`), a runnable browser demo with MSE
   playback of the HLS output (`web/example/`), React/Vue integration examples
   (`docs/wasm.md`) and a Node end-to-end smoke test (`make wasm-smoke`) ship
   with it.
 - **WebAssembly ergonomics.** Every wasm method now honours
-  `{ signal?: AbortSignal }` — aborting cancels the in-flight Go work (probe
+  `{ signal?: AbortSignal }` - aborting cancels the in-flight Go work (probe
   reads, remux, segment builds), wired for React effect cleanups.
   `hlsSegmentStream(plan)` exposes the video rendition as a progressive
   `ReadableStream`. `web/react.ts` ships copyable hooks: `useMkvGo`,
@@ -966,20 +966,20 @@ All notable changes to mkvgo are documented here. The format is based on
   http(s):// URL source, landing page that plays the output in hls.js and
   dash.js). `web/vue.ts` adds Vue 3 composables mirroring the React hooks
   (`web/react.ts`). Both TypeScript files typecheck under `--strict`.
-- **`mkv.MemFS`** — an in-memory implementation of the `FS` port. Every
+- **`mkv.MemFS`** - an in-memory implementation of the `FS` port. Every
   operation taking `Options{FS: …}` can run without a filesystem (the wasm
   build's foundation, also useful for tests and servers assembling outputs in
   memory): `NewMemFS()`, `Put`/`Get`/`Paths`, and `FS()` returning the wired
   port.
 - **`validate` streaming-readiness checks.** Beyond the structural checks,
   `validate` now audits what seeking and on-demand serving rely on: missing
-  Cues index, cue points referencing a non-video track (error — seeking
+  Cues index, cue points referencing a non-video track (error - seeking
   lands on audio; the write-side bug class fixed this release), cue times
   matching no actual video keyframe (stale index), subtitle blocks without
   BlockDuration, video tracks without DefaultDuration, AAC without its
   AudioSpecificConfig, attachments without a MIME type. Each finding names
   the fix.
-- **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism —
+- **Streaming non-goals documented.** LL-HLS (a live-ingest mechanism  - 
   mkvgo packages VOD files) and multi-period DASH (a discontinuity model
   that would degrade seeking if used for chapters) were evaluated and
   deliberately left out; the rationale lives in library.md.
@@ -1006,7 +1006,7 @@ All notable changes to mkvgo are documented here. The format is based on
   chained segments), and a range that contains media but no video keyframe is an
   explicit error instead of a silently empty or corrupt part.
 - **Rebuilt Cues key on video keyframes.** `reindex` and the full-rewrite edits
-  cued the first keyframe-flagged block of each cluster — and every audio block
+  cued the first keyframe-flagged block of each cluster - and every audio block
   carries that flag, so mixed clusters cued audio and the real video keyframes
   were never indexed. The cue scan now keys on video tracks (audio-only files
   keep the throttled first-block cue).
@@ -1015,11 +1015,11 @@ All notable changes to mkvgo are documented here. The format is based on
   every part carried the full source list at absolute timestamps).
 - **`validate`/`compare` exit codes.** `validate` exits `1` when error-severity
   issues are found (warnings are printed but do not fail; `-strict` makes them
-  fail too) and `compare` when the files differ — both previously always exited
+  fail too) and `compare` when the files differ - both previously always exited
   `0`, so neither could gate a script.
 - **`Merge` no longer discards attachments.** `MuxOptions` gained
   `Title`/`Attachments`; `Merge` carries the first input's title, chapters, tags
-  and attachments (first-wins, now documented). `MergeOptions.Progress` was dead —
+  and attachments (first-wins, now documented). `MergeOptions.Progress` was dead  - 
   it is now honoured.
 - **`RemoveTrack` drops orphan tags.** Tags targeting a removed track's UID are
   no longer carried into the output (they pointed at a track that no longer
@@ -1030,8 +1030,8 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Added
 
 - **QuickTime `.mov` support (non-faststart).** The MP4 reader now parses the
-  layout raw iPhone/camera QuickTime files use — `wide` + `mdat` first, `moov`
-  at the end — which previously failed with `box ... has invalid size`: the
+  layout raw iPhone/camera QuickTime files use - `wide` + `mdat` first, `moov`
+  at the end - which previously failed with `box ... has invalid size`: the
   audio SoundDescription version 1 (16 extra per-packet bytes before the
   extension boxes) and version 2 (64-byte struct, float64 sample rate) are now
   honoured, and an esds wrapped in a QuickTime `wave` extension is unwrapped.
@@ -1043,7 +1043,7 @@ All notable changes to mkvgo are documented here. The format is based on
   production.)
 - **Self-verifying files.** `mkvgo hash` stores each track's content SHA-256
   as a `CONTENT_SHA256` tag (in place on mkvgo-written files, thanks to the
-  metadata reserve); `mkvgo verify` recomputes and exits `1` on any mismatch —
+  metadata reserve); `mkvgo verify` recomputes and exits `1` on any mismatch  - 
   bit rot and transfer corruption are detectable with no external checksum
   file. MP4s are hashed at remux time (`to-mp4 --hash`, computed while the
   samples stream so it costs no extra I/O; stored as freeform `ilst` atoms)
@@ -1060,14 +1060,14 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`compare -blocks`.** Content-level comparison: per-track block count,
   payload bytes and payload SHA-256 in stream order (`matroska.CompareBlocks`).
   An identical result proves a remux/reindex/split+join round-trip carried
-  every frame byte-identically — beyond what the metadata compare shows.
+  every frame byte-identically - beyond what the metadata compare shows.
 - **`make e2e`** verifies the remux paths against real ffmpeg/ffprobe (local
   or `MKVGO_E2E=docker:<container>`): fixture generation, to-mp4/faststart,
   from-mp4, vp09, seekable WebM, QuickTime `.mov`, `split -every`, decode
   checks. New fuzzers cover the OGM chapter parser and the VP9 frame header
-  (the OGM one immediately caught non-monotonic chapter times — now an
+  (the OGM one immediately caught non-monotonic chapter times - now an
   explicit error), and the QuickTime fixture seeds the MP4 fuzzer.
-- **`add-attachment` / `remove-attachment`.** Attach a file (font, cover art —
+- **`add-attachment` / `remove-attachment`.** Attach a file (font, cover art  - 
   MIME sniffed from magic bytes, `-mime` to override) or remove one by ID or
   exact name; removal fails before writing anything when nothing matches.
 - **Chapters as OGM text.** `set-chapters` replaces a file's chapters from the
@@ -1083,8 +1083,8 @@ All notable changes to mkvgo are documented here. The format is based on
   verified: `mkvgo compare movie.mkv movie.mp4`. The library gains
   `matroska.CompareContainers` for already-parsed containers.
 - **Per-track statistics tags on mux.** `Mux`/`Merge` output
-  now carries mkvmerge-style statistics tags — `BPS`, `DURATION`,
-  `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES` per track, keyed by track UID —
+  now carries mkvmerge-style statistics tags - `BPS`, `DURATION`,
+  `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES` per track, keyed by track UID  - 
   accumulated while streaming and written in a Tags element the SeekHead points
   to, so `matroska.WithBitrate()` (and ffprobe's `TAG:BPS`) read them head-only.
 - **VP9 → MP4.** VP9 tracks remux to a `vp09` sample entry (VP9-in-ISOBMFF).
@@ -1102,7 +1102,7 @@ All notable changes to mkvgo are documented here. The format is based on
   (`300000`), fractional seconds (`90.5`) or `[HH:]MM:SS[.fraction]` (`5:00`,
   `01:30:00`).
 - **Seekable WebM output.** `RemuxToWebM`/`to-webm` now writes a real indexed
-  file — known-size clusters, a Cues seek index and a SeekHead — instead of the
+  file - known-size clusters, a Cues seek index and a SeekHead - instead of the
   unknown-size streaming layout with no index. The output is readable by the
   seekable reader, `keyframes` works head-only on it, and players can seek.
   `Options.Progress` is honoured by the remux (it was ignored).
@@ -1126,7 +1126,7 @@ All notable changes to mkvgo are documented here. The format is based on
   `RemuxFromMP4` / `RemuxToMP4` round trip now decodes bit-identically to the source
   for AAC, FLAC, AC-3 and E-AC-3 (verified by decoding both sides to PCM). Opus and
   MP3 stay sample-accurate at the head (no desync) but may keep a few samples of
-  encoder padding at the tail — their delay is intrinsic to the bitstream and ffmpeg
+  encoder padding at the tail - their delay is intrinsic to the bitstream and ffmpeg
   does not trim that tail from an MP4 either. Two changes make this hold:
   - New `Track.CodecDelay` / `Track.SeekPreRoll` (Matroska `0x56AA`/`0x56BB`, ns) are
     read and written. A codec's container-signalled encoder/decoder delay (the MP4
@@ -1134,37 +1134,37 @@ All notable changes to mkvgo are documented here. The format is based on
     as an MP4 edit list (`elst`) on the way back, for AAC/AC-3/E-AC-3. Opus, MP3 and
     Vorbis carry their delay intrinsically (Opus pre-skip in the OpusHead, MP3 in its
     in-band Xing/LAME header), which ffmpeg's decoder applies regardless of the
-    container, so they are excluded — a derived edit list would over-trim them;
+    container, so they are excluded - a derived edit list would over-trim them;
     FLAC/DTS/PCM have no priming. (`Options.MP3ContainerDelay` /
     `--mp3-container-delay` opts MP3 back into the edit-list path, to round-trip an
-    MP3 that originated in an MP4 — rare; it over-trims a native-MKV MP3, so it is off
+    MP3 that originated in an MP4 - rare; it over-trims a native-MKV MP3, so it is off
     by default.)
   - **Audio tracks are written on a sample-rate media timescale** (`mdhd`), as ffmpeg
     does, instead of the millisecond movie timescale. This makes the edit list's
     `media_time` sample-exact, which is required for ffmpeg to trim a codec's priming
-    precisely — notably AC-3, whose decoder delay it ignores from a millisecond-
+    precisely - notably AC-3, whose decoder delay it ignores from a millisecond-
     quantised edit list. Video/text/subtitle timing is unchanged.
 - **Per-track bitrate from Matroska tags.** The `BPS` tag ffmpeg/mkvmerge write per
   track (bits per second) is now surfaced as the typed `Track.Bitrate`, keyed by the
-  track UID. This is the value ffprobe exposes as `TAG:BPS` — ffprobe leaves its own
+  track UID. This is the value ffprobe exposes as `TAG:BPS` - ffprobe leaves its own
   per-stream `bit_rate` field `N/A` for Matroska, so this gives more than ffprobe
   there; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and equals ffprobe's
   `bit_rate`. A full `Read` fills it; the metadata-only probe does too under the new
   `matroska.WithBitrate()` / `reader.WithBitrate()` option, which follows the head
-  `SeekHead` straight to the `Tags` element (one seek, no Cluster scan — the muxer
+  `SeekHead` straight to the `Tags` element (one seek, no Cluster scan - the muxer
   references `Tags` from the head). Off by default, so the default probe stays minimal.
 - **Extended disposition flags.** `Track.HearingImpaired`, `VisualImpaired`,
   `TextDescriptions`, `Original` and `Commentary` expose the Matroska
-  FlagHearingImpaired/…/FlagCommentary elements — the ffprobe stream dispositions
-  of the same name — alongside the existing default/forced. Shown in `probe` and
+  FlagHearingImpaired/…/FlagCommentary elements - the ffprobe stream dispositions
+  of the same name - alongside the existing default/forced. Shown in `probe` and
   JSON. Matroska-only (MP4 has no equivalent boxes).
 - **3D stereo + 360 projection.** `Track.StereoMode` (with `StereoModeName()`) and
   `Track.Projection` report stereoscopic-3D arrangement and spherical/360
-  projection — from the Matroska StereoMode/Projection elements or the MP4
+  projection - from the Matroska StereoMode/Projection elements or the MP4
   `st3d`/`sv3d` boxes (st3d mapped to the Matroska StereoMode values). Shown in
   `probe` and JSON; unset for ordinary 2D video.
 - **Average frame rate.** `Track.AvgFrameRate()` returns ffprobe's
-  `avg_frame_rate` (frame count over duration) — non-zero for MP4 video
+  `avg_frame_rate` (frame count over duration) - non-zero for MP4 video
   (head-only), 0 for Matroska where the header carries no frame count. Surfaced in
   `probe` (when it diverges from the nominal rate, i.e. VFR) and JSON.
 - **HDR10 static metadata.** `Track.HDR` (`HDRStaticMetadata`) now carries the
@@ -1172,7 +1172,7 @@ All notable changes to mkvgo are documented here. The format is based on
   Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931
   chromaticities and the luminance range), read head-only from the Matroska
   Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/
-  `mdcv` boxes — the frame side data ffprobe reports, the last colour/HDR gap
+  `mdcv` boxes - the frame side data ffprobe reports, the last colour/HDR gap
   versus a head-only probe (HDR detection, CICP colour and Dolby Vision were
   already covered). mdcv's fixed-point values (and its G,B,R primary order) are
   normalised to the same units as the Matroska floats. Shown in `probe` output
@@ -1181,18 +1181,18 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Fixed
 
 - **A/V presentation offset preserved across MP4.** A per-track start offset (the
-  empty edit ffmpeg writes for an `-itsoffset`/sync correction — e.g. audio starting
+  empty edit ffmpeg writes for an `-itsoffset`/sync correction - e.g. audio starting
   476 ms after video) was read into the block timestamps but never re-emitted by
   `to-mp4`: each track was rebased to 0, silently desyncing the audio. `to-mp4` now
   writes the offset as a leading empty edit (`media_time -1`), so the A/V gap
   survives the round trip. Coded data was always intact; only the timing was lost.
 - **Split no longer trims a frame of real audio at the seam.** Every output segment
   inherited the source's `CodecDelay` (encoder priming), but only the first segment
-  actually starts with that priming — a later segment begins on real audio. A
+  actually starts with that priming - a later segment begins on real audio. A
   decoder or `to-mp4` then trimmed `CodecDelay` worth of real samples (one AAC frame,
   ~23 ms) at each cut. Later segments now drop `CodecDelay`, so a split is lossless:
   no coded packet is dropped and the decoded sample count is exact. (Decoding a later
-  segment in isolation still differs from the source within the segment — AAC frames
+  segment in isolation still differs from the source within the segment - AAC frames
   share overlap-add context across the cut, so a clean boundary is impossible without
   re-encoding; this is codec physics, not a loss. The coded stream is intact.)
 - **Last chapter's end time preserved across MP4.** The Nero `chpl` box carries only
@@ -1206,7 +1206,7 @@ All notable changes to mkvgo are documented here. The format is based on
   their iTunes atoms (`ARTIST`→`©ART`, `ALBUM`→`©alb`, `DATE_RELEASED`→`©day`,
   `GENRE`→`©gen`, `COMMENT`→`©cmt`, `COMPOSER`→`©wrt`, `DESCRIPTION`→`desc`,
   `ENCODER`→`©too`); and the track name as the `hdlr` name (ffprobe's stream
-  `handler_name`, the only per-track string MP4 exposes — MP4 has no readable stream
+  `handler_name`, the only per-track string MP4 exposes - MP4 has no readable stream
   `title`) plus the QuickTime `trak/udta/name` box ffmpeg writes. `from-mp4` reads
   them all back into `Info.Title` / `Tags` / `Track.Name`, so they survive a round
   trip (and an MP4-in/MP4-out edit) instead of being lost at the MP4 boundary.
@@ -1217,7 +1217,7 @@ All notable changes to mkvgo are documented here. The format is based on
   must physically fit) before any allocation, on both the full-table and
   keyframe-only paths.
 - **MP4 chunk/stsc quadratic.** Building the full sample table looked up the
-  samples-per-chunk with a linear scan of the stsc entries *per chunk* — O(chunks ×
+  samples-per-chunk with a linear scan of the stsc entries *per chunk* - O(chunks ×
   entries), which a forged stco+stsc pair could turn into a multi-second stall. A
   monotonic cursor makes it linear (O(chunks + entries)). Sources were checked for matching track count and
   type but not codec, so concatenating mismatched codecs (e.g. H.264 + HEVC)
@@ -1229,7 +1229,7 @@ All notable changes to mkvgo are documented here. The format is based on
   joins.
 - **`Join` redundant opens.** Each source was opened three times (validation,
   duration, streaming); the metadata is now read once and cached, halving the open
-  count — relevant for an S3/HTTP `FS`.
+  count - relevant for an S3/HTTP `FS`.
 - **Fixed-lacing residual bytes.** A fixed-lacing block whose data size is not a
   multiple of its frame count now errors instead of silently dropping the
   remainder.
@@ -1239,7 +1239,7 @@ All notable changes to mkvgo are documented here. The format is based on
   (e.g. a custom `FS` that commits the write on Close), matching `Mux`.
 - **Duplicate Info/Tracks (non-conformant files).** A file with more than one
   Info or Tracks element (the spec allows one each) is now handled "first wins"
-  by both `Read` and `ReadMeta` — previously the full `Read` appended a second
+  by both `Read` and `ReadMeta` - previously the full `Read` appended a second
   Tracks set, doubling the tracks, and the two readers could disagree.
 - **Debuggable parse errors.** A parse failure now carries the failing element's
   ID and byte offset (`element 0x… at offset N: …`) instead of a bare error, so a
@@ -1248,7 +1248,7 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Hardened
 
 - **CLI rejects unknown flags.** A mistyped or unsupported `-`/`--` option (e.g.
-  `to-mp4 --fastart`) was silently treated as a positional argument — a confusing
+  `to-mp4 --fastart`) was silently treated as a positional argument - a confusing
   `no such file` for some commands, silently ignored for others (`split`). Every
   command now fails fast with `unknown flag: …`. Flag values that contain a dash
   (e.g. `split -range 0-2000,2000-0`) are unaffected.
@@ -1274,7 +1274,7 @@ All notable changes to mkvgo are documented here. The format is based on
   from the previous night's findings and the search deepens over time rather than
   restarting cold.
 - **Complexity guard in the MP4 fuzzer.** `FuzzParseMP4` now times each input and
-  fails if a single parse exceeds a deadline — Go fuzzing flags panics but not
+  fails if a single parse exceeds a deadline - Go fuzzing flags panics but not
   slow-but-completing inputs, so a complexity DoS would otherwise pass silently.
 
 ### Documentation
@@ -1290,19 +1290,19 @@ All notable changes to mkvgo are documented here. The format is based on
 ### Added
 
 - **Colour determinacy signal.** A new `Track.ColourDetermined` reports that the
-  colour was actually read from a source — the container Colour element, an MP4
+  colour was actually read from a source - the container Colour element, an MP4
   colr box, or the codec bitstream's colour signalling (H.264/HEVC VUI, AV1
-  color_config, VP9 vpcC) — even when it resolves to "unspecified" (every Color*
+  color_config, VP9 vpcC) - even when it resolves to "unspecified" (every Color*
   left nil). It lets a caller tell a confirmed-SDR/unspecified stream (true, no
   colour values) from one whose colour could not be read at all (false), rather
   than conflating both as a bare nil. Shown in `probe` output.
 - **Complete keyframe index for Cues-less Matroska.** `WithKeyframeIndex()`
   (re-exported as `matroska.WithKeyframeIndex`) builds the *complete* video
-  keyframe index — every keyframe, equal to `ffprobe -skip_frame nokey`, not a
-  sample — for a Matroska that carries no Cues. After the head parse, and only
+  keyframe index - every keyframe, equal to `ffprobe -skip_frame nokey`, not a
+  sample - for a Matroska that carries no Cues. After the head parse, and only
   when no Cues were found, it makes a single sequential read-ahead pass over the
   Segment (cluster by cluster, never a per-block seek), reading element headers
-  and discarding block payloads in-stream — no demux, no decode. It transfers the
+  and discarding block payloads in-stream - no demux, no decode. It transfers the
   Segment like ffprobe but pure-Go in-process; discarding rather than seeking past
   payloads keeps the reads sequential, so it stays I/O-bound (not seek-bound) on a
   high-latency SMB/NAS mount. Per
@@ -1311,15 +1311,15 @@ All notable changes to mkvgo are documented here. The format is based on
   the video track only at `Timestamp + relative-timecode`. It is the "no external
   fallback" path; `WithSampledKeyframes` remains the cheaper coarse variant. Files
   with Cues are never scanned. The CLI `keyframes` command uses it for such files.
-  (Matroska has no edit list, so no time shift is applied — parity with the
+  (Matroska has no edit list, so no time shift is applied - parity with the
   Cues-derived index.)
 - **Sampled keyframe index for Cues-less Matroska.** `WithSampledKeyframes(n)`
   (re-exported as `matroska.WithSampledKeyframes`) recovers a coarse keyframe
   index for a Matroska that carries no Cues: after the head parse, and only when
   no Cues were found, it probes n evenly-spaced byte offsets in the Segment body,
   resyncing to the next Cluster at each. Within the Cluster it reads block headers
-  (payloads skipped by element size) to find the first real video keyframe — a
-  SimpleBlock keyframe flag, or a BlockGroup with no ReferenceBlock — and emits
+  (payloads skipped by element size) to find the first real video keyframe - a
+  SimpleBlock keyframe flag, or a BlockGroup with no ReferenceBlock - and emits
   that block's exact presentation time, so every point is a genuine seek point
   even when the muxer does not align Clusters to keyframes (the Cluster start is
   NOT assumed to be a keyframe). A Cluster with no video keyframe is skipped
@@ -1328,8 +1328,8 @@ All notable changes to mkvgo are documented here. The format is based on
   `keyframes` command uses it automatically for such files.
 - **Fragmented-MP4 metadata.** For a fragmented MP4 (an mvex box in the moov),
   the probe now recovers the frame rate from the fragment defaults (mvex>trex)
-  and the keyframe index from a random-access index — the mfra/tfra at the file
-  tail, or the sidx Segment Index at the head that streaming fMP4 carries — both
+  and the keyframe index from a random-access index - the mfra/tfra at the file
+  tail, or the sidx Segment Index at the head that streaming fMP4 carries - both
   bounded and head-only, so fragmented files report a frame rate and (closed-GOP)
   keyframes without a full demux. `Container.Fragmented` flags the file (also in
   `probe` output and JSON); when no such index is present those fields stay unset
@@ -1345,7 +1345,7 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Lazy moov read for the metadata probe.** `OpenMeta` / `ReadMeta` read only
   the moov boxes the metadata and keyframe index need, seeking over the large
   sample-table bodies (stsz/stco/co64/stsc) instead of reading them; reads are
-  coalesced, so it is both I/O- and round-trip-light — about 90% fewer bytes read
+  coalesced, so it is both I/O- and round-trip-light - about 90% fewer bytes read
   and ~2× faster on a high-latency (9p/SMB/NAS) mount, with lower variance. The
   full table is still read for remux/extract; any unexpected layout falls back to
   the full read, and the result is byte-identical.
@@ -1370,11 +1370,11 @@ All notable changes to mkvgo are documented here. The format is based on
 - **In-band colour fallback (opt-in).** `reader.WithInBandColourFallback()`
   (re-exported as `matroska.WithInBandColourFallback()`) and
   `mp4.Options{InBandColour: true}` recover a video track's colour when it is
-  carried only in an in-band HEVC SPS — a bare hvcC with no parameter sets and no
+  carried only in an in-band HEVC SPS - a bare hvcC with no parameter sets and no
   container colour, as some streaming-style HDR muxes write. The head parse is
   unchanged; only a track that still lacks colour reads a bounded slice of its
   first sample, parses the SPS VUI, and applies an Alternative Transfer
-  Characteristics SEI (payload type 147) override — HLG's `bt2020-10` →
+  Characteristics SEI (payload type 147) override - HLG's `bt2020-10` →
   `arib-std-b67` compatibility signal. Off by default; tracks that carry colour
   in the header read no frame.
 
@@ -1415,7 +1415,7 @@ validated against ffprobe over a sweep of real files.
 
 - **Audio output sample rate for SBR (HE-AAC).** `Track.OutputSampleRate` carries
   the decoder's doubled rate (Matroska `OutputSamplingFrequency` 0x78B5, or the
-  AAC `AudioSpecificConfig` SBR extension rate — explicit AOT 5 and the
+  AAC `AudioSpecificConfig` SBR extension rate - explicit AOT 5 and the
   backward-compatible 0x2b7 sync extension), and `Track.EffectiveSampleRate()`
   returns what ffprobe reports as `sample_rate`. Read on both the MP4 and Matroska
   paths; the writer persists 0x78B5 for round-trip.
@@ -1427,7 +1427,7 @@ validated against ffprobe over a sweep of real files.
   `sample_aspect_ratio`. Read, in precedence order, from the MP4 `pasp` box, the
   Matroska `DisplayWidth`/`DisplayHeight` (0x54B0/0x54BA) elements, or the H.264/
   HEVC SPS VUI `aspect_ratio_info` (Table E-1 `aspect_ratio_idc`, or Extended_SAR
-  `sar_width:sar_height`) — the most common H.264 SAR carrier, read head-only from
+  `sar_width:sar_height`) - the most common H.264 SAR carrier, read head-only from
   the avcC. The ratio is stored exactly (no rounding that would collapse a fine
   pixel aspect), and the helpers reduce it with the same bounded `av_reduce`
   (1024×1024) ffmpeg uses, so the `sar`/`dar` strings match ffprobe on every
@@ -1445,29 +1445,29 @@ validated against ffprobe over a sweep of real files.
   `field_order`) from the Matroska `FlagInterlaced` (0x9A) element or the H.264
   `frame_mbs_only_flag`.
 - **Frame count.** `Track.FrameCount` (ffprobe `nb_frames`) from the MP4 `stsz`/
-  `stz2` sample count — read head-only, no sample-table expansion. Matroska has no
+  `stz2` sample count - read head-only, no sample-table expansion. Matroska has no
   head-only frame count, so it stays 0 there.
 - **Per-track duration.** `Track.DurationMs` (ffprobe per-stream `duration`) from
   the MP4 `mdhd` (duration ÷ media timescale), so a track that differs from the
   movie length is reported individually. Matroska carries no per-track header
   duration, so it stays 0 there.
 - **MP4 file-level tags.** The metadata probe now reads the iTunes/QuickTime
-  `udta`/`meta`/`ilst` atoms — `Container.Tags` gets the text tags (`©nam`→`TITLE`,
+  `udta`/`meta`/`ilst` atoms - `Container.Tags` gets the text tags (`©nam`→`TITLE`,
   `©ART`→`ARTIST`, `©day`→`DATE_RELEASED`, `©too`→`ENCODER`, …) and `Info.Title` is
   filled from `©nam`, matching how the Matroska reader exposes tags. Non-text atoms
   (cover art) are skipped.
 - **Codec long name and channel layout.** `Track.CodecLongName()` returns ffprobe's
   `codec_long_name` (e.g. "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"), and
   `Track.ChannelLayout()` returns `channel_layout` ("stereo", "5.1(side)", …) from
-  the channel count — display strings the fast path previously omitted.
+  the channel count - display strings the fast path previously omitted.
 - **MP4 frame rate is read head-only.** `Track.FrameRate` is now derived from the
-  `stts` header (media timescale ÷ first `sample_delta`) — ffprobe's `r_frame_rate`
-  for constant-frame-rate video — so the metadata probe reports it without
+  `stts` header (media timescale ÷ first `sample_delta`) - ffprobe's `r_frame_rate`
+  for constant-frame-rate video - so the metadata probe reports it without
   expanding the sample table (it previously needed `Options{Keyframes: true}`).
 - **Display rotation.** `Track.Rotation` (0/90/180/270, clockwise) read from the
-  MP4 `tkhd` display matrix — the same matrix ffprobe exposes as Display Matrix
+  MP4 `tkhd` display matrix - the same matrix ffprobe exposes as Display Matrix
   side data. Lets a player show portrait phone video the right way up.
-- **CLI** — `probe` prints all of the above per track (codec long name, profile/
+- **CLI** - `probe` prints all of the above per track (codec long name, profile/
   level, pixel format, aspect ratio, rotation, frame rate, frame count, per-track
   duration, bitrate, field order, channel layout, output sample rate); `probe -json`
   and `tracks -json` carry the same fields, including the derived `codec_long_name`
@@ -1486,7 +1486,7 @@ validated against ffprobe over a sweep of real files.
 
 ### Notes
 
-- Documented three accepted head-only limitations — data present only in the media
+- Documented three accepted head-only limitations - data present only in the media
   frames, not in any header the probe parses, so ffprobe surfaces it by decoding a
   frame while mkvgo reports the header values: implicit in-band SBR and Parametric
   Stereo (audio), and colour signalled only in an in-band SPS (video).
@@ -1501,7 +1501,7 @@ validated against ffprobe over a sweep of real files.
 - **Greatly expanded the test surface**, driven by statement coverage and gremlins
   mutation testing. Statement coverage is now **≥ 90% in every package**
   (`cmd/mkvgo/commands` 16.6% → 97.9%, `mkv/reader` → 90.6%, `mkv/ops` → 92.0%,
-  `mp4` → 92.9%; `ebml`/`mkv`/`mkv/subtitle`/`mkv/writer` 90–98%), and global
+  `mp4` → 92.9%; `ebml`/`mkv`/`mkv/subtitle`/`mkv/writer` 90-98%), and global
   mutation efficacy rose from 70% to 82% (mutator coverage 85% → 95%). The new
   tests cover the previously-untested error/edge paths: malformed and truncated
   inputs, bit-reader / Exp-Golomb boundaries, sample-table and EBML element/VINT
@@ -1511,7 +1511,7 @@ validated against ffprobe over a sweep of real files.
   (inspection via captured stdout and `-json`, edit/extract by re-reading the
   output, assembly/split/remux/reindex by parsing the produced file). To make the
   `Fatal`/error paths reachable in-process, the CLI's process exit is now an
-  injectable hook (`Fatal` calls a `var osExit = os.Exit`) — behaviour is identical
+  injectable hook (`Fatal` calls a `var osExit = os.Exit`) - behaviour is identical
   in production.
 
 ## [0.8.0] - 2026-06-23
@@ -1520,7 +1520,7 @@ validated against ffprobe over a sweep of real files.
 
 - **MP4 metadata probe.** `mp4.OpenMeta` / `OpenMetaWithFS` / `ReadMeta` read an
   MP4's stream metadata head-only, reporting per track: **language** (`mdhd`
-  ISO 639-2 — including QuickTime Macintosh language codes — and the `elng` BCP-47
+  ISO 639-2 - including QuickTime Macintosh language codes - and the `elng` BCP-47
   box), the **default** flag (`tkhd` track_enabled), the **forced** flag (DASH-role
   `kind` box), the **audio channel count** (from the AAC `AudioSpecificConfig` and
   AC-3/E-AC-3 `dac3`/`dec3`, not the unreliable `AudioSampleEntry` field), and
@@ -1529,7 +1529,7 @@ validated against ffprobe over a sweep of real files.
 - **Dropped (non-carried) tracks** are surfaced: the probe returns an additional
   `[]DroppedTrack` (cover art / attached pictures, hint/timecode/metadata tracks),
   each with its track ID, fourcc and reason. `RemuxFromMP4` reports them through
-  `Options.OnDrop`. (A QuickTime chapter track is not reported — see Fixed.)
+  `Options.OnDrop`. (A QuickTime chapter track is not reported - see Fixed.)
 - **Dolby Vision.** `Track.DolbyVision` exposes the decoded
   `DOVIDecoderConfigurationRecord` (profile, level, RPU/EL/BL, `bl_signal_compatibility_id`),
   read from the MP4 `dvcC`/`dvvC` box (and the `dvhe`/`dvh1`/`dvav`/`dva1`/`dav1`
@@ -1539,7 +1539,7 @@ validated against ffprobe over a sweep of real files.
   `hvc1`/`avc1`/`av01` tag for a cross-compatible one. New `mkv.DolbyVision`,
   `ParseDolbyVisionConfig`, `EncodeDolbyVisionConfig`, `DolbyVision.BoxType`.
 - **Head-only keyframe index** on `Container.Keyframes` ([]int64 ms, ascending,
-  de-duplicated) — the cut points for `-c copy` HLS/DASH segmentation. MKV/WebM
+  de-duplicated) - the cut points for `-c copy` HLS/DASH segmentation. MKV/WebM
   fills it from the `Cues` index via the `SeekHead` (one seek, no `Cluster` scan)
   in the metadata pass; MP4 fills it from the `stss`/`stts`/`ctts` tables, with the
   edit list (`elst`) applied as ffmpeg does, opt-in via `Options{Keyframes: true}`.
@@ -1572,7 +1572,7 @@ validated against ffprobe over a sweep of real files.
 ### Fixed
 
 - The MP4 probe no longer reports a QuickTime **chapter track** (referenced via
-  `tref/chap`) as a dropped track — its content is already read from `chpl`.
+  `tref/chap`) as a dropped track - its content is already read from `chpl`.
 
 ## [0.7.2] - 2026-06-22
 
@@ -1581,18 +1581,18 @@ validated against ffprobe over a sweep of real files.
 - **WebVTT subtitles in MP4 remux.** `RemuxToMP4` now carries WebVTT tracks
   (`S_TEXT/WEBVTT` and the WebM-era `D_WEBVTT/*` ids that ffmpeg writes) instead
   of dropping them:
-  - By default a WebVTT track is carried as `tx3g` timed text — the only MP4
+  - By default a WebVTT track is carried as `tx3g` timed text - the only MP4
     subtitle form read universally (ffmpeg included).
   - **`Options.NativeWebVTT`** (CLI `--webvtt-native`) carries it losslessly as
-    native `wvtt` (ISO/IEC 14496-30) instead — cue settings and inline markup are
+    native `wvtt` (ISO/IEC 14496-30) instead - cue settings and inline markup are
     preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not, so
     it is opt-in. `RemuxFromMP4` reads `wvtt` back to `S_TEXT/WEBVTT`.
-- **`Options.FlattenStyledSubs`** (CLI `--flatten-subs`) carries ASS/SSA — which
-  have no native MP4 form — as `tx3g`, stripping the dialogue framing and override
+- **`Options.FlattenStyledSubs`** (CLI `--flatten-subs`) carries ASS/SSA - which
+  have no native MP4 form - as `tx3g`, stripping the dialogue framing and override
   tags (`{\...}`, `\N`, `\h`). Lossy: all styling/positioning/karaoke is discarded.
 - Subtitles **never fail a remux**: a subtitle whose format cannot be carried is
   now always dropped with a reason via `Options.OnDrop` (pointing at the relevant
-  flag), instead of being silently skipped or — for some inputs — aborting.
+  flag), instead of being silently skipped or - for some inputs - aborting.
 - New codec short name **`webvtt`** for `S_TEXT/WEBVTT` (reader and writer), for
   parity with `srt`/`ass`/`ssa`.
 
@@ -1600,12 +1600,12 @@ validated against ffprobe over a sweep of real files.
 
 ### Added
 
-- **`mp4.OpenMeta`** / **`OpenMetaWithFS`** / **`ReadMeta`** — metadata-only probe
+- **`mp4.OpenMeta`** / **`OpenMetaWithFS`** / **`ReadMeta`** - metadata-only probe
   of an MP4 file, the counterpart of the MKV reader's `OpenMeta`/`ReadMeta`. They
   parse only the movie header (`moov`: track sample entries, colour code points,
   chapters) and return a `*mkv.Container` (Info, Tracks, Chapters, DurationMs)
   **without reading any sample data (`mdat`) or writing an output file**. This is
-  the fast path for indexing/scanning an MP4 library — previously the only way to
+  the fast path for indexing/scanning an MP4 library - previously the only way to
   read an MP4's codecs/colour/chapters was a full `RemuxFromMP4` to disk.
   `RemuxFromMP4` and the probe now build their Matroska metadata from a single
   shared helper, so they report identical tracks/chapters/duration.
@@ -1618,7 +1618,7 @@ low-level code with `ebml`/`mkv`) and is experimental.
 
 ### Added
 
-- **`mp4.RemuxToMP4`** — MKV/WebM → progressive MP4. Compressed samples are
+- **`mp4.RemuxToMP4`** - MKV/WebM → progressive MP4. Compressed samples are
   copied verbatim into MP4 sample tables.
   - Video: H.264, HEVC, AV1. Audio: AAC, Opus, AC-3, E-AC-3, FLAC, MP3, DTS
     (incl. DTS-HD, carried as `mp4a`/`esds`). Subtitles: SRT (`S_TEXT/UTF8`) →
@@ -1630,17 +1630,17 @@ low-level code with `ebml`/`mkv`) and is experimental.
   - `Options.FastStart` places `moov` before `mdat` for progressive HTTP
     playback; `Options.SkipUnsupported` drops tracks whose codec cannot be
     carried (reported via `Options.OnDrop`) instead of failing.
-- **`mp4.RemuxFromMP4`** — MP4 → MKV. Reads the codecs above plus their MP4
+- **`mp4.RemuxFromMP4`** - MP4 → MKV. Reads the codecs above plus their MP4
   sample entries; colour and chapters round-trip back to the Matroska `Colour`
   element and chapter atoms.
-- **`writer.WriteBlockGroup`** — writes a BlockGroup with a BlockDuration; used
+- **`writer.WriteBlockGroup`** - writes a BlockGroup with a BlockDuration; used
   for subtitle cues. `WriteCluster` now emits a BlockGroup for any block with a
   non-zero `Duration`.
-- **`Block.Duration`** — new additive field, populated from a BlockGroup's
+- **`Block.Duration`** - new additive field, populated from a BlockGroup's
   BlockDuration by the block reader.
 - The MKV writer now emits the `Colour` element for tracks carrying colour code
   points.
-- **CLI** — `mkvgo to-mp4 [--faststart] [--skip-unsupported] <in> <out.mp4>`,
+- **CLI** - `mkvgo to-mp4 [--faststart] [--skip-unsupported] <in> <out.mp4>`,
   `mkvgo from-mp4 <in.mp4> <out.mkv>`, and `mkvgo to-webm <in> <out.webm>`
   (the latter exposing the existing `RemuxToWebM` on the command line).
 
@@ -1648,7 +1648,7 @@ low-level code with `ebml`/`mkv`) and is experimental.
 
 `ReadMeta`/`Read` now derive colour/HDR metadata from the codec bitstream when the
 container Colour element (0x55B0) is absent. Many files signal colour only in the
-codec SPS/VUI; such a track previously read as having no colour. Additive — no API
+codec SPS/VUI; such a track previously read as having no colour. Additive - no API
 change, the same `Track` fields are populated more often.
 
 ### Added
@@ -1661,7 +1661,7 @@ change, the same `Track` fields are populated more often.
     transfer / matrix from the SPS VUI.
   - **AV1** (av1C header + sequence-header OBU `color_config`): primaries /
     transfer / matrix, bit depth, profile.
-  - **VP9** (vpcC fixed fields, when a CodecPrivate is present) — best-effort.
+  - **VP9** (vpcC fixed fields, when a CodecPrivate is present) - best-effort.
 
   The recovered values are CICP / ITU-T H.273 code points feeding the existing
   `ColorSpace`/`ColorTransfer`/`ColorPrimaries`/`ColorRange`/`VideoBitDepth` fields
@@ -1681,13 +1681,13 @@ change, the same `Track` fields are populated more often.
 
 - The SPS / VUI / OBU parsing is **fail-soft**: a truncated, malformed or
   adversarial `CodecPrivate` never errors, panics, hangs or allocates unboundedly
-  — the colour fields stay nil and the read continues. The parsers are panic- and
-  hang-free on their own — a bounds-checked Exp-Golomb reader with a capped
+  - the colour fields stay nil and the read continues. The parsers are panic- and
+  hang-free on their own - a bounds-checked Exp-Golomb reader with a capped
   leading-zero run, every bitstream-driven loop count and bit width bounded, and
   emulation-prevention stripping; the `recover()` in the dispatcher is only a
   last-resort backstop. **`FuzzCodecColour`** drives random bytes straight at the
   parsers *without* that backstop, so a missing bound surfaces instead of being
-  masked — it found and fixed an out-of-range bit depth and an Exp-Golomb-driven
+  masked - it found and fixed an out-of-range bit depth and an Exp-Golomb-driven
   loop, both kept as regression seeds.
 
 ### Codecs covered
@@ -1698,7 +1698,7 @@ the latter outside the metadata path. VVC / Dolby Vision are out of scope.
 
 ## [0.5.0] - 2026-06-03
 
-Fast metadata-only read path for library indexing. Additive — `Read` / `Open`
+Fast metadata-only read path for library indexing. Additive - `Read` / `Open`
 are unchanged.
 
 ### Added
@@ -1706,14 +1706,14 @@ are unchanged.
 - **`ReadMeta(ctx, r, path)`** plus **`OpenMeta`** / **`OpenMetaWithFS`**,
   mirroring the `Read` / `Open` / `OpenWithFS` trio (also re-exported from the
   `matroska` facade). They return the same `Tracks` + `Info` (and `DurationMs`)
-  as a full `Read` — byte-identical, via the same `parseInfo` / `parseTracks`
-  logic — but stop as soon as both are parsed:
+  as a full `Read` - byte-identical, via the same `parseInfo` / `parseTracks`
+  logic - but stop as soon as both are parsed:
   - never parse the Cues index, never traverse Clusters;
   - reads are buffered (~2 KiB) so the byte-at-a-time EBML reads cost one syscall
     instead of hundreds (matters on a network-mounted library);
   - a head `SeekHead` is used to jump straight to Info/Tracks, so a file whose
     `Tracks` element sits after the first Cluster still works without scanning.
-  - `Chapters`, `Attachments`, `Tags` and `Cues` are left **nil** — call
+  - `Chapters`, `Attachments`, `Tags` and `Cues` are left **nil** - call
     `Read` / `Open` for those.
   - Hardened for untrusted input: a forged `SeekHead` cannot make the fast path
     over-read (the `SeekID` size is bounded to a real element-ID width and
@@ -1721,7 +1721,7 @@ are unchanged.
 
 ### Performance (measured)
 
-On 5 real 5–9 GB mkvmerge files (`bench/main.go`), per file:
+On 5 real 5-9 GB mkvmerge files (`bench/main.go`), per file:
 
 | read                | bytes read | time        |
 |---------------------|-----------:|------------:|
@@ -1732,36 +1732,36 @@ On 5 real 5–9 GB mkvmerge files (`bench/main.go`), per file:
 `ReadMeta` reads ~90× fewer bytes and is ~80,000× faster than the full `Read`,
 and ~600× fewer bytes / ~250× faster than forking `ffprobe`. The full `Read`'s
 cost is the Cues index (~790 KB across the five files) plus walking every
-Cluster — neither needed for indexing. A media server can now use the in-process
+Cluster - neither needed for indexing. A media server can now use the in-process
 reader for indexing instead of forking `ffprobe` per file.
 
 ## [0.4.0] - 2026-06-03
 
 Probe metadata: the track reader now exposes the fields a media indexer needs to
 match `ffprobe -show_streams`, and can distinguish "explicitly set in the file"
-from "spec default". All struct changes are additive — existing exported fields
+from "spec default". All struct changes are additive - existing exported fields
 and types are unchanged.
 
 ### Added
 
 - **Language**
-  - `Track.LanguageBCP47` — the IETF BCP-47 language element (`0x22B59D`), now
+  - `Track.LanguageBCP47` - the IETF BCP-47 language element (`0x22B59D`), now
     parsed alongside the legacy ISO 639-2 `Language` (`0x22B59C`). Modern muxers
     that write only BCP-47 are no longer mis-read.
-  - `Track.ResolvedLanguage()` — effective language with BCP-47 taking precedence
+  - `Track.ResolvedLanguage()` - effective language with BCP-47 taking precedence
     over the legacy element, per the Matroska spec.
-- **Presence flags** — tell an explicit value from an applied default:
+- **Presence flags** - tell an explicit value from an applied default:
   `Track.LanguagePresent`, `Track.DefaultPresent`, `Track.ForcedPresent`.
-- **Video colour** — parsed from the `Colour` element (`0x55B0`):
+- **Video colour** - parsed from the `Colour` element (`0x55B0`):
   `Track.ColorSpace` (MatrixCoefficients `0x55B1`), `Track.ColorTransfer`
   (`0x55BA`), `Track.ColorPrimaries` (`0x55BB`), `Track.ColorRange` (`0x55B9`) as
   raw CICP / ITU-T H.273 code points, and `Track.VideoBitDepth` (BitsPerChannel
   `0x55B2`). Helpers `ColorSpaceName()` / `ColorTransferName()` /
   `ColorPrimariesName()` / `ColorRangeName()` map them to the exact strings
   ffprobe prints, and `IsHDR()` reports BT.2020 + PQ/HLG signalling.
-- **Frame rate** — `Track.FrameRate`, derived from `DefaultDuration` (`0x23E383`,
+- **Frame rate** - `Track.FrameRate`, derived from `DefaultDuration` (`0x23E383`,
   `fps = 1e9 / ns`). Video tracks only (ffprobe reports `r_frame_rate` for video).
-- **Codec naming** — `FFprobeCodecName()` maps mkvgo's short codec names to
+- **Codec naming** - `FFprobeCodecName()` maps mkvgo's short codec names to
   ffprobe's `codec_name` where they diverge (`srt`→`subrip`,
   `vobsub`→`dvd_subtitle`, `pgs`→`hdmv_pgs_subtitle`, `dvbsub`→`dvb_subtitle`).
   The existing `CodecShortName` values are intentionally kept unchanged.
@@ -1770,7 +1770,7 @@ and types are unchanged.
 
 ### Changed
 
-- **Behaviour change — `Language` no longer defaults to `"eng"`.** A track with
+- **Behaviour change - `Language` no longer defaults to `"eng"`.** A track with
   neither a `Language` nor a `LanguageBCP47` element now reports `Language == ""`
   with `LanguagePresent == false` (previously it was synthesized to `"eng"`).
   Consumers that relied on the `"eng"` fallback must handle an empty language
@@ -1780,7 +1780,7 @@ and types are unchanged.
 
 ### Notes / known gaps
 
-- Colour fields reflect the **container** `Colour` element only — mkvgo does not
+- Colour fields reflect the **container** `Colour` element only - mkvgo does not
   decode the bitstream. When a muxer omits transfer/primaries/bit-depth from the
   container, those stay `nil`; ffprobe may still report them from the codec VUI.
   This is an explainable difference, verified against ffmpeg 7.1 on a real

@@ -13,12 +13,12 @@ import (
 // SeekHeadReserve is the byte budget reserved at the head of the Segment for
 // the SeekHead written by Finalize. When the final SeekHead does not fit (more
 // entries than the reserve allows), it is appended at the END of the file
-// instead of the reserved spot — still valid, but readers discover it later.
+// instead of the reserved spot - still valid, but readers discover it later.
 const SeekHeadReserve = 256
 
 // MetadataReserve is the Void padding WriteMetadata leaves after the metadata
 // elements, so a later in-place edit (ops.EditInPlace) that grows the metadata
-// — a longer title, added tags or chapters — still fits without a full
+// - a longer title, added tags or chapters - still fits without a full
 // rewrite. mkvpropedit reserves space the same way.
 const MetadataReserve = 1024
 
@@ -85,7 +85,7 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 
 	// Cue the cluster's first VIDEO keyframe. Every audio block carries the
 	// keyframe flag, so keying on "first keyframe-flagged block" cued audio in
-	// mixed clusters — cue times then named the audio block, not the seek
+	// mixed clusters - cue times then named the audio block, not the seek
 	// target, skewing every consumer of the index (same bug class as the
 	// reindex fix; here in the writer).
 	cued := false
@@ -102,7 +102,7 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 
 	// Audio-only file (no video track declared): cue on the first block,
 	// throttled (max 1 per 500ms per spec). A video file's cluster without a
-	// video keyframe is NOT cued — a mid-GOP cue is a false seek target.
+	// video keyframe is NOT cued - a mid-GOP cue is a false seek target.
 	if !cued && len(blocks) > 0 && len(m.videoTracks) == 0 {
 		lastCueTime := int64(-minCueIntervalMs - 1)
 		if len(m.Cues) > 0 {
@@ -120,7 +120,7 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 }
 
 // WriteTagsElement writes a Tags element at the current position (typically
-// after the clusters, for tags only known once the media has streamed — e.g.
+// after the clusters, for tags only known once the media has streamed - e.g.
 // per-track statistics) and records it for the SeekHead, so head-only readers
 // following SeekHead→Tags find it without a cluster scan.
 func (m *MKVWriter) WriteTagsElement(tags []mkv.Tag) error {

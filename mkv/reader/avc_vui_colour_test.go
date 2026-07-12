@@ -119,7 +119,7 @@ func TestAVCVUIMatrixOnly(t *testing.T) {
 	}
 }
 
-// TestAVCVUIAspectRatio covers the SAR read from the SPS VUI aspect_ratio_info —
+// TestAVCVUIAspectRatio covers the SAR read from the SPS VUI aspect_ratio_info  -
 // the most common H.264 SAR signalling, head-only in the avcC. No pasp box.
 func TestAVCVUIAspectRatio(t *testing.T) {
 	w, h := uint32(1280), uint32(720)
@@ -154,7 +154,7 @@ func TestPaspTakesPrecedenceOverVUI(t *testing.T) {
 
 // TestAVCColourInBandSPSOnly documents an accepted head-only limitation. This is
 // a real Main@L4.2 avcC (1280x720) whose SPS sets video_signal_type_present_flag
-// = 0 — it carries NO colour. The file's BT.709 lives only in a second, in-band
+// = 0 - it carries NO colour. The file's BT.709 lives only in a second, in-band
 // SPS that ffprobe reaches by decoding a frame; head-only mkvgo reads the avcC's
 // SPS and correctly reports no colour. Same class as implicit in-band SBR/PS: the
 // data is in no header we parse, so reporting "" is correct, not a bug.

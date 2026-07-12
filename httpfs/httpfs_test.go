@@ -46,7 +46,7 @@ func TestOpenMetaOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.BytesFetched() >= st.Size() {
-		t.Errorf("probe fetched %d bytes of a %d-byte file — not head-only", f.BytesFetched(), st.Size())
+		t.Errorf("probe fetched %d bytes of a %d-byte file - not head-only", f.BytesFetched(), st.Size())
 	}
 	t.Logf("probe: %d bytes fetched of %d (%d requests)", f.BytesFetched(), st.Size(), requests)
 }

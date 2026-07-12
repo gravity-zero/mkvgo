@@ -9,7 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-// zz_fixtures_test.go — shared test fixtures for the CLI command integration
+// zz_fixtures_test.go - shared test fixtures for the CLI command integration
 // tests. richMKV/richContainer give a metadata-rich Matroska file (no media
 // frames) for the inspection and editing commands; sampleMKV / sampleMP4 give a
 // real file with frames (copied from internal/testdata) for the commands that
@@ -17,7 +17,7 @@ import (
 // `capture` helper and `writeMKV` live in the existing test files.
 
 // mustFatal asserts that fn triggers Fatal (the process-exit hook). It overrides
-// the hook to panic, runs fn, and recovers — so the CLI error paths are exercised
+// the hook to panic, runs fn, and recovers - so the CLI error paths are exercised
 // in-process. out is whatever fn printed to stderr before exiting.
 func mustFatal(t *testing.T, fn func()) {
 	t.Helper()

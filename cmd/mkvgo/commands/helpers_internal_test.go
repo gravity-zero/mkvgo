@@ -2,7 +2,7 @@ package commands
 
 import "testing"
 
-// helpers_internal_test.go — white-box tests for unexported parsing helpers.
+// helpers_internal_test.go - white-box tests for unexported parsing helpers.
 
 // TestSplitTrackSpec locks in that the file:trackID parser splits on the LAST
 // colon, so a path that itself contains a colon (a Windows drive letter, or a

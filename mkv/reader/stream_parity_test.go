@@ -11,7 +11,7 @@ import (
 
 // TestStreamSeekableParity verifies the streaming parser (ReadStream) captures
 // the same track ContentEncodings (HeaderStripping) and nested SimpleTags as the
-// seekable parser (Read) — the drift the audit flagged.
+// seekable parser (Read) - the drift the audit flagged.
 func TestStreamSeekableParity(t *testing.T) {
 	headerStrip := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 

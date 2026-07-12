@@ -104,8 +104,8 @@ func TestParseMP4SidxKeyframeFallbackWhenNoMfra(t *testing.T) {
 		{dur: 1000, sap: true, sapType: 1},
 	}))
 	// The init segment alone has no fragments (no moof/mdat), so appending the
-	// sidx right after it still leaves it "before the first fragment" — exactly
-	// where readSidxKeyframes looks — and there is no mfra at the tail for
+	// sidx right after it still leaves it "before the first fragment" - exactly
+	// where readSidxKeyframes looks - and there is no mfra at the tail for
 	// readFragmentKeyframes to find.
 	file := append(append([]byte{}, initData...), sidx...)
 	fsize := int64(len(file))
@@ -358,7 +358,7 @@ func TestReadFragmentSamplesSizeZeroExtendsToEnd(t *testing.T) {
 // TestReadFragmentSamplesMoofExceedsLimit kills the readFragmentSamples survivor
 // on the maxFragMoofBytes rejection: the check runs before any read of the
 // (declared, not actually present) huge payload, so it needs no multi-GB
-// allocation to exercise — only a size field large enough to trip it and a
+// allocation to exercise - only a size field large enough to trip it and a
 // caller-supplied `size` bound that tolerates it.
 func TestReadFragmentSamplesMoofExceedsLimit(t *testing.T) {
 	var hdr bw
@@ -544,8 +544,8 @@ func TestParseSttsNoSamplesExpectedShortCircuits(t *testing.T) {
 // --- inband_colour.go: firstSampleLoc co64 (64-bit chunk offset) path (:32) --
 
 // TestFirstSampleLocCo64 kills the survivor on the co64 (64-bit chunk offset)
-// fallback: no existing fixture omits stco in favour of co64, so this branch —
-// the large-file counterpart of stco — was never exercised.
+// fallback: no existing fixture omits stco in favour of co64, so this branch  -
+// the large-file counterpart of stco - was never exercised.
 func TestFirstSampleLocCo64(t *testing.T) {
 	var stsz bw
 	stsz.u32(0)   // version/flags

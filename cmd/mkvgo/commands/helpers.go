@@ -362,7 +362,7 @@ func containerForJSON(c *matroska.Container) any {
 }
 
 // splitTrackSpec splits a "file:trackID" argument on its LAST colon, so a path
-// that itself contains a colon survives — most importantly a Windows
+// that itself contains a colon survives - most importantly a Windows
 // drive-letter path (C:\dir\file.mkv:1). ok is false when there is no separator
 // leaving a non-empty path on the left and a non-empty trackID on the right.
 func splitTrackSpec(spec string) (path, trackID string, ok bool) {

@@ -379,7 +379,7 @@ func TestReadStream2ChapterTitle(t *testing.T) {
 }
 
 // TestReadStream2ChapterSubAtom kills stream.go:637 (nested IDChapterAtom inside
-// parseStreamChapterAtom) — distinct from the depth arithmetic test.
+// parseStreamChapterAtom) - distinct from the depth arithmetic test.
 // The outer chapter must have a SubChapters slice of length 1.
 func TestReadStream2ChapterSubAtom(t *testing.T) {
 	inner := masterElem(mkv.IDChapterAtom, uintElem(mkv.IDChapterUID, 2, 1))
@@ -453,7 +453,7 @@ func TestReadStream2AttachmentFields(t *testing.T) {
 // the innermost is at depth=64. Original (depth>64) succeeds; mutation (>=64) errors.
 func TestReadStream2SimpleTagDepth65OK(t *testing.T) {
 	st := nestedSimpleTags(maxTagDepth + 1) // 65 levels; innermost at depth=64
-	tag := masterElem(mkv.IDTag, st)        // no extra wrapper — outermost is depth=0
+	tag := masterElem(mkv.IDTag, st)        // no extra wrapper - outermost is depth=0
 	tags := masterElem(mkv.IDTags, tag)
 
 	var seg bytes.Buffer
@@ -476,7 +476,7 @@ func TestReadStream2SimpleTagDepth65OK(t *testing.T) {
 // (ARITHMETIC_BASE: depth+1 → depth, never incrementing, depth limit never fires).
 func TestReadStream2SimpleTagDepth66Error(t *testing.T) {
 	st := nestedSimpleTags(maxTagDepth + 2) // 66 levels; innermost at depth=65 > 64
-	tag := masterElem(mkv.IDTag, st)        // no extra wrapper — outermost is depth=0
+	tag := masterElem(mkv.IDTag, st)        // no extra wrapper - outermost is depth=0
 	tags := masterElem(mkv.IDTags, tag)
 
 	var seg bytes.Buffer

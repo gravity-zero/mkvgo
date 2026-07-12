@@ -69,7 +69,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 }
 
 // statsTags builds mkvmerge-style per-track statistics tags (BPS, DURATION,
-// NUMBER_OF_FRAMES, NUMBER_OF_BYTES), keyed by track UID — the values ffprobe
+// NUMBER_OF_FRAMES, NUMBER_OF_BYTES), keyed by track UID - the values ffprobe
 // surfaces as TAG:BPS etc. and matroska.WithBitrate reads back head-only.
 func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 	var out []mkv.Tag

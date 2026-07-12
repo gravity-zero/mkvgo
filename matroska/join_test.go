@@ -75,7 +75,7 @@ func TestJoin(t *testing.T) {
 	origCounts := countBlocks(t, srcPath, c.Info.TimecodeScale)
 	for id, origN := range origCounts {
 		if counts[id] != origN {
-			t.Errorf("track %d: joined=%d, original=%d — blocks lost at the seam", id, counts[id], origN)
+			t.Errorf("track %d: joined=%d, original=%d - blocks lost at the seam", id, counts[id], origN)
 		}
 	}
 }

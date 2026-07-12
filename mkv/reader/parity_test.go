@@ -38,7 +38,7 @@ func TestDuplicateTracksFirstWins(t *testing.T) {
 		t.Fatalf("ReadMeta: %v", err)
 	}
 	if len(cm.Tracks) != len(c.Tracks) {
-		t.Errorf("ReadMeta tracks = %d, Read tracks = %d — must agree", len(cm.Tracks), len(c.Tracks))
+		t.Errorf("ReadMeta tracks = %d, Read tracks = %d - must agree", len(cm.Tracks), len(c.Tracks))
 	}
 }
 

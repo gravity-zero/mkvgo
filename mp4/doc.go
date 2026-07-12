@@ -4,7 +4,7 @@
 // It is deliberately isolated from mkvgo's EBML core: MP4 is a box format with
 // no bytes in common with EBML, so this package shares no low-level code with
 // ebml/ or the Matroska reader/writer internals. It composes with them only
-// through the public mkv types and the streaming block reader — reading
+// through the public mkv types and the streaming block reader - reading
 // Matroska blocks and emitting MP4 boxes (RemuxToMP4), and the reverse
 // (RemuxFromMP4).
 //

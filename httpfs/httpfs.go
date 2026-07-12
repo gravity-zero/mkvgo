@@ -1,6 +1,6 @@
 // Package httpfs implements the mkv.FS port over HTTP(S) Range requests, so
 // any read-only mkvgo operation works on a remote URL as a path. Combined with
-// the head-only probe, inspecting a remote file costs a few ranged kilobytes —
+// the head-only probe, inspecting a remote file costs a few ranged kilobytes  -
 // indexing a media library on S3/HTTP transfers no full file.
 //
 //	c, err := matroska.OpenMetaWithFS(ctx, url, httpfs.New().Port())
@@ -226,7 +226,7 @@ func (i fileInfo) IsDir() bool        { return false }
 func (i fileInfo) Sys() any           { return nil }
 
 // Hybrid returns an FS that reads http(s) URLs through HTTP Range requests and
-// passes every other path — including all writes — to the operating system.
+// passes every other path - including all writes - to the operating system.
 // It is what a "remux from a URL to a local file" invocation needs, since one
 // FS serves both the source and the destination:
 //

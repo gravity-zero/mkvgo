@@ -6,7 +6,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// codec_colour_kill_test.go — direct unit tests of the bitstream-parsing
+// codec_colour_kill_test.go - direct unit tests of the bitstream-parsing
 // primitives (bit reader, Exp-Golomb, nonEmpty) and the colour-fill precedence.
 // Asserting exact decoded values pins the arithmetic/boundary mutations gremlins
 // left surviving in codec_colour.go, which the higher-level crafted-SPS tests do

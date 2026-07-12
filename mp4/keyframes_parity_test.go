@@ -16,7 +16,7 @@ func TestKeyframesOnlyMatchesFullTable(t *testing.T) {
 	cheap := keyframesViaMode(t, path, sampleKeyframes)
 
 	if len(cheap) == 0 {
-		t.Fatal("fixture produced no keyframes — test would be vacuous")
+		t.Fatal("fixture produced no keyframes - test would be vacuous")
 	}
 	if !reflect.DeepEqual(cheap, full) {
 		t.Errorf("keyframes-only = %v\n        full table = %v", cheap, full)

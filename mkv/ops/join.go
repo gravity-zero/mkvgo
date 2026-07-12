@@ -28,7 +28,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	first := conts[0]
 
 	// Every source must line up with the first: same track count, types AND codecs
-	// (a codec mismatch — e.g. H.264 + HEVC — would silently produce a broken file).
+	// (a codec mismatch - e.g. H.264 + HEVC - would silently produce a broken file).
 	var totalDurationMs int64
 	for i, c := range conts {
 		if i > 0 {

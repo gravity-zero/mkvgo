@@ -9,7 +9,7 @@ import (
 // TestColourDetermined covers the colour-determinacy signal: a stream whose VUI
 // is parsed reports ColourDetermined even when the colour resolves to
 // "unspecified" (the confirmed-SDR case), while a stream whose colour cannot be
-// read at all stays undetermined — letting a caller distinguish the two.
+// read at all stays undetermined - letting a caller distinguish the two.
 func TestColourDetermined(t *testing.T) {
 	// AVC with a VUI carrying colour_description (present) but every code point
 	// "unspecified" (2): determined, yet every Color* stays nil.

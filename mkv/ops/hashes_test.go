@@ -61,7 +61,7 @@ func TestContentHashesRoundTrip(t *testing.T) {
 		t.Errorf("CONTENT_SHA256 tags = %d, want 1 (idempotent re-hash)", count)
 	}
 
-	// Flip one payload byte (bit rot) — verify must flag it.
+	// Flip one payload byte (bit rot) - verify must flag it.
 	raw, err := os.ReadFile(hashed)
 	if err != nil {
 		t.Fatal(err)

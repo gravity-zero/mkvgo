@@ -32,7 +32,7 @@ func TestExtractSubtitleNotFound(t *testing.T) {
 }
 
 // TestExtractSubtitleReal is an opt-in smoke test against a real file the
-// developer points at — e.g. a real 4K HEVC HDR rip with a text subtitle track.
+// developer points at - e.g. a real 4K HEVC HDR rip with a text subtitle track.
 // No file is committed; set MKVGO_TEST_MKV to run it. It extracts the first
 // subtitle track and checks the SRT has timing markers.
 func TestExtractSubtitleReal(t *testing.T) {

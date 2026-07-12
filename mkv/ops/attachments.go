@@ -35,7 +35,7 @@ func AddAttachment(ctx context.Context, srcPath, dstPath string, att mkv.Attachm
 }
 
 // RemoveAttachment rewrites srcPath to dstPath without the attachment matching
-// target — a decimal attachment ID or an exact attachment name. It errors
+// target - a decimal attachment ID or an exact attachment name. It errors
 // (before writing anything) when no attachment matches.
 func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts ...mkv.Options) error {
 	id, idErr := strconv.ParseUint(target, 10, 64)

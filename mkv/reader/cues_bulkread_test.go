@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// callCountingReadSeeker counts the number of Read CALLS — a proxy for syscalls
-// on a real *os.File — rather than bytes read. parseCues' bulk read does not
+// callCountingReadSeeker counts the number of Read CALLS - a proxy for syscalls
+// on a real *os.File - rather than bytes read. parseCues' bulk read does not
 // change how many bytes cross the boundary (the whole Cues body is read either
 // way); it collapses thousands of tiny per-CuePoint reads into one, which only
 // shows up as a drop in call count. On a network FS each call is a round-trip,
@@ -32,7 +32,7 @@ func (c *callCountingReadSeeker) Seek(off int64, whence int) (int64, error) {
 // needs at least one Read per CuePoint just for its header, so with n CuePoints
 // the old path issued >n Read calls; the bulk read keeps the entire file parse
 // (header + info + tracks + one Cues read + a skipped cluster) far below n. The
-// Cues are still parsed identically — the values must match.
+// Cues are still parsed identically - the values must match.
 func TestParseCuesReadsBodyInBulk(t *testing.T) {
 	const n = 2000
 	data := segmentMKV(infoElem(), tracksElem(), cuesElem(n), clusterElem())

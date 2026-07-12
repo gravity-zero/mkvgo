@@ -78,7 +78,7 @@ func TestParseKind(t *testing.T) {
 			w.u8(0)
 			w.bytes([]byte(value))
 			w.u8(0)
-		})[8:] // strip the box header — parseKind reads the payload
+		})[8:] // strip the box header - parseKind reads the payload
 	}
 	if s, v := parseKind(kind("forced-subtitle")); s != dashRoleScheme || v != "forced-subtitle" {
 		t.Errorf("parseKind = (%q, %q), want (%q, forced-subtitle)", s, v, dashRoleScheme)
@@ -89,7 +89,7 @@ func TestParseKind(t *testing.T) {
 }
 
 // TestParseTrakReadsForcedKind checks that a track-level DASH-role kind box sets
-// the forced disposition — including on non-subtitle tracks (a real muxing quirk).
+// the forced disposition - including on non-subtitle tracks (a real muxing quirk).
 func TestParseTrakReadsForcedKind(t *testing.T) {
 	tr, _, err := parseTrak(craftTrak("vide", "jpeg", "forced-subtitle", 4), 1<<20, 1000, sampleFull)
 	if err != nil {
@@ -434,7 +434,7 @@ func TestParsePasp(t *testing.T) {
 
 // TestParseColr covers the colour-type handling: 'nclc' (no range byte) is read
 // like 'nclx', and a stream specifying only the matrix (BT.709) with unspecified
-// primaries/transfer still reports its colour_space — matching ffprobe.
+// primaries/transfer still reports its colour_space - matching ffprobe.
 func TestParseColr(t *testing.T) {
 	deref := func(p *uint16) int {
 		if p == nil {
@@ -477,7 +477,7 @@ func TestTruncateRunes(t *testing.T) {
 	if n := truncateRunes([]byte("abc"), 10); n != 3 {
 		t.Errorf("max>len → %d, want 3", n)
 	}
-	// "aé" = 0x61, 0xC3, 0xA9 — truncating at 2 lands mid-rune → back off to 1.
+	// "aé" = 0x61, 0xC3, 0xA9 - truncating at 2 lands mid-rune → back off to 1.
 	if n := truncateRunes([]byte("aé"), 2); n != 1 {
 		t.Errorf("mid-rune truncation = %d, want 1", n)
 	}

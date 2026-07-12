@@ -9,7 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// bareHvcC builds a 23-byte HEVCDecoderConfigurationRecord with numOfArrays==0 —
+// bareHvcC builds a 23-byte HEVCDecoderConfigurationRecord with numOfArrays==0  -
 // the "header only, no SPS" hvcC that streaming-style HDR muxes write, keeping
 // the parameter sets in-band. Main 10, 10-bit, 4-byte NAL length prefix.
 func bareHvcC() []byte {
@@ -91,10 +91,10 @@ func inBandColourMKV(hvcC, frame []byte) []byte {
 
 // TestInBandColourFallback proves the opt-in recovers colour from an in-band SPS
 // (bare hvcC, no container Colour), while the default head-only read leaves it
-// nil — and never reads the cluster.
+// nil - and never reads the cluster.
 func TestInBandColourFallback(t *testing.T) {
 	sps := extractHEVCSPSNAL(t, mustHex(t, hevcHDRPrivateHex))
-	vps := []byte{0x40, 0x01, 0xde, 0xad} // dummy VPS (type 32) before the SPS — must be skipped
+	vps := []byte{0x40, 0x01, 0xde, 0xad} // dummy VPS (type 32) before the SPS - must be skipped
 	frame := append(lenPrefixed4(vps), lenPrefixed4(sps)...)
 	data := inBandColourMKV(bareHvcC(), frame)
 

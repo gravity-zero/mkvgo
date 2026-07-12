@@ -8,7 +8,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
-// subtitle_webvtt.go — extract an embedded MP4 text subtitle track to WebVTT,
+// subtitle_webvtt.go - extract an embedded MP4 text subtitle track to WebVTT,
 // in-process, replacing an `ffmpeg -map 0:s:N -f webvtt` fork. tx3g (mov_text) and
 // native wvtt samples are decoded to cue text; each sample's composition time and
 // duration give the cue timing.

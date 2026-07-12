@@ -49,7 +49,7 @@ func CmdHash(args []string) {
 // CmdVerify recomputes the per-track content hashes and compares them with the
 // stored hashes (MKV: CONTENT_SHA256 tags; MP4: the freeform atoms written by
 // `to-mp4 --hash`). Exits 1 on any mismatch (bit rot, truncation, transfer
-// corruption) — scriptable like validate.
+// corruption) - scriptable like validate.
 func CmdVerify(args []string) {
 	for _, a := range args {
 		rejectFlagArg(a)

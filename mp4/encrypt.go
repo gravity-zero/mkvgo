@@ -1,6 +1,6 @@
 package mp4
 
-// encrypt.go — HLS AES-128 segment encryption (EXT-X-KEY METHOD=AES-128):
+// encrypt.go - HLS AES-128 segment encryption (EXT-X-KEY METHOD=AES-128):
 // each media segment is encrypted whole with AES-128-CBC + PKCS#7 padding,
 // the IV being the segment's media sequence number (the HLS default when the
 // playlist carries no IV attribute), or a fixed caller-supplied IV. The init

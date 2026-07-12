@@ -11,7 +11,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// RemoveTrack must drop the tags that target a removed track's UID — leaving
+// RemoveTrack must drop the tags that target a removed track's UID - leaving
 // them in would produce orphan tags pointing at a track that no longer exists.
 // Global tags (TargetID 0) and tags on kept tracks survive.
 func TestRemoveTrack_DropsTagsOfRemovedTrack(t *testing.T) {

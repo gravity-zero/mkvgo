@@ -12,7 +12,7 @@ import (
 )
 
 // countingSeeker counts the bytes and the calls actually read from the
-// source — the probes that prove a filtered walk skips payloads instead of
+// source - the probes that prove a filtered walk skips payloads instead of
 // reading them, and reads in bulk chunks instead of per block (each source
 // read is a round trip on a network filesystem).
 type countingSeeker struct {
@@ -55,7 +55,7 @@ func writeBlockGroup(cluster *bytes.Buffer, track byte, relTC int16, data []byte
 }
 
 // buildTwoTrackFixture builds a segment mixing a heavy track 1 (256 KiB
-// payloads — comfortably above the seek threshold: SimpleBlocks and a
+// payloads - comfortably above the seek threshold: SimpleBlocks and a
 // BlockGroup) with a light track 2 (small text payloads: SimpleBlocks, an
 // Xiph-laced block and a BlockGroup with duration).
 func buildTwoTrackFixture(t *testing.T) []byte {
@@ -118,7 +118,7 @@ func drain(t *testing.T, br *BlockReader) []mkv.Block {
 }
 
 // A track-filtered walk must return exactly the blocks a full walk returns
-// for that track — same order, timecodes, keyframes, durations, data —
+// for that track - same order, timecodes, keyframes, durations, data  -
 // across SimpleBlocks, laced blocks and BlockGroups.
 func TestBlockReaderKeepTracksParity(t *testing.T) {
 	fixture := buildTwoTrackFixture(t)
@@ -167,7 +167,7 @@ func TestBlockReaderKeepTracksBoundedIO(t *testing.T) {
 		t.Fatal("filtered walk returned no blocks")
 	}
 	if limit := int64(len(fixture)) / 3; src.n > limit {
-		t.Errorf("filtered walk read %d of %d bytes (%.0f%%) — non-kept payloads must be seeked past",
+		t.Errorf("filtered walk read %d of %d bytes (%.0f%%) - non-kept payloads must be seeked past",
 			src.n, len(fixture), 100*float64(src.n)/float64(len(fixture)))
 	}
 }
@@ -204,10 +204,10 @@ func TestBlockReaderKeepTracksTruncatedSkip(t *testing.T) {
 }
 
 // buildSmallFrameFixture interleaves ~7 KiB track-1 payloads (the measured
-// median of a real 1080p x264 encode — SMALLER than any fixed seek threshold)
+// median of a real 1080p x264 encode - SMALLER than any fixed seek threshold)
 // with sparse track-2 cues. This is the regime the first KeepTracks cut
 // missed: per-frame skips fell below the seek threshold and the walk degraded
-// to a full read through a tiny buffer — slower than a plain sequential pass.
+// to a full read through a tiny buffer - slower than a plain sequential pass.
 func buildSmallFrameFixture(t *testing.T) []byte {
 	t.Helper()
 	frame := make([]byte, 7*1024)
@@ -235,7 +235,7 @@ func buildSmallFrameFixture(t *testing.T) []byte {
 }
 
 // When payloads are too small to seek over, the filtered walk cannot read
-// less than the file — but it must then behave like a BULK sequential read:
+// less than the file - but it must then behave like a BULK sequential read:
 // few large source reads, not one small read per block. Read-call count is
 // the proxy for per-request cost (network filesystems pay a round trip per
 // call): reading a ~7 MB fixture must take at most size/32KiB calls, and no
@@ -254,11 +254,11 @@ func TestBlockReaderKeepTracksSmallFramesBulkReads(t *testing.T) {
 		t.Fatalf("got %d track-2 blocks, want %d", len(got), want)
 	}
 	if maxCalls := int64(len(fixture))/(32<<10) + 8; src.calls > maxCalls {
-		t.Errorf("small-frame walk issued %d source reads for %d bytes (max %d) — must read in bulk chunks, not per block",
+		t.Errorf("small-frame walk issued %d source reads for %d bytes (max %d) - must read in bulk chunks, not per block",
 			src.calls, len(fixture), maxCalls)
 	}
 	if limit := int64(len(fixture)) + int64(len(fixture))/10; src.n > limit {
-		t.Errorf("small-frame walk read %d bytes for a %d-byte file — bytes are being re-read", src.n, len(fixture))
+		t.Errorf("small-frame walk read %d bytes for a %d-byte file - bytes are being re-read", src.n, len(fixture))
 	}
 }
 
@@ -293,7 +293,7 @@ func buildTimedClusterFixture(t *testing.T, numClusters int) []byte {
 // StopBeforeClusterMs must stop the walk before delivering anything from the
 // first cluster whose timestamp exceeds the limit; the limit can be raised on
 // the same reader to continue, and ResumeOffset must allow a NEW reader to
-// pick up exactly where the walk stopped — concatenation equals a full walk.
+// pick up exactly where the walk stopped - concatenation equals a full walk.
 func TestBlockReaderStopBeforeClusterMs(t *testing.T) {
 	fixture := buildTimedClusterFixture(t, 5)
 
@@ -355,7 +355,7 @@ func TestBlockReaderStopBeforeClusterMs(t *testing.T) {
 
 // On a sparse filtered track the limit is what bounds the walk: with track 2
 // present only in the first cluster, a filtered walk with a limit must stop
-// at the limit — NOT silently scan every remaining cluster hunting for a
+// at the limit - NOT silently scan every remaining cluster hunting for a
 // block that never comes.
 func TestBlockReaderStopBoundsSparseFilteredWalk(t *testing.T) {
 	fixture := buildTimedClusterFixture(t, 50)
@@ -373,7 +373,7 @@ func TestBlockReaderStopBoundsSparseFilteredWalk(t *testing.T) {
 			break
 		}
 		if err == io.EOF {
-			t.Fatal("filtered walk ran to EOF — the cluster limit did not bound it")
+			t.Fatal("filtered walk ran to EOF - the cluster limit did not bound it")
 		}
 		if err != nil {
 			t.Fatalf("Next: %v", err)
@@ -384,6 +384,6 @@ func TestBlockReaderStopBoundsSparseFilteredWalk(t *testing.T) {
 		t.Fatalf("got %d blocks, want the single track-2 cue", len(got))
 	}
 	if limit := int64(len(fixture)) / 2; src.n > limit {
-		t.Errorf("bounded filtered walk read %d of %d bytes — it should stop at the limit", src.n, len(fixture))
+		t.Errorf("bounded filtered walk read %d of %d bytes - it should stop at the limit", src.n, len(fixture))
 	}
 }

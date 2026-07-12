@@ -6,7 +6,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// keyframes.go — derive the keyframe index from the Cues seek index. The Cues are
+// keyframes.go - derive the keyframe index from the Cues seek index. The Cues are
 // read head-only (a SeekHead jump to one element, no Cluster scan) during the
 // metadata pass; this turns them into Container.Keyframes so a caller gets the
 // keyframe timestamps from the same OpenMeta/Read it already does.

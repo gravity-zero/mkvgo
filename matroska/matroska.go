@@ -1,6 +1,6 @@
 // Package matroska is the stable, supported public API of mkvgo: a small,
 // curated facade over the lower-level building blocks in mkv and its
-// subpackages. Prefer it for application code — its exported surface is the one
+// subpackages. Prefer it for application code - its exported surface is the one
 // kept backward-compatible.
 //
 // The mkv, mkv/reader, mkv/writer, mkv/ops and mkv/subtitle packages are
@@ -121,7 +121,7 @@ type KeyframeSample = ops.KeyframeSample
 // ExtractKeyframeSample returns the video keyframe nearest atMs, seeked
 // through the Cues (a few bounded reads) and packed for a decoder: Annex-B
 // with parameter sets for H.264/HEVC, an IVF wrapper for VP8/VP9/AV1. The
-// building block of thumbnail/storyboard pipelines — decoding the image is
+// building block of thumbnail/storyboard pipelines - decoding the image is
 // the consumer's job (e.g. `ffmpeg -i frame.h264 -frames:v 1 thumb.jpg`).
 func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts ...Options) (*KeyframeSample, error) {
 	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
@@ -130,14 +130,14 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 // --- Playability / ABR ladder ---
 
 // Target, TrackVerdict and PlayabilityReport are the playability decision
-// model — see ops.Target for the capability fields and TargetByName for the
+// model - see ops.Target for the capability fields and TargetByName for the
 // built-in profiles.
 type Target = ops.Target
 type TrackVerdict = ops.TrackVerdict
 type PlayabilityReport = ops.PlayabilityReport
 
 // Playability evaluates every track of the file at path against target
-// (head-only metadata only — no decode) and returns the per-track and
+// (head-only metadata only - no decode) and returns the per-track and
 // overall direct-play/remux/transcode verdicts. See ops.Playability.
 func Playability(ctx context.Context, path string, target Target, opts ...Options) (*PlayabilityReport, error) {
 	return ops.Playability(ctx, path, target, opts...)
@@ -151,13 +151,13 @@ func TargetByName(name string) (Target, bool) {
 	return ops.TargetByName(name)
 }
 
-// Rung and LadderInput are the ABR ladder recommendation model — see
+// Rung and LadderInput are the ABR ladder recommendation model - see
 // ops.RecommendLadder.
 type Rung = ops.Rung
 type LadderInput = ops.LadderInput
 
 // RecommendLadder returns a sensible ABR ladder capped at the source
-// resolution/bitrate: guidance, not a guarantee — mkvgo never transcodes.
+// resolution/bitrate: guidance, not a guarantee - mkvgo never transcodes.
 // See ops.RecommendLadder.
 func RecommendLadder(in LadderInput) []Rung {
 	return ops.RecommendLadder(in)
@@ -216,7 +216,7 @@ func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes
 
 // WithKeyframeIndex builds a COMPLETE video keyframe index (every keyframe, equal
 // to ffprobe -skip_frame nokey) for a Cues-less Matroska, via one sequential
-// header-only pass over the Segment — no demux, no decode. Use it for the "no
+// header-only pass over the Segment - no demux, no decode. Use it for the "no
 // external fallback" path; prefer WithSampledKeyframes for a cheaper coarse
 // index. Files with Cues are never scanned. See reader.WithKeyframeIndex.
 func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
@@ -244,7 +244,7 @@ func TrackDefaultDurations(tracks []mkv.Track) map[uint64]int64 {
 
 // --- Writer ---
 
-// Write serialises c's METADATA ONLY — EBML header, Info, Tracks, Chapters,
+// Write serialises c's METADATA ONLY - EBML header, Info, Tracks, Chapters,
 // Attachments and Tags. It writes NO Clusters (a Container holds no block
 // data) and no Cues/SeekHead, so the result is not a playable media file.
 // To produce a complete file, remux from a source (RemuxToWebM, mp4.RemuxToMP4,
@@ -279,7 +279,7 @@ func WebMDocTypeVersion(c *Container) uint64 {
 
 // RemuxToWebM reads srcPath and writes a complete, playable WebM file to
 // dstPath, copying the media verbatim. Rejects sources with non-WebM codecs.
-// Non-subset elements (Chapters/Attachments/Tags) are dropped — see
+// Non-subset elements (Chapters/Attachments/Tags) are dropped - see
 // WebMNonSubsetElements to detect that loss beforehand.
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
 	return ops.RemuxToWebM(ctx, srcPath, dstPath, opts...)
@@ -402,7 +402,7 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...Options) ([
 	return ops.CompareBlocks(ctx, pathA, pathB, opts...)
 }
 
-// CompareContainers diffs the metadata of two already-parsed containers —
+// CompareContainers diffs the metadata of two already-parsed containers  -
 // format-agnostic, so an MKV can be compared against an mp4.OpenMeta result to
 // verify a remux round-trip. See ops.CompareContainers.
 func CompareContainers(a, b *Container) []Diff {

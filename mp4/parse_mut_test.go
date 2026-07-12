@@ -13,7 +13,7 @@ import (
 
 // parse_mut_test.go kills mutation-testing survivors in parse.go: the box
 // header/size arithmetic, the lazy-moov reader's bookkeeping, the fragmented
-// random-access index readers, and the per-track metadata derivations —
+// random-access index readers, and the per-track metadata derivations  -
 // checked against exact parsed values or the accept/reject decision on
 // deliberately malformed input.
 
@@ -40,7 +40,7 @@ func TestIterBoxes64BitBoxExactBoundary(t *testing.T) {
 	}
 
 	// off+16 == len(buf): exactly the 16-byte largesize header, no payload
-	// bytes needed for the truncation check itself — must NOT be rejected as
+	// bytes needed for the truncation check itself - must NOT be rejected as
 	// truncated (a later, unrelated check may still reject the box for
 	// lacking its declared payload, but not with this specific error).
 	exact16 := buf[:len(first)+16]
@@ -467,7 +467,7 @@ func TestHeaderConstantFrameDurNsBoundaryAndArithmetic(t *testing.T) {
 // TestParseKindEmptyScheme kills the CONDITIONALS_BOUNDARY on `i < 0`
 // (parse.go's parseKind): a payload whose scheme is the empty string (a null
 // byte immediately after the version/flags) must yield scheme="" and the
-// value that follows — not treat the whole remainder as the scheme.
+// value that follows - not treat the whole remainder as the scheme.
 func TestParseKindEmptyScheme(t *testing.T) {
 	payload := append([]byte{0, 0, 0, 0}, 0) // vf(4) + an immediate null (empty scheme)
 	payload = append(payload, []byte("myvalue")...)

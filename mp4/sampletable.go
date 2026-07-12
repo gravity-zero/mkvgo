@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-// sampletable.go — turns an stbl's child boxes into a flat list of samples with
+// sampletable.go - turns an stbl's child boxes into a flat list of samples with
 // absolute file offsets and millisecond decode/composition times. Everything is
 // bounds-checked: a malformed table yields an error, never a panic or an
 // attacker-sized allocation.
@@ -16,8 +16,8 @@ type stscEntry struct {
 }
 
 // buildKeyframeTimes computes a video track's keyframe presentation times (ms,
-// ascending, de-duplicated) from the sync-sample table only — stss for which
-// samples are sync, stts/ctts for their times — WITHOUT resolving byte offsets
+// ascending, de-duplicated) from the sync-sample table only - stss for which
+// samples are sync, stts/ctts for their times - WITHOUT resolving byte offsets
 // (no stsz/stco/stsc). It is the cheap path behind the metadata keyframe index;
 // remux/extract use buildSampleTable, which also yields the offsets they need.
 // The cts computation mirrors buildSampleTable exactly (including the edit-list
@@ -63,7 +63,7 @@ func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64,
 		if collectSync && (sync == nil || sync[i+1]) {
 			times = append(times, cts)
 		}
-		endMs = cts // last sample's cts — the track's end, matching the full table
+		endMs = cts // last sample's cts - the track's end, matching the full table
 		dts += int64(durations[i])
 	}
 	return sortDedupTimes(times), endMs, nil
@@ -122,7 +122,7 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 	// Resolve each sample's file offset from the chunk layout. The stsc entries are
 	// keyed by ascending first-chunk and the chunks are walked in order, so a single
 	// monotonic cursor (ei) selects the entry for each chunk in O(chunks + entries)
-	// — calling samplesForChunk per chunk would be O(chunks × entries), a quadratic
+	// - calling samplesForChunk per chunk would be O(chunks × entries), a quadratic
 	// blow-up a forged stco+stsc pair could weaponise into a multi-second stall.
 	si := 0
 	ei := 0
@@ -201,7 +201,7 @@ func mustFind(boxes []memBox, typ string) []byte {
 
 // parseStsz returns the per-sample sizes. fileSize bounds the constant-size path
 // (sampleSize != 0), where the table carries no per-sample bytes: a tiny stsz must
-// not be trusted to declare more samples than the file can physically hold — the
+// not be trusted to declare more samples than the file can physically hold - the
 // classic complexity DoS that maxSamples alone (134M) does not stop. Pass
 // fileSize == 0 to disable that bound (callers with no file size). The allocation
 // happens only after the count is validated, in both paths.

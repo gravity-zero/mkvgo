@@ -10,9 +10,9 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// demux.go — RemuxFromMP4: parse an MP4's movie header and rewrite its samples
+// demux.go - RemuxFromMP4: parse an MP4's movie header and rewrite its samples
 // as a seekable Matroska file. Like RemuxToMP4 it never transcodes; sample bytes
-// are copied verbatim. Only the sample index is held in memory — sample data is
+// are copied verbatim. Only the sample index is held in memory - sample data is
 // read from the source on demand, one cluster at a time.
 
 // clusterWindowMs bounds a cluster's span (by decode time). Keeping clusters
@@ -113,7 +113,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			mt.ColorRange = t.colorRange
 			mt.ColourDetermined = t.colourDetermined
 			// Fall back to the codec bitstream (e.g. H.264 SPS VUI) for any colour
-			// field the colr box did not supply — matches ffprobe's color_space on
+			// field the colr box did not supply - matches ffprobe's color_space on
 			// SDR streams that carry colour only in the SPS.
 			reader.FillColourFromCodecPrivate(&mt)
 			mt.DolbyVision = t.dolbyVision

@@ -1,6 +1,6 @@
 package writer
 
-// mutation_kill_test.go — tests targeting surviving mutants found by gremlins.
+// mutation_kill_test.go - tests targeting surviving mutants found by gremlins.
 //
 // Strategy: each test exercises the exact line/operator with an input where the
 // flipped operator gives an observably different result, then asserts the
@@ -1013,7 +1013,7 @@ func TestMKVWriterWriteMetadataConditionals(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	// All position fields must remain 0 — no tracks/chapters/attachments/tags written.
+	// All position fields must remain 0 - no tracks/chapters/attachments/tags written.
 	if m.TracksPos != 0 {
 		t.Errorf("TracksPos = %d, want 0 (no tracks)", m.TracksPos)
 	}

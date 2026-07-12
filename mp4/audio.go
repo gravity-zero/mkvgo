@@ -2,7 +2,7 @@ package mp4
 
 import "github.com/gravity-zero/mkvgo/mkv"
 
-// audio.go — sample entries for audio codecs that need more than a verbatim
+// audio.go - sample entries for audio codecs that need more than a verbatim
 // CodecPrivate copy: AC-3 and E-AC-3 (whose MP4 config box is derived from the
 // elementary bitstream, since Matroska carries no CodecPrivate for them), plus
 // FLAC and MP3.
@@ -82,8 +82,8 @@ var ac3SampleRates = [4]uint32{48000, 44100, 32000, 0}
 //
 // AudioSampleEntry.channelcount is unreliable for multichannel audio: many MP4
 // muxers leave it at 2 regardless of the real layout. The true count lives in the
-// codec configuration — the AAC AudioSpecificConfig, or the AC-3/E-AC-3 dac3/dec3
-// boxes — which these helpers read. Each returns 0 when the count cannot be
+// codec configuration - the AAC AudioSpecificConfig, or the AC-3/E-AC-3 dac3/dec3
+// boxes - which these helpers read. Each returns 0 when the count cannot be
 // determined, so the caller keeps the sample-entry value as a fallback.
 
 // ac3AcmodChannels maps an AC-3/E-AC-3 audio coding mode to its full-bandwidth
@@ -95,7 +95,7 @@ var ac3AcmodChannels = [8]uint8{2, 1, 2, 3, 3, 4, 4, 5}
 var aacConfigChannels = [8]uint8{0, 1, 2, 3, 4, 5, 6, 8}
 
 // aacSampleRates maps a 4-bit samplingFrequencyIndex to a rate in Hz; indices
-// 13–15 are reserved (0).
+// 13-15 are reserved (0).
 var aacSampleRates = [16]uint32{
 	96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
 	16000, 12000, 11025, 8000, 7350, 0, 0, 0,
@@ -124,15 +124,15 @@ type aacInfo struct {
 //
 // Limitation: when SBR or Parametric Stereo is signalled only *in-band* (in the
 // audio frames, not the ASC), it is invisible from the head. Two real shapes:
-//   - implicit SBR: a plain AAC-LC ASC (e.g. 0x1310) whose frames carry SBR — we
+//   - implicit SBR: a plain AAC-LC ASC (e.g. 0x1310) whose frames carry SBR - we
 //     report the core rate, ffprobe reports the doubled rate (it decodes a frame).
 //   - in-band PS over an explicit-SBR mono core (e.g. ASC 0x2b8a0800: AOT 5, SBR
-//     ext 44100, channelConfiguration 1) — we report 1 channel (the ASC's mono
+//     ext 44100, channelConfiguration 1) - we report 1 channel (the ASC's mono
 //     core), ffprobe reports 2 (it decodes the reconstructed stereo).
 //
 // Both are true head-only limitations: the data is in no header. The colour
 // analogue is matrix/primaries/transfer signalled only in an in-band SPS rather
-// than the avcC's SPS — likewise invisible head-only (see codec_colour.go).
+// than the avcC's SPS - likewise invisible head-only (see codec_colour.go).
 // Don't chase any of them without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
 	r := &bitReader{data: asc}
@@ -239,7 +239,7 @@ func isGAObjectType(aot uint32) bool {
 
 // skipGASpecificConfig advances r past a GASpecificConfig (ISO/IEC 14496-3
 // §4.4.1) so the reader is positioned at any trailing sync extension. It returns
-// false — and leaves the position unusable — when the layout cannot be walked
+// false - and leaves the position unusable - when the layout cannot be walked
 // (a program config element) or the buffer runs out.
 func skipGASpecificConfig(r *bitReader, aot, cc uint32) bool {
 	if cc == 0 {

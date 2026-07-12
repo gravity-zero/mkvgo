@@ -1,11 +1,11 @@
 package mp4
 
-// fragparse.go — fragmented-MP4 / CMAF input. A fragmented file's moov carries
+// fragparse.go - fragmented-MP4 / CMAF input. A fragmented file's moov carries
 // only track headers and mvex defaults; the samples live in moof/mdat fragments
 // (streaming fMP4, DASH/HLS CMAF, the shape most pre-encoded ABR ladders take).
 // readFragmentSamples walks those fragments and fills each track's sample table
 // (offset/size/dts/cts/duration/sync) exactly as the progressive parser builds
-// it from stbl, so every downstream path — RemuxFromMP4, to-mp4, to-hls, ABR —
+// it from stbl, so every downstream path - RemuxFromMP4, to-mp4, to-hls, ABR  -
 // reads a CMAF source like an ordinary progressive one. Media bytes are never
 // read here: only the moof metadata (bounded) is parsed and sample offsets are
 // recorded for the same ranged reads the progressive path uses.

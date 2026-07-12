@@ -11,7 +11,7 @@ import (
 // ioCounter wraps the reader handed to Read and tallies the real I/O the parser
 // drives against the underlying file: Read calls, Seek calls and bytes read.
 // Read wraps it in a bufReadSeeker, so position queries served from the buffer
-// cost nothing here, while every refill, jump seek and body-skip is counted —
+// cost nothing here, while every refill, jump seek and body-skip is counted  -
 // exactly the syscall budget that decides full-Read latency on a 9p/SMB mount.
 type ioCounter struct {
 	rs    io.ReadSeeker
@@ -60,7 +60,7 @@ func TestIOBudget_SeekHeadTailCues_O1(t *testing.T) {
 }
 
 // (b) SeekHead + Cues before the clusters (Doctor Strange layout): stop-early
-// must halt at the first cluster, so the budget is O(1) — identical for 20 and
+// must halt at the first cluster, so the budget is O(1) - identical for 20 and
 // 20 000 clusters.
 func TestIOBudget_SeekHeadHeadCues_StopEarlyO1(t *testing.T) {
 	const clusterSize = 2 << 10
@@ -87,7 +87,7 @@ func TestIOBudget_SeekHeadHeadCues_StopEarlyO1(t *testing.T) {
 
 // (c) No SeekHead AND no Cues (clusters run to EOF): nothing to scan for, so the
 // walk must cross every cluster and seeks scale with the cluster count
-// (unavoidable). The point under test is that bytes do NOT — the 33 KiB clusters
+// (unavoidable). The point under test is that bytes do NOT - the 33 KiB clusters
 // (> fullReadBufSize) would each trigger a buffer refill if the walk were
 // buffered, so a regression would read ~32 KiB × clusters. The unbuffered walk
 // keeps bytes well under 1 MiB at any cluster count.

@@ -5,12 +5,12 @@ import (
 	"fmt"
 )
 
-// box.go — low-level ISO base media file format (ISO/IEC 14496-12) box encoding.
+// box.go - low-level ISO base media file format (ISO/IEC 14496-12) box encoding.
 //
 // This file knows nothing about Matroska or EBML. It only assembles big-endian
 // boxes. Boxes are built into byte slices and nested by value, which keeps the
 // call sites readable (see moov assembly in mux.go) at the cost of holding the
-// moov tree in memory — acceptable because the moov is bounded by the sample
+// moov tree in memory - acceptable because the moov is bounded by the sample
 // count, and the large media payload (mdat) is streamed separately, never built
 // as a box value here.
 

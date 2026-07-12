@@ -141,13 +141,13 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		}
 	}
 
-	// Streaming readiness — what seeking, `hls-segment` and `extract-frame`
+	// Streaming readiness - what seeking, `hls-segment` and `extract-frame`
 	// rely on: a Cues index keyed on real video keyframes.
 	switch {
 	case blockTotal == 0:
 	case len(c.Cues) == 0:
 		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-cues",
-			Message: "no Cues index — seeking, on-demand HLS and keyframe extraction need one (run `mkvgo reindex`)"})
+			Message: "no Cues index - seeking, on-demand HLS and keyframe extraction need one (run `mkvgo reindex`)"})
 	case len(videoIDs) > 0:
 		misKeyed, stale := 0, 0
 		for _, cue := range c.Cues {
@@ -159,25 +159,25 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		}
 		if misKeyed > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cues-non-video",
-				Message: fmt.Sprintf("%d/%d cue points reference a non-video track — seeking lands on audio, not a keyframe (rewrite with `mkvgo reindex`)", misKeyed, len(c.Cues))})
+				Message: fmt.Sprintf("%d/%d cue points reference a non-video track - seeking lands on audio, not a keyframe (rewrite with `mkvgo reindex`)", misKeyed, len(c.Cues))})
 		}
 		if stale > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-stale",
-				Message: fmt.Sprintf("%d/%d cue times match no video keyframe — stale or rounded cue index (rewrite with `mkvgo reindex`)", stale, len(c.Cues))})
+				Message: fmt.Sprintf("%d/%d cue times match no video keyframe - stale or rounded cue index (rewrite with `mkvgo reindex`)", stale, len(c.Cues))})
 		}
 	}
 	if subNoDuration > 0 {
 		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "subs-no-blockduration",
-			Message: fmt.Sprintf("%d subtitle blocks carry no BlockDuration — cue end times are lost (readers fall back to guesses)", subNoDuration)})
+			Message: fmt.Sprintf("%d subtitle blocks carry no BlockDuration - cue end times are lost (readers fall back to guesses)", subNoDuration)})
 	}
 	for _, t := range c.Tracks {
 		if t.Type == mkv.VideoTrack && t.FrameRate == nil && blockCounts[t.ID] > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-defaultduration", Track: t.ID,
-				Message: fmt.Sprintf("track %d: video without DefaultDuration — frame rate and last-sample durations must be guessed downstream", t.ID)})
+				Message: fmt.Sprintf("track %d: video without DefaultDuration - frame rate and last-sample durations must be guessed downstream", t.ID)})
 		}
 		if t.Type == mkv.AudioTrack && t.Codec == "aac" && len(t.CodecPrivate) == 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "aac-no-asc", Track: t.ID,
-				Message: fmt.Sprintf("track %d: AAC without an AudioSpecificConfig (CodecPrivate) — remuxing to MP4/HLS needs it", t.ID)})
+				Message: fmt.Sprintf("track %d: AAC without an AudioSpecificConfig (CodecPrivate) - remuxing to MP4/HLS needs it", t.ID)})
 		}
 	}
 	for _, a := range c.Attachments {

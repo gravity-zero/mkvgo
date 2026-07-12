@@ -14,7 +14,7 @@ import (
 // metaBufSize is the read buffer for the metadata-only path. ~2 KiB covers the
 // EBML header + SeekHead + Info + Tracks of a typical mkvmerge file in a single
 // underlying Read, so the byte-at-a-time EBML VINT reads cost one syscall instead
-// of hundreds — the difference that matters on a network-mounted library.
+// of hundreds - the difference that matters on a network-mounted library.
 const metaBufSize = 2 << 10
 
 // OpenMeta opens path and returns only its Info + Tracks via the fast
@@ -39,7 +39,7 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOp
 	return ReadMeta(ctx, f, path, opts...)
 }
 
-// ReadMeta reads ONLY the metadata an indexer needs — Info and Tracks — and stops
+// ReadMeta reads ONLY the metadata an indexer needs - Info and Tracks - and stops
 // as soon as it has both, never parsing Cues and never traversing Clusters. On a
 // typical mkvmerge file that is the first ~1-2 KB, so ReadMeta is orders of
 // magnitude faster and cheaper than a full Read.
@@ -48,10 +48,10 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOp
 // returns Tracks, Info and DurationMs byte-identical to a full Read. A malformed
 // file with DUPLICATE Info/Tracks elements may differ: a full Read merges every
 // occurrence (parseInfo overwrites, parseTracks concatenates) whereas ReadMeta
-// stops at the first — fall back to Read if you must mirror that behaviour.
+// stops at the first - fall back to Read if you must mirror that behaviour.
 //
 // The returned Container has Tracks and Info populated; Chapters, Attachments,
-// Tags and Cues are left nil — call Read/Open for those.
+// Tags and Cues are left nil - call Read/Open for those.
 //
 // If a SeekHead is present at the Segment head it is used to seek straight to
 // Info and Tracks, so files whose Tracks element sits after the Clusters are
@@ -106,8 +106,8 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 }
 
 // parseSegmentMeta walks the Segment's top-level children only far enough to
-// parse Info and Tracks — reusing the same parseInfo/parseTracks as the full
-// reader for correctness parity — then returns. A head SeekHead is recorded so it
+// parse Info and Tracks - reusing the same parseInfo/parseTracks as the full
+// reader for correctness parity - then returns. A head SeekHead is recorded so it
 // can jump straight to Info/Tracks when they sit after the first Cluster.
 func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readOpts) error {
 	h, _, err := p.readHeader()
@@ -231,17 +231,17 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			}
 		}
 		if gotInfo && gotTracks {
-			break // early stop — Cues/Tags are pulled by finalizeHeadMeta, no Cluster scan
+			break // early stop - Cues/Tags are pulled by finalizeHeadMeta, no Cluster scan
 		}
 	}
 	return p.finalizeHeadMeta(c, offs, o)
 }
 
-// finalizeHeadMeta derives Container.Keyframes from the Cues seek index, and — when
-// o.bitrate — fills each track's Bitrate from the Tags' BPS. Either element, if
+// finalizeHeadMeta derives Container.Keyframes from the Cues seek index, and - when
+// o.bitrate - fills each track's Bitrate from the Tags' BPS. Either element, if
 // not already read inline, is reached by following its SeekHead offset (one seek to
-// one element, no Cluster scan). It then leaves Cues and Tags nil — the metadata
-// path's contract — exposing only the derived Keyframes and Track.Bitrate; with
+// one element, no Cluster scan). It then leaves Cues and Tags nil - the metadata
+// path's contract - exposing only the derived Keyframes and Track.Bitrate; with
 // o.cues the raw CuePoints are kept too (WithCues), for cue-driven seeking.
 func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts) error {
 	if len(c.Cues) == 0 && offs.cues >= 0 {
@@ -278,7 +278,7 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 }
 
 // parseElementAt seeks to off, verifies the element there has the expected ID,
-// and parses it with fn. It returns (false, nil) — not an error — when the offset
+// and parses it with fn. It returns (false, nil) - not an error - when the offset
 // points at a different element (a stale/odd SeekHead entry), so the caller can
 // fall back to scanning.
 func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(int64, *mkv.Container) error) (bool, error) {
@@ -291,7 +291,7 @@ func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(
 	eh, _, err := p.readHeader()
 	if err != nil {
 		// The offset came from an untrusted SeekHead; a header that won't decode
-		// (e.g. it points past EOF) means a stale entry, not a fatal read error —
+		// (e.g. it points past EOF) means a stale entry, not a fatal read error  -
 		// let the caller fall back to scanning instead of aborting ReadMeta.
 		return false, nil
 	}
@@ -440,7 +440,7 @@ func (p *parser) pos() int64 {
 
 // bufReadSeeker buffers an io.ReadSeeker for the metadata parse. The EBML reader
 // pulls VINTs a byte at a time; without buffering each is a syscall (brutal on a
-// network mount). A position query — Seek(0, SeekCurrent) — and small forward
+// network mount). A position query - Seek(0, SeekCurrent) - and small forward
 // skips are served from the buffer; any other Seek resets it.
 type bufReadSeeker struct {
 	rs  io.ReadSeeker
@@ -466,7 +466,7 @@ func (b *bufReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekCurrent:
 		if offset == 0 {
-			return b.off, nil // position query — keep the buffer
+			return b.off, nil // position query - keep the buffer
 		}
 		if offset > 0 && offset <= int64(b.br.Buffered()) {
 			if _, err := b.br.Discard(int(offset)); err != nil {
@@ -492,7 +492,7 @@ func (b *bufReadSeeker) Seek(offset int64, whence int) (int64, error) {
 
 // raw returns the underlying reader seeked to the buffer's current logical
 // offset, so a caller can continue reading from exactly where the buffered view
-// left off — without the buffer. Any bytes still buffered ahead are discarded;
+// left off - without the buffer. Any bytes still buffered ahead are discarded;
 // they will be re-read from the underlying reader on demand.
 func (b *bufReadSeeker) raw() (io.ReadSeeker, error) {
 	if _, err := b.rs.Seek(b.off, io.SeekStart); err != nil {

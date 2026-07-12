@@ -1,7 +1,7 @@
 package mp4
 
-// singlefile.go — Options.SingleFile: each rendition becomes ONE progressive
-// file (init + sidx + all CMAF fragments) served by byte ranges — the HLS
+// singlefile.go - Options.SingleFile: each rendition becomes ONE progressive
+// file (init + sidx + all CMAF fragments) served by byte ranges - the HLS
 // playlists use EXT-X-BYTERANGE and the DASH manifest the on-demand profile's
 // SegmentBase/indexRange. One file per rendition instead of hundreds of
 // segments: friendlier to object storage and plain HTTP servers (which must
@@ -72,7 +72,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		}
 	}()
 
-	// Pass 1 (in memory): per rendition, the fragment heads and sizes — the
+	// Pass 1 (in memory): per rendition, the fragment heads and sizes - the
 	// builders are deterministic, so no media is read yet.
 	type plan struct {
 		heads [][]byte
@@ -105,7 +105,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		infos = append(infos, segInfo{durSec: float64(endMs-segStart) / 1000, bytes: segBytes})
 	}
 
-	// Pass 2: assemble each rendition file — init, sidx (sizes now known),
+	// Pass 2: assemble each rendition file - init, sidx (sizes now known),
 	// then the fragments with their media streamed from the temp files.
 	rends := make([]sfRendition, len(fts))
 	for i, ft := range fts {

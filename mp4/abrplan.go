@@ -1,13 +1,13 @@
 package mp4
 
-// abrplan.go — PlanABR: the on-demand counterpart of RemuxToABR. Given several
+// abrplan.go - PlanABR: the on-demand counterpart of RemuxToABR. Given several
 // pre-encoded quality variants of one title (best first), it plans each with
 // PlanHLS (the reference complete, the rest video-only) and serves the whole
 // multi-variant presentation resource by resource, nothing pre-generated.
 //
 // Resource names are the ABR layout: "master.m3u8" for the top manifest, and
 // "v{k}/<name>" for any resource of variant k (playlist.m3u8, init.mp4,
-// seg00007.m4s, audioN.m3u8, subN.vtt, …) — exactly the URIs the master and
+// seg00007.m4s, audioN.m3u8, subN.vtt, …) - exactly the URIs the master and
 // RemuxToABR's directories use, so a serving handler is one call to Resource. Each
 // v{k}/<name> is byte-identical to the file RemuxToABR would have written.
 
@@ -27,15 +27,15 @@ type ABRPlan struct {
 	mpd      []byte // combined DASH manifest, when the variants are segment-aligned
 }
 
-// PlanABR plans the sources — quality variants of the same content, best first
-// — as one multi-variant HLS presentation served on demand. The first source is
+// PlanABR plans the sources - quality variants of the same content, best first
+// - as one multi-variant HLS presentation served on demand. The first source is
 // the reference (its audio and subtitles serve every variant); the rest
 // contribute only their video rendition, exactly like RemuxToABR. Options apply
 // to every variant. Each source must carry a Cues index (MKV) or be a
 // progressive MP4/MOV, as PlanHLS requires.
 func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, error) {
 	if len(sources) < 2 {
-		return nil, errf("ABR planning needs at least two sources (got %d) — use PlanHLS for one", len(sources))
+		return nil, errf("ABR planning needs at least two sources (got %d) - use PlanHLS for one", len(sources))
 	}
 	o := optionsFrom(opts)
 	variants := make([]*HLSPlan, len(sources))
@@ -86,7 +86,7 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 // Resources lists every resource name the presentation serves: the master, then
 // each variant's resources under its v{k}/ prefix. A variant's own master.m3u8
 // and manifest.mpd are superseded by the ABR master and omitted (combined DASH
-// is not emitted — independently encoded variants have unaligned timelines).
+// is not emitted - independently encoded variants have unaligned timelines).
 func (a *ABRPlan) Resources() []string {
 	names := []string{"master.m3u8"}
 	if a.mpd != nil {

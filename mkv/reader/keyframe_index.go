@@ -10,10 +10,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// keyframe_index.go — a COMPLETE keyframe index for a Cues-less Matroska: every
+// keyframe_index.go - a COMPLETE keyframe index for a Cues-less Matroska: every
 // video keyframe, equal to `ffprobe -skip_frame nokey`, not a sample. It is a
-// single sequential structural pass over the Segment — cluster by cluster, never
-// a per-block seek — reading only element headers and skipping block payloads by
+// single sequential structural pass over the Segment - cluster by cluster, never
+// a per-block seek - reading only element headers and skipping block payloads by
 // their declared size (no demux, no decode). The complementary low-cost variant
 // is WithSampledKeyframes; this is WithKeyframeIndex.
 //
@@ -25,7 +25,7 @@ import (
 // buildKeyframeIndex returns every video keyframe's presentation time (ms),
 // ascending and de-duplicated, from a single forward pass. On a header that will
 // not decode (corruption) it resyncs to the next Cluster, bounded by the segment
-// end, and continues — so a damaged region costs at most the keyframes in it.
+// end, and continues - so a damaged region costs at most the keyframes in it.
 // Matroska carries no edit list, so block times need no shift; this matches the
 // Cues-derived index (keyframeTimesMs), the other Matroska keyframe path.
 func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
@@ -166,9 +166,9 @@ func (p *parser) resyncCluster(segEnd int64, inCluster, haveTS *bool, clusterTS,
 }
 
 // keyframeScanBufSize is the read-ahead window for the sequential keyframe pass.
-// It must sit comfortably above the mount's read size (CIFS rsize is ~1–4 MiB) so
+// It must sit comfortably above the mount's read size (CIFS rsize is ~1-4 MiB) so
 // each underlying read is large and the kernel read-ahead amortises per-read
-// latency — at 256 KiB a 1.25 GB Segment costs ~5000 SMB reads (latency-bound);
+// latency - at 256 KiB a 1.25 GB Segment costs ~5000 SMB reads (latency-bound);
 // at 8 MiB it is a few hundred, in ffprobe's range.
 const keyframeScanBufSize = 8 << 20
 

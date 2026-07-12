@@ -67,7 +67,7 @@ func TestRemuxToWebM(t *testing.T) {
 		t.Error("output DocType is not webm")
 	}
 
-	// The output is an unknown-size stream — read it back with ReadStream.
+	// The output is an unknown-size stream - read it back with ReadStream.
 	c, br, err := reader.ReadStream(context.Background(), bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("ReadStream output: %v", err)
@@ -224,7 +224,7 @@ func TestRemuxToWebMSeekableOutput(t *testing.T) {
 
 	mustNil(t, RemuxToWebM(context.Background(), src, dst))
 
-	// The seekable reader (which cannot read unknown-size clusters — the old
+	// The seekable reader (which cannot read unknown-size clusters - the old
 	// streaming output) must parse the file and find a Cues index.
 	got, err := reader.Open(context.Background(), dst)
 	mustNil(t, err)

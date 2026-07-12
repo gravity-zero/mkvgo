@@ -57,8 +57,8 @@ func WebMDocTypeVersion(c *Container) uint64 {
 
 // ValidateWebM checks that c can be written as WebM: every track must use a
 // codec from the WebM allowlist AND carry the codec initialisation data that
-// strict players (browsers) require. mkvgo is a container tool — it cannot
-// transcode or synthesise init data — so either is a hard error. It returns an
+// strict players (browsers) require. mkvgo is a container tool - it cannot
+// transcode or synthesise init data - so either is a hard error. It returns an
 // error naming each offending track, or nil when c is WebM-compatible.
 func ValidateWebM(c *Container) error {
 	var bad []string
@@ -78,7 +78,7 @@ func ValidateWebM(c *Container) error {
 }
 
 // WebMNonSubsetElements lists the top-level metadata elements present in c that
-// the WebM streaming output does NOT carry — RemuxToWebM / NewWebMStreamWriter
+// the WebM streaming output does NOT carry - RemuxToWebM / NewWebMStreamWriter
 // emit only Info + Tracks + Clusters (+ Cues when seekable). Attachments are not
 // part of WebM at all; Chapters and Tags are dropped because the streaming
 // writer does not serialise them. An empty result means nothing will be lost.
@@ -98,7 +98,7 @@ func WebMNonSubsetElements(c *Container) []string {
 }
 
 // webmCodecInitError reports, for codecs whose CodecPrivate is mandatory in
-// WebM, why a track's setup data is missing or malformed — or "" if acceptable.
+// WebM, why a track's setup data is missing or malformed - or "" if acceptable.
 // Browsers reject tracks lacking this initialisation data even when the codec
 // itself is allowed.
 func webmCodecInitError(t Track) string {

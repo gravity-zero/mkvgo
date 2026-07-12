@@ -14,7 +14,7 @@ import (
 // CmdToWebM remuxes an MKV/WebM file to a WebM file. It copies the media
 // verbatim, rejects sources whose codecs fall outside the WebM subset
 // (VP8/VP9/AV1, Vorbis/Opus, WebVTT), and drops non-WebM elements
-// (chapters/attachments/tags) — warning about the ones actually present.
+// (chapters/attachments/tags) - warning about the ones actually present.
 func CmdToWebM(args []string) {
 	for _, a := range args {
 		rejectFlagArg(a)

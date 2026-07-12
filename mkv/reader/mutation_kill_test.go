@@ -1,6 +1,6 @@
 package reader
 
-// mutation_kill_test.go — tests whose sole purpose is to kill surviving mutants.
+// mutation_kill_test.go - tests whose sole purpose is to kill surviving mutants.
 // Each function targets specific lines in codec_colour.go, blocks.go, keyframes.go,
 // reader_meta.go, stream.go.  Tests are kept orthogonal to existing suites.
 
@@ -92,7 +92,7 @@ func TestGcd64Arithmetic(t *testing.T) {
 
 // TestAvcColourLengthBoundary kills len(cp) < 7 CONDITIONALS_BOUNDARY.
 func TestAvcColourLengthBoundary(t *testing.T) {
-	// 0–6 bytes must return nil.
+	// 0-6 bytes must return nil.
 	for n := 0; n < 7; n++ {
 		cp := make([]byte, n)
 		if n > 0 {
@@ -195,7 +195,7 @@ func TestSARIdcBoundaries(t *testing.T) {
 		{0, false, 0, 0}, // idc=0: falls through switch, no SAR
 		// idc=1 → SAR {1,1}: sarWidth==sarHeight → no display dims (equivalent mutant for idc>=1).
 		{1, false, 0, 0},
-		{16, true, 2, 1},  // idc=16: last table entry {2,1} — kills idc <= 16 → idc < 16
+		{16, true, 2, 1},  // idc=16: last table entry {2,1} - kills idc <= 16 → idc < 16
 		{17, false, 0, 0}, // idc=17: out of range, no SAR
 	}
 	for _, c := range cases {
@@ -285,7 +285,7 @@ func TestSARExtendedExactDims(t *testing.T) {
 
 // TestHevcColourLengthBoundary kills len(cp) < 23 CONDITIONALS_BOUNDARY.
 func TestHevcColourLengthBoundary(t *testing.T) {
-	// 0–22 bytes must return nil.
+	// 0-22 bytes must return nil.
 	for n := 0; n < 23; n++ {
 		cp := make([]byte, n)
 		if n > 0 {

@@ -9,8 +9,8 @@ import (
 )
 
 // TestKeyframeIndexComplete proves the complete index collects EVERY video
-// keyframe — multiple per Cluster, non-keyframes skipped, audio ignored,
-// BlockGroups handled — unlike the sampled variant which takes one per Cluster.
+// keyframe - multiple per Cluster, non-keyframes skipped, audio ignored,
+// BlockGroups handled - unlike the sampled variant which takes one per Cluster.
 func TestKeyframeIndexComplete(t *testing.T) {
 	const v, a = 1, 2 // video / audio track numbers (see tracksElem)
 	children := [][]byte{
@@ -70,7 +70,7 @@ func TestKeyframeIndexComplete(t *testing.T) {
 }
 
 // TestKeyframeIndexResync covers corruption recovery: a garbage region between
-// two Clusters must not abort the pass — the walk resyncs to the next Cluster and
+// two Clusters must not abort the pass - the walk resyncs to the next Cluster and
 // keeps collecting keyframes.
 func TestKeyframeIndexResync(t *testing.T) {
 	const v = 1

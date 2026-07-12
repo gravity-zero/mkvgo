@@ -1,7 +1,7 @@
 package mkv
 
 // Colour-metadata helpers. The Matroska Colour element (0x55B0) stores its
-// fields as CICP / ITU-T H.273 code points — the same integers FFmpeg keeps in
+// fields as CICP / ITU-T H.273 code points - the same integers FFmpeg keeps in
 // AVColorSpace / AVColorTransferCharacteristic / AVColorPrimaries / AVColorRange.
 // ffprobe prints them through av_color_*_name; the tables below reproduce those
 // exact strings so a consumer can compare mkvgo's Track colour fields against
@@ -153,7 +153,7 @@ func (t *Track) HDRFormat() string {
 
 // IsHDR reports whether the track's colour metadata indicates a high-dynamic-range
 // video signal: BT.2020 primaries (9) combined with a PQ (16) or HLG (18) transfer
-// function — the standard HDR10/HLG signalling. It is a best-effort heuristic from
+// function - the standard HDR10/HLG signalling. It is a best-effort heuristic from
 // container metadata only (it does not inspect the bitstream) and returns false
 // when the Colour element is absent.
 func (t *Track) IsHDR() bool {

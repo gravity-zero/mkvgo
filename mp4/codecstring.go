@@ -1,6 +1,6 @@
 package mp4
 
-// codecstring.go — RFC 6381 codec strings for the HLS master playlist's CODECS
+// codecstring.go - RFC 6381 codec strings for the HLS master playlist's CODECS
 // attribute, derived from each track's configuration record. Returns "" when a
 // codec's string cannot be produced; the playlist then omits the attribute
 // entirely (a partial CODECS list is worse than none).
@@ -13,7 +13,7 @@ func rfc6381Codec(t *outTrack) string {
 	switch t.mkv.Codec {
 	case "h264":
 		// avcC: configurationVersion, AVCProfileIndication, profile_compatibility,
-		// AVCLevelIndication — the three bytes the string carries verbatim.
+		// AVCLevelIndication - the three bytes the string carries verbatim.
 		if len(cp) < 4 {
 			return ""
 		}

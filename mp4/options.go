@@ -2,7 +2,7 @@ package mp4
 
 import "github.com/gravity-zero/mkvgo/mkv"
 
-// options.go — the option type shared by RemuxToMP4 and RemuxFromMP4.
+// options.go - the option type shared by RemuxToMP4 and RemuxFromMP4.
 
 // DroppedTrack describes a source track that the remux did not carry into the
 // output, with a human-readable reason. It is reported through Options.OnDrop.
@@ -32,12 +32,12 @@ type Options struct {
 	// track that was successfully included.
 	OnDrop func(DroppedTrack)
 	// FastStart writes the moov box before the mdat box ("fast start"), so a
-	// player can begin without first reading to the end of the file — useful for
+	// player can begin without first reading to the end of the file - useful for
 	// progressive HTTP streaming. It costs one extra pass over the media (written
 	// to a temporary file first). Only RemuxToMP4 honours this.
 	FastStart bool
 	// FlattenStyledSubs carries styled text subtitles that have no plain-text-safe
-	// default — ASS/SSA — as tx3g timed text instead of dropping them. Flattening
+	// default - ASS/SSA - as tx3g timed text instead of dropping them. Flattening
 	// is lossy: all styling, positioning and karaoke is discarded, only the text
 	// remains. (SRT and WebVTT are already carried as tx3g by default.) Only
 	// RemuxToMP4 honours this.
@@ -57,7 +57,7 @@ type Options struct {
 	// InBandColour, on the metadata probe (OpenMeta/ReadMeta), recovers a video
 	// track's colour from the first sample's in-band SPS (and Alternative Transfer
 	// Characteristics SEI) when it is absent from both the colr box and a bare
-	// hvcC — the MP4 counterpart of reader.WithInBandColourFallback. Off by
+	// hvcC - the MP4 counterpart of reader.WithInBandColourFallback. Off by
 	// default; only a track that needs it reads one bounded sample.
 	InBandColour bool
 	// SegmentMs is the target media-segment duration for RemuxToHLS, in
@@ -84,27 +84,27 @@ type Options struct {
 	// SingleFile packs each rendition into ONE progressive file (init + sidx
 	// + all fragments) served by byte ranges: the HLS playlists use
 	// EXT-X-BYTERANGE and the DASH manifest SegmentBase (on-demand profile).
-	// Friendlier to object storage — the server only needs Range support.
+	// Friendlier to object storage - the server only needs Range support.
 	// RemuxToHLS/RemuxToABR only (an on-demand plan has no file to range
 	// into); incompatible with Encrypt.
 	SingleFile bool
 
-	// VideoOnly carries only the (first) video track — no audio, no subtitle
+	// VideoOnly carries only the (first) video track - no audio, no subtitle
 	// renditions. RemuxToABR packages its non-reference variants with it; it
 	// is also useful for a video-only preview rendition.
 	VideoOnly bool
 
 	// KeepTracks, when non-empty, restricts the presentation to these Matroska
 	// track IDs (a Virtual Edit Layer): one source file serves many virtual
-	// versions — "VF only", "VO + English subs", "clean" (drop a logo/forced
-	// track), a specific camera angle — with no copy and no re-mux, just a
+	// versions - "VF only", "VO + English subs", "clean" (drop a logo/forced
+	// track), a specific camera angle - with no copy and no re-mux, just a
 	// different track subset per plan. At least one video track must be kept
 	// (HLS needs video); other IDs are ignored. Composes with VideoOnly (which
 	// then narrows the kept set to its video). nil = every track, as before.
 	KeepTracks []uint64
 
 	// RewriteURL, when set, rewrites every URI the HLS playlists and the DASH
-	// manifest reference (segments, inits, playlists, subtitles) — the hook
+	// manifest reference (segments, inits, playlists, subtitles) - the hook
 	// for URL templating: prepending a CDN base, appending a signed token
 	// (?token=…), or mapping names to a route. Resource names stay canonical;
 	// the server strips its decoration before calling Resource.

@@ -26,7 +26,7 @@ jobs:
           # Go accumulates coverage-expanding inputs under $GOCACHE/fuzz. Without
           # this they are lost on every fresh runner, so each night re-explores
           # shallowly from the seed corpus. A unique key forces a save each run,
-          # while restore-keys pulls the most recent prior corpus — so tonight
+          # while restore-keys pulls the most recent prior corpus - so tonight
           # resumes from yesterday's coverage and the search deepens over time.
           path: ${{ steps.gofuzz.outputs.dir }}
           key: fuzz-corpus-${{ github.run_id }}

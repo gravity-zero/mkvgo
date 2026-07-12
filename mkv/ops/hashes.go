@@ -10,7 +10,7 @@ import (
 
 // ContentHashTag is the per-track tag WriteContentHashes stores: the SHA-256
 // (hex) over the track's block payloads in stream order. VerifyContentHashes
-// recomputes it, so a file carries its own integrity check — bit-rot or
+// recomputes it, so a file carries its own integrity check - bit-rot or
 // transfer corruption is detectable with no external checksum file.
 const ContentHashTag = "CONTENT_SHA256"
 
@@ -73,7 +73,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...mkv.Options) 
 		}
 	}
 	if len(stored) == 0 {
-		return nil, fmt.Errorf("no %s tags in %s — hash it first", ContentHashTag, path)
+		return nil, fmt.Errorf("no %s tags in %s - hash it first", ContentHashTag, path)
 	}
 
 	var mismatches []HashMismatch

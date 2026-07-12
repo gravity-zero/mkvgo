@@ -7,27 +7,27 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// meta.go — metadata-only probe of an MP4 file. OpenMeta/ReadMeta parse only the
+// meta.go - metadata-only probe of an MP4 file. OpenMeta/ReadMeta parse only the
 // movie header (the moov box: track sample entries, colour code points and
 // chapters) and return the equivalent Matroska metadata WITHOUT reading any
 // sample data (mdat) or writing an output file. This is the fast path for
-// indexing or scanning an MP4 library — the counterpart of the mkv reader's
+// indexing or scanning an MP4 library - the counterpart of the mkv reader's
 // OpenMeta/ReadMeta. Use RemuxFromMP4 to convert the media itself.
 
 // OpenMeta opens the MP4 file at path and returns its metadata as a Container:
 // Info (including the title from ©nam), Tracks, Chapters, movie-level Tags
 // (mapped from the iTunes ilst atoms) and DurationMs are populated; Attachments
 // and Cues are left nil (MP4 has no attachment equivalent, and Cues are not
-// built on the metadata path). Only the moov box's headers are read — never
+// built on the metadata path). Only the moov box's headers are read - never
 // the mdat sample data, and never the per-sample tables unless keyframes are
-// requested — so it is fast and bounded regardless of file size.
+// requested - so it is fast and bounded regardless of file size.
 //
 // By default the keyframe index is NOT built: that requires expanding the full
 // sample table, which dominates the parse cost on a long movie. Pass
 // Options{Keyframes: true} to populate Container.Keyframes in the same pass.
 //
 // The second return value lists tracks present in the file but not represented in
-// Container.Tracks — cover art / attached pictures and other non-media tracks
+// Container.Tracks - cover art / attached pictures and other non-media tracks
 // (hint, timecode, metadata). It is nil when every track was carried. Surfacing
 // them lets a probe report, for instance, that a file ffprobe counts as having two
 // video streams has one playable video track plus a cover image.
@@ -126,7 +126,7 @@ func containerFromMovie(mv *movie) *mkv.Container {
 
 // videoKeyframesMs returns the first video track's keyframe presentation
 // timestamps (ms), ascending and de-duplicated, from the sync samples already
-// parsed into the sample table — so the keyframe index costs nothing beyond the
+// parsed into the sample table - so the keyframe index costs nothing beyond the
 // metadata parse OpenMeta already does. nil when there is no video track.
 func videoKeyframesMs(mv *movie) []int64 {
 	for i := range mv.tracks {

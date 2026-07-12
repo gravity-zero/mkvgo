@@ -108,7 +108,7 @@ func TestCmdProbeMP4Details(t *testing.T) {
 	}
 
 	// The arithmetic mutation /1000→*1000 for DurationMs would produce "6000000.00s"
-	// or similar absurd values — assert they are absent.
+	// or similar absurd values - assert they are absent.
 	if strings.Contains(out, "000000.00s") {
 		t.Errorf("probe MP4: DurationMs appears to use *1000 instead of /1000 (arithmetic mutation)\n%s", out)
 	}
@@ -138,7 +138,7 @@ func TestCmdProbeMKVBoundaries(t *testing.T) {
 		}
 	}
 
-	// regfixMKV has 4 tags — assert the Tags section IS present.
+	// regfixMKV has 4 tags - assert the Tags section IS present.
 	// Kills CONDITIONALS_BOUNDARY/NEGATION at 257:17 (Tags > 0).
 	if !strings.Contains(out, "Tags (") {
 		t.Errorf("probe MKV: expected Tags section (len > 0)\n%s", out)
@@ -228,7 +228,7 @@ func TestCmdProbeFullSections(t *testing.T) {
 // TestCmdProbeDisplayAspect probes a synthetic anamorphic MKV and asserts the
 // aspect-ratio line is printed. Kills CONDITIONALS_NEGATION mutations at 205:13
 // (Type == VideoTrack → !=), 205:54 (DisplayWidth != nil), 205:80 (DisplayHeight
-// != nil) — any one of which would suppress the "aspect:" output.
+// != nil) - any one of which would suppress the "aspect:" output.
 func TestCmdProbeDisplayAspect(t *testing.T) {
 	// 720×576 pixels stored at 1024×576 display (PAL anamorphic, 16:9 display).
 	c := &matroska.Container{

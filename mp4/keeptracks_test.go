@@ -13,7 +13,7 @@ import (
 )
 
 // TestKeepTracksDropsRenditions is the Virtual Edit Layer: from one source with
-// two audio tracks, KeepTracks serves a version with only the chosen one — no
+// two audio tracks, KeepTracks serves a version with only the chosen one - no
 // copy, the dropped rendition is simply not packaged. Keeping no video errors.
 func TestKeepTracksDropsRenditions(t *testing.T) {
 	src := "../internal/testdata/regfix.mkv" // h264 + 2×aac

@@ -49,7 +49,7 @@ func cluster(ts uint64, blocks ...[]byte) []byte {
 }
 
 // TestSampledKeyframes covers the Cues-less keyframe index. Crucially, each
-// emitted point must be a real video keyframe — NOT the Cluster start, which is
+// emitted point must be a real video keyframe - NOT the Cluster start, which is
 // not keyframe-aligned for every muxer.
 func TestSampledKeyframes(t *testing.T) {
 	const v, a = 1, 2 // video / audio track numbers (see tracksElem)

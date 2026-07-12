@@ -25,7 +25,7 @@ func FuzzCodecColour(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, cp []byte) {
-		// Call the inner parsers DIRECTLY — they carry no recover(), so the
+		// Call the inner parsers DIRECTLY - they carry no recover(), so the
 		// bounds-checks alone must keep them panic-free on any input. The
 		// recover() in parseCodecColour is only a last-resort backstop and must
 		// never be the thing that saves us here: a panic in one of these aborts

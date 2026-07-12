@@ -10,7 +10,7 @@ import (
 )
 
 // TestKeyframesMP4 checks OpenMeta fills Container.Keyframes with the video sync
-// samples' presentation timestamps — in the same pass, no separate open.
+// samples' presentation timestamps - in the same pass, no separate open.
 func TestKeyframesMP4(t *testing.T) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,

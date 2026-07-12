@@ -1,6 +1,6 @@
 package commands_test
 
-// cmd_coverage_test.go — additional tests that push statement coverage from
+// cmd_coverage_test.go - additional tests that push statement coverage from
 // 79.3% to ≥90% by exercising error paths (via mustFatal), flags, and branches
 // not reached by the existing test files.
 
@@ -82,7 +82,7 @@ func TestOpenMKV_BadPath(t *testing.T) {
 	mustFatal(t, func() { commands.OpenMKV("/no/such/file.mkv") })
 }
 
-// ---------- openInput — stdin paths ------------------------------------------
+// ---------- openInput - stdin paths ------------------------------------------
 
 // TestOpenInput_StdinSuccess calls CmdInfo with "-" so openInput reads from
 // os.Stdin using reader.ReadStream. Covers the success branch of openInput.
@@ -125,7 +125,7 @@ func TestLoadContainer_BadMP4(t *testing.T) {
 // ---------- PrintJSON error path ---------------------------------------------
 
 // A channel cannot be JSON-encoded; json.Encoder.Encode returns an error and
-// Fatal is called. No capture wrapper — PrintJSON writes to os.Stdout but
+// Fatal is called. No capture wrapper - PrintJSON writes to os.Stdout but
 // Fatal fires before any output, so stdout leakage is not a concern here.
 func TestPrintJSON_UnencodableValue(t *testing.T) {
 	mustFatal(t, func() { commands.PrintJSON(make(chan int)) })
@@ -155,7 +155,7 @@ func TestParseTimeRanges_BadEnd(t *testing.T) {
 	mustFatal(t, func() { commands.ParseTimeRanges("0-xyz") })
 }
 
-// ---------- NewProgressBar — throttle and pct-cap branches -------------------
+// ---------- NewProgressBar - throttle and pct-cap branches -------------------
 
 func TestNewProgressBar_Throttle(t *testing.T) {
 	pb := commands.NewProgressBar()
@@ -181,7 +181,7 @@ func TestNewProgressBar_PctCap(t *testing.T) {
 	pb(200, 100)
 }
 
-// ---------- CmdTracks — forced and DolbyVision branches ----------------------
+// ---------- CmdTracks - forced and DolbyVision branches ----------------------
 
 func TestCmdTracks_ForcedAndDolbyVision(t *testing.T) {
 	dv := &mkv.DolbyVision{Profile: 5, Level: 6}
@@ -202,7 +202,7 @@ func TestCmdTracks_ForcedAndDolbyVision(t *testing.T) {
 	}
 }
 
-// ---------- CmdProbe — dropped tracks JSON path ------------------------------
+// ---------- CmdProbe - dropped tracks JSON path ------------------------------
 
 func TestCmdProbe_DroppedTracksJSON(t *testing.T) {
 	dir := t.TempDir()
@@ -365,7 +365,7 @@ func TestCmdEditTrack_MissingOutOrTrack(t *testing.T) {
 func TestCmdEditTrack_TrackNotFound(t *testing.T) {
 	src := richMKV(t)
 	out := filepath.Join(t.TempDir(), "out.mkv")
-	// Track ID 99 does not exist in richMKV — Fatal is called inside the EditMetadata callback.
+	// Track ID 99 does not exist in richMKV - Fatal is called inside the EditMetadata callback.
 	mustFatal(t, func() {
 		commands.CmdEditTrack([]string{src, "-o", out, "-t", "99", "-lang", "eng"})
 	})
@@ -593,7 +593,7 @@ func TestCmdMergeSubtitle_ASSFormat_Error(t *testing.T) {
 	})
 }
 
-// ---------- CmdToMP4 — flags and error paths ----------------------------------
+// ---------- CmdToMP4 - flags and error paths ----------------------------------
 
 func TestCmdToMP4_TooFewArgs(t *testing.T) {
 	mustFatal(t, func() { commands.CmdToMP4([]string{"only-one"}) })
@@ -610,7 +610,7 @@ func TestCmdToMP4_FlagsSuccess(t *testing.T) {
 
 func TestCmdToMP4_FlattenSubsWarning(t *testing.T) {
 	// --flatten-subs triggers the warning fmt.Fprintln (to stderr; captured only
-	// for coverage — we don't assert stderr here).
+	// for coverage - we don't assert stderr here).
 	src := sampleMKV(t)
 	dst := filepath.Join(t.TempDir(), "flat.mp4")
 	capture(t, func() {

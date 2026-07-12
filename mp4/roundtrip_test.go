@@ -186,7 +186,7 @@ func trackName(c *mkv.Container) string {
 // sample-exact for every audio codec: audio tracks are written on a sample-rate
 // media timescale, and the CodecDelay becomes an edit list whose media_time is the
 // exact priming in samples. ffmpeg only trims a codec's delay (notably AC-3) from
-// such a sample-exact edit list — a millisecond-quantised one is ignored/padded.
+// such a sample-exact edit list - a millisecond-quantised one is ignored/padded.
 func TestEditListSampleExact(t *testing.T) {
 	const rate = 48000
 	const primingSamples = 1024
@@ -294,10 +294,10 @@ func TestMP3ContainerDelayOptIn(t *testing.T) {
 }
 
 // TestRoundTripOpusNoDerivedCodecDelay guards the rule that only codecs whose delay
-// is container-signalled (AAC/AC-3/E-AC-3 — see hasContainerPriming) get a
+// is container-signalled (AAC/AC-3/E-AC-3 - see hasContainerPriming) get a
 // container-derived delay. Opus carries its pre-skip in the OpusHead (and MP3 in its
 // in-band Xing/LAME header), so they must NOT acquire a second delay via an MP4 edit
-// list / Matroska CodecDelay — doing so double-counts it and shifts the decoded audio.
+// list / Matroska CodecDelay - doing so double-counts it and shifts the decoded audio.
 func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
 	opusHead := makeOpusHead(2, 312, 48000, 0, 0, nil) // pre-skip 312 samples, in the OpusHead
 	tracks := []mkv.Track{

@@ -43,7 +43,7 @@ func TestJoin_PerTrackOffsets(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 
-	// Video (track 1) ends at 50; audio (track 2) ends at 120 — different ends.
+	// Video (track 1) ends at 50; audio (track 2) ends at 120 - different ends.
 	blocks := func() []mkv.Block {
 		bs := []mkv.Block{
 			{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")},
@@ -92,7 +92,7 @@ func TestJoin_PerTrackOffsets(t *testing.T) {
 	// duration ≈ 150 ms) offset would leave a ~100 ms gap at the join boundary.
 	for i := 1; i < len(video); i++ {
 		if gap := video[i] - video[i-1]; gap > 60 {
-			t.Errorf("video gap at index %d = %d ms (want ≤ 60): %v — per-track rebase failed", i, gap, video)
+			t.Errorf("video gap at index %d = %d ms (want ≤ 60): %v - per-track rebase failed", i, gap, video)
 		}
 	}
 }

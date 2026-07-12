@@ -1,6 +1,6 @@
 package mp4
 
-// singlefile_mut_test.go — targeted kills for mutation-testing survivors in
+// singlefile_mut_test.go - targeted kills for mutation-testing survivors in
 // singlefile.go. Byte-range and sidx math is verified against exact numbers
 // (never just "no error"), and the DASH/HLS-only conditionals are verified by
 // choosing inputs that force each guard's actual boundary (present vs nil,

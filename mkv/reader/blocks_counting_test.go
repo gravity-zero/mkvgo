@@ -134,7 +134,7 @@ func TestCounterMatchesRealOffset(t *testing.T) {
 	}
 
 	// After draining, counter should equal what the underlying seeker reports
-	// (the bufio.Reader may have buffered bytes that will never be read —
+	// (the bufio.Reader may have buffered bytes that will never be read  -
 	// so the real seeked pos can be >= counter). Verify counter is sane.
 	if br.r.tell() <= 0 {
 		t.Error("counter is zero after reading all blocks")
@@ -142,7 +142,7 @@ func TestCounterMatchesRealOffset(t *testing.T) {
 }
 
 // TestCounterCorrectAfterInit verifies the counter is seeded to the exact
-// position right after the EBML+Segment headers — no off-by-one.
+// position right after the EBML+Segment headers - no off-by-one.
 func TestCounterCorrectAfterInit(t *testing.T) {
 	// Build a known-size payload.
 	var cluster bytes.Buffer
@@ -187,7 +187,7 @@ func TestLargeSkipViaDiscard(t *testing.T) {
 	//   [Info element]
 	//   [large Attachments-like element]
 	//   [Cluster with one block]
-	largePayload := make([]byte, 512*1024) // 512 KiB — larger than the 256 KiB buffer
+	largePayload := make([]byte, 512*1024) // 512 KiB - larger than the 256 KiB buffer
 	for i := range largePayload {
 		largePayload[i] = 0xAB
 	}

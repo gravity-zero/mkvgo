@@ -1,6 +1,6 @@
 package ops
 
-// thumbnail.go — ExtractKeyframeSample: the mkvgo half of a thumbnail /
+// thumbnail.go - ExtractKeyframeSample: the mkvgo half of a thumbnail /
 // storyboard pipeline. It seeks to the video keyframe nearest a timestamp
 // through the Cues (a few bounded reads, no scan) and writes that single
 // compressed sample in a form a decoder ingests directly: Annex-B with the
@@ -42,7 +42,7 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 		return nil, err
 	}
 	if len(c.Cues) == 0 {
-		return nil, fmt.Errorf("%s: no Cues index — keyframe extraction seeks through the Cues (run `mkvgo reindex` first)", srcPath)
+		return nil, fmt.Errorf("%s: no Cues index - keyframe extraction seeks through the Cues (run `mkvgo reindex` first)", srcPath)
 	}
 	var video *mkv.Track
 	for i := range c.Tracks {

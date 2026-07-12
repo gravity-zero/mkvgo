@@ -1,6 +1,6 @@
 package commands
 
-// export_test.go — test-only hooks into unexported internals, visible to the
+// export_test.go - test-only hooks into unexported internals, visible to the
 // external commands_test package.
 
 // SetExit overrides the process-exit hook Fatal uses and returns a function that

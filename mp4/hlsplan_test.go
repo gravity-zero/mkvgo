@@ -118,7 +118,7 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 			t.Errorf("Resource(%q) = %d bytes, %q, %v", name, len(data), mime, err)
 			continue
 		}
-		// Every resource the full pass also wrote must be byte-identical —
+		// Every resource the full pass also wrote must be byte-identical  -
 		// audio renditions included. master/manifest differ by the estimated
 		// BANDWIDTH, and the on-demand subtitle playlist is single-segment.
 		switch name {
@@ -214,7 +214,7 @@ func truncated(b []byte) string {
 	return string(b)
 }
 
-// A source with no Cues cannot be served on demand — the error says how to fix it.
+// A source with no Cues cannot be served on demand - the error says how to fix it.
 func TestPlanHLSNoCues(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "nocues.mkv")
 	// A head-only file: metadata but no clusters, hence no Cues.
@@ -226,7 +226,7 @@ func TestPlanHLSNoCues(t *testing.T) {
 		t.Fatal(err)
 	}
 	// sample.mkv has Cues; use a truncated variant? Simpler: strip via rewrite is
-	// overkill — instead assert the good path works and the range check errors.
+	// overkill - instead assert the good path works and the range check errors.
 	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 500})
 	if err != nil {
 		t.Skipf("sample.mkv not plannable: %v", err)
@@ -236,7 +236,7 @@ func TestPlanHLSNoCues(t *testing.T) {
 	}
 }
 
-// An MP4 source plans from its sample table — head-only and exact: every
+// An MP4 source plans from its sample table - head-only and exact: every
 // resource, INCLUDING the master playlist and the DASH manifest (whose
 // BANDWIDTH the Matroska plan can only estimate), is byte-identical to the
 // full pass.
@@ -295,7 +295,7 @@ func TestPlanHLSFromMP4MatchesFullPass(t *testing.T) {
 // pass runs under the requesting client's context, and caching its
 // cancellation would make every later request on that subtitle track fail
 // instantly for the plan's lifetime (a player that gives up on the first,
-// slow request would 404 the track forever). Context errors are transient —
+// slow request would 404 the track forever). Context errors are transient  -
 // the next request with a live context re-scans and succeeds.
 func TestPlanHLSSubtitleCancelDoesNotPoisonCueCache(t *testing.T) {
 	w, h := uint32(320), uint32(240)
@@ -328,7 +328,7 @@ func TestPlanHLSSubtitleCancelDoesNotPoisonCueCache(t *testing.T) {
 
 	vtt, mime, err := plan.Resource(context.Background(), "sub1.vtt")
 	if err != nil || mime != "text/vtt" {
-		t.Fatalf("request after cancellation: %v (%s) — cancellation was cached", err, mime)
+		t.Fatalf("request after cancellation: %v (%s) - cancellation was cached", err, mime)
 	}
 	if !bytes.Contains(vtt, []byte("cue numero 3")) {
 		t.Errorf("sub1.vtt content wrong after re-scan:\n%s", vtt)
@@ -340,7 +340,7 @@ func TestPlanHLSSubtitleCancelDoesNotPoisonCueCache(t *testing.T) {
 	}
 }
 
-// countingRSC wraps a file and counts the bytes actually read through it —
+// countingRSC wraps a file and counts the bytes actually read through it  -
 // the probe the I/O-bound tests below use to prove a pass skips data instead
 // of dragging it through the reader.
 type countingRSC struct {
@@ -358,7 +358,7 @@ func (c countingRSC) Close() error                                 { return c.f.
 
 // The lazy subtitle-cue pass walks every cluster, but when the media
 // payloads it walks past are large enough to seek over it must not READ them
-// — on a big-payload file that is the difference between a full sequential
+// - on a big-payload file that is the difference between a full sequential
 // read and a header-only skim. The fixture carries ~30 MB of 256 KiB video
 // frames and a handful of text cues: loading the cues must read a small
 // fraction of the file.
@@ -407,14 +407,14 @@ func TestPlanHLSSubtitleScanSkipsMediaPayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	if limit := st.Size() / 4; readBytes > limit {
-		t.Errorf("cue pass read %d of %d bytes (%.0f%%) — media payloads must be skipped, not read",
+		t.Errorf("cue pass read %d of %d bytes (%.0f%%) - media payloads must be skipped, not read",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
 	}
 }
 
 // Every plan resource must survive a first request whose context was
 // cancelled: a transient context error must never be cached anywhere on the
-// Resource path (the bug class behind the subtitle 404 poisoning — this sweep
+// Resource path (the bug class behind the subtitle 404 poisoning - this sweep
 // guards the whole surface, not just the cue cache).
 func TestPlanHLSResourcesSurviveCancelledFirstRequest(t *testing.T) {
 	w, h := uint32(320), uint32(240)
@@ -448,9 +448,9 @@ func TestPlanHLSResourcesSurviveCancelledFirstRequest(t *testing.T) {
 	for _, name := range plan.Resources() {
 		cctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, _, _ = plan.Resource(cctx, name) // may fail — must not leave state behind
+		_, _, _ = plan.Resource(cctx, name) // may fail - must not leave state behind
 		if _, _, err := plan.Resource(context.Background(), name); err != nil {
-			t.Errorf("%s: request after a cancelled one failed: %v — a transient context error was cached", name, err)
+			t.Errorf("%s: request after a cancelled one failed: %v - a transient context error was cached", name, err)
 		}
 	}
 }
