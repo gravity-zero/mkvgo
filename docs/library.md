@@ -1000,7 +1000,17 @@ for _, f := range d.Findings {
 }
 ```
 
-`Diagnosis`: `Healthy`, `Findings` (`Kind`/`Detail`/`Remedy`, plus `Track`/`DelayNs` on per-track findings), the full `CueHealth` report, `AudioDelaysNs` (every audio track's start delay, threshold or not), and `Damage` (the `SalvageReport`, present only when the walk ran). Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (with the exact retime invocation), `truncated` (source incomplete, recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: resync), `trailing-junk`, `streamed-size`. The facade re-exports `matroska.Diagnose`; the CLI is `diagnose` (exit 1 on findings). Matroska/WebM only: an MP4's sample table is its index by construction.
+`Diagnosis`: `Healthy`, `Findings` (`Kind`/`Detail`/`Remedy`, plus `Track`/`DelayNs` on per-track findings), the full `CueHealth` report, `AudioDelaysNs` (every audio track's start delay, threshold or not), and `Damage` (the `SalvageReport`, present only when the walk ran). Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (with the exact retime invocation), `truncated` (source incomplete, recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: resync), `trailing-junk`, `streamed-size`. The facade re-exports `matroska.Diagnose`; the CLI is `diagnose` (exit 1 on findings); WASM `diagnose` (Blob-ranged, head-mostly).
+
+**MP4/MOV counterpart - `mp4.Diagnose`, same `mkv.Diagnosis` shape**: entirely head-only. The top-level box layout separates `truncated` (a declared box overruns the real end of file) from `trailing-junk`; `no-moov` is the re-download verdict (nothing any tool can rebuild); and each track's edit list carries its presentation delay, reported per audio track relative to the video anchor - `AudioDelaysNs` values plug straight into `mp4.RetimeTracks`, and the `audio-delay` finding names the exact retime invocation. No `CueHealth`/`Damage` sections (the sample table is the index by construction; there is no tolerant walk to run). Fragmented sources skip delay derivation (fragment timelines do not honour edit lists consistently).
+
+**Container-agnostic entry point** - `mkvgo.Diagnose` (root package) sniffs the first bytes and routes to either triage, so one scan loop covers a mixed library:
+
+```go
+import "github.com/gravity-zero/mkvgo"
+
+d, err := mkvgo.Diagnose(ctx, path) // MKV/WebM or MP4/MOV, same report
+```
 
 ## AudioStartDelays (native per-track A/V delay probe)
 
@@ -1125,7 +1135,7 @@ Refusals are explicit: a shift that does not resolve to a whole number of timeco
 
 The facade re-exports it: `matroska.RetimeTracks`.
 
-**MP4/MOV counterpart - `mp4.RetimeTracks`, same signature**: the shift edits each track's presentation through its edit list (`edts`/`elst`) in the moov, the container's native mechanism for exactly this - no block or sample is touched at all, so the repair is a few bytes whatever the file size. An empty edit at the head of the track's list is grown, shrunk or created; track and movie durations follow. File-only write permission: the rewritten moov is patched in place when its size is unchanged, rewritten at the tail when it sits there, and otherwise (faststart) appended with the old moov retired to a `free` box - 4 bytes flipped, crash-ordered (the new moov is synced to disk before the flip). Explicit refusals: presenting a track before the presentation start (MP4 cannot without trimming media content), unknown tracks, fragmented MP4. There is deliberately no `KeepBackup`: copying a whole file to guard a moov-only patch would contradict the constant-cost promise - the safety model is the crash-ordered write (a readable file at every instant), which is atomicity, not a restorable backup; a workflow that demands one copies the file itself first.
+**MP4/MOV counterpart - `mp4.RetimeTracks`, same signature**: the shift edits each track's presentation through its edit list (`edts`/`elst`) in the moov, the container's native mechanism for exactly this - no block or sample is touched at all, so the repair is a few bytes whatever the file size. An empty edit at the head of the track's list is grown, shrunk or created; track and movie durations follow. File-only write permission, crash-ordered on EVERY layout: the new moov is appended and synced to disk first, then the old one is retired to a `free` box with a single 4-byte type flip - the file carries exactly one intact, authoritative moov at every instant, and no in-place overwrite of the only moov (which a torn write could destroy) ever happens. The retired moov stays behind as a `free` block; a faststart source is no longer faststart afterwards (re-run the faststart remux if progressive HTTP serving needs it). The handle must implement `Sync` (same contract as the Matroska in-place family). Explicit refusals: presenting a track before the presentation start (MP4 cannot without trimming media content), unknown tracks, fragmented MP4. There is deliberately no `KeepBackup`: copying a whole file to guard a moov-only patch would contradict the constant-cost promise - the safety model is the crash-ordered write (a readable file at every instant), which is atomicity, not a restorable backup; a workflow that demands one copies the file itself first.
 
 **Container-agnostic entry point**: the root package routes for you, exactly like the CLI - the container is sniffed from the file's FIRST BYTES (never the name, so a mislabeled file routes correctly):
 

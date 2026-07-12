@@ -4,16 +4,17 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.21.0] - 2026-07-12
 
 **Highlights**
 
-- **One call, one verdict, one remedy per file** - `diagnose` composes the
-  seek-index triage, a native per-track audio-delay probe and a
-  declared-size coherence check into typed findings that each name their
-  repair (reindex / retime / resync / re-download). Head-mostly: the
-  tolerant walk runs only when the declared and real sizes disagree. Also
-  in WASM.
+- **One call, one verdict, one remedy per file - both containers** -
+  `diagnose` classifies MKV/WebM (seek-index triage, native per-track
+  audio-delay probe, declared-size coherence, tolerant walk only when the
+  sizes disagree) AND MP4/MOV (head-only: box-layout truncation, missing
+  moov, edit-list audio delays) into the same typed findings, each naming
+  its repair (reindex / retime / resync / re-download). One scan loop for a
+  mixed library, CLI and WASM routed by the file's first bytes.
 - **Stream the broken file anyway (read-only sources)** - PlanHLS gains two
   serving-side repairs that write nothing: `SynthesizeIndex` walks an
   unindexed source once (structure only) and synthesizes the seek index in
@@ -28,8 +29,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`retime` now repairs MP4 too** - `mp4.RetimeTracks` (same signature as
   the Matroska op) shifts a track's presentation through its edit list in
   the moov: no sample touched, a few bytes whatever the file size, file-only
-  permission, crash-ordered moov swap on faststart files. One CLI flag, one
-  map shape, both containers.
+  permission, and a crash-ordered moov swap on EVERY layout - the file
+  carries exactly one intact moov at every instant. One CLI flag, one map
+  shape, both containers, plus a container-agnostic root package
+  (`mkvgo.RetimeTracks` / `mkvgo.Diagnose`) that sniffs and routes.
 - **The probe JSON is self-sufficient for a library scanner** - every
   derived string is a key (aspect ratios, colour names, resolved language,
   effective sample rate) including `hdr_format`, the one-word
@@ -38,6 +41,24 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **`mp4.Diagnose`** (CLI: `diagnose` on an MP4/MOV, routed by content; WASM
+  `diagnose` likewise): the head-only MP4 triage returning the same
+  `mkv.Diagnosis` shape as the Matroska one. The top-level box layout
+  separates `truncated` (a declared box overruns the real end of file -
+  present X of Y bytes, re-download) from `trailing-junk`; `no-moov` is the
+  nothing-to-rebuild verdict; and each track's edit list yields its
+  presentation delay relative to the video anchor - the `audio-delay`
+  finding names the exact `retime` invocation, which repairs MP4 too.
+  Fragmented sources skip delay derivation. The report types
+  (`Diagnosis`/`Finding`/`CueHealthReport`/`SalvageReport`) moved to the
+  `mkv` package so both engines share them; `mkv/ops` re-exports type
+  aliases, existing consumers unchanged.
+- **Root package routers**: `mkvgo.RetimeTracks` and `mkvgo.Diagnose`
+  (import `github.com/gravity-zero/mkvgo`) sniff the file's first bytes -
+  never the name, so a mislabeled file routes correctly - and dispatch to
+  the Matroska or MP4 engine; Matroska-engine-specific options refuse
+  loudly on an MP4 source. The `retime` and `diagnose` CLI commands route
+  by content the same way.
 - **`diagnose` / `ops.Diagnose`**: one-call triage. Classifies a file -
   `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (per
   track, with the exact retime invocation), `truncated` (recovered X of Y
@@ -86,10 +107,12 @@ All notable changes to mkvgo are documented here. The format is based on
   head of the list IS the track's presentation delay, so the repair is a
   moov-only rewrite: grown, shrunk or created empty edit, track and movie
   durations following, samples and decode times untouched. File-only write
-  permission via three landing paths: same-size in-place patch, tail moov
-  rewrite, or (faststart) append-new-moov + retire-old-to-`free` - 4 bytes
-  flipped, with the new moov synced to disk before the flip so a crash at
-  any point leaves a readable file. Explicit refusals: presenting a track
+  permission, one crash-ordered landing path for every layout: the new moov
+  is appended and synced to disk first, then the old one is retired to a
+  `free` box with a single 4-byte type flip - the file carries exactly one
+  intact, authoritative moov at every instant (no in-place overwrite of the
+  only moov, which a torn write could destroy). A faststart source is no
+  longer faststart afterwards; re-run `to-mp4 --faststart` if needed. Explicit refusals: presenting a track
   before the presentation start (MP4 cannot without trimming media),
   unknown tracks, zero shifts, fragmented MP4. The Matroska mode flags do
   not apply and are refused on an MP4 path.

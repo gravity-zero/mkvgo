@@ -171,7 +171,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `keyframes` | Video keyframe timestamps (Cues / sample table, or a structural scan) |
 | | `validate` | Structural **and** streaming-readiness checks (Cues, cue keying, durations…) |
 | | `cue-health` | Head-only seek-index triage - spots files that look indexed but seek wrong, in milliseconds |
-| | `diagnose` | One-call triage with remedies: index health + per-track audio delay + truncation verdict, routes each file to the right repair |
+| | `diagnose` | One-call triage with remedies (MKV/WebM **or** MP4): index health, per-track audio delay, truncation verdict - routes each file to the right repair |
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
 | | `compare` | Diff metadata (or block content with `-blocks`) of two files - verify a round-trip |
 | **Extract** | `demux` | Extract tracks to raw streams |
