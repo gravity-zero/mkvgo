@@ -93,6 +93,12 @@ All notable changes to mkvgo are documented here. The format is based on
   before the presentation start (MP4 cannot without trimming media),
   unknown tracks, zero shifts, fragmented MP4. The Matroska mode flags do
   not apply and are refused on an MP4 path.
+- **Root package `mkvgo`**: container-agnostic entry points that sniff the
+  file's first bytes (EBML vs ISO-BMFF - never the name, so a mislabeled
+  file routes correctly) and dispatch to the right engine, exactly like the
+  CLI. First resident: `mkvgo.RetimeTracks(ctx, path, shift)` routing to
+  `matroska.RetimeTracks` or `mp4.RetimeTracks`; Matroska-engine-specific
+  options refuse loudly on an MP4 source instead of dropping silently.
 - **`mkv.Track.HDRFormat()`**: one-word dynamic-range classification
   (`dolby-vision` | `hdr10` | `hlg` | `sdr`, `""` unknown) from the
   container/bitstream colour signalling already parsed head-only. Dolby

@@ -1126,16 +1126,17 @@ Refusals are explicit: a shift that does not resolve to a whole number of timeco
 
 The facade re-exports it: `matroska.RetimeTracks`.
 
-**MP4/MOV counterpart - `mp4.RetimeTracks`, same signature**: the shift edits each track's presentation through its edit list (`edts`/`elst`) in the moov, the container's native mechanism for exactly this - no block or sample is touched at all, so the repair is a few bytes whatever the file size. An empty edit at the head of the track's list is grown, shrunk or created; track and movie durations follow. File-only write permission: the rewritten moov is patched in place when its size is unchanged, rewritten at the tail when it sits there, and otherwise (faststart) appended with the old moov retired to a `free` box - 4 bytes flipped, crash-ordered (the new moov is synced to disk before the flip). Explicit refusals: presenting a track before the presentation start (MP4 cannot without trimming media content), unknown tracks, fragmented MP4. There is deliberately no `KeepBackup`: copying a whole file to guard a moov-only patch would contradict the constant-cost promise - the safety model is the crash-ordered write (a readable file at every instant), which is atomicity, not a restorable backup; a workflow that demands one copies the file itself first. A caller repairs either container through the same map shape:
+**MP4/MOV counterpart - `mp4.RetimeTracks`, same signature**: the shift edits each track's presentation through its edit list (`edts`/`elst`) in the moov, the container's native mechanism for exactly this - no block or sample is touched at all, so the repair is a few bytes whatever the file size. An empty edit at the head of the track's list is grown, shrunk or created; track and movie durations follow. File-only write permission: the rewritten moov is patched in place when its size is unchanged, rewritten at the tail when it sits there, and otherwise (faststart) appended with the old moov retired to a `free` box - 4 bytes flipped, crash-ordered (the new moov is synced to disk before the flip). Explicit refusals: presenting a track before the presentation start (MP4 cannot without trimming media content), unknown tracks, fragmented MP4. There is deliberately no `KeepBackup`: copying a whole file to guard a moov-only patch would contradict the constant-cost promise - the safety model is the crash-ordered write (a readable file at every instant), which is atomicity, not a restorable backup; a workflow that demands one copies the file itself first.
+
+**Container-agnostic entry point**: the root package routes for you, exactly like the CLI - the container is sniffed from the file's FIRST BYTES (never the name, so a mislabeled file routes correctly):
 
 ```go
-shift := map[uint64]int64{2: -900_000_000}
-if isMP4 {
-    err = mp4.RetimeTracks(ctx, path, shift)
-} else {
-    err = matroska.RetimeTracks(ctx, path, shift)
-}
+import "github.com/gravity-zero/mkvgo"
+
+err := mkvgo.RetimeTracks(ctx, path, map[uint64]int64{2: -900_000_000})
 ```
+
+Matroska-engine-specific options (`DeepVerify`, `StrictVerify`, `KeepBackup`, `RollbackSink`) refuse loudly on an MP4 source instead of being dropped silently - call `matroska.RetimeTracks` directly when you need them and know the container.
 
 ### Salvage (damaged files)
 
