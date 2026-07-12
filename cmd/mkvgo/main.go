@@ -125,7 +125,7 @@ func main() {
 		commands.RequireArgs(args, 3, "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>")
 		commands.CmdRollback(args)
 	case "retime":
-		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]")
 		commands.CmdRetime(args)
 	case "serve":
 		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]]")
@@ -225,7 +225,7 @@ Commands:
   reindex-inplace  Rebuild the seek index by patching the file itself (no copy, crash-safe journal, auto-rollback)
   salvage       Best-effort recovery copy of a damaged file (surgical repair, --dry-run damage map)
   rollback      Reconstruct the pre-repair original from a repaired file + its --rollback-delta entry
-  retime        Cancel a constant A/V desync by shifting track timecodes in place (2 bytes per block, no rewrite)
+  retime        Cancel a constant A/V desync in place (MKV: 2 bytes per block, no rewrite; MP4: moov edit list only)
   serve         Serve one file's on-demand HLS plan over HTTP (ETag/Range/Cache-Control), no pre-generation; --direct/--auto serve the raw file for a direct-play client
   serve-growing Play while downloading: serve a still-growing file as HLS (EVENT playlist, VOD once it finishes)
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)

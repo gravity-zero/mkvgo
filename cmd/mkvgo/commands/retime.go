@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-const retimeUsage = "usage: mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]"
+const retimeUsage = "usage: mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift <track>=<ms> ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>] (MP4: moov edit-list only, mode flags do not apply)"
 
 // CmdRetime cancels a constant A/V desync by shifting the block timecodes of
 // the given tracks in place (2 bytes per block, crash-safe journal, no
@@ -66,6 +67,23 @@ func CmdRetime(args []string) {
 		Fatal("--keep-backup only applies to the rewrite engine (--replace or automatic)")
 	}
 	path := rest[0]
+
+	// MP4/MOV routes to the edit-list engine: same flag, same sign, but the
+	// repair is a moov-only rewrite (no per-block patching, hence none of the
+	// Matroska engine's mode flags).
+	if isMP4Path(path) {
+		if inPlace || replace || keepBackup || deepVerify || strict || deltaPath != "" {
+			Fatal("retime on an MP4 edits the moov only; --in-place/--replace/--keep-backup/--deep-verify/--strict/--rollback-delta do not apply")
+		}
+		if err := mp4.RetimeTracks(context.Background(), path, shift); err != nil {
+			Fatal(err.Error())
+		}
+		fmt.Printf("retimed %s (edit list):\n", path)
+		for track, ns := range shift {
+			fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)
+		}
+		return
+	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict, KeepBackup: keepBackup}
 	printPreexisting := armPreexisting(&opts)
