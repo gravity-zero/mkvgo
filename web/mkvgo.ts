@@ -282,6 +282,27 @@ export interface SalvageReport {
   clean_cut_bytes: number
 }
 
+/**
+ * Result of cueHealth(): head-only triage of the seek index - which tracks
+ * the CuePoints reference. Spots an index that exists and is non-empty yet
+ * keys on the wrong tracks, so seeking lands mid-GOP while every "has an
+ * index?" check passes. Milliseconds even on a Blob (no cluster walk).
+ */
+export interface CueHealthReport {
+  total_cues: number
+  video_cues: number
+  non_video_cues: number
+  unknown_track_cues: number
+  non_video_pct: number
+  per_track: Record<string, number>
+  first_cue_ms: number
+  last_cue_ms: number
+  has_video_track: boolean
+  healthy: boolean
+  /** Why not, with the remedy; absent when healthy. */
+  reason?: string
+}
+
 export interface MapDamageOptions extends AbortOptions {
   /** Account for resuming video only at the next keyframe after each gap. */
   cleanCut?: boolean
@@ -641,6 +662,13 @@ export interface MkvGoApi {
    * themselves are not available in wasm (browser inputs are read-only).
    */
   mapDamage(input: Uint8Array | Blob, options?: MapDamageOptions): Promise<SalvageReport>
+
+  /**
+   * Head-only triage of the seek index: which tracks the cues reference.
+   * The scan-time complement of a full validation - spots seek-broken
+   * indexes in milliseconds, before any upload.
+   */
+  cueHealth(input: Uint8Array | Blob, options?: AbortOptions): Promise<CueHealthReport>
 }
 
 // ---------------------------------------------------------------------------

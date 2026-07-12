@@ -166,6 +166,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `probe` | Full metadata dump: ffprobe-equivalent stream fields (colour/HDR, Dolby Vision, pix_fmt, aspect, rotation, bitrate, keyframes…) |
 | | `keyframes` | Video keyframe timestamps (Cues / sample table, or a structural scan) |
 | | `validate` | Structural **and** streaming-readiness checks (Cues, cue keying, durations…) |
+| | `cue-health` | Head-only seek-index triage - spots files that look indexed but seek wrong, in milliseconds |
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
 | | `compare` | Diff metadata (or block content with `-blocks`) of two files — verify a round-trip |
 | **Extract** | `demux` | Extract tracks to raw streams |

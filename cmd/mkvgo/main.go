@@ -116,7 +116,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--strict] [--rollback-delta <file>]")
 		commands.CmdReindexInPlace(args)
 	case "salvage":
-		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] | mkvgo salvage <in.mkv> --dry-run")
+		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-cut] [--rollback-delta <file>] | mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]")
 		commands.CmdSalvage(args)
 	case "rollback":
 		commands.RequireArgs(args, 3, "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>")

@@ -330,6 +330,12 @@ const fpMp4 = await MkvGo.fingerprint(mp4.data)
 check(fpMp4.tracks.every((t) => fp.tracks.some((m) => m.sha256 === t.sha256)),
   'MP4 fingerprint matches the MKV digests (cross-container, in-memory)')
 
+// --- cueHealth: head-only seek-index triage ---
+const chOk = await MkvGo.cueHealth(mkvBytes)
+check(chOk.total_cues >= 0 && typeof chOk.healthy === 'boolean' &&
+  (chOk.healthy || (chOk.reason ?? '').length > 0),
+  `cueHealth verdict on the fixture (healthy=${chOk.healthy}, cues=${chOk.total_cues})`)
+
 // --- mapDamage: read-only damage map (salvage --dry-run twin) ---
 const dmClean = await MkvGo.mapDamage(mkvBytes)
 check(dmClean.clusters_copied > 0 && dmClean.bytes_skipped === 0 &&

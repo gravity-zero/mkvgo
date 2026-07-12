@@ -1088,6 +1088,31 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 	})
 }
 
+// cueHealthJS(input, opts?) -> Promise<CueHealthReport>: head-only triage of
+// the seek index - which tracks the CuePoints reference - in milliseconds
+// even on a Blob (SeekHead-guided ranged reads, no cluster walk). It spots
+// the dormant defect where a file's index exists yet keys on the wrong
+// tracks, so every seek lands mid-GOP while every "indexed?" check passes.
+func cueHealthJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("cueHealth: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("cueHealth: %w", err)
+		}
+		report, err := ops.CueHealth(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}
+
 // openForensicJS(input, opts?) -> Promise<ForensicHandle>: single-source
 // forensic A/B session watermarking. Where openWatermark needs TWO
 // pre-encoded variants, this derives variant B from ONE source by dropping a

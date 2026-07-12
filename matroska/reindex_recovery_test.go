@@ -143,6 +143,42 @@ func TestFacadeRetimeTracks(t *testing.T) {
 	assertNoErr(t, err)
 }
 
+// TestFacadeRetimeVariantsAndCueHealth proves the retime engine variants and
+// the CueHealth probe delegate through the facade.
+func TestFacadeRetimeVariantsAndCueHealth(t *testing.T) {
+	requireFixture(t)
+	dir := t.TempDir()
+	data, err := os.ReadFile(fixturePath)
+	assertNoErr(t, err)
+
+	c, err := Open(context.Background(), fixturePath)
+	assertNoErr(t, err)
+	var audio uint64
+	for _, tr := range c.Tracks {
+		if tr.Type == AudioTrack {
+			audio = tr.ID
+			break
+		}
+	}
+	if audio == 0 {
+		t.Skip("fixture has no audio track")
+	}
+
+	inplace := filepath.Join(dir, "inplace.mkv")
+	assertNoErr(t, os.WriteFile(inplace, data, 0o644))
+	assertNoErr(t, RetimeTracksInPlace(context.Background(), inplace, map[uint64]int64{audio: 100_000_000}))
+
+	replace := filepath.Join(dir, "replace.mkv")
+	assertNoErr(t, os.WriteFile(replace, data, 0o644))
+	assertNoErr(t, RetimeTracksReplace(context.Background(), replace, map[uint64]int64{audio: 100_000_000}))
+
+	report, err := CueHealth(context.Background(), replace)
+	assertNoErr(t, err)
+	if !report.Healthy {
+		t.Errorf("the rewritten file's rebuilt index must be healthy, got: %s", report.Reason)
+	}
+}
+
 // TestFacadeContentHashes proves WriteContentHashes + VerifyContentHashes
 // round-trip: a freshly hashed file reports no mismatches.
 func TestFacadeContentHashes(t *testing.T) {

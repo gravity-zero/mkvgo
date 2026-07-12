@@ -4,7 +4,28 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.20.0] - 2026-07-12
+
+**Highlights**
+
+- **Fix a constant A/V desync without re-encoding** - `retime` shifts a
+  track's timecodes (the repack defect where audio starts late), per track,
+  choosing automatically between a 2-bytes-per-block in-place patch under a
+  crash-safe journal and a sequential verified rewrite that also rebuilds a
+  healthy seek index. Every refusal is explicit; `--rollback-delta` makes it
+  undoable for a few hundred KB.
+- **Forensic watermarking from ONE source** - `forensic-segment` /
+  `openForensic` derive the B variant by dropping a disposable H.264 frame
+  per segment, timing-compensated (shared manifest, same durations): A/B
+  session watermarking without a second encode.
+- **Triage a library's seek health in milliseconds** - `cue-health` reads
+  the index head-only and spots files that look indexed but seek wrong
+  (cues keyed on audio), with the remedy. Also in WASM, like every
+  read-only insight (`mapDamage` joined too).
+- **Repairs judge themselves fairly** - the deep verification now compares
+  the result against the source and refuses only defects the operation
+  ADDED; heritage defects are reported with their remedy instead of
+  blocking a correct repair (`--strict` restores the absolute behavior).
 
 ### Added
 
