@@ -22,7 +22,8 @@ const reindexResyncMaxSkipPercent = 50
 func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opts []mkv.Options) error {
 	var rb *rollbackBuilder
 	if mkv.RollbackSinkFrom(opts) != nil {
-		rb = newRollbackBuilder()
+		rb = newSpoolingRollbackBuilder(fs, dstPath+".rbspool.tmp")
+		defer rb.cleanup()
 	}
 
 	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb)

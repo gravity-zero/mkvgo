@@ -401,7 +401,8 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 
 	var rb *rollbackBuilder
 	if mkv.RollbackSinkFrom(opts) != nil {
-		rb = newRollbackBuilder()
+		rb = newSpoolingRollbackBuilder(fs, dstPath+".rbspool.tmp")
+		defer rb.cleanup()
 	}
 
 	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil)

@@ -69,6 +69,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **Rollback deltas spool to disk past 8 MiB.** A multi-hour multi-track
+  movie's delta (hundreds of MB of 2-byte patches, each paying its op
+  framing) used to hit the builder's 256 MiB RAM cap and abandon the entry;
+  the ops region now overflows to a temporary spool file next to the output
+  and streams to the sink at finalize - same format, one sequential pass,
+  no cap on the copy-based operations. The in-place operations keep the RAM
+  path (their deltas are bounded by the crash journal's cap, and a spool
+  file would break their file-only-permission contract).
 - **DeepVerify now diffs instead of gatekeeping.** The result's
   error-severity validation issues are compared against the source's by
   stable identity (`mkv.Issue` gained `Code` and `Track` fields), and only

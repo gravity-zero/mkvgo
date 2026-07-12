@@ -130,7 +130,8 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 
 	var rb *rollbackBuilder
 	if mkv.RollbackSinkFrom(opts) != nil {
-		rb = newRollbackBuilder()
+		rb = newSpoolingRollbackBuilder(fs, tmp+".rbspool.tmp")
+		defer rb.cleanup()
 	}
 
 	firstTC := make(map[uint64]int64)

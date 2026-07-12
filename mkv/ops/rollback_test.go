@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -144,6 +145,38 @@ func TestRollback_DeltaIsTiny(t *testing.T) {
 	}
 	if ratio := float64(delta.Len()) / float64(srcSize); ratio > 0.001 {
 		t.Errorf("delta is %d bytes for a %d-byte source (%.3f%%), want < 0.1%%", delta.Len(), srcSize, ratio*100)
+	}
+}
+
+// TestRollback_SpooledDeltaRoundTrip forces the ops region through the spool
+// file (the path a multi-hour multi-track movie's delta takes instead of the
+// RAM cap that used to refuse it) and checks the entry is byte-equivalent:
+// same round-trip, no cap error, and no spool file left behind.
+func TestRollback_SpooledDeltaRoundTrip(t *testing.T) {
+	origThreshold := rollbackSpillThreshold
+	rollbackSpillThreshold = 1
+	defer func() { rollbackSpillThreshold = origThreshold }()
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := salvageFixture(t, dir, "spool.mkv", 10)
+	original := readAll(t, src)
+
+	var delta bytes.Buffer
+	dst := filepath.Join(dir, "spool.out.mkv")
+	if err := Reindex(ctx, src, dst, mkv.Options{RollbackSink: &delta, RollbackRequired: true}); err != nil {
+		t.Fatalf("Reindex with spooled RollbackSink: %v", err)
+	}
+	rollbackRoundTrip(t, dst, delta.Bytes(), original)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".rbspool.tmp") {
+			t.Errorf("spool file left behind: %s", e.Name())
+		}
 	}
 }
 

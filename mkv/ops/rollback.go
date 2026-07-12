@@ -9,6 +9,7 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"os"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -59,16 +60,40 @@ var errRollbackTooBig = fmt.Errorf("rollback delta exceeds the %d-byte buffer ca
 // rollbackBuilder accumulates the ops of one delta entry during a repair
 // walk. Errors are sticky: after the first failure every method is a no-op
 // and finalize reports it (the caller decides best-effort vs required).
+//
+// The ops region lives in RAM until rollbackSpillThreshold, then - when the
+// builder was given a spool location - overflows to a temporary file, so a
+// long multi-track movie's delta (hundreds of MB of 2-byte patches, each
+// paying its op framing) never busts memory. A builder without a spool (the
+// in-place operations, whose contract is file-only permission and whose
+// deltas are bounded by the crash journal's cap anyway) keeps the RAM cap.
 type rollbackBuilder struct {
 	ops     bytes.Buffer
 	nOps    uint32
 	srcHash hash.Hash // sha256 of the original, fed op by op in original order
 	tiled   int64     // original bytes covered so far
 	err     error
+
+	fs        *mkv.FS
+	spoolPath string                  // "" = RAM only (capped)
+	spool     mkv.ReadWriteSeekCloser // non-nil once spilled
+	opsLen    int64                   // total ops bytes, RAM + spool
 }
+
+// rollbackSpillThreshold is where a spooling builder moves its ops region
+// from RAM to the spool file. A var so tests can force the spill path.
+var rollbackSpillThreshold int64 = 8 << 20 // 8 MiB
 
 func newRollbackBuilder() *rollbackBuilder {
 	return &rollbackBuilder{srcHash: sha256.New()}
+}
+
+// newSpoolingRollbackBuilder is newRollbackBuilder plus a spool location the
+// ops overflow to instead of hitting the RAM cap. The caller must arrange
+// cleanup() (idempotent; finalize runs it too) so an abandoned build does
+// not leave the spool file behind.
+func newSpoolingRollbackBuilder(fs *mkv.FS, spoolPath string) *rollbackBuilder {
+	return &rollbackBuilder{srcHash: sha256.New(), fs: fs, spoolPath: spoolPath}
 }
 
 func (b *rollbackBuilder) fail(err error) {
@@ -77,8 +102,53 @@ func (b *rollbackBuilder) fail(err error) {
 	}
 }
 
+// cleanup releases the spool file, if one was created. Safe to call twice.
+func (b *rollbackBuilder) cleanup() {
+	if b == nil || b.spool == nil {
+		return
+	}
+	b.spool.Close() //nolint:errcheck
+	_ = b.fs.DoRemove(b.spoolPath)
+	b.spool = nil
+}
+
+// writeOps appends raw op bytes, spilling from RAM to the spool past the
+// threshold. Failures are sticky and swallowed (the callers' own streams
+// must not be disturbed); finalize reports them.
+func (b *rollbackBuilder) writeOps(p []byte) (int, error) {
+	if b.err != nil {
+		return len(p), nil
+	}
+	if b.spool == nil && b.spoolPath != "" && int64(b.ops.Len())+int64(len(p)) > rollbackSpillThreshold {
+		f, err := b.fs.DoOpenFile(b.spoolPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			b.fail(fmt.Errorf("rollback: create spool: %w", err))
+			return len(p), nil
+		}
+		b.spool = f
+		if _, err := b.spool.Write(b.ops.Bytes()); err != nil {
+			b.fail(fmt.Errorf("rollback: spill to spool: %w", err))
+			return len(p), nil
+		}
+		b.ops.Reset()
+	}
+	if b.spool != nil {
+		if _, err := b.spool.Write(p); err != nil {
+			b.fail(fmt.Errorf("rollback: write spool: %w", err))
+			return len(p), nil
+		}
+	} else {
+		b.ops.Write(p)
+	}
+	b.opsLen += int64(len(p))
+	return len(p), nil
+}
+
 func (b *rollbackBuilder) overCap(add int64) bool {
-	if int64(b.ops.Len())+add > rollbackMaxBuffer {
+	if b.spoolPath != "" {
+		return false // spooling builders are disk-bound, not RAM-capped
+	}
+	if b.opsLen+add > rollbackMaxBuffer {
 		b.fail(errRollbackTooBig)
 		return true
 	}
@@ -95,7 +165,7 @@ func (b *rollbackBuilder) copyRun(dstOff int64, data []byte) {
 	hdr[0] = rollbackOpCopy
 	binary.BigEndian.PutUint64(hdr[1:], uint64(dstOff))
 	binary.BigEndian.PutUint64(hdr[9:], uint64(len(data)))
-	b.ops.Write(hdr[:])
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
 	b.srcHash.Write(data)
 	b.tiled += int64(len(data))
 	b.nOps++
@@ -112,7 +182,7 @@ func (b *rollbackBuilder) copyRunStreamed(dstOff, n int64) io.Writer {
 	hdr[0] = rollbackOpCopy
 	binary.BigEndian.PutUint64(hdr[1:], uint64(dstOff))
 	binary.BigEndian.PutUint64(hdr[9:], uint64(n))
-	b.ops.Write(hdr[:])
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
 	b.tiled += n
 	b.nOps++
 	return b.srcHash
@@ -126,8 +196,8 @@ func (b *rollbackBuilder) literal(data []byte) {
 	var hdr [9]byte
 	hdr[0] = rollbackOpLit
 	binary.BigEndian.PutUint64(hdr[1:], uint64(len(data)))
-	b.ops.Write(hdr[:])
-	b.ops.Write(data)
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
+	b.writeOps(data)   //nolint:errcheck
 	b.srcHash.Write(data)
 	b.tiled += int64(len(data))
 	b.nOps++
@@ -147,8 +217,8 @@ func (b *rollbackBuilder) literalFrom(r io.ReadSeeker, off, n int64) {
 	var hdr [9]byte
 	hdr[0] = rollbackOpLit
 	binary.BigEndian.PutUint64(hdr[1:], uint64(n))
-	b.ops.Write(hdr[:])
-	if _, err := io.CopyN(io.MultiWriter(&b.ops, b.srcHash), r, n); err != nil {
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
+	if _, err := io.CopyN(io.MultiWriter(opsWriter{b}, b.srcHash), r, n); err != nil {
 		b.fail(fmt.Errorf("rollback: read literal source: %w", err))
 		return
 	}
@@ -167,11 +237,16 @@ func (b *rollbackBuilder) literalWriter(n int64) io.Writer {
 	var hdr [9]byte
 	hdr[0] = rollbackOpLit
 	binary.BigEndian.PutUint64(hdr[1:], uint64(n))
-	b.ops.Write(hdr[:])
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
 	b.tiled += n
 	b.nOps++
-	return io.MultiWriter(&b.ops, b.srcHash)
+	return io.MultiWriter(opsWriter{b}, b.srcHash)
 }
+
+// opsWriter adapts writeOps to io.Writer for the streaming literal paths.
+type opsWriter struct{ b *rollbackBuilder }
+
+func (w opsWriter) Write(p []byte) (int, error) { return w.b.writeOps(p) }
 
 // literalHeader reconstructs the exact source bytes of an element header from
 // its parsed form - the ID's canonical encoding plus the size VINT at the
@@ -201,7 +276,7 @@ func (b *rollbackBuilder) trunc(n int64) {
 	var hdr [9]byte
 	hdr[0] = rollbackOpTrunc
 	binary.BigEndian.PutUint64(hdr[1:], uint64(n))
-	b.ops.Write(hdr[:])
+	b.writeOps(hdr[:]) //nolint:errcheck // sticky-error semantics
 	b.nOps++
 }
 
@@ -228,21 +303,29 @@ func (b *rollbackBuilder) finalize(sink io.Writer, originalSize int64, repairedS
 
 	crc := crc32.New(crc32cTable)
 	crc.Write(header)
-	crc.Write(b.ops.Bytes())
-
 	if _, err := sink.Write(header); err != nil {
 		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry header: %w", err)
 	}
-	if _, err := sink.Write(b.ops.Bytes()); err != nil {
+	// Stream the ops region - from RAM, or back from the spool file a large
+	// delta overflowed to - through the crc and out to the sink in one pass.
+	var opsSrc io.Reader = bytes.NewReader(b.ops.Bytes())
+	if b.spool != nil {
+		if _, err := b.spool.Seek(0, io.SeekStart); err != nil {
+			return mkv.RollbackInfo{}, fmt.Errorf("rollback: rewind spool: %w", err)
+		}
+		opsSrc = io.LimitReader(b.spool, b.opsLen)
+	}
+	if _, err := io.Copy(io.MultiWriter(sink, crc), opsSrc); err != nil {
 		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry ops: %w", err)
 	}
+	b.cleanup()
 	var crcBuf [4]byte
 	binary.BigEndian.PutUint32(crcBuf[:], crc.Sum32())
 	if _, err := sink.Write(crcBuf[:]); err != nil {
 		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry crc: %w", err)
 	}
 	return mkv.RollbackInfo{
-		Bytes:     int64(len(header)) + int64(b.ops.Len()) + 4,
+		Bytes:     int64(len(header)) + b.opsLen + 4,
 		SrcSHA256: srcSHA,
 		DstSHA256: repairedSHA,
 	}, nil
