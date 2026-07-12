@@ -9,14 +9,14 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const retimeUsage = "usage: mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--deep-verify] [--strict] [--rollback-delta <file>]"
+const retimeUsage = "usage: mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]"
 
 // CmdRetime cancels a constant A/V desync by shifting the block timecodes of
 // the given tracks in place (2 bytes per block, crash-safe journal, no
 // rewrite, no temp file). The classic use is the repack defect where audio
 // content starts late: `--shift 2=-900` moves track 2 earlier by 900 ms.
 func CmdRetime(args []string) {
-	var deepVerify, strict bool
+	var deepVerify, strict, inPlace, replace, keepBackup bool
 	var deltaPath string
 	shift := map[uint64]int64{}
 	var rest []string
@@ -26,6 +26,12 @@ func CmdRetime(args []string) {
 			deepVerify = true
 		case "--strict":
 			strict = true
+		case "--in-place":
+			inPlace = true
+		case "--replace":
+			replace = true
+		case "--keep-backup":
+			keepBackup = true
 		case "--shift":
 			if i+1 >= len(args) {
 				Fatal("--shift needs a <track>=<ms> value")
@@ -53,9 +59,15 @@ func CmdRetime(args []string) {
 	if len(shift) == 0 {
 		Fatal("at least one --shift <track>=<ms> is required")
 	}
+	if inPlace && replace {
+		Fatal("--in-place and --replace are mutually exclusive (omit both for the automatic choice)")
+	}
+	if keepBackup && inPlace {
+		Fatal("--keep-backup only applies to the rewrite engine (--replace or automatic)")
+	}
 	path := rest[0]
 
-	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict}
+	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict, KeepBackup: keepBackup}
 	printPreexisting := armPreexisting(&opts)
 	printDelta := func() {}
 	if deltaPath != "" {
@@ -64,13 +76,20 @@ func CmdRetime(args []string) {
 		defer closeDelta()
 	}
 
-	err := matroska.RetimeTracks(context.Background(), path, shift, opts)
+	retimeFn := matroska.RetimeTracks
+	switch {
+	case inPlace:
+		retimeFn = matroska.RetimeTracksInPlace
+	case replace:
+		retimeFn = matroska.RetimeTracksReplace
+	}
+	err := retimeFn(context.Background(), path, shift, opts)
 	ClearProgress()
 	if err != nil {
 		Fatal(err.Error())
 	}
 	printPreexisting()
-	fmt.Printf("retimed %s in place:\n", path)
+	fmt.Printf("retimed %s:\n", path)
 	for track, ns := range shift {
 		fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)
 	}

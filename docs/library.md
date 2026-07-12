@@ -1063,6 +1063,8 @@ Choosing a variant: `Reindex` never touches the source (safest, needs a second p
 err := ops.RetimeTracks(ctx, "movie.mkv", map[uint64]int64{2: -900_000_000})
 ```
 
+`RetimeTracks` picks the cheaper of two engines automatically: the in-place patch when the patches are few relative to the file, the sequential rewrite (`RetimeTracksReplace`: the reindex engine patching timecodes on the fly - verified copy, atomic swap, `Options.KeepBackup`, a rebuilt video-keyed index, unknown-size Segments accepted) when they are dense, since each 2-byte patch dirties a whole page and in-place I/O grows past a full rewrite on multi-track movies. `RetimeTracksInPlace` / `RetimeTracksReplace` force an engine.
+
 The patches run under the same crash-safety journal as `ReindexInPlace` (rollback on any failed check, auto-recovery after a crash), and `Options.RollbackSink` captures them as a rollback delta of a few hundred bytes. Cluster CRC-32 elements covering patched blocks are recomputed; CuePoints keyed on shifted tracks move by the same shift (an audio-only file cues audio blocks; a mixed file cues video keyframes, which stay put unless the video track itself is shifted). Several tracks can be fixed with different shifts in one pass - the map is per track.
 
 Refusals are explicit: a shift that does not resolve to a whole number of timecode ticks, a relative timecode that would leave int16 range, an absolute timestamp that would become negative, an unknown or block-less track, a cue that mixes shifted and unshifted tracks, and streamed (unknown-size) Segments. `Options.DeepVerify` re-walks the file afterwards and checks every shifted track's first block moved by exactly the requested shift, on top of the always-on read-back verification of every patch.

@@ -748,8 +748,10 @@ mkvgo reindex-inplace movie.mkv --rollback
 Cancel a constant A/V desync - the repack defect where audio content starts N ms after the video - by shifting the block timecodes of the given tracks in place. Matroska block timecodes are relative to their cluster (signed 16-bit, a range of +-32.7 s at the standard 1 ms timecode scale), so cancelling a delay of hundreds of ms is a 2-byte patch per block: no payload byte moves, no rewrite, no temp file, no disk duplication. Cluster CRC-32 elements covering patched blocks are recomputed, and cues keyed on shifted tracks move by the same amount.
 
 ```
-mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--deep-verify] [--rollback-delta <file>]
+mkvgo retime <file.mkv> --shift <track>=<ms> [--shift <track>=<ms> ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]
 ```
+
+Two engines, picked automatically: the **in-place patch** (2 bytes per block under the crash-safe journal, no rewrite, file-only permission) when patches are few relative to the file - a short file, laced audio; the **sequential rewrite** (`--replace` semantics: verified copy, atomic swap, `--keep-backup` keeps the original, directory permission) when they are dense - a multi-track movie, where each 2-byte patch dirties a whole page and in-place I/O grows past a full rewrite. The rewrite also rebuilds the seek index from the shifted blocks (healthy, video-keyed cues even when the source's were not) and handles streamed (unknown-size) Segments that in-place refuses. Force either engine with `--in-place` / `--replace`.
 
 - `--shift 2=-900` moves track 2's blocks 900 ms earlier (positive values move later). Repeat the flag to fix several tracks with different delays in one pass.
 - The patches run under the same crash-safe in-file journal as `reindex-inplace`: any failed check rolls the file back byte-identical, and a run interrupted by a crash is repaired automatically by the next in-place operation (or `reindex-inplace --rollback`).

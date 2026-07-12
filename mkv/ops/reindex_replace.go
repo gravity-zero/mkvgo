@@ -28,10 +28,17 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 		return err
 	}
 
-	if !mkv.KeepBackupFrom(opts) {
+	return installReplacement(fs, tmp, path, mkv.KeepBackupFrom(opts))
+}
+
+// installReplacement atomically swaps a verified temporary copy over the
+// original, optionally keeping the original as path+".bak". Shared by
+// ReindexReplace and RetimeTracksReplace.
+func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
+	if !keepBackup {
 		if err := fs.DoRename(tmp, path); err != nil {
 			_ = fs.DoRemove(tmp) // do not leave a blocker for the next run
-			return fmt.Errorf("reindex replace: install verified copy: %w", err)
+			return fmt.Errorf("replace: install verified copy: %w", err)
 		}
 		return nil
 	}
@@ -39,12 +46,12 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 	backup := path + ".bak"
 	if err := fs.DoRename(path, backup); err != nil {
 		_ = fs.DoRemove(tmp)
-		return fmt.Errorf("reindex replace: back up original: %w", err)
+		return fmt.Errorf("replace: back up original: %w", err)
 	}
 	if err := fs.DoRename(tmp, path); err != nil {
-		installErr := fmt.Errorf("reindex replace: install verified copy: %w", err)
+		installErr := fmt.Errorf("replace: install verified copy: %w", err)
 		if rerr := fs.DoRename(backup, path); rerr != nil {
-			return errors.Join(installErr, fmt.Errorf("reindex replace: restore original from backup: %w", rerr))
+			return errors.Join(installErr, fmt.Errorf("replace: restore original from backup: %w", rerr))
 		}
 		_ = fs.DoRemove(tmp) // original restored; drop the copy so the next run is not blocked
 		return installErr

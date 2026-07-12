@@ -106,9 +106,9 @@ func TestRetime_CancelsAudioDelay(t *testing.T) {
 		t.Fatalf("fixture defect = %dms, want 900", before[2]-before[1])
 	}
 
-	err := RetimeTracks(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{DeepVerify: true})
+	err := RetimeTracksInPlace(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{DeepVerify: true})
 	if err != nil {
-		t.Fatalf("RetimeTracks: %v", err)
+		t.Fatalf("RetimeTracksInPlace: %v", err)
 	}
 
 	after := trackStartsMs(t, target)
@@ -195,6 +195,112 @@ func TestRetime_Refusals(t *testing.T) {
 	}
 }
 
+// TestRetimeReplace_Rewrite: the sequential engine - delay cancelled through
+// a verified atomic replacement, payloads intact, cues rebuilt healthy, and
+// the rollback delta reconstructs the pre-retime original.
+func TestRetimeReplace_Rewrite(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	target := delayedAudioFixture(t, dir, "replace.mkv", 6, 900)
+	original := readAll(t, target)
+
+	var delta bytes.Buffer
+	err := RetimeTracksReplace(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{
+		DeepVerify:       true,
+		KeepBackup:       true,
+		RollbackSink:     &delta,
+		RollbackRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("RetimeTracksReplace: %v", err)
+	}
+
+	after := trackStartsMs(t, target)
+	if after[2] != after[1] {
+		t.Errorf("audio starts at %dms, video at %dms - delay not cancelled", after[2], after[1])
+	}
+	if !bytes.Equal(readAll(t, target+".bak"), original) {
+		t.Error("KeepBackup must preserve the pre-retime original")
+	}
+	diffs, err := CompareBlocks(ctx, target+".bak", target)
+	if err != nil {
+		t.Fatalf("CompareBlocks: %v", err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("payloads changed: %v", diffs)
+	}
+	validateErrorFree(t, target)
+
+	// The rebuilt index must be healthy (video-keyed).
+	ch, err := CueHealth(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ch.Healthy {
+		t.Errorf("replace must rebuild a healthy index, got: %s", ch.Reason)
+	}
+
+	rollbackRoundTrip(t, target, delta.Bytes(), original)
+}
+
+// TestRetime_AutoScattersToReplace: on a tiny fixture the auto threshold
+// always routes to the rewrite (in-place cannot beat rewriting a few KB);
+// the result must be correct either way.
+func TestRetime_AutoScattersToReplace(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	target := delayedAudioFixture(t, dir, "auto.mkv", 6, 900)
+	pristine := filepath.Join(dir, "pristine.mkv")
+	writeAll(t, pristine, readAll(t, target))
+
+	if err := RetimeTracks(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{DeepVerify: true}); err != nil {
+		t.Fatalf("RetimeTracks auto: %v", err)
+	}
+	after := trackStartsMs(t, target)
+	if after[2] != after[1] {
+		t.Errorf("audio starts at %dms, video at %dms", after[2], after[1])
+	}
+	diffs, err := CompareBlocks(ctx, pristine, target)
+	if err != nil || len(diffs) != 0 {
+		t.Errorf("payloads must be intact (diffs=%v err=%v)", diffs, err)
+	}
+	validateErrorFree(t, target)
+}
+
+// TestRetimeReplace_UnknownSizeSegment: the rewrite lifts the in-place
+// restriction on streamed (unknown-size) Segments - the class every mkvgo
+// output before the size-sealing writer belongs to.
+func TestRetimeReplace_UnknownSizeSegment(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	target := delayedAudioFixture(t, dir, "unsized.mkv", 4, 900)
+
+	// Unseal the Segment size back to the unknown-size marker (8-byte all-ones).
+	data := readAll(t, target)
+	br := bytes.NewReader(data)
+	h1, n1, err := ebml.ReadElementHeader(br)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segIDOff := int64(n1) + h1.Size
+	copy(data[segIDOff+4:segIDOff+12], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	writeAll(t, target, data)
+
+	if err := RetimeTracksInPlace(ctx, target, map[uint64]int64{2: -900_000_000}); err == nil {
+		t.Fatal("in-place must refuse an unknown-size Segment")
+	} else if !strings.Contains(err.Error(), "unknown-size") {
+		t.Errorf("refusal should name the cause, got: %v", err)
+	}
+	if err := RetimeTracksReplace(ctx, target, map[uint64]int64{2: -900_000_000}); err != nil {
+		t.Fatalf("the rewrite must handle an unknown-size Segment: %v", err)
+	}
+	after := trackStartsMs(t, target)
+	if after[2] != after[1] {
+		t.Errorf("audio starts at %dms, video at %dms", after[2], after[1])
+	}
+	validateErrorFree(t, target)
+}
+
 // TestRetime_DeepVerifyPreexistingDefect: a file whose index was ALREADY
 // defective (audio-keyed cues, the ffmpeg-muxer heritage) must not have a
 // correct retime refused for it - the deep verify diffs the issue sets and
@@ -223,7 +329,7 @@ func TestRetime_DeepVerifyPreexistingDefect(t *testing.T) {
 
 	target := build("preexisting.mkv")
 	var preexisting []mkv.Issue
-	err := RetimeTracks(ctx, target, map[uint64]int64{2: -500_000_000}, mkv.Options{
+	err := RetimeTracksInPlace(ctx, target, map[uint64]int64{2: -500_000_000}, mkv.Options{
 		DeepVerify:    true,
 		OnPreexisting: func(is mkv.Issue) { preexisting = append(preexisting, is) },
 	})
@@ -242,7 +348,7 @@ func TestRetime_DeepVerifyPreexistingDefect(t *testing.T) {
 
 	strictTarget := build("strict.mkv")
 	before := readAll(t, strictTarget)
-	err = RetimeTracks(ctx, strictTarget, map[uint64]int64{2: -500_000_000}, mkv.Options{
+	err = RetimeTracksInPlace(ctx, strictTarget, map[uint64]int64{2: -500_000_000}, mkv.Options{
 		DeepVerify:   true,
 		StrictVerify: true,
 	})
@@ -314,7 +420,7 @@ func TestRetime_CrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	size := int64(len(original))
-	patches, _, err := retimeScan(ctx, f, size, map[uint64]int64{2: -900}, nil)
+	patches, _, err := retimeScan(ctx, f, size, map[uint64]int64{2: -900}, nil, 0)
 	if err != nil {
 		t.Fatalf("retimeScan: %v", err)
 	}
@@ -362,7 +468,7 @@ func TestRetime_RollbackDelta(t *testing.T) {
 	original := readAll(t, target)
 
 	var delta bytes.Buffer
-	err := RetimeTracks(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{
+	err := RetimeTracksInPlace(ctx, target, map[uint64]int64{2: -900_000_000}, mkv.Options{
 		RollbackSink:     &delta,
 		RollbackRequired: true,
 	})

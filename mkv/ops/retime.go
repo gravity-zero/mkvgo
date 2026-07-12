@@ -10,6 +10,7 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -35,22 +36,203 @@ type retimePatch struct {
 	orig, repl []byte
 }
 
+// retimeDispersionFactor models how much slower dispersed 4 KiB page writes
+// are than a sequential rewrite: the auto mode patches in place only while
+// patchCount x 4KiB x factor stays under the file size, and switches to the
+// sequential rewrite beyond (the 10-real-files benchmark that motivated it:
+// multi-track movies lose 2-2.5x in place, short single-track wins 3.5x).
+// A var so tests can force either path.
+var retimeDispersionFactor = int64(5)
+
 // RetimeTracks shifts the block timecodes of the given tracks (track number
-// -> shift in nanoseconds, negative = earlier) in place, under the same
-// crash-safe journal as ReindexInPlace. Cluster CRC-32 elements covering
-// patched blocks are recomputed, and CuePoints keyed on shifted tracks move
-// by the same shift. It refuses when a shift does not resolve to a whole
-// number of timecode ticks, when any resulting relative timecode would leave
-// int16 range or make an absolute timestamp negative, when a track is
-// unknown or has no blocks, or when a cue mixes shifted and unshifted
-// tracks. Options.DeepVerify re-walks the result and checks every shifted
-// track's first block moved by exactly the requested shift.
+// -> shift in nanoseconds, negative = earlier), choosing the cheaper of its
+// two engines automatically: the in-place 2-bytes-per-block patch when the
+// patches are few relative to the file (a short file, laced audio), the
+// sequential rewrite when they are many (multi-track movies, where dispersed
+// page writes cost more than rewriting the file once). Force either with
+// RetimeTracksInPlace / RetimeTracksReplace; the refusal rules and the
+// verification chain are shared.
+func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	err := retimeInPlace(ctx, path, shift, opts, true)
+	if errors.Is(err, errRetimeScattered) || errors.Is(err, errRetimeUnknownSize) || errors.Is(err, errRetimeCueUnpatchable) {
+		return RetimeTracksReplace(ctx, path, shift, opts...)
+	}
+	return err
+}
+
+// RetimeTracksInPlace shifts the block timecodes of the given tracks in
+// place, under the same crash-safe journal as ReindexInPlace: a patch of 2
+// bytes per block of the shifted tracks, no payload byte moved, no temp
+// file. Cluster CRC-32 elements covering patched blocks are recomputed, and
+// CuePoints keyed on shifted tracks move by the same shift. It refuses when
+// a shift does not resolve to a whole number of timecode ticks, when any
+// resulting relative timecode would leave int16 range or make an absolute
+// timestamp negative, when a track is unknown or has no blocks, or when a
+// cue mixes shifted and unshifted tracks. Options.DeepVerify re-walks the
+// result and checks every shifted track's first block moved by exactly the
+// requested shift.
 //
 // The operation needs write access to the file only. On any failure after
 // the journal has landed, the original bytes are restored; a crash
 // mid-operation is repaired by the automatic recovery the next in-place run
 // performs, or explicitly by RecoverInPlace.
-func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	return retimeInPlace(ctx, path, shift, opts, false)
+}
+
+// The in-place engine's structural refusals, as sentinels so the auto mode
+// can route them to the rewrite (which lifts all three): patches too dense,
+// a streamed Segment, cues the point-patcher cannot represent.
+var (
+	errRetimeScattered      = errors.New("retime: patches too scattered for in-place")
+	errRetimeUnknownSize    = errors.New("retime: unknown-size (streamed) Segment is not supported in place")
+	errRetimeCueUnpatchable = errors.New("retime: the cue set cannot be point-patched in place")
+)
+
+// RetimeTracksReplace shifts the block timecodes of the given tracks through
+// a sequential rewrite: the reindex engine copies the file cluster by
+// cluster, patching the shifted tracks' timecodes (and any cluster CRC-32)
+// on the fly, rebuilds the seek index from the SHIFTED blocks - yielding
+// healthy, video-keyed cues even when the source's were not - verifies the
+// copy (light always; Options.DeepVerify adds the full-read validation diff,
+// the payload byte-comparison and a re-walk proving every shifted track
+// moved by exactly the requested shift) and only then atomically replaces
+// the original. Options.KeepBackup keeps it as path+".bak"; needs write
+// permission on the directory.
+//
+// This is the engine of choice for multi-track movies: patching one block's
+// 2 bytes dirties its whole page, so in-place I/O grows past a sequential
+// rewrite once patches are dense - and the rewrite also lifts two in-place
+// restrictions (unknown-size Segments; cue sets that cannot be
+// point-patched, since the index is rebuilt).
+func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	fs := mkv.FSFrom(opts)
+	if len(shift) == 0 {
+		return fmt.Errorf("retime: no tracks to shift")
+	}
+	meta, err := reader.OpenMetaWithFS(ctx, path, fs)
+	if err != nil {
+		return fmt.Errorf("retime: read metadata: %w", err)
+	}
+	shiftTC, _, err := retimeShiftTC(path, meta, shift)
+	if err != nil {
+		return err
+	}
+
+	tmp := path + ".mkvgo.tmp"
+	if _, err := fs.DoStat(tmp); err == nil {
+		return fmt.Errorf("retime replace: leftover temporary file %s exists; remove it first", tmp)
+	}
+	fail := func(err error) error {
+		_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched
+		return err
+	}
+
+	var rb *rollbackBuilder
+	if mkv.RollbackSinkFrom(opts) != nil {
+		rb = newRollbackBuilder()
+	}
+
+	firstTC := make(map[uint64]int64)
+	mutate := func(body []byte) ([]retimePatch, error) {
+		ps, merr := retimeCluster(body, 0, shiftTC, firstTC)
+		if merr != nil {
+			return nil, merr
+		}
+		sort.Slice(ps, func(i, j int) bool { return ps[i].off < ps[j].off })
+		for _, p := range ps {
+			copy(body[p.off:p.off+int64(len(p.repl))], p.repl)
+		}
+		return ps, nil
+	}
+
+	cues, scale, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate)
+	if err != nil {
+		return fail(err)
+	}
+	for track := range shiftTC {
+		if _, ok := firstTC[track]; !ok {
+			return fail(fmt.Errorf("retime: track %d has no blocks", track))
+		}
+	}
+
+	if err := verifyReindexedCues(ctx, tmp, fs, cues, scale); err != nil {
+		return fail(err)
+	}
+	if mkv.DeepVerifyFrom(opts) {
+		before := preValidate(ctx, path, fs)
+		if err := deepVerifyValidate(ctx, tmp, fs, before, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
+			return fail(err)
+		}
+		// The payload comparison still holds: only timecodes moved, and the
+		// block digests hash frame payloads.
+		if err := deepVerifyVerbatim(ctx, path, tmp, fs); err != nil {
+			return fail(err)
+		}
+		if err := retimeVerifyShifts(ctx, tmp, fs, shiftTC, firstTC); err != nil {
+			return fail(fmt.Errorf("retime deep verify: %w", err))
+		}
+	}
+	if err := emitRollbackEntry(ctx, rb, path, tmp, fs, opts); err != nil {
+		return fail(err)
+	}
+	return installReplacement(fs, tmp, path, mkv.KeepBackupFrom(opts))
+}
+
+// retimeVerifyShifts re-walks path and checks every shifted track's first
+// block sits at exactly its pre-shift time plus the shift.
+func retimeVerifyShifts(ctx context.Context, path string, fs *mkv.FS, shiftTC, before map[uint64]int64) error {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	stat, err := fs.DoStat(path)
+	if err != nil {
+		return err
+	}
+	_, after, err := retimeScan(ctx, f, stat.Size(), nil, nil, 0)
+	if err != nil {
+		return fmt.Errorf("re-walk: %w", err)
+	}
+	for track, tc := range shiftTC {
+		want := before[track] + tc
+		if got, ok := after[track]; !ok || got != want {
+			return fmt.Errorf("track %d first block at %d ticks, want %d", track, got, want)
+		}
+	}
+	return nil
+}
+
+// retimeShiftTC validates the shift map against the file's tracks and
+// timecode scale and converts it to ticks.
+func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (map[uint64]int64, int64, error) {
+	scale := meta.Info.TimecodeScale
+	if scale <= 0 {
+		scale = 1_000_000
+	}
+	known := make(map[uint64]bool, len(meta.Tracks))
+	for _, t := range meta.Tracks {
+		known[t.ID] = true
+	}
+	shiftTC := make(map[uint64]int64, len(shift))
+	for track, deltaNs := range shift {
+		if !known[track] {
+			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s", track, path)
+		}
+		tc := roundDiv(deltaNs, scale)
+		if tc == 0 {
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick)", deltaNs, track, scale)
+		}
+		if tc*scale != deltaNs {
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick)", deltaNs, track, scale)
+		}
+		shiftTC[track] = tc
+	}
+	return shiftTC, scale, nil
+}
+
+func retimeInPlace(ctx context.Context, path string, shift map[uint64]int64, opts []mkv.Options, bailWhenScattered bool) error {
 	fs := mkv.FSFrom(opts)
 	if len(shift) == 0 {
 		return fmt.Errorf("retime: no tracks to shift")
@@ -68,30 +250,28 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	if err != nil {
 		return fmt.Errorf("retime: read metadata: %w", err)
 	}
-	scale := meta.Info.TimecodeScale
-	if scale <= 0 {
-		scale = 1_000_000
-	}
-	known := make(map[uint64]bool, len(meta.Tracks))
-	for _, t := range meta.Tracks {
-		known[t.ID] = true
-	}
-	shiftTC := make(map[uint64]int64, len(shift))
-	for track, deltaNs := range shift {
-		if !known[track] {
-			return fmt.Errorf("retime: track %d does not exist in %s", track, path)
-		}
-		tc := roundDiv(deltaNs, scale)
-		if tc == 0 {
-			return fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick)", deltaNs, track, scale)
-		}
-		if tc*scale != deltaNs {
-			return fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick)", deltaNs, track, scale)
-		}
-		shiftTC[track] = tc
+	shiftTC, _, err := retimeShiftTC(path, meta, shift)
+	if err != nil {
+		return err
 	}
 
-	patches, firstTC, err := retimeScan(ctx, f, size, shiftTC, mkv.ProgressFrom(opts))
+	// In auto mode, bail to the rewrite once in-place stops being the
+	// cheaper engine: dispersed 4 KiB page writes past the break-even, or a
+	// journal past its cap.
+	maxPatches := int64(0)
+	if bailWhenScattered {
+		byIO := size / (4096 * retimeDispersionFactor)
+		byJournal := int64(maxInplaceJournal-64) / 14 // 12-byte zone header + 2-byte payload
+		maxPatches = byIO
+		if byJournal < maxPatches {
+			maxPatches = byJournal
+		}
+		if maxPatches < 1 {
+			maxPatches = 1
+		}
+	}
+
+	patches, firstTC, err := retimeScan(ctx, f, size, shiftTC, mkv.ProgressFrom(opts), maxPatches)
 	if err != nil {
 		return err
 	}
@@ -165,7 +345,7 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 		if err := deepVerifyValidate(ctx, path, fs, beforeIssues, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return rollback(err)
 		}
-		_, after, err := retimeScan(ctx, f, size, nil, nil)
+		_, after, err := retimeScan(ctx, f, size, nil, nil, 0)
 		if err != nil {
 			return rollback(fmt.Errorf("deep verify re-walk: %w", err))
 		}
@@ -199,7 +379,7 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 // per track. A nil shiftTC scans without producing patches (the deep-verify
 // re-walk). Strict: a file the walk cannot parse is refused (repair it with
 // reindex first).
-func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[uint64]int64, progress mkv.ProgressFunc) (patches []retimePatch, firstTC map[uint64]int64, err error) {
+func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[uint64]int64, progress mkv.ProgressFunc, maxPatches int64) (patches []retimePatch, firstTC map[uint64]int64, err error) {
 	firstTC = make(map[uint64]int64)
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, nil, fmt.Errorf("retime: seek start: %w", err)
@@ -221,7 +401,7 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 		// The crash-safety journal lands past the end of the file and relies
 		// on readers stopping at the declared Segment end; an unknown-size
 		// (streamed) Segment would expose it. Same contract as ReindexInPlace.
-		return nil, nil, fmt.Errorf("retime: unknown-size (streamed) Segment is not supported in place; use reindex first")
+		return nil, nil, fmt.Errorf("%w; use retime --replace (or the automatic mode)", errRetimeUnknownSize)
 	}
 	consumed := int64(ebmlHdrBytes) + ebmlHdr.Size + int64(segHdrBytes)
 	segEnd := consumed + segHdr.Size
@@ -266,6 +446,9 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 				return nil, nil, err
 			}
 			patches = append(patches, ps...)
+			if maxPatches > 0 && int64(len(patches)) > maxPatches {
+				return nil, nil, errRetimeScattered
+			}
 		default:
 			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
 				return nil, nil, fmt.Errorf("retime: skip 0x%X: %w", h.ID, err)
@@ -472,7 +655,7 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 		for _, tr := range refTracks {
 			if tc, ok := shiftTC[tr]; ok {
 				if shifted > 0 && tc != delta {
-					return nil, fmt.Errorf("retime: cue at %d references tracks with different shifts", bodyOff+cpStart)
+					return nil, fmt.Errorf("%w: cue at %d references tracks with different shifts", errRetimeCueUnpatchable, bodyOff+cpStart)
 				}
 				delta = tc
 				shifted++
@@ -487,17 +670,17 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 			continue
 		}
 		if unshifted > 0 {
-			return nil, fmt.Errorf("retime: cue at %d references both shifted and unshifted tracks; regenerate the index with reindex instead", bodyOff+cpStart)
+			return nil, fmt.Errorf("%w: cue at %d references both shifted and unshifted tracks (the rewrite regenerates the index)", errRetimeCueUnpatchable, bodyOff+cpStart)
 		}
 		if cueTimeOff < 0 {
 			return nil, fmt.Errorf("retime: cue at %d has no CueTime", bodyOff+cpStart)
 		}
 		newTime := cueTime + delta
 		if newTime < 0 {
-			return nil, fmt.Errorf("retime: cue at %d would get a negative time", bodyOff+cpStart)
+			return nil, fmt.Errorf("%w: cue at %d would get a negative time", errRetimeCueUnpatchable, bodyOff+cpStart)
 		}
 		if cueTimeLen < 8 && newTime >= int64(1)<<(8*cueTimeLen) {
-			return nil, fmt.Errorf("retime: cue at %d: shifted time does not fit the existing CueTime encoding; regenerate the index with reindex instead", bodyOff+cpStart)
+			return nil, fmt.Errorf("%w: cue at %d: shifted time does not fit the existing CueTime encoding (the rewrite regenerates the index)", errRetimeCueUnpatchable, bodyOff+cpStart)
 		}
 		orig := append([]byte(nil), body[cueTimeOff:cueTimeOff+cueTimeLen]...)
 		repl := make([]byte, cueTimeLen)

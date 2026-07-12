@@ -54,6 +54,19 @@ All notable changes to mkvgo are documented here. The format is based on
   `validate`, which proves cue times against real keyframes at the cost of
   a full read. Exit 1 when unhealthy; the reason names the remedy.
 
+- **`retime` gained a second engine and picks automatically.**
+  `RetimeTracksReplace` reuses the reindex rewrite: timecodes patched on the
+  fly during a sequential verified copy, the seek index rebuilt from the
+  shifted blocks (healthy video-keyed cues even when the source's were
+  not), atomic swap, `--keep-backup`, unknown-size Segments accepted. The
+  default `RetimeTracks` measures the file during its scan and uses the
+  in-place patch only while it beats a rewrite (each 2-byte patch dirties a
+  whole page: on a multi-track movie the dispersed writes cost more than
+  copying the file once - a 10-real-files benchmark showed in-place losing
+  2-2.5x there while winning 3.5x on short single-track files) or while the
+  crash journal fits its cap; beyond either bound it switches engines
+  mid-scan. Force with `--in-place` / `--replace`.
+
 ### Changed
 
 - **DeepVerify now diffs instead of gatekeeping.** The result's

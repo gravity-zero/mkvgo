@@ -499,13 +499,27 @@ func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthRep
 }
 
 // RetimeTracks shifts the block timecodes of the given tracks (track number
-// -> shift in nanoseconds, negative = earlier) in place, under the same
-// crash-safe journal as ReindexInPlace - the fix for a constant A/V desync
-// (audio content starting late) without rewriting the file. Cluster CRC-32
-// elements are recomputed and cues keyed on shifted tracks move along.
+// -> shift in nanoseconds, negative = earlier) - the fix for a constant A/V
+// desync (audio content starting late). It picks the cheaper engine
+// automatically: the in-place 2-bytes-per-block patch when patches are few,
+// the sequential rewrite when they are dense (multi-track movies).
 // See ops.RetimeTracks.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
 	return ops.RetimeTracks(ctx, path, shift, opts...)
+}
+
+// RetimeTracksInPlace forces the in-place engine: 2 bytes patched per block
+// under the crash-safe journal, no rewrite, file-only permission.
+// See ops.RetimeTracksInPlace.
+func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	return ops.RetimeTracksInPlace(ctx, path, shift, opts...)
+}
+
+// RetimeTracksReplace forces the sequential rewrite: timecodes patched on
+// the fly, the seek index rebuilt healthy, verified then atomically swapped
+// (KeepBackup keeps the original). See ops.RetimeTracksReplace.
+func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	return ops.RetimeTracksReplace(ctx, path, shift, opts...)
 }
 
 // ApplyRollback reconstructs the pre-repair original from a repaired file

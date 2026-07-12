@@ -404,7 +404,7 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		rb = newRollbackBuilder()
 	}
 
-	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb)
+	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil)
 	if err != nil {
 		return err
 	}
@@ -426,14 +426,22 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	return emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts)
 }
 
+// clusterMutator lets a rewrite transform each cluster body in place before
+// it is written (RetimeTracksReplace patches block timecodes and cluster
+// CRCs this way). It returns the byte-range patches it applied, sorted by
+// offset, each carrying the ORIGINAL bytes - the rollback delta needs them
+// to keep reconstructing the source. body offsets are body-relative.
+type clusterMutator func(body []byte) ([]retimePatch, error)
+
 // reindexCopy performs the actual byte-faithful copy from srcPath to dstPath,
 // rebuilding only the seek index (SeekHead + Cues). It returns the cue points
 // built during the walk and the timecode scale used to derive them, so the
 // caller can verify the result against them. See Reindex for the full contract.
 // A non-nil rb collects the inverse rollback delta along the way: COPY ops for
 // the verbatim bodies, literals for the re-encoded headers and dropped index
-// elements.
-func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder) (cues []mkv.CuePoint, timecodeScale int64, err error) {
+// elements. A non-nil mutate transforms each cluster body before writing (the
+// delta then splits its COPY runs around the mutated spans).
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator) (cues []mkv.CuePoint, timecodeScale int64, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks map[uint64]bool
@@ -568,6 +576,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			}
 			consumed += int64(hdrBytes) + h.Size
 
+			var patches []retimePatch
+			if mutate != nil {
+				patches, err = mutate(body)
+				if err != nil {
+					return nil, 0, err
+				}
+			}
 			if rb != nil {
 				rb.literalHeader(h, hdrBytes)
 			}
@@ -580,7 +595,21 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				if serr != nil {
 					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
 				}
-				rb.copyRun(after-h.Size, body)
+				bodyDst := after - h.Size
+				// The written body may differ from the source at the mutated
+				// spans: the delta alternates COPY runs (unchanged bytes) and
+				// literals carrying the ORIGINAL bytes of each span.
+				cur := int64(0)
+				for _, p := range patches {
+					if p.off > cur {
+						rb.copyRun(bodyDst+cur, body[cur:p.off])
+					}
+					rb.literal(p.orig)
+					cur = p.off + int64(len(p.orig))
+				}
+				if cur < h.Size {
+					rb.copyRun(bodyDst+cur, body[cur:])
+				}
 			}
 
 			if progress != nil && totalBytes > 0 {
