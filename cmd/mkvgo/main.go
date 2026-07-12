@@ -102,6 +102,9 @@ func main() {
 	case "cue-health":
 		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json]")
 		commands.CmdCueHealth(args)
+	case "diagnose":
+		commands.RequireArgs(args, 1, "mkvgo diagnose <file.mkv> [-json]")
+		commands.CmdDiagnose(args)
 	case "hash":
 		commands.CmdHash(args)
 	case "verify":
@@ -183,7 +186,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `mkvgo — pure Go MKV/WebM toolkit
+	fmt.Fprintln(os.Stderr, `mkvgo - pure Go MKV/WebM toolkit
 
 Commands:
   info          Show container info (MKV/WebM or MP4)
@@ -214,9 +217,10 @@ Commands:
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
   cue-health    Head-only seek-index triage: which tracks the cues reference (spots indexes that seek wrong)
+  diagnose      One-call triage: index health + per-track audio delay + size coherence, each finding with its remedy
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption
-  compare       Diff metadata of two files (MKV/WebM or MP4 — verify a remux)
+  compare       Diff metadata of two files (MKV/WebM or MP4 - verify a remux)
   reindex       Rebuild the seek index (Cues) into a new file, verified; --replace swaps it in, --resync repairs corrupted regions
   reindex-inplace  Rebuild the seek index by patching the file itself (no copy, crash-safe journal, auto-rollback)
   salvage       Best-effort recovery copy of a damaged file (surgical repair, --dry-run damage map)
@@ -228,10 +232,10 @@ Commands:
   from-mp4      Remux an MP4 to MKV (--mp3-container-delay)
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
-hls-segment   Serve one HLS resource on demand (master/playlist/init/N) — no pre-generation
-to-abr        Package pre-encoded quality variants as one multi-variant HLS master (ABR light)
-concat-hls    Package several sources as ONE continuous HLS session (no player reload)
-concat-segment  Serve one concat-hls resource on demand, no pre-generation
+  hls-segment   Serve one HLS resource on demand (master/playlist/init/N) - no pre-generation
+  to-abr        Package pre-encoded quality variants as one multi-variant HLS master (ABR light)
+  concat-hls    Package several sources as ONE continuous HLS session (no player reload)
+  concat-segment  Serve one concat-hls resource on demand, no pre-generation
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
 analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr (head-only, no decode; Matroska/WebM only)
 fingerprint   Container-independent content identity hash for cross-format dedup (full read of every track's payload; Matroska/WebM only)

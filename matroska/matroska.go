@@ -498,6 +498,30 @@ func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthRep
 	return ops.CueHealth(ctx, path, opts...)
 }
 
+// Finding is one diagnosed defect with its remedy. See ops.Finding.
+type Finding = ops.Finding
+
+// Diagnosis is Diagnose's full triage verdict for one file. See ops.Diagnosis.
+type Diagnosis = ops.Diagnosis
+
+// Diagnose classifies a file in one call - seek-index health, per-track
+// audio start delays, declared-size coherence, and (only when the size check
+// suggests damage) the full tolerant walk - and names the remedy for every
+// finding (reindex / retime / resync / re-download). Head-mostly.
+// See ops.Diagnose.
+func Diagnose(ctx context.Context, path string, opts ...Options) (*Diagnosis, error) {
+	return ops.Diagnose(ctx, path, opts...)
+}
+
+// AudioStartDelays returns, per audio track number, how late the track's
+// content starts relative to the first video keyframe, in nanoseconds
+// (positive = audio late; hand the negated values to RetimeTracks to cancel
+// the delay). Track numbers and delays come from the same parse.
+// See ops.AudioStartDelays.
+func AudioStartDelays(ctx context.Context, path string, opts ...Options) (map[uint64]int64, error) {
+	return ops.AudioStartDelays(ctx, path, opts...)
+}
+
 // RetimeTracks shifts the block timecodes of the given tracks (track number
 // -> shift in nanoseconds, negative = earlier) - the fix for a constant A/V
 // desync (audio content starting late). It picks the cheaper engine
