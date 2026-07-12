@@ -34,6 +34,12 @@ const probe = await MkvGo.probe(mkvBytes, { keyframes: true })
 check(probe.format === 'mkv', `probe format mkv (got ${probe.format})`)
 check(Array.isArray(probe.tracks) && probe.tracks.length >= 1, `probe tracks (${probe.tracks?.length})`)
 check(probe.tracks[0].codec_long_name?.length > 0, `derived codec_long_name (${probe.tracks[0].codec_long_name})`)
+{
+  const v = probe.tracks.find((t) => t.type === 'video')
+  check(v && v.sample_aspect_ratio?.includes(':') && v.display_aspect_ratio?.includes(':') &&
+    (v.hdr_format === undefined || ['dolby-vision', 'hdr10', 'hlg', 'sdr'].includes(v.hdr_format)),
+    `derived probe fields (sar=${v?.sample_aspect_ratio} dar=${v?.display_aspect_ratio} hdr=${v?.hdr_format ?? 'n/a'})`)
+}
 
 // --- probe (Blob) — the ranged-read path used for large browser files ---
 const probeBlob = await MkvGo.probe(new Blob([mkvBytes]))

@@ -48,7 +48,7 @@ var CmdUsage = map[string]string{
 	"chapters":           "mkvgo chapters [-json] <file.mkv|.mp4|->",
 	"attachments":        "mkvgo attachments [-json] <file.mkv|.mp4|->",
 	"tags":               "mkvgo tags [-json] <file.mkv|.mp4|->",
-	"probe":              "mkvgo probe [-json] <file.mkv|.mp4|->",
+	"probe":              "mkvgo probe [-json] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate)",
 	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
@@ -302,14 +302,26 @@ func PrintJSON(v any) {
 }
 
 // trackJSON augments a Track for JSON output with the derived display strings
-// ffprobe reports as fields (codec_long_name, channel_layout) but which the
-// library exposes as methods. The embedded Track's fields are promoted, so the
-// JSON shape is the Track plus these two extras.
+// a stream prober consumes as fields but which the library exposes as
+// methods: codec/channel names, aspect ratios, the colour code points as
+// names, and the one-word HDR classification a tonemap-or-direct-play
+// decision keys on. The embedded Track's fields are promoted, so the JSON
+// shape is the Track plus these extras.
 type trackJSON struct {
 	matroska.Track
-	CodecLongName string  `json:"codec_long_name,omitempty"`
-	ChannelLayout string  `json:"channel_layout,omitempty"`
-	AvgFrameRate  float64 `json:"avg_frame_rate,omitempty"`
+	CodecLongName       string  `json:"codec_long_name,omitempty"`
+	ChannelLayout       string  `json:"channel_layout,omitempty"`
+	AvgFrameRate        float64 `json:"avg_frame_rate,omitempty"`
+	SampleAspectRatio   string  `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio  string  `json:"display_aspect_ratio,omitempty"`
+	ColorSpaceName      string  `json:"color_space_name,omitempty"`
+	ColorTransferName   string  `json:"color_transfer_name,omitempty"`
+	ColorPrimariesName  string  `json:"color_primaries_name,omitempty"`
+	ColorRangeName      string  `json:"color_range_name,omitempty"`
+	HDRFormat           string  `json:"hdr_format,omitempty"`
+	StereoModeName      string  `json:"stereo_mode_name,omitempty"`
+	ResolvedLanguage    string  `json:"resolved_language,omitempty"`
+	EffectiveSampleRate float64 `json:"effective_sample_rate,omitempty"`
 }
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
@@ -317,7 +329,20 @@ type trackJSON struct {
 func tracksForJSON(tracks []matroska.Track) []trackJSON {
 	out := make([]trackJSON, len(tracks))
 	for i, t := range tracks {
-		out[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(), ChannelLayout: t.ChannelLayout(), AvgFrameRate: t.AvgFrameRate()}
+		out[i] = trackJSON{Track: t,
+			CodecLongName:      t.CodecLongName(),
+			ChannelLayout:      t.ChannelLayout(),
+			AvgFrameRate:       t.AvgFrameRate(),
+			SampleAspectRatio:  t.SampleAspectRatio(),
+			DisplayAspectRatio: t.DisplayAspectRatio(),
+			ColorSpaceName:     t.ColorSpaceName(),
+			ColorTransferName:  t.ColorTransferName(),
+			ColorPrimariesName: t.ColorPrimariesName(),
+			ColorRangeName:     t.ColorRangeName(),
+			HDRFormat:          t.HDRFormat(),
+			StereoModeName:     t.StereoModeName(),
+			ResolvedLanguage:   t.ResolvedLanguage(),
+		}
 	}
 	return out
 }

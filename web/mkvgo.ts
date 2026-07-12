@@ -63,6 +63,22 @@ export interface Track {
   codec_long_name?: string
   channel_layout?: string
   avg_frame_rate?: number
+  sample_aspect_ratio?: string
+  display_aspect_ratio?: string
+  /** Colour code points as the conventional prober strings (e.g. "bt2020nc", "smpte2084"). */
+  color_space_name?: string
+  color_transfer_name?: string
+  color_primaries_name?: string
+  color_range_name?: string
+  /**
+   * One-word dynamic-range classification for the tonemap-or-direct-play
+   * decision: "dolby-vision" | "hdr10" | "hlg" | "sdr"; absent when unknown
+   * or not video.
+   */
+  hdr_format?: string
+  stereo_mode_name?: string
+  /** The track's effective language (BCP-47 when present, else the legacy tag). */
+  resolved_language?: string
   /** Remaining probe fields; see docs/library.md for the full Track reference. */
   [key: string]: unknown
 }

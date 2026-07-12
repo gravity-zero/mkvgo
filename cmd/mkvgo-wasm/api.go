@@ -150,12 +150,42 @@ func readProbeOpts(args []js.Value, idx int) probeOpts {
 }
 
 // trackJSON mirrors the CLI's -json track shape: the Track fields plus the
-// derived display strings the library exposes as methods.
+// derived display strings the library exposes as methods - codec/channel
+// names, aspect ratios, colour names and the one-word HDR classification.
 type trackJSON struct {
 	matroska.Track
-	CodecLongName string  `json:"codec_long_name,omitempty"`
-	ChannelLayout string  `json:"channel_layout,omitempty"`
-	AvgFrameRate  float64 `json:"avg_frame_rate,omitempty"`
+	CodecLongName       string  `json:"codec_long_name,omitempty"`
+	ChannelLayout       string  `json:"channel_layout,omitempty"`
+	AvgFrameRate        float64 `json:"avg_frame_rate,omitempty"`
+	SampleAspectRatio   string  `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio  string  `json:"display_aspect_ratio,omitempty"`
+	ColorSpaceName      string  `json:"color_space_name,omitempty"`
+	ColorTransferName   string  `json:"color_transfer_name,omitempty"`
+	ColorPrimariesName  string  `json:"color_primaries_name,omitempty"`
+	ColorRangeName      string  `json:"color_range_name,omitempty"`
+	HDRFormat           string  `json:"hdr_format,omitempty"`
+	StereoModeName      string  `json:"stereo_mode_name,omitempty"`
+	ResolvedLanguage    string  `json:"resolved_language,omitempty"`
+	EffectiveSampleRate float64 `json:"effective_sample_rate,omitempty"`
+}
+
+// trackJSONOf fills every derived field from the Track's methods.
+func trackJSONOf(t matroska.Track) trackJSON {
+	return trackJSON{Track: t,
+		CodecLongName:       t.CodecLongName(),
+		ChannelLayout:       t.ChannelLayout(),
+		AvgFrameRate:        t.AvgFrameRate(),
+		SampleAspectRatio:   t.SampleAspectRatio(),
+		DisplayAspectRatio:  t.DisplayAspectRatio(),
+		ColorSpaceName:      t.ColorSpaceName(),
+		ColorTransferName:   t.ColorTransferName(),
+		ColorPrimariesName:  t.ColorPrimariesName(),
+		ColorRangeName:      t.ColorRangeName(),
+		HDRFormat:           t.HDRFormat(),
+		StereoModeName:      t.StereoModeName(),
+		ResolvedLanguage:    t.ResolvedLanguage(),
+		EffectiveSampleRate: t.EffectiveSampleRate(),
+	}
 }
 
 // probeResult is the JSON payload probe resolves with.
@@ -238,8 +268,7 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 	}
 	res.Tracks = make([]trackJSON, len(res.Container.Tracks))
 	for i, t := range res.Container.Tracks {
-		res.Tracks[i] = trackJSON{Track: t, CodecLongName: t.CodecLongName(),
-			ChannelLayout: t.ChannelLayout(), AvgFrameRate: t.AvgFrameRate()}
+		res.Tracks[i] = trackJSONOf(t)
 	}
 	return toJSObject(res)
 }
