@@ -1162,11 +1162,12 @@ func cueHealthJS(_ js.Value, args []js.Value) any {
 	})
 }
 
-// diagnoseJS(input, opts?) -> Promise<Diagnosis>: one-call triage - seek-index
-// health, per-track audio start delays, declared-size coherence, and (only
-// when the size check suggests damage) the full tolerant walk - each finding
-// carrying its remedy (reindex / retime / resync / re-download). Head-mostly:
-// on a healthy file it costs the head plus the first cluster(s).
+// diagnoseJS(input, opts?) -> Promise<Diagnosis>: one-call triage with a
+// remedy per finding, routed by the input's first bytes like the CLI.
+// Matroska/WebM: seek-index health, per-track audio start delays,
+// declared-size coherence, tolerant walk only when the sizes disagree.
+// MP4/MOV: head-only box-layout truncation, missing moov, trailing junk,
+// per-track edit-list audio delays. Same Diagnosis shape either way.
 func diagnoseJS(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("diagnose: missing input") })
@@ -1179,7 +1180,26 @@ func diagnoseJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("diagnose: %w", err)
 		}
-		d, err := ops.Diagnose(ctx, "in", mkv.Options{FS: fs})
+		src, err := fs.DoOpen("in")
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		head := make([]byte, 8)
+		_, herr := io.ReadFull(src, head)
+		src.Close()
+		if herr != nil {
+			return nil, fmt.Errorf("diagnose: read head: %w", herr)
+		}
+		format, err := sniffFormat(head)
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		var d *mkv.Diagnosis
+		if format == "mkv" {
+			d, err = ops.Diagnose(ctx, "in", mkv.Options{FS: fs})
+		} else {
+			d, err = mp4.Diagnose(ctx, "in", mp4.Options{FS: fs})
+		}
 		if err != nil {
 			return nil, err
 		}

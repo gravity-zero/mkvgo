@@ -386,6 +386,16 @@ check(typeof diag.healthy === 'boolean' && diag.cue_health &&
   check(!dTrunc.healthy && (dTrunc.findings ?? []).some((f) => f.kind === 'truncated'),
     `diagnose flags a truncated input (${JSON.stringify((dTrunc.findings ?? []).map((f) => f.kind))})`)
 }
+// MP4 inputs route to the head-only MP4 triage - same Diagnosis shape.
+{
+  const dMp4 = await MkvGo.diagnose(mp4.data)
+  check(dMp4.healthy === true && dMp4.cue_health === undefined,
+    `diagnose(mp4) routes to the MP4 triage (healthy=${dMp4.healthy})`)
+  const cut = mp4.data.subarray(0, Math.floor(mp4.data.length * 0.5))
+  const dCut = await MkvGo.diagnose(cut)
+  check(!dCut.healthy && (dCut.findings ?? []).some((f) => f.kind === 'truncated' || f.kind === 'no-moov'),
+    `diagnose(mp4) flags a truncated input (${JSON.stringify((dCut.findings ?? []).map((f) => f.kind))})`)
+}
 
 // --- PlanHLS options: virtual audio resync + synthesized index ---
 {

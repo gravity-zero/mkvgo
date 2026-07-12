@@ -13,6 +13,7 @@ import (
 	"io"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -48,6 +49,34 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 		return fmt.Errorf("mkvgo: retime on an MP4 edits the moov only; DeepVerify/StrictVerify/KeepBackup/RollbackSink apply to the Matroska engine alone (call matroska.RetimeTracks for those)")
 	}
 	return mp4.RetimeTracks(ctx, path, shift, mp4.Options{FS: o.FS, Progress: o.Progress})
+}
+
+// Diagnose classifies a file in one call and names the remedy for every
+// finding, whatever the container - the library counterpart of
+// `mkvgo diagnose`, which routes the same way:
+//
+//   - Matroska/WebM -> the ops triage: seek-index health, per-track audio
+//     start delays, declared-size coherence, tolerant walk only when the
+//     sizes disagree;
+//   - MP4/MOV -> the head-only mp4 triage: box-layout truncation, missing
+//     moov, trailing junk, per-track edit-list audio delays.
+//
+// Both routes return the same mkv.Diagnosis shape (MP4 reports carry no
+// CueHealth/Damage sections - the sample table is the index by
+// construction), so one scan loop covers a mixed library.
+func Diagnose(ctx context.Context, path string, opts ...matroska.Options) (*mkv.Diagnosis, error) {
+	o := matroska.Options{}
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	format, err := sniffContainer(path, &o)
+	if err != nil {
+		return nil, err
+	}
+	if format == "mkv" {
+		return matroska.Diagnose(ctx, path, opts...)
+	}
+	return mp4.Diagnose(ctx, path, mp4.Options{FS: o.FS})
 }
 
 // sniffContainer classifies path from its first bytes: "mkv" for an EBML

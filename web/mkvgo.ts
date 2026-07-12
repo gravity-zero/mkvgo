@@ -332,7 +332,7 @@ export interface CueHealthReport {
 export interface Finding {
   /**
    * "no-index" | "index-misskeyed" | "index-stale-tracks" | "audio-delay" |
-   * "truncated" | "damaged" | "trailing-junk" | "streamed-size"
+   * "truncated" | "damaged" | "trailing-junk" | "streamed-size" | "no-moov"
    */
   kind: string
   detail: string
@@ -344,16 +344,17 @@ export interface Finding {
 }
 
 /**
- * Result of diagnose(): the one-call triage - seek-index health, per-track
+ * Result of diagnose(): the one-call triage with a remedy per finding, same
+ * shape for both containers. Matroska/WebM: seek-index health, per-track
  * audio start delays, declared-size coherence, and (only when the size check
- * suggests damage) the full tolerant walk - each finding carrying its
- * remedy. Head-mostly: on a healthy file it costs the head plus the first
- * cluster(s).
+ * suggests damage) the full tolerant walk. MP4/MOV: head-only box-layout
+ * truncation, missing moov, trailing junk, per-track edit-list audio delays.
  */
 export interface Diagnosis {
   healthy: boolean
   findings: Finding[] | null
-  cue_health: CueHealthReport
+  /** Matroska only: an MP4's sample table is its index by construction. */
+  cue_health?: CueHealthReport
   /** Every audio track's start delay in ns (track number -> delay), threshold or not. */
   audio_delays_ns: Record<string, number>
   /** The damage map, present only when the tolerant walk ran. */
@@ -743,9 +744,10 @@ export interface MkvGoApi {
   cueHealth(input: Uint8Array | Blob, options?: AbortOptions): Promise<CueHealthReport>
 
   /**
-   * One-call triage: index health + per-track audio delay + size coherence,
-   * each finding with its remedy. Head-mostly - the tolerant walk runs only
-   * when the declared size and the real size disagree.
+   * One-call triage with a remedy per finding, routed by the input's first
+   * bytes. MKV/WebM: index health + per-track audio delay + size coherence
+   * (tolerant walk only when the sizes disagree). MP4/MOV: head-only box
+   * layout + edit-list audio delays.
    */
   diagnose(input: Uint8Array | Blob, options?: AbortOptions): Promise<Diagnosis>
 }

@@ -107,6 +107,38 @@ func TestRetimeTracksRefusesMatroskaOnlyOptionsOnMP4(t *testing.T) {
 	}
 }
 
+// TestDiagnoseRoutesByContent: one Diagnose call covers both containers with
+// the same report shape - the audio-delay finding carries the same retime
+// remedy either way.
+func TestDiagnoseRoutesByContent(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	mkvPath := routerFixtureMKV(t, dir) // audio +300ms
+	mp4Path := filepath.Join(dir, "mislabeled.mkv")
+	if err := mp4.RemuxToMP4(ctx, mkvPath, mp4Path); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{mkvPath, mp4Path} {
+		d, err := Diagnose(ctx, path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var found bool
+		for _, f := range d.Findings {
+			if f.Kind == "audio-delay" && f.Track == 2 && strings.Contains(f.Remedy, "retime --shift 2=-300") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: want the audio-delay finding with the retime remedy, got %+v", path, d.Findings)
+		}
+		if d.AudioDelaysNs[2] != 300_000_000 {
+			t.Errorf("%s: delay = %d, want 300ms", path, d.AudioDelaysNs[2])
+		}
+	}
+}
+
 // TestRetimeTracksUnknownContainer: garbage refuses with the sniffed reason.
 func TestRetimeTracksUnknownContainer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "junk.bin")

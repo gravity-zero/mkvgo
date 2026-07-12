@@ -103,7 +103,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json]")
 		commands.CmdCueHealth(args)
 	case "diagnose":
-		commands.RequireArgs(args, 1, "mkvgo diagnose <file.mkv> [-json]")
+		commands.RequireArgs(args, 1, "mkvgo diagnose <file.mkv|.mp4> [-json]")
 		commands.CmdDiagnose(args)
 	case "hash":
 		commands.CmdHash(args)
@@ -217,7 +217,7 @@ Commands:
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
   cue-health    Head-only seek-index triage: which tracks the cues reference (spots indexes that seek wrong)
-  diagnose      One-call triage: index health + per-track audio delay + size coherence, each finding with its remedy
+  diagnose      One-call triage with a remedy per finding (MKV/WebM or MP4: index health, audio delay, truncation)
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption
   compare       Diff metadata of two files (MKV/WebM or MP4 - verify a remux)
