@@ -96,6 +96,39 @@ func (t *Track) ColorPrimariesName() string { return nameOf(colorPrimariesNames,
 // value, or "" if absent/unknown.
 func (t *Track) ColorRangeName() string { return nameOf(colorRangeNames, t.ColorRange) }
 
+// HDRFormat classifies a video track's dynamic-range signalling in one word -
+// the field a serving decision keys on (tonemap or direct-play):
+//
+//	"dolby-vision" - a Dolby Vision configuration is present (any profile)
+//	"hdr10"        - PQ transfer (SMPTE ST 2084); HDR10 static metadata may ride along
+//	"hlg"          - HLG transfer (ARIB STD-B67)
+//	"sdr"          - colour is known (or was determined) and none of the above
+//	""             - not a video track, or colour entirely unknown
+//
+// Container metadata only (the same signals IsHDR reads); the transfer
+// function alone decides the PQ/HLG split because it is what a tonemapping
+// decision consumes.
+func (t *Track) HDRFormat() string {
+	if t.Type != VideoTrack {
+		return ""
+	}
+	if t.DolbyVision != nil {
+		return "dolby-vision"
+	}
+	if t.ColorTransfer != nil {
+		switch *t.ColorTransfer {
+		case 16:
+			return "hdr10"
+		case 18:
+			return "hlg"
+		}
+	}
+	if t.ColorTransfer != nil || t.ColorPrimaries != nil || t.ColorSpace != nil || t.ColourDetermined {
+		return "sdr"
+	}
+	return ""
+}
+
 // IsHDR reports whether the track's colour metadata indicates a high-dynamic-range
 // video signal: BT.2020 primaries (9) combined with a PQ (16) or HLG (18) transfer
 // function — the standard HDR10/HLG signalling. It is a best-effort heuristic from

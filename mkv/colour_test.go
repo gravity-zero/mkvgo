@@ -86,6 +86,29 @@ func TestIsHDR(t *testing.T) {
 	}
 }
 
+func TestHDRFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		tr   Track
+		want string
+	}{
+		{"dolby vision wins", Track{Type: VideoTrack, ColorTransfer: u16(16), DolbyVision: &DolbyVision{Profile: 8}}, "dolby-vision"},
+		{"PQ", Track{Type: VideoTrack, ColorTransfer: u16(16)}, "hdr10"},
+		{"HLG", Track{Type: VideoTrack, ColorTransfer: u16(18)}, "hlg"},
+		{"known SDR transfer", Track{Type: VideoTrack, ColorTransfer: u16(1)}, "sdr"},
+		{"determined SDR (no colour element)", Track{Type: VideoTrack, ColourDetermined: true}, "sdr"},
+		{"colour entirely unknown", Track{Type: VideoTrack}, ""},
+		{"audio track", Track{Type: AudioTrack, ColorTransfer: u16(16)}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.tr.HDRFormat(); got != tt.want {
+				t.Errorf("HDRFormat = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFFprobeCodecName(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"srt", "subrip"},
