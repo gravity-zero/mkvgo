@@ -46,6 +46,11 @@ type SalvageReport struct {
 	// CleanCutBytes counts video bytes intentionally dropped after damage
 	// gaps because they precede the next video keyframe (Options.CleanCut).
 	CleanCutBytes int64 `json:"clean_cut_bytes"`
+	// TruncatedTail is the first-class "incomplete download" verdict: the
+	// final damaged range runs to the end of the file - the missing tail is
+	// not recoverable by ANY tool, only by re-acquiring the source. Mid-file
+	// damage without this flag is repairable in full (resync).
+	TruncatedTail bool `json:"truncated_tail"`
 }
 
 // Salvage produces a best-effort copy of a damaged Matroska/WebM file: unlike
@@ -300,13 +305,19 @@ func (w *salvageWalker) recordDamage(start, end, startMs, endMs int64) {
 		StartOffset: start, EndOffset: end, ApproxStartMs: startMs, ApproxEndMs: endMs,
 	})
 	w.report.BytesSkipped += end - start
+	if end >= w.fileSize {
+		// The damage runs to the end of the file: the truncated-source
+		// verdict, whichever path detected it (plain resync, surgical scan).
+		w.report.TruncatedTail = true
+	}
 	if w.cleanCut && len(w.videoTracks) > 0 {
 		w.awaitKF = true
 	}
 }
 
 // recordTailDamage marks everything from start to EOF as lost; the caller
-// ends the walk right after.
+// ends the walk right after. This is the "truncated source" verdict: unlike
+// mid-file damage, the missing tail cannot be recovered by any repair.
 func (w *salvageWalker) recordTailDamage(start int64) {
 	w.recordDamage(start, w.fileSize, w.lastGoodMs, w.lastGoodMs)
 }
