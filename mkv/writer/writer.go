@@ -583,19 +583,56 @@ func EncodeElementID(id uint32) []byte {
 	return buf
 }
 
+// VoidHeader returns the header (ID + size VINT) of a Void element spanning
+// EXACTLY totalSize bytes. It is the single place that decides how a Void is
+// laid out, because getting it wrong is a silent corruption: callers pad a
+// reserved slot with a Void, and one that declares a span a byte longer than
+// its budget swallows the head of the element that follows it.
+//
+// The layout is 1 (the Void ID) + width + payload == totalSize. Some totals are
+// out of reach for a minimal-width size VINT - 129 bytes, for one: a 1-byte
+// width leaves a 127-byte payload, which no longer fits a 1-byte VINT (127 is
+// the reserved unknown-size pattern), while a 2-byte width leaves 126. The
+// width is therefore widened until the payload fits it, using the non-minimal
+// Data Size encoding EBML allows.
+func VoidHeader(totalSize int) ([]byte, error) {
+	if totalSize < 2 {
+		return nil, fmt.Errorf("a Void spans at least 2 bytes (1 of ID, 1 of size), got %d", totalSize)
+	}
+	for width := 1; width <= 8; width++ {
+		payload := int64(totalSize - 1 - width)
+		if payload < 0 {
+			break
+		}
+		if ebml.DataSizeLen(payload) > width {
+			continue // payload does not fit this width: widen the size VINT
+		}
+		var buf bytes.Buffer
+		if _, err := ebml.WriteElementID(&buf, mkv.IDVoid); err != nil {
+			return nil, err
+		}
+		if _, err := ebml.WriteDataSizeWidth(&buf, payload, width); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+	return nil, fmt.Errorf("cannot encode a Void of exactly %d bytes", totalSize)
+}
+
+// WriteVoid writes a Void element of EXACTLY totalSize bytes, payload included
+// (nothing at all below 2, the smallest an element can be).
 func WriteVoid(w io.Writer, totalSize int) error {
 	if totalSize < 2 {
 		return nil
 	}
-	headerSize := 1 + ebml.DataSizeLen(int64(totalSize-1-ebml.DataSizeLen(int64(totalSize-2))))
-	padLen := totalSize - headerSize
-	if padLen < 0 {
-		padLen = 0
-	}
-	if _, err := ebml.WriteElementHeader(w, mkv.IDVoid, int64(padLen)); err != nil {
+	hdr, err := VoidHeader(totalSize)
+	if err != nil {
 		return err
 	}
-	_, err := w.Write(make([]byte, padLen))
+	if _, err := w.Write(hdr); err != nil {
+		return err
+	}
+	_, err = w.Write(make([]byte, totalSize-len(hdr)))
 	return err
 }
 

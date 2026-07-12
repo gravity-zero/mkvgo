@@ -201,7 +201,9 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		allTracks:   allTracks,
 		cleanCut:    cleanCut,
 		progress:    progress,
-		rb:          rb,
+
+		prevClusterSize: -1, // no cluster written yet
+		rb:              rb,
 	}
 	if err := w.walk(ctx); err != nil {
 		return nil, nil, 0, err
@@ -232,6 +234,10 @@ type salvageWalker struct {
 	progress    mkv.ProgressFunc
 	clusterBuf  []byte           // reused cluster body buffer
 	rb          *rollbackBuilder // nil = no rollback delta requested
+	// prevClusterSize is the size of the cluster written before the current
+	// one, for its PrevSize hint. -1 until one has been written: salvage drops
+	// and splits clusters, so the source's own value is meaningless here.
+	prevClusterSize int64
 }
 
 // walk drives the top-level element loop. Every handler returns
@@ -492,14 +498,18 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 // written verbatim, or as a literal when the clean-cut filter is about to
 // rewrite it.
 func (w *salvageWalker) emitClusterWithRollback(h ebml.ElementHeader, hdrBytes int, body []byte) error {
-	filtered := w.awaitKF // the filter runs inside emitCluster iff armed now
+	// The body reaches the output verbatim only when nothing rewrites it: the
+	// clean-cut filter (armed now), or the retarget of a position hint - which
+	// also reseals the CRC. Otherwise the ORIGINAL bytes go to the delta as a
+	// literal, since the output no longer holds them.
+	filtered := w.awaitKF || clusterHasPositionHints(body)
 	if w.rb != nil {
 		w.rb.literalHeader(h, hdrBytes)
 		if filtered {
 			w.rb.literal(body)
 		}
 	}
-	if err := w.emitCluster(body); err != nil {
+	if err := w.emitCluster(body, false); err != nil {
 		return err
 	}
 	if w.rb != nil && !filtered {
@@ -563,12 +573,21 @@ func (w *salvageWalker) copyUnknownElement(h ebml.ElementHeader, elemStart int64
 }
 
 // emitCluster writes one cluster body (applying the clean-cut filter when
-// armed) and updates the report.
-func (w *salvageWalker) emitCluster(body []byte) error {
+// armed) and updates the report. reconstructed says the body is not the source
+// bytes as they stood (a surgical run: rebuilt from the children that survived,
+// possibly with a synthesized Timestamp).
+//
+// Salvage relocates every cluster it keeps and rewrites some of their bodies,
+// so both self-referencing hints (Position, PrevSize) are restated and the
+// CRC-32 - which would otherwise still cover blocks the clean cut dropped, or a
+// run that stops at the damage - is resealed over what is actually written.
+func (w *salvageWalker) emitCluster(body []byte, reconstructed bool) error {
+	changed := reconstructed
 	if w.awaitKF {
 		kept, dropped, kfMs, found := cleanCutFilterBody(body, w.videoTracks, w.scale)
 		w.report.CleanCutBytes += dropped
 		body = kept
+		changed = changed || dropped > 0
 		if found {
 			w.awaitKF = false
 			if n := len(w.report.DamagedRanges); n > 0 && w.report.DamagedRanges[n-1].ApproxEndMs < kfMs {
@@ -577,9 +596,17 @@ func (w *salvageWalker) emitCluster(body []byte) error {
 		}
 	}
 	outOff := w.mw.RelPos()
+	if hints := retargetClusterPatches(body, outOff, w.prevClusterSize); len(hints) > 0 {
+		applyPatches(body, hints)
+		changed = true
+	}
+	if changed {
+		sealClusterCRC(body)
+	}
 	if err := writeClusterVerbatim(w.mw, body, int64(len(body)), w.scale, outOff, w.videoTracks); err != nil {
 		return err
 	}
+	w.prevClusterSize = w.mw.RelPos() - outOff
 	if ms, ok := clusterTimestampMs(body, w.scale); ok {
 		w.lastGoodMs = ms
 	}
@@ -665,11 +692,15 @@ func (w *salvageWalker) emitSurgicalRuns(outcome *surgicalOutcome) (bytesKept in
 			if _, err := io.ReadFull(w.raw, body[len(prefix):]); err != nil {
 				return bytesKept, fmt.Errorf("salvage: read surgical run: %w", err)
 			}
-			filtered := w.awaitKF
+			// A run is a rebuilt cluster: its CRC-32 (when it carries one) is
+			// resealed over what survived, and its position hints are restated,
+			// so its bytes are no longer the source's. Only a run with neither
+			// still lands verbatim and can be a COPY of the output.
+			filtered := w.awaitKF || clusterHasPositionHints(body) || clusterHasCRC(body)
 			if w.rb != nil && filtered {
 				w.rb.literal(body[len(prefix):])
 			}
-			if err := w.emitCluster(body); err != nil {
+			if err := w.emitCluster(body, true); err != nil {
 				return bytesKept, err
 			}
 			if w.rb != nil && !filtered {

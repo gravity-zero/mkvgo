@@ -425,6 +425,13 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 	if segHdr.ID != mkv.IDSegment {
 		return nil, fmt.Errorf("reindex inplace: expected Segment, got 0x%X", segHdr.ID)
 	}
+	if segHdr.Size < 0 {
+		// The crash-safety window rests on the Segment ending where it says: the
+		// appended Cues and the journal live PAST that end, invisible to readers
+		// until the size is extended last. An unknown-size Segment has no end -
+		// the journal bytes would sit inside it for the whole operation.
+		return nil, fmt.Errorf("reindex inplace: unknown-size Segment (streamed file), use mkvgo reindex")
+	}
 
 	scan := &inplaceScan{
 		segSizeOff:   pos + int64(segIDLen),
@@ -480,10 +487,16 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 				return nil, inplaceReadErr("read SeekHead body", err)
 			}
 			pos += h.Size
-			if scan.seekHeadSlot == nil {
-				scan.seekHeadSlot = &inplaceSpan{off: elemOff, len: int64(hdrBytes) + h.Size}
-				scan.seekEntries = parseSeekHeadBody(body)
+			if scan.seekHeadSlot != nil {
+				// A second SeekHead carries its own Cues entry, still pointing at
+				// the index this run is about to void, and only the head one is
+				// rewritten here. Rather than leave a chained SeekHead aiming at a
+				// Void, hand the file to the full reindex, which drops every
+				// SeekHead and writes one.
+				return nil, fmt.Errorf("reindex inplace: the file carries a second SeekHead at %d, use mkvgo reindex", elemOff)
 			}
+			scan.seekHeadSlot = &inplaceSpan{off: elemOff, len: int64(hdrBytes) + h.Size}
+			scan.seekEntries = parseSeekHeadBody(body)
 
 		case mkv.IDVoid:
 			if h.Size < 0 {
@@ -557,26 +570,21 @@ func encodeDataSizeFixed(size int64, width int) ([]byte, error) {
 	return buf, nil
 }
 
-// voidHeaderBytes returns the encoded Void element header (ID + size VINT)
-// such that header length + declared size equals totalSize, mirroring
-// writer.WriteVoid's arithmetic. Unlike WriteVoid, it does not also emit the
-// zero-filled payload: the caller leaves whatever bytes were already there in
-// place, so the patch (and its journal entry) is proportional to the header
-// alone rather than to the whole voided span.
+// voidHeaderBytes returns the encoded Void element header (ID + size VINT) for
+// a Void spanning exactly totalSize bytes. Unlike writer.WriteVoid it does not
+// also emit the zero-filled payload: the caller leaves whatever bytes were
+// already there in place, so the patch (and its journal entry) is proportional
+// to the header alone rather than to the whole voided span.
+//
+// That makes the DECLARED size the whole contract - nothing overwrites the span
+// afterwards - so the layout comes from writer.VoidHeader rather than a second
+// copy of the arithmetic: a Void declaring one byte too many would swallow the
+// head of the next element, and the journal would commit it as a success.
 func voidHeaderBytes(totalSize int) ([]byte, error) {
 	if totalSize < 2 {
 		return nil, fmt.Errorf("void slot too small (%d bytes, need at least 2)", totalSize)
 	}
-	headerSize := 1 + ebml.DataSizeLen(int64(totalSize-1-ebml.DataSizeLen(int64(totalSize-2))))
-	padLen := totalSize - headerSize
-	if padLen < 0 {
-		padLen = 0
-	}
-	var buf bytes.Buffer
-	if _, err := ebml.WriteElementHeader(&buf, mkv.IDVoid, int64(padLen)); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return writer.VoidHeader(totalSize)
 }
 
 // beginInPlacePatch is the shared prologue of every in-place patch operation

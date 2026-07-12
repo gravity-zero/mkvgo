@@ -543,19 +543,38 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 			gb := bytes.NewReader(body[payloadStart : payloadStart+ch.Size])
 			gTotal := ch.Size
 			gPos := func() int64 { return gTotal - int64(gb.Len()) }
+			gCRCValOff, gCRCElemEnd := int64(-1), int64(-1)
+			gFirst, before := true, len(patches)
 			for gb.Len() > 0 {
 				gStart := gPos()
 				gh, gn, err := ebml.ReadElementHeader(gb)
 				if err != nil || gh.Size < 0 || gh.Size > int64(gb.Len()) {
 					return nil, fmt.Errorf("retime: BlockGroup child at %d does not parse", bodyOff+payloadStart+gStart)
 				}
-				if gh.ID == mkv.IDBlock {
+				switch {
+				case gh.ID == 0xBF && gFirst && gh.Size == 4: // the group's own CRC-32
+					gCRCValOff = payloadStart + gStart + int64(gn)
+					gCRCElemEnd = gCRCValOff + 4
+				case gh.ID == mkv.IDBlock:
 					if err := patchBlock(payloadStart+gStart+int64(gn), gh.Size); err != nil {
 						return nil, err
 					}
 				}
 				if _, err := gb.Seek(gh.Size, io.SeekCurrent); err != nil {
 					return nil, err
+				}
+				gFirst = false
+			}
+			// A Block under this group moved and the group guards itself with a
+			// CRC-32: recompute it before the cluster's own CRC is taken over
+			// these same bytes.
+			if len(patches) > before && gCRCValOff >= 0 {
+				oldCRC := append([]byte(nil), body[gCRCValOff:gCRCValOff+4]...)
+				newCRC := make([]byte, 4)
+				binary.LittleEndian.PutUint32(newCRC, crc32.ChecksumIEEE(body[gCRCElemEnd:payloadStart+ch.Size]))
+				if !bytes.Equal(oldCRC, newCRC) {
+					copy(body[gCRCValOff:gCRCValOff+4], newCRC)
+					patches = append(patches, retimePatch{off: bodyOff + gCRCValOff, orig: oldCRC, repl: newCRC})
 				}
 			}
 		}
@@ -590,6 +609,8 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 	br := bytes.NewReader(body)
 	total := int64(len(body))
 	pos := func() int64 { return total - int64(br.Len()) }
+	crcValOff, crcElemEnd := int64(-1), int64(-1)
+	first := true
 
 	for br.Len() > 0 {
 		cpStart := pos()
@@ -598,11 +619,19 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 			return nil, fmt.Errorf("retime: Cues child at %d does not parse", bodyOff+cpStart)
 		}
 		if cp.ID != mkv.IDCuePoint {
+			// CRC-32: only trustworthy as the first child, per spec. The
+			// CueTimes below are patched underneath it, so it must be recomputed.
+			if cp.ID == 0xBF && first && cp.Size == 4 {
+				crcValOff = cpStart + int64(n)
+				crcElemEnd = crcValOff + 4
+			}
+			first = false
 			if _, err := br.Seek(cp.Size, io.SeekCurrent); err != nil {
 				return nil, err
 			}
 			continue
 		}
+		first = false
 		cpBody := body[cpStart+int64(n) : cpStart+int64(n)+cp.Size]
 		cueTimeOff, cueTimeLen := int64(-1), int64(0)
 		var cueTime int64
@@ -690,10 +719,25 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 			repl[i] = byte(v)
 			v >>= 8
 		}
+		// Patch the scratch body too, so a CRC recompute sees the new bytes.
+		copy(body[cueTimeOff:cueTimeOff+cueTimeLen], repl)
 		patches = append(patches, retimePatch{off: bodyOff + cueTimeOff, orig: orig, repl: repl})
 
 		if _, err := br.Seek(cp.Size, io.SeekCurrent); err != nil {
 			return nil, err
+		}
+	}
+
+	// The Cues element carries a CRC-32 and its CueTimes changed: recompute it
+	// over the (patched) bytes after the CRC element, stored little-endian -
+	// exactly as retimeCluster does for a cluster. Leaving it stale would make
+	// every CRC-checking reader reject the index the patch just corrected.
+	if len(patches) > 0 && crcValOff >= 0 {
+		oldCRC := append([]byte(nil), body[crcValOff:crcValOff+4]...)
+		newCRC := make([]byte, 4)
+		binary.LittleEndian.PutUint32(newCRC, crc32.ChecksumIEEE(body[crcElemEnd:]))
+		if !bytes.Equal(oldCRC, newCRC) {
+			patches = append(patches, retimePatch{off: bodyOff + crcValOff, orig: oldCRC, repl: newCRC})
 		}
 	}
 	return patches, nil

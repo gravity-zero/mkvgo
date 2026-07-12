@@ -90,15 +90,30 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 
 // topLayout locates the moov among the top-level boxes.
 type topLayout struct {
+	// moovOff is the FIRST moov: the one a forward box walk reads, hence the
+	// one that is authoritative for players (and for mp4.Open).
 	moovOff  int64 // absolute offset of the moov box header
 	moovSize int64 // full box size, header included
 	moovHdr  int64 // header length (8, or 16 for the largesize form)
-	fileSize int64
+	// strayMoovs are any FURTHER moov boxes. An interrupted repair leaves its
+	// appended moov behind, so they exist in the wild; they are retired with
+	// the live one, or the next forward walk lands on a stale movie header.
+	strayMoovs []int64
+	fileSize   int64
 }
 
 // scanTopLevelLayout walks the top-level boxes and returns the moov's
 // location. Only well-formed layouts qualify: an edit-list repair must not
 // guess on a file whose box walk desyncs (repair or remux that first).
+//
+// Two layouts are refused outright because the repair lands its new moov by
+// APPENDING at the end of the file, which they would silently swallow:
+//   - a last box declaring size 0 (it runs to the end of the file, so it would
+//     simply grow over the appended moov, turning it into payload);
+//   - a tail of junk bytes past the last box (the appended moov would sit
+//     behind it, and a strict forward walk desyncs on the junk).
+//
+// Both are shapes mp4.Diagnose already reports, with "remux" as the remedy.
 func scanTopLevelLayout(f mkv.ReadWriteSeekCloser) (*topLayout, error) {
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -125,15 +140,23 @@ func scanTopLevelLayout(f mkv.ReadWriteSeekCloser) (*topLayout, error) {
 			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
 			hdrLen = 16
 		case 0:
-			boxSize = size - off
+			return nil, fmt.Errorf("box %q at %d declares size 0 (it runs to the end of the file): "+
+				"appending a moov would extend it - remux the file first", typ, off)
 		}
 		if boxSize < hdrLen || off+boxSize > size {
 			return nil, fmt.Errorf("box %q at %d has invalid size %d", typ, off, boxSize)
 		}
 		if typ == "moov" {
-			lay.moovOff, lay.moovSize, lay.moovHdr = off, boxSize, hdrLen
+			if lay.moovOff < 0 {
+				lay.moovOff, lay.moovSize, lay.moovHdr = off, boxSize, hdrLen
+			} else {
+				lay.strayMoovs = append(lay.strayMoovs, off)
+			}
 		}
 		off += boxSize
+	}
+	if off != size {
+		return nil, fmt.Errorf("%d byte(s) of junk beyond the last box: remux the file first", size-off)
 	}
 	if lay.moovOff < 0 {
 		return nil, fmt.Errorf("no moov box found")
@@ -503,16 +526,40 @@ func writeMoovInPlace(f mkv.ReadWriteSeekCloser, lay *topLayout, newMoov []byte)
 	if err := syncer.Sync(); err != nil {
 		return errf("retime: sync appended moov: %w", err)
 	}
-	// The box type sits at offset+4 in both header forms (the 64-bit form
-	// keeps size=1 at 0-3, the type at 4-7, the largesize after).
-	if _, err := f.Seek(lay.moovOff+4, io.SeekStart); err != nil {
-		return err
+	// Retire any stray moov (left behind by an interrupted run) BEFORE the live
+	// one. A forward walk keeps reading the live head moov - the original
+	// semantics - throughout; flipping the head first would instead expose a
+	// stale stray moov for the length of the window.
+	for _, off := range lay.strayMoovs {
+		if err := retireMoov(f, off); err != nil {
+			return err
+		}
 	}
-	if _, err := f.Write([]byte("free")); err != nil {
-		return errf("retime: retire old moov: %w", err)
+	if len(lay.strayMoovs) > 0 {
+		if err := syncer.Sync(); err != nil {
+			return errf("retime: sync retired stray moov: %w", err)
+		}
+	}
+	// The live moov goes last: this single flip is the instant the appended
+	// moov becomes the file's authoritative one.
+	if err := retireMoov(f, lay.moovOff); err != nil {
+		return err
 	}
 	if err := syncer.Sync(); err != nil {
 		return errf("retime: sync: %w", err)
+	}
+	return nil
+}
+
+// retireMoov turns a moov box into a free box with a single 4-byte type flip.
+// The type sits at offset+4 in both header forms (the 64-bit form keeps size=1
+// at 0-3, the type at 4-7, the largesize after).
+func retireMoov(f mkv.ReadWriteSeekCloser, off int64) error {
+	if _, err := f.Seek(off+4, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("free")); err != nil {
+		return errf("retime: retire moov at %d: %w", off, err)
 	}
 	return nil
 }

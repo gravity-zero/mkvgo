@@ -2,6 +2,7 @@ package ebml
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 )
@@ -66,7 +67,21 @@ func WriteDataSize(w io.Writer, size int64) (int, error) {
 		var buf = [8]byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 		return w.Write(buf[:])
 	}
-	width := DataSizeLen(size)
+	return WriteDataSizeWidth(w, size, DataSizeLen(size))
+}
+
+// WriteDataSizeWidth writes size as a VINT of EXACTLY width bytes. EBML allows
+// a Data Size to be encoded in more bytes than strictly necessary, which is the
+// only way to make an element land on some exact byte counts (a Void of 129
+// bytes, say, is unreachable with a minimal width).
+//
+// A width that cannot hold size is an error, never a silent widening: callers
+// patch fixed-width fields in place with this, and a VINT one byte wider than
+// the one it replaces shifts every byte after it.
+func WriteDataSizeWidth(w io.Writer, size int64, width int) (int, error) {
+	if size < 0 || width > 8 || width < DataSizeLen(size) {
+		return 0, fmt.Errorf("ebml: cannot encode data size %d as a %d-byte VINT", size, width)
+	}
 	val := uint64(size) | (uint64(1) << uint(width*7))
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], val)

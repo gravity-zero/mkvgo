@@ -7,8 +7,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -344,6 +346,145 @@ func reindexSafeTimecodeMs(v, scale int64) (int64, error) {
 	return v * scale / 1_000_000, nil
 }
 
+// A cluster carries two hints that describe WHERE it sits, so a cluster copied
+// to a different offset - or written after a different neighbour - takes them
+// along as lies unless they are rewritten.
+const (
+	idClusterPosition = 0xA7 // the cluster's own Segment position
+	idClusterPrevSize = 0xAB // the size of the cluster written before it
+	idCRC32           = 0xBF
+)
+
+// clusterCRCSpan locates a cluster body's CRC-32: the offset of its 4-byte
+// value and the end of the element. Per spec a CRC-32 is only trustworthy as
+// the first child, and that is the only place it is honoured here. (-1, -1)
+// when the body carries none.
+func clusterCRCSpan(body []byte) (valOff, elemEnd int64) {
+	h, n, err := ebml.ReadElementHeader(bytes.NewReader(body))
+	if err != nil || h.ID != idCRC32 || h.Size != 4 || int64(n)+4 > int64(len(body)) {
+		return -1, -1
+	}
+	return int64(n), int64(n) + 4
+}
+
+// resealClusterCRC recomputes a rewritten cluster's CRC-32 over its (patched)
+// bytes, little-endian, and returns the patch that lands it - nil when the body
+// has no CRC-32 or the value did not move. origCRC must be the CRC bytes as
+// they were in the SOURCE, so the rollback delta can undo the patch.
+func resealClusterCRC(body []byte, valOff, elemEnd int64, origCRC []byte) *retimePatch {
+	if valOff < 0 {
+		return nil
+	}
+	newCRC := sealClusterCRC(body)
+	if bytes.Equal(origCRC, newCRC) {
+		return nil
+	}
+	return &retimePatch{off: valOff, orig: origCRC, repl: newCRC}
+}
+
+// sealClusterCRC recomputes a cluster body's CRC-32 in place (no-op when it
+// carries none) and returns the value it wrote.
+func sealClusterCRC(body []byte) []byte {
+	valOff, elemEnd := clusterCRCSpan(body)
+	if valOff < 0 {
+		return nil
+	}
+	newCRC := make([]byte, 4)
+	binary.LittleEndian.PutUint32(newCRC, crc32.ChecksumIEEE(body[elemEnd:]))
+	copy(body[valOff:valOff+4], newCRC)
+	return newCRC
+}
+
+// retargetClusterPatches rewrites the position hints a RELOCATED cluster
+// carries: Position (its own Segment position) and PrevSize (the size of the
+// cluster before it, -1 when there is none). Both are optional, and a reader
+// that trusts a stale one seeks to the wrong place - worse than not having it.
+//
+// The patches never change the element's span, so the cluster's own size stays
+// valid and the rollback delta keeps tiling the body: a value that still fits
+// the bytes it had is written into them (an EBML uint may carry leading zeros),
+// and one that no longer fits - or that no longer exists, as for the first
+// cluster's PrevSize - retires the element to a Void of the same span.
+func retargetClusterPatches(body []byte, segPos, prevSize int64) []retimePatch {
+	var out []retimePatch
+	br := bytes.NewReader(body)
+	total := int64(len(body))
+	for br.Len() > 0 {
+		start := total - int64(br.Len())
+		h, n, err := ebml.ReadElementHeader(br)
+		if err != nil || h.Size < 0 || h.Size > int64(br.Len()) {
+			return out // an unparseable tail is left exactly as it was
+		}
+		switch h.ID {
+		case idClusterPosition:
+			out = appendHintPatch(out, body, start, int64(n), h.Size, segPos)
+		case idClusterPrevSize:
+			out = appendHintPatch(out, body, start, int64(n), h.Size, prevSize)
+		}
+		if _, err := br.Seek(h.Size, io.SeekCurrent); err != nil {
+			return out
+		}
+	}
+	return out
+}
+
+// appendHintPatch restates one uint hint in the bytes it already occupies, or
+// voids the whole element when the new value cannot be said there.
+func appendHintPatch(out []retimePatch, body []byte, elemStart, hdrLen, valLen, v int64) []retimePatch {
+	span := hdrLen + valLen
+	orig := append([]byte(nil), body[elemStart:elemStart+span]...)
+	repl := append([]byte(nil), orig...)
+
+	if v >= 0 && (valLen >= 8 || v>>(8*uint(valLen)) == 0) {
+		for i := valLen - 1; i >= 0; i-- { // fits: same element, true value
+			repl[hdrLen+i] = byte(v)
+			v >>= 8
+		}
+	} else {
+		hdr, err := writer.VoidHeader(int(span))
+		if err != nil {
+			return out // cannot be voided either: leave the source bytes alone
+		}
+		repl = make([]byte, span)
+		copy(repl, hdr)
+	}
+	if bytes.Equal(orig, repl) {
+		return out
+	}
+	return append(out, retimePatch{off: elemStart, orig: orig, repl: repl})
+}
+
+// clusterHasPositionHints reports whether a cluster body carries a Position or
+// PrevSize element - the two the relocation rewrites.
+func clusterHasPositionHints(body []byte) bool {
+	br := bytes.NewReader(body)
+	for br.Len() > 0 {
+		h, _, err := ebml.ReadElementHeader(br)
+		if err != nil || h.Size < 0 || h.Size > int64(br.Len()) {
+			return false
+		}
+		if h.ID == idClusterPosition || h.ID == idClusterPrevSize {
+			return true
+		}
+		if _, err := br.Seek(h.Size, io.SeekCurrent); err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// clusterHasCRC reports whether a cluster body opens with a CRC-32.
+func clusterHasCRC(body []byte) bool {
+	valOff, _ := clusterCRCSpan(body)
+	return valOff >= 0
+}
+
+func applyPatches(body []byte, patches []retimePatch) {
+	for _, p := range patches {
+		copy(body[p.off:p.off+int64(len(p.repl))], p.repl)
+	}
+}
+
 // writeClusterVerbatim writes one cluster (header + body) to mw, appends a cue
 // point, and reports progress. body must be the complete cluster body already
 // read from the source. outOff is mw.RelPos() captured before this call.
@@ -475,9 +616,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 
 	// ── Walk source Segment elements ──────────────────────────────────────────
 	var (
-		clusterBuf   []byte
-		firstCluster = true
-		consumed     int64
+		clusterBuf []byte
+		// prevClusterSize is the size of the cluster written before the current
+		// one, for its PrevSize hint. -1 until one has been written: the first
+		// cluster of the output has no predecessor, whatever the source said.
+		prevClusterSize = int64(-1)
+		firstCluster    = true
+		consumed        int64
 	)
 	timecodeScale = 1_000_000 // default; overridden when Info is copied
 
@@ -577,20 +722,49 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			}
 			consumed += int64(hdrBytes) + h.Size
 
-			var patches []retimePatch
+			outOff := mw.RelPos()
+			// The cluster lands at a different Segment position than it had (the
+			// head region is rebuilt), so its Position/PrevSize hints must be
+			// restated before anything else reads or checksums the body.
+			crcOff, crcEnd := clusterCRCSpan(body)
+			var origCRC []byte
+			if crcOff >= 0 {
+				origCRC = append([]byte(nil), body[crcOff:crcOff+4]...)
+			}
+			patches := retargetClusterPatches(body, outOff, prevClusterSize)
+			applyPatches(body, patches)
+
 			if mutate != nil {
-				patches, err = mutate(body)
-				if err != nil {
-					return nil, 0, err
+				mp, merr := mutate(body)
+				if merr != nil {
+					return nil, 0, merr
+				}
+				patches = append(patches, mp...)
+			}
+			// One CRC-32 reseal for the lot, over the final bytes: a mutator may
+			// have patched it over its own changes only, and the retarget above
+			// landed after that.
+			if len(patches) > 0 && crcOff >= 0 {
+				kept := patches[:0]
+				for _, p := range patches {
+					if p.off != crcOff {
+						kept = append(kept, p)
+					}
+				}
+				patches = kept
+				if p := resealClusterCRC(body, crcOff, crcEnd, origCRC); p != nil {
+					patches = append(patches, *p)
 				}
 			}
+			sort.Slice(patches, func(i, j int) bool { return patches[i].off < patches[j].off })
+
 			if rb != nil {
 				rb.literalHeader(h, hdrBytes)
 			}
-			outOff := mw.RelPos()
 			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
 				return nil, 0, err
 			}
+			prevClusterSize = mw.RelPos() - outOff
 			if rb != nil {
 				after, serr := out.Seek(0, io.SeekCurrent)
 				if serr != nil {

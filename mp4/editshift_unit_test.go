@@ -132,9 +132,8 @@ func TestElstEntriesBothVersions(t *testing.T) {
 	}
 }
 
-// TestScanTopLevelLayout64BitAndSize0: the largesize header form and the
-// size-0 (to end of file) form both locate the moov.
-func TestScanTopLevelLayout64BitAndSize0(t *testing.T) {
+// TestScanTopLevelLayout64Bit: the largesize header form locates the moov.
+func TestScanTopLevelLayout64Bit(t *testing.T) {
 	var w bw
 	w.bytes(box("ftyp", []byte("isom0000")))
 	// moov in the 64-bit largesize form.
@@ -143,10 +142,7 @@ func TestScanTopLevelLayout64BitAndSize0(t *testing.T) {
 	w.fourcc("moov")
 	w.u64(uint64(16 + len(moovPayload)))
 	w.bytes(moovPayload)
-	// trailing mdat with size 0 = to EOF.
-	w.u32(0)
-	w.fourcc("mdat")
-	w.bytes([]byte{1, 2, 3, 4})
+	w.bytes(box("mdat", []byte{1, 2, 3, 4}))
 
 	f := &memSeekCloser{Reader: *bytes.NewReader(w.b)}
 	lay, err := scanTopLevelLayout(f)
@@ -158,6 +154,76 @@ func TestScanTopLevelLayout64BitAndSize0(t *testing.T) {
 	}
 	if lay.moovOff != 16 || lay.moovSize != int64(16+len(moovPayload)) {
 		t.Errorf("moov located at %d size %d", lay.moovOff, lay.moovSize)
+	}
+}
+
+// TestScanTopLevelLayoutRefusesSize0: a last box declaring size 0 runs to the
+// END OF THE FILE. The repair lands its moov by appending, so that box would
+// simply grow over the new moov - turning it into payload - while the old moov
+// got retired to a free box: a file with no reachable movie header, reported as
+// a success. The scan refuses the layout instead of locating a moov in it.
+func TestScanTopLevelLayoutRefusesSize0(t *testing.T) {
+	var w bw
+	w.bytes(box("ftyp", []byte("isom0000")))
+	w.bytes(box("moov", box("mvhd", buildMvhdPayload(0, 1000, 42))))
+	w.u32(0) // mdat, size 0 = to EOF (what streaming writers emit)
+	w.fourcc("mdat")
+	w.bytes([]byte{1, 2, 3, 4})
+
+	f := &memSeekCloser{Reader: *bytes.NewReader(w.b)}
+	if _, err := scanTopLevelLayout(f); err == nil {
+		t.Fatal("a size-0 (to-EOF) last box must be refused: appending a moov would extend it")
+	} else if !strings.Contains(err.Error(), "size 0") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestScanTopLevelLayoutRefusesTrailingJunk: bytes past the last box would sit
+// between the last box and the appended moov, desyncing a strict forward walk.
+// mp4.Diagnose already flags this shape ("trailing-junk", remedy: remux); the
+// repair used to walk right past it and append anyway.
+func TestScanTopLevelLayoutRefusesTrailingJunk(t *testing.T) {
+	var w bw
+	w.bytes(box("ftyp", []byte("isom0000")))
+	w.bytes(box("moov", box("mvhd", buildMvhdPayload(0, 1000, 42))))
+	w.bytes(box("mdat", []byte{1, 2, 3, 4}))
+	w.bytes([]byte{0xDE, 0xAD, 0xBE}) // 3 bytes: too short to be a box header
+
+	f := &memSeekCloser{Reader: *bytes.NewReader(w.b)}
+	if _, err := scanTopLevelLayout(f); err == nil {
+		t.Fatal("junk past the last box must be refused")
+	} else if !strings.Contains(err.Error(), "junk") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestScanTopLevelLayoutFindsFirstMoovAndStrays: an interrupted repair leaves
+// its appended moov behind, so a file can carry two. The live one - what a
+// forward walk (and mp4.Open) reads - is the FIRST; the scan must report that
+// one and list the rest as strays. Taking the last would retime an already
+// shifted moov and leave the head one, the one players read, untouched.
+func TestScanTopLevelLayoutFindsFirstMoovAndStrays(t *testing.T) {
+	var w bw
+	ftyp := box("ftyp", []byte("isom0000"))
+	w.bytes(ftyp)
+	live := box("moov", box("mvhd", buildMvhdPayload(0, 1000, 42)))
+	w.bytes(live)
+	mdat := box("mdat", []byte{1, 2, 3, 4})
+	w.bytes(mdat)
+	strayOff := int64(len(ftyp) + len(live) + len(mdat))
+	w.bytes(box("moov", box("mvhd", buildMvhdPayload(0, 1000, 99))))
+
+	f := &memSeekCloser{Reader: *bytes.NewReader(w.b)}
+	lay, err := scanTopLevelLayout(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lay.moovOff != int64(len(ftyp)) {
+		t.Errorf("moovOff = %d, want %d (the FIRST moov, the one a forward walk reads)",
+			lay.moovOff, len(ftyp))
+	}
+	if len(lay.strayMoovs) != 1 || lay.strayMoovs[0] != strayOff {
+		t.Errorf("strayMoovs = %v, want [%d]", lay.strayMoovs, strayOff)
 	}
 }
 

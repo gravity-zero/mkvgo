@@ -4,6 +4,77 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.21.1] - 2026-07-13
+
+A correctness release: every fix below closes a path that **reported success
+while leaving the file wrong** - the guard checked one thing and the write did
+another, so nothing ever surfaced. No API change.
+
+### Fixed
+
+- **`EditInPlace` destroyed the seek index it was supposed to preserve.** The
+  head SeekHead sits at the start of the metadata region, so every in-place
+  edit writes over it; it was only rebuilt when the metadata still left room
+  for the fixed 256-byte reserve, and below that the metadata was simply
+  written across it - `nil` returned, Cues no longer reachable head-only. The
+  SeekHead is now mandatory whenever the file had one: its slot is sized to
+  fit exactly (the entry positions depend on the slot size, so the two are
+  solved by iteration), and an edit that cannot host both the metadata and a
+  SeekHead is refused with the file untouched, instead of trading the index
+  for the edit. A second index-loss path went with it: the preserved entries
+  (the Cues pointer among them) were read from the region start rather than
+  the SeekHead's own offset, and were silently dropped whenever a Void
+  preceded it.
+- **`WriteVoid` could overrun its budget by one byte.** A Void padding a
+  reserved slot must span EXACTLY the bytes it is given; the size-VINT width
+  was guessed from an estimated payload, and at 129, 16386 and 2097155 bytes
+  the element came out one byte longer - swallowing the head of the element
+  that follows. The width is now widened until the span lands exactly (EBML
+  allows a non-minimal Data Size). `ops.voidHeaderBytes` carried a private
+  copy of the same arithmetic - and, writing only the header, made the
+  DECLARED size the whole contract: a stale Cues span of exactly those sizes
+  had `ReindexInPlace` void one byte past it, break the top-level element
+  chain, and commit the result through its journal as a success. Both now go
+  through one implementation (`writer.VoidHeader`). `EditInPlace` also filled
+  a 1-byte leftover with a raw `0x00` - a byte no EBML element can be, where
+  a parser expects one to start; the odd byte is now absorbed into the
+  metadata (the first element's data size is re-encoded one byte wider).
+- **`mp4.RetimeTracks` destroyed two file layouts it should have refused.**
+  The repair lands its moov by appending at the end of the file: a last box
+  declaring `size 0` (it runs to the end of the file - what streaming writers
+  emit) simply grew over the appended moov while the old one was retired, and
+  junk past the last box left the appended moov behind it, desyncing the box
+  chain. Both are refused now - the shapes `mp4.Diagnose` already reports -
+  with the file untouched. Third fix, same function: the scan took the LAST
+  moov while a forward walk (and `mp4.Open`) reads the FIRST, so re-running
+  the repair after an interrupted one retimed the stranded moov and left the
+  live one alone - the shift silently lost, two live moovs on disk. The scan
+  now targets the first moov and retires every stray one, tail first, so the
+  file carries exactly one live movie header at every instant.
+- **Checksums and position hints went stale under in-place patches and
+  relocations.** `retime` patched the CueTimes under a Cues CRC-32 without
+  recomputing it (the cluster CRC always was), same for a CRC-32 carried by a
+  BlockGroup whose Block moved. `Reindex` and `Salvage` copied `Position` and
+  `PrevSize` verbatim into clusters that land at a different Segment position
+  - a reader trusting them seeks into the middle of another cluster - and
+  `Salvage` kept a cluster's CRC-32 across a clean-cut filter that dropped
+  blocks from under it. Hints are now restated in the bytes they already
+  occupy (or retired to a Void when the value no longer fits), CRC-32s are
+  resealed over what is actually written, and the rollback delta records the
+  original bytes as literals wherever the body is no longer verbatim.
+- **`ReindexInPlace` accepted two files it cannot repair.** A second, chained
+  SeekHead would keep pointing at the Cues the same run had just voided (only
+  the head one is rewritten in place), and an unknown-size Segment voids the
+  crash-safety window itself - the appended Cues and the journal are supposed
+  to live past the Segment's declared end, invisible until the size is
+  extended last. Both are now handed to the full reindex, which drops every
+  SeekHead and writes one.
+- **A half-written rollback entry was reported as no entry at all.** A
+  best-effort delta may be dropped silently, but once the first byte has
+  landed in the caller's append-only ledger a failure cannot be swallowed:
+  the ledger holds the prefix of an entry and has to be truncated. Torn
+  writes now reach the caller whatever `RollbackRequired` says.
+
 ## [0.21.0] - 2026-07-12
 
 **Highlights**

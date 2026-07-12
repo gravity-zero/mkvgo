@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -56,6 +57,12 @@ var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 
 // errRollbackTooBig marks a delta abandoned for exceeding rollbackMaxBuffer.
 var errRollbackTooBig = fmt.Errorf("rollback delta exceeds the %d-byte buffer cap", rollbackMaxBuffer)
+
+// errRollbackTorn marks a delta whose entry is PARTLY in the caller's sink: the
+// write failed after the first byte landed. A best-effort delta may be dropped
+// silently, but a half-written entry in an append-only ledger cannot be - the
+// caller has to know the ledger needs truncating.
+var errRollbackTorn = errors.New("rollback: entry half-written to the sink")
 
 // rollbackBuilder accumulates the ops of one delta entry during a repair
 // walk. Errors are sticky: after the first failure every method is a no-op
@@ -303,7 +310,14 @@ func (b *rollbackBuilder) finalize(sink io.Writer, originalSize int64, repairedS
 
 	crc := crc32.New(crc32cTable)
 	crc.Write(header)
-	if _, err := sink.Write(header); err != nil {
+	// From the first byte that lands in the sink, a failure is no longer "no
+	// entry was written": the caller's ledger holds the PREFIX of one. That must
+	// reach the caller whatever RollbackRequired says - see errRollbackTorn.
+	n, err := sink.Write(header)
+	if err != nil {
+		if n > 0 {
+			return mkv.RollbackInfo{}, fmt.Errorf("%w: write entry header: %w", errRollbackTorn, err)
+		}
 		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry header: %w", err)
 	}
 	// Stream the ops region - from RAM, or back from the spool file a large
@@ -316,13 +330,13 @@ func (b *rollbackBuilder) finalize(sink io.Writer, originalSize int64, repairedS
 		opsSrc = io.LimitReader(b.spool, b.opsLen)
 	}
 	if _, err := io.Copy(io.MultiWriter(sink, crc), opsSrc); err != nil {
-		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry ops: %w", err)
+		return mkv.RollbackInfo{}, fmt.Errorf("%w: write entry ops: %w", errRollbackTorn, err)
 	}
 	b.cleanup()
 	var crcBuf [4]byte
 	binary.BigEndian.PutUint32(crcBuf[:], crc.Sum32())
 	if _, err := sink.Write(crcBuf[:]); err != nil {
-		return mkv.RollbackInfo{}, fmt.Errorf("rollback: write entry crc: %w", err)
+		return mkv.RollbackInfo{}, fmt.Errorf("%w: write entry crc: %w", errRollbackTorn, err)
 	}
 	return mkv.RollbackInfo{
 		Bytes:     int64(len(header)) + b.opsLen + 4,
@@ -345,6 +359,11 @@ func emitRollbackEntry(ctx context.Context, rb *rollbackBuilder, srcPath, dstPat
 	fail := func(err error) error {
 		if required {
 			return fmt.Errorf("rollback delta (RollbackRequired): %w", err)
+		}
+		if errors.Is(err, errRollbackTorn) {
+			// Best-effort covers "no delta was emitted", never "half of one was":
+			// the caller's ledger is append-only and now holds a torn entry.
+			return err
 		}
 		return nil
 	}
@@ -384,6 +403,11 @@ func emitInPlaceRollback(ctx context.Context, f io.ReadSeeker, origSize, finalSi
 	fail := func(err error) error {
 		if required {
 			return fmt.Errorf("rollback delta (RollbackRequired): %w", err)
+		}
+		if errors.Is(err, errRollbackTorn) {
+			// Best-effort covers "no delta was emitted", never "half of one was":
+			// the caller's ledger is append-only and now holds a torn entry.
+			return err
 		}
 		return nil
 	}
