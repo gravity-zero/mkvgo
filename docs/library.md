@@ -783,6 +783,7 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `FieldOrder` | `field_order` | Matroska `FlagInterlaced` / H.264 `frame_mbs_only_flag` |
 | `VideoBitDepth` | bit depth | `colr`/Colour or codec bitstream |
 | `ColorSpaceName()`, `ColorTransferName()`, `ColorPrimariesName()`, `ColorRangeName()`, `IsHDR()` | `color_space`/`color_transfer`/`color_primaries`/`color_range` | `colr` (nclx/nclc) / Matroska Colour / SPS VUI |
+| `HDRFormat()` | (classification) | one word for the tonemap-or-direct-play decision: `dolby-vision` \| `hdr10` \| `hlg` \| `sdr`, `""` when unknown |
 | `DolbyVision` | side data | MP4 `dvcC`/`dvvC` box / Matroska `BlockAdditionMapping` |
 | `HDR` (`MaxCLL`/`MaxFALL`, `MasteringDisplay`) | side data (Content light level / Mastering display metadata) | Matroska Colour `MaxCLL`/`MaxFALL`/`MasteringMetadata` / MP4 `clli`/`mdcv` |
 | `StereoMode` (`StereoModeName()`), `Projection` | Stereo 3D / Spherical Mapping side data | Matroska `StereoMode`/`Projection` / MP4 `st3d`/`sv3d` |
@@ -1124,6 +1125,17 @@ The patches run under the same crash-safety journal as `ReindexInPlace` (rollbac
 Refusals are explicit: a shift that does not resolve to a whole number of timecode ticks, a relative timecode that would leave int16 range, an absolute timestamp that would become negative, an unknown or block-less track, a cue that mixes shifted and unshifted tracks, and streamed (unknown-size) Segments. `Options.DeepVerify` re-walks the file afterwards and checks every shifted track's first block moved by exactly the requested shift, on top of the always-on read-back verification of every patch.
 
 The facade re-exports it: `matroska.RetimeTracks`.
+
+**MP4/MOV counterpart - `mp4.RetimeTracks`, same signature**: the shift edits each track's presentation through its edit list (`edts`/`elst`) in the moov, the container's native mechanism for exactly this - no block or sample is touched at all, so the repair is a few bytes whatever the file size. An empty edit at the head of the track's list is grown, shrunk or created; track and movie durations follow. File-only write permission: the rewritten moov is patched in place when its size is unchanged, rewritten at the tail when it sits there, and otherwise (faststart) appended with the old moov retired to a `free` box - 4 bytes flipped, crash-ordered (the new moov is synced to disk before the flip). Explicit refusals: presenting a track before the presentation start (MP4 cannot without trimming media content), unknown tracks, fragmented MP4. A caller repairs either container through the same map shape:
+
+```go
+shift := map[uint64]int64{2: -900_000_000}
+if isMP4 {
+    err = mp4.RetimeTracks(ctx, path, shift)
+} else {
+    err = matroska.RetimeTracks(ctx, path, shift)
+}
+```
 
 ### Salvage (damaged files)
 

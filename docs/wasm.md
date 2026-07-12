@@ -40,7 +40,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 
 | Method | Input | Result |
 |---|---|---|
-| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object — same shape as the CLI `-json` output, plus `format: "mkv"\|"mp4"` |
+| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object — same shape as the CLI `-json` output, plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`) |
 | `remuxToMP4(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ data: Uint8Array, droppedTracks }` |
 | `remuxFromMP4(input, opts?)` | `Uint8Array` (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
 | `remuxToWebM(input)` | `Uint8Array` (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |

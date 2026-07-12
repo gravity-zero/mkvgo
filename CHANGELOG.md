@@ -25,6 +25,16 @@ All notable changes to mkvgo are documented here. The format is based on
   carries a first-class `truncated_tail` verdict: damage reaching the end
   of the file is an incomplete source whose tail no tool can restore,
   distinct from repairable mid-file corruption.
+- **`retime` now repairs MP4 too** - `mp4.RetimeTracks` (same signature as
+  the Matroska op) shifts a track's presentation through its edit list in
+  the moov: no sample touched, a few bytes whatever the file size, file-only
+  permission, crash-ordered moov swap on faststart files. One CLI flag, one
+  map shape, both containers.
+- **The probe JSON is self-sufficient for a library scanner** - every
+  derived string is a key (aspect ratios, colour names, resolved language,
+  effective sample rate) including `hdr_format`, the one-word
+  dolby-vision/hdr10/hlg/sdr classification a tonemap-or-direct-play
+  decision keys on. Same shape for MKV/WebM and MP4, CLI and WASM.
 
 ### Added
 
@@ -70,6 +80,29 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`reader.BlockReader.ClusterOffset`**: absolute file offset of the
   cluster holding the most recently returned block - the base a synthesized
   cue point needs.
+- **`mp4.RetimeTracks`** (CLI: `retime` on an `.mp4`/`.mov`, same
+  `--shift track=ms` flag): cancel a constant A/V desync in an MP4 by
+  editing the track's edit list (`edts`/`elst`) - the empty edit at the
+  head of the list IS the track's presentation delay, so the repair is a
+  moov-only rewrite: grown, shrunk or created empty edit, track and movie
+  durations following, samples and decode times untouched. File-only write
+  permission via three landing paths: same-size in-place patch, tail moov
+  rewrite, or (faststart) append-new-moov + retire-old-to-`free` - 4 bytes
+  flipped, with the new moov synced to disk before the flip so a crash at
+  any point leaves a readable file. Explicit refusals: presenting a track
+  before the presentation start (MP4 cannot without trimming media),
+  unknown tracks, zero shifts, fragmented MP4. The Matroska mode flags do
+  not apply and are refused on an MP4 path.
+- **`mkv.Track.HDRFormat()`**: one-word dynamic-range classification
+  (`dolby-vision` | `hdr10` | `hlg` | `sdr`, `""` unknown) from the
+  container/bitstream colour signalling already parsed head-only.
+- **Probe JSON derived fields** (CLI `-json` and WASM `probe`, both
+  containers): `sample_aspect_ratio`, `display_aspect_ratio`,
+  `color_space_name`/`color_transfer_name`/`color_primaries_name`/
+  `color_range_name` (conventional prober strings), `hdr_format`,
+  `stereo_mode_name`, `resolved_language` (BCP-47 preferred),
+  `effective_sample_rate` (decoder rate, SBR applied) - the whole scan
+  shape in one call, no post-processing on numeric code points.
 
 ## [0.20.0] - 2026-07-12
 
