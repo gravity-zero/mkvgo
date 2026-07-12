@@ -4,6 +4,73 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+**Highlights**
+
+- **One call, one verdict, one remedy per file** - `diagnose` composes the
+  seek-index triage, a native per-track audio-delay probe and a
+  declared-size coherence check into typed findings that each name their
+  repair (reindex / retime / resync / re-download). Head-mostly: the
+  tolerant walk runs only when the declared and real sizes disagree. Also
+  in WASM.
+- **Stream the broken file anyway (read-only sources)** - PlanHLS gains two
+  serving-side repairs that write nothing: `SynthesizeIndex` walks an
+  unindexed source once (structure only) and synthesizes the seek index in
+  memory instead of refusing, and `AudioPresentationShift` cancels a
+  constant A/V desync per track in the init segment's edit list - the
+  samples stay verbatim and every media segment is byte-identical with or
+  without the shift.
+- **"Repair" vs "re-download", said explicitly** - the salvage report now
+  carries a first-class `truncated_tail` verdict: damage reaching the end
+  of the file is an incomplete source whose tail no tool can restore,
+  distinct from repairable mid-file corruption.
+
+### Added
+
+- **`diagnose` / `ops.Diagnose`**: one-call triage. Classifies a file -
+  `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (per
+  track, with the exact retime invocation), `truncated` (recovered X of Y
+  declared bytes), `damaged` (repairable ranges), `trailing-junk`,
+  `streamed-size` - and names the remedy on every finding. Composes
+  `CueHealth` + `AudioStartDelays` + a head-only declared-size check; the
+  full tolerant walk (`MapDamage`) runs ONLY when the sizes disagree. JSON
+  carries the full cue-health report, every audio track's delay and the
+  damage map when the walk ran. Facade `matroska.Diagnose`; CLI exit 1 on
+  findings (scriptable, like `validate`); WASM `diagnose` (Blob-ranged,
+  head-mostly).
+- **`ops.AudioStartDelays`**: native per-track A/V delay probe - each audio
+  track's first block timecode against the first video keyframe (head +
+  first cluster(s), bounded, payloads never read; anchor falls back to the
+  earliest block on video-less files). Track numbers and delays come from
+  the same parse, so the values feed `RetimeTracks` or
+  `AudioPresentationShift` directly - no order-based correlation with an
+  external prober. Tolerant of truncated/damaged tails: it reports what it
+  saw. Facade `matroska.AudioStartDelays`.
+- **`mp4.Options.SynthesizeIndex`** (CLI `--synthesize-index` on
+  `hls-segment`/`serve`; WASM `synthesizeIndex`): PlanHLS serves a source
+  whose Cues are missing or reference no video keyframes by walking the
+  clusters once - block headers only via the track-filtered structure-only
+  reader - and synthesizing the video cue points in memory. Byte-identical
+  to the full pass of the same source; nothing written (the road to
+  seekable playback on `:ro` mounts); corrupt streams still refuse.
+- **`mp4.Options.AudioPresentationShift`** (CLI `--audio-shift track=ms` on
+  `to-hls`/`hls-segment`/`serve`; WASM `audioShiftMs`): re-base audio
+  tracks in presentation at packaging time (ns per track, positive =
+  content starts late, presented earlier - `AudioStartDelays`' values plug
+  in directly). Applied after the fragment timing derivation, so only the
+  init segment's edit list moves: media segments are byte-identical with or
+  without the shift, full pass and plan agree, over-shifts clamp to the
+  presentation start. The ephemeral counterpart of `retime`.
+- **`SalvageReport.TruncatedTail`**: first-class truncation verdict on
+  `salvage`/`MapDamage`/`Reindex --resync` - damage reaching the end of the
+  file marks the source incomplete ("re-download") as opposed to repairable
+  mid-file corruption ("repair"). Exposed in JSON (`truncated_tail`), the
+  TS types and the diagnose findings.
+- **`reader.BlockReader.ClusterOffset`**: absolute file offset of the
+  cluster holding the most recently returned block - the base a synthesized
+  cue point needs.
+
 ## [0.20.0] - 2026-07-12
 
 **Highlights**

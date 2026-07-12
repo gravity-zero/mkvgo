@@ -229,6 +229,28 @@ the always-exact prefix scan. The remaining difference: the master
 `BANDWIDTH` is estimated from cluster sizes. The source must carry a Cues
 index. The plan is immutable and safe for concurrent `Segment` calls.
 
+Two serving-side repairs, nothing written to the source:
+
+- **`Options.SynthesizeIndex`** - when the Cues are missing (or reference no
+  video keyframes), the plan walks the clusters once instead of refusing:
+  block headers only (`KeepTracks` + header-only, no payload bytes) and the
+  video cue points are synthesized in memory, then serving proceeds exactly
+  as with a real index. The walk is the one-time cost a persistent repair
+  would pay anyway - and the only road to seekable on-demand playback for a
+  source on a read-only mount. Cache the plan to pay it once. A corrupt
+  cluster stream still refuses (repair or salvage first); `mkvgo reindex`
+  remains the persistent fix.
+- **`Options.AudioPresentationShift`** (`map[trackNum]ns`, positive = the
+  track's content starts late and is presented earlier - `AudioStartDelays`'
+  values plug in directly) - cancels a constant A/V desync in the served
+  segments: only the init segment's edit list moves, the samples are copied
+  verbatim and every media segment is byte-identical with or without the
+  shift. Re-plan with a new shift and the same source serves a different sync
+  instantly. Over-shifts clamp to the presentation start; video tracks are
+  ignored. `RemuxToHLS` honours it too (full pass and plan stay
+  byte-identical for the same shift); `mkvgo retime` remains the persistent
+  fix.
+
 ### Play while downloading (`mp4.PlanGrowingHLS`)
 
 ```go
@@ -967,6 +989,38 @@ if !r.Healthy {
 
 `CueHealthReport`: `TotalCues`, `VideoCues`, `NonVideoCues`, `UnknownTrackCues` (references to tracks absent from the Tracks element - a stale index), `NonVideoPct`, `PerTrack`, `FirstCueMs`/`LastCueMs`, `HasVideoTrack`, `Healthy`, `Reason`. A video file is healthy when every cue references a video track; an audio-only file legitimately cues audio. The facade re-exports `matroska.CueHealth`; the CLI is `cue-health` (exit 1 when unhealthy).
 
+## Diagnose (one-call triage with remedies)
+
+`ops.Diagnose` classifies a file in one call and names the remedy for every defect, so a library scan routes each file straight to the right repair instead of stacking separate probes. It composes the seek-index triage (`CueHealth`), the per-track audio start delays (`AudioStartDelays`), and a declared-size coherence check; the full tolerant walk (`MapDamage`) runs ONLY when the declared Segment size and the real file size disagree - the head-visible signature of truncation or trailing junk. On a healthy file the whole call costs the head plus the first cluster(s).
+
+```go
+d, err := ops.Diagnose(ctx, "movie.mkv")
+for _, f := range d.Findings {
+    fmt.Printf("[%s] %s -> %s\n", f.Kind, f.Detail, f.Remedy)
+}
+```
+
+`Diagnosis`: `Healthy`, `Findings` (`Kind`/`Detail`/`Remedy`, plus `Track`/`DelayNs` on per-track findings), the full `CueHealth` report, `AudioDelaysNs` (every audio track's start delay, threshold or not), and `Damage` (the `SalvageReport`, present only when the walk ran). Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (with the exact retime invocation), `truncated` (source incomplete, recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: resync), `trailing-junk`, `streamed-size`. The facade re-exports `matroska.Diagnose`; the CLI is `diagnose` (exit 1 on findings). Matroska/WebM only: an MP4's sample table is its index by construction.
+
+## AudioStartDelays (native per-track A/V delay probe)
+
+`ops.AudioStartDelays` measures the repack defect "audio content starts late" natively: for each AUDIO track (by Matroska track number), how late its first block is relative to the first video keyframe, in nanoseconds - positive means the audio begins after the video, and the negated value is exactly what `RetimeTracks` takes to cancel the delay. On a file with no video the anchor is the earliest block of any track. Head-mostly: the track list is read head-only, then clusters are walked just long enough to see every track's first block (typically the first cluster or two, bounded at 64 MiB). Track numbers and delays come from the SAME parse - no correlating an external prober's order-based stream listing with track numbers.
+
+```go
+delays, err := ops.AudioStartDelays(ctx, "movie.mkv") // map[trackNum]ns
+shift := make(map[uint64]int64, len(delays))
+for track, ns := range delays {
+    if ns > 100_000_000 { // your threshold
+        shift[track] = -ns
+    }
+}
+err = ops.RetimeTracks(ctx, "movie.mkv", shift) // persistent repair...
+// ...or cancel it at packaging time only, nothing written:
+plan, err := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{AudioPresentationShift: delays})
+```
+
+The facade re-exports `matroska.AudioStartDelays`; the CLI surface is `diagnose` (per-track values in `audio_delays_ns`, threshold crossings as findings).
+
 ## Reindex
 
 `ops.Reindex` copies every cluster from `srcPath` to `dstPath` verbatim and writes a new SeekHead and Cues index derived from the cluster contents. All other elements (Info, Tracks, Tags, Chapters, Attachments) are also copied verbatim.
@@ -1101,6 +1155,7 @@ fmt.Printf("%d clusters copied, %d bytes recovered, %d bytes skipped\n",
 | `DamagedRanges` | `[]DamagedRange{StartOffset, EndOffset, ApproxStartMs, ApproxEndMs}`, one entry per skipped span, in file order. |
 | `RepairedRanges` | `[]RepairedRange{StartOffset, EndOffset, BytesKept}`, one entry per region reconstructed around damage (media kept that a plain skip would have dropped). |
 | `CleanCutBytes` | Video bytes intentionally dropped after gaps up to the next keyframe (`Options.CleanCut`). |
+| `TruncatedTail` | The damage reaches the end of the file: an incomplete source (interrupted download), whose tail no tool can restore - display "re-download" rather than "repair". Mid-file damage alone leaves it false. |
 
 Never in-place: `dstPath` is always a separate file. The result is reopened afterwards and its Cues checked against the ones built during the walk -- the same light verification `Reindex` always runs -- so a bug in `Salvage` itself (not the source's damage) still surfaces as an error.
 

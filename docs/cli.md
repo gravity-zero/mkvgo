@@ -684,6 +684,29 @@ mkvgo cue-health movie.mkv
 
 The library equivalent is `ops.CueHealth` / `matroska.CueHealth` (see library.md).
 
+### diagnose
+
+One-call triage: classifies a file and names the remedy for every defect, so a library scan can route each file straight to the right repair without stacking separate probes. It composes the seek-index triage (`cue-health`), the per-track audio start delays (the repack defect where audio content starts late), and a declared-size coherence check; the full tolerant walk (`salvage --dry-run`) runs ONLY when the declared Segment size and the real file size disagree - the head-visible signature of truncation or trailing junk. On a healthy file the whole call costs the head plus the first cluster(s).
+
+```
+mkvgo diagnose <file.mkv> [-json]
+```
+
+- Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
+- Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: `reindex --resync`), `trailing-junk`, `streamed-size` (unsealed Segment).
+- The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), and the `damage` map when the walk ran.
+
+```bash
+mkvgo diagnose movie.mkv
+# movie.mkv: 2 finding(s)
+#   [index-misskeyed] 57% of cues reference non-video tracks - seeking lands mid-GOP: run mkvgo reindex
+#       remedy: mkvgo reindex
+#   [audio-delay] audio track 2 starts 900ms after the video
+#       remedy: mkvgo retime --shift 2=-900
+```
+
+The library equivalent is `ops.Diagnose` / `matroska.Diagnose`; the per-track delay probe alone is `ops.AudioStartDelays` (see library.md).
+
 ### reindex
 
 Rebuild the seek index (SeekHead + Cues) of an MKV or WebM file. Copies all clusters verbatim and emits a new index derived from their content. Use this on files muxed without a usable seek index to restore fast seeking.
@@ -883,7 +906,7 @@ Package a media file — **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder — the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
-mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--chapter-markers]
+mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--chapter-markers]
 ```
 
 | Flag | Description |
@@ -892,6 +915,7 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--chapter-ma
 | `-segment` | Target segment length in seconds (default 6). Segments are cut on the first video keyframe at/after each multiple |
 | `--keep-tracks` | Comma-separated Matroska track IDs to carry (a **Virtual Edit Layer**): serve a "VF only", "VO + English subs" or "clean" version from one source, no copy — just a different track subset. Video is required |
 | `--sub-offset` | Shift every WebVTT subtitle cue by this many milliseconds (negative allowed) -- a virtual resync, no file rewritten. A cue whose shifted end is at or before 0 is dropped; one straddling 0 is clamped to start at 0 |
+| `--audio-shift` | Re-base an audio track in presentation (`track=ms`, repeatable; positive = the track's content starts late and is presented earlier - feed it `diagnose`'s per-track delay). The samples are copied verbatim and the media segments are byte-identical with or without the shift: only the init segment's edit list moves, so a constant A/V desync is cancelled in the served stream without touching the source. Over-shifts clamp to the presentation start. The persistent repair remains `mkvgo retime` |
 | `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
 
 ```bash
@@ -983,13 +1007,15 @@ and reading only that window — first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
-mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--chapter-markers]
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--synthesize-index] [--chapter-markers]
 ```
 
 Without `-o` the resource goes to stdout (pipe it from a server handler).
 `-segment` must match across calls -- it defines the boundaries. `--sub-offset`
 (see `to-hls`) resyncs the WebVTT renditions virtually; it must match `to-hls`'s
-value for the two modes to stay byte-identical.
+value for the two modes to stay byte-identical. `--audio-shift` (see `to-hls`)
+cancels a constant A/V desync in the served segments via the init's edit list,
+nothing rewritten.
 
 The output is **byte-identical** to the corresponding file `to-hls` writes
 (same boundaries, same fragments, cover art and global tags in the init), so
@@ -1001,7 +1027,14 @@ the clusters — incremental, bounded and cached: a windowed request costs one
 bounded read whether playback is sequential or seeking, only the whole-track
 `subN.vtt` costs a full pass. The remaining difference from `to-hls`: the master
 playlist's `BANDWIDTH` is estimated from the source's cluster sizes. The
-source must carry a Cues index (`mkvgo reindex` adds one).
+source must carry a Cues index (`mkvgo reindex` adds one) - or pass
+`--synthesize-index`: when the index is missing or references no video
+keyframes, the plan walks the clusters once (block headers only, no payload
+bytes) and synthesizes the cue points in memory instead of refusing. Nothing
+is written - the road to seekable on-demand playback for a source on a
+read-only mount; a corrupt cluster stream still refuses (repair first). Each
+`hls-segment` invocation re-walks, so this flag suits the long-running `serve`
+(one plan, many requests) better than per-segment CLI calls.
 
 ```bash
 mkvgo hls-segment movie.mkv master                 # multivariant playlist → stdout

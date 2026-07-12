@@ -72,6 +72,10 @@ streaming, no transcoder involved. **One segment set, two manifests.**
   **A/B forensic watermarking**, **single-file** byte-range serving, **I-frame**
   trick-play playlists, **thumbnails** for scrubbing, and **audio-only**
   (podcasts/music).
+- **Serving-side repairs** - an unindexed source streams anyway (the seek
+  index is synthesized in memory from one structure-only walk), and a constant
+  A/V desync is cancelled per track in the init's edit list: read-only
+  sources, nothing rewritten.
 - Sources: MKV/WebM **or** MP4/MOV, local path **or** `http(s)://` URL (S3).
 
 ```bash
@@ -167,6 +171,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `keyframes` | Video keyframe timestamps (Cues / sample table, or a structural scan) |
 | | `validate` | Structural **and** streaming-readiness checks (Cues, cue keying, durations…) |
 | | `cue-health` | Head-only seek-index triage - spots files that look indexed but seek wrong, in milliseconds |
+| | `diagnose` | One-call triage with remedies: index health + per-track audio delay + truncation verdict, routes each file to the right repair |
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
 | | `compare` | Diff metadata (or block content with `-blocks`) of two files — verify a round-trip |
 | **Extract** | `demux` | Extract tracks to raw streams |

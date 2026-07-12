@@ -56,15 +56,22 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `fingerprint(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads — full payload read, not head-only) | `FingerprintReport` — container-independent content identity (per-track + whole-file digests) |
 | `mapDamage(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - full tolerant walk, writes nothing) | `SalvageReport` - the damage map a repair would produce: repaired/lost ranges with byte offsets and approximate times; `opts.cleanCut` accounts for keyframe-aligned resume. The twin of `mkvgo salvage --dry-run`; the repair operations themselves are not in wasm (browser inputs are read-only) |
 | `cueHealth(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, no cluster walk) | `CueHealthReport` - which tracks the CuePoints reference: spots a seek-broken index (non-empty but keyed on audio) in milliseconds, with the remedy |
+| `diagnose(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-mostly: the tolerant walk runs only when the declared size and the real size disagree) | `Diagnosis` - one-call triage: index health + per-track audio start delays + size coherence, each finding with its remedy (reindex / retime / resync / re-download); flags a truncated download as such instead of an opaque parse failure |
 | `openForensic(input, opts?)` | `Uint8Array` **or `Blob`/`File`** | single-source A/B watermark handle: `{ numSegments, masterPlaylist, mediaPlaylist, init, segment(n, fromB), segmentForPattern(n, pattern), distinct(n), close() }` - variant B derives from the one source by dropping a disposable H.264 frame per segment, timing-compensated (shared manifest); `distinct(n)` says whether segment n carries a bit |
 | `version()` | — | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
 `{ fastStart?, skipUnsupported?, flattenSubs?, nativeWebVTT?,
-mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs? }`
+mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs?,
+synthesizeIndex?, audioShiftMs? }`
 - the same semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an
 array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
-2] })` serves a "VF only" version from one file, no copy. `openHLS`/`openABR`
+2] })` serves a "VF only" version from one file, no copy. `synthesizeIndex`
+(openHLS) serves a no-Cue source by walking it once and synthesizing the index
+in memory; `audioShiftMs` (`{trackNumber: ms}`, positive = presented earlier)
+cancels an A/V desync in the served segments via the init's edit list alone -
+both are serving-side repairs on a read-only input, nothing written.
+`openHLS`/`openABR`
 additionally accept an `encrypt` option (AES-128 whole-segment) or a `cenc`
 option (Common Encryption); `openConcat`
 additionally accepts `keepLangs`. See below for both. `analyze`/`playability`/
