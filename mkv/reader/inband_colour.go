@@ -55,20 +55,20 @@ func WithCues() ReadOption {
 }
 
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track
-// bitrate ffmpeg/mkvmerge write, which ffprobe shows as TAG:BPS - ffprobe leaves its
-// own bit_rate field N/A for Matroska, so this gives more than ffprobe) on the
+// bitrate mainstream muxers write, which probers show as TAG:BPS - they leave their
+// own bit_rate field N/A for Matroska, so this gives more than an external prober) on the
 // metadata-only path. The default OpenMeta/ReadMeta stops before Tags, so
 // Track.Bitrate is nil for Matroska; this option follows the head SeekHead straight
 // to the Tags element (one seek, no Cluster scan - the muxer references Tags from the
 // SeekHead near the head) and reads only it. The raw Tags stay nil, exactly the
 // metadata contract; a full Read sets Bitrate regardless. No effect on MP4, whose
-// Bitrate comes from btrt/esds and does equal ffprobe's bit_rate.
+// Bitrate comes from btrt/esds and does equal the conventional bit_rate.
 func WithBitrate() ReadOption {
 	return func(o *readOpts) { o.bitrate = true }
 }
 
 // WithKeyframeIndex builds a COMPLETE video keyframe index for a Matroska that
-// carries no Cues - every keyframe, equal to `ffprobe -skip_frame nokey`, not a
+// carries no Cues - every keyframe, every keyframe from a structural scan, not a
 // sample. AFTER the head parse, and only when no Cues were found, it makes a
 // single sequential structural pass over the Segment (cluster by cluster, no
 // per-block seek), reading element headers and skipping block payloads by size  -
@@ -91,7 +91,7 @@ const defaultKeyframeSamples = 200
 // reading that Cluster's Timestamp - every Cluster start being a real seek point.
 // n ≤ 0 uses defaultKeyframeSamples. The result is coarse-but-valid (one keyframe
 // per sampled interval, deduplicated), bounded to about n seeks; it spares the
-// caller an external ffprobe fallback. Files that already carry Cues never sample.
+// caller an external-prober fallback. Files that already carry Cues never sample.
 func WithSampledKeyframes(n int) ReadOption {
 	if n <= 0 {
 		n = defaultKeyframeSamples
@@ -210,7 +210,7 @@ func applyInBandSPSColour(t *mkv.Track, frame []byte) {
 	// The Alternative Transfer Characteristics SEI (payload type 147) is HLG's
 	// standard compatibility signal: the SPS VUI advertises bt2020-10 (14) for
 	// legacy decoders while the real arib-std-b67 (18) travels in this SEI. When
-	// present it is authoritative for the transfer, exactly as ffmpeg treats it.
+	// present it is authoritative for the transfer, exactly as mainstream decoders treat it.
 	if tc, ok := atcTransferFromFrame(frame, nalLen); ok {
 		t.ColorTransfer = &tc
 	}

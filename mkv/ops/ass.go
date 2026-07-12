@@ -41,7 +41,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 
 	subBlocks := make([]mkv.Block, len(ass.Events))
 	for i, ev := range ass.Events {
-		// The event's end rides as the BlockDuration, like ffmpeg writes ASS.
+		// The event's end rides as the BlockDuration, as mainstream muxers write ASS.
 		var dur int64
 		if ev.EndMs > ev.StartMs {
 			dur = ev.EndMs - ev.StartMs

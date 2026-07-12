@@ -1,17 +1,17 @@
 package mkv
 
 // Colour-metadata helpers. The Matroska Colour element (0x55B0) stores its
-// fields as CICP / ITU-T H.273 code points - the same integers FFmpeg keeps in
-// AVColorSpace / AVColorTransferCharacteristic / AVColorPrimaries / AVColorRange.
-// ffprobe prints them through av_color_*_name; the tables below reproduce those
+// fields as CICP / ITU-T H.273 code points - the integers every mainstream
+// pipeline exchanges. Probers print them as well-known short names; the tables
+// below reproduce those
 // exact strings so a consumer can compare mkvgo's Track colour fields against
-// `ffprobe -show_streams` output (color_space, color_transfer, color_primaries,
+// standard prober output (color_space, color_transfer, color_primaries,
 // color_range) without a second mapping table.
 //
 // A nil pointer on Track means the element was absent. An out-of-table value
-// returns "" (unknown), mirroring how ffprobe omits the field.
+// returns "" (unknown), mirroring how probers omit the field.
 
-// colorSpaceNames maps MatrixCoefficients (CICP) → ffprobe color_space.
+// colorSpaceNames maps MatrixCoefficients (CICP) → conventional color_space.
 var colorSpaceNames = map[uint16]string{
 	0:  "gbr",
 	1:  "bt709",
@@ -29,7 +29,7 @@ var colorSpaceNames = map[uint16]string{
 	14: "ictcp",
 }
 
-// colorTransferNames maps TransferCharacteristics (CICP) → ffprobe color_transfer.
+// colorTransferNames maps TransferCharacteristics (CICP) → conventional color_transfer.
 var colorTransferNames = map[uint16]string{
 	1:  "bt709",
 	2:  "unknown",
@@ -50,7 +50,7 @@ var colorTransferNames = map[uint16]string{
 	18: "arib-std-b67", // HLG
 }
 
-// colorPrimariesNames maps Primaries (CICP) → ffprobe color_primaries.
+// colorPrimariesNames maps Primaries (CICP) → conventional color_primaries.
 var colorPrimariesNames = map[uint16]string{
 	1:  "bt709",
 	2:  "unknown",
@@ -66,7 +66,7 @@ var colorPrimariesNames = map[uint16]string{
 	22: "ebu3213",
 }
 
-// colorRangeNames maps the Matroska/CICP Range value → ffprobe color_range.
+// colorRangeNames maps the Matroska/CICP Range value → conventional color_range.
 // Matroska Range: 0 unspecified, 1 broadcast (limited), 2 full, 3 derived.
 var colorRangeNames = map[uint16]string{
 	1: "tv", // limited / broadcast (AVCOL_RANGE_MPEG)
@@ -80,19 +80,19 @@ func nameOf(table map[uint16]string, code *uint16) string {
 	return table[*code]
 }
 
-// ColorSpaceName returns the ffprobe color_space string for t's MatrixCoefficients
+// ColorSpaceName returns the conventional color_space string for t's MatrixCoefficients
 // code point, or "" if absent/unknown.
 func (t *Track) ColorSpaceName() string { return nameOf(colorSpaceNames, t.ColorSpace) }
 
-// ColorTransferName returns the ffprobe color_transfer string for t's
+// ColorTransferName returns the conventional color_transfer string for t's
 // TransferCharacteristics code point, or "" if absent/unknown.
 func (t *Track) ColorTransferName() string { return nameOf(colorTransferNames, t.ColorTransfer) }
 
-// ColorPrimariesName returns the ffprobe color_primaries string for t's Primaries
+// ColorPrimariesName returns the conventional color_primaries string for t's Primaries
 // code point, or "" if absent/unknown.
 func (t *Track) ColorPrimariesName() string { return nameOf(colorPrimariesNames, t.ColorPrimaries) }
 
-// ColorRangeName returns the ffprobe color_range string ("tv"/"pc") for t's Range
+// ColorRangeName returns the conventional color_range string ("tv"/"pc") for t's Range
 // value, or "" if absent/unknown.
 func (t *Track) ColorRangeName() string { return nameOf(colorRangeNames, t.ColorRange) }
 

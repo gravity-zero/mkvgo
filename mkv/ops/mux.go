@@ -59,7 +59,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 		return err
 	}
 	// One Tags element after the clusters: the caller's tags plus the
-	// mkvmerge-style per-track statistics accumulated during the stream. The
+	// convention per-track statistics accumulated during the stream. The
 	// SeekHead points to it, so head-only readers (WithBitrate) still find it.
 	tags := append(append([]mkv.Tag{}, opts.Tags...), statsTags(tracks, stats)...)
 	if err := mw.WriteTagsElement(tags); err != nil {
@@ -68,8 +68,8 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	return mw.Finalize()
 }
 
-// statsTags builds mkvmerge-style per-track statistics tags (BPS, DURATION,
-// NUMBER_OF_FRAMES, NUMBER_OF_BYTES), keyed by track UID - the values ffprobe
+// statsTags builds convention per-track statistics tags (BPS, DURATION,
+// NUMBER_OF_FRAMES, NUMBER_OF_BYTES), keyed by track UID - the values probers
 // surfaces as TAG:BPS etc. and matroska.WithBitrate reads back head-only.
 func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 	var out []mkv.Tag
@@ -99,7 +99,7 @@ func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 	return out
 }
 
-// formatStatsDuration renders a duration the way mkvmerge's statistics tags
+// formatStatsDuration renders a duration the way the statistics-tag convention
 // do: HH:MM:SS.nnnnnnnnn.
 func formatStatsDuration(ms int64) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%09d",

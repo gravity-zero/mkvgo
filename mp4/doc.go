@@ -12,7 +12,7 @@
 // codecs are H.264, HEVC, AV1 and VP9 (video) and AAC, Opus, AC-3, E-AC-3, FLAC, MP3
 // and DTS (audio); the AC-3/E-AC-3 configuration boxes are derived from the
 // elementary bitstream, which Matroska carries no CodecPrivate for, and DTS
-// (incl. DTS-HD) is carried as mp4a/esds the way ffmpeg's mov muxer does it.
+// (incl. DTS-HD) is carried as mp4a/esds the way the de-facto mov muxer does it.
 // TrueHD has no portable MP4 mapping and is rejected.
 //
 // QuickTime .mov files are read as well, including the raw-camera layout

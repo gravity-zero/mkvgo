@@ -114,8 +114,8 @@ type aacInfo struct {
 // channel count and sample rate. Two things make the front fields insufficient:
 //
 //   - Parametric Stereo (HE-AACv2) codes a mono core (channelConfiguration 1) the
-//     decoder upmixes to stereo → 2 channels, like ffprobe.
-//   - SBR (HE-AAC) codes a half-rate core the decoder doubles → ffprobe reports
+//     decoder upmixes to stereo → 2 channels, like external probers.
+//   - SBR (HE-AAC) codes a half-rate core the decoder doubles → probers report
 //     the extensionSamplingFrequency, not the core rate.
 //
 // Both the explicit hierarchical form (audioObjectType 5 = SBR, 29 = PS up front)
@@ -125,10 +125,10 @@ type aacInfo struct {
 // Limitation: when SBR or Parametric Stereo is signalled only *in-band* (in the
 // audio frames, not the ASC), it is invisible from the head. Two real shapes:
 //   - implicit SBR: a plain AAC-LC ASC (e.g. 0x1310) whose frames carry SBR - we
-//     report the core rate, ffprobe reports the doubled rate (it decodes a frame).
+//     report the core rate, probers report the doubled rate (it decodes a frame).
 //   - in-band PS over an explicit-SBR mono core (e.g. ASC 0x2b8a0800: AOT 5, SBR
 //     ext 44100, channelConfiguration 1) - we report 1 channel (the ASC's mono
-//     core), ffprobe reports 2 (it decodes the reconstructed stereo).
+//     core), probers report 2 (it decodes the reconstructed stereo).
 //
 // Both are true head-only limitations: the data is in no header. The colour
 // analogue is matrix/primaries/transfer signalled only in an in-band SPS rather
@@ -158,7 +158,7 @@ func parseAACConfig(asc []byte) aacInfo {
 	}
 
 	// Backward-compatible signalling rides as a sync extension after the
-	// GASpecificConfig. ffmpeg only looks for it when SBR was not already signalled
+	// GASpecificConfig. Mainstream decoders only look for it when SBR was not already signalled
 	// explicitly, so walk the GASpecificConfig to position the reader, then probe.
 	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc) {
 		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
@@ -449,7 +449,7 @@ func flacEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 
 // dtsEntry carries DTS (Coherent Acoustics core, and DTS-HD streams whose first
 // substream is a core) as mp4a + esds with objectTypeIndication 0xA9, matching
-// the way ffmpeg's mov muxer stores DTS. The decoder reads the core and any
+// the way the de-facto mov muxer stores DTS. The decoder reads the core and any
 // extension substreams from the frames themselves, so no config payload is
 // needed; DTS-HD's extension data rides along in the verbatim samples.
 func dtsEntry(t *mkv.Track, _ []byte) ([]byte, error) {

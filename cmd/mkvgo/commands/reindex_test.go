@@ -12,7 +12,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
-// regfixMKV is the real ffmpeg-muxed fixture used across the test suite.
+// regfixMKV is the real muxer-written fixture used across the test suite.
 const regfixMKV = "../../../internal/testdata/regfix.mkv"
 
 // TestCmdReindex_ReindexRoundTrip verifies that the reindex operation used by

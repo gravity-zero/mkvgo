@@ -63,7 +63,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, er
 	// Derive the keyframe index from the Cues a full Read already parsed, so
 	// Container.Keyframes is available from Read as well as the metadata path.
 	c.Keyframes = keyframeTimesMs(c)
-	// Surface the per-track "BPS" bitrate tag (ffmpeg writes it; ffprobe reports
+	// Surface the per-track "BPS" bitrate tag (mainstream muxers write it; probers report
 	// it as bit_rate) as the typed Track.Bitrate, now that Tags are parsed.
 	promoteTrackBitrate(c)
 	return c, nil
@@ -97,7 +97,7 @@ func looksLikeISOBMFF(r io.ReadSeeker) bool {
 // tolerableTailError reports whether a segment-parse error is just a truncated
 // tail - the file was cut mid-element after the head metadata was already read.
 // It surfaces as an unexpected EOF; with the tracks in hand there is nothing more
-// to gain by failing the whole read, so return what was parsed, as ffprobe does.
+// to gain by failing the whole read, so return what was parsed, as external probers do.
 func tolerableTailError(err error, c *mkv.Container) bool {
 	return (errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)) && len(c.Tracks) > 0
 }
@@ -235,7 +235,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			// rips: a multi-MB run of 0x00 between clusters) makes the next
 			// element header undecodable. Rather than abort the whole read like
 			// a strict parser, resync to the next Cluster and keep going, as
-			// ffmpeg/mkvtoolnix do. If nothing recognizable remains, stop with
+			// mainstream tools do. If nothing recognizable remains, stop with
 			// the metadata gathered so far.
 			off, rerr := p.resyncToCluster(endPos)
 			if rerr != nil {
@@ -1043,12 +1043,12 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	// IsDefault, but DefaultPresent stays false so a consumer can tell an explicit
 	// flag from the applied default. Language is intentionally NOT defaulted to
 	// "eng" (v0.4.0 behaviour change): an absent language stays "" with
-	// LanguagePresent=false, matching what ffprobe reports.
+	// LanguagePresent=false, matching what probers report.
 	if !t.DefaultPresent {
 		t.IsDefault = true
 	}
 	// DefaultDuration exists on audio tracks too (block duration), but exposing it
-	// as FrameRate is only meaningful for video - and matches ffprobe, which only
+	// as FrameRate is only meaningful for video - and matches external probers, which only
 	// reports r_frame_rate for video streams.
 	if t.Type != mkv.VideoTrack {
 		t.FrameRate = nil
@@ -1060,7 +1060,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 }
 
 // interlacedName maps a Matroska FlagInterlaced value (0 undetermined, 1
-// interlaced, 2 progressive) to the ffprobe-style field_order string, "" when
+// interlaced, 2 progressive) to the conventional field_order string, "" when
 // undetermined.
 func interlacedName(v uint64) string {
 	switch v {

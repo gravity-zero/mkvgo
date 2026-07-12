@@ -20,11 +20,11 @@ import "github.com/gravity-zero/mkvgo/mkv"
 type bitstreamColour struct {
 	primaries  *uint16 // CICP colour_primaries
 	transfer   *uint16 // CICP transfer_characteristics
-	matrix     *uint16 // CICP matrix_coefficients (ffprobe color_space)
+	matrix     *uint16 // CICP matrix_coefficients (conventional color_space)
 	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
 	bitDepth   *uint16 // luma bit depth (8/10/12)
 	profile    string  // e.g. "Main 10"
-	level      *uint16 // level_idc (ffprobe level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
+	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
 	sarHeight  uint32  // VUI sample aspect ratio height
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
@@ -34,7 +34,7 @@ type bitstreamColour struct {
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
 }
 
-// pixelFormat composes the ffprobe pix_fmt string from a chroma_format_idc and a
+// pixelFormat composes the the conventional pix_fmt string from a chroma_format_idc and a
 // luma bit depth, or "" when the chroma is unknown. Covers the planar YUV formats
 // real video uses; an unexpected chroma yields "".
 func pixelFormat(chroma, bitDepth *uint16) string {
@@ -100,7 +100,7 @@ func validBitDepth(d uint32) *uint16 {
 }
 
 // cicpOrNil returns nil for CICP code 2 ("unspecified"), which carries no colour
-// information - ffprobe omits the field in that case, and leaving it nil keeps the
+// information - probers omit the field in that case, and leaving it nil keeps the
 // "nil means fall back" contract. Other code points (including 0 = identity/GBR)
 // are real and returned as-is.
 func cicpOrNil(v uint32) *uint16 {
@@ -351,7 +351,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	bc := &bitstreamColour{}
 	profileIDC := r.bits(8)
 	r.bits(8)                          // constraint flags + reserved
-	bc.level = u16p(uint16(r.bits(8))) // level_idc (ffprobe level)
+	bc.level = u16p(uint16(r.bits(8))) // level_idc (conventional level)
 	r.ue()                             // seq_parameter_set_id
 	bc.profile = avcProfileName(profileIDC)
 
@@ -636,7 +636,7 @@ func skipHEVCProfileTierLevel(r *bitReader, maxSub uint32, bc *bitstreamColour) 
 	r.bits(32)                         // general_profile_compatibility_flags
 	r.bits(32)                         // 4 source flags + 28 of the 44 reserved
 	r.bits(16)                         // remaining 16 of reserved (4+44 = 48 total -> 32+16)
-	bc.level = u16p(uint16(r.bits(8))) // general_level_idc (ffprobe level, 30×level)
+	bc.level = u16p(uint16(r.bits(8))) // general_level_idc (conventional level, 30×level)
 	prof := make([]uint32, maxSub)
 	lvl := make([]uint32, maxSub)
 	for i := uint32(0); i < maxSub; i++ {
@@ -868,7 +868,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 			r.bits(12) // operating_point_idc
 			levelIdx := r.bits(5)
 			if i == 0 {
-				bc.level = u16p(uint16(levelIdx)) // seq_level_idx[0] (ffprobe level)
+				bc.level = u16p(uint16(levelIdx)) // seq_level_idx[0] (conventional level)
 			}
 			if levelIdx > 7 {
 				r.bit() // seq_tier
@@ -1069,7 +1069,7 @@ func vp9Colour(cp []byte) *bitstreamColour {
 		return nil
 	}
 	bc := &bitstreamColour{}
-	bc.profile = "" // numeric VP9 profile not mapped to an ffprobe string here
+	bc.profile = "" // numeric VP9 profile not mapped to a conventional string here
 	bitDepth := b[2] >> 4
 	fullRange := (b[2] >> 0) & 1
 	if bitDepth == 8 || bitDepth == 10 || bitDepth == 12 {

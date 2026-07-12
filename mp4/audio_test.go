@@ -324,7 +324,7 @@ func TestChannelCountsFromConfig(t *testing.T) {
 
 	// AAC sample rate from the config: HE-AAC SBR codes a half-rate core and the
 	// decoder doubles it; parseAACConfig reports both the core and the SBR output
-	// rate so the caller can present ffprobe's output rate.
+	// rate so the caller can present the conventional output rate.
 	// Explicit hierarchical SBR (AOT=5): core 22050, extension 44100, stereo.
 	explicitSBR := func() []byte {
 		var w bitWriter
@@ -362,7 +362,7 @@ func TestChannelCountsFromConfig(t *testing.T) {
 	}
 
 	// Real-world explicit-SBR mono ASC (0x2b8a0800: AOT 5, core 22050, ext 44100,
-	// channelConfiguration 1). When the stream carries in-band PS, ffprobe reports
+	// channelConfiguration 1). When the stream carries in-band PS, probers report
 	// 2 channels by decoding; head-only we report the ASC's mono core and the
 	// doubled output rate. Documents the accepted in-band-PS limitation.
 	inbandPS := []byte{0x2b, 0x8a, 0x08, 0x00}

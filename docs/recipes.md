@@ -76,7 +76,7 @@ magnitude faster than a full `Open` on a large file.
 
 ```go
 c, err := matroska.OpenMeta(ctx, "video.mkv") // Tracks + Info only
-// Per-track bitrate (the TAG:BPS ffprobe shows) stays head-only with the opt-in:
+// Per-track bitrate (the TAG:BPS probers show) stays head-only with the opt-in:
 c, err = matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
 // MP4 counterpart (second value lists non-carried tracks like cover art;
 // bitrate needs no opt-in there - MP4 carries it in btrt/esds):
@@ -246,7 +246,7 @@ mkvgo fingerprint movie.mp4
 
 ## Thumbnails / scrubbing storyboard
 
-Pull the keyframe nearest a time, decoder-ready, then make the image with ffmpeg
+Pull the keyframe nearest a time, decoder-ready, then make the image with your decoder
 (mkvgo never decodes):
 
 ```bash

@@ -3,7 +3,7 @@ package mkv
 // stereo.go - names for the 3D stereo arrangement and the video projection.
 
 // StereoModeName maps the track's StereoMode to a human-readable arrangement
-// (the wording ffprobe uses for its Stereo 3D side data), or "" for mono / no
+// (the conventional Stereo 3D side-data wording), or "" for mono / no
 // stereo / an unknown value. The Matroska StereoMode enum pairs left-eye-first
 // and right-eye-first variants of each layout; both map to the same name here.
 func (t *Track) StereoModeName() string {

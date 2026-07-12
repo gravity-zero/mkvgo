@@ -302,7 +302,7 @@ func TestRetimeReplace_UnknownSizeSegment(t *testing.T) {
 }
 
 // TestRetime_DeepVerifyPreexistingDefect: a file whose index was ALREADY
-// defective (audio-keyed cues, the ffmpeg-muxer heritage) must not have a
+// defective (audio-keyed cues, a real-muxer heritage) must not have a
 // correct retime refused for it - the deep verify diffs the issue sets and
 // only an ADDED error blocks. The preexisting defect is reported through
 // OnPreexisting; StrictVerify restores the absolute refusal.

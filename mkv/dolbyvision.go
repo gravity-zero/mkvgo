@@ -4,7 +4,7 @@ package mkv
 // box) and Matroska (dvcC/dvvC BlockAddIDExtraData) readers. Both carry the same
 // DOVIDecoderConfigurationRecord, so a single decoder serves both and a probe can
 // report dovi_profile / bl_signal_compatibility_id without falling back to
-// ffprobe - the fields a player needs to pick a Dolby Vision rendering path.
+// any external prober - the fields a player needs to pick a Dolby Vision rendering path.
 
 // DolbyVision is a decoded DOVIDecoderConfigurationRecord. Profile and
 // BLSignalCompatID are what a remux/playback decision keys on: profile selects the

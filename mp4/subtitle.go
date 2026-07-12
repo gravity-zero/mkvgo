@@ -19,7 +19,7 @@ const defaultCueDurMs = 2000
 var emptyCue = []byte{0x00, 0x00}
 
 // srtEntry builds a tx3g (TextSampleEntry) box. The styling mirrors what
-// ffmpeg's mov_text muxer emits: bottom-centred, white text, transparent
+// the de-facto mov_text muxer emits: bottom-centred, white text, transparent
 // background, with a single-font table.
 func srtEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 	const font = "Serif"

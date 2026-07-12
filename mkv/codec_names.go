@@ -2,13 +2,13 @@ package mkv
 
 import "fmt"
 
-// codec_names.go - display-only derivations that ffprobe reports but the mkvgo
+// codec_names.go - display-only derivations that probers report but the mkvgo
 // fast path otherwise omits: codec_long_name and channel_layout. Both are pure
 // functions of fields already read (Codec, Channels), exposed as methods like the
-// colour name helpers so a consumer can match ffprobe's strings.
+// colour name helpers so a consumer can match standard prober strings.
 
 // codecLongNames maps an mkvgo short codec name (Track.Codec) to the codec_long_name
-// ffprobe prints (the libavcodec long_name). Only codecs mkvgo recognises are
+// probers print as codec_long_name. Only codecs mkvgo recognises are
 // listed; anything absent yields "".
 var codecLongNames = map[string]string{
 	"h264":      "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
@@ -34,16 +34,16 @@ var codecLongNames = map[string]string{
 	"dvbsub":    "DVB subtitles",
 }
 
-// CodecLongName returns the ffprobe codec_long_name for the track's codec, or ""
+// CodecLongName returns the conventional codec_long_name for the track's codec, or ""
 // when the codec is not mapped. It is a static lookup on Track.Codec.
 func (t *Track) CodecLongName() string { return codecLongNames[t.Codec] }
 
-// ChannelLayout returns the audio channel layout ffprobe reports as channel_layout
+// ChannelLayout returns the audio channel layout probers report as channel_layout
 // ("mono", "stereo", "5.1(side)", "7.1", …), derived from the channel count. "" when
 // the track is not audio or the count is unknown. The surround variant depends on
 // the codec's decoded channel positions, which is not fully recoverable head-only:
 // most codecs (AAC, E-AC-3, DTS) place 5.1 surrounds at the sides → "5.1(side)",
-// while AC-3 uses the back positions → "5.1". Uncommon counts fall back to FFmpeg's
+// while AC-3 uses the back positions → "5.1". Uncommon counts fall back to the conventional
 // "N channels" form.
 func (t *Track) ChannelLayout() string {
 	if t.Channels == nil || *t.Channels == 0 {

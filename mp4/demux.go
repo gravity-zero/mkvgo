@@ -84,7 +84,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			CodecPrivate: t.codecPrivate,
 		}
 		// Language and the "default" selection flag, so a probe carries the same
-		// track-selection metadata ffprobe reports (not gated by codec support).
+		// track-selection metadata probers report (not gated by codec support).
 		if t.languageKnown {
 			mt.Language = t.language
 			mt.LanguageBCP47 = t.languageBCP47
@@ -113,7 +113,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			mt.ColorRange = t.colorRange
 			mt.ColourDetermined = t.colourDetermined
 			// Fall back to the codec bitstream (e.g. H.264 SPS VUI) for any colour
-			// field the colr box did not supply - matches ffprobe's color_space on
+			// field the colr box did not supply - matches the conventional color_space on
 			// SDR streams that carry colour only in the SPS.
 			reader.FillColourFromCodecPrivate(&mt)
 			mt.DolbyVision = t.dolbyVision

@@ -295,7 +295,7 @@ func TestReadMetaPartialParity(t *testing.T) {
 }
 
 // TestReadMetaRealFileParity proves byte-identical Tracks+Info+DurationMs against
-// a full Read on the committed real ffmpeg-muxed fixture.
+// a full Read on the committed real muxer-written fixture.
 func TestReadMetaRealFileParity(t *testing.T) {
 	const fixture = "testdata/probe/hdr_multi.mkv"
 	f1, err := os.Open(fixture)

@@ -11,7 +11,7 @@ import (
 // CmdToMP4 remuxes an MKV/WebM file to MP4. Flags: --faststart (moov before
 // mdat), --skip-unsupported (drop tracks whose codec MP4 cannot carry),
 // --flatten-subs (carry ASS/SSA as plain tx3g, losing styling), --webvtt-native
-// (carry WebVTT as lossless wvtt instead of tx3g; not read by ffmpeg).
+// (carry WebVTT as lossless wvtt instead of tx3g; not read by every demuxer).
 func CmdToMP4(args []string) {
 	var faststart, skip, flatten, wvtt, mp3delay, hashes bool
 	var rest []string
@@ -44,7 +44,7 @@ func CmdToMP4(args []string) {
 		fmt.Fprintln(os.Stderr, "warning: --flatten-subs converts styled subtitles to plain text (styling, positioning and karaoke are lost)")
 	}
 	if wvtt {
-		fmt.Fprintln(os.Stderr, "warning: --webvtt-native writes WebVTT as wvtt (read by Apple/CMAF but not by ffmpeg)")
+		fmt.Fprintln(os.Stderr, "warning: --webvtt-native writes WebVTT as wvtt (read by Apple/CMAF players, not by every demuxer)")
 	}
 
 	err := mp4.RemuxToMP4(context.Background(), src, dst, mp4.Options{

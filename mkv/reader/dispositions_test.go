@@ -10,7 +10,7 @@ import (
 
 // TestExtendedDispositions covers the extended Matroska disposition flags
 // (commentary / hearing-impaired / visual-impaired / original / descriptions),
-// mapping to the ffprobe stream dispositions of the same name.
+// mapping to the conventional stream dispositions of the same name.
 func TestExtendedDispositions(t *testing.T) {
 	track := trackEntry(
 		uintElem(mkv.IDTrackNumber, 1, 1),

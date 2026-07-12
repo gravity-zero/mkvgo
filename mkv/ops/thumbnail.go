@@ -8,7 +8,7 @@ package ops
 // Decoding the image stays the consumer's job (mkvgo never transcodes):
 //
 //	mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264
-//	ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
+//	<decoder> -i frame.h264 -frames:v 1 thumb.jpg
 //
 // Scrubbing storyboards are this in a loop over the keyframe index.
 
@@ -220,7 +220,7 @@ func hevcParameterSetsAnnexB(hvcC []byte) []byte {
 }
 
 // ivfWrap wraps one VP8/VP9/AV1 frame in a minimal IVF container (what
-// ffmpeg and dav1d/libvpx tools read as a standalone file).
+// standard decoder tools read as a standalone file).
 func ivfWrap(t *mkv.Track, ptsMs int64, frame []byte) []byte {
 	fourcc := map[string]string{"vp8": "VP80", "vp9": "VP90", "av1": "AV01"}[t.Codec]
 	var w, h uint16

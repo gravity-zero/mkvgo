@@ -91,13 +91,13 @@ type Track struct {
 	IsDefault bool `json:"is_default"`
 	IsForced  bool `json:"is_forced"`
 	// Extended disposition flags (Matroska FlagHearingImpaired/…/FlagCommentary),
-	// mapping to the ffprobe stream dispositions of the same name. All false when
+	// mapping to the conventional stream dispositions of the same name. All false when
 	// absent. Matroska-only; MP4 has no equivalent boxes so they stay false there.
 	HearingImpaired  bool     `json:"hearing_impaired,omitempty"`
 	VisualImpaired   bool     `json:"visual_impaired,omitempty"`
-	TextDescriptions bool     `json:"text_descriptions,omitempty"` // ffprobe "descriptions"
+	TextDescriptions bool     `json:"text_descriptions,omitempty"` // the conventional "descriptions" field
 	Original         bool     `json:"original,omitempty"`
-	Commentary       bool     `json:"commentary,omitempty"` // ffprobe "comment"
+	Commentary       bool     `json:"commentary,omitempty"` // the conventional "comment" field
 	CodecPrivate     []byte   `json:"-"`
 	HeaderStripping  []byte   `json:"-"` // bytes stripped from each block (ContentCompression)
 	Width            *uint32  `json:"width,omitempty"`
@@ -135,7 +135,7 @@ type Track struct {
 	VideoBitDepth     *uint16 `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
 	// Rotation is the clockwise display rotation in degrees (0/90/180/270) from the
 	// MP4 tkhd display matrix; 0 when none/unknown. Phone videos commonly encode 90
-	// or 270 (portrait). ffprobe exposes the same matrix as Display Matrix side data.
+	// or 270 (portrait). probers expose the same matrix as Display Matrix side data.
 	Rotation int `json:"rotation,omitempty"`
 	// Display dimensions for anamorphic video, nil when pixels are square. Their
 	// ratio is the display aspect: literal pixels from the Matroska
@@ -145,8 +145,8 @@ type Track struct {
 	DisplayWidth  *uint32 `json:"display_width,omitempty"`
 	DisplayHeight *uint32 `json:"display_height,omitempty"`
 	// Colour code points (CICP / ITU-T H.273), nil when absent. Map to the strings
-	// ffprobe reports with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
-	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) - ffprobe color_space
+	// probers report with ColorSpaceName/ColorTransferName/ColorPrimariesName/ColorRangeName.
+	ColorSpace     *uint16 `json:"color_space,omitempty"`     // MatrixCoefficients (0x55B1) - conventional color_space
 	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
 	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
 	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
@@ -158,12 +158,12 @@ type Track struct {
 	// (false): a caller should treat the latter, not the former, as "fall back".
 	ColourDetermined bool    `json:"colour_determined,omitempty"`
 	Profile          string  `json:"profile,omitempty"`      // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
-	Level            *uint16 `json:"level,omitempty"`        // codec level_idc from the SPS (ffprobe level): H.264 10×level, HEVC 30×level
-	PixelFormat      string  `json:"pixel_format,omitempty"` // ffprobe pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
+	Level            *uint16 `json:"level,omitempty"`        // codec level_idc from the SPS (the conventional level field): H.264 10×level, HEVC 30×level
+	PixelFormat      string  `json:"pixel_format,omitempty"` // the conventional pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
 	FieldOrder       string  `json:"field_order,omitempty"`  // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
-	FrameCount       int64   `json:"frame_count,omitempty"`  // number of frames (ffprobe nb_frames), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
-	DurationMs       int64   `json:"duration_ms,omitempty"`  // per-track duration in ms (ffprobe per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
-	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt/esds avgBitrate = ffprobe bit_rate; or the Matroska BPS tag, which ffprobe shows as TAG:BPS); nil when unknown
+	FrameCount       int64   `json:"frame_count,omitempty"`  // number of frames (the conventional nb_frames field), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
+	DurationMs       int64   `json:"duration_ms,omitempty"`  // per-track duration in ms (the conventional per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
+	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt/esds avgBitrate = the conventional bit_rate; or the Matroska BPS tag, shown by probers as TAG:BPS); nil when unknown
 	// StereoMode is the 3D stereo arrangement (Matroska StereoMode, or the MP4 st3d
 	// box mapped to the same values); nil for ordinary 2D video. See StereoModeName.
 	StereoMode *uint16 `json:"stereo_mode,omitempty"`
@@ -178,7 +178,7 @@ type Track struct {
 	DolbyVision *DolbyVision `json:"dolby_vision,omitempty"`
 
 	// HDR holds the HDR10 static metadata (Content Light Level + Mastering Display)
-	// when the stream carries it; nil otherwise. ffprobe reports it as frame side
+	// when the stream carries it; nil otherwise. probers report it as frame side
 	// data. Read head-only from the Matroska Colour element (MaxCLL/MaxFALL +
 	// MasteringMetadata) or the MP4 clli/mdcv boxes. See HDRStaticMetadata.
 	HDR *HDRStaticMetadata `json:"hdr,omitempty"`
@@ -228,7 +228,7 @@ func (t *Track) ResolvedLanguage() string {
 }
 
 // EffectiveSampleRate returns the audio sample rate a decoder produces - the
-// value ffprobe reports as sample_rate. For SBR streams (HE-AAC / HE-AACv2) the
+// value probers report as sample_rate. For SBR streams (HE-AAC / HE-AACv2) the
 // coded core runs at half rate and the decoder doubles it, so OutputSampleRate
 // (the Matroska OutputSamplingFrequency, or the AAC AudioSpecificConfig SBR
 // extension rate) wins when present; otherwise the base SampleRate. Returns 0
@@ -243,7 +243,7 @@ func (t *Track) EffectiveSampleRate() float64 {
 	return 0
 }
 
-// AvgFrameRate returns the average frame rate (ffprobe avg_frame_rate): the total
+// AvgFrameRate returns the average frame rate (the conventional avg_frame_rate): the total
 // frame count over the track's duration. It is non-zero only when both FrameCount
 // and DurationMs are known - MP4 video, head-only - and differs from FrameRate
 // (the nominal rate) for variable-frame-rate content. It returns 0 for Matroska,
@@ -268,12 +268,12 @@ func (t *Track) displayDims() (uint32, uint32) {
 	return 0, 0
 }
 
-// DisplayAspectRatio returns the picture aspect ratio ffprobe reports as
+// DisplayAspectRatio returns the picture aspect ratio probers report as
 // display_aspect_ratio ("16:9"), from the display dimensions when the stream is
 // anamorphic or the coded dimensions otherwise. "" when no video dimensions are
-// known. The fraction is reduced with the same bounded av_reduce ffmpeg uses, so
+// known. The fraction is reduced with the same bounded rational reduction mainstream probers use, so
 // a pathological near-square ratio collapses to a sane approximation rather than
-// an absurd one (matching ffprobe).
+// an absurd one (matching mainstream probers).
 func (t *Track) DisplayAspectRatio() string {
 	w, h := t.displayDims()
 	if w == 0 || h == 0 {
@@ -283,12 +283,12 @@ func (t *Track) DisplayAspectRatio() string {
 	return fmt.Sprintf("%d:%d", num, den)
 }
 
-// SampleAspectRatio returns the pixel aspect ratio ffprobe reports as
+// SampleAspectRatio returns the pixel aspect ratio probers report as
 // sample_aspect_ratio ("1:1" for square pixels, "32:27" for anamorphic). "" when
 // the coded dimensions are unknown. Reduced with the same bounded av_reduce as
 // DisplayAspectRatio.
 //
-// On pathological near-square ratios this can differ from ffprobe, which
+// On pathological near-square ratios this can differ from other probers, which
 // re-derives the SAR from the dimension-reduced DAR (so the same VUI SAR prints
 // differently at different resolutions). mkvgo reports the exact ratio instead  -
 // display-only and imperceptible. See CHANGELOG 0.9.0 Notes.
@@ -308,7 +308,7 @@ func (t *Track) SampleAspectRatio() string {
 }
 
 // aspectReduceMax bounds the numerator and denominator of a reduced aspect ratio.
-// It is ffmpeg's constant for display aspect ratios (av_reduce(..., 1024*1024)).
+// It is the constant mainstream probers use for display aspect ratios (1024*1024).
 const aspectReduceMax = 1024 * 1024
 
 // gcd returns the greatest common divisor of a and b (gcd(x,0)=x).
@@ -324,8 +324,9 @@ func gcd(a, b uint64) uint64 {
 
 // avReduce reduces num/den to lowest terms, then - if either part still exceeds
 // max - to the best rational approximation whose numerator and denominator are
-// both ≤ max. It is a port of ffmpeg's av_reduce (non-negative inputs), so the
-// SAR/DAR strings match ffprobe, including how it tames absurd near-square ratios.
+// both ≤ max. It ports the bounded reduction mainstream probers use (non-negative
+// inputs), so the SAR/DAR strings match theirs, including how absurd near-square
+// ratios are tamed.
 func avReduce(num, den, max uint64) (uint64, uint64) {
 	if g := gcd(num, den); g != 0 {
 		num, den = num/g, den/g

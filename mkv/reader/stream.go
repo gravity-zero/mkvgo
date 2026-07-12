@@ -149,7 +149,7 @@ func (p *streamParser) boundedLoop(size int64, fn func(ebml.ElementHeader) error
 // ReadStream reads the EBML header and front-loaded segment metadata from a
 // plain io.Reader (no Seek required), then returns a *BlockReader ready to
 // yield blocks. In a well-formed streamable MKV (e.g. produced by StreamWriter
-// or ffmpeg piped output), Info and Tracks precede clusters.
+// or piped muxer output), Info and Tracks precede clusters.
 //
 // SeekHead and Cues are silently skipped (they cannot be acted on in a
 // forward-only stream). The returned Container has no Cues field populated.

@@ -18,7 +18,7 @@ Then open **http://localhost:8080/** and pick a player, or point any client at:
 
 | URL | Player |
 |---|---|
-| `http://localhost:8080/hls/master.m3u8` | HLS - hls.js, Safari, ffmpeg |
+| `http://localhost:8080/hls/master.m3u8` | HLS - hls.js, Safari |
 | `http://localhost:8080/hls/manifest.mpd` | DASH - dash.js |
 
 Flags: `-src` (required), `-addr` (default `:8080`), `-segment` seconds

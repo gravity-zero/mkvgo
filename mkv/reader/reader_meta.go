@@ -12,7 +12,7 @@ import (
 )
 
 // metaBufSize is the read buffer for the metadata-only path. ~2 KiB covers the
-// EBML header + SeekHead + Info + Tracks of a typical mkvmerge file in a single
+// EBML header + SeekHead + Info + Tracks of a typically-muxed file in a single
 // underlying Read, so the byte-at-a-time EBML VINT reads cost one syscall instead
 // of hundreds - the difference that matters on a network-mounted library.
 const metaBufSize = 2 << 10
@@ -41,7 +41,7 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOp
 
 // ReadMeta reads ONLY the metadata an indexer needs - Info and Tracks - and stops
 // as soon as it has both, never parsing Cues and never traversing Clusters. On a
-// typical mkvmerge file that is the first ~1-2 KB, so ReadMeta is orders of
+// typically-muxed file that is the first ~1-2 KB, so ReadMeta is orders of
 // magnitude faster and cheaper than a full Read.
 //
 // For a spec-conformant file (a single Info and a single Tracks element) it

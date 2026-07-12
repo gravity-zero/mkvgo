@@ -36,11 +36,11 @@ const (
 	IDTrackType            = 0x83
 	IDFlagDefault          = 0x88
 	IDFlagForced           = 0x55AA
-	IDFlagHearingImpaired  = 0x55AB // ffprobe disposition hearing_impaired
-	IDFlagVisualImpaired   = 0x55AC // ffprobe disposition visual_impaired
-	IDFlagTextDescriptions = 0x55AD // ffprobe disposition descriptions
-	IDFlagOriginal         = 0x55AE // ffprobe disposition original
-	IDFlagCommentary       = 0x55AF // ffprobe disposition comment
+	IDFlagHearingImpaired  = 0x55AB // the conventional disposition field hearing_impaired
+	IDFlagVisualImpaired   = 0x55AC // the conventional disposition field visual_impaired
+	IDFlagTextDescriptions = 0x55AD // the conventional disposition field descriptions
+	IDFlagOriginal         = 0x55AE // the conventional disposition field original
+	IDFlagCommentary       = 0x55AF // the conventional disposition field comment
 	IDCodecID              = 0x86
 	IDLanguage             = 0x22B59C // legacy ISO 639-2 language element
 	IDLanguageBCP47        = 0x22B59D // IETF BCP-47 language element (takes precedence)
@@ -88,16 +88,16 @@ const (
 )
 
 // Colour element (0x55B0) and its sub-elements. Values are CICP / ITU-T H.273
-// code points, identical to the enums FFmpeg exposes as color_space,
+// code points - the integers mainstream probers expose as color_space,
 // color_transfer, color_primaries and color_range. See mkv/colour.go for the
-// code-point → ffprobe-name mapping.
+// code-point → conventional-name mapping.
 const (
 	IDColour               = 0x55B0
-	IDColourMatrix         = 0x55B1 // MatrixCoefficients  → ffprobe color_space
+	IDColourMatrix         = 0x55B1 // MatrixCoefficients  → conventional color_space
 	IDColourBitsPerChannel = 0x55B2 // BitsPerChannel      → video bit depth
-	IDColourRange          = 0x55B9 // Range               → ffprobe color_range
-	IDColourTransfer       = 0x55BA // TransferCharacter.  → ffprobe color_transfer
-	IDColourPrimaries      = 0x55BB // Primaries           → ffprobe color_primaries
+	IDColourRange          = 0x55B9 // Range               → conventional color_range
+	IDColourTransfer       = 0x55BA // TransferCharacter.  → conventional color_transfer
+	IDColourPrimaries      = 0x55BB // Primaries           → conventional color_primaries
 	IDColourMaxCLL         = 0x55BC // MaxCLL (cd/m²)      → HDR10 content light level
 	IDColourMaxFALL        = 0x55BD // MaxFALL (cd/m²)     → HDR10 frame-average light
 )
@@ -225,9 +225,9 @@ var CodecShortName = map[string]string{
 }
 
 // ffprobeCodecName maps the (intentionally kept) mkvgo short codec names to the
-// codec_name FFmpeg's ffprobe reports for the same stream, for the cases where
+// codec_name external probers report for the same stream, for the cases where
 // the two diverge. mkvgo does NOT rename its own values (existing consumers rely
-// on them); this lookup lets a consumer normalize to ffprobe vocabulary when it
+// on them); this lookup lets a consumer normalize to that vocabulary when it
 // wants probe equivalence. Only divergent names are listed - anything absent is
 // identical in both tools (e.g. h264, hevc, aac, opus, ass).
 var ffprobeCodecName = map[string]string{
@@ -237,7 +237,7 @@ var ffprobeCodecName = map[string]string{
 	"dvbsub": "dvb_subtitle",      // S_DVBSUB
 }
 
-// FFprobeCodecName returns the codec_name ffprobe would report for a track whose
+// FFprobeCodecName returns the codec_name an external prober reports for a track whose
 // mkvgo Codec is shortName (as found in Track.Codec / CodecShortName). For codecs
 // that share the same name in both tools it returns shortName unchanged, so it is
 // always safe to call. It does not mutate Track.Codec.

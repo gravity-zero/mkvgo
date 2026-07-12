@@ -1,4 +1,4 @@
-// Package ops - non-regression suite against the real ffmpeg-muxed fixture at
+// Package ops - non-regression suite against the real muxer-written fixture at
 // internal/testdata/regfix.mkv (H.264 + 2×AAC laced, 2 chapters, track-UID
 // tags, ~6.023 s, ~258 KB).
 //
@@ -21,7 +21,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
-// regfixPath is the real ffmpeg-muxed fixture (relative to this package).
+// regfixPath is the real muxer-written fixture (relative to this package).
 const regfixPath = "../../internal/testdata/regfix.mkv"
 
 // regfixDurationMs is the expected duration with a ±30 ms tolerance.
@@ -30,7 +30,7 @@ const regfixDurationTolerance = 30
 
 // ── Test 1: Reader invariants on the real file ────────────────────────────────
 
-// TestRegfix_ReaderInvariants locks the parser against the real ffmpeg output:
+// TestRegfix_ReaderInvariants locks the parser against the real muxer output:
 // track types, codecs, languages, duration, and chapters.
 func TestRegfix_ReaderInvariants(t *testing.T) {
 	ctx := context.Background()
@@ -425,7 +425,7 @@ func TestRegfix_Demux_SingleTrack(t *testing.T) {
 // TestRegfix_BlockReader_BlockCounts reads all blocks from the real fixture via
 // BlockReader and asserts the per-track counts match the values verified when
 // the fixture was created.  This locks the lacing decode path against real
-// ffmpeg AAC lacing.
+// real-muxer AAC lacing.
 //
 // Verified counts (probed at fixture creation):
 //
@@ -456,7 +456,7 @@ func TestRegfix_BlockReader_BlockCounts(t *testing.T) {
 		trackCounts[blk.TrackNumber]++
 	}
 
-	// These exact counts were verified on the real ffmpeg-muxed fixture.
+	// These exact counts were verified on the real muxer-written fixture.
 	// If they change, it means the lacing decoder or block-counting logic
 	// regressed.
 	want := map[uint64]int{1: 144, 2: 260, 3: 260}

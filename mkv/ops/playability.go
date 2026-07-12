@@ -259,7 +259,7 @@ func isTrack10Bit(t mkv.Track) bool {
 	return t.VideoBitDepth != nil && *t.VideoBitDepth > 8
 }
 
-// h264LevelString formats an H.264 level_idc (10x the level) the way ffprobe
+// h264LevelString formats an H.264 level_idc (10x the level) the way probers
 // prints it, e.g. 41 -> "4.1".
 func h264LevelString(levelIdc uint16) string {
 	return fmt.Sprintf("%.1f", float64(levelIdc)/10)

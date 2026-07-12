@@ -719,8 +719,8 @@ Reads `avc1`/`avc3`, `hvc1`/`hev1`, `av01`, `vp09`, `mp4a` (AAC, MP3 or DTS, by 
 
 `RemuxToMP4` never lets a subtitle block the remux:
 
-- **SRT** (`S_TEXT/UTF8`) and **WebVTT** (`S_TEXT/WEBVTT`, and the WebM-era `D_WEBVTT/*` ids) are carried as `tx3g` timed text by default - the only MP4 subtitle form read universally (ffmpeg included). Inline markup is stripped.
-- **`Options.NativeWebVTT`** carries WebVTT losslessly as native `wvtt` (ISO/IEC 14496-30) instead: cue settings and markup are preserved and Apple/Safari/CMAF read it, but ffmpeg's MP4 demuxer does not - so it is opt-in.
+- **SRT** (`S_TEXT/UTF8`) and **WebVTT** (`S_TEXT/WEBVTT`, and the WebM-era `D_WEBVTT/*` ids) are carried as `tx3g` timed text by default - the only MP4 subtitle form read universally. Inline markup is stripped.
+- **`Options.NativeWebVTT`** carries WebVTT losslessly as native `wvtt` (ISO/IEC 14496-30) instead: cue settings and markup are preserved and Apple/Safari/CMAF read it, but many mainstream demuxers do not - so it is opt-in.
 - **`Options.FlattenStyledSubs`** carries ASS/SSA (no native MP4 form) as `tx3g`, stripping the dialogue framing and override tags. Lossy: styling/positioning/karaoke is discarded. Without it, ASS/SSA are dropped (reported via `OnDrop`).
 - Bitmap subtitles (PGS/VOBSUB) have no MP4 timed-text form and are dropped.
 
@@ -757,15 +757,15 @@ for _, d := range dropped { // cover art / non-media tracks not in c.Tracks
 }
 ```
 
-The second return value lists tracks present in the file but not in `c.Tracks` - cover art / attached pictures and non-media tracks (hint, timecode, metadata) - so a probe can account for every stream ffprobe reports; it is nil when every track was carried.
+The second return value lists tracks present in the file but not in `c.Tracks` - cover art / attached pictures and non-media tracks (hint, timecode, metadata) - so a probe can account for every stream probers report; it is nil when every track was carried.
 
 `OpenMetaWithFS(ctx, path, fs)` runs it against a custom filesystem, and `ReadMeta(ctx, r, path)` reads from an `io.ReadSeeker` (the `moov` box may sit after the media, so seeking is required). Info, Tracks, Chapters, DurationMs and (for MP4) file-level Tags / `Info.Title` are populated; Attachments and Cues are left nil. The probe and `RemuxFromMP4` build their metadata from the same code, so they report identical tracks, chapters and duration.
 
 #### Track metadata fields
 
-Each `Track` carries the stream metadata ffprobe reports, read head-only from the container headers and codec configuration (no frame decode). Most map directly to an ffprobe `-show_streams` field; the derived display strings are helper methods, mirroring `ColorSpaceName()` etc.
+Each `Track` carries the stream metadata probers report, read head-only from the container headers and codec configuration (no frame decode). Most map directly to a standard prober stream field; the derived display strings are helper methods, mirroring `ColorSpaceName()` etc.
 
-| `Track` field / method | ffprobe field | Source |
+| `Track` field / method | conventional prober field | Source |
 |---|---|---|
 | `Codec` / `CodecLongName()` | `codec_name` / `codec_long_name` | container codec id |
 | `Language`, `LanguageBCP47` | `tags:language` | `mdhd`/`elng`, Matroska language |
@@ -773,7 +773,7 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `DurationMs` | per-stream `duration` | MP4 `mdhd` (per-track; 0 for Matroska) |
 | `Bitrate` | `bit_rate` | MP4 `btrt` / esds `avgBitrate` |
 | `Width`, `Height` | `width`, `height` | sample entry / `PixelWidth` |
-| `DisplayAspectRatio()`, `SampleAspectRatio()` | `display_aspect_ratio`, `sample_aspect_ratio` | MP4 `pasp` / Matroska `DisplayWidth` / H.264-HEVC VUI `aspect_ratio_info` (bounded `av_reduce` like ffmpeg) |
+| `DisplayAspectRatio()`, `SampleAspectRatio()` | `display_aspect_ratio`, `sample_aspect_ratio` | MP4 `pasp` / Matroska `DisplayWidth` / H.264-HEVC VUI `aspect_ratio_info` (bounded rational reduction, prober-conventional) |
 | `Rotation` | Display Matrix side data | MP4 `tkhd` matrix (0/90/180/270) |
 | `FrameRate` | `r_frame_rate` | MP4 `stts` (timescale ÷ first delta) / Matroska `DefaultDuration` |
 | `AvgFrameRate()` | `avg_frame_rate` | frame count ÷ duration (MP4 video; 0 for Matroska) |
@@ -792,11 +792,11 @@ Each `Track` carries the stream metadata ffprobe reports, read head-only from th
 | `Channels` / `ChannelLayout()` | `channels` / `channel_layout` | codec config (HE-AACv2 PS counted) |
 | `SampleRate`, `OutputSampleRate`, `EffectiveSampleRate()` | `sample_rate` | sample entry / Matroska; SBR output rate from the AAC ASC or `OutputSamplingFrequency` |
 
-A few cases are genuinely not readable head-only (the data lives only in the media frames, so ffprobe decodes a frame): implicit in-band SBR / Parametric Stereo, and colour carried only in an in-band SPS. In those the probe reports the header value (e.g. the AAC core rate) rather than guessing. See the [CHANGELOG notes](../CHANGELOG.md).
+A few cases are genuinely not readable head-only (the data lives only in the media frames, so a prober must decode a frame to see it): implicit in-band SBR / Parametric Stereo, and colour carried only in an in-band SPS. In those the probe reports the header value (e.g. the AAC core rate) rather than guessing. See the [CHANGELOG notes](../CHANGELOG.md).
 
 **Colour determinacy.** `Track.ColourDetermined` reports whether the colour was actually read from a source - the container Colour element, an MP4 `colr` box, or the codec bitstream's colour signalling (H.264/HEVC VUI, AV1 `color_config`, VP9 `vpcC`) - *even when it resolves to "unspecified"* (every `Color*` left nil). It lets a caller tell a confirmed-SDR/unspecified stream (`true`, no colour values) from one whose colour could not be read at all (`false`): only the latter warrants a fallback. A 10-bit SDR stream whose SPS says `colour_description_present_flag = 0` is `ColourDetermined == true` with nil `Color*` - confirmed SDR, not "unread".
 
-**HDR10 static metadata.** `Track.HDR` (`*HDRStaticMetadata`) carries the Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931 chromaticities and the luminance range) - the side data ffprobe reports for HDR10. Read head-only from the Matroska Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/`mdcv` boxes (whose fixed-point, G,B,R-ordered values are normalised to the Matroska units), nil when absent. Independent of `IsHDR()` (transfer-based detection) and `DolbyVision`.
+**HDR10 static metadata.** `Track.HDR` (`*HDRStaticMetadata`) carries the Content Light Level (`MaxCLL`/`MaxFALL`, cd/m²) and the SMPTE ST 2086 Mastering Display colour volume (`MasteringDisplay`: R/G/B + white-point CIE 1931 chromaticities and the luminance range) - the side data probers report for HDR10. Read head-only from the Matroska Colour element (`MaxCLL`/`MaxFALL` + `MasteringMetadata`) or the MP4 `clli`/`mdcv` boxes (whose fixed-point, G,B,R-ordered values are normalised to the Matroska units), nil when absent. Independent of `IsHDR()` (transfer-based detection) and `DolbyVision`.
 
 **In-band colour fallback (opt-in).** Some streaming-style HEVC muxes keep the SPS in-band (a bare hvcC with no parameter sets) and write no container colour, so a head-only probe sees no colour at all. Passing the in-band option makes the probe - only for such a track - read its first sample, parse the SPS VUI, and apply an Alternative Transfer Characteristics SEI override (HLG's `bt2020-10` → `arib-std-b67` compatibility signal). It is off by default; tracks that already carry colour in the header read no frame.
 
@@ -807,7 +807,7 @@ c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithInBandColourFallback())
 c, _, _ := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{InBandColour: true})
 ```
 
-**Per-track bitrate (opt-in).** ffmpeg/mkvmerge write a per-track `BPS` tag - the per-track bitrate ffprobe surfaces as `TAG:BPS` (ffprobe's own `bit_rate` field stays `N/A` for Matroska, so this gives *more* than ffprobe; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and *does* equal ffprobe's `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV. Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element - one seek, no Cluster scan, since the muxer references `Tags` from the head - and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
+**Per-track bitrate (opt-in).** Mainstream muxers write a per-track `BPS` tag - the per-track bitrate probers surface as `TAG:BPS` (their own `bit_rate` field stays `N/A` for Matroska, so this gives *more* than an external prober; for MP4 `Track.Bitrate` comes from `btrt`/`esds` and *does* equal the conventional `bit_rate`). The metadata probe normally stops before the Matroska `Tags` element, so `Track.Bitrate` is nil for MKV. Passing the bitrate option follows the head `SeekHead` straight to the `Tags` element - one seek, no Cluster scan, since the muxer references `Tags` from the head - and fills `Track.Bitrate` from `BPS`, matching a full `Read`:
 
 ```go
 c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithBitrate())
@@ -822,7 +822,7 @@ To align `-c copy` HLS/DASH segments on source keyframes without a full packet s
 c, err := matroska.OpenMeta(ctx, "video.mkv")
 ks := c.Keyframes                                  // []int64 ms, ascending, de-duplicated
 
-// MKV/WebM with no Cues: build the complete index in-process (no ffprobe).
+// MKV/WebM with no Cues: build the complete index in-process (no external prober).
 c, _ = matroska.OpenMeta(ctx, "no-cues.mkv", matroska.WithKeyframeIndex())
 ks = c.Keyframes
 
@@ -831,13 +831,13 @@ c, _, err := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{Keyframes: true})
 ks = c.Keyframes
 ```
 
-`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as ffmpeg does - but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index.
+`Keyframes` holds the video track's keyframe presentation timestamps in milliseconds. MKV/WebM fills it from the `Cues` element reached via the `SeekHead` (one seek, no `Cluster` scan) in the normal metadata pass, and a full `matroska.Read` exposes it too. MP4 derives it from the `stss`/`stts`/`ctts` sample tables with the edit list (`elst`) applied as mainstream demuxers do - but only when `Options{Keyframes: true}` is set, because expanding the sample table is the dominant cost of parsing a long movie's `moov`; the default `mp4.OpenMeta` reads only the box headers and leaves `Keyframes` nil. It is nil when the source has no usable index.
 
-**Cues-less Matroska.** Some muxers ship MKV/WebM with no `Cues`, so `Keyframes` is nil after the head-only pass. Rather than fall back to an external probe, two opt-in options recover it: `WithKeyframeIndex()` builds the **complete** index (every keyframe, equal to `ffprobe -skip_frame nokey`) in one sequential read-ahead pass over the Segment - header-only, no demux/decode, video keyframes only (SimpleBlock keyframe flag, or a BlockGroup with no `ReferenceBlock`); `WithSampledKeyframes(n)` is the cheaper coarse variant (one keyframe per sampled interval). Files that already carry `Cues` are never scanned. The CLI `keyframes` command uses `WithKeyframeIndex()` automatically.
+**Cues-less Matroska.** Some muxers ship MKV/WebM with no `Cues`, so `Keyframes` is nil after the head-only pass. Rather than fall back to an external probe, two opt-in options recover it: `WithKeyframeIndex()` builds the **complete** index (every keyframe) in one sequential read-ahead pass over the Segment - header-only, no demux/decode, video keyframes only (SimpleBlock keyframe flag, or a BlockGroup with no `ReferenceBlock`); `WithSampledKeyframes(n)` is the cheaper coarse variant (one keyframe per sampled interval). Files that already carry `Cues` are never scanned. The CLI `keyframes` command uses `WithKeyframeIndex()` automatically.
 
 ### Subtitles to WebVTT
 
-To serve a text subtitle as WebVTT without forking `ffmpeg -f webvtt`, extract straight to an `io.Writer` (e.g. an HTTP response):
+To serve a text subtitle as WebVTT without forking an external converter, extract straight to an `io.Writer` (e.g. an HTTP response):
 
 ```go
 // Embedded track (by Container.Tracks ID), MKV/WebM or MP4:
@@ -872,7 +872,7 @@ err := matroska.Mux(ctx, matroska.MuxOptions{
 
 Mux writes the metadata you pass (title/chapters/tags/attachments) as-is; it
 does not read any of it from the sources. `MuxingApp`/`WritingApp` in the
-output are `"mkvgo"`. The output also carries mkvmerge-style per-track
+output are `"mkvgo"`. The output also carries convention per-track
 statistics tags (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
 accumulated during the stream - `WithBitrate()` reads them back head-only.
 
@@ -954,8 +954,7 @@ err := matroska.AddAttachment(ctx, "in.mkv", "out.mkv", matroska.Attachment{
 err = matroska.RemoveAttachment(ctx, "in.mkv", "out.mkv", "cover.jpg")
 
 // Replace the chapter list; ParseOGMChapters/FormatOGMChapters convert to and
-// from the OGM text format (CHAPTER01=... / CHAPTER01NAME=...) that mkvmerge
-// and ffmpeg understand.
+// from the OGM text format (CHAPTER01=... / CHAPTER01NAME=...) that chapter-aware tools exchange.
 chaps, err := matroska.ParseOGMChapters(file)
 err = matroska.SetChapters(ctx, "in.mkv", "out.mkv", chaps)
 ```

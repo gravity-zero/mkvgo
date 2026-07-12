@@ -11,7 +11,7 @@ import (
 )
 
 // keyframe_index.go - a COMPLETE keyframe index for a Cues-less Matroska: every
-// video keyframe, equal to `ffprobe -skip_frame nokey`, not a sample. It is a
+// video keyframe, every keyframe from a structural scan, not a sample. It is a
 // single sequential structural pass over the Segment - cluster by cluster, never
 // a per-block seek - reading only element headers and skipping block payloads by
 // their declared size (no demux, no decode). The complementary low-cost variant
@@ -41,7 +41,7 @@ func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
 	// Read the Segment sequentially with read-ahead, discarding block payloads
 	// in-stream rather than seeking past them: a seek-per-block walk pays a
 	// round-trip per block and collapses on SMB/NAS latency (~67k blocks → minutes),
-	// while a streaming read transfers the data in a few large reads, like ffprobe,
+	// while a streaming read transfers the data in a few large reads, like external probers,
 	// but pure-Go with no demux/decode. Existing helpers (readHeader/skip/…) are
 	// reused unchanged; only the reader under them changes for the pass.
 	raw, err := rawSeeker(p.r)
@@ -169,7 +169,7 @@ func (p *parser) resyncCluster(segEnd int64, inCluster, haveTS *bool, clusterTS,
 // It must sit comfortably above the mount's read size (CIFS rsize is ~1-4 MiB) so
 // each underlying read is large and the kernel read-ahead amortises per-read
 // latency - at 256 KiB a 1.25 GB Segment costs ~5000 SMB reads (latency-bound);
-// at 8 MiB it is a few hundred, in ffprobe's range.
+// at 8 MiB it is a few hundred, in an external prober's range.
 const keyframeScanBufSize = 8 << 20
 
 // discardChunk caps a single bufio.Discard call so the int conversion is safe on

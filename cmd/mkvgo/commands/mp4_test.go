@@ -11,7 +11,7 @@ import (
 )
 
 // TestRemuxMP4RoundTrip exercises the remux used by the to-mp4/from-mp4 commands
-// on the real ffmpeg-muxed fixture (H.264 + 2× AAC + 2 chapters): MKV → MP4 →
+// on the real muxer-written fixture (H.264 + 2× AAC + 2 chapters): MKV → MP4 →
 // MKV, checking the tracks and chapters survive.
 func TestRemuxMP4RoundTrip(t *testing.T) {
 	dir := t.TempDir()

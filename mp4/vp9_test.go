@@ -46,7 +46,7 @@ func TestParseVP9FrameHeader(t *testing.T) {
 	}
 }
 
-// A Matroska VP9 track (no CodecPrivate, as ffmpeg writes them) remuxes to a
+// A Matroska VP9 track (no CodecPrivate, as mainstream muxers write them) remuxes to a
 // vp09 sample entry whose vpcC is derived from the first keyframe, and comes
 // back as vp9 through from-mp4's parser.
 func TestVP9RoundTrip(t *testing.T) {

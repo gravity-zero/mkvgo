@@ -14,7 +14,7 @@ import (
 // webvtt.go - WebVTT serialization. A Cue is the timed-text unit; WriteWebVTT
 // emits a valid WebVTT file from cues, and the converters turn the package's
 // parsed SRT/ASS into cues. FileToWebVTT is the file-level entry point that
-// replaces an `ffmpeg -f webvtt` fork for external subtitle sidecars.
+// replaces an external conversion fork for subtitle sidecars.
 
 // Cue is a single WebVTT cue.
 type Cue struct {
@@ -180,7 +180,7 @@ func ResolveCueEnds(cues []Cue, defaultDurMs int64) {
 
 // FileToWebVTT reads an external subtitle file and writes it as WebVTT to w. The
 // format is detected from the extension: .srt, .ass/.ssa, or .vtt (already WebVTT,
-// streamed through). It replaces an `ffmpeg -i ext -f webvtt` fork for sidecars.
+// streamed through). It replaces an external conversion fork for sidecars.
 func FileToWebVTT(srcPath string, w io.Writer) error {
 	switch strings.ToLower(filepath.Ext(srcPath)) {
 	case ".vtt":

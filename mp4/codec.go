@@ -65,13 +65,13 @@ var codecTable = map[string]codecSpec{
 	"A_MPEG/L3": {handler: "soun", video: false, sampleEntry: mp3Entry},
 	// SRT (S_TEXT/UTF8) becomes tx3g timed text. This entry is also the carriage
 	// used by default for WebVTT and for flattened ASS/SSA - tx3g is the only
-	// MP4 subtitle form universally read by players (ffmpeg included).
+	// MP4 subtitle form universally read by players.
 	"srt": {handler: "text", text: true, sampleEntry: srtEntry, cueSample: encodeCue, emptySample: emptyCue},
 }
 
 // wvttSpec carries WebVTT losslessly as native wvtt (ISO/IEC 14496-30). It is
 // opt-in (Options.NativeWebVTT): wvtt preserves cue settings and markup and is
-// read by Apple/Safari/CMAF, but ffmpeg's MP4 demuxer does not recognise it, so
+// read by Apple/Safari/CMAF, but many mainstream demuxers do not recognise it, so
 // it is not the default.
 var wvttSpec = codecSpec{handler: "text", text: true, sampleEntry: wvttEntry,
 	cueSample: encodeWVTTCue, emptySample: wvttEmptyCue}
@@ -79,8 +79,8 @@ var wvttSpec = codecSpec{handler: "text", text: true, sampleEntry: wvttEntry,
 // subtitleCarriage returns how a Matroska subtitle codec is carried into MP4.
 //
 //   - SRT and WebVTT are carried as tx3g by default - the only MP4 subtitle form
-//     read universally (ffmpeg included). WebVTT uses native lossless wvtt instead
-//     when nativeWebVTT is set (Apple/CMAF; ffmpeg cannot read it).
+//     read universally. WebVTT uses native lossless wvtt instead
+//     when nativeWebVTT is set (Apple/CMAF; many demuxers cannot read it).
 //   - ASS/SSA have no plain-text-safe default and are dropped unless flatten is
 //     set, which carries them as tx3g (all styling/positioning lost).
 //   - Bitmap formats (PGS/VOBSUB) have no MP4 timed-text form and are dropped.
@@ -108,7 +108,7 @@ func subtitleCarriage(codec string, flatten, nativeWebVTT bool) (codecSpec, bool
 }
 
 // canonicalSubCodec folds the WebM-era WebVTT codec IDs (D_WEBVTT/SUBTITLES,
-// /CAPTIONS, /DESCRIPTIONS, /METADATA - written by some muxers, including ffmpeg)
+// /CAPTIONS, /DESCRIPTIONS, /METADATA - written by some mainstream muxers)
 // into the canonical "webvtt" short name, so they are carried like S_TEXT/WEBVTT
 // rather than dropped.
 func canonicalSubCodec(codec string) string {
@@ -154,7 +154,7 @@ func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []b
 // from the track's CodecPrivate when it already holds one (some muxers store
 // it), and is otherwise derived from the first keyframe's uncompressed header
 // (profile, bit depth, chroma subsampling, colour range) plus the track's
-// colour code points - the way ffmpeg builds it.
+// colour code points - the way mainstream muxers build it.
 func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	record := vpcCRecord(t.CodecPrivate)
 	if record == nil {

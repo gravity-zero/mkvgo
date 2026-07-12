@@ -454,7 +454,7 @@ func TestReindex_BlockGroup_WithRef(t *testing.T) {
 }
 
 // TestReindex_TimeBasedClusters_NoAudioCue is the Avatar-class regression: a
-// mixed video+audio file cut into time-based clusters (ffmpeg style) has clusters
+// mixed video+audio file cut into time-based clusters (the common muxer layout) has clusters
 // with no video keyframe. reindex must NOT emit a fallback cue on the audio there
 // - such a cue misdirects a seek and makes the rebuilt file fail its own Validate
 // ("seeking lands on audio, not a keyframe"). Every cue must key on the video.

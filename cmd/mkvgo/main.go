@@ -212,7 +212,7 @@ Commands:
   merge-subtitle  Inject an external SRT into an MKV
   edit-inplace  Edit metadata without rewriting clusters (instant)
   set-chapters  Replace chapters from an OGM-format text file
-  extract-chapters  Export chapters as OGM text (mkvmerge/ffmpeg compatible)
+  extract-chapters  Export chapters as OGM text (the standard chapter interchange format)
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues

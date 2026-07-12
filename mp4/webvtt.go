@@ -115,7 +115,7 @@ func decodeSubtitleSample(codec string, data []byte) ([]byte, bool) {
 // eight leading dialogue fields (ReadOrder, Layer, Style, Name, three margins,
 // Effect), strips override blocks ({\...}), and turns the ASS escapes \N/\n into
 // newlines and \h into a space. Drawing commands are not specially handled (their
-// braces are stripped, leaving the coordinates as text - matching ffmpeg's
+// braces are stripped, leaving the coordinates as text - matching the de-facto muxer's
 // mov_text). It is lossy by nature: all styling and positioning is discarded.
 func flattenASS(payload []byte) []byte {
 	s := string(payload)

@@ -29,7 +29,7 @@ import (
 // The second return value lists tracks present in the file but not represented in
 // Container.Tracks - cover art / attached pictures and other non-media tracks
 // (hint, timecode, metadata). It is nil when every track was carried. Surfacing
-// them lets a probe report, for instance, that a file ffprobe counts as having two
+// them lets a probe report, for instance, that a file external probers count as having two
 // video streams has one playable video track plus a cover image.
 func OpenMeta(ctx context.Context, path string, opts ...Options) (*mkv.Container, []DroppedTrack, error) {
 	o := optionsFrom(opts)

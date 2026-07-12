@@ -9,10 +9,10 @@ import (
 )
 
 // promoteTrackBitrate fills a track's Bitrate from the Matroska "BPS" tag (bits per
-// second) that ffmpeg/mkvmerge write per track. This is the value ffprobe exposes as
+// second) that mainstream muxers write per track. This is the value probers expose as
 // TAG:BPS - its own per-stream bit_rate field stays N/A for Matroska, so surfacing it
-// as the typed Bitrate gives MORE than ffprobe here (for MP4 the Bitrate comes from
-// btrt/esds and does equal ffprobe's bit_rate). The tag targets the track by its UID;
+// as the typed Bitrate gives MORE than external probers here (for MP4 the Bitrate comes from
+// btrt/esds and does equal the conventional bit_rate). The tag targets the track by its UID;
 // a missing or non-numeric value is ignored, and a Bitrate already set from another
 // source is kept. The full Read always reaches this; the metadata path does so only
 // under WithBitrate, which follows the head SeekHead to the Tags element.

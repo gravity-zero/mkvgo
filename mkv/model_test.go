@@ -81,9 +81,9 @@ func TestAvReduce(t *testing.T) {
 		wantN, wantD  uint64
 	}{
 		// Faithful av_reduce: a pathological near-square ratio under a tight bound
-		// collapses to the (max-1):max best approximation, like ffmpeg → 719:720.
+		// collapses to the (max-1):max best approximation, like mainstream probers → 719:720.
 		{48379, 48420, 720, 719, 720},
-		// Legit ratios stay exact under ffmpeg's 1024*1024 bound.
+		// Legit ratios stay exact under the conventional 1024*1024 bound.
 		{257, 160, aspectReduceMax, 257, 160},
 		{48379, 48420, aspectReduceMax, 48379, 48420},
 		{16, 9, aspectReduceMax, 16, 9},

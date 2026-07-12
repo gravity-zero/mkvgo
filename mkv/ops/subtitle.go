@@ -86,7 +86,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 
 // ExtractSubtitleWebVTT extracts the subtitle track trackID from the Matroska
 // file at srcPath and writes it as WebVTT to w - the head of the work an
-// `ffmpeg -map 0:s:N -f webvtt` fork does, in-process. Text codecs are decoded by
+// external subtitle-extraction fork does, in-process. Text codecs are decoded by
 // kind: S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through, S_TEXT/ASS is flattened
 // to plain text. Each cue's end is its BlockDuration, falling back to the next
 // cue's start (then a default) when absent. Bitmap subtitles are not supported.

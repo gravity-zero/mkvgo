@@ -155,7 +155,7 @@ func TestPaspTakesPrecedenceOverVUI(t *testing.T) {
 // TestAVCColourInBandSPSOnly documents an accepted head-only limitation. This is
 // a real Main@L4.2 avcC (1280x720) whose SPS sets video_signal_type_present_flag
 // = 0 - it carries NO colour. The file's BT.709 lives only in a second, in-band
-// SPS that ffprobe reaches by decoding a frame; head-only mkvgo reads the avcC's
+// SPS an external prober reaches by decoding a frame; head-only mkvgo reads the avcC's
 // SPS and correctly reports no colour. Same class as implicit in-band SBR/PS: the
 // data is in no header we parse, so reporting "" is correct, not a bug.
 func TestAVCColourInBandSPSOnly(t *testing.T) {

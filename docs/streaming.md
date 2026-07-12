@@ -4,7 +4,7 @@ mkvgo turns a media file into an adaptive-streaming presentation - **the
 packaging, not the encoding**. It never transcodes: the compressed samples are
 copied verbatim into fragmented-MP4 (CMAF) segments. Producing the encodes
 (bitrate ladders, codec choices) remains a transcoder's job; mkvgo does
-everything after that, in pure Go, with no ffmpeg.
+everything after that, in pure Go, no external process.
 
 This is the topic guide. For every flag see [cli.md](cli.md); for the Go types
 see [library.md](library.md); for browser playback see [wasm.md](wasm.md).
@@ -495,7 +495,7 @@ Two complementary tools:
   scrubbing previews. Both MKV/WebM and MP4/MOV sources get it, full pass and
   on-demand plan alike.
 - **`extract-frame`** - pull the keyframe nearest any timestamp as a
-  decoder-ready file (Annex-B / IVF); decode it to an image with one ffmpeg
+  decoder-ready file (Annex-B / IVF); decode it to an image with one decoder
   call. A storyboard is a loop over the keyframe index.
 
 **On-demand cost.** An MP4 plan builds `iframe.m3u8` eagerly at `PlanHLS` time

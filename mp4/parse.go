@@ -12,7 +12,7 @@ import (
 )
 
 // dashRoleScheme is the schemeURI of the DASH role kind box (ISO/IEC 23009-1)
-// that ffmpeg uses to record an MP4 track's "forced" disposition.
+// that mainstream muxers use to record an MP4 track's "forced" disposition.
 const dashRoleScheme = "urn:mpeg:dash:role:2011"
 
 // parse.go - a minimal, defensive ISO-BMFF reader for the boxes RemuxFromMP4
@@ -56,7 +56,7 @@ type inTrack struct {
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
 	frameDurNs       int64   // constant frame duration (audio, single-entry stts); 0 when not constant
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
-	frameCount       int64   // sample count from stsz (ffprobe nb_frames); 0 when unknown
+	frameCount       int64   // sample count from stsz (the conventional nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
 	timescale        uint32
 	samples          []inSample
@@ -68,7 +68,7 @@ type inTrack struct {
 	languageBCP47 string // BCP-47 from an elng box; "" when absent
 	name          string // track name from the QuickTime udta/name box; "" when absent
 	languageKnown bool   // a usable language was read (mdhd or elng)
-	enabled       bool   // tkhd track_enabled flag (ffprobe's "default" disposition)
+	enabled       bool   // tkhd track_enabled flag (the conventional "default" disposition)
 	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
 	forced        bool   // a DASH-role kind box marks this track forced
 	forcedKnown   bool   // a DASH-role kind box was read, so forced is meaningful
@@ -171,7 +171,7 @@ func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 // the top-level boxes by header; if that walk desyncs - a box whose declared
 // size is wrong sends it into the mdat (some real files have a slightly-off mdat
 // size) - it falls back to a bounded backward scan for the moov, which sits near
-// the end in those files. That tolerance matches ffprobe, which still reads them.
+// the end in those files. That tolerance matches mainstream probers, which still read those files.
 func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
 	if dataOff, plen, ferr := findMoovForward(r, size); ferr == nil {
 		return dataOff, plen, nil
@@ -787,7 +787,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	if mv.fragmented {
 		// The moov's sample tables are empty, so headerFrameRate gave 0. The
 		// per-fragment default sample duration in mvex>trex yields the (CFR) frame
-		// rate head-only - what ffprobe reports for a constant-rate fragmented stream.
+		// rate head-only - what probers report for a constant-rate fragmented stream.
 		defDur := trexDefaultDurations(moovBoxes)
 		for i := range mv.tracks {
 			t := &mv.tracks[i]
@@ -1028,7 +1028,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		return tr, nil, err
 	}
 	// tkhd carries the selection flags and the track_ID. track_enabled (bit 0) is
-	// what ffmpeg maps to the "default" disposition, so it feeds Track.IsDefault on
+	// what probers map to the "default" disposition, so it feeds Track.IsDefault on
 	// the read side; the track_ID labels any DroppedTrack for correlation.
 	var trackID uint64
 	if tkhd, ok := findMemBox(trakBoxes, "tkhd"); ok {
@@ -1038,7 +1038,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		trackID = uint64(tr.trackID)
 		tr.rotation = tkhdRotation(tkhd.payload)
 	}
-	// MP4 has no native "forced" flag; ffmpeg records it as a track-level kind box
+	// MP4 has no native "forced" flag; mainstream muxers record it as a track-level kind box
 	// with the DASH role scheme (e.g. value "forced-subtitle"), which its demuxer
 	// reads back as AV_DISPOSITION_FORCED - regardless of the track's media type.
 	if udta, ok := findMemBox(trakBoxes, "udta"); ok {
@@ -1053,7 +1053,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 						}
 					}
 				case "name":
-					// QuickTime track-name box (the way ffmpeg writes a per-track
+					// QuickTime track-name box (the way mainstream muxers write a per-track
 					// title): the payload is the raw UTF-8 name. -> Matroska Name.
 					tr.name = string(bytes.TrimRight(kb.payload, "\x00"))
 				}
@@ -1112,7 +1112,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	}
 	handler := string(hdlr.payload[8:12])
 	// Fallback track name: when no udta/name box was present, a non-generic hdlr name
-	// (the field ffprobe surfaces as handler_name) is the track's human-readable name.
+	// (the conventional handler_name field) is the track's human-readable name.
 	if tr.name == "" && len(hdlr.payload) > 24 {
 		if hn := string(bytes.TrimRight(hdlr.payload[24:], "\x00")); !genericHandlerName(hn) {
 			tr.name = hn
@@ -1216,7 +1216,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 
 // headerFrameRate derives the nominal (constant) frame rate from the first stts
 // entry without expanding the sample table: timescale / sample_delta. This is
-// ffprobe's r_frame_rate for CFR video and is readable head-only. Returns 0 when
+// the conventional r_frame_rate for CFR video and is readable head-only. Returns 0 when
 // the stts is absent/short or the delta is zero.
 func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 	if timescale == 0 {
@@ -1428,7 +1428,7 @@ var macLanguageCodes = map[uint16]string{
 func macLanguageToISO(code uint16) string { return macLanguageCodes[code] }
 
 // tkhdEnabled reports whether a track header's track_enabled flag (bit 0 of the
-// 24-bit flags) is set. ffmpeg maps this to the "default" stream disposition.
+// 24-bit flags) is set. probers map this to the "default" stream disposition.
 func tkhdEnabled(payload []byte) bool {
 	if len(payload) < 4 {
 		return false
@@ -1699,7 +1699,7 @@ func extractVisual(tr *inTrack, payload []byte, headerLen int, configType string
 }
 
 // parseBitrate reads a btrt box (BitRateBox: bufferSizeDB, maxBitrate, avgBitrate)
-// from a sample entry and records the average bitrate - what ffprobe reports as
+// from a sample entry and records the average bitrate - what probers report as
 // bit_rate. It falls back to maxBitrate when the average is zero (some muxers
 // only fill the max).
 func parseBitrate(tr *inTrack, payload []byte, headerLen int) {
@@ -1879,7 +1879,7 @@ func parseDolbyVision(tr *inTrack, payload []byte, headerLen int) {
 // identical but without the range byte). ICC-profile types ('rICC', 'prof') are
 // ignored. Each CICP field is taken independently, so an SDR stream that
 // specifies only the matrix (e.g. BT.709) while leaving primaries/transfer
-// unspecified still reports its colour_space, matching ffprobe.
+// unspecified still reports its colour_space, matching mainstream probers.
 func parseColr(tr *inTrack, payload []byte, headerLen int) {
 	if len(payload) < headerLen {
 		return
@@ -1904,7 +1904,7 @@ func parseColr(tr *inTrack, payload []byte, headerLen int) {
 	m := binary.BigEndian.Uint16(colr.payload[8:10])
 	tr.colorMatrix = &m
 	// Only 'nclx' carries the full-range flag. For 'nclc' the range is left unset
-	// so the codec-bitstream fallback (SPS VUI) can supply it, as ffmpeg does.
+	// so the codec-bitstream fallback (SPS VUI) can supply it, as mainstream demuxers do.
 	if typ == "nclx" && len(colr.payload) >= 11 {
 		rng := uint16(1) // limited
 		if colr.payload[10]&0x80 != 0 {

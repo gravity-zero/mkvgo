@@ -9,8 +9,7 @@ import (
 )
 
 // CmdSetChapters replaces a file's chapters from an OGM simple-format text
-// file (CHAPTER01=00:00:00.000 / CHAPTER01NAME=Intro - the format mkvmerge
-// and ffmpeg understand).
+// file (CHAPTER01=00:00:00.000 / CHAPTER01NAME=Intro - the standard chapter interchange format).
 func CmdSetChapters(args []string) {
 	usage := CmdUsage["set-chapters"]
 	var outPath string
@@ -52,7 +51,7 @@ func CmdSetChapters(args []string) {
 }
 
 // CmdExtractChapters prints a file's chapters in the OGM simple format, to
-// stdout or to -o <file> - ready for mkvmerge --chapters or set-chapters.
+// stdout or to -o <file> - ready for set-chapters and other chapter-aware tools.
 func CmdExtractChapters(args []string) {
 	usage := CmdUsage["extract-chapters"]
 	var outPath string

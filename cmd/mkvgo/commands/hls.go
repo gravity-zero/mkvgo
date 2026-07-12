@@ -43,7 +43,7 @@ func parseHLSFlags(args []string) hlsFlags {
 				f.outDir = args[i]
 			}
 		case "-segment", "--segment":
-			// Segment length in seconds (HLS convention, like ffmpeg -hls_time).
+			// Segment length in seconds (HLS convention, the HLS convention).
 			i++
 			if i < len(args) {
 				secs, err := strconv.ParseFloat(args[i], 64)

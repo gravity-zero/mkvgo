@@ -10,7 +10,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// --- minimal EBML fixture builders (hermetic: no ffmpeg/mkvmerge needed) ------
+// --- minimal EBML fixture builders (hermetic: no external tool needed) ------
 
 func uintElem(id uint32, val uint64, n int) []byte {
 	var b bytes.Buffer

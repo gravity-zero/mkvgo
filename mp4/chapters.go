@@ -8,7 +8,7 @@ import (
 
 // chapters.go - MP4 chapter markers, written as a Nero "chpl" box inside
 // moov/udta. This is the most widely read chapter format on desktop players
-// (VLC, mpv, MediaInfo, ffprobe). It carries only a start time and a title per
+// (most desktop players and probers). It carries only a start time and a title per
 // chapter, which is exactly what Matroska's ChapterAtom provides.
 
 // maxChapters is the chpl count field width (one byte).
@@ -38,14 +38,14 @@ func flattenChapters(chapters []mkv.Chapter) []mkv.Chapter {
 
 // --- QuickTime chapter track (for Apple players) -----------------------------
 //
-// In addition to chpl (read by VLC/mpv/ffmpeg), Apple players require a separate
+// In addition to chpl (read by most desktop players), Apple players require a separate
 // timed-text track whose samples are the chapter titles, linked from the media
 // tracks by a tref/chap reference. The sample entry is the QuickTime 'text'
-// type (not tx3g), and the media header is 'gmhd'. This mirrors what ffmpeg's
+// type (not tx3g), and the media header is 'gmhd'. This mirrors what the de-facto muxer's
 // mov muxer emits.
 
 // buildChapterTextEntry builds the QuickTime 'text' sample entry used by a
-// chapter track. The layout (and the trailing ftab font table) follow ffmpeg's
+// chapter track. The layout (and the trailing ftab font table) follow the de-facto muxer's
 // output; it carries no per-chapter data.
 func buildChapterTextEntry() []byte {
 	ftab := boxf("ftab", func(w *bw) {
@@ -125,7 +125,7 @@ func parseChpl(payload []byte) []mkv.Chapter {
 			break
 		}
 		out = append(out, mkv.Chapter{
-			ID:      uint64(i + 1), // ChapterUID must be non-zero for some readers (ffmpeg)
+			ID:      uint64(i + 1), // ChapterUID must be non-zero for some readers
 			StartMs: int64(start100ns / 10000),
 			Title:   string(payload[pos : pos+titleLen]),
 		})
@@ -138,7 +138,7 @@ func parseChpl(payload []byte) []mkv.Chapter {
 }
 
 // buildChpl encodes the Nero chapter list. Start times are in 100-nanosecond
-// units. The layout matches the de-facto format written by ffmpeg's mov muxer:
+// units. The layout matches the de-facto mov muxer format:
 // version(1)+flags(3), 4 reserved bytes, a 1-byte count, then per chapter an
 // 8-byte start, a 1-byte title length and the UTF-8 title.
 func buildChpl(chapters []mkv.Chapter) []byte {

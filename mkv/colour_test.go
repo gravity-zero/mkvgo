@@ -4,8 +4,8 @@ import "testing"
 
 func u16(v uint16) *uint16 { return &v }
 
-func TestColourNamesMatchFFprobe(t *testing.T) {
-	// code points and the exact strings ffprobe (av_color_*_name) reports.
+func TestColourNamesMatchConvention(t *testing.T) {
+	// code points and the exact conventional strings probers report.
 	tests := []struct {
 		name                                   string
 		matrix, transfer, primaries, rng       *uint16

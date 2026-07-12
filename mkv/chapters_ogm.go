@@ -10,7 +10,7 @@ import (
 )
 
 // chapters_ogm.go - the OGM "simple chapter" text format, the lingua franca
-// mkvmerge (--chapters) and ffmpeg understand:
+// chapter-aware tools exchange:
 //
 //	CHAPTER01=00:00:00.000
 //	CHAPTER01NAME=Intro
@@ -87,7 +87,7 @@ func ParseOGMChapters(r io.Reader) ([]Chapter, error) {
 
 // FormatOGMChapters renders chapters in the OGM simple format (sorted by
 // start time, numbered from 01). Untitled chapters get an empty NAME line,
-// as mkvmerge writes them.
+// per the de-facto convention.
 func FormatOGMChapters(w io.Writer, chapters []Chapter) error {
 	sorted := append([]Chapter(nil), chapters...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].StartMs < sorted[j].StartMs })

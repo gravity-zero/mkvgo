@@ -9,7 +9,7 @@ import (
 )
 
 // TestPromoteBPSBitrate covers surfacing the Matroska "BPS" per-track tag as the
-// typed Track.Bitrate (the value ffprobe shows as TAG:BPS), keyed by the track UID.
+// typed Track.Bitrate (the value probers show as TAG:BPS), keyed by the track UID.
 func TestPromoteBPSBitrate(t *testing.T) {
 	track := trackEntry(
 		uintElem(mkv.IDTrackNumber, 1, 1),
@@ -33,7 +33,7 @@ func TestPromoteBPSBitrate(t *testing.T) {
 }
 
 // TestReadMetaBitrate covers the head-only WithBitrate path: a SeekHead at the head
-// references the Tags element at the tail (the ffmpeg layout). Default ReadMeta
+// references the Tags element at the tail (the common tail layout). Default ReadMeta
 // leaves Bitrate nil; WithBitrate follows the SeekHead to that one element and fills
 // Track.Bitrate from the BPS tag while keeping Tags nil.
 func TestReadMetaBitrate(t *testing.T) {

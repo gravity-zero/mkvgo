@@ -129,7 +129,7 @@ cat video.mkv | mkvgo tags -
 
 ### probe
 
-Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyframe index, and - for MP4 - any dropped (non-carried) tracks such as cover art. Per track it prints the ffprobe-equivalent stream fields read head-only: codec long name, profile/level, pixel format, colour code points, HDR10 static metadata (MaxCLL/MaxFALL + mastering display), Dolby Vision, display rotation, sample/display aspect ratio, frame rate, frame count, per-track duration, bitrate, field order, channel count/layout, sample rate (with the SBR output rate), and bit depth. `-json` carries the same fields plus every derived string as its own key, so a scanner consumes the shape directly with no post-processing: `codec_long_name`, `channel_layout`, `avg_frame_rate`, `sample_aspect_ratio`/`display_aspect_ratio`, the colour code points as conventional names (`color_space_name` "bt2020nc", `color_transfer_name` "smpte2084", `color_primaries_name`, `color_range_name`), `stereo_mode_name`, `resolved_language` (BCP-47 when present, else the legacy tag), `effective_sample_rate` (the decoder's rate, SBR applied), and **`hdr_format`** - the one-word dynamic-range classification a tonemap-or-direct-play decision keys on: `dolby-vision` | `hdr10` | `hlg` | `sdr` (absent when unknown). Dolby Vision profile 8 (the cross-compatible flavour) classifies by its BASE layer - `bl_signal_compatibility_id` 1/2/4 → `hdr10`/`sdr`/`hlg`, since that layer plays without a DoVi decoder; only a stream that genuinely needs the DoVi rendering path reports `dolby-vision`, and the raw `dolby_vision` fields ride alongside for consumers applying their own policy. Both MKV/WebM and MP4/MOV, one JSON shape.
+Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyframe index, and - for MP4 - any dropped (non-carried) tracks such as cover art. Per track it prints the standard-prober stream fields read head-only: codec long name, profile/level, pixel format, colour code points, HDR10 static metadata (MaxCLL/MaxFALL + mastering display), Dolby Vision, display rotation, sample/display aspect ratio, frame rate, frame count, per-track duration, bitrate, field order, channel count/layout, sample rate (with the SBR output rate), and bit depth. `-json` carries the same fields plus every derived string as its own key, so a scanner consumes the shape directly with no post-processing: `codec_long_name`, `channel_layout`, `avg_frame_rate`, `sample_aspect_ratio`/`display_aspect_ratio`, the colour code points as conventional names (`color_space_name` "bt2020nc", `color_transfer_name` "smpte2084", `color_primaries_name`, `color_range_name`), `stereo_mode_name`, `resolved_language` (BCP-47 when present, else the legacy tag), `effective_sample_rate` (the decoder's rate, SBR applied), and **`hdr_format`** - the one-word dynamic-range classification a tonemap-or-direct-play decision keys on: `dolby-vision` | `hdr10` | `hlg` | `sdr` (absent when unknown). Dolby Vision profile 8 (the cross-compatible flavour) classifies by its BASE layer - `bl_signal_compatibility_id` 1/2/4 → `hdr10`/`sdr`/`hlg`, since that layer plays without a DoVi decoder; only a stream that genuinely needs the DoVi rendering path reports `dolby-vision`, and the raw `dolby_vision` fields ride alongside for consumers applying their own policy. Both MKV/WebM and MP4/MOV, one JSON shape.
 
 ```
 mkvgo probe [-json] <file.mkv|.mp4|->
@@ -145,7 +145,7 @@ cat video.mkv | mkvgo probe -
 
 ### keyframes
 
-List the video track's keyframe timestamps - MKV/WebM from the Cues seek index (head-only), or, when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, equal to `ffprobe -skip_frame nokey`, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
+List the video track's keyframe timestamps - MKV/WebM from the Cues seek index (head-only), or, when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, from a structural scan, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
 
 ```
 mkvgo keyframes [-json] <file.mkv|.mp4>
@@ -469,7 +469,7 @@ mkvgo edit-inplace video.mkv '{"title":"Quick Fix"}'
 ### set-chapters
 
 Replace a file's chapters from an OGM simple-format text file -- the
-`CHAPTER01=...`/`CHAPTER01NAME=...` format mkvmerge (`--chapters`) and ffmpeg
+`CHAPTER01=...`/`CHAPTER01NAME=...` format chapter-aware tools
 understand. Each chapter ends where the next starts.
 
 ```
@@ -490,7 +490,7 @@ mkvgo set-chapters video.mkv -o out.mkv chapters.txt
 ### extract-chapters
 
 Export a file's chapters in the same OGM format, to stdout or `-o <file>` --
-ready for `set-chapters` or `mkvmerge --chapters`. MP4/MOV inputs are accepted.
+ready for `set-chapters` and other chapter-aware tools. MP4/MOV inputs are accepted.
 
 ```
 mkvgo extract-chapters <file.mkv|.mp4> [-o <chapters.txt>]
@@ -851,7 +851,7 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-nativ
 - `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
 - `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy - all styling, positioning and karaoke is discarded.
-- `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by ffmpeg's MP4 demuxer; leave it off for the widest compatibility.
+- `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by every mainstream demuxer; leave it off for the widest compatibility.
 - `--hash` computes each track's content SHA-256 while the samples stream (no extra I/O) and stores them as freeform `ilst` atoms - the MP4 becomes self-verifying via `mkvgo verify`.
 - `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header - a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
 
@@ -959,7 +959,7 @@ Security flags (shared with `hls-segment`; both must use the same values):
   output - serving it (with authentication) is the server's job. Init segments
   and subtitles stay clear. AES-128 is HLS-only: no `manifest.mpd` is emitted
   for an encrypted presentation. Supported by hls.js; Safari/FairPlay requires
-  SAMPLE-AES (see `--cenc-*` below). ffmpeg's own HLS demuxer does not decrypt
+  SAMPLE-AES (see `--cenc-*` below). some demuxers do not decrypt
   whole-segment fMP4 - verified spec-conformant by openssl round-trip.
   Incompatible with `--cenc-*` (pick one scheme).
 - `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
@@ -1259,7 +1259,7 @@ half of a thumbnail/storyboard pipeline. The keyframe is seeked through the
 Cues (a few bounded reads, no scan) and packed so a decoder ingests it
 directly: Annex-B with the SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) prepended, or
 a minimal IVF wrapper for VP8/VP9/AV1. mkvgo never decodes - turning the
-sample into an image is one ffmpeg call away.
+sample into an image is one decoder call away.
 
 ```
 mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf>

@@ -8,7 +8,7 @@ import (
 // TestFindMoovBackwardFallback covers a file whose linear box walk desyncs - an
 // mdat that declares a size shorter than its content sends the walk into the
 // media data - yet the moov sits at the end. The forward walk fails; findMoov
-// must recover it with the backward scan, as ffprobe does.
+// must recover it with the backward scan, as external probers do.
 func TestFindMoovBackwardFallback(t *testing.T) {
 	ftyp := box4("ftyp", make([]byte, 8))
 	// Declares size 16 but carries 100 bytes of 0xFF: the walk lands in the

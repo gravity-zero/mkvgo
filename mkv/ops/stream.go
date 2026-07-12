@@ -248,7 +248,7 @@ type mergeSource struct {
 }
 
 // trackStats accumulates one output track's media statistics while streaming,
-// for the mkvmerge-style statistics tags (BPS/DURATION/NUMBER_OF_FRAMES/…).
+// for the convention statistics tags (BPS/DURATION/NUMBER_OF_FRAMES/…).
 type trackStats struct {
 	bytes   int64
 	frames  int64

@@ -107,7 +107,7 @@ func TestRoundTripCodecDelay(t *testing.T) {
 
 // TestRoundTripTitleAndTrackName checks that the container title and a per-track
 // name reach the MP4 (title -> moov/udta/meta/ilst/©nam, name -> trak/udta/name, the
-// way ffmpeg writes them) and survive the full MKV -> MP4 -> MKV round trip.
+// way mainstream muxers write them) and survive the full MKV -> MP4 -> MKV round trip.
 func TestRoundTripTitleAndTrackName(t *testing.T) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
@@ -185,7 +185,7 @@ func trackName(c *mkv.Container) string {
 // TestEditListSampleExact locks in the layout that makes the priming round trip
 // sample-exact for every audio codec: audio tracks are written on a sample-rate
 // media timescale, and the CodecDelay becomes an edit list whose media_time is the
-// exact priming in samples. ffmpeg only trims a codec's delay (notably AC-3) from
+// exact priming in samples. Mainstream demuxers only trim a codec's delay (notably AC-3) from
 // such a sample-exact edit list - a millisecond-quantised one is ignored/padded.
 func TestEditListSampleExact(t *testing.T) {
 	const rate = 48000
@@ -218,7 +218,7 @@ func TestEditListSampleExact(t *testing.T) {
 }
 
 // TestRoundTripAVOffset checks that a per-track presentation offset (the A/V sync
-// gap ffmpeg writes as an empty edit) survives MKV -> MP4: the audio track starts
+// gap mainstream muxers write as an empty edit) survives MKV -> MP4: the audio track starts
 // 476 ms after the video, and that gap must be re-emitted as an empty edit, not
 // rebased to 0 (which silently desyncs the audio).
 func TestRoundTripAVOffset(t *testing.T) {
@@ -250,7 +250,7 @@ func TestRoundTripAVOffset(t *testing.T) {
 }
 
 // TestMP3NoDerivedEditList guards the native-MKV MP3 head-desync fix: MP3's encoder
-// delay lives in its in-band Xing/LAME header, which ffmpeg's decoder applies anyway,
+// delay lives in its in-band Xing/LAME header, which decoders apply anyway,
 // so a derived MP4 edit list over-trims and desyncs the head (a native MKV MP3 lost
 // ~20 ms of real audio). No edit list must be written for MP3.
 func TestMP3NoDerivedEditList(t *testing.T) {

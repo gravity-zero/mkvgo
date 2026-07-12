@@ -2,7 +2,7 @@ package mkv
 
 import "testing"
 
-// TestAvgFrameRate covers the average frame rate derivation (ffprobe
+// TestAvgFrameRate covers the average frame rate derivation (the conventional
 // avg_frame_rate): frame count over duration when both are known, 0 otherwise.
 func TestAvgFrameRate(t *testing.T) {
 	// 240 frames over 10 s = 24 fps.

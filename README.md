@@ -8,7 +8,7 @@
 
 **Pure-Go media toolkit and streaming packager.** Probe, remux and edit
 Matroska/WebM/MP4, then package them for HLS **and** DASH - all in-process, with
-no ffmpeg, no cgo and zero dependencies.
+no external tools, no cgo and zero dependencies.
 
 One static binary (about 8 MB, or an imported Go library, or a WebAssembly
 module of about 6 MB that gzips to about 1.6 MB) that inspects media, converts between
@@ -32,8 +32,8 @@ fast even on multi-gigabyte sources.
 - Codecs, profile/level, pixel format, aspect ratio, rotation, frame rate,
   per-track bitrate, channel layout, keyframes.
 - Colour and **HDR** - HDR10 static metadata **and** Dolby Vision.
-- Chapters, attachments, tags, languages - mapped to the field names `ffprobe`
-  uses, with `-json` output identical to the library's structs.
+- Chapters, attachments, tags, languages - mapped to the conventional prober
+  field names, with `-json` output identical to the library's structs.
 
 ```bash
 mkvgo probe video.mkv          # or video.mp4 - same output
@@ -167,7 +167,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | Category | Command | Description |
 |---|---|---|
 | **Inspect** | `info` · `tracks` · `chapters` · `attachments` · `tags` | Show container / track / chapter / attachment / tag info - MKV or MP4 |
-| | `probe` | Full metadata dump: ffprobe-equivalent stream fields (colour/HDR, Dolby Vision, pix_fmt, aspect, rotation, bitrate, keyframes…) |
+| | `probe` | Full metadata dump: standard-prober stream fields (colour/HDR, Dolby Vision, pix_fmt, aspect, rotation, bitrate, keyframes…) |
 | | `keyframes` | Video keyframe timestamps (Cues / sample table, or a structural scan) |
 | | `validate` | Structural **and** streaming-readiness checks (Cues, cue keying, durations…) |
 | | `cue-health` | Head-only seek-index triage - spots files that look indexed but seek wrong, in milliseconds |
@@ -180,7 +180,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `extract-frame` | Keyframe nearest a time, decoder-ready - thumbnail/storyboard pipelines |
 | **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) |
 | | `edit-inplace` | Edit metadata without rewriting clusters - instant |
-| | `set-chapters` · `extract-chapters` | Import/export chapters as OGM text (mkvmerge/ffmpeg compatible) |
+| | `set-chapters` · `extract-chapters` | Import/export chapters as OGM text (the standard chapter interchange format) |
 | | `remove-track` · `add-track` | Remove / add a track |
 | **Assemble** | `mux` · `merge` · `join` | Combine tracks / files |
 | | `merge-subtitle` | Inject an external SRT/ASS |
@@ -244,7 +244,7 @@ Full library guide: **[docs/library.md](docs/library.md)**.
 | **[recipes.md](docs/recipes.md)** | Task-first cookbook - pick a goal, copy the snippet (CLI + Go). **Start here.** |
 | **[streaming.md](docs/streaming.md)** | The HLS/DASH/CMAF packager end to end: modes, sources, ABR, security, trick-play. |
 | **[cli.md](docs/cli.md)** | Every command, flag and output field. |
-| **[library.md](docs/library.md)** | The Go API, the head-only probe field table (mapped to ffprobe), streaming, FS port, determinism. |
+| **[library.md](docs/library.md)** | The Go API, the head-only probe field table (conventional prober fields), streaming, FS port, determinism. |
 | **[wasm.md](docs/wasm.md)** | The browser build: probe/remux/package client-side, TypeScript wrapper, React hooks, MSE demo. |
 | **[pkg.go.dev](https://pkg.go.dev/github.com/gravity-zero/mkvgo)** | Generated Go API reference. |
 
@@ -314,8 +314,8 @@ make build          # static binary for the current platform (CGO_ENABLED=0)
 make test           # tests with -race
 make wasm           # dist/wasm/mkvgo.wasm + wasm_exec.js
 make wasm-smoke     # build + Node end-to-end smoke test
-make e2e            # verify remux/packaging against real ffmpeg
-                    #   (needs ffmpeg on PATH, or MKVGO_E2E=docker:<container>)
+make e2e            # end-to-end verification against a real external decoder
+                    #   (needs the tool on PATH, or MKVGO_E2E=docker:<container>; see scripts/e2e.sh)
 make fuzz           # run the parser fuzzers locally
 make release        # cross-compile all platforms → dist/
 ```

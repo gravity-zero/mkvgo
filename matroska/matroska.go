@@ -72,8 +72,8 @@ const (
 
 var CodecShortName = mkv.CodecShortName
 
-// FFprobeCodecName maps an mkvgo short codec name to the codec_name ffprobe would
-// report, for consumers normalizing track metadata to ffprobe vocabulary.
+// FFprobeCodecName maps an mkvgo short codec name to the conventional codec_name
+// probers report, for consumers normalizing track metadata to that vocabulary.
 var FFprobeCodecName = mkv.FFprobeCodecName
 
 // --- Reader ---
@@ -122,7 +122,7 @@ type KeyframeSample = ops.KeyframeSample
 // through the Cues (a few bounded reads) and packed for a decoder: Annex-B
 // with parameter sets for H.264/HEVC, an IVF wrapper for VP8/VP9/AV1. The
 // building block of thumbnail/storyboard pipelines - decoding the image is
-// the consumer's job (e.g. `ffmpeg -i frame.h264 -frames:v 1 thumb.jpg`).
+// the consumer's job (any decoder takes it as-is).
 func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts ...Options) (*KeyframeSample, error) {
 	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
 }
@@ -215,14 +215,14 @@ func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallb
 func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes(n) }
 
 // WithKeyframeIndex builds a COMPLETE video keyframe index (every keyframe, equal
-// to ffprobe -skip_frame nokey) for a Cues-less Matroska, via one sequential
+// keyframe, from the block headers) for a Cues-less Matroska, via one sequential
 // header-only pass over the Segment - no demux, no decode. Use it for the "no
 // external fallback" path; prefer WithSampledKeyframes for a cheaper coarse
 // index. Files with Cues are never scanned. See reader.WithKeyframeIndex.
 func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
 
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track
-// bitrate ffprobe shows as TAG:BPS; ffprobe leaves its own bit_rate field N/A for
+// bitrate probers show as TAG:BPS; their own bit_rate field stays N/A for
 // Matroska) on the metadata-only path, which otherwise leaves Bitrate nil for
 // Matroska. It follows the head SeekHead straight to the Tags element (one seek, no
 // Cluster scan); the raw Tags stay nil. No effect on MP4. See reader.WithBitrate.
@@ -368,7 +368,7 @@ func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []Chapte
 	return ops.SetChapters(ctx, srcPath, dstPath, chapters, opts...)
 }
 
-// ParseOGMChapters parses the OGM/mkvmerge simple chapter text format
+// ParseOGMChapters parses the OGM simple chapter text format
 // (CHAPTER01=00:00:00.000 / CHAPTER01NAME=Intro). See mkv.ParseOGMChapters.
 func ParseOGMChapters(r io.Reader) ([]Chapter, error) { return mkv.ParseOGMChapters(r) }
 

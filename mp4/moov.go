@@ -67,8 +67,8 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 	children := make([][]byte, 0, len(traks)+2)
 	children = append(children, buildMvhd(movieDur, maxID+1))
 	children = append(children, traks...)
-	// One moov-level udta carrying the movie title (iTunes meta/ilst, what ffmpeg
-	// writes and ffprobe reads as the format "title") and the chapter list.
+	// One moov-level udta carrying the movie title (iTunes meta/ilst, what mainstream muxers
+	// write and probers read as the format "title") and the chapter list.
 	var udtaKids [][]byte
 	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover, meta.hashes); mb != nil {
 		udtaKids = append(udtaKids, mb)
@@ -130,9 +130,9 @@ func pickCoverArt(atts []mkv.Attachment) *coverArt {
 }
 
 // buildMovieMeta builds the iTunes-style metadata box carrying the movie title
-// (©nam, what ffprobe reports as the format "title"), the other global tags as
+// (©nam, what probers report as the format "title"), the other global tags as
 // ilst atoms (ARTIST→©ART, ALBUM→©alb, …) and the cover art (covr), exactly as
-// ffmpeg writes them and as from-mp4 reads them back. Returns nil when there is
+// mainstream muxers write them and as from-mp4 reads them back. Returns nil when there is
 // nothing to write.
 func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt, hashes map[uint32]string) []byte {
 	type atom struct{ typ, val string }
@@ -214,7 +214,7 @@ func freeformAtom(name, value string) []byte {
 }
 
 // buildTrackName builds the QuickTime udta/name box carrying a track's name (the
-// Matroska TrackEntry Name) - the form ffmpeg writes for a per-track title. The box
+// Matroska TrackEntry Name) - the form mainstream muxers write for a per-track title. The box
 // payload is the raw UTF-8 string. Returns nil for an empty name.
 func buildTrackName(name string) []byte {
 	if name == "" {
@@ -242,17 +242,17 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 // hasContainerPriming reports whether mkvgo should carry a codec's encoder/decoder
 // delay across the MP4 <-> MKV round trip via Matroska CodecDelay and an MP4 edit
 // list. The criterion is "the delay is container-signalled (not intrinsic to the
-// codec config) and ffmpeg reproduces it from a sample-exact edit list":
+// codec config) and mainstream demuxers reproduce it from a sample-exact edit list":
 //   - AAC: encoder delay lives only in the MP4 edit list, lost otherwise.
 //   - AC-3, E-AC-3: a fixed decoder delay (256 samples) the source trims via the
-//     edit list. ffmpeg only trims it when the edit list is sample-exact, which is
+//     edit list. mainstream demuxers only trim it when the edit list is sample-exact, which is
 //     why audio tracks are written on a sample-rate media timescale (mediaTimescale)
 //     rather than the millisecond movie timescale.
 //   - Opus, Vorbis, MP3: the delay is intrinsic to the bitstream (Opus pre-skip in
-//     the OpusHead, MP3 encoder delay in the in-band Xing/LAME header) and ffmpeg's
+//     the OpusHead, MP3 encoder delay in the in-band Xing/LAME header) and mainstream demuxers'
 //     decoder applies it regardless of the container. A derived edit list ADDS to
 //     that, over-trimming and desyncing the head - a native-MKV MP3 lost ~20 ms of
-//     real audio at the start before this. ffmpeg likewise writes no useful edit
+//     real audio at the start before this. mainstream muxers likewise write no useful edit
 //     list when copying a native MP3/Opus to MP4.
 //   - FLAC/DTS/PCM: no encoder priming.
 func hasContainerPriming(codec string) bool {
@@ -264,8 +264,8 @@ func hasContainerPriming(codec string) bool {
 }
 
 // mediaTimescale returns the mdia/mdhd timescale for a track. Audio tracks use their
-// sample rate (as ffmpeg does), making the sample table and the CodecDelay-derived
-// edit list sample-exact - required for ffmpeg to trim a codec's priming precisely
+// sample rate (as mainstream muxers do), making the sample table and the CodecDelay-derived
+// edit list sample-exact - required for a demuxer to trim a codec's priming precisely
 // (notably AC-3, whose decoder delay it ignores from a millisecond-quantised edit
 // list). Everything else uses the movie timescale.
 func mediaTimescale(t *outTrack) uint32 {
@@ -275,7 +275,7 @@ func mediaTimescale(t *outTrack) uint32 {
 	return movieTimescale
 }
 
-// buildEdts writes a track's edit list. Up to two entries, the way ffmpeg writes
+// buildEdts writes a track's edit list. Up to two entries, the way mainstream muxers write
 // them: an optional leading empty edit (media_time -1) carrying a presentation
 // offset - the A/V sync gap, since the sample table is rebased to 0 - followed by
 // the media edit, whose media_time re-signals an audio track's gapless priming
@@ -330,7 +330,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		durMovie = uint32(tim.total * int64(movieTimescale) / int64(mts))
 	}
 	// Presentation offset: the smallest sample PTS is where the track starts on the
-	// movie timeline (the A/V sync gap ffmpeg writes as an empty edit). The sample
+	// movie timeline (the A/V sync gap mainstream muxers write as an empty edit). The sample
 	// table is rebased to 0, so without re-emitting this the offset is lost and the
 	// tracks desync. The track's presentation span is the offset plus its media.
 	var offsetMs int64
@@ -362,8 +362,8 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if t.mkv.LanguageBCP47 != "" {
 		mdiaChildren = append(mdiaChildren, buildElng(t.mkv.LanguageBCP47))
 	}
-	// The hdlr name is the human-readable track description QuickTime/ffprobe surface
-	// (ffprobe's handler_name); carry the Matroska track Name there so it is visible,
+	// The hdlr name is the human-readable track description QuickTime and probers surface
+	// (the conventional handler_name); carry the Matroska track Name there so it is visible,
 	// falling back to the generic handler name.
 	hName := handlerName(t.spec.handler)
 	if t.mkv.Name != "" {
@@ -376,9 +376,9 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
-	// One track-level udta: the track name (QuickTime name box, the way ffmpeg writes
+	// One track-level udta: the track name (QuickTime name box, the way mainstream muxers write
 	// a per-track title) and - MP4 having no native forced flag - the forced marker as
-	// a kind box with the DASH role scheme, the way ffmpeg records it.
+	// a kind box with the DASH role scheme, the way mainstream muxers record it.
 	var trakUdta [][]byte
 	if nm := buildTrackName(t.mkv.Name); nm != nil {
 		trakUdta = append(trakUdta, nm)
@@ -425,7 +425,7 @@ func buildKind(scheme, value string) []byte {
 
 func buildTkhd(t *outTrack, durationMs uint32) []byte {
 	// in_movie | in_preview, plus track_enabled when the track is the default  -
-	// ffmpeg maps track_enabled back to the "default" disposition.
+	// probers map track_enabled back to the "default" disposition.
 	flags := uint32(0x000006)
 	if t.mkv.IsDefault {
 		flags |= 0x000001

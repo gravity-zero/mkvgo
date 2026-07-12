@@ -403,7 +403,7 @@ func TestParseBitrate(t *testing.T) {
 }
 
 // TestParsePasp checks the pasp box → display aspect, stored exactly (no rounding
-// that would collapse a fine ratio). Asserts via the ffprobe-equivalent helpers.
+// that would collapse a fine ratio). Asserts via the standard-prober helpers.
 func TestParsePasp(t *testing.T) {
 	asp := func(w, h, hs, vs uint32) (string, string) {
 		entry := append(make([]byte, 78), box("pasp", append(u32be(hs), u32be(vs)...))...)
@@ -434,7 +434,7 @@ func TestParsePasp(t *testing.T) {
 
 // TestParseColr covers the colour-type handling: 'nclc' (no range byte) is read
 // like 'nclx', and a stream specifying only the matrix (BT.709) with unspecified
-// primaries/transfer still reports its colour_space - matching ffprobe.
+// primaries/transfer still reports its colour_space - matching mainstream probers.
 func TestParseColr(t *testing.T) {
 	deref := func(p *uint16) int {
 		if p == nil {

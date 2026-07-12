@@ -360,7 +360,7 @@ func TestCmdProbeJSON(t *testing.T) {
 // ---------- CmdValidate ------------------------------------------------------
 
 func TestCmdValidate_OK(t *testing.T) {
-	// regfixMKV is a well-formed ffmpeg-muxed file; Validate should return no issues.
+	// regfixMKV is a well-formed real-muxer file; Validate should return no issues.
 	out := capture(t, func() { commands.CmdValidate([]string{regfixMKV}) })
 	if !strings.Contains(out, ": OK") {
 		t.Errorf("CmdValidate OK: expected ': OK' in output\noutput:\n%s", out)
