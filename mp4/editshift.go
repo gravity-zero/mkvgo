@@ -39,6 +39,14 @@ import (
 // presentation start (MP4 cannot - that would trim media content), zero or
 // unknown tracks, and fragmented MP4 (players do not apply edit lists to
 // fragment timelines consistently).
+//
+// There is deliberately no KeepBackup option (unlike the Matroska engine's
+// mkv.Options.KeepBackup): copying a whole file to guard a moov-only patch
+// would contradict the constant-cost promise. The safety model is the
+// crash-ordered write itself - every landing path leaves a readable file at
+// every instant - which is atomicity, NOT a restorable backup: after a
+// successful run there is no built-in undo. A caller whose workflow demands
+// a restorable copy makes one before calling.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
 	o := optionsFrom(opts)
 	if len(shift) == 0 {

@@ -99,20 +99,42 @@ func (t *Track) ColorRangeName() string { return nameOf(colorRangeNames, t.Color
 // HDRFormat classifies a video track's dynamic-range signalling in one word -
 // the field a serving decision keys on (tonemap or direct-play):
 //
-//	"dolby-vision" - a Dolby Vision configuration is present (any profile)
-//	"hdr10"        - PQ transfer (SMPTE ST 2084); HDR10 static metadata may ride along
-//	"hlg"          - HLG transfer (ARIB STD-B67)
-//	"sdr"          - colour is known (or was determined) and none of the above
+//	"dolby-vision" - a Dolby Vision configuration whose base layer is NOT
+//	                 independently playable: any profile other than 8, and
+//	                 profile 8 with an unknown compatibility id
+//	"hdr10"        - PQ transfer (SMPTE ST 2084), or Dolby Vision profile 8
+//	                 with an HDR10-compatible base layer (bl_signal_compatibility_id 1)
+//	"hlg"          - HLG transfer (ARIB STD-B67), or DoVi profile 8 with an
+//	                 HLG base layer (id 4)
+//	"sdr"          - colour is known (or was determined) and none of the
+//	                 above, or DoVi profile 8 with an SDR base layer (id 2)
 //	""             - not a video track, or colour entirely unknown
 //
-// Container metadata only (the same signals IsHDR reads); the transfer
-// function alone decides the PQ/HLG split because it is what a tonemapping
-// decision consumes.
+// The Dolby Vision rule is deliberate: profile 8 is the cross-compatible
+// flavour whose base layer plays WITHOUT a DoVi decoder, so the class that
+// drives the decision is the base layer's (bl_signal_compatibility_id
+// 1 = HDR10, 2 = SDR, 4 = HLG) - a profile-8/compat-1 title direct-plays on
+// any HDR10 client. Only a stream that genuinely needs the DoVi rendering
+// path (profile 5's IPT-PQ single layer, unknown compat) reports
+// "dolby-vision". The raw DolbyVision fields ride alongside for consumers
+// applying their own policy. Container metadata only (the same signals
+// IsHDR reads); the transfer function alone decides the PQ/HLG split
+// because it is what a tonemapping decision consumes.
 func (t *Track) HDRFormat() string {
 	if t.Type != VideoTrack {
 		return ""
 	}
-	if t.DolbyVision != nil {
+	if dv := t.DolbyVision; dv != nil {
+		if dv.Profile == 8 {
+			switch dv.BLSignalCompatID {
+			case 1:
+				return "hdr10"
+			case 2:
+				return "sdr"
+			case 4:
+				return "hlg"
+			}
+		}
 		return "dolby-vision"
 	}
 	if t.ColorTransfer != nil {

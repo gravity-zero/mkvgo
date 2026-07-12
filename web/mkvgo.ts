@@ -73,7 +73,10 @@ export interface Track {
   /**
    * One-word dynamic-range classification for the tonemap-or-direct-play
    * decision: "dolby-vision" | "hdr10" | "hlg" | "sdr"; absent when unknown
-   * or not video.
+   * or not video. Dolby Vision profile 8 classifies by its base layer
+   * (bl_signal_compatibility_id 1/2/4 -> hdr10/sdr/hlg - it plays without a
+   * DoVi decoder); only streams needing the DoVi path report "dolby-vision",
+   * and the raw dolby_vision fields ride alongside.
    */
   hdr_format?: string
   stereo_mode_name?: string

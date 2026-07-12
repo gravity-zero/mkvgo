@@ -95,7 +95,11 @@ All notable changes to mkvgo are documented here. The format is based on
   not apply and are refused on an MP4 path.
 - **`mkv.Track.HDRFormat()`**: one-word dynamic-range classification
   (`dolby-vision` | `hdr10` | `hlg` | `sdr`, `""` unknown) from the
-  container/bitstream colour signalling already parsed head-only.
+  container/bitstream colour signalling already parsed head-only. Dolby
+  Vision profile 8 (cross-compatible) classifies by its BASE layer
+  (`bl_signal_compatibility_id` 1/2/4 → hdr10/sdr/hlg - it plays without a
+  DoVi decoder); only streams that need the DoVi rendering path report
+  `dolby-vision`, with the raw DolbyVision fields alongside.
 - **Probe JSON derived fields** (CLI `-json` and WASM `probe`, both
   containers): `sample_aspect_ratio`, `display_aspect_ratio`,
   `color_space_name`/`color_transfer_name`/`color_primaries_name`/

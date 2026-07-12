@@ -92,7 +92,11 @@ func TestHDRFormat(t *testing.T) {
 		tr   Track
 		want string
 	}{
-		{"dolby vision wins", Track{Type: VideoTrack, ColorTransfer: u16(16), DolbyVision: &DolbyVision{Profile: 8}}, "dolby-vision"},
+		{"DoVi profile 5 needs the DoVi path", Track{Type: VideoTrack, ColorTransfer: u16(16), DolbyVision: &DolbyVision{Profile: 5}}, "dolby-vision"},
+		{"DoVi profile 8 unknown compat stays opaque", Track{Type: VideoTrack, ColorTransfer: u16(16), DolbyVision: &DolbyVision{Profile: 8}}, "dolby-vision"},
+		{"DoVi profile 8 HDR10-compatible base layer", Track{Type: VideoTrack, ColorTransfer: u16(16), DolbyVision: &DolbyVision{Profile: 8, BLSignalCompatID: 1}}, "hdr10"},
+		{"DoVi profile 8 SDR base layer", Track{Type: VideoTrack, DolbyVision: &DolbyVision{Profile: 8, BLSignalCompatID: 2}}, "sdr"},
+		{"DoVi profile 8 HLG base layer", Track{Type: VideoTrack, ColorTransfer: u16(18), DolbyVision: &DolbyVision{Profile: 8, BLSignalCompatID: 4}}, "hlg"},
 		{"PQ", Track{Type: VideoTrack, ColorTransfer: u16(16)}, "hdr10"},
 		{"HLG", Track{Type: VideoTrack, ColorTransfer: u16(18)}, "hlg"},
 		{"known SDR transfer", Track{Type: VideoTrack, ColorTransfer: u16(1)}, "sdr"},
