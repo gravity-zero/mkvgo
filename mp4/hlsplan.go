@@ -124,8 +124,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if err != nil {
 		return nil, err
 	}
-	if len(c.Cues) == 0 {
-		return nil, errf("%s: no Cues index — on-demand HLS seeks through the Cues (run `mkvgo reindex` first)", srcPath)
+	if len(c.Cues) == 0 && !o.SynthesizeIndex {
+		return nil, errf("%s: no Cues index - on-demand HLS seeks through the Cues (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", srcPath)
 	}
 	planned, _, err := planTracks(c, o)
 	if err != nil {
@@ -205,7 +205,20 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 	}
 	if len(cues) == 0 {
-		return nil, errf("%s: the Cues index no video keyframes — on-demand HLS seeks through them (run `mkvgo reindex` first)", srcPath)
+		// Options.SynthesizeIndex: serve the unindexed (or misskeyed-index)
+		// source anyway - walk the clusters once, structure only, and build
+		// the video cue points in memory. The synthesized index replaces
+		// nothing on disk; the plan just seeks through it.
+		if !o.SynthesizeIndex {
+			return nil, errf("%s: the Cues index no video keyframes - on-demand HLS seeks through them (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", srcPath)
+		}
+		cues, err = synthesizeVideoCues(ctx, srcPath, fs, c, vidID, p.trackDurs)
+		if err != nil {
+			return nil, err
+		}
+		if len(cues) == 0 {
+			return nil, errf("%s: no video keyframes found to synthesize an index from", srcPath)
+		}
 	}
 	p.bounds = []int64{0}
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
@@ -314,6 +327,11 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
 	}
+	// Options.AudioPresentationShift: re-base the shifted audio tracks'
+	// edit-list offsets before the init segments are built. The fragment
+	// decode times were derived above from the UNSHIFTED first PTS, exactly
+	// like the full pass - the shift lives in the init alone (parity kept).
+	applyAudioPresentationShift(&o, fts)
 	// Options.ChapterMarkers: video.ft.presentMs is derived exactly as the
 	// full pass derives fts[primaryIndex(fts)].presentMs, so the same source
 	// and option yield the same chapters (byte parity full-pass <-> plan).
@@ -573,6 +591,56 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 		if !more {
 			return nil
 		}
+	}
+}
+
+// synthesizeVideoCues is Options.SynthesizeIndex's one-time walk: the cue
+// points a healthy index would carry - one per cluster holding a video
+// keyframe, at the keyframe's stored timecode - built in memory from a
+// structure-only pass (KeepTracks + SetHeaderOnly: block headers, never
+// payload bytes). The cost is the walk a persistent repair would pay anyway,
+// but nothing is written: the only road to seekable on-demand playback for a
+// source on a read-only mount. A structurally broken cluster stream still
+// refuses (repair or salvage first).
+func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container, vidID uint64, trackDurs map[uint64]int64) ([]mkv.CuePoint, error) {
+	src, err := fs.DoOpen(srcPath)
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	br, err := reader.NewBlockReader(src, c.Info.TimecodeScale)
+	if err != nil {
+		return nil, errf("synthesize index: %w", err)
+	}
+	br.SetTrackDefaultDurations(trackDurs)
+	br.KeepTracks(vidID)
+	br.SetHeaderOnly(true)
+	var cues []mkv.CuePoint
+	lastCluster := int64(-1)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b, err := br.Next()
+		if isBlockWalkEnd(err) {
+			return cues, nil
+		}
+		if err != nil {
+			return nil, errf("synthesize index: %w (repair the source first: `mkvgo reindex --resync`)", err)
+		}
+		if !b.Keyframe {
+			continue
+		}
+		off := br.ClusterOffset()
+		if off == lastCluster {
+			continue // one cue per cluster, like real muxers write
+		}
+		lastCluster = off
+		cues = append(cues, mkv.CuePoint{
+			TimeMs:     b.BlockTimecode,
+			Track:      vidID,
+			ClusterPos: off - c.SegmentStart,
+		})
 	}
 }
 
@@ -1407,6 +1475,10 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	for _, ft := range fts {
 		p.tracks = append(p.tracks, &planTrack{ft: ft, firstPtsMs: ft.offsetMs})
 	}
+	// Options.AudioPresentationShift, after the planTracks captured the
+	// UNSHIFTED first PTS (the decode-time anchor): the shift lives in the
+	// init's edit list alone, exactly like the Matroska plan.
+	applyAudioPresentationShift(o, fts)
 
 	p.bounds = segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
 	p.segCount = len(p.bounds)

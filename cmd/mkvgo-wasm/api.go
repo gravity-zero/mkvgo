@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"syscall/js"
 	"time"
@@ -278,6 +279,25 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 	}
 	if s := v.Get("subOffsetMs"); s.Type() == js.TypeNumber {
 		o.SubtitleOffsetMs = int64(s.Float())
+	}
+	o.SynthesizeIndex = v.Get("synthesizeIndex").Truthy()
+	// audioShiftMs: {trackNumber: ms} - the browser-side ms shape converts to
+	// the library's nanoseconds here.
+	if m := v.Get("audioShiftMs"); m.Type() == js.TypeObject {
+		keys := js.Global().Get("Object").Call("keys", m)
+		for i, n := 0, keys.Get("length").Int(); i < n; i++ {
+			k := keys.Index(i).String()
+			track, err := strconv.ParseUint(k, 10, 64)
+			if err != nil {
+				continue
+			}
+			if val := m.Get(k); val.Type() == js.TypeNumber {
+				if o.AudioPresentationShift == nil {
+					o.AudioPresentationShift = map[uint64]int64{}
+				}
+				o.AudioPresentationShift[track] = int64(val.Float()) * 1_000_000
+			}
+		}
 	}
 	return o
 }
@@ -1110,6 +1130,31 @@ func cueHealthJS(_ js.Value, args []js.Value) any {
 			return nil, err
 		}
 		return toJSObject(report)
+	})
+}
+
+// diagnoseJS(input, opts?) -> Promise<Diagnosis>: one-call triage - seek-index
+// health, per-track audio start delays, declared-size coherence, and (only
+// when the size check suggests damage) the full tolerant walk - each finding
+// carrying its remedy (reindex / retime / resync / re-download). Head-mostly:
+// on a healthy file it costs the head plus the first cluster(s).
+func diagnoseJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("diagnose: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		d, err := ops.Diagnose(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(d)
 	})
 }
 

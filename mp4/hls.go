@@ -251,6 +251,12 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 		ft.presentMs = off + ft.durMovieMs
 	}
+	// Options.AudioPresentationShift: re-base the shifted audio tracks'
+	// edit-list offsets. Applied after the timing derivation, so the sample
+	// decode times keep the unshifted origin - only the init's edit list
+	// moves (and PlanHLS applies the same rule: full pass and plan stay
+	// byte-identical for the same shift).
+	applyAudioPresentationShift(&o, fts)
 
 	// Phase 2 — segment boundaries from the primary track: the video's
 	// keyframes, or (audio-only presentation) the first audio's sample grid
@@ -496,6 +502,43 @@ func segmentBoundaries(video []fragSample, targetMs int64) []int64 {
 
 // primaryIndex returns the index of the presentation's primary track: the
 // video track, or — audio-only presentation — the first track.
+// applyAudioPresentationShift re-bases each shifted audio track's edit-list
+// presentation offset (Options.AudioPresentationShift, ns; positive = the
+// track's content starts late and is presented earlier). It runs AFTER the
+// fragment timing derivation on purpose: sample decode times keep the
+// unshifted origin, so the media segments are byte-identical with or without
+// a shift - only the init segment's edit list (and the track's presented
+// duration) moves. A shift landing before the presentation start clamps to
+// 0. Video tracks and unknown track numbers are ignored.
+func applyAudioPresentationShift(o *Options, fts []*fragTrack) {
+	if len(o.AudioPresentationShift) == 0 {
+		return
+	}
+	for _, ft := range fts {
+		if ft.outTrack.spec.video {
+			continue
+		}
+		ns, ok := o.AudioPresentationShift[ft.outTrack.mkv.ID]
+		if !ok || ns == 0 {
+			continue
+		}
+		ft.offsetMs -= roundNsToMs(ns)
+		if ft.offsetMs < 0 {
+			ft.offsetMs = 0
+		}
+		ft.presentMs = ft.offsetMs + ft.durMovieMs
+	}
+}
+
+// roundNsToMs converts nanoseconds to milliseconds, rounding half away from
+// zero (the same rounding the retime op applies to its shifts).
+func roundNsToMs(ns int64) int64 {
+	if ns >= 0 {
+		return (ns + 500_000) / 1_000_000
+	}
+	return -((-ns + 500_000) / 1_000_000)
+}
+
 func primaryIndex(fts []*fragTrack) int {
 	for i := range fts {
 		if fts[i].outTrack.spec.video {

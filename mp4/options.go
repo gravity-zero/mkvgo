@@ -139,6 +139,30 @@ type Options struct {
 	// their own WebVTT rendition.
 	SubtitleOffsetMs int64
 
+	// SynthesizeIndex lets PlanHLS serve a Matroska source whose Cues index is
+	// missing or references no video keyframes: instead of refusing, the plan
+	// walks the clusters once (structure only, video block headers - no
+	// payload bytes) and synthesizes the cue points in memory. The walk is the
+	// one-time cost a repair would pay anyway, but nothing is written - the
+	// only road to seekable playback for a file on a read-only mount. A caller
+	// can cache the plan to pay the walk once. The source itself keeps its
+	// defect: run `mkvgo reindex` to repair it persistently. PlanHLS only;
+	// corrupt sources still refuse (repair first).
+	SynthesizeIndex bool
+
+	// AudioPresentationShift re-bases audio tracks in presentation at
+	// packaging time (Matroska track number -> shift in nanoseconds, positive
+	// = the track's content starts late and is presented earlier - hand it
+	// AudioStartDelays' values directly). The samples are still copied
+	// verbatim and the fragment decode times never move: only the init
+	// segment's edit list shifts, so an A/V desync is cancelled in the served
+	// segments without touching the source file. A shift that would place a
+	// track before the presentation start clamps to 0. RemuxToHLS and PlanHLS
+	// honour it (full pass and plan stay byte-identical for the same shift);
+	// video tracks and unknown numbers are ignored. Persistent repair remains
+	// `mkvgo retime`.
+	AudioPresentationShift map[uint64]int64
+
 	// ChapterMarkers exposes the source's chapters as navigable markers in the
 	// HLS/DASH manifests (RemuxToHLS/PlanHLS): one EXT-X-DATERANGE per chapter
 	// in the video media playlist, and one Event per chapter in a DASH

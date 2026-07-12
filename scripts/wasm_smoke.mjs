@@ -367,6 +367,36 @@ check(dmClean.clusters_copied > 0 && dmClean.bytes_skipped === 0 &&
   }
 }
 
+// --- diagnose: one-call triage (index + audio delay + size coherence) ---
+const diag = await MkvGo.diagnose(mkvBytes)
+check(typeof diag.healthy === 'boolean' && diag.cue_health &&
+  typeof diag.audio_delays_ns === 'object' &&
+  (diag.healthy || (diag.findings ?? []).every((f) => f.kind && f.remedy)),
+  `diagnose verdict on the fixture (healthy=${diag.healthy}, findings=${(diag.findings ?? []).length})`)
+// A truncated input must yield the re-download verdict, not a parse error.
+{
+  const cut = mkvBytes.subarray(0, Math.floor(mkvBytes.length * 0.7))
+  const dTrunc = await MkvGo.diagnose(cut)
+  check(!dTrunc.healthy && (dTrunc.findings ?? []).some((f) => f.kind === 'truncated'),
+    `diagnose flags a truncated input (${JSON.stringify((dTrunc.findings ?? []).map((f) => f.kind))})`)
+}
+
+// --- PlanHLS options: virtual audio resync + synthesized index ---
+{
+  const plain = await MkvGo.openHLS(mkvBytes, { segmentSeconds: 0.5 })
+  // Negative = delay the audio: the fixture's audio starts at 0, so an
+  // "earlier" shift would clamp to 0 and change nothing.
+  const shifted = await MkvGo.openHLS(mkvBytes, { segmentSeconds: 0.5, audioShiftMs: { 2: -100 } })
+  const plainInit = (await plain.resource('init_a1.mp4')).data
+  const shiftedInit = (await shifted.resource('init_a1.mp4')).data
+  check(Buffer.compare(plainInit, shiftedInit) !== 0, 'audioShiftMs re-bases the audio init (edit list)')
+  check(Buffer.compare(await plain.segment(0), await shifted.segment(0)) === 0,
+    'audioShiftMs leaves the media segments byte-identical')
+  const synth = await MkvGo.openHLS(mkvBytes, { segmentSeconds: 0.5, synthesizeIndex: true })
+  check(synth.numSegments === plain.numSegments, 'synthesizeIndex is a no-op on an indexed source')
+  plain.close(); shifted.close(); synth.close()
+}
+
 if (failures) { console.error(`wasm smoke: ${failures} FAILURE(S)`); process.exit(1) }
 console.log('wasm smoke: ALL PASS')
 process.exit(0)

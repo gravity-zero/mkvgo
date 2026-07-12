@@ -273,6 +273,13 @@ func (br *BlockReader) ClusterCount() int64 {
 	return br.clusterCount
 }
 
+// ClusterOffset returns the absolute file offset of the Cluster element
+// holding the most recently returned block - subtract the Segment body start
+// to obtain a CuePoint.ClusterPos. Valid once Next has returned a block.
+func (br *BlockReader) ClusterOffset() int64 {
+	return br.clusterStart
+}
+
 // KeepTracks restricts Next to blocks of the given tracks. Other tracks'
 // payloads are never delivered and, when they are large enough to seek over,
 // never read: the walk hops from header to header. When the payloads are

@@ -280,6 +280,12 @@ export interface SalvageReport {
   repaired_ranges: RepairedRange[] | null
   /** Video bytes a clean-cut repair would drop after gaps (cleanCut option). */
   clean_cut_bytes: number
+  /**
+   * True when the damage reaches the end of the file: the source is
+   * incomplete (interrupted download), the tail is unrecoverable by any
+   * tool - re-download rather than repair.
+   */
+  truncated_tail: boolean
 }
 
 /**
@@ -301,6 +307,38 @@ export interface CueHealthReport {
   healthy: boolean
   /** Why not, with the remedy; absent when healthy. */
   reason?: string
+}
+
+/** One diagnosed defect with its remedy; see Diagnosis. */
+export interface Finding {
+  /**
+   * "no-index" | "index-misskeyed" | "index-stale-tracks" | "audio-delay" |
+   * "truncated" | "damaged" | "trailing-junk" | "streamed-size"
+   */
+  kind: string
+  detail: string
+  /** The repair that fixes this finding (reindex / retime / resync / re-download). */
+  remedy: string
+  /** Track number, for per-track findings (audio-delay). */
+  track?: number
+  delay_ns?: number
+}
+
+/**
+ * Result of diagnose(): the one-call triage - seek-index health, per-track
+ * audio start delays, declared-size coherence, and (only when the size check
+ * suggests damage) the full tolerant walk - each finding carrying its
+ * remedy. Head-mostly: on a healthy file it costs the head plus the first
+ * cluster(s).
+ */
+export interface Diagnosis {
+  healthy: boolean
+  findings: Finding[] | null
+  cue_health: CueHealthReport
+  /** Every audio track's start delay in ns (track number -> delay), threshold or not. */
+  audio_delays_ns: Record<string, number>
+  /** The damage map, present only when the tolerant walk ran. */
+  damage?: SalvageReport
 }
 
 export interface MapDamageOptions extends AbortOptions {
@@ -339,6 +377,21 @@ export interface RemuxOptions extends AbortOptions {
    * different sync instantly. 0 (the default) leaves cues untouched.
    */
   subOffsetMs?: number
+  /**
+   * openHLS only: serve a source whose Cues index is missing or misskeyed by
+   * walking the clusters once (structure only) and synthesizing the index in
+   * memory - nothing is written. The one road to seekable playback for a
+   * read-only source; repair persistently with reindex when you can write.
+   */
+  synthesizeIndex?: boolean
+  /**
+   * HLS/openHLS only: re-base audio tracks in presentation (Matroska track
+   * number -> shift in milliseconds, positive = the track's content starts
+   * late and is presented earlier). Cancels an A/V desync in the served
+   * segments via the init's edit list alone - samples stay byte-identical,
+   * nothing is written. Over-shifts clamp to the presentation start.
+   */
+  audioShiftMs?: Record<number, number>
 }
 
 /**
@@ -669,6 +722,13 @@ export interface MkvGoApi {
    * indexes in milliseconds, before any upload.
    */
   cueHealth(input: Uint8Array | Blob, options?: AbortOptions): Promise<CueHealthReport>
+
+  /**
+   * One-call triage: index health + per-track audio delay + size coherence,
+   * each finding with its remedy. Head-mostly - the tolerant walk runs only
+   * when the declared size and the real size disagree.
+   */
+  diagnose(input: Uint8Array | Blob, options?: AbortOptions): Promise<Diagnosis>
 }
 
 // ---------------------------------------------------------------------------

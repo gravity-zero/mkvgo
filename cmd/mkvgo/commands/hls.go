@@ -25,6 +25,8 @@ type hlsFlags struct {
 	keepLangs      []string
 	subOffset      int64
 	chapterMarkers bool
+	synthIndex     bool
+	audioShift     map[uint64]int64
 	rest           []string
 }
 
@@ -132,6 +134,21 @@ func parseHLSFlags(args []string) hlsFlags {
 			}
 		case "--chapter-markers":
 			f.chapterMarkers = true
+		case "--synthesize-index":
+			f.synthIndex = true
+		case "--audio-shift":
+			if i+1 >= len(args) {
+				Fatal("--audio-shift needs a <track>=<ms> value")
+			}
+			i++
+			track, ms, err := parseShift(args[i])
+			if err != nil {
+				Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
+			}
+			if f.audioShift == nil {
+				f.audioShift = map[uint64]int64{}
+			}
+			f.audioShift[track] = ms * 1_000_000 // ms -> ns
 		default:
 			rejectFlagArg(args[i])
 			f.rest = append(f.rest, args[i])
@@ -204,14 +221,16 @@ func (f hlsFlags) options(src string) mp4.Options {
 		keep = resolveKeepLangs(src, f.keepLangs)
 	}
 	o := mp4.Options{
-		FS:               sourceFS(src),
-		SegmentMs:        f.segMs,
-		Encrypt:          f.encrypt,
-		CENC:             f.cenc,
-		SingleFile:       f.singleFile,
-		KeepTracks:       keep,
-		SubtitleOffsetMs: f.subOffset,
-		ChapterMarkers:   f.chapterMarkers,
+		FS:                     sourceFS(src),
+		SegmentMs:              f.segMs,
+		Encrypt:                f.encrypt,
+		CENC:                   f.cenc,
+		SingleFile:             f.singleFile,
+		KeepTracks:             keep,
+		SubtitleOffsetMs:       f.subOffset,
+		ChapterMarkers:         f.chapterMarkers,
+		SynthesizeIndex:        f.synthIndex,
+		AudioPresentationShift: f.audioShift,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix
