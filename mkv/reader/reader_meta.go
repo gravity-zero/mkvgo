@@ -170,10 +170,29 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDTags:
-			// Tags inline before the Clusters: read them now only for the per-track
-			// BPS bitrate when requested; otherwise skip (Tags are not exposed here).
-			if o.bitrate && c.Tags == nil {
+			// Tags inline before the Clusters: read them now when the caller wants
+			// them (WithTags, or WithBitrate for the per-track BPS). Otherwise skip -
+			// Tags are not exposed on this path. An element sitting HERE is reachable
+			// no other way: the SeekHead may not index it, and the tail scan only
+			// looks at the file end.
+			if (o.tags || o.bitrate) && c.Tags == nil {
 				if err := p.parseTags(eh.Size, c); err != nil {
+					return p.elemErr(eh.ID, elemStart, err)
+				}
+			} else if err := p.skip(eh.Size); err != nil {
+				return err
+			}
+		case mkv.IDChapters:
+			if o.chapters && c.Chapters == nil {
+				if err := p.parseChapters(eh.Size, c); err != nil {
+					return p.elemErr(eh.ID, elemStart, err)
+				}
+			} else if err := p.skip(eh.Size); err != nil {
+				return err
+			}
+		case mkv.IDAttachments:
+			if o.attachments && c.Attachments == nil {
+				if err := p.parseAttachments(eh.Size, c); err != nil {
 					return p.elemErr(eh.ID, elemStart, err)
 				}
 			} else if err := p.skip(eh.Size); err != nil {
@@ -230,11 +249,28 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 				return err
 			}
 		}
-		if gotInfo && gotTracks {
-			break // early stop - Cues/Tags are pulled by finalizeHeadMeta, no Cluster scan
+		// Early stop once Info and Tracks are in - unless the caller asked for an
+		// element that has not turned up yet. finalizeHeadMeta can still fetch it
+		// through the SeekHead or from the tail, but neither reaches an element
+		// sitting HERE, between the head and the first Cluster, that no SeekHead
+		// indexes: stopping now would lose it. The scan ends at the first Cluster
+		// either way, so this never walks the media.
+		if gotInfo && gotTracks && !p.headWantsMore(c, o) {
+			break
 		}
 	}
 	return p.finalizeHeadMeta(c, offs, o)
+}
+
+// headWantsMore reports whether an element the caller asked for is still missing,
+// so the head scan must keep going to the first Cluster rather than stop at
+// Info+Tracks. Callers that asked for nothing extra (the plain metadata probe)
+// always stop early, exactly as before.
+func (p *parser) headWantsMore(c *mkv.Container, o readOpts) bool {
+	return (o.cues && len(c.Cues) == 0) ||
+		((o.tags || o.bitrate) && c.Tags == nil) ||
+		(o.chapters && c.Chapters == nil) ||
+		(o.attachments && c.Attachments == nil)
 }
 
 // finalizeHeadMeta derives Container.Keyframes from the Cues seek index, and - when
@@ -305,6 +341,9 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 // file with tail Tags but NO Cues at all is not recovered here - a shape no real
 // muxer produces, since whatever writes the tags writes the index.
 func (p *parser) tailElements(c *mkv.Container, o readOpts) error {
+	if o.noTailScan {
+		return nil // WithoutTailScan: the head must resolve it or it does not exist
+	}
 	wantCues := o.cues && len(c.Cues) == 0
 	wantTags := (o.bitrate || o.tags) && c.Tags == nil
 	wantAttachments := o.attachments && c.Attachments == nil

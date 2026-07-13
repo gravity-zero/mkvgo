@@ -47,9 +47,11 @@ type ServingPlan struct {
 	// every kept track's codec, populated only when Strategy is
 	// StrategyRemuxHLS.
 	RemuxContainer string `json:"remux_container,omitempty"`
-	// HasSeekIndex reports whether the source already carries a
-	// head-discoverable Cues index (reader.WithCues, len(Cues) > 0) - ready
-	// for on-demand HLS packaging without any repair.
+	// HasSeekIndex reports whether the source already carries a Cues index
+	// on-demand HLS can seek through - cue points on the VIDEO track, which is
+	// what PlanHLS cuts its segments on - reachable without a cluster walk
+	// (reader.WithCues). An index that only cues the audio does not count: it
+	// would fail at serving time. Ready for packaging without any repair.
 	HasSeekIndex bool `json:"has_seek_index"`
 	// NeedsReindex is true when Strategy is StrategyRemuxHLS and the source
 	// has no head-discoverable seek index yet: a reindex is required before
@@ -143,7 +145,12 @@ func Ingest(ctx context.Context, path string, opts IngestOptions) (*ServingPlan,
 		if err != nil {
 			return nil, fmt.Errorf("ingest: check seek index: %w", err)
 		}
-		plan.HasSeekIndex = len(head.Cues) > 0
+		// "Has an index" must mean what the CONSUMER needs, not merely "some cue
+		// exists": on-demand HLS cuts its segments on the video track's cue points
+		// (PlanHLS) and refuses a source whose Cues index no video keyframe. An
+		// index that only cues the audio would otherwise be waved through here and
+		// blow up at serving time, on a plan that promised it was ready.
+		plan.HasSeekIndex = hasVideoSeekIndex(head)
 
 		if plan.HasSeekIndex {
 			plan.Reasons = append(plan.Reasons, "source already carries a head-discoverable Cues index; ready for on-demand HLS")
@@ -199,4 +206,25 @@ func Ingest(ctx context.Context, path string, opts IngestOptions) (*ServingPlan,
 	}
 
 	return plan, nil
+}
+
+// hasVideoSeekIndex reports whether the source carries an index on-demand HLS can
+// actually seek through: cue points on the VIDEO track, which is what PlanHLS cuts
+// its segments on. A file whose Cues key only on audio has an index by the letter
+// and none by the meaning - the same trap CueHealth calls "index-misskeyed". An
+// audio-only source has no video to cue, so any cue serves.
+func hasVideoSeekIndex(c *mkv.Container) bool {
+	if len(c.Cues) == 0 {
+		return false
+	}
+	video := videoTrackSet(c.Tracks)
+	if len(video) == 0 {
+		return true // audio-only: its cues are the index
+	}
+	for _, cue := range c.Cues {
+		if video[cue.Track] {
+			return true
+		}
+	}
+	return false
 }

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -160,13 +161,44 @@ func TestIngest_Reindex_InPlaceCapable_Succeeds(t *testing.T) {
 	}
 }
 
+// TestIngest_Reindex_NoSeekHeadButVoidSlot_Succeeds: a source with no SeekHead
+// but a Void slot in its head CAN be patched in place - the rebuilt index lands
+// before the first Cluster, where any head-only reader walks past it. This used
+// to be refused (ErrIndexNotHeadDiscoverable) for a reason that was never about
+// the file: the metadata reader stopped at Info+Tracks and never looked at what
+// followed, so it declared its own blind spot a defect of the layout. These files
+// no longer pay for a full copy rewrite.
+func TestIngest_Reindex_NoSeekHeadButVoidSlot_Succeeds(t *testing.T) {
+	dir := t.TempDir()
+	path := buildNoSeekHeadNoCuesMKV(t, dir) // no SeekHead, one Void slot after Info/Tracks
+
+	plan, err := Ingest(context.Background(), path, IngestOptions{Target: "safari", Reindex: true})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if !plan.Reindexed || !plan.HasSeekIndex || plan.NeedsReindex {
+		t.Fatalf("expected an in-place reindex to succeed: reindexed=%v hasIndex=%v needsReindex=%v (reasons=%v)",
+			plan.Reindexed, plan.HasSeekIndex, plan.NeedsReindex, plan.Reasons)
+	}
+	// And the index must really be reachable from the head, with no help from the
+	// EOF fallback - that is what "in place" bought us.
+	head, err := reader.OpenMeta(context.Background(), path, reader.WithCues(), reader.WithoutTailScan())
+	if err != nil {
+		t.Fatalf("head-only reopen: %v", err)
+	}
+	if len(head.Cues) == 0 {
+		t.Error("the patched index is not reachable head-only without the tail scan")
+	}
+}
+
+// TestIngest_Reindex_NotHeadDiscoverable_PlanStillReturned: a layout with no
+// SeekHead AND no Void anywhere has nowhere to put a head-discoverable index in
+// place. Ingest must not fail on it - it returns the plan and points at the copy
+// reindex.
 func TestIngest_Reindex_NotHeadDiscoverable_PlanStillReturned(t *testing.T) {
 	dir := t.TempDir()
-	path := buildNoSeekHeadNoCuesMKV(t, dir) // no front SeekHead slot: patch would land after Info/Tracks
+	path := buildNoSlotMKV(t, dir, "noslot.mkv") // no SeekHead, no Void: nothing to patch into
 
-	// safari has no H.264 level ceiling, so this fixture's video-only,
-	// level-less track (built by buildNoSeekHeadNoCuesMKV) still verdicts
-	// remux (mkv source, mp4/hls target containers) rather than transcode.
 	plan, err := Ingest(context.Background(), path, IngestOptions{Target: "safari", Reindex: true})
 	if err != nil {
 		t.Fatalf("Ingest must still return a plan when in-place reindex is impossible, got error: %v", err)

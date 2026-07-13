@@ -4,12 +4,24 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.22.0] - 2026-07-13
 
-Two independent false verdicts on the seek index, both measured on a real
-library: the index was not being FOUND, and once found it was being JUDGED on
-the wrong thing. A file could clear one and still fail the other, so both had to
-go.
+One bug class, found on a real library and then hunted through the code: **the
+head-only path answered "absent" for data the file carries, and the verdicts
+built on it judged the wrong thing.** A file could clear one of these and still
+fail the next, so they are fixed together - the seek index is now found wherever
+a muxer left it, and "is this index any good?" is decided by what actually serves
+a seek.
+
+### Added
+
+- `CueHealthReport.MaxVideoGapMs` (`max_video_gap_ms`): the widest hole in the
+  video cue coverage - the worst distance a seek can land from its target.
+- `Finding.Kind` `"index-sparse"`: the video cues are keyed right but too far
+  apart to seek into.
+- `reader.WithoutTailScan()`: turn the EOF fallback off, for the caller that must
+  prove an index is reachable from the head itself rather than merely obtain it
+  (ReindexInPlace's verifier).
 
 ### Changed
 
@@ -54,6 +66,33 @@ go.
   real library. The tail scan now hands over whatever the caller asked for. It
   runs only when something REQUESTED is still missing, so a plain metadata probe
   pays nothing and a file whose SeekHead delivered does not pay twice.
+- **The metadata path was blind to everything written between Tracks and the
+  first Cluster.** It stopped the moment it had Info and Tracks, and had no case
+  for Chapters or Attachments on the way past (and kept Tags only for
+  `WithBitrate`), so an element sitting there - a perfectly ordinary place to
+  write one - was neither read in passing nor reachable afterwards: no SeekHead
+  points at it and it is nowhere near EOF. It now reads what the caller asked for
+  wherever it sits in the head, and stops early only when nothing requested is
+  still outstanding. The scan still ends at the first Cluster: the media is never
+  walked.
+- **`ReindexInPlace` refused layouts it can actually repair.** With no SeekHead
+  but a Void slot in the head, the patched index lands before the first Cluster -
+  where a head-only reader walks straight past it. The verify called that "not
+  head-discoverable" and rolled the file back, because the reader it asked
+  stopped at Info+Tracks and never looked: a blind spot reported as a defect of
+  the file. Those files are now patched in place instead of paying for a full
+  copy rewrite. `ErrIndexNotHeadDiscoverable` keeps its meaning and now also
+  wraps the two layout refusals that always did mean it (no SeekHead and no Void
+  to patch into), so `Ingest` returns its plan with the copy-reindex fallback
+  there instead of failing outright. The verifier asks for the strict answer via
+  the new `reader.WithoutTailScan()`, so it tests what it claims - the head, with
+  no EOF fallback - rather than accepting an index only a tail scan can find.
+- **`Ingest` called an audio-keyed index a seek index.** `HasSeekIndex` was
+  `len(Cues) > 0` - any cue, any track - while the consumer it speaks for
+  (`PlanHLS`) cuts its segments on the VIDEO track's cues and refuses a source
+  that indexes no video keyframe. A file whose index only cues the audio was
+  waved through as "ready for on-demand HLS" and blew up at serving time, on the
+  plan Ingest had just blessed. It now requires a cue the video can seek to.
 
 ## [0.21.1] - 2026-07-13
 

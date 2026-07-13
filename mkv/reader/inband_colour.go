@@ -11,6 +11,7 @@ import (
 type ReadOption func(*readOpts)
 
 type readOpts struct {
+	noTailScan       bool // refuse the EOF fallback: the SeekHead alone must resolve (WithoutTailScan)
 	inBandColour     bool
 	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
 	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
@@ -61,6 +62,17 @@ func WithChapters() ReadOption {
 // none.
 func WithCues() ReadOption {
 	return func(o *readOpts) { o.cues = true }
+}
+
+// WithoutTailScan turns OFF the bounded read back from EOF, so the metadata path
+// resolves ONLY what the head gives it: an element the SeekHead points at, or one
+// written before the first Cluster. It exists for the caller that must prove that
+// property itself rather than merely obtain the data - ReindexInPlace's verifier,
+// which refuses a patched index no SeekHead references (ErrIndexNotHeadDiscoverable)
+// even though the reader would happily find it at the tail. Everyone else wants the
+// fallback: it is what makes the metadata path agree with a full read.
+func WithoutTailScan() ReadOption {
+	return func(o *readOpts) { o.noTailScan = true }
 }
 
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track

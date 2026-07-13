@@ -53,14 +53,16 @@ func verifyReindexedCues(ctx context.Context, path string, fs *mkv.FS, want []mk
 		prev = got.TimeMs
 	}
 
-	// Head-only readability: a seek index is only useful if it is discoverable
-	// the way seekers actually consume it - head-only, by following the head
-	// SeekHead to the Cues (reader.WithCues), without a full-segment walk. A
-	// full Open above can recover a tail Cues by scanning back from EOF even
-	// when the SeekHead does not point at it, so it alone would pass an index
-	// that no head-only reader can find. Require the head-only path to resolve
-	// the same cues; otherwise the index is present but not usable for seeking.
-	head, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues())
+	// Structural discoverability: the patched index must be REFERENCED, by a
+	// SeekHead entry the head hands over - not merely findable. Both readers can
+	// recover a trailing Cues element with a bounded scan back from EOF (that is
+	// how most muxers leave their index), so a plain read would pass an index that
+	// nothing points at, and the in-place patch would silently produce a file whose
+	// index only a tail-scanning reader locates. WithoutTailScan turns that
+	// fallback off so this check tests what it claims: the SeekHead resolves the
+	// cues. It does not, the layout has no room for a head SeekHead - the caller
+	// falls back to a copy reindex, which always writes one.
+	head, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues(), reader.WithoutTailScan())
 	if err != nil {
 		return fmt.Errorf("reindex verify: head-only reopen: %w", err)
 	}

@@ -315,12 +315,15 @@ func buildInPlacePatch(scan *inplaceScan, size, timecodeScale int64) (*inplacePa
 	shBytes := shBuf.Bytes()
 
 	// Slot fit: the existing head SeekHead span, or (when there is none) the
-	// first head Void that is big enough.
+	// first head Void that is big enough. Neither means the layout cannot hold a
+	// head-discoverable index in place - exactly what ErrIndexNotHeadDiscoverable
+	// tells a caller, so both refusals carry it and Ingest keeps returning a plan
+	// that points at the copy reindex instead of failing outright.
 	var slotOff, slotLen int64
 	if scan.seekHeadSlot != nil {
 		slotOff, slotLen = scan.seekHeadSlot.off, scan.seekHeadSlot.len
 		if r := slotLen - int64(len(shBytes)); r != 0 && r < 2 {
-			return nil, fmt.Errorf("reindex inplace: head SeekHead too small for the Cues entry, use mkvgo reindex")
+			return nil, fmt.Errorf("reindex inplace: head SeekHead too small for the Cues entry, use mkvgo reindex: %w", ErrIndexNotHeadDiscoverable)
 		}
 	} else {
 		found := false
@@ -332,7 +335,7 @@ func buildInPlacePatch(scan *inplaceScan, size, timecodeScale int64) (*inplacePa
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("reindex inplace: no head SeekHead or Void space, use mkvgo reindex")
+			return nil, fmt.Errorf("reindex inplace: no head SeekHead or Void space, use mkvgo reindex: %w", ErrIndexNotHeadDiscoverable)
 		}
 	}
 	remainder := slotLen - int64(len(shBytes))

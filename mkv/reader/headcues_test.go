@@ -4,7 +4,36 @@ import (
 	"bytes"
 	"context"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/mkv"
 )
+
+// chaptersElem/attachmentsElem: minimal head elements a real muxer writes between
+// Tracks and the first Cluster, and that no SeekHead is required to index.
+func chaptersElem() []byte {
+	return masterElem(mkv.IDChapters,
+		masterElem(mkv.IDEditionEntry,
+			masterElem(mkv.IDChapterAtom,
+				uintElem(mkv.IDChapterUID, 42, 1),
+				uintElem(mkv.IDChapterTimeStart, 0, 1),
+			),
+		),
+	)
+}
+
+func attachmentsElem() []byte {
+	var data bytes.Buffer
+	ebml.WriteElementHeader(&data, mkv.IDFileData, 4)
+	data.Write([]byte{0xFF, 0xD8, 0xFF, 0xD9})
+	return masterElem(mkv.IDAttachments,
+		masterElem(mkv.IDAttachedFile,
+			strElem(mkv.IDFileName, "cover.jpg"),
+			strElem(mkv.IDFileMimeType, "image/jpeg"),
+			data.Bytes(),
+		),
+	)
+}
 
 // TestHeadMetaNoSeekHeadTailCuesScan is the regression for the head-only false
 // "no-index". A file whose Cues sit intact at the tail but which carries NO
@@ -97,6 +126,47 @@ func TestHeadMetaNoSeekHeadTailTags(t *testing.T) {
 	// still hides what was not requested.
 	if c.Cues != nil {
 		t.Errorf("Cues = %d, want nil (not requested)", len(c.Cues))
+	}
+}
+
+// TestHeadMetaHeadElementsNoSeekHead covers the third face of the same hole, and
+// the one the tail scan CANNOT close: Chapters, Attachments and Tags written in
+// the head - between Tracks and the first Cluster - with no SeekHead indexing
+// them. The metadata path skipped them outright (no case for Chapters or
+// Attachments; Tags kept only for WithBitrate) and then stopped at Info+Tracks,
+// so the elements were neither read on the way past nor reachable afterwards:
+// the SeekHead does not point at them and they are nowhere near EOF. The full
+// reader parses them wherever they sit.
+func TestHeadMetaHeadElementsNoSeekHead(t *testing.T) {
+	data := segmentMKV(infoElem(), tracksElem(),
+		chaptersElem(), attachmentsElem(), tagsElem("ENCODER", "mkvgo-test"),
+		clusterElem())
+
+	full, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(full.Chapters) == 0 || len(full.Attachments) == 0 || len(full.Tags) == 0 {
+		t.Fatalf("fixture is wrong: full Read got chapters=%d attachments=%d tags=%d",
+			len(full.Chapters), len(full.Attachments), len(full.Tags))
+	}
+
+	c, err := ReadMeta(context.Background(), bytes.NewReader(data), "x.mkv",
+		WithChapters(), WithAttachments(), WithTags())
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if len(c.Chapters) != len(full.Chapters) {
+		t.Errorf("Chapters = %d, want %d", len(c.Chapters), len(full.Chapters))
+	}
+	if len(c.Attachments) != len(full.Attachments) {
+		t.Errorf("Attachments = %d, want %d", len(c.Attachments), len(full.Attachments))
+	}
+	if len(c.Tags) != len(full.Tags) {
+		t.Errorf("Tags = %d, want %d (WithTags alone, no WithBitrate)", len(c.Tags), len(full.Tags))
+	}
+	if len(c.Tracks) != len(full.Tracks) {
+		t.Errorf("Tracks = %d, want %d (the head scan must not duplicate or lose tracks)", len(c.Tracks), len(full.Tracks))
 	}
 }
 

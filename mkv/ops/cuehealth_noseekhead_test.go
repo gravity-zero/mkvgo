@@ -108,3 +108,30 @@ func TestIngestNoSeekHeadSeesSeekIndex(t *testing.T) {
 		t.Error("NeedsReindex = true: a file with a healthy tail index must not be scheduled for a reindex")
 	}
 }
+
+// TestIngestAudioKeyedIndexNeedsReindex closes the gap between what Ingest
+// PROMISES and what serving actually needs. "Has a seek index" used to mean
+// len(Cues) > 0 - any cue, any track - while PlanHLS cuts its segments on the
+// VIDEO track's cues and refuses a source that indexes no video keyframe. An
+// audio-keyed index was therefore waved through as "ready for on-demand HLS",
+// and blew up at serving time on the plan Ingest had just blessed.
+func TestIngestAudioKeyedIndexNeedsReindex(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	audioCues := []mkv.CuePoint{{TimeMs: 0, Track: 2, ClusterPos: 100}, {TimeMs: 1000, Track: 2, ClusterPos: 200}}
+	path := buildMKVWithCues(t, dir, "audio-keyed.mkv", tracks, cueHealthFixtureSets(2), audioCues)
+
+	plan, err := Ingest(context.Background(), path, IngestOptions{Target: "safari"})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if plan.Strategy != StrategyRemuxHLS {
+		t.Fatalf("strategy = %q, want remux-hls (reasons=%v)", plan.Strategy, plan.Reasons)
+	}
+	if plan.HasSeekIndex {
+		t.Error("HasSeekIndex = true on an index that cues only the audio: PlanHLS would refuse this source")
+	}
+	if !plan.NeedsReindex {
+		t.Error("NeedsReindex = false: the source needs a video-keyed index before it can be packaged")
+	}
+}
