@@ -23,24 +23,26 @@ type readOpts struct {
 
 // WithAttachments keeps Container.Attachments populated on the metadata-only
 // path (normally left nil), reached through the SeekHead entry - one seek to
-// one element, no Cluster scan. Attachment bodies (cover art, fonts) are read
-// whole, so the cost is their size; files whose SeekHead has no Attachments
-// entry leave the field nil.
+// one element, no Cluster scan - or, when no SeekHead indexes them, through the
+// same bounded read back from EOF that recovers the Cues. Attachment bodies
+// (cover art, fonts) are read whole, so the cost is their size.
 func WithAttachments() ReadOption {
 	return func(o *readOpts) { o.attachments = true }
 }
 
 // WithTags keeps Container.Tags populated on the metadata-only path (normally
 // left nil). The Tags element is reached through its SeekHead entry - one seek
-// to one element, no Cluster scan - so the read stays head-only.
+// to one element, no Cluster scan - or, when no SeekHead indexes it (which is
+// how most files are muxed), through the same bounded read back from EOF that
+// recovers the Cues. The read stays head-only either way.
 func WithTags() ReadOption {
 	return func(o *readOpts) { o.tags = true }
 }
 
 // WithChapters keeps Container.Chapters populated on the metadata-only path
 // (normally left nil), reached through the SeekHead entry - one seek to one
-// element, no Cluster scan. Files whose SeekHead has no Chapters entry (or
-// carry no SeekHead) leave the field nil.
+// element, no Cluster scan - or, when no SeekHead indexes them, through the same
+// bounded read back from EOF that recovers the Cues.
 func WithChapters() ReadOption {
 	return func(o *readOpts) { o.chapters = true }
 }
@@ -49,7 +51,14 @@ func WithChapters() ReadOption {
 // normally consumed into Keyframes and dropped). Each CuePoint's ClusterPos is
 // relative to Container.SegmentStart - together they let a caller seek straight
 // to the cluster holding a given time, which is what cue-driven readers (e.g.
-// on-demand HLS segmenting) need. The read stays head-only.
+// on-demand HLS segmenting) need.
+//
+// The Cues are followed through the SeekHead when one indexes them and, when
+// none does - no SeekHead at all, or a stale Cues pointer, which is how most
+// real files are muxed - recovered with one bounded read back from EOF, the same
+// fallback the full reader uses. The read stays head-only either way: no cluster
+// walk. A file whose Cues sit further from the end than that window reports
+// none.
 func WithCues() ReadOption {
 	return func(o *readOpts) { o.cues = true }
 }
@@ -59,10 +68,12 @@ func WithCues() ReadOption {
 // own bit_rate field N/A for Matroska, so this gives more than an external prober) on the
 // metadata-only path. The default OpenMeta/ReadMeta stops before Tags, so
 // Track.Bitrate is nil for Matroska; this option follows the head SeekHead straight
-// to the Tags element (one seek, no Cluster scan - the muxer references Tags from the
-// SeekHead near the head) and reads only it. The raw Tags stay nil, exactly the
-// metadata contract; a full Read sets Bitrate regardless. No effect on MP4, whose
-// Bitrate comes from btrt/esds and does equal the conventional bit_rate.
+// to the Tags element (one seek, no Cluster scan) and reads only it - and when no
+// SeekHead indexes the Tags, which is how most files are muxed, it recovers them
+// from the trailing region with the same bounded read back from EOF that finds the
+// Cues. The raw Tags stay nil, exactly the metadata contract; a full Read sets
+// Bitrate regardless. No effect on MP4, whose Bitrate comes from btrt/esds and does
+// equal the conventional bit_rate.
 func WithBitrate() ReadOption {
 	return func(o *readOpts) { o.bitrate = true }
 }

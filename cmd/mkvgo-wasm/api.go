@@ -1139,7 +1139,8 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 
 // cueHealthJS(input, opts?) -> Promise<CueHealthReport>: head-only triage of
 // the seek index - which tracks the CuePoints reference - in milliseconds
-// even on a Blob (SeekHead-guided ranged reads, no cluster walk). It spots
+// even on a Blob (a handful of ranged reads: the head, then the SeekHead's Cues
+// or, failing that, one window at the file end - never a cluster walk). It spots
 // the dormant defect where a file's index exists yet keys on the wrong
 // tracks, so every seek lands mid-GOP while every "indexed?" check passes.
 func cueHealthJS(_ js.Value, args []js.Value) any {

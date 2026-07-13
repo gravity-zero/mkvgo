@@ -486,14 +486,16 @@ func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageRe
 // Options.RollbackSink. See mkv.RollbackInfo.
 type RollbackInfo = mkv.RollbackInfo
 
-// CueHealthReport classifies a file's CuePoints by referenced track.
-// See ops.CueHealthReport.
+// CueHealthReport classifies a file's CuePoints by referenced track and reports
+// the video cues' coverage (MaxVideoGapMs). See ops.CueHealthReport.
 type CueHealthReport = ops.CueHealthReport
 
-// CueHealth classifies the seek index head-only (no cluster walk): which
-// tracks the CuePoints reference, spotting an index that exists but keys on
-// the wrong tracks - present, non-empty, useless for seeking. The scan-time
-// complement of Validate. See ops.CueHealth.
+// CueHealth judges the seek index head-only (no cluster walk): can it seek
+// video? It spots an index that exists yet keys on no video track at all -
+// present, non-empty, useless for seeking - and one whose video cues are too
+// far apart to land near a target. Cues on other tracks are counted, never held
+// against a file: seeking never uses them. The scan-time complement of Validate.
+// See ops.CueHealth.
 func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthReport, error) {
 	return ops.CueHealth(ctx, path, opts...)
 }

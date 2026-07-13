@@ -308,20 +308,32 @@ export interface SalvageReport {
 }
 
 /**
- * Result of cueHealth(): head-only triage of the seek index - which tracks
- * the CuePoints reference. Spots an index that exists and is non-empty yet
- * keys on the wrong tracks, so seeking lands mid-GOP while every "has an
- * index?" check passes. Milliseconds even on a Blob (no cluster walk).
+ * Result of cueHealth(): head-only triage of the seek index - can it actually
+ * seek video? Spots an index that exists and is non-empty yet keys on the wrong
+ * tracks (every seek lands mid-GOP while every "has an index?" check passes),
+ * and one too coarse to land near its target. Milliseconds even on a Blob (no
+ * cluster walk).
  */
 export interface CueHealthReport {
   total_cues: number
   video_cues: number
   non_video_cues: number
   unknown_track_cues: number
+  /**
+   * Share of cues keyed on another track. Reporting only: those cues are inert
+   * for seeking (the keyframe index uses the video-keyed ones alone), so a high
+   * share is index bloat, not a defect. The verdict judges the video cues.
+   */
   non_video_pct: number
   per_track: Record<string, number>
   first_cue_ms: number
   last_cue_ms: number
+  /**
+   * Widest hole in the VIDEO cue coverage - the worst distance a seek can land
+   * from its target. Measured between consecutive video cues, and from 0 to the
+   * first and from the last to the duration. Over 30s the index is unhealthy.
+   */
+  max_video_gap_ms: number
   has_video_track: boolean
   healthy: boolean
   /** Why not, with the remedy; absent when healthy. */
@@ -331,8 +343,9 @@ export interface CueHealthReport {
 /** One diagnosed defect with its remedy; see Diagnosis. */
 export interface Finding {
   /**
-   * "no-index" | "index-misskeyed" | "index-stale-tracks" | "audio-delay" |
-   * "truncated" | "damaged" | "trailing-junk" | "streamed-size" | "no-moov"
+   * "no-index" | "index-misskeyed" | "index-sparse" | "index-stale-tracks" |
+   * "audio-delay" | "truncated" | "damaged" | "trailing-junk" |
+   * "streamed-size" | "no-moov"
    */
   kind: string
   detail: string

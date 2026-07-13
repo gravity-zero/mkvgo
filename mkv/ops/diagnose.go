@@ -60,9 +60,15 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		d.Findings = append(d.Findings, Finding{
 			Kind: "index-stale-tracks", Detail: ch.Reason, Remedy: "mkvgo reindex",
 		})
-	default:
+	case ch.VideoCues == 0:
 		d.Findings = append(d.Findings, Finding{
 			Kind: "index-misskeyed", Detail: ch.Reason, Remedy: "mkvgo reindex",
+		})
+	default:
+		// Video cues exist but leave a hole too wide to seek into. Distinct from
+		// misskeyed: the index is on the right track, just too coarse.
+		d.Findings = append(d.Findings, Finding{
+			Kind: "index-sparse", Detail: ch.Reason, Remedy: "mkvgo reindex",
 		})
 	}
 

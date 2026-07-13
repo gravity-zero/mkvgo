@@ -249,10 +249,6 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 			return err
 		}
 	}
-	c.Keyframes = keyframeTimesMs(c)
-	if !o.cues {
-		c.Cues = nil
-	}
 	if (o.bitrate || o.tags) && c.Tags == nil && offs.tags >= 0 {
 		if _, err := p.parseElementAt(offs.tags, mkv.IDTags, c, p.parseTags); err != nil {
 			return err
@@ -268,11 +264,70 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 			return err
 		}
 	}
+	// Whatever the SeekHead did not hand over, the tail can: everything the
+	// metadata path serves past the head (Cues, Tags, Chapters, Attachments)
+	// lives in the SAME contiguous region at the file end, and most muxers index
+	// none of it. One bounded read recovers the lot.
+	if err := p.tailElements(c, o); err != nil {
+		return err
+	}
+	c.Keyframes = keyframeTimesMs(c)
+	if !o.cues {
+		c.Cues = nil
+	}
 	if o.bitrate {
 		promoteTrackBitrate(c)
 	}
 	if !o.tags {
 		c.Tags = nil
+	}
+	return nil
+}
+
+// tailElements recovers the post-cluster elements no SeekHead points at: either
+// the muxer wrote no SeekHead at all (the common case - most real files carry
+// their Cues, Tags and the rest at the very end and index none of it), or its
+// pointer was stale and got rejected above. It is the same bounded read back from
+// EOF the full reader already does, so both read paths reach the same verdict on
+// the same file; without it the metadata path reported a healthy trailing index
+// as missing, and left Tags/Chapters/Attachments nil on files that carry them.
+//
+// It runs only when something the caller ASKED for is still missing, so a caller
+// that wants none of the tail (a plain metadata probe) never pays the read, and
+// one whose SeekHead already delivered does not pay it twice.
+//
+// The tail is parsed into a scratch Container because parseTailBuffer also
+// handles the Info/Tracks a tail may carry, and parseTracks CONCATENATES: merging
+// it into c would duplicate the tracks already parsed from the head. Only what
+// the caller asked for is lifted across.
+//
+// Limit: the scan anchors on the Cues element (that is what tiles to EOF), so a
+// file with tail Tags but NO Cues at all is not recovered here - a shape no real
+// muxer produces, since whatever writes the tags writes the index.
+func (p *parser) tailElements(c *mkv.Container, o readOpts) error {
+	wantCues := o.cues && len(c.Cues) == 0
+	wantTags := (o.bitrate || o.tags) && c.Tags == nil
+	wantAttachments := o.attachments && c.Attachments == nil
+	wantChapters := o.chapters && c.Chapters == nil
+	if !wantCues && !wantTags && !wantAttachments && !wantChapters {
+		return nil
+	}
+
+	var tail mkv.Container
+	if _, err := p.scanTailForCues(&tail); err != nil {
+		return err
+	}
+	if wantCues {
+		c.Cues = tail.Cues
+	}
+	if wantTags {
+		c.Tags = tail.Tags
+	}
+	if wantAttachments {
+		c.Attachments = tail.Attachments
+	}
+	if wantChapters {
+		c.Chapters = tail.Chapters
 	}
 	return nil
 }

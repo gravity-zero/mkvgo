@@ -14,6 +14,13 @@ import (
 // buildMKVWithCues builds a file whose Cues are supplied verbatim, so a
 // defective index (audio-keyed, stale tracks) can be constructed at will.
 func buildMKVWithCues(t *testing.T, dir, name string, tracks []mkv.Track, sets [][]mkv.Block, cues []mkv.CuePoint) string {
+	return buildMKVWithCuesDur(t, dir, name, tracks, sets, cues, 4000)
+}
+
+// buildMKVWithCuesDur is buildMKVWithCues with the declared duration spelled out:
+// cue coverage is judged against it, so a sparse index needs a file long enough
+// for the hole to be real.
+func buildMKVWithCuesDur(t *testing.T, dir, name string, tracks []mkv.Track, sets [][]mkv.Block, cues []mkv.CuePoint, durationMs int64) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	f, err := os.Create(path)
@@ -26,7 +33,7 @@ func buildMKVWithCues(t *testing.T, dir, name string, tracks []mkv.Track, sets [
 		t.Fatal(err)
 	}
 	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"}}
-	if err := mw.WriteMetadata(c, tracks, 4000); err != nil {
+	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		t.Fatal(err)
 	}
 	for _, blocks := range sets {
@@ -67,9 +74,18 @@ func TestCueHealth(t *testing.T) {
 		{"video-keyed index", []mkv.CuePoint{
 			{TimeMs: 0, Track: 1, ClusterPos: 100}, {TimeMs: 1000, Track: 1, ClusterPos: 200},
 		}, true, ""},
-		{"audio-keyed index", []mkv.CuePoint{
-			{TimeMs: 0, Track: 2, ClusterPos: 100}, {TimeMs: 1000, Track: 2, ClusterPos: 200}, {TimeMs: 2000, Track: 1, ClusterPos: 300},
-		}, false, "non-video"},
+		// Real muxers cue every track: the audio cues are inert (the keyframe
+		// index drops them) and the video cues seek fine, so the file is healthy
+		// however lopsided the ratio. This is the shape of most of a real library.
+		{"every track cued, dense video cues", []mkv.CuePoint{
+			{TimeMs: 0, Track: 1, ClusterPos: 100}, {TimeMs: 0, Track: 2, ClusterPos: 100},
+			{TimeMs: 1000, Track: 2, ClusterPos: 200}, {TimeMs: 2000, Track: 1, ClusterPos: 300},
+			{TimeMs: 2000, Track: 2, ClusterPos: 300}, {TimeMs: 3000, Track: 2, ClusterPos: 400},
+		}, true, ""},
+		// The defect the check exists for: the index seeks the audio only.
+		{"audio-keyed index, no video cue", []mkv.CuePoint{
+			{TimeMs: 0, Track: 2, ClusterPos: 100}, {TimeMs: 1000, Track: 2, ClusterPos: 200},
+		}, false, "no video cue"},
 		{"stale track reference", []mkv.CuePoint{
 			{TimeMs: 0, Track: 9, ClusterPos: 100},
 		}, false, "do not exist"},

@@ -983,11 +983,20 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 ```go
 r, err := ops.CueHealth(ctx, "movie.mkv")
 if !r.Healthy {
-    fmt.Println(r.Reason) // e.g. "57% of cues reference non-video tracks - ... run mkvgo reindex"
+    fmt.Println(r.Reason) // e.g. "the index keys on non-video tracks only (4210 cue(s), no video cue) - ... run mkvgo reindex"
 }
 ```
 
-`CueHealthReport`: `TotalCues`, `VideoCues`, `NonVideoCues`, `UnknownTrackCues` (references to tracks absent from the Tracks element - a stale index), `NonVideoPct`, `PerTrack`, `FirstCueMs`/`LastCueMs`, `HasVideoTrack`, `Healthy`, `Reason`. A video file is healthy when every cue references a video track; an audio-only file legitimately cues audio. The facade re-exports `matroska.CueHealth`; the CLI is `cue-health` (exit 1 when unhealthy).
+`CueHealthReport`: `TotalCues`, `VideoCues`, `NonVideoCues`, `UnknownTrackCues` (references to tracks absent from the Tracks element - a stale index), `NonVideoPct`, `PerTrack`, `FirstCueMs`/`LastCueMs`, `MaxVideoGapMs`, `HasVideoTrack`, `Healthy`, `Reason`. The facade re-exports `matroska.CueHealth`; the CLI is `cue-health` (exit 1 when unhealthy).
+
+**The verdict judges the video cues, because they are what seeking uses**: the keyframe index is built from the video-keyed cues and drops the rest. A cue on an audio track is therefore inert - and plenty of real muxers cue *every* track, leaving an index that is mostly "non-video" and seeks perfectly. `NonVideoPct` is reported for that reason alone (a high share is index bloat, which a reindex slims), never held against a file. A video file is unhealthy when its index cannot serve a seek:
+
+- no cues at all (`no-index`),
+- cues referencing tracks that do not exist (`index-stale-tracks`: a stale or foreign index),
+- not one video cue (`index-misskeyed`: the index seeks the audio, every seek lands mid-GOP),
+- video cues leaving a hole wider than 30s (`index-sparse`: `MaxVideoGapMs`, measured between consecutive video cues and from 0 to the first and from the last to the duration - a seek into the hole lands that far from its target; a reindex writes one cue per cluster holding a video keyframe, seconds apart).
+
+An audio-only file legitimately cues audio and is judged on having cues at all.
 
 ## Diagnose (one-call triage with remedies)
 
@@ -1000,7 +1009,7 @@ for _, f := range d.Findings {
 }
 ```
 
-`Diagnosis`: `Healthy`, `Findings` (`Kind`/`Detail`/`Remedy`, plus `Track`/`DelayNs` on per-track findings), the full `CueHealth` report, `AudioDelaysNs` (every audio track's start delay, threshold or not), and `Damage` (the `SalvageReport`, present only when the walk ran). Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (with the exact retime invocation), `truncated` (source incomplete, recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: resync), `trailing-junk`, `streamed-size`. The facade re-exports `matroska.Diagnose`; the CLI is `diagnose` (exit 1 on findings); WASM `diagnose` (Blob-ranged, head-mostly).
+`Diagnosis`: `Healthy`, `Findings` (`Kind`/`Detail`/`Remedy`, plus `Track`/`DelayNs` on per-track findings), the full `CueHealth` report, `AudioDelaysNs` (every audio track's start delay, threshold or not), and `Damage` (the `SalvageReport`, present only when the walk ran). Finding kinds: `no-index`, `index-misskeyed` (not one cue keys on video), `index-sparse` (the video cues leave a hole wider than 30s), `index-stale-tracks`, `audio-delay` (with the exact retime invocation), `truncated` (source incomplete, recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: resync), `trailing-junk`, `streamed-size`. The facade re-exports `matroska.Diagnose`; the CLI is `diagnose` (exit 1 on findings); WASM `diagnose` (Blob-ranged, head-mostly).
 
 **MP4/MOV counterpart - `mp4.Diagnose`, same `mkv.Diagnosis` shape**: entirely head-only. The top-level box layout separates `truncated` (a declared box overruns the real end of file) from `trailing-junk`; `no-moov` is the re-download verdict (nothing any tool can rebuild); and each track's edit list carries its presentation delay, reported per audio track relative to the video anchor - `AudioDelaysNs` values plug straight into `mp4.RetimeTracks`, and the `audio-delay` finding names the exact retime invocation. No `CueHealth`/`Damage` sections (the sample table is the index by construction; there is no tolerant walk to run). Fragmented sources skip delay derivation (fragment timelines do not honour edit lists consistently).
 
@@ -1854,9 +1863,11 @@ case matroska.StrategyTranscode:
 - `Target`, `SourceContainer` (`"mkv"` or `"mp4"`, as mkvgo's own head-only
   sniffing resolves it - see `Playability`), `RemuxContainer` (set only for
   `remux-hls`).
-- `HasSeekIndex`, `NeedsReindex`: whether the source already carries a
-  head-discoverable Cues index (`reader.WithCues`), checked only when the
-  strategy is `remux-hls` (on-demand HLS needs to seek into the source).
+- `HasSeekIndex`, `NeedsReindex`: whether the source already carries a Cues
+  index reachable without a cluster walk (`reader.WithCues`: through the
+  SeekHead, or - since most muxers write none - one bounded read back from EOF),
+  checked only when the strategy is `remux-hls` (on-demand HLS needs to seek
+  into the source).
 - `Reindexed`: true when `Ingest` itself performed an in-place reindex during
   this call (`opts.Reindex` was set and it succeeded).
 - `ReindexInPlacePossible`: false means the file's layout cannot hold a

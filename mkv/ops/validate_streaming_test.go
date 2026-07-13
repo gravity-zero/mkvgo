@@ -103,4 +103,34 @@ func TestValidateStreamingReadiness(t *testing.T) {
 	if !find(noCues, "no Cues index") {
 		t.Error("missing Cues not reported")
 	}
+
+	// Severity of the mis-keyed cue depends on whether a video cue survives it:
+	// with none, the index cannot seek video (error); alongside one, the audio
+	// cue is inert - the keyframe index drops it - so it is bloat (warning), the
+	// shape a muxer that cues every track produces on a perfectly seekable file.
+	severity := func(path, code string) (mkv.Severity, bool) {
+		t.Helper()
+		issues, err := Validate(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, is := range issues {
+			if is.Code == code {
+				return is.Severity, true
+			}
+		}
+		return "", false
+	}
+	if sev, ok := severity(badCue, "cues-non-video"); !ok || sev != mkv.SeverityError {
+		t.Errorf("audio-only index: severity = %q (found=%v), want error", sev, ok)
+	}
+
+	everyTrackCued := build(func(mw *writer.MKVWriter) {
+		pos := mw.Cues[0].ClusterPos
+		mw.Cues = []mkv.CuePoint{{TimeMs: 0, Track: 1, ClusterPos: pos}, {TimeMs: 0, Track: 2, ClusterPos: pos}}
+	}, blocks, vids)
+	sev, ok := severity(everyTrackCued, "cues-non-video")
+	if !ok || sev != mkv.SeverityWarning {
+		t.Errorf("every-track-cued index: severity = %q (found=%v), want warning - the audio cue is inert, the video cue seeks", sev, ok)
+	}
 }

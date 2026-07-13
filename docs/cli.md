@@ -667,19 +667,25 @@ mkvgo split video.mkv -o chapters/ -chapters -pattern "{title}.mkv"
 
 ### cue-health
 
-Head-only triage of the seek index: which tracks the CuePoints reference. `validate` proves cue times against real keyframes but reads the whole file; `cue-health` answers the earlier, cheaper question a library scan needs - "is this index even pointing at the right tracks?" - from the SeekHead, Tracks and Cues alone, in milliseconds. It spots the dormant defect where a video file's index exists and is non-empty, so everything reports the file as "indexed", yet the cues key on audio and every seek lands mid-GOP.
+Head-only triage of the seek index: can it actually seek video? `validate` proves cue times against real keyframes but reads the whole file; `cue-health` answers the earlier, cheaper question a library scan needs - from the Tracks and Cues alone, in milliseconds. It spots the dormant defect where a video file's index exists and is non-empty, so everything reports the file as "indexed", yet not one cue keys on video and every seek lands mid-GOP - and the index so coarse that a seek lands nowhere near its target.
 
 ```
 mkvgo cue-health <file.mkv> [-json]
 ```
 
 - Exit 0 when healthy, 1 when not (scriptable, like `validate`); the reason names the remedy (`mkvgo reindex`).
-- A video file is healthy when every cue references a video track; an audio-only file legitimately cues audio. No index at all, or cues referencing tracks that do not exist (a stale index), is unhealthy.
+- The verdict judges the VIDEO cues, because they are what seeking uses (the keyframe index drops the rest). Cues on an audio track are inert - real muxers routinely cue every track, leaving an index that is mostly "non-video" and seeks perfectly - so their share is reported, never held against a file.
+- A video file is unhealthy when its index cannot serve a seek: no cues at all, cues referencing tracks that do not exist (a stale index), not one video cue (the index seeks the audio), or video cues leaving a hole wider than 30s (a seek into the hole lands that far from its target). An audio-only file legitimately cues audio.
 
 ```bash
 mkvgo cue-health movie.mkv
-# movie.mkv: 1247 cue(s) (531 video, 716 non-video, 0 unknown-track), 0:00:00 to 2:01:14
-#   index UNHEALTHY: 57% of cues reference non-video tracks - seeking lands mid-GOP: run mkvgo reindex
+# movie.mkv: 40219 cue(s) (3333 video, 36886 non-video, 0 unknown-track), 0:00:00 to 1:15:02
+#   video coverage: worst hole 0:00:02
+#   index healthy
+
+mkvgo cue-health broken.mkv
+# broken.mkv: 4210 cue(s) (0 video, 4210 non-video, 0 unknown-track), 0:00:00 to 2:01:14
+#   index UNHEALTHY: the index keys on non-video tracks only (4210 cue(s), no video cue) - every seek lands mid-GOP: run mkvgo reindex
 ```
 
 The library equivalent is `ops.CueHealth` / `matroska.CueHealth` (see library.md).
@@ -693,13 +699,13 @@ mkvgo diagnose <file.mkv> [-json]
 ```
 
 - Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
-- Finding kinds: `no-index`, `index-misskeyed`, `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: `reindex --resync`), `trailing-junk`, `streamed-size` (unsealed Segment).
+- Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: `reindex --resync`), `trailing-junk`, `streamed-size` (unsealed Segment).
 - The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), and the `damage` map when the walk ran.
 
 ```bash
 mkvgo diagnose movie.mkv
 # movie.mkv: 2 finding(s)
-#   [index-misskeyed] 57% of cues reference non-video tracks - seeking lands mid-GOP: run mkvgo reindex
+#   [index-misskeyed] the index keys on non-video tracks only (4210 cue(s), no video cue) - every seek lands mid-GOP: run mkvgo reindex
 #       remedy: mkvgo reindex
 #   [audio-delay] audio track 2 starts 900ms after the video
 #       remedy: mkvgo retime --shift 2=-900

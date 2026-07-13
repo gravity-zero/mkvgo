@@ -149,17 +149,31 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-cues",
 			Message: "no Cues index - seeking, on-demand HLS and keyframe extraction need one (run `mkvgo reindex`)"})
 	case len(videoIDs) > 0:
-		misKeyed, stale := 0, 0
+		misKeyed, videoCues, stale := 0, 0, 0
 		for _, cue := range c.Cues {
-			if !videoIDs[cue.Track] {
+			switch {
+			case !videoIDs[cue.Track]:
 				misKeyed++
-			} else if !videoKfPts[cue.TimeMs] {
-				stale++
+			default:
+				videoCues++
+				if !videoKfPts[cue.TimeMs] {
+					stale++
+				}
 			}
 		}
-		if misKeyed > 0 {
+		// A cue on a non-video track is INERT: the keyframe index is built from
+		// the video-keyed cues and drops the rest, so seeking never lands on it.
+		// It only breaks the file when it is all there is - an index with no
+		// video cue cannot seek video at all. Plenty of real muxers cue every
+		// track, which leaves an index that is mostly non-video and seeks fine:
+		// that is bloat (a reindex slims it), not a defect.
+		switch {
+		case misKeyed > 0 && videoCues == 0:
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cues-non-video",
-				Message: fmt.Sprintf("%d/%d cue points reference a non-video track - seeking lands on audio, not a keyframe (rewrite with `mkvgo reindex`)", misKeyed, len(c.Cues))})
+				Message: fmt.Sprintf("all %d cue points reference a non-video track - no video cue to seek to, every seek lands mid-GOP (rewrite with `mkvgo reindex`)", misKeyed)})
+		case misKeyed > 0:
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-non-video",
+				Message: fmt.Sprintf("%d/%d cue points reference a non-video track - inert for seeking (the %d video cues serve it), index bloat only (slim it with `mkvgo reindex`)", misKeyed, len(c.Cues), videoCues)})
 		}
 		if stale > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-stale",

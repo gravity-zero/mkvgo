@@ -41,14 +41,22 @@ type CueHealthReport struct {
 	// the Tracks element (a stale or foreign index).
 	UnknownTrackCues int `json:"unknown_track_cues"`
 	// NonVideoPct is NonVideoCues+UnknownTrackCues over TotalCues, in percent.
+	// Reporting only: cues keyed on another track are inert for seeking (the
+	// keyframe index consumes the video-keyed ones alone), so a high share is
+	// index bloat, not a seek defect. The verdict judges the video cues.
 	NonVideoPct float64 `json:"non_video_pct"`
 	// PerTrack counts cues per referenced track number.
 	PerTrack map[uint64]int `json:"per_track"`
 	// FirstCueMs/LastCueMs bracket the index's time coverage.
 	FirstCueMs int64 `json:"first_cue_ms"`
 	LastCueMs  int64 `json:"last_cue_ms"`
-	// HasVideoTrack tells which rule applied: a video file's cues must key
-	// on video keyframes; an audio-only file legitimately cues audio.
+	// MaxVideoGapMs is the widest hole in the VIDEO cue coverage - the worst
+	// distance a seek can land from its target - measured between consecutive
+	// video cues, and from 0 to the first and from the last to the file's
+	// duration when it is known. 0 when the file has no video track.
+	MaxVideoGapMs int64 `json:"max_video_gap_ms"`
+	// HasVideoTrack tells which rule applied: a video file's index must be able
+	// to seek video; an audio-only file legitimately cues audio.
 	HasVideoTrack bool `json:"has_video_track"`
 	// Healthy is the verdict; Reason says why not, with the remedy.
 	Healthy bool   `json:"healthy"`
@@ -57,9 +65,9 @@ type CueHealthReport struct {
 
 // Finding is one diagnosed defect with its remedy.
 type Finding struct {
-	// Kind: "no-index" | "index-misskeyed" | "index-stale-tracks" |
-	// "audio-delay" | "truncated" | "damaged" | "trailing-junk" |
-	// "streamed-size" | "no-moov".
+	// Kind: "no-index" | "index-misskeyed" | "index-sparse" |
+	// "index-stale-tracks" | "audio-delay" | "truncated" | "damaged" |
+	// "trailing-junk" | "streamed-size" | "no-moov".
 	Kind    string `json:"kind"`
 	Detail  string `json:"detail"`
 	Remedy  string `json:"remedy"`

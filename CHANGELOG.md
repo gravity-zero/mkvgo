@@ -4,6 +4,57 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Two independent false verdicts on the seek index, both measured on a real
+library: the index was not being FOUND, and once found it was being JUDGED on
+the wrong thing. A file could clear one and still fail the other, so both had to
+go.
+
+### Changed
+
+- **`CueHealth`/`Diagnose` now judge the VIDEO cues, not the share of non-video
+  ones.** A cue keyed on an audio track is inert: the keyframe index that serves
+  seeking is built from the video-keyed cues and drops the rest. Yet any single
+  non-video cue condemned a file, and real muxers routinely cue *every* track -
+  so files whose video index is dense and perfectly seekable were reported
+  `index-misskeyed` (measured: a film with 2112 video cues flagged over 10 stray
+  audio cues; an episode with 3333 video cues, one every ~2s, flagged because
+  91.7% of its 40219 cues were audio). The verdict is now the video index's own
+  ability to serve a seek: `index-misskeyed` when NOT ONE cue keys on video (the
+  defect the check was built for - every seek lands mid-GOP), and the new
+  `index-sparse` when the video cues leave a hole wider than 30s. The hole is
+  reported as `MaxVideoGapMs` (`max_video_gap_ms`), measured between consecutive
+  video cues and from 0 to the first and from the last to the duration, so a
+  half-indexed file is caught too. `NonVideoPct` is still reported - a high share
+  is index bloat a reindex slims - but no longer condemns anything.
+- **`validate`'s `cues-non-video` follows the same rule**: an error only when no
+  video cue survives (the index cannot seek video), a warning when video cues
+  are there and the non-video ones are mere bloat.
+
+### Fixed
+
+- **The head-only path called a healthy seek index missing on every file with
+  no SeekHead.** `reader.WithCues()` looked for the Cues only where a SeekHead
+  pointed at them, so a file whose Cues sit intact at the tail - the layout most
+  muxers produce, and the one the full reader has always handled with a bounded
+  read back from EOF - came back with zero cues. Every head-only consumer
+  inherited the false verdict: `CueHealth` reported `Healthy=false` with "no seek
+  index: run mkvgo reindex", `Diagnose` raised a `no-index` finding, `Ingest` set
+  `HasSeekIndex=false` and scheduled a reindex, and `PlanHLS` fell back to
+  synthesizing an index the file already had. The metadata path now runs the same
+  bounded tail scan as the full reader when nothing indexes the Cues (no SeekHead,
+  or a stale Cues pointer that gets rejected), so both read paths reach the same
+  verdict on the same file. A file that genuinely has no index still reports none.
+- **Same hole, same trailing region, for the other head-only options.**
+  `WithTags`/`WithBitrate`, `WithChapters` and `WithAttachments` also followed a
+  SeekHead pointer and nothing else, so on a file that indexes none of its tail
+  they returned nil while the elements sat right there behind the Cues - a
+  per-track BPS bitrate (`Track.Bitrate`) reported as absent on the majority of a
+  real library. The tail scan now hands over whatever the caller asked for. It
+  runs only when something REQUESTED is still missing, so a plain metadata probe
+  pays nothing and a file whose SeekHead delivered does not pay twice.
+
 ## [0.21.1] - 2026-07-13
 
 A correctness release: every fix below closes a path that **reported success
