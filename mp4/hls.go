@@ -86,6 +86,10 @@ type fragTrack struct {
 	durMovieMs int64
 	presentMs  int64
 	hasCTS     bool
+	// ctsShiftTS is how far this track's presentation is pushed back so its
+	// composition offsets stay non-negative (compositionShiftTS); the init's
+	// edit list takes exactly this much back out.
+	ctsShiftTS int64
 }
 
 // hlsSubTrack is one text subtitle track carried as a segmented WebVTT
@@ -242,9 +246,10 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			return nil, cerr
 		}
 		ft.tmp = nil
-		off, hasCTS, totalTS := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale,
+		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale,
 			audioGridTS(ft.outTrack, ft.timescale))
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
+		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS
 		if ft.timescale != movieTimescale {
 			ft.durMovieMs = totalTS * int64(movieTimescale) / int64(ft.timescale)

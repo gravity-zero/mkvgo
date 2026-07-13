@@ -371,7 +371,7 @@ func TestBuildMoofDataOffsetArithmetic(t *testing.T) {
 func TestFillFragTimingHasCTS(t *testing.T) {
 	t.Run("no-reordering-no-cts", func(t *testing.T) {
 		samples := []fragSample{{ptsMs: 0}, {ptsMs: 40}, {ptsMs: 80}}
-		_, hasCTS, _ := fillFragTiming(samples, 0, movieTimescale, 0)
+		_, hasCTS, _, _ := fillFragTiming(samples, 0, movieTimescale, 0)
 		if hasCTS {
 			t.Error("hasCTS must be false when decode order matches presentation order")
 		}
@@ -380,7 +380,7 @@ func TestFillFragTimingHasCTS(t *testing.T) {
 		// Decode order 0,120,40,80 (B-frames): the 2nd decoded sample (pts 120)
 		// is not the 2nd-smallest pts, so its composition offset is nonzero.
 		samples := []fragSample{{ptsMs: 0}, {ptsMs: 120}, {ptsMs: 40}, {ptsMs: 80}}
-		_, hasCTS, _ := fillFragTiming(samples, 0, movieTimescale, 0)
+		_, hasCTS, _, _ := fillFragTiming(samples, 0, movieTimescale, 0)
 		if !hasCTS {
 			t.Error("hasCTS must be true when a sample's decode order differs from its presentation order")
 		}

@@ -331,6 +331,13 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// edit-list offsets before the init segments are built. The fragment
 	// decode times were derived above from the UNSHIFTED first PTS, exactly
 	// like the full pass - the shift lives in the init alone (parity kept).
+	// The video's composition shift, measured header-only from the opening frames:
+	// the trun's offsets are pushed up by it (a fragmented file cannot carry a
+	// negative one - see compositionShiftTS) and the init's edit list takes it back
+	// out. It must be known BEFORE the init is built.
+	if err := p.probeCompositionShift(ctx); err != nil {
+		return nil, err
+	}
 	applyAudioPresentationShift(&o, fts)
 	// Options.ChapterMarkers: video.ft.presentMs is derived exactly as the
 	// full pass derives fts[primaryIndex(fts)].presentMs, so the same source
@@ -424,6 +431,10 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 		haveFirst, haveSecond     bool
 	}
 	probes := map[*planTrack]*gridProbe{}
+	// Leading PTS in decode order, per track: the composition shift is measured
+	// over the same bounded prefix the full pass measures it over, so the plan's
+	// init carries the same edit list - byte-identical, without ever seeing more
+	// than the head of the file.
 	needFirst := len(p.tracks)
 	needGrid := 0
 	for _, pt := range p.tracks {
@@ -644,6 +655,39 @@ func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv
 	}
 }
 
+// probeCompositionShift measures the video track's composition shift - what the
+// trun's offsets are pushed up by, and the init's edit list takes back out - from
+// the opening frames alone, HEADER-ONLY: block headers carry the timecodes and the
+// keyframe flag, and no sample byte is read. The full pass measures the same shift
+// over the same prefix of the same track (compositionShiftTS), so the two inits
+// stay byte-identical while this one costs a handful of headers, not a GOP of
+// video.
+func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
+	pt := p.tracks[p.videoIndex()]
+	var (
+		pts  []int64
+		sync []bool
+	)
+	err := p.walkVideoHeadersOnly(ctx, func(b mkv.Block) (bool, error) {
+		if len(pts) > 0 && b.Keyframe {
+			return false, nil // the GOP closed: the reorder pattern is fully in hand
+		}
+		pts = append(pts, b.Timecode)
+		sync = append(sync, b.Keyframe)
+		return len(pts) < compositionPrefix, nil
+	})
+	if err != nil {
+		return err
+	}
+	scale := tsScale(pt.ft.timescale)
+	ts := make([]int64, len(pts))
+	for i, ms := range pts {
+		ts[i] = scale(ms)
+	}
+	pt.ft.ctsShiftTS = compositionShiftTS(ts, sync)
+	return nil
+}
+
 // iframePlaylist returns the trick-play playlist, built once and cached. MP4
 // plans build it eagerly at PlanHLS time (the sample table makes it free);
 // Matroska plans build it lazily, on whichever request needs it first, from
@@ -817,7 +861,11 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseD
 	sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
-		window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x])
+		off := scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS
+		if off < 0 {
+			off = 0 // fillFragTiming's clamp, window-local (same rule, same bytes)
+		}
+		window[x].ctsTS = int32(off)
 	}
 	for x := 0; x < len(window)-1; x++ {
 		window[x].durTS = dts[x+1] - dts[x]

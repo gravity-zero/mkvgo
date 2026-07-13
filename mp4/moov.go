@@ -280,12 +280,18 @@ func mediaTimescale(t *outTrack) uint32 {
 // offset - the A/V sync gap, since the sample table is rebased to 0 - followed by
 // the media edit, whose media_time re-signals an audio track's gapless priming
 // (Matroska CodecDelay) as the MP4 encoder delay so a decoder discards it.
-func buildEdts(codecDelayNs, offsetMovieMs int64, durMovieMs, mts uint32) []byte {
+//
+// ctsShiftTS (media timescale) is the composition shift a fragmented track had to
+// add to keep its offsets non-negative (compositionShiftTS): trimming it back out
+// here is what puts the first frame back at the presentation time the source gave
+// it. Zero on the progressive path, whose sample table needs no such shift.
+func buildEdts(codecDelayNs, offsetMovieMs, ctsShiftTS int64, durMovieMs, mts uint32) []byte {
 	// media_time is in the media timescale (mts == sample rate for audio), so the
 	// trim is sample-exact; segment_duration is in the movie timescale (ms). Round to
 	// nearest so an N-sample priming comes back as exactly N samples, not N-1.
-	mediaTime := (codecDelayNs*int64(mts) + 500_000_000) / 1_000_000_000
-	segDur := int64(durMovieMs) - codecDelayNs/1_000_000
+	mediaTime := (codecDelayNs*int64(mts)+500_000_000)/1_000_000_000 + ctsShiftTS
+	shiftMovieMs := ctsShiftTS * int64(movieTimescale) / int64(mts)
+	segDur := int64(durMovieMs) - codecDelayNs/1_000_000 - shiftMovieMs
 	if segDur < 0 {
 		segDur = 0
 	}
@@ -397,7 +403,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		codecDelay = t.mkv.CodecDelay
 	}
 	if offsetMs > 0 || codecDelay > 0 {
-		trakChildren = append(trakChildren, buildEdts(codecDelay, offsetMs, durMovie, mts))
+		trakChildren = append(trakChildren, buildEdts(codecDelay, offsetMs, 0, durMovie, mts))
 	}
 	trakChildren = append(trakChildren, mdia)
 	return container("trak", trakChildren...), presentDur

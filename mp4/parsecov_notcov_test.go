@@ -457,7 +457,7 @@ func TestAppendTrunSamplesFirstSampleFlagsOverride(t *testing.T) {
 // the "single sample" (default) results.
 func TestFillFragTimingLastDurMsOverride(t *testing.T) {
 	samples := []fragSample{{ptsMs: 0}, {ptsMs: 40}, {ptsMs: 80}}
-	_, _, totalTS := fillFragTiming(samples, 777, movieTimescale, 0)
+	_, _, totalTS, _ := fillFragTiming(samples, 777, movieTimescale, 0)
 	if got := samples[2].durTS; got != 777 {
 		t.Errorf("last sample durTS = %d, want 777 (the caller-supplied lastDurMs, not the previous sample's duration or 1)", got)
 	}
@@ -473,7 +473,7 @@ func TestFillFragTimingLastDurMsOverride(t *testing.T) {
 // so its duration must default to 1 tick, not read samples[-1].
 func TestFillFragTimingSingleSampleDefaultDuration(t *testing.T) {
 	samples := []fragSample{{ptsMs: 0}}
-	_, _, totalTS := fillFragTiming(samples, 0, movieTimescale, 0)
+	_, _, totalTS, _ := fillFragTiming(samples, 0, movieTimescale, 0)
 	if got := samples[0].durTS; got != 1 {
 		t.Errorf("single-sample durTS = %d, want 1 (the n<=1 default, since there is no lastDurMs and no previous sample)", got)
 	}

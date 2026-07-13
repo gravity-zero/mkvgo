@@ -36,7 +36,7 @@ func TestBuildMoovNoUdtaWhenEmpty(t *testing.T) {
 func TestBuildEdtsArithmeticAndBoundaries(t *testing.T) {
 	// codecDelayNs = 40ms at mts=48000 -> exactly 1920 samples (clean, no
 	// rounding ambiguity). durMovieMs=960, offsetMovieMs=250.
-	edts := buildEdts(40_000_000, 250, 960, 48000)
+	edts := buildEdts(40_000_000, 250, 0, 960, 48000)
 	boxes, err := iterBoxes(edts[8:])
 	if err != nil {
 		t.Fatalf("iterBoxes(edts): %v", err)
@@ -70,7 +70,7 @@ func TestBuildEdtsArithmeticAndBoundaries(t *testing.T) {
 // TestBuildEdtsNoOffsetOmitsEmptyEdit kills the other direction of the
 // moov.go:297 boundary: offsetMovieMs == 0 must NOT add a leading empty edit.
 func TestBuildEdtsNoOffsetOmitsEmptyEdit(t *testing.T) {
-	edts := buildEdts(0, 0, 500, 1000)
+	edts := buildEdts(0, 0, 0, 500, 1000)
 	boxes, _ := iterBoxes(edts[8:])
 	elst, ok := findMemBox(boxes, "elst")
 	if !ok {

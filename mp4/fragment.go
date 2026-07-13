@@ -138,8 +138,12 @@ func buildInitTrak(ft *fragTrack, cenc *CENCOptions) []byte {
 	if wantsEditList(t.mkv.Codec, t.mp3Delay) {
 		codecDelay = t.mkv.CodecDelay
 	}
-	if ft.offsetMs > 0 || codecDelay > 0 {
-		trakChildren = append(trakChildren, buildEdts(codecDelay, ft.offsetMs, uint32(ft.durMovieMs), ft.timescale))
+	// The composition shift joins the offset and the priming in the edit list: the
+	// trun's offsets were pushed up by it so no reader would re-shift the whole
+	// presentation, and this takes it straight back out - the first frame lands
+	// where the source put it.
+	if ft.offsetMs > 0 || codecDelay > 0 || ft.ctsShiftTS > 0 {
+		trakChildren = append(trakChildren, buildEdts(codecDelay, ft.offsetMs, ft.ctsShiftTS, uint32(ft.durMovieMs), ft.timescale))
 	}
 	trakChildren = append(trakChildren, mdia)
 	return container("trak", trakChildren...)
@@ -264,16 +268,79 @@ func buildStyp() []byte {
 	})
 }
 
+// compositionPrefix caps how many leading samples (decode order) the composition
+// shift is measured over - the first GOP when it closes sooner. A stream's reorder
+// pattern is an encoder constant that its opening frames already spell out (a
+// depth-2 reorder needs three frames to show itself), so a short prefix measures
+// the shift the whole track needs. It has to be short: the on-demand plan applies
+// the very same rule (it never sees every sample), and reading a whole GOP just to
+// time the init would cost it a large chunk of the file before it serves a byte.
+const compositionPrefix = 24
+
+// compositionPrefixLen is the prefix both paths measure the shift over: the first
+// GOP (up to, excluding, the second keyframe), capped. sync flags the keyframes,
+// in decode order.
+func compositionPrefixLen(sync []bool) int {
+	n := len(sync)
+	if n > compositionPrefix {
+		n = compositionPrefix
+	}
+	for i := 1; i < n; i++ {
+		if sync[i] {
+			return i // the GOP closed: everything the reorder pattern can show is in it
+		}
+	}
+	return n
+}
+
+// compositionShiftTS is how far a track's presentation must be pushed back for
+// its composition offsets to stay non-negative: max(DTS - PTS) over that prefix,
+// 0 when nothing is reordered. ptsTS are the presentation times, in the media
+// timescale, in DECODE order; sync flags the keyframes.
+//
+// A fragmented file cannot carry the alternative. Its decode times live in the
+// tfdt, which is UNSIGNED: a reader that meets a negative composition offset
+// cannot answer it by pulling the decode clock back before zero (the progressive
+// path can - its sample table has no such floor - which is why it plays in sync
+// with none of this). It compensates the only way left to it: by pushing every
+// PTS forward by the deepest negative offset - the whole picture, audio excepted,
+// arriving one to two frames late. So the offsets must be non-negative before
+// they are written, and an edit list must then take back the shift that made them
+// so (buildEdts).
+func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
+	n := compositionPrefixLen(sync)
+	if n > len(ptsTS) {
+		n = len(ptsTS)
+	}
+	if n < 2 {
+		return 0
+	}
+	dts := make([]int64, n)
+	copy(dts, ptsTS[:n])
+	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
+
+	var shift int64
+	for i := 0; i < n; i++ {
+		if d := dts[i] - ptsTS[i]; d > shift {
+			shift = d
+		}
+	}
+	return shift
+}
+
 // fillFragTiming assigns each sample its decode time, duration and composition
 // offset (in the track's media timescale), from the presentation timestamps  -
 // the same reconstruction the progressive path uses (sample.go reconstructTiming):
-// DTS is the sorted PTS in decode order, durations are the diffs, ctts = PTS - DTS.
+// DTS is the sorted PTS in decode order, durations are the diffs, ctts = PTS - DTS
+// plus the track's composition shift, which keeps every offset non-negative (see
+// compositionShiftTS; the init's edit list takes the shift back out, so the
+// presentation still starts where the source does).
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
-func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64) {
+func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
 	n := len(samples)
 	if n == 0 {
-		return 0, false, 0
+		return 0, false, 0, 0
 	}
 	scale := func(ms int64) int64 {
 		if mts == movieTimescale {
@@ -317,7 +384,7 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 		for i := range samples {
 			totalTS += samples[i].durTS
 		}
-		return offsetMs, false, totalTS
+		return offsetMs, false, totalTS, 0 // grid audio never reorders
 	}
 	// DTS = sorted PTS: the i-th stored sample (decode order) gets the i-th
 	// smallest presentation time. Rebase to 0.
@@ -330,6 +397,16 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 	for i := range samples {
 		samples[i].dtsTS = dts[i] - base
 	}
+	// The shift that keeps every composition offset non-negative, measured over
+	// the SAME bounded prefix the on-demand plan measures it over, so both derive
+	// the same init.
+	ptsTS := make([]int64, 0, compositionPrefix)
+	syncs := make([]bool, 0, compositionPrefix)
+	for i := 0; i < n && i < compositionPrefix; i++ {
+		ptsTS = append(ptsTS, scale(samples[i].ptsMs))
+		syncs = append(syncs, samples[i].sync)
+	}
+	ctsShiftTS = compositionShiftTS(ptsTS, syncs)
 	for i := 0; i < n-1; i++ {
 		samples[i].durTS = dts[i+1] - dts[i]
 	}
@@ -346,12 +423,20 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 		if samples[i].ptsMs < offsetMs {
 			offsetMs = samples[i].ptsMs
 		}
-		off := scale(samples[i].ptsMs) - dts[i]
+		off := scale(samples[i].ptsMs) - dts[i] + ctsShiftTS
+		if off < 0 {
+			// Only a stream that reorders deeper later than it does in its first
+			// GOPs can land here. Clamping keeps the offsets non-negative - the
+			// invariant the whole shift exists to hold - at the price of that one
+			// sample presenting at its decode time, a sub-frame error, instead of
+			// letting a reader re-shift the ENTIRE presentation.
+			off = 0
+		}
 		samples[i].ctsTS = int32(off)
 		if off != 0 {
 			hasCTS = true
 		}
 		totalTS += samples[i].durTS
 	}
-	return offsetMs, hasCTS, totalTS
+	return offsetMs, hasCTS, totalTS, ctsShiftTS
 }

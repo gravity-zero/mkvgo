@@ -4,6 +4,37 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The picture played one to two frames after the sound, in every fragmented
+  output of a source with B-frames.** Decode times are derived by sorting the
+  presentation times, which leaves composition offsets that may be negative -
+  legal in a `trun`/`ctts` version 1, and what mkvgo wrote. A FRAGMENTED file
+  cannot honour them: its decode clock lives in the `tfdt`, which is unsigned, so
+  a reader cannot answer a negative offset by pulling the decode clock back before
+  zero (a progressive file can - its sample table has no such floor - which is why
+  `to-mp4` was in sync through all of this). It compensates the only way left to
+  it: by pushing every video PTS forward by the deepest negative offset. Audio,
+  never reordered, stays where it is. Measured on a real 23.976fps source: the
+  first frame presented at 42ms instead of 0, the whole picture that far behind
+  the sound - audible, and above the ITU-R BT.1359 threshold for sound arriving
+  early. The composition offsets are now shifted non-negative before they are
+  written, and the init segment carries the edit list that takes exactly that shift
+  back out, so the presentation starts where the source put it: first frame at 0,
+  not a sample lost, audio and video on one timeline. The shift is measured from
+  the opening frames of the video track (its reorder depth is an encoder constant
+  the first GOP already spells out) - header-only in the on-demand plan, which
+  never reads a sample byte to time its init, and over the same prefix in the full
+  pass, so the two still produce byte-identical inits.
+
+  **Integration note**: the init segment's bytes change for reordered sources (it
+  gains an `edts`/`elst`). Callers caching init segments must invalidate them.
+  Callers that were compensating this delay themselves - shifting a separately
+  encoded audio rendition to match the late video - must STOP: the video no longer
+  arrives late, and the compensation would now push the sound behind it.
+
 ## [0.22.0] - 2026-07-13
 
 One bug class, found on a real library and then hunted through the code: **the
