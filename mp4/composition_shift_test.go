@@ -216,6 +216,60 @@ func TestPlanAndFullPassAgreeOnTheShift(t *testing.T) {
 	}
 }
 
+// TestGrowingPlanCarriesTheShift is the regression for a trap the fix itself set:
+// the growing (still-downloading) plan builds its own HLSPlan by hand and delegates
+// segment building to the very same window timing. Give it no shift and that timing
+// clamps the negative offsets to zero - every B-frame presented at its DECODE time,
+// the display order destroyed. It must measure the shift like the others (from the
+// blocks its scan already walks) and settle it before the init is ever published:
+// the init is a byte a player fetches once and caches.
+func TestGrowingPlanCarriesTheShift(t *testing.T) {
+	src := reorderedSource(t, 8)
+	ctx := context.Background()
+
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := plan.Segment(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := PlanGrowingHLS(ctx, src, Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.Complete()
+	got, err := g.Segment(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	offsets, firstPts := segmentCTS(t, got)
+	zeros := 0
+	for _, cts := range offsets {
+		if cts < 0 {
+			t.Fatalf("growing plan wrote a negative composition offset (%d)", cts)
+		}
+		if cts == 0 {
+			zeros++
+		}
+	}
+	if zeros == len(offsets) {
+		t.Fatal("every composition offset is zero: the reordering was clamped away, and the B-frames now present at their decode time")
+	}
+	if firstPts != 42 {
+		t.Errorf("first sample presents at %dms, want 42 (the shift the edit list takes back out)", firstPts)
+	}
+	if _, ok := initEditList(t, g.InitSegment()); !ok {
+		t.Error("the growing plan's init carries no edit list: the picture would play late")
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("growing segment (%d bytes) != plan segment (%d bytes): the two time the same window differently", len(got), len(want))
+	}
+}
+
 // TestNoReorderNoEditList guards the other side: a source with no B-frames gets no
 // shift and no edit list - its bytes are exactly what they were.
 func TestNoReorderNoEditList(t *testing.T) {

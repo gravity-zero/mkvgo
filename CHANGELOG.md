@@ -29,6 +29,14 @@ All notable changes to mkvgo are documented here. The format is based on
   never reads a sample byte to time its init, and over the same prefix in the full
   pass, so the two still produce byte-identical inits.
 
+  Every fragmented producer is covered and verified against a decoder on a real
+  B-frame source - the full pass, the on-demand plan, the growing (still-
+  downloading) plan, the single-file byte-range renditions, and a plan built from
+  an MP4 source: all now present their first frame at 0, with no sample lost, and
+  the three that can be compared produce byte-identical inits. The `sidx` of a
+  single-file rendition now declares its real earliest presentation time (the
+  shift) rather than a zero no sample carries.
+
   **Integration note**: the init segment's bytes change for reordered sources (it
   gains an `edts`/`elst`). Callers caching init segments must invalidate them.
   Callers that were compensating this delay themselves - shifting a separately

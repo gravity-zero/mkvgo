@@ -36,13 +36,18 @@ func singleFileName(fts []*fragTrack, i int) string {
 
 // buildSidx renders a Segment Index box: one reference per fragment, each a
 // media subsegment starting with a SAP (segments are keyframe-cut).
-func buildSidx(trackID, timescale uint32, sizes []int64, durTS []int64) []byte {
+//
+// earliestPTS is the first subsegment's earliest composition time in the track's
+// MEDIA timeline - which is the composition shift when the track is reordered (its
+// offsets were pushed up by it; the edit list, a different timeline, is not what
+// this box speaks in). Zero would claim a presentation time no sample has.
+func buildSidx(trackID, timescale uint32, earliestPTS int64, sizes []int64, durTS []int64) []byte {
 	return fullBox("sidx", 0, 0, func(w *bw) {
 		w.u32(trackID)
 		w.u32(timescale)
-		w.u32(0) // earliest_presentation_time
-		w.u32(0) // first_offset: subsegments start right after the sidx
-		w.u16(0) // reserved
+		w.u32(uint32(earliestPTS)) // earliest_presentation_time
+		w.u32(0)                   // first_offset: subsegments start right after the sidx
+		w.u16(0)                   // reserved
 		w.u16(uint16(len(sizes)))
 		for i := range sizes {
 			w.u32(uint32(sizes[i]))       // reference_type(0) + referenced_size
@@ -118,7 +123,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		for k := range plans[i].heads {
 			sizes[k] = int64(len(plans[i].heads[k])) + plans[i].segs[k].dataLen
 		}
-		sidx := buildSidx(ft.outTrack.mp4ID, ft.timescale, sizes, segDur[i])
+		sidx := buildSidx(ft.outTrack.mp4ID, ft.timescale, ft.ctsShiftTS, sizes, segDur[i])
 
 		r := &rends[i]
 		r.name = singleFileName(fts, i)

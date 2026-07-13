@@ -112,8 +112,15 @@ type GrowingHLSPlan struct {
 	// entry, first PTS) and, for a laced no-DefaultDuration audio track, its
 	// grid stride, before any output can be built (mirrors HLSPlan.peekHead,
 	// but incremental - extended cluster by cluster until resolved).
-	headDone     bool
-	headNeed     int
+	headDone bool
+	headNeed int
+	// leadPts/leadSync are the video track's opening frames (decode order), from
+	// which its composition shift is measured - the same prefix rule the full pass
+	// and PlanHLS apply (compositionShiftTS), so the three build the same init. No
+	// extra read: these blocks are the ones the growing scan already walks.
+	leadPts      []int64
+	leadSync     []bool
+	leadDone     bool
 	headNeedGrid int
 	headProbes   map[*planTrack]*growingGridProbe
 
@@ -364,7 +371,7 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 		}
 	}
 
-	if p.headDone {
+	if p.headDone && p.leadDone {
 		p.rebuildOutputsLocked()
 	}
 	return p.published - before, nil
@@ -409,8 +416,11 @@ func (p *GrowingHLSPlan) scanClusterLocked(ctx context.Context, src mkv.ReadSeek
 				return herr
 			}
 		}
-		if pt.ft.outTrack.spec.video && b.Keyframe {
-			p.recordKeyframeLocked(b.BlockTimecode, clusterStart)
+		if pt.ft.outTrack.spec.video {
+			p.extendLeadLocked(b)
+			if b.Keyframe {
+				p.recordKeyframeLocked(b.BlockTimecode, clusterStart)
+			}
 		}
 	}
 	if !p.headDone && p.headNeed == 0 && p.headNeedGrid == 0 {
@@ -418,6 +428,45 @@ func (p *GrowingHLSPlan) scanClusterLocked(ctx context.Context, src mkv.ReadSeek
 	}
 	p.updateSegCountLocked()
 	return nil
+}
+
+// extendLeadLocked folds one video block into the composition-shift prefix: the
+// opening frames, up to the second keyframe (the first GOP shows the whole reorder
+// pattern) or compositionPrefix, whichever comes first. The shift is settled before
+// a single output is published, because the edit list it produces lives in the INIT
+// - a byte a player fetches once and caches, and which therefore may never change
+// under it mid-session.
+func (p *GrowingHLSPlan) extendLeadLocked(b mkv.Block) {
+	if p.leadDone {
+		return
+	}
+	if (len(p.leadPts) > 0 && b.Keyframe) || len(p.leadPts) >= compositionPrefix {
+		p.settleLeadLocked()
+		return
+	}
+	p.leadPts = append(p.leadPts, b.Timecode)
+	p.leadSync = append(p.leadSync, b.Keyframe)
+}
+
+// settleLeadLocked computes the video track's composition shift from the prefix
+// gathered so far and freezes it. Called when the prefix closes, and again when the
+// source is declared complete - a source shorter than one GOP still gets its shift,
+// measured over every frame it has, exactly as the full pass measures it.
+func (p *GrowingHLSPlan) settleLeadLocked() {
+	if p.leadDone {
+		return
+	}
+	p.leadDone = true
+	if len(p.full.tracks) == 0 {
+		return
+	}
+	pt := p.full.tracks[p.full.videoIndex()]
+	scale := tsScale(pt.ft.timescale)
+	ts := make([]int64, len(p.leadPts))
+	for i, ms := range p.leadPts {
+		ts[i] = scale(ms)
+	}
+	pt.ft.ctsShiftTS = compositionShiftTS(ts, p.leadSync)
 }
 
 // extendHeadLocked folds one block into head resolution: the track's first
@@ -520,6 +569,10 @@ func (p *GrowingHLSPlan) finalizeLocked(ctx context.Context) error {
 	if p.done {
 		return nil
 	}
+	// The source will not grow again: a prefix still open (a file shorter than one
+	// GOP) is settled on what it has, so the shift - and the init's edit list - is
+	// never left unmeasured.
+	p.settleLeadLocked()
 	if !p.headDone || !p.haveFirstKF {
 		// Degenerate source (no video keyframe ever scanned, or the head never
 		// resolved): nothing to close into a real presentation.
