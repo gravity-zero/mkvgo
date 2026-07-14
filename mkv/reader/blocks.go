@@ -176,6 +176,23 @@ type peekedHeader struct {
 	start int64 // absolute offset of the header's first byte
 }
 
+// BlockPos locates a block precisely enough to restart a walk there - at the
+// block itself, mid-cluster, not at the enclosing cluster's header. A cluster
+// spans several segments of a typical HLS grid, so a server that can only
+// resume at cluster boundaries re-reads the same cluster prefix once per
+// segment it holds; a resume point taken at the boundary block reads each byte
+// once. Zero value = no position (Valid reports it).
+type BlockPos struct {
+	Off          int64 // absolute offset of the block's element header (SimpleBlock or BlockGroup)
+	ClusterStart int64 // absolute offset of the enclosing cluster's header
+	ClusterEnd   int64 // absolute offset one past the cluster's last byte; -1 when unknown-size
+	ClusterTS    int64 // the enclosing cluster's raw Timestamp (unscaled)
+}
+
+// Valid reports whether p names a block (a zero BlockPos does not: offset 0 is
+// the EBML header, never a block).
+func (p BlockPos) Valid() bool { return p.Off > 0 }
+
 // BlockReader reads MKV blocks sequentially from an io.ReadSeeker.
 // Internally it uses a buffered reader and tracks position by counting bytes
 // so that Seek(0, SeekCurrent) syscalls are eliminated on the hot path.
@@ -209,6 +226,7 @@ type BlockReader struct {
 	hasStop       bool          // a cluster-timecode limit is set
 	awaitLimit    bool          // stopped at a cluster beyond stopMs; recheck on Next
 	clusterStart  int64         // absolute offset of the current cluster's header
+	blockStart    int64         // absolute offset of the block element Next last returned from
 	clusterCount  int64         // number of Cluster elements entered so far
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
@@ -246,6 +264,44 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 	}
 	br.r = newCountingReader(r, offset)
 	return br, nil
+}
+
+// NewBlockReaderFrom resumes a walk at the exact block a previous reader
+// stopped on (its Pos), inside the cluster that block belongs to: no cluster
+// prefix is re-read. The caller supplies the TimecodeScale, as with
+// NewBlockReaderAt; the segment end is unknown, so reading stops at EOF or at
+// a non-cluster top-level element.
+func NewBlockReaderFrom(r io.ReadSeeker, timecodeScale int64, p BlockPos) (*BlockReader, error) {
+	if !p.Valid() {
+		return nil, fmt.Errorf("resume: invalid block position")
+	}
+	if _, err := r.Seek(p.Off, io.SeekStart); err != nil {
+		return nil, err
+	}
+	br := &BlockReader{
+		raw:           r,
+		timecodeScale: timecodeScale,
+		segEnd:        -1,
+		inCluster:     true,
+		clusterEnd:    p.ClusterEnd,
+		clusterTS:     p.ClusterTS,
+		clusterStart:  p.ClusterStart,
+		clusterCount:  1,
+	}
+	br.r = newCountingReader(r, p.Off)
+	return br, nil
+}
+
+// Pos locates the block Next last returned - the resume point NewBlockReaderFrom
+// takes. The frames of a laced block share their enclosing block's position, so
+// resuming there re-delivers the whole lace.
+func (br *BlockReader) Pos() BlockPos {
+	return BlockPos{
+		Off:          br.blockStart,
+		ClusterStart: br.clusterStart,
+		ClusterEnd:   br.clusterEnd,
+		ClusterTS:    br.clusterTS,
+	}
 }
 
 // StopBeforeClusterMs bounds the walk: Next returns ErrClusterLimit instead
@@ -533,12 +589,14 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 				}
 				continue
 			case mkv.IDSimpleBlock:
+				br.blockStart = hdrStart
 				b, err := br.parseBlock(h.Size, true)
 				if errors.Is(err, errFilteredBlock) {
 					continue
 				}
 				return b, err
 			case mkv.IDBlockGroup:
+				br.blockStart = hdrStart
 				b, err := br.parseBlockGroup(h.Size)
 				if errors.Is(err, errFilteredBlock) {
 					continue

@@ -4,6 +4,50 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] - 2026-07-14
+
+### Changed
+
+- **On-demand serving read the source several times over to hand it out once.**
+  A direct-play server's ceiling is its storage bandwidth, so every byte read and
+  thrown away is a viewer it cannot serve. Two habits of the segment walk read
+  bytes it never served. First, the walk could only open on a CLUSTER: the index
+  points at clusters, and a real muxer writes clusters spanning seconds while a
+  segment grid cuts every few - so one cluster holds two to five segments, and
+  each of them re-read that cluster from its header, stepping over the neighbours
+  it had already served (or was about to). Second, the walk read every track's
+  blocks and dropped the ones it did not want AFTER reading them: the audio (often
+  two heavy tracks) and the subtitles crossed the disk, the bus and the heap to be
+  discarded. Measured on a 2 GiB source, serving 30 consecutive segments: 96.7 MiB
+  read for 14.4 MiB served - **6.7 bytes read per byte served**, and the same ratio
+  from 3 segments to 30, so not a one-off warm-up cost.
+
+  A walk now opens on the window's own first block, not on its cluster's header.
+  Nothing points there - only a walk can find it - so each walk pays the discovery
+  forward: it already stops ON the block the next segment opens on (that is how it
+  knows the window ended), and it now remembers it. Serving in playback order
+  therefore reads every source byte exactly once, and the other tracks' blocks are
+  skipped inside the reader (`KeepTracks`), never copied out of it. The remembered
+  positions are pure hints: a seek anywhere, a cold plan or a concurrent request
+  simply walks from the cluster as before, so `Segment`/`Resource` stay stateless in
+  effect and safe under concurrency. Segments are byte-identical to what the full
+  pass writes - unchanged, and still gated as such end to end.
+
+  On a source shaped like a real release (10s clusters, a cue per keyframe, 6s
+  segments, two audio tracks): **2.54x -> 1.57x** read amplification, the residue
+  being the interleaved audio a video window physically sits between. A full
+  playthrough now reads the source once instead of 1.7 times over. Per-segment
+  allocations drop ~19% (the other tracks' payloads are no longer copied to be
+  discarded).
+
+### Added
+
+- `reader.BlockPos` / `reader.NewBlockReaderFrom` / `BlockReader.Pos`: a walk can
+  now be resumed at an exact block, mid-cluster, instead of only at a cluster
+  header (`NewBlockReaderAt`). The position carries the enclosing cluster's
+  timestamp and end, so a resumed walk stamps its blocks exactly as a full walk
+  does without re-reading anything ahead of them.
+
 ## [0.22.1] - 2026-07-13
 
 ### Fixed

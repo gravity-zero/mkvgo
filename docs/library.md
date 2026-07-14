@@ -75,6 +75,23 @@ br.SetTrackDefaultDurations(matroska.TrackDefaultDurations(c.Tracks))
 Without a known duration every frame of a lace keeps the block timecode
 (`Track.DefaultDurationNs` is 0 when the source declares none).
 
+A walk can also be resumed at an exact BLOCK rather than at a cluster header.
+`BlockReader.Pos` returns the position of the block `Next` just delivered, and
+`reader.NewBlockReaderFrom` restarts a walk there - mid-cluster, reading nothing
+ahead of it (the position carries the enclosing cluster's timestamp and end, so
+the resumed blocks are stamped exactly as a full walk stamps them):
+
+```go
+pos := br.Pos()                  // where this walk stopped
+br2, err := reader.NewBlockReaderFrom(f, c.Info.TimecodeScale, pos)
+```
+
+This is what keeps consecutive reads of one source from overlapping: the Cues
+index can only name a CLUSTER, and a cluster usually spans several seconds - so
+a consumer that reads one window after another (an HLS segment, a scan stride)
+would re-read the whole cluster prefix each time. Handing the next walk the
+block the previous one stopped on reads each byte once.
+
 ---
 
 ## Writing MKV Files
