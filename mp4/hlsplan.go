@@ -78,17 +78,40 @@ type HLSPlan struct {
 	// (laced frames share one stored timecode; the stride times them) - a
 	// reader seeked to a cluster never sees the Tracks element on its own.
 	trackDurs map[uint64]int64
-	// segPos holds, per track and per segment, the exact block the window
-	// opens on. The index gives a segment's CLUSTER, and a cluster spans
-	// several segments of any usual grid: a walk that can only start at the
-	// cluster header re-reads that cluster's prefix once per segment it holds
-	// - the source is read several times over to serve it once. Each walk
-	// stops precisely on the block the NEXT segment opens on, so serving in
-	// playback order learns every start for free and reads each byte once;
-	// entries are pure hints (a miss just walks from the cluster, as before),
-	// so a seek anywhere, a fresh plan or a concurrent request stays correct.
+	// segPos holds, per segment, the exact block its window opens on - the
+	// Cues can only name the enclosing CLUSTER. It matters only where a
+	// cluster is long enough to hold the window (some muxers write multi-second
+	// clusters): the walk then skips the cluster prefix ahead of the window
+	// instead of reading it. Real releases cluster every ~2s, so a 6s segment
+	// spans several clusters and there is no prefix to skip - the entry is
+	// simply never a win there, and never a cost either. Each walk stops on the
+	// block the NEXT window opens on, so playback order learns them for free.
+	// Entries are pure hints: a miss walks from the cluster, so a seek anywhere,
+	// a fresh plan or a concurrent request stays correct.
 	segMu  sync.Mutex
-	segPos [][]reader.BlockPos
+	segPos []reader.BlockPos
+
+	// windows caches, per segment index, the media of EVERY rendition - built
+	// by the one walk that had to read all of it. That walk is the unit of I/O:
+	// a source interleaves its tracks block by block and every payload in a real
+	// file is too small for the reader to seek past, so reading a window for one
+	// rendition reads it for all of them. Serving video and audio through
+	// separate walks therefore read the source TWICE to serve it once; this is
+	// what makes it once. A bundle is dropped as soon as every rendition has been
+	// collected (seconds), and winBudget is only a net against a client that
+	// never collects the rest.
+	winMu     sync.Mutex
+	windows   map[int]*windowBundle
+	winFlight map[int]*windowFlight
+	winOrder  []int // insertion order, for the byte-budget trim
+	winBytes  int64
+	winBudget int64 // 0 = derive from the source (see budget); negative = sharing off
+	// winPeak is the largest window this plan has met - the budget is twice it.
+	// It is seeded from the Cues (the source bytes between two segment boundaries
+	// bound the window they hold) so that the FIRST window is already covered,
+	// then refined by the bundles actually built - which is what a growing plan,
+	// whose segments do not exist yet at construction, relies on entirely.
+	winPeak int64
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -334,6 +357,12 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		segs = append(segs, segInfo{durSec: p.durs[k], bytes: end - p.offsets[k]})
 	}
 	p.segs = segs
+	p.winBudget = o.WindowCacheBytes
+	for _, s := range segs {
+		if s.bytes > p.winPeak {
+			p.winPeak = s.bytes
+		}
+	}
 	fts := make([]*fragTrack, len(p.tracks))
 	for i, pt := range p.tracks {
 		fts[i] = pt.ft
@@ -896,143 +925,154 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 	return p.segmentTrack(ctx, p.videoIndex(), n)
 }
 
-// segmentWindow reads the ti-th track's n-th window from the source and
-// returns its samples plus the PTS of the track's first sample past the window
-// (-1 when the track ends inside it) - the boundary lookahead the fragment
-// timing needs.
+// walkWindow reads the n-th window of EVERY rendition in ONE pass and returns
+// each track's samples plus the PTS of its first sample past the window (-1
+// when the track ends inside it) - the boundary lookahead the fragment timing
+// needs.
 //
-// Cursor semantics, exactly like the full pass: the window starts at the
-// track's first sample (decode order) with PTS >= segStart and ends just
+// One pass, not one per rendition, because the source cannot give a rendition
+// its bytes without handing over the others': the tracks are interleaved block
+// by block, and in a real source EVERY payload (a ~10 KiB video frame, a ~2 KiB
+// audio frame) sits under the reader's seek-vs-read threshold, so a track filter
+// skips none of them. A walk therefore reads 100% of a window whichever slice of
+// it it serves - the video's ~77%, an audio track's ~11%. A viewer pulls video
+// AND audio for the same instant, so serving them through separate walks read
+// the window twice to serve it once. Building every rendition from the single
+// pass that had to read all those bytes anyway is what makes the source read
+// once. (The cluster prefix is NOT where the cost was: real clusters run ~2s,
+// so a 6s segment SPANS several of them - there is no prefix to re-read.)
+//
+// Cursor semantics per track, exactly like the full pass: a track's window
+// starts at its first sample (decode order) with PTS >= segStart and ends just
 // before its first sample with PTS >= segEnd. Everything in between belongs to
-// the window whatever its PTS - open-GOP leading B-frames ride with the
-// keyframe that follows them in presentation but precedes them in decode.
-// Membership keys on the enclosing block's stored timecode, so a lace is never
-// split.
-//
-// It reads what it serves, and no more: the other tracks' blocks never leave
-// the source (KeepTracks skips their payloads unread where they are big enough
-// to beat a read), and the walk opens on the window's own first block whenever
-// a previous walk revealed where that block sits - the cluster prefix ahead of
-// it, which the Cues alone cannot point past, is then never read at all. The
-// walk pays that discovery forward: it stops ON the block the next segment
-// opens on, so serving in playback order reads every source byte once.
-func (p *HLSPlan) segmentWindow(ctx context.Context, ti, n int, segStart, segEnd int64) ([]segSample, int64, error) {
-	pt := p.tracks[ti]
-	trackID := pt.ft.outTrack.mkv.ID
-
+// it whatever its PTS - open-GOP leading B-frames ride with the keyframe that
+// follows them in presentation but precedes them in decode. Membership keys on
+// the enclosing block's stored timecode, so a lace is never split. The latch is
+// held per track (a shared one would hand a track blocks its own cursor has not
+// reached yet, and change its bytes), and the walk runs until EVERY track has
+// crossed the end - one track's window can hold blocks stored after another
+// track already left the window.
+func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64) ([][]segSample, []int64, error) {
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
-		return nil, -1, err
+		return nil, nil, err
 	}
 	defer src.Close()
 
+	index := make(map[uint64]int, len(p.tracks))
+	keep := make([]uint64, 0, len(p.tracks))
+	for i, pt := range p.tracks {
+		index[pt.ft.outTrack.mkv.ID] = i
+		keep = append(keep, pt.ft.outTrack.mkv.ID)
+	}
+
+	// The window's opening block, when a previous walk revealed it: the FIRST
+	// block of any track past segStart, which necessarily precedes (or is) every
+	// track's own opening block - so resuming there loses no track's samples.
+	// The Cues can only name the enclosing cluster; on a source whose clusters
+	// are long enough to hold the whole window, this is what keeps the prefix
+	// ahead of it from being read. A miss simply walks from the cluster.
 	var br *reader.BlockReader
-	from := p.segPosAt(ti, n)
+	from := p.segPosAt(n)
 	if from.Valid() {
 		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
 	} else {
 		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.offsets[n])
 	}
 	if err != nil {
-		return nil, -1, err
+		return nil, nil, err
 	}
 	br.SetTrackDefaultDurations(p.trackDurs)
-	br.KeepTracks(trackID)
+	br.KeepTracks(keep...)
 
-	// Resuming on the window's opening block means the window has, by
-	// construction, already started; from a cluster header it has not (unless
-	// the presentation itself starts there).
-	started := n == 0 || from.Valid()
-	nextPts := int64(-1)
-	var window []segSample
-	for {
+	windows := make([][]segSample, len(p.tracks))
+	nextPts := make([]int64, len(p.tracks))
+	started := make([]bool, len(p.tracks))
+	crossed := make([]bool, len(p.tracks))
+	for i := range p.tracks {
+		nextPts[i] = -1
+		started[i] = n == 0
+	}
+	remaining := len(p.tracks)
+	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, -1, err
+			return nil, nil, err
 		}
 		b, err := br.Next()
 		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			break
 		}
 		if err != nil {
-			return nil, -1, errf("read block: %w", err)
+			return nil, nil, errf("read block: %w", err)
 		}
-		if !started {
+		ti, ok := index[b.TrackNumber]
+		if !ok || crossed[ti] {
+			continue
+		}
+		if !started[ti] {
 			if b.BlockTimecode < segStart {
 				continue // interleaved leftovers of the previous window
 			}
-			started = true
-			p.learnSegPos(ti, n, br.Pos()) // this window's own opening block
+			started[ti] = true
+			p.learnSegPos(n, br.Pos()) // first past segStart: where this window opens
 		}
 		if b.BlockTimecode >= segEnd {
-			nextPts = b.Timecode
-			p.learnSegPos(ti, n+1, br.Pos()) // where the next window opens
-			break
+			nextPts[ti] = b.Timecode
+			crossed[ti] = true
+			remaining--
+			p.learnSegPos(n+1, br.Pos()) // first past segEnd: where the next one opens
+			continue
 		}
+		pt := p.tracks[ti]
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
-		window = append(window, segSample{
+		windows[ti] = append(windows[ti], segSample{
 			fragSample: fragSample{size: uint32(len(data)),
 				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
 			data: data,
 		})
 	}
-	return window, nextPts, nil
+	return windows, nextPts, nil
 }
 
-// segPosAt returns the known opening block of track ti's n-th window, if a walk
-// has revealed it (zero BlockPos otherwise: walk from the segment's cluster).
-func (p *HLSPlan) segPosAt(ti, n int) reader.BlockPos {
-	if ti < 0 || n < 0 {
+// segPosAt returns the known opening block of the n-th window, if a walk has
+// revealed it (zero BlockPos otherwise: walk from the segment's cluster).
+func (p *HLSPlan) segPosAt(n int) reader.BlockPos {
+	if n < 0 {
 		return reader.BlockPos{}
 	}
 	p.segMu.Lock()
 	defer p.segMu.Unlock()
-	if ti >= len(p.segPos) || n >= len(p.segPos[ti]) {
+	if n >= len(p.segPos) {
 		return reader.BlockPos{}
 	}
-	return p.segPos[ti][n]
+	return p.segPos[n]
 }
 
-// learnSegPos records where a window opens. The store grows on demand rather
-// than being sized once: a growing plan appends segments as the source is
-// written, and only what has been walked is ever held. Writes are idempotent -
-// two walks reaching the same boundary find the same block - so concurrent
-// requests for the same segment race harmlessly.
-func (p *HLSPlan) learnSegPos(ti, n int, at reader.BlockPos) {
-	if !at.Valid() || ti < 0 || ti >= len(p.tracks) || n < 0 || n >= p.segCount {
+// learnSegPos records where a window opens. Only the FIRST block past the
+// boundary is kept: a later track crossing the same boundary must not push the
+// mark forward, or a resumed walk would open past a track's own first sample.
+// The store grows on demand (a growing plan appends segments as the source is
+// written). Writes are idempotent - two walks reaching the same boundary find
+// the same block - so concurrent requests race harmlessly.
+func (p *HLSPlan) learnSegPos(n int, at reader.BlockPos) {
+	if !at.Valid() || n < 0 || n >= p.segCount {
 		return
 	}
 	p.segMu.Lock()
 	defer p.segMu.Unlock()
-	for len(p.segPos) <= ti {
-		p.segPos = append(p.segPos, nil)
+	for len(p.segPos) <= n {
+		p.segPos = append(p.segPos, reader.BlockPos{})
 	}
-	for len(p.segPos[ti]) <= n {
-		p.segPos[ti] = append(p.segPos[ti], reader.BlockPos{})
+	if cur := p.segPos[n]; cur.Valid() && cur.Off <= at.Off {
+		return // an earlier block already opens this window
 	}
-	p.segPos[ti][n] = at
+	p.segPos[n] = at
 }
 
-// segmentTrack builds the n-th segment of the ti-th track - styp + moof +
-// mdat - reading only that segment's window from the source (segmentWindow
-// seeks to it and stops once the track crosses the window's end).
-func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
-	if n < 0 || n >= p.segCount {
-		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
-	}
-	if p.mp4src {
-		return p.mp4SegmentTrack(ctx, ti, n)
-	}
+// buildTrackSegment frames one rendition's window as a media segment - styp +
+// moof + mdat - from the samples the walk read for it.
+func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64) ([]byte, error) {
 	pt := p.tracks[ti]
-	segStart := p.bounds[n]
-	var segEnd int64 = 1<<63 - 1
-	if n+1 < p.segCount {
-		segEnd = p.bounds[n+1]
-	}
-
-	window, nextPts, err := p.segmentWindow(ctx, ti, n, segStart, segEnd)
-	if err != nil {
-		return nil, err
-	}
 
 	// Fragment timing - fillFragTiming's DTS derivation applied to the window,
 	// anchored on the track's global first PTS, with the boundary lookahead
@@ -1086,6 +1126,34 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
 	}
 	return out, nil
+}
+
+// segmentTrack builds the n-th segment of the ti-th track, reading only that
+// segment's window from the source. The walk that reads the window builds every
+// rendition of it (it had to read all their bytes to reach its own), so the
+// sibling segments of the same instant - the audio a viewer pulls beside its
+// video - are already built when they are asked for, and cost no I/O at all.
+func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
+	if n < 0 || n >= p.segCount {
+		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
+	}
+	if p.mp4src {
+		return p.mp4SegmentTrack(ctx, ti, n)
+	}
+	b, err := p.window(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	if data := p.takeRendition(n, ti, b); data != nil {
+		return data, nil
+	}
+	// Another request collected this rendition and its bytes were released with
+	// it. Rebuild the window: correctness never rests on the cache being there.
+	fresh, err := p.buildWindow(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	return fresh.segs[ti], nil
 }
 
 // Resources returns every resource name the plan serves - the HLS master, the

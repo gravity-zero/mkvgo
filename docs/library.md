@@ -228,6 +228,36 @@ reads just its samples' byte ranges. A server answers any HLS request in
 milliseconds with nothing pre-generated; combined with an `httpfs` source,
 only the ranges a viewer actually watches are ever transferred.
 
+**One walk serves a whole instant.** A Matroska source interleaves its tracks
+block by block, and in a real file every payload (a ~10 KiB video frame, a ~2 KiB
+audio frame) is far under the reader's seek-vs-read threshold - so reading a
+window for ONE rendition unavoidably reads it for all of them. A viewer pulls the
+video segment and the audio segment of the same instant, which would read that
+window twice to serve it once. The walk therefore frames **every rendition** of
+the window it reads, and the siblings are already built when they are asked for:
+requests that race (players fetch video and audio in parallel) share the single
+walk. Measured across 34 real 1080p/2160p releases, a viewer's read amplification
+halves on every one of them - from 2.1-3.7x down to 1.07-1.84x, and it holds
+through a mid-film seek. The source is read once per viewer, not once per
+rendition.
+
+A window is held only while it is **in flight**: each rendition's bytes are freed
+as they are delivered, and the window is dropped once a viewer has what a viewer
+takes - its video and ONE audio track. Nobody fetches the second language or the
+subtitles, so holding a window until every rendition is claimed would be waiting on
+a request that never comes, and those leftovers would crowd out the windows about
+to be collected. Retained media stays at ~0.5 MiB per plan.
+
+`Options.WindowCacheBytes` is the net beneath that (a client that takes video and
+never audio). Left at zero it is **derived from the source**: twice the largest
+window, floored at 32 MiB - a fixed ceiling would be wrong for somebody by
+construction (a 1080p window runs ~2 MiB, a high-bitrate 2160p one ~22 MiB), and
+one smaller than a window evicts it before the player has collected its audio, so
+the saving evaporates on exactly the biggest files. A negative value disables the
+sharing. A miss - a seek, a cold plan, an evicted bundle - simply walks the source,
+so serving stays stateless in effect and no request depends on another having
+happened.
+
 The fragments are built by the same code as `RemuxToHLS`, so every resource is
 **byte-identical** to the full pass (regression-tested) - pre-generated and
 on-demand serving mix transparently. Cover art and global tags ride in the

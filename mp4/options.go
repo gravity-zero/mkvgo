@@ -23,6 +23,30 @@ type Options struct {
 	// remux entry points report progress; OpenMeta/ReadMeta ignore it (the
 	// metadata probe is a single bounded read).
 	Progress mkv.ProgressFunc
+	// WindowCacheBytes bounds, per plan, the media an on-demand HLS/DASH plan
+	// holds for renditions nobody has asked for. A window's renditions are all
+	// built by the single walk that reads it (their bytes are interleaved: the
+	// source cannot yield one without yielding the others), so a viewer's audio
+	// segment is already built when its video segment's walk returns - and costs
+	// no read at all. Each rendition's bytes are freed the moment they are
+	// delivered, so what this bounds is only what nobody comes for: a viewer
+	// takes its video and ONE audio track, never the other languages.
+	//
+	// Zero DERIVES the budget from the source: twice the largest window, never
+	// below 32 MiB. A fixed ceiling is wrong for somebody by construction - a
+	// 1080p window runs ~2 MiB, a high-bitrate 2160p one ~22 MiB - and a budget
+	// smaller than one window evicts it before the player has collected its audio,
+	// so the second request re-walks and the saving evaporates on exactly the
+	// biggest files. Deriving it keeps a 1080p plan light (~4 MiB held per viewer),
+	// covers 2160p, and does not trip over a bitrate nobody has shipped yet.
+	//
+	// A negative value turns the sharing off entirely: every rendition then
+	// re-walks its own window, and a viewer's video and audio read the source
+	// twice over.
+	//
+	// Only the on-demand plans (PlanHLS, PlanABR, PlanGrowingHLS) honour this; a
+	// full pass writes every rendition from one walk by construction.
+	WindowCacheBytes int64
 	// SkipUnsupported drops audio/video tracks whose codec cannot be carried in
 	// the output instead of failing the whole remux. The remux still fails if no
 	// supported track remains. Every dropped track is reported via OnDrop.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 
@@ -43,6 +44,12 @@ func (c *countingFile) Seek(off int64, whence int) (int64, error) {
 
 func (c *countingFile) Close() error { return c.f.Close() }
 
+// sortBlocksByTimecode interleaves a cluster's tracks the way a muxer does:
+// in timecode order, stable so a tie keeps video ahead of its audio.
+func sortBlocksByTimecode(b []mkv.Block) {
+	sort.SliceStable(b, func(i, j int) bool { return b[i].Timecode < b[j].Timecode })
+}
+
 func countingFS(t *readTally) *mkv.FS {
 	return &mkv.FS{Open: func(path string) (mkv.ReadSeekCloser, error) {
 		f, err := os.Open(path)
@@ -53,27 +60,35 @@ func countingFS(t *readTally) *mkv.FS {
 	}}
 }
 
-// buildInterleavedSource writes the layout a real muxer produces and a serving
-// path pays for: several seconds of video per cluster (so one cluster holds
-// more than one HLS segment), a cue per video keyframe (not per cluster - that
-// is what puts two segment starts inside one cluster), and heavy interleaved
-// audio (two tracks, the VF+VO of a real release) whose bytes a video segment
-// must step over.
+// buildInterleavedSource writes the layout a real release actually has - the
+// numbers below are measured off real 1080p/2160p sources, not assumed:
 //
-// Sizes are scaled down but keep the proportions that decide the I/O: a
-// keyframe an order above a delta frame, delta frames and audio blocks both
-// well under the reader's seek-vs-read threshold.
+//   - clusters are SHORT (~2s), so a 6s segment SPANS about three of them. A
+//     cluster does not hold several segments; the reverse is true. (Assuming
+//     the opposite is what makes a fixture confirm whatever it was built to
+//     show.)
+//   - the video track is ~77% of the bytes, its payloads a median ~10 KiB;
+//     each audio track is ~11.5%, its blocks ~1.8 KiB. BOTH sit under the
+//     reader's 64 KiB seek-vs-read threshold, so a track filter skips none of
+//     them: serving one track still reads every byte of the window.
+//   - a cue per video keyframe, as every real muxer writes.
+//
+// What that layout costs is therefore NOT a re-read of a cluster: it is that a
+// viewer pulls video and audio for the same instant through two separate walks,
+// each of which reads the whole window to serve its slice of it.
 func buildInterleavedSource(tb testing.TB, seconds int) string {
 	tb.Helper()
 	const (
 		fps        = 25
-		gopSec     = 2  // keyframe (and cue) every 2s
-		clusterSec = 10 // one cluster spans several segments
-		keyBytes   = 60 << 10
-		deltaBytes = 12 << 10
-		audioBytes = 3 << 10
+		gopSec     = 2 // keyframe (and cue) every 2s
+		clusterMs  = 2000
+		keyBytes   = 80 << 10
+		deltaBytes = 14 << 10 // ~77% of the stream, median payload well under 64 KiB
+		audioBytes = 1792     // an AC-3 frame: ~11.5% per track, far under the threshold
+		audioMs    = 32       // one audio block per 32ms, as AC-3 frames run
 		scale      = 1_000_000
 	)
+	clusterTS := func(ms int64) int64 { return ms }
 	sample := func(n int, seed byte) []byte {
 		b := make([]byte, n)
 		for i := range b {
@@ -106,28 +121,37 @@ func buildInterleavedSource(tb testing.TB, seconds int) string {
 		tb.Fatal(err)
 	}
 
-	for cs := 0; cs < seconds; cs += clusterSec {
-		clusterTS := int64(cs) * 1000
+	totalMs := int64(seconds) * 1000
+	for cs := int64(0); cs < totalMs; cs += clusterMs {
+		clusterEnd := cs + clusterMs
 		clusterPos := m.RelPos()
 		var blks []mkv.Block
-		for f := cs * fps; f < (cs+clusterSec)*fps && f < seconds*fps; f++ {
-			ms := int64(f) * 1000 / fps
+
+		// Video: one frame per 1/fps, a keyframe (and a cue) every gopSec.
+		for f := cs * fps / 1000; f*1000/fps < clusterEnd; f++ {
+			ms := f * 1000 / fps
+			if ms < cs {
+				continue
+			}
 			key := f%(gopSec*fps) == 0
 			data := sample(deltaBytes, byte(f))
 			if key {
 				data = sample(keyBytes, byte(f))
-				// A real muxer cues every video keyframe, so a 10s cluster
-				// carries 5 cue points - and two HLS segment starts.
 				m.Cues = append(m.Cues, mkv.CuePoint{TimeMs: ms, Track: 1, ClusterPos: clusterPos})
 			}
 			blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: ms, Keyframe: key, Data: data})
-			blks = append(blks, mkv.Block{TrackNumber: 2, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(f+1))})
-			blks = append(blks, mkv.Block{TrackNumber: 3, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(f+2))})
-			if f%fps == 0 {
-				blks = append(blks, mkv.Block{TrackNumber: 4, Timecode: ms, Keyframe: true, Data: []byte("subtitle line")})
-			}
 		}
-		if err := writer.WriteCluster(m.W, clusterTS, scale, blks); err != nil {
+		// Two audio tracks (the VF+VO of a real release) and a subtitle track,
+		// interleaved through the same cluster.
+		for ms := cs; ms < clusterEnd; ms += audioMs {
+			blks = append(blks, mkv.Block{TrackNumber: 2, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(ms))})
+			blks = append(blks, mkv.Block{TrackNumber: 3, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(ms+1))})
+		}
+		for ms := cs; ms < clusterEnd; ms += 1000 {
+			blks = append(blks, mkv.Block{TrackNumber: 4, Timecode: ms, Keyframe: true, Data: []byte("subtitle line")})
+		}
+		sortBlocksByTimecode(blks)
+		if err := writer.WriteCluster(m.W, clusterTS(cs), scale, blks); err != nil {
 			tb.Fatal(err)
 		}
 	}
@@ -137,14 +161,18 @@ func buildInterleavedSource(tb testing.TB, seconds int) string {
 	return path
 }
 
-// TestServingReadAmplificationCeiling gates what serving consecutive segments
-// costs in source bytes read. A cluster holds several segments here (as in any
-// real muxing), so a walk that could only open on the cluster header re-read
-// its prefix once per segment inside it: the source went over the bus a
-// multiple of the bytes served. Playback order must now read each byte once -
-// the residue above 1.0 is the interleaved audio a video window steps over,
-// nothing more.
-func TestServingReadAmplificationCeiling(t *testing.T) {
+// TestViewerReadAmplificationCeiling gates what ONE VIEWER costs in source
+// bytes read - which is the only figure a direct-play server's capacity
+// answers to, since its ceiling is storage bandwidth.
+//
+// A viewer does not pull video alone: it pulls the video segment AND the audio
+// segment of the same instant. Those are two walks over the SAME window, and
+// neither can skip the other's bytes (every payload in a real source sits under
+// the reader's seek threshold), so each reads 100% of the window to serve its
+// own slice - the video ~77% of it, the audio ~11%. Read twice, serve once:
+// that, and not any cluster re-read, is the amplification. Playing a file to the
+// end must read it ONCE, not once per rendition.
+func TestViewerReadAmplificationCeiling(t *testing.T) {
 	src := buildInterleavedSource(t, 60)
 	st, err := os.Stat(src)
 	if err != nil {
@@ -160,30 +188,28 @@ func TestServingReadAmplificationCeiling(t *testing.T) {
 	tally = readTally{} // plan built: measure the serving alone
 	var served int64
 	n := plan.NumSegments()
+	audio := plan.videoIndex() + 1 // the first audio rendition: the one a viewer picks
 	for i := 0; i < n; i++ {
-		data, err := plan.Segment(ctx, i)
+		video, err := plan.Segment(ctx, i)
 		if err != nil {
 			t.Fatal(err)
 		}
-		served += int64(len(data))
+		sound, err := plan.segmentTrack(ctx, audio, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		served += int64(len(video)) + int64(len(sound))
 	}
 	amp := float64(tally.bytes) / float64(served)
-	t.Logf("source %.1f MiB, %d segments: %.2f MiB served, %.2f MiB read (%d reads) -> %.2fx",
-		float64(st.Size())/(1<<20), n, float64(served)/(1<<20), float64(tally.bytes)/(1<<20), tally.reads, amp)
+	over := float64(tally.bytes) / float64(st.Size())
+	t.Logf("source %.1f MiB, %d segments (video+audio): %.2f MiB served, %.2f MiB read (%d reads) -> %.2fx amplification, source read %.2f times",
+		float64(st.Size())/(1<<20), n, float64(served)/(1<<20), float64(tally.bytes)/(1<<20), tally.reads, amp, over)
 
-	// The window's own audio+subtitle bytes are the only legitimate surplus
-	// (~24% of this source): they are interleaved between the video blocks
-	// the window does serve, so a walk steps over them where it cannot seek
-	// past them. Anything approaching 2x means a segment is reading a
-	// neighbour's bytes again.
-	if amp > 1.75 {
-		t.Errorf("read amplification %.2fx: serving reads the source several times over", amp)
+	if amp > 1.35 {
+		t.Errorf("read amplification %.2fx: a viewer's renditions are each re-reading the same window", amp)
 	}
-	// Same statement from the source's side, and the one that decides a
-	// direct-play server's ceiling: playing a file from end to end must read
-	// it ONCE. Serving through cluster starts alone read it 1.7 times over.
-	if over := float64(tally.bytes) / float64(st.Size()); over > 1.15 {
-		t.Errorf("a full playthrough read the source %.2f times over", over)
+	if over > 1.15 {
+		t.Errorf("one viewer's playthrough read the source %.2f times over", over)
 	}
 }
 

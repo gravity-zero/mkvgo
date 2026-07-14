@@ -4,41 +4,85 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] - 2026-07-14
+
+### Changed
+
+- **A viewer read the source twice to be served once.** A direct-play server's
+  ceiling is its storage bandwidth, so a byte read and thrown away is a viewer it
+  cannot serve. A viewer does not pull video alone: it pulls the video segment AND
+  the audio segment of the same instant, and those were two separate walks over the
+  SAME window. Neither could skip the other's bytes - a source interleaves its
+  tracks block by block, and in a real file every payload (a ~10 KiB video frame, a
+  ~2 KiB audio frame) is far under the reader's seek-vs-read threshold, so a track
+  filter skips none of them. Each walk therefore read 100% of the window to serve
+  its own slice of it: the video ~77%, the audio ~11%. Read twice, serve once.
+
+  The walk that reads a window now frames EVERY rendition of it - it had to read
+  all of their bytes to reach its own - so the sibling segments of one instant are
+  already built when they are asked for, and cost no read at all. Requests that
+  race (hls.js pulls video and audio in parallel, and nothing orders them on the
+  server) share the one walk rather than opening a second over the same bytes.
+
+  A window is held only while it is in flight. A rendition's bytes are freed the
+  instant they are delivered, and the window goes as soon as a viewer has what a
+  viewer takes - its video and ONE audio track. Waiting for the rest would be
+  waiting for a request that never comes: nobody fetches the second language or
+  the subtitles, so a bundle held until exhaustion sits in the cache with its
+  leftovers, and on a source with heavy audio those leftovers crowd out the windows
+  that ARE about to be collected - the saving decays as the viewer watches on, and
+  a seek loses it outright. Dropping on the consumption profile keeps the retained
+  media at ~0.5 MiB per plan (it was 25-87 MiB when the leftovers stayed). A viewer
+  who switches language re-walks one window; a miss is correct by construction.
+
+  `Options.WindowCacheBytes` is what remains as a net - it bounds a client that
+  takes a video and never an audio - and left at zero it is **derived from the
+  source**: twice the largest window, floored at 32 MiB. A fixed ceiling is wrong
+  for somebody by construction (a 1080p window runs ~2 MiB, a high-bitrate 2160p
+  one ~22 MiB), and one under a window's size evicts it before the player has
+  collected its audio, so the second request re-walks and the saving evaporates on
+  precisely the biggest files. A miss - a seek, a cold plan, an evicted bundle, the
+  cache turned off - simply walks the source as before, so serving stays stateless
+  in effect: no request depends on another having happened.
+
+  Measured on **34 real releases** (rchar, 100 windows plus a mid-film seek, the
+  video + audio a viewer actually pulls): every one of them halves, **2.1-3.7x down
+  to 1.07-1.84x**, 1080p and 2160p alike, the heaviest 2160p remux (22 MiB windows)
+  landing at 1.08x, and the figure holds through a seek instead of decaying. The
+  source is read once per viewer instead of twice. Every resource is byte-identical
+  with the cache on, off, or evicted - checked against real sources, not only
+  fixtures.
+
+### Added
+
+- `Options.WindowCacheBytes` bounds the media an on-demand plan holds for the
+  renditions nobody asked for. Zero derives it from the source (twice the largest
+  window, floor 32 MiB); negative disables the sharing entirely.
+
 ## [0.23.0] - 2026-07-14
 
 ### Changed
 
-- **On-demand serving read the source several times over to hand it out once.**
-  A direct-play server's ceiling is its storage bandwidth, so every byte read and
-  thrown away is a viewer it cannot serve. Two habits of the segment walk read
-  bytes it never served. First, the walk could only open on a CLUSTER: the index
-  points at clusters, and a real muxer writes clusters spanning seconds while a
-  segment grid cuts every few - so one cluster holds two to five segments, and
-  each of them re-read that cluster from its header, stepping over the neighbours
-  it had already served (or was about to). Second, the walk read every track's
-  blocks and dropped the ones it did not want AFTER reading them: the audio (often
-  two heavy tracks) and the subtitles crossed the disk, the bus and the heap to be
-  discarded. Measured on a 2 GiB source, serving 30 consecutive segments: 96.7 MiB
-  read for 14.4 MiB served - **6.7 bytes read per byte served**, and the same ratio
-  from 3 segments to 30, so not a one-off warm-up cost.
+- **A segment walk can open on the window's own first block, not on its cluster's
+  header.** The Cues index can only name a CLUSTER, so a walk that opens there
+  reads whatever of the cluster precedes the window. Where a cluster is long enough
+  to hold a whole segment, that prefix was re-read once per segment inside it; the
+  walk now remembers the block each window opens on (it already stops on precisely
+  that block - that is how it knows the previous window ended) and resumes there.
 
-  A walk now opens on the window's own first block, not on its cluster's header.
-  Nothing points there - only a walk can find it - so each walk pays the discovery
-  forward: it already stops ON the block the next segment opens on (that is how it
-  knows the window ended), and it now remembers it. Serving in playback order
-  therefore reads every source byte exactly once, and the other tracks' blocks are
-  skipped inside the reader (`KeepTracks`), never copied out of it. The remembered
-  positions are pure hints: a seek anywhere, a cold plan or a concurrent request
-  simply walks from the cluster as before, so `Segment`/`Resource` stay stateless in
-  effect and safe under concurrency. Segments are byte-identical to what the full
-  pass writes - unchanged, and still gated as such end to end.
+  **This was released on a premise that does not hold for real sources, and its
+  effect on them is nil.** Real releases cluster every ~0.4-2s, so a 6s segment
+  SPANS three to fourteen clusters - there is no cluster prefix to re-read, and
+  measurement on real 1080p/2160p files confirms the amplification is unchanged to
+  the byte. The claim that this addressed the 6.7x read amplification was wrong: it
+  came from a fixture built to the assumption (10s clusters) instead of to the
+  measured layout, so it confirmed what it encoded. The real cause - a viewer's
+  renditions each re-reading the same window - is fixed in 0.24.0.
 
-  On a source shaped like a real release (10s clusters, a cue per keyframe, 6s
-  segments, two audio tracks): **2.54x -> 1.57x** read amplification, the residue
-  being the interleaved audio a video window physically sits between. A full
-  playthrough now reads the source once instead of 1.7 times over. Per-segment
-  allocations drop ~19% (the other tracks' payloads are no longer copied to be
-  discarded).
+  What this release does deliver: sources whose muxer writes long clusters do skip
+  the prefix, and the segment walk stopped copying the other tracks' payloads out
+  of the reader (`KeepTracks`), cutting per-segment allocations ~19%. It never
+  changed a byte of any segment.
 
 ### Added
 
