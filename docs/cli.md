@@ -1059,13 +1059,14 @@ mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 
 Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wrapped in a long-running `net/http` server (`mkvhttp.Handler`), so a player can be pointed straight at it: nothing is written to disk, every resource is built the first time it is requested.
 
 ```
-mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre]
+mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off]
 mkvgo serve <file.mkv|url> [-addr :8478] --direct
 mkvgo serve <file.mkv|url> [-addr :8478] --auto [-target mse-generic]
 ```
 
 - `-addr` sets the listen address (default `:8478`); the command prints the playable URL on startup.
 - Accepts the same shared HLS flags as `to-hls`/`hls-segment` (`-segment`, `--keep-tracks`, `--keep-lang`, ...) when packaging (the default mode, and the mode `--auto` falls back to).
+- `--window-cache <MiB>`: what the plan may hold for a window's un-collected renditions. A viewer asks for the video and the audio of the same instant, and one walk of the source builds both (their bytes are interleaved - reading one rendition's window reads them all), so the second request costs no read at all: a viewer reads the source once instead of twice, measured 2.1-3.7x down to 1.07-1.84x on real releases. Omit the flag and the plan sizes the budget from the source; `off` disables the sharing, and every rendition re-walks its own window.
 - Responses carry a strong ETag (SHA-256 of the bytes), support `Range` (206 partial content) and conditional `If-None-Match` (304), and set `Cache-Control` per resource class: `no-cache` for playlists/manifests (`.m3u8`/`.mpd`), `public, max-age=31536000, immutable` for everything else (segments and init segments are a deterministic function of the source, so caching them forever is safe). CORS headers are enabled, for a browser-based player on another origin.
 - `--direct`: skip packaging entirely and serve the raw file byte-range (`mkvhttp.FileHandler`) -- direct-play: serve the file as-is when the client supports it, no packaging.
 - `--auto`: run `mkvgo playability` (target `-target`, default `mse-generic`) and pick `--direct` when the overall verdict is direct-play, or the on-demand HLS plan otherwise; prints which mode it chose. `--direct` and `--auto` are mutually exclusive.

@@ -63,7 +63,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
 `{ fastStart?, skipUnsupported?, flattenSubs?, nativeWebVTT?,
 mp3ContainerDelay?, contentHashes?, segmentSeconds?, keepTracks?, subOffsetMs?,
-synthesizeIndex?, audioShiftMs? }`
+synthesizeIndex?, audioShiftMs?, windowCacheBytes? }`
 - the same semantics as the CLI flags ([cli.md](cli.md)). `keepTracks` (an
 array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
 2] })` serves a "VF only" version from one file, no copy. `synthesizeIndex`
@@ -71,6 +71,14 @@ array of track IDs) is the Virtual Edit Layer: `openHLS(file, { keepTracks: [1,
 in memory; `audioShiftMs` (`{trackNumber: ms}`, positive = presented earlier)
 cancels an A/V desync in the served segments via the init's edit list alone -
 both are serving-side repairs on a read-only input, nothing written.
+`windowCacheBytes` (openHLS/openABR) bounds what a plan holds for the renditions
+of a window nobody has collected. A player asks for the video and the audio of
+the same instant, and one walk of the source builds both - their bytes are
+interleaved, so reading one rendition's window reads them all - which is why the
+second request costs **no read at all**. Over a `Blob`/`File`, where every read is
+a range request the browser has to serve, that halves the traffic: a viewer reads
+the source once instead of twice. Omit it and the plan sizes itself from the
+source; a negative value turns the sharing off.
 `openHLS`/`openABR`
 additionally accept an `encrypt` option (AES-128 whole-segment) or a `cenc`
 option (Common Encryption); `openConcat`

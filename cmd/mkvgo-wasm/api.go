@@ -310,6 +310,14 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 		o.SubtitleOffsetMs = int64(s.Float())
 	}
 	o.SynthesizeIndex = v.Get("synthesizeIndex").Truthy()
+	// windowCacheBytes: what an on-demand plan may hold for the renditions of a
+	// window nobody has collected. Omit it and the plan sizes itself from the
+	// source; a negative value turns the sharing off (every rendition then
+	// re-walks its own window, so a viewer's video and audio read the source
+	// twice - through the Blob, that is twice the range requests).
+	if s := v.Get("windowCacheBytes"); s.Type() == js.TypeNumber {
+		o.WindowCacheBytes = int64(s.Float())
+	}
 	// audioShiftMs: {trackNumber: ms} - the browser-side ms shape converts to
 	// the library's nanoseconds here.
 	if m := v.Get("audioShiftMs"); m.Type() == js.TypeObject {

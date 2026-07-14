@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -33,6 +34,9 @@ func CmdServe(args []string) {
 	direct := false
 	auto := false
 	targetName := "mse-generic"
+	// windowCache: what the plan may hold for a window's un-collected renditions.
+	// 0 lets it size itself from the source (see mp4.Options.WindowCacheBytes).
+	var windowCache int64
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -49,6 +53,19 @@ func CmdServe(args []string) {
 			i++
 			if i < len(args) {
 				targetName = args[i]
+			}
+		case "-window-cache", "--window-cache":
+			i++
+			if i < len(args) {
+				if args[i] == "off" {
+					windowCache = -1
+					break
+				}
+				mib, err := strconv.ParseInt(args[i], 10, 64)
+				if err != nil || mib < 0 {
+					Fatal("serve: --window-cache takes a size in MiB, or \"off\"")
+				}
+				windowCache = mib << 20
 			}
 		default:
 			rest = append(rest, args[i])
@@ -83,6 +100,7 @@ func CmdServe(args []string) {
 	}
 
 	opts := f.options(src)
+	opts.WindowCacheBytes = windowCache
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}

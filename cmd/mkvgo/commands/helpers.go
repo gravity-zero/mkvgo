@@ -81,7 +81,7 @@ var CmdUsage = map[string]string{
 	"retime":             "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>] (cancel a constant A/V desync; MP4 = moov edit list only, mode flags do not apply)",
 	"cue-health":         "mkvgo cue-health <file.mkv> [-json] (head-only seek-index triage: which tracks the cues reference; exit 1 when unhealthy)",
 	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
-	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
+	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
 	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>",
