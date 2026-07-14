@@ -3,8 +3,10 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -182,6 +184,64 @@ func TestServingReadAmplificationCeiling(t *testing.T) {
 	// it ONCE. Serving through cluster starts alone read it 1.7 times over.
 	if over := float64(tally.bytes) / float64(st.Size()); over > 1.15 {
 		t.Errorf("a full playthrough read the source %.2f times over", over)
+	}
+}
+
+// A COLD plan hit concurrently is the race the learned starts introduce: two
+// goroutines walk the same stretch at once and both try to record the block a
+// window opens on. They must agree (a boundary is a property of the source, not
+// of who found it), and every segment must still come out byte-identical to the
+// cold reference. The existing concurrency gate warms the plan single-threaded
+// before it forks, so it never runs this path.
+func TestConcurrentColdPlanLearnsConsistently(t *testing.T) {
+	src := buildInterleavedSource(t, 60)
+	ctx := context.Background()
+	opts := Options{SegmentMs: 6000}
+
+	ref, err := PlanHLS(ctx, src, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := ref.NumSegments()
+	want := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		fresh, err := PlanHLS(ctx, src, opts) // cold every time: cluster path
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want[i], err = fresh.Segment(ctx, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	plan, err := PlanHLS(ctx, src, opts) // never served: the cache is empty
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan string, 64)
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(seed int) {
+			defer wg.Done()
+			for k := 0; k < n; k++ {
+				i := (k + seed) % n // workers enter the segment ring at different points
+				got, err := plan.Segment(ctx, i)
+				if err != nil {
+					errs <- fmt.Sprintf("segment %d: %v", i, err)
+					return
+				}
+				if !bytes.Equal(got, want[i]) {
+					errs <- fmt.Sprintf("segment %d: %d bytes, differs from the cold segment (%d bytes)", i, len(got), len(want[i]))
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }
 
