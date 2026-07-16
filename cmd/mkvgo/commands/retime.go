@@ -88,6 +88,10 @@ func CmdRetime(args []string) {
 
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict, KeepBackup: keepBackup}
 	printPreexisting := armPreexisting(&opts)
+	// The rewrite engine drops trailing junk past the declared Segment end;
+	// the operator must see what left the file.
+	var skipped []matroska.DamagedRange
+	opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
@@ -112,6 +116,7 @@ func CmdRetime(args []string) {
 	for track, ns := range shift {
 		fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)
 	}
+	printTrailingJunkDrops(skipped)
 	printDelta()
 }
 

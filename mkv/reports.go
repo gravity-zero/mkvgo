@@ -25,9 +25,13 @@ type SalvageReport struct {
 	// gaps because they precede the next video keyframe (Options.CleanCut).
 	CleanCutBytes int64 `json:"clean_cut_bytes"`
 	// TruncatedTail is the first-class "incomplete download" verdict: the
-	// final damaged range runs to the end of the file - the missing tail is
-	// not recoverable by ANY tool, only by re-acquiring the source. Mid-file
-	// damage without this flag is repairable in full (resync).
+	// final damaged range runs to the end of the file AND begins inside the
+	// declared Segment - the missing tail is not recoverable by ANY tool,
+	// only by re-acquiring the source. Mid-file damage without this flag is
+	// repairable in full (resync). Unparseable bytes lying entirely PAST the
+	// declared Segment end never set it: those are surplus bytes (trailing
+	// junk, a crashed in-place journal), still counted in DamagedRanges and
+	// BytesSkipped, but dropping them loses nothing.
 	TruncatedTail bool `json:"truncated_tail"`
 }
 
@@ -67,7 +71,7 @@ type CueHealthReport struct {
 type Finding struct {
 	// Kind: "no-index" | "index-misskeyed" | "index-sparse" |
 	// "index-stale-tracks" | "audio-delay" | "truncated" | "damaged" |
-	// "trailing-junk" | "streamed-size" | "no-moov".
+	// "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container".
 	Kind    string `json:"kind"`
 	Detail  string `json:"detail"`
 	Remedy  string `json:"remedy"`

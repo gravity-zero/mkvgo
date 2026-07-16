@@ -54,7 +54,7 @@ var retimeDispersionFactor = int64(5)
 // verification chain are shared.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
 	err := retimeInPlace(ctx, path, shift, opts, true)
-	if errors.Is(err, errRetimeScattered) || errors.Is(err, errRetimeUnknownSize) || errors.Is(err, errRetimeCueUnpatchable) {
+	if errors.Is(err, errRetimeScattered) || errors.Is(err, ErrUnknownSizeSegment) || errors.Is(err, errRetimeCueUnpatchable) {
 		return RetimeTracksReplace(ctx, path, shift, opts...)
 	}
 	return err
@@ -81,12 +81,41 @@ func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int6
 }
 
 // The in-place engine's structural refusals, as sentinels so the auto mode
-// can route them to the rewrite (which lifts all three): patches too dense,
-// a streamed Segment, cues the point-patcher cannot represent.
+// can route them to the rewrite (which lifts them): patches too dense, cues
+// the point-patcher cannot represent. (The third, a streamed Segment, is the
+// exported ErrUnknownSizeSegment below.)
 var (
 	errRetimeScattered      = errors.New("retime: patches too scattered for in-place")
-	errRetimeUnknownSize    = errors.New("retime: unknown-size (streamed) Segment is not supported in place")
 	errRetimeCueUnpatchable = errors.New("retime: the cue set cannot be point-patched in place")
+)
+
+// The refusal classes of the retime operations, exported so a caller can
+// route on errors.Is instead of parsing message text. Every one of them is
+// permanent for the same (file, shift) call: retrying it cannot succeed.
+// Transient conditions - I/O failures, a cancelled context, a leftover
+// temporary file - are never wrapped in these. A source that does not parse
+// wraps ErrCorruptSource (see reindex.go); a file that is not Matroska at
+// all wraps reader.ErrNotMatroska.
+var (
+	// ErrUnknownSizeSegment: the Segment declares no size (a streamed or
+	// interrupted write), which the in-place engines cannot patch safely -
+	// their crash-safety journal lives past the declared end. The rewrite
+	// engines lift it: RetimeTracks routes to RetimeTracksReplace on it
+	// automatically.
+	ErrUnknownSizeSegment = errors.New("unknown-size (streamed) Segment is not supported in place")
+	// ErrUnknownTrack: the shift map names a track number the file does not
+	// have.
+	ErrUnknownTrack = errors.New("the track does not exist in the file")
+	// ErrTrackHasNoBlocks: the track exists but carries no blocks, so there
+	// is nothing to shift (and no way to verify a shift).
+	ErrTrackHasNoBlocks = errors.New("the track has no blocks")
+	// ErrShiftNotRepresentable: the requested shift is not a whole number of
+	// timecode ticks at the file's TimecodeScale (or rounds to zero).
+	ErrShiftNotRepresentable = errors.New("the shift is not representable at the file's timecode scale")
+	// ErrShiftOutOfRange: applying the shift would push a block outside the
+	// representable range - past the int16 cluster-relative window, or to a
+	// negative absolute timestamp.
+	ErrShiftOutOfRange = errors.New("the shift would leave the representable timecode range")
 )
 
 // RetimeTracksReplace shifts the block timecodes of the given tracks through
@@ -105,6 +134,14 @@ var (
 // rewrite once patches are dense - and the rewrite also lifts two in-place
 // restrictions (unknown-size Segments; cue sets that cannot be
 // point-patched, since the index is rebuilt).
+//
+// Trailing junk past the declared Segment end is dropped from the rewritten
+// file and reported through Options.OnSkip, exactly as Reindex does - a few
+// surplus bytes at EOF never block the repair. Refusals wrap the exported
+// sentinels (ErrUnknownTrack, ErrShiftNotRepresentable, ErrShiftOutOfRange,
+// ErrTrackHasNoBlocks, ErrCorruptSource, reader.ErrNotMatroska), so a caller
+// routes on errors.Is instead of parsing text; all of them are permanent for
+// the same call.
 func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
 	if len(shift) == 0 {
@@ -147,13 +184,13 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 		return ps, nil
 	}
 
-	cues, scale, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate)
+	cues, scale, dropped, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate)
 	if err != nil {
 		return fail(err)
 	}
 	for track := range shiftTC {
 		if _, ok := firstTC[track]; !ok {
-			return fail(fmt.Errorf("retime: track %d has no blocks", track))
+			return fail(fmt.Errorf("retime: track %d has no blocks: %w", track, ErrTrackHasNoBlocks))
 		}
 	}
 
@@ -177,7 +214,17 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 	if err := emitRollbackEntry(ctx, rb, path, tmp, fs, opts); err != nil {
 		return fail(err)
 	}
-	return installReplacement(fs, tmp, path, mkv.KeepBackupFrom(opts))
+	if err := installReplacement(fs, tmp, path, mkv.KeepBackupFrom(opts)); err != nil {
+		return err
+	}
+	// Only after the replacement landed: an OnSkip for an operation that then
+	// fails would report a drop that never happened.
+	if onSkip := mkv.OnSkipFrom(opts); onSkip != nil {
+		for _, r := range dropped {
+			onSkip(r)
+		}
+	}
+	return nil
 }
 
 // retimeVerifyShifts re-walks path and checks every shifted track's first
@@ -219,14 +266,14 @@ func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (ma
 	shiftTC := make(map[uint64]int64, len(shift))
 	for track, deltaNs := range shift {
 		if !known[track] {
-			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s", track, path)
+			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, path, ErrUnknownTrack)
 		}
 		tc := roundDiv(deltaNs, scale)
 		if tc == 0 {
-			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick)", deltaNs, track, scale)
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick): %w", deltaNs, track, scale, ErrShiftNotRepresentable)
 		}
 		if tc*scale != deltaNs {
-			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick)", deltaNs, track, scale)
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick): %w", deltaNs, track, scale, ErrShiftNotRepresentable)
 		}
 		shiftTC[track] = tc
 	}
@@ -278,7 +325,7 @@ func retimeInPlace(ctx context.Context, path string, shift map[uint64]int64, opt
 	}
 	for track := range shiftTC {
 		if _, ok := firstTC[track]; !ok {
-			return fmt.Errorf("retime: track %d has no blocks", track)
+			return fmt.Errorf("retime: track %d has no blocks: %w", track, ErrTrackHasNoBlocks)
 		}
 	}
 
@@ -402,7 +449,7 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 		// The crash-safety journal lands past the end of the file and relies
 		// on readers stopping at the declared Segment end; an unknown-size
 		// (streamed) Segment would expose it. Same contract as ReindexInPlace.
-		return nil, nil, fmt.Errorf("%w; use retime --replace (or the automatic mode)", errRetimeUnknownSize)
+		return nil, nil, fmt.Errorf("retime: %w; use retime --replace (or the automatic mode)", ErrUnknownSizeSegment)
 	}
 	consumed := int64(ebmlHdrBytes) + ebmlHdr.Size + int64(segHdrBytes)
 	segEnd := consumed + segHdr.Size
@@ -418,10 +465,10 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 			if errors.Is(err, io.EOF) {
 				return patches, firstTC, nil
 			}
-			return nil, nil, fmt.Errorf("retime: top-level element at %d: %w (repair the file with reindex first)", elemStart, err)
+			return nil, nil, fmt.Errorf("retime: top-level element at %d: %w (repair the file with reindex first): %w", elemStart, err, ErrCorruptSource)
 		}
 		if h.Size < 0 {
-			return nil, nil, fmt.Errorf("retime: unknown-size element 0x%X at %d is not supported in place (use reindex first)", h.ID, elemStart)
+			return nil, nil, fmt.Errorf("retime: unknown-size element 0x%X at %d is not supported in place (use reindex first): %w", h.ID, elemStart, ErrCorruptSource)
 		}
 		if h.Size > maxReindexClusterSize {
 			return nil, nil, fmt.Errorf("retime: element 0x%X size %d exceeds limit (%d)", h.ID, h.Size, maxReindexClusterSize)
@@ -483,12 +530,12 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 		sub := bytes.NewReader(body[payloadStart : payloadStart+blockSize])
 		track, n, err := ebml.ReadDataSize(sub)
 		if err != nil || blockSize < int64(n)+3 {
-			return fmt.Errorf("retime: malformed block at %d", bodyOff+payloadStart)
+			return fmt.Errorf("retime: malformed block at %d: %w", bodyOff+payloadStart, ErrCorruptSource)
 		}
 		relOff := payloadStart + int64(n)
 		rel := int64(int16(binary.BigEndian.Uint16(body[relOff : relOff+2])))
 		if !tsSeen {
-			return fmt.Errorf("retime: block before cluster Timestamp at %d (malformed cluster)", bodyOff+payloadStart)
+			return fmt.Errorf("retime: block before cluster Timestamp at %d (malformed cluster): %w", bodyOff+payloadStart, ErrCorruptSource)
 		}
 		abs := clusterTS + rel
 		if cur, ok := firstTC[uint64(track)]; !ok || abs < cur {
@@ -500,10 +547,10 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 		}
 		newRel := rel + tc
 		if newRel < math.MinInt16 || newRel > math.MaxInt16 {
-			return fmt.Errorf("retime: shifting track %d block at %d would leave int16 relative-timecode range (%d)", track, bodyOff+payloadStart, newRel)
+			return fmt.Errorf("retime: shifting track %d block at %d would leave int16 relative-timecode range (%d): %w", track, bodyOff+payloadStart, newRel, ErrShiftOutOfRange)
 		}
 		if clusterTS+newRel < 0 {
-			return fmt.Errorf("retime: shifting track %d block at %d would make its absolute timestamp negative", track, bodyOff+payloadStart)
+			return fmt.Errorf("retime: shifting track %d block at %d would make its absolute timestamp negative: %w", track, bodyOff+payloadStart, ErrShiftOutOfRange)
 		}
 		orig := append([]byte(nil), body[relOff:relOff+2]...)
 		repl := make([]byte, 2)
@@ -519,7 +566,7 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 		chStart := pos()
 		ch, n, err := ebml.ReadElementHeader(br)
 		if err != nil || ch.Size < 0 || ch.Size > int64(br.Len()) {
-			return nil, fmt.Errorf("retime: cluster child at %d does not parse (repair the file with reindex first)", bodyOff+chStart)
+			return nil, fmt.Errorf("retime: cluster child at %d does not parse (repair the file with reindex first): %w", bodyOff+chStart, ErrCorruptSource)
 		}
 		payloadStart := chStart + int64(n)
 		switch ch.ID {
@@ -531,7 +578,7 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 		case mkv.IDTimestamp:
 			v, err := ebml.ReadUint(bytes.NewReader(body[payloadStart:payloadStart+ch.Size]), ch.Size)
 			if err != nil {
-				return nil, fmt.Errorf("retime: cluster Timestamp at %d does not parse", bodyOff+chStart)
+				return nil, fmt.Errorf("retime: cluster Timestamp at %d does not parse: %w", bodyOff+chStart, ErrCorruptSource)
 			}
 			clusterTS = int64(v)
 			tsSeen = true
@@ -549,7 +596,7 @@ func retimeCluster(body []byte, bodyOff int64, shiftTC map[uint64]int64, firstTC
 				gStart := gPos()
 				gh, gn, err := ebml.ReadElementHeader(gb)
 				if err != nil || gh.Size < 0 || gh.Size > int64(gb.Len()) {
-					return nil, fmt.Errorf("retime: BlockGroup child at %d does not parse", bodyOff+payloadStart+gStart)
+					return nil, fmt.Errorf("retime: BlockGroup child at %d does not parse: %w", bodyOff+payloadStart+gStart, ErrCorruptSource)
 				}
 				switch {
 				case gh.ID == 0xBF && gFirst && gh.Size == 4: // the group's own CRC-32
@@ -616,7 +663,7 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 		cpStart := pos()
 		cp, n, err := ebml.ReadElementHeader(br)
 		if err != nil || cp.Size < 0 || cp.Size > int64(br.Len()) {
-			return nil, fmt.Errorf("retime: Cues child at %d does not parse", bodyOff+cpStart)
+			return nil, fmt.Errorf("retime: Cues child at %d does not parse: %w", bodyOff+cpStart, ErrCorruptSource)
 		}
 		if cp.ID != mkv.IDCuePoint {
 			// CRC-32: only trustworthy as the first child, per spec. The
@@ -644,13 +691,13 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 			eStart := cPos()
 			eh, en, err := ebml.ReadElementHeader(cb)
 			if err != nil || eh.Size < 0 || eh.Size > int64(cb.Len()) {
-				return nil, fmt.Errorf("retime: CuePoint child at %d does not parse", bodyOff+cpStart+eStart)
+				return nil, fmt.Errorf("retime: CuePoint child at %d does not parse: %w", bodyOff+cpStart+eStart, ErrCorruptSource)
 			}
 			switch eh.ID {
 			case mkv.IDCueTime:
 				v, err := ebml.ReadUint(bytes.NewReader(cpBody[eStart+int64(en):eStart+int64(en)+eh.Size]), eh.Size)
 				if err != nil {
-					return nil, fmt.Errorf("retime: CueTime at %d does not parse", bodyOff+cpStart+eStart)
+					return nil, fmt.Errorf("retime: CueTime at %d does not parse: %w", bodyOff+cpStart+eStart, ErrCorruptSource)
 				}
 				cueTime = int64(v)
 				cueTimeOff = cpStart + int64(n) + eStart + int64(en)
@@ -703,7 +750,7 @@ func retimeCues(body []byte, bodyOff int64, shiftTC map[uint64]int64) ([]retimeP
 			return nil, fmt.Errorf("%w: cue at %d references both shifted and unshifted tracks (the rewrite regenerates the index)", errRetimeCueUnpatchable, bodyOff+cpStart)
 		}
 		if cueTimeOff < 0 {
-			return nil, fmt.Errorf("retime: cue at %d has no CueTime", bodyOff+cpStart)
+			return nil, fmt.Errorf("retime: cue at %d has no CueTime: %w", bodyOff+cpStart, ErrCorruptSource)
 		}
 		newTime := cueTime + delta
 		if newTime < 0 {

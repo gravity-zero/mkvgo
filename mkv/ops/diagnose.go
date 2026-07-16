@@ -3,10 +3,12 @@ package ops
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // diagnose.go - Diagnose is the one-call triage a media library scan needs:
@@ -46,6 +48,24 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	// Index health (head-only).
 	ch, err := CueHealth(ctx, path, opts...)
 	if err != nil {
+		// A .mkv that is really an ISO base media file is a CLASSIFICATION,
+		// not an error: an error would put the file back in the failed pile
+		// of every scan pass, while this finding settles it once - the file
+		// needs a rename/remux, no Matroska repair will ever apply. (The root
+		// mkvgo.Diagnose and the CLI sniff content and route such a file to
+		// the MP4 triage on their own; this finding is for callers addressing
+		// the Matroska engine directly.)
+		if errors.Is(err, reader.ErrNotMatroska) {
+			d.Findings = append(d.Findings, Finding{
+				Kind:   "wrong-container",
+				Detail: "the content is ISO base media (MP4/MOV), not Matroska/WebM",
+				Remedy: "rename or remux the file; mkvgo.Diagnose and the CLI route by content",
+			})
+			// Empty, not nil: every successful Diagnosis carries the map, and
+			// a consumer indexing it must not care which finding path ran.
+			d.AudioDelaysNs = map[uint64]int64{}
+			return d, nil
+		}
 		return nil, fmt.Errorf("diagnose: %w", err)
 	}
 	d.CueHealth = ch

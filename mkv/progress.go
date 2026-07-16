@@ -70,9 +70,13 @@ type Options struct {
 	// Not supported by ReindexInPlace, which cannot drop bytes from the file
 	// itself.
 	Resync bool
-	// OnSkip, when non-nil, is called once per source range that a Resync
-	// reindex dropped, after the copy and all its verifications have passed.
-	// It is never called when Resync is unset or when the source was clean.
+	// OnSkip, when non-nil, is called once per source range that a rewrite
+	// dropped, after the copy and all its verifications have passed. Under
+	// Resync that is every corrupted region the tolerant walk skipped;
+	// without Resync the strict rewrites (Reindex, ReindexReplace,
+	// RetimeTracksReplace) still drop - and report here - proven trailing
+	// junk past the declared Segment end, and nothing else. Never called
+	// when the source was clean.
 	OnSkip func(DamagedRange)
 	// OnRepair, when non-nil, is called once per region a Resync reindex
 	// reconstructed with zero or partial loss (see RepairedRange), after all

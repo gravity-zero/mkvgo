@@ -4,6 +4,62 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A handful of surplus bytes made a 2 GB file unrepairable.** Some batch
+  tools leave a few zero bytes PAST the declared Segment end - bytes no
+  reader ever sees, since readers stop at the declared end - yet the rewrite
+  engines (`Reindex`, `ReindexReplace`, `RetimeTracksReplace`, and the
+  automatic `RetimeTracks` once it routes to the rewrite) walked the source
+  to EOF, read the padding as a top-level element, and aborted the whole
+  operation on `invalid VINT: leading zero byte` - after reading 100% of the
+  file, and with a refusal message suggesting `Options.Resync`, which the
+  retime path did not honor. The walk is now bounded by the declared Segment
+  end: bytes past it that neither parse as an element nor carry any trace of
+  a Cluster are dropped from the output and reported through
+  `Options.OnSkip` (the CLI prints `dropped N B of trailing junk...`). Junk
+  must prove itself first - a bounded scan reaching EOF without finding even
+  the 4-byte Cluster ID - so real media behind an undershooting declared
+  size keeps being copied, and a cluster cut mid-write, which no structural
+  validation can see precisely because it is incomplete, keeps the strict
+  refusal rather than being dropped with the junk around it. Corruption
+  inside the declared Segment still refuses; that is what `Options.Resync`
+  is for. The rollback delta carries the dropped bytes:
+  `ApplyRollback` keeps reconstructing the original byte for byte, junk
+  included. Verified on real releases carrying 4-33 bytes of zero padding:
+  every repair that refused now lands, deep-verify and all, and a clean
+  source still rewrites byte-identical.
+
+- **Surplus bytes are not missing bytes.** The tolerant walk raised the
+  `TruncatedTail` verdict - "incomplete download, re-download the source" -
+  for ANY damage touching EOF, including bytes lying entirely past the
+  declared Segment end. A caller relaying that verdict told its operator to
+  re-download a file whose media is complete. `TruncatedTail` now requires
+  the damage to begin INSIDE the declared Segment; surplus bytes still count
+  in `DamagedRanges`/`BytesSkipped` and keep the `trailing-junk` finding, but
+  never the truncated verdict or its remedy.
+
+### Added
+
+- **Typed retime refusals.** Every permanent refusal of
+  `RetimeTracks`/`RetimeTracksInPlace`/`RetimeTracksReplace` now wraps an
+  exported sentinel - `ErrShiftNotRepresentable`, `ErrShiftOutOfRange`,
+  `ErrUnknownTrack`, `ErrTrackHasNoBlocks`, `ErrUnknownSizeSegment` - and the
+  strict-walk refusals of the reindex/retime family wrap `ErrCorruptSource`
+  (repair first, then retry). All re-exported by the `matroska` facade. A
+  caller routes on `errors.Is` - "permanent for this call, do not retry"
+  versus a transient failure - instead of parsing message text.
+
+- **`wrong-container` finding.** `Diagnose` on a `.mkv` whose content is
+  really ISO base media (MP4/MOV) used to return an error, putting the file
+  back in the failed pile of every scan pass. It now returns one structured
+  `wrong-container` finding (remedy: rename/remux, or route by content via
+  the root `mkvgo.Diagnose`), settling the file once. `CueHealth` on the same
+  file keeps failing but wraps `ErrNotMatroska` (`errors.Is`-able). Content
+  that is neither container remains an error.
+
 ## [0.24.0] - 2026-07-14
 
 ### Changed

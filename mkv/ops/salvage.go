@@ -183,9 +183,13 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: %w", err)
 	}
-	segBytes, err := beginSegmentRewrite(r, out, mw, rb)
+	segBytes, segDeclared, err := beginSegmentRewrite(r, out, mw, rb)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: %w", err)
+	}
+	declaredEnd := int64(-1)
+	if segDeclared >= 0 {
+		declaredEnd = ebmlBytes + segBytes + segDeclared
 	}
 
 	w := &salvageWalker{
@@ -195,6 +199,7 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		mw:          mw,
 		report:      &SalvageReport{},
 		fileSize:    stat.Size(),
+		declaredEnd: declaredEnd,
 		consumed:    ebmlBytes + segBytes,
 		scale:       1_000_000,
 		videoTracks: videoTracks,
@@ -224,6 +229,7 @@ type salvageWalker struct {
 	mw          *writer.MKVWriter
 	report      *SalvageReport
 	fileSize    int64
+	declaredEnd int64 // declared absolute Segment end; -1 when unknown (streamed)
 	consumed    int64 // absolute source offset of the next element to read
 	scale       int64 // timecode scale, picked up from Info during the walk
 	lastGoodMs  int64 // timestamp of the last successfully copied cluster
@@ -294,9 +300,13 @@ func (w *salvageWalker) recordDamage(start, end, startMs, endMs int64) {
 		StartOffset: start, EndOffset: end, ApproxStartMs: startMs, ApproxEndMs: endMs,
 	})
 	w.report.BytesSkipped += end - start
-	if end >= w.fileSize {
-		// The damage runs to the end of the file: the truncated-source
-		// verdict, whichever path detected it (plain resync, surgical scan).
+	if end >= w.fileSize && (w.declaredEnd < 0 || start < w.declaredEnd) {
+		// The damage runs to the end of the file AND began inside the declared
+		// Segment: the truncated-source verdict, whichever path detected it
+		// (plain resync, surgical scan). Damage that starts AT or past the
+		// declared end is surplus bytes (trailing junk, a crashed in-place
+		// journal) - bytes in excess are not bytes missing, and flagging them
+		// truncated would tell the operator to re-download a healthy file.
 		w.report.TruncatedTail = true
 	}
 	if w.cleanCut && len(w.videoTracks) > 0 {

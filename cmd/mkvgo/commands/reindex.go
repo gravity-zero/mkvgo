@@ -49,8 +49,10 @@ func CmdReindex(args []string) {
 	var repaired []matroska.RepairedRange
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync, CleanCut: cleanCut, StrictVerify: strict}
 	printPreexisting := armPreexisting(&opts)
+	// Always collect drops: even the strict walk drops trailing junk past
+	// the declared Segment end, and the operator must see what left the file.
+	opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
 	if resync {
-		opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
 		opts.OnRepair = func(r matroska.RepairedRange) { repaired = append(repaired, r) }
 	}
 	printDelta := func() {}
@@ -99,9 +101,12 @@ func CmdReindex(args []string) {
 
 // printResyncOutcome reports what a --resync run repaired and dropped, so the
 // operator knows exactly which byte ranges (and roughly which presentation
-// times) were reconstructed or lost. No-op without --resync.
+// times) were reconstructed or lost. Without --resync the strict walk only
+// ever drops trailing junk past the declared Segment end - said plainly when
+// it happened, silent otherwise.
 func printResyncOutcome(resync bool, skipped []matroska.DamagedRange, repaired []matroska.RepairedRange) {
 	if !resync {
+		printTrailingJunkDrops(skipped)
 		return
 	}
 	for i, r := range repaired {
@@ -124,4 +129,13 @@ func printResyncOutcome(resync bool, skipped []matroska.DamagedRange, repaired [
 			FmtMs(r.ApproxStartMs), FmtMs(r.ApproxEndMs))
 	}
 	fmt.Printf("  %s of corrupted data skipped across %d range(s)\n", FormatBytes(total), len(skipped))
+}
+
+// printTrailingJunkDrops reports the trailing bytes a strict rewrite dropped
+// past the declared Segment end. Shared by reindex and retime.
+func printTrailingJunkDrops(skipped []matroska.DamagedRange) {
+	for _, r := range skipped {
+		fmt.Printf("  dropped %s of trailing junk past the declared Segment end (offset %d-%d)\n",
+			FormatBytes(r.EndOffset-r.StartOffset), r.StartOffset, r.EndOffset)
+	}
 }

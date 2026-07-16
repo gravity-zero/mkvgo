@@ -509,8 +509,10 @@ type Diagnosis = ops.Diagnosis
 // Diagnose classifies a file in one call - seek-index health, per-track
 // audio start delays, declared-size coherence, and (only when the size check
 // suggests damage) the full tolerant walk - and names the remedy for every
-// finding (reindex / retime / resync / re-download). Head-mostly.
-// See ops.Diagnose.
+// finding (reindex / retime / resync / re-download). Head-mostly. A .mkv
+// whose content is really ISO base media (MP4/MOV) is classified rather than
+// failed: one "wrong-container" finding (remedy: rename/remux), so a scan
+// settles the file instead of erroring on it every pass. See ops.Diagnose.
 func Diagnose(ctx context.Context, path string, opts ...Options) (*Diagnosis, error) {
 	return ops.Diagnose(ctx, path, opts...)
 }
@@ -534,6 +536,32 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	return ops.RetimeTracks(ctx, path, shift, opts...)
 }
 
+// The retime refusal classes, re-exported so a caller routes on errors.Is
+// instead of parsing message text. Each is PERMANENT for the same (file,
+// shift) call - retrying it cannot succeed - unlike I/O failures or a
+// leftover temporary file, which are never wrapped in these. Two more typed
+// causes complete the set: ErrCorruptSource (the file needs a repair first)
+// and ErrNotMatroska (the file is not Matroska at all). See ops for the
+// per-sentinel contracts.
+var (
+	// ErrUnknownSizeSegment: streamed/unsealed Segment, in-place engines
+	// only; RetimeTracks routes to the rewrite on it automatically.
+	ErrUnknownSizeSegment = ops.ErrUnknownSizeSegment
+	// ErrUnknownTrack: the shift map names a track the file does not have.
+	ErrUnknownTrack = ops.ErrUnknownTrack
+	// ErrTrackHasNoBlocks: the named track exists but has nothing to shift.
+	ErrTrackHasNoBlocks = ops.ErrTrackHasNoBlocks
+	// ErrShiftNotRepresentable: the shift is not a whole number of timecode
+	// ticks at the file's TimecodeScale (or rounds to zero).
+	ErrShiftNotRepresentable = ops.ErrShiftNotRepresentable
+	// ErrShiftOutOfRange: the shift would push a block past the int16
+	// cluster-relative window or to a negative absolute timestamp.
+	ErrShiftOutOfRange = ops.ErrShiftOutOfRange
+	// ErrCorruptSource: the source itself does not parse; repair it first
+	// (Reindex with Options.Resync, or Salvage), then retry.
+	ErrCorruptSource = ops.ErrCorruptSource
+)
+
 // RetimeTracksInPlace forces the in-place engine: 2 bytes patched per block
 // under the crash-safe journal, no rewrite, file-only permission.
 // See ops.RetimeTracksInPlace.
@@ -543,7 +571,9 @@ func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int6
 
 // RetimeTracksReplace forces the sequential rewrite: timecodes patched on
 // the fly, the seek index rebuilt healthy, verified then atomically swapped
-// (KeepBackup keeps the original). See ops.RetimeTracksReplace.
+// (KeepBackup keeps the original). Trailing junk past the declared Segment
+// end is dropped and reported through Options.OnSkip instead of blocking the
+// repair. See ops.RetimeTracksReplace.
 func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
 	return ops.RetimeTracksReplace(ctx, path, shift, opts...)
 }

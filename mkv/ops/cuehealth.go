@@ -36,6 +36,11 @@ type CueHealthReport = mkv.CueHealthReport
 // proves cue times against real keyframes at the cost of a full read; CueHealth
 // spots an index that cannot seek video - absent, keyed on the wrong tracks, or
 // too full of holes - in milliseconds.
+//
+// A file whose content is ISO base media (MP4/MOV) rather than Matroska fails
+// with an error wrapping reader.ErrNotMatroska - errors.Is-able, so a scan
+// can classify the mislabeled file instead of retrying it forever (Diagnose
+// converts the same condition into a "wrong-container" finding).
 func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealthReport, error) {
 	fs := mkv.FSFrom(opts)
 	meta, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues())

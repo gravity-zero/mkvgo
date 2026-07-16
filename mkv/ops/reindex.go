@@ -523,6 +523,15 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // file-only-permission variant with no output copy (ReindexInPlace) exists
 // separately.
 //
+// Trailing junk is tolerated without any option: bytes past the DECLARED
+// Segment end that neither parse as an element nor carry any trace of a
+// Cluster (a bounded scan looks for the Cluster ID itself, so even a cluster
+// CUT mid-write keeps the strict refusal) are dropped from the output and
+// reported through Options.OnSkip - a few surplus bytes at EOF must not make
+// a 2 GB file unrepairable, and every reader already stops at the declared
+// end. Corruption INSIDE the declared Segment still aborts (wrapping
+// ErrCorruptSource); that is what Options.Resync is for.
+//
 // With Options.Resync set, a corrupted region in the cluster stream no longer
 // aborts the copy: the walk scans forward (bounded, 64 MiB) for the next
 // structurally valid Cluster and resumes, dropping the skipped bytes from the
@@ -546,7 +555,7 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		defer rb.cleanup()
 	}
 
-	cues, timecodeScale, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil)
+	cues, timecodeScale, dropped, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil)
 	if err != nil {
 		return err
 	}
@@ -560,13 +569,33 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		if err := deepVerifyValidate(ctx, dstPath, fs, before, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return err
 		}
+		// Dropped trailing junk does not disturb the verbatim proof: it lies
+		// past the declared Segment end, where the block walk never reads.
 		if err := deepVerifyVerbatim(ctx, srcPath, dstPath, fs); err != nil {
 			return err
 		}
 	}
 
-	return emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts)
+	if err := emitRollbackEntry(ctx, rb, srcPath, dstPath, fs, opts); err != nil {
+		return err
+	}
+	if onSkip := mkv.OnSkipFrom(opts); onSkip != nil {
+		for _, r := range dropped {
+			onSkip(r)
+		}
+	}
+	return nil
 }
+
+// ErrCorruptSource is wrapped into the strict-walk refusals of Reindex and
+// the retime operations when the source is not what the strict walk requires
+// of a sealed file: an element header that will not decode, a malformed
+// cluster child, a block that does not follow its cluster's Timestamp, or an
+// unknown-size element inside a sized Segment (a streamed leftover the
+// strict engines cannot bound). Permanent for the file as it is: retrying
+// the same call cannot succeed; repair the file first (Reindex with
+// Options.Resync, or Salvage) and then retry. errors.Is-able.
+var ErrCorruptSource = errors.New("the source is structurally corrupt")
 
 // clusterMutator lets a rewrite transform each cluster body in place before
 // it is written (RetimeTracksReplace patches block timecodes and cluster
@@ -583,7 +612,14 @@ type clusterMutator func(body []byte) ([]retimePatch, error)
 // the verbatim bodies, literals for the re-encoded headers and dropped index
 // elements. A non-nil mutate transforms each cluster body before writing (the
 // delta then splits its COPY runs around the mutated spans).
-func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator) (cues []mkv.CuePoint, timecodeScale int64, err error) {
+//
+// Trailing junk - bytes past the declared Segment end that neither parse as
+// an element nor carry any trace of a Cluster - is dropped from the output
+// and returned in dropped (at most one range, running to EOF), never an
+// error: surplus bytes must not make an otherwise-healthy file unrepairable.
+// The caller reports the range through Options.OnSkip once its own checks
+// pass.
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks map[uint64]bool
@@ -593,13 +629,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 
 	raw, err := fs.DoOpen(srcPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reindex open src: %w", err)
+		return nil, 0, nil, fmt.Errorf("reindex open src: %w", err)
 	}
 	defer raw.Close()
 
 	out, err := fs.DoCreate(dstPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reindex create dst: %w", err)
+		return nil, 0, nil, fmt.Errorf("reindex create dst: %w", err)
 	}
 	defer closeWithErr(out, &err)
 
@@ -607,11 +643,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	mw := writer.NewMKVWriter(out)
 
 	// ── EBML header + Segment open ────────────────────────────────────────────
-	if _, err := copyEBMLHeaderVerbatim(r, out, rb); err != nil {
-		return nil, 0, fmt.Errorf("reindex: %w", err)
+	ebmlBytes, err := copyEBMLHeaderVerbatim(r, out, rb)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("reindex: %w", err)
 	}
-	if _, err := beginSegmentRewrite(r, out, mw, rb); err != nil {
-		return nil, 0, fmt.Errorf("reindex: %w", err)
+	segBytes, segDeclared, err := beginSegmentRewrite(r, out, mw, rb)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("reindex: %w", err)
 	}
 
 	// ── Walk source Segment elements ──────────────────────────────────────────
@@ -622,34 +660,89 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		// cluster of the output has no predecessor, whatever the source said.
 		prevClusterSize = int64(-1)
 		firstCluster    = true
-		consumed        int64
+		// consumed is the absolute source offset of the next element to read.
+		consumed = ebmlBytes + segBytes
 	)
 	timecodeScale = 1_000_000 // default; overridden when Info is copied
 
-	var totalBytes int64
-	if progress != nil {
-		if stat, _ := fs.DoStat(srcPath); stat != nil {
-			totalBytes = stat.Size()
+	var fileSize int64
+	if stat, _ := fs.DoStat(srcPath); stat != nil {
+		fileSize = stat.Size()
+	}
+	// segEnd is the declared absolute end of the Segment; -1 when the size is
+	// unknown (streamed) or the file size is unavailable. Bytes at or past it
+	// are candidates for the trailing-junk drop below, never inside it.
+	segEnd := int64(-1)
+	if segDeclared >= 0 && fileSize > 0 {
+		segEnd = consumed + segDeclared
+	}
+
+	// dropTrailingJunk classifies the bytes at [start, EOF) - already known to
+	// sit at or past the declared Segment end and not to be a real element -
+	// and either records them as dropped junk (rollback literal included, so
+	// the delta keeps reconstructing the source byte for byte) or returns the
+	// strict refusal when they are not provably junk.
+	dropTrailingJunk := func(start int64, cause error) error {
+		junk, jerr := reindexTrailingJunk(raw, start, fileSize, lastCueMs(mw.Cues), cause)
+		if jerr != nil {
+			return jerr
 		}
+		if rb != nil {
+			rb.literalFrom(raw, junk.StartOffset, junk.EndOffset-junk.StartOffset)
+		}
+		dropped = append(dropped, junk)
+		return nil
 	}
 
 	for {
 		if ctx.Err() != nil {
-			return nil, 0, ctx.Err()
+			return nil, 0, nil, ctx.Err()
 		}
+		elemStart := consumed
 		h, hdrBytes, err := ebml.ReadElementHeader(r)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				// A bare io.EOF with bytes still on disk past the declared end
+				// is NOT a clean end: the header read consumed a complete
+				// element ID and hit EOF before its size (a torn write's exact
+				// shape). Breaking here would drop those bytes invisibly - no
+				// report, and a rollback delta missing them could never
+				// reconstruct the source.
+				if segEnd >= 0 && elemStart >= segEnd && elemStart < fileSize {
+					cause := fmt.Errorf("trailing bytes at %d end mid-element-header", elemStart)
+					if jerr := dropTrailingJunk(elemStart, cause); jerr != nil {
+						return nil, 0, nil, jerr
+					}
+				}
 				break
 			}
-			return nil, 0, fmt.Errorf("reindex: top-level element: %w (a corrupted region can be skipped with Options.Resync / --resync)", err)
+			if segEnd >= 0 && elemStart >= segEnd {
+				if jerr := dropTrailingJunk(elemStart, err); jerr != nil {
+					return nil, 0, nil, jerr
+				}
+				break
+			}
+			return nil, 0, nil, fmt.Errorf("reindex: top-level element: %w (a corrupted region can be skipped with Options.Resync / --resync): %w", err, ErrCorruptSource)
+		}
+		// Junk can also masquerade as an element header: past the declared
+		// Segment end, an element that has no bounded size or does not fit the
+		// remaining file cannot be real, and takes the same trailing-junk path
+		// (an element that parses AND fits is real and is copied as usual - a
+		// Segment whose declared size undershoots its content keeps working).
+		if segEnd >= 0 && elemStart >= segEnd &&
+			(h.Size < 0 || elemStart+int64(hdrBytes)+h.Size > fileSize) {
+			cause := fmt.Errorf("element 0x%X at %d overruns the end of the file", h.ID, elemStart)
+			if jerr := dropTrailingJunk(elemStart, cause); jerr != nil {
+				return nil, 0, nil, jerr
+			}
+			break
 		}
 
 		switch h.ID {
 		case mkv.IDSeekHead, mkv.IDCues, mkv.IDVoid:
 			// Drop old index elements - they will be rebuilt by Finalize.
 			if h.Size < 0 {
-				return nil, 0, fmt.Errorf("reindex: unknown-size index element 0x%X", h.ID)
+				return nil, 0, nil, fmt.Errorf("reindex: unknown-size index element 0x%X", h.ID)
 			}
 			litDst := io.Discard
 			if rb != nil {
@@ -658,23 +751,23 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				litDst = rb.literalWriter(h.Size)
 			}
 			if _, err := io.CopyN(litDst, r, h.Size); err != nil {
-				return nil, 0, fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
+				return nil, 0, nil, fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 
 		case mkv.IDInfo, mkv.IDTracks, mkv.IDTags, mkv.IDChapters, mkv.IDAttachments:
 			// Copy verbatim; record position so Finalize's SeekHead points here.
 			if h.Size < 0 {
-				return nil, 0, fmt.Errorf("reindex: unknown-size metadata element 0x%X", h.ID)
+				return nil, 0, nil, fmt.Errorf("reindex: unknown-size metadata element 0x%X", h.ID)
 			}
 			if h.Size > maxReindexClusterSize {
-				return nil, 0, fmt.Errorf("reindex: metadata element 0x%X size %d exceeds limit (%d bytes)", h.ID, h.Size, maxReindexClusterSize)
+				return nil, 0, nil, fmt.Errorf("reindex: metadata element 0x%X size %d exceeds limit (%d bytes)", h.ID, h.Size, maxReindexClusterSize)
 			}
 			// Buffer the body so we can (a) scan Info for timecodeScale and
 			// (b) write it out verbatim in one step.
 			metaBuf := make([]byte, h.Size)
 			if _, err := io.ReadFull(r, metaBuf); err != nil {
-				return nil, 0, fmt.Errorf("reindex: read 0x%X body: %w", h.ID, err)
+				return nil, 0, nil, fmt.Errorf("reindex: read 0x%X body: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 			// Extract timecodeScale from Info before writing.
@@ -688,7 +781,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				rb.literalHeader(h, hdrBytes)
 			}
 			if err := writeMetaElementVerbatim(mw, out, h, metaBuf); err != nil {
-				return nil, 0, fmt.Errorf("reindex: %w", err)
+				return nil, 0, nil, fmt.Errorf("reindex: %w", err)
 			}
 			if rb != nil {
 				// The body was just written verbatim, ending at the current
@@ -696,7 +789,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				// COPY source, with no assumption about the header encoding.
 				after, serr := out.Seek(0, io.SeekCurrent)
 				if serr != nil {
-					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+					return nil, 0, nil, fmt.Errorf("reindex: rollback offset: %w", serr)
 				}
 				rb.copyRun(after-h.Size, metaBuf)
 			}
@@ -704,12 +797,12 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		case mkv.IDCluster:
 			if h.Size < 0 {
 				if firstCluster {
-					return nil, 0, fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
+					return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
 				}
-				return nil, 0, fmt.Errorf("reindex: unknown-size cluster after first")
+				return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster after first")
 			}
 			if h.Size > maxReindexClusterSize {
-				return nil, 0, fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
+				return nil, 0, nil, fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
 			}
 			firstCluster = false
 
@@ -718,7 +811,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			}
 			body := clusterBuf[:h.Size]
 			if _, err := io.ReadFull(r, body); err != nil {
-				return nil, 0, fmt.Errorf("reindex: read cluster body: %w", err)
+				return nil, 0, nil, fmt.Errorf("reindex: read cluster body: %w", err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 
@@ -737,7 +830,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			if mutate != nil {
 				mp, merr := mutate(body)
 				if merr != nil {
-					return nil, 0, merr
+					return nil, 0, nil, merr
 				}
 				patches = append(patches, mp...)
 			}
@@ -762,13 +855,13 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				rb.literalHeader(h, hdrBytes)
 			}
 			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
-				return nil, 0, err
+				return nil, 0, nil, err
 			}
 			prevClusterSize = mw.RelPos() - outOff
 			if rb != nil {
 				after, serr := out.Seek(0, io.SeekCurrent)
 				if serr != nil {
-					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+					return nil, 0, nil, fmt.Errorf("reindex: rollback offset: %w", serr)
 				}
 				bodyDst := after - h.Size
 				// The written body may differ from the source at the mutated
@@ -787,41 +880,121 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				}
 			}
 
-			if progress != nil && totalBytes > 0 {
-				progress(consumed, totalBytes)
+			if progress != nil && fileSize > 0 {
+				progress(consumed, fileSize)
 			}
 
 		default:
 			// Unknown top-level element: copy verbatim to preserve any extensions.
 			if h.Size < 0 {
-				return nil, 0, fmt.Errorf("reindex: unknown-size element 0x%X", h.ID)
+				return nil, 0, nil, fmt.Errorf("reindex: unknown-size element 0x%X", h.ID)
 			}
 			if _, err := ebml.WriteElementID(out, h.ID); err != nil {
-				return nil, 0, fmt.Errorf("reindex: write unknown 0x%X ID: %w", h.ID, err)
+				return nil, 0, nil, fmt.Errorf("reindex: write unknown 0x%X ID: %w", h.ID, err)
 			}
 			if _, err := ebml.WriteDataSize(out, h.Size); err != nil {
-				return nil, 0, fmt.Errorf("reindex: write unknown 0x%X size: %w", h.ID, err)
+				return nil, 0, nil, fmt.Errorf("reindex: write unknown 0x%X size: %w", h.ID, err)
 			}
 			bodyDst := io.Writer(out)
 			if rb != nil {
 				rb.literalHeader(h, hdrBytes)
 				bodyOff, serr := out.Seek(0, io.SeekCurrent)
 				if serr != nil {
-					return nil, 0, fmt.Errorf("reindex: rollback offset: %w", serr)
+					return nil, 0, nil, fmt.Errorf("reindex: rollback offset: %w", serr)
 				}
 				bodyDst = io.MultiWriter(out, rb.copyRunStreamed(bodyOff, h.Size))
 			}
 			if _, err := io.CopyN(bodyDst, r, h.Size); err != nil {
-				return nil, 0, fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
+				return nil, 0, nil, fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 		}
 	}
 
 	if err := mw.Finalize(); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	return mw.Cues, timecodeScale, nil
+	return mw.Cues, timecodeScale, dropped, nil
+}
+
+// reindexTrailingJunk decides whether the bytes at [start, fileSize) - which
+// begin at or past the declared Segment end and do not parse as an element -
+// are droppable trailing junk. Junk must prove itself: a bounded scan
+// (salvageResyncCap, the window every resync scan uses) must reach EOF
+// without finding even a TRACE of a Cluster - the 4-byte Cluster ID, not a
+// structurally valid Cluster. A complete Cluster past the failure means real
+// media behind an undershooting Segment size, and a Cluster ID whose element
+// was cut mid-write (a torn download's tail) is real media too, invisible to
+// any structural validation precisely because it is incomplete; a strict
+// walk must drop neither. Anything unproven keeps the strict refusal
+// carrying cause. lastMs stamps the range with the last indexed time, the
+// closest honest approximation for bytes at the very end of the file.
+func reindexTrailingJunk(raw io.ReadSeeker, start, fileSize, lastMs int64, cause error) (mkv.DamagedRange, error) {
+	strict := fmt.Errorf("reindex: top-level element: %w (a corrupted region can be skipped with Options.Resync / --resync): %w", cause, ErrCorruptSource)
+	if start+salvageResyncCap < fileSize {
+		// Junk longer than the scan window cannot be proven junk.
+		return mkv.DamagedRange{}, strict
+	}
+	found, err := regionContainsClusterMagic(raw, start, fileSize)
+	if err != nil {
+		return mkv.DamagedRange{}, fmt.Errorf("reindex: trailing-bytes scan: %w", err)
+	}
+	if found {
+		return mkv.DamagedRange{}, strict
+	}
+	return mkv.DamagedRange{
+		StartOffset: start, EndOffset: fileSize,
+		ApproxStartMs: lastMs, ApproxEndMs: lastMs,
+	}, nil
+}
+
+// regionContainsClusterMagic reports whether [start, end) of raw contains the
+// 4-byte Cluster element ID anywhere, chunked with a 3-byte overlap so a
+// pattern straddling two reads is still seen.
+func regionContainsClusterMagic(raw io.ReadSeeker, start, end int64) (bool, error) {
+	magic := []byte{0x1F, 0x43, 0xB6, 0x75}
+	if _, err := raw.Seek(start, io.SeekStart); err != nil {
+		return false, err
+	}
+	const chunkSize = 64 << 10
+	buf := make([]byte, chunkSize)
+	carry := 0 // trailing bytes of the previous chunk kept in front of buf
+	for pos := start; pos < end; {
+		want := min(chunkSize-carry, int(end-pos))
+		n, err := io.ReadFull(raw, buf[carry:carry+want])
+		if n > 0 {
+			if bytes.Contains(buf[:carry+n], magic) {
+				return true, nil
+			}
+			pos += int64(n)
+			carry = copy(buf, tailBytes(buf[:carry+n], len(magic)-1))
+		}
+		if err != nil {
+			// The file ended earlier than the caller's bound: everything that
+			// exists has been scanned.
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// tailBytes returns the last n bytes of b (all of b when shorter).
+func tailBytes(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
+	}
+	return b[len(b)-n:]
+}
+
+// lastCueMs is the time of the last cue built so far, 0 when none exists yet.
+func lastCueMs(cues []mkv.CuePoint) int64 {
+	if len(cues) == 0 {
+		return 0
+	}
+	return cues[len(cues)-1].TimeMs
 }
 
 // copyEBMLHeaderVerbatim reads the source EBML header from r and writes it byte
@@ -866,14 +1039,16 @@ func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer, rb *rollbackBuilder) (in
 // output Segment the way every index rewrite does: unknown size, a Void
 // placeholder where Finalize will patch the rebuilt SeekHead, and the
 // writer's position bookkeeping primed. Returns the source bytes consumed
-// (the Segment header itself). Shared by reindexCopy and salvageCopy.
-func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter, rb *rollbackBuilder) (int64, error) {
+// (the Segment header itself) and the source's declared Segment size (-1
+// when unknown/streamed), so the walk can tell bytes past the declared end
+// from bytes inside it. Shared by reindexCopy and salvageCopy.
+func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter, rb *rollbackBuilder) (int64, int64, error) {
 	segHdr, segHdrBytes, err := ebml.ReadElementHeader(r)
 	if err != nil {
-		return 0, fmt.Errorf("read Segment header: %w", err)
+		return 0, 0, fmt.Errorf("read Segment header: %w", err)
 	}
 	if segHdr.ID != mkv.IDSegment {
-		return 0, fmt.Errorf("expected Segment, got 0x%X", segHdr.ID)
+		return 0, 0, fmt.Errorf("expected Segment, got 0x%X", segHdr.ID)
 	}
 	if rb != nil {
 		// The output Segment header is re-encoded (unknown size): the source
@@ -881,21 +1056,21 @@ func beginSegmentRewrite(r io.Reader, out io.WriteSeeker, mw *writer.MKVWriter, 
 		rb.literalHeader(segHdr, segHdrBytes)
 	}
 	if _, err := ebml.WriteElementID(out, mkv.IDSegment); err != nil {
-		return 0, fmt.Errorf("write Segment ID: %w", err)
+		return 0, 0, fmt.Errorf("write Segment ID: %w", err)
 	}
 	if _, err := ebml.WriteDataSize(out, -1); err != nil {
-		return 0, fmt.Errorf("write Segment size: %w", err)
+		return 0, 0, fmt.Errorf("write Segment size: %w", err)
 	}
 	segDataStart, err := out.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return 0, fmt.Errorf("seek Segment data start: %w", err)
+		return 0, 0, fmt.Errorf("seek Segment data start: %w", err)
 	}
 	mw.SegDataStart = segDataStart
 	mw.SeekHeadPos = 0
 	if err := writer.WriteVoid(out, writer.SeekHeadReserve); err != nil {
-		return 0, fmt.Errorf("write SeekHead placeholder: %w", err)
+		return 0, 0, fmt.Errorf("write SeekHead placeholder: %w", err)
 	}
-	return int64(segHdrBytes), nil
+	return int64(segHdrBytes), segHdr.Size, nil
 }
 
 // writeMetaElementVerbatim records the metadata element's output position on

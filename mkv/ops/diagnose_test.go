@@ -140,7 +140,10 @@ func TestDiagnose_Truncated(t *testing.T) {
 }
 
 // TestDiagnose_TrailingJunk: bytes beyond the declared Segment end are
-// reported without being mistaken for corruption.
+// reported without being mistaken for corruption - and never for a
+// truncated download: surplus bytes are not missing bytes, and the
+// truncated verdict's remedy ("re-download") would be wrong for a file
+// whose media is complete.
 func TestDiagnose_TrailingJunk(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -158,5 +161,41 @@ func TestDiagnose_TrailingJunk(t *testing.T) {
 	}
 	if f := hasFinding(d, "trailing-junk"); f == nil {
 		t.Errorf("want the trailing-junk finding, got %v", findingKinds(d))
+	}
+	if f := hasFinding(d, "truncated"); f != nil {
+		t.Errorf("surplus bytes must not diagnose truncated: %v", findingKinds(d))
+	}
+	if d.Damage == nil || d.Damage.TruncatedTail {
+		t.Error("trailing junk must not set the TruncatedTail verdict")
+	}
+}
+
+// TestDiagnose_WrongContainer: a .mkv whose content is ISO base media is a
+// classification, not an error - one structured finding settles the file
+// for every future scan pass, where an error would re-enter it each time.
+func TestDiagnose_WrongContainer(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	mp4ish := filepath.Join(dir, "fake.mkv")
+	writeAll(t, mp4ish, []byte{0, 0, 0, 16, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0})
+
+	d, err := Diagnose(ctx, mp4ish)
+	if err != nil {
+		t.Fatalf("an MP4 disguised as .mkv must classify, not fail: %v", err)
+	}
+	f := hasFinding(d, "wrong-container")
+	if d.Healthy || f == nil {
+		t.Fatalf("want the wrong-container finding, got %v", findingKinds(d))
+	}
+	if !strings.Contains(f.Remedy, "rename") && !strings.Contains(f.Remedy, "remux") {
+		t.Errorf("the remedy must point to rename/remux: %q", f.Remedy)
+	}
+
+	// Content that is neither Matroska nor ISO base media stays an error:
+	// there is nothing to classify about arbitrary garbage.
+	garbage := filepath.Join(dir, "garbage.mkv")
+	writeAll(t, garbage, []byte{0xAA, 0xBB, 0xCC, 0xDD, 'x', 'y', 'z', 'w'})
+	if _, err := Diagnose(ctx, garbage); err == nil {
+		t.Error("garbage content must keep failing Diagnose")
 	}
 }
