@@ -194,9 +194,10 @@ type Options struct {
 	// every frame verbatim and keeps the output byte-for-byte the unconverted
 	// presentation. The converter is a caller-supplied implementation (this
 	// module stays dependency-free); it is offered every audio track and
-	// converts only the ones it claims. RemuxToHLS/RemuxToABR and the on-
-	// demand plans honour it; RemuxToMP4/RemuxFromMP4 do not. See
-	// FrameConverter.
+	// converts only the ones it claims. From a Matroska source RemuxToHLS,
+	// RemuxToABR, PlanHLS and PlanABR honour it (full pass and plan stay
+	// byte-identical); the progressive RemuxToMP4/RemuxFromMP4 do not, and an
+	// MP4 source and PlanGrowingHLS are not wired yet. See FrameConverter.
 	FrameConverter FrameConverter
 
 	// ChapterMarkers exposes the source's chapters as navigable markers in the

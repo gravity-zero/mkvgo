@@ -298,6 +298,44 @@ Two serving-side repairs, nothing written to the source:
   byte-identical for the same shift); `mkvgo retime` remains the persistent
   fix.
 
+### Convert an audio codec at packaging time (`Options.FrameConverter`)
+
+Some audio codecs a source carries - AC-3, E-AC-3 - no browser decodes. Rather
+than transcode the file, `Options.FrameConverter` re-encodes each audio frame
+as segments are packaged, so the presentation is served in a codec every
+browser plays (FLAC) with nothing written to the source. It is an interface you
+implement (mkvgo stays dependency-free - the decoder and re-encoder are yours):
+
+```go
+type FrameConverter interface {
+    // (nil, nil) carries the track verbatim; otherwise a per-track converter.
+    NewTrackConverter(track mkv.Track) (TrackConverter, error)
+}
+type TrackConverter interface {
+    Convert(frame []byte) ([]byte, error)          // one frame in, one out
+    OutputCodec() (codec string, codecPrivate []byte) // e.g. "flac" + its header
+}
+
+plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{
+    SegmentMs:      6000,
+    FrameConverter: myAC3ToFLAC, // offered every audio track; converts the ones it claims
+})
+```
+
+The mapping is one frame in for one frame out (one AC-3 syncframe is 1536
+samples, one FLAC frame at block size 1536 the same), so timing and segment
+boundaries never move; only the bytes and the advertised codec change. When
+`FrameConverter` is nil - the default - every frame is carried verbatim and the
+output is byte-for-byte the unconverted presentation. `RemuxToHLS`,
+`RemuxToABR`, `PlanHLS` and `PlanABR` honour it from a Matroska source (full
+pass and plan stay byte-identical); the progressive `RemuxToMP4`/`RemuxFromMP4`
+do not, and conversion of an MP4 source and of `PlanGrowingHLS` is not wired
+yet.
+
+It is a library-only option: unlike the scalar options above it cannot be a CLI
+flag or a wasm field, because the converter is code you inject, not a value -
+the CLI and wasm can only enable a converter compiled in alongside them.
+
 ### Play while downloading (`mp4.PlanGrowingHLS`)
 
 ```go
