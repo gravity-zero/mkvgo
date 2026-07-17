@@ -1,0 +1,2 @@
+go test fuzz v1
+string("CHAPTER0=2700000000000:0:0")

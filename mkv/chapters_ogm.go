@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -127,5 +128,18 @@ func parseOGMTime(s string) (int64, error) {
 			return bad()
 		}
 	}
-	return h*3_600_000 + m*60_000 + sec*1000 + frac, nil
+	// The format puts no ceiling on HH, so the hours alone can be any int64
+	// the field spells. Left to itself the multiply wraps and hands back a
+	// negative timestamp, which reads as a chapter before the start of the
+	// file rather than as the bad input it is. rest is under an hour, m, sec
+	// and frac all being bounded above.
+	rest := m*60_000 + sec*1000 + frac
+	if h > math.MaxInt64/3_600_000 {
+		return bad()
+	}
+	ms := h * 3_600_000
+	if ms > math.MaxInt64-rest {
+		return bad()
+	}
+	return ms + rest, nil
 }
