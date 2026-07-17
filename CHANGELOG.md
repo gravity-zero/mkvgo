@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-07-18
+
 ### Fixed
 
 - **A handful of surplus bytes made a 2 GB file unrepairable.** Some batch
@@ -41,6 +43,15 @@ All notable changes to mkvgo are documented here. The format is based on
   in `DamagedRanges`/`BytesSkipped` and keep the `trailing-junk` finding, but
   never the truncated verdict or its remedy.
 
+- **An OGM chapter whose hours field does not fit is refused, not wrapped.**
+  The OGM simple-chapter format bounds minutes, seconds and the fraction but
+  never the hours, so a time like `2700000000000:0:0` overflowed the signed
+  64-bit millisecond it is converted to and wrapped into a large negative
+  `StartMs` - a chapter apparently starting long before the file - instead of
+  an error. `ParseOGMChapters` now rejects an hours field that would not fit;
+  the largest time it accepts is `2562047788015:12:55.807`. Found by the fuzz
+  suite; the crashing input is kept as a regression seed.
+
 ### Added
 
 - **Typed retime refusals.** Every permanent refusal of
@@ -59,6 +70,26 @@ All notable changes to mkvgo are documented here. The format is based on
   the root `mkvgo.Diagnose`), settling the file once. `CueHealth` on the same
   file keeps failing but wraps `ErrNotMatroska` (`errors.Is`-able). Content
   that is neither container remains an error.
+
+- **An optional audio frame converter for HLS packaging.**
+  `Options.FrameConverter` re-encodes an audio track's frames from one codec
+  to another as HLS segments are packaged - a way to serve a source codec a
+  browser does not decode as one it does - through a small interface the
+  caller implements, so the module itself stays dependency-free. When nil (the
+  default) every frame is carried verbatim and the packaged output is
+  byte-for-byte the unconverted presentation. The full pass (`RemuxToHLS`,
+  `RemuxToABR`, from a Matroska or an MP4 source) honours it, feeding each
+  track's frames through the converter in decode order; a claimed track is
+  rebound to its output codec so the existing sample-entry machinery is
+  reused. The on-demand plans refuse a converter for now - a shared converter
+  cannot serve windows built out of order and in parallel; per-window
+  conversion with preroll is a later step. See `docs/library.md`.
+
+- **MPEG-TS is named.** The root sniff behind `RetimeTracks`/`Diagnose`
+  recognises an MPEG-TS transport stream - a `0x47` sync byte confirmed by a
+  second one exactly a packet (188 bytes) later - and reports it with remux
+  guidance instead of the generic "unrecognised container" message. A lone
+  `0x47` stays unrecognised.
 
 ## [0.24.0] - 2026-07-14
 
