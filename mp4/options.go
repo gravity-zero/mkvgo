@@ -187,6 +187,18 @@ type Options struct {
 	// `mkvgo retime`.
 	AudioPresentationShift map[uint64]int64
 
+	// FrameConverter, when set, re-encodes audio frames from one codec to
+	// another as segments are packaged - the seam that serves an AC-3 or
+	// E-AC-3 track as FLAC (which every browser decodes) with no separate
+	// transcode and no change to the source file. nil (the default) carries
+	// every frame verbatim and keeps the output byte-for-byte the unconverted
+	// presentation. The converter is a caller-supplied implementation (this
+	// module stays dependency-free); it is offered every audio track and
+	// converts only the ones it claims. RemuxToHLS/RemuxToABR and the on-
+	// demand plans honour it; RemuxToMP4/RemuxFromMP4 do not. See
+	// FrameConverter.
+	FrameConverter FrameConverter
+
 	// ChapterMarkers exposes the source's chapters as navigable markers in the
 	// HLS/DASH manifests (RemuxToHLS/PlanHLS): one EXT-X-DATERANGE per chapter
 	// in the video media playlist, and one Event per chapter in a DASH

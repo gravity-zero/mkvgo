@@ -428,6 +428,10 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 			continue
 		}
 		data := ft.outTrack.mkv.RestoreHeader(b.Data)
+		data, err = ft.outTrack.convertFrame(data)
+		if err != nil {
+			return errf("convert frame: %w", err)
+		}
 		if ft.outTrack.sampleEntry == nil {
 			entry, err := ft.outTrack.spec.sampleEntry(&ft.outTrack.mkv, data)
 			if err != nil {
