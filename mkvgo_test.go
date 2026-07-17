@@ -150,3 +150,35 @@ func TestRetimeTracksUnknownContainer(t *testing.T) {
 		t.Errorf("unknown container must refuse, got %v", err)
 	}
 }
+
+// TestSniffNamesMPEGTS: a transport stream (0x47 sync every 188 bytes) is
+// named as MPEG-TS with remux guidance, not lumped into "unrecognised" - a
+// common mislabel that a bare "not a container" message leaves the user
+// guessing about.
+func TestSniffNamesMPEGTS(t *testing.T) {
+	ts := make([]byte, 200)
+	ts[0] = 0x47   // first packet sync
+	ts[188] = 0x47 // next packet sync, confirming the 188-byte cadence
+	path := filepath.Join(t.TempDir(), "stream.mp4")
+	if err := os.WriteFile(path, ts, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Diagnose(context.Background(), path)
+	if err == nil || !strings.Contains(err.Error(), "MPEG-TS") {
+		t.Errorf("MPEG-TS must be named, got %v", err)
+	}
+
+	// A lone 0x47 with no second sync stays "unrecognised": one byte is not a
+	// transport stream, and mislabelling arbitrary data as MPEG-TS would be
+	// worse than the generic message.
+	lone := make([]byte, 200)
+	lone[0] = 0x47
+	lonePath := filepath.Join(t.TempDir(), "lone.bin")
+	if err := os.WriteFile(lonePath, lone, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Diagnose(context.Background(), lonePath)
+	if err == nil || !strings.Contains(err.Error(), "unrecognised") {
+		t.Errorf("a lone 0x47 must stay unrecognised, got %v", err)
+	}
+}

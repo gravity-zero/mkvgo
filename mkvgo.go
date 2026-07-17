@@ -98,5 +98,15 @@ func sniffContainer(path string, o *matroska.Options) (string, error) {
 	case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
 		return "mp4", nil
 	}
+	// MPEG-TS carries no header, only a 0x47 sync byte every 188 bytes. One
+	// sync byte is a coincidence; a second one exactly a packet later is not,
+	// so it is named rather than lumped into "unrecognised" - a transport
+	// stream is a common mislabel and needs remuxing, not repair.
+	if head[0] == 0x47 {
+		var rest [181]byte // reach the sync byte at offset 188 (8 + 180)
+		if _, err := io.ReadFull(f, rest[:]); err == nil && rest[180] == 0x47 {
+			return "", fmt.Errorf("mkvgo: %s: this is an MPEG-TS transport stream, not a container mkvgo reads - remux it to MP4 or Matroska first", path)
+		}
+	}
 	return "", fmt.Errorf("mkvgo: %s: unrecognised container (neither an EBML/Matroska header nor an ISO-BMFF box)", path)
 }
