@@ -17,11 +17,13 @@ import "github.com/gravity-zero/mkvgo/mkv"
 // re-encoded, and supplies the per-track converter that does it.
 type FrameConverter interface {
 	// NewTrackConverter returns a converter for one audio track, or (nil, nil)
-	// to carry that track verbatim. It is called once per audio track per
-	// packaging pass, so a converter's per-track state - a decoder's
-	// inter-frame overlap, a re-encoder's running sample number - is never
-	// shared across tracks and never reused across passes (each on-demand
-	// window and each full pass gets its own).
+	// to carry that track verbatim. It is called once per audio track on the
+	// full pass (RemuxToHLS/RemuxToABR), which feeds that track's frames
+	// through the one converter in decode order, on one goroutine - the shape a
+	// stateful decoder (inter-frame overlap) and re-encoder (a running sample
+	// number) need. The on-demand plans (PlanHLS and kin) refuse a converter
+	// rather than share one instance across windows they build out of order and
+	// in parallel; per-window conversion with preroll is a later step.
 	//
 	// The track is the source track (its Channels, SampleRate and ID carry
 	// over to the converted output unchanged); only video tracks are never
@@ -116,6 +118,27 @@ func applyFrameConverterToTracks(fc FrameConverter, tracks []*outTrack) error {
 			}
 			ot.sampleEntry = entry
 		}
+	}
+	return nil
+}
+
+// refuseFrameConverterOnPlan rejects a FrameConverter on the on-demand plan
+// paths (PlanHLS, PlanABR through it, PlanGrowingHLS). Conversion runs only on
+// the full pass, which feeds a track's frames through one converter in decode
+// order, once, on one goroutine - the shape a stateful audio decoder needs
+// (inter-frame overlap) and a re-encoder needs (a running sample number).
+//
+// A plan cannot use one converter that way: it builds windows out of order, on
+// demand, and races two of them concurrently (a viewer's video and audio, a
+// seek), so a single shared converter would be mutated from two goroutines and
+// carry the wrong inter-frame state into a window that does not follow the last
+// one served. Doing it right - a fresh converter per window, primed with the
+// frames before the window's start - is the audio decoder's own work and is
+// deferred to that integration. Until then, refusing is honest: the alternative
+// is silently garbled audio on exactly the serving path.
+func refuseFrameConverterOnPlan(fc FrameConverter) error {
+	if fc != nil {
+		return errf("Options.FrameConverter is not supported on the on-demand plans yet - use RemuxToHLS/RemuxToABR (the full pass converts a track's frames in order); per-window conversion with preroll is the next step")
 	}
 	return nil
 }

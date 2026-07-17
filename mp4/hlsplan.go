@@ -137,6 +137,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if segMs <= 0 {
 		segMs = defaultSegmentMs
 	}
+	if err := refuseFrameConverterOnPlan(o.FrameConverter); err != nil {
+		return nil, err
+	}
 
 	// Source sniff: an MP4's moov IS the index (sample offsets/sizes/sync,
 	// head-only), so its plan is exact by construction; a Matroska source
@@ -163,9 +166,6 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	planned, _, err := planTracks(c, o)
 	if err != nil {
-		return nil, err
-	}
-	if err := applyFrameConverterToTracks(o.FrameConverter, planned); err != nil {
 		return nil, err
 	}
 	// Track selection mirrors remuxToHLSInto exactly so a variant's plan stays
@@ -1028,10 +1028,6 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		}
 		pt := p.tracks[ti]
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
-		data, err = pt.ft.outTrack.convertFrame(data)
-		if err != nil {
-			return nil, nil, errf("convert frame: %w", err)
-		}
 		windows[ti] = append(windows[ti], segSample{
 			fragSample: fragSample{size: uint32(len(data)),
 				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},

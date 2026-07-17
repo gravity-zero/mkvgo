@@ -316,7 +316,7 @@ type TrackConverter interface {
     OutputCodec() (codec string, codecPrivate []byte) // e.g. "flac" + its header
 }
 
-plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{
+err := mp4.RemuxToHLS(ctx, "movie.mkv", "stream/", mp4.Options{
     SegmentMs:      6000,
     FrameConverter: myAC3ToFLAC, // offered every audio track; converts the ones it claims
 })
@@ -326,11 +326,16 @@ The mapping is one frame in for one frame out (one AC-3 syncframe is 1536
 samples, one FLAC frame at block size 1536 the same), so timing and segment
 boundaries never move; only the bytes and the advertised codec change. When
 `FrameConverter` is nil - the default - every frame is carried verbatim and the
-output is byte-for-byte the unconverted presentation. `RemuxToHLS`,
-`RemuxToABR`, `PlanHLS` and `PlanABR` honour it from a Matroska source (full
-pass and plan stay byte-identical); the progressive `RemuxToMP4`/`RemuxFromMP4`
-do not, and conversion of an MP4 source and of `PlanGrowingHLS` is not wired
-yet.
+output is byte-for-byte the unconverted presentation.
+
+The full pass honours it: `RemuxToHLS` and `RemuxToABR`, from a Matroska or an
+MP4 source, feed each track's frames through the converter in decode order -
+the order a stateful decoder (inter-frame overlap) and re-encoder (a running
+sample number) need. The on-demand plans (`PlanHLS`, `PlanABR`,
+`PlanGrowingHLS`) refuse a converter for now, because they build segment
+windows out of order and in parallel and a single shared converter cannot serve
+them; per-window conversion with preroll is the next step. The progressive
+`RemuxToMP4`/`RemuxFromMP4` ignore the option.
 
 It is a library-only option: unlike the scalar options above it cannot be a CLI
 flag or a wasm field, because the converter is code you inject, not a value -

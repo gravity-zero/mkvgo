@@ -203,6 +203,9 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	if len(c.Tracks) == 0 {
 		return nil, errf("%s: no Tracks element yet (the downloader must write the head before play-while-downloading can start)", srcPath)
 	}
+	if err := refuseFrameConverterOnPlan(o.FrameConverter); err != nil {
+		return nil, err
+	}
 
 	planned, _, err := planTracks(c, o)
 	if err != nil {
