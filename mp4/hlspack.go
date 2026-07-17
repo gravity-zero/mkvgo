@@ -108,6 +108,10 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		if err != nil {
 			return errf("read sample: %w", err)
 		}
+		data, err = ft.outTrack.convertFrame(data)
+		if err != nil {
+			return errf("convert frame: %w", err)
+		}
 		if ft.outTrack.sampleEntry == nil {
 			entry, err := ft.outTrack.spec.sampleEntry(&ft.outTrack.mkv, data)
 			if err != nil {
@@ -118,7 +122,9 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		if _, err := ft.tmp.Write(data); err != nil {
 			return errf("buffer sample: %w", err)
 		}
-		ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
+		// size is the written (possibly converted) byte count; processed tracks
+		// progress against the source, so it keeps the source sample size.
+		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)), ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
 		processed += int64(s.size)
 		if progress != nil {
 			progress(processed, ps.size)

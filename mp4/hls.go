@@ -167,6 +167,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if err != nil {
 		return nil, err
 	}
+	if err := applyFrameConverterToTracks(o.FrameConverter, planned); err != nil {
+		return nil, err
+	}
 	// One demuxed rendition per track: the video, each audio, and the text
 	// subtitles as WebVTT renditions. Secondary video tracks have no HLS/DASH
 	// form here (they would be camera angles) and are dropped with a reason.

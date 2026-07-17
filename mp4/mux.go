@@ -259,20 +259,6 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 		if o.ContentHashes {
 			ot.hasher = sha256.New()
 		}
-		// An audio frame converter, when it claims this track, rebinds it to the
-		// output codec here - so every step below (the sample-entry decision, the
-		// brand, the lazy build during streaming) sees the converted codec and
-		// only the frame bytes still pass through it downstream.
-		conv, err := applyFrameConverter(o.FrameConverter, ot)
-		if err != nil {
-			if o.SkipUnsupported {
-				o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: err.Error()})
-				continue
-			}
-			return nil, nil, err
-		}
-		ot.conv = conv
-		spec = ot.spec // may have been rebound to the converter's output codec
 		// Codecs whose config comes from CodecPrivate are validated now (fail
 		// fast); those needing the first frame are built lazily during streaming.
 		if !spec.needsFirstFrame {

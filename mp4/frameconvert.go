@@ -85,6 +85,41 @@ func applyFrameConverter(fc FrameConverter, ot *outTrack) (TrackConverter, error
 	return tc, nil
 }
 
+// applyFrameConverterToTracks rebinds every audio track a converter claims to
+// its output codec and rebuilds that track's sample entry from the converted
+// codec, in place. It is called at the HLS entry points only (RemuxToHLS,
+// PlanHLS and their kin) right after the tracks are planned - never on the
+// progressive RemuxToMP4 path, whose frame writer this seam does not touch, so
+// setting the option there stays inert rather than swapping a codec whose bytes
+// are then carried unconverted. A nil converter is a no-op.
+func applyFrameConverterToTracks(fc FrameConverter, tracks []*outTrack) error {
+	if fc == nil {
+		return nil
+	}
+	for _, ot := range tracks {
+		conv, err := applyFrameConverter(fc, ot)
+		if err != nil {
+			return err
+		}
+		if conv == nil {
+			continue
+		}
+		ot.conv = conv
+		// Rebuild the sample entry now from the output codec. FLAC takes its
+		// config from CodecPrivate (not the first frame), so it is available
+		// immediately; a converter to a needs-first-frame codec would leave it
+		// nil for the choke point to build lazily.
+		if !ot.spec.needsFirstFrame {
+			entry, err := ot.spec.sampleEntry(&ot.mkv, nil)
+			if err != nil {
+				return err
+			}
+			ot.sampleEntry = entry
+		}
+	}
+	return nil
+}
+
 // convertFrame runs one frame through the track's converter, or returns it
 // unchanged when the track is carried verbatim (conv nil). It is the single
 // call every choke point makes, so the verbatim path stays a plain passthrough.

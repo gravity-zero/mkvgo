@@ -165,6 +165,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if err != nil {
 		return nil, err
 	}
+	if err := applyFrameConverterToTracks(o.FrameConverter, planned); err != nil {
+		return nil, err
+	}
 	// Track selection mirrors remuxToHLSInto exactly so a variant's plan stays
 	// byte-identical to its full pass: one video rendition (secondary video
 	// dropped), each audio, and - unless VideoOnly (an ABR variant carries only
@@ -1025,6 +1028,10 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		}
 		pt := p.tracks[ti]
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+		data, err = pt.ft.outTrack.convertFrame(data)
+		if err != nil {
+			return nil, nil, errf("convert frame: %w", err)
+		}
 		windows[ti] = append(windows[ti], segSample{
 			fragSample: fragSample{size: uint32(len(data)),
 				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},

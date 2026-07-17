@@ -124,6 +124,58 @@ func TestFrameConverterSwapsCodecAndPayload(t *testing.T) {
 	}
 }
 
+// TestFrameConverterPlanMatchesFullPass: the on-demand plan and the full pass
+// must produce the same converted audio - the plan/full-pass byte-identity the
+// rest of the packager guarantees has to survive the seam. The audio init and
+// the first audio segment are compared between RemuxToHLS output and the plan's
+// served resources, with the codec-swapping converter on both.
+func TestFrameConverterPlanMatchesFullPass(t *testing.T) {
+	src := chapterFixture(t, nil)
+	ctx := context.Background()
+	opts := Options{SegmentMs: 2000, FrameConverter: toFLACConverter{}}
+
+	dir := t.TempDir()
+	if err := RemuxToHLS(ctx, src, dir, opts); err != nil {
+		t.Fatalf("full pass: %v", err)
+	}
+	plan, err := PlanHLS(ctx, src, opts)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+
+	for _, name := range []string{"init_a1.mp4", "seg_a1_00001.m4s"} {
+		full, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("full-pass %s: %v", name, err)
+		}
+		served, _, err := plan.Resource(ctx, name)
+		if err != nil {
+			t.Fatalf("plan %s: %v", name, err)
+		}
+		if !bytes.Equal(full, served) {
+			t.Errorf("%s: plan (%d bytes) differs from full pass (%d bytes)", name, len(served), len(full))
+		}
+	}
+
+	// And the converter must actually have run on the plan path (marker present,
+	// FLAC advertised) - not silently skipped into a passthrough that happens to
+	// match a full pass that also skipped.
+	init, _, err := plan.Resource(ctx, "init_a1.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(init, []byte("fLaC")) {
+		t.Error("plan audio init does not advertise FLAC")
+	}
+	seg, _, err := plan.Resource(ctx, "seg_a1_00001.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(seg, frameMarker) {
+		t.Error("plan audio segment does not carry the converted-frame marker")
+	}
+}
+
 // assertDirsByteIdentical fails unless a and b hold the same set of files with
 // identical bytes.
 func assertDirsByteIdentical(t *testing.T, a, b string) {
