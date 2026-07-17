@@ -124,6 +124,49 @@ func TestFrameConverterSwapsCodecAndPayload(t *testing.T) {
 	}
 }
 
+// TestFrameConverterMP4Source: the full pass converts an MP4 source too, not
+// only Matroska - the doc claims both, so both are proven. The fixture MKV is
+// first remuxed to MP4, then that MP4 is packaged to HLS with the codec-
+// swapping converter.
+func TestFrameConverterMP4Source(t *testing.T) {
+	src := chapterFixture(t, nil)
+	ctx := context.Background()
+
+	mp4Path := filepath.Join(t.TempDir(), "source.mp4")
+	if err := RemuxToMP4(ctx, src, mp4Path); err != nil {
+		t.Fatalf("mkv -> mp4: %v", err)
+	}
+	dir := t.TempDir()
+	if err := RemuxToHLS(ctx, mp4Path, dir, Options{SegmentMs: 2000, FrameConverter: toFLACConverter{}}); err != nil {
+		t.Fatalf("mp4 -> hls with converter: %v", err)
+	}
+	audioInit, err := os.ReadFile(filepath.Join(dir, "init_a1.mp4"))
+	if err != nil {
+		t.Fatalf("read audio init: %v", err)
+	}
+	if !bytes.Contains(audioInit, []byte("fLaC")) {
+		t.Error("MP4-source audio init does not advertise FLAC")
+	}
+	segs, _ := filepath.Glob(filepath.Join(dir, "seg_a1_*.m4s"))
+	if len(segs) == 0 {
+		segs, _ = filepath.Glob(filepath.Join(dir, "*a1*.m4s"))
+	}
+	if len(segs) == 0 {
+		t.Fatal("no audio media segments produced")
+	}
+	marked := false
+	for _, s := range segs {
+		b, _ := os.ReadFile(s)
+		if bytes.Contains(b, frameMarker) {
+			marked = true
+			break
+		}
+	}
+	if !marked {
+		t.Error("no MP4-source audio segment carries the converted-frame marker")
+	}
+}
+
 // TestFrameConverterRefusedOnPlan: the on-demand plans refuse a converter
 // rather than run one shared, stateful instance across windows built out of
 // order and in parallel - which would race and carry the wrong inter-frame
