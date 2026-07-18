@@ -6,6 +6,33 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Constant-rate B-frame video was classified `vfr`.** `Analyze` measured
+  frame durations as the delta between consecutive stored blocks - but
+  Matroska stores blocks in DECODE order carrying PRESENTATION timecodes, so
+  on any B-frame stream (most modern video) the stored-order deltas jump
+  around (+125, -84, +41, ...) even when every frame is presented on a
+  perfectly constant cadence. On top of that the verdict keyed on the raw
+  max-min delta spread, a statistic one single outlier dominates: a lone
+  dropped-frame hole among 150000 constant deltas flipped the whole title to
+  `vfr`. Measured on a real constant-rate 23.976fps release, 77% of
+  stored-order deltas sat off the modal delta and the track reported
+  variable frame rate - a caller keying a copy-vs-transcode decision on that
+  verdict transcoded content that was copy-eligible. `FrameRateMode` now
+  restores presentation order through a bounded 64-frame reorder window
+  (H.264/HEVC cap reorder depth at 16) before measuring deltas, and the
+  verdict is outlier-robust: only when more than 1% of the
+  presentation-ordered deltas (and at least 2) sit farther than the +-1ms
+  quantisation slack from the modal delta is the track reported `vfr` - a
+  genuinely variable track still is, an isolated glitch or splice no longer
+  is. That real release now reads `cfr` with a 1ms spread (the legitimate
+  41/42ms alternation of a millisecond-quantised 24000/1001 cadence).
+  `FrameDurationVarianceNs` keeps reporting the raw spread as a diagnostic,
+  and the new `TrackStats.FrameDurationOutlierFrac`
+  (`frame_duration_outlier_frac`) exposes the fraction the verdict
+  thresholds on, so a consumer can apply its own cutoff.
+
 ## [0.25.0] - 2026-07-18
 
 ### Fixed

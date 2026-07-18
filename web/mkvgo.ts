@@ -145,6 +145,15 @@ export interface TrackStats {
   /** Video only: a decode-free heuristic hinting at B-frame reordering. */
   reordered?: boolean
   frame_rate_avg?: number
+  /** Video only: 'cfr' | 'vfr', outlier-robust (vfr only when over 1% of the
+   * frame-timecode deltas sit farther than 1ms from the modal delta). */
+  frame_rate_mode?: string
+  /** Max-min spread between consecutive frame-timecode deltas, in ns - a
+   * diagnostic magnitude; a single anomalous frame widens it arbitrarily. */
+  frame_duration_variance_ns?: number
+  /** Fraction (0..1) of deltas farther than 1ms from the modal delta - the
+   * signal frame_rate_mode thresholds on. */
+  frame_duration_outlier_frac?: number
 }
 
 /**

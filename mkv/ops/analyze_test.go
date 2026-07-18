@@ -474,6 +474,166 @@ func TestAnalyze_VFR(t *testing.T) {
 	}
 }
 
+// --- Test 11b: CFR + one aberrant delta stays constant ---
+
+// A ms-quantised 24000/1001 track alternates 41ms and 42ms deltas; one
+// dropped-frame hole must not flip the whole title to vfr - the raw max-min
+// spread is dominated by that single outlier, the verdict must not be.
+func TestAnalyze_CFRWithIsolatedOutlier(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	var blocks []mkv.Block
+	tc := int64(0)
+	for i := 0; i < 300; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: i == 0, Data: []byte{0x01}})
+		switch {
+		case i == 150:
+			tc += 500
+		case i%2 == 0:
+			tc += 41
+		default:
+			tc += 42
+		}
+	}
+	path := buildMultiClusterMKV(t, dir, "cfrhole.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, tc)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "cfr" {
+		t.Errorf("FrameRateMode = %q, want cfr (a single outlier is a glitch, not vfr)", ts.FrameRateMode)
+	}
+	if want := int64(500-41) * 1_000_000; ts.FrameDurationVarianceNs != want {
+		t.Errorf("FrameDurationVarianceNs = %d, want %d (spread stays diagnostic)", ts.FrameDurationVarianceNs, want)
+	}
+	if f := ts.FrameDurationOutlierFrac; f <= 0 || f > 0.01 {
+		t.Errorf("FrameDurationOutlierFrac = %v, want in (0, 0.01]", f)
+	}
+	if warningsContain(report.Warnings, "variable frame rate") {
+		t.Errorf("Warnings = %v, want no VFR warning", report.Warnings)
+	}
+}
+
+// --- Test 11b2: B-frame decode-order storage does not read as vfr ---
+
+// Matroska stores blocks in decode order carrying presentation timecodes: on
+// B-frame content the stored-order deltas jump around (e.g. +125, -84, +41)
+// even though every frame is presented on a perfectly constant cadence. The
+// classifier must restore presentation order before measuring durations.
+func TestAnalyze_CFRWithBFrameReordering(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	// Presentation times on a 41/42ms alternating cadence, stored per group
+	// of 4 as [I, P, B, B] = [t0, t3, t1, t2] - the P frame the Bs reference
+	// is decoded (stored) before them.
+	var times []int64
+	tc := int64(0)
+	for i := 0; i < 200; i++ {
+		times = append(times, tc)
+		if i%2 == 0 {
+			tc += 41
+		} else {
+			tc += 42
+		}
+	}
+	var blocks []mkv.Block
+	for g := 0; g+4 <= len(times); g += 4 {
+		for _, i := range []int{0, 3, 1, 2} {
+			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: times[g+i], Keyframe: g == 0 && i == 0, Data: []byte{0x01}})
+		}
+	}
+	path := buildMultiClusterMKV(t, dir, "bframes.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, tc)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if !ts.Reordered {
+		t.Errorf("Reordered = false, want true (fixture stores frames in decode order)")
+	}
+	if ts.FrameRateMode != "cfr" {
+		t.Errorf("FrameRateMode = %q, want cfr (reordering jitter is not frame-duration variance)", ts.FrameRateMode)
+	}
+	if ts.FrameDurationVarianceNs != 1_000_000 {
+		t.Errorf("FrameDurationVarianceNs = %d, want 1000000 (the 41/42ms quantisation alternation)", ts.FrameDurationVarianceNs)
+	}
+	if ts.FrameDurationOutlierFrac != 0 {
+		t.Errorf("FrameDurationOutlierFrac = %v, want 0", ts.FrameDurationOutlierFrac)
+	}
+}
+
+// --- Test 11c: a rare outlier fraction (below threshold, above the lone-glitch guard) stays constant ---
+
+func TestAnalyze_CFRRareOutliersStayCFR(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	var blocks []mkv.Block
+	tc := int64(0)
+	for i := 0; i < 300; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: i == 0, Data: []byte{0x01}})
+		switch {
+		case i == 100 || i == 200:
+			tc += 300
+		case i%2 == 0:
+			tc += 41
+		default:
+			tc += 42
+		}
+	}
+	path := buildMultiClusterMKV(t, dir, "cfrrare.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, tc)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "cfr" {
+		t.Errorf("FrameRateMode = %q, want cfr (2 outliers out of 299 deltas is below the vfr threshold)", ts.FrameRateMode)
+	}
+}
+
+// --- Test 11d: a significant outlier fraction classifies as variable ---
+
+func TestAnalyze_VFRSignificantOutlierFraction(t *testing.T) {
+	dir := t.TempDir()
+	video := videoTrack(1)
+
+	// Deltas alternate 33ms and 50ms: about half the deltas sit far from the
+	// modal delta - genuinely variable, not a glitch.
+	var blocks []mkv.Block
+	tc := int64(0)
+	for i := 0; i < 100; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: i == 0, Data: []byte{0x01}})
+		if i%2 == 0 {
+			tc += 33
+		} else {
+			tc += 50
+		}
+	}
+	path := buildMultiClusterMKV(t, dir, "vfrfrac.mkv", []mkv.Track{video}, [][]mkv.Block{blocks}, tc)
+
+	report, err := Analyze(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := report.Tracks[0]
+	if ts.FrameRateMode != "vfr" {
+		t.Errorf("FrameRateMode = %q, want vfr", ts.FrameRateMode)
+	}
+	if f := ts.FrameDurationOutlierFrac; f < 0.4 {
+		t.Errorf("FrameDurationOutlierFrac = %v, want >= 0.4", f)
+	}
+	if !warningsContain(report.Warnings, "variable frame rate") {
+		t.Errorf("Warnings = %v, want a VFR warning", report.Warnings)
+	}
+}
+
 // --- Test 12: a single-frame track has no measurable frame rate mode ---
 
 func TestAnalyze_FrameRateMode_SingleFrame(t *testing.T) {

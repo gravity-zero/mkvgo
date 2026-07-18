@@ -21,11 +21,37 @@ const durationMismatchWarnMs = 1000
 // instead by TrackStats.Reordered) from a real backward jump worth a Warning.
 const backwardTimecodeWarnMs = 1000
 
-// frameDurationToleranceMs is the +-1ms slack allowed between consecutive
-// video frame-timecode deltas before TrackStats.FrameRateMode reports "vfr":
-// Matroska timecodes are millisecond-scale, so exact-equal deltas would be
-// too strict a test for a genuinely constant frame rate.
+// frameDurationToleranceMs is the +-1ms slack allowed between a consecutive
+// video frame-timecode delta and the track's modal (most common) delta before
+// that delta counts as an outlier for TrackStats.FrameRateMode: Matroska
+// timecodes are millisecond-scale, so a constant 23.976fps track legitimately
+// alternates 41ms and 42ms deltas - exact-equal deltas would be too strict a
+// test for a genuinely constant frame rate.
 const frameDurationToleranceMs = 1
+
+// vfrOutlierPercent is the share of out-of-tolerance deltas a video track must
+// exceed before FrameRateMode reports "vfr". The raw max-min spread is
+// dominated by a single anomalous frame (a dropped-frame hole, a splice): one
+// outlier among 150000 constant-rate frames is a glitch, not a variable frame
+// rate. A lone outlier never flips the verdict regardless of frame count.
+const vfrOutlierPercent = 1
+
+// frameDeltaHistogramCap bounds the per-track distinct-delta histogram behind
+// the modal-delta computation, keeping Analyze's memory bounded. A constant-
+// rate track needs 2 buckets (ms quantisation alternates floor/ceil of the
+// true frame duration); deltas past the cap are counted as outliers - a track
+// with over 64 distinct frame durations is variable by any reading.
+const frameDeltaHistogramCap = 64
+
+// frameReorderWindow is the sliding-window depth used to restore presentation
+// order over video frame timecodes before frame-duration deltas are measured:
+// Matroska stores blocks in decode order carrying presentation timecodes, so
+// on B-frame content the stored-order deltas measure reordering jitter, not
+// frame durations - a perfectly constant-rate track would read as wildly
+// variable. H.264/HEVC cap the decoded-picture buffer (the maximum reorder
+// depth) at 16 frames; 64 leaves a wide margin while keeping memory bounded
+// (64 timecodes per video track).
+const frameReorderWindow = 64
 
 // TrackStats summarises one track's block-header walk: exact frame/keyframe
 // counts, byte totals and derived rates, computed from (Simple)Block headers
@@ -66,15 +92,30 @@ type TrackStats struct {
 	Reordered    bool    `json:"reordered,omitempty"`
 	FrameRateAvg float64 `json:"frame_rate_avg,omitempty"`
 	// FrameRateMode classifies a VIDEO track as "cfr" (constant frame rate) or
-	// "vfr" (variable), derived decode-free from consecutive frame-timecode
-	// deltas (see frameDurationToleranceMs). "" when unknown: fewer than 2
-	// frames, or a non-video track (CFR/VFR is a video concept here).
+	// "vfr" (variable), derived decode-free from the deltas between
+	// consecutively PRESENTED frame timecodes - a bounded window restores
+	// presentation order first (see frameReorderWindow), since stored order is
+	// decode order and B-frame reordering would otherwise read as variance.
+	// The verdict is outlier-robust: "vfr" only when more than
+	// vfrOutlierPercent of the deltas (and at least 2) sit farther than
+	// frameDurationToleranceMs from the modal delta - isolated dropped-frame
+	// holes or splices on an otherwise constant-rate track stay "cfr". "" when
+	// unknown: fewer than 2 frames, or a non-video track (CFR/VFR is a video
+	// concept here).
 	FrameRateMode string `json:"frame_rate_mode,omitempty"`
 	// FrameDurationVarianceNs is the spread (max delta - min delta) between
-	// consecutive video frame timecodes, in nanoseconds: 0 for a perfect CFR
-	// track, a diagnostic magnitude for VFR. 0 alongside FrameRateMode == ""
-	// simply means no measurement was possible.
+	// consecutive presentation-ordered video frame timecodes, in nanoseconds:
+	// 0 for a perfect CFR track. A diagnostic magnitude only - a single
+	// anomalous frame widens it arbitrarily, so it does not decide
+	// FrameRateMode (see FrameDurationOutlierFrac). 0 alongside
+	// FrameRateMode == "" simply means no measurement was possible.
 	FrameDurationVarianceNs int64 `json:"frame_duration_variance_ns,omitempty"`
+	// FrameDurationOutlierFrac is the fraction (0..1) of presentation-ordered
+	// video frame-timecode deltas farther than frameDurationToleranceMs from
+	// the modal delta - the fine-grained signal FrameRateMode thresholds on,
+	// exposed so a consumer can apply its own cutoff. 0 for a clean CFR track
+	// or when no measurement was possible.
+	FrameDurationOutlierFrac float64 `json:"frame_duration_outlier_frac,omitempty"`
 }
 
 // AnalyzeReport is the result of a structural, no-decode stream-statistics
@@ -140,14 +181,110 @@ type trackAcc struct {
 	reordered      bool
 	backwardWarned bool
 
-	// Frame-duration variance tracking (video only): the delta between this
-	// and the previous frame's Timecode, min/max seen so far - never the
-	// deltas themselves, keeping memory bounded.
-	fdPrevTC    int64
-	fdHavePrev  bool
-	fdMinDelta  int64
-	fdMaxDelta  int64
-	fdHaveDelta bool
+	// Frame-duration variance tracking (video only): a bounded reorder window
+	// restoring presentation order, then per-delta min/max plus a capped
+	// distinct-delta histogram - never the deltas themselves, keeping memory
+	// bounded (see frameReorderWindow, frameDeltaHistogramCap).
+	fdWindow     []int64
+	fdPrevTC     int64
+	fdHavePrev   bool
+	fdMinDelta   int64
+	fdMaxDelta   int64
+	fdHaveDelta  bool
+	fdDeltas     int64           // total consecutive deltas observed
+	fdDeltaCount map[int64]int64 // distinct delta -> occurrences, capped
+	fdDeltaOther int64           // deltas past the histogram cap (outliers)
+}
+
+// pushFrameTime feeds one video frame's presentation timecode (in stored,
+// i.e. decode, order) into the reorder window; once the window is full the
+// earliest pending timecode flows on to delta tracking, so deltas are
+// measured between consecutively PRESENTED frames even on B-frame content.
+func (a *trackAcc) pushFrameTime(tc int64) {
+	a.fdWindow = append(a.fdWindow, tc)
+	if len(a.fdWindow) >= frameReorderWindow {
+		a.emitEarliestFrameTime()
+	}
+}
+
+// emitEarliestFrameTime removes the smallest pending timecode from the
+// reorder window and records its delta against the previous emitted one.
+func (a *trackAcc) emitEarliestFrameTime() {
+	mi := 0
+	for i, tc := range a.fdWindow {
+		if tc < a.fdWindow[mi] {
+			mi = i
+		}
+	}
+	tc := a.fdWindow[mi]
+	a.fdWindow[mi] = a.fdWindow[len(a.fdWindow)-1]
+	a.fdWindow = a.fdWindow[:len(a.fdWindow)-1]
+	a.recordFrameDelta(tc)
+}
+
+// drainFrameTimes flushes the reorder window at end of walk, releasing the
+// tail frames (in presentation order) into delta tracking.
+func (a *trackAcc) drainFrameTimes() {
+	for len(a.fdWindow) > 0 {
+		a.emitEarliestFrameTime()
+	}
+}
+
+// recordFrameDelta tracks one consecutive presentation-order delta: min/max
+// spread plus the capped histogram behind the modal-delta computation.
+func (a *trackAcc) recordFrameDelta(tc int64) {
+	if !a.fdHavePrev {
+		a.fdPrevTC, a.fdHavePrev = tc, true
+		return
+	}
+	delta := tc - a.fdPrevTC
+	a.fdPrevTC = tc
+	if !a.fdHaveDelta {
+		a.fdMinDelta, a.fdMaxDelta = delta, delta
+		a.fdHaveDelta = true
+	} else {
+		if delta < a.fdMinDelta {
+			a.fdMinDelta = delta
+		}
+		if delta > a.fdMaxDelta {
+			a.fdMaxDelta = delta
+		}
+	}
+	a.fdDeltas++
+	if a.fdDeltaCount == nil {
+		a.fdDeltaCount = make(map[int64]int64, 4)
+	}
+	if _, seen := a.fdDeltaCount[delta]; seen || len(a.fdDeltaCount) < frameDeltaHistogramCap {
+		a.fdDeltaCount[delta]++
+		return
+	}
+	a.fdDeltaOther++
+}
+
+// frameDeltaOutliers counts the deltas farther than frameDurationToleranceMs
+// from the modal (most common) delta, histogram-overflow deltas included.
+// Ties on the modal count break toward the smallest delta so the result is
+// deterministic across map iteration orders.
+func (a *trackAcc) frameDeltaOutliers() int64 {
+	var modal, modalCount int64
+	first := true
+	for d, n := range a.fdDeltaCount {
+		if first || n > modalCount || (n == modalCount && d < modal) {
+			modal, modalCount = d, n
+			first = false
+		}
+	}
+	out := a.fdDeltaOther
+	for d, n := range a.fdDeltaCount {
+		diff := d - modal
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > frameDurationToleranceMs {
+			out += n
+		}
+	}
+	return out
 }
 
 // closeGOP records the just-finished GOP's frame count (the frames from the
@@ -276,22 +413,7 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		acc.haveTimecode = true
 
 		if acc.track.Type == mkv.VideoTrack {
-			if acc.fdHavePrev {
-				delta := blk.Timecode - acc.fdPrevTC
-				if !acc.fdHaveDelta {
-					acc.fdMinDelta, acc.fdMaxDelta = delta, delta
-					acc.fdHaveDelta = true
-				} else {
-					if delta < acc.fdMinDelta {
-						acc.fdMinDelta = delta
-					}
-					if delta > acc.fdMaxDelta {
-						acc.fdMaxDelta = delta
-					}
-				}
-			}
-			acc.fdPrevTC = blk.Timecode
-			acc.fdHavePrev = true
+			acc.pushFrameTime(blk.Timecode)
 
 			if blk.Keyframe {
 				acc.closeGOP()
@@ -326,6 +448,7 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 			ts.FrameRateAvg = float64(acc.frames) * 1000 / float64(acc.durationMs)
 		}
 		if t.Type == mkv.VideoTrack {
+			acc.drainFrameTimes()
 			if acc.gopCount > 0 {
 				ts.MinGopFrames = acc.gopMin
 				ts.MaxGopFrames = acc.gopMax
@@ -339,7 +462,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 			if acc.fdHaveDelta {
 				spreadMs := acc.fdMaxDelta - acc.fdMinDelta
 				ts.FrameDurationVarianceNs = spreadMs * 1_000_000
-				if spreadMs <= frameDurationToleranceMs {
+				outliers := acc.frameDeltaOutliers()
+				ts.FrameDurationOutlierFrac = float64(outliers) / float64(acc.fdDeltas)
+				if outliers < 2 || outliers*100 <= acc.fdDeltas*vfrOutlierPercent {
 					ts.FrameRateMode = "cfr"
 				} else {
 					ts.FrameRateMode = "vfr"

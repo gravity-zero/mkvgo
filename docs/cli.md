@@ -160,7 +160,7 @@ mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 
 Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans, a declared-vs-true duration reconciliation, and a per-video-track constant/variable frame rate (cfr/vfr) classification - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. The walk is head-only: cost is proportional to the block-header count, not the media volume. Matroska/WebM only for now; MP4 is a follow-up.
 
-The cfr/vfr column comes from the spread between consecutive video frame-timecode deltas: within +-1ms counts as constant (Matroska timecodes are millisecond-scale, so exact-equal deltas would be too strict a test), a wider spread is reported as variable, with a warning (some pipelines assume constant frame rate).
+The cfr/vfr column comes from the deltas between consecutively PRESENTED video frame timecodes - a bounded window restores presentation order first, since blocks are stored in decode order and B-frame reordering would otherwise read as duration variance - compared against the modal (most common) delta with +-1ms slack (Matroska timecodes are millisecond-scale, so a constant 23.976fps track legitimately alternates 41ms/42ms deltas). Only when more than 1% of the deltas (and at least 2) fall outside that slack is the track reported variable, with a warning (some pipelines assume constant frame rate) - isolated dropped-frame holes or splices on an otherwise constant-rate track stay constant instead of flipping the whole title to vfr.
 
 ```
 mkvgo analyze [-json] <file.mkv|url>
