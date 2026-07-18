@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-07-18
+
 ### Fixed
 
 - **Constant-rate B-frame video was classified `vfr`.** `Analyze` measured
