@@ -101,6 +101,12 @@ func CmdCompare(args []string) {
 	switch {
 	case JsonOutput:
 		PrintJSON(diffs)
+	case len(diffs) == 0 && len(parts) > 1:
+		// Only the content was compared: there is no such thing as the
+		// concatenated metadata of several files.
+		fmt.Printf("identical content (%d parts)\n", len(parts))
+	case len(diffs) == 0 && blocks:
+		fmt.Println("identical metadata and content")
 	case len(diffs) == 0:
 		fmt.Println("identical metadata")
 	default:
