@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -140,19 +141,18 @@ func sanitizeName(title string, n int) string {
 
 func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	ranges := make([]mkv.TimeRange, len(chapters))
+	next := nextChapterStarts(chapters)
 	for i, ch := range chapters {
 		ranges[i] = mkv.TimeRange{StartMs: ch.StartMs, EndMs: ch.EndMs}
-		if ranges[i].EndMs == 0 {
-			if next := nextChapterStart(chapters, ch.StartMs); next > 0 {
-				ranges[i].EndMs = next
-			}
+		if ranges[i].EndMs == 0 && next[i] > 0 {
+			ranges[i].EndMs = next[i]
 		}
 	}
 	return ranges
 }
 
-// nextChapterStart returns the start of the sibling that follows startMs in
-// TIME, or -1 when nothing does.
+// nextChapterStarts returns, for each chapter, the start of the sibling that
+// follows it in TIME, or -1 when nothing does.
 //
 // Not chapters[i+1]: the reader concatenates every EditionEntry of a file into
 // one flat list, each edition restarting at its own first timestamp, so the
@@ -163,15 +163,29 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 //
 // Strictly greater, so several atoms sharing one timestamp (an edition
 // restarting at 0, an atom with no ChapterTimeStart) do not deduce an end of 0
-// and fall back to "runs forever", which is the very reading this replaced.
-func nextChapterStart(chapters []mkv.Chapter, startMs int64) int64 {
-	next := int64(-1)
-	for _, ch := range chapters {
-		if ch.StartMs > startMs && (next < 0 || ch.StartMs < next) {
-			next = ch.StartMs
-		}
+// and fall back to "runs forever", which is the reading this replaced.
+//
+// Computed for the whole list at once rather than scanned per chapter: Split
+// clips the list once per part, so a per-chapter scan made the cut cubic in the
+// number of chapters - 4.3 s at 2000 of them, eight times that at every
+// doubling.
+func nextChapterStarts(chapters []mkv.Chapter) []int64 {
+	sorted := make([]int64, len(chapters))
+	for i, ch := range chapters {
+		sorted[i] = ch.StartMs
 	}
-	return next
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+	out := make([]int64, len(chapters))
+	for i, ch := range chapters {
+		j := sort.Search(len(sorted), func(k int) bool { return sorted[k] > ch.StartMs })
+		if j == len(sorted) {
+			out[i] = -1
+			continue
+		}
+		out[i] = sorted[j]
+	}
+	return out
 }
 
 func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
@@ -251,7 +265,8 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 // "until the end of the source".
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	var out []mkv.Chapter
-	for _, ch := range chapters {
+	next := nextChapterStarts(chapters)
+	for i, ch := range chapters {
 		if endMs > 0 && ch.StartMs >= endMs {
 			continue
 		}
@@ -264,7 +279,7 @@ func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 		// instant; -1 is the honest "nothing follows", which does run to the end.
 		end := ch.EndMs
 		if end == 0 {
-			end = nextChapterStart(chapters, ch.StartMs)
+			end = next[i]
 		}
 		if end > 0 && end <= startMs {
 			continue
