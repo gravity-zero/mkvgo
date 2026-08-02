@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -420,7 +421,7 @@ func TestJoin_ScaleAndAttachmentIdentity(t *testing.T) {
 		{Attachments: []mkv.Attachment{font("AAAA"), cover("111")}},
 		{Attachments: []mkv.Attachment{font("ZZZZ"), cover("222")}}, // same names, other bytes
 		{Attachments: []mkv.Attachment{font("AAAA")}},               // a duplicate from a split
-	})
+	}, mkv.FSFrom(nil))
 	var fonts, covers int
 	for _, at := range merged {
 		switch at.Name {
@@ -436,5 +437,70 @@ func TestJoin_ScaleAndAttachmentIdentity(t *testing.T) {
 	}
 	if covers != 1 {
 		t.Errorf("cover.jpg kept = %d, want 1 - Matroska defines a single one", covers)
+	}
+}
+
+// TestJoin_AttachmentsAreNeverResident: a font set is unbounded user data and
+// Join only forwards it, so it must travel from the source file to the output
+// without passing through memory - the difference between fitting in a small
+// container and not. The bytes written are unchanged; only where they come from.
+func TestJoin_AttachmentsAreNeverResident(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	const n, size = 3, 4 << 20 // 12 MiB pooled, small enough to stay polite
+
+	srcs := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		p := filepath.Join(dir, "s"+string(rune('a'+i))+".mkv")
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := make([]byte, size)
+		for j := range data {
+			data[j] = byte(i + 1)
+		}
+		mw := writer.NewMKVWriter(f)
+		mustNil(t, mw.WriteStart())
+		mustNil(t, mw.WriteMetadata(&mkv.Container{
+			Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"},
+			Attachments: []mkv.Attachment{{ID: 1, Name: "f" + string(rune('a'+i)) + ".ttf",
+				MIMEType: "font/ttf", Size: size, Data: data}},
+		}, []mkv.Track{videoTrack(1)}, 1000))
+		mustNil(t, mw.WriteClusterWithCues(0, 1_000_000, []mkv.Block{
+			{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}))
+		mustNil(t, mw.Finalize())
+		mustNil(t, f.Close())
+		srcs = append(srcs, p)
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, srcs, dst); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+
+	// The three distinct fonts must all be there...
+	c, err := reader.OpenMeta(ctx, dst, reader.WithAttachments())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Attachments) != n {
+		t.Fatalf("attachments = %d, want %d", len(c.Attachments), n)
+	}
+	for _, a := range c.Attachments {
+		if a.Size != size {
+			t.Errorf("%s: size %d, want %d", a.Name, a.Size, size)
+		}
+	}
+	// ... without the join ever allocating them. Loading each payload once would
+	// allocate at least the pooled total.
+	const pooled = n * size
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > pooled/2 {
+		t.Errorf("the join allocated %d bytes for %d of attachments: the payloads are being loaded, "+
+			"not streamed from the source", alloc, pooled)
 	}
 }

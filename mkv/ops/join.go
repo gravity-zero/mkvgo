@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -19,7 +20,10 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// Open each source once for its metadata (it was opened three times before).
 	conts := make([]*mkv.Container, len(sources))
 	for i, src := range sources {
-		c, err := reader.OpenWithFS(ctx, src, fs)
+		// The attachment payloads stay on disk: Join only forwards them, and a
+		// font set held for the whole operation is what a small container cannot
+		// afford. They are streamed straight from the source at write time.
+		c, err := reader.OpenWithFS(ctx, src, fs, reader.WithoutAttachmentData())
 		if err != nil {
 			return err
 		}
@@ -79,10 +83,24 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// ASS track needs may only be attached to the part that uses them, and a
 	// first-wins policy drops them. Matched on name + size, so the same font
 	// attached to every part lands once.
-	meta.Attachments = mergeAttachments(conts)
+	meta.Attachments = mergeAttachments(conts, fs)
 	plan := planContentTags(first.Tags).withStatistics()
 	meta.Tags = nil // booked below, in the head, filled once measured
 	digests, stats := plan.digestsFor(), plan.statsFor()
+	// The payloads are still on disk: hand the writer the way to reach them so
+	// the element is written from its original position, byte for byte, without
+	// a font ever becoming resident.
+	mw.SetAttachmentSource(func(a *mkv.Attachment) (io.Reader, error) {
+		f, err := fs.DoOpen(a.DataPath)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := f.Seek(a.DataOffset, io.SeekStart); err != nil {
+			f.Close()
+			return nil, err
+		}
+		return f, nil
+	})
 	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}

@@ -469,6 +469,14 @@ func writeSimpleTagElement(parent *ew, st *mkv.SimpleTag) {
 // lengths, which are known without copying anything, so the peak is now the
 // data the caller already holds.
 func WriteAttachments(w io.Writer, attachments []mkv.Attachment) error {
+	return WriteAttachmentsFrom(w, attachments, nil)
+}
+
+// WriteAttachmentsFrom is WriteAttachments for a caller whose payloads are still
+// on disk: open is asked for a reader positioned on the payload of an attachment
+// whose Data is nil (see mkv.Attachment.DataPath). It may be nil when every
+// payload is in hand.
+func WriteAttachmentsFrom(w io.Writer, attachments []mkv.Attachment, open func(*mkv.Attachment) (io.Reader, error)) error {
 	// The small children (name, mime type, UID) are cheap to materialise; only
 	// the payload is kept out of memory.
 	metas := make([][]byte, len(attachments))
@@ -492,12 +500,12 @@ func WriteAttachments(w io.Writer, attachments []mkv.Attachment) error {
 		metas[i] = m.Bytes()
 
 		bodies[i] = int64(len(metas[i]))
-		if len(att.Data) > 0 {
-			hdr, err := elementHeaderLen(mkv.IDFileData, int64(len(att.Data)))
+		if n := payloadLen(att); n > 0 {
+			hdr, err := elementHeaderLen(mkv.IDFileData, n)
 			if err != nil {
 				return err
 			}
-			bodies[i] += hdr + int64(len(att.Data))
+			bodies[i] += hdr + n
 		}
 		fileHdr, err := elementHeaderLen(mkv.IDAttachedFile, bodies[i])
 		if err != nil {
@@ -517,16 +525,49 @@ func WriteAttachments(w io.Writer, attachments []mkv.Attachment) error {
 		if _, err := w.Write(metas[i]); err != nil {
 			return err
 		}
-		if len(att.Data) > 0 {
-			if _, err := ebml.WriteElementHeader(w, mkv.IDFileData, int64(len(att.Data))); err != nil {
-				return err
-			}
+		n := payloadLen(att)
+		if n == 0 {
+			continue
+		}
+		if _, err := ebml.WriteElementHeader(w, mkv.IDFileData, n); err != nil {
+			return err
+		}
+		if att.Data != nil {
 			if _, err := w.Write(att.Data); err != nil {
 				return err
 			}
+			continue
+		}
+		// The payload was left on disk (reader.WithoutAttachmentData): copy it
+		// through, so a font never becomes resident just to be forwarded.
+		src, err := open(att)
+		if err != nil {
+			return fmt.Errorf("attachment %q: %w", att.Name, err)
+		}
+		copied, cerr := io.CopyN(w, src, n)
+		if c, ok := src.(io.Closer); ok {
+			c.Close()
+		}
+		if cerr != nil {
+			return fmt.Errorf("attachment %q: %w", att.Name, cerr)
+		}
+		if copied != n {
+			return fmt.Errorf("attachment %q: copied %d bytes, declared %d", att.Name, copied, n)
 		}
 	}
 	return nil
+}
+
+// payloadLen is the attachment's payload length whether the bytes are in hand or
+// still on disk.
+func payloadLen(att *mkv.Attachment) int64 {
+	if att.Data != nil {
+		return int64(len(att.Data))
+	}
+	if att.DataPath != "" && att.Size > 0 {
+		return att.Size
+	}
+	return 0
 }
 
 // elementHeaderLen is the encoded length of an element header, so a size can be

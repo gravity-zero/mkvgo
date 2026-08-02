@@ -23,13 +23,13 @@ func Open(ctx context.Context, path string) (*mkv.Container, error) {
 	return Read(ctx, f, path)
 }
 
-func OpenWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, error) {
+func OpenWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	return Read(ctx, f, path)
+	return Read(ctx, f, path, opts...)
 }
 
 // fullReadBufSize buffers the head of a full read. The EBML reader pulls VINTs a
@@ -40,12 +40,16 @@ func OpenWithFS(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, e
 // body-skip there never refills a window it would immediately discard.
 const fullReadBufSize = 32 << 10
 
-func Read(ctx context.Context, r io.ReadSeeker, path string) (*mkv.Container, error) {
+func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*mkv.Container, error) {
+	var o readOpts
+	for _, opt := range opts {
+		opt(&o)
+	}
 	br, err := newBufReadSeeker(r, fullReadBufSize)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx}
+	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(); err != nil {
@@ -122,6 +126,10 @@ type parser struct {
 	segStart   int64           // Segment body start offset (set once the Segment header is read)
 	segEnd     int64           // Segment body end offset, or -1 for an unknown-size Segment
 	ctx        context.Context // cancellation, also honoured in the inner element loops
+	// lazyAttachments records where an attachment payload lives instead of
+	// loading it (reader.WithoutAttachmentData); path is the file it refers to.
+	lazyAttachments bool
+	path            string
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -1625,6 +1633,18 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 			}
 			att.MIMEType = v
 		case mkv.IDFileData:
+			att.Size = eh.Size
+			if p.lazyAttachments {
+				// Note where the bytes are and step over them: a font set is
+				// unbounded user data, and an op that only copies it has no
+				// reason to hold it. See reader.WithoutAttachmentData.
+				at, _ := p.r.Seek(0, io.SeekCurrent)
+				att.DataPath, att.DataOffset = p.path, at
+				if err := p.skip(eh.Size); err != nil {
+					return att, err
+				}
+				continue
+			}
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return att, err
 			}
@@ -1633,7 +1653,6 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 				return att, err
 			}
 			att.Data = data
-			att.Size = eh.Size
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return att, err

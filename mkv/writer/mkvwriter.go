@@ -41,6 +41,7 @@ type MKVWriter struct {
 	info          mkv.SegmentInfo // kept by WriteMetadata for RestateDuration
 	infoDurMs     int64           // the duration WriteMetadata was given
 	infoWritten   bool
+	attachOpen    func(*mkv.Attachment) (io.Reader, error)
 }
 
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
@@ -248,7 +249,7 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 	}
 	if len(c.Attachments) > 0 {
 		m.AttachPos = m.RelPos()
-		if err := WriteAttachments(m.W, c.Attachments); err != nil {
+		if err := WriteAttachmentsFrom(m.W, c.Attachments, m.attachOpen); err != nil {
 			return err
 		}
 	}
@@ -361,6 +362,14 @@ func (m *MKVWriter) WriteReservedChapters(chapters []mkv.Chapter) error {
 	}
 	_, err := m.W.Seek(end, io.SeekStart)
 	return err
+}
+
+// SetAttachmentSource tells WriteMetadata how to reach attachment payloads that
+// were left on disk (mkv.Attachment.DataPath, from reader.WithoutAttachmentData):
+// they are then copied straight through instead of being loaded. Setting it
+// changes nothing about the bytes written, only where they travel from.
+func (m *MKVWriter) SetAttachmentSource(open func(*mkv.Attachment) (io.Reader, error)) {
+	m.attachOpen = open
 }
 
 // ReserveTags books room in the HEAD for a Tags element whose values are only

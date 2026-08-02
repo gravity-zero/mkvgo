@@ -3,6 +3,7 @@ package ops
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -103,12 +104,12 @@ func (u *chapterUIDs) unique(id uint64) uint64 {
 // The conventional cover art is the exception. Matroska defines at most one
 // cover.jpg (plus one small_cover.*), so joining twelve episodes must not
 // produce twelve of them: the first one wins, by name.
-func mergeAttachments(sources []*mkv.Container) []mkv.Attachment {
+func mergeAttachments(sources []*mkv.Container, fs *mkv.FS) []mkv.Attachment {
 	var out []mkv.Attachment
 	seen := map[string]bool{}
 	for _, c := range sources {
 		for _, a := range c.Attachments {
-			key := attachmentKey(a)
+			key := attachmentKey(a, fs)
 			if seen[key] {
 				continue
 			}
@@ -127,20 +128,41 @@ var coverNames = map[string]bool{
 	"small_cover.jpg": true, "small_cover.png": true,
 }
 
-func attachmentKey(a mkv.Attachment) string {
+func attachmentKey(a mkv.Attachment, fs *mkv.FS) string {
 	name := strings.ToLower(a.Name)
 	if coverNames[name] {
 		return "cover:" + name
 	}
 	if a.Data != nil {
-		return "sha:" + string(sha256Sum(a.Data))
+		sum := sha256.Sum256(a.Data)
+		return "sha:" + string(sum[:])
 	}
-	// No payload in hand (a metadata-only read): fall back to the weaker
-	// name+size identity rather than duplicating everything.
+	// The payload was left on disk (reader.WithoutAttachmentData): hash it by
+	// reading it through a fixed buffer rather than loading it, so identity
+	// stays the content without the content ever becoming resident.
+	if sum, err := hashAttachmentAt(a, fs); err == nil {
+		return "sha:" + string(sum)
+	}
+	// Unreadable: fall back to the weaker name+size identity rather than
+	// dropping the attachment or duplicating every one of them.
 	return fmt.Sprintf("meta:%s\x00%d", a.Name, a.Size)
 }
 
-func sha256Sum(b []byte) []byte {
-	sum := sha256.Sum256(b)
-	return sum[:]
+func hashAttachmentAt(a mkv.Attachment, fs *mkv.FS) ([]byte, error) {
+	if a.DataPath == "" || a.Size <= 0 {
+		return nil, fmt.Errorf("attachment %q has no payload location", a.Name)
+	}
+	f, err := fs.DoOpen(a.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(a.DataOffset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	if _, err := io.CopyN(h, f, a.Size); err != nil {
+		return nil, err
+	}
+	return h.Sum(nil), nil
 }

@@ -390,6 +390,14 @@ type Attachment struct {
 	MIMEType string `json:"mime_type"`
 	Size     int64  `json:"size"`
 	Data     []byte `json:"-"`
+	// DataPath and DataOffset say where the payload lives when Data is nil,
+	// which is what reader.WithoutAttachmentData leaves behind: the file it was
+	// read from and the offset of the FileData payload inside it, Size holding
+	// its length. An op that only has to COPY an attachment - a join, a split -
+	// then never holds a font in memory at all. Zero DataPath means "the bytes
+	// are in Data or there are none".
+	DataPath   string `json:"-"`
+	DataOffset int64  `json:"-"`
 }
 
 type Tag struct {

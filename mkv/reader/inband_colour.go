@@ -19,7 +19,17 @@ type readOpts struct {
 	cues             bool // keep the raw CuePoints on the metadata path (WithCues)
 	tags             bool // keep the Tags element on the metadata path (WithTags)
 	attachments      bool // keep the Attachments on the metadata path (WithAttachments)
+	lazyAttachments  bool // record where payloads live instead of loading them
 	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
+}
+
+// WithoutAttachmentData parses the attachment list but leaves the payloads on
+// disk: Data stays nil while Size, DataPath and DataOffset say where each one
+// lives. An op that copies attachments rather than inspecting them - Join,
+// Split - then runs without a single font byte resident, which is the
+// difference between fitting in a small container and not.
+func WithoutAttachmentData() ReadOption {
+	return func(o *readOpts) { o.lazyAttachments = true }
 }
 
 // WithAttachments keeps Container.Attachments populated on the metadata-only
