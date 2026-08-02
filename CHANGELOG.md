@@ -45,6 +45,21 @@ All notable changes to mkvgo are documented here. The format is based on
   every part lands once, and cover art stays single.
 - `Join` no longer fails on sources that declare no duration at all, which left a
   truncated file behind.
+- **Attachments never become resident.** `reader.WithoutAttachmentData` records
+  where a payload lives instead of loading it, and the writer copies it straight
+  from the source file, so joining files with a large font set no longer scales
+  memory with that set - it used to peak at four times its size. The bytes
+  written are unchanged. Matters wherever mkvgo runs in a small container.
+- A chapter is clipped to what its source actually wrote, so one sitting in the
+  phantom tail of a file that declares more than it holds no longer lands on the
+  next source's frames.
+- The per-track statistics describe every declared track, including one that
+  received no block (zero frames) or a single frame (no measurable duration);
+  both used to lose their statistics entirely. They now also carry the
+  conventional `_STATISTICS_TAGS` / `_STATISTICS_WRITING_APP` markers, which were
+  stripped and never restated. No date is stamped, so two identical runs still
+  produce identical files.
+- `Join` decodes each source's timecodes with its own `TimecodeScale`.
 
 ### Added
 
