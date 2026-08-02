@@ -375,3 +375,74 @@ func TestSplitJoin_TagsStayInTheHead(t *testing.T) {
 		}
 	}
 }
+
+// TestStats_DescribeEveryTrack covers three ways a track used to fall out of the
+// tags entirely: no block in this part, a measured duration of zero, and the
+// conventional markers that say the statistics are auto-generated.
+func TestStats_DescribeEveryTrack(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2), subtitleTrack(3, "srt")}
+
+	var sets [][]mkv.Block
+	for base := int64(0); base < 6000; base += 1000 {
+		var cl []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cl = append(cl,
+				mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("v")},
+				mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+		}
+		if base == 4000 { // the only subtitle cue, in the SECOND half
+			cl = append(cl, mkv.Block{TrackNumber: 3, Timecode: 4000, Keyframe: true, Data: []byte("s")})
+		}
+		sets = append(sets, cl)
+	}
+	plain := buildMultiClusterMKV(t, dir, "plain.mkv", tracks, sets, 6000)
+	src := filepath.Join(dir, "src.mkv")
+	if err := WriteContentHashes(ctx, plain, src); err != nil {
+		t.Fatal(err)
+	}
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 3000}, {StartMs: 3000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Part 1 holds no subtitle block at all; part 2 holds exactly one, so that
+	// track's measured duration there is 0.
+	for i, p := range parts {
+		c, err := reader.OpenMeta(ctx, p, reader.WithTags())
+		if err != nil {
+			t.Fatal(err)
+		}
+		byTrack := map[uint64]map[string]string{}
+		for _, tag := range c.Tags {
+			m := byTrack[tag.TargetID]
+			if m == nil {
+				m = map[string]string{}
+				byTrack[tag.TargetID] = m
+			}
+			for _, st := range tag.SimpleTags {
+				m[st.Name] = st.Value
+			}
+		}
+		sub := byTrack[3]
+		if sub[ContentHashTag] == "" {
+			t.Errorf("part %d: the subtitle track has no content hash - it dropped out of the "+
+				"certified set instead of being checked", i+1)
+		}
+		if sub["NUMBER_OF_FRAMES"] == "" || sub["NUMBER_OF_BYTES"] == "" {
+			t.Errorf("part %d: the subtitle track has no frame/byte count: %v", i+1, sub)
+		}
+		if byTrack[1]["_STATISTICS_TAGS"] == "" || byTrack[1]["_STATISTICS_WRITING_APP"] != "mkvgo" {
+			t.Errorf("part %d: the statistics are not marked as auto-generated: %v", i+1, byTrack[1])
+		}
+		// The whole point: they still verify.
+		if mm, err := VerifyContentHashes(ctx, p); err != nil {
+			t.Fatal(err)
+		} else if len(mm) != 0 {
+			t.Errorf("part %d fails its own hashes: %v", i+1, mm)
+		}
+	}
+}

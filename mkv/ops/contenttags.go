@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"hash"
 	"strings"
@@ -106,7 +107,11 @@ func (p contentTagPlan) tagsForOutput(tracks []mkv.Track, digests map[uint64]has
 		for i := range tracks {
 			h := digests[tracks[i].ID]
 			if h == nil {
-				continue // no block of this track reached the output
+				// A declared track that received no block still belongs to the
+				// certified set: WriteContentHashes stamps it with the digest of
+				// the empty stream, and skipping it here made the track drop out
+				// of verification silently instead of being checked.
+				h = sha256.New()
 			}
 			out = append(out, mkv.Tag{
 				TargetID:   trackUID(&tracks[i]),
@@ -141,6 +146,8 @@ func (p contentTagPlan) upperBoundTags(tracks []mkv.Track) []mkv.Tag {
 				{Name: "DURATION", Value: "99999999:99:99.999999999"},
 				{Name: "NUMBER_OF_FRAMES", Value: digits},
 				{Name: "NUMBER_OF_BYTES", Value: digits},
+				{Name: "_STATISTICS_TAGS", Value: "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES"},
+				{Name: "_STATISTICS_WRITING_APP", Value: "mkvgo"},
 			}})
 		}
 	}

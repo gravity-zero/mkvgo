@@ -43,11 +43,19 @@ func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 	var out []mkv.Chapter
 	uids := &chapterUIDs{seen: map[uint64]bool{}, next: 1}
 	for i, c := range sources {
-		var off int64
+		var off, extent int64
 		if i < len(offsets) {
 			off = offsets[i]
+			// How much of the timeline this source actually filled: the next
+			// source starts where it stopped. A file that DECLARES more than it
+			// holds (a truncated download, a verdict this project names) carries
+			// chapters in that phantom tail, and shifting them without clipping
+			// drops them onto the next source's frames.
+			if i+1 < len(offsets) {
+				extent = offsets[i+1] - off
+			}
 		}
-		out = append(out, shiftChapters(c.Chapters, off, uids)...)
+		out = append(out, shiftChapters(c.Chapters, off, extent, uids)...)
 	}
 	return out
 }
@@ -55,11 +63,16 @@ func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 // shiftChapters moves one source's chapters onto the output timeline, dropping
 // the linked ones and re-numbering UID collisions. Sub-chapters are shifted with
 // their parent, at every depth.
-func shiftChapters(chapters []mkv.Chapter, offsetMs int64, uids *chapterUIDs) []mkv.Chapter {
+// extentMs is how far this source's timeline reaches; 0 means "unbounded", which
+// is the last source and the sizing pass.
+func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapterUIDs) []mkv.Chapter {
 	var out []mkv.Chapter
 	for _, ch := range chapters {
 		if len(ch.SegmentUID) > 0 {
 			continue // links out to another segment: see concatChapters
+		}
+		if extentMs > 0 && ch.StartMs >= extentMs {
+			continue // past what this source actually wrote
 		}
 		shifted := ch
 		shifted.ID = uids.unique(ch.ID)
@@ -67,7 +80,7 @@ func shiftChapters(chapters []mkv.Chapter, offsetMs int64, uids *chapterUIDs) []
 		if ch.EndMs > 0 {
 			shifted.EndMs = ch.EndMs + offsetMs
 		}
-		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, uids)
+		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, extentMs, uids)
 		out = append(out, shifted)
 	}
 	return out

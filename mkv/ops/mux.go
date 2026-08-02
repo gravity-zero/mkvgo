@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -74,27 +75,41 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 	var out []mkv.Tag
 	for _, t := range tracks {
+		// A declared track that received nothing reports zero, it does not
+		// vanish: that is the truth about the output, and it matches the
+		// empty-stream content hash the same track gets.
 		s := stats[t.ID]
-		if s == nil || !s.seen {
-			continue
-		}
-		dur := s.durationMs()
-		if dur <= 0 {
-			continue
+		if s == nil {
+			s = &trackStats{}
 		}
 		uid := t.UID
 		if uid == 0 {
 			uid = t.ID // the writer defaults a zero UID to the track ID
 		}
-		out = append(out, mkv.Tag{
-			TargetID: uid,
-			SimpleTags: []mkv.SimpleTag{
+		// A frame count and a byte count are true whatever the track's duration
+		// is; only the rate and the duration itself need one. Declining the whole
+		// set when a part holds a single frame of a track - so its measured
+		// duration is 0 - deleted the source's statistics and put nothing back.
+		names := []string{"NUMBER_OF_FRAMES", "NUMBER_OF_BYTES"}
+		simple := []mkv.SimpleTag{
+			{Name: "NUMBER_OF_FRAMES", Value: strconv.FormatInt(s.frames, 10)},
+			{Name: "NUMBER_OF_BYTES", Value: strconv.FormatInt(s.bytes, 10)},
+		}
+		if dur := s.durationMs(); dur > 0 {
+			names = append([]string{"BPS", "DURATION"}, names...)
+			simple = append([]mkv.SimpleTag{
 				{Name: "BPS", Value: strconv.FormatInt(s.bytes*8*1000/dur, 10)},
 				{Name: "DURATION", Value: formatStatsDuration(dur)},
-				{Name: "NUMBER_OF_FRAMES", Value: strconv.FormatInt(s.frames, 10)},
-				{Name: "NUMBER_OF_BYTES", Value: strconv.FormatInt(s.bytes, 10)},
-			},
-		})
+			}, simple...)
+		}
+		// The conventional markers that say these values are auto-generated and
+		// by whom. Without them a consumer keying on _STATISTICS_TAGS treats the
+		// set as hand-written. No date is stamped: mkvgo's outputs stay
+		// reproducible, and a wall clock would make two identical runs differ.
+		simple = append(simple,
+			mkv.SimpleTag{Name: "_STATISTICS_TAGS", Value: strings.Join(names, " ")},
+			mkv.SimpleTag{Name: "_STATISTICS_WRITING_APP", Value: "mkvgo"})
+		out = append(out, mkv.Tag{TargetID: uid, SimpleTags: simple})
 	}
 	return out
 }

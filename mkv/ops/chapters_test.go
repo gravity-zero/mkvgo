@@ -504,3 +504,35 @@ func TestJoin_AttachmentsAreNeverResident(t *testing.T) {
 			"not streamed from the source", alloc, pooled)
 	}
 }
+
+// TestConcatChapters_ClippedToWhatTheSourceWrote: a file that DECLARES more than
+// it holds - a truncated download - carries chapters in that phantom tail.
+// Shifted without clipping, they land on the next source's frames and the list
+// stops being monotonic.
+func TestConcatChapters_ClippedToWhatTheSourceWrote(t *testing.T) {
+	got := concatChapters([]*mkv.Container{
+		// Declares 4000 but really stops at 1000: "Credits" is in the tail that
+		// was never written.
+		cont(mkv.Chapter{ID: 1, Title: "Main", StartMs: 0},
+			mkv.Chapter{ID: 2, Title: "Credits", StartMs: 1900}),
+		cont(mkv.Chapter{ID: 5, Title: "Next", StartMs: 0}),
+	}, []int64{0, 1000})
+
+	var titles []string
+	var prev int64 = -1
+	for _, ch := range got {
+		titles = append(titles, ch.Title)
+		if ch.StartMs < prev {
+			t.Errorf("chapter %q starts at %d, before the previous %d - the list is not monotonic",
+				ch.Title, ch.StartMs, prev)
+		}
+		prev = ch.StartMs
+		if ch.Title == "Credits" {
+			t.Errorf("%q sat past what its source wrote (1000 ms) and was carried onto the next "+
+				"source's frames at %d ms", ch.Title, ch.StartMs)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("chapters = %v, want Main + Next", titles)
+	}
+}
