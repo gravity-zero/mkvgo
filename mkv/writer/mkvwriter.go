@@ -271,7 +271,15 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 // with. A rewrite that would not fit is refused rather than written over what
 // follows.
 func (m *MKVWriter) RestateDuration(durationMs int64) error {
-	if !m.infoWritten || durationMs <= 0 || durationMs == m.infoDurMs {
+	// Nothing was written to rewrite over, or nothing to say. The second case is
+	// an Info that carries NO Duration element - sources that declared none - and
+	// there is no room to add one in place: the output then declares nothing, as
+	// its sources did. Failing the whole operation over that (which this used to
+	// do, leaving a truncated file behind) is worse than the honest silence.
+	if !m.infoWritten || durationMs <= 0 {
+		return nil
+	}
+	if m.infoDurMs <= 0 && m.info.Duration <= 0 {
 		return nil
 	}
 	info := m.info

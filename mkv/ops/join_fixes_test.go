@@ -259,3 +259,104 @@ func TestJoin_SparseTrackDoesNotStretchTheSeam(t *testing.T) {
 		t.Errorf("second file resumes at %d ms, want <= 11000: a sparse subtitle track stretched the seam", seam)
 	}
 }
+
+// TestJoin_SeamIsTheLastFrameNotTheLongest: the "one frame" added to a track's
+// end must be the LAST frame's duration. Taking the longest of the whole track
+// let a 12 s sign near the start decide where the file ended - 11 s of dead air
+// at the seam, and a single-source join declaring twice its own length.
+func TestJoin_SeamIsTheLastFrameNotTheLongest(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), subtitleTrack(3, "srt")}
+
+	var sets [][]mkv.Block
+	for base := int64(0); base < 10000; base += 1000 {
+		var cl []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cl = append(cl, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: []byte("v")})
+		}
+		switch base {
+		case 1000: // a 12 s sign, early
+			cl = append(cl, mkv.Block{TrackNumber: 3, Timecode: 1000, Duration: 12000, Keyframe: true, Data: []byte("s")})
+		case 9000: // the LAST cue, 500 ms: the track honestly ends at 9500
+			cl = append(cl, mkv.Block{TrackNumber: 3, Timecode: 9000, Duration: 500, Keyframe: true, Data: []byte("s")})
+		}
+		sets = append(sets, cl)
+	}
+	src := buildMultiClusterMKV(t, dir, "p.mkv", tracks, sets, 10000)
+
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, []string{src, src}, dst); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seam int64 = -1
+	for {
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blk.TrackNumber == 1 && blk.Timecode > 9900 && seam < 0 {
+			seam = blk.Timecode
+		}
+	}
+	// The media ends at 10000; 21000 is 9000 + the 12 s sign.
+	if seam < 0 || seam > 10100 {
+		t.Errorf("second file resumes at %d ms, want ~10000: the longest cue of the track, not the "+
+			"last one, decided where the first file ended", seam)
+	}
+	c, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs > 20100 {
+		t.Errorf("the joined file declares %d ms for 20 s of media", c.DurationMs)
+	}
+}
+
+// TestJoin_SourcesWithoutADeclaredDuration: sources that declare no duration at
+// all (live captures, MediaRecorder chunks) have no Duration element to rewrite,
+// and there is no room to add one in place. The output declares nothing, like
+// its sources - it must not fail the join and leave a truncated file behind.
+func TestJoin_SourcesWithoutADeclaredDuration(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	sets := [][]mkv.Block{
+		{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}},
+		{{TrackNumber: 1, Timecode: 1000, Keyframe: true, Data: []byte("v")}},
+	}
+	a := buildMultiClusterMKV(t, dir, "a.mkv", []mkv.Track{videoTrack(1)}, sets, 0)
+	b := buildMultiClusterMKV(t, dir, "b.mkv", []mkv.Track{videoTrack(1)}, sets, 0)
+
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, []string{a, b}, dst); err != nil {
+		t.Fatalf("join refused sources that declare no duration: %v", err)
+	}
+	c, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatalf("the output is not readable: %v", err)
+	}
+	if got := len(c.Tracks); got != 1 {
+		t.Errorf("tracks = %d, want 1 - the file looks truncated", got)
+	}
+	if issues, err := Validate(ctx, dst); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, is := range issues {
+			if is.Severity == mkv.SeverityError {
+				t.Errorf("validate: %s", is.Message)
+			}
+		}
+	}
+}

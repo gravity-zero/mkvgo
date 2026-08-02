@@ -52,7 +52,11 @@ type trackEndState struct {
 	prevTC  int64
 	hasPrev bool
 	minGap  int64
-	maxDur  int64
+	// lastDur is the explicit duration of the block at maxTC - the only one that
+	// says where the track ends. Keeping the LARGEST duration of the whole track
+	// instead let a long sign early on decide: a 12 s cue at 0:01 in a 10 s part
+	// put the end at 21 s, and Join opened 11 s of dead air at the seam.
+	lastDur int64
 }
 
 func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, timecodeScale int64, fs *mkv.FS, opts streamOpts) error {
@@ -124,7 +128,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			// this did - let a sparse track dictate the end: subtitle cues
 			// minutes apart made "one frame" mean minutes, pushing the file's
 			// end (and, for Join, the next file's whole timeline) out with it.
-			frame := s.maxDur
+			frame := s.lastDur
 			if frame <= 0 {
 				frame = s.minGap
 			}
@@ -218,9 +222,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			s.prevTC, s.hasPrev = blk.Timecode, true
 			if blk.Timecode > s.maxTC {
 				s.maxTC = blk.Timecode
-			}
-			if blk.Duration > s.maxDur {
-				s.maxDur = blk.Duration
+				s.lastDur = blk.Duration
 			}
 		}
 
