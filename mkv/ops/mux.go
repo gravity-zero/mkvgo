@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -98,7 +99,7 @@ func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 		if dur := s.durationMs(); dur > 0 {
 			names = append([]string{"BPS", "DURATION"}, names...)
 			simple = append([]mkv.SimpleTag{
-				{Name: "BPS", Value: strconv.FormatInt(s.bytes*8*1000/dur, 10)},
+				{Name: "BPS", Value: strconv.FormatInt(bitsPerSecond(s.bytes, dur), 10)},
 				{Name: "DURATION", Value: formatStatsDuration(dur)},
 			}, simple...)
 		}
@@ -116,6 +117,27 @@ func statsTags(tracks []mkv.Track, stats map[uint64]*trackStats) []mkv.Tag {
 
 // formatStatsDuration renders a duration the way the statistics-tag convention
 // do: HH:MM:SS.nnnnnnnnn.
+// bitsPerSecond is bytes*8000/durationMs without the overflow that wrote a
+// NEGATIVE bitrate into the file: the product passes 2^63 at about 1.15 PB, so
+// beyond that the division comes first - a rounding no real file can notice, and
+// a rate that stays a rate.
+func bitsPerSecond(bytes, durationMs int64) int64 {
+	if durationMs <= 0 || bytes <= 0 {
+		return 0
+	}
+	if bytes <= math.MaxInt64/8000 {
+		return bytes * 8 * 1000 / durationMs
+	}
+	// Past ~1.15 PB the product no longer fits: divide first, and saturate
+	// rather than wrap - dividing first is not enough on its own, the result
+	// can still pass 2^63.
+	perMs := bytes / durationMs
+	if perMs > math.MaxInt64/8000 {
+		return math.MaxInt64
+	}
+	return perMs * 8000
+}
+
 func formatStatsDuration(ms int64) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%09d",
 		ms/3_600_000, ms/60_000%60, ms/1000%60, ms%1000*1_000_000)

@@ -127,9 +127,15 @@ func (p contentTagPlan) tagsForOutput(tracks []mkv.Track, digests map[uint64]has
 
 // upperBoundTags is the shape tagsForOutput will produce, with every measured
 // value at its widest, so MKVWriter.ReserveTags can book a slot no real write
-// can overflow. The hash is a fixed 64 hex characters; the statistics are
-// decimal integers that cannot exceed an int64's 19 digits, and the duration
-// is a fixed-width HH:MM:SS.nnnnnnnnn (hours widened for good measure).
+// can overflow.
+//
+// Each field is bounded on its own, not on the assumption that another one will
+// be short: the hash is a fixed 64 hex characters, the counters are int64 decimals
+// (19 digits), and DURATION's hour field is NOT capped at 24 - formatStatsDuration
+// writes ms/3_600_000, which reaches 13 digits for an int64 of milliseconds. An
+// earlier bound allowed 8 there and only held because a duration that long forces
+// the bitrate to one digit; a bound that relies on another field being small is
+// not a bound.
 func (p contentTagPlan) upperBoundTags(tracks []mkv.Track) []mkv.Tag {
 	out := append([]mkv.Tag{}, p.kept...)
 	const digits = "9999999999999999999"
@@ -143,7 +149,7 @@ func (p contentTagPlan) upperBoundTags(tracks []mkv.Track) []mkv.Tag {
 		if p.wantStats {
 			out = append(out, mkv.Tag{TargetID: uid, SimpleTags: []mkv.SimpleTag{
 				{Name: "BPS", Value: digits},
-				{Name: "DURATION", Value: "99999999:99:99.999999999"},
+				{Name: "DURATION", Value: "9999999999999:99:99.999999999"},
 				{Name: "NUMBER_OF_FRAMES", Value: digits},
 				{Name: "NUMBER_OF_BYTES", Value: digits},
 				{Name: "_STATISTICS_TAGS", Value: "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES"},

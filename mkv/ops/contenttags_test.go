@@ -1,9 +1,12 @@
 package ops
 
 import (
+	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -443,6 +446,59 @@ func TestStats_DescribeEveryTrack(t *testing.T) {
 			t.Fatal(err)
 		} else if len(mm) != 0 {
 			t.Errorf("part %d fails its own hashes: %v", i+1, mm)
+		}
+	}
+}
+
+// TestUpperBoundTags_HoldsFieldByField is the guard on the slot ReserveTags
+// books in the head: if the real write ever exceeded it, WriteReservedTags would
+// refuse and the op would fail. The bound must therefore hold on each field on
+// its OWN - an earlier version allowed 8 digits of hours in DURATION and only
+// survived because a duration that long forces the bitrate to one digit. A bound
+// that leans on another field being small is not a bound.
+func TestUpperBoundTags_HoldsFieldByField(t *testing.T) {
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	plan := contentTagPlan{wantHashes: true, wantStats: true}
+
+	longest := map[string]int{}
+	for _, tag := range plan.upperBoundTags(tracks) {
+		for _, st := range tag.SimpleTags {
+			if len(st.Value) > longest[st.Name] {
+				longest[st.Name] = len(st.Value)
+			}
+		}
+	}
+
+	cases := map[string]*trackStats{
+		"ordinary":           {bytes: 1 << 20, frames: 1000, maxTC: 600_000, lastDur: 40, seen: true},
+		"hours beyond a day": {bytes: 1 << 20, frames: 10, maxTC: math.MaxInt64 / 2, lastDur: 0, seen: true},
+		"absurd byte count":  {bytes: math.MaxInt64 / 4, frames: math.MaxInt64, maxTC: 1000, lastDur: 0, seen: true},
+		"single frame":       {bytes: 7, frames: 1, maxTC: 4000, lastDur: 0, seen: true},
+		"nothing at all":     {},
+	}
+	for name, st := range cases {
+		stats := map[uint64]*trackStats{1: st, 2: st}
+		for _, tag := range plan.tagsForOutput(tracks, nil, stats) {
+			for _, s := range tag.SimpleTags {
+				if max, ok := longest[s.Name]; ok && len(s.Value) > max {
+					t.Errorf("%s: %s = %q is %d chars, the reserved slot sizes it at %d",
+						name, s.Name, s.Value, len(s.Value), max)
+				}
+				if s.Name == "BPS" && strings.HasPrefix(s.Value, "-") {
+					t.Errorf("%s: BPS = %q - the bitrate overflowed into a negative", name, s.Value)
+				}
+			}
+		}
+		// And the whole element still fits what was booked.
+		var up, real bytes.Buffer
+		if err := writer.WriteTags(&up, plan.upperBoundTags(tracks)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.WriteTags(&real, plan.tagsForOutput(tracks, nil, stats)); err != nil {
+			t.Fatal(err)
+		}
+		if real.Len() > up.Len() {
+			t.Errorf("%s: the tags need %d bytes, the slot books %d", name, real.Len(), up.Len())
 		}
 	}
 }
