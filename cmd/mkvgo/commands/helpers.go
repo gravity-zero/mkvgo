@@ -55,7 +55,7 @@ var CmdUsage = map[string]string{
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",
 	"verify":             "mkvgo verify [-json] <file.mkv|.mp4> (recompute content hashes, exit 1 on mismatch)",
-	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> (-blocks: per-track content hashes, MKV/WebM only)",
+	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> [part2.mkv ...] (-blocks: per-track content hashes, MKV/WebM only; several files on the right = compare against their concatenation)",
 	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)]",
 	"mux":                "mkvgo mux -o <out.mkv> <file:trackID> [<file:trackID> ...]",
 	"merge":              "mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]",

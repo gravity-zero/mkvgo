@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"hash"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -47,6 +48,62 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options
 		return nil, fmt.Errorf("digest %s: %w", pathB, err)
 	}
 
+	return diffDigests(a, b), nil
+}
+
+// CompareBlocksConcat diffs one file's media content against the CONCATENATION
+// of several others, in the order given - the question a split asks: "do these
+// parts, end to end, still hold everything the source did?".
+//
+// It answers it WITHOUT building the joined file: the parts are hashed one
+// after another into the same per-track accumulator, so a 12-part split of a
+// 2 GB film is proven with no temporary copy. An empty result means every track
+// matches block for block, byte for byte.
+//
+// Tracks are matched by POSITION, like CompareBlocks and like the layout Join
+// already requires: a part whose track count differs is an error, not a diff,
+// because nothing sensible can be lined up after that.
+func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts ...mkv.Options) ([]mkv.Diff, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("no parts to compare against")
+	}
+	fs := mkv.FSFrom(opts)
+	_, whole, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts))
+	if err != nil {
+		return nil, fmt.Errorf("digest %s: %w", path, err)
+	}
+	concat, err := digestConcat(ctx, parts, fs)
+	if err != nil {
+		return nil, err
+	}
+	return diffDigests(whole, concat), nil
+}
+
+// digestConcat hashes several files as one logical stream per track position.
+func digestConcat(ctx context.Context, paths []string, fs *mkv.FS) ([]trackDigest, error) {
+	var accs []*digestAcc
+	for i, p := range paths {
+		c, err := reader.OpenWithFS(ctx, p, fs)
+		if err != nil {
+			return nil, fmt.Errorf("open %s: %w", p, err)
+		}
+		if accs == nil {
+			accs = newTrackAccs(len(c.Tracks))
+		} else if len(c.Tracks) != len(accs) {
+			return nil, fmt.Errorf("%s has %d tracks, expected %d like %s", p, len(c.Tracks), len(accs), paths[0])
+		}
+		order := make(map[uint64]int, len(c.Tracks))
+		for j, t := range c.Tracks {
+			order[t.ID] = j
+		}
+		if err := digestBlocksInto(ctx, p, fs, c.Info.TimecodeScale, order, accs, nil); err != nil {
+			return nil, fmt.Errorf("digest part %d (%s): %w", i+1, p, err)
+		}
+	}
+	return sealTrackAccs(accs), nil
+}
+
+func diffDigests(a, b []trackDigest) []mkv.Diff {
 	var diffs []mkv.Diff
 	n := len(a)
 	if len(b) > n {
@@ -72,7 +129,69 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options
 				Detail: fmt.Sprintf("payload hash differs (%d blocks, %d bytes each side)", a[i].blocks, a[i].bytes)})
 		}
 	}
-	return diffs, nil
+	return diffs
+}
+
+// digestAcc accumulates one track's running digest while blocks stream past.
+type digestAcc struct {
+	h hash.Hash
+	d trackDigest
+}
+
+func newTrackAccs(n int) []*digestAcc {
+	accs := make([]*digestAcc, n)
+	for i := range accs {
+		accs[i] = &digestAcc{h: sha256.New()}
+	}
+	return accs
+}
+
+func sealTrackAccs(accs []*digestAcc) []trackDigest {
+	out := make([]trackDigest, len(accs))
+	for i, a := range accs {
+		a.h.Sum(a.d.hash[:0])
+		out[i] = a.d
+	}
+	return out
+}
+
+// digestBlocksInto walks one file's blocks and folds each payload into the
+// accumulator its track maps to. The accumulators are the caller's, so several
+// files can be hashed as one stream (see digestConcat).
+func digestBlocksInto(ctx context.Context, path string, fs *mkv.FS, timecodeScale int64, order map[uint64]int, accs []*digestAcc, progress mkv.ProgressFunc) error {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, timecodeScale)
+	if err != nil {
+		return err
+	}
+	if progress != nil {
+		if st, _ := fs.DoStat(path); st != nil {
+			br.SetProgress(progress, st.Size())
+		}
+	}
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		blk, err := br.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		i, ok := order[blk.TrackNumber]
+		if !ok {
+			continue // block for an undeclared track: not attributable
+		}
+		accs[i].d.blocks++
+		accs[i].d.bytes += int64(len(blk.Data))
+		_, _ = accs[i].h.Write(blk.Data) // hash.Hash.Write never errors
+	}
 }
 
 // digestTracks walks every block of the file and returns the parsed container
@@ -86,58 +205,11 @@ func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.Pro
 	for i, t := range c.Tracks {
 		order[t.ID] = i
 	}
-	type acc struct {
-		h interface {
-			io.Writer
-			Sum([]byte) []byte
-		}
-		d trackDigest
-	}
-	accs := make([]acc, len(c.Tracks))
-	for i := range accs {
-		accs[i].h = sha256.New()
-	}
-
-	f, err := fs.DoOpen(path)
-	if err != nil {
+	accs := newTrackAccs(len(c.Tracks))
+	if err := digestBlocksInto(ctx, path, fs, c.Info.TimecodeScale, order, accs, progress); err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
-	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
-	if err != nil {
-		return nil, nil, err
-	}
-	if progress != nil {
-		if st, _ := fs.DoStat(path); st != nil {
-			br.SetProgress(progress, st.Size())
-		}
-	}
-	for {
-		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
-		}
-		blk, err := br.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		i, ok := order[blk.TrackNumber]
-		if !ok {
-			continue // block for an undeclared track: not attributable
-		}
-		accs[i].d.blocks++
-		accs[i].d.bytes += int64(len(blk.Data))
-		_, _ = accs[i].h.Write(blk.Data) // hash.Hash.Write never errors
-	}
-
-	out := make([]trackDigest, len(accs))
-	for i := range accs {
-		accs[i].h.Sum(accs[i].d.hash[:0])
-		out[i] = accs[i].d
-	}
-	return c, out, nil
+	return c, sealTrackAccs(accs), nil
 }
 
 // CompareContainers diffs the metadata of two already-parsed containers. It is

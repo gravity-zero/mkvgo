@@ -174,3 +174,57 @@ func TestSplit_StatisticsAreRemeasured(t *testing.T) {
 		t.Errorf("NUMBER_OF_FRAMES = %q, want \"50\" (the part's own video frames)", frames)
 	}
 }
+
+// TestCompareBlocksConcat proves a split lost nothing WITHOUT joining the parts
+// back - the point of the N-way form: no temporary copy of a 2 GB film.
+func TestCompareBlocksConcat(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	var sets [][]mkv.Block
+	for base := int64(0); base < 12000; base += 1000 {
+		var cluster []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cluster = append(cluster,
+				mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%2000 == 0, Data: []byte{byte(tc / 100), 0x11}},
+				mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte{byte(tc / 100), 0x22}})
+		}
+		sets = append(sets, cluster)
+	}
+	src := buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 12000)
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 4000}, {StartMs: 4000, EndMs: 8000}, {StartMs: 8000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 3 {
+		t.Fatalf("parts = %v", parts)
+	}
+	diffs, err := CompareBlocksConcat(ctx, src, parts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("the three parts should hold exactly the source's content: %+v", diffs)
+	}
+
+	// Order matters: the same parts shuffled are NOT the source.
+	shuffled := []string{parts[1], parts[0], parts[2]}
+	if diffs, err := CompareBlocksConcat(ctx, src, shuffled); err != nil {
+		t.Fatal(err)
+	} else if len(diffs) == 0 {
+		t.Error("parts given out of order should not compare equal")
+	}
+
+	// A missing part is caught too.
+	if diffs, err := CompareBlocksConcat(ctx, src, parts[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(diffs) == 0 {
+		t.Error("a missing part should show up as a content diff")
+	}
+
+	if _, err := CompareBlocksConcat(ctx, src, nil); err == nil {
+		t.Error("no parts at all must be an error, not an empty match")
+	}
+}

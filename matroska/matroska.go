@@ -402,6 +402,14 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...Options) ([
 	return ops.CompareBlocks(ctx, pathA, pathB, opts...)
 }
 
+// CompareBlocksConcat diffs one file's content against the CONCATENATION of
+// several others, in order: the question a split asks - "do these parts, end to
+// end, still hold everything the source did?" - answered without building the
+// joined file. Tracks are matched by position. See ops.CompareBlocksConcat.
+func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts ...Options) ([]Diff, error) {
+	return ops.CompareBlocksConcat(ctx, path, parts, opts...)
+}
+
 // CompareContainers diffs the metadata of two already-parsed containers  -
 // format-agnostic, so an MKV can be compared against an mp4.OpenMeta result to
 // verify a remux round-trip. See ops.CompareContainers.

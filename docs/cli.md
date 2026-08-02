@@ -281,6 +281,15 @@ mkvgo compare movie.mkv movie.mp4     # verify a to-mp4 round-trip
 mkvgo compare -blocks a.mkv b.mkv     # prove the media content is identical
 ```
 
+
+Several files on the right compare the left one against their **concatenation**,
+in order - proving a split kept everything without rebuilding the joined file:
+
+```bash
+mkvgo compare -blocks film.mkv part1.mkv part2.mkv part3.mkv
+# no output + exit 0  =>  the parts hold exactly the film's content
+```
+
 ---
 
 ## Extraction
@@ -611,6 +620,10 @@ mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
 
 Metadata policy (first-wins): the output's title, tags and attachments come
 from the **first** file; later files' metadata is not carried.
+
+Content hashes and per-track statistics are re-measured, so a joined file
+certifies its own content rather than the first part's (`mkvgo verify` on it now
+passes instead of reporting a mismatch).
 
 Chapters are the exception, because they describe the timeline rather than
 decorate it: **every** file contributes its own, shifted by the offset its

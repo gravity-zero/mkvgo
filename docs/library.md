@@ -1582,6 +1582,25 @@ an editorial call. Chapters linked to another segment (ChapterSegmentUID) are
 dropped, since the join makes that reference meaningless, and multi-edition
 files are out of scope: mkvgo reads and writes a single edition throughout.
 
+
+**Prove a split lost nothing, without joining it back:**
+```go
+// One file against the concatenation of its parts, in order. Per-track,
+// block for block, byte for byte - and no temporary copy of the film.
+diffs, err := matroska.CompareBlocksConcat(ctx, "film.mkv",
+    []string{"part1.mkv", "part2.mkv", "part3.mkv"})
+// len(diffs) == 0  =>  the parts hold exactly what the source holds
+```
+
+`CompareBlocks` answers the same question for a single file on each side (a
+remux, a reindex, a join). Both match tracks by position, Matroska/WebM only.
+
+Split and Join re-measure the content-derived tags they carry - `CONTENT_SHA256`
+and the statistics family (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`,
+`NUMBER_OF_BYTES`) - so a part certifies its own slice and a joined file its own
+whole. They are only written when the source carried them: an op that was not
+asked to certify anything does not start hashing every byte it copies.
+
 ---
 
 ## Self-verifying files (content hashes)

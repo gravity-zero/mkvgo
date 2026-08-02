@@ -73,15 +73,26 @@ func CmdCompare(args []string) {
 		Fatal("usage: " + CmdUsage["compare"])
 	}
 	pathA, pathB := rest[0], rest[1]
+	// More than two paths means "this file against those parts, in order",
+	// which only the content compare can answer.
+	parts := rest[1:]
+	if len(parts) > 1 && !blocks {
+		Fatal("comparing against several files needs -blocks (metadata has no concatenation)")
+	}
 
 	a, _ := loadContainer(pathA, false)
 	b, _ := loadContainer(pathB, false)
-	diffs := matroska.CompareContainers(a, b)
+	var diffs []matroska.Diff
+	if len(parts) == 1 {
+		diffs = matroska.CompareContainers(a, b)
+	}
 	if blocks {
-		if isMP4Path(pathA) || isMP4Path(pathB) {
-			Fatal("-blocks compares Matroska/WebM content only (remux the MP4 side to MKV first)")
+		for _, p := range append([]string{pathA}, parts...) {
+			if isMP4Path(p) {
+				Fatal("-blocks compares Matroska/WebM content only (remux the MP4 side to MKV first)")
+			}
 		}
-		bd, err := matroska.CompareBlocks(context.Background(), pathA, pathB)
+		bd, err := matroska.CompareBlocksConcat(context.Background(), pathA, parts)
 		if err != nil {
 			Fatal(err.Error())
 		}
