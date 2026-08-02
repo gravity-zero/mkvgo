@@ -242,3 +242,55 @@ func TestJoin_RestoresChaptersOfEverySource(t *testing.T) {
 		}
 	}
 }
+
+// TestJoin_PoolsAttachments: an ASS track's fonts may be attached only to the
+// part that uses them, so a first-wins policy loses them. Duplicates left in
+// every part by a split collapse back to one.
+func TestJoin_PoolsAttachments(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	blocks := [][]mkv.Block{{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}}
+
+	mk := func(name string, atts []mkv.Attachment) string {
+		p := filepath.Join(dir, name)
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		mw := writer.NewMKVWriter(f)
+		mustNil(t, mw.WriteStart())
+		mustNil(t, mw.WriteMetadata(&mkv.Container{
+			Info:        mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"},
+			Attachments: atts,
+		}, []mkv.Track{videoTrack(1)}, 1000))
+		for _, b := range blocks {
+			mustNil(t, mw.WriteClusterWithCues(b[0].Timecode, 1_000_000, b))
+		}
+		mustNil(t, mw.Finalize())
+		return p
+	}
+	shared := mkv.Attachment{ID: 1, Name: "shared.ttf", MIMEType: "font/ttf", Size: 4, Data: []byte("AAAA")}
+	a := mk("a.mkv", []mkv.Attachment{shared})
+	b := mk("b.mkv", []mkv.Attachment{shared,
+		{ID: 2, Name: "only-in-b.ttf", MIMEType: "font/ttf", Size: 3, Data: []byte("BBB")}})
+
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, []string{a, b}, dst); err != nil {
+		t.Fatal(err)
+	}
+	c, err := reader.OpenMeta(ctx, dst, reader.WithAttachments())
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]int{}
+	for _, at := range c.Attachments {
+		names[at.Name]++
+	}
+	if names["only-in-b.ttf"] != 1 {
+		t.Errorf("the font attached only to the second file was lost: %v", names)
+	}
+	if names["shared.ttf"] != 1 {
+		t.Errorf("the shared font should appear once, got %d", names["shared.ttf"])
+	}
+}

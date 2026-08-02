@@ -1,6 +1,10 @@
 package ops
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"fmt"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
 
 // concatChapters lays every source's chapters onto the joined timeline: the
 // chapters of source i shifted by offsets[i], the offset at which that source's
@@ -83,4 +87,24 @@ func (u *chapterUIDs) unique(id uint64) uint64 {
 	}
 	u.seen[u.next] = true
 	return u.next
+}
+
+// mergeAttachments pools every source's attachments, keeping the first copy of
+// each and skipping the duplicates a split leaves in every part (same name and
+// same size). Attachment IDs are renumbered so the output has no collisions.
+func mergeAttachments(sources []*mkv.Container) []mkv.Attachment {
+	var out []mkv.Attachment
+	seen := map[string]bool{}
+	for _, c := range sources {
+		for _, a := range c.Attachments {
+			key := fmt.Sprintf("%s\x00%d", a.Name, a.Size)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			a.ID = uint64(len(out) + 1)
+			out = append(out, a)
+		}
+	}
+	return out
 }

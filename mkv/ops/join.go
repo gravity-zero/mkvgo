@@ -75,6 +75,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// after the clusters.
 	meta := metaForNewDuration(first)
 	meta.Chapters = nil
+	// Attachments are pooled, not taken from the first file alone: the fonts an
+	// ASS track needs may only be attached to the part that uses them, and a
+	// first-wins policy drops them. Matched on name + size, so the same font
+	// attached to every part lands once.
+	meta.Attachments = mergeAttachments(conts)
 	plan := planContentTags(first.Tags)
 	if plan.recompute() {
 		meta.Tags = nil

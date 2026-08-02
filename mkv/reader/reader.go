@@ -1468,7 +1468,12 @@ func (p *parser) parseEditionEntry(size int64, c *mkv.Container) error {
 			}
 		}
 	}
-	_ = ordered // parsed but not used yet
+	// EditionFlagOrdered is read but deliberately dropped, not pending: an
+	// ordered edition plays chapters in its own order and leans on segment
+	// linking (ChapterSegmentUID), which mkvgo neither follows nor writes.
+	// Carrying the flag onto a rewrite whose links are gone would promise a
+	// playback order nothing can honour.
+	_ = ordered
 	c.Chapters = append(c.Chapters, chapters...)
 	return nil
 }

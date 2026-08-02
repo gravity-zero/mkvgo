@@ -168,7 +168,11 @@ func (m *MKVWriter) Finalize() error {
 	}
 
 	seekData := buf.Bytes()
-	if len(seekData) > SeekHeadReserve {
+	// A leftover of exactly one byte cannot be filled: no EBML element is
+	// shorter than two, and the stray byte of the old Void would be read as an
+	// element ID. Fall back to the append-at-the-end path, which leaves the
+	// head's Void whole.
+	if len(seekData) > SeekHeadReserve || SeekHeadReserve-len(seekData) == 1 {
 		if _, err := m.W.Write(seekData); err != nil {
 			return err
 		}
