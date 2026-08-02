@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -338,5 +339,102 @@ func TestClipChapters_ListOrderIsNotTimeOrder(t *testing.T) {
 		if ch.Title == "Intro" || ch.Title == "Hidden" {
 			t.Errorf("%q leaked into the slice starting at 600000 - it ends there", ch.Title)
 		}
+	}
+}
+
+// TestJoin_ScaleAndAttachmentIdentity covers two silent losses at once, both on
+// the metadata Join carries across sources.
+func TestJoin_ScaleAndAttachmentIdentity(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	scaled := func(name string, scale int64) string {
+		p := filepath.Join(dir, name)
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		mw := writer.NewMKVWriter(f)
+		mustNil(t, mw.WriteStart())
+		mustNil(t, mw.WriteMetadata(&mkv.Container{
+			Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "t", WritingApp: "t"},
+		}, []mkv.Track{videoTrack(1)}, 1000))
+		for tc := int64(0); tc <= 900; tc += 300 {
+			mustNil(t, mw.WriteClusterWithCues(tc, scale, []mkv.Block{
+				{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("v")}}))
+		}
+		mustNil(t, mw.Finalize())
+		return p
+	}
+	// The second file is muxed at 0.1 ms, the output declares 1 ms.
+	a, b := scaled("a.mkv", 1_000_000), scaled("b.mkv", 100_000)
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, []string{a, b}, dst); err != nil {
+		t.Fatal(err)
+	}
+	c, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tcs []int64
+	for {
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		tcs = append(tcs, blk.Timecode)
+	}
+	if len(tcs) != 8 {
+		t.Fatalf("blocks = %v, want 8", tcs)
+	}
+	// The first file ends at 900 + one 300 ms frame; the second resumes there.
+	// 12000 is the second file's ticks read against the wrong divisor.
+	if tcs[4] != 1200 {
+		t.Errorf("the second file resumes at %d ms, want 1200: its ticks were written against its "+
+			"own TimecodeScale while the header declares the first's (%v)", tcs[4], tcs)
+	}
+
+	// Attachment identity is the content, and cover art stays single.
+	font := func(data string) mkv.Attachment {
+		return mkv.Attachment{ID: 1, Name: "font.ttf", MIMEType: "font/ttf",
+			Size: int64(len(data)), Data: []byte(data)}
+	}
+	cover := func(data string) mkv.Attachment {
+		return mkv.Attachment{ID: 2, Name: "cover.jpg", MIMEType: "image/jpeg",
+			Size: int64(len(data)), Data: []byte(data)}
+	}
+	merged := mergeAttachments([]*mkv.Container{
+		{Attachments: []mkv.Attachment{font("AAAA"), cover("111")}},
+		{Attachments: []mkv.Attachment{font("ZZZZ"), cover("222")}}, // same names, other bytes
+		{Attachments: []mkv.Attachment{font("AAAA")}},               // a duplicate from a split
+	})
+	var fonts, covers int
+	for _, at := range merged {
+		switch at.Name {
+		case "font.ttf":
+			fonts++
+		case "cover.jpg":
+			covers++
+		}
+	}
+	if fonts != 2 {
+		t.Errorf("fonts kept = %d, want 2: two different files share the name, the third is a "+
+			"byte-identical duplicate", fonts)
+	}
+	if covers != 1 {
+		t.Errorf("cover.jpg kept = %d, want 1 - Matroska defines a single one", covers)
 	}
 }

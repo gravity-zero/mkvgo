@@ -1,7 +1,9 @@
 package ops
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -89,15 +91,24 @@ func (u *chapterUIDs) unique(id uint64) uint64 {
 	return u.next
 }
 
-// mergeAttachments pools every source's attachments, keeping the first copy of
-// each and skipping the duplicates a split leaves in every part (same name and
-// same size). Attachment IDs are renumbered so the output has no collisions.
+// mergeAttachments pools every source's attachments, keeping one copy of each
+// distinct FILE and renumbering the IDs so the output has no collision.
+//
+// Identity is the content, not the name: a split leaves the same font in every
+// part (one copy survives), while two parts can carry different files under one
+// name - matching on name and size alone silently kept the first and threw the
+// other away, which for a font means subtitles rendering wrong in half the
+// joined film.
+//
+// The conventional cover art is the exception. Matroska defines at most one
+// cover.jpg (plus one small_cover.*), so joining twelve episodes must not
+// produce twelve of them: the first one wins, by name.
 func mergeAttachments(sources []*mkv.Container) []mkv.Attachment {
 	var out []mkv.Attachment
 	seen := map[string]bool{}
 	for _, c := range sources {
 		for _, a := range c.Attachments {
-			key := fmt.Sprintf("%s\x00%d", a.Name, a.Size)
+			key := attachmentKey(a)
 			if seen[key] {
 				continue
 			}
@@ -107,4 +118,29 @@ func mergeAttachments(sources []*mkv.Container) []mkv.Attachment {
 		}
 	}
 	return out
+}
+
+// coverNames are the attachment names Matroska reserves for cover art, of which
+// a file carries at most one each.
+var coverNames = map[string]bool{
+	"cover.jpg": true, "cover.png": true,
+	"small_cover.jpg": true, "small_cover.png": true,
+}
+
+func attachmentKey(a mkv.Attachment) string {
+	name := strings.ToLower(a.Name)
+	if coverNames[name] {
+		return "cover:" + name
+	}
+	if a.Data != nil {
+		return "sha:" + string(sha256Sum(a.Data))
+	}
+	// No payload in hand (a metadata-only read): fall back to the weaker
+	// name+size identity rather than duplicating everything.
+	return fmt.Sprintf("meta:%s\x00%d", a.Name, a.Size)
+}
+
+func sha256Sum(b []byte) []byte {
+	sum := sha256.Sum256(b)
+	return sum[:]
 }

@@ -16,6 +16,15 @@ const defaultClusterDurationMs = 1000
 
 type streamOpts struct {
 	remap map[uint64]uint64
+	// outScale is the TimecodeScale the OUTPUT declares, when it differs from
+	// the source's. The one scale served both jobs before - decoding the
+	// source's ticks into milliseconds AND encoding them back on the way out -
+	// so appending a file muxed at a different scale wrote ticks against a
+	// divisor the header does not declare: a source at 0.1 ms joined into a
+	// 1 ms file came out stretched tenfold, silently. 0 means "same as the
+	// source", which is every caller but Join. streamMergeToWriter has always
+	// kept the two apart; this is that distinction, brought here.
+	outScale int64
 	// timeOffset shifts every block of this source by the same amount, which is
 	// what keeps the tracks aligned with each other when Join appends a file.
 	timeOffset int64
@@ -88,7 +97,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if len(cluster) == 0 {
 			return nil
 		}
-		err := mw.WriteClusterWithCues(clusterTS, timecodeScale, cluster)
+		outScale := opts.outScale
+		if outScale <= 0 {
+			outScale = timecodeScale
+		}
+		err := mw.WriteClusterWithCues(clusterTS, outScale, cluster)
 		cluster = cluster[:0]
 		return err
 	}

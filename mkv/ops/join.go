@@ -141,6 +141,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		trackEnds := make(map[uint64]int64, len(c.Tracks))
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
+			outScale:       first.Info.TimecodeScale,
 			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,
 		}); err != nil {
