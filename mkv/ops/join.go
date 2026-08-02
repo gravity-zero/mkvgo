@@ -147,6 +147,14 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}
 	}
 
+	// What was actually written runs to the last seam offset, which is more than
+	// the sum of the sources' DECLARED durations whenever they were cut on
+	// keyframes (each part keeps the GOP straddling its end). Left as declared,
+	// a rejoined film's seek bar stops short - 24.8 s short on a 12-part split.
+	if err := mw.RestateDuration(offset); err != nil {
+		return err
+	}
+
 	// The seam offsets are known now: same values the blocks were written with.
 	if err := mw.WriteReservedChapters(concatChapters(conts, offsets)); err != nil {
 		return err

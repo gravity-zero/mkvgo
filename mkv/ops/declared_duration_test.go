@@ -25,13 +25,15 @@ func TestJoin_DeclaresSummedDuration(t *testing.T) {
 	ctx := context.Background()
 	tracks := []mkv.Track{videoTrack(1)}
 
+	// Frames every second: the measured end of each source then lands on the
+	// duration it declares, so the joined total is unambiguous.
 	srcs := make([]string, 0, 3)
 	for i, ms := range []int64{10000, 10000, 5000} {
-		blocks := []mkv.Block{
-			{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")},
-			{TrackNumber: 1, Timecode: ms - 1000, Keyframe: true, Data: []byte("v")},
+		var sets [][]mkv.Block
+		for tc := int64(0); tc < ms; tc += 1000 {
+			sets = append(sets, []mkv.Block{{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("v")}})
 		}
-		srcs = append(srcs, buildMinimalMKV(t, dir, string(rune('a'+i))+".mkv", tracks, blocks, ms))
+		srcs = append(srcs, buildMultiClusterMKV(t, dir, string(rune('a'+i))+".mkv", tracks, sets, ms))
 	}
 
 	dst := filepath.Join(dir, "joined.mkv")
@@ -46,6 +48,17 @@ func TestJoin_DeclaresSummedDuration(t *testing.T) {
 	if c.DurationMs != 25000 {
 		t.Errorf("joined file declares %d ms, want 25000 (10000+10000+5000); "+
 			"10000 means the first source's Duration overwrote the summed one", c.DurationMs)
+	}
+	// The declaration is what was MEASURED at the last seam, not the sum of what
+	// the sources declared: keyframe-cut parts hold a little past their nominal
+	// end, and a film rejoined from twelve of them fell 24.8 s short.
+	rep, err := Analyze(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeclaredDurationMs < rep.DurationMs {
+		t.Errorf("declares %d ms but holds %d ms - the seek bar stops %d ms early",
+			rep.DeclaredDurationMs, rep.DurationMs, rep.DurationMs-rep.DeclaredDurationMs)
 	}
 }
 
@@ -254,5 +267,47 @@ func TestSplit_DeclaresPerSegmentDuration(t *testing.T) {
 			t.Errorf("part %d declares %d ms, want %d; 6000 means every segment claims the whole source",
 				i+1, got.DurationMs, want)
 		}
+	}
+}
+
+// TestJoin_DeclaresWhatItHoldsAfterASplit is the case the arithmetic alone
+// cannot reach: parts cut on keyframes each hold a little past the range they
+// were asked for, so the sum of what they DECLARE falls short of what the
+// joined file actually contains. Declared from that sum, the seek bar stops
+// before the end - 24.8 s early on a twelve-part split of a real film.
+func TestJoin_DeclaresWhatItHoldsAfterASplit(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	// Keyframes every 2 s, frames every 100 ms: a cut asked for at 5 s lands on
+	// the keyframe at 6 s, and the part keeps everything up to it.
+	var sets [][]mkv.Block
+	for base := int64(0); base < 12000; base += 1000 {
+		var cluster []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cluster = append(cluster, mkv.Block{TrackNumber: 1, Timecode: tc,
+				Keyframe: tc%2000 == 0, Data: []byte("v")})
+		}
+		sets = append(sets, cluster)
+	}
+	src := buildMultiClusterMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1)}, sets, 12000)
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 5000}, {StartMs: 5000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, parts, joined); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Analyze(ctx, joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeclaredDurationMs < rep.DurationMs {
+		t.Errorf("declares %d ms but holds %d ms: the seek bar stops %d ms early - the sum of the "+
+			"parts' declared durations was used instead of the measured end",
+			rep.DeclaredDurationMs, rep.DurationMs, rep.DurationMs-rep.DeclaredDurationMs)
 	}
 }

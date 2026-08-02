@@ -36,6 +36,9 @@ type MKVWriter struct {
 	TimecodeScale int64
 	videoTracks   map[uint64]bool // set by WriteMetadata; cue selection keys on these
 	chaptersSlot  int             // bytes booked by ReserveChapters, 0 if none
+	info          mkv.SegmentInfo // kept by WriteMetadata for RestateDuration
+	infoDurMs     int64           // the duration WriteMetadata was given
+	infoWritten   bool
 }
 
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
@@ -221,6 +224,7 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 		m.TimecodeScale = 1000000
 	}
 	m.InfoPos = m.RelPos()
+	m.info, m.infoDurMs, m.infoWritten = c.Info, durationMs, true
 	if err := WriteSegmentInfo(m.W, &c.Info, durationMs); err != nil {
 		return err
 	}
@@ -250,6 +254,43 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 	}
 	// Padding for later in-place metadata edits (see MetadataReserve).
 	return WriteVoid(m.W, MetadataReserve)
+}
+
+// RestateDuration rewrites the Segment Info with a duration measured after the
+// fact, for an op that only learns how long its output really is once the last
+// block is written - a concatenation, whose parts each hold a little more than
+// the range they were cut on, so the sum of what they DECLARE falls short of
+// what they hold.
+//
+// The Info is re-serialised over itself: a Matroska Duration is a float, always
+// eight bytes, so the element keeps its size as long as it was there to begin
+// with. A rewrite that would not fit is refused rather than written over what
+// follows.
+func (m *MKVWriter) RestateDuration(durationMs int64) error {
+	if !m.infoWritten || durationMs <= 0 || durationMs == m.infoDurMs {
+		return nil
+	}
+	info := m.info
+	info.Duration = 0 // the measured value is the one to write, see WriteSegmentInfo
+	var before, after bytes.Buffer
+	if err := WriteSegmentInfo(&before, &m.info, m.infoDurMs); err != nil {
+		return err
+	}
+	if err := WriteSegmentInfo(&after, &info, durationMs); err != nil {
+		return err
+	}
+	if before.Len() != after.Len() {
+		return fmt.Errorf("restated Info is %d bytes, was %d - refusing to write past it", after.Len(), before.Len())
+	}
+	end := m.pos()
+	if _, err := m.W.Seek(m.SegDataStart+m.InfoPos, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := m.W.Write(after.Bytes()); err != nil {
+		return err
+	}
+	_, err := m.W.Seek(end, io.SeekStart)
+	return err
 }
 
 // ReserveChapters books room in the HEAD for a Chapters element whose timestamps
