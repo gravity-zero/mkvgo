@@ -118,12 +118,18 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			return
 		}
 		for id, s := range endStates {
+			// An explicit Block.Duration is ground truth and wins; the smallest
+			// inter-frame gap is only a stand-in for the tracks that carry no
+			// duration (video, most audio). Taking the LARGER of the two - as
+			// this did - let a sparse track dictate the end: subtitle cues
+			// minutes apart made "one frame" mean minutes, pushing the file's
+			// end (and, for Join, the next file's whole timeline) out with it.
 			frame := s.maxDur
-			if s.minGap > frame {
+			if frame <= 0 {
 				frame = s.minGap
 			}
 			if frame <= 0 {
-				frame = 1 // no second frame seen: nudge to avoid an exact overlap
+				frame = 1 // a single frame seen: nudge to avoid an exact overlap
 			}
 			opts.trackEnds[id] = s.maxTC + frame
 		}

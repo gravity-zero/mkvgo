@@ -196,3 +196,66 @@ func TestJoin_SeamKeepsTracksAligned(t *testing.T) {
 			"used and the seam holds a hole", videoSeam)
 	}
 }
+
+// TestJoin_SparseTrackDoesNotStretchTheSeam: the seam is the end of the media,
+// and a subtitle track's cues sitting minutes apart say nothing about how long
+// a frame lasts. Estimating "one frame" from the smallest gap BETWEEN cues -
+// and then taking the larger of that and the explicit duration - let such a
+// track push the next file's whole timeline out by that gap.
+func TestJoin_SparseTrackDoesNotStretchTheSeam(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2), subtitleTrack(3, "srt")}
+
+	var sets [][]mkv.Block
+	for base := int64(0); base < 10000; base += 1000 {
+		var cluster []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cluster = append(cluster,
+				mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: []byte("v")},
+				mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+		}
+		// Two cues, 8 s apart, each lasting 2 s: the media ends at 10000, and the
+		// subtitle track ends at 9000+2000 = 11000 at the very most.
+		switch base {
+		case 0:
+			cluster = append(cluster, mkv.Block{TrackNumber: 3, Timecode: 1000, Duration: 2000, Keyframe: true, Data: []byte("s")})
+		case 9000:
+			cluster = append(cluster, mkv.Block{TrackNumber: 3, Timecode: 9000, Duration: 2000, Keyframe: true, Data: []byte("s")})
+		}
+		sets = append(sets, cluster)
+	}
+	src := buildMultiClusterMKV(t, dir, "p.mkv", tracks, sets, 10000)
+
+	dst := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, []string{src, src}, dst); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seam int64 = -1
+	for {
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blk.TrackNumber == 1 && blk.Timecode > 9900 && seam < 0 {
+			seam = blk.Timecode // first video block of the second copy
+		}
+	}
+	// 11000 = the subtitle track's own honest end. Anything beyond that (the old
+	// 9000 + 8000-gap = 17000) is the sparse track stretching the timeline.
+	if seam < 0 || seam > 11000 {
+		t.Errorf("second file resumes at %d ms, want <= 11000: a sparse subtitle track stretched the seam", seam)
+	}
+}
