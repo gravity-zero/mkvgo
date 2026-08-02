@@ -381,25 +381,45 @@ func WriteChapters(w io.Writer, chapters []mkv.Chapter) error {
 	var e ew
 	e.master(mkv.IDEditionEntry, func(ed *ew) {
 		for i := range chapters {
-			ch := &chapters[i]
-			ed.master(mkv.IDChapterAtom, func(a *ew) {
-				a.uint(mkv.IDChapterUID, ch.ID)
-				a.uint(mkv.IDChapterTimeStart, uint64(ch.StartMs)*1000000)
-				if ch.EndMs > 0 {
-					a.uint(mkv.IDChapterTimeEnd, uint64(ch.EndMs)*1000000)
-				}
-				if ch.Title != "" {
-					a.master(mkv.IDChapterDisplay, func(d *ew) {
-						d.str(mkv.IDChapString, ch.Title)
-					})
-				}
-				if len(ch.SegmentUID) > 0 {
-					a.raw(mkv.IDChapterSegmentUID, ch.SegmentUID)
-				}
-			})
+			writeChapterAtom(ed, &chapters[i], 0)
 		}
 	})
 	return e.flush(w, mkv.IDChapters)
+}
+
+// maxChapterWriteDepth mirrors the reader's nesting limit, so a hand-built
+// container cannot recurse this writer past what mkvgo will read back.
+const maxChapterWriteDepth = 64
+
+// writeChapterAtom writes one chapter and, nested inside it, its sub-chapters -
+// which the reader has always parsed and every other op carries around, but
+// which this used to drop on the floor at write time.
+func writeChapterAtom(ed *ew, ch *mkv.Chapter, depth int) {
+	if depth > maxChapterWriteDepth {
+		if ed.err == nil {
+			ed.err = fmt.Errorf("chapter nesting exceeds %d levels", maxChapterWriteDepth)
+		}
+		return
+	}
+	ed.master(mkv.IDChapterAtom, func(a *ew) {
+		a.uint(mkv.IDChapterUID, ch.ID)
+		a.uint(mkv.IDChapterTimeStart, uint64(ch.StartMs)*1000000)
+		if ch.EndMs > 0 {
+			a.uint(mkv.IDChapterTimeEnd, uint64(ch.EndMs)*1000000)
+		}
+		if ch.Title != "" {
+			a.master(mkv.IDChapterDisplay, func(d *ew) {
+				d.str(mkv.IDChapString, ch.Title)
+			})
+		}
+		if len(ch.SegmentUID) > 0 {
+			a.raw(mkv.IDChapterSegmentUID, ch.SegmentUID)
+		}
+		// Nested atoms come after the atom's own fields.
+		for i := range ch.SubChapters {
+			writeChapterAtom(a, &ch.SubChapters[i], depth+1)
+		}
+	})
 }
 
 func WriteTags(w io.Writer, tags []mkv.Tag) error {

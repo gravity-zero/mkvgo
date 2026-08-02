@@ -121,6 +121,47 @@ func TestConcatChapters_SubChaptersRideAlong(t *testing.T) {
 	}
 }
 
+// TestChapters_SubChaptersSurviveAWrite: nesting is parsed by the reader and
+// carried by every op, but the writer used to emit only the top level, so a
+// sub-chapter vanished at the first rewrite - split, join or a metadata edit.
+func TestChapters_SubChaptersSurviveAWrite(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	src := filepath.Join(dir, "nested.mkv")
+	writeChapteredMKV(t, src, [][]mkv.Block{{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")},
+	}}, []mkv.Chapter{
+		{ID: 1, Title: "Act I", StartMs: 0, EndMs: 4000, SubChapters: []mkv.Chapter{
+			{ID: 2, Title: "Scene 1", StartMs: 0, EndMs: 2000},
+			{ID: 3, Title: "Scene 2", StartMs: 2000, EndMs: 4000, SubChapters: []mkv.Chapter{
+				{ID: 4, Title: "Beat", StartMs: 3000, EndMs: 4000},
+			}},
+		}},
+	}, 4000)
+
+	c, err := reader.OpenMeta(ctx, src, reader.WithChapters())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Chapters) != 1 {
+		t.Fatalf("top level = %d chapters, want 1: %+v", len(c.Chapters), c.Chapters)
+	}
+	act := c.Chapters[0]
+	if len(act.SubChapters) != 2 {
+		t.Fatalf("%q has %d sub-chapters, want 2 - the writer dropped the nesting", act.Title, len(act.SubChapters))
+	}
+	if act.SubChapters[0].Title != "Scene 1" || act.SubChapters[1].Title != "Scene 2" {
+		t.Errorf("sub-chapters = %q, %q", act.SubChapters[0].Title, act.SubChapters[1].Title)
+	}
+	if act.SubChapters[1].StartMs != 2000 || act.SubChapters[1].EndMs != 4000 {
+		t.Errorf("Scene 2 = [%d, %d], want [2000, 4000]", act.SubChapters[1].StartMs, act.SubChapters[1].EndMs)
+	}
+	// Two levels down.
+	if len(act.SubChapters[1].SubChapters) != 1 || act.SubChapters[1].SubChapters[0].Title != "Beat" {
+		t.Errorf("second nesting level lost: %+v", act.SubChapters[1].SubChapters)
+	}
+}
+
 // TestJoin_RestoresChaptersOfEverySource is the round trip the real corpus
 // showed missing: split a file on its chapters, join the parts back, and get
 // every chapter again - at the offsets the blocks were really written to, not
