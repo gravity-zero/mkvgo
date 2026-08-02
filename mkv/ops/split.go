@@ -178,15 +178,30 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// without the reset every part would declare the whole film's length.
 	segMeta := metaForNewDuration(c)
 	segMeta.Chapters = clipChapters(c.Chapters, r.StartMs, r.EndMs)
+	// A part holds a slice of the source, so the source's content hash and
+	// statistics describe something it does not contain. They are measured
+	// again while the blocks go by and written after the clusters, in ONE Tags
+	// element (the SeekHead points at it, and EditInPlace knows to fold it).
+	plan := planContentTags(c.Tags)
+	if plan.recompute() {
+		segMeta.Tags = nil
+	}
+	digests, stats := plan.digestsFor(), plan.statsFor()
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
-		videoTracks: videoTrackSet(c.Tracks),
-		progress:    progress,
+		videoTracks:    videoTrackSet(c.Tracks),
+		contentDigests: digests, contentStats: stats,
+		progress: progress,
 	}); err != nil {
 		return err
+	}
+	if plan.recompute() {
+		if err := mw.WriteTagsElement(plan.tagsForOutput(tracks, digests, stats)); err != nil {
+			return err
+		}
 	}
 	return mw.Finalize()
 }

@@ -69,8 +69,17 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// needs the offset its own source ends up at - so the head only books the
 	// room here (sized on the list, which is already known) and the timestamps
 	// are filled in once the last block has been written.
+	//
+	// The content hash and statistics of the first file describe the first file
+	// only; the joined one measures its own while streaming and states them
+	// after the clusters.
 	meta := metaForNewDuration(first)
 	meta.Chapters = nil
+	plan := planContentTags(first.Tags)
+	if plan.recompute() {
+		meta.Tags = nil
+	}
+	digests, stats := plan.digestsFor(), plan.statsFor()
 	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}
@@ -126,6 +135,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		trackEnds := make(map[uint64]int64, len(c.Tracks))
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
+			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", src, err)
@@ -140,6 +150,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// The seam offsets are known now: same values the blocks were written with.
 	if err := mw.WriteReservedChapters(concatChapters(conts, offsets)); err != nil {
 		return err
+	}
+	if plan.recompute() {
+		if err := mw.WriteTagsElement(plan.tagsForOutput(first.Tracks, digests, stats)); err != nil {
+			return err
+		}
 	}
 	return mw.Finalize()
 }

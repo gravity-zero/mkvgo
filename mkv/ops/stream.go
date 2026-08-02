@@ -2,7 +2,9 @@ package ops
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"hash"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -20,10 +22,19 @@ type streamOpts struct {
 	// trackEnds, when non-nil, is filled with each output track's next free start
 	// timecode (its last frame's end). Join takes the largest as the next file's
 	// timeOffset: the end of the whole file, measured rather than declared.
-	trackEnds     map[uint64]int64
-	timeStart     int64
-	timeEnd       int64
-	keyframeAlign bool // split on keyframe boundaries
+	trackEnds map[uint64]int64
+	// contentDigests and contentStats, when non-nil, accumulate each OUTPUT
+	// track's payload digest and media statistics as the blocks go by, keyed by
+	// output track number and filled lazily. An op that cuts or concatenates
+	// uses them to write tags describing what it ACTUALLY wrote: copying the
+	// source's CONTENT_SHA256 and statistics over instead makes the output
+	// carry a checksum of somebody else's content. Both survive across calls,
+	// so Join can accumulate over all its sources.
+	contentDigests map[uint64]hash.Hash
+	contentStats   map[uint64]*trackStats
+	timeStart      int64
+	timeEnd        int64
+	keyframeAlign  bool // split on keyframe boundaries
 	// videoTracks holds the SOURCE track numbers of video tracks. keyframeAlign
 	// aligns on these: every audio block is flagged keyframe, so aligning on
 	// "any keyframe" would start a segment mid-GOP (corrupt video until the
@@ -169,6 +180,23 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		blk.TrackNumber = newID
 
 		blk.Timecode = blk.Timecode - opts.timeStart + opts.timeOffset
+
+		if opts.contentDigests != nil {
+			h := opts.contentDigests[newID]
+			if h == nil {
+				h = sha256.New()
+				opts.contentDigests[newID] = h
+			}
+			h.Write(blk.Data)
+		}
+		if opts.contentStats != nil {
+			s := opts.contentStats[newID]
+			if s == nil {
+				s = &trackStats{}
+				opts.contentStats[newID] = s
+			}
+			s.add(&blk)
+		}
 
 		if opts.trackEnds != nil {
 			s := endStates[newID]

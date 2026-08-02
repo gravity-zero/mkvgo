@@ -1,0 +1,176 @@
+package ops
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
+)
+
+// writeTaggedMKV is buildMultiClusterMKV plus a tag list.
+func writeTaggedMKV(t *testing.T, path string, tracks []mkv.Track, blockSets [][]mkv.Block, tags []mkv.Tag, durationMs int64) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{
+		Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "test", WritingApp: "test"},
+		Tags: tags,
+	}, tracks, durationMs))
+	for _, blocks := range blockSets {
+		if len(blocks) == 0 {
+			continue
+		}
+		mustNil(t, mw.WriteClusterWithCues(blocks[0].Timecode, 1_000_000, blocks))
+	}
+	mustNil(t, mw.Finalize())
+}
+
+// hashedFixture writes a two-track file and stamps it with content hashes.
+func hashedFixture(t *testing.T, dir, name string) string {
+	t.Helper()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	var sets [][]mkv.Block
+	for tc := int64(0); tc < 10000; tc += 100 {
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: []byte{byte(tc), 0xAA}},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte{byte(tc), 0xBB}},
+		})
+	}
+	plain := buildMultiClusterMKV(t, dir, "plain_"+name, tracks, sets, 10000)
+	hashed := filepath.Join(dir, name)
+	if err := WriteContentHashes(context.Background(), plain, hashed); err != nil {
+		t.Fatal(err)
+	}
+	return hashed
+}
+
+// TestSplitJoin_ContentHashesDescribeTheOutput: a part carries a slice of the
+// source, a joined file carries several sources - neither is described by the
+// source's CONTENT_SHA256. Copying it over made mkvgo's own verification report
+// mkvgo's own output as corrupt.
+func TestSplitJoin_ContentHashesDescribeTheOutput(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	src := hashedFixture(t, dir, "src.mkv")
+	if mm, err := VerifyContentHashes(ctx, src); err != nil || len(mm) != 0 {
+		t.Fatalf("the fixture must verify: %d mismatches, %v", len(mm), err)
+	}
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 5000}, {StartMs: 5000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range parts {
+		mm, err := VerifyContentHashes(ctx, p)
+		if err != nil {
+			t.Fatalf("part %d: %v", i+1, err)
+		}
+		if len(mm) != 0 {
+			t.Errorf("part %d fails its own hashes (%d mismatches) - the source's were copied over", i+1, len(mm))
+		}
+	}
+
+	joined := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, parts, joined); err != nil {
+		t.Fatal(err)
+	}
+	mm, err := VerifyContentHashes(ctx, joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mm) != 0 {
+		t.Errorf("the joined file fails its own hashes (%d mismatches)", len(mm))
+	}
+
+	// And the round trip is provably lossless: same content as the source.
+	diffs, err := CompareBlocks(ctx, src, joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("split+join changed the content: %+v", diffs)
+	}
+}
+
+// TestPlanContentTags keeps the sorting rule explicit: work metadata stays,
+// media-derived families are re-measured, and an emptied tag disappears.
+func TestPlanContentTags(t *testing.T) {
+	plan := planContentTags([]mkv.Tag{
+		{TargetID: 1, SimpleTags: []mkv.SimpleTag{
+			{Name: "TITLE", Value: "Ep 1"},
+			{Name: ContentHashTag, Value: "deadbeef"},
+		}},
+		{TargetID: 2, SimpleTags: []mkv.SimpleTag{
+			{Name: "BPS", Value: "128000"},
+			{Name: "NUMBER_OF_FRAMES", Value: "42"},
+		}},
+	})
+	if !plan.wantHashes || !plan.wantStats {
+		t.Errorf("families detected: hashes=%v stats=%v, want both", plan.wantHashes, plan.wantStats)
+	}
+	if len(plan.kept) != 1 || len(plan.kept[0].SimpleTags) != 1 || plan.kept[0].SimpleTags[0].Name != "TITLE" {
+		t.Errorf("kept = %+v, want the TITLE tag alone", plan.kept)
+	}
+	if plan.digestsFor() == nil || plan.statsFor() == nil {
+		t.Error("accumulators must be allocated when the families are present")
+	}
+
+	// A source with no content-derived tag must not start hashing anything.
+	none := planContentTags([]mkv.Tag{{TargetID: 1, SimpleTags: []mkv.SimpleTag{{Name: "TITLE", Value: "x"}}}})
+	if none.recompute() || none.digestsFor() != nil || none.statsFor() != nil {
+		t.Error("a source without content tags must not trigger a recompute")
+	}
+}
+
+// TestSplit_StatisticsAreRemeasured: the statistics family describes the media,
+// so a part must state its own - not the whole film's frame count.
+func TestSplit_StatisticsAreRemeasured(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	var sets [][]mkv.Block
+	for tc := int64(0); tc < 10000; tc += 100 {
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: []byte("v")},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")},
+		})
+	}
+	src := filepath.Join(dir, "src.mkv")
+	writeTaggedMKV(t, src, tracks, sets, []mkv.Tag{{TargetID: 1, SimpleTags: []mkv.SimpleTag{
+		{Name: "NUMBER_OF_FRAMES", Value: "100"},
+	}}}, 10000)
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 5000}, {StartMs: 5000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := reader.OpenMeta(ctx, parts[0], reader.WithTags())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frames string
+	for _, tag := range c.Tags {
+		for _, st := range tag.SimpleTags {
+			if st.Name == "NUMBER_OF_FRAMES" && tag.TargetID == 1 {
+				frames = st.Value
+			}
+		}
+	}
+	if frames == "100" {
+		t.Error("the part still declares the source's 100 frames")
+	}
+	if frames != "50" {
+		t.Errorf("NUMBER_OF_FRAMES = %q, want \"50\" (the part's own video frames)", frames)
+	}
+}
