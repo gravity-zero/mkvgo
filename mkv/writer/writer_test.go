@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"runtime"
 	"testing"
 	"time"
 
@@ -1334,3 +1335,40 @@ func (s *seekBuffer) Seek(offset int64, whence int) (int64, error) {
 	s.pos = int(abs)
 	return abs, nil
 }
+
+// TestWriteAttachments_StreamsThePayload pins the memory shape, not just the
+// bytes: an attachment payload is unbounded user data, and mkvgo runs where RAM
+// is not. Building the element in nested buffers held every byte three times.
+func TestWriteAttachments_StreamsThePayload(t *testing.T) {
+	const size = 4 << 20 // 4 MiB, enough to dwarf the fixed overhead
+	atts := []mkv.Attachment{
+		{ID: 1, Name: "a.ttf", MIMEType: "font/ttf", Size: size, Data: make([]byte, size)},
+		{ID: 2, Name: "b.ttf", MIMEType: "font/ttf", Size: size, Data: make([]byte, size)},
+	}
+	// countingWriter keeps nothing, so what the run allocates is what the
+	// element construction needed.
+	var written int64
+	w := writerFunc(func(p []byte) (int, error) { written += int64(len(p)); return len(p), nil })
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	if err := WriteAttachments(w, atts); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+
+	payload := int64(len(atts)) * size
+	if written < payload {
+		t.Fatalf("wrote %d bytes for %d of payload", written, payload)
+	}
+	// Copying the payload even once more would allocate at least its size.
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > uint64(payload/4) {
+		t.Errorf("allocated %d bytes to write %d of payload: the element is being buffered, "+
+			"not streamed", alloc, payload)
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -461,26 +461,80 @@ func writeSimpleTagElement(parent *ew, st *mkv.SimpleTag) {
 	})
 }
 
+// WriteAttachments streams the Attachments element instead of building it in
+// memory. An attachment payload is unbounded user data - a subtitle font set is
+// tens of megabytes - and the nested element buffers held every byte three times
+// over at the peak: once in the source container, once in the per-file buffer,
+// once in the buffer accumulating the set. Sizes are computed from the payload
+// lengths, which are known without copying anything, so the peak is now the
+// data the caller already holds.
 func WriteAttachments(w io.Writer, attachments []mkv.Attachment) error {
-	var e ew
+	// The small children (name, mime type, UID) are cheap to materialise; only
+	// the payload is kept out of memory.
+	metas := make([][]byte, len(attachments))
+	bodies := make([]int64, len(attachments))
+	var total int64
 	for i := range attachments {
 		att := &attachments[i]
-		e.master(mkv.IDAttachedFile, func(ae *ew) {
-			if att.Name != "" {
-				ae.str(mkv.IDFileName, att.Name)
+		var m ew
+		if att.Name != "" {
+			m.str(mkv.IDFileName, att.Name)
+		}
+		if att.MIMEType != "" {
+			m.str(mkv.IDFileMimeType, att.MIMEType)
+		}
+		if att.ID > 0 {
+			m.uint(mkv.IDFileUID, att.ID)
+		}
+		if m.err != nil {
+			return m.err
+		}
+		metas[i] = m.Bytes()
+
+		bodies[i] = int64(len(metas[i]))
+		if len(att.Data) > 0 {
+			hdr, err := elementHeaderLen(mkv.IDFileData, int64(len(att.Data)))
+			if err != nil {
+				return err
 			}
-			if att.MIMEType != "" {
-				ae.str(mkv.IDFileMimeType, att.MIMEType)
-			}
-			if att.ID > 0 {
-				ae.uint(mkv.IDFileUID, att.ID)
-			}
-			if len(att.Data) > 0 {
-				ae.raw(mkv.IDFileData, att.Data)
-			}
-		})
+			bodies[i] += hdr + int64(len(att.Data))
+		}
+		fileHdr, err := elementHeaderLen(mkv.IDAttachedFile, bodies[i])
+		if err != nil {
+			return err
+		}
+		total += fileHdr + bodies[i]
 	}
-	return e.flush(w, mkv.IDAttachments)
+
+	if _, err := ebml.WriteElementHeader(w, mkv.IDAttachments, total); err != nil {
+		return err
+	}
+	for i := range attachments {
+		att := &attachments[i]
+		if _, err := ebml.WriteElementHeader(w, mkv.IDAttachedFile, bodies[i]); err != nil {
+			return err
+		}
+		if _, err := w.Write(metas[i]); err != nil {
+			return err
+		}
+		if len(att.Data) > 0 {
+			if _, err := ebml.WriteElementHeader(w, mkv.IDFileData, int64(len(att.Data))); err != nil {
+				return err
+			}
+			if _, err := w.Write(att.Data); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// elementHeaderLen is the encoded length of an element header, so a size can be
+// computed without writing the element.
+func elementHeaderLen(id uint32, size int64) (int64, error) {
+	var b bytes.Buffer
+	n, err := ebml.WriteElementHeader(&b, id, size)
+	return int64(n), err
 }
 
 func WriteSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, data []byte) error {
