@@ -36,6 +36,8 @@ type MKVWriter struct {
 	TimecodeScale int64
 	videoTracks   map[uint64]bool // set by WriteMetadata; cue selection keys on these
 	chaptersSlot  int             // bytes booked by ReserveChapters, 0 if none
+	tagsSlot      int             // bytes booked by ReserveTags, 0 if none
+	tagsSlotPos   int64
 	info          mkv.SegmentInfo // kept by WriteMetadata for RestateDuration
 	infoDurMs     int64           // the duration WriteMetadata was given
 	infoWritten   bool
@@ -355,6 +357,61 @@ func (m *MKVWriter) WriteReservedChapters(chapters []mkv.Chapter) error {
 		return err
 	}
 	if err := WriteVoid(m.W, m.chaptersSlot-buf.Len()); err != nil {
+		return err
+	}
+	_, err := m.W.Seek(end, io.SeekStart)
+	return err
+}
+
+// ReserveTags books room in the HEAD for a Tags element whose values are only
+// known once the media has streamed - a content hash, a frame count - and
+// WriteReservedTags fills it in.
+//
+// Writing them after the clusters instead (which is what Mux does for its own
+// statistics) costs three things a head element does not: a forward-only reader
+// never reaches them, ops.EditInPlace has to fold them back into a head region
+// that was never sized for them, and finding them at all depends on the
+// SeekHead. upper must bound the real list - see ops.contentTagPlan.
+func (m *MKVWriter) ReserveTags(upper []mkv.Tag) error {
+	if len(upper) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := WriteTags(&buf, upper); err != nil {
+		return err
+	}
+	m.tagsSlotPos = m.RelPos()
+	m.tagsSlot = buf.Len() + 2 // +2 so the leftover can always hold a Void
+	if m.TagsPos == 0 {
+		m.TagsPos = m.tagsSlotPos
+	}
+	return WriteVoid(m.W, m.tagsSlot)
+}
+
+// WriteReservedTags writes tags into the slot ReserveTags booked and voids the
+// rest of it. A list that does not fit is refused rather than written over what
+// follows.
+func (m *MKVWriter) WriteReservedTags(tags []mkv.Tag) error {
+	if m.tagsSlot == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	if len(tags) > 0 {
+		if err := WriteTags(&buf, tags); err != nil {
+			return err
+		}
+	}
+	if buf.Len() > m.tagsSlot {
+		return fmt.Errorf("tags need %d bytes, slot holds %d", buf.Len(), m.tagsSlot)
+	}
+	end := m.pos()
+	if _, err := m.W.Seek(m.SegDataStart+m.tagsSlotPos, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := m.W.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	if err := WriteVoid(m.W, m.tagsSlot-buf.Len()); err != nil {
 		return err
 	}
 	_, err := m.W.Seek(end, io.SeekStart)

@@ -208,11 +208,12 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// again while the blocks go by and written after the clusters, in ONE Tags
 	// element (the SeekHead points at it, and EditInPlace knows to fold it).
 	plan := planContentTags(c.Tags).withStatistics()
-	if plan.recompute() {
-		segMeta.Tags = nil
-	}
+	segMeta.Tags = nil // booked below, in the head, filled once measured
 	digests, stats := plan.digestsFor(), plan.statsFor()
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
+		return err
+	}
+	if err := mw.ReserveTags(plan.upperBoundTags(tracks)); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
@@ -223,10 +224,8 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	}); err != nil {
 		return err
 	}
-	if plan.recompute() {
-		if err := mw.WriteTagsElement(plan.tagsForOutput(tracks, digests, stats)); err != nil {
-			return err
-		}
+	if err := mw.WriteReservedTags(plan.tagsForOutput(tracks, digests, stats)); err != nil {
+		return err
 	}
 	return mw.Finalize()
 }

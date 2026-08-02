@@ -81,14 +81,15 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// attached to every part lands once.
 	meta.Attachments = mergeAttachments(conts)
 	plan := planContentTags(first.Tags).withStatistics()
-	if plan.recompute() {
-		meta.Tags = nil
-	}
+	meta.Tags = nil // booked below, in the head, filled once measured
 	digests, stats := plan.digestsFor(), plan.statsFor()
 	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}
 	if err := mw.ReserveChapters(concatChapters(conts, nil)); err != nil {
+		return err
+	}
+	if err := mw.ReserveTags(plan.upperBoundTags(first.Tracks)); err != nil {
 		return err
 	}
 
@@ -164,10 +165,8 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	if err := mw.WriteReservedChapters(concatChapters(conts, offsets)); err != nil {
 		return err
 	}
-	if plan.recompute() {
-		if err := mw.WriteTagsElement(plan.tagsForOutput(first.Tracks, digests, stats)); err != nil {
-			return err
-		}
+	if err := mw.WriteReservedTags(plan.tagsForOutput(first.Tracks, digests, stats)); err != nil {
+		return err
 	}
 	return mw.Finalize()
 }

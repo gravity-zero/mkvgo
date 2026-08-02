@@ -302,3 +302,76 @@ func TestSplit_StatisticsWrittenEvenWhenSourceHadNone(t *testing.T) {
 		t.Errorf("content changed: %+v", diffs)
 	}
 }
+
+// TestSplitJoin_TagsStayInTheHead pins the layout, not just the values. Parking
+// the measured tags after the clusters cost three things at once: a
+// forward-only reader (a pipe, an HTTP body) never reached them, EditInPlace
+// had to fold them into a head region never sized for them and started refusing
+// files it used to accept, and finding them at all became SeekHead-dependent.
+func TestSplitJoin_TagsStayInTheHead(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	var sets [][]mkv.Block
+	for tc := int64(0); tc < 10000; tc += 500 {
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: make([]byte, 400)},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: make([]byte, 40)},
+		})
+	}
+	src := filepath.Join(dir, "src.mkv")
+	writeTaggedMKV(t, src, tracks, sets, []mkv.Tag{
+		{TargetID: 0, SimpleTags: []mkv.SimpleTag{{Name: "TITLE", Value: "Work"}}},
+		// Spelled the way the bitrate reader matches it: case-insensitively.
+		{TargetID: 1, SimpleTags: []mkv.SimpleTag{{Name: "Bps", Value: "8000000"}}},
+	}, 10000)
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 5000}, {StartMs: 5000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := filepath.Join(dir, "joined.mkv")
+	if err := Join(ctx, parts, joined); err != nil {
+		t.Fatal(err)
+	}
+
+	// A forward-only reader stops at the first cluster: the tags must be before it.
+	streamTags := func(p string) int {
+		f, err := os.Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		c, _, err := reader.ReadStream(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(c.Tags)
+	}
+	for _, p := range append(parts, joined) {
+		if n := streamTags(p); n == 0 {
+			t.Errorf("%s: a streaming reader sees no tag - they were written past the clusters",
+				filepath.Base(p))
+		}
+	}
+
+	// The stale whole-film bitrate must be gone, not merely shadowed.
+	c, err := reader.OpenMeta(ctx, parts[0], reader.WithBitrate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Tracks[0].Bitrate == nil {
+		t.Fatal("no bitrate on the part")
+	}
+	if *c.Tracks[0].Bitrate == 8000000 {
+		t.Error("the part reports the whole film's bitrate: a differently-spelled BPS escaped the strip")
+	}
+
+	// And an in-place edit still fits, on the part and on the joined file.
+	for _, p := range append(parts, joined) {
+		if err := EditInPlace(ctx, p, func(c *mkv.Container) { c.Info.Title = "edited" }); err != nil {
+			t.Errorf("EditInPlace refused %s: %v", filepath.Base(p), err)
+		}
+	}
+}

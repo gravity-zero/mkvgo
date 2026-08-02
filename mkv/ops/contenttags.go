@@ -3,6 +3,7 @@ package ops
 import (
 	"encoding/hex"
 	"hash"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -57,10 +58,15 @@ func planContentTags(tags []mkv.Tag) contentTagPlan {
 	for _, tag := range tags {
 		var kept []mkv.SimpleTag
 		for _, st := range tag.SimpleTags {
+			// Matched case-insensitively because the consumer is:
+			// promoteTrackBitrate compares with EqualFold and takes the first
+			// hit, so a source spelling it "Bps" kept its whole-film value AND
+			// gained a recomputed "BPS" - and the stale one won.
+			name := strings.ToUpper(st.Name)
 			switch {
-			case st.Name == ContentHashTag:
+			case name == ContentHashTag:
 				plan.wantHashes = true
-			case contentDerivedTags[st.Name]:
+			case contentDerivedTags[name]:
 				plan.wantStats = true
 			default:
 				kept = append(kept, st)
@@ -110,6 +116,33 @@ func (p contentTagPlan) tagsForOutput(tracks []mkv.Track, digests map[uint64]has
 	}
 	if p.wantStats {
 		out = append(out, statsTags(tracks, stats)...)
+	}
+	return out
+}
+
+// upperBoundTags is the shape tagsForOutput will produce, with every measured
+// value at its widest, so MKVWriter.ReserveTags can book a slot no real write
+// can overflow. The hash is a fixed 64 hex characters; the statistics are
+// decimal integers that cannot exceed an int64's 19 digits, and the duration
+// is a fixed-width HH:MM:SS.nnnnnnnnn (hours widened for good measure).
+func (p contentTagPlan) upperBoundTags(tracks []mkv.Track) []mkv.Tag {
+	out := append([]mkv.Tag{}, p.kept...)
+	const digits = "9999999999999999999"
+	for i := range tracks {
+		uid := trackUID(&tracks[i])
+		if p.wantHashes {
+			out = append(out, mkv.Tag{TargetID: uid, SimpleTags: []mkv.SimpleTag{
+				{Name: ContentHashTag, Value: strings.Repeat("0", 64)},
+			}})
+		}
+		if p.wantStats {
+			out = append(out, mkv.Tag{TargetID: uid, SimpleTags: []mkv.SimpleTag{
+				{Name: "BPS", Value: digits},
+				{Name: "DURATION", Value: "99999999:99:99.999999999"},
+				{Name: "NUMBER_OF_FRAMES", Value: digits},
+				{Name: "NUMBER_OF_BYTES", Value: digits},
+			}})
+		}
 	}
 	return out
 }
