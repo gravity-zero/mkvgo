@@ -265,7 +265,7 @@ side may be an MP4/MOV (read via the head-only MP4 probe), so a remux
 round-trip can be verified.
 
 ```
-mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4>
+mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> [part2.mkv ...]
 ```
 
 `-blocks` additionally compares the media CONTENT: per-track block count,
@@ -287,7 +287,7 @@ in order - proving a split kept everything without rebuilding the joined file:
 
 ```bash
 mkvgo compare -blocks film.mkv part1.mkv part2.mkv part3.mkv
-# no output + exit 0  =>  the parts hold exactly the film's content
+# identical content (3 parts) + exit 0  =>  the parts hold exactly the film's content
 ```
 
 ---
@@ -618,8 +618,10 @@ mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
 |---|---|
 | `-o` | Output file path (required) |
 
-Metadata policy (first-wins): the output's title, tags and attachments come
-from the **first** file; later files' metadata is not carried.
+Metadata policy: the output's title and tags come from the **first** file
+(first-wins). Attachments are pooled from every file instead, identified by
+content so a font attached to one part only is not lost and a font repeated in
+every part lands once; cover art stays single.
 
 Per-track statistics (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
 are measured on what is actually written and always attached. A content hash is

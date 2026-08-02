@@ -6,6 +6,53 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **A file declares the length it holds.** `Join` announced the duration of its
+  first source, `Split` gave every part the whole film's, and `AddTrack` ignored
+  a track that outlasted the file it was added to: the duration each op computed
+  was silently overridden by the one copied from the source. An edit callback
+  setting `Info.Duration` still wins, which is how a caller restates a length.
+- **`Join` keeps the tracks of a file aligned with each other.** Each track used
+  to be rebased on its own end, so a track that stopped earlier than the others -
+  a subtitle track whose last cue is minutes before the end - came back that much
+  early in the next file. On a real episode split at 10:00 that was 5m50s of
+  desync; past ~32 s the block no longer fits a SimpleBlock's timecode and the
+  join failed outright. One offset now shifts every track, taken from the end
+  measured at the seam rather than the one declared.
+- **`Join` keeps every source's chapters**, shifted onto the seams actually
+  written, instead of only the first file's: splitting a film on its chapters and
+  joining the parts back returns all of them. Colliding ChapterUIDs are
+  renumbered, chapters linked to another segment are dropped.
+- **A chapter with no explicit end runs until the next one starts**, so a part no
+  longer inherits every chapter before it. That next chapter is the next in TIME,
+  not the next in the list - editions arrive concatenated, so reading the list
+  order made a chapter vanish from the slice it names and `Split` write empty
+  parts without an error.
+- **Nested chapters survive a write.** `WriteChapters` emitted only the top level,
+  so sub-chapters were dropped by any op that rewrote a file.
+- **`Split` and `Join` measure the tags that describe the media** - the content
+  hash and the per-track statistics - instead of copying the source's. Every file
+  they produced failed mkvgo's own `VerifyContentHashes`, and a ten-minute part
+  reported the whole film's bitrate and frame count. The statistics are now always
+  attached; the content hash follows the source's intent.
+- **`Join` decodes a source's timecodes with its own `TimecodeScale` and writes
+  them with the output's.** One scale served both jobs, so appending a file muxed
+  at a different scale wrote ticks against a divisor the header does not declare -
+  the media came out stretched, silently.
+- **Attachments are pooled from every joined source**, identified by content: a
+  font attached only to the part that uses it is no longer lost, one repeated in
+  every part lands once, and cover art stays single.
+- `Join` no longer fails on sources that declare no duration at all, which left a
+  truncated file behind.
+
+### Added
+
+- `compare -blocks` accepts several files on the right and diffs the left one
+  against their **concatenation** (`matroska.CompareBlocksConcat`), proving a
+  split kept everything without rebuilding the joined file - 12 parts of a 2 GB
+  film in under nine seconds, no temporary copy.
+
 ## [0.25.1] - 2026-07-18
 
 ### Fixed

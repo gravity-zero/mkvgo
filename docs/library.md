@@ -1567,8 +1567,9 @@ err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
 ```
 
 Join requires the same track layout (count, types, codecs, codec
-configuration) in every file and errors on mismatch. Title, tags and
-attachments come from the first file (first-wins).
+configuration) in every file and errors on mismatch. Title and tags come from the first file
+(first-wins). Attachments are pooled from every source, identified by content
+rather than by name, with the conventional cover art kept single.
 
 Chapters are different: they are timeline data, so **every** source
 contributes its own, shifted onto the joined timeline by the offset its blocks

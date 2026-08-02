@@ -303,8 +303,9 @@ out, err := matroska.Split(ctx, matroska.SplitOptions{
 
 ## Join files
 
-Concatenate clips with the same track layout (each track is rebased on its own
-end, so audio and video stay in sync).
+Concatenate clips with the same track layout. Every track shifts by the same
+amount at each seam, so the alignment they had in the source survives; chapters
+ride the same offsets, and attachments are pooled from all the sources.
 
 ```bash
 mkvgo join part1.mkv part2.mkv part3.mkv -o full.mkv
