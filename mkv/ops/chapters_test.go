@@ -294,3 +294,49 @@ func TestJoin_PoolsAttachments(t *testing.T) {
 		t.Errorf("the shared font should appear once, got %d", names["shared.ttf"])
 	}
 }
+
+// TestClipChapters_ListOrderIsNotTimeOrder: the reader concatenates every
+// EditionEntry into one flat list, each edition restarting at its own first
+// timestamp, so chapters[i+1] is not the chapter that follows in TIME. Reading
+// it as such dropped a chapter from the very slice it names, and made two atoms
+// sharing a timestamp fall back to "runs forever" - the bug the deduction was
+// added to fix.
+func TestClipChapters_ListOrderIsNotTimeOrder(t *testing.T) {
+	// Two editions flattened: A1@0, A2@3600000, then B1@600000, B2@1800000.
+	multi := []mkv.Chapter{
+		{ID: 1, Title: "A1", StartMs: 0},
+		{ID: 2, Title: "A2", StartMs: 3600000},
+		{ID: 3, Title: "B1", StartMs: 600000},
+		{ID: 4, Title: "B2", StartMs: 1800000},
+	}
+	last := clipChapters(multi, 3600000, 0)
+	var found bool
+	for _, ch := range last {
+		if ch.Title == "A2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the slice starting at 3600000 lost A2, the chapter that names it: %+v", last)
+	}
+	// No range may end before it starts.
+	for i, r := range chaptersToRanges(multi) {
+		if r.EndMs != 0 && r.EndMs <= r.StartMs {
+			t.Errorf("range %d = [%d, %d): ends before it starts, Split writes an empty part for it",
+				i, r.StartMs, r.EndMs)
+		}
+	}
+
+	// Two atoms sharing a timestamp: the first must still end where the next
+	// DIFFERENT timestamp begins, not run to the end of the file.
+	same := []mkv.Chapter{
+		{ID: 1, Title: "Intro", StartMs: 0},
+		{ID: 2, Title: "Hidden", StartMs: 0},
+		{ID: 3, Title: "Middle", StartMs: 600000},
+	}
+	for _, ch := range clipChapters(same, 600000, 0) {
+		if ch.Title == "Intro" || ch.Title == "Hidden" {
+			t.Errorf("%q leaked into the slice starting at 600000 - it ends there", ch.Title)
+		}
+	}
+}

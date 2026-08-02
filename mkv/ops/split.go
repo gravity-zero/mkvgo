@@ -142,11 +142,36 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	ranges := make([]mkv.TimeRange, len(chapters))
 	for i, ch := range chapters {
 		ranges[i] = mkv.TimeRange{StartMs: ch.StartMs, EndMs: ch.EndMs}
-		if ranges[i].EndMs == 0 && i+1 < len(chapters) {
-			ranges[i].EndMs = chapters[i+1].StartMs
+		if ranges[i].EndMs == 0 {
+			if next := nextChapterStart(chapters, ch.StartMs); next > 0 {
+				ranges[i].EndMs = next
+			}
 		}
 	}
 	return ranges
+}
+
+// nextChapterStart returns the start of the sibling that follows startMs in
+// TIME, or -1 when nothing does.
+//
+// Not chapters[i+1]: the reader concatenates every EditionEntry of a file into
+// one flat list, each edition restarting at its own first timestamp, so the
+// next entry in the list can point back to an earlier moment. Reading the
+// following INDEX as the following instant made a chapter end before it began -
+// a negative range that Split turned into an empty part, no error - and made
+// the last chapter of the first edition vanish from the slice it names.
+//
+// Strictly greater, so several atoms sharing one timestamp (an edition
+// restarting at 0, an atom with no ChapterTimeStart) do not deduce an end of 0
+// and fall back to "runs forever", which is the very reading this replaced.
+func nextChapterStart(chapters []mkv.Chapter, startMs int64) int64 {
+	next := int64(-1)
+	for _, ch := range chapters {
+		if ch.StartMs > startMs && (next < 0 || ch.StartMs < next) {
+			next = ch.StartMs
+		}
+	}
+	return next
 }
 
 func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
@@ -227,7 +252,7 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 // "until the end of the source".
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	var out []mkv.Chapter
-	for i, ch := range chapters {
+	for _, ch := range chapters {
 		if endMs > 0 && ch.StartMs >= endMs {
 			continue
 		}
@@ -236,9 +261,11 @@ func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 		// to cut on them). Taking a missing end for "no end" instead made every
 		// chapter look like it spanned the rest of the file, so each part
 		// inherited all the chapters before it, collapsed onto its own start.
+		// nextChapterStart says why the following INDEX is not the following
+		// instant; -1 is the honest "nothing follows", which does run to the end.
 		end := ch.EndMs
-		if end == 0 && i+1 < len(chapters) {
-			end = chapters[i+1].StartMs
+		if end == 0 {
+			end = nextChapterStart(chapters, ch.StartMs)
 		}
 		if end > 0 && end <= startMs {
 			continue
