@@ -192,6 +192,15 @@ func writeEBMLHeaderDocType(w io.Writer, docType string, version, readVersion ui
 	return e.flush(w, ebml.IDEBMLHeader)
 }
 
+// WriteSegmentInfo writes the Segment Info element.
+//
+// durationMs is a FALLBACK, used only when info.Duration is 0: a non-zero
+// info.Duration is the authoritative declared length and is written verbatim,
+// so a metadata rewrite preserves the sub-millisecond precision that
+// Container.DurationMs has truncated away, and so an explicit edit of
+// info.Duration is honoured. An op whose output is NOT the same length as the
+// source it copied info from must therefore clear info.Duration - see
+// ops.metaForNewDuration and NewStreamWriter, which both do exactly that.
 func WriteSegmentInfo(w io.Writer, info *mkv.SegmentInfo, durationMs int64) error {
 	var e ew
 	// A zero TimecodeScale means "unset": fall back to the Matroska default

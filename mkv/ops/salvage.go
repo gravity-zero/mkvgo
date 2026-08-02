@@ -55,6 +55,14 @@ type SalvageReport = mkv.SalvageReport
 // A clean source produces zero damaged ranges and a result equivalent to
 // Reindex (same cues, same verbatim clusters, same freshly-built SeekHead).
 //
+// The Segment Info is copied BYTE FOR BYTE, declared duration included, so a
+// truncated source yields a shorter file that still announces the length of the
+// original - deliberately: the rollback delta maps output bytes back to source
+// bytes, and re-encoding a Duration (whose stored float may be 4 or 8 bytes)
+// would shift every offset behind it. Measuring what was actually recovered is
+// Analyze's job - it reports DurationMs against DeclaredDurationMs and warns on
+// the gap - and restating it afterwards is EditInPlace's (set Info.Duration).
+//
 // Never in-place: dstPath is always a separate file. The result is re-opened
 // and its Cues checked against the ones built during the walk (the same
 // light verification Reindex always runs), so a bug in Salvage itself - not

@@ -60,8 +60,12 @@ type SegmentInfo struct {
 	MuxingApp  string `json:"muxing_app"`
 	WritingApp string `json:"writing_app"`
 	// Duration is in TimecodeScale units (the raw stored value). At write time
-	// a Duration > 0 wins over the Container.DurationMs-derived value; leave it
-	// 0 to have the writer derive the Duration element from DurationMs.
+	// a Duration > 0 is authoritative and written verbatim - it wins over the
+	// Container.DurationMs-derived value, which keeps its sub-millisecond
+	// precision through a metadata rewrite and lets an explicit edit of this
+	// field change the declared length. The flip side: an op whose output is
+	// NOT as long as the source it copied this from MUST clear it, or the
+	// output declares a length it does not have.
 	Duration float64 `json:"duration"`
 	// TimecodeScale is in nanoseconds per timecode unit (Matroska default
 	// 1_000_000 = 1 ms). 0 means "unset": writers fall back to 1_000_000.

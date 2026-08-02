@@ -117,9 +117,14 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	t.IsDefault = input.IsDefault
 	tracks := append(c.Tracks, t)
 
+	// An added track that outlasts the source makes the output longer than the
+	// source's Info declares, so that declaration has to go (when it does not,
+	// keeping it preserves its sub-millisecond precision).
+	meta := *c
 	durationMs := c.DurationMs
 	if srcAdd.DurationMs > durationMs {
 		durationMs = srcAdd.DurationMs
+		meta = metaForNewDuration(c)
 	}
 
 	out, err := fs.DoCreate(dstPath)
@@ -132,7 +137,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
+	if err := mw.WriteMetadata(&meta, tracks, durationMs); err != nil {
 		return err
 	}
 	sources := []mergeSource{
@@ -153,6 +158,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	}
 
 	edit(c)
+	syncDurationMs(c)
 
 	out, err := fs.DoCreate(dstPath)
 	if err != nil {

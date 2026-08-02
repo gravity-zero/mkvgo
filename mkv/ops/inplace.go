@@ -34,6 +34,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	}
 
 	edit(c)
+	syncDurationMs(c)
 
 	region, err := findMetadataRegion(path, fs)
 	if err != nil {

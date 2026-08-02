@@ -174,7 +174,9 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	}
 	// Each segment gets only the chapters that overlap its range, shifted to
 	// its own timeline - not the source's full list at absolute timestamps.
-	segMeta := *c
+	// Likewise it lasts as long as its own range, not as long as the source:
+	// without the reset every part would declare the whole film's length.
+	segMeta := metaForNewDuration(c)
 	segMeta.Chapters = clipChapters(c.Chapters, r.StartMs, r.EndMs)
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
 		return err

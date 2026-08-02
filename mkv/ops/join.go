@@ -60,7 +60,10 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-	if err := mw.WriteMetadata(first, first.Tracks, totalDurationMs); err != nil {
+	// The joined file is as long as its sources put together, not as long as
+	// the first one - whose Info the metadata is otherwise copied from.
+	meta := metaForNewDuration(first)
+	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}
 
