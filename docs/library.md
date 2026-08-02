@@ -1567,9 +1567,20 @@ err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
 ```
 
 Join requires the same track layout (count, types, codecs, codec
-configuration) in every file and errors on mismatch. The output's
-title/chapters/tags/attachments come from the first file (first-wins);
-chapters keep their original timestamps.
+configuration) in every file and errors on mismatch. Title, tags and
+attachments come from the first file (first-wins).
+
+Chapters are different: they are timeline data, so **every** source
+contributes its own, shifted onto the joined timeline by the offset its blocks
+were really written at - the measured end of the files before it, not their
+declared durations. Splitting a film on its chapters and joining the parts back
+therefore returns every chapter, each one landing on its part's seam. Colliding
+ChapterUIDs (the norm when the parts were cut from one original) are renumbered,
+the first claimant keeping its UID. Two sources may each carry a chapter around
+a seam and both are kept - their timestamps differ, and dropping either would be
+an editorial call. Chapters linked to another segment (ChapterSegmentUID) are
+dropped, since the join makes that reference meaningless, and multi-edition
+files are out of scope: mkvgo reads and writes a single edition throughout.
 
 ---
 

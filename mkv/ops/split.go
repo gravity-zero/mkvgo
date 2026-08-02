@@ -212,11 +212,20 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 // "until the end of the source".
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	var out []mkv.Chapter
-	for _, ch := range chapters {
+	for i, ch := range chapters {
 		if endMs > 0 && ch.StartMs >= endMs {
 			continue
 		}
-		if ch.EndMs > 0 && ch.EndMs <= startMs {
+		// ChapterTimeEnd is optional and most muxers leave it out: such a chapter
+		// runs until the next one starts (the same reading chaptersToRanges uses
+		// to cut on them). Taking a missing end for "no end" instead made every
+		// chapter look like it spanned the rest of the file, so each part
+		// inherited all the chapters before it, collapsed onto its own start.
+		end := ch.EndMs
+		if end == 0 && i+1 < len(chapters) {
+			end = chapters[i+1].StartMs
+		}
+		if end > 0 && end <= startMs {
 			continue
 		}
 		clipped := ch

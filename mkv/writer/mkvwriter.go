@@ -35,6 +35,7 @@ type MKVWriter struct {
 	Cues          []mkv.CuePoint
 	TimecodeScale int64
 	videoTracks   map[uint64]bool // set by WriteMetadata; cue selection keys on these
+	chaptersSlot  int             // bytes booked by ReserveChapters, 0 if none
 }
 
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
@@ -249,4 +250,91 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 	}
 	// Padding for later in-place metadata edits (see MetadataReserve).
 	return WriteVoid(m.W, MetadataReserve)
+}
+
+// ReserveChapters books room in the HEAD for a Chapters element whose timestamps
+// are not known yet, and WriteReservedChapters fills it in once they are. That
+// is the case of a concatenation: a chapter must be shifted by the offset at
+// which its source's blocks really landed, and that offset is only known after
+// those blocks have been written.
+//
+// The alternative - writing Chapters after the clusters, like Mux does for its
+// statistics Tags - would put the element where ops.EditInPlace folds only Tags
+// back into the head, leaving a second Chapters element behind. Keeping the
+// conventional layout avoids that entirely.
+//
+// The slot is sized for the widest timestamps EBML can encode, so no offset can
+// overflow it, plus two bytes so the leftover can always hold a Void.
+// ReserveChapters is a no-op for an empty list, and so is its counterpart.
+func (m *MKVWriter) ReserveChapters(chapters []mkv.Chapter) error {
+	if len(chapters) == 0 {
+		return nil
+	}
+	size, err := maxChaptersSize(chapters)
+	if err != nil {
+		return err
+	}
+	m.ChaptersPos = m.RelPos()
+	m.chaptersSlot = size
+	return WriteVoid(m.W, size)
+}
+
+// WriteReservedChapters writes chapters into the slot ReserveChapters booked and
+// voids what is left of it, then returns to the end of the file. chapters must be
+// the list handed to ReserveChapters, with the timestamps it was waiting for:
+// anything that does not fit is refused rather than written over the clusters.
+func (m *MKVWriter) WriteReservedChapters(chapters []mkv.Chapter) error {
+	if m.chaptersSlot == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := WriteChapters(&buf, chapters); err != nil {
+		return err
+	}
+	if buf.Len() > m.chaptersSlot {
+		return fmt.Errorf("chapters need %d bytes, slot holds %d", buf.Len(), m.chaptersSlot)
+	}
+	end := m.pos()
+	if _, err := m.W.Seek(m.SegDataStart+m.ChaptersPos, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := m.W.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	if err := WriteVoid(m.W, m.chaptersSlot-buf.Len()); err != nil {
+		return err
+	}
+	_, err := m.W.Seek(end, io.SeekStart)
+	return err
+}
+
+// maxChaptersSize is the size the list would serialise to with every timestamp
+// at EBML's widest encoding, which no real offset can exceed, plus the two bytes
+// a Void needs to fill whatever the real write leaves over.
+func maxChaptersSize(chapters []mkv.Chapter) (int, error) {
+	var buf bytes.Buffer
+	if err := WriteChapters(&buf, widenChapterTimes(chapters)); err != nil {
+		return 0, err
+	}
+	return buf.Len() + 2, nil
+}
+
+// widestChapterMs, multiplied by the nanosecond factor WriteChapters applies,
+// lands between 2^56 and 2^63: the widest a Matroska uint is written, and still
+// clear of the overflow the multiplication would hit near the top of the range.
+const widestChapterMs = 100_000_000_000
+
+func widenChapterTimes(chapters []mkv.Chapter) []mkv.Chapter {
+	out := make([]mkv.Chapter, len(chapters))
+	for i, ch := range chapters {
+		out[i] = ch
+		out[i].StartMs = widestChapterMs
+		// A zero end writes no element at all: keep it zero, or the slot would
+		// be sized for an element the real write never produces.
+		if ch.EndMs > 0 {
+			out[i].EndMs = widestChapterMs
+		}
+		out[i].SubChapters = widenChapterTimes(ch.SubChapters)
+	}
+	return out
 }

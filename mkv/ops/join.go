@@ -62,8 +62,19 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	}
 	// The joined file is as long as its sources put together, not as long as
 	// the first one - whose Info the metadata is otherwise copied from.
+	//
+	// Chapters come from EVERY source, not just the first: they are timeline
+	// data, and keeping only the first file's would silently return one chapter
+	// where twelve were joined. They cannot be written yet though - each one
+	// needs the offset its own source ends up at - so the head only books the
+	// room here (sized on the list, which is already known) and the timestamps
+	// are filled in once the last block has been written.
 	meta := metaForNewDuration(first)
+	meta.Chapters = nil
 	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
+		return err
+	}
+	if err := mw.ReserveChapters(concatChapters(conts, nil)); err != nil {
 		return err
 	}
 
@@ -93,7 +104,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// duration: a container that declares more than it holds must not open a
 	// hole at the seam.
 	var offset int64
+	offsets := make([]int64, len(sources)) // where each source's timeline starts
 	for i, src := range sources {
+		offsets[i] = offset
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -124,5 +137,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}
 	}
 
+	// The seam offsets are known now: same values the blocks were written with.
+	if err := mw.WriteReservedChapters(concatChapters(conts, offsets)); err != nil {
+		return err
+	}
 	return mw.Finalize()
 }

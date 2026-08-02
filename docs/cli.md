@@ -609,8 +609,14 @@ mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
 |---|---|
 | `-o` | Output file path (required) |
 
-Metadata policy (first-wins): the output's title, chapters, tags and
-attachments come from the **first** file; later files' metadata is not carried.
+Metadata policy (first-wins): the output's title, tags and attachments come
+from the **first** file; later files' metadata is not carried.
+
+Chapters are the exception, because they describe the timeline rather than
+decorate it: **every** file contributes its own, shifted by the offset its
+blocks were actually written at. Splitting on chapters and joining the parts
+back gives every chapter again. Repeated ChapterUIDs are renumbered; chapters
+linked to another segment are dropped.
 
 ```bash
 mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
