@@ -78,10 +78,21 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}
 	}
 
-	// Per-track offsets: each track is concatenated against ITS OWN end, not the
-	// single container duration, so tracks that end at slightly different times do
-	// not accumulate A/V drift across joins.
-	trackOffsets := make(map[uint64]int64, len(first.Tracks))
+	// ONE offset shared by every track: a file is appended after the end of the
+	// whole previous file, so all its tracks shift by the same amount and keep
+	// the alignment they had at the source.
+	//
+	// Rebasing each track on its own end instead (what this did) slides a track
+	// forward relative to the others by however much earlier it happened to
+	// stop: a subtitle track whose last cue is minutes before the end of a part
+	// comes back minutes early in the next one. On a real episode split at
+	// 10:00 that is 5m50s of desync, and the block then lands so far outside its
+	// cluster that the write fails on SimpleBlock's int16 relative timecode.
+	//
+	// The offset is the LAST FRAME'S END across the tracks, not the declared
+	// duration: a container that declares more than it holds must not open a
+	// hole at the seam.
+	var offset int64
 	for i, src := range sources {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -101,14 +112,14 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}
 		trackEnds := make(map[uint64]int64, len(c.Tracks))
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
-			remap: remap, trackOffsets: trackOffsets, trackEnds: trackEnds,
+			remap: remap, timeOffset: offset, trackEnds: trackEnds,
 			progress: srcProgress,
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", src, err)
 		}
-		for id, end := range trackEnds {
-			if end > trackOffsets[id] {
-				trackOffsets[id] = end
+		for _, end := range trackEnds {
+			if end > offset {
+				offset = end
 			}
 		}
 	}

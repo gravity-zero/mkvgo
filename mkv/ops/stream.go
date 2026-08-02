@@ -13,16 +13,13 @@ import (
 const defaultClusterDurationMs = 1000
 
 type streamOpts struct {
-	remap      map[uint64]uint64
+	remap map[uint64]uint64
+	// timeOffset shifts every block of this source by the same amount, which is
+	// what keeps the tracks aligned with each other when Join appends a file.
 	timeOffset int64
-	// trackOffsets, when non-nil, shifts each block by a PER-OUTPUT-TRACK offset
-	// (keyed by the remapped track id) instead of the single timeOffset. Join uses
-	// it so each track is concatenated against its own end, avoiding the A/V drift
-	// a single per-file offset causes when tracks end at slightly different times.
-	trackOffsets map[uint64]int64
 	// trackEnds, when non-nil, is filled with each output track's next free start
-	// timecode (its last frame's end), so the caller can use it as the next file's
-	// trackOffsets. Independent of trackOffsets.
+	// timecode (its last frame's end). Join takes the largest as the next file's
+	// timeOffset: the end of the whole file, measured rather than declared.
 	trackEnds     map[uint64]int64
 	timeStart     int64
 	timeEnd       int64
@@ -171,11 +168,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		blk.TrackNumber = newID
 
-		off := opts.timeOffset
-		if opts.trackOffsets != nil {
-			off = opts.trackOffsets[newID]
-		}
-		blk.Timecode = blk.Timecode - opts.timeStart + off
+		blk.Timecode = blk.Timecode - opts.timeStart + opts.timeOffset
 
 		if opts.trackEnds != nil {
 			s := endStates[newID]
