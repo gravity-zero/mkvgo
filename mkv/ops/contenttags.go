@@ -35,6 +35,21 @@ type contentTagPlan struct {
 // recompute reports whether anything has to be measured while streaming.
 func (p contentTagPlan) recompute() bool { return p.wantHashes || p.wantStats }
 
+// withStatistics turns the statistics family on whether or not the source
+// carried it. The counters come free with a walk the op is doing anyway - bytes
+// and frames it already touches - so there is no reason for a part or a joined
+// file to go without the bitrate and frame count that describe it. Metadata-only
+// readers depend on them: matroska.WithBitrate has no other source of a track's
+// bitrate on a Matroska file.
+//
+// The content hash is deliberately NOT treated this way: it costs a SHA-256 over
+// every payload byte, which an op that was never asked to certify anything
+// should not spend.
+func (p contentTagPlan) withStatistics() contentTagPlan {
+	p.wantStats = true
+	return p
+}
+
 // planContentTags sorts a source's tags. A tag left with no simple tags after
 // the content-derived ones are taken out is dropped entirely.
 func planContentTags(tags []mkv.Tag) contentTagPlan {

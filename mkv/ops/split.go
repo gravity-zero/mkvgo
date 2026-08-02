@@ -182,7 +182,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// statistics describe something it does not contain. They are measured
 	// again while the blocks go by and written after the clusters, in ONE Tags
 	// element (the SeekHead points at it, and EditInPlace knows to fold it).
-	plan := planContentTags(c.Tags)
+	plan := planContentTags(c.Tags).withStatistics()
 	if plan.recompute() {
 		segMeta.Tags = nil
 	}

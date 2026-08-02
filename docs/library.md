@@ -1595,11 +1595,17 @@ diffs, err := matroska.CompareBlocksConcat(ctx, "film.mkv",
 `CompareBlocks` answers the same question for a single file on each side (a
 remux, a reindex, a join). Both match tracks by position, Matroska/WebM only.
 
-Split and Join re-measure the content-derived tags they carry - `CONTENT_SHA256`
-and the statistics family (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`,
-`NUMBER_OF_BYTES`) - so a part certifies its own slice and a joined file its own
-whole. They are only written when the source carried them: an op that was not
-asked to certify anything does not start hashing every byte it copies.
+Split and Join measure the content-derived tags of what they write rather than
+copying the source's, so a part describes its own slice and a joined file its own
+whole. The two families differ on purpose:
+
+- the **statistics** (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
+  are always written, source tagged or not: the counters come free with a walk
+  the op is doing anyway, and `WithBitrate` has no other way to report a
+  Matroska track's bitrate on the metadata-only path;
+- the **content hash** (`CONTENT_SHA256`) is only written when the source
+  carried one, since it costs a SHA-256 over every payload byte and an op that
+  was not asked to certify anything should not spend it.
 
 ---
 

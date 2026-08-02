@@ -621,9 +621,10 @@ mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...
 Metadata policy (first-wins): the output's title, tags and attachments come
 from the **first** file; later files' metadata is not carried.
 
-Content hashes and per-track statistics are re-measured, so a joined file
-certifies its own content rather than the first part's (`mkvgo verify` on it now
-passes instead of reporting a mismatch).
+Per-track statistics (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
+are measured on what is actually written and always attached. A content hash is
+re-measured too when the source carried one, so `mkvgo verify` on a joined file
+passes instead of reporting the first part's checksum as a mismatch.
 
 Chapters are the exception, because they describe the timeline rather than
 decorate it: **every** file contributes its own, shifted by the offset its

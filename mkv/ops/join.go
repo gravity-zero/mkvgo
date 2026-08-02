@@ -80,7 +80,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// first-wins policy drops them. Matched on name + size, so the same font
 	// attached to every part lands once.
 	meta.Attachments = mergeAttachments(conts)
-	plan := planContentTags(first.Tags)
+	plan := planContentTags(first.Tags).withStatistics()
 	if plan.recompute() {
 		meta.Tags = nil
 	}

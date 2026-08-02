@@ -228,3 +228,77 @@ func TestCompareBlocksConcat(t *testing.T) {
 		t.Error("no parts at all must be an error, not an empty match")
 	}
 }
+
+// TestSplit_StatisticsWrittenEvenWhenSourceHadNone: the statistics come free
+// with a walk the op is doing anyway, so a part states its own bitrate and
+// frame count even if nobody ever tagged the source. That matters beyond
+// tidiness: WithBitrate has no other way to report a Matroska track's bitrate
+// on the metadata-only path.
+func TestSplit_StatisticsWrittenEvenWhenSourceHadNone(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	var sets [][]mkv.Block
+	for base := int64(0); base < 10000; base += 1000 {
+		var cluster []mkv.Block
+		for tc := base; tc < base+1000; tc += 100 {
+			cluster = append(cluster,
+				mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: make([]byte, 500)},
+				mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: make([]byte, 50)})
+		}
+		sets = append(sets, cluster)
+	}
+	// No tags whatsoever on the source.
+	src := buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 10000)
+	if c, err := reader.OpenMeta(ctx, src, reader.WithTags()); err != nil {
+		t.Fatal(err)
+	} else if len(c.Tags) != 0 {
+		t.Fatalf("the fixture must start untagged, has %d", len(c.Tags))
+	}
+
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "p"),
+		Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 5000}, {StartMs: 5000, EndMs: 0}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := reader.OpenMeta(ctx, parts[0], reader.WithTags())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, tag := range c.Tags {
+		if tag.TargetID != 1 {
+			continue
+		}
+		for _, st := range tag.SimpleTags {
+			got[st.Name] = st.Value
+		}
+	}
+	// Half the film: 50 video frames of 500 bytes.
+	if got["NUMBER_OF_FRAMES"] != "50" {
+		t.Errorf("NUMBER_OF_FRAMES = %q, want \"50\"", got["NUMBER_OF_FRAMES"])
+	}
+	if got["NUMBER_OF_BYTES"] != "25000" {
+		t.Errorf("NUMBER_OF_BYTES = %q, want \"25000\"", got["NUMBER_OF_BYTES"])
+	}
+	if got["BPS"] == "" || got["DURATION"] == "" {
+		t.Errorf("BPS/DURATION missing: %v", got)
+	}
+
+	// The head-only bitrate path finds them - the reason this is not cosmetic.
+	withBitrate, err := reader.OpenMeta(ctx, parts[0], reader.WithBitrate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withBitrate.Tracks[0].Bitrate == nil {
+		t.Error("WithBitrate found no bitrate on the part - the statistics tags are its only source")
+	}
+
+	// And the content is untouched by any of this.
+	if diffs, err := CompareBlocksConcat(ctx, src, parts); err != nil {
+		t.Fatal(err)
+	} else if len(diffs) != 0 {
+		t.Errorf("content changed: %+v", diffs)
+	}
+}
