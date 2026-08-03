@@ -216,7 +216,14 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// Likewise it lasts as long as its own range, not as long as the source:
 	// without the reset every part would declare the whole film's length.
 	segMeta := metaForNewDuration(c)
-	segMeta.Chapters = clipChapters(c.Chapters, r.StartMs, r.EndMs)
+	// The chapters cannot be written yet: a keyframe-aligned part starts on the
+	// first keyframe at or after the bound it was cut on, and only the blocks
+	// say where that is. Written against the REQUESTED bound they would sit
+	// ahead of the picture by however far the GOP reached - the very desync the
+	// per-part clipping is there to avoid. So the head books the room and the
+	// timestamps are filled in once the part's real start is known.
+	chapters := clipChapters(c.Chapters, r.StartMs, r.EndMs)
+	segMeta.Chapters = nil
 	// A part holds a slice of the source, so the source's content hash and
 	// statistics describe something it does not contain. They are measured
 	// again while the blocks go by and written after the clusters, in ONE Tags
@@ -227,15 +234,42 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
 		return err
 	}
+	if err := mw.ReserveChapters(chapters); err != nil {
+		return err
+	}
 	if err := mw.ReserveTags(plan.upperBoundTags(tracks)); err != nil {
 		return err
 	}
+	var bounds streamBounds
+	trackEnds := make(map[uint64]int64, len(c.Tracks))
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
 		videoTracks:    videoTrackSet(c.Tracks),
 		contentDigests: digests, contentStats: stats,
-		progress: progress,
+		trackEnds: trackEnds,
+		bounds:    &bounds,
+		progress:  progress,
 	}); err != nil {
+		return err
+	}
+	// What the part holds, not what it was asked for: it starts on a keyframe
+	// the source chose and keeps the GOP straddling its end, so both bounds move
+	// outwards. Declaring the requested range instead left the seek bar of every
+	// part describing a slice that is not the one inside it.
+	var extent int64
+	for _, end := range trackEnds {
+		if end > extent {
+			extent = end
+		}
+	}
+	if err := mw.RestateDuration(extent); err != nil {
+		return err
+	}
+	// clipChapters rebased on the requested bound; the part actually begins at
+	// bounds.startMs, so close the difference. It is never negative - the first
+	// kept frame is at or after the bound - and a chapter that ends up before
+	// the part's first frame lands on 0, where the picture it names now is.
+	if err := mw.WriteReservedChapters(rebaseChapters(chapters, bounds.startMs-r.StartMs)); err != nil {
 		return err
 	}
 	if err := mw.WriteReservedTags(plan.tagsForOutput(tracks, digests, stats)); err != nil {
@@ -258,6 +292,33 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 		}
 	}
 	return set
+}
+
+// rebaseChapters moves an already-clipped list back by deltaMs, keeping the
+// list itself intact: the same chapters, in the same order, so it still fits
+// the slot ReserveChapters booked for it. Timestamps stop at zero, which is
+// where a chapter naming a moment before the part's first frame belongs.
+func rebaseChapters(chapters []mkv.Chapter, deltaMs int64) []mkv.Chapter {
+	if deltaMs == 0 || len(chapters) == 0 {
+		return chapters
+	}
+	out := make([]mkv.Chapter, len(chapters))
+	for i, ch := range chapters {
+		ch.StartMs = max0(ch.StartMs - deltaMs)
+		if ch.EndMs > 0 {
+			ch.EndMs = max0(ch.EndMs - deltaMs)
+		}
+		ch.SubChapters = rebaseChapters(ch.SubChapters, deltaMs)
+		out[i] = ch
+	}
+	return out
+}
+
+func max0(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // clipChapters keeps the chapters (recursively) that overlap [startMs, endMs)

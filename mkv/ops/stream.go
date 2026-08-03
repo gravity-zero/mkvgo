@@ -50,7 +50,20 @@ type streamOpts struct {
 	// next real video keyframe). Empty means no video track: any keyframe cuts.
 	videoTracks map[uint64]bool
 	extraSubs   []mkv.Block
-	progress    mkv.ProgressFunc
+	// bounds, when non-nil, receives where the segment really began. A
+	// keyframe-aligned cut starts where the source's GOPs fall, not where it was
+	// asked to, so a caller that has to agree with the blocks - chapters to
+	// rebase against the same instant - has to be told.
+	bounds   *streamBounds
+	progress mkv.ProgressFunc
+}
+
+// streamBounds reports where a segment's own timeline starts in its source.
+type streamBounds struct {
+	// startMs is the source timecode the output's zero stands for: the
+	// requested bound normally, the first cut keyframe at or after it when the
+	// cut is keyframe-aligned.
+	startMs int64
 }
 
 // trackEndState tracks one output track's end while streaming: the last frame's
@@ -93,15 +106,57 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
 	endStates := map[uint64]*trackEndState{}
 
+	// base is the source timecode that lands on opts.timeOffset in the output:
+	// blocks are shifted by base-timeOffset on their way out, and they are held
+	// at their SOURCE timecode until then.
+	//
+	// Without keyframe alignment the base is the requested bound, known before
+	// a single block is read. With it, the segment really starts on the first
+	// cut keyframe at or after that bound, wherever the source's GOP puts it -
+	// measured on real films, 2.4 s to 5.5 s later. Rebasing on the REQUESTED
+	// bound opened every part with a hole of exactly that length: played alone
+	// it froze on its first frame, and joined back it pushed the whole seam out
+	// by the same amount.
+	//
+	// It cannot simply be the first block accepted either. The gate opens on a
+	// video keyframe, and the audio of that same instant may still follow it in
+	// file order while sitting slightly BEHIND it in time - 182 ms on a real
+	// remux. Those blocks would rebase to a negative timestamp. So the decision
+	// waits for the first flush and takes the smallest timecode of that cluster,
+	// which spans a second of content; anything reordered further than that is
+	// refused rather than written out of range.
+	base := opts.timeStart
+	baseSettled := !(opts.keyframeAlign && opts.timeStart > 0)
+
+	// shift converts a source timecode to an output one. Only meaningful once
+	// the base is settled.
+	shift := func() int64 { return base - opts.timeOffset }
+
 	flush := func() error {
 		if len(cluster) == 0 {
 			return nil
+		}
+		if !baseSettled {
+			base = cluster[0].Timecode
+			for i := range cluster {
+				if cluster[i].Timecode < base {
+					base = cluster[i].Timecode
+				}
+			}
+			baseSettled = true
+		}
+		s := shift()
+		for i := range cluster {
+			if cluster[i].Timecode < base {
+				return fmt.Errorf("block at %dms precedes the segment's first frame (%dms) by more than one cluster: refusing to write a negative timestamp", cluster[i].Timecode, base)
+			}
+			cluster[i].Timecode -= s
 		}
 		outScale := opts.outScale
 		if outScale <= 0 {
 			outScale = timecodeScale
 		}
-		err := mw.WriteClusterWithCues(clusterTS, outScale, cluster)
+		err := mw.WriteClusterWithCues(clusterTS-s, outScale, cluster)
 		cluster = cluster[:0]
 		return err
 	}
@@ -130,10 +185,16 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 
 	// recordEnds publishes each output track's next free start (its last frame's
 	// end) so a concatenating caller can rebase the following file per track.
+	// Called after the last flush: the ends are in the OUTPUT timeline, and the
+	// base that defines it is only settled once a cluster has been written.
 	recordEnds := func() {
+		if opts.bounds != nil {
+			opts.bounds.startMs = base
+		}
 		if opts.trackEnds == nil {
 			return
 		}
+		out := shift()
 		for id, s := range endStates {
 			// An explicit Block.Duration is ground truth and wins; the smallest
 			// inter-frame gap is only a stand-in for the tracks that carry no
@@ -148,7 +209,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			if frame <= 0 {
 				frame = 1 // a single frame seen: nudge to avoid an exact overlap
 			}
-			opts.trackEnds[id] = s.maxTC + frame
+			opts.trackEnds[id] = s.maxTC + frame - out
 		}
 	}
 
@@ -164,8 +225,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			if err := injectSubs(1 << 62); err != nil {
 				return err
 			}
+			if err := flush(); err != nil {
+				return err
+			}
 			recordEnds()
-			return flush()
+			return nil
 		}
 		if err != nil {
 			return err
@@ -202,8 +266,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		blk.TrackNumber = newID
 
-		blk.Timecode = blk.Timecode - opts.timeStart + opts.timeOffset
-
+		// The timecode stays the SOURCE's until flush: the output's zero is not
+		// known yet when the cut is keyframe-aligned (see base above). Nothing
+		// below depends on the output timeline - the digests are payload only,
+		// the statistics are differences, and the track ends are converted when
+		// they are published.
 		if opts.contentDigests != nil {
 			h := opts.contentDigests[newID]
 			if h == nil {
@@ -261,8 +328,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	if err := injectSubs(1 << 62); err != nil {
 		return err
 	}
+	if err := flush(); err != nil {
+		return err
+	}
 	recordEnds()
-	return flush()
+	return nil
 }
 
 // noCutKeyframeErr reports a range that contains blocks but no video keyframe

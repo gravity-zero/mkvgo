@@ -666,8 +666,14 @@ dropped so the segment starts decodable), and ends right before the next video
 keyframe at/after its end time (the GOP straddling the cut is kept, so
 chaining segments loses no frame). A range that contains media but no video
 keyframe is an explicit error. Audio-only files cut exactly at the requested
-times. Chapters are clipped to each segment's range and rebased to its
-timeline.
+times.
+
+A segment's timeline starts at the first frame it actually keeps, not at the
+time it was asked for: those differ by however far the source's next keyframe
+was, and counting from the requested time would open the segment on a hole of
+that length. Its chapters are clipped to its range and measured from the same
+first frame, and the duration it declares is the stretch it holds - a little
+more than the range, since it keeps the GOP straddling its end.
 
 ```bash
 # Split by chapters

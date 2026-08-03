@@ -55,10 +55,17 @@ func TestSplit_KeyframeAlignGatesOnVideoTrack(t *testing.T) {
 	// Start: nothing before the first video keyframe >= 1000 (at 2000) - in
 	// particular no leading audio, and no mid-GOP video from 1000/1500.
 	// End: the GOP straddling 3000 is kept up to (excluding) the next video
-	// keyframe at 4000. Output timecodes are rebased to the segment timeline
-	// (source − StartMs).
-	wantVideo := []int64{1000, 1500, 2000, 2500}
-	wantAudio := []int64{1250, 1750, 2250, 2750}
+	// keyframe at 4000.
+	//
+	// Output timecodes are rebased on the first frame KEPT (2000), not on the
+	// requested bound (1000). Rebasing on the bound - which this test used to
+	// require, freezing the defect - opened the part with a hole as long as the
+	// distance to the keyframe: 1 s of nothing here, 2.4 to 5.5 s on real films
+	// with long GOPs. Played alone the part froze on its first frame; joined
+	// back, every seam gained that same gap. The A/V relationship is what must
+	// survive, and it does: audio still sits 250 ms behind the picture.
+	wantVideo := []int64{0, 500, 1000, 1500}
+	wantAudio := []int64{250, 750, 1250, 1750}
 	assertTimecodes(t, "video", video, wantVideo)
 	assertTimecodes(t, "audio", audio, wantAudio)
 }
