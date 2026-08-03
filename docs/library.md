@@ -1064,6 +1064,14 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 })
 ```
 
+An op whose output holds different content than its source - a track removed or
+added, a subtitle merged, a container converted to WebM - writes its **own**
+`SegmentUID`, derived deterministically from the source's and the op, instead of
+copying it: two different files must not claim to be one segment. The hard links
+(`PrevUID`/`NextUID`) are kept, since the timeline itself has not moved. Ops
+that rewrite a file without touching its content (`EditMetadata`, `Reindex`,
+`Salvage`, `RetimeTracks`) keep the identity untouched.
+
 ---
 
 ## CueHealth (head-only seek-index triage)
@@ -1566,6 +1574,18 @@ that length. Its chapters are clipped to its range and measured from the same
 first frame, and the duration it declares is the stretch it holds - a little
 more than the range, since it keeps the GOP straddling its end.
 
+Its chapters are decided on that same first frame, not on the bound the part was
+asked for: a marker between the two names a frame the PREVIOUS part holds, so
+that is the part it goes to. A part still opens on the chapter that was playing
+when it starts, at its own zero - both statements are true, and `Join` is the
+one that knows the second is the first still running (see below).
+
+Each part is a segment of its own: it gets its own `Info.SegmentUID` (derived
+from the source, so splitting the same file twice writes the same bytes) rather
+than the source's, and consecutive parts are chained through `Info.PrevUID` and
+`Info.NextUID`. That chain is what `Join` reads to tell slices of one timeline
+from files that merely follow each other.
+
 **Join sequential files:**
 ```go
 err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
@@ -1576,6 +1596,20 @@ configuration) in every file and errors on mismatch. Title and tags come from th
 (first-wins). Attachments are pooled from every source, identified by content
 rather than by name, with the conventional cover art kept single.
 
+Where a seam falls depends on what the two files are to each other. Two files
+that merely follow one another resume after everything the previous one holds -
+the last frame's measured end across its tracks, its audio tail included, never
+the declared duration, so a container that declares more than it holds opens no
+gap at the seam. Parts of one timeline resume where the **picture** does
+instead: `Split` chains its parts through their segment identity
+(`Info.PrevUID`/`NextUID`), and `Join` reads that chain. The distinction is not
+cosmetic - a cut runs down the file at a video keyframe, so it is exact on the
+video track and on no other: interleaving leaves the part before the cut holding
+sound from after it, and the part after the cut opening on sound from before it.
+Rejoined on the measured end, each seam gains that overlap and the film drifts a
+little further out at every one. Parts joined out of order, or with one missing,
+do not form a chain and get the ordinary seam.
+
 Chapters are different: they are timeline data, so **every** source
 contributes its own, shifted onto the joined timeline by the offset its blocks
 were really written at - the measured end of the files before it, not their
@@ -1583,8 +1617,11 @@ declared durations. Splitting a film on its chapters and joining the parts back
 therefore returns every chapter, each one landing on its part's seam. Colliding
 ChapterUIDs (the norm when the parts were cut from one original) are renumbered,
 the first claimant keeping its UID. Two sources may each carry a chapter around
-a seam and both are kept - their timestamps differ, and dropping either would be
-an editorial call. Chapters linked to another segment (ChapterSegmentUID) are
+a seam: for files that merely follow each other both are kept - their timestamps
+differ, and dropping either would be an editorial call - while for parts of one
+timeline the second is the first still running and is dropped, so a rejoined
+split names each chapter once, at the instant it was cut on. Chapters linked to
+another segment (ChapterSegmentUID) are
 dropped, since the join makes that reference meaningless, and multi-edition
 files are out of scope: mkvgo reads and writes a single edition throughout.
 

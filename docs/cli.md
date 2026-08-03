@@ -527,6 +527,12 @@ mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>
 mkvgo remove-track video.mkv -o clean.mkv -t 3,4
 ```
 
+Commands whose output differs from their source - `remove-track`, `add-track`,
+`merge-subtitle`, `merge-ass`, `to-webm` - write their own SegmentUID (derived,
+so the same command writes the same bytes twice) instead of copying the
+source's: two different files must not claim to be one segment. Hard links
+(PrevUID/NextUID) are kept - the timeline has not moved.
+
 ### add-track
 
 Add a track from another MKV file.
@@ -631,8 +637,22 @@ passes instead of reporting the first part's checksum as a mismatch.
 Chapters are the exception, because they describe the timeline rather than
 decorate it: **every** file contributes its own, shifted by the offset its
 blocks were actually written at. Splitting on chapters and joining the parts
-back gives every chapter again. Repeated ChapterUIDs are renumbered; chapters
-linked to another segment are dropped.
+back gives every chapter again, each at the instant it was cut on. Repeated
+ChapterUIDs are renumbered - except between parts of one timeline, where a
+repeat is that chapter still running across the cut and is dropped rather than
+announced twice. Chapters linked to another segment are dropped.
+
+Where the seam falls depends on what the files are to each other. Two files
+that merely follow one another resume after everything the previous one holds,
+its audio tail included - the last frame's measured end, never the declared
+duration, so a container that declares more than it holds opens no gap. Parts
+of one timeline, which `split` chains through their segment identity
+(`PrevUID`/`NextUID`), resume where the **picture** does instead: a cut runs
+down the file at a video keyframe, so the part before it keeps sound from after
+the cut and the part after it opens on sound from before it, and putting the
+seam past that overlap would push the film a little further out at every join.
+Parts joined out of order, or with one missing, are not a chain and get the
+ordinary seam.
 
 ```bash
 mkvgo join -o full.mkv part1.mkv part2.mkv part3.mkv
@@ -674,6 +694,17 @@ was, and counting from the requested time would open the segment on a hole of
 that length. Its chapters are clipped to its range and measured from the same
 first frame, and the duration it declares is the stretch it holds - a little
 more than the range, since it keeps the GOP straddling its end.
+
+Its chapters are decided on that same first frame rather than on the bound the
+part was asked for: a marker between the two names a frame the PREVIOUS part
+holds, so that is the part that carries it. A part still opens on the chapter
+that was playing when it starts.
+
+Each part is a segment in its own right and gets its own SegmentUID, derived
+from the source so that splitting the same file twice writes the same bytes.
+Consecutive parts are chained through `PrevUID`/`NextUID`, which is what lets
+`join` recognise them as slices of one timeline and put the seam back exactly
+where the cut was.
 
 ```bash
 # Split by chapters

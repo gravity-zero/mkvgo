@@ -8,6 +8,52 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A rejoined film keeps the timeline it was cut from.** A cut runs down the
+  file at a video keyframe, so it is exact on the video track and on no other:
+  interleaving leaves the part before it holding sound from after the cut, and
+  the part after it opening on sound from before it. Rejoined on the latest
+  measured end, every seam gained that overlap - 83 ms a seam, 909 ms over the
+  eleven seams of a 12-part film, and the picture dragged through every one of
+  them. `Split` now chains its parts through their segment identity
+  (`PrevUID`/`NextUID`), and a seam between chained parts lands where the
+  picture continues: the same film comes back 8 ms off end to end, block for
+  block identical. Files that merely follow each other - episodes, recorder
+  chunks - are unaffected: their seam stays after everything the previous file
+  holds, audio tail included, and so does the seam between parts joined out of
+  order or with one missing.
+- **A chapter marker stays on the picture it names.** A part is cut on the first
+  keyframe at or after the bound it was asked for and keeps the GOP straddling
+  its end, so a marker sitting between the two names a frame the PREVIOUS part
+  holds - and, selected on the requested bound, it came to the next part anyway
+  with nowhere to sit but zero. Every chapter of a rejoined split was announced
+  up to a GOP early: measured on a 12-chapter film, 287 ms out on ten of them
+  and 2.3 s and 3.1 s on the last two, now 1 to 7 ms. The selection is made
+  against the CUT, which consecutive parts share, so each marker goes to the one
+  part that holds its frame; a part still opens on the chapter that is playing
+  when it starts, and a `Join` of linked parts knows that repeat is the same
+  chapter still running rather than a second one.
+- **Every part of a split is a segment of its own.** Each carried the source's
+  `SegmentUID`, leaving twelve files all claiming to BE the file they came from.
+  They now get their own, derived from the source so that splitting the same
+  file twice still writes the same bytes. A joined file likewise stops wearing
+  its first part's identity, whose `NextUID` sent a player looking for the
+  second part - which is inside it. A source that is itself a slice of a larger
+  timeline keeps its own links at the chain's ends: the first part still
+  succeeds the source's predecessor, the last still precedes its successor.
+- **A merged subtitle cue that outlasts the source extends the declared
+  duration.** `MergeSubtitle` and `MergeASS` inject every cue, late ones
+  included, but copied the source's authoritative `Duration` verbatim - the
+  output played past the length it declared. Both now restate it to the last
+  cue's end, exactly as `AddTrack` already did for a longer track; a cue that
+  fits changes nothing, the source's declaration surviving untouched.
+- **The same rule holds for every op whose output differs from its source.**
+  `RemoveTrack`, `AddTrack`, `MergeSubtitle`, `MergeASS` and `RemuxToWebM` all
+  copied the source's `SegmentUID` onto a file with different content; each now
+  derives its own, deterministically, per op. The hard links (`PrevUID`/
+  `NextUID`) stay untouched - adding or removing a track does not move the
+  timeline, so a subtitled part still joins back at the precise seam. Ops that
+  repair or restate a file without touching its content (`Reindex`, `Salvage`,
+  `RetimeTracks`, `EditMetadata`) keep the identity: same content, same segment.
 - **A file declares the length it holds.** `Join` announced the duration of its
   first source, `Split` gave every part the whole film's, and `AddTrack` ignored
   a track that outlasted the file it was added to: the duration each op computed
