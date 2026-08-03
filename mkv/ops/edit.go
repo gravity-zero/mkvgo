@@ -70,7 +70,11 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-	if err := mw.WriteMetadata(c, kept, c.DurationMs); err != nil {
+	// A file with fewer tracks is not the file it came from: it gets its own
+	// derived identity instead of the source's (see derivedSegmentUID).
+	meta := *c
+	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "remove-track")
+	if err := mw.WriteMetadata(&meta, kept, c.DurationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, srcPath, c.Info.TimecodeScale, fs, streamOpts{
@@ -126,6 +130,8 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 		durationMs = srcAdd.DurationMs
 		meta = metaForNewDuration(c)
 	}
+	// A file with one more track is not the file it came from (derivedSegmentUID).
+	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "add-track")
 
 	out, err := fs.DoCreate(dstPath)
 	if err != nil {

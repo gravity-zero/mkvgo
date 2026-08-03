@@ -62,7 +62,11 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
-	if err := mw.WriteMetadata(c, tracks, c.DurationMs); err != nil {
+	// A file with a subtitle track added is not the file it came from
+	// (derivedSegmentUID).
+	meta := *c
+	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "merge-ass")
+	if err := mw.WriteMetadata(&meta, tracks, c.DurationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, srcPath, c.Info.TimecodeScale, fs, streamOpts{
