@@ -79,6 +79,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// after the clusters.
 	meta := metaForNewDuration(first)
 	meta.Chapters = nil
+	// The joined file is a new segment, not the first part wearing its name: the
+	// identity copied along with the Info would have it claim to BE that part,
+	// and its NextUID would send a player looking for the second one - which is
+	// now inside this very file.
+	meta.Info.SegmentUID, meta.Info.PrevUID, meta.Info.NextUID = nil, nil, nil
 	// Attachments are pooled, not taken from the first file alone: the fonts an
 	// ASS track needs may only be attached to the part that uses them, and a
 	// first-wins policy drops them. Matched on name + size, so the same font
@@ -136,9 +141,30 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// The offset is the LAST FRAME'S END across the tracks, not the declared
 	// duration: a container that declares more than it holds must not open a
 	// hole at the seam.
-	var offset int64
+	//
+	// Slices of one timeline get a tighter seam - see videoSeamOffset - because
+	// for them the latest end overshoots by the interleaving the cut ran through.
+	outVideo := videoTrackSet(first.Tracks) // output track numbers
+	var offset, prevEnd, prevVideoEnd int64
+	var prevHasVideoEnd bool
 	offsets := make([]int64, len(sources)) // where each source's timeline starts
 	for i, src := range sources {
+		if i > 0 {
+			offset = prevEnd
+			if prevHasVideoEnd && linkedTo(&conts[i-1].Info, &conts[i].Info) {
+				seam, ok, err := videoSeamOffset(ctx, conts[i], prevVideoEnd, fs)
+				if err != nil {
+					return err
+				}
+				// Never behind the previous source's own start, and never more
+				// than the reordering a muxer is allowed - past that it is not
+				// interleaving that separates the two ends, it is content, and
+				// pulling the seam over it would bury the previous part's tail.
+				if ok && seam >= offsets[i-1] && prevEnd-seam <= defaultClusterDurationMs {
+					offset = seam
+				}
+			}
+		}
 		offsets[i] = offset
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -165,11 +191,16 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", src, err)
 		}
-		for _, end := range trackEnds {
-			if end > offset {
-				offset = end
+		prevEnd, prevVideoEnd, prevHasVideoEnd = offset, 0, false
+		for id, end := range trackEnds {
+			if end > prevEnd {
+				prevEnd = end
+			}
+			if outVideo[id] && (!prevHasVideoEnd || end > prevVideoEnd) {
+				prevVideoEnd, prevHasVideoEnd = end, true
 			}
 		}
+		offset = prevEnd
 	}
 
 	// What was actually written runs to the last seam offset, which is more than
@@ -188,4 +219,84 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		return err
 	}
 	return mw.Finalize()
+}
+
+// linkedTo reports whether next is the segment that FOLLOWS prev, in the sense
+// Matroska gives hard-linked segments: the parts of one timeline, cut apart.
+//
+// Join is asked to do two different things with the same call. Appending files
+// that have nothing to do with each other - episodes, recorder chunks - the
+// seam belongs after everything the previous file holds, its audio tail
+// included, and the measured end of the latest track is that. Rejoining slices
+// of one file it belongs where the cut was, which is a different place. Nothing
+// in the numbers tells the two apart: a part whose audio runs past its picture
+// and a film whose audio runs past its picture measure the same. The chain does,
+// and it is precise - joining parts 1 and 3 of a split leaves 3 pointing back at
+// 2, so the link does not hold and the seam stays where it was.
+func linkedTo(prev, next *mkv.SegmentInfo) bool {
+	return len(prev.SegmentUID) > 0 && bytes.Equal(next.PrevUID, prev.SegmentUID)
+}
+
+// videoSeamOffset returns where a slice's timeline must start for its picture to
+// carry on from the previous slice's, and whether that could be established.
+//
+// A keyframe-aligned cut runs down the file at a video keyframe, so it is exact
+// on the video track and on no other: interleaving leaves the part BEFORE the
+// cut holding audio from after that keyframe, and the part AFTER it opening on
+// audio from before it. Measured, the first part therefore ends later than the
+// picture does and the second part's zero stands for an earlier instant than
+// its first frame - and rejoined on the latest end, each seam gains the sum of
+// the two. On a real film that is 83 ms a seam, 909 ms over eleven of them,
+// every one of which the picture had to be dragged through.
+//
+// So the seam is the picture's: the previous part's last frame ends, less how
+// far into this one its own first frame sits. Both parts keep the overlap they
+// were cut with, which is the interleaving the source was muxed with.
+func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int64, fs *mkv.FS) (int64, bool, error) {
+	video := videoTrackSet(next.Tracks)
+	if len(video) == 0 {
+		return 0, false, nil
+	}
+	f, err := fs.DoOpen(next.Path)
+	if err != nil {
+		return 0, false, err
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, next.Info.TimecodeScale)
+	if err != nil {
+		return 0, false, err
+	}
+	br.SetHeaderOnly(true) // where the blocks are, not what they hold
+
+	// The first video block met is not necessarily the earliest one - a muxer
+	// may store the picture slightly behind the sound - so the smallest video
+	// timecode of the opening cluster is what counts, and one cluster is as far
+	// as that reordering goes (the window Split settles a part's own zero on).
+	var firstTC, best int64
+	var seen, found bool
+	for br.ClusterCount() <= 1 {
+		if ctx.Err() != nil {
+			return 0, false, ctx.Err()
+		}
+		blk, err := br.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		if !seen {
+			firstTC, seen = blk.Timecode, true
+		}
+		if video[blk.TrackNumber] && (!found || blk.Timecode < best) {
+			best, found = blk.Timecode, true
+		}
+		if blk.Timecode-firstTC >= defaultClusterDurationMs {
+			break
+		}
+	}
+	if !found {
+		return 0, false, nil
+	}
+	return prevVideoEnd - best, true, nil
 }

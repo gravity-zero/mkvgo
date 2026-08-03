@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -56,6 +58,8 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		remap[t.ID] = t.ID
 	}
 
+	uids := splitSegmentUIDs(c, len(ranges))
+
 	var outputs []string
 	used := map[string]bool{}
 	for i, r := range ranges {
@@ -87,7 +91,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 			durationMs = c.DurationMs - r.StartMs
 		}
 
-		if err := splitRange(ctx, c, outPath, r, remap, durationMs, fs, mkv.ProgressFrom(extra)); err != nil {
+		if err := splitRange(ctx, c, outPath, r, remap, durationMs, linkAt(uids, i, &c.Info), fs, mkv.ProgressFrom(extra)); err != nil {
 			return outputs, fmt.Errorf("part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, outPath)
@@ -188,7 +192,59 @@ func nextChapterStarts(chapters []mkv.Chapter) []int64 {
 	return out
 }
 
-func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
+// segmentLink is one part's place in the chain of parts: its own identity, and
+// the identity of the parts on either side of it.
+type segmentLink struct {
+	uid, prev, next []byte
+}
+
+// splitSegmentUIDs derives one SegmentUID per part, and linkAt chains them.
+//
+// A part is a new segment and owes itself an identity: carrying the source's
+// Info over left twelve files all claiming to BE the source, which is what a
+// SegmentUID is not allowed to do. Chained through PrevUID/NextUID they say
+// more than that - they say these files are consecutive slices of ONE timeline,
+// which is exactly what Join needs to know to put the seam back where the cut
+// was rather than after everything the previous part happens to hold.
+//
+// Derived from the source rather than drawn at random: splitting the same file
+// twice has to write the same bytes, or the byte-for-byte comparisons this
+// package is checked with compare nothing.
+func splitSegmentUIDs(c *mkv.Container, n int) [][]byte {
+	seed := c.Info.SegmentUID
+	if len(seed) == 0 {
+		seed = []byte(c.Path)
+	}
+	uids := make([][]byte, n)
+	for i := range uids {
+		h := sha256.New()
+		h.Write([]byte("mkvgo.split.segment-uid.v1"))
+		h.Write(seed)
+		var idx [8]byte
+		binary.BigEndian.PutUint64(idx[:], uint64(i))
+		h.Write(idx[:])
+		uids[i] = h.Sum(nil)[:16] // a SegmentUID is 128 bits
+	}
+	return uids
+}
+
+// linkAt chains part i to its neighbours. The ends of the chain keep the
+// SOURCE's own links: a source that is itself a slice of a larger timeline has
+// a predecessor, and the first part still succeeds it - dropping that link
+// threw away a statement that stayed true. Same for the last part and the
+// source's successor.
+func linkAt(uids [][]byte, i int, src *mkv.SegmentInfo) segmentLink {
+	l := segmentLink{uid: uids[i], prev: src.PrevUID, next: src.NextUID}
+	if i > 0 {
+		l.prev = uids[i-1]
+	}
+	if i+1 < len(uids) {
+		l.next = uids[i+1]
+	}
+	return l
+}
+
+func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, link segmentLink, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
 		return err
@@ -216,6 +272,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// Likewise it lasts as long as its own range, not as long as the source:
 	// without the reset every part would declare the whole film's length.
 	segMeta := metaForNewDuration(c)
+	segMeta.Info.SegmentUID, segMeta.Info.PrevUID, segMeta.Info.NextUID = link.uid, link.prev, link.next
 	// The chapters cannot be written yet: a keyframe-aligned part starts on the
 	// first keyframe at or after the bound it was cut on, and only the blocks
 	// say where that is. Written against the REQUESTED bound they would sit
