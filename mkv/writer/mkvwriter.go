@@ -336,12 +336,30 @@ func (m *MKVWriter) ReserveChapters(chapters []mkv.Chapter) error {
 }
 
 // WriteReservedChapters writes chapters into the slot ReserveChapters booked and
-// voids what is left of it, then returns to the end of the file. chapters must be
-// the list handed to ReserveChapters, with the timestamps it was waiting for:
-// anything that does not fit is refused rather than written over the clusters.
+// voids what is left of it, then returns to the end of the file. chapters must
+// fit the slot - a subset of the list ReserveChapters sized it on, with the
+// timestamps it was waiting for; anything that does not fit is refused rather
+// than written over the clusters.
+//
+// A subset may be EMPTY: a booking made before the blocks said where the cut
+// fell can find every candidate out of range. The whole slot becomes a Void and
+// the SeekHead entry is dropped - writing a Chapters element whose EditionEntry
+// holds no atom would put a spec-invalid element at the end of an index.
 func (m *MKVWriter) WriteReservedChapters(chapters []mkv.Chapter) error {
 	if m.chaptersSlot == 0 {
 		return nil
+	}
+	if len(chapters) == 0 {
+		end := m.pos()
+		if _, err := m.W.Seek(m.SegDataStart+m.ChaptersPos, io.SeekStart); err != nil {
+			return err
+		}
+		if err := WriteVoid(m.W, m.chaptersSlot); err != nil {
+			return err
+		}
+		m.ChaptersPos = 0
+		_, err := m.W.Seek(end, io.SeekStart)
+		return err
 	}
 	var buf bytes.Buffer
 	if err := WriteChapters(&buf, chapters); err != nil {

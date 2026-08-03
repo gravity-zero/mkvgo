@@ -91,7 +91,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 			durationMs = c.DurationMs - r.StartMs
 		}
 
-		if err := splitRange(ctx, c, outPath, r, remap, durationMs, linkAt(uids, i, &c.Info), fs, mkv.ProgressFrom(extra)); err != nil {
+		if err := splitRange(ctx, c, outPath, r, remap, durationMs, chapterWindowEnd(ranges, i), linkAt(uids, i, &c.Info), fs, mkv.ProgressFrom(extra)); err != nil {
 			return outputs, fmt.Errorf("part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, outPath)
@@ -244,7 +244,32 @@ func linkAt(uids [][]byte, i int, src *mkv.SegmentInfo) segmentLink {
 	return l
 }
 
-func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs int64, link segmentLink, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
+// chapterWindowEnd is how far a part's chapter window may reach: the head has
+// to book room before the blocks say where the cut fell, so a bound is needed
+// that holds in both passes.
+//
+// The part stops on the first keyframe at or after its requested end, and that
+// keyframe is inside the NEXT range whenever the two are contiguous - a range
+// with no keyframe of its own is an explicit error, so a range that survives
+// opens on a keyframe before its own end. Ranges with a gap between them say
+// nothing of the sort: for those the window is the rest of the file, which is
+// always safe and costs a few hundred bytes of Void per chapter (`-range`
+// splits are counted on one hand, while `-chapters` and `-every`, the ones that
+// produce hundreds of parts, are contiguous by construction).
+//
+// The SAME value bounds the booking and the selection, so the two can never
+// disagree: where the cut does reach past it - a split that is about to fail on
+// the next range - the part simply keeps the chapters it was asked for, and the
+// failure is reported by the range that has no keyframe rather than by a slot
+// that came up short.
+func chapterWindowEnd(ranges []mkv.TimeRange, i int) int64 {
+	if i+1 >= len(ranges) || ranges[i].EndMs != ranges[i+1].StartMs {
+		return 0 // to the end of the source
+	}
+	return ranges[i+1].EndMs
+}
+
+func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs, windowEndMs int64, link segmentLink, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
 		return err
@@ -273,13 +298,19 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// without the reset every part would declare the whole film's length.
 	segMeta := metaForNewDuration(c)
 	segMeta.Info.SegmentUID, segMeta.Info.PrevUID, segMeta.Info.NextUID = link.uid, link.prev, link.next
-	// The chapters cannot be written yet: a keyframe-aligned part starts on the
-	// first keyframe at or after the bound it was cut on, and only the blocks
-	// say where that is. Written against the REQUESTED bound they would sit
-	// ahead of the picture by however far the GOP reached - the very desync the
-	// per-part clipping is there to avoid. So the head books the room and the
-	// timestamps are filled in once the part's real start is known.
-	chapters := clipChapters(c.Chapters, r.StartMs, r.EndMs)
+	// The chapters cannot be written yet, and not only because their timestamps
+	// wait on the part's real start: WHICH of them belong here waits on it too.
+	// A keyframe-aligned part opens on the first keyframe at or after the bound
+	// it was cut on and keeps the GOP straddling its end, so a marker sitting
+	// between the requested bound and that keyframe names a frame the PREVIOUS
+	// part holds. Selected on the requested bound it came here anyway, with
+	// nowhere to sit but zero - a chapter announced up to a GOP early, at the
+	// wrong picture, on every part of a split.
+	//
+	// So the head books room for every chapter that could possibly land here
+	// (the slot is sized for the widest timestamp EBML can encode, so only the
+	// LIST has to be bounded, never the values), and the real selection is made
+	// against the cut once the blocks have said where it fell.
 	segMeta.Chapters = nil
 	// A part holds a slice of the source, so the source's content hash and
 	// statistics describe something it does not contain. They are measured
@@ -291,7 +322,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.WriteMetadata(&segMeta, tracks, durationMs); err != nil {
 		return err
 	}
-	if err := mw.ReserveChapters(chapters); err != nil {
+	if err := mw.ReserveChapters(clipChapters(c.Chapters, r.StartMs, windowEndMs)); err != nil {
 		return err
 	}
 	if err := mw.ReserveTags(plan.upperBoundTags(tracks)); err != nil {
@@ -322,11 +353,13 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.RestateDuration(extent); err != nil {
 		return err
 	}
-	// clipChapters rebased on the requested bound; the part actually begins at
-	// bounds.startMs, so close the difference. It is never negative - the first
-	// kept frame is at or after the bound - and a chapter that ends up before
-	// the part's first frame lands on 0, where the picture it names now is.
-	if err := mw.WriteReservedChapters(rebaseChapters(chapters, bounds.startMs-r.StartMs)); err != nil {
+	// Selected on the cut, which is exact and which consecutive parts share, so
+	// every marker goes to the one part that holds its frame. clipChapters then
+	// counts from that cut, while the part's own zero is bounds.startMs - the
+	// audio of the same instant, which may sit slightly below it - so close that
+	// difference. It is never positive: the first frame is the cut.
+	chapters := clipChapters(c.Chapters, bounds.cutStartMs, clampWindow(bounds.cutEndMs, windowEndMs))
+	if err := mw.WriteReservedChapters(rebaseChapters(chapters, bounds.startMs-bounds.cutStartMs)); err != nil {
 		return err
 	}
 	if err := mw.WriteReservedTags(plan.tagsForOutput(tracks, digests, stats)); err != nil {
@@ -351,10 +384,11 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 	return set
 }
 
-// rebaseChapters moves an already-clipped list back by deltaMs, keeping the
-// list itself intact: the same chapters, in the same order, so it still fits
-// the slot ReserveChapters booked for it. Timestamps stop at zero, which is
-// where a chapter naming a moment before the part's first frame belongs.
+// rebaseChapters moves an already-clipped list by deltaMs (back for a positive
+// delta, forward for a negative one), keeping the list itself intact: the same
+// chapters, in the same order, so it still fits the slot ReserveChapters booked
+// for it. Timestamps stop at zero, which is where a chapter naming a moment
+// before the part's first frame belongs.
 func rebaseChapters(chapters []mkv.Chapter, deltaMs int64) []mkv.Chapter {
 	if deltaMs == 0 || len(chapters) == 0 {
 		return chapters
@@ -369,6 +403,15 @@ func rebaseChapters(chapters []mkv.Chapter, deltaMs int64) []mkv.Chapter {
 		out[i] = ch
 	}
 	return out
+}
+
+// clampWindow keeps a part's chapter window inside the bound the head booked
+// room for; 0 on either side means "no bound".
+func clampWindow(endMs, windowEndMs int64) int64 {
+	if windowEndMs > 0 && (endMs == 0 || endMs > windowEndMs) {
+		return windowEndMs
+	}
+	return endMs
 }
 
 func max0(v int64) int64 {

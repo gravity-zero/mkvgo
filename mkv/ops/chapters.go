@@ -26,23 +26,41 @@ import (
 //     and the writer emits exactly one, so mkvgo carries a single edition end to
 //     end. A multi-edition source arrives here already flattened; picking the
 //     default edition would require the reader to keep them apart. Out of scope.
+//
 //   - Linked chapters. An atom with a ChapterSegmentUID points at ANOTHER
 //     segment, and the join has just made that reference meaningless. They are
 //     dropped rather than carried over as dangling links. Rare, and out of scope.
+//
 //   - The seam. Two consecutive sources can each carry a chapter around the cut,
-//     because the GOP straddling it belongs to both. BOTH are kept: their
-//     timestamps differ (the second starts where the first part really ended),
-//     and dropping either would be an editorial decision this has no business
-//     making. A rejoined split therefore gives back exactly the chapters it was
-//     split on, one per part.
+//     because the GOP straddling it belongs to both: the part before the cut
+//     holds the frame the marker names, and the part after it opens in the
+//     middle of that same chapter and says so, at its own zero.
+//
+//     For files that merely follow each other BOTH are kept: their timestamps
+//     differ and dropping either would be an editorial decision this has no
+//     business making. For PARTS OF ONE TIMELINE - hard-linked segments, which
+//     is what Split writes - the second is the first still running, not a
+//     second chapter, and it is dropped: keeping it announced the same chapter
+//     twice, a fraction of a second apart, at every seam of a rejoined split.
+//     Same UID means same chapter there, since the parts were cut from one file
+//     whose UIDs are unique.
+//
 //   - ChapterUID. Unique within a file; two sources cut from the same original
-//     carry the same UIDs. The first occurrence keeps its UID, any repeat gets
-//     the lowest free one - deterministic, so the same join always numbers them
-//     the same way.
+//     carry the same UIDs. The first occurrence keeps its UID, any repeat that
+//     is not a continuation gets the lowest free one - deterministic, so the
+//     same join always numbers them the same way.
 func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 	var out []mkv.Chapter
 	uids := &chapterUIDs{seen: map[uint64]bool{}, next: 1}
 	for i, c := range sources {
+		// Continuation dedup happens on the WRITE pass only. The sizing pass
+		// (nil offsets) has no extents, so the two passes can disagree on which
+		// COPY of a continued chapter survives: a phantom copy past a source's
+		// extent exists for the sizing but is clipped at the write, letting the
+		// next source's copy - deduped in one pass, written in the other - land
+		// in a slot that was never sized for it. Sizing keeps every copy
+		// instead: a superset always fits, the surplus is a few bytes of Void.
+		continues := offsets != nil && i > 0 && linkedTo(&sources[i-1].Info, &c.Info)
 		var off, extent int64
 		if i < len(offsets) {
 			off = offsets[i]
@@ -55,7 +73,7 @@ func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 				extent = offsets[i+1] - off
 			}
 		}
-		out = append(out, shiftChapters(c.Chapters, off, extent, uids)...)
+		out = append(out, shiftChapters(c.Chapters, off, extent, uids, continues)...)
 	}
 	return out
 }
@@ -65,7 +83,9 @@ func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 // their parent, at every depth.
 // extentMs is how far this source's timeline reaches; 0 means "unbounded", which
 // is the last source and the sizing pass.
-func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapterUIDs) []mkv.Chapter {
+// continues says this source is the previous one still running - a later part of
+// one timeline - so a UID already placed names the same chapter, not a new one.
+func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapterUIDs, continues bool) []mkv.Chapter {
 	var out []mkv.Chapter
 	for _, ch := range chapters {
 		if len(ch.SegmentUID) > 0 {
@@ -74,13 +94,16 @@ func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapt
 		if extentMs > 0 && ch.StartMs >= extentMs {
 			continue // past what this source actually wrote
 		}
+		if continues && uids.seen[ch.ID] {
+			continue // the same chapter, carried across the cut: see concatChapters
+		}
 		shifted := ch
 		shifted.ID = uids.unique(ch.ID)
 		shifted.StartMs = ch.StartMs + offsetMs
 		if ch.EndMs > 0 {
 			shifted.EndMs = ch.EndMs + offsetMs
 		}
-		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, extentMs, uids)
+		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, extentMs, uids, continues)
 		out = append(out, shifted)
 	}
 	return out

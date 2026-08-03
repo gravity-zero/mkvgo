@@ -58,12 +58,27 @@ type streamOpts struct {
 	progress mkv.ProgressFunc
 }
 
-// streamBounds reports where a segment's own timeline starts in its source.
+// streamBounds reports where a segment's own timeline starts in its source, and
+// which slice of that source it claims.
 type streamBounds struct {
 	// startMs is the source timecode the output's zero stands for: the
 	// requested bound normally, the first cut keyframe at or after it when the
 	// cut is keyframe-aligned.
 	startMs int64
+	// cutStartMs and cutEndMs are the keyframes the segment opened and stopped
+	// on - the cut itself, which is exact, as opposed to startMs, which the
+	// audio of that same instant may sit a little below. cutEndMs is 0 when the
+	// segment ran to the end of the source.
+	//
+	// Consecutive segments SHARE a cut: one stops on the keyframe the next one
+	// opens on. Anything that has to be handed to exactly one of them - a
+	// chapter marker, which belongs where its frame is - is decided on these
+	// and on nothing else. The requested bounds do not have that property: the
+	// segment before the cut keeps the GOP straddling it, so a marker between
+	// the requested bound and the keyframe names a frame that is in the
+	// PREVIOUS segment, and giving it to this one puts it on the wrong picture.
+	cutStartMs int64
+	cutEndMs   int64
 }
 
 // trackEndState tracks one output track's end while streaming: the last frame's
@@ -126,7 +141,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	// which spans a second of content; anything reordered further than that is
 	// refused rather than written out of range.
 	base := opts.timeStart
-	baseSettled := !(opts.keyframeAlign && opts.timeStart > 0)
+	baseSettled := !opts.keyframeAlign || opts.timeStart <= 0
 
 	// shift converts a source timecode to an output one. Only meaningful once
 	// the base is settled.
@@ -187,9 +202,16 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	// end) so a concatenating caller can rebase the following file per track.
 	// Called after the last flush: the ends are in the OUTPUT timeline, and the
 	// base that defines it is only settled once a cluster has been written.
+	// cutStart is the keyframe the segment opened on. Without the gate the
+	// segment opens on the bound it was asked for, which is then the cut.
+	cutStart, cutStartSet := opts.timeStart, !opts.keyframeAlign || opts.timeStart <= 0
+	cutEnd := int64(0)
+
 	recordEnds := func() {
 		if opts.bounds != nil {
 			opts.bounds.startMs = base
+			opts.bounds.cutStartMs = cutStart
+			opts.bounds.cutEndMs = cutEnd
 		}
 		if opts.trackEnds == nil {
 			return
@@ -253,11 +275,17 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 				return noCutKeyframeErr(opts.timeStart)
 			}
 			if !opts.keyframeAlign || cutKeyframe {
+				cutEnd = blk.Timecode
 				break
 			}
 			// keyframeAlign: the cut lands on the next cut keyframe at/after
 			// timeEnd. Blocks before it belong to the GOP that started inside
 			// the range: keep them so no frame is lost across segments.
+		}
+
+		// Past the gate, so this is the cut keyframe the segment opens on.
+		if !cutStartSet {
+			cutStart, cutStartSet = blk.Timecode, true
 		}
 
 		newID, ok := opts.remap[blk.TrackNumber]
