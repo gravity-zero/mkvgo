@@ -224,9 +224,12 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	}
 	// A file with a subtitle track added is not the file it came from: it gets
 	// its own derived identity instead of the source's (see derivedSegmentUID).
-	meta := *c
+	// And a cue that outlasts the source is still injected, so the output runs
+	// to its end and must say so, exactly as AddTrack does for a longer track -
+	// the copied Info.Duration is authoritative, so it has to be cleared.
+	meta, durationMs := metaForMergedSubs(c, subBlocks)
 	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "merge-subtitle")
-	if err := mw.WriteMetadata(&meta, tracks, c.DurationMs); err != nil {
+	if err := mw.WriteMetadata(&meta, tracks, durationMs); err != nil {
 		return err
 	}
 

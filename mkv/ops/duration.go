@@ -28,6 +28,24 @@ func metaForNewDuration(c *mkv.Container) mkv.Container {
 	return meta
 }
 
+// metaForMergedSubs sizes a subtitle merge's output: the file runs as long as
+// its source OR its last injected cue, whichever ends later. A cue that
+// outlasts the source is injected all the same, so left as copied the source's
+// authoritative Info.Duration declared a length the file plays past - AddTrack
+// already handles the same situation for a longer track.
+func metaForMergedSubs(c *mkv.Container, subBlocks []mkv.Block) (mkv.Container, int64) {
+	durationMs := c.DurationMs
+	for _, b := range subBlocks {
+		if end := b.Timecode + b.Duration; end > durationMs {
+			durationMs = end
+		}
+	}
+	if durationMs > c.DurationMs {
+		return metaForNewDuration(c), durationMs
+	}
+	return *c, durationMs
+}
+
 // syncDurationMs re-derives c.DurationMs from c.Info.Duration exactly as the
 // reader does when opening a file, and is called after an edit callback has had
 // the container.

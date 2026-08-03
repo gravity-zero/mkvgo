@@ -63,10 +63,11 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 		return err
 	}
 	// A file with a subtitle track added is not the file it came from
-	// (derivedSegmentUID).
-	meta := *c
+	// (derivedSegmentUID), and a cue outlasting the source extends the declared
+	// duration (metaForMergedSubs).
+	meta, durationMs := metaForMergedSubs(c, subBlocks)
 	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "merge-ass")
-	if err := mw.WriteMetadata(&meta, tracks, c.DurationMs); err != nil {
+	if err := mw.WriteMetadata(&meta, tracks, durationMs); err != nil {
 		return err
 	}
 	if err := streamToWriter(ctx, mw, srcPath, c.Info.TimecodeScale, fs, streamOpts{

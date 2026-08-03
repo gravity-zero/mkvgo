@@ -165,6 +165,76 @@ func TestDerivedIdentityIsDeterministic(t *testing.T) {
 	}
 }
 
+// A merged cue that outlasts the source extends the file, and the file says so:
+// the copied Info.Duration is authoritative, so left in place it declared the
+// source's length under a file that plays past it. AddTrack already restates
+// the duration for a longer track; the subtitle merges do the same now.
+func TestMergeSubtitle_CueOutlastingTheSourceExtendsTheDuration(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1)},
+		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}, 1000)
+
+	srt := filepath.Join(dir, "sub.srt")
+	// One cue running to 3.5 s in a 1 s file.
+	if err := os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:03,500\nLate\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "out.mkv")
+	if err := MergeSubtitle(ctx, src, srt, dst, "eng", "Sub"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs != 3500 {
+		t.Errorf("merged file declares %d ms, want 3500 (the cue's end)", c.DurationMs)
+	}
+
+	// A cue that fits changes nothing: the source's declaration - with its
+	// sub-millisecond precision - survives untouched.
+	srt2 := filepath.Join(dir, "sub2.srt")
+	if err := os.WriteFile(srt2, []byte("1\n00:00:00,100 --> 00:00:00,900\nEarly\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst2 := filepath.Join(dir, "out2.mkv")
+	if err := MergeSubtitle(ctx, src, srt2, dst2, "eng", "Sub"); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = reader.Open(ctx, dst2); err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs != 1000 {
+		t.Errorf("merged file declares %d ms, want the source's 1000", c.DurationMs)
+	}
+}
+
+// Same rule through the ASS path.
+func TestMergeASS_CueOutlastingTheSourceExtendsTheDuration(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1)},
+		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}, 1000)
+
+	ass := filepath.Join(dir, "sub.ass")
+	body := "[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.50,0:00:04.00,Default,,0,0,0,,Late\n"
+	if err := os.WriteFile(ass, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "out.mkv")
+	if err := MergeASS(ctx, src, ass, dst, "eng", "Sub"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := reader.Open(ctx, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs != 4000 {
+		t.Errorf("merged file declares %d ms, want 4000 (the event's end)", c.DurationMs)
+	}
+}
+
 // EditMetadata rewrites the same content: it IS the same segment, and its
 // identity - hard links included - survives untouched. A retitled part must
 // still join at the precise seam.
