@@ -97,16 +97,20 @@ func assertDerivedIdentity(t *testing.T, path string, srcUID, prev, next []byte)
 	}
 }
 
-// The WebM remux is the same rule in another container.
-func TestRemuxToWebM_GetsItsOwnIdentity(t *testing.T) {
+// The WebM remux carries NO segment identity at all: the WebM element table
+// lists SegmentUID, PrevUID and NextUID as Unsupported, so writing any of the
+// three - the source's, as this did, or a derived one - puts a non-subset
+// element in a file that claims the "webm" DocType.
+func TestRemuxToWebM_CarriesNoSegmentIdentity(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 	uid := bytes.Repeat([]byte{0xA1}, 16)
+	prev := bytes.Repeat([]byte{0xB2}, 16)
 
 	src := buildLinkedMKV(t, dir, "src.mkv",
 		[]mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "vp9", Language: "eng"}},
 		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}},
-		500, uid, nil, nil)
+		500, uid, prev, nil)
 
 	dst := filepath.Join(dir, "out.webm")
 	if err := RemuxToWebM(ctx, src, dst); err != nil {
@@ -116,8 +120,9 @@ func TestRemuxToWebM_GetsItsOwnIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Info.SegmentUID) != 16 || bytes.Equal(c.Info.SegmentUID, uid) {
-		t.Errorf("webm output SegmentUID = %x, want its own 16 bytes", c.Info.SegmentUID)
+	if len(c.Info.SegmentUID) != 0 || len(c.Info.PrevUID) != 0 || len(c.Info.NextUID) != 0 {
+		t.Errorf("webm output carries a segment identity (uid %x prev %x next %x); the WebM subset has none",
+			c.Info.SegmentUID, c.Info.PrevUID, c.Info.NextUID)
 	}
 }
 

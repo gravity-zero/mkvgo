@@ -58,12 +58,13 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	if err := mw.WriteStartWebM(mkv.WebMDocTypeVersion(c)); err != nil {
 		return err
 	}
-	// Only Info + Tracks: chapters/attachments/tags are outside the WebM subset.
-	// What was dropped makes the output a different file than its source, so it
-	// gets its own derived identity too (derivedSegmentUID).
+	// Only Info + Tracks: chapters/attachments/tags are outside the WebM subset,
+	// and so is the segment identity itself - the WebM element table lists
+	// SegmentUID, PrevUID and NextUID as Unsupported, so the output carries
+	// none rather than a derived one.
 	meta := *c
 	meta.Chapters, meta.Attachments, meta.Tags = nil, nil, nil
-	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "remux-webm")
+	meta.Info.SegmentUID, meta.Info.PrevUID, meta.Info.NextUID = nil, nil, nil
 	if err := mw.WriteMetadata(&meta, c.Tracks, c.DurationMs); err != nil {
 		return err
 	}

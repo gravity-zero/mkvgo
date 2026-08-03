@@ -1065,12 +1065,14 @@ err := matroska.AddTrack(ctx, "in.mkv", "out.mkv", matroska.TrackInput{
 ```
 
 An op whose output holds different content than its source - a track removed or
-added, a subtitle merged, a container converted to WebM - writes its **own**
-`SegmentUID`, derived deterministically from the source's and the op, instead of
-copying it: two different files must not claim to be one segment. The hard links
-(`PrevUID`/`NextUID`) are kept, since the timeline itself has not moved. Ops
-that rewrite a file without touching its content (`EditMetadata`, `Reindex`,
-`Salvage`, `RetimeTracks`) keep the identity untouched.
+added, a subtitle merged - writes its **own** `SegmentUID`, derived
+deterministically from the source's and the op, instead of copying it: two
+different files must not claim to be one segment. The hard links
+(`PrevUID`/`NextUID`) are kept, since the timeline itself has not moved.
+`RemuxToWebM` writes no segment identity at all - the WebM element table lists
+`SegmentUID`, `PrevUID` and `NextUID` as Unsupported. Ops that rewrite a file
+without touching its content (`EditMetadata`, `Reindex`, `Salvage`,
+`RetimeTracks`) keep the identity untouched.
 
 ---
 

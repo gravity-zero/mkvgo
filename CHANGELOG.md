@@ -47,13 +47,16 @@ All notable changes to mkvgo are documented here. The format is based on
   cue's end, exactly as `AddTrack` already did for a longer track; a cue that
   fits changes nothing, the source's declaration surviving untouched.
 - **The same rule holds for every op whose output differs from its source.**
-  `RemoveTrack`, `AddTrack`, `MergeSubtitle`, `MergeASS` and `RemuxToWebM` all
-  copied the source's `SegmentUID` onto a file with different content; each now
-  derives its own, deterministically, per op. The hard links (`PrevUID`/
-  `NextUID`) stay untouched - adding or removing a track does not move the
-  timeline, so a subtitled part still joins back at the precise seam. Ops that
-  repair or restate a file without touching its content (`Reindex`, `Salvage`,
-  `RetimeTracks`, `EditMetadata`) keep the identity: same content, same segment.
+  `RemoveTrack`, `AddTrack`, `MergeSubtitle` and `MergeASS` all copied the
+  source's `SegmentUID` onto a file with different content; each now derives
+  its own, deterministically, per op. The hard links (`PrevUID`/`NextUID`)
+  stay untouched - adding or removing a track does not move the timeline, so a
+  subtitled part still joins back at the precise seam. `RemuxToWebM` carries no
+  segment identity at all: the WebM element table lists `SegmentUID`, `PrevUID`
+  and `NextUID` as Unsupported, and the source's used to be copied in anyway.
+  Ops that repair or restate a file without touching its content (`Reindex`,
+  `Salvage`, `RetimeTracks`, `EditMetadata`) keep the identity: same content,
+  same segment.
 - **A file declares the length it holds.** `Join` announced the duration of its
   first source, `Split` gave every part the whole film's, and `AddTrack` ignored
   a track that outlasted the file it was added to: the duration each op computed

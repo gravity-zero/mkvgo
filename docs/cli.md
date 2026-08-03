@@ -528,10 +528,11 @@ mkvgo remove-track video.mkv -o clean.mkv -t 3,4
 ```
 
 Commands whose output differs from their source - `remove-track`, `add-track`,
-`merge-subtitle`, `merge-ass`, `to-webm` - write their own SegmentUID (derived,
-so the same command writes the same bytes twice) instead of copying the
-source's: two different files must not claim to be one segment. Hard links
-(PrevUID/NextUID) are kept - the timeline has not moved.
+`merge-subtitle`, `merge-ass` - write their own SegmentUID (derived, so the
+same command writes the same bytes twice) instead of copying the source's: two
+different files must not claim to be one segment. Hard links (PrevUID/NextUID)
+are kept - the timeline has not moved. `to-webm` writes no segment identity at
+all: the WebM subset supports none.
 
 ### add-track
 
