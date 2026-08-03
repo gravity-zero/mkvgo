@@ -4,7 +4,30 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.26.0] - 2026-08-03
+
+**Highlights**
+
+- **A split now round-trips.** Each part is a hard-linked segment - its own
+  derived `SegmentUID`, chained through `PrevUID`/`NextUID` - and `Join`
+  reads that chain: a seam between chained parts lands where the picture
+  continues instead of after the latest measured track end. A 12-part film
+  comes back 8 ms off end to end (from 909 ms), every chapter within a few
+  milliseconds of the instant it was cut on, block for block identical.
+  Appending unrelated files keeps the ordinary measured seam.
+- **An output that differs from its source owns its identity.** Removing or
+  adding a track, merging subtitles - each derives its own `SegmentUID`
+  deterministically instead of claiming to be the file it came from; the WebM
+  remux carries none at all, per the WebM subset; repairs keep the identity
+  untouched.
+- **Attachments never become resident.** A joined font set streams from the
+  source file to the output without passing through memory - bytes unchanged,
+  peak memory no longer scales with the attachment set. Matters wherever mkvgo
+  runs in a small container.
+- **Prove a split lost nothing without rebuilding the film.**
+  `compare -blocks` (and `CompareBlocksConcat`) diffs one file against the
+  concatenation of its parts, per track, byte for byte - 12 parts of a 2 GB
+  film in under nine seconds, no temporary copy.
 
 ### Fixed
 
@@ -108,7 +131,6 @@ All notable changes to mkvgo are documented here. The format is based on
   conventional `_STATISTICS_TAGS` / `_STATISTICS_WRITING_APP` markers, which were
   stripped and never restated. No date is stamped, so two identical runs still
   produce identical files.
-- `Join` decodes each source's timecodes with its own `TimecodeScale`.
 
 ### Added
 
