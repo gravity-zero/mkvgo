@@ -57,6 +57,14 @@ func ProbeCueHoles(ctx context.Context, path string, r *CueHealthReport, opts ..
 	if err != nil {
 		return fmt.Errorf("probe cue holes: %w", err)
 	}
+	return probeCueHolesFrom(ctx, path, fs, meta, r)
+}
+
+// probeCueHolesFrom is ProbeCueHoles on an already-read container (Cues).
+func probeCueHolesFrom(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container, r *CueHealthReport) error {
+	if r == nil || len(r.Holes) == 0 {
+		return nil
+	}
 	video := videoTrackSet(meta.Tracks)
 	cues := make([]mkv.CuePoint, 0, len(meta.Cues))
 	for _, c := range meta.Cues {

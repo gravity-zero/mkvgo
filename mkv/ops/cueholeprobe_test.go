@@ -146,9 +146,10 @@ func TestProbeCueHolesClassifiesTheHole(t *testing.T) {
 	}
 }
 
-// TestProbeCueHolesTailAndMixed: the tail is probed to EOF (its natural end),
-// and a file with one fixable hole and one hopeless one keeps the reindex as
-// remedy - the fixable part gets fixed - while the detail names both.
+// TestProbeCueHolesTailAndMixed: the tail is probed to EOF (its natural end)
+// on the head-only report. Diagnose, though, walks the track ends first and
+// learns the picture stops at 99 s: the 205 s "tail" was sound outlasting
+// picture, and its verdict keeps only the fixable hole, reindex as remedy.
 func TestProbeCueHolesTailAndMixed(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -185,9 +186,69 @@ func TestProbeCueHolesTailAndMixed(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := hasFinding(d, "index-sparse")
-	if f == nil || !strings.HasPrefix(f.Remedy, "mkvgo reindex (closes the hole(s) holding uncued keyframes") ||
-		!strings.Contains(f.Detail, "205s tail after 00:01:35 has no video at all for 201s of it") {
-		t.Errorf("finding = %+v, want the reindex kept for the fixable hole and the tail named as picture-less", f)
+	if f == nil || f.Remedy != "mkvgo reindex" || !strings.Contains(f.Detail, "leave 1 hole(s)") || strings.Contains(f.Detail, "tail") {
+		t.Errorf("finding = %+v, want the one fixable hole with the reindex, the tail re-judged away by the walked picture end", f)
+	}
+	if !d.CueHealth.VideoEndExact || d.CueHealth.VideoEndMs != 99_000 || d.CueHealth.TailGapMs != 4000 {
+		t.Errorf("Diagnosis.CueHealth end = %d exact=%v tail=%d, want the walked 99000, exact, a 4 s tail", d.CueHealth.VideoEndMs, d.CueHealth.VideoEndExact, d.CueHealth.TailGapMs)
+	}
+	if hasFinding(d, "audio-short") != nil || hasFinding(d, "picture-missing") != nil {
+		t.Errorf("unexpected findings: %+v", d.Findings)
+	}
+}
+
+// TestDiagnoseReJudgesTheTailWithTheWalkedEnd: a file stating no statistics,
+// with sound outlasting picture by far more than the 5% the head-only rule
+// allows. CueHealth alone, measuring to the declared duration, condemns the
+// tail; Diagnose walks the ends, learns where the picture stops, and clears it.
+func TestDiagnoseReJudgesTheTailWithTheWalkedEnd(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	// Picture to 100 s, sound to 250 s, declared 250 s: a 155 s tail (62%).
+	var sets [][]mkv.Block
+	for ts := int64(0); ts < 100_000; ts += 5000 {
+		sets = append(sets, fullCluster(ts, true))
+	}
+	for ts := int64(100_000); ts < 250_000; ts += 5000 {
+		sets = append(sets, audioOnlyCluster(ts))
+	}
+	path := buildMKVProbeFixture(t, dir, "outlast.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, sets, 250_000, func(mkv.Block) bool { return true })
+
+	r, err := CueHealth(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Healthy || r.VideoEndExact {
+		t.Fatalf("head-only: Healthy=%v exact=%v (%s), want the tail condemned against the declared end", r.Healthy, r.VideoEndExact, r.Reason)
+	}
+	d, err := Diagnose(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Healthy || len(d.Findings) != 0 {
+		t.Errorf("Diagnose: Healthy=%v findings=%+v, want healthy once the picture's end is walked", d.Healthy, d.Findings)
+	}
+	if !d.CueHealth.VideoEndExact || d.CueHealth.VideoEndMs != 99_000 {
+		t.Errorf("Diagnosis.CueHealth end = %d exact=%v, want the walked 99000", d.CueHealth.VideoEndMs, d.CueHealth.VideoEndExact)
+	}
+}
+
+// TestDiagnosePictureMissingFinding: a hole the probe finds without video gets
+// its own finding - a playback defect, located - next to the index one.
+func TestDiagnosePictureMissingFinding(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := buildMKVProbeFixture(t, dir, "gap.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, probeSets(audioOnlyCluster), 300_000, func(mkv.Block) bool { return true })
+	d, err := Diagnose(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := hasFinding(d, "picture-missing")
+	if f == nil || f.Track != 1 || !strings.Contains(f.Detail, "96s at 00:01:40") || !strings.HasPrefix(f.Remedy, "re-acquire the source") {
+		t.Errorf("finding = %+v, want picture-missing on the video track, 96 s at 100 s", f)
+	}
+	if hasFinding(d, "index-sparse") == nil {
+		t.Errorf("the index-sparse finding must stay alongside: %+v", d.Findings)
 	}
 }
 

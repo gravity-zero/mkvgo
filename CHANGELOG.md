@@ -20,6 +20,13 @@ All notable changes to mkvgo are documented here. The format is based on
   gap; a track silent through the widest window is reported as ending at or
   before it rather than guessed. `Diagnose` raises `audio-short` from it, and
   `CueHealth` measures its tail against the same trusted picture end.
+- **A missing stretch of picture is a finding of its own.** The episode whose
+  cues matched its keyframes one for one freezes for 50 and 61 s: a playback
+  defect whatever the index does. `Diagnose` now raises `picture-missing`,
+  located, from what the hole probe saw - next to the index verdict, not
+  folded into it - and, for a file that states no statistics, hands the
+  picture end its tail walk established back to the index verdict, so the
+  tail of an untagged file is no longer measured against an audio track's end.
 - **A sparse index is probed where it is sparse, and the remedy follows.**
   Three files with the same 60 s hole in their video cues want three different
   answers - keyframes nobody cued (a reindex closes it), frames without a

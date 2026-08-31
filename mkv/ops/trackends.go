@@ -55,6 +55,11 @@ func TrackEnds(ctx context.Context, path string, opts ...mkv.Options) (*TrackEnd
 	if err != nil {
 		return nil, fmt.Errorf("track ends: %w", err)
 	}
+	return trackEndsFrom(ctx, path, fs, meta)
+}
+
+// trackEndsFrom is TrackEnds on an already-read container (Tracks, Cues, Tags).
+func trackEndsFrom(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container) (*TrackEndsReport, error) {
 	r := &TrackEndsReport{DeclaredDurationMs: meta.DurationMs}
 	stats := trustedTrackStatistics(meta)
 	want := map[uint64]bool{}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -45,8 +46,9 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	fs := mkv.FSFrom(opts)
 	d := &Diagnosis{}
 
-	// Index health (head-only).
-	ch, err := CueHealth(ctx, path, opts...)
+	// One head-only read serves the index verdict, the track ends and the hole
+	// probe alike: Tracks, Cues (with their positions) and Tags.
+	meta, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues(), reader.WithTags())
 	if err != nil {
 		// A .mkv that is really an ISO base media file is a CLASSIFICATION,
 		// not an error: an error would put the file back in the failed pile
@@ -67,6 +69,24 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			return d, nil
 		}
 		return nil, fmt.Errorf("diagnose: %w", err)
+	}
+
+	// Index health (head-only), then where each track's content really ends
+	// (statistics tags, else a bounded tail walk from the index - so only when
+	// there is one). The walked picture end is handed back to the index
+	// verdict: a file that states no statistics had its tail measured against
+	// the declared duration - an audio track's end, on real files - and this is
+	// where that last guess is replaced by the picture's real end.
+	ch := cueHealthFrom(meta, 0)
+	if ch.TotalCues > 0 {
+		ends, err := trackEndsFrom(ctx, path, fs, meta)
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		d.TrackEnds = ends
+		if !ch.VideoEndExact && ends.VideoEndMs > 0 {
+			ch = cueHealthFrom(meta, ends.VideoEndMs)
+		}
 	}
 	d.CueHealth = ch
 	switch {
@@ -97,7 +117,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		// (ProbeCueHoles) says whether a reindex has anything to cue there. The
 		// head-only verdict stands wherever the probe could not conclude, and
 		// a probe that fails to run is said so rather than swallowed.
-		if err := ProbeCueHoles(ctx, path, ch, opts...); err != nil {
+		if err := probeCueHolesFrom(ctx, path, fs, meta, ch); err != nil {
 			detail += fmt.Sprintf(" (hole probe failed: %v)", err)
 		} else {
 			detail, remedy = probedSparseVerdict(ch, detail, remedy)
@@ -105,18 +125,18 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		d.Findings = append(d.Findings, Finding{
 			Kind: "index-sparse", Detail: detail, Remedy: remedy,
 		})
+		// Picture missing from the stream is a PLAYBACK defect in its own
+		// right - the picture freezes there whatever the index does - and gets
+		// its own finding, from what the probe saw (exact, located), with the
+		// track's own statistics as corroboration when they speak.
+		if f, ok := pictureMissingFinding(ch, meta); ok {
+			d.Findings = append(d.Findings, f)
+		}
 	}
 
-	// Where each track's content really ends (statistics tags, else a bounded
-	// tail walk from the index - so only when there is one): an audio track
-	// that dies before the picture leaves a structurally healthy file whose
-	// playlists promise audio that cannot exist.
-	if ch.TotalCues > 0 {
-		ends, err := TrackEnds(ctx, path, opts...)
-		if err != nil {
-			return nil, fmt.Errorf("diagnose: %w", err)
-		}
-		d.TrackEnds = ends
+	// An audio track that dies before the picture leaves a structurally
+	// healthy file whose playlists promise audio that cannot exist.
+	if ends := d.TrackEnds; ends != nil {
 		if ends.AudioShortfallMs >= audioShortFindingMs {
 			bound := ""
 			for _, e := range ends.Ends {
@@ -260,3 +280,34 @@ func segmentDeclaredEndOf(path string, fs *mkv.FS) (end int64, known bool, err e
 // milliseconds either way on any real mux, a lost stretch is seconds to
 // minutes.
 const audioShortFindingMs = 5_000
+
+// pictureMissingFinding names every stretch the hole probe found without any
+// video block: where the picture is missing from the stream, and for how long.
+func pictureMissingFinding(ch *CueHealthReport, meta *mkv.Container) (Finding, bool) {
+	var parts []string
+	for _, h := range ch.Holes {
+		if h.Content == "picture-missing" {
+			parts = append(parts, fmt.Sprintf("%.0fs at %s", secs(h.VideoAbsentMs), clockMs(h.AtMs)))
+		}
+	}
+	if len(parts) == 0 {
+		return Finding{}, false
+	}
+	detail := "the picture is missing from the stream: " + strings.Join(parts, ", ")
+	if ch.VideoShortfallMs > 0 {
+		detail += fmt.Sprintf(" (the video track states %.0fs less picture than its duration at its frame rate holds)", secs(ch.VideoShortfallMs))
+	}
+	var track uint64
+	for _, t := range meta.Tracks {
+		if t.Type == mkv.VideoTrack {
+			track = t.ID
+			break
+		}
+	}
+	return Finding{
+		Kind:   "picture-missing",
+		Detail: detail,
+		Remedy: "re-acquire the source (playback freezes there; no repair restores frames the file does not hold)",
+		Track:  track,
+	}, true
+}

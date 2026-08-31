@@ -423,8 +423,10 @@ export interface TrackEndsReport {
 export interface Finding {
   /**
    * "no-index" | "index-misskeyed" | "index-sparse" | "index-stale-tracks" |
-   * "audio-delay" | "truncated" | "damaged" | "trailing-junk" |
-   * "streamed-size" | "no-moov"
+   * "picture-missing" (a stretch without any video block: playback freezes
+   * there whatever the index does) | "audio-short" (an audio track ends
+   * before the picture) | "audio-delay" | "truncated" | "damaged" |
+   * "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container"
    */
   kind: string
   detail: string

@@ -62,7 +62,15 @@ func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealt
 	if err != nil {
 		return nil, fmt.Errorf("cue health: %w", err)
 	}
+	return cueHealthFrom(meta, 0), nil
+}
 
+// cueHealthFrom judges an already-read container (Tracks, Cues, Tags).
+// videoEndMs, when positive, is the picture's end established by other means
+// (Diagnose hands over the one TrackEnds walked) and stands in for the
+// statistics tag when the file carries none it can trust - the tail is then
+// measured exactly on a file that states nothing.
+func cueHealthFrom(meta *mkv.Container, videoEndMs int64) *CueHealthReport {
 	known := make(map[uint64]bool, len(meta.Tracks))
 	video := videoTrackSet(meta.Tracks)
 	for _, t := range meta.Tracks {
@@ -95,7 +103,7 @@ func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealt
 		r.NonVideoPct = float64(r.NonVideoCues+r.UnknownTrackCues) * 100 / float64(r.TotalCues)
 	}
 	if r.HasVideoTrack {
-		measureVideoCoverage(r, meta, video)
+		measureVideoCoverage(r, meta, video, videoEndMs)
 	}
 
 	switch {
@@ -110,7 +118,7 @@ func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealt
 	default:
 		r.Healthy = true
 	}
-	return r, nil
+	return r
 }
 
 // maxSeekGapMs is the widest hole tolerated in a file's video cue coverage. Past
@@ -132,7 +140,7 @@ const inexactTailPct = 5
 // The worst hole is the widest of: 0 to the first cue (a seek before it lands
 // on it), consecutive cues, and - when it counts - the last cue to the
 // picture's end.
-func measureVideoCoverage(r *CueHealthReport, c *mkv.Container, video map[uint64]bool) {
+func measureVideoCoverage(r *CueHealthReport, c *mkv.Container, video map[uint64]bool, knownEndMs int64) {
 	times := make([]int64, 0, len(c.Cues))
 	for _, cue := range c.Cues {
 		if video[cue.Track] {
@@ -162,6 +170,8 @@ func measureVideoCoverage(r *CueHealthReport, c *mkv.Container, video map[uint64
 	if st, ok := trustedVideoStatistics(c, video); ok {
 		r.VideoEndMs, r.VideoEndExact = st.durationMs, true
 		r.VideoShortfallMs = st.shortfallMs()
+	} else if knownEndMs > 0 {
+		r.VideoEndMs, r.VideoEndExact = knownEndMs, true
 	}
 	last := times[len(times)-1]
 	if r.VideoEndMs > last {
