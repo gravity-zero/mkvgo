@@ -49,9 +49,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Pinned to the go.mod toolchain, not stable: the golangci-lint binary is
+      # built against one Go release and panics on sources compiled by a newer
+      # one ("file requires newer Go version") the day stable moves past it.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.26.4'
           cache: false
 
       - name: golangci-lint
