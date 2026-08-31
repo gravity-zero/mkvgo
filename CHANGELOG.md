@@ -4,7 +4,24 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.27.0] - 2026-09-01
+
+**Highlights**
+
+- **A seek index is judged against the picture, not the container.** The
+  stretch from the last video cue to the declared duration is, on real files,
+  sound outlasting picture - not a hole - and files cued every 2 s were being
+  condemned for it. The tail is now measured to the video track's own end,
+  from its statistics when they describe the file, else from a bounded walk.
+- **A sparse index is probed where it is sparse.** Each hole's clusters are
+  walked header-only and the remedy follows what they hold: a reindex where
+  keyframes went uncued, the source where the picture is missing, a re-encode
+  where a stretch has no keyframe - instead of a repair loop that never
+  converges.
+- **Where each track really ends.** `TrackEnds` measures content against
+  content; `Diagnose` raises `audio-short` and `picture-missing` from it, and
+  states the file's real, declared and missing sizes on both engines.
+- **No op that merely carries an attachment loads it.**
 
 ### Added
 
