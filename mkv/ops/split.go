@@ -16,7 +16,7 @@ import (
 
 func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]string, error) {
 	fs := mkv.FSFrom(extra)
-	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs)
+	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +277,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}

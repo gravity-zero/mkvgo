@@ -15,7 +15,7 @@ const defaultSubDurationMs = 3000
 
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 // cue's start (then a default) when absent. Bitmap subtitles are not supported.
 func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	}
 
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -219,6 +219,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}

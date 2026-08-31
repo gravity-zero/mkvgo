@@ -18,7 +18,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		return nil, err
 	}
 
-	c, err := reader.OpenWithFS(ctx, path, fs)
+	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse: %w", err)
 	}

@@ -50,6 +50,18 @@ All notable changes to mkvgo are documented here. The format is based on
   stood between those keyframes. `MaxKeyframeGapMs`/`MaxKeyframeGapAtMs` put
   the hole on the clock next to the cue verdict that names it.
 
+### Changed
+
+- **No op that merely carries an attachment loads it.** Removing or adding a
+  track, editing metadata, splitting, merging, remuxing to WebM, and every
+  read-only pass (validate, compare, analyze) now open their source with the
+  attachment payloads left on disk, and the writers copy them through from
+  there - as `Join` already did. A font set travels byte for byte without a
+  byte of it resident; extracting an attachment still reads it whole. An
+  `EditMetadata` callback therefore sees `Attachment.Data` nil on the
+  attachments it inherits (`DataPath`/`DataOffset`/`Size` say where they are)
+  and writes the ones it adds from `Data` as before.
+
 ### Fixed
 
 - **A file's seek index is judged against the picture, not the container.**

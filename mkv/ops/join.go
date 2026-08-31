@@ -95,17 +95,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// The payloads are still on disk: hand the writer the way to reach them so
 	// the element is written from its original position, byte for byte, without
 	// a font ever becoming resident.
-	mw.SetAttachmentSource(func(a *mkv.Attachment) (io.Reader, error) {
-		f, err := fs.DoOpen(a.DataPath)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := f.Seek(a.DataOffset, io.SeekStart); err != nil {
-			f.Close()
-			return nil, err
-		}
-		return f, nil
-	})
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteMetadata(&meta, first.Tracks, totalDurationMs); err != nil {
 		return err
 	}

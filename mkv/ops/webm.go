@@ -25,7 +25,7 @@ import (
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
 
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ import (
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -67,6 +67,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
@@ -87,12 +88,12 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 
 func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
 
-	srcAdd, err := reader.OpenWithFS(ctx, input.SourcePath, fs)
+	srcAdd, err := reader.OpenWithFS(ctx, input.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -140,6 +141,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
@@ -158,7 +160,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 
 func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -173,6 +175,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}

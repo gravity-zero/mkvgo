@@ -1014,6 +1014,8 @@ err := matroska.EditMetadata(ctx, "input.mkv", "output.mkv",
 )
 ```
 
+The attachments the callback inherits are not loaded: `Attachment.Data` is nil, `DataPath`/`DataOffset`/`Size` say where each payload lives, and the writer copies it through from there - so a font set never becomes resident on the way to the output. The same holds for every op that merely carries attachments (`RemoveTrack`, `AddTrack`, `Split`, `Join`, `Merge`, `MergeSubtitle`, `MergeASS`); an attachment the callback ADDS is written from its `Data`, and `ExtractAttachment` reads a payload whole because that is its job.
+
 ### In-place (instant, headers only)
 
 Files written by mkvgo reserve `writer.MetadataReserve` bytes of Void after

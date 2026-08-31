@@ -12,7 +12,7 @@ import (
 
 func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) error {
 	fs := mkv.FSFrom(extra)
-	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs)
+	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	}
 
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
@@ -59,6 +59,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 
 func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}

@@ -13,11 +13,11 @@ import (
 
 func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
 	fs := mkv.FSFrom(opts)
-	a, err := reader.OpenWithFS(ctx, pathA, fs)
+	a, err := reader.OpenWithFS(ctx, pathA, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", pathA, err)
 	}
-	b, err := reader.OpenWithFS(ctx, pathB, fs)
+	b, err := reader.OpenWithFS(ctx, pathB, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", pathB, err)
 	}
@@ -83,7 +83,7 @@ func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts 
 func digestConcat(ctx context.Context, paths []string, fs *mkv.FS) ([]trackDigest, error) {
 	var accs []*digestAcc
 	for i, p := range paths {
-		c, err := reader.OpenWithFS(ctx, p, fs)
+		c, err := reader.OpenWithFS(ctx, p, fs, reader.WithoutAttachmentData())
 		if err != nil {
 			return nil, fmt.Errorf("open %s: %w", p, err)
 		}
@@ -197,7 +197,7 @@ func digestBlocksInto(ctx context.Context, path string, fs *mkv.FS, timecodeScal
 // digestTracks walks every block of the file and returns the parsed container
 // plus one digest per track, ordered like Container.Tracks.
 func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
-	c, err := reader.OpenWithFS(ctx, path, fs)
+	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, nil, err
 	}

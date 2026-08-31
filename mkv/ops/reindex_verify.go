@@ -28,7 +28,7 @@ var ErrIndexNotHeadDiscoverable = errors.New("reindex: seek index not discoverab
 // The comparison accounts for the CueTime quantisation WriteCues applies on
 // non-millisecond timecode scales, so it never flags a lossless roundtrip.
 func verifyReindexedCues(ctx context.Context, path string, fs *mkv.FS, want []mkv.CuePoint, timecodeScale int64) error {
-	c, err := reader.OpenWithFS(ctx, path, fs)
+	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return fmt.Errorf("reindex verify: reopen result: %w", err)
 	}

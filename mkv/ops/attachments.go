@@ -3,11 +3,34 @@ package ops
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
+
+// attachmentSource is the way an MKVWriter reaches an attachment payload that
+// reader.WithoutAttachmentData left on disk (Data nil, DataPath/DataOffset
+// set): opened and positioned on demand, copied straight through, never
+// resident. Every op that merely CARRIES a source's attachments to its output
+// - a split, a join, a track removed or added, subtitles merged, metadata
+// edited - opens the source that way and hands the writer this; only the ops
+// that inspect a payload (extracting one) read it whole. An attachment added
+// by the caller, Data in hand, is written from Data as before.
+func attachmentSource(fs *mkv.FS) func(*mkv.Attachment) (io.Reader, error) {
+	return func(a *mkv.Attachment) (io.Reader, error) {
+		f, err := fs.DoOpen(a.DataPath)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := f.Seek(a.DataOffset, io.SeekStart); err != nil {
+			f.Close()
+			return nil, err
+		}
+		return f, nil
+	}
+}
 
 // AddAttachment rewrites srcPath to dstPath with att appended to the
 // attachments. A zero att.ID is assigned the next free ID; att.Size defaults
@@ -44,7 +67,7 @@ func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts
 	}
 
 	fs := mkv.FSFrom(opts)
-	probe, err := reader.OpenWithFS(ctx, srcPath, fs)
+	probe, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}

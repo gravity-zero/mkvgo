@@ -345,7 +345,7 @@ func (a *trackAcc) addToWindow(tsMs, size int64) int64 {
 func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeReport, error) {
 	fs := mkv.FSFrom(opts)
 
-	c, err := reader.OpenWithFS(ctx, path, fs)
+	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse: %w", err)
 	}

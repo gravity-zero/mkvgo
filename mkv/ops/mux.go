@@ -50,6 +50,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	}
 
 	mw := writer.NewMKVWriter(out)
+	mw.SetAttachmentSource(attachmentSource(fs))
 	if err := mw.WriteStart(); err != nil {
 		return err
 	}
@@ -149,7 +150,7 @@ func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([
 	nextID := uint64(1)
 
 	for _, inp := range inputs {
-		c, err := reader.OpenWithFS(ctx, inp.SourcePath, fs)
+		c, err := reader.OpenWithFS(ctx, inp.SourcePath, fs, reader.WithoutAttachmentData())
 		if err != nil {
 			return nil, nil, fmt.Errorf("open %s: %w", inp.SourcePath, err)
 		}
@@ -206,7 +207,7 @@ func buildMuxSources(ctx context.Context, inputs []mkv.TrackInput, trackMap map[
 	var timecodeScale, durationMs int64
 	sources := make([]mergeSource, 0, len(order))
 	for _, path := range order {
-		c, err := reader.OpenWithFS(ctx, path, fs)
+		c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 		if err != nil {
 			return nil, 0, 0, err
 		}
