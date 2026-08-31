@@ -495,7 +495,11 @@ func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageRe
 type RollbackInfo = mkv.RollbackInfo
 
 // CueHealthReport classifies a file's CuePoints by referenced track and reports
-// the video cues' coverage (MaxVideoGapMs). See ops.CueHealthReport.
+// the video cues' coverage: the worst hole and where it opens (MaxVideoGapMs/
+// MaxVideoGapAtMs), the tail measured to the picture's own end rather than the
+// declared duration (VideoEndMs/VideoEndExact/TailGapMs), and picture the
+// track's statistics say is missing from the stream (VideoShortfallMs). See
+// ops.CueHealthReport.
 type CueHealthReport = ops.CueHealthReport
 
 // CueHealth judges the seek index head-only (no cluster walk): can it seek
