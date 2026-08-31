@@ -512,6 +512,19 @@ func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthRep
 	return ops.CueHealth(ctx, path, opts...)
 }
 
+// TrackEndsReport is the result of TrackEnds. See ops.TrackEndsReport.
+type TrackEndsReport = ops.TrackEndsReport
+
+// TrackEnds reports where each track's content REALLY ends - the declared
+// duration is only the longest track's end - from the statistics DURATION tags
+// when they describe this file, else a bounded, header-only walk of the tail
+// (a cue a window before the end, widened once for a deep gap): the picture's
+// end, and how far any audio track stops before it. Diagnose draws its
+// "audio-short" finding from it. See ops.TrackEnds.
+func TrackEnds(ctx context.Context, path string, opts ...Options) (*TrackEndsReport, error) {
+	return ops.TrackEnds(ctx, path, opts...)
+}
+
 // ProbeCueHoles fills the Content of every hole CueHealth reported (the
 // report's Holes) with what the hole's own clusters hold - uncued keyframes a
 // reindex would cue, video without a keyframe, or no video at all - in one

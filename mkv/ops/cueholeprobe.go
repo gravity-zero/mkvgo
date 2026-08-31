@@ -110,6 +110,11 @@ func probeHole(f io.ReadSeeker, scale, startOff int64, video map[uint64]bool, h 
 	var br *reader.BlockReader
 	var err error
 	if startOff < 0 {
+		// NewBlockReader parses the EBML header from the current position:
+		// the file is at wherever the previous hole's walk left it.
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return
+		}
 		br, err = reader.NewBlockReader(f, scale)
 	} else {
 		br, err = reader.NewBlockReaderAt(f, scale, startOff)

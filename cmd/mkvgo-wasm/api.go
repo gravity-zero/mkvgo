@@ -1171,6 +1171,31 @@ func cueHealthJS(_ js.Value, args []js.Value) any {
 	})
 }
 
+// trackEndsJS(input, opts?) -> Promise<TrackEndsReport>: where each track's
+// content really ends - the statistics DURATION tags when they describe the
+// file (one head-only read), else a bounded header-only walk of the tail from
+// a cue a window before the end (ranged reads on a Blob, payloads skipped):
+// the picture's end and any audio track's shortfall against it.
+func trackEndsJS(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return promise(func() (any, error) { return nil, fmt.Errorf("trackEnds: missing input") })
+	}
+	input := args[0]
+	ctx, release := signalContext(optArg(args, 1))
+	return promise(func() (any, error) {
+		defer release()
+		fs, err := singleSourceFS(input)
+		if err != nil {
+			return nil, fmt.Errorf("trackEnds: %w", err)
+		}
+		report, err := ops.TrackEnds(ctx, "in", mkv.Options{FS: fs})
+		if err != nil {
+			return nil, err
+		}
+		return toJSObject(report)
+	})
+}
+
 // diagnoseJS(input, opts?) -> Promise<Diagnosis>: one-call triage with a
 // remedy per finding, routed by the input's first bytes like the CLI.
 // Matroska/WebM: seek-index health, per-track audio start delays,

@@ -339,14 +339,84 @@ export interface CueHealthReport {
   last_cue_ms: number
   /**
    * Widest hole in the VIDEO cue coverage - the worst distance a seek can land
-   * from its target. Measured between consecutive video cues, and from 0 to the
-   * first and from the last to the duration. Over 30s the index is unhealthy.
+   * from its target. Measured between consecutive video cues, from 0 to the
+   * first, and from the last to the end of the PICTURE when that tail counts
+   * (see tail_gap_ms). Over 30s the index is unhealthy. max_video_gap_at_ms is
+   * where it opens (the cue before it; 0 for a hole at the start).
    */
   max_video_gap_ms: number
+  max_video_gap_at_ms: number
+  /**
+   * What the tail is measured to: the video track's own end when the file
+   * states it (a statistics DURATION tag written by the same application as
+   * the file - video_end_exact), else the declared duration, which is the
+   * LONGEST track's end - on real files an audio track's, 30-110s past the
+   * picture, so a tail measured against it is usually sound outlasting picture.
+   */
+  video_end_ms: number
+  video_end_exact: boolean
+  /** Last video cue to video_end_ms; always reported, counts only when it is a hole. */
+  tail_gap_ms: number
+  /**
+   * Picture the video track's own statistics say is MISSING from the stream
+   * (declared frames short of the duration at the frame rate); absent when
+   * unknown or none. A hole it accounts for is not an index defect.
+   */
+  video_shortfall_ms?: number
+  /** Every hole wider than 30s in file order (tail included when it counts), capped; absent when healthy. */
+  holes?: CueHole[]
   has_video_track: boolean
   healthy: boolean
   /** Why not, with the remedy; absent when healthy. */
   reason?: string
+}
+
+/** One hole in the video cue coverage; see CueHealthReport.holes. */
+export interface CueHole {
+  /** The cue before the hole (0 for a hole at the start). */
+  at_ms: number
+  gap_ms: number
+  /**
+   * What the hole's own clusters hold, set by the bounded probe diagnose()
+   * runs (absent from cueHealth(), which stays head-only, and when the probe
+   * could not conclude): "uncued-keyframes" (a reindex closes it),
+   * "picture-missing" (a stretch wider than 30s without any video block),
+   * "no-keyframes" (frames all along, not one keyframe: only a re-encode).
+   */
+  content?: 'uncued-keyframes' | 'picture-missing' | 'no-keyframes'
+  video_blocks?: number
+  keyframes?: number
+  /** Widest stretch of the hole without a video block. */
+  video_absent_ms?: number
+}
+
+/** One track's real end; see TrackEndsReport. */
+export interface TrackEnd {
+  track: number
+  type: 'video' | 'audio' | 'subtitle' | string
+  end_ms: number
+  /**
+   * How the end is known: "statistics" (a DURATION tag that describes this
+   * file), "walk" (the last block seen in a bounded tail walk), "walk-bound"
+   * (silent through the widest window walked: ended at or before end_ms),
+   * absent when unknown.
+   */
+  source?: 'statistics' | 'walk' | 'walk-bound'
+}
+
+/**
+ * Result of trackEnds(): where each track's content REALLY ends - the declared
+ * duration is only the longest track's end - the picture's end, and how far an
+ * audio track stops before it (a structurally healthy file's hidden defect:
+ * playlists promising audio that never comes).
+ */
+export interface TrackEndsReport {
+  declared_duration_ms: number
+  ends: TrackEnd[]
+  video_end_ms?: number
+  /** A lower bound when the short track's end is only "walk-bound". */
+  audio_shortfall_ms?: number
+  short_audio_track?: number
 }
 
 /** One diagnosed defect with its remedy; see Diagnosis. */
@@ -377,6 +447,8 @@ export interface Diagnosis {
   findings: Finding[] | null
   /** Matroska only: an MP4's sample table is its index by construction. */
   cue_health?: CueHealthReport
+  /** Matroska with an index: where each track's content really ends; the "audio-short" finding is drawn from it. */
+  track_ends?: TrackEndsReport
   /** Every audio track's start delay in ns (track number -> delay), threshold or not. */
   audio_delays_ns: Record<string, number>
   /** The damage map, present only when the tolerant walk ran. */
@@ -764,6 +836,13 @@ export interface MkvGoApi {
    * indexes in milliseconds, before any upload.
    */
   cueHealth(input: Uint8Array | Blob, options?: AbortOptions): Promise<CueHealthReport>
+
+  /**
+   * Where each track's content really ends: statistics tags when they describe
+   * the file, else a bounded header-only walk of the tail (ranged reads on a
+   * Blob). The picture's end and any audio track's shortfall against it.
+   */
+  trackEnds(input: Uint8Array | Blob, options?: AbortOptions): Promise<TrackEndsReport>
 
   /**
    * One-call triage with a remedy per finding, routed by the input's first

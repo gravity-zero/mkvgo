@@ -107,6 +107,33 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		})
 	}
 
+	// Where each track's content really ends (statistics tags, else a bounded
+	// tail walk from the index - so only when there is one): an audio track
+	// that dies before the picture leaves a structurally healthy file whose
+	// playlists promise audio that cannot exist.
+	if ch.TotalCues > 0 {
+		ends, err := TrackEnds(ctx, path, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		d.TrackEnds = ends
+		if ends.AudioShortfallMs >= audioShortFindingMs {
+			bound := ""
+			for _, e := range ends.Ends {
+				if e.Track == ends.ShortAudioTrack && e.Source == "walk-bound" {
+					bound = " at least"
+				}
+			}
+			d.Findings = append(d.Findings, Finding{
+				Kind: "audio-short",
+				Detail: fmt.Sprintf("audio track %d ends%s %.0fs before the picture (at %s, the picture ends at %s)",
+					ends.ShortAudioTrack, bound, secs(ends.AudioShortfallMs), clockMs(ends.VideoEndMs-ends.AudioShortfallMs), clockMs(ends.VideoEndMs)),
+				Remedy: "re-acquire the source (the audio is missing from the file; playback pads it with silence)",
+				Track:  ends.ShortAudioTrack,
+			})
+		}
+	}
+
 	// Audio start delays (first clusters).
 	delays, err := AudioStartDelays(ctx, path, opts...)
 	if err != nil {
@@ -227,3 +254,9 @@ func segmentDeclaredEndOf(path string, fs *mkv.FS) (end int64, known bool, err e
 	}
 	return int64(n1) + h1.Size + int64(n2) + h2.Size, true, nil
 }
+
+// audioShortFindingMs is how far an audio track may end before the picture
+// without a finding: encoder priming and padding leave a few hundred
+// milliseconds either way on any real mux, a lost stretch is seconds to
+// minutes.
+const audioShortFindingMs = 5_000

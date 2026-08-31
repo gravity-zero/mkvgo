@@ -102,6 +102,42 @@ type CueHealthReport struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// TrackEnd is where one track's content actually ends - as opposed to where
+// the container says the file ends, which is the LONGEST track's end and says
+// nothing about the others.
+type TrackEnd struct {
+	Track uint64    `json:"track"`
+	Type  TrackType `json:"type"`
+	// EndMs is the end of the track's last frame. Source says how it is known:
+	//
+	//	"statistics" - the track's statistics DURATION tag, trusted only when the
+	//	               tag describes this file (same writing application and date
+	//	               as the file, not past the declared duration)
+	//	"walk"       - the last block seen in a bounded tail walk (its timecode
+	//	               plus its duration, or the track's default frame duration)
+	//	"walk-bound" - the track was silent through the widest window walked: it
+	//	               ended AT OR BEFORE EndMs, the window's start
+	//	""           - unknown (no block of the track was ever seen)
+	EndMs  int64  `json:"end_ms"`
+	Source string `json:"source,omitempty"`
+}
+
+// TrackEndsReport is the result of TrackEnds: every track's real end, and the
+// two facts a scan wants from them - where the picture ends, and whether an
+// audio track dies before it.
+type TrackEndsReport struct {
+	DeclaredDurationMs int64      `json:"declared_duration_ms"`
+	Ends               []TrackEnd `json:"ends"`
+	// VideoEndMs is the latest known video end (0 when no video track's end is
+	// known). AudioShortfallMs is how far the earliest-ending audio track stops
+	// before it, on ShortAudioTrack - a lower bound when that track's end is
+	// only "walk-bound". 0 when every audio track reaches the picture or nothing
+	// is known.
+	VideoEndMs       int64  `json:"video_end_ms,omitempty"`
+	AudioShortfallMs int64  `json:"audio_shortfall_ms,omitempty"`
+	ShortAudioTrack  uint64 `json:"short_audio_track,omitempty"`
+}
+
 // CueHole is one hole in a file's video cue coverage: GapMs of picture no cue
 // lands in, opening at AtMs (the cue before it; 0 for a hole at the start).
 type CueHole struct {
@@ -153,6 +189,10 @@ type Diagnosis struct {
 	// CueHealth is the index classification behind the index findings.
 	// Matroska only: an MP4's sample table is its index by construction.
 	CueHealth *CueHealthReport `json:"cue_health,omitempty"`
+	// TrackEnds is where each track's content really ends (present when the
+	// file has an index to start the tail walk from - see ops.TrackEnds); the
+	// "audio-short" finding is drawn from it.
+	TrackEnds *TrackEndsReport `json:"track_ends,omitempty"`
 	// AudioDelaysNs holds every audio track's start delay relative to the
 	// video, whether or not it crossed the finding threshold.
 	AudioDelaysNs map[uint64]int64 `json:"audio_delays_ns"`

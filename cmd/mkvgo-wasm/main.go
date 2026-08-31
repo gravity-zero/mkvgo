@@ -4,9 +4,9 @@
 // registers a global `MkvGo` object whose methods mirror the library: probe,
 // remuxToMP4, remuxFromMP4, remuxToWebM, remuxToHLS, openHLS, openABR,
 // openConcat, extractSubtitleVTT, analyze, playability, ladder, ingest,
-// fingerprint, mapDamage, cueHealth, diagnose, openForensic. Every method returns a Promise;
+// fingerprint, mapDamage, cueHealth, trackEnds, diagnose, openForensic. Every method returns a Promise;
 // inputs are Uint8Array (whole file in memory) or, for probe/openHLS/openABR/openConcat/
-// analyze/playability/ladder/ingest/fingerprint/mapDamage/cueHealth/diagnose, a Blob/File -
+// analyze/playability/ladder/ingest/fingerprint/mapDamage/cueHealth/trackEnds/diagnose, a Blob/File -
 // read through ranged slices, so probing a 40 GB file in the browser touches only
 // a few hundred kilobytes, and an on-demand plan (media segments and windowed
 // subtitle renditions alike) reads only the windows a player watches. analyze,
@@ -48,6 +48,7 @@ func main() {
 	api.Set("fingerprint", js.FuncOf(fingerprintJS))
 	api.Set("mapDamage", js.FuncOf(mapDamageJS))
 	api.Set("cueHealth", js.FuncOf(cueHealthJS))
+	api.Set("trackEnds", js.FuncOf(trackEndsJS))
 	api.Set("diagnose", js.FuncOf(diagnoseJS))
 	js.Global().Set("MkvGo", api)
 

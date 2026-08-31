@@ -750,6 +750,27 @@ mkvgo cue-health broken.mkv
 
 The library equivalent is `ops.CueHealth` / `matroska.CueHealth` (see library.md).
 
+
+### track-ends
+
+Where each track's content REALLY ends. The declared duration is only the longest track's end - on real files an audio track's - and says nothing about the others: an audio track that dies minutes before the picture leaves a structurally healthy file (index fine, sizes coherent) whose playlists promise audio segments that can never exist. Content is measured against content, one track against another; the declared duration is only a ceiling.
+
+```
+mkvgo track-ends <file.mkv> [-json]
+```
+
+- Two stages, cheapest first. STATISTICS: the per-track `DURATION` tag mkvmerge and mkvgo write, trusted only when it describes THIS file (same writing application and date as the file, not past the declared duration - the checks mkvmerge applies, since a tag copied through a remux certifies frames the file no longer holds); one head-only read settles every track so stamped. TAIL WALK: for the rest, from a cue 120 s before the end (900 s when a track is still unseen), the final clusters are walked header-only - payloads skipped by size, constant memory - keeping each track's last block. A track silent through the widest window ended at or before its start and is reported so ("at or before"); a file with no index is walked whole, header-only.
+- Prints where the picture ends and how far any audio track stops before it. `diagnose` runs the same pass and raises `audio-short` past 5 s.
+
+```bash
+mkvgo track-ends episode.mkv
+# episode.mkv: declared duration 00:48:52
+#   track 1 (video): ends 00:48:10 (statistics)
+#   track 2 (audio): ends 00:48:52 (statistics)
+#   track 3 (subtitle): ends 00:45:05 (statistics)
+#   picture ends 00:48:10
+```
+
 ### diagnose
 
 One-call triage: classifies a file and names the remedy for every defect, so a library scan can route each file straight to the right repair without stacking separate probes. It composes the seek-index triage (`cue-health`), the per-track audio start delays (the repack defect where audio content starts late), and a declared-size coherence check; the full tolerant walk (`salvage --dry-run`) runs ONLY when the declared Segment size and the real file size disagree - the head-visible signature of truncation or trailing junk. On a healthy file the whole call costs the head plus the first cluster(s).
@@ -759,7 +780,7 @@ mkvgo diagnose <file.mkv> [-json]
 ```
 
 - Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
-- Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `damaged` (repairable: `reindex --resync`), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass).
+- Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `audio-short` (an audio track ends more than 5 s before the picture - measured content against content by `track-ends`, a lower bound when the track was silent through the whole tail walked; re-acquire the source, playback pads it with silence), `damaged` (repairable: `reindex --resync`), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass).
 - The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), and the `damage` map when the walk ran.
 
 ```bash

@@ -99,6 +99,9 @@ func main() {
 	case "validate":
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
+	case "track-ends":
+		commands.RequireArgs(args, 1, "mkvgo track-ends <file.mkv> [-json]")
+		commands.CmdTrackEnds(args)
 	case "cue-health":
 		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json] [-probe]")
 		commands.CmdCueHealth(args)
@@ -217,6 +220,7 @@ Commands:
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)
   validate      Check MKV structure for issues
   cue-health    Head-only seek-index triage: which tracks the cues reference (spots indexes that seek wrong)
+  track-ends    Where each track's content really ends (statistics tags, else a bounded tail walk): picture end, audio shortfall
   diagnose      One-call triage with a remedy per finding (MKV/WebM or MP4: index health, audio delay, truncation)
   hash          Store per-track content hashes (self-verifying file)
   verify        Recompute content hashes; exit 1 on corruption

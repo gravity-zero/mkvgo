@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -252,68 +250,27 @@ func (st videoStatistics) shortfallMs() int64 {
 }
 
 // trustedVideoStatistics returns the statistics of the video track whose stated
-// duration is the longest, provided the tags describe THIS file. A tag survives
-// remuxes that do not rewrite it - copied verbatim by a muxer, it certifies
-// frames the file no longer holds - so, as mkvmerge does before trusting one,
-// the tag's writing application must be the file's, its writing date the
-// file's when both are stated, and its duration not past the declared one.
+// duration is the longest, provided the tags describe THIS file (see
+// trustedTrackStatistics for what that takes).
 func trustedVideoStatistics(c *mkv.Container, video map[uint64]bool) (videoStatistics, bool) {
 	var best videoStatistics
 	var found bool
+	stats := trustedTrackStatistics(c)
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
-		if !video[t.ID] {
+		st, ok := stats[t.ID]
+		if !video[t.ID] || !ok || (found && st.durationMs <= best.durationMs) {
 			continue
 		}
-		for _, tag := range c.Tags {
-			if tag.TargetID == 0 || tag.TargetID != trackUID(t) || !statisticsDescribeFile(c, tag.SimpleTags) {
-				continue
-			}
-			durMs, err := mkv.ParseClockTime(simpleTagValue(tag.SimpleTags, "DURATION"))
-			if err != nil || durMs <= 0 || (c.DurationMs > 0 && durMs > c.DurationMs+1000) {
-				continue
-			}
-			if found && durMs <= best.durationMs {
-				continue
-			}
-			st := videoStatistics{durationMs: durMs}
-			if n, err := strconv.ParseInt(strings.TrimSpace(simpleTagValue(tag.SimpleTags, "NUMBER_OF_FRAMES")), 10, 64); err == nil && n > 0 {
-				st.frames = n
-			}
-			if t.FrameRate != nil && *t.FrameRate > 0 {
-				st.fps = *t.FrameRate
-			} else if t.DefaultDurationNs > 0 {
-				st.fps = 1e9 / float64(t.DefaultDurationNs)
-			}
-			best, found = st, true
+		v := videoStatistics{durationMs: st.durationMs, frames: st.frames}
+		if t.FrameRate != nil && *t.FrameRate > 0 {
+			v.fps = *t.FrameRate
+		} else if t.DefaultDurationNs > 0 {
+			v.fps = 1e9 / float64(t.DefaultDurationNs)
 		}
+		best, found = v, true
 	}
 	return best, found
-}
-
-// statisticsDescribeFile is the freshness check on a statistics tag set: the
-// application that measured it must be the one that wrote the file, and, when
-// both state a date, the same date.
-func statisticsDescribeFile(c *mkv.Container, tags []mkv.SimpleTag) bool {
-	app := simpleTagValue(tags, "_STATISTICS_WRITING_APP")
-	if app == "" || app != c.Info.WritingApp {
-		return false
-	}
-	if date := simpleTagValue(tags, "_STATISTICS_WRITING_DATE_UTC"); date != "" && c.Info.DateUTC != nil {
-		return date == c.Info.DateUTC.UTC().Format("2006-01-02 15:04:05")
-	}
-	return true
-}
-
-// simpleTagValue returns the value of the named SimpleTag (case-insensitive), or
-// "" when absent.
-func simpleTagValue(tags []mkv.SimpleTag, name string) string {
-	for _, st := range tags {
-		if strings.EqualFold(st.Name, name) {
-			return st.Value
-		}
-	}
-	return ""
 }
 
 func secs(ms int64) float64 { return float64(ms) / 1000 }

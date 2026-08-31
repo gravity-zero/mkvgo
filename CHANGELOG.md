@@ -8,6 +8,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **Where each track's content really ends.** The declared duration is the
+  longest track's end - on real files an audio track's - and says nothing
+  about the others: an audio track that dies minutes before the picture leaves
+  a structurally healthy file whose playlists promise audio that can never
+  exist. `TrackEnds` (`track-ends`, WASM `trackEnds`) measures content against
+  content: the per-track statistics `DURATION` tag when it describes this file
+  (same writing application and date, not past the declared duration - the
+  checks mkvmerge applies before believing one), else a bounded header-only
+  walk of the tail from a cue a window before the end, widened once for a deep
+  gap; a track silent through the widest window is reported as ending at or
+  before it rather than guessed. `Diagnose` raises `audio-short` from it, and
+  `CueHealth` measures its tail against the same trusted picture end.
 - **A sparse index is probed where it is sparse, and the remedy follows.**
   Three files with the same 60 s hole in their video cues want three different
   answers - keyframes nobody cued (a reindex closes it), frames without a
