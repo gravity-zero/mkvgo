@@ -51,7 +51,15 @@ func CmdCueHealth(args []string) {
 		}
 		fmt.Println()
 		if report.VideoCues > 0 {
-			fmt.Printf("  video coverage: worst hole %s\n", FmtMs(report.MaxVideoGapMs))
+			fmt.Printf("  video coverage: worst hole %s at %s\n", FmtMs(report.MaxVideoGapMs), FmtMs(report.MaxVideoGapAtMs))
+			end := "declared end"
+			if report.VideoEndExact {
+				end = "picture ends"
+			}
+			fmt.Printf("  %s %s, %s past the last video cue\n", end, FmtMs(report.VideoEndMs), FmtMs(report.TailGapMs))
+			if report.VideoShortfallMs > 0 {
+				fmt.Printf("  picture missing from the stream: about %s (stated frames vs duration at frame rate)\n", FmtMs(report.VideoShortfallMs))
+			}
 		}
 		if report.Healthy {
 			fmt.Println("  index healthy")

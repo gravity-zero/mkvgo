@@ -86,9 +86,15 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		})
 	default:
 		// Video cues exist but leave a hole too wide to seek into. Distinct from
-		// misskeyed: the index is on the right track, just too coarse.
+		// misskeyed: the index is on the right track, just too coarse - unless
+		// the picture itself is missing where the hole is, in which case no
+		// index can close it and the remedy is the source, not a reindex.
+		remedy := "mkvgo reindex"
+		if pictureMissing(ch) {
+			remedy = "re-acquire the source (the picture is missing from the stream there; a reindex cannot restore it)"
+		}
 		d.Findings = append(d.Findings, Finding{
-			Kind: "index-sparse", Detail: ch.Reason, Remedy: "mkvgo reindex",
+			Kind: "index-sparse", Detail: ch.Reason, Remedy: remedy,
 		})
 	}
 

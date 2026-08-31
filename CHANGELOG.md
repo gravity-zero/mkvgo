@@ -4,6 +4,38 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A file's seek index is judged against the picture, not the container.**
+  The worst hole in the video cue coverage counted the stretch from the last
+  video cue to the declared duration - which is the longest track's end, on
+  real files an audio track's, 30 to 110 s past the last frame. Files cued
+  every 1 to 10 s were condemned as `index-sparse` for their end credits, sent
+  to a reindex that changed nothing, then to a re-encode: measured on a library
+  scan, four such verdicts in five. The tail is now measured to the video
+  track's own end, read from the statistics `DURATION` tag mainstream muxers
+  write per track once the tag is shown to describe this file (same writing
+  application and date, not past the declared duration - what mkvmerge checks
+  before trusting one); without it the tail counts only past what an
+  outlasting track accounts for. The same four files: one GOP past the last
+  cue, healthy. A dense index that stops while the picture goes on stays
+  sparse either way.
+- **A hole the picture itself is missing from is not an index defect.** The
+  fifth verdict was an episode whose 771 cues matched its 771 keyframes one for
+  one: its 50 to 65 s holes were frames absent from the video track, and a
+  reindex - however faithful - left them where they were. The track's own
+  statistics say so head-only (`NUMBER_OF_FRAMES` short of the duration at the
+  frame rate, 183 s on that file); when they account for the hole the reason
+  says the picture is missing there and the remedy is the source, not a
+  reindex. `CueHealthReport` gains `MaxVideoGapAtMs`, `VideoEndMs`,
+  `VideoEndExact`, `TailGapMs` and `VideoShortfallMs`; every reason names
+  where the hole is ("the video cues stop at 00:00:59, 541s before the
+  picture ends", "a 65s hole at 00:40:34"), and `cue-health` prints the
+  picture's end and the tail. `mkv.ParseClockTime` is exported for the
+  HH:MM:SS.fraction form the tag and OGM chapters share.
+
 ## [0.26.0] - 2026-08-03
 
 **Highlights**

@@ -102,6 +102,13 @@ func FormatOGMChapters(w io.Writer, chapters []Chapter) error {
 	return nil
 }
 
+// ParseClockTime parses an HH:MM:SS.fraction clock time to milliseconds - the
+// form OGM chapter files use, and the one the statistics DURATION tag that
+// mkvmerge and mkvgo write per track is spelled in ("00:48:10.680000000").
+// Fraction digits past the millisecond are dropped, not rounded. An
+// unparseable or out-of-range field is an error, never a guess.
+func ParseClockTime(s string) (int64, error) { return parseOGMTime(s) }
+
 // parseOGMTime parses HH:MM:SS.mmm (fraction optional). The fraction is
 // parsed as decimal digits, not a float, so no millisecond is lost to
 // floating-point rounding.

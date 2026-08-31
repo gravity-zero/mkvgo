@@ -56,9 +56,37 @@ type CueHealthReport struct {
 	LastCueMs  int64 `json:"last_cue_ms"`
 	// MaxVideoGapMs is the widest hole in the VIDEO cue coverage - the worst
 	// distance a seek can land from its target - measured between consecutive
-	// video cues, and from 0 to the first and from the last to the file's
-	// duration when it is known. 0 when the file has no video track.
-	MaxVideoGapMs int64 `json:"max_video_gap_ms"`
+	// video cues, from 0 to the first, and from the last to the end of the
+	// picture when that tail counts (see TailGapMs). 0 when the file has no
+	// video track. MaxVideoGapAtMs is where that hole opens: the cue before it
+	// (0 for a hole at the start).
+	MaxVideoGapMs   int64 `json:"max_video_gap_ms"`
+	MaxVideoGapAtMs int64 `json:"max_video_gap_at_ms"`
+	// VideoEndMs is what the tail is measured to. VideoEndExact says which end
+	// that is: the video track's OWN end when the file states it (a statistics
+	// DURATION tag written by the same application that wrote the file, as
+	// mkvmerge and mkvgo do), else the declared segment duration - which is the
+	// LONGEST track's end, on real files an audio track's, 30 to 110 s past the
+	// picture. Measured against that, the tail of a perfectly cued file read as
+	// a 30-110 s hole and condemned it; measured against the picture's end it
+	// is one GOP.
+	VideoEndMs    int64 `json:"video_end_ms"`
+	VideoEndExact bool  `json:"video_end_exact"`
+	// TailGapMs is the distance from the last video cue to VideoEndMs - always
+	// reported, so a consumer can tell "cues stop before the end" from "a hole
+	// in the middle". It counts toward MaxVideoGapMs when the end is exact, or,
+	// when it is only the declared duration, when it exceeds what another
+	// track outlasting the picture accounts for (5% of the duration, at least
+	// the sparse threshold) - a half-indexed file leaves far more than that.
+	TailGapMs int64 `json:"tail_gap_ms"`
+	// VideoShortfallMs is how much picture the video track's own statistics say
+	// is MISSING from the stream: the frames it declares (NUMBER_OF_FRAMES) fall
+	// short of what its duration at its frame rate holds. A hole in the cues
+	// that the shortfall accounts for is not an index defect - the frames are
+	// not there to cue, a reindex leaves the hole where it is, and only the
+	// source can supply them. 0 when the file states no such statistics or they
+	// add up.
+	VideoShortfallMs int64 `json:"video_shortfall_ms,omitempty"`
 	// HasVideoTrack tells which rule applied: a video file's index must be able
 	// to seek video; an audio-only file legitimately cues audio.
 	HasVideoTrack bool `json:"has_video_track"`

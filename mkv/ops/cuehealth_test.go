@@ -21,6 +21,14 @@ func buildMKVWithCues(t *testing.T, dir, name string, tracks []mkv.Track, sets [
 // cue coverage is judged against it, so a sparse index needs a file long enough
 // for the hole to be real.
 func buildMKVWithCuesDur(t *testing.T, dir, name string, tracks []mkv.Track, sets [][]mkv.Block, cues []mkv.CuePoint, durationMs int64) string {
+	return buildMKVWithCuesTags(t, dir, name, tracks, sets, cues, durationMs, nil)
+}
+
+// buildMKVWithCuesTags is buildMKVWithCuesDur with Tags in the head, for the
+// statistics tags CueHealth reads the picture's own end from. The fixture's
+// WritingApp is "test": a statistics set claiming that app describes the file,
+// any other is stale.
+func buildMKVWithCuesTags(t *testing.T, dir, name string, tracks []mkv.Track, sets [][]mkv.Block, cues []mkv.CuePoint, durationMs int64, tags []mkv.Tag) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	f, err := os.Create(path)
@@ -32,7 +40,7 @@ func buildMKVWithCuesDur(t *testing.T, dir, name string, tracks []mkv.Track, set
 	if err := mw.WriteStart(); err != nil {
 		t.Fatal(err)
 	}
-	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"}}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"}, Tags: tags}
 	if err := mw.WriteMetadata(c, tracks, durationMs); err != nil {
 		t.Fatal(err)
 	}
