@@ -76,6 +76,7 @@ func diagnoseScanBoxes(f mkv.ReadSeekCloser, d *mkv.Diagnosis) *topLayout {
 		return lay
 	}
 	lay.fileSize = size
+	d.FileSize = size
 	var off int64
 	hdr := make([]byte, 16)
 	for off+8 <= size {
@@ -107,6 +108,7 @@ func diagnoseScanBoxes(f mkv.ReadSeekCloser, d *mkv.Diagnosis) *topLayout {
 			return lay
 		}
 		if off+boxSize > size {
+			d.DeclaredSize, d.MissingTailBytes = off+boxSize, off+boxSize-size
 			d.Findings = append(d.Findings, mkv.Finding{
 				Kind: "truncated",
 				Detail: fmt.Sprintf("box %q at offset %d declares %d bytes but only %d remain: the source ends early",
@@ -120,6 +122,7 @@ func diagnoseScanBoxes(f mkv.ReadSeekCloser, d *mkv.Diagnosis) *topLayout {
 		}
 		off += boxSize
 	}
+	d.DeclaredSize = off
 	if off < size {
 		d.Findings = append(d.Findings, mkv.Finding{
 			Kind:   "trailing-junk",

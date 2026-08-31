@@ -94,6 +94,11 @@ func TestMP4Diagnose_TruncatedNoMoovJunk(t *testing.T) {
 	if !findKind(kinds, "truncated") || !findKind(kinds, "no-moov") {
 		t.Errorf("a mid-mdat cut must report truncated + no-moov, got %v", kinds)
 	}
+	if d, err := Diagnose(context.Background(), trunc); err != nil {
+		t.Fatal(err)
+	} else if d.FileSize != int64(len(data)/2) || d.DeclaredSize <= d.FileSize || d.MissingTailBytes != d.DeclaredSize-d.FileSize {
+		t.Errorf("sizes = file %d declared %d missing %d, want the cut box's declared end past the file", d.FileSize, d.DeclaredSize, d.MissingTailBytes)
+	}
 
 	// moov retired without a replacement -> no-moov alone.
 	noMoov := append([]byte(nil), data...)

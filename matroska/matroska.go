@@ -228,6 +228,37 @@ func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
 // Cluster scan); the raw Tags stay nil. No effect on MP4. See reader.WithBitrate.
 func WithBitrate() ReadOption { return reader.WithBitrate() }
 
+// WithTags keeps Container.Tags populated on the metadata-only path (normally
+// left nil): through the SeekHead entry, or the same bounded read back from EOF
+// that recovers the Cues. Head-only either way. See reader.WithTags.
+func WithTags() ReadOption { return reader.WithTags() }
+
+// WithChapters keeps Container.Chapters populated on the metadata-only path,
+// head-only. See reader.WithChapters.
+func WithChapters() ReadOption { return reader.WithChapters() }
+
+// WithAttachments keeps Container.Attachments populated on the metadata-only
+// path, head-only; the payloads are read whole unless WithoutAttachmentData is
+// passed too. See reader.WithAttachments.
+func WithAttachments() ReadOption { return reader.WithAttachments() }
+
+// WithoutAttachmentData leaves attachment payloads on disk: Data stays nil while
+// Size, DataPath and DataOffset say where each one lives - what every op that
+// merely carries attachments uses, so a font set never becomes resident. See
+// reader.WithoutAttachmentData.
+func WithoutAttachmentData() ReadOption { return reader.WithoutAttachmentData() }
+
+// WithCues keeps the raw CuePoints (time, track, cluster position) on the
+// metadata-only path, head-only: what a cue-driven reader needs to seek straight
+// to the cluster holding a time. See reader.WithCues.
+func WithCues() ReadOption { return reader.WithCues() }
+
+// WithoutTailScan turns off the bounded read back from EOF, so the metadata
+// path resolves only what the head gives it - for a caller that must PROVE an
+// element is head-discoverable rather than merely obtain it. See
+// reader.WithoutTailScan.
+func WithoutTailScan() ReadOption { return reader.WithoutTailScan() }
+
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }

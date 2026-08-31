@@ -183,6 +183,13 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		return nil, fmt.Errorf("diagnose: %w", err)
 	}
 	size := stat.Size()
+	d.FileSize = size
+	if known {
+		d.DeclaredSize = declaredEnd
+		if declaredEnd > size {
+			d.MissingTailBytes = declaredEnd - size
+		}
+	}
 	needWalk := false
 	switch {
 	case !known:

@@ -455,6 +455,14 @@ export interface Diagnosis {
   audio_delays_ns: Record<string, number>
   /** The damage map, present only when the tolerant walk ran. */
   damage?: SalvageReport
+  /** The file's real size, and where the container says it ends (absent when it declares none). */
+  file_size?: number
+  declared_size?: number
+  /**
+   * How much of the declared file is absent from its end - the magnitude that
+   * routes a truncated file (a 9 KB stub is invisible, 41 MB is a missing scene).
+   */
+  missing_tail_bytes?: number
 }
 
 export interface MapDamageOptions extends AbortOptions {

@@ -199,4 +199,14 @@ type Diagnosis struct {
 	// Damage is the tolerant-walk report, present only when the size check
 	// warranted the walk (Matroska only).
 	Damage *SalvageReport `json:"damage,omitempty"`
+	// FileSize is the file's real size; DeclaredSize is where the container
+	// says it ends (the Segment's declared end, or the end of the last
+	// declared box), 0 when it declares none (streamed-size). MissingTailBytes
+	// is how much of the declared file is absent from its end (DeclaredSize
+	// minus FileSize when positive) - the MAGNITUDE that routes an operator's
+	// decision on a truncated file: a 9 KB stub cut off a 900 MB episode is
+	// invisible in playback, 41 MB is a missing final scene.
+	FileSize         int64 `json:"file_size,omitempty"`
+	DeclaredSize     int64 `json:"declared_size,omitempty"`
+	MissingTailBytes int64 `json:"missing_tail_bytes,omitempty"`
 }

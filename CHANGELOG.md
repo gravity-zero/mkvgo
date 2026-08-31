@@ -52,6 +52,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **The facade reads everything head-only that the reader can.** `WithTags`,
+  `WithChapters`, `WithAttachments`, `WithoutAttachmentData`, `WithCues` and
+  `WithoutTailScan` are re-exported on `matroska`, so a caller never has to
+  reach into `mkv/reader` for a metadata read.
+- **A diagnosis states the file's sizes.** `Diagnosis.FileSize`,
+  `DeclaredSize` and `MissingTailBytes` (both engines) put a number on a
+  truncated file - the magnitude that routes the operator's decision, which
+  callers were re-parsing the container header to obtain.
 - **No op that merely carries an attachment loads it.** Removing or adding a
   track, editing metadata, splitting, merging, remuxing to WebM, and every
   read-only pass (validate, compare, analyze) now open their source with the

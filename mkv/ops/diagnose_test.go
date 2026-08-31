@@ -137,6 +137,12 @@ func TestDiagnose_Truncated(t *testing.T) {
 	if d.Damage == nil || !d.Damage.TruncatedTail {
 		t.Error("the damage map with the truncated verdict must be attached")
 	}
+	// The sizes a caller routes on, stated rather than re-parsed from the
+	// header: the declared end is the intact file's size.
+	kept, whole := int64(offsets[5]+15), int64(len(data))
+	if d.FileSize != kept || d.DeclaredSize != whole || d.MissingTailBytes != whole-kept {
+		t.Errorf("sizes = file %d declared %d missing %d, want %d / %d / %d", d.FileSize, d.DeclaredSize, d.MissingTailBytes, kept, whole, whole-kept)
+	}
 }
 
 // TestDiagnose_TrailingJunk: bytes beyond the declared Segment end are
