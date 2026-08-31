@@ -11,10 +11,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # go.mod pins `toolchain go1.26.4`, so every build uses >= 1.26.4 (an older
+        # go.mod pins `toolchain go1.27.0`, so every build uses >= 1.27.0 (an older
         # setup-go version would auto-upgrade to it). Test the pinned floor and the
         # latest stable.
-        go-version: ['1.26.4', stable]
+        go-version: ['1.27.0', stable]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -49,18 +49,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Pinned to the go.mod toolchain, not stable: the golangci-lint binary is
-      # built against one Go release and panics on sources compiled by a newer
-      # one ("file requires newer Go version") the day stable moves past it.
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: stable
           cache: false
 
+      # The linter binary is built against one Go release and panics on sources
+      # compiled by a newer one ("file requires newer Go version"): its version
+      # moves with the toolchain (v2.13.2 is built with go1.27.0).
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.12.2
+          version: v2.13.2
 
   vulncheck:
     runs-on: ubuntu-latest
