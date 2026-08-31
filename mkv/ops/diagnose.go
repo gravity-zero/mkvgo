@@ -89,12 +89,21 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		// misskeyed: the index is on the right track, just too coarse - unless
 		// the picture itself is missing where the hole is, in which case no
 		// index can close it and the remedy is the source, not a reindex.
-		remedy := "mkvgo reindex"
+		detail, remedy := ch.Reason, "mkvgo reindex"
 		if pictureMissing(ch) {
 			remedy = "re-acquire the source (the picture is missing from the stream there; a reindex cannot restore it)"
 		}
+		// Then look inside the holes: one bounded, header-only walk per hole
+		// (ProbeCueHoles) says whether a reindex has anything to cue there. The
+		// head-only verdict stands wherever the probe could not conclude, and
+		// a probe that fails to run is said so rather than swallowed.
+		if err := ProbeCueHoles(ctx, path, ch, opts...); err != nil {
+			detail += fmt.Sprintf(" (hole probe failed: %v)", err)
+		} else {
+			detail, remedy = probedSparseVerdict(ch, detail, remedy)
+		}
 		d.Findings = append(d.Findings, Finding{
-			Kind: "index-sparse", Detail: ch.Reason, Remedy: remedy,
+			Kind: "index-sparse", Detail: detail, Remedy: remedy,
 		})
 	}
 

@@ -8,6 +8,22 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **A sparse index is probed where it is sparse, and the remedy follows.**
+  Three files with the same 60 s hole in their video cues want three different
+  answers - keyframes nobody cued (a reindex closes it), frames without a
+  keyframe (only a re-encode makes the stretch seekable), a stretch with no video
+  at all (the picture is missing from the stream; nothing can cue it) - and sent to a
+  reindex regardless, the last two come back exactly as sparse: a repair loop
+  that never converges. `CueHealthReport` now lists its `Holes`, and
+  `ProbeCueHoles` walks the clusters between the two cues around each one -
+  block headers alone, payloads skipped, constant memory, nowhere else in the
+  file - and pronounces what it holds; it refuses to guess on a cue whose
+  position is not a cluster or a walk that never reached the far side.
+  `Diagnose` runs it for every `index-sparse` finding and restates detail and
+  remedy from what it found; `cue-health -probe` prints the same. Measured on
+  the episode above: three holes, 28 to 61 s without a video block in each,
+  "re-acquire the source" -
+  from the index alone, no statistics tag needed.
 - **`analyze` reports the widest keyframe gap in time, and where it opens.**
   The GOP statistics count frames between keyframes, so a stretch the frames
   are missing from is invisible to them: the episode above read "GOP max 253

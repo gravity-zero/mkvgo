@@ -8,7 +8,7 @@ import (
 	"github.com/gravity-zero/mkvgo/matroska"
 )
 
-const cueHealthUsage = "usage: mkvgo cue-health <file.mkv> [-json]"
+const cueHealthUsage = "usage: mkvgo cue-health <file.mkv> [-json] [-probe]"
 
 // CmdCueHealth classifies the seek index head-only and judges whether it can
 // actually seek video: it spots the dormant defect where a video file's index
@@ -20,12 +20,14 @@ const cueHealthUsage = "usage: mkvgo cue-health <file.mkv> [-json]"
 //
 // Exit contract: 0 healthy, 1 unhealthy (scriptable, like validate).
 func CmdCueHealth(args []string) {
-	var jsonOut bool
+	var jsonOut, probe bool
 	var rest []string
 	for _, a := range args {
 		switch a {
 		case "-json", "--json":
 			jsonOut = true
+		case "-probe", "--probe":
+			probe = true
 		default:
 			rejectFlagArg(a)
 			rest = append(rest, a)
@@ -38,6 +40,13 @@ func CmdCueHealth(args []string) {
 	report, err := matroska.CueHealth(context.Background(), rest[0])
 	if err != nil {
 		Fatal(err.Error())
+	}
+	// -probe: look inside each hole (bounded, header-only) so the printout
+	// says what a reindex would find there - the same pass diagnose runs.
+	if probe {
+		if err := matroska.ProbeCueHoles(context.Background(), rest[0], report); err != nil {
+			Fatal(err.Error())
+		}
 	}
 
 	if jsonOut || JsonOutput {
@@ -59,6 +68,22 @@ func CmdCueHealth(args []string) {
 			fmt.Printf("  %s %s, %s past the last video cue\n", end, FmtMs(report.VideoEndMs), FmtMs(report.TailGapMs))
 			if report.VideoShortfallMs > 0 {
 				fmt.Printf("  picture missing from the stream: about %s (stated frames vs duration at frame rate)\n", FmtMs(report.VideoShortfallMs))
+			}
+			for _, h := range report.Holes {
+				line := fmt.Sprintf("  hole: %s at %s", FmtMs(h.GapMs), FmtMs(h.AtMs))
+				switch h.Content {
+				case "uncued-keyframes":
+					line += " - holds uncued keyframes (a reindex closes it)"
+				case "no-keyframes":
+					line += fmt.Sprintf(" - %d video frame(s), no keyframe, none for %s of it (only a re-encode makes it seekable)", h.VideoBlocks, FmtMs(h.VideoAbsentMs))
+				case "picture-missing":
+					line += fmt.Sprintf(" - no video at all for %s of it (the picture is missing from the stream)", FmtMs(h.VideoAbsentMs))
+				default:
+					if probe {
+						line += " - not probed (stale cue position or truncated walk)"
+					}
+				}
+				fmt.Println(line)
 			}
 		}
 		if report.Healthy {

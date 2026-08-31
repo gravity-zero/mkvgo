@@ -147,9 +147,16 @@ func measureVideoCoverage(r *CueHealthReport, c *mkv.Container, video map[uint64
 	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 
 	r.MaxVideoGapMs, r.MaxVideoGapAtMs = times[0], 0
+	if times[0] > maxSeekGapMs {
+		r.Holes = append(r.Holes, mkv.CueHole{AtMs: 0, GapMs: times[0]})
+	}
 	for i := 1; i < len(times); i++ {
-		if gap := times[i] - times[i-1]; gap > r.MaxVideoGapMs {
+		gap := times[i] - times[i-1]
+		if gap > r.MaxVideoGapMs {
 			r.MaxVideoGapMs, r.MaxVideoGapAtMs = gap, times[i-1]
+		}
+		if gap > maxSeekGapMs && len(r.Holes) < maxReportedHoles {
+			r.Holes = append(r.Holes, mkv.CueHole{AtMs: times[i-1], GapMs: gap})
 		}
 	}
 
@@ -163,10 +170,19 @@ func measureVideoCoverage(r *CueHealthReport, c *mkv.Container, video map[uint64
 		r.TailGapMs = r.VideoEndMs - last
 	}
 	tailCounts := r.VideoEndExact || r.TailGapMs > inexactTailTolerance(c.DurationMs)
+	if tailCounts && r.TailGapMs > maxSeekGapMs && len(r.Holes) < maxReportedHoles {
+		r.Holes = append(r.Holes, mkv.CueHole{AtMs: last, GapMs: r.TailGapMs})
+	}
 	if tailCounts && r.TailGapMs > r.MaxVideoGapMs {
 		r.MaxVideoGapMs, r.MaxVideoGapAtMs = r.TailGapMs, last
 	}
 }
+
+// maxReportedHoles caps CueHealthReport.Holes: enough for any real file (the
+// worst measured carried three), small enough that a pathological index cannot
+// balloon the report or the probe's work. MaxVideoGapMs still carries the
+// worst hole even when the list is full.
+const maxReportedHoles = 16
 
 // tailIsWorst reports whether the hole MaxVideoGapMs names is the tail: it
 // opens at the last cue and spans to the picture's end.

@@ -79,6 +79,13 @@ type CueHealthReport struct {
 	// track outlasting the picture accounts for (5% of the duration, at least
 	// the sparse threshold) - a half-indexed file leaves far more than that.
 	TailGapMs int64 `json:"tail_gap_ms"`
+	// Holes lists every hole in the video cue coverage wider than the seek
+	// threshold, in file order (the head from 0 when it opens past the
+	// threshold, consecutive-cue holes, and the tail when it counts - see
+	// TailGapMs), capped at a handful; MaxVideoGapMs always carries the worst
+	// whether or not it fit here. Empty for a healthy file. ProbeCueHoles
+	// fills each hole's Content in a second, bounded pass.
+	Holes []CueHole `json:"holes,omitempty"`
 	// VideoShortfallMs is how much picture the video track's own statistics say
 	// is MISSING from the stream: the frames it declares (NUMBER_OF_FRAMES) fall
 	// short of what its duration at its frame rate holds. A hole in the cues
@@ -93,6 +100,36 @@ type CueHealthReport struct {
 	// Healthy is the verdict; Reason says why not, with the remedy.
 	Healthy bool   `json:"healthy"`
 	Reason  string `json:"reason,omitempty"`
+}
+
+// CueHole is one hole in a file's video cue coverage: GapMs of picture no cue
+// lands in, opening at AtMs (the cue before it; 0 for a hole at the start).
+type CueHole struct {
+	AtMs  int64 `json:"at_ms"`
+	GapMs int64 `json:"gap_ms"`
+	// Content is what a bounded probe of the hole's own clusters found - block
+	// headers alone, payloads skipped by size - and stays "" until
+	// ProbeCueHoles runs or when the probe was inconclusive (a stale cue
+	// position, a truncated walk: the probe refuses to guess):
+	//
+	//	"uncued-keyframes" - video keyframes sit inside, uncued: a reindex closes the hole
+	//	"picture-missing"  - a stretch wider than the seek threshold holds no video block at
+	//	                     all: the picture is missing from the stream there, nothing can cue it
+	//	"no-keyframes"     - video frames all along, but not one keyframe: only a re-encode
+	//	                     can make the stretch seekable
+	//
+	// The frames of the GOP the opening cue starts are inside the hole too, so
+	// a hole is never judged on holding frames - a real episode's 61 s of
+	// missing picture held 84 of them - but on VideoAbsentMs, the widest
+	// stretch of it without any video block.
+	Content string `json:"content,omitempty"`
+	// VideoBlocks/Keyframes count what the probe saw strictly inside the hole,
+	// VideoAbsentMs is its widest stretch without a video block. An
+	// "uncued-keyframes" verdict may stop at the first keyframe found (the
+	// verdict is already decided), so they are lower bounds there.
+	VideoBlocks   int   `json:"video_blocks,omitempty"`
+	Keyframes     int   `json:"keyframes,omitempty"`
+	VideoAbsentMs int64 `json:"video_absent_ms,omitempty"`
 }
 
 // Finding is one diagnosed defect with its remedy.

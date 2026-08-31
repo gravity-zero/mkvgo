@@ -100,7 +100,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
 		commands.CmdValidate(args)
 	case "cue-health":
-		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json]")
+		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json] [-probe]")
 		commands.CmdCueHealth(args)
 	case "diagnose":
 		commands.RequireArgs(args, 1, "mkvgo diagnose <file.mkv|.mp4> [-json]")

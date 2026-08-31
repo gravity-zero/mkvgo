@@ -512,6 +512,16 @@ func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthRep
 	return ops.CueHealth(ctx, path, opts...)
 }
 
+// ProbeCueHoles fills the Content of every hole CueHealth reported (the
+// report's Holes) with what the hole's own clusters hold - uncued keyframes a
+// reindex would cue, video without a keyframe, or no video at all - in one
+// bounded, header-only walk per hole, and nowhere else in the file. A hole the
+// probe cannot conclude on keeps Content "". Diagnose runs it on its own for an
+// index-sparse finding. See ops.ProbeCueHoles.
+func ProbeCueHoles(ctx context.Context, path string, r *CueHealthReport, opts ...Options) error {
+	return ops.ProbeCueHoles(ctx, path, r, opts...)
+}
+
 // Finding is one diagnosed defect with its remedy. See ops.Finding.
 type Finding = ops.Finding
 
