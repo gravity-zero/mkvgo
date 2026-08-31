@@ -15,7 +15,7 @@ All notable changes to mkvgo are documented here. The format is based on
   exist. `TrackEnds` (`track-ends`, WASM `trackEnds`) measures content against
   content: the per-track statistics `DURATION` tag when it describes this file
   (same writing application and date, not past the declared duration - the
-  checks mkvmerge applies before believing one), else a bounded header-only
+  checks a muxer applies before believing one), else a bounded header-only
   walk of the tail from a cue a window before the end, widened once for a deep
   gap; a track silent through the widest window is reported as ending at or
   before it rather than guessed. `Diagnose` raises `audio-short` from it, and
@@ -84,7 +84,7 @@ All notable changes to mkvgo are documented here. The format is based on
   scan, four such verdicts in five. The tail is now measured to the video
   track's own end, read from the statistics `DURATION` tag mainstream muxers
   write per track once the tag is shown to describe this file (same writing
-  application and date, not past the declared duration - what mkvmerge checks
+  application and date, not past the declared duration - what a muxer checks
   before trusting one); without it the tail counts only past what an
   outlasting track accounts for. The same four files: one GOP past the last
   cue, healthy. A dense index that stops while the picture goes on stays

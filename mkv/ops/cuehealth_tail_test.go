@@ -16,7 +16,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// videoStatsTags is a statistics tag set as mkvmerge writes one, targeting track uid.
+// videoStatsTags is a statistics tag set as mainstream muxers write one, targeting track uid.
 func videoStatsTags(uid uint64, app, duration string, frames int64) []mkv.Tag {
 	st := []mkv.SimpleTag{
 		{Name: "DURATION", Value: duration},
@@ -122,7 +122,7 @@ func TestCueHealthStaleStatisticsAreNotTrusted(t *testing.T) {
 		name string
 		tags []mkv.Tag
 	}{
-		{"other writing app", videoStatsTags(1, "mkvmerge v61.0.0 ('So') 64-bit", "00:05:00.000000000", 0)},
+		{"other writing app", videoStatsTags(1, "othermux v61.0.0 64-bit", "00:05:00.000000000", 0)},
 		{"duration past the file", videoStatsTags(1, "test", "01:30:00.000000000", 0)},
 		{"unparseable duration", videoStatsTags(1, "test", "9999999999999:99:99.999999999", 0)},
 	} {

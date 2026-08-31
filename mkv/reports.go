@@ -65,7 +65,7 @@ type CueHealthReport struct {
 	// VideoEndMs is what the tail is measured to. VideoEndExact says which end
 	// that is: the video track's OWN end when the file states it (a statistics
 	// DURATION tag written by the same application that wrote the file, as
-	// mkvmerge and mkvgo do), else the declared segment duration - which is the
+	// mainstream muxers do), else the declared segment duration - which is the
 	// LONGEST track's end, on real files an audio track's, 30 to 110 s past the
 	// picture. Measured against that, the tail of a perfectly cued file read as
 	// a 30-110 s hole and condemned it; measured against the picture's end it

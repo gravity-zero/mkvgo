@@ -34,7 +34,7 @@ import (
 // end credits. The video track's own end is read from the statistics DURATION
 // tag mainstream muxers write per track, once the tag is shown to describe THIS
 // file (same writing application, same date when both are stated, not past the
-// declared duration - the checks mkvmerge itself applies before trusting one);
+// declared duration - the checks a muxer itself applies before trusting one);
 // without it, the tail counts only past what an outlasting track accounts for.
 
 // CueHealthReport classifies a file's CuePoints by referenced track. The

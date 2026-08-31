@@ -23,10 +23,10 @@ import (
 // Content is measured against content, one track against another, and the
 // declared duration is kept only as a ceiling. Two stages, cheapest first:
 //
-//  1. STATISTICS: mkvmerge and mkvgo stamp every track with a DURATION tag. A
+//  1. STATISTICS: mainstream muxers (mkvgo included) stamp every track with a DURATION tag. A
 //     tag is trusted only when it describes THIS file - written by the same
 //     application and on the same date as the file, and not past the declared
-//     duration - the checks mkvmerge applies before believing one, because a
+//     duration - the checks a muxer applies before believing one, because a
 //     tag copied through a remux certifies frames the file no longer holds.
 //     One head-only read settles every track so stamped.
 //  2. TAIL WALK: for the rest, a cue a window before the declared end is the
@@ -244,7 +244,7 @@ type trackStatistics struct {
 // trustedTrackStatistics returns, by track number, the statistics of every
 // track whose tags describe THIS file. A tag survives remuxes that do not
 // rewrite it - copied verbatim by a muxer, it certifies frames the file no
-// longer holds - so, as mkvmerge does before trusting one, the tag's writing
+// longer holds - so, as a muxer does before trusting one, the tag's writing
 // application must be the file's, its writing date the file's when both are
 // stated, and its duration not past the declared one.
 func trustedTrackStatistics(c *mkv.Container) map[uint64]trackStatistics {
