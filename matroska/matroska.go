@@ -673,6 +673,15 @@ func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, out
 	return ops.ExtractAttachment(ctx, srcPath, attachID, outPath, opts...)
 }
 
+// LoadAttachmentData fills an attachment's Data from the payload left on disk
+// (Data nil, DataPath/DataOffset/Size set - what an EditMetadata callback sees
+// on the attachments it inherits, and what OpenMeta with WithoutAttachmentData
+// returns). The one way a caller that needs the bytes gets them; forwarding an
+// attachment never requires it. See ops.LoadAttachmentData.
+func LoadAttachmentData(ctx context.Context, a *Attachment, opts ...Options) error {
+	return ops.LoadAttachmentData(ctx, a, opts...)
+}
+
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...Options) error {
 	return ops.ExtractSubtitle(ctx, srcPath, trackID, outPath, opts...)
 }

@@ -116,6 +116,25 @@ func TestAttachmentsAreCarriedWithoutBecomingResident(t *testing.T) {
 		}
 	}
 
+	// A callback that needs the bytes asks for them: the inherited attachment
+	// arrives without its Data, LoadAttachmentData fills it from disk.
+	var seen []byte
+	if err := EditMetadata(ctx, src, filepath.Join(dir, "loaded.mkv"), func(c *mkv.Container) {
+		a := &c.Attachments[0]
+		if a.Data != nil {
+			t.Errorf("callback: Data already loaded (%d bytes) - the carrying open must leave it on disk", len(a.Data))
+		}
+		if err := LoadAttachmentData(ctx, a); err != nil {
+			t.Errorf("LoadAttachmentData: %v", err)
+		}
+		seen = append([]byte(nil), a.Data...)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(seen, font) {
+		t.Errorf("LoadAttachmentData: %d bytes, want the %d-byte font", len(seen), len(font))
+	}
+
 	// Adding one: the new payload from Data, the old one streamed from disk.
 	dst := filepath.Join(dir, "added.mkv")
 	extra := []byte("second-attachment")

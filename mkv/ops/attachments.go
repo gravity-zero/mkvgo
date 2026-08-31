@@ -32,6 +32,38 @@ func attachmentSource(fs *mkv.FS) func(*mkv.Attachment) (io.Reader, error) {
 	}
 }
 
+// LoadAttachmentData fills a.Data with the payload an attachment left on disk
+// (Data nil, DataPath/DataOffset/Size set - the shape every carrying op and the
+// EditMetadata callback see), reading exactly Size bytes from DataPath. An
+// attachment already holding its Data, or one with no payload at all, is left
+// as it is. This is the one way a callback that needs the bytes - to hash or
+// inspect an inherited font - gets them; everything that merely forwards an
+// attachment never has to.
+func LoadAttachmentData(ctx context.Context, a *mkv.Attachment, opts ...mkv.Options) error {
+	if a.Data != nil || a.DataPath == "" || a.Size <= 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fs := mkv.FSFrom(opts)
+	src, err := attachmentSource(fs)(a)
+	if err != nil {
+		return fmt.Errorf("attachment %q: %w", a.Name, err)
+	}
+	defer func() {
+		if c, ok := src.(io.Closer); ok {
+			c.Close()
+		}
+	}()
+	data := make([]byte, a.Size)
+	if _, err := io.ReadFull(src, data); err != nil {
+		return fmt.Errorf("attachment %q: %w", a.Name, err)
+	}
+	a.Data = data
+	return nil
+}
+
 // AddAttachment rewrites srcPath to dstPath with att appended to the
 // attachments. A zero att.ID is assigned the next free ID; att.Size defaults
 // to len(att.Data).

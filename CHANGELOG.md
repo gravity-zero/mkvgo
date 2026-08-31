@@ -68,7 +68,10 @@ All notable changes to mkvgo are documented here. The format is based on
   byte of it resident; extracting an attachment still reads it whole. An
   `EditMetadata` callback therefore sees `Attachment.Data` nil on the
   attachments it inherits (`DataPath`/`DataOffset`/`Size` say where they are)
-  and writes the ones it adds from `Data` as before.
+  and writes the ones it adds from `Data` as before. **Behaviour change,
+  same signatures**: a callback that read `Data` on an inherited attachment
+  now finds it nil - call `LoadAttachmentData(ctx, &att)` (new, facade and
+  `ops`) to fill it from disk; nothing in mkvgo's own callers did.
 
 ### Fixed
 
