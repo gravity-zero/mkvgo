@@ -85,6 +85,14 @@ type TrackStats struct {
 	MaxGopFrames       int     `json:"max_gop_frames,omitempty"`
 	AvgGopFrames       float64 `json:"avg_gop_frames,omitempty"`
 	KeyframeEveryMsAvg int64   `json:"keyframe_every_ms_avg,omitempty"`
+	// MaxKeyframeGapMs is the widest TIME span between consecutive video
+	// keyframes, and MaxKeyframeGapAtMs the keyframe it opens at. The
+	// frame-count GOP above cannot see a stretch the frames are missing from -
+	// measured on a real episode, 61 s without a video packet read as "GOP max
+	// 253" because only 253 frames stood between those keyframes - so a
+	// seek-sized hole is only visible in time. Zero for non-video tracks.
+	MaxKeyframeGapMs   int64 `json:"max_keyframe_gap_ms,omitempty"`
+	MaxKeyframeGapAtMs int64 `json:"max_keyframe_gap_at_ms,omitempty"`
 	// Reordered is a decode-free HEURISTIC (video only): a presentation
 	// timecode (Block.Timecode) that goes backwards in decode order (the
 	// order Next delivers blocks) is consistent with B-frame reordering, but
@@ -175,6 +183,8 @@ type trackAcc struct {
 	haveKf     bool
 	kfGapSum   int64
 	kfGapCount int64
+	kfGapMax   int64
+	kfGapMaxAt int64
 
 	lastTimecode   int64
 	haveTimecode   bool
@@ -420,8 +430,15 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 				acc.haveGOP = true
 				acc.framesInGOP = 0
 				if acc.haveKf {
-					acc.kfGapSum += blk.Timecode - acc.lastKfTC
+					gap := blk.Timecode - acc.lastKfTC
+					acc.kfGapSum += gap
 					acc.kfGapCount++
+					// Keyframes present in order even under B-frame reordering
+					// (nothing crosses a keyframe), so a positive delta is a
+					// real span; a negative one is a broken stream, not a gap.
+					if gap > acc.kfGapMax {
+						acc.kfGapMax, acc.kfGapMaxAt = gap, acc.lastKfTC
+					}
 				}
 				acc.lastKfTC = blk.Timecode
 				acc.haveKf = true
@@ -456,6 +473,7 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 			}
 			if acc.kfGapCount > 0 {
 				ts.KeyframeEveryMsAvg = acc.kfGapSum / acc.kfGapCount
+				ts.MaxKeyframeGapMs, ts.MaxKeyframeGapAtMs = acc.kfGapMax, acc.kfGapMaxAt
 			}
 			ts.Reordered = acc.reordered
 

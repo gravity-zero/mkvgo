@@ -6,6 +6,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`analyze` reports the widest keyframe gap in time, and where it opens.**
+  The GOP statistics count frames between keyframes, so a stretch the frames
+  are missing from is invisible to them: the episode above read "GOP max 253
+  frames, keyframe every ~4.6 s" across a 61 s hole, because only 253 frames
+  stood between those keyframes. `MaxKeyframeGapMs`/`MaxKeyframeGapAtMs` put
+  the hole on the clock next to the cue verdict that names it.
+
 ### Fixed
 
 - **A file's seek index is judged against the picture, not the container.**

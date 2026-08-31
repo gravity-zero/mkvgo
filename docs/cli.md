@@ -174,7 +174,7 @@ mkvgo analyze video.mkv
 #
 # Track 1 (video, h264): 20736 frames (20736 packets), 173 keyframes, 41821440 bytes
 #   avg 3877 kb/s, peak 5210 kb/s, duration 00:14:23, 24.000 fps cfr
-#   GOP: min 120, max 120, avg 120.0 frames; keyframe every ~5000ms; reordered=true
+#   GOP: min 120, max 120, avg 120.0 frames; keyframe every ~5000ms (max 5000ms at 00:31:15); reordered=true
 #
 # Track 2 (audio, aac): 40448 frames (10112 packets), 40448 keyframes, 6469120 bytes
 #   avg 60 kb/s, peak 62 kb/s, duration 00:14:23, 46.865 fps

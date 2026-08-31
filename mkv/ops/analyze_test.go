@@ -189,6 +189,9 @@ func TestAnalyze_GopStats(t *testing.T) {
 	if ts.KeyframeEveryMsAvg != 133 {
 		t.Errorf("KeyframeEveryMsAvg = %d, want 133 ((100+166)/2)", ts.KeyframeEveryMsAvg)
 	}
+	if ts.MaxKeyframeGapMs != 166 || ts.MaxKeyframeGapAtMs != 100 {
+		t.Errorf("MaxKeyframeGapMs = %d at %d, want the 166ms span opening at the keyframe at 100ms", ts.MaxKeyframeGapMs, ts.MaxKeyframeGapAtMs)
+	}
 }
 
 // --- Test 4: bitrate - exact average and the densest 1s window ---
