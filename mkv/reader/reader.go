@@ -130,6 +130,10 @@ type parser struct {
 	// loading it (reader.WithoutAttachmentData); path is the file it refers to.
 	lazyAttachments bool
 	path            string
+	// posBase is the file offset the current reader's offset 0 corresponds to.
+	// It is 0 for the file reader and non-zero only while a tail BUFFER stands
+	// in for it, so a position recorded as an offset in the file stays one.
+	posBase int64
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -530,7 +534,7 @@ func (p *parser) scanTailForCues(c *mkv.Container) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	if err := p.parseTailBuffer(c, buf[rel:]); err != nil {
+	if err := p.parseTailBuffer(c, buf[rel:], start+int64(rel)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -580,10 +584,15 @@ func isTailElement(id uint32) bool {
 // parseTailBuffer parses the post-cluster metadata from an in-memory tail slice
 // (already validated by tilesToEnd), reusing the normal element parsers via a
 // bytes.Reader so no further I/O is needed.
-func (p *parser) parseTailBuffer(c *mkv.Container, tail []byte) error {
+func (p *parser) parseTailBuffer(c *mkv.Container, tail []byte, base int64) error {
 	saved := p.r
+	savedBase := p.posBase
 	p.r = bytes.NewReader(tail)
-	defer func() { p.r = saved }()
+	// Offsets taken from here are relative to the buffer; anything recorded as
+	// a position IN THE FILE (a lazy attachment's DataOffset) must add this
+	// base back, or it names bytes that belong to some cluster instead.
+	p.posBase = base
+	defer func() { p.r, p.posBase = saved, savedBase }()
 	end := int64(len(tail))
 	for p.pos() < end {
 		eh, _, err := p.readHeader()
@@ -719,7 +728,21 @@ func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
 		}
 
 		next += int64(n)
-		if (limit >= 0 && next >= limit) || rerr != nil {
+		if limit >= 0 && next >= limit {
+			return -1, nil
+		}
+		if rerr != nil {
+			// A clean end of input is "no cluster here"; a real read failure is
+			// not, and reporting it as one lets the caller finish with a
+			// silently truncated Container and a nil error.
+			if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
+				return -1, nil
+			}
+			return -1, rerr
+		}
+		if n == 0 {
+			// A reader may legally return (0, nil); without this the scan makes
+			// no progress and never terminates when limit < 0.
 			return -1, nil
 		}
 		keep := len(clusterMagic) - 1
@@ -776,7 +799,10 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			if err != nil {
 				return err
 			}
-			if v > 0 { // keep the 1000000 default; a 0 scale would divide-by-zero downstream
+			// Keep the 1000000 default on 0 (divide-by-zero downstream) and on
+			// anything past MaxInt64, which int64() would turn negative - and a
+			// negative scale flips the overflow guards that consume it.
+			if v > 0 && v <= math.MaxInt64 {
 				c.Info.TimecodeScale = int64(v)
 			}
 		case mkv.IDDuration:
@@ -930,6 +956,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				t.Type = mkv.SubtitleTrack
 			}
 		case mkv.IDCodecID:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return t, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return t, err
@@ -949,6 +978,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			}
 			t.CodecPrivate = v
 		case mkv.IDLanguage:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return t, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return t, err
@@ -956,6 +988,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			t.Language = v
 			t.LanguagePresent = true
 		case mkv.IDLanguageBCP47:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return t, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return t, err
@@ -1532,6 +1567,9 @@ func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
 			}
 			ch.SubChapters = append(ch.SubChapters, sub)
 		case mkv.IDChapterSegmentUID:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return ch, err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return ch, err
@@ -1559,6 +1597,9 @@ func (p *parser) parseChapterDisplay(size int64, ch *mkv.Chapter) error {
 			return err
 		}
 		if eh.ID == mkv.IDChapString {
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return err
@@ -1621,12 +1662,18 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 			}
 			att.ID = v
 		case mkv.IDFileName:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return att, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return att, err
 			}
 			att.Name = v
 		case mkv.IDFileMimeType:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return att, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return att, err
@@ -1639,7 +1686,7 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 				// unbounded user data, and an op that only copies it has no
 				// reason to hold it. See reader.WithoutAttachmentData.
 				at, _ := p.r.Seek(0, io.SeekCurrent)
-				att.DataPath, att.DataOffset = p.path, at
+				att.DataPath, att.DataOffset = p.path, p.posBase+at
 				if err := p.skip(eh.Size); err != nil {
 					return att, err
 				}
@@ -1739,6 +1786,9 @@ func (p *parser) parseTargets(size int64, tag *mkv.Tag) error {
 		}
 		switch eh.ID {
 		case mkv.IDTargetType:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return err
@@ -1781,18 +1831,27 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 		}
 		switch eh.ID {
 		case mkv.IDTagName:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return st, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return st, err
 			}
 			st.Name = v
 		case mkv.IDTagString:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return st, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return st, err
 			}
 			st.Value = v
 		case mkv.IDTagLanguage:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return st, err
+			}
 			v, err := ebml.ReadString(p.r, eh.Size)
 			if err != nil {
 				return st, err
@@ -1886,6 +1945,9 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDContentCompSettings:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
 			v, err := ebml.ReadBytes(p.r, eh.Size)
 			if err != nil {
 				return err

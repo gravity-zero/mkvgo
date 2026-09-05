@@ -100,6 +100,9 @@ func WriteElementHeader(w io.Writer, id uint32, size int64) (int, error) {
 
 // WriteUint writes an unsigned integer in big-endian using n bytes.
 func WriteUint(w io.Writer, val uint64, n int) (int, error) {
+	if n < 1 || n > 8 {
+		return 0, fmt.Errorf("ebml: cannot encode a uint in %d bytes", n)
+	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], val)
 	return w.Write(buf[8-n:])

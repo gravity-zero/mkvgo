@@ -3,6 +3,7 @@ package reader
 import (
 	"encoding/binary"
 	"io"
+	"math"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -136,7 +137,11 @@ func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale in
 				return 0, false
 			}
 			if haveTS && key && (videoTrack == 0 || track == videoTrack) {
-				return scaleTimeMs(clusterTS+int64(rel), scale), true
+				ms, ok := scaleTimeMs(clusterTS+int64(rel), scale)
+				if !ok {
+					continue
+				}
+				return ms, true
 			}
 		case mkv.IDBlockGroup:
 			blocks++
@@ -145,7 +150,11 @@ func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale in
 				return 0, false
 			}
 			if haveTS && key && (videoTrack == 0 || track == videoTrack) {
-				return scaleTimeMs(clusterTS+int64(rel), scale), true
+				ms, ok := scaleTimeMs(clusterTS+int64(rel), scale)
+				if !ok {
+					continue
+				}
+				return ms, true
 			}
 		default:
 			if ch.Size < 0 {
@@ -238,10 +247,17 @@ func videoTrackID(c *mkv.Container) uint64 {
 
 // scaleTimeMs converts a timecode (in TimecodeScale units) to ms, clamping a
 // rare negative result (a small negative block relative timecode at time 0) to 0.
-func scaleTimeMs(v, scale int64) int64 {
+// scaleTimeMs converts a raw timecode to milliseconds, reporting false when the
+// multiplication would wrap. Without the guard a wrap lands in the negative
+// clamp below and comes back as a plausible-looking 0, putting a keyframe that
+// does not exist at the head of the index. Mirrors safeTimecodeMs.
+func scaleTimeMs(v, scale int64) (int64, bool) {
+	if scale != 0 && (v > math.MaxInt64/scale || v < math.MinInt64/scale) {
+		return 0, false
+	}
 	ms := v * scale / 1_000_000
 	if ms < 0 {
-		return 0
+		return 0, true
 	}
-	return ms
+	return ms, true
 }

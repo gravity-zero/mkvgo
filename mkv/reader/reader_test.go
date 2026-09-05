@@ -1529,3 +1529,45 @@ func TestMetadataBudgetRejectsHugeAttachment(t *testing.T) {
 		t.Fatalf("expected budget error, got: %v", err)
 	}
 }
+
+// The budget must cover the STRING metadata too, not only the binary payloads.
+// SimpleTag nests and repeats without limit, so an uncharged TagString would let
+// a file carry unbounded text into the Container while maxMetadataBytes never
+// fires - the very thing the budget exists to stop.
+func TestMetadataBudgetRejectsHugeStrings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file []byte
+	}{
+		{"TagString", func() []byte {
+			var el bytes.Buffer
+			ebml.WriteElementHeader(&el, mkv.IDTagString, 2<<30)
+			return wrapEl(mkv.IDTags, wrapEl(mkv.IDTag, wrapEl(mkv.IDSimpleTag, el.Bytes())))
+		}()},
+		{"FileName", func() []byte {
+			var el bytes.Buffer
+			ebml.WriteElementHeader(&el, mkv.IDFileName, 2<<30)
+			return wrapEl(mkv.IDAttachments, wrapEl(mkv.IDAttachedFile, el.Bytes()))
+		}()},
+		{"CodecID", func() []byte {
+			var el bytes.Buffer
+			ebml.WriteElementHeader(&el, mkv.IDCodecID, 2<<30)
+			return wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, el.Bytes()))
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writeEBMLHeader(&buf)
+			writeSegmentStart(&buf, int64(len(tc.file)))
+			buf.Write(tc.file)
+
+			_, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "huge-string.mkv")
+			if err == nil {
+				t.Fatal("expected a metadata-budget error")
+			}
+			if !strings.Contains(err.Error(), "budget") {
+				t.Fatalf("expected a budget error, got: %v", err)
+			}
+		})
+	}
+}

@@ -60,6 +60,10 @@ func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
 	var inCluster, haveTS bool
 	clusterEnd := int64(-1)
 
+	// Labelled: the default case below sits inside a switch, where a bare
+	// break would leave the switch and let the walk carry on from a position
+	// it never reached - a silently wrong index, since this pass returns none.
+walk:
 	for inCluster || segEnd < 0 || p.pos() < segEnd {
 		if inCluster && clusterEnd >= 0 && p.pos() >= clusterEnd {
 			inCluster, haveTS, clusterEnd = false, false, -1
@@ -119,7 +123,9 @@ func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
 				continue
 			}
 			if haveTS && key && (videoTrack == 0 || track == videoTrack) {
-				times = append(times, scaleTimeMs(clusterTS+int64(rel), scale))
+				if ms, ok := scaleTimeMs(clusterTS+int64(rel), scale); ok {
+					times = append(times, ms)
+				}
 			}
 		case mkv.IDBlockGroup:
 			rel, track, key, ok := p.blockGroupKeyframe(h.Size)
@@ -130,14 +136,16 @@ func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
 				continue
 			}
 			if haveTS && key && (videoTrack == 0 || track == videoTrack) {
-				times = append(times, scaleTimeMs(clusterTS+int64(rel), scale))
+				if ms, ok := scaleTimeMs(clusterTS+int64(rel), scale); ok {
+					times = append(times, ms)
+				}
 			}
 		default:
 			if h.Size < 0 {
-				break
+				break walk
 			}
 			if err := p.skip(h.Size); err != nil {
-				break
+				break walk
 			}
 		}
 	}

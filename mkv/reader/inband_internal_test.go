@@ -221,7 +221,7 @@ func TestParseTailBufferAllElements(t *testing.T) {
 	}
 	p := &parser{metaBudget: maxMetadataBytes}
 	c := &mkv.Container{}
-	if err := p.parseTailBuffer(c, tail); err != nil {
+	if err := p.parseTailBuffer(c, tail, 0); err != nil {
 		t.Fatalf("parseTailBuffer: %v", err)
 	}
 	if len(c.Cues) != 1 || len(c.Tags) != 1 {
