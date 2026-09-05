@@ -4,6 +4,131 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] - 2026-09-05
+
+### Added
+
+- **A seek index for subtitle tracks.** Matroska's `Cues` index the video
+  track, so reaching one subtitle track's blocks means visiting every block
+  header in the file - ~12 M of them on a 15.8 GB 2160p source, for a few KiB
+  of cues. An MP4 pays none of this because its sample table already records
+  where every sample of every track is; `SubtitleIndex` is that table, for
+  Matroska. `BuildSubtitleIndex` walks the source once (headers only, no
+  payload of any track is read) and records the position of every block of the
+  named subtitle tracks, or of all of them; `MarshalBinary`/`UnmarshalBinary`
+  encode it as delta varints; `ExtractSubtitleWebVTTFrom` serves a track by
+  seeking to those positions. Measured on that source, cold cache, local SSD:
+  build 15.2 s and 152 KiB for all eight subtitle tracks (46 KiB for the four
+  text ones), then 19 ms for an 82-block track and 310 ms for a 1348-block one,
+  against 14.5-14.9 s for the walking extractor - byte-identical output. The
+  build is the same single pass a direct extraction makes, so it pays for
+  itself from the second extraction of a file onwards.
+
+  mkvgo builds, encodes and decodes an index and never stores one: where the
+  bytes live and when they are discarded is the caller's, and
+  `MarshalBinary`/`UnmarshalBinary` is the whole interface. That is not a trust
+  boundary, though - an index carries a fingerprint of its source (size,
+  Segment UID, timecode scale), checked before anything is read, and every
+  block read back must carry the track number and timecode the index recorded.
+  A mismatch returns `ErrIndexStale` before a single cue is written rather than
+  following a stale offset to whatever now sits there; a track missing from a
+  partial index returns `ErrTrackNotIndexed`. CLI: `mkvgo subtitle-index`, and
+  `mkvgo extract-subtitle -index`.
+- **`reader.BlockReader.SeekTo`** re-seats an existing reader at a recorded
+  `BlockPos`, keeping its window and its `KeepTracks`/header-only settings -
+  what lets a walk over many recorded positions allocate one 256 KiB window
+  instead of one per position.
+
+### Fixed
+
+- **The metadata budget covers the strings too.** Twelve `ReadString`/
+  `ReadBytes` sites in the seekable parser - `TagName`/`TagString`/
+  `TagLanguage`, `FileName`/`FileMimeType`, `CodecID`/`Language`, chapter
+  strings, compression settings - never charged `maxMetadataBytes`, so a file
+  with many large ones pulled unbounded text into the Container while the
+  budget whose doc promises to cap exactly that never fired. `SimpleTag` nests
+  and repeats without limit, which made it the widest of them. The streaming
+  parser already charged all of them; the seekable one now does too.
+- **A resync no longer turns a read failure into "no cluster here".** The
+  cluster scan collapsed a genuine I/O error into a clean not-found, so a
+  transient fault mid-file let `Read` return a silently truncated Container
+  with a nil error - against `ResyncToCluster`'s own documented contract. It
+  also spun forever on a reader legally returning `(0, nil)` with no scan limit.
+- **A `break` that left the switch instead of the walk.** The keyframe index
+  builder meant to stop on an unknown-size element or a failed skip; both
+  `break`s exited their `switch`, so the walk carried on from a position it had
+  never reached and returned a wrong index - with no error, since that pass
+  returns none.
+- **An opportunistic read no longer kills the walk it rides on.** A
+  `TrackNumber`/`DefaultDuration` wider than eight bytes is a structural
+  anomaly, which `scanTracksDurations` documents as "skip the rest"; it was
+  propagating out of `Next` and ending the caller's whole block walk.
+- **CLI flags report a missing value instead of panicking.** The bounds check
+  guarding `-flag <value>` existed on five commands and had never been ported
+  to the other five: `edit`, `extract-subtitle`, `merge`, `mux` and `split`
+  panicked with a stack trace when a flag came last.
+- Smaller hardening: `TimecodeScale` above `MaxInt64` no longer becomes a
+  negative scale that inverts the overflow guards consuming it;
+  `ebml.WriteUint` rejects an out-of-range width instead of panicking on a
+  slice bound; the sampled-keyframe time conversion reports an overflow rather
+  than clamping the wrap to a plausible `0`; the buffered reader restores the
+  source position when a skip runs past the end, instead of leaving it at EOF
+  with the invariant broken; `BlockReader.SeekTo` keeps a segment end that
+  still bounds the new position; and `mp4`'s moov reads allocate as bytes
+  arrive (a declared size is only as trustworthy as the reported file size,
+  which over `httpfs` is a remote server's Content-Length).
+- **A lazy attachment recorded where it was NOT.** When a file's Cues and
+  Attachments tile to EOF and no SeekHead points at them, the metadata read
+  parses them from an in-memory tail buffer - and `WithoutAttachmentData`
+  recorded each payload's offset as a position in that buffer while naming the
+  real file as its path. `LoadAttachmentData` then copied whatever lived at
+  that offset, typically cluster bytes, as if it were the attachment. The
+  parser now carries the buffer's absolute base, so a recorded position is a
+  position in the file.
+- **A block declaring an unknown size is refused before the track filter, not
+  after.** The filter discards "declared size minus what it consumed", and a
+  negative count is a no-op, so a filtered block of unknown size left the walk
+  sitting inside the payload and reading it as element headers - handing back
+  blocks that exist nowhere in the file, with no error. The unfiltered path
+  caught it four lines later; the filtered one did not.
+- **A corrupt in-place journal could ask for 137 GB.** The trailer's zone count
+  is a 32-bit field and sized the zone slice before any of it was validated;
+  the CRC gate does not help, since a crafted trailer carries its own matching
+  CRC. The count is now bounded by the bytes the payload actually holds.
+- **`ReadMeta`/`OpenMeta` ignored `WithoutAttachmentData`**, loading every
+  payload into memory and leaving `DataPath` empty - the opposite of the
+  documented contract, and the font-set memory cost the option exists to avoid.
+- **`EditInPlace` reported success when its Close failed.** The metadata region
+  is overwritten from its first byte, so a Close that fails to flush leaves the
+  file's head half-rewritten - and the call returned nil. Its `Sync` stays
+  best-effort by design: the function documents that it is not crash-safe and
+  points at `EditMetadata` for atomicity, so a write barrier is not part of its
+  contract. This is about the write being seen, not about surviving a crash.
+- **`Demux` reported success when its outputs failed to close.** On an FS that
+  finalises the write on Close (S3, network), N output files could fail to
+  commit and the call still returned nil.
+- **A laced subtitle block is served correctly from a `SubtitleIndex`.** Every
+  frame of a lace reports the same block position, so the index recorded one
+  entry per frame and serving replayed the first frame N times - silently,
+  since the recorded timecode matched too. The index now stores one entry per
+  block with its frame count. `SubtitleIndex` also bounds its declared track
+  count before sizing a map, rejects a track list naming non-subtitle tracks,
+  and reports a genuine I/O error as itself rather than as `ErrIndexStale`.
+- **Extracting one subtitle track no longer carries every other track's
+  payload through the reader.** `ExtractSubtitleWebVTT`, `ExtractSubtitle`
+  (SRT) and `ExtractASS` each built their `BlockReader` unfiltered and
+  discarded the unwanted blocks in Go - after their bytes had been read, copied
+  into a block and allocated. They now set `KeepTracks(trackID)`, the
+  reader-side filter written for exactly this case. Output is unchanged, byte
+  for byte, on every real source tested. On a 15.8 GB 2160p source with eight
+  subtitle tracks (12.2 M blocks, 82 in the extracted track), from local SSD,
+  cold cache: 19.3 s to 16.4 s, user CPU 7.41 s to 1.13 s, bytes read 14.70 to
+  13.46 GiB. Most of the saving is the payload copy, not the read: a block is
+  only seeked past when it is larger than the reader's read-ahead window, so on
+  a source whose payloads sit under it the walk stays a bulk sequential read
+  and the gain is CPU. Over a slow network mount the walk is I/O-bound and the
+  saving is within the mount's own noise.
+
 ## [0.27.0] - 2026-09-01
 
 **Highlights**
