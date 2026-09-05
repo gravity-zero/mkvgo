@@ -110,6 +110,9 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	if err != nil {
 		return err
 	}
+	// Filter in the reader, not after the fact - see ExtractSubtitle: the other
+	// tracks' payloads are neither delivered nor, past the read window, read.
+	br.KeepTracks(trackID)
 
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
@@ -133,9 +136,6 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 		}
 		if err != nil {
 			return err
-		}
-		if blk.TrackNumber != trackID {
-			continue
 		}
 		text := trimNulls(blk.Data)
 		if len(text) == 0 {
