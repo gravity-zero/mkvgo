@@ -696,6 +696,31 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 	return ops.ExtractSubtitleWebVTT(ctx, srcPath, trackID, w, opts...)
 }
 
+// SubtitleIndex records where every block of a subtitle track sits, so a later
+// extraction seeks straight to them instead of walking the file. See
+// ops.SubtitleIndex.
+type SubtitleIndex = ops.SubtitleIndex
+
+// Returned when an index does not describe the file it is used against, and
+// when the requested track was not indexed. See ops.ErrIndexStale.
+var (
+	ErrIndexStale      = ops.ErrIndexStale
+	ErrTrackNotIndexed = ops.ErrTrackNotIndexed
+)
+
+// BuildSubtitleIndex walks a source once and records the block positions of the
+// given subtitle tracks (all of them when none are named). mkvgo does not store
+// the result: marshal it and keep it wherever suits. See ops.BuildSubtitleIndex.
+func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, opts ...Options) (*SubtitleIndex, error) {
+	return ops.BuildSubtitleIndex(ctx, srcPath, trackIDs, opts...)
+}
+
+// ExtractSubtitleWebVTTFrom is ExtractSubtitleWebVTT served from a prebuilt
+// index. See ops.ExtractSubtitleWebVTTFrom.
+func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, w io.Writer, opts ...Options) error {
+	return ops.ExtractSubtitleWebVTTFrom(ctx, srcPath, trackID, ix, w, opts...)
+}
+
 // SubtitleFileToWebVTT converts an external subtitle sidecar (.srt/.ass/.ssa/.vtt)
 // to WebVTT, written to w. See subtitle.FileToWebVTT.
 func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {

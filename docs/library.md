@@ -942,6 +942,61 @@ err = subtitle.FileToWebVTT("subs.fr.srt", w)
 
 S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` - are exported for custom pipelines.
 
+#### Serving a Matroska subtitle track without walking the file
+
+An MP4 extraction is near-instant because the sample table already records where
+every sample of every track is. Matroska has no equivalent: its `Cues` index the
+video track, so reaching one subtitle track's blocks means walking every block
+header in the file. `SubtitleIndex` is that missing table, built once and served
+many times:
+
+```go
+// Once per file - one full pass, the same one a direct extraction makes.
+ix, err := matroska.BuildSubtitleIndex(ctx, "movie.mkv", nil) // nil = every subtitle track
+blob, err := ix.MarshalBinary()                               // store these bytes wherever
+
+// Later, per request - seeks straight to the blocks.
+var ix2 matroska.SubtitleIndex
+err = ix2.UnmarshalBinary(blob)
+err = matroska.ExtractSubtitleWebVTTFrom(ctx, "movie.mkv", trackID, &ix2, w)
+```
+
+Measured on a 15.8 GB 2160p source with eight subtitle tracks (12.2 M blocks),
+cold cache, local SSD: the build takes 15.2 s and marshals to 152 KiB for all
+eight tracks (46 KiB for the four text ones); serving then takes 19 ms for an
+82-block track and 310 ms for a 1348-block one, against 14.5-14.9 s for the
+walking extractor - byte-identical output either way.
+
+Those are SSD figures and they do not transfer: the build is one sequential pass
+over the whole source, so it tracks the storage underneath - on a spindle or a
+network mount, expect it several times slower. What does transfer is the shape.
+The build is paid once per file and reads no payload at all (headers only);
+serving afterwards reads a few blocks, so it stays in the milliseconds wherever
+the file lives. Measure the build on the hardware that will run it, not on this
+number.
+
+On a cache miss there is nothing to combine: building the index and then serving
+from it costs the same single pass an extraction costs - marginally less, since
+the build reads no payload where the walking extractor reads the requested
+track's. Build, then serve.
+
+mkvgo builds, encodes and decodes an index; it never stores one. Where the bytes
+live and when they are discarded is the caller's, so `MarshalBinary` /
+`UnmarshalBinary` (the stdlib `encoding.BinaryMarshaler` pair) is the whole
+interface - mkvgo never learns an index's origin. It is not a trust boundary
+either: an index carries a fingerprint of its source (size, Segment UID,
+timecode scale), checked before anything is read, and every block read back must
+carry the track number and timecode the index recorded. A mismatch returns
+`ErrIndexStale` before a single cue is written, rather than following a stale
+offset to whatever now sits there. A track missing from a partial index returns
+`ErrTrackNotIndexed`.
+
+Pass explicit track IDs to index a subset. Indexing the bitmap (PGS) tracks
+alongside the text ones costs the same walk and ~107 KiB more on the wire, so
+the choice is only about what the store carries; a caller that only ever serves
+WebVTT can name the text tracks and skip the rest. `Tracks()`, `Blocks(id)` and
+`SourceSize()` report what an index covers. CLI: `mkvgo subtitle-index`.
+
 ---
 
 ## Mux / Demux

@@ -159,3 +159,110 @@ func TestBlockReaderResumeRejectsZeroPos(t *testing.T) {
 		t.Error("resuming at a zero BlockPos must fail")
 	}
 }
+
+// SeekTo must land exactly where NewBlockReaderFrom lands - it is the same
+// resume, on a reader that already exists - and hopping over every recorded
+// position with ONE reader must deliver the same blocks as one reader per
+// position, which is the point: the 256 KiB window is allocated once.
+func TestBlockReaderSeekToMatchesFreshResume(t *testing.T) {
+	fixture := buildMixedBlockFixture(t, 4)
+
+	full, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []mkv.Block
+	var at []BlockPos
+	for {
+		b, err := full.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, b)
+		at = append(at, full.Pos())
+	}
+
+	// One reader, re-seated at each position in turn.
+	hop, err := NewBlockReaderFrom(bytes.NewReader(fixture), 1_000_000, at[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range want {
+		if i > 0 {
+			if err := hop.SeekTo(at[i]); err != nil {
+				t.Fatalf("SeekTo block %d: %v", i, err)
+			}
+		}
+		got, err := hop.Next()
+		if err != nil {
+			t.Fatalf("block %d after SeekTo: %v", i, err)
+		}
+		// A lace replays from its first frame, so compare against that frame.
+		start := i
+		for start > 0 && at[start-1] == at[i] {
+			start--
+		}
+		if !reflect.DeepEqual(got, want[start]) {
+			t.Errorf("block %d after SeekTo = %+v, want %+v", i, got, want[start])
+		}
+	}
+}
+
+// SeekTo must carry the reader's settings across the hop: a filtered reader
+// re-seated onto a filtered-out block skips it rather than delivering it.
+func TestBlockReaderSeekToKeepsFilter(t *testing.T) {
+	fixture := buildTwoTrackFixture(t)
+	full, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var track1 BlockPos
+	for {
+		b, err := full.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b.TrackNumber == 1 {
+			track1 = full.Pos()
+			break
+		}
+	}
+	if !track1.Valid() {
+		t.Fatal("fixture has no track-1 block")
+	}
+
+	br, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.KeepTracks(2)
+	if err := br.SeekTo(track1); err != nil {
+		t.Fatal(err)
+	}
+	b, err := br.Next()
+	if err != nil {
+		t.Fatalf("Next after SeekTo: %v", err)
+	}
+	if b.TrackNumber != 2 {
+		t.Errorf("delivered track %d - SeekTo dropped the KeepTracks filter", b.TrackNumber)
+	}
+}
+
+// A zero BlockPos names no block: SeekTo must refuse it the way
+// NewBlockReaderFrom does, rather than seeking to offset 0.
+func TestBlockReaderSeekToRejectsZeroPos(t *testing.T) {
+	fixture := buildMixedBlockFixture(t, 2)
+	br, err := NewBlockReader(bytes.NewReader(fixture), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := br.SeekTo(BlockPos{}); err == nil {
+		t.Error("SeekTo accepted a zero BlockPos")
+	}
+}

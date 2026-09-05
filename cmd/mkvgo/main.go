@@ -90,6 +90,8 @@ func main() {
 		commands.CmdExtractChapters(args)
 	case "remove-attachment":
 		commands.CmdRemoveAttachment(args)
+	case "subtitle-index":
+		commands.CmdSubtitleIndex(args)
 	case "extract-subtitle":
 		commands.CmdExtractSubtitle(args)
 	case "split":
@@ -206,7 +208,8 @@ Commands:
   extract-attachment  Extract an attachment to file
   add-attachment      Attach a file (font, cover art; MIME sniffed)
   remove-attachment   Remove an attachment by ID or name
-  extract-subtitle    Extract subtitle track as SRT/ASS/WebVTT (MKV or MP4)
+  extract-subtitle    Extract subtitle track as SRT/ASS/WebVTT (MKV or MP4); -index serves from a subtitle-index
+  subtitle-index      Build the subtitle block index of an MKV/WebM (Cues index only the video), so extraction seeks instead of walking
   to-vtt        Convert an external .srt/.ass/.vtt sidecar to WebVTT
   keyframes     List video keyframe timestamps (from Cues / sample table)
   split         Split MKV by time ranges or chapters

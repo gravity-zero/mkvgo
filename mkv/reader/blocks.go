@@ -155,12 +155,31 @@ func (c *countingReader) discard(n int64) error {
 	}
 	target := c.pos + n
 	if target > c.end {
+		// The size probe above moved src to EOF; put it back where pos says it
+		// is, or the invariant (src offset == pos + (w-r)) stays broken for
+		// every later read on this reader.
+		if _, serr := c.src.Seek(c.pos, io.SeekStart); serr != nil {
+			return serr
+		}
 		return io.ErrUnexpectedEOF
 	}
 	if _, err := c.src.Seek(target, io.SeekStart); err != nil {
 		return err
 	}
 	c.pos = target
+	c.chunk = minChunk
+	return nil
+}
+
+// reset re-seats the reader at pos, keeping the window storage. A walk that
+// hops between recorded positions would otherwise allocate a fresh 256 KiB
+// window per hop.
+func (c *countingReader) reset(pos int64) error {
+	if _, err := c.src.Seek(pos, io.SeekStart); err != nil {
+		return err
+	}
+	c.r, c.w = 0, 0
+	c.pos = pos
 	c.chunk = minChunk
 	return nil
 }
@@ -292,6 +311,40 @@ func NewBlockReaderFrom(r io.ReadSeeker, timecodeScale int64, p BlockPos) (*Bloc
 	return br, nil
 }
 
+// SeekTo re-seats an existing reader at p, the way NewBlockReaderFrom seats a
+// new one - but reusing this reader's window and its KeepTracks/header-only
+// settings. A caller holding many recorded positions in one file (a subtitle
+// block index, say) walks them with one reader instead of one per position,
+// which is what keeps the window from being reallocated per block.
+func (br *BlockReader) SeekTo(p BlockPos) error {
+	if !p.Valid() {
+		return fmt.Errorf("seek: invalid block position")
+	}
+	if br.raw == nil {
+		return fmt.Errorf("seek: reader is not seekable")
+	}
+	if err := br.r.reset(p.Off); err != nil {
+		return err
+	}
+	// Keep a segment end that still bounds this position: NewBlockReaderFrom
+	// clears it because it cannot know one, which is not this reader's case.
+	if br.segEnd >= 0 && p.Off >= br.segEnd {
+		br.segEnd = -1
+	}
+	br.inCluster = true
+	br.clusterEnd = p.ClusterEnd
+	br.clusterTS = p.ClusterTS
+	br.clusterStart = p.ClusterStart
+	br.pending = nil
+	br.peeked = nil
+	br.awaitLimit = false
+	// Pos() must not pair the PREVIOUS block's offset with this cluster's
+	// bounds: that would be a valid-looking but incoherent resume point.
+	br.blockStart = 0
+	br.clusterCount = 1
+	return nil
+}
+
 // Pos locates the block Next last returned - the resume point NewBlockReaderFrom
 // takes. The frames of a laced block share their enclosing block's position, so
 // resuming there re-delivers the whole lace.
@@ -337,11 +390,19 @@ func (br *BlockReader) ClusterOffset() int64 {
 }
 
 // KeepTracks restricts Next to blocks of the given tracks. Other tracks'
-// payloads are never delivered and, when they are large enough to seek over,
-// never read: the walk hops from header to header. When the payloads are
-// smaller than the adaptive read-ahead (frame-interleaved video is a few KiB
-// per block), the walk degrades gracefully to bulk sequential reads - the
-// same I/O as a plain full pass, never worse.
+// payloads are never delivered, and a payload past the read-ahead window is
+// seeked over rather than read.
+//
+// How much I/O that actually saves depends on the source, and on real files it
+// is usually little: a payload already sitting in the window is dropped from it
+// for free, having been read, so the effective threshold is the window (up to
+// bufSize) and not seekSkipMin. On a 2160p remux where two thirds of the bytes
+// live in blocks smaller than the window, filtering cut the bytes read by ~8%.
+// The saving that is not conditional is the work per block: no payload is
+// copied out or allocated for a filtered track, which on a file with millions
+// of blocks dominates - measured at -85% user CPU on a subtitle extraction.
+// The walk never degrades below a plain full pass: where payloads are too
+// small to seek past it stays a bulk sequential read.
 func (br *BlockReader) KeepTracks(tracks ...uint64) {
 	br.keep = make(map[uint64]bool, len(tracks))
 	for _, id := range tracks {
@@ -429,12 +490,21 @@ func (br *BlockReader) scanTracksDurations(size int64) error {
 			}
 			switch eh.ID {
 			case mkv.IDTrackNumber:
+				if eh.Size > 8 {
+					// Wider than a uint can be: structural, so skip the rest
+					// rather than killing the caller's whole block walk over an
+					// opportunistic read.
+					return skipRest()
+				}
 				v, err := ebml.ReadUint(br.r, eh.Size)
 				if err != nil {
 					return err
 				}
 				num = v
 			case mkv.IDDefaultDuration:
+				if eh.Size > 8 {
+					return skipRest()
+				}
 				v, err := ebml.ReadUint(br.r, eh.Size)
 				if err != nil {
 					return err
@@ -669,6 +739,13 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 }
 
 func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
+	// An unknown size must be refused here, before anything else: the filter
+	// below discards "size - consumed", and a negative count is a no-op, so a
+	// filtered block of unknown size would leave the walk sitting inside the
+	// payload and parsing it as element headers.
+	if size < 0 {
+		return mkv.Block{}, fmt.Errorf("block with unknown size")
+	}
 	start := br.r.tell()
 
 	trackNum, _, err := ebml.ReadDataSize(br.r)

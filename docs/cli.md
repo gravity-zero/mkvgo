@@ -376,13 +376,47 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-t` | Track ID to extract (required) |
 | `-o` | Output file path (required) |
 | `-format` | Output format: `srt` (default), `ass`, or `vtt` |
+| `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, MKV/WebM only) |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
 mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt
 mkvgo extract-subtitle movie.mp4  -t 3 -o subs.vtt -format vtt
+mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt -index video.mkvsix
 ```
+
+### subtitle-index
+
+Record where every block of a subtitle track sits, so later extractions seek to
+them instead of walking the file. Matroska's `Cues` index the video track only,
+so without an index reaching a subtitle track means visiting every block header
+in the file - on a 15.8 GB 2160p source, ~12 M of them.
+
+The build is one full pass, the same one a direct extraction makes; it pays for
+itself from the second extraction of that file onwards, and one build covers
+every track it names.
+
+```
+mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5]
+```
+
+| Flag | Description |
+|---|---|
+| `-o` | Output index file (required) |
+| `-t` | Comma-separated track IDs to index (default: every subtitle track) |
+
+```bash
+mkvgo subtitle-index video.mkv -o video.mkvsix              # every subtitle track
+mkvgo subtitle-index video.mkv -t 4,5,6,7 -o video.mkvsix   # the text ones only
+mkvgo extract-subtitle video.mkv -t 4 -o subs.vtt -format vtt -index video.mkvsix
+```
+
+The index is a plain file mkvgo neither stores nor tracks: keeping it, keying it
+and throwing it away are the caller's. It does carry a fingerprint of the source
+(size, Segment UID, timecode scale), and every block read back is checked
+against what the index recorded, so an index used against a file it was not
+built from fails rather than emitting whatever now sits at those offsets.
 
 ### to-vtt
 

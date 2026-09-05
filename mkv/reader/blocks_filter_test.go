@@ -387,3 +387,53 @@ func TestBlockReaderStopBoundsSparseFilteredWalk(t *testing.T) {
 		t.Errorf("bounded filtered walk read %d of %d bytes - it should stop at the limit", src.n, len(fixture))
 	}
 }
+
+// A block declaring an unknown size must be refused even when the track filter
+// would drop it: the filter discards "size - consumed", a negative count is a
+// no-op, and the walk would then resume INSIDE the payload and parse it as
+// element headers - emitting fabricated blocks with no error at all.
+func TestBlockReaderKeepTracksRejectsUnknownSizeBlock(t *testing.T) {
+	var cluster bytes.Buffer
+	ebml.WriteElementHeader(&cluster, mkv.IDTimestamp, 1)
+	ebml.WriteUint(&cluster, 0, 1)
+	// Track-1 SimpleBlock with an unknown (all-ones VINT) size, followed by
+	// bytes that would parse as plausible elements if the walk fell into them.
+	cluster.Write([]byte{0xA3, 0xFF}) // SimpleBlock, unknown size
+	cluster.Write([]byte{0x81})       // its track VINT: track 1
+	// What follows is the block's PAYLOAD. It is shaped as a well-formed
+	// SimpleBlock for track 2 so that a walk which wrongly resumes here reads
+	// it as an element and hands back a block that exists nowhere in the file.
+	cluster.Write(bytes.Repeat([]byte{0xA3, 0x84, 0x82, 0x00, 0x00, 0x80}, 8))
+
+	var seg bytes.Buffer
+	ebml.WriteElementHeader(&seg, mkv.IDCluster, int64(cluster.Len()))
+	seg.Write(cluster.Bytes())
+
+	var full bytes.Buffer
+	ebml.WriteElementHeader(&full, ebml.IDEBMLHeader, 0)
+	ebml.WriteElementHeader(&full, mkv.IDSegment, int64(seg.Len()))
+	full.Write(seg.Bytes())
+
+	for _, tc := range []struct {
+		name string
+		keep bool
+	}{{"unfiltered", false}, {"filtered", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			br, err := NewBlockReader(bytes.NewReader(full.Bytes()), 1_000_000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.keep {
+				br.KeepTracks(2) // track 1 is filtered out
+			}
+			b, err := br.Next()
+			if err == nil {
+				t.Fatalf("Next() returned block %+v with no error - it was fabricated from the payload",
+					b)
+			}
+			if err == io.EOF {
+				t.Fatal("Next() = io.EOF - an unknown-size block must be reported, not skipped")
+			}
+		})
+	}
+}
