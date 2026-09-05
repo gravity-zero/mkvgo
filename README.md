@@ -153,6 +153,9 @@ copy-paste ready, CLI **and** Go side by side.
 
 ## Install
 
+Requires **Go 1.27 or newer**. Zero third-party dependencies: the module graph
+is empty, so `go get` pulls nothing but mkvgo itself.
+
 ```bash
 go install github.com/gravity-zero/mkvgo/cmd/mkvgo@latest   # CLI
 go get github.com/gravity-zero/mkvgo                        # library
