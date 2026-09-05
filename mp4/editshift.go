@@ -168,9 +168,11 @@ func readRange(f io.ReadSeeker, off, n int64) ([]byte, error) {
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, n)
-	_, err := io.ReadFull(f, buf)
-	return buf, err
+	// readExact, not make+ReadFull: n is a size the FILE declared, and the
+	// "offset + box size <= file size" guard that vetted it is only as
+	// trustworthy as the reported size - which over httpfs is a remote
+	// server's Content-Length.
+	return readExact(f, n)
 }
 
 // elstEntry is one raw edit-list entry; rate is the 16.16 media_rate verbatim.
