@@ -4,6 +4,30 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.28.1] - 2026-09-05
+
+### Changed
+
+- **The declared Go floor now matches the real one.** `go.mod` said `go 1.22`
+  while its `toolchain go1.27.0` line already required 1.27 of every consumer:
+  a build pinned to `GOTOOLCHAIN=local` on an older Go failed with a toolchain
+  message instead of a clear version requirement. The directive is now
+  `go 1.27`, which is what the CI matrix has been testing all along, and the
+  README states the requirement - it stated none.
+
+### Fixed
+
+- **`httpfs` is tested at the boundary it actually guards.** Coverage went from
+  64% to 92%, over the behaviours that matter when the server is not
+  trustworthy: a 206 carrying no usable total is refused rather than treated as
+  "size unknown"; a 416 is a clean EOF only once a size is known, and an error
+  before that; every other status is surfaced by name instead of reading empty;
+  a caller's `Authorization` header reaches the server; the window bounds each
+  ranged request and the byte accounting matches what was served; seeks stay
+  local except the one `SeekEnd` that must learn the size; every write on an
+  HTTP port is refused, not just `Create`; and `Hybrid` routes URLs over HTTP
+  while reads *and* writes of local paths reach the OS.
+
 ## [0.28.0] - 2026-09-05
 
 ### Added
