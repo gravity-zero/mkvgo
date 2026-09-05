@@ -26,7 +26,7 @@ import (
 // entries to elements outside the head, e.g. the Cues). A Tags element sitting
 // after the clusters (as Mux writes statistics tags) is folded into the head
 // metadata and its old bytes voided, so tags are not duplicated.
-func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) error {
+func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, path, fs)
 	if err != nil {
@@ -106,7 +106,11 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// The region is overwritten from its first byte, so a Close that fails to
+	// flush leaves the file's head half-rewritten. Reporting nil there would
+	// say the edit landed. This is about the write being SEEN, not about crash
+	// safety: the Sync below stays best-effort, as documented.
+	defer closeWithErr(f, &err)
 
 	if _, err := f.Seek(region.start, io.SeekStart); err != nil {
 		return err

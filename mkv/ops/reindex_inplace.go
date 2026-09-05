@@ -756,6 +756,15 @@ func parseInplaceJournalPayload(payload []byte) (*inplaceJournal, error) {
 	origSize := int64(binary.BigEndian.Uint64(payload[0:8]))
 	zoneCount := binary.BigEndian.Uint32(payload[8:12])
 	off := 12
+	// A declared count is not an authorisation to allocate: each zone costs at
+	// least its 12-byte header on the wire, so a count that cannot fit in what
+	// is left is corrupt. The CRC does not help here - a crafted trailer
+	// carries its own matching CRC - and the range checks the caller applies
+	// run only once this function has returned, i.e. after the allocation.
+	if maxZones := uint32((len(payload) - 12) / 12); zoneCount > maxZones {
+		return nil, fmt.Errorf("journal declares %d zones but only %d fit in %d bytes",
+			zoneCount, maxZones, len(payload))
+	}
 	zones := make([]inplaceZone, 0, zoneCount)
 	for i := uint32(0); i < zoneCount; i++ {
 		if off+12 > len(payload) {

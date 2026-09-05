@@ -10,7 +10,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
-func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) error {
+func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
 	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -31,8 +31,10 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) err
 		return err
 	}
 	defer func() {
+		// A custom FS (S3/network) may finalise the write on Close: dropping
+		// that error would report success over N outputs that never landed.
 		for _, cl := range closers {
-			cl.Close()
+			closeWithErr(cl, &err)
 		}
 	}()
 
