@@ -21,14 +21,23 @@ func CmdSplit(args []string) {
 		switch args[i] {
 		case "-o":
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outDir = args[i]
 		case "-chapters":
 			byChapters = true
 		case "-range":
 			i++
+			if i >= len(args) {
+				Fatal("-range needs a value")
+			}
 			ranges = ParseTimeRanges(args[i])
 		case "-every":
 			i++
+			if i >= len(args) {
+				Fatal("-every needs a value")
+			}
 			ms, err := ParseTimePoint(args[i])
 			if err != nil || ms <= 0 {
 				Fatal(fmt.Sprintf("invalid -every duration %q", args[i]))
@@ -36,6 +45,9 @@ func CmdSplit(args []string) {
 			everyMs = ms
 		case "-pattern":
 			i++
+			if i >= len(args) {
+				Fatal("-pattern needs a value")
+			}
 			pattern = args[i]
 		default:
 			rejectFlagArg(args[i])
@@ -81,6 +93,9 @@ func CmdJoin(args []string) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
 			i++
+			if i >= len(args) {
+				Fatal("-pattern needs a value")
+			}
 			outPath = args[i]
 		} else {
 			rejectFlagArg(args[i])

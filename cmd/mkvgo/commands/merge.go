@@ -18,6 +18,9 @@ func CmdMerge(args []string) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 			continue
 		}
@@ -51,15 +54,27 @@ func CmdMergeSubtitle(args []string) {
 		switch args[i] {
 		case "-o":
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		case "-format":
 			i++
+			if i >= len(args) {
+				Fatal("-format needs a value")
+			}
 			format = args[i]
 		case "-lang":
 			i++
+			if i >= len(args) {
+				Fatal("-lang needs a value")
+			}
 			lang = args[i]
 		case "-name":
 			i++
+			if i >= len(args) {
+				Fatal("-name needs a value")
+			}
 			name = args[i]
 		default:
 			rejectFlagArg(args[i])

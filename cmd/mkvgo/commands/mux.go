@@ -21,11 +21,17 @@ func CmdDemux(args []string) {
 		case "-o":
 			i++
 			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
+			if i >= len(args) {
 				Fatal("-o requires a directory")
 			}
 			outDir = args[i]
 		case "-t":
 			i++
+			if i >= len(args) {
+				Fatal("-t needs a value")
+			}
 			if i >= len(args) {
 				Fatal("-t requires track IDs (comma-separated)")
 			}
@@ -58,6 +64,9 @@ func CmdMux(args []string) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
 			i++
+			if i >= len(args) {
+				Fatal("-t needs a value")
+			}
 			if i >= len(args) {
 				Fatal("-o requires an output path")
 			}
@@ -107,9 +116,15 @@ func CmdRemoveTrack(args []string) {
 		switch args[i] {
 		case "-o":
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		case "-t":
 			i++
+			if i >= len(args) {
+				Fatal("-t needs a value")
+			}
 			trackIDs = ParseTrackIDs(args[i])
 		default:
 			rejectFlagArg(args[i])
@@ -140,12 +155,21 @@ func CmdAddTrack(args []string) {
 		switch args[i] {
 		case "-o":
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		case "-lang":
 			i++
+			if i >= len(args) {
+				Fatal("-lang needs a value")
+			}
 			input.Language = args[i]
 		case "-name":
 			i++
+			if i >= len(args) {
+				Fatal("-name needs a value")
+			}
 			input.Name = args[i]
 		default:
 			rejectFlagArg(args[i])

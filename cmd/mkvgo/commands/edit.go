@@ -76,6 +76,9 @@ JSON schema:
 	for i := 1; i < len(args); i++ {
 		if args[i] == "-o" {
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		} else {
 			rejectFlagArg(args[i])
@@ -123,6 +126,9 @@ func CmdEditTitle(args []string) {
 	for i := 1; i < len(args); i++ {
 		if args[i] == "-o" {
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		} else {
 			rejectFlagArg(args[i])
@@ -158,9 +164,15 @@ func CmdEditTrack(args []string) {
 		switch args[i] {
 		case "-o":
 			i++
+			if i >= len(args) {
+				Fatal("-o needs a value")
+			}
 			outPath = args[i]
 		case "-t":
 			i++
+			if i >= len(args) {
+				Fatal("-t needs a value")
+			}
 			id, err := strconv.ParseUint(args[i], 10, 64)
 			if err != nil {
 				Fatal(fmt.Sprintf("invalid track ID %q", args[i]))
@@ -168,9 +180,15 @@ func CmdEditTrack(args []string) {
 			trackID = id
 		case "-lang":
 			i++
+			if i >= len(args) {
+				Fatal("-lang needs a value")
+			}
 			lang = &args[i]
 		case "-name":
 			i++
+			if i >= len(args) {
+				Fatal("-name needs a value")
+			}
 			name = &args[i]
 		case "-default":
 			v := true
