@@ -20,6 +20,12 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// DefaultTimecodeScale is the Matroska default TimecodeScale: one timecode unit
+// is one millisecond (1000000 ns). A file that declares none is read with it,
+// and every writer here falls back to it. Re-exported so a caller on this
+// facade can name the value instead of spelling out the constant.
+const DefaultTimecodeScale = mkv.DefaultTimecodeScale
+
 // --- Type aliases ---
 
 type TrackType = mkv.TrackType

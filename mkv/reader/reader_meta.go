@@ -307,6 +307,9 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 	if err := p.tailElements(c, o); err != nil {
 		return err
 	}
+	// Same single conversion the full read does, at this path's own "the Cues
+	// are final" point - the tail scan above is the last thing that can add any.
+	scaleCueTimesToMs(c)
 	c.Keyframes = keyframeTimesMs(c)
 	if !o.cues {
 		c.Cues = nil

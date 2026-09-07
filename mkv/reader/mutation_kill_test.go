@@ -619,18 +619,24 @@ func TestBlockGroupDuration(t *testing.T) {
 
 // ─── keyframes.go: keyframeTimesMs ────────────────────────────────────────
 
-// TestKeyframeTimescaleDefault kills scale <= 0 → scale = 1_000_000 default.
-// With TimecodeScale=0, scale defaults to 1_000_000, so TimeMs is returned as-is.
+// TestKeyframeTimescaleDefault kills scale <= 0 → scale = DefaultTimecodeScale.
+// The conversion lives in scaleCueTimesToMs; a container that declares no scale
+// must come out with the default applied AND its cue times left alone.
 func TestKeyframeTimescaleDefault(t *testing.T) {
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{TimecodeScale: 0}, // triggers default
 		Cues: []mkv.CuePoint{{TimeMs: 1000}},
 	}
+	scaleCueTimesToMs(c)
+	if c.Info.TimecodeScale != mkv.DefaultTimecodeScale {
+		t.Errorf("TimecodeScale = %d, want %d (default applied)", c.Info.TimecodeScale, mkv.DefaultTimecodeScale)
+	}
 	kf := keyframeTimesMs(c)
 	if len(kf) != 1 {
 		t.Fatalf("kf = %v, want [1000]", kf)
 	}
-	// 1000 * 1_000_000 / 1_000_000 = 1000, not 0 (which would happen if scale stayed 0).
+	// 1 tick == 1 ms under the default: 1000 stays 1000, and must not become 0
+	// (which is what scaling by a scale left at zero would produce).
 	if kf[0] != 1000 {
 		t.Errorf("kf[0] = %d, want 1000 (scale default applied)", kf[0])
 	}
@@ -642,13 +648,20 @@ func TestKeyframeNegativeTimescaleDefault(t *testing.T) {
 		Info: mkv.SegmentInfo{TimecodeScale: -1}, // negative → default
 		Cues: []mkv.CuePoint{{TimeMs: 500}},
 	}
+	scaleCueTimesToMs(c)
+	if c.Info.TimecodeScale != mkv.DefaultTimecodeScale {
+		t.Errorf("TimecodeScale = %d, want %d (default applied)", c.Info.TimecodeScale, mkv.DefaultTimecodeScale)
+	}
 	kf := keyframeTimesMs(c)
 	if len(kf) != 1 || kf[0] != 500 {
 		t.Errorf("kf = %v, want [500] (default scale for negative TimecodeScale)", kf)
 	}
 }
 
-// TestKeyframeExactScalingArithmetic kills cue.TimeMs*scale/1_000_000 arithmetic.
+// TestKeyframeExactScalingArithmetic kills the TimeMs*scale/DefaultTimecodeScale
+// arithmetic, now that it lives in scaleCueTimesToMs rather than in the keyframe
+// derivation. It also pins that the conversion reaches CuePoint.TimeMs itself -
+// every other consumer reads that field, not the keyframe list.
 func TestKeyframeExactScalingArithmetic(t *testing.T) {
 	c := &mkv.Container{
 		Info:   mkv.SegmentInfo{TimecodeScale: 2_000_000},
@@ -658,17 +671,38 @@ func TestKeyframeExactScalingArithmetic(t *testing.T) {
 			{TimeMs: 1000, Track: 1},
 		},
 	}
+	scaleCueTimesToMs(c)
+	// 500 * 2_000_000 / 1_000_000 = 1000 ; 1000 * 2 = 2000
+	if c.Cues[0].TimeMs != 1000 || c.Cues[1].TimeMs != 2000 {
+		t.Errorf("cue times = %d, %d; want 1000, 2000", c.Cues[0].TimeMs, c.Cues[1].TimeMs)
+	}
 	kf := keyframeTimesMs(c)
 	if len(kf) != 2 {
 		t.Fatalf("kf = %v, want 2 entries", kf)
 	}
-	// 500 * 2_000_000 / 1_000_000 = 1000
-	if kf[0] != 1000 {
-		t.Errorf("kf[0] = %d, want 1000", kf[0])
+	if kf[0] != 1000 || kf[1] != 2000 {
+		t.Errorf("kf = %v, want [1000 2000]", kf)
 	}
-	// 1000 * 2_000_000 / 1_000_000 = 2000
-	if kf[1] != 2000 {
-		t.Errorf("kf[1] = %d, want 2000", kf[1])
+}
+
+// TestScaleCueTimesToMsRunsOnce pins the single-call contract: scaleCueTimesToMs
+// is not idempotent by construction (a second pass would scale again), so the
+// reader must call it exactly once per container. This test documents the hazard
+// so a future path that adds cues later does not quietly call it twice.
+func TestScaleCueTimesToMsRunsOnce(t *testing.T) {
+	c := &mkv.Container{
+		Info: mkv.SegmentInfo{TimecodeScale: 2_000_000},
+		Cues: []mkv.CuePoint{{TimeMs: 1000, Track: 1}},
+	}
+	scaleCueTimesToMs(c)
+	if c.Cues[0].TimeMs != 2000 {
+		t.Fatalf("after one call: %d, want 2000", c.Cues[0].TimeMs)
+	}
+	scaleCueTimesToMs(c)
+	if c.Cues[0].TimeMs != 4000 {
+		t.Errorf("after a second call: %d, want 4000 - if this changed, the "+
+			"function became idempotent and the single-call comments are stale",
+			c.Cues[0].TimeMs)
 	}
 }
 

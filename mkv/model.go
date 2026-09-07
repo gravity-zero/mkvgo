@@ -447,6 +447,22 @@ func (t *Track) RestoreHeader(data []byte) []byte {
 	return restored
 }
 
+// DefaultTimecodeScale is the Matroska default TimecodeScale: one timecode unit
+// is one millisecond. A file that declares no TimecodeScale is read with this
+// value, which is also what every writer here falls back to.
+const DefaultTimecodeScale = 1_000_000
+
+// CuePoint is one entry of the Cues seek index.
+//
+// TimeMs is MILLISECONDS, not the raw CueTime element (which the file stores in
+// TimecodeScale units). The reader converts on the way out and the writer
+// converts back on the way in, so every consumer - cue health, validation, HLS
+// segment planning, thumbnails - compares it against other milliseconds without
+// knowing the file's scale.
+//
+// The reader used to hand back the raw units here. Callers that compensated for
+// that by scaling the value themselves must drop the compensation: the field's
+// type is unchanged, so nothing catches it.
 type CuePoint struct {
 	TimeMs     int64
 	Track      uint64

@@ -61,6 +61,9 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	if err := p.parseSegment(ctx, c); err != nil && !tolerableTailError(err, c) {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
+	// The Cues are final here: turn their raw CueTime units into the
+	// milliseconds CuePoint.TimeMs promises, once, before anything reads them.
+	scaleCueTimesToMs(c)
 	if err := setDurationMs(c); err != nil {
 		return nil, err
 	}
