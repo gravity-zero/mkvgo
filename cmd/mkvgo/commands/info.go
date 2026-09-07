@@ -11,17 +11,18 @@ func CmdInfo(path string) {
 	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		PrintJSON(struct {
-			Path        string `json:"path"`
-			Title       string `json:"title"`
-			DurationMs  int64  `json:"duration_ms"`
-			MuxingApp   string `json:"muxing_app"`
-			WritingApp  string `json:"writing_app"`
-			Tracks      int    `json:"tracks"`
-			Chapters    int    `json:"chapters"`
-			Attachments int    `json:"attachments"`
-			Tags        int    `json:"tags"`
+			Path          string `json:"path"`
+			Title         string `json:"title"`
+			DurationMs    int64  `json:"duration_ms"`
+			TimecodeScale int64  `json:"timecode_scale"`
+			MuxingApp     string `json:"muxing_app"`
+			WritingApp    string `json:"writing_app"`
+			Tracks        int    `json:"tracks"`
+			Chapters      int    `json:"chapters"`
+			Attachments   int    `json:"attachments"`
+			Tags          int    `json:"tags"`
 		}{
-			c.Path, c.Info.Title, c.DurationMs,
+			c.Path, c.Info.Title, c.DurationMs, c.Info.TimecodeScale,
 			c.Info.MuxingApp, c.Info.WritingApp,
 			len(c.Tracks), len(c.Chapters), len(c.Attachments), len(c.Tags),
 		})
@@ -30,6 +31,7 @@ func CmdInfo(path string) {
 	fmt.Printf("File:        %s\n", c.Path)
 	fmt.Printf("Title:       %s\n", c.Info.Title)
 	fmt.Printf("Duration:    %d ms\n", c.DurationMs)
+	fmt.Printf("Timebase:    %d ns/unit\n", c.Info.TimecodeScale)
 	fmt.Printf("MuxingApp:   %s\n", c.Info.MuxingApp)
 	fmt.Printf("WritingApp:  %s\n", c.Info.WritingApp)
 	fmt.Printf("Tracks:      %d\n", len(c.Tracks))

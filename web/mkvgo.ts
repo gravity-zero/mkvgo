@@ -449,6 +449,13 @@ export interface Diagnosis {
   findings: Finding[] | null
   /** Matroska only: an MP4's sample table is its index by construction. */
   cue_health?: CueHealthReport
+  /**
+   * The source's declared timebase in nanoseconds per timecode unit; 1000000
+   * (one millisecond) is what nearly every file uses. Matroska only - absent
+   * for an MP4, which times its samples per track. Reported so a scan can
+   * single out the files an unusual timebase touches.
+   */
+  timecode_scale?: number
   /** Matroska with an index: where each track's content really ends; the "audio-short" finding is drawn from it. */
   track_ends?: TrackEndsReport
   /** Every audio track's start delay in ns (track number -> delay), threshold or not. */

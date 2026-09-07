@@ -189,6 +189,15 @@ type Diagnosis struct {
 	// CueHealth is the index classification behind the index findings.
 	// Matroska only: an MP4's sample table is its index by construction.
 	CueHealth *CueHealthReport `json:"cue_health,omitempty"`
+	// TimecodeScale is the source's declared timebase in nanoseconds per unit
+	// (DefaultTimecodeScale = 1 ms, what all but a handful of files use).
+	// Matroska only; 0 for an MP4, which times its samples per track instead.
+	//
+	// It is reported because it is the one property that makes a scan able to
+	// single out the files an unusual timebase touches - cue times, seek gaps
+	// and segment lengths all derive from it - without opening every file a
+	// second time to ask.
+	TimecodeScale int64 `json:"timecode_scale,omitempty"`
 	// TrackEnds is where each track's content really ends (present when the
 	// file has an index to start the tail walk from - see ops.TrackEnds); the
 	// "audio-short" finding is drawn from it.

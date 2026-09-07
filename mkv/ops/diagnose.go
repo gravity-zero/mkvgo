@@ -71,6 +71,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		return nil, fmt.Errorf("diagnose: %w", err)
 	}
 
+	d.TimecodeScale = meta.Info.TimecodeScale
+
 	// Index health (head-only), then where each track's content really ends
 	// (statistics tags, else a bounded tail walk from the index - so only when
 	// there is one). The walked picture end is handed back to the index
