@@ -4,6 +4,79 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed - behaviour, read this before upgrading
+
+- **`CuePoint.TimeMs` from the reader is now milliseconds, as its name always
+  said.** It previously held the stored `CueTime` verbatim, a raw count of
+  `TimecodeScale` units. The type is unchanged, so nothing stops compiling and
+  no test fails on the shape - only the meaning moved, and only on a file whose
+  timebase is not the 1 ms default, where the two used to differ by the ratio of
+  the scale.
+  - Code that read the field and compared it against other milliseconds was
+    wrong before and is right now; it needs no change.
+  - Code that noticed the discrepancy and **compensated for it** - scaling the
+    value itself before use - is now wrong in the other direction, silently, and
+    its tests will keep passing. Remove the compensation when you upgrade.
+  Affected consumers inside this module were all corrected; the note is for
+  callers of the library.
+
+### Fixed
+
+- **Cue times are milliseconds on every timebase.** `CuePoint.TimeMs` is
+  documented as milliseconds and every producer builds it that way, but the
+  reader handed back the stored `CueTime` verbatim - a raw count of
+  `TimecodeScale` units. The two are the same number on the 1 ms default, which
+  is what all but a handful of files declare, so the defect was invisible there
+  and wrong by the ratio of the scale everywhere else. On a file declaring
+  48 units to the millisecond it made every consumer of the index wrong at once:
+  `Reindex` rejected its own correct rebuild (`reindex verify: cue N mismatch`,
+  the same cluster position on both sides and only the time apart), `CueHealth`
+  reported a dense index as sparse and `Validate` called it stale, `Diagnose`
+  turned both into findings, and `thumbnail`, `TrackEnds` and `mp4.PlanHLS` all
+  compared units against milliseconds. The reader now converts once, on both the
+  full and the head-only path, and applies the Matroska default when a file
+  declares no scale - so `Info.TimecodeScale` is never zero either.
+- **HLS segment planning no longer follows the timebase.** As a consequence of
+  the above, `mp4.PlanHLS` compared cue times in raw units against a millisecond
+  segment target: every cue cleared it, so `Options.SegmentMs` was ignored and
+  the plan degenerated to one segment per cluster, each announcing a duration as
+  many times too long as the file's scale is fine. Playlists on such a source
+  described media that was not there.
+- **Rewriting a file with a fine timebase no longer fails outright.** A
+  SimpleBlock's offset from its cluster is a signed 16-bit count of TIMECODE
+  UNITS, but the rewrite window was a flat 1000 milliseconds: where a second of
+  media is more than 32767 units, `RemoveTrack`, `Split`, `Join`, `Mux` and the
+  WebM remux all refused the file with "outside SimpleBlock's int16 range". The
+  window now follows the timebase - unchanged on the 1 ms default, where a
+  cluster could run 32 seconds. Older than the cue-time defect above and
+  independent of it; it refused rather than answered, which is why it went
+  unreported.
+- **A refused retime now names a shift that would work.** `ErrShiftNotRepresentable`
+  said only that the requested shift was not a whole number of timecode ticks.
+  On a fine timebase almost no round number of milliseconds is - at ~1/48000 s,
+  only multiples of 651 ms are - so an operator picking an offset from a slider
+  was refused repeatedly with no way to tell what to try, and the accepted value
+  cannot be derived without knowing the file's scale. Both refusals now name it
+  (the nearest representable shift, or the smallest the file can express); the
+  value was already computed. No behaviour change: same sentinel, same refusal.
+- **`Validate` no longer calls a rebuilt index stale.** Cue times written
+  through the millisecond API cannot round-trip exactly on a timebase that is
+  not 1 ms, so an exact match against keyframe timestamps failed for every cue.
+  Both spellings of the same keyframe are now accepted - the muxer's own
+  timecode and the round trip of it - with no tolerance window.
+
+### Added
+
+- **`Diagnosis.TimecodeScale`** (`timecode_scale`) reports the source's declared
+  timebase, Matroska only. `Diagnose` already reads it; exposing it lets a scan
+  single out the files an unusual timebase touches without opening each one a
+  second time. `mkvgo info` prints it too (`Timebase`, `timecode_scale` in JSON).
+- **`mkv.DefaultTimecodeScale`** names the Matroska default (1000000 ns, one
+  millisecond) that readers and writers fall back to, re-exported on the stable
+  facade as `matroska.DefaultTimecodeScale`.
+
 ## [0.28.1] - 2026-09-05
 
 ### Changed

@@ -49,11 +49,14 @@ AWS_REGION=eu-west-1 mkvgo probe s3://my-bucket/movies/one.mkv
 
 ### info
 
-Show container info (title, duration, muxing/writing app).
+Show container info (title, duration, timebase, muxing/writing app).
 
 ```
 mkvgo info [-json] <file.mkv|->
 ```
+
+`Timebase` (`timecode_scale` in JSON) is the declared TimecodeScale in nanoseconds
+per timecode unit; 1000000 (one millisecond) is what nearly every file uses.
 
 Pass `-` as the path to read from stdin (uses the streaming reader; Cues are not available).
 
@@ -815,7 +818,7 @@ mkvgo diagnose <file.mkv> [-json]
 
 - Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
 - Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `picture-missing` (a stretch the hole probe found without any video block - the picture freezes there whatever the index does; located; re-acquire the source), `audio-short` (an audio track ends more than 5 s before the picture - measured content against content by `track-ends`, a lower bound when the track was silent through the whole tail walked; re-acquire the source, playback pads it with silence), `damaged` (repairable: `reindex --resync`), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass).
-- The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), and the `damage` map when the walk ran.
+- The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), the source's `timecode_scale` (its declared timebase in nanoseconds per unit, Matroska only - 1000000 is one millisecond and is what nearly every file uses), and the `damage` map when the walk ran.
 
 ```bash
 mkvgo diagnose movie.mkv
