@@ -4,7 +4,25 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.29.0] - 2026-09-07
+
+**Highlights**
+
+- **A file whose timebase is not one millisecond is read correctly.** The reader
+  handed back the Cues' raw timecode units as if they were milliseconds. On the
+  1 ms default the two are the same number, so the defect was invisible on all
+  but a handful of files - and wrong by the ratio of the scale on the rest,
+  where it made the seek index, its health verdict, its validation, thumbnail
+  extraction and HLS segment planning wrong at once, each in a different way.
+- **A minor, not a patch: the meaning of a public field moved.** `CuePoint.TimeMs`
+  keeps its type, so no build breaks and no test fails on the shape. Code that
+  compensated for the old raw units must drop the compensation - see the
+  behaviour note below.
+- **Two older refusals on the same files are lifted.** Rewriting one (split,
+  track removal, join, mux, WebM remux) sized its clusters in milliseconds while
+  a block's offset from its cluster is a 16-bit count of timecode units, so it
+  refused outright; and a refused retime now names a shift that would actually
+  apply instead of only saying no.
 
 ### Changed - behaviour, read this before upgrading
 
