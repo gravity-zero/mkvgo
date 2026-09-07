@@ -93,7 +93,7 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 		if err != nil {
 			return fmt.Errorf("remux webm: read block: %w", err)
 		}
-		if clusterStart >= 0 && b.Timecode-clusterStart >= defaultClusterDurationMs {
+		if clusterStart >= 0 && b.Timecode-clusterStart >= clusterSpanMs(c.Info.TimecodeScale) {
 			if err := flush(); err != nil {
 				return fmt.Errorf("remux webm: write cluster: %w", err)
 			}

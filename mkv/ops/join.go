@@ -281,6 +281,9 @@ func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int6
 		if video[blk.TrackNumber] && (!found || blk.Timecode < best) {
 			best, found = blk.Timecode, true
 		}
+		// A scan window, not a cluster being written: how far into the file to
+		// look for the seam. It is deliberately NOT clusterSpanMs - nothing here
+		// encodes a block offset, so the timebase does not bound it.
 		if blk.Timecode-firstTC >= defaultClusterDurationMs {
 			break
 		}

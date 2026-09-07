@@ -14,6 +14,36 @@ import (
 
 const defaultClusterDurationMs = 1000
 
+// maxBlockRelTC is the widest offset a SimpleBlock can carry from its cluster's
+// timestamp: the field is a signed 16-bit count of TIMECODE UNITS, not of
+// milliseconds.
+const maxBlockRelTC = 32767
+
+// clusterSpanMs is how long a rewritten cluster may run, in milliseconds, on a
+// file with this timebase: the 1s default, unless the timebase is fine enough
+// that a second of media no longer fits a block's 16-bit offset.
+//
+// At the 1 ms default a cluster could run 32 seconds, so this changes nothing
+// for all but a handful of files. On a timebase of ~1/48000 s - 48 units to the
+// millisecond - a second is 48003 units and every rewriting op (RemoveTrack,
+// Split, Join, Mux, the WebM remux) refused the file outright rather than
+// closing the cluster sooner.
+func clusterSpanMs(scale int64) int64 {
+	if scale <= 0 {
+		scale = mkv.DefaultTimecodeScale
+	}
+	span := maxBlockRelTC * scale / mkv.DefaultTimecodeScale
+	if span >= defaultClusterDurationMs {
+		return defaultClusterDurationMs
+	}
+	// Zero is a real answer, not a floor to round away from: on a timebase so
+	// fine that not even a millisecond fits 16 bits, every block has to open its
+	// own cluster, and each one then carries an offset of zero. A one-millisecond
+	// floor here looks safer and is not - it hands back a span that still
+	// overflows, which is the bug this function exists to prevent.
+	return span
+}
+
 type streamOpts struct {
 	remap map[uint64]uint64
 	// outScale is the TimecodeScale the OUTPUT declares, when it differs from
@@ -121,6 +151,14 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
 	endStates := map[uint64]*trackEndState{}
 
+	// The output's timebase decides how long a cluster may run: block offsets
+	// are 16-bit counts of ITS units, not of milliseconds.
+	outScale := opts.outScale
+	if outScale <= 0 {
+		outScale = timecodeScale
+	}
+	clusterMs := clusterSpanMs(outScale)
+
 	// base is the source timecode that lands on opts.timeOffset in the output:
 	// blocks are shifted by base-timeOffset on their way out, and they are held
 	// at their SOURCE timecode until then.
@@ -167,10 +205,6 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			}
 			cluster[i].Timecode -= s
 		}
-		outScale := opts.outScale
-		if outScale <= 0 {
-			outScale = timecodeScale
-		}
 		err := mw.WriteClusterWithCues(clusterTS-s, outScale, cluster)
 		cluster = cluster[:0]
 		return err
@@ -183,7 +217,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	injectSubs := func(upTo int64) error {
 		for subIdx < len(opts.extraSubs) && opts.extraSubs[subIdx].Timecode <= upTo {
 			sub := opts.extraSubs[subIdx]
-			if clusterTS >= 0 && sub.Timecode-clusterTS >= defaultClusterDurationMs {
+			if clusterTS >= 0 && sub.Timecode-clusterTS >= clusterMs {
 				if err := flush(); err != nil {
 					return err
 				}
@@ -337,7 +371,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if clusterTS < 0 {
 			clusterTS = blk.Timecode
 		}
-		if blk.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
+		if blk.Timecode-clusterTS >= clusterMs && len(cluster) > 0 {
 			if err := injectSubs(blk.Timecode); err != nil {
 				return err
 			}
@@ -549,7 +583,7 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		if clusterTS < 0 {
 			clusterTS = blk.Timecode
 		}
-		if blk.Timecode-clusterTS >= defaultClusterDurationMs && len(cluster) > 0 {
+		if blk.Timecode-clusterTS >= clusterSpanMs(outScale) && len(cluster) > 0 {
 			if err := flush(); err != nil {
 				return nil, err
 			}
