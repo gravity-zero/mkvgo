@@ -45,8 +45,13 @@ type retimePatch struct {
 var retimeDispersionFactor = int64(5)
 
 // RetimeTracks shifts the block timecodes of the given tracks (track number
-// -> shift in nanoseconds, negative = earlier), choosing the cheaper of its
-// two engines automatically: the in-place 2-bytes-per-block patch when the
+// -> shift in nanoseconds, negative = earlier). The shift is applied to the
+// nearest whole timecode unit of the file - the finest it can express - so a
+// request that is not an exact multiple lands within half a unit of what was
+// asked; only a shift that rounds to nothing is refused.
+//
+// It chooses the cheaper of its two engines automatically: the in-place
+// 2-bytes-per-block patch when the
 // patches are few relative to the file (a short file, laced audio), the
 // sequential rewrite when they are many (multi-track movies, where dispersed
 // page writes cost more than rewriting the file once). Force either with
@@ -64,8 +69,9 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 // place, under the same crash-safe journal as ReindexInPlace: a patch of 2
 // bytes per block of the shifted tracks, no payload byte moved, no temp
 // file. Cluster CRC-32 elements covering patched blocks are recomputed, and
-// CuePoints keyed on shifted tracks move by the same shift. It refuses when
-// a shift does not resolve to a whole number of timecode ticks, when any
+// CuePoints keyed on shifted tracks move by the same shift. The shift lands
+// on the nearest whole timecode unit; it refuses when a shift rounds to no
+// shift at all, when any
 // resulting relative timecode would leave int16 range or make an absolute
 // timestamp negative, when a track is unknown or has no blocks, or when a
 // cue mixes shifted and unshifted tracks. Options.DeepVerify re-walks the
@@ -109,8 +115,11 @@ var (
 	// ErrTrackHasNoBlocks: the track exists but carries no blocks, so there
 	// is nothing to shift (and no way to verify a shift).
 	ErrTrackHasNoBlocks = errors.New("the track has no blocks")
-	// ErrShiftNotRepresentable: the requested shift is not a whole number of
-	// timecode ticks at the file's TimecodeScale (or rounds to zero).
+	// ErrShiftNotRepresentable: the requested shift is smaller than one
+	// timecode unit at the file's TimecodeScale, so it rounds to no shift at
+	// all. A shift that is merely not an exact multiple of a unit is NOT
+	// refused - it is applied to the nearest one, since no file can express
+	// finer than its own resolution.
 	ErrShiftNotRepresentable = errors.New("the shift is not representable at the file's timecode scale")
 	// ErrShiftOutOfRange: applying the shift would push a block outside the
 	// representable range - past the int16 cluster-relative window, or to a
@@ -268,17 +277,21 @@ func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (ma
 		if !known[track] {
 			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, path, ErrUnknownTrack)
 		}
-		// Both refusals name a shift that WOULD be accepted. The caller cannot
-		// derive it without knowing the file's scale, and on a fine timebase
-		// almost no round number of milliseconds is a whole number of ticks -
-		// so an operator picking an offset from a slider gets refused over and
-		// over with no way to tell what to try. The value is already computed.
+		// The shift lands on the nearest whole timecode unit. A file cannot
+		// express finer than one unit, so a request that is not an exact
+		// multiple has no exact answer in ANY file - refusing it did not make
+		// the operation more precise, it made it impossible: at ~1/48000 s per
+		// unit only multiples of 651 ms are exact multiples of a millisecond,
+		// so an operator picking an offset from a slider was refused whatever
+		// they chose. The rounding is bounded by half a unit - half a
+		// millisecond at the 1 ms default, ten microseconds on a fine timebase
+		// - and Options.DeepVerify re-walks the output to prove what landed.
+		//
+		// A shift that rounds to nothing is still refused: there is no such
+		// thing as applying it, and silently doing nothing would be worse.
 		tc := roundDiv(deltaNs, scale)
 		if tc == 0 {
 			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick; the smallest shift it can express is %dns): %w", deltaNs, track, scale, scale, ErrShiftNotRepresentable)
-		}
-		if tc*scale != deltaNs {
-			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick; the nearest shift this file can express is %dns): %w", deltaNs, track, scale, tc*scale, ErrShiftNotRepresentable)
 		}
 		shiftTC[track] = tc
 	}

@@ -623,8 +623,10 @@ var (
 	ErrUnknownTrack = ops.ErrUnknownTrack
 	// ErrTrackHasNoBlocks: the named track exists but has nothing to shift.
 	ErrTrackHasNoBlocks = ops.ErrTrackHasNoBlocks
-	// ErrShiftNotRepresentable: the shift is not a whole number of timecode
-	// ticks at the file's TimecodeScale (or rounds to zero).
+	// ErrShiftNotRepresentable: the shift is smaller than one timecode unit at
+	// the file's TimecodeScale, so it rounds to no shift at all. A shift that
+	// is merely not an exact multiple of a unit is applied to the nearest one,
+	// not refused.
 	ErrShiftNotRepresentable = ops.ErrShiftNotRepresentable
 	// ErrShiftOutOfRange: the shift would push a block past the int16
 	// cluster-relative window or to a negative absolute timestamp.

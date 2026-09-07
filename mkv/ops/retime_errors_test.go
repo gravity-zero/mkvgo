@@ -57,14 +57,6 @@ func TestRetime_TypedRefusals(t *testing.T) {
 			want: ErrShiftNotRepresentable,
 		},
 		{
-			name:  "not a whole number of ticks",
-			shift: map[uint64]int64{2: 1_500_000},
-			run: func(ctx context.Context, p string, s map[uint64]int64) error {
-				return RetimeTracksReplace(ctx, p, s)
-			},
-			want: ErrShiftNotRepresentable,
-		},
-		{
 			name:  "past int16 relative range",
 			shift: map[uint64]int64{2: 40_000_000_000},
 			run: func(ctx context.Context, p string, s map[uint64]int64) error {

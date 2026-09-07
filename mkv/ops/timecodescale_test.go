@@ -253,32 +253,50 @@ func TestRewriteOpsOnNonDefaultScale(t *testing.T) {
 	})
 }
 
-// TestRetimeRefusalNamesAnApplicableShift pins that a refused shift tells the
-// caller what would work. On a fine timebase almost no round number of
-// milliseconds is a whole number of ticks, so an operator picking an offset
-// from a slider is refused over and over; the accepted value cannot be derived
-// without knowing the file's scale, and the refusal text is what reaches them.
-func TestRetimeRefusalNamesAnApplicableShift(t *testing.T) {
+// TestRetimeAppliesToTheNearestUnit pins that a shift which is not an exact
+// multiple of the file's timecode unit is APPLIED to the nearest one rather
+// than refused. Refusing it never made the operation more precise - no file
+// can express finer than its own resolution - it made it impossible: at this
+// timebase only multiples of 651 ms are whole milliseconds, so an operator
+// picking an offset from a slider was refused whatever they chose.
+func TestRetimeAppliesToTheNearestUnit(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	path := buildScaledFixture(t, dir, "src.mkv", nonDefaultScale, 6)
 
-	// 100ms is 4800.7 ticks at this timebase: not representable.
-	err := RetimeTracks(ctx, path, map[uint64]int64{2: 100_000_000})
-	if err == nil {
-		t.Fatal("a shift of 100ms is not a whole number of ticks here; expected a refusal")
+	// 100ms is 4800.7 units here: no exact answer exists in this file.
+	const wantNs = 100_000_000
+	if err := RetimeTracks(ctx, path, map[uint64]int64{2: wantNs}); err != nil {
+		t.Fatalf("shift of %dns refused: %v", wantNs, err)
 	}
+	// It must have landed within half a unit of the request. Measured through
+	// the audio-start delay rather than by re-reading blocks by hand: that is
+	// the number a caller actually acts on.
+	delays, err := AudioStartDelays(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := delays[2]
+	if d := got - wantNs; d < -nonDefaultScale || d > nonDefaultScale {
+		t.Errorf("audio now starts %dns after the video, want %dns within one timecode unit (%dns)",
+			got, wantNs, nonDefaultScale)
+	}
+}
+
+// TestRetimeRefusesAShiftThatRoundsToNothing pins the one refusal that stays,
+// and that its message names the smallest shift the file CAN express - the
+// caller cannot derive it without knowing the timebase.
+func TestRetimeRefusesAShiftThatRoundsToNothing(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := buildScaledFixture(t, dir, "src.mkv", nonDefaultScale, 6)
+
+	err := RetimeTracks(ctx, path, map[uint64]int64{2: 1})
 	if !errors.Is(err, ErrShiftNotRepresentable) {
-		t.Fatalf("error is not ErrShiftNotRepresentable: %v", err)
+		t.Fatalf("a 1ns shift must be refused as unrepresentable, got: %v", err)
 	}
-	// The nearest representable shift, which the message must name.
-	nearest := int64(100_000_000+nonDefaultScale/2) / nonDefaultScale * nonDefaultScale
-	if !strings.Contains(err.Error(), strconv.FormatInt(nearest, 10)) {
-		t.Errorf("refusal does not name an applicable shift (%dns): %v", nearest, err)
-	}
-	// And that value must actually be accepted, or the message is a lie.
-	if err := RetimeTracks(ctx, path, map[uint64]int64{2: nearest}); err != nil {
-		t.Errorf("the shift the refusal recommended (%dns) was itself refused: %v", nearest, err)
+	if !strings.Contains(err.Error(), strconv.FormatInt(nonDefaultScale, 10)) {
+		t.Errorf("refusal does not name the smallest expressible shift: %v", err)
 	}
 }
 

@@ -4,6 +4,24 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A retime is no longer refused for asking something the file cannot express
+  exactly.** The shift is given in nanoseconds; a file stores timecodes in units
+  of its own TimecodeScale. `RetimeTracks` rounded the request to the nearest
+  unit, then refused it unless the rounding had been a no-op - which did not
+  make the operation more precise, since no file can express finer than one
+  unit, it made it impossible. On the 1 ms default only whole milliseconds
+  passed; on a timebase of ~1/48000 s only multiples of 651 ms did, so an
+  audio delay of a few hundred milliseconds could not be cancelled at all and
+  the retime `Diagnose` prescribes for its own `audio-delay` finding was
+  refused when run. The shift now lands on the nearest unit, within half a
+  unit of the request, and `Options.DeepVerify` proves what landed.
+  `ErrShiftNotRepresentable` still refuses a shift that rounds to no shift at
+  all, and still names the smallest the file can express.
+
 ## [0.29.0] - 2026-09-07
 
 **Highlights**
