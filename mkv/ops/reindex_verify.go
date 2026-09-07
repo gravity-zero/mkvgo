@@ -40,9 +40,12 @@ func verifyReindexedCues(ctx context.Context, path string, fs *mkv.FS, want []mk
 	}
 	prev := int64(-1 << 62)
 	for i, got := range c.Cues {
-		// Mirror WriteCues (ms -> timecode units) then the reader (units -> ms)
-		// so a truncating scale conversion is not reported as a mismatch.
-		wantMs := int64(uint64(want[i].TimeMs) * 1_000_000 / uint64(timecodeScale) * uint64(timecodeScale) / 1_000_000)
+		// Both sides are milliseconds: the walk built want that way and the
+		// reader converts the stored units back. What survives is the ROUNDING
+		// of the round trip - WriteCues truncates ms into timecode units, the
+		// reader truncates them back - so mirror both truncations here rather
+		// than report a lossless roundtrip as a mismatch.
+		wantMs := cueTimeRoundTripMs(want[i].TimeMs, timecodeScale)
 		if got.TimeMs != wantMs || got.Track != want[i].Track || got.ClusterPos != want[i].ClusterPos {
 			return fmt.Errorf("reindex verify: cue %d mismatch: got {time=%dms track=%d cluster=%d}, want {time=%dms track=%d cluster=%d}",
 				i, got.TimeMs, got.Track, got.ClusterPos, wantMs, want[i].Track, want[i].ClusterPos)

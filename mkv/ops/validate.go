@@ -117,6 +117,11 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			hasKeyframe = true
 			if videoIDs[blk.TrackNumber] {
 				videoKfPts[blk.Timecode] = true
+				// The same keyframe as a cue time that has been through the
+				// millisecond API. Identical to the line above under the 1 ms
+				// default; under any other timebase it is what a rebuilt index
+				// legitimately holds. Both are fresh, neither is stale.
+				videoKfPts[cueTimeRoundTripMs(blk.Timecode, c.Info.TimecodeScale)] = true
 			}
 		}
 		if textIDs[blk.TrackNumber] && blk.Duration == 0 {
