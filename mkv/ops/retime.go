@@ -268,12 +268,17 @@ func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (ma
 		if !known[track] {
 			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, path, ErrUnknownTrack)
 		}
+		// Both refusals name a shift that WOULD be accepted. The caller cannot
+		// derive it without knowing the file's scale, and on a fine timebase
+		// almost no round number of milliseconds is a whole number of ticks -
+		// so an operator picking an offset from a slider gets refused over and
+		// over with no way to tell what to try. The value is already computed.
 		tc := roundDiv(deltaNs, scale)
 		if tc == 0 {
-			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick): %w", deltaNs, track, scale, ErrShiftNotRepresentable)
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is below the file's timecode resolution (%dns per tick; the smallest shift it can express is %dns): %w", deltaNs, track, scale, scale, ErrShiftNotRepresentable)
 		}
 		if tc*scale != deltaNs {
-			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick): %w", deltaNs, track, scale, ErrShiftNotRepresentable)
+			return nil, 0, fmt.Errorf("retime: shift %dns for track %d is not a whole number of timecode ticks (%dns per tick; the nearest shift this file can express is %dns): %w", deltaNs, track, scale, tc*scale, ErrShiftNotRepresentable)
 		}
 		shiftTC[track] = tc
 	}
