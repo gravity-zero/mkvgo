@@ -1052,12 +1052,23 @@ Twenty seconds is not free, but it is against 493 s for the pass it replaces.
 The win is reuse across requests - not the first extraction, and not track
 count.
 
-**On a network mount, tell the kernel not to read ahead.** The build's cost is
-dominated by bytes the storage moves, and on a CIFS/SMB mount the kernel's own
-readahead fights the protocol's larger rsize: it fetches windows the walk is
-about to seek past, and it slows even the reads the walk does want. mkvgo needs
-no option for this - `Options.FS` already lets a caller hand it a descriptor of
-its choosing:
+**A mount whose readahead is misconfigured will dominate everything below.**
+Before treating any of these numbers as a property of mkvgo, check the mount. On
+the CIFS mount these figures come from, `read_ahead_kb` was **8192** against a
+negotiated `rsize` of **4096** - the kernel speculatively fetching 8 MiB behind
+every read, twice the largest read the protocol will issue. A header-only walk
+reads a 256 KiB window and seeks about 11 MB on, so nearly all of that 8 MiB is
+thrown away; and it is not only the walk that pays. A bare `read()` loop with no
+mkvgo in it at all runs at 76 MB/s on that mount and at 146 MB/s with readahead
+suppressed, so EVERY sequential reader on it - an external transcoder included -
+is paying the same tax. Fixing the mount (root: `echo 4096 >
+/sys/class/bdi/cifs-<n>/read_ahead_kb`) helps every reader and is the right
+repair.
+
+What follows is the per-process workaround for when you cannot change the mount.
+It is not an optimization mkvgo brings; it is a way to opt out of someone else's
+misconfiguration. mkvgo needs no option for it - `Options.FS` already lets a
+caller hand it a descriptor of its choosing:
 
 ```go
 opts := mkv.Options{FS: &mkv.FS{Open: func(p string) (mkv.ReadSeekCloser, error) {
@@ -1086,11 +1097,13 @@ same index out of both (3702 blocks, byte-identical):
 That is 4.6x less traffic and 20% less wall clock, and a plain sequential read
 of the same mount goes from 76 MB/s to 146 MB/s under the same hint.
 
-CAVEAT, and it decides whether you should use this: that is one network mount.
-Kernel readahead exists because it usually helps, and on a local disk turning it
-off is expected to HURT a walk that reads most of the file - which is why mkvgo
-does not do this for you and why it is not a default. Measure it on the storage
-you actually run on before adopting it.
+CAVEAT, and it decides whether you should use this: that is one network mount,
+with a readahead set to twice its own read size. Kernel readahead exists because
+it usually helps, and on a correctly tuned mount - or on a local disk - turning
+it off is expected to HURT a walk that reads most of the file. That expectation
+is NOT measured here; treat it as the reason mkvgo does not do this for you and
+why it is not a default, not as a result. Measure it on the storage you actually
+run on, and look at `read_ahead_kb` before you reach for the workaround.
 
 Two things that look like optimizations and are not, both measured and both
 rejected: coalescing neighbouring block reads (the blocks of a subtitle track
