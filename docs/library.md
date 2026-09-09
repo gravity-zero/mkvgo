@@ -1039,8 +1039,15 @@ once, so neither can be faster. Extracting three bitmap tracks from one file in
 a single shot is the same story - 39.2 s against 39.4 s, 104.6% of the file on
 the wire either way.
 
-So use the walking extractor for a file read once, and reach for the index for
-what it actually buys: it PERSISTS. The pass is paid once, and every later
+The rule that falls out of this is blunt: **build an index only when you will
+extract two or more tracks from the file.** Below that it is a pass you did not
+need. On one real library of 1503 files, 24% carry no text subtitle track at
+all, 15% carry exactly one - where indexing is a net loss - and 61% carry two or
+more, where it wins. "Do not always index" is not a theoretical caution at that
+ratio.
+
+So use the walking extractor for a file read once or for a single track, and
+reach for the index for what it actually buys: it PERSISTS. The pass is paid once, and every later
 request against that file is a seek instead of a pass. What that seek costs
 scales with the number of blocks and with how far apart they sit, NOT with the
 payload it returns - it is dominated by round trips, not bytes:
