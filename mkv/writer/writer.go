@@ -365,12 +365,26 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			}
 		})
 	}
-	if len(t.HeaderStripping) > 0 {
+	switch {
+	case len(t.HeaderStripping) > 0:
 		e.master(mkv.IDContentEncodings, func(enc *ew) {
 			enc.master(mkv.IDContentEncoding, func(ce *ew) {
 				ce.master(mkv.IDContentCompression, func(cc *ew) {
 					cc.uint(mkv.IDContentCompAlgo, 3)
 					cc.raw(mkv.IDContentCompSettings, t.HeaderStripping)
+				})
+			})
+		})
+	case t.Compression != mkv.CompressionNone && t.Compression != mkv.CompressionHeaderStrip:
+		// The reader hands block payloads back COMPRESSED, so an op that copies
+		// blocks copies them still compressed - and the output must keep saying
+		// so. Dropping the declaration here is what would leave a remuxed file
+		// holding zlib bytes it claims are plain: the track would simply stop
+		// working, with nothing in the file to say why.
+		e.master(mkv.IDContentEncodings, func(enc *ew) {
+			enc.master(mkv.IDContentEncoding, func(ce *ew) {
+				ce.master(mkv.IDContentCompression, func(cc *ew) {
+					cc.uint(mkv.IDContentCompAlgo, t.Compression.Algo())
 				})
 			})
 		})
