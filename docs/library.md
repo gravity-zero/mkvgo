@@ -970,10 +970,13 @@ walking extractor - byte-identical output either way.
 Those are SSD figures and they do not transfer: the build is one sequential pass
 over the whole source, so it tracks the storage underneath - on a spindle or a
 network mount, expect it several times slower. What does transfer is the shape.
-The build is paid once per file and reads no payload at all (headers only);
-serving afterwards reads a few blocks, so it stays in the milliseconds wherever
-the file lives. Measure the build on the hardware that will run it, not on this
-number.
+The build is paid once per file and parses no payload (headers only) - which is
+what keeps its memory flat, NOT what makes it fast: skipping a payload does not
+stop the storage from having fetched it, and measured over a network mount the
+build still pulls the whole file across (see the read-amplification figures
+below). Serving afterwards reads a few blocks, so that half stays in the
+milliseconds wherever the file lives. Measure the build on the hardware that
+will run it, not on this number.
 
 On a cache miss there is nothing to combine: building the index and then serving
 from it costs the same single pass an extraction costs - marginally less, since
@@ -1028,10 +1031,20 @@ right call: measured on two real single-track remuxes over SMB, it ran 95.6 s on
 a 3216 MB source and 85.6 s on a 2947 MB one, against 98.7 s and 72.0 s for an
 external `-c:s copy` of the same tracks - the same order of magnitude, faster on
 one file and slower on the other, while additionally decoding every cue to a
-bitmap where the external copy only moves compressed packets. Neither tool came
-close to the link's 76 MB/s sequential rate, so both are bound by the per-block
-read pattern rather than by throughput. (Two files, one link: treat the shape as
-the result, not the constants.)
+bitmap where the external copy only moves compressed packets. Both ran at about
+a third of the link's measured 107 MB/s, so both are bound by the per-block read
+pattern rather than by throughput. (Two files, one link: treat the shape as the
+result, not the constants.)
+
+**The build pass is not cheap, and "header-only" does not make it so.** It reads
+no payload INTO MEMORY, which is what bounds its RSS - but that is not what
+bounds its time. Measured on a 4.50 GB 2160p source with the kernel's own
+counters: the application read 91.7% of the file, and 104.3% of it crossed the
+network. Seeking over a payload does not stop the client from having fetched it,
+so the build costs a full read of the file whatever the walk skips. The win is
+entirely on the other side: serving one track from the index afterwards read
+0.02% of that file for a 13-cue track and 1.5% for a 2032-cue one. Budget the
+index as "one full read, once" and the serve as free - not the reverse.
 
 **Prefer the `ForEach` form.** A `PGSCue` owns a decoded bitmap, and the slice
 form holds every one of them at once. Subtitle pictures run to roughly 1920x150
