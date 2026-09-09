@@ -729,6 +729,37 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 	return ops.ExtractSubtitleWebVTTFrom(ctx, srcPath, trackID, ix, w, opts...)
 }
 
+// PGSCue is one decoded HDMV PGS bitmap subtitle: when it is shown, where on
+// the subtitle plane, and the picture with its palette applied. See ops.PGSCue.
+type PGSCue = ops.PGSCue
+
+// ExtractSubtitlePGS decodes a PGS (S_HDMV/PGS) bitmap subtitle track by walking
+// the source once. The whole track's pictures are held at once - prefer
+// ForEachSubtitlePGS on a feature-length track. See ops.ExtractSubtitlePGS.
+func ExtractSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, opts ...Options) ([]PGSCue, error) {
+	return ops.ExtractSubtitlePGS(ctx, srcPath, trackID, opts...)
+}
+
+// ForEachSubtitlePGS is ExtractSubtitlePGS in bounded memory: one cue's picture
+// is alive at a time. See ops.ForEachSubtitlePGS.
+func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn func(PGSCue) error, opts ...Options) error {
+	return ops.ForEachSubtitlePGS(ctx, srcPath, trackID, fn, opts...)
+}
+
+// ExtractSubtitlePGSFrom is ExtractSubtitlePGS served from a prebuilt index. The
+// index needs nothing new: it covers subtitle tracks by type, never by codec, so
+// one built by an earlier release already holds the PGS track's blocks. See
+// ops.ExtractSubtitlePGSFrom.
+func ExtractSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, opts ...Options) ([]PGSCue, error) {
+	return ops.ExtractSubtitlePGSFrom(ctx, srcPath, trackID, ix, opts...)
+}
+
+// ForEachSubtitlePGSFrom is ExtractSubtitlePGSFrom in bounded memory. See
+// ops.ForEachSubtitlePGSFrom.
+func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(PGSCue) error, opts ...Options) error {
+	return ops.ForEachSubtitlePGSFrom(ctx, srcPath, trackID, ix, fn, opts...)
+}
+
 // SubtitleFileToWebVTT converts an external subtitle sidecar (.srt/.ass/.ssa/.vtt)
 // to WebVTT, written to w. See subtitle.FileToWebVTT.
 func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {
