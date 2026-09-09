@@ -78,6 +78,94 @@ func TestStreamSeekableParity(t *testing.T) {
 	}
 }
 
+// TestContentCompressionAlgo covers the form that matters most and reads as
+// nothing at all: an EMPTY ContentCompression element. Its ContentCompAlgo
+// therefore takes the spec's default value, 0 = zlib, and that is exactly how
+// mkvmerge writes a compressed subtitle track - so "no child element parsed"
+// must NOT be read as "no compression". Before this was handled, a whole PGS
+// track came back as raw zlib bytes with nothing to say why.
+//
+// Both parsers are checked: the streaming one drifting from the seekable one is
+// the defect this file exists for.
+func TestContentCompressionAlgo(t *testing.T) {
+	cases := []struct {
+		name string
+		body []byte
+		want mkv.Compression
+	}{
+		{"empty ContentCompression means zlib", nil, mkv.CompressionZlib},
+		{"explicit zlib", compAlgo(0), mkv.CompressionZlib},
+		{"bzlib", compAlgo(1), mkv.CompressionBzlib},
+		{"lzo1x", compAlgo(2), mkv.CompressionLZO1X},
+		{"header stripping", compAlgo(3), mkv.CompressionHeaderStrip},
+		{"an algorithm this build does not know", compAlgo(99), mkv.CompressionNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := trackWithEncodings(wrapEl(mkv.IDContentEncodings,
+				wrapEl(mkv.IDContentEncoding, wrapEl(mkv.IDContentCompression, tc.body))))
+
+			cs, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if got := cs.Tracks[0].Compression; got != tc.want {
+				t.Errorf("seekable Compression = %v, want %v", got, tc.want)
+			}
+			cst, _, err := ReadStream(context.Background(), bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("ReadStream: %v", err)
+			}
+			if got := cst.Tracks[0].Compression; got != cs.Tracks[0].Compression {
+				t.Errorf("streaming Compression = %v, seekable = %v (parity broken)", got, cs.Tracks[0].Compression)
+			}
+		})
+	}
+}
+
+// A track with no ContentEncodings at all must stay CompressionNone - the zero
+// value - so nothing built in code is mistaken for compressed.
+func TestContentCompressionAbsent(t *testing.T) {
+	cs, err := Read(context.Background(), bytes.NewReader(trackWithEncodings(nil)), "x.mkv")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got := cs.Tracks[0].Compression; got != mkv.CompressionNone {
+		t.Errorf("Compression = %v, want none", got)
+	}
+}
+
+func compAlgo(v uint64) []byte {
+	var b bytes.Buffer
+	ebml.WriteElementHeader(&b, mkv.IDContentCompAlgo, 1)
+	ebml.WriteUint(&b, v, 1)
+	return b.Bytes()
+}
+
+// trackWithEncodings builds a minimal readable file holding one subtitle track,
+// with encodings appended to its TrackEntry verbatim.
+func trackWithEncodings(encodings []byte) []byte {
+	var te bytes.Buffer
+	ebml.WriteElementHeader(&te, mkv.IDTrackNumber, 1)
+	ebml.WriteUint(&te, 1, 1)
+	ebml.WriteElementHeader(&te, mkv.IDTrackType, 1)
+	ebml.WriteUint(&te, mkv.TrackTypeSubtitle, 1)
+	ebml.WriteElementHeader(&te, mkv.IDCodecID, 10)
+	ebml.WriteString(&te, "S_HDMV/PGS")
+	te.Write(encodings)
+
+	var seg bytes.Buffer
+	ebml.WriteElementHeader(&seg, mkv.IDInfo, 0)
+	seg.Write(wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, te.Bytes())))
+	seg.Write(realCluster())
+
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+	return buf.Bytes()
+}
+
 func wrapEl(id uint32, body []byte) []byte {
 	var b bytes.Buffer
 	ebml.WriteElementHeader(&b, id, int64(len(body)))

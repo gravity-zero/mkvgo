@@ -13,6 +13,56 @@ const (
 	SubtitleTrack TrackType = "subtitle"
 )
 
+// Compression is a track's ContentCompression scheme. The values are NOT the
+// Matroska ContentCompAlgo numbers: they are shifted by one so that the zero
+// value means "no compression", which is what a Track built in code must be.
+// CompressionFromAlgo converts from the wire.
+type Compression uint8
+
+const (
+	CompressionNone        Compression = iota // the track declares no ContentCompression
+	CompressionZlib                           // ContentCompAlgo 0
+	CompressionBzlib                          // ContentCompAlgo 1
+	CompressionLZO1X                          // ContentCompAlgo 2
+	CompressionHeaderStrip                    // ContentCompAlgo 3 - see Track.HeaderStripping
+)
+
+// CompressionFromAlgo maps a Matroska ContentCompAlgo value to a Compression.
+// An algorithm this build does not know maps to CompressionNone, so an unknown
+// scheme reads as "nothing declared" rather than as the wrong codec.
+func CompressionFromAlgo(algo uint64) Compression {
+	switch algo {
+	case 0:
+		return CompressionZlib
+	case 1:
+		return CompressionBzlib
+	case 2:
+		return CompressionLZO1X
+	case 3:
+		return CompressionHeaderStrip
+	}
+	return CompressionNone
+}
+
+// Algo is the Matroska ContentCompAlgo value to write for c. Only meaningful
+// when c is not CompressionNone.
+func (c Compression) Algo() uint64 { return uint64(c) - 1 }
+
+// String names the scheme for an error message an operator will read.
+func (c Compression) String() string {
+	switch c {
+	case CompressionZlib:
+		return "zlib"
+	case CompressionBzlib:
+		return "bzlib"
+	case CompressionLZO1X:
+		return "lzo1x"
+	case CompressionHeaderStrip:
+		return "header stripping"
+	}
+	return "none"
+}
+
 const (
 	MsPerHour   = 3600000
 	MsPerMinute = 60000
@@ -97,19 +147,23 @@ type Track struct {
 	// Extended disposition flags (Matroska FlagHearingImpaired/…/FlagCommentary),
 	// mapping to the conventional stream dispositions of the same name. All false when
 	// absent. Matroska-only; MP4 has no equivalent boxes so they stay false there.
-	HearingImpaired  bool     `json:"hearing_impaired,omitempty"`
-	VisualImpaired   bool     `json:"visual_impaired,omitempty"`
-	TextDescriptions bool     `json:"text_descriptions,omitempty"` // the conventional "descriptions" field
-	Original         bool     `json:"original,omitempty"`
-	Commentary       bool     `json:"commentary,omitempty"` // the conventional "comment" field
-	CodecPrivate     []byte   `json:"-"`
-	HeaderStripping  []byte   `json:"-"` // bytes stripped from each block (ContentCompression)
-	Width            *uint32  `json:"width,omitempty"`
-	Height           *uint32  `json:"height,omitempty"`
-	Channels         *uint8   `json:"channels,omitempty"`
-	SampleRate       *float64 `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
-	OutputSampleRate *float64 `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
-	BitDepth         *uint8   `json:"bit_depth,omitempty"`          // audio bits/sample (0x6264); video uses VideoBitDepth
+	HearingImpaired  bool   `json:"hearing_impaired,omitempty"`
+	VisualImpaired   bool   `json:"visual_impaired,omitempty"`
+	TextDescriptions bool   `json:"text_descriptions,omitempty"` // the conventional "descriptions" field
+	Original         bool   `json:"original,omitempty"`
+	Commentary       bool   `json:"commentary,omitempty"` // the conventional "comment" field
+	CodecPrivate     []byte `json:"-"`
+	HeaderStripping  []byte `json:"-"` // bytes stripped from each block (ContentCompression, algo 3)
+	// Compression is how the track's block payloads are encoded, from its
+	// ContentCompression element. CompressionNone is the zero value, so a Track
+	// built in code is uncompressed unless it says otherwise.
+	Compression      Compression `json:"-"`
+	Width            *uint32     `json:"width,omitempty"`
+	Height           *uint32     `json:"height,omitempty"`
+	Channels         *uint8      `json:"channels,omitempty"`
+	SampleRate       *float64    `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
+	OutputSampleRate *float64    `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
+	BitDepth         *uint8      `json:"bit_depth,omitempty"`          // audio bits/sample (0x6264); video uses VideoBitDepth
 	// CodecDelay is the codec's built-in delay in NANOSECONDS (Matroska 0x56AA)  -
 	// the gapless/encoder priming a decoder must discard from the start. It is the
 	// portable home for an MP4 audio track's edit-list priming (AAC/AC-3), so the

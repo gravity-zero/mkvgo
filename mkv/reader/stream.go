@@ -462,8 +462,19 @@ func (p *streamParser) parseStreamContentEncoding(size int64, t *mkv.Track) erro
 }
 
 func (p *streamParser) parseStreamContentCompression(size int64, t *mkv.Track) error {
+	// Same default as the seekable parser: ContentCompression present with no
+	// ContentCompAlgo child means zlib, the spec's default value.
+	t.Compression = mkv.CompressionZlib
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
-		if h.ID == mkv.IDContentCompSettings {
+		switch h.ID {
+		case mkv.IDContentCompAlgo:
+			algo, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			t.Compression = mkv.CompressionFromAlgo(algo)
+			return nil
+		case mkv.IDContentCompSettings:
 			v, err := p.readBytes(h.Size)
 			if err != nil {
 				return err

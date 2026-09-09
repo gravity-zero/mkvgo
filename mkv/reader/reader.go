@@ -1935,6 +1935,12 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 }
 
 func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
+	// ContentCompAlgo defaults to 0 (zlib) when the element is absent, so the
+	// presence of ContentCompression is itself the declaration. mkvmerge writes
+	// a compressed subtitle track as an EMPTY ContentCompression element - no
+	// children at all - which is why "no child parsed" must not be read as "no
+	// compression": that is how a whole PGS track came back as raw zlib.
+	t.Compression = mkv.CompressionZlib
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
@@ -1947,6 +1953,12 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 			return err
 		}
 		switch eh.ID {
+		case mkv.IDContentCompAlgo:
+			algo, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			t.Compression = mkv.CompressionFromAlgo(algo)
 		case mkv.IDContentCompSettings:
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
