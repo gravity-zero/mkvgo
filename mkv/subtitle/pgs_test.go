@@ -637,3 +637,118 @@ func TestPaletted_TooManyColours(t *testing.T) {
 		t.Error("a 300-colour picture was indexed anyway")
 	}
 }
+
+// The compositing path has never been seen on a real disc - roughly 7700 display
+// sets across four films and four muxer versions all carried exactly one object.
+// So it gets exercised here deliberately, in the shapes a disc could produce:
+// two windows, overlap, reversed order, and one object cropped.
+func TestPGSDecoder_MultipleObjects(t *testing.T) {
+	build := func(t *testing.T, objs ...synthObject) []PGSObject {
+		t.Helper()
+		d := NewPGSDecoder()
+		parts := [][]byte{
+			pgsPCS(1920, 1080, pgsEpochStart, 0, objs...),
+			pgsPDS(0, palWhite, palBlue),
+		}
+		seen := map[uint16]bool{}
+		for _, o := range objs {
+			if !seen[o.id] {
+				seen[o.id] = true
+				parts = append(parts, pgsODS(o.id, 4, 2, rle4x2))
+			}
+		}
+		parts = append(parts, pgsEND())
+		sets, err := d.Decode(concat(parts...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sets) != 1 {
+			t.Fatalf("got %d display sets, want 1", len(sets))
+		}
+		return sets[0].Objects
+	}
+
+	t.Run("two windows far apart keep their own positions", func(t *testing.T) {
+		got := build(t, synthObject{id: 1, x: 100, y: 60}, synthObject{id: 2, x: 400, y: 950})
+		if len(got) != 2 {
+			t.Fatalf("got %d objects, want 2", len(got))
+		}
+		if got[0].X != 100 || got[0].Y != 60 || got[1].X != 400 || got[1].Y != 950 {
+			t.Errorf("positions = (%d,%d) and (%d,%d), want (100,60) and (400,950)",
+				got[0].X, got[0].Y, got[1].X, got[1].Y)
+		}
+		// Order matters: a caller compositing them must get them as composed.
+		if got[0].Image == nil || got[1].Image == nil {
+			t.Fatal("an object came back without a picture")
+		}
+	})
+
+	t.Run("the same object twice at two positions", func(t *testing.T) {
+		// One definition, two compositions - legal, and it must not consume the
+		// object on first use.
+		got := build(t, synthObject{id: 7, x: 10, y: 20}, synthObject{id: 7, x: 30, y: 40})
+		if len(got) != 2 {
+			t.Fatalf("got %d objects, want 2", len(got))
+		}
+		if got[0].X != 10 || got[1].X != 30 {
+			t.Errorf("positions = %d and %d, want 10 and 30", got[0].X, got[1].X)
+		}
+		if string(got[0].Image.Pix) != string(got[1].Image.Pix) {
+			t.Error("the same object decoded to different pixels at two positions")
+		}
+	})
+
+	t.Run("overlapping objects both survive", func(t *testing.T) {
+		got := build(t, synthObject{id: 1, x: 100, y: 100}, synthObject{id: 2, x: 102, y: 101})
+		if len(got) != 2 {
+			t.Fatalf("got %d objects, want 2", len(got))
+		}
+	})
+
+	t.Run("one forced among several", func(t *testing.T) {
+		got := build(t,
+			synthObject{id: 1, x: 0, y: 0},
+			synthObject{id: 2, x: 50, y: 50, forced: true})
+		if len(got) != 2 {
+			t.Fatalf("got %d objects, want 2", len(got))
+		}
+		if got[0].Forced || !got[1].Forced {
+			t.Errorf("forced flags = %v, %v; want false, true", got[0].Forced, got[1].Forced)
+		}
+	})
+
+	t.Run("a cropped object beside a whole one", func(t *testing.T) {
+		crop := image.Rect(2, 0, 4, 2)
+		got := build(t,
+			synthObject{id: 1, x: 0, y: 0},
+			synthObject{id: 2, x: 50, y: 50, crop: &crop})
+		if len(got) != 2 {
+			t.Fatalf("got %d objects, want 2", len(got))
+		}
+		if got[0].Image.Bounds() != image.Rect(0, 0, 4, 2) {
+			t.Errorf("the uncropped object is %v, want 4x2", got[0].Image.Bounds())
+		}
+		if got[1].Image.Bounds() != image.Rect(0, 0, 2, 2) {
+			t.Errorf("the cropped object is %v, want 2x2", got[1].Image.Bounds())
+		}
+	})
+
+	t.Run("one object missing, the other still composes", func(t *testing.T) {
+		// A composition naming an object the epoch never defined: the defined
+		// one must still come through rather than the whole set being lost.
+		d := NewPGSDecoder()
+		sets, err := d.Decode(concat(
+			pgsPCS(1920, 1080, pgsEpochStart, 0,
+				synthObject{id: 1, x: 10, y: 10}, synthObject{id: 99, x: 20, y: 20}),
+			pgsPDS(0, palWhite, palBlue),
+			pgsODS(1, 4, 2, rle4x2),
+			pgsEND(),
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sets[0].Objects) != 1 || sets[0].Objects[0].X != 10 {
+			t.Errorf("got %+v, want only the defined object at x=10", sets[0].Objects)
+		}
+	})
+}

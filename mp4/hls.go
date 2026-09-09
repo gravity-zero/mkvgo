@@ -373,6 +373,13 @@ func planSubTracks(c *mkv.Container, o Options) []hlsSubTrack {
 		switch canonicalSubCodec(t.Codec) {
 		case "srt", "webvtt", "ass", "ssa":
 			subs = append(subs, hlsSubTrack{track: t})
+		case "pgs":
+			// HLS carries subtitles as WebVTT renditions, and a picture has no
+			// WebVTT form. Burning it into the video or shipping a sprite sheet
+			// is player-side packaging, which is the consumer's call - so name
+			// the extractor rather than pretend the track is unusable.
+			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+				Reason: "PGS subtitles are pictures and HLS renditions carry WebVTT; extract them with matroska.ExtractSubtitlePGS and overlay them player-side"})
 		default:
 			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
 				Reason: "subtitle format not representable as WebVTT (bitmap formats cannot be carried)"})

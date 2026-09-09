@@ -12,6 +12,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
+// bzip2Hello is "hello bzip2\n" compressed by Python's bz2 module, so the
+// test exercises a stream mkvgo did not produce (compress/bzip2 is decode-only).
+var bzip2Hello = []byte{0x42, 0x5a, 0x68, 0x39, 0x31, 0x41, 0x59, 0x26, 0x53, 0x59, 0xab, 0x6b, 0xa1, 0xf1, 0x00, 0x00, 0x02, 0xd9, 0x80, 0x00, 0x10, 0x40, 0x00, 0x10, 0x00, 0x12, 0x64, 0xc0, 0x10, 0x20, 0x00, 0x31, 0x00, 0xd3, 0x4d, 0x04, 0x00, 0x1e, 0xa3, 0xef, 0x4e, 0x51, 0xa2, 0x07, 0x8b, 0xb9, 0x22, 0x9c, 0x28, 0x48, 0x55, 0xb5, 0xd0, 0xf8, 0x80}
+
 func zlibBytes(t *testing.T, plain []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -60,8 +64,28 @@ func TestDecompressSubtitleBlock(t *testing.T) {
 		}
 	})
 
+	t.Run("bzlib inflates", func(t *testing.T) {
+		// compress/bzip2 is decompress-only, so the fixture is a stream captured
+		// from a known-good compressor rather than one built here.
+		tr := &mkv.Track{ID: 1, Compression: mkv.CompressionBzlib}
+		got, err := decompressSubtitleBlock(tr, bzip2Hello)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "hello bzip2\n" {
+			t.Errorf("got %q, want %q", got, "hello bzip2\n")
+		}
+	})
+
+	t.Run("a track that lies about bzlib is refused", func(t *testing.T) {
+		tr := &mkv.Track{ID: 1, Compression: mkv.CompressionBzlib}
+		if _, err := decompressSubtitleBlock(tr, plain); err == nil {
+			t.Error("a non-bzip2 payload was accepted")
+		}
+	})
+
 	t.Run("a scheme with no decoder says which", func(t *testing.T) {
-		for _, c := range []mkv.Compression{mkv.CompressionBzlib, mkv.CompressionLZO1X} {
+		for _, c := range []mkv.Compression{mkv.CompressionLZO1X} {
 			tr := &mkv.Track{ID: 4, Compression: c}
 			_, err := decompressSubtitleBlock(tr, plain)
 			if err == nil || !strings.Contains(err.Error(), c.String()) {

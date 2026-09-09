@@ -312,3 +312,98 @@ func TestExtractSubtitlePGS_TwoObjectsAreComposited(t *testing.T) {
 		}
 	}
 }
+
+// pgsShowN builds one display set placing the same 4x2 picture at several
+// positions, so the ops-level compositing is exercised in shapes no real disc
+// has yet produced.
+func pgsShowN(at [][2]int) []byte {
+	head := []byte{0x07, 0x80, 0x04, 0x38, 0x10, 0x00, 0x00, 0x80, 0x00, 0x00, byte(len(at))}
+	for i, p := range at {
+		head = append(head,
+			0x00, byte(0x0a+i), 0x00, 0x00,
+			byte(p[0]>>8), byte(p[0]), byte(p[1]>>8), byte(p[1]))
+	}
+	out := pgsSeg(0x16, head)
+	out = append(out, pgsSeg(0x14, []byte{0x00, 0x00, 0x01, 235, 128, 128, 255})...)
+	rle := []byte{0x00, 0x84, 0x01, 0x00, 0x00, 0x00, 0x00}
+	for i := range at {
+		ods := []byte{0x00, byte(0x0a + i), 0x00, 0xc0,
+			0x00, 0x00, byte(len(rle) + 4), 0x00, 0x04, 0x00, 0x02}
+		out = append(out, pgsSeg(0x15, append(ods, rle...))...)
+	}
+	return append(out, pgsSeg(0x80, nil)...)
+}
+
+// The union rectangle must cover every object exactly, whatever their layout -
+// this is the path that turns several objects into the single picture a PGSCue
+// carries, and no disc in the corpus exercises it.
+func TestFlattenPGS_UnionGeometry(t *testing.T) {
+	cases := []struct {
+		name   string
+		at     [][2]int
+		wantXY [2]int
+		wantWH [2]int
+	}{
+		{"side by side", [][2]int{{100, 900}, {200, 900}}, [2]int{100, 900}, [2]int{104, 2}},
+		{"stacked", [][2]int{{100, 60}, {100, 900}}, [2]int{100, 60}, [2]int{4, 842}},
+		{"reversed order still yields the top-left origin",
+			[][2]int{{500, 900}, {100, 60}}, [2]int{100, 60}, [2]int{404, 842}},
+		{"overlapping", [][2]int{{100, 100}, {102, 101}}, [2]int{100, 100}, [2]int{6, 3}},
+		{"three objects", [][2]int{{10, 10}, {50, 10}, {30, 200}}, [2]int{10, 10}, [2]int{44, 192}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := buildMinimalMKV(t, dir, "multi.mkv",
+				[]mkv.Track{subtitleTrack(1, "pgs")},
+				[]mkv.Block{{TrackNumber: 1, Timecode: 0, Duration: 100, Data: pgsShowN(tc.at)}}, 100)
+
+			cues, err := ExtractSubtitlePGS(context.Background(), path, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cues) != 1 {
+				t.Fatalf("got %d cues, want 1", len(cues))
+			}
+			c := cues[0]
+			if c.X != tc.wantXY[0] || c.Y != tc.wantXY[1] {
+				t.Errorf("origin (%d,%d), want (%d,%d)", c.X, c.Y, tc.wantXY[0], tc.wantXY[1])
+			}
+			if got := c.Image.Bounds(); got.Dx() != tc.wantWH[0] || got.Dy() != tc.wantWH[1] {
+				t.Errorf("size %dx%d, want %dx%d", got.Dx(), got.Dy(), tc.wantWH[0], tc.wantWH[1])
+			}
+			// Every object must have landed: its top-left pixel is opaque white.
+			for _, p := range tc.at {
+				x, y := p[0]-c.X, p[1]-c.Y
+				off := c.Image.PixOffset(x, y)
+				if got := [4]uint8(c.Image.Pix[off : off+4]); got != [4]uint8{255, 255, 255, 255} {
+					t.Errorf("object at screen (%d,%d) missing from the composite: pixel = %v", p[0], p[1], got)
+				}
+			}
+		})
+	}
+}
+
+// Forced is per cue but a composite has several objects: any forced object must
+// make the cue forced, or a disc that marks only the sign in a mixed set would
+// lose it.
+func TestFlattenPGS_ForcedSurvivesCompositing(t *testing.T) {
+	dir := t.TempDir()
+	block := pgsShowN([][2]int{{10, 10}, {50, 50}})
+	// Set the forced flag on the SECOND composition object only.
+	block[3+11+8+3] |= 0x40
+	path := buildMinimalMKV(t, dir, "forced.mkv",
+		[]mkv.Track{subtitleTrack(1, "pgs")},
+		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Duration: 100, Data: block}}, 100)
+
+	cues, err := ExtractSubtitlePGS(context.Background(), path, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cues) != 1 {
+		t.Fatalf("got %d cues, want 1", len(cues))
+	}
+	if !cues[0].Forced {
+		t.Error("a composite holding one forced object did not report Forced")
+	}
+}

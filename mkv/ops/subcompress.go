@@ -16,6 +16,7 @@ package ops
 
 import (
 	"bytes"
+	"compress/bzip2"
 	"compress/zlib"
 	"fmt"
 	"io"
@@ -44,22 +45,41 @@ func decompressSubtitleBlock(t *mkv.Track, data []byte) ([]byte, error) {
 	case mkv.CompressionNone, mkv.CompressionHeaderStrip:
 		return data, nil
 	case mkv.CompressionZlib:
-		return inflateBlock(data)
+		return inflateBlock(data, func(r io.Reader) (io.Reader, error) {
+			zr, err := zlib.NewReader(r)
+			if err != nil {
+				return nil, fmt.Errorf("the block is declared zlib-compressed but does not start a zlib stream: %w", err)
+			}
+			return zr, nil
+		})
+	case mkv.CompressionBzlib:
+		return inflateBlock(data, func(r io.Reader) (io.Reader, error) {
+			// bzip2 has no header to validate up front, so a block that is not
+			// one fails on the first read rather than here.
+			return bzip2.NewReader(r), nil
+		})
 	default:
-		// bzlib and lzo1x have no decompressor in the standard library and
-		// mkvgo takes no dependencies. Say which scheme, so the operator knows
-		// this is a missing feature and not a broken file.
-		return nil, fmt.Errorf("subtitle track %d is compressed with %s, which mkvgo cannot decode (only zlib is supported)",
+		// lzo1x has no decompressor in the standard library, and mkvgo takes no
+		// dependencies. Writing one is not the obstacle - validating it is: no
+		// LZO-compressed Matroska has turned up to test it against, and an
+		// unverified decompressor is worse than an honest refusal. Name the
+		// scheme, so the operator knows this is a gap and not a broken file.
+		return nil, fmt.Errorf("subtitle track %d is compressed with %s, which mkvgo cannot decode (zlib and bzlib are supported)",
 			t.ID, t.Compression)
 	}
 }
 
-func inflateBlock(data []byte) ([]byte, error) {
-	zr, err := zlib.NewReader(bytes.NewReader(data))
+// inflateBlock decompresses one block through the reader open builds, bounded so
+// a stream that claims a huge expansion ratio is refused rather than allocated
+// for.
+func inflateBlock(data []byte, open func(io.Reader) (io.Reader, error)) ([]byte, error) {
+	zr, err := open(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("the block is declared zlib-compressed but does not start a zlib stream: %w", err)
+		return nil, err
 	}
-	defer zr.Close()
+	if c, ok := zr.(io.Closer); ok {
+		defer c.Close()
+	}
 	// Read one byte past the ceiling: that is what distinguishes "exactly at the
 	// limit" from "over it", without allocating for the overrun.
 	out, err := io.ReadAll(io.LimitReader(zr, maxDecompressedBlock+1))

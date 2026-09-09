@@ -46,6 +46,11 @@ All notable changes to mkvgo are documented here. The format is based on
   point is not only size: a cache of decoded cues turns out to be a THIRD of the
   size of a cache of the undecoded stream, so "keep the stream, decode later" is
   the expensive option, not the cheap one. Figures in docs/library.md.
+- **bzlib-compressed subtitle blocks decode too** (`compress/bzip2`, standard
+  library, still no dependency). lzo1x stays refused BY NAME rather than
+  guessed at: writing the decompressor is not the obstacle, validating one is -
+  no LZO-compressed Matroska has turned up to test against, and an unverified
+  decompressor is worse than an honest refusal.
 - **`mkv.Compression`** with `CompressionFromAlgo`, `Algo` and `String`, carried
   on `Track.Compression`. Its zero value is CompressionNone, so a Track built in
   code is never mistaken for a compressed one.
@@ -76,6 +81,14 @@ Found on a real 70 GB 2160p Blu-ray remux: both its PGS tracks are compressed
 this way, and the PGS extractor failed on it outright (`a 0x78 segment declares
 56013 bytes` - a zlib header read as a PGS segment header). The text path had
 been failing silently on the same class of file all along.
+
+### Changed
+
+- **A dropped bitmap subtitle now says what to do about it.** MP4 and HLS both
+  refuse PGS - and they are right to: MP4 has no sample entry for it and HLS
+  renditions carry WebVTT, so writing one would produce a file nothing reads.
+  The refusals name `ExtractSubtitlePGS` instead of only reporting the failure,
+  and say that every other track still carries.
 
 ### Notes
 

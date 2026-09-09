@@ -124,6 +124,13 @@ func subtitleDropReason(codec string) string {
 	switch canonicalSubCodec(codec) {
 	case "ass", "ssa":
 		return "styled subtitles (ASS/SSA) have no native MP4 form; set Options.FlattenStyledSubs to carry them as plain timed text (styling is lost)"
+	case "pgs":
+		// There is no standard MP4 carriage for PGS, so this is not a gap mkvgo
+		// can close by writing one - a file inventing an entry for it would be
+		// read by nothing. Point at the path that does work instead.
+		return "PGS subtitles are pictures, and MP4 has no sample entry for them; extract them separately with matroska.ExtractSubtitlePGS (the video and every other track still carry)"
+	case "vobsub", "dvbsub":
+		return "bitmap subtitles have no MP4 timed-text form and cannot be carried; the video and every other track still carry"
 	default:
 		return "subtitle format not representable as MP4 timed text"
 	}
