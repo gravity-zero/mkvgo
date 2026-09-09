@@ -15,6 +15,11 @@ All notable changes to mkvgo are documented here. The format is based on
   codec, so an index built by any earlier release already holds the PGS track's
   blocks. Serving one costs a seek, not a rebuild, and the wire format is
   unchanged (`subIndexVersion` still 2).
+- **Measured on a real 70 GB 2160p remux** (SMB, 76 MB/s link): the index build
+  is one pass at 8 min 10 s for 3702 blocks over two PGS tracks, marshalling to
+  61 KiB; serving then costs **0.21 s for the 12-cue forced track and 26.6 s for
+  the 1843-cue full track**, at 15 MB of RSS. The pictures decode to legible
+  subtitles.
 
 ### Added
 
@@ -33,6 +38,33 @@ All notable changes to mkvgo are documented here. The format is based on
 - **CLI `mkvgo extract-subtitle -format pgs -o <dir>`** writes one PNG per cue
   plus a `cues.json` manifest (timing, position, plane, forced). `-index` now
   applies to `-format pgs` as well as `-format vtt`.
+
+### Fixed
+
+- **A track whose blocks are zlib-compressed was read as if they were not.** The
+  reader parsed `ContentCompression` for its `ContentCompSettings` child only,
+  and never read `ContentCompAlgo` - whose default value, when the element is
+  absent, is 0: zlib. mkvmerge writes a compressed subtitle track in exactly
+  that form, an EMPTY `ContentCompression` element, so nothing on the wire said
+  "zlib" in words and mkvgo saw no compression at all. Every subtitle extractor
+  then handed the deflated bytes on as content: `ExtractSubtitle` and
+  `ExtractSubtitleWebVTT` wrote raw zlib into the output **as text, with no
+  error**, and `ExtractASS` did the same. `Track.Compression` now carries the
+  scheme, and the subtitle extractors inflate before decoding (bounded, so a
+  compression bomb is refused rather than allocated for). bzlib and lzo1x have
+  no decoder in the standard library and mkvgo takes no dependencies: those are
+  refused by name, not mis-decoded.
+- **A remux of such a file dropped the declaration while copying the compressed
+  blocks.** The writer emitted `ContentEncodings` only for header stripping,
+  hardcoding algo 3. Reading a zlib track and writing it back therefore produced
+  a file whose blocks were still deflated but which claimed they were not - the
+  track simply stopped working, with nothing in it to say why. The writer now
+  preserves the declared scheme.
+
+Found on a real 70 GB 2160p Blu-ray remux: both its PGS tracks are compressed
+this way, and the PGS extractor failed on it outright (`a 0x78 segment declares
+56013 bytes` - a zlib header read as a PGS segment header). The text path had
+been failing silently on the same class of file all along.
 
 ### Notes
 
