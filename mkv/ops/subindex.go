@@ -245,6 +245,7 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 	if err != nil {
 		return err
 	}
+	track := subtitleTrackByID(c, trackID)
 	entries, ok := ix.entries[trackID]
 	if !ok {
 		return fmt.Errorf("%w: track %d", ErrTrackNotIndexed, trackID)
@@ -297,7 +298,11 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 				return fmt.Errorf("%w: offset %d holds track %d at %d ms, the index recorded %d ms",
 					ErrIndexStale, e.pos.Off, trackID, blk.Timecode, e.timeMs)
 			}
-			text := decodeSubtitleCue(codec, blk.Data)
+			payload, err := decompressSubtitleBlock(track, blk.Data)
+			if err != nil {
+				return err
+			}
+			text := decodeSubtitleCue(codec, payload)
 			if text == "" {
 				continue
 			}

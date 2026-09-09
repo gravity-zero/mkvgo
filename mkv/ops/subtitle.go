@@ -20,14 +20,14 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 		return err
 	}
 
-	var found bool
-	for _, t := range c.Tracks {
-		if t.ID == trackID && t.Type == mkv.SubtitleTrack {
-			found = true
+	var track *mkv.Track
+	for i := range c.Tracks {
+		if c.Tracks[i].ID == trackID && c.Tracks[i].Type == mkv.SubtitleTrack {
+			track = &c.Tracks[i]
 			break
 		}
 	}
-	if !found {
+	if track == nil {
 		return fmt.Errorf("subtitle track %d not found", trackID)
 	}
 
@@ -65,7 +65,11 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 		if err != nil {
 			return err
 		}
-		text := trimNulls(blk.Data)
+		payload, err := decompressSubtitleBlock(track, blk.Data)
+		if err != nil {
+			return err
+		}
+		text := trimNulls(payload)
 		if len(text) == 0 {
 			continue
 		}
@@ -98,17 +102,17 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		return err
 	}
 
-	var codec string
-	found := false
-	for _, t := range c.Tracks {
-		if t.ID == trackID && t.Type == mkv.SubtitleTrack {
-			codec, found = t.Codec, true
+	var track *mkv.Track
+	for i := range c.Tracks {
+		if c.Tracks[i].ID == trackID && c.Tracks[i].Type == mkv.SubtitleTrack {
+			track = &c.Tracks[i]
 			break
 		}
 	}
-	if !found {
+	if track == nil {
 		return fmt.Errorf("subtitle track %d not found", trackID)
 	}
+	codec := track.Codec
 	if !isTextSubtitle(codec) {
 		return fmt.Errorf("subtitle track %d codec %q is not text (cannot convert to WebVTT)", trackID, codec)
 	}
@@ -136,7 +140,11 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		if err != nil {
 			return err
 		}
-		text := decodeSubtitleCue(codec, blk.Data)
+		payload, err := decompressSubtitleBlock(track, blk.Data)
+		if err != nil {
+			return err
+		}
+		text := decodeSubtitleCue(codec, payload)
 		if text == "" {
 			continue
 		}

@@ -137,7 +137,11 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 		if err != nil {
 			return err
 		}
-		text := trimNulls(blk.Data)
+		payload, err := decompressSubtitleBlock(track, blk.Data)
+		if err != nil {
+			return err
+		}
+		text := trimNulls(payload)
 		if len(text) == 0 {
 			continue
 		}

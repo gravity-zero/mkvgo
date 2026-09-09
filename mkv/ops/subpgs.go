@@ -87,7 +87,7 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 	}
 	br.KeepTracks(trackID) // reader-side filter, as in ExtractSubtitleWebVTT
 
-	asm := newPGSAssembler(fn)
+	asm := newPGSAssembler(fn, subtitleTrackByID(c, trackID))
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -161,7 +161,7 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 	}
 	defer f.Close()
 
-	asm := newPGSAssembler(fn)
+	asm := newPGSAssembler(fn, subtitleTrackByID(c, trackID))
 	var br *reader.BlockReader
 	for i := range entries {
 		if err := ctx.Err(); err != nil {
@@ -231,16 +231,21 @@ func checkPGSTrack(c *mkv.Container, trackID uint64) error {
 // cue is held open until the block that ends it arrives, and emitted then - one
 // cue of latency, never the whole track.
 type pgsAssembler struct {
-	dec  *subtitle.PGSDecoder
-	emit func(PGSCue) error
-	open *PGSCue
+	dec   *subtitle.PGSDecoder
+	emit  func(PGSCue) error
+	track *mkv.Track
+	open  *PGSCue
 }
 
-func newPGSAssembler(fn func(PGSCue) error) *pgsAssembler {
-	return &pgsAssembler{dec: subtitle.NewPGSDecoder(), emit: fn}
+func newPGSAssembler(fn func(PGSCue) error, t *mkv.Track) *pgsAssembler {
+	return &pgsAssembler{dec: subtitle.NewPGSDecoder(), emit: fn, track: t}
 }
 
 func (a *pgsAssembler) block(timeMs, durMs int64, data []byte) error {
+	data, err := decompressSubtitleBlock(a.track, data)
+	if err != nil {
+		return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+	}
 	sets, err := a.dec.Decode(data)
 	if err != nil {
 		return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
