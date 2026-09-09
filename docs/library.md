@@ -1177,6 +1177,10 @@ three ways:
     PNG, truecolour RGBA           9.4 MB   13.4 MB
     PNG, indexed palette           6.3 MB    8.8 MB
 
+(PNG at maximum compression; the encoder's default costs about 4% more, and the
+CLI keeps the default because the palette is what does the work - re-indexing
+alone accounts for a 51% drop on a second film, the compression level for 3%.)
+
 The format's run-length coding compresses worse than PNG's, and the stream
 repeats its palette and window segments for every display set. So a cache of
 decoded pictures is a third of the size AND free to serve, where a cache of the
