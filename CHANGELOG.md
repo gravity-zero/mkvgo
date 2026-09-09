@@ -4,6 +4,65 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.30.0] - 2026-09-09
+
+**Highlights**
+
+- **PGS bitmap subtitles can be extracted.** `S_HDMV/PGS` - what a Blu-ray rip
+  carries - decodes to timed pictures with their screen positions. Additive: no
+  existing signature or output changes.
+- **The subtitle index needed nothing.** It selects tracks by type and never by
+  codec, so an index built by any earlier release already holds the PGS track's
+  blocks. Serving one costs a seek, not a rebuild, and the wire format is
+  unchanged (`subIndexVersion` still 2).
+
+### Added
+
+- **`ExtractSubtitlePGS` / `ExtractSubtitlePGSFrom` and their streaming
+  siblings `ForEachSubtitlePGS` / `ForEachSubtitlePGSFrom`** (`mkv/ops`, mirrored
+  on the `matroska` facade). A `PGSCue` carries `StartMs`, `EndMs`, the `X, Y`
+  the composition draws at, the `ScreenW, ScreenH` plane those coordinates live
+  in, a per-cue `Forced` flag, and the decoded picture. The `From` variants seek
+  through a `SubtitleIndex`; the walking variants read the file once. All four
+  share the read path the WebVTT extractors use - the same reader-side
+  `KeepTracks` filter, the same re-seated `BlockReader`, the same staleness
+  checks that refuse an index that does not describe the file.
+- **`subtitle.PGSDecoder`**, the block-level decoder underneath: PCS/WDS/PDS/ODS
+  segments, run-length objects, YCrCb palettes. Written from the format
+  description - mkvgo is MIT and links no third-party subtitle decoder.
+- **CLI `mkvgo extract-subtitle -format pgs -o <dir>`** writes one PNG per cue
+  plus a `cues.json` manifest (timing, position, plane, forced). `-index` now
+  applies to `-format pgs` as well as `-format vtt`.
+
+### Notes
+
+- **`PGSCue.Image` is `*image.NRGBA`, not `*image.RGBA`.** A PGS palette carries
+  STRAIGHT alpha; Go's `image.RGBA` is alpha-premultiplied by convention, so
+  straight values stored there would make every `draw.Draw` and every encode
+  wrong, and premultiplying first is lossy. `*image.NRGBA` satisfies
+  `image.Image` and `png.Encode` writes it without a conversion.
+- **Prefer the `ForEach` form on a real track.** A cue owns a decoded bitmap and
+  the slice form holds every one at once: subtitle pictures run to roughly
+  1920x150 pixels, about 1.2 MB of NRGBA each, so a feature-length track of
+  ~1500 cues is on the order of 1.7 GB - past mkvgo's whole memory budget. (That
+  is arithmetic from typical dimensions, not a measurement.) The streaming form
+  keeps one picture alive; the CLI uses it.
+- **Blocks must be fed in file order from the start of the track.** PGS state -
+  palettes and pictures - spans display sets within an epoch, so a decoder
+  started mid-track can meet a composition whose picture was defined in a block
+  it never read. Those objects are skipped rather than invented, and an epoch
+  start clears the carried state.
+- **Cue ends** come from the `BlockDuration` when the muxer wrote one, otherwise
+  from the next display set (PGS ends a subtitle with an empty composition),
+  falling back to 3 s for a last cue the track never closed - the same fallback
+  the text path uses.
+- **`ScreenW`/`ScreenH` is the disc's subtitle plane**, which is not necessarily
+  the video track's size. A consumer scaling a picture to its player must scale
+  by that, not by the video's width and height.
+- Out of scope by design: no OCR, no sprite sheet, no WebVTT rendering of a
+  bitmap track. Which player-side packaging a PGS track gets is the consumer's
+  decision, not an extractor's.
+
 ## [0.29.1] - 2026-09-07
 
 ### Fixed
