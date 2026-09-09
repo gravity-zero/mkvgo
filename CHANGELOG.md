@@ -38,6 +38,17 @@ All notable changes to mkvgo are documented here. The format is based on
 - **CLI `mkvgo extract-subtitle -format pgs -o <dir>`** writes one PNG per cue
   plus a `cues.json` manifest (timing, position, plane, forced). `-index` now
   applies to `-format pgs` as well as `-format vtt`.
+- **`subtitle.Paletted`** re-indexes a decoded cue against its own colours,
+  returning nil when it would not fit a palette (a PGS cue never does not fit -
+  the format's palette has 256 entries and one display set draws from one
+  palette; measured, 65 distinct colours per cue and the same 65 across a whole
+  track). It halves what a decoded cue costs on disk, and the CLI uses it. The
+  point is not only size: a cache of decoded cues turns out to be a THIRD of the
+  size of a cache of the undecoded stream, so "keep the stream, decode later" is
+  the expensive option, not the cheap one. Figures in docs/library.md.
+- **`mkv.Compression`** with `CompressionFromAlgo`, `Algo` and `String`, carried
+  on `Track.Compression`. Its zero value is CompressionNone, so a Track built in
+  code is never mistaken for a compressed one.
 
 ### Fixed
 
