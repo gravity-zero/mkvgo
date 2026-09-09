@@ -178,7 +178,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
 | | `compare` | Diff metadata, or block content with `-blocks` - several files on the right compare against their concatenation |
 | **Extract** | `demux` | Extract tracks to raw streams |
-| | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT; external sidecar → WebVTT |
+| | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT, or PGS bitmaps → PNGs + manifest; external sidecar → WebVTT |
 | | `extract-attachment` · `add-attachment` · `remove-attachment` | Manage attachments (MIME sniffed) |
 | | `extract-frame` | Keyframe nearest a time, decoder-ready - thumbnail/storyboard pipelines |
 | **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) |

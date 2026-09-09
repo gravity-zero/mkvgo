@@ -997,6 +997,61 @@ the choice is only about what the store carries; a caller that only ever serves
 WebVTT can name the text tracks and skip the rest. `Tracks()`, `Blocks(id)` and
 `SourceSize()` report what an index covers. CLI: `mkvgo subtitle-index`.
 
+### Bitmap subtitles: PGS
+
+Blu-ray rips carry their subtitles as `S_HDMV/PGS`: not text, but a stream of
+palettized pictures with the screen position each is drawn at. There is nothing
+to convert to WebVTT - a PGS cue has no characters in it, only pixels - so the
+extractor hands back images and rectangles and stops there:
+
+```go
+// Walking the file, or served from the same SubtitleIndex the text tracks use:
+cues, err := matroska.ExtractSubtitlePGS(ctx, "movie.mkv", trackID)
+cues, err = matroska.ExtractSubtitlePGSFrom(ctx, "movie.mkv", trackID, ix)
+
+// The bounded form - one picture alive at a time:
+err = matroska.ForEachSubtitlePGSFrom(ctx, "movie.mkv", trackID, ix, func(c matroska.PGSCue) error {
+    return png.Encode(w, c.Image) // c.StartMs, c.EndMs, c.X, c.Y, c.ScreenW, c.ScreenH, c.Forced
+})
+```
+
+**The index needs nothing new.** `BuildSubtitleIndex` selects tracks by TYPE and
+never by codec, so an index built by any release since the feature landed
+already holds the PGS track's blocks: serving one costs a seek, not a rebuild,
+and the wire format is unchanged.
+
+**Prefer the `ForEach` form.** A `PGSCue` owns a decoded bitmap, and the slice
+form holds every one of them at once. Subtitle pictures run to roughly 1920x150
+pixels, or about 1.2 MB of NRGBA each, so a feature-length track of ~1500 cues
+is on the order of 1.7 GB - past mkvgo's whole budget. (That is arithmetic from
+typical dimensions, not a measurement.) The streaming form keeps one picture
+alive, so writing a whole track out costs a few MB.
+
+**Details that bite.** `Image` is `*image.NRGBA`, not `*image.RGBA`: a PGS
+palette carries straight alpha, while Go's `image.RGBA` is alpha-premultiplied
+by convention, so straight values stored there would draw and encode wrong.
+`ScreenW`/`ScreenH` is the disc's subtitle plane, which is not necessarily the
+video track's size - scale by that, not by the video's width and height.
+`Forced` is per cue, not per track: one PGS track routinely mixes forced signs
+with normal dialogue, so the track's own forced flag cannot answer the question.
+Cue ends come from the `BlockDuration` when the muxer wrote one, otherwise from
+the next display set (PGS ends a subtitle with an empty composition), falling
+back to 3 s for a last cue the track never closed.
+
+Feed blocks in file order from the start of the track. PGS state - palettes and
+pictures - spans display sets within an epoch, so a decoder started in the
+middle can meet a composition whose picture was defined in a block it never
+read; those objects are skipped rather than invented. `subtitle.PGSDecoder` is
+the block-level decoder underneath, exported for callers that drive their own
+read loop (`Decode` per block, `Reset` when seeking).
+
+The decoder was written from the format description; mkvgo is MIT and links no
+third-party subtitle decoder. Out of scope by design: no OCR, no sprite sheet,
+no WebVTT rendering - which player-side packaging a bitmap track gets is the
+consumer's decision, not an extractor's. CLI: `mkvgo extract-subtitle -format
+pgs -o <dir>` writes one PNG per cue plus a `cues.json` manifest, driven by the
+streaming form.
+
 ---
 
 ## Mux / Demux
