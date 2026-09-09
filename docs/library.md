@@ -1098,12 +1098,15 @@ That is 4.6x less traffic and 20% less wall clock, and a plain sequential read
 of the same mount goes from 76 MB/s to 146 MB/s under the same hint.
 
 CAVEAT, and it decides whether you should use this: that is one network mount,
-with a readahead set to twice its own read size. Kernel readahead exists because
-it usually helps, and on a correctly tuned mount - or on a local disk - turning
-it off is expected to HURT a walk that reads most of the file. That expectation
-is NOT measured here; treat it as the reason mkvgo does not do this for you and
-why it is not a default, not as a result. Measure it on the storage you actually
-run on, and look at `read_ahead_kb` before you reach for the workaround.
+with a readahead set to twice its own read size. What the hint does elsewhere
+was checked rather than assumed, and the answer so far is "nothing": on a local
+9p/drvfs mount the same read loop ran at 160.9 vs 156.7 MB/s and 152.1 vs 151.5
+MB/s with and without it - inside the noise, in both directions. So the hint has
+not been observed to HURT anywhere; it has simply not been observed to help on
+anything but the misconfigured mount. Nobody has measured it against a real
+block device, which is where kernel readahead earns its keep and where it could
+still cost you. Measure it on the storage you actually run on, and look at
+`read_ahead_kb` before you reach for the workaround at all.
 
 Two things that look like optimizations and are not, both measured and both
 rejected: coalescing neighbouring block reads (the blocks of a subtitle track
