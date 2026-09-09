@@ -2,8 +2,11 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"image/png"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -94,14 +97,19 @@ func CmdExtractSubtitle(args []string) {
 	GuardOverwrite(outPath)
 
 	if indexPath != "" {
-		if format != "vtt" {
-			Fatal("-index applies to -format vtt only")
+		if format != "vtt" && format != "pgs" {
+			Fatal("-index applies to -format vtt and -format pgs only")
 		}
 		if isMP4Path(source) {
 			Fatal("-index applies to MKV/WebM only: an MP4 already carries its own sample table")
 		}
-		if err := extractWebVTTFromIndex(source, trackID, indexPath, outPath); err != nil {
+		n, err := extractFromIndex(source, trackID, format, indexPath, outPath)
+		if err != nil {
 			Fatal(err.Error())
+		}
+		if format == "pgs" {
+			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d (from %s) → %s\n", n, trackID, indexPath, outPath)
+			return
 		}
 		fmt.Printf("extracted subtitle track %d (vtt, from %s) → %s\n", trackID, indexPath, outPath)
 		return
@@ -111,6 +119,18 @@ func CmdExtractSubtitle(args []string) {
 	switch format {
 	case "vtt":
 		err = extractWebVTT(source, trackID, outPath)
+	case "pgs":
+		if isMP4Path(source) {
+			Fatal("PGS bitmap subtitles are a Matroska codec: -format pgs applies to MKV/WebM only")
+		}
+		var n int
+		n, err = writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
+			return matroska.ForEachSubtitlePGS(context.Background(), source, trackID, fn)
+		})
+		if err == nil {
+			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d → %s\n", n, trackID, outPath)
+			return
+		}
 	case "srt":
 		if isMP4Path(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
@@ -122,7 +142,7 @@ func CmdExtractSubtitle(args []string) {
 		}
 		err = matroska.ExtractASS(context.Background(), source, trackID, outPath)
 	default:
-		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt)", format))
+		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
 	}
 	if err != nil {
 		Fatal(err.Error())
@@ -144,23 +164,84 @@ func extractWebVTT(source string, trackID uint64, outPath string) error {
 	return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
 }
 
-// extractWebVTTFromIndex serves one track from an index file written by
-// CmdSubtitleIndex, instead of walking the source.
-func extractWebVTTFromIndex(source string, trackID uint64, indexPath, outPath string) error {
+// extractFromIndex serves one track from an index file written by
+// CmdSubtitleIndex, instead of walking the source. It returns the number of PGS
+// cues written, which is 0 (and meaningless) for the text formats.
+func extractFromIndex(source string, trackID uint64, format, indexPath, outPath string) (int, error) {
 	blob, err := os.ReadFile(indexPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var ix matroska.SubtitleIndex
 	if err := ix.UnmarshalBinary(blob); err != nil {
-		return err
+		return 0, err
+	}
+	if format == "pgs" {
+		return writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
+			return matroska.ForEachSubtitlePGSFrom(context.Background(), source, trackID, &ix, fn)
+		})
 	}
 	out, err := os.Create(outPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer out.Close()
-	return matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out)
+	return 0, matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out)
+}
+
+// pgsCueManifest is one line of the manifest written beside the pictures. The
+// CLI writes an on-disk form of PGSCue and stops there: turning bitmaps into
+// something a player renders (a sprite sheet, an OCR pass) is a packaging
+// decision that belongs to the consumer, not to an extractor.
+type pgsCueManifest struct {
+	Index   int    `json:"index"`
+	StartMs int64  `json:"start_ms"`
+	EndMs   int64  `json:"end_ms"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
+	ScreenW int    `json:"screen_w"`
+	ScreenH int    `json:"screen_h"`
+	Forced  bool   `json:"forced,omitempty"`
+	File    string `json:"file"`
+}
+
+// writePGSDir writes one PNG per cue into outDir plus a cues.json manifest. It
+// drives the streaming extractor, so a two-hour track costs one picture of
+// memory rather than the whole track's worth.
+func writePGSDir(outDir string, each func(func(matroska.PGSCue) error) error) (int, error) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return 0, err
+	}
+	var manifest []pgsCueManifest
+	n := 0
+	err := each(func(c matroska.PGSCue) error {
+		name := fmt.Sprintf("%05d.png", n)
+		f, err := os.Create(filepath.Join(outDir, name))
+		if err != nil {
+			return err
+		}
+		if err := png.Encode(f, c.Image); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+		manifest = append(manifest, pgsCueManifest{
+			Index: n, StartMs: c.StartMs, EndMs: c.EndMs, X: c.X, Y: c.Y,
+			ScreenW: c.ScreenW, ScreenH: c.ScreenH, Forced: c.Forced, File: name,
+		})
+		n++
+		return nil
+	})
+	if err != nil {
+		return n, err
+	}
+	blob, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return n, err
+	}
+	return n, os.WriteFile(filepath.Join(outDir, "cues.json"), append(blob, '\n'), 0o644)
 }
 
 // CmdSubtitleIndex builds the subtitle block index of an MKV/WebM and writes it
