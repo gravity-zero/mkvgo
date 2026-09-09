@@ -1052,6 +1052,54 @@ Twenty seconds is not free, but it is against 493 s for the pass it replaces.
 The win is reuse across requests - not the first extraction, and not track
 count.
 
+**On a network mount, tell the kernel not to read ahead.** The build's cost is
+dominated by bytes the storage moves, and on a CIFS/SMB mount the kernel's own
+readahead fights the protocol's larger rsize: it fetches windows the walk is
+about to seek past, and it slows even the reads the walk does want. mkvgo needs
+no option for this - `Options.FS` already lets a caller hand it a descriptor of
+its choosing:
+
+```go
+opts := mkv.Options{FS: &mkv.FS{Open: func(p string) (mkv.ReadSeekCloser, error) {
+    f, err := os.Open(p)
+    if err != nil {
+        return nil, err
+    }
+    // POSIX_FADV_RANDOM over the whole file. Linux only - guard it with a
+    // build tag, and skip it for local disks (see the caveat below).
+    _, _, e := syscall.Syscall6(syscall.SYS_FADVISE64, f.Fd(), 0, 0, 1, 0, 0)
+    if e != 0 {
+        f.Close()
+        return nil, e
+    }
+    return f, nil
+}}}
+ix, err := matroska.BuildSubtitleIndex(ctx, path, nil, opts)
+```
+
+Measured on a 70.0 GB source over SMB 3.1.1 (rsize 4 MiB, cache=strict), the
+same index out of both (3702 blocks, byte-identical):
+
+    default readahead   493 s    17.4% -> 79.3% of the file crossed the wire
+    FADV_RANDOM         395 s                17.4%
+
+That is 4.6x less traffic and 20% less wall clock, and a plain sequential read
+of the same mount goes from 76 MB/s to 146 MB/s under the same hint.
+
+CAVEAT, and it decides whether you should use this: that is one network mount.
+Kernel readahead exists because it usually helps, and on a local disk turning it
+off is expected to HURT a walk that reads most of the file - which is why mkvgo
+does not do this for you and why it is not a default. Measure it on the storage
+you actually run on before adopting it.
+
+Two things that look like optimizations and are not, both measured and both
+rejected: coalescing neighbouring block reads (the blocks of a subtitle track
+sit a median 11.5 MB apart, so a 4 MB coalescing window removes 28% of the
+requests while reading 9x the bytes), and serving the index concurrently (1 to
+32 readers moves a scattered read from 10.4 ms to 8.25 ms, per-worker handles
+change nothing, and the sequential serve already beats that floor by reading
+neighbouring blocks inside one window).
+
 (Timings on a network mount vary by up to 2x run to run on the same file, so
 these are round totals over four films, with the tool order swapped between
 rounds. Never conclude from a single file. Note also that the same 39 s of
