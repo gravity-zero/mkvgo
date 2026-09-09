@@ -1168,6 +1168,22 @@ read; those objects are skipped rather than invented. `subtitle.PGSDecoder` is
 the block-level decoder underneath, exported for callers that drive their own
 read loop (`Decode` per block, `Reset` when seeking).
 
+**Caching decoded pictures costs LESS than caching the stream they came from.**
+Worth knowing before designing a subtitle cache, because the intuition runs the
+other way. Measured on two full PGS tracks of one disc, the same cues stored
+three ways:
+
+    undecoded PGS stream (.sup)   21.0 MB   28.6 MB
+    PNG, truecolour RGBA           9.4 MB   13.4 MB
+    PNG, indexed palette           6.3 MB    8.8 MB
+
+The format's run-length coding compresses worse than PNG's, and the stream
+repeats its palette and window segments for every display set. So a cache of
+decoded pictures is a third of the size AND free to serve, where a cache of the
+raw stream must be decoded again on every request. `subtitle.Paletted` does the
+re-indexing - a PGS cue never holds more than 256 colours, so it always fits -
+and the CLI uses it.
+
 The decoder was written from the format description; mkvgo is MIT and links no
 third-party subtitle decoder. Out of scope by design: no OCR, no sprite sheet,
 no WebVTT rendering - which player-side packaging a bitmap track gets is the
