@@ -1020,6 +1020,19 @@ never by codec, so an index built by any release since the feature landed
 already holds the PGS track's blocks: serving one costs a seek, not a rebuild,
 and the wire format is unchanged.
 
+**Which entry point.** The index is not the answer to every extraction. It costs
+one full pass, and it covers EVERY subtitle track of the file in that one pass -
+so it pays off from the SECOND track of a file, not from the second request. For
+a file carrying a single PGS track and read once, the walking extractor is the
+right call: measured on two real single-track remuxes over SMB, it ran 95.6 s on
+a 3216 MB source and 85.6 s on a 2947 MB one, against 98.7 s and 72.0 s for an
+external `-c:s copy` of the same tracks - the same order of magnitude, faster on
+one file and slower on the other, while additionally decoding every cue to a
+bitmap where the external copy only moves compressed packets. Neither tool came
+close to the link's 76 MB/s sequential rate, so both are bound by the per-block
+read pattern rather than by throughput. (Two files, one link: treat the shape as
+the result, not the constants.)
+
 **Prefer the `ForEach` form.** A `PGSCue` owns a decoded bitmap, and the slice
 form holds every one of them at once. Subtitle pictures run to roughly 1920x150
 pixels, or about 1.2 MB of NRGBA each, so a feature-length track of ~1500 cues
