@@ -1041,9 +1041,16 @@ the wire either way.
 
 So use the walking extractor for a file read once, and reach for the index for
 what it actually buys: it PERSISTS. The pass is paid once, and every later
-request against that file is a seek - 0.01 s for a 2-cue track, 0.28 s for a
-1584-cue one, against a fresh full pass for an external tool. The win is reuse
-across requests, not the first extraction, and not track count.
+request against that file is a seek instead of a pass. What that seek costs
+scales with the number of blocks and with how far apart they sit, NOT with the
+payload it returns - it is dominated by round trips, not bytes:
+
+    3.9 GB source     2 cues 0.01 s      1584 cues  0.28 s
+    70.0 GB source   12 cues 0.13 s      1843 cues 20.11 s   (0.09% of the file)
+
+Twenty seconds is not free, but it is against 493 s for the pass it replaces.
+The win is reuse across requests - not the first extraction, and not track
+count.
 
 (Timings on a network mount vary by up to 2x run to run on the same file, so
 these are round totals over four films, with the tool order swapped between
@@ -1053,13 +1060,17 @@ only moves compressed packets - equal time, unequal work.)
 
 **The build pass is not cheap, and "header-only" does not make it so.** It reads
 no payload INTO MEMORY, which is what bounds its RSS - but that is not what
-bounds its time. Measured on a 4.50 GB 2160p source with the kernel's own
-counters: the application read 91.7% of the file, and 104.3% of it crossed the
-network. Seeking over a payload does not stop the client from having fetched it,
-so the build costs a full read of the file whatever the walk skips. The win is
-entirely on the other side: serving one track from the index afterwards read
-0.02% of that file for a 13-cue track and 1.5% for a 2032-cue one. Budget the
-index as "one full read, once" and the serve as free - not the reverse.
+bounds its time. Measured with the kernel's own counters, application reads
+against bytes actually pulled from the storage:
+
+    4.50 GB 2160p source    app 91.7%    wire 104.3%    x1.14
+    70.0 GB 2160p source    app 15.5%    wire  79.3%    x5.1
+
+The walk really does skip, and on a large-block source it skips most of the file
+- but seeking over a payload does not stop the client from having fetched it,
+and the readahead it wastes grows with how much it skips. Both ends of that
+range cost a near-full read of the file. So budget the build as "one full pass",
+whatever its skip ratio, and never infer the bytes moved from the bytes read.
 
 **Prefer the `ForEach` form.** A `PGSCue` owns a decoded bitmap, and the slice
 form holds every one of them at once. Subtitle pictures run to roughly 1920x150
