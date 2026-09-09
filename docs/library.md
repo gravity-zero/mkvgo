@@ -1023,18 +1023,33 @@ never by codec, so an index built by any release since the feature landed
 already holds the PGS track's blocks: serving one costs a seek, not a rebuild,
 and the wire format is unchanged.
 
-**Which entry point.** The index is not the answer to every extraction. It costs
-one full pass, and it covers EVERY subtitle track of the file in that one pass -
-so it pays off from the SECOND track of a file, not from the second request. For
-a file carrying a single PGS track and read once, the walking extractor is the
-right call: measured on two real single-track remuxes over SMB, it ran 95.6 s on
-a 3216 MB source and 85.6 s on a 2947 MB one, against 98.7 s and 72.0 s for an
-external `-c:s copy` of the same tracks - the same order of magnitude, faster on
-one file and slower on the other, while additionally decoding every cue to a
-bitmap where the external copy only moves compressed packets. Both ran at about
-a third of the link's measured 107 MB/s, so both are bound by the per-block read
-pattern rather than by throughput. (Two files, one link: treat the shape as the
-result, not the constants.)
+**Which entry point.** The index is not the answer to every extraction, and it
+does not make a FIRST extraction faster. It costs one full pass, which is what
+any extraction costs, and an external tool pays that pass only once too - it can
+write several tracks from a single read, so "one pass here against one pass per
+track there" is not the trade. Measured over SMB, four films aggregated, one
+text track each, both sides decoding and converting to WebVTT:
+
+    round 1 (mkvgo first)    mkvgo 170.3 s    external 171.1 s
+    round 2 (external first) mkvgo 170.3 s    external 174.9 s
+    bytes on the wire        16.26 GB         16.27 GB
+
+They are the same, and the equal byte counts say why: both read the whole file
+once, so neither can be faster. Extracting three bitmap tracks from one file in
+a single shot is the same story - 39.2 s against 39.4 s, 104.6% of the file on
+the wire either way.
+
+So use the walking extractor for a file read once, and reach for the index for
+what it actually buys: it PERSISTS. The pass is paid once, and every later
+request against that file is a seek - 0.01 s for a 2-cue track, 0.28 s for a
+1584-cue one, against a fresh full pass for an external tool. The win is reuse
+across requests, not the first extraction, and not track count.
+
+(Timings on a network mount vary by up to 2x run to run on the same file, so
+these are round totals over four films, with the tool order swapped between
+rounds. Never conclude from a single file. Note also that the same 39 s of
+bitmap extraction decodes every cue to a picture, where an external `-c:s copy`
+only moves compressed packets - equal time, unequal work.)
 
 **The build pass is not cheap, and "header-only" does not make it so.** It reads
 no payload INTO MEMORY, which is what bounds its RSS - but that is not what
