@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -220,7 +222,15 @@ func writePGSDir(outDir string, each func(func(matroska.PGSCue) error) error) (i
 		if err != nil {
 			return err
 		}
-		if err := png.Encode(f, c.Image); err != nil {
+		// A PGS cue holds at most 256 colours, so truecolour spends four bytes
+		// a pixel to say what one can - about a third more on disk for output
+		// a consumer will cache. Fall back to the picture as decoded if it
+		// somehow does not fit a palette.
+		var img image.Image = c.Image
+		if p := subtitle.Paletted(c.Image); p != nil {
+			img = p
+		}
+		if err := png.Encode(f, img); err != nil {
 			f.Close()
 			return err
 		}

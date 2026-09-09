@@ -586,3 +586,54 @@ func TestPGSDecoder_UndefinedPaletteEntryIsTransparent(t *testing.T) {
 		t.Errorf("an undefined palette index painted %v, want %v", got, want)
 	}
 }
+
+// A PGS picture always fits a palette - that is the whole point of Paletted -
+// and re-indexing must not change a single pixel.
+func TestPaletted(t *testing.T) {
+	d := NewPGSDecoder()
+	sets, err := d.Decode(concat(
+		pgsPCS(1920, 1080, pgsEpochStart, 0, synthObject{id: 1}),
+		pgsPDS(0, palWhite, palBlue),
+		pgsODS(1, 4, 2, rle4x2),
+		pgsEND(),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := sets[0].Objects[0].Image
+	p := Paletted(src)
+	if p == nil {
+		t.Fatal("a decoded PGS picture did not fit a palette")
+	}
+	if p.Bounds() != src.Bounds() {
+		t.Fatalf("bounds %v, want %v", p.Bounds(), src.Bounds())
+	}
+	for y := 0; y < src.Bounds().Dy(); y++ {
+		for x := 0; x < src.Bounds().Dx(); x++ {
+			r1, g1, b1, a1 := src.At(x, y).RGBA()
+			r2, g2, b2, a2 := p.At(x, y).RGBA()
+			if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+				t.Fatalf("pixel (%d,%d) changed: %v -> %v", x, y, src.At(x, y), p.At(x, y))
+			}
+		}
+	}
+	if n := len(p.Palette); n > 3 {
+		t.Errorf("palette holds %d colours for a 3-colour picture", n)
+	}
+	if Paletted(nil) != nil {
+		t.Error("Paletted(nil) must be nil")
+	}
+}
+
+// More than 256 distinct colours cannot be indexed; the caller keeps the
+// truecolour picture rather than getting a silently degraded one.
+func TestPaletted_TooManyColours(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 300, 1))
+	for x := 0; x < 300; x++ {
+		o := img.PixOffset(x, 0)
+		img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = uint8(x), uint8(x>>1), uint8(x>>2), 255
+	}
+	if Paletted(img) != nil {
+		t.Error("a 300-colour picture was indexed anyway")
+	}
+}
