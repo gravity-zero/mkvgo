@@ -203,3 +203,40 @@ func TestFillColourSARBoundaries(t *testing.T) {
 		t.Errorf("zero coded width must not set DisplayWidth, got %v", *zeroW.DisplayWidth)
 	}
 }
+
+// TestHEVCScanTypeFromConstraintFlags: the hvcC source flags name the scan type
+// on their own, never a field order, and a mixed or unspecified source stays "".
+func TestHEVCScanTypeFromConstraintFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		c0   byte
+		want string
+	}{
+		{"progressive source", 0x80, "progressive"},
+		{"interlaced source", 0x40, "interlaced"},
+		{"both set: mixed, per-picture", 0xC0, ""},
+		{"neither: unspecified", 0x00, ""},
+		{"other constraint bits alone say nothing", 0x3F, ""},
+	}
+	for _, c := range cases {
+		if got := hevcScanType(c.c0); got != c.want {
+			t.Errorf("%s: hevcScanType(%#x) = %q, want %q", c.name, c.c0, got, c.want)
+		}
+		cp := make([]byte, 23) // hvcC header, no NAL arrays (hev1-style, SPS in-band)
+		cp[0] = 1
+		cp[1] = 1 // Main
+		cp[6] = c.c0
+		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: cp}
+		fillColourFromCodecPrivate(&tr)
+		if tr.ScanType != c.want {
+			t.Errorf("%s: ScanType = %q, want %q", c.name, tr.ScanType, c.want)
+		}
+		wantOrder := "" // interlaced or unknown: the flags never say which field comes first
+		if c.want == "progressive" {
+			wantOrder = "progressive"
+		}
+		if tr.FieldOrder != wantOrder {
+			t.Errorf("%s: FieldOrder = %q, want %q", c.name, tr.FieldOrder, wantOrder)
+		}
+	}
+}

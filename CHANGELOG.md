@@ -22,6 +22,14 @@ All notable changes to mkvgo are documented here. The format is based on
   "interlaced"` and **no** `field_order`; nothing is invented. Progressive
   streams report both, unchanged. Measured on a 1080i H.264 sample: was
   `field_order: "interlaced"`, now `scan_type: "interlaced"` alone.
+- **HEVC gets a scan type too.** The hvcC header's `general_progressive_source_flag`
+  / `general_interlaced_source_flag` (the first two constraint bits) name it,
+  head-only, so it holds for `hev1` with an in-band SPS as well. One flag set
+  names the scan type; both set (the stream mixes, each picture says for
+  itself) or neither (unspecified) stay unknown. Never a field order - the
+  flags do not carry one. Measured on a 2160p library: 116 of 117 HEVC files
+  declare a progressive source and now report it; the one that declares
+  nothing reports nothing.
 - **Read compat for what earlier releases persisted.** `Track.UnmarshalJSON`
   maps a legacy `field_order: "interlaced"` to `ScanType "interlaced"` with an
   empty `FieldOrder`, and fills a missing `scan_type` from a known order.

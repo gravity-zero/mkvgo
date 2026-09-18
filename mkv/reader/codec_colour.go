@@ -28,7 +28,7 @@ type bitstreamColour struct {
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
 	sarHeight  uint32  // VUI sample aspect ratio height
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
-	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag; "" unknown
+	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag or the hvcC source flags; "" unknown
 	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
 	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
@@ -530,6 +530,7 @@ func hevcColour(cp []byte) *bitstreamColour {
 	bc := &bitstreamColour{}
 	bc.bitDepth = validBitDepth(uint32(cp[17]&0x07) + 8)
 	bc.profile = hevcProfileName(cp[1] & 0x1f)
+	bc.scanType = hevcScanType(cp[6])
 	// Main and Main 10 are 4:2:0 by profile definition, so the chroma is known from
 	// the hvcC header even when the SPS is in-band (hev1, no NAL arrays here). The
 	// SPS, when present, overrides with its exact chroma_format_idc.
@@ -564,6 +565,25 @@ func hevcColour(cp []byte) *bitstreamColour {
 		}
 	}
 	return bc
+}
+
+// hevcScanType reads the two source flags that open the 48-bit
+// general_constraint_indicator_flags of the hvcC header (byte 6, bits 7 and 6:
+// general_progressive_source_flag, general_interlaced_source_flag). One flag set
+// names the scan type; both set means the stream mixes the two and each picture
+// says for itself (pic_struct), neither set means unspecified - both "" here.
+// Header-only, so it holds for hev1 with an in-band SPS too. Neither flag says
+// which field comes first: the scan type never yields a field order.
+func hevcScanType(constraint0 byte) string {
+	progressive := constraint0&0x80 != 0
+	interlaced := constraint0&0x40 != 0
+	switch {
+	case progressive && !interlaced:
+		return "progressive"
+	case interlaced && !progressive:
+		return "interlaced"
+	}
+	return ""
 }
 
 func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
