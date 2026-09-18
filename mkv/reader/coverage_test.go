@@ -649,8 +649,8 @@ func TestCoverReadStreamFullFields(t *testing.T) {
 	if vtr.DisplayHeight == nil || *vtr.DisplayHeight != 1080 {
 		t.Errorf("DisplayHeight = %v, want 1080", vtr.DisplayHeight)
 	}
-	if vtr.FieldOrder != "progressive" {
-		t.Errorf("FieldOrder = %q, want progressive", vtr.FieldOrder)
+	if vtr.ScanType != "progressive" || vtr.FieldOrder != "progressive" {
+		t.Errorf("ScanType/FieldOrder = %q/%q, want progressive/progressive", vtr.ScanType, vtr.FieldOrder)
 	}
 	if vtr.VideoBitDepth == nil || *vtr.VideoBitDepth != 10 {
 		t.Errorf("VideoBitDepth = %v, want 10", vtr.VideoBitDepth)
@@ -695,11 +695,11 @@ func TestCoverReadStreamFullFields(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// interlacedName value 2 (progressive) - was at 75%
+// scanFromVideo, FlagInterlaced 2 (progressive)
 // ---------------------------------------------------------------------------
 
-func TestCoverInterlacedNameProgressive(t *testing.T) {
-	// interlacedName(2) should return "progressive".
+func TestCoverScanFromVideoProgressive(t *testing.T) {
+	// FlagInterlaced=2 → ScanType and FieldOrder both "progressive".
 	// Exercise via a track built with IDFlagInterlaced=2 in the seekable reader.
 	var videoSub bytes.Buffer
 	ebml.WriteElementHeader(&videoSub, mkv.IDPixelWidth, 2)
@@ -716,13 +716,14 @@ func TestCoverInterlacedNameProgressive(t *testing.T) {
 		masterElem(mkv.IDVideo, videoSub.Bytes()),
 	)
 	tr := readFirstTrack(t, buildMKV(te))
-	if tr.FieldOrder != "progressive" {
-		t.Errorf("FieldOrder = %q, want progressive", tr.FieldOrder)
+	if tr.ScanType != "progressive" || tr.FieldOrder != "progressive" {
+		t.Errorf("ScanType/FieldOrder = %q/%q, want progressive/progressive", tr.ScanType, tr.FieldOrder)
 	}
 }
 
-// TestCoverInterlacedNameInterlaced exercises the interlacedName(1) path.
-func TestCoverInterlacedNameInterlaced(t *testing.T) {
+// TestCoverScanFromVideoInterlaced: FlagInterlaced=1 alone gives the scan type
+// and no field order - the container did not state one.
+func TestCoverScanFromVideoInterlaced(t *testing.T) {
 	var videoSub bytes.Buffer
 	ebml.WriteElementHeader(&videoSub, mkv.IDPixelWidth, 2)
 	ebml.WriteUint(&videoSub, 1920, 2)
@@ -738,8 +739,11 @@ func TestCoverInterlacedNameInterlaced(t *testing.T) {
 		masterElem(mkv.IDVideo, videoSub.Bytes()),
 	)
 	tr := readFirstTrack(t, buildMKV(te))
-	if tr.FieldOrder != "interlaced" {
-		t.Errorf("FieldOrder = %q, want interlaced", tr.FieldOrder)
+	if tr.ScanType != "interlaced" {
+		t.Errorf("ScanType = %q, want interlaced", tr.ScanType)
+	}
+	if tr.FieldOrder != "" {
+		t.Errorf("FieldOrder = %q, want \"\" (no FieldOrder element)", tr.FieldOrder)
 	}
 }
 
@@ -1391,15 +1395,37 @@ func TestCoverAV1ColorConfigProfile2NonTwelveBit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// interlacedName default return ("") - was missing at 75%
+// scanFromVideo: the flag/order combinations, including the ones the spec says
+// to ignore and the contradictory one, which must not invent an order.
 // ---------------------------------------------------------------------------
 
-func TestCoverInterlacedNameDefault(t *testing.T) {
-	if got := interlacedName(0); got != "" {
-		t.Errorf("interlacedName(0) = %q, want \"\"", got)
+func TestCoverScanFromVideoTable(t *testing.T) {
+	u := func(v uint64) *uint64 { return &v }
+	cases := []struct {
+		name       string
+		flag       uint64
+		order      *uint64
+		scan, want string
+	}{
+		{"undetermined, no order", 0, nil, "", ""},
+		{"unknown flag value", 99, nil, "", ""},
+		{"undetermined flag: order ignored per spec", 0, u(1), "", ""},
+		{"progressive flag: order ignored per spec", 2, u(6), "progressive", "progressive"},
+		{"interlaced, no order", 1, nil, "interlaced", ""},
+		{"interlaced tt", 1, u(1), "interlaced", "tt"},
+		{"interlaced bb", 1, u(6), "interlaced", "bb"},
+		{"interlaced bt", 1, u(9), "interlaced", "bt"},
+		{"interlaced tb", 1, u(14), "interlaced", "tb"},
+		{"interlaced, order undetermined", 1, u(2), "interlaced", ""},
+		{"interlaced, order says progressive: contradiction", 1, u(0), "interlaced", ""},
+		{"interlaced, order out of range", 1, u(7), "interlaced", ""},
 	}
-	if got := interlacedName(99); got != "" {
-		t.Errorf("interlacedName(99) = %q, want \"\"", got)
+	for _, c := range cases {
+		var tr mkv.Track
+		scanFromVideo(&tr, c.flag, c.order)
+		if tr.ScanType != c.scan || tr.FieldOrder != c.want {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, tr.ScanType, tr.FieldOrder, c.scan, c.want)
+		}
 	}
 }
 

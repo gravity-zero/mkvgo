@@ -28,7 +28,7 @@ type bitstreamColour struct {
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
 	sarHeight  uint32  // VUI sample aspect ratio height
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
-	fieldOrder string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag; "" unknown
+	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag; "" unknown
 	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
 	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
@@ -175,8 +175,13 @@ func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
 			t.PixelFormat = pf
 		}
 	}
-	if t.FieldOrder == "" && bc.fieldOrder != "" {
-		t.FieldOrder = bc.fieldOrder
+	if t.ScanType == "" && bc.scanType != "" {
+		t.ScanType = bc.scanType
+	}
+	// Progressive video has one possible order. Interlaced video keeps an unknown
+	// FieldOrder: the SPS does not say which field comes first.
+	if t.FieldOrder == "" && t.ScanType == "progressive" {
+		t.FieldOrder = "progressive"
 	}
 	// Sample aspect ratio from the SPS VUI → display dimensions, only when the
 	// container/pasp did not already supply them (those take precedence) and the
@@ -312,7 +317,7 @@ func unescapeRBSP(b []byte) []byte {
 func (bc *bitstreamColour) nonEmpty() bool {
 	return bc.primaries != nil || bc.transfer != nil || bc.matrix != nil ||
 		bc.rng != nil || bc.bitDepth != nil || bc.profile != "" || bc.level != nil ||
-		bc.sarWidth != 0 || bc.chroma != nil || bc.fieldOrder != ""
+		bc.sarWidth != 0 || bc.chroma != nil || bc.scanType != ""
 }
 
 // --- H.264 / AVC ---------------------------------------------------------------
@@ -408,10 +413,10 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	r.ue()                       // pic_width_in_mbs_minus1
 	r.ue()                       // pic_height_in_map_units_minus1
 	frameMbsOnly := r.bit() == 1 // 1 → progressive
-	bc.fieldOrder = "progressive"
+	bc.scanType = "progressive"
 	if !frameMbsOnly {
-		bc.fieldOrder = "interlaced"
-		r.bit() // mb_adaptive_frame_field_flag
+		bc.scanType = "interlaced" // field coding allowed; the order is not in the SPS
+		r.bit()                    // mb_adaptive_frame_field_flag
 	}
 	r.bit() // direct_8x8_inference_flag
 	if r.bit() == 1 {

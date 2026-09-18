@@ -218,10 +218,22 @@ type Track struct {
 	Profile          string  `json:"profile,omitempty"`      // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
 	Level            *uint16 `json:"level,omitempty"`        // codec level_idc from the SPS (the conventional level field): H.264 10×level, HEVC 30×level
 	PixelFormat      string  `json:"pixel_format,omitempty"` // the conventional pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
-	FieldOrder       string  `json:"field_order,omitempty"`  // "progressive" or "interlaced" (Matroska FlagInterlaced 0x9A, or H.264 frame_mbs_only_flag); "" unknown
-	FrameCount       int64   `json:"frame_count,omitempty"`  // number of frames (the conventional nb_frames field), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
-	DurationMs       int64   `json:"duration_ms,omitempty"`  // per-track duration in ms (the conventional per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
-	Bitrate          *uint32 `json:"bitrate,omitempty"`      // average stream bitrate in bits/s (MP4 btrt/esds avgBitrate = the conventional bit_rate; or the Matroska BPS tag, shown by probers as TAG:BPS); nil when unknown
+	// ScanType is how the pictures are coded - "progressive" or "interlaced" - from
+	// the Matroska FlagInterlaced element (0x9A) or the H.264 frame_mbs_only_flag;
+	// "" when unknown. It says nothing about which field comes first: that is
+	// FieldOrder, which is known far less often.
+	ScanType string `json:"scan_type,omitempty"`
+	// FieldOrder is the conventional field_order - "progressive", or for interlaced
+	// video "tt"/"bb"/"tb"/"bt" - only when the source states it: the Matroska
+	// FieldOrder element (0x9D), or a progressive ScanType (progressive video has no
+	// order to know). "" when unknown. An interlaced H.264 SPS yields ScanType
+	// "interlaced" and no FieldOrder: frame_mbs_only_flag does not say which field
+	// comes first, so no order is invented. JSON written before the two fields were
+	// separate carried "interlaced" here; UnmarshalJSON moves it to ScanType.
+	FieldOrder string  `json:"field_order,omitempty"`
+	FrameCount int64   `json:"frame_count,omitempty"` // number of frames (the conventional nb_frames field), from the MP4 stsz count; 0 unknown (not head-only for Matroska)
+	DurationMs int64   `json:"duration_ms,omitempty"` // per-track duration in ms (the conventional per-stream duration), from the MP4 mdhd; 0 unknown (Matroska has no per-track duration in the header)
+	Bitrate    *uint32 `json:"bitrate,omitempty"`     // average stream bitrate in bits/s (MP4 btrt/esds avgBitrate = the conventional bit_rate; or the Matroska BPS tag, shown by probers as TAG:BPS); nil when unknown
 	// StereoMode is the 3D stereo arrangement (Matroska StereoMode, or the MP4 st3d
 	// box mapped to the same values); nil for ordinary 2D video. See StereoModeName.
 	StereoMode *uint16 `json:"stereo_mode,omitempty"`

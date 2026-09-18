@@ -182,8 +182,8 @@ func TestReadStream2VideoFields(t *testing.T) {
 	if tr.Height == nil || *tr.Height != 1080 {
 		t.Errorf("Height = %v, want 1080", tr.Height)
 	}
-	if tr.FieldOrder != "interlaced" {
-		t.Errorf("FieldOrder = %q, want %q", tr.FieldOrder, "interlaced")
+	if tr.ScanType != "interlaced" {
+		t.Errorf("ScanType = %q, want %q", tr.ScanType, "interlaced")
 	}
 }
 
@@ -646,8 +646,8 @@ func TestRead2VideoFields(t *testing.T) {
 		t.Fatal("no tracks")
 	}
 	tr := c.Tracks[0]
-	if tr.FieldOrder != "interlaced" {
-		t.Errorf("FieldOrder = %q, want %q", tr.FieldOrder, "interlaced")
+	if tr.ScanType != "interlaced" {
+		t.Errorf("ScanType = %q, want %q", tr.ScanType, "interlaced")
 	}
 	if tr.DisplayWidth == nil || *tr.DisplayWidth != 640 {
 		t.Errorf("DisplayWidth = %v, want 640", tr.DisplayWidth)

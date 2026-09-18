@@ -134,7 +134,7 @@ MuxingApp:   Lavf60.16.100
 
 Tracks (3):
   #1  video     h264        lang=und    name=""  320x180
-        codec: profile="High 4:4:4 Predictive" level=12 pix_fmt=yuv444p field_order=progressive
+        codec: profile="High 4:4:4 Predictive" level=12 pix_fmt=yuv444p scan=progressive field_order=progressive
         colour: unspecified (determined - SDR)
   #2  audio     aac         lang=fre    name="French"  44100Hz  1ch(mono)  [default]
   #3  audio     aac         lang=eng    name="English"  44100Hz  1ch(mono)

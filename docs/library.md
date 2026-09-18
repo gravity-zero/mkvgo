@@ -870,7 +870,8 @@ Each `Track` carries the stream metadata probers report, read head-only from the
 | `FrameCount` | `nb_frames` | MP4 `stsz` count (0 for Matroska) |
 | `Profile`, `Level` | `profile`, `level` | SPS / hvcC |
 | `PixelFormat` | `pix_fmt` | chroma subsampling + bit depth (SPS / av1C / vpcC) |
-| `FieldOrder` | `field_order` | Matroska `FlagInterlaced` / H.264 `frame_mbs_only_flag` |
+| `ScanType` | (scan type: `progressive` / `interlaced`) | Matroska `FlagInterlaced` / H.264 `frame_mbs_only_flag`. Says how the pictures are coded, not which field comes first |
+| `FieldOrder` | `field_order` | `progressive`, or `tt`/`bb`/`tb`/`bt` from the Matroska `FieldOrder` element; `""` when the order is not stated. An interlaced H.264 SPS gives `ScanType` alone - it does not carry the order, so none is invented. JSON persisted by releases before 0.31.0 carried `"interlaced"` in `field_order`; `Track.UnmarshalJSON` reads it back as `ScanType` (`ScanTypeOf` does the same for a value held elsewhere) |
 | `VideoBitDepth` | bit depth | `colr`/Colour or codec bitstream |
 | `ColorSpaceName()`, `ColorTransferName()`, `ColorPrimariesName()`, `ColorRangeName()`, `IsHDR()` | `color_space`/`color_transfer`/`color_primaries`/`color_range` | `colr` (nclx/nclc) / Matroska Colour / SPS VUI |
 | `HDRFormat()` | (classification) | one word for the tonemap-or-direct-play decision: `dolby-vision` \| `hdr10` \| `hlg` \| `sdr`, `""` when unknown. DoVi profile 8 classifies by its base layer (`bl_signal_compatibility_id` 1/2/4 → hdr10/sdr/hlg - it plays without a DoVi decoder); only profiles that need the DoVi path report `dolby-vision` |

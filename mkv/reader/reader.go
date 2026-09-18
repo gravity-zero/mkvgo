@@ -1105,17 +1105,25 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	return t, nil
 }
 
-// interlacedName maps a Matroska FlagInterlaced value (0 undetermined, 1
-// interlaced, 2 progressive) to the conventional field_order string, "" when
-// undetermined.
-func interlacedName(v uint64) string {
-	switch v {
+// scanFromVideo records what the Video element says about scanning. FlagInterlaced
+// (0 undetermined, 1 interlaced, 2 progressive) gives the scan type. FieldOrder
+// (nil when absent) gives the order only for interlaced video - the spec says to
+// ignore it otherwise - and only when it names an interlaced order: "progressive"
+// under an interlaced flag is a contradiction, so the order stays unknown rather
+// than invented. Progressive video gets the one order it can have.
+func scanFromVideo(t *mkv.Track, flagInterlaced uint64, fieldOrder *uint64) {
+	switch flagInterlaced {
 	case 1:
-		return "interlaced"
+		t.ScanType = "interlaced"
+		if fieldOrder != nil {
+			if o := mkv.FieldOrderName(*fieldOrder); mkv.ScanTypeOf(o) == "interlaced" {
+				t.FieldOrder = o
+			}
+		}
 	case 2:
-		return "progressive"
+		t.ScanType = "progressive"
+		t.FieldOrder = "progressive"
 	}
-	return ""
 }
 
 // parseProjection reads the Video>Projection element and records its
@@ -1151,6 +1159,11 @@ func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
+	// FlagInterlaced and FieldOrder are resolved together after the loop: the
+	// order only counts under an interlaced flag, whichever comes first.
+	var flagInterlaced uint64
+	var fieldOrder *uint64
+	defer func() { scanFromVideo(t, flagInterlaced, fieldOrder) }()
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -1180,7 +1193,13 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			t.FieldOrder = interlacedName(v)
+			flagInterlaced = v
+		case mkv.IDFieldOrder:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			fieldOrder = &v
 		case mkv.IDDisplayWidth:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

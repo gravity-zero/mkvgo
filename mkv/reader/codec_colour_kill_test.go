@@ -82,7 +82,7 @@ func TestBitstreamColourNonEmpty(t *testing.T) {
 	cases := []*bitstreamColour{
 		{primaries: u16p(1)}, {transfer: u16p(1)}, {matrix: u16p(1)}, {rng: u16p(1)},
 		{bitDepth: u16p(8)}, {profile: "Main"}, {level: u16p(40)},
-		{sarWidth: 16}, {chroma: u16p(1)}, {fieldOrder: "progressive"},
+		{sarWidth: 16}, {chroma: u16p(1)}, {scanType: "progressive"},
 	}
 	for i, bc := range cases {
 		if !bc.nonEmpty() {
@@ -122,21 +122,56 @@ func TestAvcColourLengthAndCountBounds(t *testing.T) {
 	}
 }
 
-// TestFillColourFieldOrderPrecedence kills the field_order fill conditionals:
-// a container-supplied value wins; an empty one is filled from the bitstream.
-func TestFillColourFieldOrderPrecedence(t *testing.T) {
-	avcc := buildHighSPSAvcC(2, 2, 1) // frame_mbs_only=1 → bc.fieldOrder "progressive"
-	// Container already set FieldOrder → must be kept (kills `== ""` → `!= ""`).
-	kept := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc, FieldOrder: "interlaced"}
+// TestFillColourScanPrecedence kills the scan-type fill conditionals: a
+// container-supplied value wins; an empty one is filled from the bitstream,
+// and only progressive video gets a field order out of it.
+func TestFillColourScanPrecedence(t *testing.T) {
+	avcc := buildHighSPSAvcC(2, 2, 1) // frame_mbs_only=1 → bc.scanType "progressive"
+	// Container already set ScanType → must be kept (kills `== ""` → `!= ""`),
+	// and an interlaced scan type without an order must not gain one.
+	kept := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc, ScanType: "interlaced"}
 	fillColourFromCodecPrivate(&kept)
-	if kept.FieldOrder != "interlaced" {
-		t.Errorf("container FieldOrder must win, got %q", kept.FieldOrder)
+	if kept.ScanType != "interlaced" {
+		t.Errorf("container ScanType must win, got %q", kept.ScanType)
 	}
-	// Empty FieldOrder → filled from the SPS.
+	if kept.FieldOrder != "" {
+		t.Errorf("interlaced video without a stated order must keep FieldOrder empty, got %q", kept.FieldOrder)
+	}
+	// Empty ScanType → filled from the SPS, and the progressive order follows.
 	filled := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
 	fillColourFromCodecPrivate(&filled)
+	if filled.ScanType != "progressive" {
+		t.Errorf("empty ScanType should be filled to progressive, got %q", filled.ScanType)
+	}
 	if filled.FieldOrder != "progressive" {
-		t.Errorf("empty FieldOrder should be filled to progressive, got %q", filled.FieldOrder)
+		t.Errorf("progressive video should get the progressive order, got %q", filled.FieldOrder)
+	}
+	// Container FieldOrder present → kept (kills the FieldOrder `== ""` guard).
+	ordered := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc, ScanType: "interlaced", FieldOrder: "tt"}
+	fillColourFromCodecPrivate(&ordered)
+	if ordered.FieldOrder != "tt" {
+		t.Errorf("container FieldOrder must win, got %q", ordered.FieldOrder)
+	}
+}
+
+// TestAVCInterlacedSPSNoFieldOrder: frame_mbs_only_flag=0 says the stream may be
+// field-coded, not which field comes first. ScanType "interlaced", FieldOrder "".
+func TestAVCInterlacedSPSNoFieldOrder(t *testing.T) {
+	avcc := buildHighSPSAvcCScan(2, 2, 1, false)
+	bc := avcColour(avcc)
+	if bc == nil {
+		t.Fatal("avcColour returned nil")
+	}
+	if bc.scanType != "interlaced" {
+		t.Fatalf("scanType = %q, want interlaced", bc.scanType)
+	}
+	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
+	fillColourFromCodecPrivate(&tr)
+	if tr.ScanType != "interlaced" {
+		t.Errorf("ScanType = %q, want interlaced", tr.ScanType)
+	}
+	if tr.FieldOrder != "" {
+		t.Errorf("FieldOrder = %q, want \"\" (the SPS carries no field order)", tr.FieldOrder)
 	}
 }
 

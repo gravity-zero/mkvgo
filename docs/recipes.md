@@ -43,6 +43,7 @@ One track in the `-json` output:
   "profile": "High 4:4:4 Predictive",
   "level": 12,
   "pixel_format": "yuv444p",
+  "scan_type": "progressive",
   "field_order": "progressive",
   "colour_determined": true,
   "color_range": 1

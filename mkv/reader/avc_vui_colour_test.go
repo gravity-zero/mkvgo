@@ -39,7 +39,11 @@ func (w *tbw) bytes() []byte {
 
 // spsPrefix builds a High-profile SPS up to (and including) the
 // vui_parameters_present_flag, leaving the caller to append the VUI body.
-func spsPrefix() *tbw {
+func spsPrefix() *tbw { return spsPrefixScan(true) }
+
+// spsPrefixScan is spsPrefix with frame_mbs_only_flag chosen: false declares
+// field coding possible (interlaced), which adds mb_adaptive_frame_field_flag.
+func spsPrefixScan(frameMbsOnly bool) *tbw {
 	b := &tbw{}
 	b.u(100, 8) // profile_idc = High
 	b.u(0, 8)   // constraint flags + reserved
@@ -57,10 +61,15 @@ func spsPrefix() *tbw {
 	b.u(0, 1)   // gaps_in_frame_num_value_allowed_flag
 	b.ue(29)    // pic_width_in_mbs_minus1
 	b.ue(17)    // pic_height_in_map_units_minus1
-	b.u(1, 1)   // frame_mbs_only_flag = 1
-	b.u(1, 1)   // direct_8x8_inference_flag
-	b.u(0, 1)   // frame_cropping_flag = 0
-	b.u(1, 1)   // vui_parameters_present_flag = 1
+	if frameMbsOnly {
+		b.u(1, 1) // frame_mbs_only_flag = 1
+	} else {
+		b.u(0, 1) // frame_mbs_only_flag = 0
+		b.u(0, 1) // mb_adaptive_frame_field_flag
+	}
+	b.u(1, 1) // direct_8x8_inference_flag
+	b.u(0, 1) // frame_cropping_flag = 0
+	b.u(1, 1) // vui_parameters_present_flag = 1
 	return b
 }
 
@@ -75,7 +84,12 @@ func wrapAvcC(b *tbw) []byte {
 // buildHighSPSAvcC builds an avcC for a High-profile SPS whose VUI carries the
 // given colour code points (no aspect_ratio_info, no container colr).
 func buildHighSPSAvcC(primaries, transfer, matrix uint32) []byte {
-	b := spsPrefix()
+	return buildHighSPSAvcCScan(primaries, transfer, matrix, true)
+}
+
+// buildHighSPSAvcCScan is buildHighSPSAvcC with frame_mbs_only_flag chosen.
+func buildHighSPSAvcCScan(primaries, transfer, matrix uint32, frameMbsOnly bool) []byte {
+	b := spsPrefixScan(frameMbsOnly)
 	b.u(0, 1)         // aspect_ratio_info_present_flag
 	b.u(0, 1)         // overscan_info_present_flag
 	b.u(1, 1)         // video_signal_type_present_flag

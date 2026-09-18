@@ -487,6 +487,9 @@ func (p *streamParser) parseStreamContentCompression(size int64, t *mkv.Track) e
 }
 
 func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
+	var flagInterlaced uint64
+	var fieldOrder *uint64
+	defer func() { scanFromVideo(t, flagInterlaced, fieldOrder) }()
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDPixelWidth:
@@ -508,7 +511,13 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			t.FieldOrder = interlacedName(v)
+			flagInterlaced = v
+		case mkv.IDFieldOrder:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			fieldOrder = &v
 		case mkv.IDDisplayWidth:
 			v, err := p.readUint(h.Size)
 			if err != nil {

@@ -4,6 +4,31 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Scan type and field order are separate fields.** `Track.FieldOrder` used
+  to carry `"interlaced"` when the H.264 `frame_mbs_only_flag` (or the Matroska
+  `FlagInterlaced` element) said the pictures may be field-coded. That names the
+  scan type, not an order - the SPS never says which field comes first - and a
+  consumer keying `field_order` on `tt`/`bb`/`tb`/`bt` was handed a value from
+  another axis. Now `Track.ScanType` (`scan_type`) carries `"progressive"` /
+  `"interlaced"`, and `FieldOrder` (`field_order`) is only set when the order is
+  stated: `"progressive"` for progressive video (the one order it can have), or
+  `tt`/`bb`/`tb`/`bt` from the Matroska `FieldOrder` element (0x9D), which is
+  now read - by both parsers, and only under an interlaced flag, as the spec
+  requires. An interlaced H.264 stream therefore reports `scan_type:
+  "interlaced"` and **no** `field_order`; nothing is invented. Progressive
+  streams report both, unchanged. Measured on a 1080i H.264 sample: was
+  `field_order: "interlaced"`, now `scan_type: "interlaced"` alone.
+- **Read compat for what earlier releases persisted.** `Track.UnmarshalJSON`
+  maps a legacy `field_order: "interlaced"` to `ScanType "interlaced"` with an
+  empty `FieldOrder`, and fills a missing `scan_type` from a known order.
+  `mkv.ScanTypeOf(fieldOrder)` does the same for a value stored outside a
+  Track; `mkv.FieldOrderName(v)` names a raw element value. CLI `info` prints
+  `scan=` next to `field_order=`.
+
 ## [0.30.0] - 2026-09-09
 
 **Highlights**

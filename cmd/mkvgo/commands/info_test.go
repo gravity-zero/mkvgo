@@ -92,7 +92,8 @@ func TestCmdProbeMP4Details(t *testing.T) {
 		{"level=12", "Level != nil inner conditional"},
 		// PixelFormat != "" inner check: kills 216:21.
 		{"pix_fmt=yuv444p", "PixelFormat != '' inner conditional"},
-		// FieldOrder != "" inner check: kills 219:20.
+		// ScanType != "" and FieldOrder != "" inner checks.
+		{"scan=progressive", "ScanType != '' inner conditional"},
 		{"field_order=progressive", "FieldOrder != '' inner conditional"},
 		// ColorSpace present (via fallback from SPS): kills at least the colour line.
 		{"colour:", "colour section present"},
