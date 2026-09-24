@@ -32,7 +32,7 @@ func TestCLICMAFMPD(t *testing.T) {
 		}
 		for _, e := range entries {
 			n := e.Name()
-			if !strings.HasPrefix(n, prefix) || !(strings.HasSuffix(n, ".m4s") || strings.HasSuffix(n, ".mp4")) {
+			if !strings.HasPrefix(n, prefix) || (!strings.HasSuffix(n, ".m4s") && !strings.HasSuffix(n, ".mp4")) {
 				continue
 			}
 			if err := os.Rename(filepath.Join(from, n), filepath.Join(to, n)); err != nil {
