@@ -1,5 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
+# The golangci-lint the CI lint job runs (.github/workflows/ci.yml); preflight uses the same.
+GOLANGCI_LINT_VERSION = v2.13.2
 BIN = mkvgo
 
 .PHONY: build test vet fuzz bench clean release wasm wasm-smoke preflight ci-status
@@ -66,6 +68,10 @@ preflight:
 	  GOOS=$$os CGO_ENABLED=0 go vet ./...   || exit 1; \
 	done
 	@echo "== wasm build =="; GOOS=js GOARCH=wasm CGO_ENABLED=0 go build ./cmd/mkvgo-wasm/
+	@echo "== lint =="; \
+	  lint="$$(command -v golangci-lint || echo "$$(go env GOPATH)/bin/golangci-lint")"; \
+	  [ -x "$$lint" ] || { echo "golangci-lint missing: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"; exit 1; }; \
+	  CGO_ENABLED=0 "$$lint" run ./... || exit 1
 	@echo "== tests =="; CGO_ENABLED=0 go test ./...
 	@echo "preflight OK - cross-platform compile + tests pass locally; confirm the real matrix with 'make ci-status' after pushing"
 
