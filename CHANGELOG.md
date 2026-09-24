@@ -19,6 +19,24 @@ All notable changes to mkvgo are documented here. The format is based on
   both spans, with the remedy. Counting names get a `SegmentTemplate`, any
   other naming a `SegmentList`. CLI `mkvgo cmaf-mpd -o manifest.mpd <rung-dir>...
   [--audio <dir>]`.
+- **HLS playlists over external CMAF fragments.** `mp4.HLSFromCMAF` returns
+  the master and one media playlist per representation for the same
+  `CMAFPresentation`, over the same files (no alignment required between
+  rungs; each representation is checked on its own). CLI `mkvgo cmaf-hls -o
+  <dir> <rung-dir>... [--audio <dir>]`.
+- **`AudioChannelConfiguration` in every DASH manifest.** Each audio
+  Representation now carries the element when the channel count is known,
+  with the scheme the codec calls for: the Dolby channel mask for AC-3/E-AC-3
+  (`F801` for 5.1, the count when no single conventional layout matches), the
+  MPEG channel count for every other codec.
+
+### Changed
+
+- **Manifests use the resolved language.** The DASH `lang` attribute and the
+  HLS `LANGUAGE` attribute (and the rendition name fallback) now come from
+  `Track.ResolvedLanguage()`: the BCP-47 tag when the source carries one
+  (`elng` box, Matroska `LanguageBCP47`), else the three-letter code as
+  before. Sources without a BCP-47 tag produce the same manifests as before.
 
 ## [0.31.0] - 2026-09-18
 
