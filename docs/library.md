@@ -611,6 +611,30 @@ box, an init without `mvex`, a missing file - each is refused with the
 representation and file named. Encryption is not described
 (`Options.CENC`/`Options.Encrypt` are ignored). CLI: `mkvgo cmaf-mpd`.
 
+`mp4.HLSFromCMAF(ctx, p, opts...)` is the HLS side of the same
+`CMAFPresentation`: it returns the playlists keyed by file name -
+`"master.m3u8"` (audio group + one `EXT-X-STREAM-INF` per rung with its real
+`BANDWIDTH`/`RESOLUTION`/`FRAME-RATE`/`CODECS`) and `"<id>.m3u8"` per
+representation (`EXT-X-MAP` on the init, one `EXTINF` per segment from the
+same tick spans) - all meant for the directory the DASH manifest sits in, so
+one `URLPrefix` serves both. HLS carries one playlist per rung and has no
+shared timeline, so it does not require the rungs to be segment-aligned (a
+switch realigns on the next segment); every representation is still checked
+on its own. The first audio representation is `DEFAULT=YES` (an external
+init's track flags say "enabled", not "default"). CLI: `mkvgo cmaf-hls`.
+
+Across every DASH manifest mkvgo writes (`RemuxToHLS`, `RemuxToABR`/`PlanABR`,
+single-file, `DASHFromCMAF`) and every HLS master, a track's language is its
+`Track.ResolvedLanguage()` - the BCP-47 tag (`elng` box, Matroska
+`LanguageBCP47`) when present, else the legacy three-letter code - and each
+audio Representation carries an `AudioChannelConfiguration` element when the
+channel count is known: the Dolby scheme
+(`tag:dolby.com,2014:dash:audio_channel_configuration:2011`, channel mask of
+the conventional layout, e.g. `F801` for 5.1) for AC-3/E-AC-3, the MPEG scheme
+(`urn:mpeg:dash:23003:3:audio_channel_configuration:2011`, the count) for every
+other codec, and the count too for a Dolby channel count with no single
+conventional layout (7).
+
 ### Forensic A/B session watermarking (`mp4.PlanWatermark`)
 
 ```go

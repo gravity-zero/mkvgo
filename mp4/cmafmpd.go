@@ -71,11 +71,26 @@ type CMAFPresentation struct {
 // Encryption is not described (Options.CENC and Options.Encrypt are ignored).
 func DASHFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) ([]byte, error) {
 	o := optionsFrom(opts)
-	if len(p.Video) == 0 {
-		return nil, errf("a CMAF presentation needs at least one video representation")
+	video, audio, err := readCMAFPresentation(ctx, &o, p)
+	if err != nil {
+		return nil, err
 	}
-	video := make([]*cmafRep, len(p.Video))
-	audio := make([]*cmafRep, len(p.Audio))
+	if err := validateCMAFSwitchSet(video); err != nil {
+		return nil, err
+	}
+	return renderCMAFManifest(&o, video, audio), nil
+}
+
+// readCMAFPresentation reads every representation's files and checks each
+// one on its own (ids unique, segments in order, one video track for Video,
+// none for Audio). What holds between rungs is the manifest's business:
+// DASH validates the switch set, HLS carries one playlist per rung.
+func readCMAFPresentation(ctx context.Context, o *Options, p CMAFPresentation) (video, audio []*cmafRep, err error) {
+	if len(p.Video) == 0 {
+		return nil, nil, errf("a CMAF presentation needs at least one video representation")
+	}
+	video = make([]*cmafRep, len(p.Video))
+	audio = make([]*cmafRep, len(p.Audio))
 	seen := map[string]bool{}
 	read := func(dst []*cmafRep, src []CMAFRepresentation, prefix string, isVideo bool) error {
 		for i := range src {
@@ -99,15 +114,12 @@ func DASHFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) ([]b
 		return nil
 	}
 	if err := read(video, p.Video, "v", true); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := read(audio, p.Audio, "a", false); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := validateCMAFSwitchSet(video); err != nil {
-		return nil, err
-	}
-	return renderCMAFManifest(&o, video, audio), nil
+	return video, audio, nil
 }
 
 // cmafRep is a representation as read from its files.
@@ -670,10 +682,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 	// Audio: one AdaptationSet per representation.
 	for _, r := range audio {
 		t := &r.tracks[r.primary]
-		as := `mimeType="audio/mp4" contentType="audio"`
-		if t.Language != "" {
-			as += fmt.Sprintf(" lang=%q", t.Language)
-		}
+		as := `mimeType="audio/mp4" contentType="audio"` + dashLangAttr(t)
 		rep := fmt.Sprintf(`id=%q bandwidth="%d"`, r.id, r.bandwidth)
 		if t.SampleRate != nil && *t.SampleRate > 0 {
 			rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
@@ -683,6 +692,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		writeCMAFAddressing(&b, rw, r)
 		b.WriteString("      </Representation>\n")
 		b.WriteString("    </AdaptationSet>\n")

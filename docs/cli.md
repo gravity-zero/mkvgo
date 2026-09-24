@@ -1311,6 +1311,26 @@ times, or publish each rung as its own manifest). Counting segment names get a
 `SegmentTemplate`, any other naming a `SegmentList`. `-o -` (or no `-o`)
 writes the manifest to stdout. Library: `mp4.DASHFromCMAF`.
 
+### cmaf-hls
+
+The HLS counterpart of `cmaf-mpd` over the same rung directories: writes
+`master.m3u8` (audio group, one `EXT-X-STREAM-INF` per rung) and one
+`<id>.m3u8` media playlist per rendition (`v1.m3u8`, `v2.m3u8`, `a1.m3u8`, …;
+`EXT-X-MAP` on the init, one `EXTINF` per segment) into the output directory,
+referencing the segments relative to it. HLS needs no segment alignment
+between rungs, so misaligned rungs are accepted here (a switch realigns on the
+next segment) where `cmaf-mpd` refuses them.
+
+```
+mkvgo cmaf-hls -o <dir> <rung-dir> [<rung-dir> ...] [--audio <dir>]...
+```
+
+```bash
+mkvgo cmaf-hls -o stream/ stream/1080p stream/720p --audio stream/aac-fre
+```
+
+Library: `mp4.HLSFromCMAF`.
+
 ### watermark-segment
 
 Serve one resource of a forensic A/B session-watermarked stream. Two GOP-aligned

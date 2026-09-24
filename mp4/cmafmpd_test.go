@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,7 +29,7 @@ func cmafLadder(t *testing.T) string {
 	sr := 44100.0 // the rate fakeASC declares, so the init and the track agree
 	fr := 25.0
 	ch := uint8(2)
-	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "fre"}
+	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "fre", LanguageBCP47: "fr-CA"}
 	hd := buildABRVariant(t, mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(1280), Height: u32(720), FrameRate: &fr}, audio)
 	sd := buildABRVariant(t, mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(640), Height: u32(360), FrameRate: &fr}, audio)
 	dir := filepath.Join(t.TempDir(), "stream")
@@ -80,7 +81,8 @@ var bandwidthAttr = regexp.MustCompile(`bandwidth="\d+"`)
 // as external fragments. Bandwidth derives from segment byte sizes - the
 // packager's business, not this manifest's - so it is normalised before the
 // comparison. The golden was reviewed by hand: native timescales, exact tick
-// timelines, the two rungs in one switch set, the audio in its own set.
+// timelines, the two rungs in one switch set, the audio in its own set with
+// its BCP-47 language (the init's elng box) and channel configuration.
 func TestDASHFromCMAF_Golden(t *testing.T) {
 	dir := cmafLadder(t)
 	got, err := DASHFromCMAF(context.Background(), cmafPresentation(t, dir))
@@ -108,8 +110,9 @@ func TestDASHFromCMAF_Golden(t *testing.T) {
         </SegmentTemplate>
       </Representation>
     </AdaptationSet>
-    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="fre">
+    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="fr-CA">
       <Representation id="a1" bandwidth="N" audioSamplingRate="44100" codecs="mp4a.40.2">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
         <SegmentTemplate initialization="v1/init_a1.mp4" media="v1/seg_a1_$Number%05d$.m4s" startNumber="1" timescale="44100">
           <SegmentTimeline>
             <S t="0" d="44100" r="1"/>
@@ -145,7 +148,8 @@ func TestDASHFromCMAF_MatchesPackagerManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	mpd := string(got)
-	for _, attr := range []string{`id="v1"`, `id="v2"`, `id="a1"`, `width="1280"`, `width="640"`, `codecs="avc1.64001F"`, `codecs="mp4a.40.2"`, `lang="fre"`, `mediaPresentationDuration="PT2.400S"`} {
+	for _, attr := range []string{`id="v1"`, `id="v2"`, `id="a1"`, `width="1280"`, `width="640"`, `codecs="avc1.64001F"`, `codecs="mp4a.40.2"`, `lang="fr-CA"`, `mediaPresentationDuration="PT2.400S"`,
+		`<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`} {
 		mustContain(t, ref, attr)
 		mustContain(t, mpd, attr)
 	}
@@ -500,5 +504,130 @@ func TestSameTicks(t *testing.T) {
 	}
 	if sameTicks(1<<40, 1<<30, 1<<41+1, 1<<31) {
 		t.Error("large values one tick apart must differ")
+	}
+}
+
+// TestHLSFromCMAF_Golden pins the HLS side over the same ladder: one master,
+// one media playlist per representation, the same files referenced.
+func TestHLSFromCMAF_Golden(t *testing.T) {
+	dir := cmafLadder(t)
+	got, err := HLSFromCMAF(context.Background(), cmafPresentation(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("playlists = %d, want 4 (master + v1 + v2 + a1): %v", len(got), got)
+	}
+	bwLine := regexp.MustCompile(`BANDWIDTH=\d+`)
+	master := bwLine.ReplaceAllString(string(got["master.m3u8"]), "BANDWIDTH=N")
+	const wantMaster = `#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="fr-CA",AUTOSELECT=YES,LANGUAGE="fr-CA",DEFAULT=YES,URI="a1.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=N,RESOLUTION=1280x720,CODECS="avc1.64001F,mp4a.40.2",AUDIO="aud"
+v1.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=N,RESOLUTION=640x360,CODECS="avc1.64001F,mp4a.40.2",AUDIO="aud"
+v2.m3u8
+`
+	if master != wantMaster {
+		t.Errorf("master differs:\n--- got ---\n%s\n--- want ---\n%s", master, wantMaster)
+	}
+	const wantV2 = `#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-TARGETDURATION:1
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-MAP:URI="v2/init.mp4"
+#EXTINF:1.000,
+v2/seg00001.m4s
+#EXTINF:1.000,
+v2/seg00002.m4s
+#EXTINF:0.400,
+v2/seg00003.m4s
+#EXT-X-ENDLIST
+`
+	if v2 := string(got["v2.m3u8"]); v2 != wantV2 {
+		t.Errorf("v2.m3u8 differs:\n--- got ---\n%s\n--- want ---\n%s", v2, wantV2)
+	}
+	a1 := string(got["a1.m3u8"])
+	for _, want := range []string{`#EXT-X-MAP:URI="v1/init_a1.mp4"`, "#EXTINF:1.000,\nv1/seg_a1_00001.m4s\n", "#EXTINF:0.400,\nv1/seg_a1_00003.m4s\n#EXT-X-ENDLIST\n"} {
+		mustContain(t, a1, want)
+	}
+	// The same files, the same URIs as the DASH manifest over this ladder.
+	mpd, err := DASHFromCMAF(context.Background(), cmafPresentation(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, uri := range []string{"v1/init.mp4", "v2/init.mp4", "v1/init_a1.mp4"} {
+		mustContain(t, string(mpd), uri)
+		mustContain(t, string(got["master.m3u8"])+string(got["v1.m3u8"])+string(got["v2.m3u8"])+a1, uri)
+	}
+}
+
+// HLS carries one playlist per rung, so misaligned rungs are accepted there
+// (a switch realigns on the next segment) while DASH refuses them; the
+// per-representation checks still apply to both.
+func TestHLSFromCMAF_AcceptsMisalignedRungs(t *testing.T) {
+	dir := cmafLadder(t)
+	ctx := context.Background()
+	p := cmafPresentation(t, dir)
+	p.Video[1].Segments = p.Video[1].Segments[:2]
+	if _, err := DASHFromCMAF(ctx, p); err == nil {
+		t.Fatal("DASH must refuse misaligned rungs")
+	}
+	got, err := HLSFromCMAF(ctx, p)
+	if err != nil {
+		t.Fatalf("HLS must accept misaligned rungs: %v", err)
+	}
+	if n := strings.Count(string(got["v2.m3u8"]), "#EXTINF"); n != 2 {
+		t.Errorf("v2 segments = %d, want 2", n)
+	}
+	p.Video[0].Segments[1] = p.Video[0].Segments[0] // out of order: refused by both
+	if _, err := HLSFromCMAF(ctx, p); err == nil || !strings.Contains(err.Error(), "playback order") {
+		t.Errorf("HLS must refuse an out-of-order representation, got %v", err)
+	}
+	if _, err := HLSFromCMAF(ctx, CMAFPresentation{}); err == nil {
+		t.Error("HLS must refuse a presentation without video")
+	}
+}
+
+// RewriteURL applies to every playlist URI, as for the packager's playlists.
+func TestHLSFromCMAF_RewriteURL(t *testing.T) {
+	dir := cmafLadder(t)
+	got, err := HLSFromCMAF(context.Background(), cmafPresentation(t, dir), Options{RewriteURL: func(n string) string { return "https://cdn/x/" + n }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, string(got["master.m3u8"]), `URI="https://cdn/x/a1.m3u8"`)
+	mustContain(t, string(got["master.m3u8"]), "\nhttps://cdn/x/v1.m3u8\n")
+	mustContain(t, string(got["v1.m3u8"]), `#EXT-X-MAP:URI="https://cdn/x/v1/init.mp4"`)
+	mustContain(t, string(got["v1.m3u8"]), "\nhttps://cdn/x/v1/seg00002.m4s\n")
+}
+
+// The channel configuration follows the codec: Dolby mask for AC-3/E-AC-3
+// on a conventional layout, MPEG count otherwise, nothing when unknown.
+func TestDashAudioChannelConfiguration(t *testing.T) {
+	ch := func(n uint8) *uint8 { return &n }
+	const mpeg = `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="%s"/>` + "\n"
+	const dolby = `<AudioChannelConfiguration schemeIdUri="tag:dolby.com,2014:dash:audio_channel_configuration:2011" value="%s"/>` + "\n"
+	cases := []struct {
+		track mkv.Track
+		want  string
+	}{
+		{mkv.Track{Codec: "aac", Channels: ch(2)}, fmt.Sprintf(mpeg, "2")},
+		{mkv.Track{Codec: "opus", Channels: ch(6)}, fmt.Sprintf(mpeg, "6")},
+		{mkv.Track{Codec: "ac3", Channels: ch(2)}, fmt.Sprintf(dolby, "A000")},
+		{mkv.Track{Codec: "ac3", Channels: ch(6)}, fmt.Sprintf(dolby, "F801")},
+		{mkv.Track{Codec: "eac3", Channels: ch(8)}, fmt.Sprintf(dolby, "FA01")},
+		{mkv.Track{Codec: "eac3", Channels: ch(1)}, fmt.Sprintf(dolby, "4000")},
+		{mkv.Track{Codec: "eac3", Channels: ch(7)}, fmt.Sprintf(mpeg, "7")}, // 6.1 or 7.0: no single layout, the count is honest
+		{mkv.Track{Codec: "aac"}, ""},
+		{mkv.Track{Codec: "ac3", Channels: ch(0)}, ""},
+	}
+	for _, c := range cases {
+		if got := dashAudioChannelConfiguration(&c.track, ""); got != c.want {
+			t.Errorf("%s/%v: got %q, want %q", c.track.Codec, c.track.Channels, got, c.want)
+		}
+	}
+	if got := dashAudioChannelConfiguration(&mkv.Track{Codec: "aac", Channels: ch(2)}, "    "); !strings.HasPrefix(got, "    <Audio") {
+		t.Errorf("indent not applied: %q", got)
 	}
 }

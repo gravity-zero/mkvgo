@@ -243,8 +243,9 @@ written.
 mkvgo cmaf-mpd -o stream/manifest.mpd stream/1080p stream/720p --audio stream/aac
 ```
 
-Library: `mp4.DASHFromCMAF`. See [cli.md](cli.md#cmaf-mpd) and
-[library.md](library.md).
+`cmaf-hls -o stream/ …` writes the HLS side (master + one media playlist per
+rendition) over the same directories. Library: `mp4.DASHFromCMAF` /
+`mp4.HLSFromCMAF`. See [cli.md](cli.md#cmaf-mpd) and [library.md](library.md).
 
 ---
 

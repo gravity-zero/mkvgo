@@ -18,17 +18,69 @@ import (
 // The manifest references each file relative to where it is written, so the
 // rung directories are normally siblings under the manifest's directory.
 func CmdCMAFMPD(args []string) {
-	var (
-		outPath string
-		videos  []string
-		audios  []string
-	)
+	outPath, videos, audios := parseCMAFArgs(args, "cmaf-mpd")
+	base := "."
+	if outPath != "" && outPath != "-" {
+		base = filepath.Dir(outPath)
+	}
+	p := cmafPresentationFromDirs(videos, audios, base)
+	data, err := mp4.DASHFromCMAF(context.Background(), p)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	if outPath == "" || outPath == "-" {
+		if _, err := os.Stdout.Write(data); err != nil {
+			Fatal(err.Error())
+		}
+		return
+	}
+	GuardOverwrite(outPath)
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		Fatal(err.Error())
+	}
+	fmt.Fprintf(os.Stderr, "manifest.mpd → %s (%d bytes, %d video + %d audio representations)\n", outPath, len(data), len(p.Video), len(p.Audio))
+}
+
+// CmdCMAFHLS is the HLS counterpart of cmaf-mpd: it writes master.m3u8 and
+// one <id>.m3u8 media playlist per rendition into the output directory, over
+// the same rung directories (normally its subdirectories).
+func CmdCMAFHLS(args []string) {
+	outDir, videos, audios := parseCMAFArgs(args, "cmaf-hls")
+	if outDir == "" || outDir == "-" {
+		Fatal("usage: " + CmdUsage["cmaf-hls"])
+	}
+	p := cmafPresentationFromDirs(videos, audios, outDir)
+	playlists, err := mp4.HLSFromCMAF(context.Background(), p)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		Fatal(err.Error())
+	}
+	names := make([]string, 0, len(playlists))
+	for name := range playlists {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		path := filepath.Join(outDir, name)
+		GuardOverwrite(path)
+		if err := os.WriteFile(path, playlists[name], 0o644); err != nil {
+			Fatal(err.Error())
+		}
+	}
+	fmt.Fprintf(os.Stderr, "HLS playlists written → %s (%d files; play master.m3u8)\n", outDir, len(names))
+}
+
+// parseCMAFArgs reads the shared cmaf-* command line: -o, repeated --audio,
+// and the rung directories.
+func parseCMAFArgs(args []string, cmd string) (out string, videos, audios []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
 			i++
 			if i < len(args) {
-				outPath = args[i]
+				out = args[i]
 			}
 		case "--audio":
 			i++
@@ -41,13 +93,13 @@ func CmdCMAFMPD(args []string) {
 		}
 	}
 	if len(videos) == 0 {
-		Fatal("usage: " + CmdUsage["cmaf-mpd"])
+		Fatal("usage: " + CmdUsage[cmd])
 	}
-	base := "."
-	if outPath != "" && outPath != "-" {
-		base = filepath.Dir(outPath)
-	}
+	return out, videos, audios
+}
 
+// cmafPresentationFromDirs describes every rung directory relative to base.
+func cmafPresentationFromDirs(videos, audios []string, base string) mp4.CMAFPresentation {
 	var p mp4.CMAFPresentation
 	for _, d := range videos {
 		rep, err := cmafRepFromDir(d, base)
@@ -63,22 +115,7 @@ func CmdCMAFMPD(args []string) {
 		}
 		p.Audio = append(p.Audio, rep)
 	}
-	data, err := mp4.DASHFromCMAF(context.Background(), p)
-	if err != nil {
-		Fatal(err.Error())
-	}
-
-	if outPath == "" || outPath == "-" {
-		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
-		}
-		return
-	}
-	GuardOverwrite(outPath)
-	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
-	}
-	fmt.Fprintf(os.Stderr, "manifest.mpd → %s (%d bytes, %d video + %d audio representations)\n", outPath, len(data), len(p.Video), len(p.Audio))
+	return p
 }
 
 // cmafRepFromDir describes the rendition in dir: init.mp4 (or the only .mp4)

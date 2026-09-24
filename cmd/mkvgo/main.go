@@ -160,6 +160,8 @@ func main() {
 		commands.CmdABRSegment(args)
 	case "cmaf-mpd":
 		commands.CmdCMAFMPD(args)
+	case "cmaf-hls":
+		commands.CmdCMAFHLS(args)
 	case "watermark-segment":
 		commands.CmdWatermarkSegment(args)
 	case "forensic-segment":

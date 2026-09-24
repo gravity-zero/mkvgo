@@ -68,6 +68,26 @@ func TestCLICMAFMPD(t *testing.T) {
 	if n := strings.Count(mpd, "<Representation "); n != 4 {
 		t.Errorf("representations = %d, want 4", n)
 	}
+
+	// The HLS counterpart over the same directories.
+	hlsDir := filepath.Join(out, "hls")
+	CmdCMAFHLS([]string{"-o", hlsDir, filepath.Join(out, "hd"), filepath.Join(out, "sd"), "--audio", filepath.Join(out, "a1"), "--audio", filepath.Join(out, "a2")})
+	master, err := os.ReadFile(filepath.Join(hlsDir, "master.m3u8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`URI="a1.m3u8"`, `URI="a2.m3u8"`, "\nv1.m3u8\n", "\nv2.m3u8\n", `AUDIO="aud"`} {
+		if !strings.Contains(string(master), want) {
+			t.Errorf("master missing %s:\n%s", want, master)
+		}
+	}
+	v2, err := os.ReadFile(filepath.Join(hlsDir, "v2.m3u8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(v2), `#EXT-X-MAP:URI="../sd/init.mp4"`) {
+		t.Errorf("v2 playlist must reference the rung relative to the playlist directory:\n%s", v2)
+	}
 }
 
 func TestNaturalLess(t *testing.T) {
