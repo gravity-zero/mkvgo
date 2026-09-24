@@ -45,7 +45,7 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 
 	t.Run("rich-metadata-and-explicit-default", func(t *testing.T) {
 		video := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(1920), Height: u32(1080), FrameRate: &fr}
-		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Name: "Commentary", Language: "fra", IsDefault: true}
+		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Name: "Commentary", Language: "fra", LanguageBCP47: "fr-BE", IsDefault: true}
 		src := buildABRVariant(t, video, audio)
 		dir := t.TempDir()
 		if err := RemuxToABR(ctx, []string{src, src}, dir, Options{SegmentMs: 1000}); err != nil {
@@ -53,14 +53,15 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 		}
 		master := readTextFile(t, filepath.Join(dir, "master.m3u8"))
 		mustContain(t, master, `NAME="Commentary"`)
-		mustContain(t, master, `LANGUAGE="fra"`)
+		mustContain(t, master, `LANGUAGE="fr-BE"`)
 		mustContain(t, master, `DEFAULT=YES`)
 		mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
 		mustContain(t, mpd, `width="1920"`)
 		mustContain(t, mpd, `height="1080"`)
 		mustContain(t, mpd, `frameRate=`)
-		mustContain(t, mpd, `lang="fra"`)
+		mustContain(t, mpd, `lang="fr-BE"`)
 		mustContain(t, mpd, `audioSamplingRate="48000"`)
+		mustContain(t, mpd, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`)
 	})
 
 	t.Run("minimal-metadata", func(t *testing.T) {

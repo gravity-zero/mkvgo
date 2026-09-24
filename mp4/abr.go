@@ -88,15 +88,15 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		nAudio++
 		t := &ft.outTrack.mkv
 		name := t.Name
-		if name == "" && t.Language != "" {
-			name = t.Language
+		if name == "" && t.ResolvedLanguage() != "" {
+			name = t.ResolvedLanguage()
 		}
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", nAudio)
 		}
 		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
-		if t.Language != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		if l := t.ResolvedLanguage(); l != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
@@ -106,15 +106,15 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	for i := range ref.subs {
 		t := &ref.subs[i].track
 		name := t.Name
-		if name == "" && t.Language != "" {
-			name = t.Language
+		if name == "" && t.ResolvedLanguage() != "" {
+			name = t.ResolvedLanguage()
 		}
 		if name == "" {
 			name = fmt.Sprintf("Subtitles %d", i+1)
 		}
 		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
-		if t.Language != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		if l := t.ResolvedLanguage(); l != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
 		if t.IsDefault {
 			attrs += ",DEFAULT=YES"
@@ -278,10 +278,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 			continue
 		}
 		t := &ft.outTrack.mkv
-		as := `mimeType="audio/mp4" contentType="audio"`
-		if t.Language != "" {
-			as += fmt.Sprintf(" lang=%q", t.Language)
-		}
+		as := `mimeType="audio/mp4" contentType="audio"` + dashLangAttr(t)
 		rep := fmt.Sprintf(`id="a%d" bandwidth="0"`, audioIndex(ref.fts, i))
 		if t.SampleRate != nil && *t.SampleRate > 0 {
 			rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
@@ -292,6 +289,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		media := "v1/" + strings.Replace(renditionSegment(ref.fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
 			rw("v1/"+renditionInit(ref.fts, i)), rw(media))
 		b.WriteString(timeline)
@@ -301,10 +299,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 	}
 	for i := range ref.subs {
 		t := &ref.subs[i].track
-		as := `mimeType="text/vtt" contentType="text"`
-		if t.Language != "" {
-			as += fmt.Sprintf(" lang=%q", t.Language)
-		}
+		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("v1/sub%d.vtt", i+1)))

@@ -46,14 +46,15 @@ func TestRemuxToHLS_DASHAttributes(t *testing.T) {
 
 	t.Run("full-metadata", func(t *testing.T) {
 		video := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(1280), Height: u32(720), FrameRate: &fr}
-		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "deu"}
+		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "deu", LanguageBCP47: "de-CH"}
 		src := buildABRVariant(t, video, audio)
 		dir := t.TempDir()
 		if err := RemuxToHLS(ctx, src, dir, Options{SegmentMs: 1000}); err != nil {
 			t.Fatal(err)
 		}
 		mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
-		for _, want := range []string{`width="1280"`, `height="720"`, `frameRate=`, `lang="deu"`, `audioSamplingRate="48000"`} {
+		for _, want := range []string{`width="1280"`, `height="720"`, `frameRate=`, `lang="de-CH"`, `audioSamplingRate="48000"`,
+			`<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`} {
 			mustContain(t, mpd, want)
 		}
 		// Constant-duration segments must run-length compress: at least one <S>

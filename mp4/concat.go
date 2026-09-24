@@ -345,15 +345,15 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 	for j, i := range audioIdx {
 		t := &ref.fts[i].outTrack.mkv
 		name := t.Name
-		if name == "" && t.Language != "" {
-			name = t.Language
+		if name == "" && t.ResolvedLanguage() != "" {
+			name = t.ResolvedLanguage()
 		}
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", j+1)
 		}
 		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
-		if t.Language != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		if l := t.ResolvedLanguage(); l != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
 		if t.IsDefault || (!hasDefaultAudio && j == 0) {
 			attrs += ",DEFAULT=YES"
@@ -366,15 +366,15 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		for i := range ref.subs {
 			t := &ref.subs[i].track
 			name := t.Name
-			if name == "" && t.Language != "" {
-				name = t.Language
+			if name == "" && t.ResolvedLanguage() != "" {
+				name = t.ResolvedLanguage()
 			}
 			if name == "" {
 				name = fmt.Sprintf("Subtitles %d", i+1)
 			}
 			attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
-			if t.Language != "" {
-				attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+			if l := t.ResolvedLanguage(); l != "" {
+				attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 			}
 			if t.IsDefault {
 				attrs += ",DEFAULT=YES"

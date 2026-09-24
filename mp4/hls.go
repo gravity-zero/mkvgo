@@ -971,15 +971,15 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		nAudio++
 		t := &ft.outTrack.mkv
 		name := t.Name
-		if name == "" && t.Language != "" {
-			name = t.Language
+		if name == "" && t.ResolvedLanguage() != "" {
+			name = t.ResolvedLanguage()
 		}
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", nAudio)
 		}
 		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
-		if t.Language != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		if l := t.ResolvedLanguage(); l != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
@@ -990,15 +990,15 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	for i := range subs {
 		t := &subs[i].track
 		name := t.Name
-		if name == "" && t.Language != "" {
-			name = t.Language
+		if name == "" && t.ResolvedLanguage() != "" {
+			name = t.ResolvedLanguage()
 		}
 		if name == "" {
 			name = fmt.Sprintf("Subtitles %d", i+1)
 		}
 		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
-		if t.Language != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", t.Language)
+		if l := t.ResolvedLanguage(); l != "" {
+			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
 		if t.IsDefault {
 			attrs += ",DEFAULT=YES"

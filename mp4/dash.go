@@ -63,10 +63,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 				rep += fmt.Sprintf(` frameRate="%s"`, dashFrameRate(*t.FrameRate))
 			}
 		} else {
-			as = `mimeType="audio/mp4" contentType="audio"`
-			if t.Language != "" {
-				as += fmt.Sprintf(" lang=%q", t.Language)
-			}
+			as = `mimeType="audio/mp4" contentType="audio"` + dashLangAttr(t)
 			rep = fmt.Sprintf(`id="a%d" bandwidth="0"`, audioIndex(fts, i))
 			if t.SampleRate != nil && *t.SampleRate > 0 {
 				rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
@@ -80,6 +77,9 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 			b.WriteString(cencContentProtection(o.CENC))
 		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+		if !ft.outTrack.spec.video {
+			b.WriteString(dashAudioChannelConfiguration(t, "        "))
+		}
 		media := strings.Replace(renditionSegment(fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
 			rw(renditionInit(fts, i)), rw(media))
@@ -92,10 +92,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 	// Subtitle renditions: one whole-presentation WebVTT file each.
 	for i := range subs {
 		t := &subs[i].track
-		as := `mimeType="text/vtt" contentType="text"`
-		if t.Language != "" {
-			as += fmt.Sprintf(" lang=%q", t.Language)
-		}
+		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
@@ -144,6 +141,61 @@ func dashTimelineSpans(starts, durs []int64) string {
 	}
 	b.WriteString("          </SegmentTimeline>\n")
 	return b.String()
+}
+
+// dashLangAttr is the AdaptationSet lang attribute (with its leading space)
+// for a track, or "" when the track has no language. The BCP-47 tag wins over
+// the legacy three-letter code (Track.ResolvedLanguage), which is what the
+// attribute is defined as (RFC 5646).
+func dashLangAttr(t *mkv.Track) string {
+	if l := t.ResolvedLanguage(); l != "" {
+		return fmt.Sprintf(" lang=%q", l)
+	}
+	return ""
+}
+
+// dashAudioChannelConfiguration is the Representation's
+// AudioChannelConfiguration element (one line, indented) for an audio track,
+// or "" when the channel count is unknown. The scheme follows the codec, as
+// players expect: AC-3 and E-AC-3 carry the Dolby channel mask, everything
+// else the MPEG channel count.
+func dashAudioChannelConfiguration(t *mkv.Track, indent string) string {
+	if t.Channels == nil || *t.Channels == 0 {
+		return ""
+	}
+	scheme, value := "urn:mpeg:dash:23003:3:audio_channel_configuration:2011", fmt.Sprintf("%d", *t.Channels)
+	if t.Codec == "ac3" || t.Codec == "eac3" {
+		if mask, ok := dolbyChannelMask(*t.Channels); ok {
+			scheme, value = "tag:dolby.com,2014:dash:audio_channel_configuration:2011", mask
+		}
+	}
+	return fmt.Sprintf(`%s<AudioChannelConfiguration schemeIdUri="%s" value="%s"/>`+"\n", indent, scheme, value)
+}
+
+// dolbyChannelMask is the Dolby DASH channel-configuration value for the
+// conventional layout of a channel count (ETSI TS 102 366 speaker bits, L
+// 0x8000, C 0x4000, R 0x2000, Ls 0x1000, Rs 0x0800, Lrs/Rrs 0x0200, LFE
+// 0x0001): 2.0, 5.1, 7.1 and the smaller layouts. A count with no single
+// conventional layout (7 channels: 6.1 or 7.0) reports !ok and the caller
+// falls back to the count.
+func dolbyChannelMask(channels uint8) (string, bool) {
+	switch channels {
+	case 1:
+		return "4000", true // C
+	case 2:
+		return "A000", true // L R
+	case 3:
+		return "E000", true // L C R
+	case 4:
+		return "B800", true // L R Ls Rs
+	case 5:
+		return "F800", true // L C R Ls Rs
+	case 6:
+		return "F801", true // 5.1
+	case 8:
+		return "FA01", true // 7.1
+	}
+	return "", false
 }
 
 // dashDuration formats seconds as an ISO 8601 duration (PT#S).
