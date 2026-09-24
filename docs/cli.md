@@ -1282,6 +1282,35 @@ mkvgo abr-segment master.m3u8 movie-1080p.mp4 movie-720p.mp4     # top manifest
 mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
 ```
 
+### cmaf-mpd
+
+Write the multi-rung **DASH** `manifest.mpd` for CMAF fragments an **external
+encoder** already produced - `init.mp4` + `.m4s` media segments per quality
+rung, optionally audio renditions - without re-packaging or copying anything.
+Each positional is a rung directory holding one rendition: its initialisation
+segment (`init.mp4`, or the only `.mp4` there) and its `.m4s` segments, taken
+in natural order (`seg9` before `seg10`). `--audio` names an audio rendition's
+directory the same way. Files are referenced relative to the manifest's
+directory, so the rung directories are normally its subdirectories.
+
+```
+mkvgo cmaf-mpd -o <manifest.mpd> <rung-dir> [<rung-dir> ...] [--audio <dir>]...
+```
+
+```bash
+mkvgo cmaf-mpd -o stream/manifest.mpd stream/1080p stream/720p --audio stream/aac-fre
+```
+
+Codecs, dimensions, frame rate, sample rate, language, timescale and each
+segment's exact span come from the files themselves (the init's `moov`, each
+segment's `moof`). The rungs are **checked before anything is written**: same
+segment count, every segment N covering exactly the same time span in every
+rung, same kinds of tracks - otherwise the command fails naming the rung, the
+segment and both spans (re-encode on the same fixed GOP and forced keyframe
+times, or publish each rung as its own manifest). Counting segment names get a
+`SegmentTemplate`, any other naming a `SegmentList`. `-o -` (or no `-o`)
+writes the manifest to stdout. Library: `mp4.DASHFromCMAF`.
+
 ### watermark-segment
 
 Serve one resource of a forensic A/B session-watermarked stream. Two GOP-aligned

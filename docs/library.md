@@ -559,6 +559,58 @@ variant transfers only the ranges a viewer watches. In the browser, the WASM
 `openABR(inputs[])` exposes the same over `Uint8Array` or `Blob` variants (see
 wasm.md).
 
+### DASH manifest over external CMAF fragments (`mp4.DASHFromCMAF`)
+
+```go
+mpd, err := mp4.DASHFromCMAF(ctx, mp4.CMAFPresentation{
+	Video: []mp4.CMAFRepresentation{
+		{Dir: "stream/v1", Init: "init.mp4", Segments: segs1, URLPrefix: "v1/"},
+		{Dir: "stream/v2", Init: "init.mp4", Segments: segs2, URLPrefix: "v2/"},
+	},
+	Audio: []mp4.CMAFRepresentation{
+		{Dir: "stream/a1", Init: "init.mp4", Segments: segsA, URLPrefix: "a1/"},
+	},
+})
+```
+
+The multi-rung `manifest.mpd` for CMAF fragments an **external encoder**
+already produced - `init.mp4` + `.m4s` media segments per quality rung, with
+optional audio renditions - without re-packaging or copying anything. Each
+`CMAFRepresentation` names its files (`Dir`, `Init`, `Segments` in playback
+order) and how the manifest references them (`URLPrefix`, then
+`Options.RewriteURL` as for every other URI); everything else is read from the
+files: codecs (RFC 6381 strings from the init's sample entries), dimensions,
+frame rate, sample rate, language, each track's native timescale, and the
+exact tick span of every segment (`tfdt` + `trun` durations from the `moof`;
+`mdat` is never read). `ID` and `Bandwidth` are optional overrides; the
+default bandwidth is the peak segment bitrate from the file sizes, as the
+packager's own manifests report.
+
+`Video` is the switch set - one AdaptationSet, one Representation per rung,
+best first. It is **validated before anything is emitted**: every rung must
+have the same segment count, every segment N must cover exactly the same
+time span in every rung (compared in ticks across differing timescales, no
+tolerance), and every rung must carry the same kinds of tracks. A mismatch is
+an error naming the rung, the segment and both spans, with the remedy
+(re-encode on the same fixed GOP and forced keyframe times, or publish each
+rung as its own manifest) - a DASH player switching quality fetches segment N
+of the new rung expecting it to cover the same time as segment N of the old.
+The AdaptationSet then carries `segmentAlignment="true"`, and
+`startWithSAP="1"` when every segment opens on a sync sample. Each `Audio`
+entry is its own AdaptationSet (audio is selected by language, not switched).
+A rung whose init carries both a video and an audio track (muxed segments) is
+described as such, its `codecs` listing both.
+
+Segment names that count up by one (`seg00001.m4s`, `seg00002.m4s`, …) are
+addressed with a `SegmentTemplate` (`$Number%05d$`, `startNumber`) under the
+`isoff-live` profile; any other naming with a `SegmentList` of explicit
+`SegmentURL`s under `isoff-main`. Either way the timeline is an explicit
+`SegmentTimeline` in the track's timescale, run-length encoded. Segments out
+of order or overlapping, a segment with no `moof` for the track, a truncated
+box, an init without `mvex`, a missing file - each is refused with the
+representation and file named. Encryption is not described
+(`Options.CENC`/`Options.Encrypt` are ignored). CLI: `mkvgo cmaf-mpd`.
+
 ### Forensic A/B session watermarking (`mp4.PlanWatermark`)
 
 ```go

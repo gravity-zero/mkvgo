@@ -230,6 +230,22 @@ variant); the others contribute their video. Each variant lands in `v1/`,
 `BANDWIDTH`/`RESOLUTION`/`CODECS`. For seamless switching the sources should
 share the keyframe cadence (same GOP length).
 
+### Rungs already packaged elsewhere - `cmaf-mpd`
+
+When an external encoder already wrote the CMAF fragments (`init.mp4` +
+`.m4s` per quality rung, optionally audio renditions), mkvgo writes the
+multi-rung DASH `manifest.mpd` over them without re-packaging or copying a
+byte: codecs, dimensions, timescales and each segment's exact span are read
+from the files, and the rungs are checked segment-aligned before anything is
+written.
+
+```bash
+mkvgo cmaf-mpd -o stream/manifest.mpd stream/1080p stream/720p --audio stream/aac
+```
+
+Library: `mp4.DASHFromCMAF`. See [cli.md](cli.md#cmaf-mpd) and
+[library.md](library.md).
+
 ---
 
 ## Gapless multi-file sessions (concat) - `concat-hls`
