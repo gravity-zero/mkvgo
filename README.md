@@ -196,6 +196,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | **Stream** | `to-hls` | Package as CMAF - HLS + DASH over one demuxed segment set (AES-128 + key rotation, CENC AV1/VP9, single-file, I-frames, audio-only) |
 | | `hls-segment` | Serve one HLS/DASH resource on demand - zero pre-generation (local file **or** URL) |
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
+| | `cmaf-mpd` · `cmaf-hls` | DASH manifest / HLS playlists over CMAF rungs an external encoder already produced - nothing re-packaged, rungs checked segment-aligned |
 | | `watermark-segment` | Serve one segment of an A/B forensic-watermarked stream (per-viewer bit routing, no re-encode) |
 | | `forensic-segment` | Single-source A/B watermark - variant B derived by dropping one disposable H.264 frame per segment, timing-compensated |
 

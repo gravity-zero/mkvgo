@@ -1024,8 +1024,8 @@ mkvgo to-webm <input.mkv> <output.webm>
 mkvgo to-webm video.mkv video.webm
 ```
 
-> The streaming commands (`to-hls`, `hls-segment`, `to-abr`, `concat-hls`) are
-> covered end to end - modes, sources, ABR, concat, security, trick-play - in
+> The streaming commands (`to-hls`, `hls-segment`, `to-abr`, `concat-hls`,
+> `cmaf-mpd`, `cmaf-hls`) are covered end to end - modes, sources, ABR, concat, security, trick-play - in
 > the **[streaming guide](streaming.md)**. Below is the per-flag reference.
 
 ### to-hls
