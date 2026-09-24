@@ -110,13 +110,29 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 // dashTimeline renders the shared SegmentTimeline (exact millisecond
 // durations, run-length encoded).
 func dashTimeline(durs []float64) string {
+	starts := make([]int64, len(durs))
+	ticks := make([]int64, len(durs))
+	var t int64
+	for i, d := range durs {
+		ticks[i] = int64(d*1000 + 0.5)
+		starts[i] = t
+		t += ticks[i]
+	}
+	return dashTimelineSpans(starts, ticks)
+}
+
+// dashTimelineSpans renders a SegmentTimeline from segment start times and
+// durations in the enclosing timescale's ticks. Consecutive segments of equal
+// duration that follow each other without a gap collapse into one <S> with a
+// repeat count; a gap (a start past the previous end) opens a new <S> with an
+// explicit t.
+func dashTimelineSpans(starts, durs []int64) string {
 	var b strings.Builder
 	b.WriteString("          <SegmentTimeline>\n")
-	var t int64
 	for i := 0; i < len(durs); {
-		d := int64(durs[i]*1000 + 0.5)
+		t, d := starts[i], durs[i]
 		j := i + 1
-		for j < len(durs) && int64(durs[j]*1000+0.5) == d {
+		for j < len(durs) && durs[j] == d && starts[j] == starts[j-1]+d {
 			j++
 		}
 		if r := j - i - 1; r > 0 {
@@ -124,7 +140,6 @@ func dashTimeline(durs []float64) string {
 		} else {
 			fmt.Fprintf(&b, `            <S t="%d" d="%d"/>`+"\n", t, d)
 		}
-		t += d * int64(j-i)
 		i = j
 	}
 	b.WriteString("          </SegmentTimeline>\n")

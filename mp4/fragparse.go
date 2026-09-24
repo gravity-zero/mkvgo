@@ -142,6 +142,67 @@ func parseMoofSamples(moof []byte, moofStart int64, trex map[uint32]trexDefault,
 	return nil
 }
 
+// tfhd is a parsed Track Fragment Header: the track the fragment belongs to,
+// its data anchor and the per-fragment sample defaults it declares.
+type tfhd struct {
+	trackID                      uint32
+	baseDataOffset               int64
+	haveBaseOffset               bool // else the data anchor is the moof start (default-base-is-moof, and the pre-CMAF default alike)
+	defDur, defSize, defFlags    uint32
+	haveDur, haveSize, haveFlags bool
+}
+
+// parseTfhd decodes a tfhd payload.
+func parseTfhd(p []byte) (tfhd, error) {
+	var h tfhd
+	if len(p) < 8 {
+		return h, errf("tfhd too short")
+	}
+	flags := binary.BigEndian.Uint32(p[0:4]) & 0xFFFFFF
+	h.trackID = binary.BigEndian.Uint32(p[4:8])
+	off := 8
+	read4 := func() (uint32, bool) {
+		if off+4 > len(p) {
+			return 0, false
+		}
+		v := binary.BigEndian.Uint32(p[off : off+4])
+		off += 4
+		return v, true
+	}
+	if flags&tfhdBaseDataOffset != 0 {
+		if off+8 > len(p) {
+			return h, errf("tfhd truncated base_data_offset")
+		}
+		h.baseDataOffset = int64(binary.BigEndian.Uint64(p[off : off+8]))
+		off += 8
+		h.haveBaseOffset = true
+	}
+	if flags&tfhdSampleDescIndex != 0 {
+		read4()
+	}
+	if flags&tfhdDefaultDuration != 0 {
+		h.defDur, h.haveDur = read4()
+	}
+	if flags&tfhdDefaultSize != 0 {
+		h.defSize, h.haveSize = read4()
+	}
+	if flags&tfhdDefaultFlags != 0 {
+		h.defFlags, h.haveFlags = read4()
+	}
+	return h, nil
+}
+
+// parseTfdt returns the fragment's base media decode time (version 0 or 1).
+func parseTfdt(p []byte) int64 {
+	if len(p) < 8 {
+		return 0
+	}
+	if p[0] == 1 && len(p) >= 12 {
+		return int64(binary.BigEndian.Uint64(p[4:12]))
+	}
+	return int64(binary.BigEndian.Uint32(p[4:8]))
+}
+
 // parseTrafSamples reads a Track Fragment (tfhd + tfdt + one or more trun) and
 // appends its samples to the track, in the same units the progressive parser
 // uses (ms, edit-list shift folded into cts).
@@ -152,89 +213,49 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 	}
 
 	var (
-		trackID                      uint32
-		haveBaseOffset               bool
-		baseDataOffset               int64
-		defaultBaseIsMoof            bool
-		defDur                       uint32
-		defSize                      uint32
-		defFlags                     uint32
-		haveDur, haveSize, haveFlags bool
-		baseDecodeTime               int64
-		haveTfhd                     bool
+		h              tfhd
+		haveTfhd       bool
+		baseDecodeTime int64
 	)
 	for _, b := range boxes {
 		if b.typ != "tfhd" || len(b.payload) < 8 {
 			continue
 		}
-		flags := binary.BigEndian.Uint32(b.payload[0:4]) & 0xFFFFFF
-		trackID = binary.BigEndian.Uint32(b.payload[4:8])
-		p := 8
-		read4 := func() (uint32, bool) {
-			if p+4 > len(b.payload) {
-				return 0, false
-			}
-			v := binary.BigEndian.Uint32(b.payload[p : p+4])
-			p += 4
-			return v, true
+		if h, err = parseTfhd(b.payload); err != nil {
+			return err
 		}
-		if flags&tfhdBaseDataOffset != 0 {
-			if p+8 > len(b.payload) {
-				return errf("tfhd truncated base_data_offset")
-			}
-			baseDataOffset = int64(binary.BigEndian.Uint64(b.payload[p : p+8]))
-			p += 8
-			haveBaseOffset = true
-		}
-		if flags&tfhdSampleDescIndex != 0 {
-			read4()
-		}
-		if flags&tfhdDefaultDuration != 0 {
-			defDur, haveDur = read4()
-		}
-		if flags&tfhdDefaultSize != 0 {
-			defSize, haveSize = read4()
-		}
-		if flags&tfhdDefaultFlags != 0 {
-			defFlags, haveFlags = read4()
-		}
-		defaultBaseIsMoof = flags&tfhdDefaultBaseIsMoof != 0
 		haveTfhd = true
 	}
 	if !haveTfhd {
 		return nil // fragment with no tfhd: nothing to place
 	}
+	trackID := h.trackID
 	t := trackByID(mv, trackID)
 	if t == nil || t.timescale == 0 {
 		return nil // fragment for a track we do not carry
 	}
 
 	for _, b := range boxes {
-		if b.typ == "tfdt" && len(b.payload) >= 8 {
-			if b.payload[0] == 1 && len(b.payload) >= 12 {
-				baseDecodeTime = int64(binary.BigEndian.Uint64(b.payload[4:12]))
-			} else {
-				baseDecodeTime = int64(binary.BigEndian.Uint32(b.payload[4:8]))
-			}
+		if b.typ == "tfdt" {
+			baseDecodeTime = parseTfdt(b.payload)
 		}
 	}
 
+	// Defaults the tfhd leaves out come from the init's trex.
 	td := trex[trackID]
-	if !haveDur {
-		defDur = td.duration
+	if !h.haveDur {
+		h.defDur = td.duration
 	}
-	if !haveSize {
-		defSize = td.size
+	if !h.haveSize {
+		h.defSize = td.size
 	}
-	if !haveFlags {
-		defFlags = td.flags
+	if !h.haveFlags {
+		h.defFlags = td.flags
 	}
 
 	base := moofStart
-	if haveBaseOffset {
-		base = baseDataOffset
-	} else if defaultBaseIsMoof {
-		base = moofStart
+	if h.haveBaseOffset {
+		base = h.baseDataOffset
 	}
 
 	dts := baseDecodeTime
@@ -243,7 +264,7 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 		if b.typ != "trun" {
 			continue
 		}
-		sampleOff, newDTS, err := appendTrunSamples(b.payload, t, base, dataCursor, dts, defDur, defSize, defFlags)
+		sampleOff, newDTS, err := appendTrunSamples(b.payload, t, base, dataCursor, dts, h.defDur, h.defSize, h.defFlags)
 		if err != nil {
 			return err
 		}
