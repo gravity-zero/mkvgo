@@ -4,6 +4,22 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **DASH manifest over external CMAF fragments.** `mp4.DASHFromCMAF` writes
+  the multi-rung `manifest.mpd` for `init.mp4` + `.m4s` segments an external
+  encoder already produced (one `CMAFRepresentation` per quality rung, optional
+  audio renditions), reading codecs, dimensions, frame rate, sample rate,
+  language, native timescales and each segment's exact tick span from the
+  files - nothing is re-packaged or copied. The video switch set is validated
+  segment by segment before anything is emitted (same count, same spans in
+  ticks, same kinds of tracks); a mismatch names the rung, the segment and
+  both spans, with the remedy. Counting names get a `SegmentTemplate`, any
+  other naming a `SegmentList`. CLI `mkvgo cmaf-mpd -o manifest.mpd <rung-dir>...
+  [--audio <dir>]`.
+
 ## [0.31.0] - 2026-09-18
 
 ### Changed
