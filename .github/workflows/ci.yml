@@ -31,6 +31,16 @@ jobs:
         shell: bash
         run: GOOS=js GOARCH=wasm go build ./cmd/mkvgo-wasm/
 
+      - name: Build (32-bit)
+        shell: bash
+        run: GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...
+
+      # 386 binaries run natively on the x86_64 Linux runner: the whole suite
+      # executes with a 32-bit int, catching truncation a build alone cannot.
+      - name: Test (32-bit)
+        if: runner.os == 'Linux'
+        run: GOARCH=386 CGO_ENABLED=0 go test ./...
+
       - name: Vet
         run: go vet ./...
 

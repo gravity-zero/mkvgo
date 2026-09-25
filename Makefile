@@ -68,11 +68,13 @@ preflight:
 	  GOOS=$$os CGO_ENABLED=0 go vet ./...   || exit 1; \
 	done
 	@echo "== wasm build =="; GOOS=js GOARCH=wasm CGO_ENABLED=0 go build ./cmd/mkvgo-wasm/
+	@echo "== GOARCH=arm (32-bit) build =="; GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...
 	@echo "== lint =="; \
 	  lint="$$(command -v golangci-lint || echo "$$(go env GOPATH)/bin/golangci-lint")"; \
 	  [ -x "$$lint" ] || { echo "golangci-lint missing: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"; exit 1; }; \
 	  CGO_ENABLED=0 "$$lint" run ./... || exit 1
 	@echo "== tests =="; CGO_ENABLED=0 go test ./...
+	@echo "== tests (386, 32-bit int) =="; GOARCH=386 CGO_ENABLED=0 go test ./...
 	@echo "preflight OK - cross-platform compile + tests pass locally; confirm the real matrix with 'make ci-status' after pushing"
 
 # ci-status: report the real GitHub Actions matrix result (all OSes) for the
