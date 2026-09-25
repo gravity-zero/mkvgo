@@ -4,6 +4,41 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.34.0] - 2026-09-25
+
+### Added
+
+- **`AnalyzeReport.ClusterTimecodeBackstepMs`** (`cluster_timecode_backstep_ms`,
+  shown by `mkvgo analyze`): the largest drop of the Cluster Timestamp between
+  two consecutive clusters in file order. 0 for an interleaving muxer; seconds
+  to minutes when the tracks are stored in single-track blocks (a two-input
+  remux with a large interleave delta), the layout a direct-play client stalls
+  on and an on-demand packager reads several times over. Header-only and
+  deterministic - every cluster is seen, no sampling - from the walk `Analyze`
+  already does; a Warning names it past one second.
+
+### Fixed
+
+- **`PlanHLS` declared a block-ordered source's video bandwidth 12x too high.**
+  The on-demand plan estimates each segment's bytes from the span between its
+  two video keyframe clusters (the Cues index only the video); on a source
+  laid out in single-track blocks the span that straddles a block boundary
+  swallows the other tracks' whole blocks, and read as a bitrate it declared
+  a 1.5 Mb/s rung at 24 Mb/s in `master.m3u8` and `manifest.mpd` - a rung an
+  adaptive player never picks. A span past three times the presentation's
+  median byte rate is now checked against the file itself - the cluster
+  headers inside it, a cluster timestamp stepping back from the previous
+  cluster's being the foreign block - and only a confirmed span is replaced
+  by the segment's duration at the median rate, the bytes taken out (the
+  other tracks' media, which such a file's spans otherwise lack) being handed
+  back to every segment at their average rate. Measured on a real
+  block-ordered file: 24.2 Mb/s before, 1.95 Mb/s after, the full pass
+  measuring 1.96 Mb/s from the written segments; on five real interleaved
+  releases nothing changes (a real 5x peak is a peak, and is kept). The same
+  figure seeded the window cache budget, which no longer inflates on these
+  files. Blocks short enough to stay under the trigger over-declare by less
+  than 3x and are left alone.
+
 ## [0.33.0] - 2026-09-25
 
 ### Added
