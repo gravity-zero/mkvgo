@@ -92,7 +92,7 @@ func parseCMAFArgs(args []string, cmd string) (out string, videos, audios []stri
 			videos = append(videos, args[i])
 		}
 	}
-	if len(videos) == 0 {
+	if len(videos) == 0 && len(audios) == 0 {
 		Fatal("usage: " + CmdUsage[cmd])
 	}
 	return out, videos, audios

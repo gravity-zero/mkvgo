@@ -1294,8 +1294,10 @@ directory the same way. Files are referenced relative to the manifest's
 directory, so the rung directories are normally its subdirectories.
 
 ```
-mkvgo cmaf-mpd -o <manifest.mpd> <rung-dir> [<rung-dir> ...] [--audio <dir>]...
+mkvgo cmaf-mpd -o <manifest.mpd> [<rung-dir> ...] [--audio <dir>]...
 ```
+
+An audio-only presentation is `--audio` directories alone, no rung.
 
 ```bash
 mkvgo cmaf-mpd -o stream/manifest.mpd stream/1080p stream/720p --audio stream/aac-fre
@@ -1322,8 +1324,11 @@ between rungs, so misaligned rungs are accepted here (a switch realigns on the
 next segment) where `cmaf-mpd` refuses them.
 
 ```
-mkvgo cmaf-hls -o <dir> <rung-dir> [<rung-dir> ...] [--audio <dir>]...
+mkvgo cmaf-hls -o <dir> [<rung-dir> ...] [--audio <dir>]...
 ```
+
+An audio-only presentation is `--audio` directories alone: the master then
+carries one audio-only variant per rendition.
 
 ```bash
 mkvgo cmaf-hls -o stream/ stream/1080p stream/720p --audio stream/aac-fre

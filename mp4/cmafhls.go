@@ -45,11 +45,23 @@ func HLSFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) (map[
 
 // buildCMAFMaster writes master.m3u8: the audio group, then one
 // EXT-X-STREAM-INF per video representation with its real
-// BANDWIDTH/RESOLUTION/FRAME-RATE/CODECS.
+// BANDWIDTH/RESOLUTION/FRAME-RATE/CODECS. Without video, every audio
+// representation is its own audio-only variant (no group: there is nothing
+// to attach it to).
 func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 	rw := urlRewriter(o)
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n")
+	if len(video) == 0 {
+		for _, r := range audio {
+			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth)
+			if cs := cmafCodecs(r.tracks); cs != "" {
+				inf += fmt.Sprintf(",CODECS=%q", cs)
+			}
+			fmt.Fprintf(&b, "%s\n%s\n", inf, rw(r.id+".m3u8"))
+		}
+		return []byte(b.String())
+	}
 
 	var (
 		audioCodecs  []string
@@ -68,6 +80,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		if l := t.ResolvedLanguage(); l != "" {
 			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
+		attrs += hlsChannelsAttr(t)
 		if i == 0 {
 			attrs += ",DEFAULT=YES"
 		}

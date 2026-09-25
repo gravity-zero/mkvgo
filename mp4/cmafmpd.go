@@ -56,7 +56,9 @@ type CMAFRepresentation struct {
 // first, validated segment-aligned. Each Audio entry gets an AdaptationSet of
 // its own (one per language or codec; audio is selected, not switched). A
 // video representation whose init also carries audio (muxed segments) is
-// described as such: its codecs attribute lists both.
+// described as such: its codecs attribute lists both. A presentation with
+// Audio only (no Video) is valid: an audio-only manifest, each representation
+// its own AdaptationSet (DASH) or its own variant (HLS).
 type CMAFPresentation struct {
 	Video []CMAFRepresentation
 	Audio []CMAFRepresentation
@@ -86,8 +88,8 @@ func DASHFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) ([]b
 // none for Audio). What holds between rungs is the manifest's business:
 // DASH validates the switch set, HLS carries one playlist per rung.
 func readCMAFPresentation(ctx context.Context, o *Options, p CMAFPresentation) (video, audio []*cmafRep, err error) {
-	if len(p.Video) == 0 {
-		return nil, nil, errf("a CMAF presentation needs at least one video representation")
+	if len(p.Video) == 0 && len(p.Audio) == 0 {
+		return nil, nil, errf("a CMAF presentation needs at least one representation (Video or Audio)")
 	}
 	video = make([]*cmafRep, len(p.Video))
 	audio = make([]*cmafRep, len(p.Audio))
@@ -444,6 +446,9 @@ func trunSpan(p []byte, defDur, defFlags uint32) (dur int64, count uint32, first
 // player assumes when it switches between Representations of one
 // AdaptationSet.
 func validateCMAFSwitchSet(reps []*cmafRep) error {
+	if len(reps) < 2 {
+		return nil // nothing to switch between (one rung, or an audio-only presentation)
+	}
 	ref := reps[0]
 	const remedy = "the rungs were not segmented on the same boundaries; encode them with the same fixed GOP and forced keyframe times, or publish each rung as its own manifest"
 	for _, r := range reps[1:] {
@@ -655,12 +660,15 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 		profile, dashDuration(totalSec), dashDuration(maxSegSec))
 	b.WriteString("  <Period>\n")
 
-	// Video: one AdaptationSet, the validated switch set.
-	as := `mimeType="video/mp4" contentType="video" segmentAlignment="true"`
-	if cmafAllSync(video) {
-		as += ` startWithSAP="1"`
+	// Video: one AdaptationSet, the validated switch set (none for an
+	// audio-only presentation).
+	if len(video) > 0 {
+		as := `mimeType="video/mp4" contentType="video" segmentAlignment="true"`
+		if cmafAllSync(video) {
+			as += ` startWithSAP="1"`
+		}
+		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 	}
-	fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 	for _, r := range video {
 		t := &r.tracks[r.primary]
 		rep := fmt.Sprintf(`id=%q bandwidth="%d"`, r.id, r.bandwidth)
@@ -677,7 +685,9 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 		writeCMAFAddressing(&b, rw, r)
 		b.WriteString("      </Representation>\n")
 	}
-	b.WriteString("    </AdaptationSet>\n")
+	if len(video) > 0 {
+		b.WriteString("    </AdaptationSet>\n")
+	}
 
 	// Audio: one AdaptationSet per representation.
 	for _, r := range audio {
@@ -691,6 +701,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 			rep += fmt.Sprintf(" codecs=%q", codecs)
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		writeCMAFAddressing(&b, rw, r)

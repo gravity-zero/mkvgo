@@ -88,6 +88,17 @@ func TestCLICMAFMPD(t *testing.T) {
 	if !strings.Contains(string(v2), `#EXT-X-MAP:URI="../sd/init.mp4"`) {
 		t.Errorf("v2 playlist must reference the rung relative to the playlist directory:\n%s", v2)
 	}
+
+	// Audio-only: no rung directory, only --audio.
+	audioMPD := filepath.Join(out, "audio.mpd")
+	CmdCMAFMPD([]string{"-o", audioMPD, "--audio", filepath.Join(out, "a1")})
+	data, err = os.ReadFile(audioMPD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `contentType="video"`) || !strings.Contains(string(data), `id="a1"`) {
+		t.Errorf("audio-only manifest wrong:\n%s", data)
+	}
 }
 
 func TestNaturalLess(t *testing.T) {

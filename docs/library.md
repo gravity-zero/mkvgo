@@ -633,7 +633,15 @@ channel count is known: the Dolby scheme
 the conventional layout, e.g. `F801` for 5.1) for AC-3/E-AC-3, the MPEG scheme
 (`urn:mpeg:dash:23003:3:audio_channel_configuration:2011`, the count) for every
 other codec, and the count too for a Dolby channel count with no single
-conventional layout (7).
+conventional layout (7). Every audio and subtitle AdaptationSet also carries a
+`<Label>` with the track name when it has one (the HLS master's `NAME`), and
+every audio Representation its real `bandwidth` (from its samples, else the
+container's `BPS`/`btrt` figure, 0 only when unknown). On the HLS side each
+`EXT-X-MEDIA` audio rendition declares `CHANNELS` when the count is known.
+
+A `CMAFPresentation` with `Audio` only (no `Video`) is valid for both
+functions: an audio-only manifest, one AdaptationSet per representation in
+DASH, one audio-only variant per representation in the HLS master.
 
 ### Forensic A/B session watermarking (`mp4.PlanWatermark`)
 

@@ -29,7 +29,7 @@ func cmafLadder(t *testing.T) string {
 	sr := 44100.0 // the rate fakeASC declares, so the init and the track agree
 	fr := 25.0
 	ch := uint8(2)
-	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "fre", LanguageBCP47: "fr-CA"}
+	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, Language: "fre", LanguageBCP47: "fr-CA", Name: "VF"}
 	hd := buildABRVariant(t, mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(1280), Height: u32(720), FrameRate: &fr}, audio)
 	sd := buildABRVariant(t, mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(640), Height: u32(360), FrameRate: &fr}, audio)
 	dir := filepath.Join(t.TempDir(), "stream")
@@ -111,6 +111,7 @@ func TestDASHFromCMAF_Golden(t *testing.T) {
       </Representation>
     </AdaptationSet>
     <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="fr-CA">
+      <Label>VF</Label>
       <Representation id="a1" bandwidth="N" audioSamplingRate="44100" codecs="mp4a.40.2">
         <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
         <SegmentTemplate initialization="v1/init_a1.mp4" media="v1/seg_a1_$Number%05d$.m4s" startNumber="1" timescale="44100">
@@ -244,7 +245,7 @@ func TestDASHFromCMAF_RejectsBadFiles(t *testing.T) {
 		mutate func(p *CMAFPresentation)
 		want   []string
 	}{
-		{"no-video", func(p *CMAFPresentation) { p.Video = nil }, []string{"at least one video representation"}},
+		{"nothing", func(p *CMAFPresentation) { p.Video, p.Audio = nil, nil }, []string{"at least one representation"}},
 		{"init-as-segment", func(p *CMAFPresentation) { p.Video[0].Segments = []string{"init.mp4"} },
 			[]string{`"v1": segment 1 (init.mp4)`, "no moof box"}},
 		{"segment-as-init", func(p *CMAFPresentation) { p.Video[0].Init = "seg00001.m4s" },
@@ -522,7 +523,7 @@ func TestHLSFromCMAF_Golden(t *testing.T) {
 	master := bwLine.ReplaceAllString(string(got["master.m3u8"]), "BANDWIDTH=N")
 	const wantMaster = `#EXTM3U
 #EXT-X-VERSION:7
-#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="fr-CA",AUTOSELECT=YES,LANGUAGE="fr-CA",DEFAULT=YES,URI="a1.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="VF",AUTOSELECT=YES,LANGUAGE="fr-CA",CHANNELS="2",DEFAULT=YES,URI="a1.m3u8"
 #EXT-X-STREAM-INF:BANDWIDTH=N,RESOLUTION=1280x720,CODECS="avc1.64001F,mp4a.40.2",AUDIO="aud"
 v1.m3u8
 #EXT-X-STREAM-INF:BANDWIDTH=N,RESOLUTION=640x360,CODECS="avc1.64001F,mp4a.40.2",AUDIO="aud"
@@ -629,5 +630,39 @@ func TestDashAudioChannelConfiguration(t *testing.T) {
 	}
 	if got := dashAudioChannelConfiguration(&mkv.Track{Codec: "aac", Channels: ch(2)}, "    "); !strings.HasPrefix(got, "    <Audio") {
 		t.Errorf("indent not applied: %q", got)
+	}
+}
+
+// An audio-only presentation is valid: no video AdaptationSet, one audio set
+// per representation in DASH; one audio-only variant per representation in
+// HLS (no group, nothing to attach it to).
+func TestCMAF_AudioOnly(t *testing.T) {
+	dir := cmafLadder(t)
+	ctx := context.Background()
+	p := cmafPresentation(t, dir)
+	p.Video = nil
+	mpd, err := DASHFromCMAF(ctx, p)
+	if err != nil {
+		t.Fatalf("audio-only DASH: %v", err)
+	}
+	if strings.Contains(string(mpd), `contentType="video"`) {
+		t.Errorf("audio-only manifest must not carry a video AdaptationSet:\n%s", mpd)
+	}
+	for _, want := range []string{`contentType="audio" lang="fr-CA"`, `<Label>VF</Label>`, `id="a1"`, `codecs="mp4a.40.2"`, `initialization="v1/init_a1.mp4"`} {
+		mustContain(t, string(mpd), want)
+	}
+	pl, err := HLSFromCMAF(ctx, p)
+	if err != nil {
+		t.Fatalf("audio-only HLS: %v", err)
+	}
+	master := string(pl["master.m3u8"])
+	if strings.Contains(master, "#EXT-X-MEDIA") {
+		t.Errorf("audio-only master must not declare a rendition group:\n%s", master)
+	}
+	if !regexp.MustCompile(`#EXT-X-STREAM-INF:BANDWIDTH=\d+,CODECS="mp4a.40.2"\na1.m3u8\n`).MatchString(master) {
+		t.Errorf("audio-only master must carry one audio variant:\n%s", master)
+	}
+	if _, ok := pl["a1.m3u8"]; !ok || len(pl) != 2 {
+		t.Errorf("playlists = %v, want master + a1", pl)
 	}
 }
