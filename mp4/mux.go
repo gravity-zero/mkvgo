@@ -89,7 +89,7 @@ func (t *outTrack) emitChapterSamples(cw *countWriter) error {
 // timed-text paths. blockPts is the source block's stored timecode (pts for
 // synthetic/timed-text samples).
 func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, blockPts, dur int64, sync bool) error {
-	if len(data) > math.MaxUint32 {
+	if uint64(len(data)) > math.MaxUint32 {
 		return errf("track %d: sample of %d bytes exceeds MP4 sample size limit", t.mkv.ID, len(data))
 	}
 	t.samples.addDur(uint32(len(data)), pts, blockPts, dur, sync)
