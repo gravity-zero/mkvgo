@@ -542,6 +542,19 @@ across a switch set); otherwise only each variant's own `v{k}/manifest.mpd` is
 written. Variants may be Matroska/WebM or progressive/**fragmented** (CMAF)
 MP4 - a pre-encoded ladder already in fragmented MP4 is read directly.
 
+#### Block-ordered sources
+
+A source laid out in single-track blocks (a two-input remux with a large
+interleave delta writes minutes of video, then the same minutes of audio)
+puts the audio of an instant megabytes past its video. The plan's first walk
+into such a region still traverses the block to reach every track, but it
+records where each track's window opens; from the next window on, tracks that
+open far apart (further than a window's worth of bytes, in different clusters)
+are read as one short walk each from their own block - the same bytes as the
+linear walk, and as `RemuxToHLS`. Measured: 46x the file read for 9-minute
+blocks before, 2.2x after; interleaved sources keep their single walk (1.04x).
+A seek into an unvisited region pays one traversal.
+
 ### On-demand ABR (`mp4.PlanABR`)
 
 ```go

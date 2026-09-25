@@ -90,6 +90,17 @@ type HLSPlan struct {
 	// a fresh plan or a concurrent request stays correct.
 	segMu  sync.Mutex
 	segPos []reader.BlockPos
+	// trackPos holds, per segment, per track, the block each TRACK's window
+	// opens on - learned by the walks exactly like segPos. It is what serves a
+	// source laid out in single-track BLOCKS (a two-input remux with a large
+	// interleave delta writes minutes of one track, then minutes of the next):
+	// there the audio of an instant lies megabytes past its video, and one
+	// linear walk from the video's cluster reads the whole video block before
+	// it reaches the audio. Once every track's opening block is known and they
+	// lie far apart (scatteredWindow), the window is read as one short walk
+	// per track from its own block instead. The bytes are the same either way;
+	// only the first window after a seek pays the traversal.
+	trackPos [][]reader.BlockPos
 
 	// windows caches, per segment index, the media of EVERY rendition - built
 	// by the one walk that had to read all of it. That walk is the unit of I/O:
@@ -153,7 +164,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 
 	// WithBitrate: each track's BPS statistic (the Tags are read anyway) -
 	// the DASH manifest's audio bandwidth, which read 0 without it.
-	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithBitrate()}
+	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithBitrate()}
 	if o.ChapterMarkers {
 		// Only fetched when the opt-in is set: an extra bounded SeekHead ->
 		// Chapters read a plan otherwise has no use for.
@@ -392,7 +403,11 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
 	}
-	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
+	cover, err := loadCoverArt(fs, c.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover}
 	for i, ft := range fts {
 		m := movieMeta{}
 		if ft.outTrack.spec.video {
@@ -971,6 +986,12 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		keep = append(keep, pt.ft.outTrack.mkv.ID)
 	}
 
+	// Every track's own opening block known and far apart: a block-ordered
+	// source, read track by track (see trackPos).
+	if starts := p.trackPosAt(n); p.scatteredWindow(n, starts) {
+		return p.walkScatteredWindow(ctx, src, n, starts, keep, segStart, segEnd)
+	}
+
 	// The window's opening block, when a previous walk revealed it: the FIRST
 	// block of any track past segStart, which necessarily precedes (or is) every
 	// track's own opening block - so resuming there loses no track's samples.
@@ -994,6 +1015,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	nextPts := make([]int64, len(p.tracks))
 	started := make([]bool, len(p.tracks))
 	crossed := make([]bool, len(p.tracks))
+	opened := make([]bool, len(p.tracks)) // the track's own opening block is recorded
 	for i := range p.tracks {
 		nextPts[i] = -1
 		started[i] = n == 0
@@ -1021,11 +1043,16 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			started[ti] = true
 			p.learnSegPos(n, br.Pos()) // first past segStart: where this window opens
 		}
+		if !opened[ti] {
+			opened[ti] = true
+			p.learnTrackPos(n, ti, br.Pos()) // this track's own first block of the window
+		}
 		if b.BlockTimecode >= segEnd {
 			nextPts[ti] = b.Timecode
 			crossed[ti] = true
 			remaining--
 			p.learnSegPos(n+1, br.Pos()) // first past segEnd: where the next one opens
+			p.learnTrackPos(n+1, ti, br.Pos())
 			continue
 		}
 		pt := p.tracks[ti]
@@ -1037,6 +1064,137 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		})
 	}
 	return windows, nextPts, nil
+}
+
+// walkScatteredWindow reads the n-th window one track at a time, each from
+// its own opening block (starts[ti]) with the reader filtered to that track,
+// stopping on the track's first block past segEnd. The cursor semantics are
+// walkWindow's: the opening block is the track's first block with a stored
+// timecode >= segStart, everything after it up to the crossing block belongs
+// to the window whatever its PTS, so the samples - and the segment bytes -
+// are identical to the linear walk's.
+func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n int, starts []reader.BlockPos, keep []uint64, segStart, segEnd int64) ([][]segSample, []int64, error) {
+	windows := make([][]segSample, len(p.tracks))
+	nextPts := make([]int64, len(p.tracks))
+	for ti, pt := range p.tracks {
+		nextPts[ti] = -1
+		br, err := reader.NewBlockReaderFrom(src, p.tcScale, starts[ti])
+		if err != nil {
+			return nil, nil, err
+		}
+		br.SetTrackDefaultDurations(p.trackDurs)
+		br.KeepTracks(keep[ti])
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			b, err := br.Next()
+			if isBlockWalkEnd(err) {
+				break
+			}
+			if err != nil {
+				return nil, nil, errf("read block: %w", err)
+			}
+			if b.TrackNumber != keep[ti] {
+				continue
+			}
+			if b.BlockTimecode >= segEnd {
+				nextPts[ti] = b.Timecode
+				p.learnSegPos(n+1, br.Pos())
+				p.learnTrackPos(n+1, ti, br.Pos())
+				break
+			}
+			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+			windows[ti] = append(windows[ti], segSample{
+				fragSample: fragSample{size: uint32(len(data)),
+					ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
+				data: data,
+			})
+		}
+	}
+	return windows, nextPts, nil
+}
+
+// scatteredWindow reports whether the n-th window should be read track by
+// track: every track's opening block is known, they lie in different
+// clusters, and further apart than one window's worth of bytes. An
+// interleaved source never shows that - its tracks open within the same
+// cluster or two, less than a window apart when a window spans clusters, and
+// in the SAME cluster when a cluster spans windows - while a block-ordered one
+// does everywhere but at a block's tail, where the linear walk is cheap
+// anyway. On an interleaved source the linear walk stays: reading one track's
+// window there reads everything anyway, and two walks would read it twice.
+func (p *HLSPlan) scatteredWindow(n int, starts []reader.BlockPos) bool {
+	if len(starts) < 2 {
+		return false
+	}
+	lo, hi := starts[0], starts[0]
+	for _, s := range starts {
+		if !s.Valid() {
+			return false
+		}
+		if s.Off < lo.Off {
+			lo = s
+		}
+		if s.Off > hi.Off {
+			hi = s
+		}
+	}
+	if lo.ClusterStart == hi.ClusterStart {
+		return false
+	}
+	span := p.windowSpan(n)
+	return span > 0 && hi.Off-lo.Off > span
+}
+
+// windowSpan estimates the bytes one window of the source covers, from the
+// Cues' cluster offsets around segment n (the largest window met so far when
+// n is the last).
+func (p *HLSPlan) windowSpan(n int) int64 {
+	switch {
+	case n+1 < len(p.offsets) && p.offsets[n+1] > p.offsets[n]:
+		return p.offsets[n+1] - p.offsets[n]
+	case n > 0 && n < len(p.offsets) && p.offsets[n] > p.offsets[n-1]:
+		return p.offsets[n] - p.offsets[n-1]
+	}
+	p.winMu.Lock()
+	defer p.winMu.Unlock()
+	return p.winPeak
+}
+
+// trackPosAt returns the known opening block of every track for the n-th
+// window (zero entries where no walk has revealed one).
+func (p *HLSPlan) trackPosAt(n int) []reader.BlockPos {
+	out := make([]reader.BlockPos, len(p.tracks))
+	if n < 0 {
+		return out
+	}
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	if n < len(p.trackPos) {
+		copy(out, p.trackPos[n])
+	}
+	return out
+}
+
+// learnTrackPos records where track ti's window n opens. Like learnSegPos,
+// only the earliest block is kept and writes are idempotent.
+func (p *HLSPlan) learnTrackPos(n, ti int, at reader.BlockPos) {
+	if !at.Valid() || n < 0 || n >= p.segCount {
+		return
+	}
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	for len(p.trackPos) <= n {
+		p.trackPos = append(p.trackPos, nil)
+	}
+	if p.trackPos[n] == nil {
+		p.trackPos[n] = make([]reader.BlockPos, len(p.tracks))
+	}
+	if cur := p.trackPos[n][ti]; cur.Valid() && cur.Off <= at.Off {
+		return
+	}
+	p.trackPos[n][ti] = at
 }
 
 // segPosAt returns the known opening block of the n-th window, if a walk has
