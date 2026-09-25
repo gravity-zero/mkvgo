@@ -5,6 +5,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -193,5 +195,157 @@ func TestPlanHLSInterleavedStaysLinear(t *testing.T) {
 	}
 	if plan.scatteredWindow(1, starts) {
 		t.Errorf("an interleaved window must not be read track by track: %+v", starts)
+	}
+}
+
+// masterBandwidth extracts the first EXT-X-STREAM-INF BANDWIDTH of a master.
+func masterBandwidth(t *testing.T, master []byte) int64 {
+	t.Helper()
+	m := regexp.MustCompile(`#EXT-X-STREAM-INF:BANDWIDTH=(\d+)`).FindSubmatch(master)
+	if m == nil {
+		t.Fatalf("no BANDWIDTH in master:\n%s", master)
+	}
+	v, _ := strconv.ParseInt(string(m[1]), 10, 64)
+	return v
+}
+
+// On a block-ordered source the plan's BANDWIDTH (estimated from the cue
+// offsets) must not read a foreign block as a bitrate peak: it stays within
+// the full pass's figure (measured from the real segments), not 12x above.
+func TestPlanHLSBlockOrderedBandwidth(t *testing.T) {
+	ctx := context.Background()
+	// 120 s blocks: the span straddling a boundary swallows two minutes of
+	// audio, about four times the median rate - past the trigger, so the
+	// file is asked and the block confirmed. (Shorter blocks stay under the
+	// trigger and over-declare by less than 3x, by design.)
+	src := buildBlockOrderedSource(t, 240, 120)
+	full := t.TempDir()
+	if err := RemuxToHLS(ctx, src, full, Options{SegmentMs: 6000}); err != nil {
+		t.Fatal(err)
+	}
+	ref := masterBandwidth(t, readFileBytes(t, filepath.Join(full, "master.m3u8")))
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 6000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := masterBandwidth(t, plan.MasterPlaylist())
+	if got > 2*ref || got < ref/2 {
+		t.Errorf("plan BANDWIDTH %d vs full pass %d: the estimate swallowed a foreign block", got, ref)
+	}
+	st, _ := os.Stat(src)
+	if raw := peakBandwidth(rawSpans(plan, st.Size())); got >= raw {
+		t.Errorf("plan BANDWIDTH %d must be below the raw cue-offset peak %d (the bound was not wired into the master)", got, raw)
+	}
+	if !bytes.Contains(plan.MasterPlaylist(), []byte("BANDWIDTH=")) {
+		t.Fatal("no bandwidth")
+	}
+	mpd, _, err := plan.Resource(ctx, "manifest.mpd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(mpd, []byte(`bandwidth="`+strconv.FormatInt(got, 10)+`"`)) {
+		t.Errorf("the MPD must carry the same estimate %d:\n%s", got, mpd)
+	}
+}
+
+func readFileBytes(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// rawSpans recomputes the unbounded cue-offset spans of a plan.
+func rawSpans(p *HLSPlan, size int64) []segInfo {
+	var segs []segInfo
+	for k := 0; k < p.segCount; k++ {
+		end := size
+		if k+1 < p.segCount {
+			end = p.offsets[k+1]
+		}
+		segs = append(segs, segInfo{durSec: p.durs[k], bytes: end - p.offsets[k]})
+	}
+	return segs
+}
+
+// boundSegmentSpans asks the file only about spans past three times the
+// median rate, replaces only the ones the file confirms as a foreign block,
+// and keeps every real peak whatever its size.
+func TestBoundSegmentSpans(t *testing.T) {
+	asked := map[int]bool{}
+	yes := func(k int) bool { asked[k] = true; return true }
+	no := func(k int) bool { asked[k] = true; return false }
+
+	even := []segInfo{{6, 600}, {6, 660}, {6, 540}, {6, 1500}, {6, 600}} // 2.5x peak: never asked
+	for i, s := range boundSegmentSpans(even, yes) {
+		if s != even[i] {
+			t.Errorf("span %d changed: %+v -> %+v", i, even[i], s)
+		}
+	}
+	if len(asked) != 0 {
+		t.Errorf("spans under 3x the median must not be checked: %v", asked)
+	}
+
+	peak := []segInfo{{6, 600}, {6, 660}, {6, 3300}, {6, 540}, {6, 600}} // 5.5x real peak, the file says no
+	asked = map[int]bool{}
+	for i, s := range boundSegmentSpans(peak, no) {
+		if s != peak[i] {
+			t.Errorf("a real peak must be kept: span %d %+v -> %+v", i, peak[i], s)
+		}
+	}
+	if !asked[2] || len(asked) != 1 {
+		t.Errorf("only the 5.5x span must be checked: %v", asked)
+	}
+
+	block := []segInfo{{6, 600}, {6, 660}, {6, 60000}, {6, 540}, {3, 300}} // a swallowed block, confirmed
+	got := boundSegmentSpans(block, yes)
+	// The block is bounded to the median rate (100 B/s x 6 s = 600) and the
+	// 59400 bytes taken out - the other tracks' media - come back to every
+	// segment at their average rate over the 27 s: 2200 B/s.
+	want := []int64{600 + 2200*6, 660 + 2200*6, 600 + 2200*6, 540 + 2200*6, 300 + 2200*3}
+	for i := range got {
+		if got[i].bytes != want[i] {
+			t.Errorf("span %d: got %d bytes, want %d", i, got[i].bytes, want[i])
+		}
+	}
+	if short := boundSegmentSpans([]segInfo{{6, 600}, {6, 60000}}, yes); short[1].bytes != 60000 {
+		t.Error("fewer than three segments: no statistics, nothing bounded")
+	}
+	if nilc := boundSegmentSpans(block, nil); nilc[2].bytes != 60000 {
+		t.Error("no checker: nothing bounded")
+	}
+}
+
+// spanHoldsForeignBlock reads the cluster headers of the block-ordered
+// fixture: a span straddling a block boundary holds a cluster whose timestamp
+// steps back (true); a span inside the video block does not (false).
+func TestSpanHoldsForeignBlock(t *testing.T) {
+	src := buildBlockOrderedSource(t, 60, 20)
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 6000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	st, _ := f.Stat()
+	raw := rawSpans(plan, st.Size())
+	// 20 s blocks, 6 s segments: segments 3 and 6 straddle a boundary (their
+	// span runs into the audio block); segment 0 does not.
+	for _, c := range []struct {
+		k    int
+		want bool
+	}{{0, false}, {1, false}, {3, true}, {6, true}} {
+		end := st.Size()
+		if c.k+1 < plan.segCount {
+			end = plan.offsets[c.k+1]
+		}
+		if got := spanHoldsForeignBlock(f, plan.offsets[c.k], end); got != c.want {
+			t.Errorf("segment %d (span %d bytes): foreign = %v, want %v", c.k, raw[c.k].bytes, got, c.want)
+		}
 	}
 }

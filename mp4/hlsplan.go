@@ -23,6 +23,7 @@ package mp4
 // always-exact prefix path.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -372,6 +374,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		segs = append(segs, segInfo{durSec: p.durs[k], bytes: end - p.offsets[k]})
 	}
+	confirm, closeConfirm := p.foreignBlockChecker(srcPath, fs)
+	segs = boundSegmentSpans(segs, confirm)
+	closeConfirm()
 	p.segs = segs
 	p.winBudget = o.WindowCacheBytes
 	for _, s := range segs {
@@ -1195,6 +1200,187 @@ func (p *HLSPlan) learnTrackPos(n, ti int, at reader.BlockPos) {
 		return
 	}
 	p.trackPos[n][ti] = at
+}
+
+// boundSegmentSpans makes the cue-offset estimate of each segment's bytes
+// robust to the source's layout. The span between two video keyframe clusters
+// is the segment's media only when the file interleaves its tracks; on a
+// block-ordered source the span that straddles a block boundary swallows the
+// other tracks' whole blocks - minutes of audio - and read as a bitrate it
+// declared a 1.5 Mb/s rung at 24 Mb/s (measured: 12x), a rung a player then
+// never picks.
+//
+// Statistics alone cannot tell such a span from a real peak: measured on real
+// releases, one 6 s segment in a film runs at 4-5x the median byte rate, and a
+// swallowed block of one minute adds only ~3x. So a span past three times the
+// median rate is only a CANDIDATE; confirm(k) then looks at the file - the
+// cluster headers inside the span, a cluster whose timestamp steps back from
+// the previous one's being the foreign block itself - and only a confirmed
+// span is replaced by what the segment's duration is worth at the median
+// rate, the bytes taken out being handed back to every segment at their
+// average rate (they are the other tracks' media, which the spans of such a
+// file otherwise lack). Real peaks stay whatever their size. At most
+// maxForeignChecks candidates are examined, largest first, to bound the
+// reads on a remote source; blocks short enough to stay under the trigger
+// over-declare by less than 3x and are left alone.
+func boundSegmentSpans(segs []segInfo, confirm func(k int) bool) []segInfo {
+	rates := make([]float64, 0, len(segs))
+	for _, s := range segs {
+		if s.durSec > 0 && s.bytes > 0 {
+			rates = append(rates, float64(s.bytes)/s.durSec)
+		}
+	}
+	if len(rates) < 3 || confirm == nil {
+		return segs
+	}
+	sort.Float64s(rates)
+	median := rates[len(rates)/2]
+	if median <= 0 {
+		return segs
+	}
+	var candidates []int
+	for k, s := range segs {
+		if s.durSec > 0 && float64(s.bytes) > 3*median*s.durSec {
+			candidates = append(candidates, k)
+		}
+	}
+	if len(candidates) == 0 {
+		return segs
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		a, b := segs[candidates[i]], segs[candidates[j]]
+		return float64(a.bytes)/a.durSec > float64(b.bytes)/b.durSec
+	})
+	if len(candidates) > maxForeignChecks {
+		candidates = candidates[:maxForeignChecks]
+	}
+	out := make([]segInfo, len(segs))
+	copy(out, segs)
+	var removed, totalDur float64
+	for _, k := range candidates {
+		if confirm(k) {
+			out[k].bytes = int64(median * segs[k].durSec)
+			removed += float64(segs[k].bytes - out[k].bytes)
+		}
+	}
+	if removed <= 0 {
+		return out
+	}
+	// The bytes taken out of the confirmed spans are the other tracks' media
+	// (their blocks), which every span of a block-ordered file lacks - the
+	// spans there measure the video alone. Hand them back to every segment at
+	// their average rate, so the peak counts audio and video as it does on an
+	// interleaved file.
+	for _, s := range segs {
+		totalDur += s.durSec
+	}
+	if totalDur > 0 {
+		perSec := removed / totalDur
+		for i := range out {
+			out[i].bytes += int64(perSec * out[i].durSec)
+		}
+	}
+	return out
+}
+
+// maxForeignChecks bounds how many candidate spans foreignBlockChecker reads
+// into (a couple of dozen tiny reads each at most); a real release has one to
+// four spans past the trigger, a block-ordered film one per block boundary.
+const maxForeignChecks = 32
+
+// maxForeignClusterHeaders bounds the cluster headers read inside one
+// candidate span. A foreign block starts right after the segment's own
+// clusters (two or three for a 6 s segment at 2 s clusters, a dozen for
+// sub-second clusters), so its first cluster - the one whose timestamp steps
+// back - is met within the first headers or not at all.
+const maxForeignClusterHeaders = 16
+
+// foreignBlockChecker returns the confirm callback boundSegmentSpans uses on
+// this plan's source (opened on first use; the returned close releases it)
+// and a no-op close when nothing was opened.
+func (p *HLSPlan) foreignBlockChecker(srcPath string, fs *mkv.FS) (func(k int) bool, func()) {
+	var (
+		src  mkv.ReadSeekCloser
+		size int64
+		bad  bool
+	)
+	confirm := func(k int) bool {
+		if bad {
+			return false
+		}
+		if src == nil {
+			f, err := fs.DoOpen(srcPath)
+			if err != nil {
+				bad = true
+				return false
+			}
+			st, err := fs.DoStat(srcPath)
+			if err != nil {
+				f.Close()
+				bad = true
+				return false
+			}
+			src, size = f, st.Size()
+		}
+		end := size
+		if k+1 < len(p.offsets) {
+			end = p.offsets[k+1]
+		}
+		return spanHoldsForeignBlock(src, p.offsets[k], end)
+	}
+	return confirm, func() {
+		if src != nil {
+			src.Close()
+		}
+	}
+}
+
+// spanHoldsForeignBlock walks the cluster headers of [from, end) - the ID,
+// size and Timestamp of each cluster, one small read per cluster, no block
+// read - and reports whether a cluster's timestamp steps BACK from the
+// previous cluster's: the segment's span then contains another track's
+// block, stored out of time order (an interleaving muxer writes cluster
+// timestamps forward, always). The comparison is between consecutive
+// clusters, not against the segment's start: a segment's own first cluster
+// legitimately starts before its keyframe. An unknown-size cluster or
+// anything that is not a cluster ends the walk undecided (false: the span is
+// left as measured).
+func spanHoldsForeignBlock(src io.ReadSeeker, from, end int64) bool {
+	var buf [32]byte
+	off := from
+	var prev int64 = -1
+	for n := 0; n < maxForeignClusterHeaders && off+8 < end; n++ {
+		if _, err := src.Seek(off, io.SeekStart); err != nil {
+			return false
+		}
+		got, err := io.ReadFull(src, buf[:])
+		if err != nil && got < 12 {
+			return false
+		}
+		r := bytes.NewReader(buf[:got])
+		h, hdrLen, err := ebml.ReadElementHeader(r)
+		if err != nil || h.Size < 0 {
+			return false
+		}
+		if h.ID != mkv.IDCluster {
+			off += int64(hdrLen) + h.Size // a stray top-level element (Cues, Tags): step over it
+			continue
+		}
+		ch, _, err := ebml.ReadElementHeader(r)
+		if err != nil || ch.ID != mkv.IDTimestamp || ch.Size <= 0 || ch.Size > 8 {
+			return false
+		}
+		ts, err := ebml.ReadUint(r, ch.Size)
+		if err != nil {
+			return false
+		}
+		if prev >= 0 && int64(ts) < prev {
+			return true
+		}
+		prev = int64(ts)
+		off += int64(hdrLen) + h.Size
+	}
+	return false
 }
 
 // segPosAt returns the known opening block of the n-th window, if a walk has
