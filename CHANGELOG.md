@@ -4,6 +4,27 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.34.1] - 2026-09-26
+
+### Fixed
+
+- **mkvgo did not compile on 32-bit targets** (`GOARCH=arm`, `386` - e.g. an
+  Android armeabi-v7a or x86 build through gomobile): the MP4 sample-size
+  check compared `len(data)` to `math.MaxUint32`, a constant that overflows a
+  32-bit `int`.
+- **A crafted MP4 box size or in-place journal crashed a 32-bit build.** A
+  64-bit box size (`largesize`) or a journal zone length was converted to
+  `int` before the bounds check, which truncates on 32-bit: the parser
+  panicked on a negative slice bound, or accepted a box with a bogus length
+  (2^32+16 read as 16). The declared size is now compared to the bytes left
+  without truncation, and the malformed input is refused. 64-bit builds were
+  not affected.
+
+### Changed
+
+- CI builds `GOARCH=arm` and runs the whole test suite under `GOARCH=386`, as
+  does `make preflight`.
+
 ## [0.34.0] - 2026-09-25
 
 ### Added
