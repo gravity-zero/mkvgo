@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -102,31 +103,77 @@ type coverArt struct {
 	png  bool // selects the data box's well-known type: 14 (PNG) vs 13 (JPEG)
 }
 
+// maxCoverArtBytes bounds the one attachment payload the remux and the
+// packagers load: a cover is a picture of a few hundred KB, and an "image"
+// attachment past this size is not one - it is skipped rather than held.
+const maxCoverArtBytes = 32 << 20
+
+// loadCoverArt is pickCoverArt over attachments read with
+// reader.WithoutAttachmentData: the selection needs no payload (MIME type,
+// name and size are in the list), and only the chosen picture is then read
+// from the source - a font set never enters memory. An attachment whose
+// payload was already loaded is used as is.
+func loadCoverArt(fs *mkv.FS, atts []mkv.Attachment) (*coverArt, error) {
+	a := pickCoverAttachment(atts)
+	if a == nil {
+		return nil, nil
+	}
+	png := a.MIMEType == "image/png"
+	if len(a.Data) > 0 {
+		return &coverArt{data: a.Data, png: png}, nil
+	}
+	f, err := fs.DoOpen(a.DataPath)
+	if err != nil {
+		return nil, errf("cover art %q: %w", a.Name, err)
+	}
+	defer f.Close()
+	if _, err := f.Seek(a.DataOffset, io.SeekStart); err != nil {
+		return nil, errf("cover art %q: %w", a.Name, err)
+	}
+	data, err := readExact(f, a.Size)
+	if err != nil {
+		return nil, errf("cover art %q: %w", a.Name, err)
+	}
+	return &coverArt{data: data, png: png}, nil
+}
+
+// pickCoverAttachment selects the attachment to carry as cover art: the first
+// JPEG/PNG image, preferring one whose name starts with "cover". The payload
+// may be loaded (Data) or still on disk (Size + DataPath); an empty or
+// oversized one is never a cover.
+func pickCoverAttachment(atts []mkv.Attachment) *mkv.Attachment {
+	var found *mkv.Attachment
+	for i := range atts {
+		a := &atts[i]
+		if a.MIMEType != "image/jpeg" && a.MIMEType != "image/png" {
+			continue
+		}
+		size := int64(len(a.Data))
+		if size == 0 && a.DataPath != "" {
+			size = a.Size
+		}
+		if size <= 0 || size > maxCoverArtBytes {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(a.Name), "cover") {
+			return a
+		}
+		if found == nil {
+			found = a
+		}
+	}
+	return found
+}
+
 // pickCoverArt selects the source attachment to carry as MP4 cover art: the
 // first JPEG/PNG image attachment, preferring one whose name starts with
 // "cover" (the Matroska cover-art convention). Nil when there is none.
 func pickCoverArt(atts []mkv.Attachment) *coverArt {
-	var found *coverArt
-	for _, a := range atts {
-		var png bool
-		switch a.MIMEType {
-		case "image/jpeg":
-		case "image/png":
-			png = true
-		default:
-			continue
-		}
-		if len(a.Data) == 0 {
-			continue
-		}
-		if strings.HasPrefix(strings.ToLower(a.Name), "cover") {
-			return &coverArt{data: a.Data, png: png}
-		}
-		if found == nil {
-			found = &coverArt{data: a.Data, png: png}
-		}
+	a := pickCoverAttachment(atts)
+	if a == nil || len(a.Data) == 0 {
+		return nil
 	}
-	return found
+	return &coverArt{data: a.Data, png: a.MIMEType == "image/png"}
 }
 
 // buildMovieMeta builds the iTunes-style metadata box carrying the movie title

@@ -130,7 +130,13 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	o := optionsFrom(opts)
 	fs := o.FS
 
-	c, err := reader.OpenWithFS(ctx, srcPath, fs)
+	// The attachment payloads stay on disk: only the cover art is carried into
+	// the MP4, and it is read on its own below (loadCoverArt).
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
+	if err != nil {
+		return err
+	}
+	cover, err := loadCoverArt(fs, c.Attachments)
 	if err != nil {
 		return err
 	}
@@ -172,7 +178,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		title:    c.Info.Title,
 		tags:     globalTags(c),
 		chapters: c.Chapters,
-		cover:    pickCoverArt(c.Attachments),
+		cover:    cover,
 	}
 	return writeMP4(ctx, dst, dstPath, br, tracks, brands, meta, o)
 }

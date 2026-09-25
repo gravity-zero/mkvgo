@@ -49,7 +49,9 @@ func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS) (*pack
 	}
 	if head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
 		f.Close() // Matroska: the existing reader owns its own handle
-		c, err := reader.OpenWithFS(ctx, srcPath, fs)
+		// Attachment payloads stay on disk: the packager carries only the
+		// cover art, read on its own by loadCoverArt.
+		c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 		if err != nil {
 			return nil, err
 		}

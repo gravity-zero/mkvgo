@@ -271,7 +271,11 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// (every audio sample is a sync point, so the same cut applies).
 	bounds := segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
 
-	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)}
+	cover, err := loadCoverArt(fs, c.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover}
 
 	var segs []segInfo
 	var rends []sfRendition

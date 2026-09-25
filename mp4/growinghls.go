@@ -196,7 +196,11 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, errf("%s: play-while-downloading is Matroska/WebM-only in this version", srcPath)
 	}
 
-	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithTags(), reader.WithAttachments())
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData())
+	if err != nil {
+		return nil, err
+	}
+	cover, err := loadCoverArt(fs, c.Attachments)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +247,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	p := &GrowingHLSPlan{
 		srcPath: srcPath, fs: fs, opts: o, segMs: segMs,
 		segStart: c.SegmentStart, segDeclaredEnd: -1,
-		meta: movieMeta{title: c.Info.Title, tags: globalTags(c), cover: pickCoverArt(c.Attachments)},
+		meta: movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover},
 	}
 	p.full = &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks)}
