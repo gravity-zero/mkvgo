@@ -667,3 +667,87 @@ func warningsContain(warnings []string, substr string) bool {
 	}
 	return false
 }
+
+// Cluster order: an interleaving muxer's clusters run forward (backstep 0); a
+// file storing its tracks in single-track blocks writes the first audio
+// cluster of a block with a timestamp that steps back by the block length,
+// which the walk measures exactly and names in a Warning past one second.
+func TestAnalyze_ClusterTimecodeBackstep(t *testing.T) {
+	write := func(t *testing.T, name string, clusters [][]mkv.Block, stamps []int64) (*AnalyzeReport, error) {
+		t.Helper()
+		mem := mkv.NewMemFS()
+		fs := mem.FS()
+		w, err := fs.DoCreate(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mw := writer.NewMKVWriter(w)
+		if err := mw.WriteStart(); err != nil {
+			t.Fatal(err)
+		}
+		c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "test", WritingApp: "test"}}
+		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac"}
+		if err := mw.WriteMetadata(c, []mkv.Track{videoTrack(1), audio}, 4000); err != nil {
+			t.Fatal(err)
+		}
+		for i, blks := range clusters {
+			if err := mw.WriteClusterWithCues(stamps[i], 1_000_000, blks); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := mw.Finalize(); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return Analyze(context.Background(), name, mkv.Options{FS: fs})
+	}
+	v := func(ms int64, key bool) mkv.Block {
+		return mkv.Block{TrackNumber: 1, Timecode: ms, Keyframe: key, Data: []byte("v")}
+	}
+	a := func(ms int64) mkv.Block {
+		return mkv.Block{TrackNumber: 2, Timecode: ms, Keyframe: true, Data: []byte("a")}
+	}
+
+	// Interleaved: video and audio in every cluster, timestamps forward.
+	interleaved, err := write(t, "inter.mkv", [][]mkv.Block{
+		{v(0, true), a(0), v(1000, false), a(1000)},
+		{v(2000, true), a(2000), v(3000, false), a(3000)},
+	}, []int64{0, 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interleaved.ClusterTimecodeBackstepMs != 0 {
+		t.Errorf("interleaved backstep = %d, want 0", interleaved.ClusterTimecodeBackstepMs)
+	}
+	for _, w := range interleaved.Warnings {
+		if strings.Contains(w, "not in time order") {
+			t.Errorf("interleaved file must not warn about cluster order: %q", w)
+		}
+	}
+
+	// Block-ordered: the video clusters of 4 s, then the audio clusters of the
+	// same 4 s - the first audio cluster steps back by 2 s.
+	blocks, err := write(t, "blocks.mkv", [][]mkv.Block{
+		{v(0, true), v(1000, false)},
+		{v(2000, true), v(3000, false)},
+		{a(0), a(1000)},
+		{a(2000), a(3000)},
+	}, []int64{0, 2000, 0, 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocks.ClusterTimecodeBackstepMs != 2000 {
+		t.Errorf("block-ordered backstep = %d, want 2000", blocks.ClusterTimecodeBackstepMs)
+	}
+	found := false
+	for _, w := range blocks.Warnings {
+		if strings.Contains(w, "not in time order") && strings.Contains(w, "2000ms") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("block-ordered file must warn about cluster order, got %v", blocks.Warnings)
+	}
+}

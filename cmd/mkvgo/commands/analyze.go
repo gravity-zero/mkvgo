@@ -48,6 +48,9 @@ func printAnalyzeReport(r *matroska.AnalyzeReport) {
 	fmt.Printf("Duration: %s (declared %s)\n", FmtMs(r.DurationMs), FmtMs(r.DeclaredDurationMs))
 	fmt.Printf("Overall bitrate: %d kb/s\n", r.OverallBitrateBps/1000)
 	fmt.Printf("Clusters: %d, blocks: %d\n", r.ClusterCount, r.BlockCount)
+	if r.ClusterTimecodeBackstepMs > 0 {
+		fmt.Printf("Cluster order: timestamp steps back by up to %s in file order (tracks stored in blocks)\n", FmtMs(r.ClusterTimecodeBackstepMs))
+	}
 
 	for _, ts := range r.Tracks {
 		fmt.Printf("\nTrack %d (%s, %s): %d frames (%d packets), %d keyframes, %d bytes\n",

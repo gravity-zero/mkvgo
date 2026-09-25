@@ -553,7 +553,14 @@ open far apart (further than a window's worth of bytes, in different clusters)
 are read as one short walk each from their own block - the same bytes as the
 linear walk, and as `RemuxToHLS`. Measured: 46x the file read for 9-minute
 blocks before, 2.2x after; interleaved sources keep their single walk (1.04x).
-A seek into an unvisited region pays one traversal.
+A seek into an unvisited region pays one traversal. The master's `BANDWIDTH`
+(and the MPD's `bandwidth`), estimated from the bytes between two video
+keyframe clusters, is guarded against this layout too: a span past three
+times the median rate is checked in the file (its cluster headers - a
+timestamp stepping back marks the foreign block) and, when confirmed,
+replaced by the segment's worth at the median rate with the removed bytes
+handed back to every segment at their average rate; measured within 0.4 % of
+the full pass on a real block-ordered file, unchanged on interleaved ones.
 
 ### On-demand ABR (`mp4.PlanABR`)
 
@@ -1768,8 +1775,9 @@ A VFR video track (`FrameRateMode == "vfr"`) adds a Warning: some downstream pip
 | `DeclaredDurationMs` | The Segment `Info` `Duration` element, before the walk confirms it. |
 | `OverallBitrateBps` | Total bytes across every track, over `DurationMs`. |
 | `ClusterCount` / `BlockCount` | Number of Cluster elements entered, and stored (Simple)Block/BlockGroup elements seen. |
+| `ClusterTimecodeBackstepMs` | Largest drop of the Cluster Timestamp between two consecutive clusters in file order (ms); 0 for an interleaving muxer. A large value (seconds to minutes) means the tracks are stored in single-track blocks - a two-input remux with a large interleave delta - which a direct-play client stalls on and an on-demand packager reads several times over. Header-only, deterministic (every cluster is seen, no sampling); a Warning names it past 1 second. |
 | `Tracks` | `[]TrackStats`, one per track, in `Container.Tracks` order. |
-| `Warnings` | Timing sanity issues: a declared-vs-true duration mismatch over 1 second, a track's timecode jumping backwards by more than a second, a track with zero frames, or a track whose frame durations could not be determined (no `BlockDuration`, no usable `DefaultDuration`). |
+| `Warnings` | Timing sanity issues: a declared-vs-true duration mismatch over 1 second, a track's timecode jumping backwards by more than a second, clusters out of time order by more than a second (block-ordered tracks), a track with zero frames, or a track whose frame durations could not be determined (no `BlockDuration`, no usable `DefaultDuration`). |
 
 Supports the FS port like every other operation (`mkv.Options{FS: ...}`), so a remote file can be analyzed the same way `Validate` and `Reindex` do.
 

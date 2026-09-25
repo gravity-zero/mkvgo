@@ -134,11 +134,21 @@ type AnalyzeReport struct {
 	DurationMs int64 `json:"duration_ms"`
 	// DeclaredDurationMs is the Segment Info Duration element - see Warnings
 	// for a mismatch against the walked DurationMs.
-	DeclaredDurationMs int64        `json:"declared_duration_ms"`
-	OverallBitrateBps  int64        `json:"overall_bitrate_bps"`
-	ClusterCount       int64        `json:"cluster_count"`
-	BlockCount         int64        `json:"block_count"`
-	Tracks             []TrackStats `json:"tracks"`
+	DeclaredDurationMs int64 `json:"declared_duration_ms"`
+	OverallBitrateBps  int64 `json:"overall_bitrate_bps"`
+	ClusterCount       int64 `json:"cluster_count"`
+	BlockCount         int64 `json:"block_count"`
+	// ClusterTimecodeBackstepMs is the largest drop of the Cluster Timestamp
+	// between two consecutive clusters in FILE order, in ms; 0 when the
+	// clusters run forward, as every interleaving muxer writes them. A large
+	// value says the file stores its tracks in single-track BLOCKS (a
+	// two-input remux with a large interleave delta writes minutes of video,
+	// then the same minutes of audio, whose first cluster jumps back by the
+	// block length): a layout a direct-play client stalls on and an on-demand
+	// packager reads several times over. Header-only, from the walk Analyze
+	// already does - no sampling, no payload read.
+	ClusterTimecodeBackstepMs int64        `json:"cluster_timecode_backstep_ms"`
+	Tracks                    []TrackStats `json:"tracks"`
 	// Warnings flags timing sanity issues found during the walk: a declared
 	// vs. true duration mismatch, a backward timecode jump, a track with zero
 	// frames, or a track whose frame durations could not be determined.
@@ -369,6 +379,14 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		accs[t.ID] = &trackAcc{track: t}
 	}
 
+	// Cluster order: the Timestamp of each cluster entered, compared with the
+	// previous one's, for ClusterTimecodeBackstepMs.
+	var (
+		lastClusterStart int64 = -1
+		lastClusterTS    int64
+		maxBackstepTicks int64
+	)
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -379,6 +397,14 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read blocks: %w", err)
+		}
+		if pos := br.Pos(); pos.ClusterStart != lastClusterStart {
+			if lastClusterStart >= 0 && pos.ClusterTS < lastClusterTS {
+				if d := lastClusterTS - pos.ClusterTS; d > maxBackstepTicks {
+					maxBackstepTicks = d
+				}
+			}
+			lastClusterStart, lastClusterTS = pos.ClusterStart, pos.ClusterTS
 		}
 		acc, ok := accs[blk.TrackNumber]
 		if !ok {
@@ -448,8 +474,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 	}
 
 	report := &AnalyzeReport{
-		DeclaredDurationMs: c.DurationMs,
-		ClusterCount:       br.ClusterCount(),
+		DeclaredDurationMs:        c.DurationMs,
+		ClusterCount:              br.ClusterCount(),
+		ClusterTimecodeBackstepMs: maxBackstepTicks * c.Info.TimecodeScale / 1_000_000,
 	}
 
 	var totalBytes int64
@@ -514,6 +541,10 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 
 	if report.DurationMs > 0 {
 		report.OverallBitrateBps = totalBytes * 8 * 1000 / report.DurationMs
+	}
+	if report.ClusterTimecodeBackstepMs >= backwardTimecodeWarnMs {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("clusters are not in time order: the timestamp steps back by up to %dms in file order - the tracks are stored in single-track blocks (a remux with a large interleave delta); direct play stalls on it and on-demand packaging reads it several times over, re-interleave the file to fix", report.ClusterTimecodeBackstepMs))
 	}
 	if report.DeclaredDurationMs > 0 && report.DurationMs > 0 {
 		diff := report.DeclaredDurationMs - report.DurationMs
