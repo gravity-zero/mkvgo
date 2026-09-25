@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.33.0] - 2026-09-25
 
 ### Added
 
@@ -22,8 +22,25 @@ All notable changes to mkvgo are documented here. The format is based on
   declares the track's channel count when it is known, the HLS counterpart
   of the DASH `AudioChannelConfiguration`.
 
+### Changed
+
+- **Attachment payloads stay on disk.** `RemuxToMP4`, `RemuxToHLS`,
+  `PlanHLS` and the growing plan read the attachment list without its
+  payloads and load only the picture they carry as cover art (an image over
+  32 MiB is not one). A source with a large font set no longer costs that
+  memory - and that I/O - to remux or package.
+
 ### Fixed
 
+- **Block-ordered sources read many times over.** A Matroska file laid out in
+  single-track blocks (a two-input remux with a large interleave delta writes
+  minutes of video, then the same minutes of audio) made the on-demand plan
+  traverse the rest of the video block for EVERY window - 6x the file for
+  60 s blocks, 46x for 9-minute blocks, measured. Each walk now records where
+  every track's window opens; once known and far apart, the next window is
+  read as one short walk per track. Same bytes as before (and as the full
+  pass); 2.2x for 9-minute blocks, unchanged 1.04x on interleaved sources.
+  Only the first window after a seek still pays the traversal.
 - **Audio Representations declared `bandwidth="0"`.** The DASH manifests
   now carry the audio track's own bit rate: measured from its samples when
   the packager holds them, else the container's figure (Matroska `BPS`
