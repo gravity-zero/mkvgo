@@ -151,7 +151,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return planHLSFromMP4(ctx, mp4ps, srcPath, fs, &o, segMs)
 	}
 
-	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments()}
+	// WithBitrate: each track's BPS statistic (the Tags are read anyway) -
+	// the DASH manifest's audio bandwidth, which read 0 without it.
+	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithBitrate()}
 	if o.ChapterMarkers {
 		// Only fetched when the opt-in is set: an extra bounded SeekHead ->
 		// Chapters read a plan otherwise has no use for.

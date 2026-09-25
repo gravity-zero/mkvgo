@@ -215,7 +215,7 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 			}
 		} else {
 			as = `mimeType="audio/mp4" contentType="audio"` + dashLangAttr(t)
-			rep = fmt.Sprintf(`id="a%d" bandwidth="0"`, audioIndex(fts, i))
+			rep = fmt.Sprintf(`id="a%d" bandwidth="%d"`, audioIndex(fts, i), dashAudioBandwidth(ft))
 			if t.SampleRate != nil && *t.SampleRate > 0 {
 				rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
 			}
@@ -225,6 +225,9 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 		}
 		r := &rends[i]
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		if !ft.outTrack.spec.video {
+			b.WriteString(dashLabel(t, "      "))
+		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		if !ft.outTrack.spec.video {
 			b.WriteString(dashAudioChannelConfiguration(t, "        "))
@@ -239,6 +242,7 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 		t := &subs[i].track
 		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
 		b.WriteString("      </Representation>\n")

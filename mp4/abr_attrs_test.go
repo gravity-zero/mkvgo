@@ -54,6 +54,7 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 		master := readTextFile(t, filepath.Join(dir, "master.m3u8"))
 		mustContain(t, master, `NAME="Commentary"`)
 		mustContain(t, master, `LANGUAGE="fr-BE"`)
+		mustContain(t, master, `CHANNELS="2"`)
 		mustContain(t, master, `DEFAULT=YES`)
 		mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
 		mustContain(t, mpd, `width="1920"`)
@@ -62,6 +63,7 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 		mustContain(t, mpd, `lang="fr-BE"`)
 		mustContain(t, mpd, `audioSamplingRate="48000"`)
 		mustContain(t, mpd, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`)
+		mustContain(t, mpd, `<Label>Commentary</Label>`)
 	})
 
 	t.Run("minimal-metadata", func(t *testing.T) {

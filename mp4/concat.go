@@ -355,6 +355,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		if l := t.ResolvedLanguage(); l != "" {
 			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
+		attrs += hlsChannelsAttr(t)
 		if t.IsDefault || (!hasDefaultAudio && j == 0) {
 			attrs += ",DEFAULT=YES"
 		}

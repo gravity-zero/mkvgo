@@ -981,6 +981,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		if l := t.ResolvedLanguage(); l != "" {
 			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
 		}
+		attrs += hlsChannelsAttr(t)
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
 		}

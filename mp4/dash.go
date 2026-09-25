@@ -64,7 +64,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 			}
 		} else {
 			as = `mimeType="audio/mp4" contentType="audio"` + dashLangAttr(t)
-			rep = fmt.Sprintf(`id="a%d" bandwidth="0"`, audioIndex(fts, i))
+			rep = fmt.Sprintf(`id="a%d" bandwidth="%d"`, audioIndex(fts, i), dashAudioBandwidth(ft))
 			if t.SampleRate != nil && *t.SampleRate > 0 {
 				rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
 			}
@@ -75,6 +75,9 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		if o.CENC != nil {
 			b.WriteString(cencContentProtection(o.CENC))
+		}
+		if !ft.outTrack.spec.video {
+			b.WriteString(dashLabel(t, "      ")) // after ContentProtection: the schema's order
 		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		if !ft.outTrack.spec.video {
@@ -94,6 +97,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		t := &subs[i].track
 		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
 		b.WriteString("      </Representation>\n")
@@ -152,6 +156,50 @@ func dashLangAttr(t *mkv.Track) string {
 		return fmt.Sprintf(" lang=%q", l)
 	}
 	return ""
+}
+
+// dashAudioBandwidth is an audio Representation's bandwidth attribute: the
+// track's own bit rate when it is known - from its samples when the plan
+// holds them, else the container's figure (the Matroska BPS tag, the MP4
+// btrt/esds average) - and 0 only when neither says. 0 is what every audio
+// Representation declared before, known or not.
+func dashAudioBandwidth(ft *fragTrack) int64 {
+	if n := len(ft.samples); n > 1 {
+		if span := ft.samples[n-1].ptsMs - ft.samples[0].ptsMs; span > 0 {
+			var bytes int64
+			for _, s := range ft.samples {
+				bytes += int64(s.size)
+			}
+			return bytes * 8 * 1000 / span
+		}
+	}
+	if b := ft.outTrack.mkv.Bitrate; b != nil && *b > 0 {
+		return int64(*b)
+	}
+	return 0
+}
+
+// dashLabel is the AdaptationSet's Label element (one line, indented) for a
+// track with a name - the title the HLS master already shows as NAME - or ""
+// when it has none. It goes where the schema puts it: after ContentProtection,
+// before the Representations.
+func dashLabel(t *mkv.Track, indent string) string {
+	if t.Name == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s<Label>%s</Label>\n", indent, xmlEscapeText(t.Name))
+}
+
+// hlsChannelsAttr is the EXT-X-MEDIA CHANNELS attribute (with its leading
+// comma) for an audio track - the count of its channels, which players and
+// the HLS authoring rules expect on every audio rendition - or "" when the
+// count is unknown. The DASH side of the same fact is
+// dashAudioChannelConfiguration.
+func hlsChannelsAttr(t *mkv.Track) string {
+	if t.Channels == nil || *t.Channels == 0 {
+		return ""
+	}
+	return fmt.Sprintf(",CHANNELS=\"%d\"", *t.Channels)
 }
 
 // dashAudioChannelConfiguration is the Representation's
