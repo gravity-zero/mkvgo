@@ -137,7 +137,7 @@ func iterBoxes(buf []byte) ([]memBox, error) {
 		case 0:
 			size = int64(len(buf) - off)
 		}
-		if size < int64(hdr) || off+int(size) > len(buf) {
+		if size < int64(hdr) || size > int64(len(buf)-off) {
 			return nil, errf("box %q has invalid size %d", typ, size)
 		}
 		out = append(out, memBox{typ: typ, payload: buf[off+hdr : off+int(size)]})
@@ -403,7 +403,7 @@ func (m *lazyMoov) parse(start, end int) error {
 		case 0:
 			boxSize = int64(end - off)
 		}
-		if boxSize < int64(hdr) || off+int(boxSize) > end {
+		if boxSize < int64(hdr) || boxSize > int64(end-off) {
 			return errf("box %q has invalid size %d", typ, boxSize)
 		}
 		boxEnd := off + int(boxSize)

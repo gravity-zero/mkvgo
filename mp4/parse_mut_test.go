@@ -166,8 +166,8 @@ func TestLazyMoovParseLoopBoundary(t *testing.T) {
 	}
 }
 
-// TestLazyMoovParseSizeCheckBoundary kills the ARITHMETIC_BASE on
-// `off+int(boxSize)` (parse.go:406): a box whose declared size exactly
+// TestLazyMoovParseSizeCheckBoundary kills the ARITHMETIC_BASE on the
+// declared-size check (parse.go:406): a box whose declared size exactly
 // reaches the end of the parse window is valid; one byte more is not.
 func TestLazyMoovParseSizeCheckBoundary(t *testing.T) {
 	raw := box("free", make([]byte, 8)) // 16-byte box (8 header + 8 payload)
@@ -674,5 +674,32 @@ func TestParseESDSLengthBoundaryMessage(t *testing.T) {
 	_, _, _, err = parseESDS([]byte{0, 0, 0})
 	if err == nil || !strings.Contains(err.Error(), "too short") {
 		t.Errorf("3-byte esds err = %v, want \"too short\"", err)
+	}
+}
+
+// largeBox is a 64-bit-size box header (size field 1) declaring size, padded
+// so the parse window holds more than the 16-byte header.
+func largeBox(size uint64) []byte {
+	b := make([]byte, 64)
+	binary.BigEndian.PutUint32(b[0:4], 1)
+	copy(b[4:8], "free")
+	binary.BigEndian.PutUint64(b[8:16], size)
+	return b
+}
+
+// TestHugeLargesizeRejected pins the declared-size check against int
+// truncation: on a 32-bit build `off+int(size)` wrapped a 64-bit largesize,
+// so a crafted box panicked on a negative slice bound or was accepted with a
+// bogus length (2^32+16 read as 16). Run under GOARCH=386 to exercise it.
+func TestHugeLargesizeRejected(t *testing.T) {
+	for _, size := range []uint64{1<<63 - 1, 1<<63 - 8, 1<<32 + 16, 1<<31 + 16} {
+		raw := largeBox(size)
+		if _, err := iterBoxes(raw); err == nil {
+			t.Errorf("iterBoxes: largesize %d accepted", size)
+		}
+		m := &lazyMoov{r: bytes.NewReader(raw), buf: make([]byte, len(raw))}
+		if err := m.parse(0, len(raw)); err == nil {
+			t.Errorf("lazyMoov.parse: largesize %d accepted", size)
+		}
 	}
 }

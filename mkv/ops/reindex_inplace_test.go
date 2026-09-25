@@ -729,3 +729,20 @@ func TestReindexInPlace_HeadOnlyDiscoverableOrRefuse(t *testing.T) {
 		t.Fatalf("ReindexInPlace succeeded but the Cues index is not discoverable head-only (0 cues via SeekHead)")
 	}
 }
+
+// TestParseInplaceJournalHugeZoneLen pins the zone-length check against int
+// truncation: on a 32-bit build int(0xFFFFFFFF) is -1, so a corrupt journal
+// passed the bound and panicked on a negative slice instead of being refused.
+// Run under GOARCH=386 to exercise it.
+func TestParseInplaceJournalHugeZoneLen(t *testing.T) {
+	payload := []byte{
+		0, 0, 0, 0, 0, 0, 0x10, 0, // origSize
+		0, 0, 0, 1, // zoneCount
+		0, 0, 0, 0, 0, 0, 0, 0, // zone offset
+		0xFF, 0xFF, 0xFF, 0xFF, // zone length
+		0, 0, 0, 0, // a few data bytes, far fewer than declared
+	}
+	if _, err := parseInplaceJournalPayload(payload); err == nil {
+		t.Fatal("zone length 0xFFFFFFFF accepted")
+	}
+}

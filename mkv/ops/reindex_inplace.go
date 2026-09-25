@@ -773,7 +773,7 @@ func parseInplaceJournalPayload(payload []byte) (*inplaceJournal, error) {
 		zoff := int64(binary.BigEndian.Uint64(payload[off : off+8]))
 		zlen := binary.BigEndian.Uint32(payload[off+8 : off+12])
 		off += 12
-		if off+int(zlen) > len(payload) {
+		if int64(zlen) > int64(len(payload)-off) {
 			return nil, fmt.Errorf("truncated zone data at index %d", i)
 		}
 		orig := append([]byte(nil), payload[off:off+int(zlen)]...)
