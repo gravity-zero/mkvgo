@@ -4,6 +4,32 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Audio-only CMAF presentations.** `mp4.DASHFromCMAF` and `mp4.HLSFromCMAF`
+  accept a `CMAFPresentation` with `Audio` representations and no `Video`:
+  the manifest carries one audio AdaptationSet per representation, the HLS
+  master one audio-only variant per representation. CLI `cmaf-mpd` /
+  `cmaf-hls` take `--audio` alone.
+- **Track titles in the DASH manifests.** Every audio and subtitle
+  AdaptationSet carries a `<Label>` with the track name (XML-escaped) - what
+  the HLS master already shows as `NAME` - in all four generators (single
+  variant, ABR, single-file, external CMAF), placed after `ContentProtection`
+  as the schema orders.
+- **`CHANNELS` on the HLS audio renditions.** Each `EXT-X-MEDIA` audio line
+  declares the track's channel count when it is known, the HLS counterpart
+  of the DASH `AudioChannelConfiguration`.
+
+### Fixed
+
+- **Audio Representations declared `bandwidth="0"`.** The DASH manifests
+  now carry the audio track's own bit rate: measured from its samples when
+  the packager holds them, else the container's figure (Matroska `BPS`
+  statistics tag, MP4 `btrt`/`esds`), and 0 only when neither says. The
+  on-demand plan reads the `BPS` tag for this (`reader.WithBitrate`).
+
 ## [0.32.0] - 2026-09-25
 
 ### Added
