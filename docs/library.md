@@ -45,6 +45,40 @@ import "github.com/gravity-zero/mkvgo/mkv/reader"
 c, err := reader.Read(ctx, myReadSeeker, "label.mkv")
 ```
 
+**WebM or Matroska?** The two share every structure; the only thing that tells
+them apart is the EBML header's `DocType`, and a prober that reports the demuxer
+family (`matroska,webm`) cannot separate them. Every Matroska reader
+(`Open`/`Read`, `OpenMeta`/`ReadMeta`, `ReadStream`) fills it from the header in
+the same pass, at no cost - the header is a few dozen bytes at the start of the
+file:
+
+```go
+c.DocType            // "matroska", "webm", or "" when the header declares none (always "" for MP4)
+c.DocTypeVersion     // e.g. 2 for baseline WebM, 4 for WebM with AV1
+c.DocTypeReadVersion // the minimum a reader must support
+c.IsWebM()           // c.DocType == "webm"
+```
+
+`IsWebM` reads the declaration only. A file can declare `webm` and still carry a
+codec outside the WebM profile - whether a given player copes with that is the
+player's call, so the codec audit stays a separate step (`ValidateWebM`,
+`IsWebMCodec`); `Validate` flags such a file with a `webm-codec-off-profile`
+warning per track. The CLI prints it as `DocType` (`doc_type` in `-json`).
+
+**Rewrites keep the declaration.** Every operation that writes a new file from
+a source - `EditMetadata`, `RemoveTrack`, `AddTrack`, `MergeSubtitle`,
+`MergeASS`, `Split`, `Join` - opens it with the DocType the source declared
+(the in-place and copy paths, `EditInPlace`/`Reindex`/`Retime`, already carried
+the header verbatim). A `webm` source stays `webm`, at its declared
+`DocTypeVersion` or higher when the tracks need it (AV1 needs 4), so a
+rewrite never quietly turns a WebM file into one a browser classes as
+Matroska. The one exception is an operation that ADDS a track outside the WebM
+codec profile - an SRT or ASS subtitle, a track pulled from an MKV: the result
+is then written as plain Matroska, because a `webm` declaration around such a
+track is one a player will not trust. Tracks the source already carried are not
+audited. `Join` follows its first source when every source declares the same
+DocType, and writes Matroska when the sources disagree.
+
 **Block-level access (frame iteration):**
 ```go
 f, _ := os.Open("video.mkv")
@@ -109,7 +143,7 @@ err := writer.Write(&buf, container)
 
 ## WebM Output
 
-WebM is a constrained Matroska profile: the `webm` DocType and a small codec set (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles).
+WebM is a constrained Matroska profile: the `webm` DocType and a small codec set (VP8/VP9/AV1 video, Vorbis/Opus audio, WebVTT subtitles). On the reading side, `Container.DocType`/`IsWebM()` report what a file declares (see Reading MKV Metadata).
 
 Check whether a `Container` can be written as WebM:
 

@@ -4,6 +4,42 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`Container.DocType`, `DocTypeVersion`, `DocTypeReadVersion` and
+  `IsWebM()`** - the EBML header's DocType declaration, read by every Matroska
+  reader (`Read`/`Open`, `ReadMeta`/`OpenMeta`, `ReadStream`) in the same pass.
+  It is the one thing that tells a WebM file from a Matroska one: the two share
+  every other structure, and a prober reporting the demuxer family cannot
+  separate them, so a `.webm` a browser plays natively was being classed as an
+  incompatible container. `IsWebM` reads the declaration only; the codec audit
+  stays `ValidateWebM`. The EBML header used to be skipped outright, so the parse
+  is lenient by design: a malformed header child ends the walk and the file
+  opens as before. The CLI `info` and `probe` print it as `DocType` (`doc_type`
+  in `-json`).
+- **`Validate` warns `webm-codec-off-profile`** for a track whose codec is
+  outside the WebM profile in a file that declares `webm` - the case a player
+  trusting the declaration may refuse, and a prober reporting the demuxer
+  family never sees.
+
+### Fixed
+
+- **Rewriting a WebM file produced a file declaring `matroska`.** `EditMetadata`,
+  `RemoveTrack`, `AddTrack`, `MergeSubtitle`, `MergeASS`, `Split` and `Join`
+  always wrote a `matroska` EBML header, whatever the source declared, so an
+  edited or split `.webm` came out classed as Matroska by anything reading the
+  declaration (the in-place and copy paths already carried the header
+  verbatim). They now open the output with the source's DocType, at its
+  declared `DocTypeVersion` or higher when the tracks need it. An operation
+  that adds a track outside the WebM codec profile (an SRT/ASS subtitle, a
+  track from an MKV) writes plain Matroska, since the file no longer fits the
+  profile it declared; `Join` writes Matroska when its sources disagree.
+- `Diagnose` skipped the EBML header through a 32-bit `int`, which truncated
+  a declared header size past 2 GiB on 32-bit builds; it is now consumed in
+  bounded steps.
+
 ## [0.34.1] - 2026-09-26
 
 ### Fixed
