@@ -54,6 +54,12 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		if t.Codec == "" {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "track-no-codec", Track: t.ID, Message: fmt.Sprintf("track %d: no codec", t.ID)})
 		}
+		// The declaration is what a player trusts: a file that says webm and
+		// carries a codec outside the WebM profile is one such a player may
+		// refuse, and a prober reporting the demuxer family will not see it.
+		if t.Codec != "" && c.IsWebM() && !mkv.IsWebMCodec(t.Codec) {
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "webm-codec-off-profile", Track: t.ID, Message: fmt.Sprintf("track %d: codec %s is outside the WebM profile the file declares (DocType webm)", t.ID, t.Codec)})
+		}
 		if t.Type == mkv.VideoTrack && (t.Width == nil || t.Height == nil) {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-dimensions", Track: t.ID, Message: fmt.Sprintf("track %d: video without dimensions", t.ID)})
 		}

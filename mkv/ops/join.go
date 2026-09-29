@@ -61,7 +61,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, joinedDocTypeSource(conts), first.Tracks); err != nil {
 		return err
 	}
 	// The joined file is as long as its sources put together, not as long as

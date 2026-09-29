@@ -68,7 +68,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, c, kept); err != nil {
 		return err
 	}
 	// A file with fewer tracks is not the file it came from: it gets its own
@@ -142,7 +142,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, c, tracks, t); err != nil {
 		return err
 	}
 	if err := mw.WriteMetadata(&meta, tracks, durationMs); err != nil {
@@ -176,7 +176,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, c, c.Tracks); err != nil {
 		return err
 	}
 	if err := mw.WriteMetadata(c, c.Tracks, c.DurationMs); err != nil {

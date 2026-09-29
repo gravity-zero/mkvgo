@@ -278,7 +278,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, c, c.Tracks); err != nil {
 		return err
 	}
 	// Only the first segment starts with the original encoder priming. A later

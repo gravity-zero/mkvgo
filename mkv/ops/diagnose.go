@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -271,7 +272,7 @@ func segmentDeclaredEndOf(path string, fs *mkv.FS) (end int64, known bool, err e
 	if err != nil || h1.ID != ebml.IDEBMLHeader || h1.Size < 0 {
 		return 0, false, fmt.Errorf("not a Matroska file")
 	}
-	if _, err := r.Discard(int(h1.Size)); err != nil {
+	if err := discardN(r, h1.Size); err != nil {
 		return 0, false, err
 	}
 	h2, n2, err := ebml.ReadElementHeader(r)
@@ -319,4 +320,21 @@ func pictureMissingFinding(ch *CueHealthReport, meta *mkv.Container) (Finding, b
 		Remedy: "re-acquire the source (playback freezes there; no repair restores frames the file does not hold)",
 		Track:  track,
 	}, true
+}
+
+// discardN skips n bytes of r in int-sized steps, so a declared size past a
+// 32-bit int is still consumed to its end (or fails at EOF) instead of being
+// truncated into a wrong, possibly negative, count.
+func discardN(r *bufio.Reader, n int64) error {
+	for n > 0 {
+		step := n
+		if step > math.MaxInt32 {
+			step = math.MaxInt32
+		}
+		if _, err := r.Discard(int(step)); err != nil {
+			return err
+		}
+		n -= step
+	}
+	return nil
 }

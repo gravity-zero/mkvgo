@@ -227,7 +227,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
-	if err := mw.WriteStart(); err != nil {
+	if err := writeStartLike(mw, c, tracks, subTrack); err != nil {
 		return err
 	}
 	// A file with a subtitle track added is not the file it came from: it gets
