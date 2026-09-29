@@ -1135,7 +1135,7 @@ func TestCoverAVCProfileNames(t *testing.T) {
 		{255, ""},
 	}
 	for _, tc := range cases {
-		got := avcProfileName(tc.idc)
+		got := avcProfileName(tc.idc, 0)
 		if got != tc.want {
 			t.Errorf("avcProfileName(%d) = %q, want %q", tc.idc, got, tc.want)
 		}

@@ -442,6 +442,7 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	// Mirror the seekable reader: derive colour/bit-depth/profile from the codec
 	// bitstream when the container Colour element is absent (container wins).
 	fillColourFromCodecPrivate(&t)
+	fillCodecDerived(&t)
 	return t, err
 }
 

@@ -67,9 +67,11 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 	})
 
 	t.Run("minimal-metadata", func(t *testing.T) {
-		// No name, no language, no frame rate, no sample rate: the master must
-		// fall back to "Audio 1" for the name and omit LANGUAGE; the DASH must
-		// omit frameRate, lang and audioSamplingRate.
+		// No name, no language, no frame rate, no container sample rate: the
+		// master must fall back to "Audio 1" for the name and omit LANGUAGE;
+		// the DASH must omit frameRate and lang. The sample rate is still
+		// known - the AudioSpecificConfig states it - so audioSamplingRate is
+		// written from it.
 		video := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(640), Height: u32(360)}
 		audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, Channels: &ch}
 		src := buildABRVariant(t, video, audio)
@@ -84,7 +86,7 @@ func TestABRMasterAndDASHAttributes(t *testing.T) {
 		mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
 		mustNotContain(t, mpd, `frameRate=`)
 		mustNotContain(t, mpd, ` lang=`)
-		mustNotContain(t, mpd, `audioSamplingRate=`)
+		mustContain(t, mpd, `audioSamplingRate="44100"`) // from the ASC (0x1210), not the container
 	})
 
 	t.Run("two-audio-none-default", func(t *testing.T) {

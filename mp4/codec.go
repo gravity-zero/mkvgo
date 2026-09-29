@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // codec.go - maps a Matroska track's codec to an ISO-BMFF sample entry plus its
@@ -144,7 +145,22 @@ func visualEntry(entryType, dvEntryType, configType string) func(*mkv.Track, []b
 		if len(t.CodecPrivate) == 0 {
 			return nil, errf("track %d (%s): missing CodecPrivate, cannot build %s", t.ID, t.Codec, configType)
 		}
+		if err := checkConfigRecord(t, configType); err != nil {
+			return nil, err
+		}
 		et := entryType
+		// A record that carries no parameter sets (they travel in-band, in the
+		// samples) must be declared as such: avc3/hev1 tell the player to look
+		// in the stream, avc1/hvc1 promise the record holds them and a player
+		// that trusts the promise fails to decode.
+		if inBandParameterSets(t.Codec, t.CodecPrivate) {
+			switch configType {
+			case "avcC":
+				et = "avc3"
+			case "hvcC":
+				et = "hev1"
+			}
+		}
 		// A non-cross-compatible Dolby Vision stream (bl_signal_compatibility_id 0,
 		// e.g. profile 5/7) needs the Dolby sample entry type - its base layer is not
 		// a standard HEVC/AVC/AV1 stream, so a plain hvc1/avc1/av01 tag would mislead
@@ -187,32 +203,10 @@ func vp9Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	return visualSampleEntry("vp09", t, config), nil
 }
 
-// vp9Level returns the VP9 level code (10*major + minor, e.g. 21 = level 2.1)
-// for a w*h picture, the smallest level whose MaxLumaPictureSize (VP9 spec
-// Annex A) fits. A valid level is mandatory in the vpcC and the codec string:
-// players reject level 0. Picture size is the dominant constraint; a
-// frame-rate-based bump would only ever raise the level, so this conservative
-// choice stays a valid, decodable declaration. nil dimensions default to
-// level 1.0.
+// vp9Level is mkv.VP9Level narrowed to the vpcC's one-byte field: the level
+// mkvgo declares for a VP9 stream (it carries none of its own).
 func vp9Level(w, h *uint32) byte {
-	var size uint64
-	if w != nil && h != nil {
-		size = uint64(*w) * uint64(*h)
-	}
-	for _, e := range []struct {
-		code   byte
-		maxPic uint64
-	}{
-		{10, 36864}, {11, 73728}, {20, 122880}, {21, 245760},
-		{30, 552960}, {31, 983040}, {40, 2228224}, {41, 2228224},
-		{50, 8912896}, {51, 8912896}, {52, 8912896},
-		{60, 35651584}, {61, 35651584},
-	} {
-		if size <= e.maxPic {
-			return e.code
-		}
-	}
-	return 62
+	return byte(mkv.VP9Level(w, h))
 }
 
 // vp9RecordFromSampleEntry pulls the VPCodecConfigurationRecord out of a built
@@ -231,6 +225,13 @@ func vp9RecordFromSampleEntry(entry []byte) []byte {
 // CodecPrivate already holds one (with or without the 4-byte FullBox prefix  -
 // both forms exist in the wild), nil otherwise.
 func vpcCRecord(cp []byte) []byte {
+	// The Matroska "VP9 Codec Feature Metadata" records mkvmerge writes are
+	// not a vpcC: read as one they yield a bogus profile/level that would end
+	// up in the sample entry and the codec string. The record is then derived
+	// from the first keyframe as for a track with no CodecPrivate.
+	if _, ok := reader.ParseVP9FeatureMetadata(cp); ok {
+		return nil
+	}
 	switch {
 	case len(cp) >= 12 && cp[0] <= 1: // FullBox: version(1) flags(3) precede the record
 		return cp[4:]
@@ -249,59 +250,14 @@ type vp9Header struct {
 	fullRange bool
 }
 
-// parseVP9FrameHeader reads the start of a VP9 KEYFRAME's uncompressed header.
+// parseVP9FrameHeader reads the start of a VP9 KEYFRAME's uncompressed header
+// (reader.ParseVP9KeyframeHeader, the one parser both packages use).
 func parseVP9FrameHeader(b []byte) (*vp9Header, error) {
-	r := &bitReader{data: b}
-	if r.bits(2) != 2 {
-		return nil, errf("VP9: bad frame_marker")
+	h, err := reader.ParseVP9KeyframeHeader(b)
+	if err != nil {
+		return nil, err // the caller adds the "mp4: track N (vp9):" context
 	}
-	profile := byte(r.bits(1)) | byte(r.bits(1))<<1
-	if profile == 3 {
-		r.bits(1) // reserved_zero
-	}
-	if r.bits(1) == 1 {
-		return nil, errf("VP9: show_existing_frame, not a keyframe")
-	}
-	frameType := r.bits(1)
-	r.bits(2) // show_frame, error_resilient_mode
-	if frameType != 0 {
-		return nil, errf("VP9: first sample is not a keyframe")
-	}
-	if r.bits(24) != 0x498342 {
-		return nil, errf("VP9: bad frame sync code")
-	}
-	h := &vp9Header{profile: profile, bitDepth: 8}
-	if profile >= 2 {
-		if r.bits(1) == 1 {
-			h.bitDepth = 12
-		} else {
-			h.bitDepth = 10
-		}
-	}
-	if colorSpace := r.bits(3); colorSpace != 7 { // 7 = CS_RGB
-		h.fullRange = r.bits(1) == 1
-		if profile == 1 || profile == 3 {
-			sx, sy := r.bits(1), r.bits(1)
-			r.bits(1) // reserved_zero
-			switch {
-			case sx == 1 && sy == 1:
-				h.chroma = 0 // 4:2:0
-			case sx == 1:
-				h.chroma = 2 // 4:2:2
-			default:
-				h.chroma = 3 // 4:4:4
-			}
-		} else {
-			h.chroma = 0 // profiles 0 and 2 are always 4:2:0
-		}
-	} else {
-		h.fullRange = true
-		h.chroma = 3 // CS_RGB is 4:4:4
-	}
-	if r.err {
-		return nil, errf("VP9: truncated frame header")
-	}
-	return h, nil
+	return &vp9Header{profile: h.Profile, bitDepth: h.BitDepth, chroma: h.Chroma, fullRange: h.FullRange}, nil
 }
 
 // visualSampleEntry assembles a VisualSampleEntry (ISO/IEC 14496-12 §12.1.3)
@@ -522,4 +478,40 @@ func derefU32(p *uint32) uint32 {
 		return 0
 	}
 	return *p
+}
+
+// checkConfigRecord refuses a CodecPrivate that is not the configuration
+// record its MP4 box would claim it is: an AVCDecoderConfigurationRecord and
+// an HEVCDecoderConfigurationRecord start with configurationVersion 1, an
+// AV1CodecConfigurationRecord with marker+version 0x81. Anything else - an
+// Annex-B parameter-set stream with start codes, a bare sequence header - is
+// another format, and wrapping it in an avcC/hvcC/av1C box would produce an
+// MP4 no player can decode while claiming to describe the stream.
+func checkConfigRecord(t *mkv.Track, configType string) error {
+	cp := t.CodecPrivate
+	var want byte = 1
+	record := "AVCDecoderConfigurationRecord"
+	switch configType {
+	case "hvcC":
+		record = "HEVCDecoderConfigurationRecord"
+	case "av1C":
+		want, record = 0x81, "AV1CodecConfigurationRecord"
+	}
+	if cp[0] != want {
+		return errf("track %d (%s): CodecPrivate is not an %s (starts with 0x%02X, expected 0x%02X), so the MP4 cannot describe the stream to a player; remux the source with a muxer that writes one", t.ID, t.Codec, record, cp[0], want)
+	}
+	return nil
+}
+
+// inBandParameterSets reports whether an avcC/hvcC record carries no parameter
+// sets: numOfSequenceParameterSets == 0 (avcC byte 5, low 5 bits) or
+// numOfArrays == 0 (hvcC byte 22).
+func inBandParameterSets(codec string, cp []byte) bool {
+	switch codec {
+	case "h264":
+		return len(cp) >= 7 && cp[5]&0x1f == 0
+	case "hevc":
+		return len(cp) >= 23 && cp[22] == 0
+	}
+	return false
 }

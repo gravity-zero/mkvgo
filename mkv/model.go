@@ -240,8 +240,8 @@ type Track struct {
 	// stream (true, Color* nil) from one whose colour could not be read at all
 	// (false): a caller should treat the latter, not the former, as "fall back".
 	ColourDetermined bool    `json:"colour_determined,omitempty"`
-	Profile          string  `json:"profile,omitempty"`      // codec profile from the SPS, e.g. "Main 10" (v0.6.0)
-	Level            *uint16 `json:"level,omitempty"`        // codec level_idc from the SPS (the conventional level field): H.264 10×level, HEVC 30×level
+	Profile          string  `json:"profile,omitempty"`      // codec profile, conventional prober spelling: SPS "Main 10", AV1 "Main", VP9 "Profile 0".."Profile 3" (CodecPrivate, or the keyframe header with WithInBandColourFallback), AAC "LC"/"HE-AAC"/"HE-AACv2" (AudioSpecificConfig)
+	Level            *uint16 `json:"level,omitempty"`        // codec level: H.264 10×level, HEVC 30×level (SPS level_idc), AV1 seq_level_idx; VP9 level code 10×major+minor (40 = 4.0) from the vpcC, else derived from the picture size (VP9 carries no level in the bitstream; VP9Level) - the value mkvgo's MP4 remux declares
 	PixelFormat      string  `json:"pixel_format,omitempty"` // the conventional pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
 	// ScanType is how the pictures are coded - "progressive" or "interlaced" - from
 	// the Matroska FlagInterlaced element (0x9A) or the H.264 frame_mbs_only_flag;

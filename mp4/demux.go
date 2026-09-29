@@ -115,7 +115,15 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			// Fall back to the codec bitstream (e.g. H.264 SPS VUI) for any colour
 			// field the colr box did not supply - matches the conventional color_space on
 			// SDR streams that carry colour only in the SPS.
-			reader.FillColourFromCodecPrivate(&mt)
+			reader.FillFromCodecPrivate(&mt)
+			// A Matroska V_VP9 CodecPrivate is the VP9 Codec Feature Metadata,
+			// not a vpcC: convert once the vpcC's colour has been read into the
+			// track (it goes to the Colour element, where Matroska keeps it).
+			if mt.Codec == "vp9" {
+				if fm, ok := reader.VP9FeatureMetadataFromVpcC(mt.CodecPrivate); ok {
+					mt.CodecPrivate = fm
+				}
+			}
 			mt.DolbyVision = t.dolbyVision
 			mt.HDR = t.hdr
 			mt.StereoMode = t.stereoMode
@@ -147,6 +155,8 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			// Constant frame duration (single-entry stts) → DefaultDuration, so
 			// MKV outputs declare it and packaging grid-times the audio.
 			mt.DefaultDurationNs = t.frameDurNs
+			// The AAC profile lives only in the AudioSpecificConfig.
+			reader.FillFromCodecPrivate(&mt)
 		}
 		if t.bitrate > 0 {
 			br := t.bitrate

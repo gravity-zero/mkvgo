@@ -1,6 +1,9 @@
 package mp4
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+)
 
 // audio.go - sample entries for audio codecs that need more than a verbatim
 // CodecPrivate copy: AC-3 and E-AC-3 (whose MP4 config box is derived from the
@@ -90,179 +93,25 @@ var ac3SampleRates = [4]uint32{48000, 44100, 32000, 0}
 // channel count (before adding the LFE).
 var ac3AcmodChannels = [8]uint8{2, 1, 2, 3, 3, 4, 4, 5}
 
-// aacConfigChannels maps an AAC channelConfiguration to a channel count. Index 0
-// means the layout is carried in a program config element (not resolved here).
-var aacConfigChannels = [8]uint8{0, 1, 2, 3, 4, 5, 6, 8}
-
-// aacSampleRates maps a 4-bit samplingFrequencyIndex to a rate in Hz; indices
-// 13-15 are reserved (0).
-var aacSampleRates = [16]uint32{
-	96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
-	16000, 12000, 11025, 8000, 7350, 0, 0, 0,
-}
-
 // aacInfo is everything the AudioSpecificConfig tells us that the AudioSampleEntry
 // gets wrong or omits: the real channel count and the decoder's output sample
-// rate.
+// rate. parseAACConfig is reader.ParseAACConfig, the one parser both packages use.
 type aacInfo struct {
 	channels   uint8   // 0 when carried in a program config element
 	sampleRate float64 // base/core rate, 0 if not derivable
 	outputRate float64 // SBR extension (output) rate, 0 when no SBR
 }
 
-// parseAACConfig walks an AudioSpecificConfig and reports the decoder's effective
-// channel count and sample rate. Two things make the front fields insufficient:
-//
-//   - Parametric Stereo (HE-AACv2) codes a mono core (channelConfiguration 1) the
-//     decoder upmixes to stereo → 2 channels, like external probers.
-//   - SBR (HE-AAC) codes a half-rate core the decoder doubles → probers report
-//     the extensionSamplingFrequency, not the core rate.
-//
-// Both the explicit hierarchical form (audioObjectType 5 = SBR, 29 = PS up front)
-// and the backward-compatible trailing sync extension (0x2b7 → SBR, 0x548 → PS)
-// are detected.
-//
-// Limitation: when SBR or Parametric Stereo is signalled only *in-band* (in the
-// audio frames, not the ASC), it is invisible from the head. Two real shapes:
-//   - implicit SBR: a plain AAC-LC ASC (e.g. 0x1310) whose frames carry SBR - we
-//     report the core rate, probers report the doubled rate (it decodes a frame).
-//   - in-band PS over an explicit-SBR mono core (e.g. ASC 0x2b8a0800: AOT 5, SBR
-//     ext 44100, channelConfiguration 1) - we report 1 channel (the ASC's mono
-//     core), probers report 2 (it decodes the reconstructed stereo).
-//
-// Both are true head-only limitations: the data is in no header. The colour
-// analogue is matrix/primaries/transfer signalled only in an in-band SPS rather
-// than the avcC's SPS - likewise invisible head-only (see codec_colour.go).
-// Don't chase any of them without parsing sample data.
 func parseAACConfig(asc []byte) aacInfo {
-	r := &bitReader{data: asc}
-	aot := getAudioObjectType(r)
-	baseRate := readSamplingFrequency(r)
-	cc := r.bits(4)
-
-	ps := false
-	sbr := false
-	outputRate := float64(0)
-	explicitExt := false
-	if aot == 5 || aot == 29 { // SBR or PS signalled hierarchically up front
-		explicitExt = true
-		sbr = true
-		if aot == 29 {
-			ps = true
-		}
-		outputRate = readSamplingFrequency(r) // extensionSamplingFrequency
-		aot = getAudioObjectType(r)           // underlying object type
-		if aot == 22 {                        // ER BSAC carries an extension channel config
-			r.skip(4)
-		}
-	}
-
-	// Backward-compatible signalling rides as a sync extension after the
-	// GASpecificConfig. Mainstream decoders only look for it when SBR was not already signalled
-	// explicitly, so walk the GASpecificConfig to position the reader, then probe.
-	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc) {
-		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
-			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
-				sbr = true
-				outputRate = readSamplingFrequency(r)         // extensionSamplingFrequency
-				if bitsLeft(r) >= 12 && r.bits(11) == 0x548 { // syncExtensionType: PS
-					ps = r.bits(1) == 1 // psPresentFlag
-				}
-			}
-		}
-	}
-
-	if r.err {
-		// A short/partial parse still yields the trustworthy front fields.
-		outputRate = 0
-	}
-	if !sbr {
-		outputRate = 0
-	}
-	return aacInfo{channels: aacChannelsFrom(cc, ps), sampleRate: baseRate, outputRate: outputRate}
-}
-
-// readSamplingFrequency reads a 4-bit samplingFrequencyIndex (or the explicit
-// 24-bit rate when the index is 0xF) and returns the rate in Hz, 0 if reserved.
-func readSamplingFrequency(r *bitReader) float64 {
-	idx := r.bits(4)
-	if idx == 0xF {
-		return float64(r.bits(24))
-	}
-	return float64(aacSampleRates[idx])
+	c := reader.ParseAACConfig(asc)
+	return aacInfo{channels: c.Channels, sampleRate: c.SampleRate, outputRate: c.OutputRate}
 }
 
 // aacChannels returns the decoder's output channel count for an
 // AudioSpecificConfig (accounting for Parametric Stereo). 0 when the layout is in
-// a program config element. Thin wrapper over parseAACConfig.
+// a program config element.
 func aacChannels(asc []byte) uint8 {
 	return parseAACConfig(asc).channels
-}
-
-// aacChannelsFrom resolves a channelConfiguration plus a Parametric Stereo flag
-// to the decoder's output channel count: a PS stream over a mono core yields 2.
-func aacChannelsFrom(cc uint32, ps bool) uint8 {
-	if cc == 0 || cc >= uint32(len(aacConfigChannels)) {
-		return 0
-	}
-	ch := aacConfigChannels[cc]
-	if ps && ch == 1 {
-		ch = 2
-	}
-	return ch
-}
-
-// getAudioObjectType reads an AAC audioObjectType: 5 bits, or 5+6 (escape) when
-// the first five are all ones.
-func getAudioObjectType(r *bitReader) uint32 {
-	aot := r.bits(5)
-	if aot == 31 {
-		aot = 32 + r.bits(6)
-	}
-	return aot
-}
-
-// bitsLeft reports how many bits remain unread in r.
-func bitsLeft(r *bitReader) int {
-	return len(r.data)*8 - int(r.pos)
-}
-
-// isGAObjectType reports whether aot uses a GASpecificConfig (the General Audio
-// object types whose config skipGASpecificConfig can walk).
-func isGAObjectType(aot uint32) bool {
-	switch aot {
-	case 1, 2, 3, 4, 6, 7, 17, 19, 20, 21, 22, 23:
-		return true
-	}
-	return false
-}
-
-// skipGASpecificConfig advances r past a GASpecificConfig (ISO/IEC 14496-3
-// §4.4.1) so the reader is positioned at any trailing sync extension. It returns
-// false - and leaves the position unusable - when the layout cannot be walked
-// (a program config element) or the buffer runs out.
-func skipGASpecificConfig(r *bitReader, aot, cc uint32) bool {
-	if cc == 0 {
-		return false // program_config_element: not walked
-	}
-	r.skip(1)           // frameLengthFlag
-	if r.bits(1) == 1 { // dependsOnCoreCoder
-		r.skip(14) // coreCoderDelay
-	}
-	extensionFlag := r.bits(1)
-	if aot == 6 || aot == 20 {
-		r.skip(3) // layerNr
-	}
-	if extensionFlag == 1 {
-		if aot == 22 {
-			r.skip(5 + 11) // numOfSubFrame + layer_length
-		}
-		if aot == 17 || aot == 19 || aot == 20 || aot == 23 {
-			r.skip(3) // section/scalefactor/spectral data resilience flags
-		}
-		r.skip(1) // extensionFlag3
-	}
-	return !r.err
 }
 
 // ac3Channels reads acmod + lfeon from a dac3 (AC3SpecificBox) payload.

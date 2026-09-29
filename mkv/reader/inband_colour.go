@@ -132,16 +132,22 @@ func WithSampledKeyframes(n int) ReadOption {
 	return func(o *readOpts) { o.sampledKeyframes = n }
 }
 
-// WithInBandColourFallback enables a bounded colour fallback. By default a read
-// is head-only and never touches a cluster. With this option, AFTER the head
-// parse, any video track whose colour is absent from BOTH the container and the
-// codec-private SPS - a bare hvcC with no NAL arrays, as streaming-style muxes
-// write when they keep the parameter sets in-band - triggers a read of the first
-// video sample to recover the SPS and parse its colour VUI.
+// WithInBandColourFallback enables a bounded in-band fallback. By default a
+// read is head-only and never touches a cluster. With this option, AFTER the
+// head parse, a video track whose stream description lives only in its first
+// sample triggers a read of that sample:
 //
-// The cost is paid only for those tracks (≈the HDR files a header-only probe
-// would otherwise report as "no colour"); files that already carry colour in the
-// header never read a frame. The read is bounded to the first sample per track.
+//   - HEVC whose colour is absent from BOTH the container and the codec-private
+//     SPS - a bare hvcC with no NAL arrays, as streaming-style muxes write when
+//     they keep the parameter sets in-band: the SPS is recovered and its colour
+//     VUI parsed;
+//   - VP9 with no vpcC in CodecPrivate - how WebM is normally muxed - whose
+//     profile, bit depth and chroma subsampling (Profile, VideoBitDepth,
+//     PixelFormat, ColorRange) exist only in the keyframe's uncompressed header.
+//
+// The cost is paid only for those tracks; files that carry the description in
+// the header never read a frame. The read is bounded to the first sample per
+// track.
 func WithInBandColourFallback() ReadOption {
 	return func(o *readOpts) { o.inBandColour = true }
 }
@@ -186,26 +192,35 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			continue
 		}
 		delete(need, blk.TrackNumber) // first sample carries the parameter sets
-		applyInBandSPSColour(t, blk.Data)
+		applyInBandHeader(t, blk.Data)
 	}
 }
 
-// NeedsInBandColour reports whether t is an HEVC video track whose colour can
-// only come from an in-band SPS (no container/codec-private colour, bare hvcC).
-// Exposed so the mp4 package can drive the same fallback off its sample table.
+// NeedsInBandColour reports whether t is a video track whose stream
+// description can only come from its first sample: an HEVC track with a bare
+// hvcC and no colour, or a VP9 track with no vpcC (see
+// WithInBandColourFallback). Exposed so the mp4 package can drive the same
+// fallback off its sample table.
 func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) }
 
-// ApplyInBandColour fills t's colour from one length-prefixed HEVC access unit
-// (the first sample): the SPS VUI and an Alternative Transfer Characteristics
-// SEI override if present. Safe on any input; leaves colour unset on failure.
-func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandSPSColour(t, frame) }
+// ApplyInBandColour fills t from its first sample: for HEVC, one
+// length-prefixed access unit - the SPS VUI and an Alternative Transfer
+// Characteristics SEI override if present; for VP9, the keyframe's
+// uncompressed header - profile, bit depth, chroma subsampling, range. Safe on
+// any input; leaves the fields unset on failure.
+func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame) }
 
-// needsInBandColour reports whether t is a video track whose colour can only come
-// from an in-band SPS: no container/SPS colour yet, HEVC, and a hvcC that holds
-// no NAL arrays (numOfArrays == 0, byte 22 of the configuration record).
+// needsInBandColour reports whether t is a video track whose description can
+// only come from its first sample: HEVC with no container/SPS colour yet and a
+// hvcC that holds no NAL arrays (numOfArrays == 0, byte 22 of the configuration
+// record); or VP9 with no profile yet - no vpcC in CodecPrivate, the profile
+// then exists only in the keyframe header.
 func needsInBandColour(t *mkv.Track) bool {
 	if t.Type != mkv.VideoTrack {
 		return false
+	}
+	if isVP9Codec(t.Codec) {
+		return t.Profile == ""
 	}
 	if t.ColorTransfer != nil || t.ColorPrimaries != nil || t.ColorSpace != nil {
 		return false
@@ -215,6 +230,17 @@ func needsInBandColour(t *mkv.Track) bool {
 	}
 	cp := t.CodecPrivate
 	return len(cp) >= 23 && cp[0] == 1 && cp[22] == 0
+}
+
+// applyInBandHeader dispatches the first-sample parse on the codec.
+func applyInBandHeader(t *mkv.Track, frame []byte) {
+	if isVP9Codec(t.Codec) {
+		if h, err := ParseVP9KeyframeHeader(frame); err == nil {
+			mergeBitstreamColour(t, vp9HeaderColour(h))
+		}
+		return
+	}
+	applyInBandSPSColour(t, frame)
 }
 
 func isHEVCCodec(codec string) bool {

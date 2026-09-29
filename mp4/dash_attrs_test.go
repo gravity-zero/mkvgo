@@ -73,8 +73,10 @@ func TestRemuxToHLS_DASHAttributes(t *testing.T) {
 			t.Fatal(err)
 		}
 		mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
-		for _, notWant := range []string{`frameRate=`, ` lang=`, `audioSamplingRate=`} {
+		for _, notWant := range []string{`frameRate=`, ` lang=`} {
 			mustNotContain(t, mpd, notWant)
 		}
+		// The container states no sample rate but the ASC (0x1210) does.
+		mustContain(t, mpd, `audioSamplingRate="44100"`)
 	})
 }

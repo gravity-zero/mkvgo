@@ -5,7 +5,11 @@ package mp4
 // codec's string cannot be produced; the playlist then omits the attribute
 // entirely (a partial CODECS list is worse than none).
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+)
 
 // rfc6381Codec returns the codec string for one output track, or "".
 func rfc6381Codec(t *outTrack) string {
@@ -16,6 +20,9 @@ func rfc6381Codec(t *outTrack) string {
 		// AVCLevelIndication - the three bytes the string carries verbatim.
 		if len(cp) < 4 {
 			return ""
+		}
+		if inBandParameterSets("h264", cp) {
+			return fmt.Sprintf("avc3.%02X%02X%02X", cp[1], cp[2], cp[3])
 		}
 		return fmt.Sprintf("avc1.%02X%02X%02X", cp[1], cp[2], cp[3])
 	case "hevc":
@@ -42,9 +49,8 @@ func rfc6381Codec(t *outTrack) string {
 		if len(cp) == 0 {
 			return ""
 		}
-		r := &bitReader{data: cp}
-		aot := getAudioObjectType(r)
-		if r.err || aot == 0 {
+		aot := reader.ParseAACConfig(cp).ObjectType
+		if aot == 0 {
 			return ""
 		}
 		return fmt.Sprintf("mp4a.40.%d", aot)
@@ -76,6 +82,9 @@ func hevcCodecString(hvcC []byte) string {
 	levelIDC := hvcC[12]
 
 	s := "hvc1."
+	if inBandParameterSets("hevc", hvcC) {
+		s = "hev1."
+	}
 	if profileSpace > 0 {
 		s += string(rune('A' + profileSpace - 1))
 	}

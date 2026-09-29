@@ -125,7 +125,7 @@ func spsRange(fullRangeFlag uint32) *uint16 {
 // reader (e.g. the mp4 package, where colour may live only in the SPS VUI and not
 // in a colr box). Safe on any input: malformed bitstreams leave the fields nil.
 func FillColourFromCodecPrivate(t *mkv.Track) {
-	fillColourFromCodecPrivate(t)
+	FillFromCodecPrivate(t)
 }
 
 // fillColourFromCodecPrivate fills any colour field the container Colour element
@@ -355,10 +355,10 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	r := &bitReader{data: rbsp}
 	bc := &bitstreamColour{}
 	profileIDC := r.bits(8)
-	r.bits(8)                          // constraint flags + reserved
-	bc.level = u16p(uint16(r.bits(8))) // level_idc (conventional level)
-	r.ue()                             // seq_parameter_set_id
-	bc.profile = avcProfileName(profileIDC)
+	constraints := r.bits(8)       // constraint_set0..5 flags (bits 7..2) + reserved
+	bc.level = avcLevel(r.bits(8)) // level_idc (conventional level)
+	r.ue()                         // seq_parameter_set_id
+	bc.profile = avcProfileName(profileIDC, constraints)
 
 	bc.chroma = u16p(1) // Baseline/Main/Extended are always 4:2:0
 
@@ -498,22 +498,49 @@ func skipAVCScalingList(r *bitReader, size int) {
 	}
 }
 
-func avcProfileName(idc uint32) string {
+// avcProfileName is the conventional prober spelling of an H.264 profile.
+// The constraint_set flags (Annex A) qualify the profile_idc: set1 on Baseline
+// is Constrained Baseline, set4+set5 on High is Constrained High, set3 on the
+// High 10 / 4:2:2 / 4:4:4 profiles is the Intra variant - a player's codec
+// string and its decoder support key on the qualified name (avc1.4240xx vs
+// 4200xx).
+func avcProfileName(idc, constraints uint32) string {
+	set1 := constraints&0x40 != 0
+	set3 := constraints&0x10 != 0
+	set4 := constraints&0x08 != 0
+	set5 := constraints&0x04 != 0
 	switch idc {
 	case 66:
+		if set1 {
+			return "Constrained Baseline"
+		}
 		return "Baseline"
 	case 77:
 		return "Main"
 	case 88:
 		return "Extended"
 	case 100:
+		if set4 && set5 {
+			return "Constrained High"
+		}
 		return "High"
 	case 110:
+		if set3 {
+			return "High 10 Intra"
+		}
 		return "High 10"
 	case 122:
+		if set3 {
+			return "High 4:2:2 Intra"
+		}
 		return "High 4:2:2"
 	case 244:
+		if set3 {
+			return "High 4:4:4 Intra"
+		}
 		return "High 4:4:4 Predictive"
+	case 44:
+		return "CAVLC 4:4:4 Intra"
 	}
 	return ""
 }
@@ -657,11 +684,11 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 
 func skipHEVCProfileTierLevel(r *bitReader, maxSub uint32, bc *bitstreamColour) {
 	// general profile/tier/level: 2+1+5 +32 +4 +44 +8 = 96 bits.
-	r.bits(8)                          // profile_space(2) tier(1) profile_idc(5)
-	r.bits(32)                         // general_profile_compatibility_flags
-	r.bits(32)                         // 4 source flags + 28 of the 44 reserved
-	r.bits(16)                         // remaining 16 of reserved (4+44 = 48 total -> 32+16)
-	bc.level = u16p(uint16(r.bits(8))) // general_level_idc (conventional level, 30×level)
+	r.bits(8)                       // profile_space(2) tier(1) profile_idc(5)
+	r.bits(32)                      // general_profile_compatibility_flags
+	r.bits(32)                      // 4 source flags + 28 of the 44 reserved
+	r.bits(16)                      // remaining 16 of reserved (4+44 = 48 total -> 32+16)
+	bc.level = hevcLevel(r.bits(8)) // general_level_idc (conventional level, 30×level)
 	prof := make([]uint32, maxSub)
 	lvl := make([]uint32, maxSub)
 	for i := uint32(0); i < maxSub; i++ {
@@ -867,7 +894,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 	r.bit()   // still_picture
 	reduced := r.bit()
 	if reduced == 1 {
-		bc.level = u16p(uint16(r.bits(5))) // seq_level_idx[0]
+		bc.level = av1Level(r.bits(5)) // seq_level_idx[0]
 	} else {
 		timing := r.bit()
 		decoderModel := uint32(0)
@@ -893,7 +920,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 			r.bits(12) // operating_point_idc
 			levelIdx := r.bits(5)
 			if i == 0 {
-				bc.level = u16p(uint16(levelIdx)) // seq_level_idx[0] (conventional level)
+				bc.level = av1Level(levelIdx) // seq_level_idx[0] (conventional level)
 			}
 			if levelIdx > 7 {
 				r.bit() // seq_tier
@@ -1077,6 +1104,12 @@ func av1ProfileName(p uint32) string {
 // --- VP9 (vpcC, when present in CodecPrivate) ----------------------------------
 
 func vp9Colour(cp []byte) *bitstreamColour {
+	// The Matroska form first: mkvmerge writes the VP9 Codec Feature Metadata
+	// records ({id, 1, value}), which read as a vpcC would give a bogus
+	// profile and level. The strict walk tells the two apart.
+	if m, ok := ParseVP9FeatureMetadata(cp); ok {
+		return vp9FeatureColour(m)
+	}
 	// VPCodecConfigurationRecord (vpcC): version+flags(4) then profile(1) level(1)
 	// [bitDepth(4)|chromaSubsampling(3)|videoFullRangeFlag(1)](1) colourPrimaries(1)
 	// transferCharacteristics(1) matrixCoefficients(1) ... Some muxers store it
@@ -1094,7 +1127,14 @@ func vp9Colour(cp []byte) *bitstreamColour {
 		return nil
 	}
 	bc := &bitstreamColour{}
-	bc.profile = "" // numeric VP9 profile not mapped to a conventional string here
+	// The VP9 profile is a number (vp09.PP), reported as "0".."3"; the level
+	// is the record's own code (10×major + minor), 0 meaning undeclared.
+	if b[0] <= 3 {
+		bc.profile = vp9ProfileName(b[0])
+	}
+	if validVP9Level(b[1]) {
+		bc.level = u16p(uint16(b[1]))
+	}
 	bitDepth := b[2] >> 4
 	fullRange := (b[2] >> 0) & 1
 	if bitDepth == 8 || bitDepth == 10 || bitDepth == 12 {
@@ -1118,4 +1158,36 @@ func vp9Colour(cp []byte) *bitstreamColour {
 	}
 	bc.determined = true // vpcC always carries the colour fields
 	return bc
+}
+
+// A declared level outside the codec's level table is not a level: reporting
+// it would hand a consumer a value it can only misuse (a codec string no
+// player accepts), so it reads as absent instead. The tables:
+
+// avcLevel: H.264 level_idc (Annex A) - 9 is level 1b, 11 doubles as 1b under
+// constraint_set3 and is kept as its face value.
+func avcLevel(idc uint32) *uint16 {
+	switch idc {
+	case 9, 10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62:
+		return u16p(uint16(idc))
+	}
+	return nil
+}
+
+// hevcLevel: HEVC general_level_idc = 30 × level (Annex A).
+func hevcLevel(idc uint32) *uint16 {
+	switch idc {
+	case 30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186:
+		return u16p(uint16(idc))
+	}
+	return nil
+}
+
+// av1Level: AV1 seq_level_idx - 0..23 are levels 2.0..7.3, 24..30 reserved,
+// 31 is "maximum parameters" (no level constraint) and is reported as is.
+func av1Level(idx uint32) *uint16 {
+	if idx <= 23 || idx == 31 {
+		return u16p(uint16(idx))
+	}
+	return nil
 }

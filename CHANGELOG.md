@@ -19,6 +19,62 @@ All notable changes to mkvgo are documented here. The format is based on
   is lenient by design: a malformed header child ends the walk and the file
   opens as before. The CLI `info` and `probe` print it as `DocType` (`doc_type`
   in `-json`).
+- **VP9 profile, level, bit depth and colour on read.** `Track.Level` of a
+  VP9 track is now filled on every read: from the `vpcC` when the container
+  carries one, else derived from the picture size (`mkv.VP9Level`, new) - VP9
+  carries no level in the bitstream, and the derivation is the level mkvgo's
+  own MP4 remux declares, so a `vp09.PP.LL.DD` codec string can be built from
+  the probe. `Track.Profile` (`"Profile 0"`..`"Profile 3"`) comes from the
+  `vpcC`, or - WebM normally has none - from the keyframe's uncompressed header
+  under `WithInBandColourFallback`, together with `VideoBitDepth`,
+  `PixelFormat`, `ColorRange` and the colour its `color_space` names where the
+  standard fixes the code points (BT.709, SMPTE 170M/240M, sRGB in full;
+  BT.601 matrix and transfer; BT.2020 primaries and matrix, never the transfer,
+  which for an HDR stream only the container can state). Head-only reads are
+  unchanged apart from `Level`. `reader.ParseVP9KeyframeHeader` is exported;
+  the `mp4` package now uses it.
+- **Codec configuration records are read and written as what they are** (a
+  systematic pass over Matroska, WebM and MP4, both remux directions, after
+  the VP9 finding below):
+  - the Matroska reader now parses the AAC AudioSpecificConfig: `Track.Profile`
+    (`LC`, `HE-AAC`, `HE-AACv2`, `Main`, `LTP`, ...), the SBR output rate
+    (`OutputSampleRate`, which Matroska muxers seldom write), and the channel
+    count and core rate when the Audio element omits them. The MP4 probe
+    reports the AAC profile too. One parser serves both containers
+    (`reader.ParseAACConfig`).
+  - H.264 profiles are qualified by the SPS constraint_set flags the way
+    probers spell them: `Constrained Baseline`, `Constrained High`, the
+    `High 10/4:2:2/4:4:4 Intra` profiles, `CAVLC 4:4:4 Intra`.
+  - a declared level outside the codec's level table reads as absent - H.264
+    `level_idc`, HEVC `general_level_idc`, AV1 `seq_level_idx` 24..30 - so
+    a consumer never builds a codec string from a value no player accepts.
+  - VP8, VP9 and AV1 report `ScanType`/`FieldOrder` `progressive` when the
+    container states nothing: these codecs have no interlaced coding.
+  - the MP4 remux refuses a CodecPrivate that is not the record its box
+    would claim (an Annex-B parameter-set stream where an `avcC` is expected,
+    a bare OBU where an `av1C` is), naming the record in the error, instead
+    of wrapping it into an MP4 no player decodes.
+  - an `avcC`/`hvcC` with no parameter sets (in-band) gets the `avc3`/`hev1`
+    sample entry and codec string; `avc1`/`hvc1` promised the record held
+    them.
+  - the MP4 → MKV remux writes a VP9 track's CodecPrivate as the Matroska
+    VP9 Codec Feature Metadata built from the `vpcC` (its colour goes to the
+    Colour element), not the `vpcC` itself.
+  - verified unchanged, no fix needed: Opus (`OpusHead` ↔ `dOps`), FLAC
+    (`fLaC` ↔ `dfLa`), Vorbis (Xiph-laced CodecPrivate, not interpreted),
+    AV1 (`av1C` marker rejects a bare OBU), H.264/HEVC on read (a non-record
+    CodecPrivate yields nothing rather than something wrong), colour (the
+    container's Colour element / `colr` wins over every bitstream value; an
+    out-of-range code point names nothing).
+- **The Matroska "VP9 Codec Feature Metadata" CodecPrivate is read as what it
+  is.** mkvmerge stores a VP9 track's CodecPrivate as `{id, 1, value}` records
+  (Profile, Level, Bit depth, Chroma subsampling), not as a `vpcC`; read as a
+  `vpcC` those bytes gave a bogus profile and level (`Profile 1`, level 1) -
+  on read, and in the MP4 remux, whose sample entry and `vp09` codec string
+  carried them (a string no player accepts). Both now tell the two forms apart
+  (`reader.ParseVP9FeatureMetadata`); the remux derives its `vpcC` from the
+  first keyframe as for a track without one. A declared level outside the VP9
+  level table is ignored in favour of the picture-size derivation.
 - **`Validate` warns `webm-codec-off-profile`** for a track whose codec is
   outside the WebM profile in a file that declares `webm` - the case a player
   trusting the declaration may refuse, and a prober reporting the demuxer

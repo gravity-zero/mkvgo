@@ -1108,6 +1108,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	// Fill colour/bit-depth/profile from the codec bitstream when the container
 	// Colour element didn't (container values, parsed above, still win per field).
 	fillColourFromCodecPrivate(&t)
+	fillCodecDerived(&t)
 	return t, nil
 }
 

@@ -420,45 +420,6 @@ func TestFindSyncMaxScanBoundary(t *testing.T) {
 	}
 }
 
-// ── audio.go: aacChannelsFrom boundary ─────────────────────────────────────
-
-// TestAACChannelsFromBoundary kills the cc >= uint32(len(aacConfigChannels))
-// CONDITIONALS_BOUNDARY mutant.  cc==7 (last valid index, len-1) must return
-// the table value 8; cc==8 (== len) must return 0.
-func TestAACChannelsFromBoundary(t *testing.T) {
-	// aacConfigChannels = [8]uint8{0,1,2,3,4,5,6,8}, len=8
-	if got := aacChannelsFrom(7, false); got != 8 {
-		t.Errorf("cc=7 (last valid): %d, want 8", got)
-	}
-	if got := aacChannelsFrom(8, false); got != 0 {
-		t.Errorf("cc=8 (== len): %d, want 0", got)
-	}
-	if got := aacChannelsFrom(0, false); got != 0 {
-		t.Errorf("cc=0 (program config): %d, want 0", got)
-	}
-}
-
-// ── audio.go: bitsLeft arithmetic ──────────────────────────────────────────
-
-// TestBitsLeftArithmetic kills ARITHMETIC_BASE mutants on len(data)*8 - pos.
-func TestBitsLeftArithmetic(t *testing.T) {
-	// 5 bytes × 8 bits − 8 consumed = 32.
-	r := &bitReader{data: make([]byte, 5), pos: 8}
-	if got := bitsLeft(r); got != 32 {
-		t.Errorf("5B pos=8: bitsLeft = %d, want 32", got)
-	}
-	// 3 bytes × 8 − 0 = 24.
-	r2 := &bitReader{data: make([]byte, 3), pos: 0}
-	if got := bitsLeft(r2); got != 24 {
-		t.Errorf("3B pos=0: bitsLeft = %d, want 24", got)
-	}
-	// exactly exhausted: 2 bytes − 16 bits = 0.
-	r3 := &bitReader{data: make([]byte, 2), pos: 16}
-	if got := bitsLeft(r3); got != 0 {
-		t.Errorf("2B pos=16: bitsLeft = %d, want 0", got)
-	}
-}
-
 // ── demux.go: videoFrameRate ────────────────────────────────────────────────
 
 // TestVideoFrameRateExact2Samples kills the len(samples) < 2
