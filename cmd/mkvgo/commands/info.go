@@ -15,6 +15,7 @@ func CmdInfo(path string) {
 			Title         string `json:"title"`
 			DurationMs    int64  `json:"duration_ms"`
 			TimecodeScale int64  `json:"timecode_scale"`
+			DocType       string `json:"doc_type"`
 			MuxingApp     string `json:"muxing_app"`
 			WritingApp    string `json:"writing_app"`
 			Tracks        int    `json:"tracks"`
@@ -22,7 +23,7 @@ func CmdInfo(path string) {
 			Attachments   int    `json:"attachments"`
 			Tags          int    `json:"tags"`
 		}{
-			c.Path, c.Info.Title, c.DurationMs, c.Info.TimecodeScale,
+			c.Path, c.Info.Title, c.DurationMs, c.Info.TimecodeScale, c.DocType,
 			c.Info.MuxingApp, c.Info.WritingApp,
 			len(c.Tracks), len(c.Chapters), len(c.Attachments), len(c.Tags),
 		})
@@ -32,6 +33,9 @@ func CmdInfo(path string) {
 	fmt.Printf("Title:       %s\n", c.Info.Title)
 	fmt.Printf("Duration:    %d ms\n", c.DurationMs)
 	fmt.Printf("Timebase:    %d ns/unit\n", c.Info.TimecodeScale)
+	if c.DocType != "" {
+		fmt.Printf("DocType:     %s\n", c.DocType)
+	}
 	fmt.Printf("MuxingApp:   %s\n", c.Info.MuxingApp)
 	fmt.Printf("WritingApp:  %s\n", c.Info.WritingApp)
 	fmt.Printf("Tracks:      %d\n", len(c.Tracks))
@@ -154,6 +158,9 @@ func CmdProbe(path string) {
 	fmt.Printf("File:        %s\n", c.Path)
 	fmt.Printf("Title:       %s\n", c.Info.Title)
 	fmt.Printf("Duration:    %s (%d ms)\n", FmtMs(c.DurationMs), c.DurationMs)
+	if c.DocType != "" {
+		fmt.Printf("DocType:     %s\n", c.DocType)
+	}
 	fmt.Printf("MuxingApp:   %s\n", c.Info.MuxingApp)
 	fmt.Printf("WritingApp:  %s\n", c.Info.WritingApp)
 	if c.Info.DateUTC != nil {

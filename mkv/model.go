@@ -102,6 +102,31 @@ type Container struct {
 	// a caller should fall back to a full demux when a Fragmented file leaves them
 	// empty. Always false for Matroska.
 	Fragmented bool `json:"fragmented,omitempty"`
+
+	// DocType is the EBML header's DocType exactly as the file stores it:
+	// "matroska", "webm", or "" when the header declares none. It is what tells
+	// a WebM file from a Matroska one - the two share every other structure, and
+	// a prober that reports the demuxer family cannot separate them. Every
+	// Matroska reader fills it (Read, ReadMeta, ReadStream): the EBML header is
+	// a few dozen bytes at the start of the file, read in the same pass. Always
+	// "" for MP4. The value is the declaration, not a codec audit: a file may
+	// declare "webm" and carry a codec outside the WebM profile (see IsWebM).
+	DocType string `json:"doc_type,omitempty"`
+	// DocTypeVersion and DocTypeReadVersion are the EBML header's DocTypeVersion
+	// (the version of the DocType the file was written against - WebM writes 2,
+	// or 4 with AV1) and DocTypeReadVersion (the minimum a reader must support).
+	// 0 when the header does not declare them.
+	DocTypeVersion     uint64 `json:"doc_type_version,omitempty"`
+	DocTypeReadVersion uint64 `json:"doc_type_read_version,omitempty"`
+}
+
+// IsWebM reports whether the file declares itself WebM: its EBML header's
+// DocType is "webm". It reads the declaration only - it does not check the
+// tracks against the WebM codec profile, because a file can declare webm and
+// still carry a codec outside it, and that is the player's call, not the
+// container's (use ValidateWebM for the codec audit).
+func (c *Container) IsWebM() bool {
+	return c.DocType == "webm"
 }
 
 type SegmentInfo struct {

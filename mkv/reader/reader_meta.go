@@ -74,7 +74,7 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path}
 	c := &mkv.Container{Path: path}
 
-	if err := p.parseEBMLHeader(); err != nil {
+	if err := p.parseEBMLHeader(c); err != nil {
 		if looksLikeISOBMFF(r) {
 			return nil, fmt.Errorf("%s: %w", path, ErrNotMatroska)
 		}

@@ -58,6 +58,12 @@ mkvgo info [-json] <file.mkv|->
 `Timebase` (`timecode_scale` in JSON) is the declared TimecodeScale in nanoseconds
 per timecode unit; 1000000 (one millisecond) is what nearly every file uses.
 
+`DocType` (`doc_type` in JSON) is the EBML header's DocType as the file declares
+it: `matroska` or `webm` - the one thing that tells a WebM file from a Matroska
+one, which a prober reporting the demuxer family cannot. It is the declaration,
+not a codec audit; the line is omitted (JSON: empty) when the header declares
+none, and for MP4.
+
 Pass `-` as the path to read from stdin (uses the streaming reader; Cues are not available).
 
 ```bash
@@ -138,7 +144,7 @@ Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyfra
 mkvgo probe [-json] <file.mkv|.mp4|->
 ```
 
-`info`, `tracks`, `chapters` and `probe` accept an MP4/MOV path as well as MKV/WebM (read via the head-only MP4 probe; `probe` additionally builds the keyframe index). Pass `-` to read MKV from stdin.
+`info`, `tracks`, `chapters` and `probe` accept an MP4/MOV path as well as MKV/WebM (read via the head-only MP4 probe; `probe` additionally builds the keyframe index). Pass `-` to read MKV from stdin. A Matroska file's `DocType` (`doc_type`, `doc_type_version`, `doc_type_read_version` in JSON) tells WebM from MKV, see `info`.
 
 ```bash
 mkvgo probe -json video.mkv | jq '.tracks[] | select(.type == "audio")'

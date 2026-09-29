@@ -52,7 +52,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path}
 	c := &mkv.Container{Path: path}
 
-	if err := p.parseEBMLHeader(); err != nil {
+	if err := p.parseEBMLHeader(c); err != nil {
 		if looksLikeISOBMFF(r) {
 			return nil, fmt.Errorf("%s: %w", path, ErrNotMatroska)
 		}
@@ -198,7 +198,10 @@ func (p *parser) readFlag(size int64) (bool, error) {
 	return v == 1, err
 }
 
-func (p *parser) parseEBMLHeader() error {
+// parseEBMLHeader reads the EBML header and records its DocType declaration
+// on c (see parseEBMLHeaderBody); the header body is a few dozen bytes, read
+// in the same pass as the rest.
+func (p *parser) parseEBMLHeader(c *mkv.Container) error {
 	h, _, err := p.readHeader()
 	if err != nil {
 		return err
@@ -206,7 +209,10 @@ func (p *parser) parseEBMLHeader() error {
 	if h.ID != ebml.IDEBMLHeader {
 		return fmt.Errorf("expected EBML header (0x%X), got 0x%X", ebml.IDEBMLHeader, h.ID)
 	}
-	return p.skip(h.Size)
+	if h.Size < 0 {
+		return fmt.Errorf("cannot skip element with unknown size")
+	}
+	return parseEBMLHeaderBody(p.r, h.Size, c)
 }
 
 func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {

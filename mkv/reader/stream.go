@@ -164,9 +164,17 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 	if h.ID != ebml.IDEBMLHeader {
 		return nil, nil, fmt.Errorf("ebml header: expected 0x%X got 0x%X", ebml.IDEBMLHeader, h.ID)
 	}
-	if err := p.skip(h.Size); err != nil {
+	c := &mkv.Container{}
+	c.Info.TimecodeScale = 1_000_000 // EBML default
+	if h.Size < 0 {
+		return nil, nil, fmt.Errorf("ebml header body: cannot skip element with unknown size")
+	}
+	// The header body carries the DocType declaration (webm vs matroska); read
+	// it in passing instead of skipping it.
+	if err := parseEBMLHeaderBody(p.r, h.Size, c); err != nil {
 		return nil, nil, fmt.Errorf("ebml header body: %w", err)
 	}
+	p.pos += h.Size
 
 	// Segment.
 	h, _, err = p.readHeader()
@@ -177,9 +185,6 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 		return nil, nil, fmt.Errorf("segment: expected 0x%X got 0x%X", mkv.IDSegment, h.ID)
 	}
 	// h.Size may be -1 (unknown-size segment) - fine for streaming.
-
-	c := &mkv.Container{}
-	c.Info.TimecodeScale = 1_000_000 // EBML default
 
 	// Scan segment-level elements until we hit the first Cluster.
 	var peekedCluster *ebml.ElementHeader
