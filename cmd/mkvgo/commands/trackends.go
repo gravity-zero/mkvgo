@@ -38,6 +38,9 @@ func CmdTrackEnds(args []string) {
 		return
 	}
 	fmt.Printf("%s: declared duration %s\n", rest[0], FmtMs(report.DeclaredDurationMs))
+	if report.StartMs > 0 {
+		fmt.Printf("  timeline starts at %.3fs (the ends below are positions on it, not lengths)\n", float64(report.StartMs)/1000)
+	}
 	for _, e := range report.Ends {
 		switch e.Source {
 		case "":

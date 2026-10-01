@@ -83,7 +83,35 @@ func trackEndsFrom(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		}
 	}
 	judgeTrackEnds(r)
+	r.StartMs = timelineStartMs(path, fs, meta.Info.TimecodeScale)
 	return r, nil
+}
+
+// timelineStartMs returns the Timestamp of the first Cluster holding a block,
+// in ms: where the file's timeline starts. One header-only read of the first
+// block; 0 when it cannot be read (the ends are still worth reporting).
+func timelineStartMs(path string, fs *mkv.FS, scale int64) int64 {
+	if scale <= 0 {
+		scale = 1_000_000
+	}
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, scale)
+	if err != nil {
+		return 0
+	}
+	br.SetHeaderOnly(true)
+	if _, err := br.Next(); err != nil {
+		return 0
+	}
+	ms, err := reindexSafeTimecodeMs(br.Pos().ClusterTS, scale)
+	if err != nil {
+		return 0
+	}
+	return ms
 }
 
 // tailWalkWindowsMs are the successive "walk the last N seconds" windows of the

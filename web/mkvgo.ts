@@ -413,6 +413,12 @@ export interface TrackEnd {
 export interface TrackEndsReport {
   declared_duration_ms: number
   ends: TrackEnd[]
+  /**
+   * Where the timeline starts (the first cluster's timestamp); absent when 0.
+   * Every end_ms is a position on that timeline: the content's length is
+   * end_ms - start_ms.
+   */
+  start_ms?: number
   video_end_ms?: number
   /** A lower bound when the short track's end is only "walk-bound". */
   audio_shortfall_ms?: number

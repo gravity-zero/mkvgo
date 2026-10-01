@@ -128,6 +128,12 @@ type TrackEnd struct {
 type TrackEndsReport struct {
 	DeclaredDurationMs int64      `json:"declared_duration_ms"`
 	Ends               []TrackEnd `json:"ends"`
+	// StartMs is where the file's timeline starts: the Timestamp of the first
+	// Cluster holding a block. 0 on an ordinary file; a live recording or a
+	// stream cut from a longer one starts wherever it was picked up (12.345 s,
+	// say). Every EndMs is a position on that same timeline, so the content's
+	// length is EndMs - StartMs - the duration a file with no declared one has.
+	StartMs int64 `json:"start_ms,omitempty"`
 	// VideoEndMs is the latest known video end (0 when no video track's end is
 	// known). AudioShortfallMs is how far the earliest-ending audio track stops
 	// before it, on ShortAudioTrack - a lower bound when that track's end is
