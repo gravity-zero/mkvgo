@@ -171,6 +171,8 @@ Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte
 
 The cfr/vfr column comes from the deltas between consecutively PRESENTED video frame timecodes - a bounded window restores presentation order first, since blocks are stored in decode order and B-frame reordering would otherwise read as duration variance - compared against the modal (most common) delta with +-1ms slack (Matroska timecodes are millisecond-scale, so a constant 23.976fps track legitimately alternates 41ms/42ms deltas). Only when more than 1% of the deltas (and at least 2) fall outside that slack is the track reported variable, with a warning (some pipelines assume constant frame rate) - isolated dropped-frame holes or splices on an otherwise constant-rate track stay constant instead of flipping the whole title to vfr.
 
+When the timeline does not start at 0 (a live recording, a stream cut from a longer one) the start is printed and reported as `start_ms`: the durations are end positions on that timeline, and the bitrates and frame rates are measured over the span the content actually covers.
+
 ```
 mkvgo analyze [-json] <file.mkv|url>
 ```

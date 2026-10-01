@@ -74,6 +74,11 @@ All notable changes to mkvgo are documented here. The format is based on
   a sound 36-cluster file. Such a Cluster is now copied like any other: a
   clean live source gives the same bytes as the strict reindex and reports
   nothing.
+- **`analyze` rates on a timeline that does not start at 0.** Bitrates and
+  frame rates were bytes and frames over the END POSITION of the content: a
+  24 fps recording starting at 12.345 s read as 20.3 fps. They are measured
+  over the span the content covers; `AnalyzeReport.StartMs` (`start_ms`,
+  omitted at 0) says where it starts. Unchanged on a file starting at 0.
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported
