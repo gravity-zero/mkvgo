@@ -23,6 +23,13 @@ import (
 // streamToWriter before any cluster data has been written to the output.
 var errUnknownSizeCluster = errors.New("reindex: unknown-size cluster, falling back to streamToWriter")
 
+// errUnreadableHead is returned by reindexFastCopy when an element header does
+// not decode BEFORE the first cluster: junk between the Segment header and the
+// media, which the readers resync past. Nothing has been written yet, so
+// EditMetadata falls back to streamToWriter, whose block walk resyncs the same
+// way. Past the first cluster an undecodable header stays an error.
+var errUnreadableHead = errors.New("reindex: undecodable element ahead of the first cluster, falling back to streamToWriter")
+
 const (
 	reindexBufSize        = 256 * 1024 // 256 KB sequential read buffer
 	reindexCueMinGapMs    = 500        // mirrors mkvwriter.go minCueIntervalMs
@@ -84,6 +91,9 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
+			}
+			if firstCluster {
+				return errUnreadableHead
 			}
 			return fmt.Errorf("reindex: top-level element: %w", err)
 		}

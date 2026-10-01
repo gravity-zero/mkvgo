@@ -199,10 +199,11 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	if fastErr == nil {
 		return mw.Finalize()
 	}
-	if fastErr != errUnknownSizeCluster {
+	if fastErr != errUnknownSizeCluster && fastErr != errUnreadableHead {
 		return fastErr
 	}
-	// errUnknownSizeCluster: fall through to streamToWriter.
+	// Nothing written yet (a live source, or junk ahead of the media): fall
+	// through to streamToWriter.
 
 	if err := streamToWriter(ctx, mw, srcPath, c.Info.TimecodeScale, fs, streamOpts{
 		remap: identityRemap(c.Tracks), progress: progress,

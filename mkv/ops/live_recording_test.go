@@ -255,6 +255,34 @@ func TestAdviceOnCleanLiveRecordingKeepsTheStrictReindex(t *testing.T) {
 	}
 }
 
+// TestEditMetadataBehindHeadJunk: a metadata edit copies the clusters with a
+// strict walk, which stopped on the junk the reader had just resynced past.
+// With nothing written yet it now falls back to the block rewrite, as it does
+// for a live source.
+func TestEditMetadataBehindHeadJunk(t *testing.T) {
+	for name, o := range map[string]livefixture.Options{
+		"junk after the Segment header": {JunkHead: 134, ShortUnknown: true},
+		"junk between Info and Tracks":  {JunkMid: 134, SizedSegment: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			dst := filepath.Join(t.TempDir(), "edited.mkv")
+			err := EditMetadata(ctx, liveFile(t, o), dst, func(c *mkv.Container) { c.Info.Title = "edited" })
+			if err != nil {
+				t.Fatalf("EditMetadata: %v", err)
+			}
+			checkLiveOutput(t, dst)
+			c, err := reader.Open(ctx, dst)
+			if err != nil {
+				t.Fatalf("open output: %v", err)
+			}
+			if c.Info.Title != "edited" || c.ResyncedBytes != 0 {
+				t.Errorf("title = %q, resynced bytes = %d; want the edit applied and a clean file", c.Info.Title, c.ResyncedBytes)
+			}
+		})
+	}
+}
+
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a
 // file that has neither Duration nor Cues; head junk used to leave every track
 // "never seen".
