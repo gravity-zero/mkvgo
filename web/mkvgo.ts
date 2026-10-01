@@ -171,6 +171,12 @@ export interface TrackStats {
 export interface AnalyzeReport {
   /** The container's TRUE duration: the latest track end seen during the walk. */
   duration_ms: number
+  /**
+   * Where the timeline starts (earliest frame timecode); absent when 0. The
+   * durations are end positions on that timeline: the content spans
+   * duration_ms - start_ms, which is what the rates are measured over.
+   */
+  start_ms?: number
   /** The Segment Info Duration element, for comparison against duration_ms. */
   declared_duration_ms: number
   overall_bitrate_bps: number

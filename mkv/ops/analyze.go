@@ -132,6 +132,11 @@ type AnalyzeReport struct {
 	// DurationMs is the container's TRUE duration: the latest track end seen
 	// during the walk (max over Tracks[i].DurationMs).
 	DurationMs int64 `json:"duration_ms"`
+	// StartMs is where the timeline starts: the earliest frame timecode seen.
+	// 0 on an ordinary file. DurationMs and every track's DurationMs are end
+	// POSITIONS on that timeline; the content spans DurationMs - StartMs, and
+	// that span is what the bitrates and frame rates are measured over.
+	StartMs int64 `json:"start_ms,omitempty"`
 	// DeclaredDurationMs is the Segment Info Duration element - see Warnings
 	// for a mismatch against the walked DurationMs.
 	DeclaredDurationMs int64 `json:"declared_duration_ms"`
@@ -173,7 +178,8 @@ type trackAcc struct {
 	haveBlockTC bool
 
 	durationMs   int64
-	haveDuration bool // a non-zero frame duration was derived at least once
+	haveDuration bool  // a non-zero frame duration was derived at least once
+	firstMs      int64 // earliest frame timecode seen (valid when frames > 0)
 
 	win      []winEntry
 	winBytes int64
@@ -434,6 +440,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		if end := blk.Timecode + durMs; end > acc.durationMs {
 			acc.durationMs = end
 		}
+		if acc.frames == 1 || blk.Timecode < acc.firstMs {
+			acc.firstMs = blk.Timecode
+		}
 
 		acc.addToWindow(blk.Timecode, blk.Size)
 
@@ -479,6 +488,16 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		ClusterTimecodeBackstepMs: maxBackstepTicks * c.Info.TimecodeScale / 1_000_000,
 	}
 
+	// Where the timeline starts: rates are bytes and frames over the time the
+	// content spans, not over its end position - the two differ on a file that
+	// does not start at 0 (a live recording, a stream cut from a longer one).
+	started := false
+	for _, t := range c.Tracks {
+		if acc := accs[t.ID]; acc.frames > 0 && (!started || acc.firstMs < report.StartMs) {
+			report.StartMs, started = acc.firstMs, true
+		}
+	}
+
 	var totalBytes int64
 	for _, t := range c.Tracks {
 		acc := accs[t.ID]
@@ -487,9 +506,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 			Frames: acc.frames, Packets: acc.packets, Keyframes: acc.keyframes,
 			Bytes: acc.bytes, DurationMs: acc.durationMs, PeakBitrateBps: acc.peakBps,
 		}
-		if acc.durationMs > 0 {
-			ts.AvgBitrateBps = acc.bytes * 8 * 1000 / acc.durationMs
-			ts.FrameRateAvg = float64(acc.frames) * 1000 / float64(acc.durationMs)
+		if span := acc.durationMs - report.StartMs; span > 0 {
+			ts.AvgBitrateBps = acc.bytes * 8 * 1000 / span
+			ts.FrameRateAvg = float64(acc.frames) * 1000 / float64(span)
 		}
 		if t.Type == mkv.VideoTrack {
 			acc.drainFrameTimes()
@@ -539,8 +558,8 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		}
 	}
 
-	if report.DurationMs > 0 {
-		report.OverallBitrateBps = totalBytes * 8 * 1000 / report.DurationMs
+	if span := report.DurationMs - report.StartMs; span > 0 {
+		report.OverallBitrateBps = totalBytes * 8 * 1000 / span
 	}
 	if report.ClusterTimecodeBackstepMs >= backwardTimecodeWarnMs {
 		report.Warnings = append(report.Warnings,

@@ -46,6 +46,9 @@ func CmdAnalyze(args []string) {
 
 func printAnalyzeReport(r *matroska.AnalyzeReport) {
 	fmt.Printf("Duration: %s (declared %s)\n", FmtMs(r.DurationMs), FmtMs(r.DeclaredDurationMs))
+	if r.StartMs > 0 {
+		fmt.Printf("Timeline starts at %.3fs: the content spans %s (rates are measured over that span)\n", float64(r.StartMs)/1000, FmtMs(r.DurationMs-r.StartMs))
+	}
 	fmt.Printf("Overall bitrate: %d kb/s\n", r.OverallBitrateBps/1000)
 	fmt.Printf("Clusters: %d, blocks: %d\n", r.ClusterCount, r.BlockCount)
 	if r.ClusterTimecodeBackstepMs > 0 {
