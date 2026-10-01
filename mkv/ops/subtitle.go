@@ -215,6 +215,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 			TrackNumber: newID,
 			Timecode:    e.StartMs,
 			Duration:    dur,
+			Keyframe:    true, // a text cue depends on no other
 			Data:        []byte(e.Text),
 		}
 	}

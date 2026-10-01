@@ -626,6 +626,9 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 	rawTS := uint64(clusterTS * 1000000 / timecodeScale)
 	var e ew
 	e.uint(mkv.IDTimestamp, rawTS)
+	// lastTC is each track's previous block in this cluster, for the
+	// ReferenceBlock of a non-keyframe BlockGroup.
+	lastTC := map[uint64]int64{}
 	for i := range blocks {
 		b := &blocks[i]
 		// Block timecodes are milliseconds internally; the SimpleBlock offset is
@@ -640,12 +643,27 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 		}
 		if b.Duration > 0 {
 			// A block with an explicit duration (e.g. a subtitle cue) is written
-			// as a BlockGroup so the duration can be carried.
+			// as a BlockGroup so the duration can be carried. A Block has no
+			// keyframe flag: a frame that is not a keyframe says so by naming a
+			// ReferenceBlock, without which every demuxer takes it for one.
 			rawDur := uint64(b.Duration * 1000000 / timecodeScale)
-			e.err = WriteBlockGroup(&e.Buffer, b.TrackNumber, relTC, b.Data, rawDur)
+			var ref *int64
+			if !b.Keyframe {
+				// The frame before it on the track, when this cluster holds
+				// one; else the tick before. What a demuxer reads is whether a
+				// reference exists.
+				d := int64(-1)
+				if prev, ok := lastTC[b.TrackNumber]; ok && prev < b.Timecode {
+					d = (prev - b.Timecode) * 1000000 / timecodeScale
+				}
+				ref = &d
+			}
+			e.err = writeBlockGroup(&e.Buffer, b.TrackNumber, relTC, b.Data, rawDur, ref)
+			lastTC[b.TrackNumber] = b.Timecode
 			continue
 		}
 		e.err = WriteSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, b.Data)
+		lastTC[b.TrackNumber] = b.Timecode
 	}
 	return e.flush(w, mkv.IDCluster)
 }
@@ -653,6 +671,32 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 // WriteBlockGroup writes a BlockGroup containing a Block and a BlockDuration
 // (in raw timecode-scale units). Used for subtitle cues, which need a duration.
 func WriteBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64) error {
+	return writeBlockGroup(w, trackNum, relTC, data, rawDuration, nil)
+}
+
+// writeSintElement writes a signed integer element in the fewest bytes that
+// hold it, two's complement, big-endian.
+func writeSintElement(w io.Writer, id uint32, val int64) error {
+	n := 1
+	for n < 8 && (val < -(int64(1)<<(8*n-1)) || val >= int64(1)<<(8*n-1)) {
+		n++
+	}
+	if _, err := ebml.WriteElementHeader(w, id, int64(n)); err != nil {
+		return err
+	}
+	var buf [8]byte
+	for i := 0; i < n; i++ {
+		buf[i] = byte(val >> (8 * (n - 1 - i)))
+	}
+	_, err := w.Write(buf[:n])
+	return err
+}
+
+// writeBlockGroup is WriteBlockGroup with an optional ReferenceBlock (the
+// referenced frame's timestamp relative to this block's, in raw
+// timecode-scale units): its presence is what marks the frame as not a
+// keyframe.
+func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64, ref *int64) error {
 	var inner bytes.Buffer
 	trackVINT := ebml.DataSizeLen(int64(trackNum))
 	bodySize := int64(trackVINT + 2 + 1 + len(data))
@@ -666,6 +710,11 @@ func WriteBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 	inner.Write(data)
 	if err := WriteUintElement(&inner, mkv.IDBlockDuration, rawDuration); err != nil {
 		return err
+	}
+	if ref != nil {
+		if err := writeSintElement(&inner, mkv.IDReferenceBlock, *ref); err != nil {
+			return err
+		}
 	}
 	return WriteMasterElement(w, mkv.IDBlockGroup, inner.Bytes())
 }

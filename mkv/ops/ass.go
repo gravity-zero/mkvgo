@@ -48,7 +48,8 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 		}
 		subBlocks[i] = mkv.Block{
 			TrackNumber: newID, Timecode: ev.StartMs, Duration: dur,
-			Data: []byte(fmt.Sprintf("%d,0,%s", i, ev.Fields)),
+			Keyframe: true, // a text event depends on no other
+			Data:     []byte(fmt.Sprintf("%d,0,%s", i, ev.Fields)),
 		}
 	}
 
