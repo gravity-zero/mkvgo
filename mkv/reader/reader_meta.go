@@ -158,6 +158,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			if off < 0 {
 				break // nothing recognizable in the window: return what we have
 			}
+			c.ResyncedBytes += off - elemStart
 			continue
 		}
 		switch eh.ID {

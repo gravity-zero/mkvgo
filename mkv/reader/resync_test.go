@@ -134,6 +134,43 @@ func TestLiveRecordingBlockReader(t *testing.T) {
 	}
 }
 
+// TestResyncedBytes: a read that had to resync says so, with the exact number
+// of bytes it skipped - what lets a caller tell a sound file from one a strict
+// rewrite will refuse. Every reader counts the same.
+func TestResyncedBytes(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		opts livefixture.Options
+		want int64
+	}{
+		{"clean", livefixture.Options{}, 0},
+		{"junk after the Segment header", livefixture.Options{JunkHead: 134, ShortUnknown: true}, 134},
+		{"junk between Info and Tracks", livefixture.Options{JunkMid: 61}, 61},
+		{"both", livefixture.Options{JunkHead: 134, JunkMid: 61}, 195},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := livefixture.Build(tc.opts)
+			full, err := Read(ctx, bytes.NewReader(data), "live.mkv")
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			meta, err := ReadMeta(ctx, bytes.NewReader(data), "live.mkv")
+			if err != nil {
+				t.Fatalf("ReadMeta: %v", err)
+			}
+			stream, _, err := ReadStream(ctx, io.MultiReader(bytes.NewReader(data)))
+			if err != nil {
+				t.Fatalf("ReadStream: %v", err)
+			}
+			if full.ResyncedBytes != tc.want || meta.ResyncedBytes != tc.want || stream.ResyncedBytes != tc.want {
+				t.Errorf("ResyncedBytes: Read %d, ReadMeta %d, ReadStream %d; want %d",
+					full.ResyncedBytes, meta.ResyncedBytes, stream.ResyncedBytes, tc.want)
+			}
+		})
+	}
+}
+
 // TestBlockGroupKeyframe: a Block carries no keyframe flag - in a BlockGroup the
 // frame is a keyframe exactly when the group has no ReferenceBlock. The block
 // walk used to report every such frame as a non-keyframe, so a file storing

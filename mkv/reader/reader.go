@@ -267,6 +267,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if off < 0 {
 				break
 			}
+			c.ResyncedBytes += off - elemStart
 			continue
 		}
 		switch eh.ID {

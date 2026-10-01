@@ -204,6 +204,7 @@ metaLoop:
 			// Junk ahead of (or between) the head elements: scan forward to
 			// the next segment-level element, as the seekable readers do. A
 			// stream with nothing valid behind the junk keeps the decode error.
+			junkStart := p.pos
 			found, rerr := p.resyncStream(ctx, br0)
 			if rerr != nil {
 				return nil, nil, rerr
@@ -211,6 +212,7 @@ metaLoop:
 			if !found {
 				return nil, nil, derr
 			}
+			c.ResyncedBytes += p.pos - junkStart
 			continue
 		}
 		elemStart := p.pos

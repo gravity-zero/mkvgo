@@ -79,6 +79,14 @@ type Container struct {
 	Cues        []CuePoint   `json:"cues,omitempty"`
 	DurationMs  int64        `json:"duration_ms"`
 
+	// ResyncedBytes counts the undecodable bytes the reader skipped to resume
+	// on the next valid element - junk between the Segment header and the
+	// metadata, a zeroed region between clusters. 0 on a sound file. The read
+	// succeeded either way; a non-zero count says the file is padded or damaged
+	// where the reader went through, which a strict rewrite will refuse (the
+	// head-only readers only see what precedes the first Cluster).
+	ResyncedBytes int64 `json:"resynced_bytes,omitempty"`
+
 	// SegmentStart is the absolute file offset of the Segment body - the origin
 	// CuePoint.ClusterPos values are relative to. Filled by the seekable readers
 	// (Read/ReadMeta); 0 is a valid value only for a file with no EBML header,
