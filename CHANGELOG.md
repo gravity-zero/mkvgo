@@ -15,6 +15,11 @@ All notable changes to mkvgo are documented here. The format is based on
   that timeline, so a file that declares no duration has one after all: the
   latest end minus the start.
 
+- **`Container.ResyncedBytes`** (`resynced_bytes` in JSON, omitted at 0) - how
+  many undecodable bytes the reader skipped to resume on the next valid
+  element. The read succeeded; the count says the file is padded or damaged
+  where the reader went through. `validate` reports it (`undecodable-bytes`),
+  `diagnose` raises `damaged` for it head-only.
 - **`FFprobeCodecName` resolves the single-word Matroska CodecIDs.** A codec
   mkvgo has no short name for keeps its raw CodecID as `Track.Codec`
   (`V_THEORA`), and the lookup returned it unchanged - a consumer normalizing
@@ -58,6 +63,17 @@ All notable changes to mkvgo are documented here. The format is based on
   delta work as on any file (the delta rebuilds the unknown-size headers byte
   for byte). A Cluster whose children stop parsing before a boundary is still
   refused, with `ErrCorruptSource`.
+- **Advice names the command that works.** `diagnose`, `cue-health` and
+  `validate` recommended `mkvgo reindex` on a file with junk ahead of its
+  metadata, where the strict reindex is refused. On such a file every piece of
+  advice now names `mkvgo reindex --resync`; the wording is unchanged
+  everywhere else.
+- **A healthy live recording is not reported as repaired.** `Reindex` with
+  `Resync`, `Salvage` and `MapDamage` sent every unknown-size Cluster through
+  the surgical recovery and listed each as a repaired region - 36 "repairs" on
+  a sound 36-cluster file. Such a Cluster is now copied like any other: a
+  clean live source gives the same bytes as the strict reindex and reports
+  nothing.
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported

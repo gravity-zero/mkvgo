@@ -216,8 +216,11 @@ timecodes…) and **streaming readiness**: a missing Cues index, cue points
 referencing a non-video track (seeking would land on audio - an error),
 cue times matching no actual video keyframe (stale index), subtitle blocks
 without BlockDuration (cue end times lost), video without DefaultDuration,
-AAC without its AudioSpecificConfig. Every finding names the fix
-(usually `mkvgo reindex`).
+AAC without its AudioSpecificConfig, undecodable bytes the reader had to
+skip between elements (`undecodable-bytes`: junk ahead of the metadata, a
+padded region). Every finding names the fix (usually `mkvgo reindex`; on a
+file with undecodable bytes the strict reindex is refused, so the findings
+name `mkvgo reindex --resync` instead).
 
 ```
 mkvgo validate [-json] [-strict] <file.mkv>
@@ -824,7 +827,7 @@ mkvgo diagnose <file.mkv> [-json]
 ```
 
 - Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
-- Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `picture-missing` (a stretch the hole probe found without any video block - the picture freezes there whatever the index does; located; re-acquire the source), `audio-short` (an audio track ends more than 5 s before the picture - measured content against content by `track-ends`, a lower bound when the track was silent through the whole tail walked; re-acquire the source, playback pads it with silence), `damaged` (repairable: `reindex --resync`), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass).
+- Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `picture-missing` (a stretch the hole probe found without any video block - the picture freezes there whatever the index does; located; re-acquire the source), `audio-short` (an audio track ends more than 5 s before the picture - measured content against content by `track-ends`, a lower bound when the track was silent through the whole tail walked; re-acquire the source, playback pads it with silence), `damaged` (repairable: `reindex --resync`; also raised head-only for undecodable bytes ahead of the metadata, in which case every other remedy names `reindex --resync` too, the strict reindex being refused on such a file), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass).
 - The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), the source's `timecode_scale` (its declared timebase in nanoseconds per unit, Matroska only - 1000000 is one millisecond and is what nearly every file uses), and the `damage` map when the walk ran.
 
 ```bash
