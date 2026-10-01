@@ -231,11 +231,39 @@ var CodecShortName = map[string]string{
 // on them); this lookup lets a consumer normalize to that vocabulary when it
 // wants probe equivalence. Only divergent names are listed - anything absent is
 // identical in both tools (e.g. h264, hevc, aac, opus, ass).
+//
+// A codec mkvgo has no short name for keeps its raw Matroska CodecID as
+// Track.Codec ("V_THEORA"); those with a single-word ID are listed here too, or
+// a consumer normalizing through this lookup would store the raw ID as if it
+// were the prober's name. IDs carrying a "/" are deliberately left out for now:
+// several of them name a family whose codec_name depends on the track's
+// parameters (V_MS/VFW/FOURCC on its FourCC, the PCM IDs on the bit depth), and
+// the "/" is what tells a consumer the name was not resolved.
 var ffprobeCodecName = map[string]string{
 	"srt":    "subrip",            // S_TEXT/UTF8
+	"ssa":    "ass",               // S_TEXT/SSA
 	"vobsub": "dvd_subtitle",      // S_VOBSUB
 	"pgs":    "hdmv_pgs_subtitle", // S_HDMV/PGS
 	"dvbsub": "dvb_subtitle",      // S_DVBSUB
+
+	"V_THEORA":       "theora",
+	"V_MPEG1":        "mpeg1video",
+	"V_MPEG2":        "mpeg2video",
+	"V_MJPEG":        "mjpeg",
+	"V_PRORES":       "prores",
+	"V_FFV1":         "ffv1",
+	"V_DIRAC":        "dirac",
+	"V_SNOW":         "snow",
+	"V_AVS2":         "avs2",
+	"V_AVS3":         "avs3",
+	"V_UNCOMPRESSED": "rawvideo",
+	"A_MLP":          "mlp",
+	"A_ALAC":         "alac",
+	"A_TTA1":         "tta",
+	"A_WAVPACK4":     "wavpack",
+	"S_ASS":          "ass",
+	"S_SSA":          "ass",
+	"S_ARIBSUB":      "arib_caption",
 }
 
 // FFprobeCodecName returns the codec_name an external prober reports for a track whose

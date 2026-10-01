@@ -15,6 +15,16 @@ All notable changes to mkvgo are documented here. The format is based on
   that timeline, so a file that declares no duration has one after all: the
   latest end minus the start.
 
+- **`FFprobeCodecName` resolves the single-word Matroska CodecIDs.** A codec
+  mkvgo has no short name for keeps its raw CodecID as `Track.Codec`
+  (`V_THEORA`), and the lookup returned it unchanged - a consumer normalizing
+  to a prober's vocabulary stored `V_THEORA` where the prober says `theora`.
+  Now mapped: Theora, MPEG-1/2 video, MJPEG, ProRes, FFV1, Dirac, Snow, AVS2,
+  AVS3, uncompressed video, MLP, ALAC, TTA, WavPack, `S_ASS`/`S_SSA`, ARIB
+  captions; and the short name `ssa` to `ass`. A CodecID carrying a `/` is
+  still returned as it is: several name a family whose prober name depends on
+  the track's parameters, and the `/` is what says the name was not resolved.
+
 ### Fixed
 
 - **Live recordings open.** A Segment of unknown-size Clusters with no

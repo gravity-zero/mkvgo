@@ -122,7 +122,21 @@ func TestFFprobeCodecName(t *testing.T) {
 		{"h264", "h264"}, // identical in both tools
 		{"opus", "opus"}, // identical
 		{"ass", "ass"},   // identical
+		{"ssa", "ass"},   // one decoder for both script flavours
 		{"unknown", "unknown"},
+		// A codec with no mkvgo short name keeps its raw CodecID as Track.Codec:
+		// the single-word ones resolve to the prober's name...
+		{"V_THEORA", "theora"},
+		{"V_MPEG2", "mpeg2video"},
+		{"V_UNCOMPRESSED", "rawvideo"},
+		{"A_ALAC", "alac"},
+		{"A_WAVPACK4", "wavpack"},
+		{"S_ARIBSUB", "arib_caption"},
+		// ...and an ID with a "/" stays as it is, the mark of a name that was
+		// not resolved (several depend on the track's parameters).
+		{"V_MS/VFW/FOURCC", "V_MS/VFW/FOURCC"},
+		{"A_PCM/INT/BIG", "A_PCM/INT/BIG"},
+		{"A_MPEG/L3", "A_MPEG/L3"},
 	}
 	for _, tt := range tests {
 		if got := FFprobeCodecName(tt.in); got != tt.want {
