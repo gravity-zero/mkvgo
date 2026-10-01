@@ -4,6 +4,51 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`TrackEndsReport.StartMs`** (`start_ms` in JSON and in the WebAssembly
+  types, printed by `track-ends`) - where the file's timeline starts: the
+  first cluster's timestamp. 0 on an ordinary file and omitted; a live
+  recording starts wherever it was picked up. Every `EndMs` is a position on
+  that timeline, so a file that declares no duration has one after all: the
+  latest end minus the start.
+
+### Fixed
+
+- **Live recordings open.** A Segment of unknown-size Clusters with no
+  SeekHead and no Cues (a live or streamed capture, `test4.mkv` of the
+  official Matroska test suite) was refused by the full reader - `Read`/`Open`,
+  and with it `info`, `tracks`, `probe`, `analyze`, `validate`, `to-mp4` -
+  with `unknown-size element 0x1F43B675 cannot be skipped`. The reader now
+  finds where such a Cluster ends the way the EBML rule for unknown-sized
+  elements defines it: at the first element that is not one of its children,
+  at the Segment end, or at the end of the file. An element following the last
+  Cluster (Tags, Cues) is parsed as usual.
+- **Junk ahead of the metadata no longer hides the tracks.** Undecodable bytes
+  between the Segment header and Info, or between Info and Tracks (the same
+  test file carries 134 of them) made every reader resume on the first
+  CLUSTER, past the metadata. The head-only reader (`ReadMeta`/`OpenMeta`)
+  returned an empty Container - no track, no duration, and no error; `ReadStream`
+  failed; the block walk could not reach a single block. All of them now resync
+  on the next segment-level element, validated by its size and its first
+  child so a chance byte pattern is not trusted. The head-only scan looks at
+  most 1 MiB past the junk; the full reader has no such bound.
+- **`Reindex` with `Resync`, `Salvage` and `MapDamage` keep the metadata
+  behind head junk.** The tolerant walk skipped from the junk to the first
+  Cluster, dropping Info and Tracks with it: the repair reported success and
+  `recovered ~100%`, and wrote a file whose blocks belonged to no track. The
+  skipped range is now the junk and nothing else.
+- **The strict `Reindex` accepts unknown-size Clusters.** It refused them
+  (`unknown-size cluster (streaming not supported)`) while `diagnose` and
+  `reindex-inplace` send exactly those files to it. Each such Cluster is now
+  measured by a strict walk of its children and copied like any other; the
+  output states the sizes the source left open, `DeepVerify` and the rollback
+  delta work as on any file (the delta rebuilds the unknown-size headers byte
+  for byte). A Cluster whose children stop parsing before a boundary is still
+  refused, with `ErrCorruptSource`.
+
 ## [0.35.0] - 2026-09-29
 
 ### Added
