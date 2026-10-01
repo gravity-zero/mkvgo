@@ -1,0 +1,146 @@
+// Package livefixture builds tiny Matroska files shaped like a live recording,
+// for tests: an unknown-size Segment holding unknown-size Clusters, no
+// Duration, no SeekHead, no Cues, first timestamp at 12.345 s - the structure
+// of test4.mkv in the official Matroska test suite - optionally with a run of
+// junk bytes in the head, which that file also carries right after its Segment
+// header.
+//
+// The files are a few hundred bytes and are generated on the fly, so a test
+// needs neither a download nor a binary in the repository. Their shape (VP8
+// and PCM tracks with picture and audio parameters) is one an external
+// demuxer reads without complaint: 2 streams, 12 packets each.
+package livefixture
+
+import (
+	"bytes"
+	"math"
+
+	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/mkv"
+)
+
+const (
+	// Clusters, BlocksPerTrack and Tracks size the media a fixture carries.
+	Clusters       = 3
+	BlocksPerTrack = 4 // per cluster
+	Tracks         = 2
+	// Blocks is the total number of blocks in a fixture.
+	Blocks = Clusters * BlocksPerTrack * Tracks
+	// FirstTimestampMs is the first cluster's timestamp; LastBlockMs is the
+	// timestamp of the last block.
+	FirstTimestampMs = 12345
+	LastBlockMs      = FirstTimestampMs + (Clusters-1)*1000 + (BlocksPerTrack-1)*250
+)
+
+// Options selects the shape of the fixture. The zero value is a clean live
+// recording.
+type Options struct {
+	// JunkHead is the number of junk bytes written right after the Segment
+	// header, before Info.
+	JunkHead int
+	// JunkMid is the number of junk bytes written between Info and Tracks.
+	JunkMid int
+	// TailTags appends a Tags element after the last (unknown-size) Cluster:
+	// the element that has to end it.
+	TailTags bool
+	// ShortUnknown writes the unknown sizes on one byte (0xFF) instead of
+	// eight.
+	ShortUnknown bool
+	// SizedSegment gives the Segment its real size, keeping the Clusters
+	// unknown-size.
+	SizedSegment bool
+}
+
+// JunkByte is the value the junk runs are filled with: as an element ID it
+// announces a 5-byte width, which no reader can decode.
+const JunkByte = 0x0A
+
+// Build returns the fixture's bytes.
+func Build(o Options) []byte {
+	var body bytes.Buffer
+	body.Write(bytes.Repeat([]byte{JunkByte}, o.JunkHead))
+	body.Write(elem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3)))
+	body.Write(bytes.Repeat([]byte{JunkByte}, o.JunkMid))
+	body.Write(elem(mkv.IDTracks, join(
+		track(1, 1, "V_VP8", elem(0xE0, join(uintElem(0xB0, 320, 2), uintElem(0xBA, 240, 2)))),
+		track(2, 2, "A_PCM/INT/LIT", elem(0xE1, join(floatElem(0xB5, 48000), uintElem(0x9F, 2, 1)))),
+	)))
+	for c := 0; c < Clusters; c++ {
+		body.Write(unknownSizeHeader(mkv.IDCluster, o.ShortUnknown))
+		body.Write(uintElem(mkv.IDTimestamp, uint64(FirstTimestampMs+c*1000), 2))
+		for b := 0; b < BlocksPerTrack; b++ {
+			rel := b * 250
+			for trk := byte(1); trk <= Tracks; trk++ {
+				body.Write(elem(mkv.IDSimpleBlock, []byte{0x80 | trk, byte(rel >> 8), byte(rel), 0x80, byte(c), byte(b), 0xAB}))
+			}
+		}
+	}
+	if o.TailTags {
+		simple := elem(0x67C8, join(elem(0x45A3, []byte("TITLE")), elem(0x4487, []byte("tail"))))
+		body.Write(elem(mkv.IDTags, elem(mkv.IDTag, join(elem(0x63C0, nil), simple))))
+	}
+
+	var out bytes.Buffer
+	out.Write(elem(ebml.IDEBMLHeader, join(
+		uintElem(0x4286, 1, 1), uintElem(0x42F7, 1, 1), uintElem(0x42F2, 4, 1), uintElem(0x42F3, 8, 1),
+		elem(0x4282, []byte("matroska")), uintElem(0x4287, 2, 1), uintElem(0x4285, 2, 1),
+	)))
+	if o.SizedSegment {
+		out.Write(elem(mkv.IDSegment, body.Bytes()))
+		return out.Bytes()
+	}
+	out.Write(unknownSizeHeader(mkv.IDSegment, o.ShortUnknown))
+	out.Write(body.Bytes())
+	return out.Bytes()
+}
+
+// SegmentBodyOffset returns the offset of the first byte after the Segment
+// header in the fixture Build(o) returns - where JunkHead starts.
+func SegmentBodyOffset(o Options) int64 {
+	o.JunkHead = 0
+	info := elem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3))
+	return int64(bytes.Index(Build(o), info))
+}
+
+func track(num, typ uint64, codec string, params []byte) []byte {
+	return elem(mkv.IDTrackEntry, join(
+		uintElem(mkv.IDTrackNumber, num, 1),
+		uintElem(mkv.IDTrackUID, num, 1),
+		uintElem(mkv.IDTrackType, typ, 1),
+		elem(mkv.IDCodecID, []byte(codec)),
+		params,
+	))
+}
+
+func elem(id uint32, body []byte) []byte {
+	var b bytes.Buffer
+	ebml.WriteElementHeader(&b, id, int64(len(body))) //nolint:errcheck // bytes.Buffer never fails
+	b.Write(body)
+	return b.Bytes()
+}
+
+func uintElem(id uint32, v uint64, n int) []byte {
+	var b bytes.Buffer
+	ebml.WriteUint(&b, v, n) //nolint:errcheck // bytes.Buffer never fails
+	return elem(id, b.Bytes())
+}
+
+func floatElem(id uint32, v float64) []byte {
+	bits := math.Float32bits(float32(v))
+	return elem(id, []byte{byte(bits >> 24), byte(bits >> 16), byte(bits >> 8), byte(bits)})
+}
+
+func unknownSizeHeader(id uint32, short bool) []byte {
+	var b bytes.Buffer
+	ebml.WriteElementID(&b, id) //nolint:errcheck // bytes.Buffer never fails
+	if short {
+		b.WriteByte(0xFF)
+		return b.Bytes()
+	}
+	ebml.WriteDataSize(&b, -1) //nolint:errcheck // bytes.Buffer never fails
+	return b.Bytes()
+}
+
+func join(parts ...[]byte) []byte {
+	return bytes.Join(parts, nil)
+}

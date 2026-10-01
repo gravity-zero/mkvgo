@@ -252,13 +252,15 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			// A corrupted or zero-padded region in the body (seen in some real
-			// rips: a multi-MB run of 0x00 between clusters) makes the next
-			// element header undecodable. Rather than abort the whole read like
-			// a strict parser, resync to the next Cluster and keep going, as
-			// mainstream tools do. If nothing recognizable remains, stop with
-			// the metadata gathered so far.
-			off, rerr := p.resyncToCluster(endPos)
+			// A corrupted or padded region (seen in real files: a multi-MB run
+			// of 0x00 between clusters, or junk between the Segment header and
+			// Info) makes the next element header undecodable. Rather than
+			// abort the whole read like a strict parser, resync to the next
+			// segment-level element and keep going, as mainstream tools do -
+			// any of them, not only a Cluster, or junk ahead of the metadata
+			// would cost the Info and Tracks behind it. If nothing recognizable
+			// remains, stop with the metadata gathered so far.
+			off, rerr := p.resyncToSegmentElement(elemStart+1, -1, endPos)
 			if rerr != nil {
 				return rerr
 			}
@@ -398,7 +400,12 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return err
 			}
 			if eh.Size < 0 {
-				return fmt.Errorf("unknown-size element 0x%X cannot be skipped", eh.ID)
+				// A live/streamed Cluster declares no size: find its end by
+				// walking its children instead of refusing the file.
+				if err := p.skipUnknownSizeCluster(endPos); err != nil {
+					return err
+				}
+				break
 			}
 			if err := p.skip(eh.Size); err != nil {
 				return err
@@ -707,10 +714,16 @@ func ResyncToCluster(r io.ReadSeeker, limit int64) (int64, error) {
 }
 
 // scanForClusterMagic returns the absolute offset of the next clusterMagic at
-// or after `from` and before `limit` (-1 = until EOF), or -1 if none. It reads
-// forward in windows, carrying the last few bytes so a magic split across a
-// read boundary is still found.
+// or after `from` and before `limit` (-1 = until EOF), or -1 if none.
 func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
+	return scanForMagic(r, from, limit, func(b []byte) int { return bytes.Index(b, clusterMagic) })
+}
+
+// scanForMagic returns the absolute offset of the first 4-byte element ID that
+// index locates at or after `from` and before `limit` (-1 = until EOF), or -1
+// if none. It reads forward in windows, carrying the last few bytes so an ID
+// split across a read boundary is still found.
+func scanForMagic(r io.ReadSeeker, from, limit int64, index func([]byte) int) (int64, error) {
 	if _, err := r.Seek(from, io.SeekStart); err != nil {
 		return -1, err
 	}
@@ -732,7 +745,7 @@ func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
 				search = buf[:max]
 			}
 		}
-		if i := bytes.Index(search, clusterMagic); i >= 0 {
+		if i := index(search); i >= 0 {
 			return base + int64(i), nil
 		}
 

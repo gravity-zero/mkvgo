@@ -239,14 +239,19 @@ type BlockReader struct {
 	// that times the frames of a laced block (they share one stored timecode).
 	// Filled by SetTrackDefaultDurations, or opportunistically from the Tracks
 	// element when the sequential walk passes over it.
-	trackDurNs    map[uint64]int64
-	peeked        *peekedHeader // element read in peek-ahead, to be processed next iteration
-	stopMs        int64         // StopBeforeClusterMs limit (only when hasStop)
-	hasStop       bool          // a cluster-timecode limit is set
-	awaitLimit    bool          // stopped at a cluster beyond stopMs; recheck on Next
-	clusterStart  int64         // absolute offset of the current cluster's header
-	blockStart    int64         // absolute offset of the block element Next last returned from
-	clusterCount  int64         // number of Cluster elements entered so far
+	trackDurNs   map[uint64]int64
+	peeked       *peekedHeader // element read in peek-ahead, to be processed next iteration
+	stopMs       int64         // StopBeforeClusterMs limit (only when hasStop)
+	hasStop      bool          // a cluster-timecode limit is set
+	awaitLimit   bool          // stopped at a cluster beyond stopMs; recheck on Next
+	clusterStart int64         // absolute offset of the current cluster's header
+	blockStart   int64         // absolute offset of the block element Next last returned from
+	clusterCount int64         // number of Cluster elements entered so far
+	// atHead is set on a reader that walks the Segment from its start, until
+	// the first Cluster: junk ahead of or between the head elements is resynced
+	// past there (see resyncHead). A reader seated at a recorded position never
+	// sets it - an undecodable header there means the position is stale.
+	atHead        bool
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -569,11 +574,29 @@ func (br *BlockReader) init() error {
 	// Wrap the raw reader in a counting buffered reader.
 	// The buffer will issue its first real Read from startPos onwards.
 	br.r = newCountingReader(br.raw, startPos)
+	br.atHead = true
 
 	if h2.Size >= 0 {
 		br.segEnd = startPos + h2.Size
 	}
 	return nil
+}
+
+// resyncHead repositions the walk on the next valid segment-level element at
+// or after from, and reports whether it found one. It is the block walk's
+// share of the head resync Read and ReadMeta do: junk between the Segment
+// header and the first Cluster must not make every block unreachable. On a
+// non-seekable source, or when nothing valid follows, it reports false and
+// the caller returns the decode error it already holds.
+func (br *BlockReader) resyncHead(from int64) bool {
+	if _, err := br.raw.Seek(from, io.SeekStart); err != nil {
+		return false
+	}
+	off, err := resyncToSegmentElement(br.raw, -1, br.segEnd)
+	if err != nil || off < 0 {
+		return false
+	}
+	return br.r.reset(off) == nil
 }
 
 // isSegmentLevelID returns true for element IDs that can appear directly
@@ -705,11 +728,15 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 				if errors.Is(err, io.EOF) {
 					return mkv.Block{}, io.EOF
 				}
+				if br.atHead && br.resyncHead(hdrStart+1) {
+					continue
+				}
 				return mkv.Block{}, err
 			}
 		}
 
 		if h.ID == mkv.IDCluster {
+			br.atHead = false
 			br.clusterStart = hdrStart
 			br.clusterCount++
 			br.inCluster = true

@@ -17,6 +17,8 @@ package reader
 //     handled in Next() (clusterEnd == -1 → read until next top-level element).
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -154,6 +156,11 @@ func (p *streamParser) boundedLoop(size int64, fn func(ebml.ElementHeader) error
 // SeekHead and Cues are silently skipped (they cannot be acted on in a
 // forward-only stream). The returned Container has no Cues field populated.
 func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader, error) {
+	// Buffered so the head scan can look at an element header before
+	// consuming it: resyncing past junk (see resyncStream) needs the bytes a
+	// failed decode would otherwise have swallowed. No Seek is involved.
+	br0 := bufio.NewReaderSize(r, streamResyncWindow)
+	r = br0
 	p := &streamParser{r: r, metaBudget: maxMetadataBytes}
 
 	// EBML header.
@@ -192,6 +199,19 @@ metaLoop:
 	for {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
+		}
+		if derr := peekHeaderErr(br0); derr != nil {
+			// Junk ahead of (or between) the head elements: scan forward to
+			// the next segment-level element, as the seekable readers do. A
+			// stream with nothing valid behind the junk keeps the decode error.
+			found, rerr := p.resyncStream(ctx, br0)
+			if rerr != nil {
+				return nil, nil, rerr
+			}
+			if !found {
+				return nil, nil, derr
+			}
+			continue
 		}
 		elemStart := p.pos
 		eh, _, err := p.readHeader()
@@ -270,6 +290,53 @@ metaLoop:
 	}
 
 	return c, br, nil
+}
+
+// streamResyncWindow is the look-ahead ReadStream keeps over its input: the
+// stride of the forward scan for a segment-level element.
+const streamResyncWindow = 4 << 10
+
+// peekHeaderErr decodes the element header at the head of br without
+// consuming it and returns the decode error, if any. A header cut short by
+// the end of the stream is not reported here: the consuming read that follows
+// surfaces it as it always did.
+func peekHeaderErr(br *bufio.Reader) error {
+	b, _ := br.Peek(12) // an element header is at most 4 ID + 8 size bytes
+	_, _, err := ebml.ReadElementHeader(bytes.NewReader(b))
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil
+	}
+	return err
+}
+
+// resyncStream is the forward-only counterpart of ResyncToSegmentElement: it
+// discards bytes until br sits on a plausible segment-level element (see
+// segmentElementPrefix) and reports whether one was found before the end of
+// the stream. The undecodable byte the caller stopped on is skipped first.
+func (p *streamParser) resyncStream(ctx context.Context, br *bufio.Reader) (bool, error) {
+	skip := 1
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		n, _ := br.Discard(skip)
+		p.pos += int64(n)
+		b, _ := br.Peek(streamResyncWindow)
+		if len(b) < 4 {
+			return false, nil
+		}
+		switch i := indexSegmentLevelID(b); {
+		case i < 0:
+			skip = len(b) - 3 // keep the bytes an ID could straddle
+		case i > 0:
+			skip = i // bring the candidate to the head of the window
+		default:
+			if _, _, ok := segmentElementPrefix(b); ok {
+				return true, nil
+			}
+			skip = 1
+		}
+	}
 }
 
 // --- metadata sub-parsers (all forward-only) ---

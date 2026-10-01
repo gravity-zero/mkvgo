@@ -3,6 +3,7 @@ package reader
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,10 @@ import (
 // underlying Read, so the byte-at-a-time EBML VINT reads cost one syscall instead
 // of hundreds - the difference that matters on a network-mounted library.
 const metaBufSize = 2 << 10
+
+// headResyncCap bounds how far the head scan looks past an undecodable region
+// for the next segment-level element.
+const headResyncCap = 1 << 20
 
 // OpenMeta opens path and returns only its Info + Tracks via the fast
 // metadata-only path (see ReadMeta). Chapters, Attachments, Tags and Cues are
@@ -57,10 +62,10 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOp
 // Info and Tracks, so files whose Tracks element sits after the Clusters are
 // still handled without scanning the body. Reads are buffered.
 //
-// Unlike Read, ReadMeta does NOT resync past a corrupted/zero-padded region that
-// precedes the metadata: on such a damaged head it returns what it managed to
-// parse (possibly empty). Callers that must tolerate corruption before the
-// metadata should fall back to Read.
+// Junk preceding the metadata (a padded or damaged run after the Segment
+// header) is resynced past as in Read, but only within headResyncCap bytes:
+// beyond that ReadMeta returns what it managed to parse (possibly empty), and
+// callers that must tolerate a larger damaged head should fall back to Read.
 func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*mkv.Container, error) {
 	var o readOpts
 	for _, fn := range opts {
@@ -138,7 +143,22 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 		elemStart := p.pos()
 		eh, _, err := p.readHeader()
 		if err != nil {
-			break // EOF or an undecodable head region: return what we have
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// Junk ahead of (or between) the head elements - a padded or
+			// damaged run right after the Segment header - hides the Info and
+			// Tracks behind it. Look for the next segment-level element, as
+			// Read does, but no further than headResyncCap: a head scan must
+			// not turn into a read of the whole file on a wrecked one.
+			off, rerr := p.resyncToSegmentElement(elemStart+1, elemStart+1+headResyncCap, endPos)
+			if rerr != nil {
+				return rerr
+			}
+			if off < 0 {
+				break // nothing recognizable in the window: return what we have
+			}
+			continue
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
