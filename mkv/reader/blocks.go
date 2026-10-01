@@ -893,7 +893,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	start := br.r.tell()
 	end := start + size
 	var block mkv.Block
-	var found bool
+	var found, referenced bool
 	var durationMs int64
 
 	for br.r.tell() < end {
@@ -924,6 +924,11 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 			if err != nil {
 				return mkv.Block{}, err
 			}
+		case mkv.IDReferenceBlock:
+			referenced = true
+			if err := br.r.discard(h.Size); err != nil {
+				return mkv.Block{}, err
+			}
 		default:
 			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
@@ -934,6 +939,16 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 		return mkv.Block{}, fmt.Errorf("BlockGroup without Block element")
 	}
 	block.Duration = durationMs
+	// A Block has no keyframe flag of its own (that bit is SimpleBlock's): in a
+	// BlockGroup the frame is a keyframe exactly when the group names no
+	// ReferenceBlock - it depends on no other frame. The frames a lace queued
+	// behind the first one share the verdict.
+	if !referenced {
+		block.Keyframe = true
+		for i := range br.pending {
+			br.pending[i].Keyframe = true
+		}
+	}
 	return block, nil
 }
 

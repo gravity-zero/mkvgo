@@ -26,6 +26,9 @@ const (
 	Tracks         = 2
 	// Blocks is the total number of blocks in a fixture.
 	Blocks = Clusters * BlocksPerTrack * Tracks
+	// VideoTrack is the video track's number. Its keyframes: every block when
+	// the fixture uses SimpleBlocks, the first of each cluster with BlockGroups.
+	VideoTrack = 1
 	// FirstTimestampMs is the first cluster's timestamp; LastBlockMs is the
 	// timestamp of the last block.
 	FirstTimestampMs = 12345
@@ -49,6 +52,14 @@ type Options struct {
 	// SizedSegment gives the Segment its real size, keeping the Clusters
 	// unknown-size.
 	SizedSegment bool
+	// BlockGroups stores every block in a BlockGroup instead of a SimpleBlock,
+	// as test4.mkv does. A Block has no keyframe flag: the first video frame of
+	// each cluster is the keyframe (its group names no ReferenceBlock), the
+	// others reference the frame before them. Audio groups never reference.
+	BlockGroups bool
+	// BlockDurations (with BlockGroups) gives every group a BlockDuration: the
+	// shape that keeps a frame in a BlockGroup when a file is rewritten.
+	BlockDurations bool
 }
 
 // JunkByte is the value the junk runs are filled with: as an element ID it
@@ -71,7 +82,27 @@ func Build(o Options) []byte {
 		for b := 0; b < BlocksPerTrack; b++ {
 			rel := b * 250
 			for trk := byte(1); trk <= Tracks; trk++ {
-				body.Write(elem(mkv.IDSimpleBlock, []byte{0x80 | trk, byte(rel >> 8), byte(rel), 0x80, byte(c), byte(b), 0xAB}))
+				// The first payload byte doubles as the VP8 frame tag, whose low
+				// bit says "not a keyframe": a demuxer that asks the codec
+				// agrees with what the container states.
+				keyframe := trk != VideoTrack || !o.BlockGroups || b == 0
+				payload := []byte{0x00, byte(c<<4 | b), 0xAB}
+				if !keyframe {
+					payload[0] = 0x01
+				}
+				header := []byte{0x80 | trk, byte(rel >> 8), byte(rel)}
+				if !o.BlockGroups {
+					body.Write(elem(mkv.IDSimpleBlock, join(header, []byte{0x80}, payload)))
+					continue
+				}
+				group := elem(mkv.IDBlock, join(header, []byte{0x00}, payload))
+				if o.BlockDurations {
+					group = join(group, uintElem(mkv.IDBlockDuration, 250, 1))
+				}
+				if !keyframe {
+					group = join(group, elem(mkv.IDReferenceBlock, []byte{0xFF, 0x06})) // -250: the previous frame
+				}
+				body.Write(elem(mkv.IDBlockGroup, group))
 			}
 		}
 	}

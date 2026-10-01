@@ -134,6 +134,46 @@ func TestLiveRecordingBlockReader(t *testing.T) {
 	}
 }
 
+// TestBlockGroupKeyframe: a Block carries no keyframe flag - in a BlockGroup the
+// frame is a keyframe exactly when the group has no ReferenceBlock. The block
+// walk used to report every such frame as a non-keyframe, so a file storing
+// its video in BlockGroups had no keyframe at all: none counted, and no point
+// to cut or seek at.
+func TestBlockGroupKeyframe(t *testing.T) {
+	br, err := NewBlockReader(bytes.NewReader(livefixture.Build(livefixture.Options{BlockGroups: true})), 1_000_000)
+	if err != nil {
+		t.Fatalf("NewBlockReader: %v", err)
+	}
+	var videoKeys, videoOthers, audioKeys, audioOthers int
+	for {
+		b, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		switch {
+		case b.TrackNumber == livefixture.VideoTrack && b.Keyframe:
+			videoKeys++
+		case b.TrackNumber == livefixture.VideoTrack:
+			videoOthers++
+		case b.Keyframe:
+			audioKeys++
+		default:
+			audioOthers++
+		}
+	}
+	perTrack := livefixture.Clusters * livefixture.BlocksPerTrack
+	if videoKeys != livefixture.Clusters || videoOthers != perTrack-livefixture.Clusters {
+		t.Errorf("video: %d keyframes, %d others; want %d (one per cluster, no ReferenceBlock) and %d",
+			videoKeys, videoOthers, livefixture.Clusters, perTrack-livefixture.Clusters)
+	}
+	if audioKeys != perTrack || audioOthers != 0 {
+		t.Errorf("audio: %d keyframes, %d others; want %d and 0 (no group references another frame)", audioKeys, audioOthers, perTrack)
+	}
+}
+
 // TestBlockReaderAtStalePositionDoesNotResync: the head resync belongs to a
 // walk from the start of the file. A reader seated at a recorded offset that
 // turns out to hold garbage must keep failing - resuming on whatever element
