@@ -114,7 +114,9 @@ type TrackEnd struct {
 	//	               tag describes this file (same writing application and date
 	//	               as the file, not past the declared duration)
 	//	"walk"       - the last block seen in a bounded tail walk (its timecode
-	//	               plus its duration, or the track's default frame duration)
+	//	               plus its duration, or the track's default frame duration;
+	//	               an audio track stating neither - laced audio, typically -
+	//	               is given the stride measured between its own blocks)
 	//	"walk-bound" - the track was silent through the widest window walked: it
 	//	               ended AT OR BEFORE EndMs, the window's start
 	//	""           - unknown (no block of the track was ever seen)

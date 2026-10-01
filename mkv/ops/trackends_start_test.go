@@ -64,3 +64,58 @@ func TestAnalyzeRatesOverTheContentSpan(t *testing.T) {
 			got, want, frames*1000/float64(livefixture.LastBlockMs))
 	}
 }
+
+// TestTrackEndsOfAudioStatingNoFrameDuration: an audio track with neither a
+// DefaultDuration nor BlockDurations says nothing about where its last block
+// ends. Taken at its START, a laced last block put the audio short of the
+// picture by as many frames as it held - a false "audio stops before the
+// picture". The end is measured from the stride of the track's own blocks.
+func TestTrackEndsOfAudioStatingNoFrameDuration(t *testing.T) {
+	for name, o := range map[string]livefixture.Options{
+		"one frame per block":         {},
+		"two frames per block":        {LacedAudio: true},
+		"two frames, in block groups": {LacedAudio: true, BlockGroups: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "live.mkv")
+			writeAll(t, path, livefixture.Build(o))
+			report, err := TrackEnds(context.Background(), path)
+			if err != nil {
+				t.Fatalf("TrackEnds: %v", err)
+			}
+			// Audio blocks are 250 ms apart: the last one ends a stride later.
+			if got, want := report.Ends[1].EndMs, int64(livefixture.LastBlockMs+250); got != want {
+				t.Errorf("audio ends at %d ms, want %d (the last block's start plus its frames)", got, want)
+			}
+			if report.AudioShortfallMs != 0 {
+				t.Errorf("audio reported %d ms short of the picture", report.AudioShortfallMs)
+			}
+		})
+	}
+}
+
+// TestTrackStrideMedian: the estimate takes the median of the recent strides -
+// a gap right before the last block, or a run of short frames, moves it not.
+func TestTrackStrideMedian(t *testing.T) {
+	for name, tc := range map[string]struct {
+		blocks []int64 // block timecodes, 8 frames each
+		want   int64   // end of the last block
+	}{
+		"steady":                 {[]int64{0, 168, 336, 504, 672}, 672 + 168},
+		"gap before the end":     {[]int64{0, 168, 336, 504, 2000}, 2000 + 168},
+		"short frames once":      {[]int64{0, 168, 336, 357, 525, 693}, 693 + 168},
+		"a single block, no way": {[]int64{40}, 40},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var s trackStride
+			for _, tc := range tc.blocks {
+				for f := 0; f < 8; f++ {
+					s.add(tc)
+				}
+			}
+			if got := s.endMs(); got != tc.want {
+				t.Errorf("end = %d ms, want %d", got, tc.want)
+			}
+		})
+	}
+}

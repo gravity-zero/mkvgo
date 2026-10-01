@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -132,6 +133,14 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		scale = 1_000_000
 	}
 	durs := reader.TrackDefaultDurations(meta.Tracks)
+	// Audio tracks that state no frame duration: their last block's end is
+	// measured from the stride of the blocks before it (see trackStride).
+	strided := map[uint64]bool{}
+	for _, t := range meta.Tracks {
+		if t.Type == mkv.AudioTrack && durs[t.ID] == 0 {
+			strided[t.ID] = true
+		}
+	}
 
 	pending := make(map[uint64]bool, len(want))
 	for id := range want {
@@ -151,7 +160,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		if startOff < 0 {
 			windowStart = 0
 		}
-		last, clusters, done, err := walkTailFrom(f, scale, startOff, durs, pending)
+		last, clusters, done, err := walkTailFrom(f, scale, startOff, durs, strided, pending)
 		if err != nil {
 			return err
 		}
@@ -159,7 +168,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 			// The cue's position is not a cluster: a stale index. Walk from
 			// the first cluster instead, the one start that cannot lie.
 			windowStart = 0
-			if last, _, done, err = walkTailFrom(f, scale, -1, durs, pending); err != nil {
+			if last, _, done, err = walkTailFrom(f, scale, -1, durs, strided, pending); err != nil {
 				return err
 			}
 		}
@@ -184,12 +193,56 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 	return nil
 }
 
+// trackStride measures how long one frame of a track lasts when nothing in the
+// file says so: no DefaultDuration, no BlockDuration - laced audio, typically,
+// whose last block would otherwise "end" where it starts, short of its real
+// end by as many frames as it holds. A stride is the time from one block to
+// the next divided by the frames the first one held; the median of the last
+// few is used, so neither a gap in the audio just before the end (a stride far
+// too long) nor a run of short frames (far too short) decides the estimate.
+type trackStride struct {
+	blockTC int64 // timecode of the block being counted
+	frames  int64 // frames seen in it so far
+	started bool
+	recent  [trackStrideWindow]int64 // last per-frame strides measured, microseconds
+	n       int                      // how many were ever measured
+}
+
+const trackStrideWindow = 5
+
+// add counts one frame of the block at blockTC, closing the previous block's
+// measurement when blockTC starts a new one.
+func (s *trackStride) add(blockTC int64) {
+	if s.started && blockTC == s.blockTC {
+		s.frames++
+		return
+	}
+	if s.started && blockTC > s.blockTC && s.frames > 0 {
+		s.recent[s.n%trackStrideWindow] = (blockTC - s.blockTC) * 1000 / s.frames
+		s.n++
+	}
+	s.blockTC, s.frames, s.started = blockTC, 1, true
+}
+
+// endMs is where the block being counted ends: its frames, each one stride
+// long. Its start when no stride could be measured.
+func (s *trackStride) endMs() int64 {
+	k := min(s.n, trackStrideWindow)
+	if k == 0 {
+		return s.blockTC
+	}
+	recent := append([]int64(nil), s.recent[:k]...)
+	slices.Sort(recent)
+	return s.blockTC + (s.frames*recent[k/2]+500)/1000
+}
+
 // walkTailFrom walks the clusters from startOff (-1: from the first cluster)
 // to the end of the clusters, header-only, and returns the end of the last
 // block seen per pending track, the clusters entered, and whether the walk
 // reached the end cleanly (false: stopped on an undecodable element - junk past
-// the clusters, or damage - keeping what it saw).
-func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, err error) {
+// the clusters, or damage - keeping what it saw). A track in strided states no
+// frame duration: its end is measured from its own block stride.
+func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64, strided, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, err error) {
 	var br *reader.BlockReader
 	if startOff < 0 {
 		// NewBlockReader parses the EBML header from the current position:
@@ -207,13 +260,22 @@ func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64,
 	br.SetHeaderOnly(true)
 	br.SetTrackDefaultDurations(durs)
 	last = map[uint64]int64{}
+	strides := map[uint64]*trackStride{}
+	finish := func(done bool) (map[uint64]int64, int64, bool, error) {
+		for id, s := range strides {
+			if end := s.endMs(); end > last[id] {
+				last[id] = end
+			}
+		}
+		return last, br.ClusterCount(), done, nil
+	}
 	for {
 		blk, nerr := br.Next()
 		if nerr == io.EOF {
-			return last, br.ClusterCount(), true, nil
+			return finish(true)
 		}
 		if nerr != nil {
-			return last, br.ClusterCount(), false, nil
+			return finish(false)
 		}
 		if !pending[blk.TrackNumber] {
 			continue
@@ -224,6 +286,14 @@ func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64,
 		}
 		if end > last[blk.TrackNumber] {
 			last[blk.TrackNumber] = end
+		}
+		if blk.Duration == 0 && strided[blk.TrackNumber] {
+			s := strides[blk.TrackNumber]
+			if s == nil {
+				s = &trackStride{}
+				strides[blk.TrackNumber] = s
+			}
+			s.add(blk.BlockTimecode)
 		}
 	}
 }

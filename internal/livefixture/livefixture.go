@@ -60,6 +60,10 @@ type Options struct {
 	// BlockDurations (with BlockGroups) gives every group a BlockDuration: the
 	// shape that keeps a frame in a BlockGroup when a file is rewritten.
 	BlockDurations bool
+	// LacedAudio stores two audio frames per block (fixed-size lacing). The
+	// audio track states no frame duration, so nothing in the file says where
+	// such a block ends - the shape of test4.mkv's audio.
+	LacedAudio bool
 }
 
 // JunkByte is the value the junk runs are filled with: as an element ID it
@@ -91,11 +95,18 @@ func Build(o Options) []byte {
 					payload[0] = 0x01
 				}
 				header := []byte{0x80 | trk, byte(rel >> 8), byte(rel)}
+				var lacing byte
+				if o.LacedAudio && trk != VideoTrack {
+					// Fixed-size lacing: the frame count minus one, then the
+					// frames, all the same size.
+					lacing = 0x04
+					payload = join([]byte{0x01}, payload, payload)
+				}
 				if !o.BlockGroups {
-					body.Write(elem(mkv.IDSimpleBlock, join(header, []byte{0x80}, payload)))
+					body.Write(elem(mkv.IDSimpleBlock, join(header, []byte{0x80 | lacing}, payload)))
 					continue
 				}
-				group := elem(mkv.IDBlock, join(header, []byte{0x00}, payload))
+				group := elem(mkv.IDBlock, join(header, []byte{lacing}, payload))
 				if o.BlockDurations {
 					group = join(group, uintElem(mkv.IDBlockDuration, 250, 1))
 				}
