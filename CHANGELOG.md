@@ -86,6 +86,10 @@ All notable changes to mkvgo are documented here. The format is based on
   audio outlasts it. The end is now measured from the stride of the track's
   own blocks (the median of the last few, so a gap or a run of short frames
   does not decide it).
+- **Metadata edits on a file with junk ahead of its media.** `edit`,
+  `edit-title`, `edit-track` and the other `EditMetadata` rewrites failed on
+  the undecodable bytes the reader itself had resynced past. They now take
+  the block rewrite they already use for a live source.
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported
