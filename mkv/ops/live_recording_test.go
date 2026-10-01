@@ -139,6 +139,39 @@ func TestResyncKeepsMetadataBehindHeadJunk(t *testing.T) {
 	}
 }
 
+// TestResyncOnLiveRecordingReportsNoRepair: an unknown-size Cluster is how a
+// live recording is written, not damage. The tolerant walk used to send every
+// one of them through the surgical recovery and report each as a repaired
+// region ("media kept that a plain resync would have dropped") - 36 repairs on
+// a healthy 36-cluster file. A clean live source now takes the same path as
+// the strict reindex: identical output, nothing reported.
+func TestResyncOnLiveRecordingReportsNoRepair(t *testing.T) {
+	ctx := context.Background()
+	src := liveFile(t, livefixture.Options{TailTags: true})
+	dir := t.TempDir()
+	strict, tolerant := filepath.Join(dir, "strict.mkv"), filepath.Join(dir, "resync.mkv")
+	if err := Reindex(ctx, src, strict); err != nil {
+		t.Fatalf("strict Reindex: %v", err)
+	}
+	var skips, repairs int
+	err := Reindex(ctx, src, tolerant, mkv.Options{
+		Resync:   true,
+		OnSkip:   func(mkv.DamagedRange) { skips++ },
+		OnRepair: func(mkv.RepairedRange) { repairs++ },
+	})
+	if err != nil {
+		t.Fatalf("Reindex with Resync: %v", err)
+	}
+	if skips != 0 || repairs != 0 {
+		t.Errorf("clean live source: %d skips, %d repairs reported, want none", skips, repairs)
+	}
+	a, _ := os.ReadFile(strict)
+	b, _ := os.ReadFile(tolerant)
+	if !bytes.Equal(a, b) {
+		t.Error("Resync output differs from the strict one on a clean live source")
+	}
+}
+
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a
 // file that has neither Duration nor Cues; head junk used to leave every track
 // "never seen".

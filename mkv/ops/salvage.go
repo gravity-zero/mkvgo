@@ -456,6 +456,22 @@ func (w *salvageWalker) copyMetaElement(h ebml.ElementHeader, elemStart int64, h
 // pre-surgical skip/resync behavior as the fallback.
 func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBytes int) (bool, error) {
 	bodyStart := elemStart + int64(hdrBytes)
+	srcHdr := h // as the source wrote it, for the rollback delta
+	if h.Size < 0 {
+		// A live or streamed Cluster declares no size, and that is not damage:
+		// when its children chain cleanly to the element that ends it, it is
+		// copied like any other - no repair to report. Only a chain that
+		// breaks goes on to the surgical recovery below.
+		size, serr := unknownSizeClusterSize(w.raw, bodyStart, w.fileSize, w.declaredEnd, w.allTracks)
+		if serr == nil {
+			h.Size = size
+		}
+		// The measuring walk moved the source: reseat it on the body.
+		if _, err := w.raw.Seek(bodyStart, io.SeekStart); err != nil {
+			return false, fmt.Errorf("salvage: seek cluster body: %w", err)
+		}
+		w.r = bufio.NewReaderSize(w.raw, reindexBufSize)
+	}
 	if h.Size < 0 || h.Size > maxReindexClusterSize {
 		// Implausible declared size: re-derive the truth from the bytes
 		// before giving up on the region.
@@ -512,7 +528,7 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		return false, nil
 	}
 
-	if err := w.emitClusterWithRollback(h, hdrBytes, body); err != nil {
+	if err := w.emitClusterWithRollback(srcHdr, hdrBytes, body); err != nil {
 		return false, err
 	}
 	w.consumed = clusterEnd
