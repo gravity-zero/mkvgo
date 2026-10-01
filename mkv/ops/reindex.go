@@ -523,6 +523,10 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // file-only-permission variant with no output copy (ReindexInPlace) exists
 // separately.
 //
+// A live or streamed source needs no option either: an unknown-size Cluster
+// is measured by a strict walk of its children (unknownSizeClusterSize) and
+// copied like any other, and the output states the sizes the source left open.
+//
 // Trailing junk is tolerated without any option: bytes past the DECLARED
 // Segment end that neither parse as an element nor carry any trace of a
 // Cluster (a bounded scan looks for the Cluster ID itself, so even a cluster
@@ -591,8 +595,9 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 // the retime operations when the source is not what the strict walk requires
 // of a sealed file: an element header that will not decode, a malformed
 // cluster child, a block that does not follow its cluster's Timestamp, or an
-// unknown-size element inside a sized Segment (a streamed leftover the
-// strict engines cannot bound). Permanent for the file as it is: retrying
+// unknown-size Cluster whose children stop parsing before the element that
+// ends it (an unknown-size Cluster that does parse is a live recording, not
+// corruption, and is copied). Permanent for the file as it is: retrying
 // the same call cannot succeed; repair the file first (Reindex with
 // Options.Resync, or Salvage) and then retry. errors.Is-able.
 var ErrCorruptSource = errors.New("the source is structurally corrupt")
@@ -622,9 +627,15 @@ type clusterMutator func(body []byte) ([]retimePatch, error)
 func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
-	var videoTracks map[uint64]bool
+	var videoTracks, allTracks map[uint64]bool
 	if meta, merr := reader.OpenMetaWithFS(ctx, srcPath, fs); merr == nil {
 		videoTracks = videoTrackSet(meta.Tracks)
+		// Every track number, for the child-chain validation that bounds an
+		// unknown-size Cluster (unknownSizeClusterSize).
+		allTracks = make(map[uint64]bool, len(meta.Tracks))
+		for _, t := range meta.Tracks {
+			allTracks[t.ID] = true
+		}
 	}
 
 	raw, err := fs.DoOpen(srcPath)
@@ -659,7 +670,6 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		// one, for its PrevSize hint. -1 until one has been written: the first
 		// cluster of the output has no predecessor, whatever the source said.
 		prevClusterSize = int64(-1)
-		firstCluster    = true
 		// consumed is the absolute source offset of the next element to read.
 		consumed = ebmlBytes + segBytes
 	)
@@ -795,16 +805,25 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			}
 
 		case mkv.IDCluster:
+			srcHdr := h // as the source wrote it, for the rollback delta
 			if h.Size < 0 {
-				if firstCluster {
-					return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
+				// A live or streamed Cluster declares no size. Measure its
+				// body from the bytes, then copy it like any other: the output
+				// states the size the source left open.
+				bodyStart := elemStart + int64(hdrBytes)
+				size, serr := unknownSizeClusterSize(raw, bodyStart, fileSize, segEnd, allTracks)
+				if serr != nil {
+					return nil, 0, nil, serr
 				}
-				return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster after first")
+				if _, serr := raw.Seek(bodyStart, io.SeekStart); serr != nil {
+					return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster: %w", serr)
+				}
+				r.Reset(raw)
+				h.Size = size
 			}
 			if h.Size > maxReindexClusterSize {
 				return nil, 0, nil, fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
 			}
-			firstCluster = false
 
 			if int(h.Size) > len(clusterBuf) {
 				clusterBuf = make([]byte, h.Size)
@@ -852,7 +871,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			sort.Slice(patches, func(i, j int) bool { return patches[i].off < patches[j].off })
 
 			if rb != nil {
-				rb.literalHeader(h, hdrBytes)
+				rb.literalHeader(srcHdr, hdrBytes)
 			}
 			if err := writeClusterVerbatim(mw, body, h.Size, timecodeScale, outOff, videoTracks); err != nil {
 				return nil, 0, nil, err
@@ -915,6 +934,41 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		return nil, 0, nil, err
 	}
 	return mw.Cues, timecodeScale, dropped, nil
+}
+
+// unknownSizeClusterSize measures the body of an unknown-size Cluster whose
+// children start at bodyStart. Per the EBML rule for unknown-sized elements
+// (RFC 8794 section 6.2) the Cluster runs until the first element that is not
+// one of its children - a segment-level element - or the end of the Segment or
+// of the file. The walk is the strict one the surgical recovery uses: every
+// child must be a known cluster-level element that fits, every block must
+// name a real track. A chain that breaks before reaching such a boundary is
+// corruption, not a boundary, and keeps the strict refusal (ErrCorruptSource);
+// Options.Resync recovers what the bytes still hold.
+func unknownSizeClusterSize(raw io.ReadSeeker, bodyStart, fileSize, segEnd int64, tracks map[uint64]bool) (int64, error) {
+	limit := fileSize
+	if segEnd >= 0 && segEnd < limit {
+		limit = segEnd
+	}
+	if limit <= 0 {
+		// No file size to bound the walk with.
+		return 0, fmt.Errorf("reindex: unknown-size cluster (streaming not supported)")
+	}
+	for pos := bodyStart; pos-bodyStart <= maxReindexClusterSize; {
+		run, stop, err := chainWalkChildren(raw, pos, limit, tracks)
+		if err != nil {
+			return 0, fmt.Errorf("reindex: unknown-size cluster: %w", err)
+		}
+		switch stop {
+		case surgicalStopSplit:
+			pos = run.end // the walk only paused at its run cap
+		case surgicalStopBreak:
+			return 0, fmt.Errorf("reindex: unknown-size cluster at %d does not parse past %d (a corrupted region can be skipped with Options.Resync / --resync): %w", bodyStart, run.end, ErrCorruptSource)
+		default:
+			return run.end - bodyStart, nil
+		}
+	}
+	return 0, fmt.Errorf("reindex: cluster size exceeds limit (%d)", maxReindexClusterSize)
 }
 
 // reindexTrailingJunk decides whether the bytes at [start, fileSize) - which

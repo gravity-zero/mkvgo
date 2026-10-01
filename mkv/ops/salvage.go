@@ -268,7 +268,12 @@ func (w *salvageWalker) walk(ctx context.Context) error {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			ended, rerr := w.skipToNextCluster()
+			// An undecodable header resumes on ANY segment-level element, not
+			// only a Cluster: junk ahead of the metadata (a padded or damaged
+			// run after the Segment header) must not take the Info and Tracks
+			// behind it into the skipped range - the output would keep its
+			// blocks and lose every track they belong to.
+			ended, rerr := w.skipTo(reader.ResyncToSegmentElement)
 			if rerr != nil || ended {
 				return rerr
 			}
@@ -336,6 +341,12 @@ func (w *salvageWalker) recordTailDamage(start int64) {
 // exceeded mid-file (garbage longer than the cap, more data beyond it) or a
 // genuine I/O failure returns a non-nil error.
 func (w *salvageWalker) skipToNextCluster() (ended bool, err error) {
+	return w.skipTo(reader.ResyncToCluster)
+}
+
+// skipTo is skipToNextCluster with the anchor left to resync: the bounded scan
+// that finds where the walk resumes.
+func (w *salvageWalker) skipTo(resync func(r io.ReadSeeker, limit int64) (int64, error)) (ended bool, err error) {
 	if _, err := w.raw.Seek(w.consumed, io.SeekStart); err != nil {
 		return false, fmt.Errorf("salvage: seek for resync: %w", err)
 	}
@@ -344,7 +355,7 @@ func (w *salvageWalker) skipToNextCluster() (ended bool, err error) {
 	if reachesEOF {
 		capLimit = w.fileSize
 	}
-	off, err := reader.ResyncToCluster(w.raw, capLimit)
+	off, err := resync(w.raw, capLimit)
 	if err != nil {
 		return false, fmt.Errorf("salvage: resync scan: %w", err)
 	}

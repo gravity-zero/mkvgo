@@ -791,43 +791,29 @@ func TestCovReindex_UnknownSizeMetadataElem(t *testing.T) {
 	}
 }
 
-func TestCovReindex_UnknownSizeClusterFirst(t *testing.T) {
-	// IDCluster with unknown size as the first cluster → "unknown-size cluster (streaming not supported)".
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src.mkv")
-	dst := filepath.Join(dir, "dst.mkv")
-	var raw bytes.Buffer
-	raw.Write(ebmlHeaderBytes)
-	ebml.WriteElementID(&raw, mkv.IDSegment)
-	ebml.WriteDataSize(&raw, -1)
-	raw.Write(elemUnknownSize(mkv.IDCluster))
-	os.WriteFile(src, raw.Bytes(), 0644)
+func TestCovReindex_UnknownSizeClusterEmpty(t *testing.T) {
+	// An unknown-size Cluster with no child, as the first cluster and after a
+	// sized one: it ends where the file does, and reindexes as an empty cluster
+	// (it used to be refused: "unknown-size cluster (streaming not supported)").
+	sized := elemBytes(mkv.IDCluster, []byte{0xE7, 0x81, 0x00}) // IDTimestamp(0xE7) size=1 value=0
+	for name, clusters := range map[string][]byte{
+		"first":       elemUnknownSize(mkv.IDCluster),
+		"after first": append(append([]byte{}, sized...), elemUnknownSize(mkv.IDCluster)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "src.mkv")
+			var raw bytes.Buffer
+			raw.Write(ebmlHeaderBytes)
+			ebml.WriteElementID(&raw, mkv.IDSegment)
+			ebml.WriteDataSize(&raw, -1)
+			raw.Write(clusters)
+			os.WriteFile(src, raw.Bytes(), 0644)
 
-	err := Reindex(context.Background(), src, dst)
-	if err == nil || !strings.Contains(err.Error(), "unknown-size cluster (streaming not supported)") {
-		t.Fatalf("expected 'unknown-size cluster (streaming not supported)', got %v", err)
-	}
-}
-
-func TestCovReindex_UnknownSizeClusterAfterFirst(t *testing.T) {
-	// One known-size cluster followed by unknown-size → "unknown-size cluster after first".
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src.mkv")
-	dst := filepath.Join(dir, "dst.mkv")
-	var raw bytes.Buffer
-	raw.Write(ebmlHeaderBytes)
-	ebml.WriteElementID(&raw, mkv.IDSegment)
-	ebml.WriteDataSize(&raw, -1)
-	// First cluster: known size with just a Timestamp element.
-	clusterBody := []byte{0xE7, 0x81, 0x00} // IDTimestamp(0xE7) size=1 value=0
-	raw.Write(elemBytes(mkv.IDCluster, clusterBody))
-	// Second cluster: unknown size.
-	raw.Write(elemUnknownSize(mkv.IDCluster))
-	os.WriteFile(src, raw.Bytes(), 0644)
-
-	err := Reindex(context.Background(), src, dst)
-	if err == nil || !strings.Contains(err.Error(), "unknown-size cluster after first") {
-		t.Fatalf("expected 'unknown-size cluster after first', got %v", err)
+			if err := Reindex(context.Background(), src, filepath.Join(dir, "dst.mkv")); err != nil {
+				t.Fatalf("Reindex: %v", err)
+			}
+		})
 	}
 }
 
