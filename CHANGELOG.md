@@ -79,6 +79,13 @@ All notable changes to mkvgo are documented here. The format is based on
   24 fps recording starting at 12.345 s read as 20.3 fps. They are measured
   over the span the content covers; `AnalyzeReport.StartMs` (`start_ms`,
   omitted at 0) says where it starts. Unchanged on a file starting at 0.
+- **`track-ends` on audio that states no frame duration.** With neither a
+  DefaultDuration nor BlockDurations (laced Vorbis, typically) the last audio
+  block was taken to end where it starts, short of its real end by every
+  frame it holds: `audio stops 0.098s before the picture` on a file whose
+  audio outlasts it. The end is now measured from the stride of the track's
+  own blocks (the median of the last few, so a gap or a run of short frames
+  does not decide it).
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported
