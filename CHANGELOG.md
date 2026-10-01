@@ -48,6 +48,18 @@ All notable changes to mkvgo are documented here. The format is based on
   delta work as on any file (the delta rebuilds the unknown-size headers byte
   for byte). A Cluster whose children stop parsing before a boundary is still
   refused, with `ErrCorruptSource`.
+- **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
+  keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
+  exactly when its group names no ReferenceBlock. The block walk reported
+  every such frame as a non-keyframe, so a file keeping its video in
+  BlockGroups had none: `analyze` counted 0 keyframes, `validate` warned
+  `no keyframes found`, and `split` could not find a keyframe to cut at.
+- **...and on write.** A block with a duration is written as a BlockGroup, and
+  was written without a ReferenceBlock whatever it was: a rewrite (`split`,
+  `join`, `mux`...) turned every non-keyframe carrying a duration into a
+  keyframe for whoever read the result. The group now names the reference.
+  Text subtitle cues injected by `merge-subtitle` are marked as the keyframes
+  they are.
 
 ## [0.35.0] - 2026-09-29
 
