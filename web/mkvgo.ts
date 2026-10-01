@@ -100,6 +100,12 @@ export interface ProbeResult {
   format: 'mkv' | 'mp4'
   info: { title: string; muxing_app: string; writing_app: string; [key: string]: unknown }
   duration_ms: number
+  /**
+   * Undecodable bytes the reader skipped to resume on the next valid element
+   * (junk ahead of the metadata); absent on a sound file. The read succeeded,
+   * but a strict rewrite refuses such a file: repair with reindex + resync.
+   */
+  resynced_bytes?: number
   tracks: Track[]
   chapters: Chapter[]
   attachments: { id: number; name: string; mime_type: string; size: number; [key: string]: unknown }[]

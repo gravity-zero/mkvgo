@@ -254,8 +254,35 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		}
 	}
 
+	if meta.ResyncedBytes > 0 {
+		// Junk ahead of the metadata: the head read resynced past it, a strict
+		// rewrite will not. Every remedy naming the strict reindex would be
+		// refused on this file - name the one that works.
+		for i := range d.Findings {
+			d.Findings[i].Remedy = adviseResync(meta, d.Findings[i].Remedy)
+		}
+		d.Findings = append(d.Findings, Finding{
+			Kind: "damaged",
+			Detail: fmt.Sprintf("%d undecodable byte(s) in the head of the Segment were skipped to reach the metadata; a reader that does not resynchronize sees no track",
+				meta.ResyncedBytes),
+			Remedy: "mkvgo reindex --resync",
+		})
+	}
+
 	d.Healthy = len(d.Findings) == 0
 	return d, nil
+}
+
+// adviseResync rewrites advice that names the strict reindex for a file the
+// reader had to resync through (Container.ResyncedBytes): the strict rewrite
+// refuses undecodable bytes, so the command that works there is the tolerant
+// one. Advice must never recommend what will be refused.
+func adviseResync(c *mkv.Container, advice string) string {
+	if c.ResyncedBytes == 0 {
+		return advice
+	}
+	advice = strings.ReplaceAll(advice, "mkvgo reindex", "mkvgo reindex --resync")
+	return strings.ReplaceAll(advice, "--resync --resync", "--resync")
 }
 
 // segmentDeclaredEndOf reads the EBML and Segment headers and returns the

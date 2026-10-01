@@ -39,6 +39,10 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 	if len(c.Tracks) == 0 {
 		issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "no-tracks", Message: "no tracks"})
 	}
+	if c.ResyncedBytes > 0 {
+		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "undecodable-bytes",
+			Message: fmt.Sprintf("%d undecodable byte(s) between elements were skipped to read the file (padding or damage; a reader that does not resynchronize stops there - `mkvgo reindex --resync` rewrites the file without them)", c.ResyncedBytes)})
+	}
 
 	hasVideo := false
 	trackIDs := map[uint64]bool{}
@@ -210,6 +214,9 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "attachment-no-mime",
 				Message: fmt.Sprintf("attachment %d (%s): no MIME type", a.ID, a.Name)})
 		}
+	}
+	for i := range issues {
+		issues[i].Message = adviseResync(c, issues[i].Message)
 	}
 
 	return issues, nil

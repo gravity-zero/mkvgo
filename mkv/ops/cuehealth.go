@@ -118,6 +118,7 @@ func cueHealthFrom(meta *mkv.Container, videoEndMs int64) *CueHealthReport {
 	default:
 		r.Healthy = true
 	}
+	r.Reason = adviseResync(meta, r.Reason)
 	return r
 }
 

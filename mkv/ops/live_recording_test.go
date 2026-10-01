@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/internal/livefixture"
@@ -169,6 +170,88 @@ func TestResyncOnLiveRecordingReportsNoRepair(t *testing.T) {
 	b, _ := os.ReadFile(tolerant)
 	if !bytes.Equal(a, b) {
 		t.Error("Resync output differs from the strict one on a clean live source")
+	}
+}
+
+// TestAdviceOnHeadJunkNamesTheCommandThatWorks: a remedy must never recommend
+// what will be refused. On a file with junk ahead of its metadata the strict
+// reindex is refused, so Diagnose, CueHealth and Validate must name the
+// tolerant one - and that command must actually leave a file with nothing
+// left to repair.
+func TestAdviceOnHeadJunkNamesTheCommandThatWorks(t *testing.T) {
+	ctx := context.Background()
+	src := liveFile(t, livefixture.Options{JunkHead: 134, ShortUnknown: true})
+
+	d, err := Diagnose(ctx, src)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	var damaged bool
+	for _, f := range d.Findings {
+		damaged = damaged || f.Kind == "damaged"
+		for _, advice := range []string{f.Detail, f.Remedy} {
+			if strings.Contains(advice, "mkvgo reindex") && !strings.Contains(advice, "mkvgo reindex --resync") {
+				t.Errorf("[%s] recommends the strict reindex, which this file is refused by: %q", f.Kind, advice)
+			}
+		}
+	}
+	if !damaged {
+		t.Errorf("no damaged finding for 134 undecodable head bytes: %+v", d.Findings)
+	}
+
+	issues, err := Validate(ctx, src)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	var warned bool
+	for _, is := range issues {
+		warned = warned || is.Code == "undecodable-bytes"
+		if strings.Contains(is.Message, "`mkvgo reindex`") {
+			t.Errorf("[%s] recommends the strict reindex: %q", is.Code, is.Message)
+		}
+	}
+	if !warned {
+		t.Error("Validate does not report the undecodable bytes")
+	}
+
+	// The strict command is indeed refused; the recommended one works, and
+	// its output needs neither.
+	if err := Reindex(ctx, src, filepath.Join(t.TempDir(), "strict.mkv")); err == nil {
+		t.Fatal("strict Reindex accepted the junk: the advice under test would be moot")
+	}
+	dst := filepath.Join(t.TempDir(), "repaired.mkv")
+	if err := Reindex(ctx, src, dst, mkv.Options{Resync: true}); err != nil {
+		t.Fatalf("the recommended Reindex with Resync: %v", err)
+	}
+	after, err := Diagnose(ctx, dst)
+	if err != nil {
+		t.Fatalf("Diagnose after repair: %v", err)
+	}
+	if !after.Healthy {
+		t.Errorf("after the recommended repair: %+v", after.Findings)
+	}
+	issues, err = Validate(ctx, dst)
+	if err != nil {
+		t.Fatalf("Validate after repair: %v", err)
+	}
+	for _, is := range issues {
+		if is.Code == "undecodable-bytes" {
+			t.Errorf("repaired file still reports %q", is.Message)
+		}
+	}
+}
+
+// TestAdviceOnCleanLiveRecordingKeepsTheStrictReindex: without junk the plain
+// command is the right one, and its wording does not change.
+func TestAdviceOnCleanLiveRecordingKeepsTheStrictReindex(t *testing.T) {
+	d, err := Diagnose(context.Background(), liveFile(t, livefixture.Options{}))
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	for _, f := range d.Findings {
+		if f.Kind == "damaged" || strings.Contains(f.Remedy, "--resync") {
+			t.Errorf("clean live recording: [%s] %q / %q", f.Kind, f.Detail, f.Remedy)
+		}
 	}
 }
 
