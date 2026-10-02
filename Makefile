@@ -103,6 +103,6 @@ release: clean
 		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
 		out="dist/$(BIN)-$$os-$$arch$$ext"; \
 		echo "building $$out"; \
-		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $$out ./cmd/mkvgo/; \
+		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $$out ./cmd/mkvgo/ || exit 1; \
 	done
 	@ls -lh dist/
