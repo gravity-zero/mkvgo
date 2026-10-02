@@ -1237,9 +1237,47 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 	// The first one alone reads 23.81 fps; the rate is the samples over the
 	// time they cover.
 	if samples, ticks, ok := sttsRoundedConstant(stts.payload); ok {
+		if num, den, ok := standardFrameRate(samples, ticks, timescale); ok {
+			return float64(num) / float64(den)
+		}
 		return float64(timescale) * float64(samples) / float64(ticks)
 	}
 	return float64(timescale) / float64(delta)
+}
+
+// standardFrameRate names the standard frame rate a rounded constant stts
+// stands for, when the measurement allows exactly one. The samples cover ticks
+// give or take one tick of rounding, so the true frame duration lies in
+// [(ticks-1)/samples, (ticks+1)/samples] ticks: a rate is returned only when
+// it is the single standard one (an integer, or an NTSC n*1000/1001) inside
+// that interval. A long track pins it down - 23.976 fps is told from 24 - and
+// then the exact fraction is used instead of an average a few nanoseconds off,
+// from which a demuxer derives another fraction than the source's (9998/417
+// for 24000/1001). A short track leaves several candidates: no answer.
+func standardFrameRate(samples, ticks uint64, timescale uint32) (num, den uint64, ok bool) {
+	if samples == 0 || ticks < 2 || timescale == 0 {
+		return 0, 0, false
+	}
+	lo := float64(ticks-1) / float64(samples) / float64(timescale) // seconds per frame
+	hi := float64(ticks+1) / float64(samples) / float64(timescale)
+	within := func(n, d uint64) bool {
+		dur := float64(d) / float64(n)
+		return dur >= lo && dur <= hi
+	}
+	found := 0
+	for n := uint64(1); n <= 240; n++ {
+		if within(n, 1) {
+			num, den = n, 1
+			found++
+		}
+	}
+	for _, n := range []uint64{24, 30, 48, 60, 120} {
+		if within(n*1000, 1001) {
+			num, den = n*1000, 1001
+			found++
+		}
+	}
+	return num, den, found == 1
 }
 
 // sttsRoundedConstant reports whether an stts describes a constant frame
@@ -1286,6 +1324,9 @@ func headerVideoFrameDurNs(stblBoxes []memBox, timescale uint32) int64 {
 	samples, ticks, ok := sttsRoundedConstant(stts.payload)
 	if !ok {
 		return 0
+	}
+	if num, den, ok := standardFrameRate(samples, ticks, timescale); ok {
+		return int64(den * 1_000_000_000 / num) // the DefaultDuration muxers write for that rate
 	}
 	return int64((float64(ticks)*1e9/float64(timescale))/float64(samples) + 0.5)
 }
