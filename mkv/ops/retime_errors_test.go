@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -169,5 +170,47 @@ func TestRetime_CorruptSourceTyped(t *testing.T) {
 	}
 	if !errors.Is(err, ErrCorruptSource) {
 		t.Errorf("errors.Is(ErrCorruptSource) = false for: %v", err)
+	}
+}
+
+// TestRetime_RefusalNamesLowestTrack: when several requested tracks are at
+// fault, the refusal names the lowest one on every call and on both engines,
+// so the same request on the same file always reads the same.
+func TestRetime_RefusalNamesLowestTrack(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2), audioTrack(3), audioTrack(4), audioTrack(5), audioTrack(6)}
+	sets := make([][]mkv.Block, 0, 4)
+	for i := 0; i < 4; i++ {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: []byte{0xAA}},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: []byte{0x01}},
+		})
+	}
+	src := buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 4000)
+
+	cases := []struct {
+		name  string
+		shift map[uint64]int64
+		want  string
+	}{
+		{"no blocks", map[uint64]int64{6: -300_000_000, 5: -300_000_000, 4: -300_000_000, 3: -300_000_000}, "track 3 has no blocks"},
+		{"unknown track", map[uint64]int64{12: -300_000_000, 11: -300_000_000, 10: -300_000_000, 9: -300_000_000}, "track 9 does not exist"},
+		{"below resolution", map[uint64]int64{5: 1, 4: 1, 3: 1, 2: 1}, "for track 2 is below"},
+	}
+	engines := map[string]func(map[uint64]int64) error{
+		"replace": func(s map[uint64]int64) error { return RetimeTracksReplace(ctx, src, s) },
+		"inplace": func(s map[uint64]int64) error { return RetimeTracksInPlace(ctx, src, s) },
+	}
+	for _, tc := range cases {
+		for engine, run := range engines {
+			for i := 0; i < 20; i++ {
+				err := run(tc.shift)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("%s/%s run %d: want a refusal naming %q, got %v", tc.name, engine, i, tc.want, err)
+				}
+			}
+		}
 	}
 }

@@ -3,7 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -140,13 +141,8 @@ func parseShift(s string) (track uint64, ms int64, err error) {
 // shiftLines renders the applied shifts one track per line, in track order (a
 // map walk would print the same command's result differently from run to run).
 func shiftLines(shift map[uint64]int64) string {
-	tracks := make([]uint64, 0, len(shift))
-	for track := range shift {
-		tracks = append(tracks, track)
-	}
-	sort.Slice(tracks, func(i, j int) bool { return tracks[i] < tracks[j] })
 	var b strings.Builder
-	for _, track := range tracks {
+	for _, track := range slices.Sorted(maps.Keys(shift)) {
 		fmt.Fprintf(&b, "  track %d shifted by %+d ms\n", track, shift[track]/1_000_000)
 	}
 	return b.String()

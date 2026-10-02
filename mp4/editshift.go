@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -55,8 +57,10 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	if len(shift) == 0 {
 		return errf("retime: no track shifts given")
 	}
-	for track, ns := range shift {
-		if ns == 0 {
+	// In track order, here and below: a map walk would name a different track
+	// from one call to the next when several are at fault.
+	for _, track := range slices.Sorted(maps.Keys(shift)) {
+		if shift[track] == 0 {
 			return errf("retime: track %d: a zero shift does nothing", track)
 		}
 	}
@@ -236,9 +240,8 @@ func rewriteMoovEditShifts(payload []byte, shift map[uint64]int64) ([]byte, erro
 		trakDurs = append(trakDurs, newDur)
 	}
 	if len(pending) > 0 {
-		for track := range pending {
-			return nil, fmt.Errorf("track %d not found (the file has %d)", track, trakNum)
-		}
+		track := slices.Min(slices.Collect(maps.Keys(pending)))
+		return nil, fmt.Errorf("track %d not found (the file has %d)", track, trakNum)
 	}
 
 	// The movie duration is the longest track's presentation - recomputed

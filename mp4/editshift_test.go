@@ -194,3 +194,27 @@ func TestMP4RetimeTracksMemFS(t *testing.T) {
 		t.Fatalf("repaired in-memory file does not parse: %v (%d tracks)", err, len(c.Tracks))
 	}
 }
+
+// TestMP4RetimeTracksRefusalNamesLowestTrack: when several requested tracks
+// are at fault, the refusal names the lowest one on every call.
+func TestMP4RetimeTracksRefusalNamesLowestTrack(t *testing.T) {
+	ctx := context.Background()
+	path := editShiftFixture(t, false)
+
+	cases := []struct {
+		name  string
+		shift map[uint64]int64
+		want  string
+	}{
+		{"zero shift", map[uint64]int64{5: 0, 4: 0, 3: 0, 2: 0}, "track 2: a zero shift"},
+		{"not found", map[uint64]int64{9: 100_000_000, 8: 100_000_000, 7: 100_000_000, 6: 100_000_000}, "track 6 not found"},
+	}
+	for _, tc := range cases {
+		for i := 0; i < 20; i++ {
+			err := RetimeTracks(ctx, path, tc.shift)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("%s run %d: want a refusal naming %q, got %v", tc.name, i, tc.want, err)
+			}
+		}
+	}
+}

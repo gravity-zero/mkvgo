@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -197,7 +199,7 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 	if err != nil {
 		return fail(err)
 	}
-	for track := range shiftTC {
+	for _, track := range sortedTracks(shiftTC) {
 		if _, ok := firstTC[track]; !ok {
 			return fail(fmt.Errorf("retime: track %d has no blocks: %w", track, ErrTrackHasNoBlocks))
 		}
@@ -252,13 +254,20 @@ func retimeVerifyShifts(ctx context.Context, path string, fs *mkv.FS, shiftTC, b
 	if err != nil {
 		return fmt.Errorf("re-walk: %w", err)
 	}
-	for track, tc := range shiftTC {
-		want := before[track] + tc
+	for _, track := range sortedTracks(shiftTC) {
+		want := before[track] + shiftTC[track]
 		if got, ok := after[track]; !ok || got != want {
 			return fmt.Errorf("track %d first block at %d ticks, want %d", track, got, want)
 		}
 	}
 	return nil
+}
+
+// sortedTracks returns the track numbers of m in ascending order. Refusals
+// and findings walk the tracks through it: a map walk would name a different
+// track, or list them in a different order, from one call to the next.
+func sortedTracks[V any](m map[uint64]V) []uint64 {
+	return slices.Sorted(maps.Keys(m))
 }
 
 // retimeShiftTC validates the shift map against the file's tracks and
@@ -273,7 +282,8 @@ func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (ma
 		known[t.ID] = true
 	}
 	shiftTC := make(map[uint64]int64, len(shift))
-	for track, deltaNs := range shift {
+	for _, track := range sortedTracks(shift) {
+		deltaNs := shift[track]
 		if !known[track] {
 			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, path, ErrUnknownTrack)
 		}
@@ -341,7 +351,7 @@ func retimeInPlace(ctx context.Context, path string, shift map[uint64]int64, opt
 	if err != nil {
 		return err
 	}
-	for track := range shiftTC {
+	for _, track := range sortedTracks(shiftTC) {
 		if _, ok := firstTC[track]; !ok {
 			return fmt.Errorf("retime: track %d has no blocks: %w", track, ErrTrackHasNoBlocks)
 		}
@@ -415,8 +425,8 @@ func retimeInPlace(ctx context.Context, path string, shift map[uint64]int64, opt
 		if err != nil {
 			return rollback(fmt.Errorf("deep verify re-walk: %w", err))
 		}
-		for track, tc := range shiftTC {
-			want := firstTC[track] + tc
+		for _, track := range sortedTracks(shiftTC) {
+			want := firstTC[track] + shiftTC[track]
 			if got, ok := after[track]; !ok || got != want {
 				return rollback(fmt.Errorf("deep verify: track %d first block at %d ticks, want %d", track, got, want))
 			}

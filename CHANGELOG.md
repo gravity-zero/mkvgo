@@ -13,6 +13,12 @@ All notable changes to mkvgo are documented here. The format is based on
   to the next, so two scans of the same file could look different while
   saying the same thing. `mkvgo retime` prints the shifts it applied in track
   order for the same reason.
+- **A `retime` refusal names the lowest track at fault.** When several
+  requested tracks were refused at once (unknown track, no blocks, a shift
+  below the file's timecode resolution, a zero shift or a track missing from
+  an MP4), the message named one of them at random, so the same request on
+  the same file could read differently from one call to the next. The
+  messages themselves are unchanged.
 
 ## [0.36.0] - 2026-10-02
 
