@@ -137,6 +137,10 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			if fps > 0 {
 				mt.FrameRate = &fps
 			}
+			// A constant frame duration becomes the Matroska DefaultDuration:
+			// without it an MKV written from this track leaves its frame rate
+			// to be guessed from millisecond timecodes (23.81 fps for 24).
+			mt.DefaultDurationNs = t.frameDurNs
 			mt.Rotation = t.rotation
 			mt.FrameCount = t.frameCount
 		case mkv.AudioTrack:

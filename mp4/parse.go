@@ -54,7 +54,7 @@ type inTrack struct {
 	outputSampleRate float64 // SBR (HE-AAC) decoder output rate; 0 when not SBR
 	bitrate          uint32  // average bitrate (btrt box / esds avgBitrate); 0 when unknown
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
-	frameDurNs       int64   // constant frame duration (audio, single-entry stts); 0 when not constant
+	frameDurNs       int64   // constant frame duration (single-entry stts, or a video one rounded to the timescale); 0 when not constant
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
 	frameCount       int64   // sample count from stsz (the conventional nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
@@ -1180,6 +1180,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	// derive them head-only - no need to expand the sample table.
 	if tr.trackType == mkv.VideoTrack {
 		tr.frameRate = headerFrameRate(stblBoxes, tr.timescale)
+		tr.frameDurNs = headerVideoFrameDurNs(stblBoxes, tr.timescale)
 		tr.frameCount = headerFrameCount(stblBoxes)
 		tr.firstSampleOffset, tr.firstSampleSize = firstSampleLoc(stblBoxes)
 	}
@@ -1231,7 +1232,62 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 	if delta == 0 {
 		return 0
 	}
+	// A constant rate that does not divide the timescale is stored as deltas
+	// one tick apart (24 fps on a millisecond timescale: 42, 41, 42, 42...).
+	// The first one alone reads 23.81 fps; the rate is the samples over the
+	// time they cover.
+	if samples, ticks, ok := sttsRoundedConstant(stts.payload); ok {
+		return float64(timescale) * float64(samples) / float64(ticks)
+	}
 	return float64(timescale) / float64(delta)
+}
+
+// sttsRoundedConstant reports whether an stts describes a constant frame
+// duration rounded to the timescale - several entries whose deltas are all
+// within one tick of each other - and returns the sample count and the ticks
+// they cover. A single-entry table is constant by construction and is not
+// reported here (its one delta is exact); deltas further apart are a variable
+// rate, which no average describes.
+func sttsRoundedConstant(payload []byte) (samples, ticks uint64, ok bool) {
+	entries := binary.BigEndian.Uint32(payload[4:8])
+	if entries < 2 || uint64(len(payload)) < 8+8*uint64(entries) {
+		return 0, 0, false
+	}
+	var lo, hi uint32
+	for i := uint32(0); i < entries; i++ {
+		count := binary.BigEndian.Uint32(payload[8+8*i:])
+		delta := binary.BigEndian.Uint32(payload[12+8*i:])
+		if i == 0 || delta < lo {
+			lo = delta
+		}
+		if delta > hi {
+			hi = delta
+		}
+		samples += uint64(count)
+		ticks += uint64(count) * uint64(delta)
+	}
+	if lo == 0 || hi-lo > 1 || samples == 0 {
+		return 0, 0, false
+	}
+	return samples, ticks, true
+}
+
+// headerVideoFrameDurNs returns a video track's constant frame duration in
+// nanoseconds: the single stts delta, or the average of a rounded constant one
+// (see sttsRoundedConstant). 0 when the rate is variable or unknown.
+func headerVideoFrameDurNs(stblBoxes []memBox, timescale uint32) int64 {
+	if ns := headerConstantFrameDurNs(stblBoxes, timescale); ns > 0 {
+		return ns
+	}
+	stts, found := findMemBox(stblBoxes, "stts")
+	if timescale == 0 || !found || len(stts.payload) < 16 {
+		return 0
+	}
+	samples, ticks, ok := sttsRoundedConstant(stts.payload)
+	if !ok {
+		return 0
+	}
+	return int64((float64(ticks)*1e9/float64(timescale))/float64(samples) + 0.5)
 }
 
 // headerConstantFrameDurNs returns the constant per-frame duration in
