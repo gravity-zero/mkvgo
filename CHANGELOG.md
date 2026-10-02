@@ -90,6 +90,23 @@ All notable changes to mkvgo are documented here. The format is based on
   `edit-title`, `edit-track` and the other `EditMetadata` rewrites failed on
   the undecodable bytes the reader itself had resynced past. They now take
   the block rewrite they already use for a live source.
+- **Damage inside a file is no longer taken for the end of it.** An element
+  declaring more bytes than the file holds surfaced as `io.ErrUnexpectedEOF`,
+  the error of a truncated tail - which `to-mp4`, `to-hls` and the other
+  packaging paths tolerate by stopping there. When that element sits in the
+  MIDDLE of the file the rest was dropped without a word: `to-mp4` of a 37 s
+  file damaged one second in wrote a 1 s MP4 and exited 0. The block walk now
+  tells the two apart: when a valid Cluster follows, it returns a
+  `*reader.DamageError` (`reader.ErrDamagedRegion`) that names the repair
+  (`mkvgo reindex --resync`) and does not match `io.ErrUnexpectedEOF`. The
+  whole-file outputs refuse the file (and leave no partial output); `validate`
+  and `analyze` report it with the remedy; the on-demand segment paths behave
+  as before. A truncated tail is still tolerated.
+- **`track-ends` past damage.** The tail walk stopped at the first element it
+  could not read and reported what it had seen: both tracks of that same file
+  "ended" at 1 s. It walks past the damage (`BlockReader.SetSkipDamage`),
+  reports the real ends and `TrackEndsReport.SkippedBytes`; `diagnose`, which
+  called the file healthy, raises `damaged` from it.
 - **A reindexed live recording states its duration.** `Reindex` (strict or
   with `Resync`) and `Salvage` sealed the sizes of a live source and left it
   without a `Duration`: sized, indexed, and still of unknown length. A source
