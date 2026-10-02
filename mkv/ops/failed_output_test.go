@@ -257,3 +257,45 @@ func TestDiagnose_CueLessDamagedFileIsWalked(t *testing.T) {
 		t.Errorf("want the walk's skipped bytes in the report, got %+v", d.TrackEnds)
 	}
 }
+
+// TestDiagnose_DeepVerifyWalksTheWholeFile: damage inside a cluster far from
+// the tail, in a file whose head is sound (index present, sizes agree), is
+// outside everything the head-mostly diagnose reads. Options.DeepVerify runs
+// the tolerant walk over the whole file and finds it; without the option the
+// cost model stands and the file reads healthy.
+func TestDiagnose_DeepVerifyWalksTheWholeFile(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	const clusters = 200 // 200 s: the damage at 1 s sits beyond the 120 s tail window
+	sets := make([][]mkv.Block, 0, clusters)
+	for i := 0; i < clusters; i++ {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0xAA}, 256)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0x01}, 32)},
+		})
+	}
+	path := buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, clusters*1000)
+	damageSecondCluster(t, path)
+	ctx := context.Background()
+
+	d, err := Diagnose(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Healthy {
+		t.Fatalf("head-mostly diagnose: want healthy (the damage is out of its reach), got %v", findingKinds(d))
+	}
+
+	deep, err := Diagnose(ctx, path, mkv.Options{DeepVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := hasFinding(deep, "damaged")
+	if deep.Healthy || f == nil || deep.Damage == nil || len(deep.Damage.DamagedRanges) == 0 {
+		t.Fatalf("deep diagnose: want the damage mapped, got %v (damage %+v)", findingKinds(deep), deep.Damage)
+	}
+	if !strings.Contains(f.Remedy, "--resync") {
+		t.Errorf("remedy must name the repair the file accepts, got %q", f.Remedy)
+	}
+}

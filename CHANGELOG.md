@@ -6,6 +6,22 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`Diagnose` with `Options.DeepVerify` (CLI `diagnose --deep-verify`) walks
+  the whole file.** Zeroed bytes in the middle of a file whose index, sizes
+  and head are all sound are out of reach of the head-mostly checks, so such
+  a file read healthy while its strict reindex, retime and subtitle extraction
+  all failed on it (found on a real episode). With the option the tolerant
+  walk runs whatever the head says: the damage map is in the report and every
+  remedy names `reindex --resync`. One full read, for a scheduled deep scan.
+
+### Changed
+
+- **`Demux` names a track file by its resolved codec when the CodecID has no
+  short name**: `1.theora` rather than `1.V_THEORA`, next to `2.vorbis`. A
+  CodecID nothing resolves still names the file as before (`3.S_UNKNOWN_X`).
+
 ### Fixed
 
 - **`Diagnose` reports `audio-delay` findings in track order.** With several
@@ -55,13 +71,8 @@ All notable changes to mkvgo are documented here. The format is based on
   it. Such a file is walked from its first cluster (it cannot be judged from
   its head, and the reindex it needs reads it whole anyway), so `damaged` is
   reported and every remedy names `reindex --resync`. Files with an index
-  keep the bounded walk.
-
-### Changed
-
-- **`Demux` names a track file by its resolved codec when the CodecID has no
-  short name**: `1.theora` rather than `1.V_THEORA`, next to `2.vorbis`. A
-  CodecID nothing resolves still names the file as before (`3.S_UNKNOWN_X`).
+  keep the bounded walk; a cue-less file the tolerant walk is about to read
+  whole (declared and real sizes disagree) is read once, not twice.
 
 ## [0.36.0] - 2026-10-02
 

@@ -85,13 +85,55 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	// index verdict: a file that states no statistics had its tail measured
 	// against the declared duration - an audio track's end, on real files -
 	// and this is where that last guess is replaced by the picture's real end.
-	ch := cueHealthFrom(meta, 0)
-	ends, err := trackEndsFrom(ctx, path, fs, meta)
+	// Declared-size coherence (head-only): the Segment's declared end vs the
+	// real file size is the cheap signature of truncation or trailing junk,
+	// and decides whether the tolerant walk over the whole file runs. So does
+	// Options.DeepVerify: damage inside a cluster far from the tail, in a file
+	// whose head is sound, is out of reach of everything else here, and a
+	// caller that wants it found pays the full read deliberately.
+	declaredEnd, known, err := segmentDeclaredEndOf(path, fs)
 	if err != nil {
 		return nil, fmt.Errorf("diagnose: %w", err)
 	}
-	d.TrackEnds = ends
-	if ends.SkippedBytes > 0 {
+	stat, err := fs.DoStat(path)
+	if err != nil {
+		return nil, fmt.Errorf("diagnose: %w", err)
+	}
+	size := stat.Size()
+	d.FileSize = size
+	if known {
+		d.DeclaredSize = declaredEnd
+		if declaredEnd > size {
+			d.MissingTailBytes = declaredEnd - size
+		}
+	}
+	needWalk := mkv.DeepVerifyFrom(opts)
+	var sizeFinding *Finding
+	switch {
+	case !known:
+		sizeFinding = &Finding{
+			Kind:   "streamed-size",
+			Detail: "the Segment declares no size (a streamed or interrupted write); readers cannot bound it",
+			Remedy: "mkvgo reindex (the rewrite seals the size)",
+		}
+	case declaredEnd > size:
+		needWalk = true // truncated: measure what survives
+	case declaredEnd < size:
+		needWalk = true // trailing bytes: junk, or a crashed in-place journal
+	}
+
+	ch := cueHealthFrom(meta, 0)
+	// A file with no Cues is walked from its first cluster - unless the
+	// tolerant walk is about to read it whole anyway, which finds the same
+	// damage: one full read, not two.
+	if ch.TotalCues > 0 || !needWalk {
+		ends, err := trackEndsFrom(ctx, path, fs, meta)
+		if err != nil {
+			return nil, fmt.Errorf("diagnose: %w", err)
+		}
+		d.TrackEnds = ends
+	}
+	if ends := d.TrackEnds; ends != nil && ends.SkippedBytes > 0 {
 		d.Findings = append(d.Findings, Finding{
 			Kind: "damaged",
 			Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
@@ -99,7 +141,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			Remedy: "mkvgo reindex --resync",
 		})
 	}
-	if !ch.VideoEndExact && ends.VideoEndMs > 0 {
+	if ends := d.TrackEnds; ends != nil && !ch.VideoEndExact && ends.VideoEndMs > 0 {
 		ch = cueHealthFrom(meta, ends.VideoEndMs)
 	}
 	d.CueHealth = ch
@@ -189,39 +231,11 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		}
 	}
 
-	// Declared-size coherence (head-only): the Segment's declared end vs the
-	// real file size is the cheap signature of truncation or trailing junk.
-	declaredEnd, known, err := segmentDeclaredEndOf(path, fs)
-	if err != nil {
-		return nil, fmt.Errorf("diagnose: %w", err)
-	}
-	stat, err := fs.DoStat(path)
-	if err != nil {
-		return nil, fmt.Errorf("diagnose: %w", err)
-	}
-	size := stat.Size()
-	d.FileSize = size
-	if known {
-		d.DeclaredSize = declaredEnd
-		if declaredEnd > size {
-			d.MissingTailBytes = declaredEnd - size
-		}
-	}
-	needWalk := false
-	switch {
-	case !known:
-		d.Findings = append(d.Findings, Finding{
-			Kind:   "streamed-size",
-			Detail: "the Segment declares no size (a streamed or interrupted write); readers cannot bound it",
-			Remedy: "mkvgo reindex (the rewrite seals the size)",
-		})
-	case declaredEnd > size:
-		needWalk = true // truncated: measure what survives
-	case declaredEnd < size:
-		needWalk = true // trailing bytes: junk, or a crashed in-place journal
+	if sizeFinding != nil {
+		d.Findings = append(d.Findings, *sizeFinding)
 	}
 
-	// The tolerant walk, only when the size check warranted it.
+	// The tolerant walk, when the size check warranted it or the caller asked.
 	if needWalk {
 		report, derr := MapDamage(ctx, path, opts...)
 		if derr != nil {

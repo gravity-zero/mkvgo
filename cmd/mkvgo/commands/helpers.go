@@ -83,7 +83,7 @@ var CmdUsage = map[string]string{
 	"retime":             "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>] (cancel a constant A/V desync; MP4 = moov edit list only, mode flags do not apply)",
 	"track-ends":         "mkvgo track-ends <file.mkv> [-json] (where each track's content really ends: statistics tags when they describe the file, else a bounded header-only tail walk; picture end and audio shortfall)",
 	"cue-health":         "mkvgo cue-health <file.mkv> [-json] [-probe] (head-only seek-index triage: which tracks the cues reference; -probe looks inside each hole; exit 1 when unhealthy)",
-	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
+	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [--deep-verify] [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
 	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
 	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
