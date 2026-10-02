@@ -112,6 +112,37 @@ All notable changes to mkvgo are documented here. The format is based on
   whole-file outputs refuse the file (and leave no partial output); `validate`
   and `analyze` report it with the remedy; the on-demand segment paths behave
   as before. A truncated tail is still tolerated.
+- **Mapping the damage of a holed file took minutes, then gave up.** Measured
+  on a real 2.7 GiB download with missing pieces: `diagnose` ran 499 s and
+  ended on `the tolerant walk itself failed`. Three causes, all fixed (the
+  same file now takes 46 s and is repaired):
+  - every byte of a damaged region that looks like the start of a block is
+    tested as a resume point, and the test read the whole payload the
+    candidate declared - up to 96 MB - before looking at its track number. A
+    candidate naming an undeclared track, or a size no block has, is refused
+    on its header;
+  - a zeroed region longer than the 64 MiB scan cap (here 80 MiB: the pieces
+    the download never received) made `Salvage` and `Reindex` with `Resync`
+    refuse the whole file, the 640 MiB of sound media behind the hole
+    included. A zeroed region is walked to its end whatever its length - one
+    linear pass, nothing starts in it; the cap still bounds a search through
+    actual garbage;
+  - a resync that follows an unusable Cluster started its scan ON that
+    Cluster and could find it again, never leaving it (an unknown-size Cluster
+    whose recovery found nothing in range). The scan starts past it.
+- **Recovered blocks are no longer timed against the wrong cluster.** When a
+  gap swallows a Cluster header, the blocks behind it count their timecodes
+  from the lost cluster's timestamp. They passed the continuity gate as the
+  broken cluster's continuation: on the same real file the audio stepped back
+  half a second after every hole (287 timestamp complaints from a stream
+  copy; none now). A resume must also be in keeping with the bytes it skipped.
+- **`diagnose` on a file both cut short and holed** reported `truncated`
+  alone; it now adds `damaged` for the ranges lost inside the file. And every
+  remedy naming the strict reindex is rewritten to `mkvgo reindex --resync`
+  whenever the file is shown damaged, by whichever check.
+- **A tail walk seated on a stale cue is not damage.** The damage-tolerant
+  walk only applies once a Cluster has been entered: a cue that does not land
+  on one stays what it was, a stale index.
 - **A block of a track the file does not declare is dropped.** In a damaged
   region, bytes that happen to parse as a block name whatever track number
   they spell (track 87 of a two-track file) and were delivered as content.
@@ -152,8 +183,11 @@ All notable changes to mkvgo are documented here. The format is based on
   on a millisecond timescale is stored as sample deltas of 42 and 41; read
   from the first one alone the track was reported at 23.81 fps, and an MKV
   written from it (`from-mp4`) carried no `DefaultDuration`, so a demuxer
-  guessed 500/21 fps. The rate is now the samples over the time they cover,
-  and a constant-rate video track from an MP4 states its `DefaultDuration`.
+  guessed 500/21 fps. The rate is now the samples over the time they cover -
+  or, when the measurement allows exactly one standard rate (24000/1001 is
+  told from 24 on any track of some length), that rate's exact duration - and
+  a constant-rate video track from an MP4 states its `DefaultDuration`.
+  Measured on a real 23.976 fps episode: 24000/1001 back, as in the source.
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported
