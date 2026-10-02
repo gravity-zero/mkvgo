@@ -334,6 +334,42 @@ func TestRewriteKeepsLacedAudio(t *testing.T) {
 	}
 }
 
+// TestResyncRollbackDeltaStaysSmall: a cluster whose position hints are
+// restated on the way out differs from the source by those few bytes. The
+// tolerant walk used to put the WHOLE body of every such cluster in the
+// rollback delta as a literal - 19.9 MB of delta for a 20 MB file. Only the
+// restated spans are literals; the delta still rebuilds the source exactly.
+func TestResyncRollbackDeltaStaysSmall(t *testing.T) {
+	ctx := context.Background()
+	o := livefixture.Options{JunkHead: 134, PositionHints: true, TailTags: true}
+	src := liveFile(t, o)
+	data := livefixture.Build(o)
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "resync.mkv")
+	var delta bytes.Buffer
+	if err := Reindex(ctx, src, dst, mkv.Options{Resync: true, RollbackSink: &delta}); err != nil {
+		t.Fatalf("Reindex with Resync: %v", err)
+	}
+	checkLiveOutput(t, dst)
+
+	// The run of blocks closing the first cluster is media the output holds
+	// verbatim: it must be a COPY in the delta, not bytes carried in it.
+	second := bytes.Index(data[bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75})+4:], []byte{0x1F, 0x43, 0xB6, 0x75})
+	first := bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+	media := data[first+4+second-40 : first+4+second]
+	if bytes.Contains(delta.Bytes(), media) {
+		t.Error("the rollback delta carries cluster media the output already holds")
+	}
+
+	restored := filepath.Join(dir, "restored.mkv")
+	if err := ApplyRollback(ctx, dst, &delta, restored); err != nil {
+		t.Fatalf("ApplyRollback: %v", err)
+	}
+	if got, _ := os.ReadFile(restored); !bytes.Equal(got, data) {
+		t.Error("rollback did not rebuild the source byte for byte")
+	}
+}
+
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a
 // file that has neither Duration nor Cues; head junk used to leave every track
 // "never seen".

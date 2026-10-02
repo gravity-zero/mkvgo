@@ -64,6 +64,10 @@ type Options struct {
 	// audio track states no frame duration, so nothing in the file says where
 	// such a block ends - the shape of test4.mkv's audio.
 	LacedAudio bool
+	// PositionHints gives every cluster a Position and a PrevSize element
+	// (with deliberately stale values): the hints a rewrite has to restate
+	// when it moves the cluster.
+	PositionHints bool
 }
 
 // JunkByte is the value the junk runs are filled with: as an element ID it
@@ -83,6 +87,10 @@ func Build(o Options) []byte {
 	for c := 0; c < Clusters; c++ {
 		body.Write(unknownSizeHeader(mkv.IDCluster, o.ShortUnknown))
 		body.Write(uintElem(mkv.IDTimestamp, uint64(FirstTimestampMs+c*1000), 2))
+		if o.PositionHints {
+			body.Write(uintElem(0xA7, 0x7777, 2)) // Position
+			body.Write(uintElem(0xAB, 0x6666, 2)) // PrevSize
+		}
 		for b := 0; b < BlocksPerTrack; b++ {
 			rel := b * 250
 			for trk := byte(1); trk <= Tracks; trk++ {

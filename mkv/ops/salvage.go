@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -543,15 +544,24 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 // written verbatim, or as a literal when the clean-cut filter is about to
 // rewrite it.
 func (w *salvageWalker) emitClusterWithRollback(h ebml.ElementHeader, hdrBytes int, body []byte) error {
-	// The body reaches the output verbatim only when nothing rewrites it: the
-	// clean-cut filter (armed now), or the retarget of a position hint - which
-	// also reseals the CRC. Otherwise the ORIGINAL bytes go to the delta as a
-	// literal, since the output no longer holds them.
-	filtered := w.awaitKF || clusterHasPositionHints(body)
+	// The clean-cut filter (armed now) rewrites the body wholesale: the
+	// ORIGINAL bytes go to the delta as one literal, since the output no
+	// longer holds them. Otherwise the body reaches the output verbatim but
+	// for the few bytes a relocation restates - the position hints and the
+	// CRC-32 resealed over them - and only those spans are literals, the rest
+	// a COPY of the output: the delta stays a few bytes per cluster instead of
+	// the whole cluster.
+	filtered := w.awaitKF
+	var patches []retimePatch
 	if w.rb != nil {
 		w.rb.literalHeader(h, hdrBytes)
 		if filtered {
 			w.rb.literal(body)
+		} else if patches = retargetClusterPatches(body, w.mw.RelPos(), w.prevClusterSize); len(patches) > 0 {
+			if crcOff, _ := clusterCRCSpan(body); crcOff >= 0 {
+				patches = append(patches, retimePatch{off: crcOff, orig: append([]byte(nil), body[crcOff:crcOff+4]...)})
+			}
+			sort.Slice(patches, func(i, j int) bool { return patches[i].off < patches[j].off })
 		}
 	}
 	if err := w.emitCluster(body, false); err != nil {
@@ -562,7 +572,18 @@ func (w *salvageWalker) emitClusterWithRollback(h ebml.ElementHeader, hdrBytes i
 		if serr != nil {
 			return fmt.Errorf("salvage: rollback offset: %w", serr)
 		}
-		w.rb.copyRun(after-int64(len(body)), body)
+		bodyDst := after - int64(len(body))
+		cur := int64(0)
+		for _, p := range patches {
+			if p.off > cur {
+				w.rb.copyRun(bodyDst+cur, body[cur:p.off])
+			}
+			w.rb.literal(p.orig)
+			cur = p.off + int64(len(p.orig))
+		}
+		if cur < int64(len(body)) {
+			w.rb.copyRun(bodyDst+cur, body[cur:])
+		}
 	}
 	return nil
 }
