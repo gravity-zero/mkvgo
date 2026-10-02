@@ -119,3 +119,27 @@ func TestTrackStrideMedian(t *testing.T) {
 		})
 	}
 }
+
+// TestTrackEndsPastDamage: the tail walk used to stop at the first element it
+// could not read and report what it had seen - on a file damaged one second
+// in, both tracks "ended" at one second. It walks past the damage, reports
+// the real ends, and says how many bytes it had to pass over.
+func TestTrackEndsPastDamage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "live.mkv")
+	writeAll(t, path, livefixture.Build(livefixture.Options{Overrun: true}))
+	report, err := TrackEnds(context.Background(), path)
+	if err != nil {
+		t.Fatalf("TrackEnds: %v", err)
+	}
+	if report.VideoEndMs != livefixture.LastBlockMs {
+		t.Errorf("picture ends at %d ms, want %d (the last block, past the damage)", report.VideoEndMs, livefixture.LastBlockMs)
+	}
+	if report.SkippedBytes == 0 {
+		t.Error("the damage the walk passed over is not reported")
+	}
+
+	writeAll(t, path, livefixture.Build(livefixture.Options{}))
+	if report, err = TrackEnds(context.Background(), path); err != nil || report.SkippedBytes != 0 {
+		t.Errorf("a sound file: %d skipped bytes (err %v), want none", report.SkippedBytes, err)
+	}
+}

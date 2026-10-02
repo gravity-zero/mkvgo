@@ -144,6 +144,13 @@ type TrackEndsReport struct {
 	VideoEndMs       int64  `json:"video_end_ms,omitempty"`
 	AudioShortfallMs int64  `json:"audio_shortfall_ms,omitempty"`
 	ShortAudioTrack  uint64 `json:"short_audio_track,omitempty"`
+	// SkippedBytes is how many bytes of damaged regions the walk passed over
+	// to reach the ends it reports: an element it could not read, with media
+	// continuing behind it. 0 when the stretch walked is sound - which says
+	// nothing of what was not walked (tracks settled by their statistics, or
+	// the file before the tail window). A copy of the file is refused there;
+	// Reindex with Resync repairs it.
+	SkippedBytes int64 `json:"skipped_bytes,omitempty"`
 }
 
 // CueHole is one hole in a file's video cue coverage: GapMs of picture no cue

@@ -435,6 +435,11 @@ export interface TrackEndsReport {
   /** A lower bound when the short track's end is only "walk-bound". */
   audio_shortfall_ms?: number
   short_audio_track?: number
+  /**
+   * Bytes of damaged regions the walk passed over (an unreadable element with
+   * media continuing behind it); absent when the stretch walked is sound.
+   */
+  skipped_bytes?: number
 }
 
 /** One diagnosed defect with its remedy; see Diagnosis. */

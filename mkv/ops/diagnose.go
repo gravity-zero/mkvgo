@@ -87,6 +87,14 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			return nil, fmt.Errorf("diagnose: %w", err)
 		}
 		d.TrackEnds = ends
+		if ends.SkippedBytes > 0 {
+			d.Findings = append(d.Findings, Finding{
+				Kind: "damaged",
+				Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
+					ends.SkippedBytes),
+				Remedy: "mkvgo reindex --resync",
+			})
+		}
 		if !ch.VideoEndExact && ends.VideoEndMs > 0 {
 			ch = cueHealthFrom(meta, ends.VideoEndMs)
 		}
