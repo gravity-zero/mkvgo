@@ -90,6 +90,15 @@ All notable changes to mkvgo are documented here. The format is based on
   `edit-title`, `edit-track` and the other `EditMetadata` rewrites failed on
   the undecodable bytes the reader itself had resynced past. They now take
   the block rewrite they already use for a live source.
+- **A reindexed live recording states its duration.** `Reindex` (strict or
+  with `Resync`) and `Salvage` sealed the sizes of a live source and left it
+  without a `Duration`: sized, indexed, and still of unknown length. A source
+  whose `Info` declares none now gets one, set to where its content ends -
+  the one addition to an otherwise verbatim `Info` (a CRC-32 opening it is
+  resealed); the rollback delta still rebuilds the source byte for byte. An
+  `Info` that declares its `Duration` is copied as it is. `TrackEnds` on an
+  indexed file that declares no duration counts its tail window back from the
+  last cue instead of walking from the first cluster.
 - **A failed write leaves no truncated output.** A `reindex` refused part-way,
   a `salvage` that gave up, a `split`, `join`, metadata edit or subtitle
   operation that failed left what it had written under the output's name - a
