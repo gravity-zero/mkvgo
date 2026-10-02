@@ -37,6 +37,12 @@ All notable changes to mkvgo are documented here. The format is based on
   already at the output path. The CLI's WebVTT outputs (`extract-subtitle
   -format vtt`, `to-vtt`) behave the same: a refused request leaves no empty
   `.vtt`.
+- **`Validate` no longer calls the cues behind a damaged cluster stale.** When
+  the walk stopped on damage, every cue past the break was audited against a
+  keyframe list that ended there and reported as `cues-stale` (36/37 on a
+  file damaged at its second cluster), with a strict reindex as the advice -
+  the one operation the file refuses. The cues the walk could not reach are
+  left unjudged; `cluster-read-error` already names the break.
 
 ### Changed
 

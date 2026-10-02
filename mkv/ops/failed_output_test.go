@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/livefixture"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // failed_output_test.go - an operation that fails leaves nothing under its
@@ -156,5 +158,77 @@ func TestReindex_StrictRefusesClusterThatDoesNotParse(t *testing.T) {
 	// which parses, so the refusal is not a dead end.
 	if err := Reindex(context.Background(), src, dst, mkv.Options{Resync: true}); err != nil {
 		t.Fatalf("resync repair: %v", err)
+	}
+}
+
+// damageSecondCluster rewrites the first block header of the file's second
+// cluster into an element that overruns the cluster: the walk breaks there
+// while the clusters behind it stay intact.
+func damageSecondCluster(t *testing.T, path string) {
+	t.Helper()
+	ctx := context.Background()
+	c, err := reader.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Cues) < 3 {
+		t.Fatalf("fixture has %d cues, want one per cluster", len(c.Cues))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := c.SegmentStart + c.Cues[1].ClusterPos
+	r := bytes.NewReader(data[at:])
+	h, n, err := ebml.ReadElementHeader(r) // the Cluster
+	if err != nil || h.ID != mkv.IDCluster {
+		t.Fatalf("no cluster at %d: %v %x", at, err, h.ID)
+	}
+	ts, tn, err := ebml.ReadElementHeader(r) // its Timestamp
+	if err != nil || ts.ID != mkv.IDTimestamp {
+		t.Fatalf("cluster at %d does not open with a Timestamp", at)
+	}
+	blockAt := at + int64(n) + int64(tn) + ts.Size
+	if data[blockAt] != 0xA3 {
+		t.Fatalf("no SimpleBlock at %d (byte %#x)", blockAt, data[blockAt])
+	}
+	// SimpleBlock header with an 8-byte size of 2 GiB.
+	copy(data[blockAt:], []byte{0xA3, 0x01, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00})
+	writeAll(t, path, data)
+}
+
+// TestValidate_StaleCuesNotJudgedPastDamage: a walk that stops on damage has
+// seen no keyframe behind it, so the cues behind it are not stale - they are
+// unjudged. Before, every cue past the break was reported stale and the
+// advice (a strict reindex) was one the file refuses.
+func TestValidate_StaleCuesNotJudgedPastDamage(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 6)
+	for i := 0; i < 6; i++ {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0xAA}, 512)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0x01}, 64)},
+		})
+	}
+	path := buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 6000)
+	damageSecondCluster(t, path)
+
+	issues, err := Validate(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readError bool
+	for _, is := range issues {
+		switch is.Code {
+		case "cluster-read-error":
+			readError = true
+		case "cues-stale":
+			t.Errorf("cues behind the break reported stale: %s", is.Message)
+		}
+	}
+	if !readError {
+		t.Errorf("want the damage reported, got %v", issues)
 	}
 }

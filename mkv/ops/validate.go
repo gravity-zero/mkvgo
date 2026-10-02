@@ -109,6 +109,8 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 	var lastTC int64
 	var blockTotal, subNoDuration int
 	var hasKeyframe bool
+	walked := true    // the walk reached the end of the clusters
+	var brokeAt int64 // where it stopped otherwise: the cluster holding the break
 	for {
 		if ctx.Err() != nil {
 			return issues, ctx.Err()
@@ -119,6 +121,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		}
 		if err != nil {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cluster-read-error", Message: fmt.Sprintf("cluster read error at block %d: %v", blockTotal, err)})
+			walked, brokeAt = false, br.ClusterOffset()-c.SegmentStart
 			break
 		}
 		blockCounts[blk.TrackNumber]++
@@ -171,7 +174,11 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 				misKeyed++
 			default:
 				videoCues++
-				if !videoKfPts[cue.TimeMs] {
+				// A cue at or behind the point a broken walk stopped at is
+				// unjudged, not stale: the keyframes there were never seen. The
+				// read error above already names the break.
+				unseen := !walked && (cue.ClusterPos >= brokeAt || cue.TimeMs > lastTC)
+				if !videoKfPts[cue.TimeMs] && !unseen {
 					stale++
 				}
 			}
