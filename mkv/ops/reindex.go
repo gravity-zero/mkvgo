@@ -10,6 +10,7 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+	"os"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -536,6 +537,10 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // A live or streamed source needs no option either: an unknown-size Cluster
 // is measured by a strict walk of its children (unknownSizeClusterSize) and
 // copied like any other, and the output states the sizes the source left open.
+// It states the duration too, the one addition to an otherwise verbatim Info:
+// a source that declares no Duration gets one, set to where its content ends
+// (the latest track end), with a CRC-32 opening the Info resealed over it. An
+// Info that declares its Duration is copied as it is.
 //
 // Trailing junk is tolerated without any option: bytes past the DECLARED
 // Segment end that neither parse as an element nor carry any trace of a
@@ -569,9 +574,13 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		defer rb.cleanup()
 	}
 
-	cues, timecodeScale, dropped, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil)
+	var seal durationSeal
+	cues, timecodeScale, dropped, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil, &seal)
 	if err != nil {
 		return err
+	}
+	if err := sealDuration(ctx, dstPath, fs, &seal, timecodeScale); err != nil {
+		return fmt.Errorf("reindex: %w", err)
 	}
 
 	if err := verifyReindexedCues(ctx, dstPath, fs, cues, timecodeScale); err != nil {
@@ -634,7 +643,7 @@ type clusterMutator func(body []byte) ([]retimePatch, error)
 // error: surplus bytes must not make an otherwise-healthy file unrepairable.
 // The caller reports the range through Options.OnSkip once its own checks
 // pass.
-func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator, seal *durationSeal) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks, allTracks map[uint64]bool
@@ -806,18 +815,34 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			if rb != nil {
 				rb.literalHeader(h, hdrBytes)
 			}
-			if err := writeMetaElementVerbatim(mw, out, h, metaBuf); err != nil {
+			// outBody is what lands in the output: the source body, plus - for
+			// an Info declaring no Duration - a reserved one behind it.
+			outHdr, outBody := h, metaBuf
+			reserved := false
+			if h.ID == mkv.IDInfo && seal != nil && seal.bodyLen == 0 {
+				if outBody, reserved = infoReservingDuration(metaBuf); reserved {
+					outHdr.Size = int64(len(outBody))
+				}
+			}
+			if err := writeMetaElementVerbatim(mw, out, outHdr, outBody); err != nil {
 				return nil, 0, nil, fmt.Errorf("reindex: %w", err)
 			}
-			if rb != nil {
-				// The body was just written verbatim, ending at the current
-				// output position: that position minus the body length is the
-				// COPY source, with no assumption about the header encoding.
+			if rb != nil || reserved {
+				// The body was just written, ending at the current output
+				// position: that position minus its length is where the
+				// source bytes start, with no assumption about the header
+				// encoding. They are the COPY source of the delta - the
+				// reserved Duration behind them is the output's own.
 				after, serr := out.Seek(0, io.SeekCurrent)
 				if serr != nil {
 					return nil, 0, nil, fmt.Errorf("reindex: rollback offset: %w", serr)
 				}
-				rb.copyRun(after-h.Size, metaBuf)
+				if reserved {
+					seal.reserve(after, outBody)
+				}
+				if rb != nil {
+					copyRunInfo(rb, after-int64(len(outBody)), metaBuf, reserved)
+				}
 			}
 
 		case mkv.IDCluster:
@@ -950,6 +975,114 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		return nil, 0, nil, err
 	}
 	return mw.Cues, timecodeScale, dropped, nil
+}
+
+// durationSeal carries, out of a copy, where the Info it wrote with a reserved
+// Duration lives in the output: the absolute offset and length of its body
+// (the Duration's 8 value bytes are the last ones). bodyLen is 0 when nothing
+// was reserved. See infoReservingDuration and sealDuration.
+type durationSeal struct {
+	bodyOff int64
+	bodyLen int
+}
+
+// reserve records the Info body just written, ending at the output offset after.
+func (s *durationSeal) reserve(after int64, outBody []byte) {
+	s.bodyOff, s.bodyLen = after-int64(len(outBody)), len(outBody)
+}
+
+// infoReservingDuration returns the Info body to write for a source that
+// declares no Duration - a live or streamed recording, whose muxer never came
+// back to write one: the source body followed by a Duration element holding 0,
+// to be filled once the copy has shown where the content ends (sealDuration).
+// A CRC-32 opening the body is resealed over the addition. reserved is false,
+// and body returned as it is, when the Info already declares a Duration,
+// carries a CRC-32 anywhere but first, or does not parse: those are copied
+// verbatim as ever.
+func infoReservingDuration(body []byte) (out []byte, reserved bool) {
+	br := bytes.NewReader(body)
+	for first := true; br.Len() > 0; first = false {
+		h, _, err := ebml.ReadElementHeader(br)
+		if err != nil || h.Size < 0 || h.Size > int64(br.Len()) || h.ID == mkv.IDDuration || (h.ID == idCRC32 && !first) {
+			return body, false
+		}
+		if _, err := br.Seek(h.Size, io.SeekCurrent); err != nil {
+			return body, false
+		}
+	}
+	out = make([]byte, 0, len(body)+11)
+	out = append(out, body...)
+	out = append(out, 0x44, 0x89, 0x88) // Duration, 8-byte float
+	out = append(out, make([]byte, 8)...)
+	sealClusterCRC(out) // first-child CRC-32 over the rest; no-op without one
+	return out, true
+}
+
+// copyRunInfo records a copied Info body in the rollback delta: a COPY of the
+// output bytes at bodyStart. When a Duration was reserved behind it the CRC-32
+// opening the body, if any, was resealed - its SOURCE value then goes in as a
+// literal, the output no longer holding it.
+func copyRunInfo(rb *rollbackBuilder, bodyStart int64, src []byte, reserved bool) {
+	crcOff, _ := clusterCRCSpan(src)
+	if !reserved || crcOff < 0 {
+		rb.copyRun(bodyStart, src)
+		return
+	}
+	rb.copyRun(bodyStart, src[:crcOff])
+	rb.literal(src[crcOff : crcOff+4])
+	rb.copyRun(bodyStart+crcOff+4, src[crcOff+4:])
+}
+
+// sealDuration fills the Duration a copy reserved (see infoReservingDuration)
+// with where the output's content ends - the latest track end, the position
+// Matroska's Duration states - so the rewrite of a live recording seals its
+// duration along with its sizes. The ends are measured on the output itself,
+// which is indexed by now: a bounded tail walk, not a second pass over the
+// file. Nothing is written when no end could be established: the reserved 0
+// reads as "no duration", exactly what the source said.
+func sealDuration(ctx context.Context, dstPath string, fs *mkv.FS, seal *durationSeal, timecodeScale int64) (err error) {
+	if seal == nil || seal.bodyLen == 0 {
+		return nil
+	}
+	report, err := TrackEnds(ctx, dstPath, mkv.Options{FS: fs})
+	if err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	var endMs int64
+	for _, e := range report.Ends {
+		if e.Source != "" && e.Source != "walk-bound" && e.EndMs > endMs {
+			endMs = e.EndMs
+		}
+	}
+	if endMs <= 0 {
+		return nil
+	}
+	if timecodeScale <= 0 {
+		timecodeScale = 1_000_000
+	}
+	f, err := fs.DoOpenFile(dstPath, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	defer closeWithErr(f, &err)
+	// The whole Info body: the value goes in its last 8 bytes, and a CRC-32
+	// opening it is resealed over the result.
+	body := make([]byte, seal.bodyLen)
+	if _, err := f.Seek(seal.bodyOff, io.SeekStart); err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	if _, err := io.ReadFull(f, body); err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	binary.BigEndian.PutUint64(body[len(body)-8:], math.Float64bits(float64(endMs)*1e6/float64(timecodeScale)))
+	sealClusterCRC(body)
+	if _, err := f.Seek(seal.bodyOff, io.SeekStart); err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	if _, err := f.Write(body); err != nil {
+		return fmt.Errorf("seal duration: %w", err)
+	}
+	return nil
 }
 
 // removeUnfinished removes the output of a copy that returned an error.

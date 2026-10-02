@@ -3,13 +3,16 @@ package ops
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/livefixture"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -395,6 +398,120 @@ func TestRefusedReindexLeavesNoOutput(t *testing.T) {
 	if got, _ := os.ReadFile(dst); string(got) != "somebody else's file" {
 		t.Errorf("a reindex that never created its output altered the file already there: %q", got)
 	}
+}
+
+// TestReindexSealsTheDurationOfALiveRecording: a live source declares no
+// Duration - its muxer never came back to write one. The rewrite that seals
+// its sizes left it that way: sized, indexed, and still of unknown length. It
+// now states where the content ends, in an Info that is otherwise the source's
+// (a CRC-32 opening it is resealed), and the rollback delta still rebuilds the
+// source byte for byte. A source that declares a Duration keeps its Info
+// untouched.
+func TestReindexSealsTheDurationOfALiveRecording(t *testing.T) {
+	ctx := context.Background()
+	// The latest end: the audio's last block plus its stride (250 ms).
+	const wantMs = livefixture.LastBlockMs + 250
+	for name, tc := range map[string]struct {
+		opts   livefixture.Options
+		resync bool
+	}{
+		"strict":                 {livefixture.Options{}, false},
+		"strict, Info with CRC":  {livefixture.Options{InfoCRC: true, TailTags: true}, false},
+		"resync past head junk":  {livefixture.Options{JunkHead: 134, InfoCRC: true}, true},
+		"resync, no CRC, hints":  {livefixture.Options{JunkMid: 61, PositionHints: true}, true},
+		"strict, sized Segment":  {livefixture.Options{SizedSegment: true, InfoCRC: true}, false},
+		"strict, laced audio":    {livefixture.Options{LacedAudio: true, BlockGroups: true}, false},
+		"salvage past head junk": {livefixture.Options{JunkHead: 134, InfoCRC: true}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := liveFile(t, tc.opts)
+			dir := t.TempDir()
+			dst := filepath.Join(dir, "out.mkv")
+			var delta bytes.Buffer
+			var err error
+			if strings.HasPrefix(name, "salvage") {
+				_, err = Salvage(ctx, src, dst, mkv.Options{RollbackSink: &delta})
+			} else {
+				err = Reindex(ctx, src, dst, mkv.Options{Resync: tc.resync, RollbackSink: &delta})
+			}
+			if err != nil {
+				t.Fatalf("rewrite: %v", err)
+			}
+			c, err := reader.Open(ctx, dst)
+			if err != nil {
+				t.Fatalf("open output: %v", err)
+			}
+			if c.DurationMs != wantMs {
+				t.Errorf("output declares %d ms, want %d (where the content ends)", c.DurationMs, wantMs)
+			}
+			issues, err := Validate(ctx, dst)
+			if err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			for _, is := range issues {
+				if is.Code == "no-duration" {
+					t.Errorf("output still reports: %s", is.Message)
+				}
+			}
+			if tc.opts.InfoCRC && !infoCRCHolds(t, dst) {
+				t.Error("the Info CRC-32 no longer matches its body")
+			}
+			restored := filepath.Join(dir, "restored.mkv")
+			if err := ApplyRollback(ctx, dst, &delta, restored); err != nil {
+				t.Fatalf("ApplyRollback: %v", err)
+			}
+			if got, _ := os.ReadFile(restored); !bytes.Equal(got, livefixture.Build(tc.opts)) {
+				t.Error("rollback did not rebuild the source byte for byte")
+			}
+		})
+	}
+
+	// A source that declares its duration: the Info is copied as it is.
+	dst := filepath.Join(t.TempDir(), "sample.out.mkv")
+	if err := Reindex(ctx, sampleMKV, dst); err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+	if a, b := infoBody(t, sampleMKV), infoBody(t, dst); !bytes.Equal(a, b) {
+		t.Error("the Info of a source that declares a Duration was not copied verbatim")
+	}
+}
+
+// infoBody returns the body of path's Info element. The Info ID also appears
+// in the SeekHead, as a SeekID value followed by a SeekPosition: that
+// occurrence is skipped.
+func infoBody(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := []byte{0x15, 0x49, 0xA9, 0x66}
+	for off := bytes.Index(data, id); off >= 0; {
+		if !bytes.HasPrefix(data[off+4:], []byte{0x53, 0xAC}) {
+			h, n, err := ebml.ReadElementHeader(bytes.NewReader(data[off:]))
+			if err == nil && h.Size > 0 && off+n+int(h.Size) <= len(data) {
+				return data[off+n : off+n+int(h.Size)]
+			}
+		}
+		next := bytes.Index(data[off+1:], id)
+		if next < 0 {
+			break
+		}
+		off += 1 + next
+	}
+	t.Fatalf("%s: no Info element found", path)
+	return nil
+}
+
+// infoCRCHolds reports whether the CRC-32 opening path's Info matches the
+// rest of its body.
+func infoCRCHolds(t *testing.T, path string) bool {
+	t.Helper()
+	body := infoBody(t, path)
+	if len(body) < 6 || body[0] != 0xBF || body[1] != 0x84 {
+		t.Fatalf("%s: the Info does not open with a CRC-32", path)
+	}
+	return binary.LittleEndian.Uint32(body[2:6]) == crc32.ChecksumIEEE(body[6:])
 }
 
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a

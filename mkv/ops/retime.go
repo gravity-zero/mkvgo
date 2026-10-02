@@ -193,7 +193,7 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 		return ps, nil
 	}
 
-	cues, scale, dropped, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate)
+	cues, scale, dropped, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate, nil)
 	if err != nil {
 		return fail(err)
 	}

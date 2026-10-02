@@ -77,9 +77,13 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 		defer rb.cleanup()
 	}
 
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb)
+	var seal durationSeal
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb, &seal)
 	if err != nil {
 		return nil, err
+	}
+	if err := sealDuration(ctx, dstPath, fs, &seal, timecodeScale); err != nil {
+		return nil, fmt.Errorf("salvage: %w", err)
 	}
 
 	if err := verifyReindexedCues(ctx, dstPath, fs, cues, timecodeScale); err != nil {
@@ -109,7 +113,7 @@ func MapDamage(ctx context.Context, srcPath string, opts ...mkv.Options) (*Salva
 	// Options.RollbackSink is deliberately ignored: nothing is written, so
 	// there is nothing to roll back (and COPY ops would reference a
 	// discarded output).
-	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), nil)
+	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +157,7 @@ func (d *discardWriteSeeker) Close() error { return nil }
 // verification pass) and the timecode scale used to derive them. cleanCut
 // resumes video only at the next keyframe after each damage gap. The walk
 // itself lives on salvageWalker, one method per element class.
-func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool, rb *rollbackBuilder) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
+func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool, rb *rollbackBuilder, seal *durationSeal) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
 	stat, err := fs.DoStat(srcPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: stat src: %w", err)
@@ -221,6 +225,7 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 
 		prevClusterSize: -1, // no cluster written yet
 		rb:              rb,
+		seal:            seal,
 	}
 	if err := w.walk(ctx); err != nil {
 		return nil, nil, 0, err
@@ -256,6 +261,9 @@ type salvageWalker struct {
 	// one, for its PrevSize hint. -1 until one has been written: salvage drops
 	// and splits clusters, so the source's own value is meaningless here.
 	prevClusterSize int64
+	// seal, when non-nil, receives where the Duration reserved in an Info
+	// that declares none was written (see infoReservingDuration).
+	seal *durationSeal
 }
 
 // walk drives the top-level element loop. Every handler returns
@@ -440,15 +448,27 @@ func (w *salvageWalker) copyMetaElement(h ebml.ElementHeader, elemStart int64, h
 	if w.rb != nil {
 		w.rb.literalHeader(h, hdrBytes)
 	}
-	if err := writeMetaElementVerbatim(w.mw, w.out, h, metaBuf); err != nil {
+	outHdr, outBody := h, metaBuf
+	reserved := false
+	if h.ID == mkv.IDInfo && w.seal != nil && w.seal.bodyLen == 0 {
+		if outBody, reserved = infoReservingDuration(metaBuf); reserved {
+			outHdr.Size = int64(len(outBody))
+		}
+	}
+	if err := writeMetaElementVerbatim(w.mw, w.out, outHdr, outBody); err != nil {
 		return false, fmt.Errorf("salvage: %w", err)
 	}
-	if w.rb != nil {
+	if w.rb != nil || reserved {
 		after, serr := w.out.Seek(0, io.SeekCurrent)
 		if serr != nil {
 			return false, fmt.Errorf("salvage: rollback offset: %w", serr)
 		}
-		w.rb.copyRun(after-h.Size, metaBuf)
+		if reserved {
+			w.seal.reserve(after, outBody)
+		}
+		if w.rb != nil {
+			copyRunInfo(w.rb, after-int64(len(outBody)), metaBuf, reserved)
+		}
 	}
 	w.report.BytesCopied += int64(hdrBytes) + h.Size
 	return false, nil

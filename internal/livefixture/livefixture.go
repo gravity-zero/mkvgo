@@ -13,6 +13,7 @@ package livefixture
 
 import (
 	"bytes"
+	"hash/crc32"
 	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -68,6 +69,9 @@ type Options struct {
 	// (with deliberately stale values): the hints a rewrite has to restate
 	// when it moves the cluster.
 	PositionHints bool
+	// InfoCRC opens the Info element with a CRC-32 over the rest of its body,
+	// as some muxers write it (test4.mkv's does).
+	InfoCRC bool
 }
 
 // JunkByte is the value the junk runs are filled with: as an element ID it
@@ -78,7 +82,12 @@ const JunkByte = 0x0A
 func Build(o Options) []byte {
 	var body bytes.Buffer
 	body.Write(bytes.Repeat([]byte{JunkByte}, o.JunkHead))
-	body.Write(elem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3)))
+	info := uintElem(mkv.IDTimecodeScale, 1_000_000, 3)
+	if o.InfoCRC {
+		sum := crc32.ChecksumIEEE(info)
+		info = join(elem(0xBF, []byte{byte(sum), byte(sum >> 8), byte(sum >> 16), byte(sum >> 24)}), info)
+	}
+	body.Write(elem(mkv.IDInfo, info))
 	body.Write(bytes.Repeat([]byte{JunkByte}, o.JunkMid))
 	body.Write(elem(mkv.IDTracks, join(
 		track(1, 1, "V_VP8", elem(0xE0, join(uintElem(0xB0, 320, 2), uintElem(0xBA, 240, 2)))),
@@ -148,8 +157,7 @@ func Build(o Options) []byte {
 // header in the fixture Build(o) returns - where JunkHead starts.
 func SegmentBodyOffset(o Options) int64 {
 	o.JunkHead = 0
-	info := elem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3))
-	return int64(bytes.Index(Build(o), info))
+	return int64(bytes.Index(Build(o), []byte{0x15, 0x49, 0xA9, 0x66}))
 }
 
 func track(num, typ uint64, codec string, params []byte) []byte {

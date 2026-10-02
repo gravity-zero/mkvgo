@@ -146,14 +146,21 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 	for id := range want {
 		pending[id] = true
 	}
+	// Where to count the tail windows back from: the declared duration, or -
+	// for an indexed file that declares none, a sealed live recording - its
+	// last cue. With neither the walk starts at the first cluster.
+	refMs := meta.DurationMs
+	if refMs <= 0 {
+		refMs = lastCueMs(meta.Cues)
+	}
 	var windowStart int64
 	complete := false // the last walk reached the end of the clusters
 	for _, window := range tailWalkWindowsMs {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		windowStart = meta.DurationMs - window
-		if windowStart < 0 || meta.DurationMs <= 0 {
+		windowStart = refMs - window
+		if windowStart < 0 || refMs <= 0 {
 			windowStart = 0
 		}
 		startOff := cueOffsetAtOrBefore(meta, windowStart)
