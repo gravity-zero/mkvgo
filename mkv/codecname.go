@@ -33,20 +33,57 @@ var ffprobeCodecNameByID = map[string]string{
 	"A_AAC/MPEG4/LTP":    "aac",
 	"S_TEXT/ASCII":       "text",
 	"S_HDMV/TEXTST":      "hdmv_text_subtitle",
+	"D_WEBVTT/SUBTITLES": "webvtt",
 }
 
 // ffprobeCodecNameByFourCC maps the FourCC of a V_MS/VFW/FOURCC track (upper
-// case) to the prober's codec_name.
+// case: the prober compares them case-insensitively) to its codec_name.
 var ffprobeCodecNameByFourCC = map[string]string{
+	"H264": "h264", "X264": "h264", "AVC1": "h264",
 	"XVID": "mpeg4", "DIVX": "mpeg4", "DX50": "mpeg4", "FMP4": "mpeg4", "MP4V": "mpeg4", "3IV2": "mpeg4",
 	"MP41": "msmpeg4v1", "MPG4": "msmpeg4v1", "MP42": "msmpeg4v2",
 	"MP43": "msmpeg4v3", "DIV3": "msmpeg4v3", "DIV4": "msmpeg4v3",
-	"MJPG": "mjpeg", "WMV1": "wmv1", "WMV2": "wmv2",
+	"MJPG": "mjpeg", "LJPG": "mjpeg", "MJLS": "jpegls", "MJP2": "jpeg2000", "MPNG": "png",
+	"WMV1": "wmv1", "WMV2": "wmv2",
 	"MPG1": "mpeg1video", "MPG2": "mpeg2video",
+	"H261": "h261", "H263": "h263", "FLV1": "flv1", "FSV1": "flashsv",
 	"VP80": "vp8", "VP90": "vp9", "AV01": "av1", "VP60": "vp6", "VP62": "vp6",
-	"FFV1": "ffv1", "MSVC": "msvideo1", "CRAM": "msvideo1", "DVSD": "dvvideo",
-	"IV50": "indeo5", "CVID": "cinepak", "SVQ3": "svq3", "H263": "h263",
+	"FFV1": "ffv1", "FFVH": "ffvhuff", "HFYU": "huffyuv", "M8RG": "magicyuv", "ULRG": "utvideo",
+	"MSVC": "msvideo1", "CRAM": "msvideo1", "DVSD": "dvvideo", "CFHD": "cfhd", "SHQ4": "speedhq",
+	"AMVF": "amv", "ASV1": "asv1", "ASV2": "asv2", "ZLIB": "zlib", "ZMBV": "zmbv",
+	"IV50": "indeo5", "CVID": "cinepak", "SVQ3": "svq3",
 	"I420": "rawvideo", "YV12": "rawvideo",
+	"V210": "v210", "V308": "v308", "V408": "v408", "V410": "v410", "Y41P": "y41p", "YUV4": "yuv4",
+	"R10K": "r10k", "R210": "r210", "DPX ": "dpx", "TGA ": "targa",
+}
+
+// ffprobeCodecNameByFormatTag maps the wFormatTag opening the WAVEFORMATEX of
+// an A_MS/ACM track to the prober's codec_name. Tags whose codec depends on
+// further fields (plain PCM, the extensible format) are left out.
+var ffprobeCodecNameByFormatTag = map[uint16]string{
+	0x0002: "adpcm_ms",
+	0x0006: "pcm_alaw",
+	0x0007: "pcm_mulaw",
+	0x0011: "adpcm_ima_wav",
+	0x0020: "adpcm_yamaha",
+	0x0042: "g723_1",
+	0x0045: "adpcm_g726",
+	0x0160: "wmav1",
+	0x0161: "wmav2",
+	0x028F: "adpcm_g722",
+	0x5346: "adpcm_swf",
+}
+
+// ffprobeCodecNameByQuickTimeTag maps the sample-description tag of a
+// V_QUICKTIME track (bytes 4..8 of its CodecPrivate, case-sensitive) to the
+// prober's codec_name.
+var ffprobeCodecNameByQuickTimeTag = map[string]string{
+	"cvid": "cinepak",
+	"AVdn": "dnxhd",
+	"gif ": "gif",
+	"sgi ": "sgi",
+	"SVQ1": "svq1",
+	"tiff": "tiff",
 }
 
 // vfwCodecID and the PCM CodecIDs name a family: which codec a track holds
@@ -56,14 +93,18 @@ const (
 	pcmIntLitID     = "A_PCM/INT/LIT"
 	pcmIntBigID     = "A_PCM/INT/BIG"
 	pcmFloatIEEEID  = "A_PCM/FLOAT/IEEE"
+	acmCodecID      = "A_MS/ACM"
+	quickTimeID     = "V_QUICKTIME"
 	vfwFourCCOffset = 16 // biCompression in the BITMAPINFOHEADER a VFW track's CodecPrivate holds
 )
 
 // FFprobeCodecName returns the codec_name an external prober reports for the
 // track. Unlike FFprobeCodecName(shortName) it has the whole track to go by,
 // so it also resolves the names that depend on more than the CodecID: a
-// V_MS/VFW/FOURCC track by the FourCC in its CodecPrivate (XVID is mpeg4), a
-// PCM track by its bit depth (pcm_s24le), and the CodecIDs carrying a "/".
+// V_MS/VFW/FOURCC track by the FourCC in its CodecPrivate (XVID is mpeg4), an
+// A_MS/ACM track by its format tag, a V_QUICKTIME track by its sample
+// description, a PCM track by its bit depth (pcm_s24le), and the CodecIDs
+// carrying a "/".
 //
 // What it cannot resolve - an unknown FourCC, a PCM track stating no bit
 // depth, a CodecID outside its tables - is returned as the raw Matroska
@@ -78,6 +119,20 @@ func (t Track) FFprobeCodecName() string {
 			}
 		}
 		return vfwCodecID
+	case acmCodecID:
+		if len(t.CodecPrivate) >= 2 {
+			if n, ok := ffprobeCodecNameByFormatTag[uint16(t.CodecPrivate[0])|uint16(t.CodecPrivate[1])<<8]; ok {
+				return n
+			}
+		}
+		return acmCodecID
+	case quickTimeID:
+		if len(t.CodecPrivate) >= 8 {
+			if n, ok := ffprobeCodecNameByQuickTimeTag[string(t.CodecPrivate[4:8])]; ok {
+				return n
+			}
+		}
+		return quickTimeID
 	case "pcm", pcmIntLitID:
 		return pcmCodecName(t.BitDepth, pcmIntLitID, "pcm_u8", "pcm_s16le", "pcm_s24le", "pcm_s32le")
 	case pcmIntBigID:
