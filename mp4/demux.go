@@ -60,6 +60,13 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	if err != nil {
 		return err
 	}
+	// A remux that fails leaves no truncated file under the output's name
+	// (runs after the close below; never touches a file it did not create).
+	defer func() {
+		if err != nil {
+			_ = fs.DoRemove(dstPath)
+		}
+	}()
 	defer func() {
 		if cerr := dst.Close(); cerr != nil && err == nil {
 			err = errf("close output: %w", cerr)

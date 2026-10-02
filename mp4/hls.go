@@ -38,7 +38,21 @@ import (
 // as the metadata reader tolerates an over-declared tail. The strict BlockReader
 // still returns the raw error, so integrity paths (validate/compare) can report
 // the truncation.
+//
+// A damaged region INSIDE the file (reader.ErrDamagedRegion: an element that
+// overruns the file while media continues behind it) ends the walk the same
+// way here: these are the on-demand paths, where a segment that stops at the
+// damage beats a segment that fails. A path that writes the WHOLE file out
+// uses isSourceEnd instead, and refuses.
 func isBlockWalkEnd(err error) bool {
+	return isSourceEnd(err) || errors.Is(err, reader.ErrDamagedRegion)
+}
+
+// isSourceEnd reports whether a BlockReader.Next error is the end of the
+// source: io.EOF, or a truncated/over-declared tail. Damage inside the file is
+// NOT the end of it - taken for one, a remux delivered the first second of a
+// 37 s file and reported success.
+func isSourceEnd(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
@@ -425,7 +439,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 			return err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) {
+		if isSourceEnd(err) {
 			break
 		}
 		if err != nil {
