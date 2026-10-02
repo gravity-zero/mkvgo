@@ -90,6 +90,27 @@ All notable changes to mkvgo are documented here. The format is based on
   `edit-title`, `edit-track` and the other `EditMetadata` rewrites failed on
   the undecodable bytes the reader itself had resynced past. They now take
   the block rewrite they already use for a live source.
+- **A failed write leaves no truncated output.** A `reindex` refused part-way,
+  a `salvage` that gave up, a `split`, `join`, metadata edit or subtitle
+  operation that failed left what it had written under the output's name - a
+  truncated file a later step can take for the result. It is removed. A file
+  the operation never created is not touched, and a copy that completes and
+  then fails a verification is still kept, as documented.
+- **Laced audio survives a block-by-block rewrite.** The frames of a laced
+  block share its timecode when the track states no frame duration. A rewrite
+  (`edit`, `split`, `join`...) of such a file wrote each frame as its own
+  block, all claiming the same instant: 3762 audio frames on 487 distinct
+  timestamps. They are written back as one laced block; packet timestamps and
+  sizes then match the source exactly.
+- **The rollback delta of a `Resync` reindex.** A cluster whose position hints
+  are restated was stored whole in the delta - 19.9 MB of delta for a 20 MB
+  file. Only the restated bytes are stored (2.5 KB on the same file).
+- **MP4 frame rate when the constant rate is rounded to the timescale.** 24 fps
+  on a millisecond timescale is stored as sample deltas of 42 and 41; read
+  from the first one alone the track was reported at 23.81 fps, and an MKV
+  written from it (`from-mp4`) carried no `DefaultDuration`, so a demuxer
+  guessed 500/21 fps. The rate is now the samples over the time they cover,
+  and a constant-rate video track from an MP4 states its `DefaultDuration`.
 - **Keyframes of frames stored in a BlockGroup, on read.** A Block has no
   keyframe flag (that bit belongs to SimpleBlock): the frame is a keyframe
   exactly when its group names no ReferenceBlock. The block walk reported
