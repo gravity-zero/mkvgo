@@ -258,8 +258,17 @@ type BlockReader struct {
 	// skipDamage makes Next resume on the next valid Cluster past a damaged
 	// region instead of returning an error (SetSkipDamage); skippedBytes counts
 	// what was passed over.
-	skipDamage    bool
-	skippedBytes  int64
+	skipDamage   bool
+	skippedBytes int64
+	// known is the set of track numbers the file declares, learned when the
+	// walk passes over the Tracks element or given by SetKnownTracks; nil when
+	// unknown (a reader seated in mid-file). A block naming any other track is
+	// not the file's: it is dropped, and suspectAt remembers the first one met
+	// since the last Cluster header (suspected) - where a damaged region most
+	// likely starts, should the walk fail further on.
+	known         map[uint64]bool
+	suspected     bool
+	suspectAt     int64
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -473,6 +482,8 @@ func TrackDefaultDurations(tracks []mkv.Track) map[uint64]int64 {
 func (br *BlockReader) scanTracksDurations(size int64) error {
 	end := br.r.tell() + size
 	skipRest := func() error { return br.r.discard(end - br.r.tell()) }
+	learnDurs := br.trackDurNs == nil // durations a caller supplied are left alone
+	declared := map[uint64]bool{}
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
@@ -529,14 +540,37 @@ func (br *BlockReader) scanTracksDurations(size int64) error {
 				}
 			}
 		}
-		if num > 0 && durNs > 0 && durNs <= maxLacedFrameDurNs {
+		if num > 0 {
+			declared[num] = true
+		}
+		if learnDurs && num > 0 && durNs > 0 && durNs <= maxLacedFrameDurNs {
 			if br.trackDurNs == nil {
 				br.trackDurNs = make(map[uint64]int64)
 			}
 			br.trackDurNs[num] = durNs
 		}
 	}
+	// Only a Tracks element read to its end says which tracks exist: a partial
+	// list would drop the blocks of real tracks.
+	if br.known == nil && len(declared) > 0 {
+		br.known = declared
+	}
 	return nil
+}
+
+// SetKnownTracks tells the walk which tracks the file declares, for a reader
+// that never passes over the Tracks element (NewBlockReaderAt). A block naming
+// another track is dropped, as it is on a walk from the start of the file:
+// such a block is not the file's content, but bytes of a damaged region that
+// happen to parse.
+func (br *BlockReader) SetKnownTracks(tracks []mkv.Track) {
+	if len(tracks) == 0 {
+		return
+	}
+	br.known = make(map[uint64]bool, len(tracks))
+	for _, t := range tracks {
+		br.known[t.ID] = true
+	}
 }
 
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
@@ -666,17 +700,25 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if !br.skipDamage && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return b, err // a decode error is already its own refusal
 		}
-		resume, found := br.clusterAfter(br.elemStart)
+		// The damage starts at the element that failed - or earlier, at the
+		// first block of an undeclared track met since the last Cluster
+		// header: garbage that parsed, with the real media possibly resuming
+		// well before the point of failure.
+		from := br.elemStart
+		if br.suspected && br.suspectAt < from {
+			from = br.suspectAt
+		}
+		resume, found := br.clusterAfter(from)
 		if !found {
 			return b, err // nothing behind it: a truncated tail, as reported
 		}
 		if !br.skipDamage {
-			return b, &DamageError{Offset: br.elemStart, Resume: resume, Cause: err}
+			return b, &DamageError{Offset: from, Resume: resume, Cause: err}
 		}
 		if br.r.reset(resume) != nil {
 			return b, err
 		}
-		br.skippedBytes += resume - br.elemStart
+		br.skippedBytes += resume - from
 		br.inCluster, br.clusterEnd = false, -1
 		br.pending, br.peeked, br.awaitLimit = nil, nil, false
 	}
@@ -830,6 +872,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 
 		if h.ID == mkv.IDCluster {
 			br.atHead = false
+			br.suspected = false
 			br.clusterStart = hdrStart
 			br.clusterCount++
 			br.inCluster = true
@@ -843,7 +886,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
 		}
-		if h.ID == mkv.IDTracks && br.trackDurNs == nil && h.Size <= 16<<20 {
+		if h.ID == mkv.IDTracks && (br.trackDurNs == nil || br.known == nil) && h.Size <= 16<<20 {
 			// Walking over the track metadata anyway: pick up the per-track
 			// DefaultDurations so laced frames get individual timecodes even
 			// when the caller never supplied them.
@@ -871,6 +914,18 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	trackNum, _, err := ebml.ReadDataSize(br.r)
 	if err != nil {
 		return mkv.Block{}, err
+	}
+	if br.known != nil && !br.known[uint64(trackNum)] {
+		// A track the file does not declare: bytes that happen to parse as a
+		// block, not content. Dropped, and remembered as where damage may
+		// have begun.
+		if !br.suspected {
+			br.suspected, br.suspectAt = true, br.blockStart
+		}
+		if err := br.r.discard(size - (br.r.tell() - start)); err != nil {
+			return mkv.Block{}, err
+		}
+		return mkv.Block{}, errFilteredBlock
 	}
 	if br.keep != nil && !br.keep[uint64(trackNum)] {
 		if err := br.r.discard(size - (br.r.tell() - start)); err != nil {

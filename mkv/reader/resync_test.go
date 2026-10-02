@@ -257,6 +257,82 @@ func TestDamageInsideTheFileIsNotATruncatedTail(t *testing.T) {
 	})
 }
 
+// TestBlockOfAnUndeclaredTrack: a block naming a track the file does not
+// declare is not content - on a damaged file it is garbage that happens to
+// parse, and it used to be delivered (track 87 of a two-track file). It is
+// dropped; the file's own blocks are all still there. And when the walk fails
+// further on, that block is where the damage is reported to start - not the
+// later point where the garbage finally stopped parsing.
+func TestBlockOfAnUndeclaredTrack(t *testing.T) {
+	t.Run("dropped, the rest delivered", func(t *testing.T) {
+		data := livefixture.Build(livefixture.Options{Stray: true})
+		br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for {
+			b, err := br.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("block %d: %v", n, err)
+			}
+			if b.TrackNumber == livefixture.StrayTrack {
+				t.Fatalf("block %d names undeclared track %d", n, b.TrackNumber)
+			}
+			n++
+		}
+		if n != livefixture.Blocks {
+			t.Errorf("%d blocks, want the file's own %d", n, livefixture.Blocks)
+		}
+	})
+
+	t.Run("marks where the damage starts", func(t *testing.T) {
+		data := livefixture.Build(livefixture.Options{Stray: true, Overrun: true})
+		strayAt := int64(bytes.Index(data, []byte{0xA3, 0x86, 0x80 | livefixture.StrayTrack}))
+		br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, err = br.Next(); err != nil {
+				break
+			}
+		}
+		var de *DamageError
+		if !errors.As(err, &de) {
+			t.Fatalf("%v, want a DamageError", err)
+		}
+		if de.Offset != strayAt {
+			t.Errorf("damage reported at %d, want %d (the undeclared block ahead of the failure)", de.Offset, strayAt)
+		}
+	})
+
+	t.Run("a reader in mid-file is told the tracks", func(t *testing.T) {
+		data := livefixture.Build(livefixture.Options{Stray: true})
+		c, err := ReadMeta(context.Background(), bytes.NewReader(data), "live.mkv")
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstCluster := int64(bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75}))
+		for _, told := range []bool{false, true} {
+			br, err := NewBlockReaderAt(bytes.NewReader(data), 1_000_000, firstCluster)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if told {
+				br.SetKnownTracks(c.Tracks)
+			}
+			n, _, _ := drainBlocks(t, br)
+			if want := livefixture.Blocks + map[bool]int{false: 1, true: 0}[told]; n != want {
+				t.Errorf("tracks told = %v: %d blocks, want %d", told, n, want)
+			}
+		}
+	})
+}
+
 // TestBlockGroupKeyframe: a Block carries no keyframe flag - in a BlockGroup the
 // frame is a keyframe exactly when the group has no ReferenceBlock. The block
 // walk used to report every such frame as a non-keyframe, so a file storing

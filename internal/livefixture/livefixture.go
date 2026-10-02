@@ -77,7 +77,14 @@ type Options struct {
 	// follows intact. The blocks of the second cluster behind it are out of
 	// reach of a walk that resumes on the next cluster (OverrunLostBlocks).
 	Overrun bool
+	// Stray plants, in the middle of the second cluster (ahead of the Overrun
+	// element when both are set), a block naming StrayTrack - a track the file
+	// does not declare: bytes of a damaged region that happen to parse.
+	Stray bool
 }
+
+// StrayTrack is the undeclared track number a Stray block names.
+const StrayTrack = 87
 
 // OverrunLostBlocks is how many blocks an Overrun fixture hides from a walk
 // that skips to the next cluster: the second half of the second cluster.
@@ -110,6 +117,9 @@ func Build(o Options) []byte {
 			body.Write(uintElem(0xAB, 0x6666, 2)) // PrevSize
 		}
 		for b := 0; b < BlocksPerTrack; b++ {
+			if o.Stray && c == 1 && b == BlocksPerTrack/2 {
+				body.Write(elem(mkv.IDSimpleBlock, []byte{0x80 | StrayTrack, 0x00, 0x00, 0x80, 0xDE, 0xAD}))
+			}
 			if o.Overrun && c == 1 && b == BlocksPerTrack/2 {
 				body.Write([]byte{0xEC, 0x01, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF}) // Void, 2 GiB
 			}

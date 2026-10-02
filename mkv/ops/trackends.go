@@ -169,7 +169,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		if startOff < 0 {
 			windowStart = 0
 		}
-		last, clusters, done, passed, err := walkTailFrom(f, scale, startOff, durs, strided, pending)
+		last, clusters, done, passed, err := walkTailFrom(f, scale, startOff, meta.Tracks, durs, strided, pending)
 		if err != nil {
 			return 0, err
 		}
@@ -178,7 +178,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 			// The cue's position is not a cluster: a stale index. Walk from
 			// the first cluster instead, the one start that cannot lie.
 			windowStart = 0
-			if last, _, done, skipped, err = walkTailFrom(f, scale, -1, durs, strided, pending); err != nil {
+			if last, _, done, skipped, err = walkTailFrom(f, scale, -1, meta.Tracks, durs, strided, pending); err != nil {
 				return 0, err
 			}
 		}
@@ -252,7 +252,7 @@ func (s *trackStride) endMs() int64 {
 // reached the end cleanly (false: stopped on an undecodable element - junk past
 // the clusters, or damage - keeping what it saw). A track in strided states no
 // frame duration: its end is measured from its own block stride.
-func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64, strided, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, skipped int64, err error) {
+func walkTailFrom(f io.ReadSeeker, scale, startOff int64, tracks []mkv.Track, durs map[uint64]int64, strided, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, skipped int64, err error) {
 	var br *reader.BlockReader
 	if startOff < 0 {
 		// NewBlockReader parses the EBML header from the current position:
@@ -272,6 +272,7 @@ func walkTailFrom(f io.ReadSeeker, scale, startOff int64, durs map[uint64]int64,
 	// A measurement: a damaged region in mid-file is walked past, or the ends
 	// reported would be where the damage is, not where the tracks end.
 	br.SetSkipDamage(true)
+	br.SetKnownTracks(tracks) // a walk from a cue never passes over the Tracks element
 	last = map[uint64]int64{}
 	strides := map[uint64]*trackStride{}
 	finish := func(done bool) (map[uint64]int64, int64, bool, int64, error) {
