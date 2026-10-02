@@ -283,4 +283,13 @@ func TestProbeCueHolesRefusesStalePositions(t *testing.T) {
 	if f := hasFinding(d, "index-sparse"); f == nil || f.Remedy != "mkvgo reindex" || !strings.Contains(f.Detail, "run mkvgo reindex") {
 		t.Errorf("finding = %+v, want the head-only verdict kept", f)
 	}
+	// A cue that does not land on a cluster is a stale index, not damage in
+	// the file: the tail walk seated there must not "walk past" it and report
+	// the file damaged.
+	if f := hasFinding(d, "damaged"); f != nil {
+		t.Errorf("a stale cue position was reported as damage: %+v", f)
+	}
+	if d.TrackEnds != nil && d.TrackEnds.SkippedBytes != 0 {
+		t.Errorf("the tail walk reports %d skipped bytes on a sound file with a stale index", d.TrackEnds.SkippedBytes)
+	}
 }

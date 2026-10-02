@@ -700,6 +700,12 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if !br.skipDamage && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return b, err // a decode error is already its own refusal
 		}
+		if br.clusterCount == 0 {
+			// Not one Cluster entered yet: a reader seated on a position that
+			// turns out not to be a Cluster (a stale cue) is not looking at
+			// damage in the file. That error stays as it is.
+			return b, err
+		}
 		// The damage starts at the element that failed - or earlier, at the
 		// first block of an undeclared track met since the last Cluster
 		// header: garbage that parsed, with the real media possibly resuming

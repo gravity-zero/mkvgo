@@ -231,9 +231,17 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			// crashed in-place journal), which the walker cannot parse by
 			// definition.
 			bodyDamage := 0
+			// midDamage counts the ranges lost INSIDE the file, the cut tail
+			// aside: a download can be both cut short and missing pieces in
+			// its middle, and the first verdict must not hide the second.
+			midDamage, midBytes := 0, int64(0)
 			for _, r := range report.DamagedRanges {
 				if r.StartOffset < declaredEnd {
 					bodyDamage++
+				}
+				if r.StartOffset < declaredEnd && r.EndOffset < size {
+					midDamage++
+					midBytes += r.EndOffset - r.StartOffset
 				}
 			}
 			switch {
@@ -244,6 +252,14 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 						size, declaredEnd),
 					Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
 				})
+				if midDamage > 0 {
+					d.Findings = append(d.Findings, Finding{
+						Kind: "damaged",
+						Detail: fmt.Sprintf("%d damaged range(s) inside the file as well, %d bytes unrecoverable (missing or overwritten regions before the cut)",
+							midDamage, midBytes),
+						Remedy: "re-download the source (mkvgo reindex --resync keeps what the file still holds meanwhile)",
+					})
+				}
 			case bodyDamage > 0 || len(report.RepairedRanges) > 0:
 				d.Findings = append(d.Findings, Finding{
 					Kind: "damaged",
@@ -265,11 +281,6 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	if meta.ResyncedBytes > 0 {
 		// Junk in the head - ahead of the metadata, or between it and the first
 		// Cluster: the head read resynced past it, a strict rewrite will not.
-		// Every remedy naming the strict reindex would be refused on this file
-		// - name the one that works.
-		for i := range d.Findings {
-			d.Findings[i].Remedy = adviseResync(meta, d.Findings[i].Remedy)
-		}
 		d.Findings = append(d.Findings, Finding{
 			Kind: "damaged",
 			Detail: fmt.Sprintf("%d undecodable byte(s) ahead of the first Cluster were skipped to read the head of the file; a reader that does not resynchronize stops there, and a strict rewrite refuses the file",
@@ -278,8 +289,34 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		})
 	}
 
+	// Whatever showed the file damaged - junk in its head, a region the tail
+	// walk passed over, ranges the tolerant walk mapped inside the Segment -
+	// the strict reindex is refused on it. A remedy naming it (for a missing
+	// or stale index, an unsealed size...) would send the operator to a
+	// refusal: name the command that works.
+	damaged := meta.ResyncedBytes > 0 || (d.TrackEnds != nil && d.TrackEnds.SkippedBytes > 0)
+	if d.Damage != nil {
+		for _, r := range d.Damage.DamagedRanges {
+			damaged = damaged || !known || r.StartOffset < declaredEnd
+		}
+		damaged = damaged || len(d.Damage.RepairedRanges) > 0
+	}
+	if damaged {
+		for i := range d.Findings {
+			d.Findings[i].Detail = resyncAdvice(d.Findings[i].Detail)
+			d.Findings[i].Remedy = resyncAdvice(d.Findings[i].Remedy)
+		}
+	}
+
 	d.Healthy = len(d.Findings) == 0
 	return d, nil
+}
+
+// resyncAdvice rewrites advice naming the strict reindex into the tolerant
+// one. Advice must never recommend what will be refused.
+func resyncAdvice(advice string) string {
+	advice = strings.ReplaceAll(advice, "mkvgo reindex", "mkvgo reindex --resync")
+	return strings.ReplaceAll(advice, "--resync --resync", "--resync")
 }
 
 // adviseResync rewrites advice that names the strict reindex for a file the
@@ -290,8 +327,7 @@ func adviseResync(c *mkv.Container, advice string) string {
 	if c.ResyncedBytes == 0 {
 		return advice
 	}
-	advice = strings.ReplaceAll(advice, "mkvgo reindex", "mkvgo reindex --resync")
-	return strings.ReplaceAll(advice, "--resync --resync", "--resync")
+	return resyncAdvice(advice)
 }
 
 // segmentDeclaredEndOf reads the EBML and Segment headers and returns the
