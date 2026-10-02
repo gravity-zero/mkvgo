@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -80,9 +81,7 @@ func CmdRetime(args []string) {
 			Fatal(err.Error())
 		}
 		fmt.Printf("retimed %s (edit list):\n", path)
-		for track, ns := range shift {
-			fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)
-		}
+		fmt.Print(shiftLines(shift))
 		return
 	}
 
@@ -113,9 +112,7 @@ func CmdRetime(args []string) {
 	}
 	printPreexisting()
 	fmt.Printf("retimed %s:\n", path)
-	for track, ns := range shift {
-		fmt.Printf("  track %d shifted by %+d ms\n", track, ns/1_000_000)
-	}
+	fmt.Print(shiftLines(shift))
 	printTrailingJunkDrops(skipped)
 	printDelta()
 }
@@ -138,4 +135,19 @@ func parseShift(s string) (track uint64, ms int64, err error) {
 		return 0, 0, fmt.Errorf("--shift: a zero shift does nothing")
 	}
 	return track, ms, nil
+}
+
+// shiftLines renders the applied shifts one track per line, in track order (a
+// map walk would print the same command's result differently from run to run).
+func shiftLines(shift map[uint64]int64) string {
+	tracks := make([]uint64, 0, len(shift))
+	for track := range shift {
+		tracks = append(tracks, track)
+	}
+	sort.Slice(tracks, func(i, j int) bool { return tracks[i] < tracks[j] })
+	var b strings.Builder
+	for _, track := range tracks {
+		fmt.Fprintf(&b, "  track %d shifted by %+d ms\n", track, shift[track]/1_000_000)
+	}
+	return b.String()
 }

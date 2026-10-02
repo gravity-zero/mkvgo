@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -77,6 +78,40 @@ func TestDiagnose_NoIndex(t *testing.T) {
 	}
 	if !strings.Contains(f.Remedy, "reindex") {
 		t.Errorf("no-index remedy must name reindex: %q", f.Remedy)
+	}
+}
+
+// TestDiagnose_AudioDelayOrder: several late audio tracks are reported in track
+// order on every call, so two scans of the same file compare equal.
+func TestDiagnose_AudioDelayOrder(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2), audioTrack(3), audioTrack(4), audioTrack(5)}
+	sets := make([][]mkv.Block, 0, 4)
+	for i := 0; i < 4; i++ {
+		ts := int64(i * 1000)
+		set := []mkv.Block{{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: []byte{0xAA}}}
+		for n := uint64(2); n <= 5; n++ {
+			set = append(set, mkv.Block{TrackNumber: n, Timecode: ts + 300, Keyframe: true, Data: []byte{0x01}})
+		}
+		sets = append(sets, set)
+	}
+	path := buildMultiClusterMKV(t, dir, "late4.mkv", tracks, sets, 4000)
+
+	for run := 0; run < 20; run++ {
+		d, err := Diagnose(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []uint64
+		for _, f := range d.Findings {
+			if f.Kind == "audio-delay" {
+				got = append(got, f.Track)
+			}
+		}
+		if want := []uint64{2, 3, 4, 5}; !slices.Equal(got, want) {
+			t.Fatalf("run %d: audio-delay findings on tracks %v, want %v", run, got, want)
+		}
 	}
 }
 

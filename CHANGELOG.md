@@ -4,6 +4,16 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`Diagnose` reports `audio-delay` findings in track order.** With several
+  late audio tracks the findings came out in a different order from one call
+  to the next, so two scans of the same file could look different while
+  saying the same thing. `mkvgo retime` prints the shifts it applied in track
+  order for the same reason.
+
 ## [0.36.0] - 2026-10-02
 
 ### Added

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -171,7 +172,15 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		return nil, fmt.Errorf("diagnose: %w", err)
 	}
 	d.AudioDelaysNs = delays
-	for track, ns := range delays {
+	// In track order: a map walk would report the same file's findings in a
+	// different order from one call to the next.
+	late := make([]uint64, 0, len(delays))
+	for track := range delays {
+		late = append(late, track)
+	}
+	sort.Slice(late, func(i, j int) bool { return late[i] < late[j] })
+	for _, track := range late {
+		ns := delays[track]
 		if ns >= audioDelayFindingThresholdNs {
 			d.Findings = append(d.Findings, Finding{
 				Kind:    "audio-delay",
