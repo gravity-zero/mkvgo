@@ -17,10 +17,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - **`Track.FFprobeCodecName()`** - the prober's `codec_name` for a track,
   with the whole track to go by: a `V_MS/VFW/FOURCC` track is named by the
-  FourCC in its CodecPrivate (`msmpeg4v2`, `mpeg4`, `mjpeg`... where the lookup
-  by name could only say `vfw`), a PCM track by its bit depth (`pcm_s24le`),
-  and the CodecIDs carrying a `/` are resolved (`A_MPEG/L3` is `mp3`). What it
-  cannot resolve is returned as the raw CodecID, never as a guess.
+  FourCC in its CodecPrivate (`msmpeg4v2`, `mpeg4`, `h264`... where the lookup
+  by name could only say `vfw`), an `A_MS/ACM` track by its format tag, a
+  `V_QUICKTIME` track by its sample description, a PCM track by its bit depth
+  (`pcm_s24le`), and the CodecIDs carrying a `/` are resolved (`A_MPEG/L3` is
+  `mp3`). What it cannot resolve is returned as the raw CodecID, never as a
+  guess. `probe` shows it (`codec_name`, in JSON and in the text output when
+  it differs from `codec`). The names are checked by `make e2e` on one real
+  file per encoder: each must match what the prober says of the same file.
 - **`Container.ResyncedBytes`** (`resynced_bytes` in JSON, omitted at 0) - how
   many undecodable bytes the reader skipped to resume on the next valid
   element. The read succeeded; the count says the file is padded or damaged
@@ -108,6 +112,13 @@ All notable changes to mkvgo are documented here. The format is based on
   whole-file outputs refuse the file (and leave no partial output); `validate`
   and `analyze` report it with the remedy; the on-demand segment paths behave
   as before. A truncated tail is still tolerated.
+- **A block of a track the file does not declare is dropped.** In a damaged
+  region, bytes that happen to parse as a block name whatever track number
+  they spell (track 87 of a two-track file) and were delivered as content.
+  The block walk now drops them once it knows the declared tracks - from the
+  Tracks element on a walk from the start, from `BlockReader.SetKnownTracks`
+  otherwise - and the first one met is where a damaged region is reported to
+  start, instead of the later point where the garbage stopped parsing.
 - **`track-ends` past damage.** The tail walk stopped at the first element it
   could not read and reported what it had seen: both tracks of that same file
   "ended" at 1 s. It walks past the damage (`BlockReader.SetSkipDamage`),
