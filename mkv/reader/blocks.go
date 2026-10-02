@@ -251,7 +251,15 @@ type BlockReader struct {
 	// the first Cluster: junk ahead of or between the head elements is resynced
 	// past there (see resyncHead). A reader seated at a recorded position never
 	// sets it - an undecodable header there means the position is stale.
-	atHead        bool
+	atHead bool
+	// elemStart is the offset of the element the walk is reading: where a
+	// failure began, and where the search for the media behind it starts.
+	elemStart int64
+	// skipDamage makes Next resume on the next valid Cluster past a damaged
+	// region instead of returning an error (SetSkipDamage); skippedBytes counts
+	// what was passed over.
+	skipDamage    bool
+	skippedBytes  int64
 	progressFn    mkv.ProgressFunc
 	progressTotal int64
 	progressTick  int
@@ -612,7 +620,88 @@ func isSegmentLevelID(id uint32) bool {
 	return false
 }
 
+// ErrDamagedRegion is what a DamageError matches (errors.Is): the walk met an
+// element it cannot read while media continues behind it.
+var ErrDamagedRegion = errors.New("damaged region in the cluster stream")
+
+// DamageError is returned by Next when an element declares more bytes than
+// the file holds while a valid Cluster follows further on: damage INSIDE the
+// file, not a truncated tail. The two used to be indistinguishable - both
+// surfaced as io.ErrUnexpectedEOF - and a caller tolerating a truncated tail
+// then stopped at the damage and delivered the head of the file as if it were
+// the whole of it. A DamageError deliberately does not match
+// io.ErrUnexpectedEOF.
+type DamageError struct {
+	Offset int64 // where the unreadable element starts
+	Resume int64 // the next valid Cluster
+	Cause  error
+}
+
+func (e *DamageError) Error() string {
+	return fmt.Sprintf("damaged region at offset %d: an element there runs past the end of the file while media continues at offset %d - damage inside the file, not a truncated tail; repair it with `mkvgo reindex --resync` (%v)",
+		e.Offset, e.Resume, e.Cause)
+}
+
+func (e *DamageError) Is(target error) bool { return target == ErrDamagedRegion }
+
+// SetSkipDamage makes the walk tolerant of damage inside the file: where Next
+// would return an error although a valid Cluster follows, it resumes on that
+// Cluster instead, and SkippedBytes counts what it passed over. For a
+// MEASUREMENT of the file (where its tracks end), never for a copy of it - a
+// copy that silently loses a region is what the default refuses.
+func (br *BlockReader) SetSkipDamage(on bool) { br.skipDamage = on }
+
+// SkippedBytes is how many bytes of damaged regions a SetSkipDamage walk has
+// passed over so far.
+func (br *BlockReader) SkippedBytes() int64 { return br.skippedBytes }
+
+// Next returns the next block, io.EOF at the clean end of the walk. See
+// DamageError and SetSkipDamage for an unreadable element in mid-file.
 func (br *BlockReader) Next() (mkv.Block, error) {
+	for {
+		b, err := br.next()
+		if err == nil || errors.Is(err, io.EOF) || errors.Is(err, ErrClusterLimit) {
+			return b, err
+		}
+		if !br.skipDamage && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return b, err // a decode error is already its own refusal
+		}
+		resume, found := br.clusterAfter(br.elemStart)
+		if !found {
+			return b, err // nothing behind it: a truncated tail, as reported
+		}
+		if !br.skipDamage {
+			return b, &DamageError{Offset: br.elemStart, Resume: resume, Cause: err}
+		}
+		if br.r.reset(resume) != nil {
+			return b, err
+		}
+		br.skippedBytes += resume - br.elemStart
+		br.inCluster, br.clusterEnd = false, -1
+		br.pending, br.peeked, br.awaitLimit = nil, nil, false
+	}
+}
+
+// clusterAfter looks for a valid Cluster past off (the start of an element the
+// walk could not read) and leaves the source where it found it, so a failed
+// search changes nothing for a reader that is retried later.
+func (br *BlockReader) clusterAfter(off int64) (int64, bool) {
+	if br.raw == nil {
+		return 0, false
+	}
+	cur, err := br.raw.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, false
+	}
+	defer br.raw.Seek(cur, io.SeekStart) //nolint:errcheck // best effort: the caller holds an error already
+	if _, err := br.raw.Seek(off+1, io.SeekStart); err != nil {
+		return 0, false
+	}
+	resume, err := ResyncToCluster(br.raw, br.segEnd)
+	return resume, err == nil && resume > off
+}
+
+func (br *BlockReader) next() (mkv.Block, error) {
 	if len(br.pending) > 0 {
 		b := br.pending[0]
 		br.pending = br.pending[1:]
@@ -648,9 +737,11 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			if br.peeked != nil {
 				h = br.peeked.h
 				hdrStart = br.peeked.start
+				br.elemStart = hdrStart
 				br.peeked = nil
 			} else {
 				hdrStart = br.r.tell()
+				br.elemStart = hdrStart
 				var err error
 				h, _, err = ebml.ReadElementHeader(br.r)
 				if err != nil {
@@ -719,9 +810,11 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if br.peeked != nil {
 			h = br.peeked.h
 			hdrStart = br.peeked.start
+			br.elemStart = hdrStart
 			br.peeked = nil
 		} else {
 			hdrStart = br.r.tell()
+			br.elemStart = hdrStart
 			var err error
 			h, _, err = ebml.ReadElementHeader(br.r)
 			if err != nil {

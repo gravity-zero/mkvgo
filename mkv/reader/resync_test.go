@@ -171,6 +171,92 @@ func TestResyncedBytes(t *testing.T) {
 	}
 }
 
+// TestDamageInsideTheFileIsNotATruncatedTail: an element declaring more bytes
+// than the file holds surfaces as io.ErrUnexpectedEOF - the signature of a
+// truncated tail, which the packaging paths tolerate by stopping there. When a
+// valid Cluster follows it is not the tail at all: taken for one, a remux
+// delivered the first second of a 37 s file and reported success. The walk
+// now says which it is.
+func TestDamageInsideTheFileIsNotATruncatedTail(t *testing.T) {
+	data := livefixture.Build(livefixture.Options{Overrun: true})
+	overrunAt := int64(bytes.Index(data, []byte{0xEC, 0x01, 0x00, 0x00, 0x00, 0x7F}))
+	thirdCluster := int64(bytes.LastIndex(data, []byte{0x1F, 0x43, 0xB6, 0x75}))
+	readable := livefixture.Blocks - livefixture.OverrunLostBlocks
+
+	t.Run("refused by default, and not as an EOF", func(t *testing.T) {
+		br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for {
+			if _, err = br.Next(); err != nil {
+				break
+			}
+			n++
+		}
+		var de *DamageError
+		if !errors.As(err, &de) || !errors.Is(err, ErrDamagedRegion) {
+			t.Fatalf("after %d blocks: %v, want a DamageError", n, err)
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			t.Error("the damage still reads as an end of file")
+		}
+		if de.Offset != overrunAt || de.Resume != thirdCluster {
+			t.Errorf("damage at %d, media resuming at %d; want %d and %d", de.Offset, de.Resume, overrunAt, thirdCluster)
+		}
+		if !strings.Contains(err.Error(), "mkvgo reindex --resync") {
+			t.Errorf("the refusal does not name the repair: %v", err)
+		}
+	})
+
+	t.Run("walked past on request", func(t *testing.T) {
+		br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		br.SetSkipDamage(true)
+		n, _, last := drainBlocks(t, br)
+		if n != readable || last != livefixture.LastBlockMs {
+			t.Errorf("%d blocks up to %d ms, want %d up to %d", n, last, readable, livefixture.LastBlockMs)
+		}
+		if got, want := br.SkippedBytes(), thirdCluster-overrunAt; got != want {
+			t.Errorf("skipped %d bytes, want %d (from the element to the next cluster)", got, want)
+		}
+	})
+
+	t.Run("a real truncated tail stays one", func(t *testing.T) {
+		whole := livefixture.Build(livefixture.Options{})
+		br, err := NewBlockReader(bytes.NewReader(whole[:len(whole)-2]), 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, err = br.Next(); err != nil {
+				break
+			}
+		}
+		if !errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, ErrDamagedRegion) {
+			t.Fatalf("a file cut inside its last block: %v, want io.ErrUnexpectedEOF", err)
+		}
+	})
+
+	t.Run("a forward-only source keeps its error", func(t *testing.T) {
+		_, br, err := ReadStream(context.Background(), io.MultiReader(bytes.NewReader(data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, err = br.Next(); err != nil {
+				break
+			}
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, ErrDamagedRegion) {
+			t.Fatalf("a stream cannot look ahead: %v, want the read error as it is", err)
+		}
+	})
+}
+
 // TestBlockGroupKeyframe: a Block carries no keyframe flag - in a BlockGroup the
 // frame is a keyframe exactly when the group has no ReferenceBlock. The block
 // walk used to report every such frame as a non-keyframe, so a file storing

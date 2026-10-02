@@ -72,7 +72,16 @@ type Options struct {
 	// InfoCRC opens the Info element with a CRC-32 over the rest of its body,
 	// as some muxers write it (test4.mkv's does).
 	InfoCRC bool
+	// Overrun plants, in the middle of the second cluster, an element that
+	// declares 2 GiB: it runs past the end of the file while the third cluster
+	// follows intact. The blocks of the second cluster behind it are out of
+	// reach of a walk that resumes on the next cluster (OverrunLostBlocks).
+	Overrun bool
 }
+
+// OverrunLostBlocks is how many blocks an Overrun fixture hides from a walk
+// that skips to the next cluster: the second half of the second cluster.
+const OverrunLostBlocks = BlocksPerTrack / 2 * Tracks
 
 // JunkByte is the value the junk runs are filled with: as an element ID it
 // announces a 5-byte width, which no reader can decode.
@@ -101,6 +110,9 @@ func Build(o Options) []byte {
 			body.Write(uintElem(0xAB, 0x6666, 2)) // PrevSize
 		}
 		for b := 0; b < BlocksPerTrack; b++ {
+			if o.Overrun && c == 1 && b == BlocksPerTrack/2 {
+				body.Write([]byte{0xEC, 0x01, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF}) // Void, 2 GiB
+			}
 			rel := b * 250
 			for trk := byte(1); trk <= Tracks; trk++ {
 				// The first payload byte doubles as the VP8 frame tag, whose low
