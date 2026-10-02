@@ -275,28 +275,11 @@ func appendCueFromCluster(cues *[]mkv.CuePoint, body []byte, timecodeScale, outO
 // 1-byte flags) and discards the remaining payload bytes.
 // Returns (track, relTC, keyframe).
 func readBlockHeader(r io.Reader, blockSize int64) (track uint64, relTC int16, keyframe bool, err error) {
-	return readBlockHeaderOf(r, blockSize, nil)
-}
-
-// errUndeclaredTrack is readBlockHeaderOf's refusal of a block naming a track
-// outside the set it was given.
-var errUndeclaredTrack = errors.New("block names a track the file does not declare")
-
-// readBlockHeaderOf is readBlockHeader for a walk that knows the file's tracks
-// (tracks non-empty): a block naming any other track is refused BEFORE its
-// payload is consumed. That order is the point - a candidate tested inside a
-// damaged region declares whatever size its bytes spell, and reading 96 MB of
-// "payload" to then reject the block for its track number made the search for
-// one resume point read a file forty times over.
-func readBlockHeaderOf(r io.Reader, blockSize int64, tracks map[uint64]bool) (track uint64, relTC int16, keyframe bool, err error) {
 	trackRaw, n, err := ebml.ReadDataSize(r)
 	if err != nil {
 		return 0, 0, false, err
 	}
 	track = uint64(trackRaw)
-	if len(tracks) > 0 && !tracks[track] {
-		return track, 0, false, errUndeclaredTrack
-	}
 	consumed := int64(n)
 
 	var tcBuf [2]byte
@@ -326,13 +309,6 @@ func readBlockHeaderOf(r io.Reader, blockSize int64, tracks map[uint64]bool) (tr
 // detect whether a ReferenceBlock is present (its presence means non-keyframe).
 // Consumes exactly size bytes from r.
 func scanBlockGroup(r io.Reader, size int64) (track uint64, relTC int16, isKeyframe bool, err error) {
-	return scanBlockGroupOf(r, size, nil)
-}
-
-// scanBlockGroupOf is scanBlockGroup for a walk that knows the file's tracks:
-// a Block naming another one ends the scan at once (errUndeclaredTrack), the
-// rest of the group left unread - see readBlockHeaderOf.
-func scanBlockGroupOf(r io.Reader, size int64, tracks map[uint64]bool) (track uint64, relTC int16, isKeyframe bool, err error) {
 	limit := &io.LimitedReader{R: r, N: size}
 	var foundBlock bool
 	var hasRef bool
@@ -344,10 +320,7 @@ func scanBlockGroupOf(r io.Reader, size int64, tracks map[uint64]bool) (track ui
 		}
 		switch h.ID {
 		case mkv.IDBlock:
-			t, rt, _, e := readBlockHeaderOf(limit, h.Size, tracks)
-			if errors.Is(e, errUndeclaredTrack) {
-				return t, 0, false, e
-			}
+			t, rt, _, e := readBlockHeader(limit, h.Size)
 			if e != nil {
 				// Drain and report error.
 				io.CopyN(io.Discard, limit, limit.N) //nolint:errcheck
@@ -704,6 +677,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 
 	r := bufio.NewReaderSize(raw, reindexBufSize)
 	mw := writer.NewMKVWriter(out)
+	var measure mkv.ReadSeekCloser // second handle on the source, opened for the first unknown-size cluster
 
 	// ── EBML header + Segment open ────────────────────────────────────────────
 	ebmlBytes, err := copyEBMLHeaderVerbatim(r, out, rb)
@@ -879,14 +853,20 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				// body from the bytes, then copy it like any other: the output
 				// states the size the source left open.
 				bodyStart := elemStart + int64(hdrBytes)
-				size, serr := unknownSizeClusterSize(raw, bodyStart, fileSize, segEnd, allTracks)
+				// Measured through a second handle: the copy's own reader
+				// keeps its position and its buffer. Reseating it after
+				// every measure refilled a full window per cluster - many
+				// times the cluster, on a recording of small ones.
+				if measure == nil {
+					if measure, err = fs.DoOpen(srcPath); err != nil {
+						return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster: %w", err)
+					}
+					defer measure.Close()
+				}
+				size, serr := unknownSizeClusterSize(measure, bodyStart, fileSize, segEnd, allTracks)
 				if serr != nil {
 					return nil, 0, nil, serr
 				}
-				if _, serr := raw.Seek(bodyStart, io.SeekStart); serr != nil {
-					return nil, 0, nil, fmt.Errorf("reindex: unknown-size cluster: %w", serr)
-				}
-				r.Reset(raw)
 				h.Size = size
 			}
 			if h.Size > maxReindexClusterSize {

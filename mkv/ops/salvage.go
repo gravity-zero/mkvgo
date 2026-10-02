@@ -226,7 +226,13 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		prevClusterSize: -1, // no cluster written yet
 		rb:              rb,
 		seal:            seal,
+		openSource:      func() (mkv.ReadSeekCloser, error) { return fs.DoOpen(srcPath) },
 	}
+	defer func() {
+		if w.measure != nil {
+			w.measure.Close()
+		}
+	}()
 	if err := w.walk(ctx); err != nil {
 		return nil, nil, 0, err
 	}
@@ -264,6 +270,10 @@ type salvageWalker struct {
 	// seal, when non-nil, receives where the Duration reserved in an Info
 	// that declares none was written (see infoReservingDuration).
 	seal *durationSeal
+	// openSource opens another handle on the source; measure is the one kept
+	// for measuring unknown-size clusters, opened on the first of them.
+	openSource func() (mkv.ReadSeekCloser, error)
+	measure    mkv.ReadSeekCloser
 }
 
 // walk drives the top-level element loop. Every handler returns
@@ -526,15 +536,20 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		// when its children chain cleanly to the element that ends it, it is
 		// copied like any other - no repair to report. Only a chain that
 		// breaks goes on to the surgical recovery below.
-		size, serr := unknownSizeClusterSize(w.raw, bodyStart, w.fileSize, w.declaredEnd, w.allTracks)
-		if serr == nil {
-			h.Size = size
+		// Measured through a second handle, so the copy's reader keeps its
+		// position and its buffer (see reindexCopy).
+		if w.measure == nil && w.openSource != nil {
+			m, err := w.openSource()
+			if err != nil {
+				return false, fmt.Errorf("salvage: open src: %w", err)
+			}
+			w.measure = m
 		}
-		// The measuring walk moved the source: reseat it on the body.
-		if _, err := w.raw.Seek(bodyStart, io.SeekStart); err != nil {
-			return false, fmt.Errorf("salvage: seek cluster body: %w", err)
+		if w.measure != nil {
+			if size, serr := unknownSizeClusterSize(w.measure, bodyStart, w.fileSize, w.declaredEnd, w.allTracks); serr == nil {
+				h.Size = size
+			}
 		}
-		w.r = bufio.NewReaderSize(w.raw, reindexBufSize)
 	}
 	if h.Size < 0 || h.Size > maxReindexClusterSize {
 		// Implausible declared size: re-derive the truth from the bytes
@@ -756,7 +771,7 @@ func (w *salvageWalker) surgical(elemStart, bodyStart int64) (recovered, ended b
 	if w.scale > 0 {
 		toleranceTC = surgicalContinuityToleranceNs / w.scale
 	}
-	outcome, serr := surgicalScanCluster(w.raw, bodyStart, w.fileSize, w.allTracks, toleranceTC)
+	outcome, serr := surgicalScanCluster(w.raw, bodyStart, w.fileSize, w.allTracks, w.videoTracks, toleranceTC)
 	if serr != nil || outcome == nil || !anyRunHasBlocks(outcome.runs) {
 		// Unreadable timestamp, scan failure, or nothing solid to keep.
 		// The caller restores its own stream position.

@@ -3,6 +3,7 @@ package ops
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -86,6 +87,24 @@ type surgicalRun struct {
 	firstRelTC, lastRelTC int64
 	hasBlocks             bool
 	children              int // child elements walked, for the solidity gate
+	// firstByTrack/lastByTrack are each track's first and last block timecode
+	// in the run: a track's timecodes do not go back within a cluster, so a
+	// run where one does - against what the cluster held before the gap - is
+	// another cluster's.
+	firstByTrack, lastByTrack map[uint64]int64
+}
+
+// note records one block of track at relTC.
+func (r *surgicalRun) note(track uint64, relTC int64) {
+	if !r.hasBlocks {
+		r.firstRelTC, r.hasBlocks = relTC, true
+		r.firstByTrack, r.lastByTrack = map[uint64]int64{}, map[uint64]int64{}
+	}
+	r.lastRelTC = relTC
+	if _, seen := r.firstByTrack[track]; !seen {
+		r.firstByTrack[track] = relTC
+	}
+	r.lastByTrack[track] = relTC
 }
 
 // surgicalOutcome maps one damaged cluster region.
@@ -98,16 +117,143 @@ type surgicalOutcome struct {
 	tsValid bool
 }
 
+// blockGroupChildIDs are the elements a BlockGroup can hold beside its Block.
+// All of them are small: a "child" of another ID, or of an implausible size,
+// means the bytes are not a BlockGroup.
+var blockGroupChildIDs = map[uint32]bool{
+	uint32(mkv.IDBlockDuration):  true, // 0x9B
+	uint32(mkv.IDReferenceBlock): true, // 0xFB
+	uint32(mkv.IDVoid):           true, // 0xEC
+	0xBF:                         true, // CRC-32
+	0xFA:                         true, // ReferencePriority
+	0xA4:                         true, // CodecState
+	0x8E:                         true, // Slices
+	0x75A1:                       true, // BlockAdditions
+	0x75A2:                       true, // DiscardPadding
+}
+
+// surgicalMaxSideChildSize bounds a BlockGroup child that is not the Block
+// (BlockAdditions is the largest in practice, a few KB of dynamic metadata).
+const surgicalMaxSideChildSize = 1 << 20
+
+// chainReadThrough is the longest hop a chain walk reads through rather than
+// seeks over; chainCandidateBuf is the buffer of a walk started on a candidate
+// (most die on their first header: a large buffer would be filled for nothing).
+const (
+	chainReadThrough  = 64 << 10
+	chainCandidateBuf = 4 << 10
+	// chainWalkBuf is the buffer of an ordinary chain walk. Small on purpose:
+	// the walk only reads headers, and whatever the buffer holds past the end
+	// of a cluster is read again by the copy that follows.
+	chainWalkBuf = 16 << 10
+)
+
+// chainWalker reads element headers through a buffer and steps over what
+// follows them WITHOUT reading it: a chain walk judges structure, never
+// payload. That is what keeps a candidate test cheap inside a damaged region,
+// where every byte that looks like a block start gets tested and a "block"
+// declares whatever size its bytes spell - read through instead of stepped
+// over, the search for one resume point read a real file forty times.
+type chainWalker struct {
+	raw io.ReadSeeker
+	r   *bufio.Reader
+	pos int64 // absolute offset of the next byte r returns
+}
+
+// header reads one element header.
+func (c *chainWalker) header() (ebml.ElementHeader, bool) {
+	h, n, err := ebml.ReadElementHeader(c.r)
+	c.pos += int64(n)
+	return h, err == nil
+}
+
+// to steps to the absolute offset target (never backwards).
+func (c *chainWalker) to(target int64) bool {
+	d := target - c.pos
+	switch {
+	case d < 0:
+		return false
+	case d <= chainReadThrough:
+		// A short hop: reading through it keeps the walk sequential. Seeking
+		// over every ordinary block would refill the buffer each time and
+		// read more than the bytes it steps over.
+		if _, err := c.r.Discard(int(d)); err != nil {
+			return false
+		}
+	default:
+		if _, err := c.raw.Seek(target, io.SeekStart); err != nil {
+			return false
+		}
+		c.r.Reset(c.raw)
+	}
+	c.pos = target
+	return true
+}
+
+// blockHead reads the head of a (Simple)Block ending at end - track number and
+// relative timecode - checks the track against tracks (when non-empty), and
+// steps over the rest.
+func (c *chainWalker) blockHead(end int64, tracks map[uint64]bool) (track uint64, relTC int16, ok bool) {
+	trackRaw, n, err := ebml.ReadDataSize(c.r)
+	c.pos += int64(n)
+	if err != nil || trackRaw < 0 || (len(tracks) > 0 && !tracks[uint64(trackRaw)]) {
+		return 0, 0, false
+	}
+	var head [3]byte // relative timecode (2) + flags (1)
+	if _, err := io.ReadFull(c.r, head[:]); err != nil {
+		return 0, 0, false
+	}
+	c.pos += 3
+	if c.pos > end {
+		return 0, 0, false
+	}
+	return uint64(trackRaw), int16(binary.BigEndian.Uint16(head[:2])), c.to(end)
+}
+
+// blockGroup walks the children of a BlockGroup ending at end: exactly the
+// elements a BlockGroup holds, each inside it, one of them a Block.
+func (c *chainWalker) blockGroup(end int64, tracks map[uint64]bool) (track uint64, relTC int16, ok bool) {
+	found := false
+	for c.pos < end {
+		h, hok := c.header()
+		childEnd := c.pos + h.Size
+		if !hok || h.Size < 0 || childEnd > end {
+			return 0, 0, false
+		}
+		switch {
+		case h.ID == mkv.IDBlock:
+			if track, relTC, ok = c.blockHead(childEnd, tracks); !ok {
+				return 0, 0, false
+			}
+			found = true
+		case blockGroupChildIDs[uint32(h.ID)] && h.Size <= surgicalMaxSideChildSize:
+			if !c.to(childEnd) {
+				return 0, 0, false
+			}
+		default:
+			return 0, 0, false
+		}
+	}
+	return track, relTC, found && c.pos == end
+}
+
 // chainWalkChildren walks cluster children from pos, accepting only known
-// child IDs with in-bounds sizes and, for blocks, a track number from tracks
-// (when non-empty). It stops at the first validated top-level element, EOF,
-// a structural break, or the run cap.
+// child IDs with plausible, in-bounds sizes and, for blocks, a track number
+// from tracks (when non-empty). It reads headers only (see chainWalker). It
+// stops at the first validated top-level element, EOF, a structural break, or
+// the run cap.
 func chainWalkChildren(raw io.ReadSeeker, pos, fileSize int64, tracks map[uint64]bool) (surgicalRun, surgicalStop, error) {
+	return chainWalkChildrenBuf(raw, pos, fileSize, tracks, chainWalkBuf)
+}
+
+// chainWalkChildrenBuf is chainWalkChildren with the read buffer size chosen
+// by the caller.
+func chainWalkChildrenBuf(raw io.ReadSeeker, pos, fileSize int64, tracks map[uint64]bool, bufSize int) (surgicalRun, surgicalStop, error) {
 	run := surgicalRun{start: pos, end: pos, firstRelTC: -1 << 62, lastRelTC: -1 << 62}
 	if _, err := raw.Seek(pos, io.SeekStart); err != nil {
 		return run, surgicalStopBreak, err
 	}
-	r := bufio.NewReaderSize(raw, reindexBufSize)
+	c := &chainWalker{raw: raw, r: bufio.NewReaderSize(raw, bufSize), pos: pos}
 	for {
 		if run.end >= fileSize {
 			return run, surgicalStopEOF, nil
@@ -115,8 +261,8 @@ func chainWalkChildren(raw io.ReadSeeker, pos, fileSize int64, tracks map[uint64
 		if run.end-run.start >= surgicalRunCap {
 			return run, surgicalStopSplit, nil
 		}
-		h, n, err := ebml.ReadElementHeader(r)
-		if err != nil {
+		h, ok := c.header()
+		if !ok {
 			if run.end >= fileSize {
 				return run, surgicalStopEOF, nil
 			}
@@ -128,39 +274,34 @@ func chainWalkChildren(raw io.ReadSeeker, pos, fileSize int64, tracks map[uint64
 			}
 			return run, surgicalStopBreak, nil
 		}
-		if !surgicalChildIDs[uint32(h.ID)] || h.Size < 0 || run.end+int64(n)+h.Size > fileSize {
+		end := c.pos + h.Size
+		if !surgicalChildIDs[uint32(h.ID)] || h.Size < 0 || end > fileSize {
 			return run, surgicalStopBreak, nil
 		}
-		if (h.ID == mkv.IDSimpleBlock || h.ID == mkv.IDBlockGroup) && h.Size > surgicalMaxBlockSize {
-			return run, surgicalStopBreak, nil // no reader accepts a block that large: not a block
+		isBlock := h.ID == mkv.IDSimpleBlock || h.ID == mkv.IDBlockGroup
+		switch {
+		case h.Size > surgicalMaxBlockSize:
+			return run, surgicalStopBreak, nil // no reader accepts an element that large here
+		case (h.ID == mkv.IDTimestamp || h.ID == 0xA7 || h.ID == 0xAB || h.ID == 0xBF) && h.Size > 8:
+			return run, surgicalStopBreak, nil // Timestamp, Position, PrevSize, CRC-32: a few bytes each
 		}
+		var track uint64
+		var relTC int16
 		switch h.ID {
 		case mkv.IDSimpleBlock:
-			track, relTC, _, berr := readBlockHeaderOf(r, h.Size, tracks)
-			if berr != nil || (len(tracks) > 0 && !tracks[track]) {
-				return run, surgicalStopBreak, nil
-			}
-			if !run.hasBlocks {
-				run.firstRelTC = int64(relTC)
-				run.hasBlocks = true
-			}
-			run.lastRelTC = int64(relTC)
+			track, relTC, ok = c.blockHead(end, tracks)
 		case mkv.IDBlockGroup:
-			track, relTC, _, berr := scanBlockGroupOf(r, h.Size, tracks)
-			if berr != nil || (len(tracks) > 0 && !tracks[track]) {
-				return run, surgicalStopBreak, nil
-			}
-			if !run.hasBlocks {
-				run.firstRelTC = int64(relTC)
-				run.hasBlocks = true
-			}
-			run.lastRelTC = int64(relTC)
+			track, relTC, ok = c.blockGroup(end, tracks)
 		default:
-			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-				return run, surgicalStopBreak, nil
-			}
+			ok = c.to(end)
 		}
-		run.end += int64(n) + h.Size
+		if !ok {
+			return run, surgicalStopBreak, nil
+		}
+		if isBlock {
+			run.note(track, int64(relTC))
+		}
+		run.end = end
 		run.children++
 	}
 }
@@ -206,14 +347,24 @@ func validTopLevelAt(raw io.ReadSeeker, off, fileSize int64) bool {
 // gap, and attached to this one they would be timed against the wrong base
 // (measured on a real download with missing pieces: audio stepping back half
 // a second after every hole).
-func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint64]bool, prevLastRelTC int64, toleranceTC int64, gapStart int64, rate float64) (kind surgicalStop, off int64, err error) {
+//
+// seen is each track's last timecode in the cluster before the gap and video
+// the video tracks: a third gate. Within a cluster a track's timecodes do not
+// go back, bar the few frames a video reorders (toleranceTC). A run where an
+// audio or subtitle track restarts earlier than it left off is another
+// cluster's, however short the gap - a lost Cluster header is 16 bytes.
+func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint64]bool, prevLastRelTC int64, toleranceTC int64, gapStart int64, rate float64, seen map[uint64]int64, video map[uint64]bool) (kind surgicalStop, off int64, err error) {
 	limit := from + salvageResyncCap
 	if limit > fileSize {
 		limit = fileSize
 	}
 	const window = 64 << 10
 	buf := make([]byte, window)
+	skipUntil := int64(0) // candidates before it belong to a run already refused
 	for base := from; base < limit; base += window {
+		if base+window <= skipUntil {
+			continue
+		}
 		if _, serr := raw.Seek(base, io.SeekStart); serr != nil {
 			return 0, -1, serr
 		}
@@ -228,13 +379,22 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 		for i := int64(0); i < end; i++ {
 			b := buf[i]
 			cand := base + i
+			if cand < skipUntil {
+				continue
+			}
 			switch {
 			case b == 0x1F && i+4 <= end && bytes.Equal(buf[i:i+4], []byte{0x1F, 0x43, 0xB6, 0x75}):
 				if validTopLevelAt(raw, cand, fileSize) {
 					return surgicalStopAnchor, cand, nil
 				}
 			case b == 0xA3 || b == 0xA0:
-				run, stop, perr := chainWalkChildren(raw, cand, fileSize, tracks)
+				// Most candidates are payload bytes that happen to equal a
+				// block ID: judge them on the bytes already in memory, and
+				// read the file only for the few that hold up.
+				if plausible, decided := blockStartPlausible(buf[i:n], fileSize-cand, tracks); decided && !plausible {
+					continue
+				}
+				run, stop, perr := chainWalkChildrenBuf(raw, cand, fileSize, tracks, chainCandidateBuf)
 				if perr != nil {
 					return 0, -1, perr
 				}
@@ -243,14 +403,23 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 				if !solid {
 					continue
 				}
+				// A solid run the time gates refuse is refused whole: its
+				// later blocks belong to the same chain and would each be
+				// walked to the same verdict.
 				if prevLastRelTC > (-1<<62) && run.firstRelTC < prevLastRelTC-toleranceTC {
+					skipUntil = run.end
 					continue // restarts too far back in time: not this cluster's blocks
 				}
 				if prevLastRelTC > (-1<<62) && rate > 0 && toleranceTC > 0 {
 					expected := float64(cand-gapStart) / rate // the time a gap this long holds
 					if expected > float64(toleranceTC) && float64(run.firstRelTC-prevLastRelTC) < expected/4 {
+						skipUntil = run.end
 						continue // far too little time for the bytes skipped: a later cluster's blocks
 					}
+				}
+				if stepsBack(run.firstByTrack, seen, video, toleranceTC) {
+					skipUntil = run.end
+					continue // a track restarts before where it left off: a later cluster's blocks
 				}
 				return surgicalStopBreak, cand, nil
 			}
@@ -259,13 +428,70 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 	return 0, -1, nil
 }
 
+// stepsBack reports whether any track of a candidate run starts before the
+// timecode that track had reached (seen). A video track may step back by tol,
+// the reach of frame reordering; any other track, not at all.
+func stepsBack(first, seen map[uint64]int64, video map[uint64]bool, tol int64) bool {
+	for track, tc := range first {
+		last, ok := seen[track]
+		if !ok {
+			continue
+		}
+		if video[track] {
+			last -= tol
+		}
+		if tc < last {
+			return true
+		}
+	}
+	return false
+}
+
+// blockStartPlausible judges, from the bytes b at a candidate offset alone,
+// whether a SimpleBlock or BlockGroup can start there: a size no block has, a
+// size running past the file (room is what is left of it), a track the file
+// does not declare, a BlockGroup opening on something a BlockGroup cannot hold
+// - all are refused without touching the file. decided is false when b is too
+// short to tell; the caller then walks the chain as before.
+func blockStartPlausible(b []byte, room int64, tracks map[uint64]bool) (plausible, decided bool) {
+	r := bytes.NewReader(b)
+	h, n, err := ebml.ReadElementHeader(r)
+	if err != nil {
+		return false, len(b) >= 12 // a header is at most 12 bytes: with them all in hand it is simply invalid
+	}
+	if h.Size <= 0 || h.Size > surgicalMaxBlockSize || int64(n)+h.Size > room {
+		return false, true
+	}
+	declared := func() (bool, bool) {
+		track, _, err := ebml.ReadDataSize(r)
+		if err != nil {
+			return false, r.Len() >= 8
+		}
+		return track > 0 && (len(tracks) == 0 || tracks[uint64(track)]), true
+	}
+	if h.ID == mkv.IDSimpleBlock {
+		return declared()
+	}
+	child, _, err := ebml.ReadElementHeader(r)
+	if err != nil {
+		return false, r.Len() >= 12
+	}
+	switch {
+	case child.Size < 0 || child.Size > h.Size:
+		return false, true
+	case child.ID == mkv.IDBlock:
+		return declared()
+	}
+	return blockGroupChildIDs[uint32(child.ID)] && child.Size <= surgicalMaxSideChildSize, true
+}
+
 // surgicalScanCluster maps the region of one damaged cluster starting at
 // bodyStart (right after the cluster's ID+size header): valid child runs,
 // the gaps between them, and the top-level anchor where the main walk should
 // resume. It requires the cluster's own Timestamp to open the first run -
 // without it the continuation runs could not be timed and the caller must
 // fall back to dropping the region.
-func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks map[uint64]bool, toleranceTC int64) (*surgicalOutcome, error) {
+func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks, video map[uint64]bool, toleranceTC int64) (*surgicalOutcome, error) {
 	out := &surgicalOutcome{end: bodyStart}
 
 	// The first run must open with the Timestamp child (possibly preceded by
@@ -282,6 +508,7 @@ func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks ma
 	// timecode and the bytes of its valid runs - for the byte rate the resume
 	// gate checks a gap against.
 	firstTC, haveFirst, kept := int64(0), false, int64(0)
+	seen := map[uint64]int64{} // each track's last timecode in the cluster so far
 	for {
 		run, stop, err := chainWalkChildren(raw, pos, fileSize, tracks)
 		if err != nil {
@@ -294,6 +521,9 @@ func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks ma
 				prevLast = run.lastRelTC
 				if !haveFirst {
 					firstTC, haveFirst = run.firstRelTC, true
+				}
+				for track, tc := range run.lastByTrack {
+					seen[track] = tc
 				}
 			}
 		}
@@ -321,7 +551,7 @@ func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks ma
 		if haveFirst && prevLast > firstTC {
 			rate = float64(kept) / float64(prevLast-firstTC)
 		}
-		kind, cand, err := surgicalCandidate(raw, max(huntFrom, run.end+1), fileSize, tracks, prevLast, toleranceTC, run.end, rate)
+		kind, cand, err := surgicalCandidate(raw, max(huntFrom, run.end+1), fileSize, tracks, prevLast, toleranceTC, run.end, rate, seen, video)
 		if err != nil {
 			return nil, err
 		}

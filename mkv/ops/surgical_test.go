@@ -136,7 +136,7 @@ func FuzzSurgicalScanCluster(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		raw := bytes.NewReader(data)
-		out, err := surgicalScanCluster(raw, 0, int64(len(data)), nil, 1000)
+		out, err := surgicalScanCluster(raw, 0, int64(len(data)), nil, nil, 1000)
 		if err != nil || out == nil {
 			return
 		}

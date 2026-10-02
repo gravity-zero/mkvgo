@@ -673,3 +673,93 @@ func TestTrackEndsBehindHeadJunk(t *testing.T) {
 		}
 	}
 }
+
+// TestBlockStartPlausible: the in-memory judgement a candidate block start
+// gets before the file is touched for it. On a real damaged file almost every
+// candidate is a payload byte that happens to equal a block ID; walking each
+// one from disk read the file eight times over.
+func TestBlockStartPlausible(t *testing.T) {
+	tracks := map[uint64]bool{1: true, 2: true}
+	pad := make([]byte, 16)
+	for name, tc := range map[string]struct {
+		b                  []byte
+		room               int64
+		plausible, decided bool
+	}{
+		"SimpleBlock of a declared track":   {append([]byte{0xA3, 0x87, 0x81, 0, 0, 0x80}, pad...), 1 << 20, true, true},
+		"SimpleBlock of an undeclared one":  {append([]byte{0xA3, 0x87, 0x99, 0, 0, 0x80}, pad...), 1 << 20, false, true},
+		"SimpleBlock larger than any block": {append([]byte{0xA3, 0x08, 0x40, 0x00, 0x01, 0x81}, pad...), 1 << 40, false, true},
+		"SimpleBlock running past the file": {append([]byte{0xA3, 0x87, 0x81, 0, 0, 0x80}, pad...), 4, false, true},
+		"BlockGroup opening on its Block":   {append([]byte{0xA0, 0x8A, 0xA1, 0x86, 0x82, 0, 0, 0}, pad...), 1 << 20, true, true},
+		"BlockGroup, undeclared track":      {append([]byte{0xA0, 0x8A, 0xA1, 0x86, 0x99, 0, 0, 0}, pad...), 1 << 20, false, true},
+		"BlockGroup opening on garbage":     {append([]byte{0xA0, 0x8A, 0x77, 0x86, 0x82, 0, 0, 0}, pad...), 1 << 20, false, true},
+		"BlockGroup opening on a duration":  {append([]byte{0xA0, 0x8A, 0x9B, 0x81, 0x28, 0xA1, 0x84, 0x81}, pad...), 1 << 20, true, true},
+		"too few bytes to tell":             {[]byte{0xA3}, 1 << 20, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plausible, decided := blockStartPlausible(tc.b, tc.room, tracks)
+			if plausible != tc.plausible || decided != tc.decided {
+				t.Errorf("plausible=%v decided=%v, want %v %v", plausible, decided, tc.plausible, tc.decided)
+			}
+		})
+	}
+}
+
+// TestTolerantWalkReadsAHoledFileOnce: mapping the damage of a file with a
+// lost region is one pass over it. It read a real 2.7 GiB download with
+// missing pieces eight to forty times over (21 to 100 GiB, up to 499 s); the
+// candidates of a resume point are now judged in memory, and a run the time
+// gates refuse is refused whole.
+func TestTolerantWalkReadsAHoledFileOnce(t *testing.T) {
+	// Clusters with the weight of real ones (4 KiB blocks), so a re-read of
+	// the damaged region shows: 30 of them, then 10 whose header and
+	// Timestamp were lost to junk - their blocks remain, headerless - then
+	// 30 more.
+	one := livefixture.Build(livefixture.Options{PayloadBytes: 4096})
+	cluster := []byte{0x1F, 0x43, 0xB6, 0x75}
+	head := one[:bytes.Index(one, cluster)]
+	body := one[bytes.Index(one, cluster):]
+	lost := append([]byte(nil), body...)
+	for j := 0; j+16 <= len(lost); j++ {
+		if bytes.Equal(lost[j:j+4], cluster) {
+			copy(lost[j:j+16], bytes.Repeat([]byte{livefixture.JunkByte}, 16))
+		}
+	}
+	data := append([]byte(nil), head...)
+	for i := 0; i < 10; i++ {
+		data = append(data, body...)
+	}
+	holeAt := len(data)
+	for i := 0; i < 4; i++ {
+		data = append(data, lost...)
+	}
+	holeEnd := len(data)
+	for i := 0; i < 10; i++ {
+		data = append(data, body...)
+	}
+	path := filepath.Join(t.TempDir(), "holed.mkv")
+	writeAll(t, path, data)
+
+	var read int64
+	fs := &mkv.FS{
+		Open: func(p string) (mkv.ReadSeekCloser, error) {
+			f, err := os.Open(p)
+			if err != nil {
+				return nil, err
+			}
+			return countingFile{f, &read}, nil
+		},
+	}
+	report, err := MapDamage(context.Background(), path, mkv.Options{FS: fs})
+	if err != nil {
+		t.Fatalf("MapDamage: %v", err)
+	}
+	if report.BytesSkipped < int64(holeEnd-holeAt)/2 {
+		t.Errorf("skipped %d bytes, want most of the %d-byte region of headerless clusters", report.BytesSkipped, holeEnd-holeAt)
+	}
+	// The head-only reads and the walk itself: a small multiple of the file,
+	// never the tens of passes a per-candidate file read costs.
+	if limit := int64(len(data)) * 4; read > limit {
+		t.Errorf("read %d bytes to map a %d-byte file (more than %d): the damaged region is being re-read", read, len(data), limit)
+	}
+}

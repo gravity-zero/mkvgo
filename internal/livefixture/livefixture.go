@@ -81,6 +81,9 @@ type Options struct {
 	// element when both are set), a block naming StrayTrack - a track the file
 	// does not declare: bytes of a damaged region that happen to parse.
 	Stray bool
+	// PayloadBytes pads every block's payload to this size (0: the minimal 3
+	// bytes), for a fixture whose clusters have the weight of real ones.
+	PayloadBytes int
 }
 
 // StrayTrack is the undeclared track number a Stray block names.
@@ -132,6 +135,10 @@ func Build(o Options) []byte {
 				payload := []byte{0x00, byte(c<<4 | b), 0xAB}
 				if !keyframe {
 					payload[0] = 0x01
+				}
+				if o.PayloadBytes > len(payload) {
+					// 0x55 filler: no byte of it reads as an element ID.
+					payload = append(payload, bytes.Repeat([]byte{0x55}, o.PayloadBytes-len(payload))...)
 				}
 				header := []byte{0x80 | trk, byte(rel >> 8), byte(rel)}
 				var lacing byte
