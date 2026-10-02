@@ -158,6 +158,35 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 	}
 }
 
+// clusterBodyParses checks that every child of a cluster body decodes and fits
+// inside it, bodyStart being the body's absolute offset for the message. The
+// strict copy carries a cluster's bytes verbatim, so a body that does not
+// parse would be carried verbatim too: damage copied into an output declared
+// verified, with no cue for that cluster (the scan deriving cues stops where
+// the parse does) and the same unreadable element waiting for every reader.
+// An unknown child ID is fine - EBML lets a reader skip what it does not know
+// as long as the size is there - and a Void is a child like any other.
+func clusterBodyParses(body []byte, bodyStart int64) error {
+	r := bytes.NewReader(body)
+	for r.Len() > 0 {
+		at := bodyStart + int64(len(body)-r.Len())
+		h, _, err := ebml.ReadElementHeader(r)
+		if err != nil {
+			return fmt.Errorf("element header at %d does not decode", at)
+		}
+		if h.Size < 0 {
+			return fmt.Errorf("element 0x%X at %d declares no size", h.ID, at)
+		}
+		if h.Size > int64(r.Len()) {
+			return fmt.Errorf("element 0x%X at %d overruns the cluster", h.ID, at)
+		}
+		if _, err := r.Seek(h.Size, io.SeekCurrent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // appendCueFromCluster scans the raw bytes of a cluster body to find the first
 // keyframe and adds a CuePoint to cues. outOff is the Segment-data-relative byte
 // offset of this cluster's element header (to store in CuePoint.ClusterPos).
@@ -879,6 +908,9 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 			body := clusterBuf[:h.Size]
 			if _, err := io.ReadFull(r, body); err != nil {
 				return nil, 0, nil, fmt.Errorf("reindex: read cluster body: %w", err)
+			}
+			if cause := clusterBodyParses(body, elemStart+int64(hdrBytes)); cause != nil {
+				return nil, 0, nil, fmt.Errorf("reindex: cluster at %d: %w (a corrupted region can be skipped with Options.Resync / --resync): %w", elemStart, cause, ErrCorruptSource)
 			}
 			consumed += int64(hdrBytes) + h.Size
 

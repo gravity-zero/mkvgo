@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -493,6 +494,18 @@ func NewProgressBar() matroska.ProgressFunc {
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
 		fmt.Fprintf(os.Stderr, "\r  [%s] %5.1f%% %s/%s", bar, pct, FormatBytes(processed), FormatBytes(total))
 	}
+}
+
+// writeFileFrom runs write against a buffer and stores the result at path only
+// once it has succeeded: a refused request neither leaves an empty file under
+// the output name nor empties one already there. For small text outputs only
+// (subtitles) - the whole result is held in memory.
+func writeFileFrom(path string, write func(io.Writer) error) error {
+	var buf bytes.Buffer
+	if err := write(&buf); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 func ClearProgress() {

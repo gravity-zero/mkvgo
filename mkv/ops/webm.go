@@ -52,6 +52,7 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 	if err != nil {
 		return err
 	}
+	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
 	defer closeWithErr(dst, &err)
 
 	mw := writer.NewMKVWriter(dst)

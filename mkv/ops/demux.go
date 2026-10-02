@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -26,15 +27,22 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		return err
 	}
 
-	writers, closers, err := openOutputFiles(wanted, opts.OutputDir, fs)
+	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, fs)
 	if err != nil {
 		return err
 	}
+	// A demux that fails leaves no truncated stream under its output names
+	// (runs after the closes below).
+	defer func() {
+		if err != nil {
+			removeOutputs(fs, outputs)
+		}
+	}()
 	defer func() {
 		// A custom FS (S3/network) may finalise the write on Close: dropping
 		// that error would report success over N outputs that never landed.
-		for _, cl := range closers {
-			closeWithErr(cl, &err)
+		for _, o := range outputs {
+			closeWithErr(o.file, &err)
 		}
 	}()
 
@@ -77,8 +85,8 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 	}
 	// Flush buffered writers so a final write error (e.g. disk full) is surfaced
 	// rather than swallowed by the deferred Close.
-	for id, w := range writers {
-		if err := w.Flush(); err != nil {
+	for _, id := range sortedTracks(writers) {
+		if err := writers[id].Flush(); err != nil {
 			return fmt.Errorf("flush track %d: %w", id, err)
 		}
 	}
@@ -105,28 +113,55 @@ func buildTrackSet(c *mkv.Container, trackIDs []uint64) map[uint64]mkv.Track {
 	return m
 }
 
-func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[uint64]*bufio.Writer, []io.Closer, error) {
+// demuxOutput is one track file a demux created.
+type demuxOutput struct {
+	path string
+	file io.Closer
+}
+
+// openOutputFiles creates one output per track, in track order. On a failure
+// it closes and removes the files it had already created.
+func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
-	var closers []io.Closer
-	for id, t := range tracks {
-		ext := sanitizeCodec(t.Codec)
-		name := fmt.Sprintf("%d.%s", id, ext)
+	outputs := make([]demuxOutput, 0, len(tracks))
+	abandon := func(err error) (map[uint64]*bufio.Writer, []demuxOutput, error) {
+		for _, o := range outputs {
+			o.file.Close()
+		}
+		removeOutputs(fs, outputs)
+		return nil, nil, err
+	}
+	for _, id := range sortedTracks(tracks) {
+		name := fmt.Sprintf("%d.%s", id, sanitizeCodec(demuxCodecName(tracks[id])))
 		path, err := safePath(dir, name)
 		if err != nil {
-			for _, cl := range closers {
-				cl.Close()
-			}
-			return nil, nil, err
+			return abandon(err)
 		}
 		f, err := fs.DoCreate(path)
 		if err != nil {
-			for _, cl := range closers {
-				cl.Close()
-			}
-			return nil, nil, err
+			return abandon(err)
 		}
 		writers[id] = bufio.NewWriterSize(f, 64<<10) // batch block writes
-		closers = append(closers, f)
+		outputs = append(outputs, demuxOutput{path: path, file: f})
 	}
-	return writers, closers, nil
+	return writers, outputs, nil
+}
+
+// removeOutputs removes the track files of a demux that returned an error.
+func removeOutputs(fs *mkv.FS, outputs []demuxOutput) {
+	for _, o := range outputs {
+		_ = fs.DoRemove(o.path)
+	}
+}
+
+// demuxCodecName is the codec an output file is named after: mkvgo's short
+// name when the track has one, otherwise the codec its CodecID resolves to
+// (theora for V_THEORA), and the CodecID itself only when nothing resolves it.
+func demuxCodecName(t mkv.Track) string {
+	for _, prefix := range []string{"V_", "A_", "S_"} {
+		if strings.HasPrefix(t.Codec, prefix) {
+			return t.FFprobeCodecName()
+		}
+	}
+	return t.Codec
 }

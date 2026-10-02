@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -73,12 +74,9 @@ func CmdToVTT(args []string) {
 	src := rest[0]
 	GuardOverwrite(outPath)
 
-	out, err := os.Create(outPath)
-	if err != nil {
-		Fatal(err.Error())
-	}
-	defer out.Close()
-	if err := matroska.SubtitleFileToWebVTT(src, out); err != nil {
+	if err := writeFileFrom(outPath, func(out io.Writer) error {
+		return matroska.SubtitleFileToWebVTT(src, out)
+	}); err != nil {
 		Fatal(err.Error())
 	}
 	fmt.Printf("converted %s → %s\n", src, outPath)

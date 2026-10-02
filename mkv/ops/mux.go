@@ -14,18 +14,9 @@ import (
 
 func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(extra)
-	out, err := fs.DoCreate(opts.OutputPath)
-	if err != nil {
-		return fmt.Errorf("create output: %w", err)
-	}
-	// Surface a Close error on the success path (e.g. a custom FS that finalises
-	// the write on Close) instead of silently dropping it.
-	defer func() {
-		if cerr := out.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-
+	// The sources are read before the output is created: a request naming a
+	// missing file or track is refused without emptying whatever already
+	// sits at the output path.
 	tracks, trackMap, err := buildMuxTracks(ctx, opts.Tracks, fs)
 	if err != nil {
 		return err
@@ -35,6 +26,19 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	if err != nil {
 		return err
 	}
+
+	out, err := fs.DoCreate(opts.OutputPath)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	defer removeUnfinished(fs, opts.OutputPath, &err) // a failed write leaves no truncated output
+	// Surface a Close error on the success path (e.g. a custom FS that finalises
+	// the write on Close) instead of silently dropping it.
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{

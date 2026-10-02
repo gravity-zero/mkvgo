@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -155,15 +156,12 @@ func CmdExtractSubtitle(args []string) {
 // extractWebVTT writes subtitle track trackID of source (MKV/WebM or MP4) to
 // outPath as WebVTT.
 func extractWebVTT(source string, trackID uint64, outPath string) error {
-	out, err := os.Create(outPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if isMP4Path(source) {
-		return mp4.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
-	}
-	return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
+	return writeFileFrom(outPath, func(out io.Writer) error {
+		if isMP4Path(source) {
+			return mp4.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
+		}
+		return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
+	})
 }
 
 // extractFromIndex serves one track from an index file written by
@@ -183,12 +181,9 @@ func extractFromIndex(source string, trackID uint64, format, indexPath, outPath 
 			return matroska.ForEachSubtitlePGSFrom(context.Background(), source, trackID, &ix, fn)
 		})
 	}
-	out, err := os.Create(outPath)
-	if err != nil {
-		return 0, err
-	}
-	defer out.Close()
-	return 0, matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out)
+	return 0, writeFileFrom(outPath, func(out io.Writer) error {
+		return matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out)
+	})
 }
 
 // pgsCueManifest is one line of the manifest written beside the pictures. The

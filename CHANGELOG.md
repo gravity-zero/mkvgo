@@ -19,6 +19,30 @@ All notable changes to mkvgo are documented here. The format is based on
   an MP4), the message named one of them at random, so the same request on
   the same file could read differently from one call to the next. The
   messages themselves are unchanged.
+- **A strict `Reindex` refuses a cluster whose body does not parse.** An
+  element inside a cluster that overruns it (or a child header that does not
+  decode) is damage, and the strict copy carried those bytes verbatim into an
+  output it declared verified - with no cue for that cluster, since the scan
+  deriving cues stopped where the parse did - so `diagnose` on the output
+  still said `damaged`. It now refuses with `ErrCorruptSource` and names
+  `--resync`, as the documented contract always said; the same bytes with
+  `Options.Resync` repair as before. Every caller of the strict copy
+  (`Reindex`, `ReindexReplace`, the rewrite engines of `RetimeTracks` and
+  `EditMetadata`) gets the refusal.
+- **A failed `Demux`, `Mux` or `RemuxToWebM` leaves no file under its output
+  names.** A source that broke mid-walk left truncated track streams, a
+  1.5 KB MKV or a WebM head behind, with the error - a later step taking
+  them for results. `Mux` also reads its sources before creating the output,
+  so a request naming a missing file or track no longer empties a file
+  already at the output path. The CLI's WebVTT outputs (`extract-subtitle
+  -format vtt`, `to-vtt`) behave the same: a refused request leaves no empty
+  `.vtt`.
+
+### Changed
+
+- **`Demux` names a track file by its resolved codec when the CodecID has no
+  short name**: `1.theora` rather than `1.V_THEORA`, next to `2.vorbis`. A
+  CodecID nothing resolves still names the file as before (`3.S_UNKNOWN_X`).
 
 ## [0.36.0] - 2026-10-02
 

@@ -65,3 +65,17 @@ func TestTrackFFprobeCodecName(t *testing.T) {
 		t.Errorf("FFprobeCodecName(%q) = %q, want it unchanged", "A_MPEG/L3", got)
 	}
 }
+
+// TestCodecShortNameIsOneToOne: a short name stands for exactly one CodecID.
+// The writer maps a track's short name back to its CodecID by walking the
+// table, so two CodecIDs sharing a short name would make it write one or the
+// other from one run to the next.
+func TestCodecShortNameIsOneToOne(t *testing.T) {
+	full := map[string]string{}
+	for id, short := range CodecShortName {
+		if other, dup := full[short]; dup {
+			t.Errorf("short name %q stands for both %s and %s", short, other, id)
+		}
+		full[short] = id
+	}
+}
