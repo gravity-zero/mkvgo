@@ -92,6 +92,10 @@ type surgicalRun struct {
 	// run where one does - against what the cluster held before the gap - is
 	// another cluster's.
 	firstByTrack, lastByTrack map[uint64]int64
+	// lastStart is where the run's last child starts, lastIsBlock whether it
+	// is a block: the one a hole may have begun inside (trimZeroedTail).
+	lastStart   int64
+	lastIsBlock bool
 }
 
 // note records one block of track at relTC.
@@ -301,6 +305,7 @@ func chainWalkChildrenBuf(raw io.ReadSeeker, pos, fileSize int64, tracks map[uin
 		if isBlock {
 			run.note(track, int64(relTC))
 		}
+		run.lastStart, run.lastIsBlock = run.end, isBlock
 		run.end = end
 		run.children++
 	}
@@ -428,6 +433,41 @@ func surgicalCandidate(raw io.ReadSeeker, from, fileSize int64, tracks map[uint6
 	return 0, -1, nil
 }
 
+// zeroedTailMin is how many zero bytes must close a block, with zeros
+// following it, for the block to count as cut by a zeroed hole.
+const zeroedTailMin = 16
+
+// trimZeroedTail drops the last block of a run that broke on a zeroed region
+// when that block's own payload ends in zeros: the hole (the pieces a download
+// never received) began INSIDE it. Its header is intact, so the chain accepted
+// it, but its tail is the hole's - kept, it is a frame a decoder chokes on at
+// the leading edge of every hole. An intact block that merely ends on padding
+// right before a hole is dropped with it: one frame, against a corrupt one.
+func trimZeroedTail(raw io.ReadSeeker, run surgicalRun, fileSize int64) (surgicalRun, error) {
+	if !run.lastIsBlock || run.end <= run.lastStart || run.end+zeroedTailMin > fileSize {
+		return run, nil
+	}
+	n := min(run.end-run.lastStart, zeroedTailMin)
+	buf := make([]byte, n+zeroedTailMin)
+	if _, err := raw.Seek(run.end-n, io.SeekStart); err != nil {
+		return run, err
+	}
+	if _, err := io.ReadFull(raw, buf); err != nil {
+		return run, nil // cannot tell: keep the block
+	}
+	for _, b := range buf {
+		if b != 0 {
+			return run, nil
+		}
+	}
+	if n < zeroedTailMin {
+		return run, nil // a block shorter than the test: no verdict
+	}
+	run.end = run.lastStart
+	run.children--
+	return run, nil
+}
+
 // stepsBack reports whether any track of a candidate run starts before the
 // timecode that track had reached (seen). A video track may step back by tol,
 // the reach of frame reordering; any other track, not at all.
@@ -513,6 +553,11 @@ func surgicalScanCluster(raw io.ReadSeeker, bodyStart, fileSize int64, tracks, v
 		run, stop, err := chainWalkChildren(raw, pos, fileSize, tracks)
 		if err != nil {
 			return nil, err
+		}
+		if stop == surgicalStopBreak {
+			if run, err = trimZeroedTail(raw, run, fileSize); err != nil {
+				return nil, err
+			}
 		}
 		if run.end > run.start {
 			out.runs = append(out.runs, run)

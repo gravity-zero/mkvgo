@@ -763,3 +763,61 @@ func TestTolerantWalkReadsAHoledFileOnce(t *testing.T) {
 		t.Errorf("read %d bytes to map a %d-byte file (more than %d): the damaged region is being re-read", read, len(data), limit)
 	}
 }
+
+// TestBlockCutByAZeroedHoleIsDropped: a zeroed hole (pieces a download never
+// received) usually begins in the middle of a block. That block's header is
+// intact, so the chain accepted it - with a payload whose tail is the hole's
+// zeros. Kept, it is one frame a decoder chokes on at the leading edge of every
+// hole (measured on a real file: 9 holes, 9 decode errors, present in the
+// source and carried into the repair). It is dropped with the hole.
+func TestBlockCutByAZeroedHoleIsDropped(t *testing.T) {
+	data := livefixture.Build(livefixture.Options{PayloadBytes: 4096})
+	cluster := []byte{0x1F, 0x43, 0xB6, 0x75}
+	first := bytes.Index(data, cluster)
+	second := first + 4 + bytes.Index(data[first+4:], cluster)
+	third := second + 4 + bytes.Index(data[second+4:], cluster)
+	// The hole starts 1 KiB into the last block of the first cluster and
+	// swallows the whole second cluster.
+	lastBlock := bytes.LastIndex(data[:second], []byte{0xA3})
+	for lastBlock > first && data[lastBlock+3] != 0x82 { // the SimpleBlock of track 2, not a payload byte
+		lastBlock = bytes.LastIndex(data[:lastBlock], []byte{0xA3})
+	}
+	holed := append([]byte(nil), data...)
+	for i := lastBlock + 1024; i < third; i++ {
+		holed[i] = 0
+	}
+	src := filepath.Join(t.TempDir(), "holed.mkv")
+	writeAll(t, src, holed)
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	if _, err := Salvage(context.Background(), src, dst); err != nil {
+		t.Fatalf("Salvage: %v", err)
+	}
+
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for {
+		b, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.HasSuffix(b.Data, make([]byte, 64)) {
+			t.Fatalf("block %d (track %d, %d ms) was kept with a zeroed tail: the hole began inside it", n, b.TrackNumber, b.Timecode)
+		}
+		n++
+	}
+	// The first cluster less its cut block, and the third cluster whole.
+	if want := 2*livefixture.BlocksPerTrack*livefixture.Tracks - 1; n != want {
+		t.Errorf("%d blocks recovered, want %d", n, want)
+	}
+}

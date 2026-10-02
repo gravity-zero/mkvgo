@@ -145,6 +145,13 @@ All notable changes to mkvgo are documented here. The format is based on
   skipped, and no track may restart before where it left off in the cluster
   (a video track by the reach of frame reordering, any other not at all) -
   which catches the gap of a few bytes that took only the Cluster header.
+- **The block a zeroed hole begins inside is dropped with it.** A hole
+  usually starts in the middle of a block: the header is intact, the payload
+  ends in the hole's zeros, and the block was kept - one frame a decoder
+  chokes on at the leading edge of every hole. Measured on a real file with 9
+  holes: 9 decode errors, present in the source and carried into the repair;
+  none now, and with `CleanCut` the repaired file decodes without a single
+  complaint.
 - **Measuring an unknown-size Cluster no longer re-reads a window per
   cluster.** The measure runs on a second handle, so the copy's reader keeps
   its buffer: a live recording is read about twice, whatever its cluster size.

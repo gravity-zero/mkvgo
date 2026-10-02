@@ -83,8 +83,11 @@ type Container struct {
 	// on the next valid element - junk between the Segment header and the
 	// metadata, a zeroed region between clusters. 0 on a sound file. The read
 	// succeeded either way; a non-zero count says the file is padded or damaged
-	// where the reader went through, which a strict rewrite will refuse (the
-	// head-only readers only see what precedes the first Cluster).
+	// where the reader went through, which a strict rewrite will refuse. A read
+	// counts only what it walked: a head-only read stops as soon as it has what
+	// it was asked for, so junk sitting between the Tracks and the first Cluster
+	// is counted by a read that goes that far (WithCues, the full reader, or
+	// Diagnose, which does) and not by a plain ReadMeta.
 	ResyncedBytes int64 `json:"resynced_bytes,omitempty"`
 
 	// SegmentStart is the absolute file offset of the Segment body - the origin
