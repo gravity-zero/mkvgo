@@ -107,7 +107,8 @@ All notable changes to mkvgo are documented here. The format is based on
   MIDDLE of the file the rest was dropped without a word: `to-mp4` of a 37 s
   file damaged one second in wrote a 1 s MP4 and exited 0. The block walk now
   tells the two apart: when a valid Cluster follows, it returns a
-  `*reader.DamageError` (`reader.ErrDamagedRegion`) that names the repair
+  `*reader.DamageError` (`reader.ErrDamagedRegion`, re-exported as
+  `matroska.ErrDamagedRegion`) that names the repair
   (`mkvgo reindex --resync`) and does not match `io.ErrUnexpectedEOF`. The
   whole-file outputs refuse the file (and leave no partial output); `validate`
   and `analyze` report it with the remedy; the on-demand segment paths behave

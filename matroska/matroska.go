@@ -52,6 +52,13 @@ type Severity = mkv.Severity
 // errors.Is to re-route to the mp4 reader.
 var ErrNotMatroska = reader.ErrNotMatroska
 
+// ErrDamagedRegion is what a block walk returns (errors.Is) when an element
+// runs past the end of the file while a valid Cluster follows further on:
+// damage inside the file, as opposed to a truncated tail. A whole-file remux
+// stops on it rather than deliver the head of the file as if it were all of
+// it; the file is repaired with Reindex and Options.Resync (or Salvage).
+var ErrDamagedRegion = reader.ErrDamagedRegion
+
 type Issue = mkv.Issue
 type DiffType = mkv.DiffType
 type Diff = mkv.Diff
