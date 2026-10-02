@@ -113,14 +113,19 @@ All notable changes to mkvgo are documented here. The format is based on
   and `analyze` report it with the remedy; the on-demand segment paths behave
   as before. A truncated tail is still tolerated.
 - **Mapping the damage of a holed file took minutes, then gave up.** Measured
-  on a real 2.7 GiB download with missing pieces: `diagnose` ran 499 s and
-  ended on `the tolerant walk itself failed`. Three causes, all fixed (the
-  same file now takes 46 s and is repaired):
+  on two real 2.7 GiB downloads with missing pieces: `diagnose` ran 499 s,
+  reading the file eight to forty times over (21 to 100 GiB), and ended on
+  `the tolerant walk itself failed`. The walk is now one pass - 2.7 GiB read,
+  11 s - and both files are repaired. The causes, all fixed:
   - every byte of a damaged region that looks like the start of a block is
     tested as a resume point, and the test read the whole payload the
-    candidate declared - up to 96 MB - before looking at its track number. A
-    candidate naming an undeclared track, or a size no block has, is refused
-    on its header;
+    candidate declared - up to 96 MB - before looking at its track number,
+    then a 256 KiB buffer for each of the others. A candidate is now judged in
+    memory on its header (declared track, a size a block can have, a
+    BlockGroup opening on something a BlockGroup holds); the few that hold up
+    are walked header by header, never through their payload;
+  - a run of blocks the time gates refuse is refused whole, instead of each
+    of its blocks being walked again to the same verdict;
   - a zeroed region longer than the 64 MiB scan cap (here 80 MiB: the pieces
     the download never received) made `Salvage` and `Reindex` with `Resync`
     refuse the whole file, the 640 MiB of sound media behind the hole
@@ -135,7 +140,13 @@ All notable changes to mkvgo are documented here. The format is based on
   from the lost cluster's timestamp. They passed the continuity gate as the
   broken cluster's continuation: on the same real file the audio stepped back
   half a second after every hole (287 timestamp complaints from a stream
-  copy; none now). A resume must also be in keeping with the bytes it skipped.
+  copy; none now). A resume must also be in keeping with the bytes it
+  skipped, and no track may restart before where it left off in the cluster
+  (a video track by the reach of frame reordering, any other not at all) -
+  which catches the gap of a few bytes that took only the Cluster header.
+- **Measuring an unknown-size Cluster no longer re-reads a window per
+  cluster.** The measure runs on a second handle, so the copy's reader keeps
+  its buffer: a live recording is read about twice, whatever its cluster size.
 - **`diagnose` on a file both cut short and holed** reported `truncated`
   alone; it now adds `damaged` for the ranges lost inside the file. And every
   remedy naming the strict reindex is rewritten to `mkvgo reindex --resync`
