@@ -275,11 +275,28 @@ func appendCueFromCluster(cues *[]mkv.CuePoint, body []byte, timecodeScale, outO
 // 1-byte flags) and discards the remaining payload bytes.
 // Returns (track, relTC, keyframe).
 func readBlockHeader(r io.Reader, blockSize int64) (track uint64, relTC int16, keyframe bool, err error) {
+	return readBlockHeaderOf(r, blockSize, nil)
+}
+
+// errUndeclaredTrack is readBlockHeaderOf's refusal of a block naming a track
+// outside the set it was given.
+var errUndeclaredTrack = errors.New("block names a track the file does not declare")
+
+// readBlockHeaderOf is readBlockHeader for a walk that knows the file's tracks
+// (tracks non-empty): a block naming any other track is refused BEFORE its
+// payload is consumed. That order is the point - a candidate tested inside a
+// damaged region declares whatever size its bytes spell, and reading 96 MB of
+// "payload" to then reject the block for its track number made the search for
+// one resume point read a file forty times over.
+func readBlockHeaderOf(r io.Reader, blockSize int64, tracks map[uint64]bool) (track uint64, relTC int16, keyframe bool, err error) {
 	trackRaw, n, err := ebml.ReadDataSize(r)
 	if err != nil {
 		return 0, 0, false, err
 	}
 	track = uint64(trackRaw)
+	if len(tracks) > 0 && !tracks[track] {
+		return track, 0, false, errUndeclaredTrack
+	}
 	consumed := int64(n)
 
 	var tcBuf [2]byte
@@ -309,6 +326,13 @@ func readBlockHeader(r io.Reader, blockSize int64) (track uint64, relTC int16, k
 // detect whether a ReferenceBlock is present (its presence means non-keyframe).
 // Consumes exactly size bytes from r.
 func scanBlockGroup(r io.Reader, size int64) (track uint64, relTC int16, isKeyframe bool, err error) {
+	return scanBlockGroupOf(r, size, nil)
+}
+
+// scanBlockGroupOf is scanBlockGroup for a walk that knows the file's tracks:
+// a Block naming another one ends the scan at once (errUndeclaredTrack), the
+// rest of the group left unread - see readBlockHeaderOf.
+func scanBlockGroupOf(r io.Reader, size int64, tracks map[uint64]bool) (track uint64, relTC int16, isKeyframe bool, err error) {
 	limit := &io.LimitedReader{R: r, N: size}
 	var foundBlock bool
 	var hasRef bool
@@ -320,7 +344,10 @@ func scanBlockGroup(r io.Reader, size int64) (track uint64, relTC int16, isKeyfr
 		}
 		switch h.ID {
 		case mkv.IDBlock:
-			t, rt, _, e := readBlockHeader(limit, h.Size)
+			t, rt, _, e := readBlockHeaderOf(limit, h.Size, tracks)
+			if errors.Is(e, errUndeclaredTrack) {
+				return t, 0, false, e
+			}
 			if e != nil {
 				// Drain and report error.
 				io.CopyN(io.Discard, limit, limit.N) //nolint:errcheck

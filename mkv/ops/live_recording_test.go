@@ -514,6 +514,148 @@ func infoCRCHolds(t *testing.T, path string) bool {
 	return binary.LittleEndian.Uint32(body[2:6]) == crc32.ChecksumIEEE(body[6:])
 }
 
+// TestZeroedHoleLongerThanTheScanCap: a zeroed region - the pieces a download
+// never received - is walked to its end whatever its length. The scan cap used
+// to count it: a file missing more than the cap in its middle was refused
+// outright ("no valid cluster found"), sound media behind the hole included.
+// The cap still bounds a search through actual garbage of that length.
+func TestZeroedHoleLongerThanTheScanCap(t *testing.T) {
+	saved := salvageResyncCap
+	salvageResyncCap = 256
+	defer func() { salvageResyncCap = saved }()
+
+	ctx := context.Background()
+	data := livefixture.Build(livefixture.Options{})
+	cluster := []byte{0x1F, 0x43, 0xB6, 0x75}
+	second := bytes.Index(data[bytes.Index(data, cluster)+4:], cluster) + bytes.Index(data, cluster) + 4
+	holed := func(fill byte) string {
+		out := append([]byte(nil), data[:second]...)
+		out = append(out, bytes.Repeat([]byte{fill}, 4096)...) // 16x the cap
+		out = append(out, data[second:]...)
+		path := filepath.Join(t.TempDir(), "holed.mkv")
+		writeAll(t, path, out)
+		return path
+	}
+
+	report, err := MapDamage(ctx, holed(0x00))
+	if err != nil {
+		t.Fatalf("MapDamage over a zeroed hole: %v", err)
+	}
+	if report.BytesSkipped != 4096 || report.ClustersCopied != livefixture.Clusters {
+		t.Errorf("skipped %d bytes, copied %d clusters; want the 4096 zeroed bytes and all %d clusters",
+			report.BytesSkipped, report.ClustersCopied, livefixture.Clusters)
+	}
+	if _, err := MapDamage(ctx, holed(livefixture.JunkByte)); err == nil {
+		t.Error("garbage longer than the scan cap was searched through to the end")
+	}
+}
+
+// countingFS counts the bytes read through it.
+type countingFile struct {
+	mkv.ReadSeekCloser
+	n *int64
+}
+
+func (c countingFile) Read(p []byte) (int, error) {
+	n, err := c.ReadSeekCloser.Read(p)
+	*c.n += int64(n)
+	return n, err
+}
+
+// TestSurgicalCandidateDoesNotReadItsPayload: every byte of a damaged region
+// that looks like the start of a block is tested as a resume point, and the
+// test used to read the whole "payload" the candidate declared before looking
+// at its track number. On a real 2.7 GiB file with missing pieces that read
+// about a hundred GiB (eight minutes) to map the damage. A candidate naming an
+// undeclared track, or a size no block has, is now refused on its header.
+func TestSurgicalCandidateDoesNotReadItsPayload(t *testing.T) {
+	// One valid block header for track 1 claiming 32 MiB of payload, then
+	// zeros: chain-walked from its first byte, it must be judged on what
+	// follows without that payload being read through.
+	const claimed = 32 << 20
+	candidate := []byte{0xA3, 0x12, 0x00, 0x00, 0x00, 0x99, 0x00, 0x00, 0x80} // track 0x99: undeclared
+	candidate[1], candidate[2], candidate[3], candidate[4] = 0x12, 0x00, 0x00, 0x00
+	binary.BigEndian.PutUint32(candidate[1:5], 0x10000000|claimed)
+	data := append(candidate, make([]byte, claimed+1024)...)
+	path := filepath.Join(t.TempDir(), "candidate.bin")
+	writeAll(t, path, data)
+
+	var read int64
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	run, stop, err := chainWalkChildren(countingFile{f, &read}, 0, int64(len(data)), map[uint64]bool{1: true, 2: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop != surgicalStopBreak || run.children != 0 {
+		t.Fatalf("a block of an undeclared track was accepted: stop %v, %d children", stop, run.children)
+	}
+	if read > 1<<20 {
+		t.Errorf("read %d bytes to refuse a candidate on its header", read)
+	}
+}
+
+// TestRecoveryDoesNotAttachALaterClusterToTheBrokenOne: when a gap swallows a
+// Cluster header, the blocks behind it belong to that lost cluster - their
+// relative timecodes count from ITS timestamp. Their timecodes restart near
+// where the broken cluster stopped, so the continuity gate let them through
+// as its continuation, timed against the wrong base: on a real download with
+// missing pieces the audio stepped back half a second after every hole. A
+// resume must also account for the bytes it skipped: far too little time for
+// a gap that long means another cluster.
+func TestRecoveryDoesNotAttachALaterClusterToTheBrokenOne(t *testing.T) {
+	ctx := context.Background()
+	data := livefixture.Build(livefixture.Options{})
+	cluster := []byte{0x1F, 0x43, 0xB6, 0x75}
+	first := bytes.Index(data, cluster)
+	second := first + 4 + bytes.Index(data[first+4:], cluster)
+	// The second cluster loses its header and Timestamp (12 + 4 bytes) to
+	// 4096 bytes of junk; its blocks follow, headerless.
+	holed := append([]byte(nil), data[:second]...)
+	holed = append(holed, bytes.Repeat([]byte{livefixture.JunkByte}, 4096)...)
+	holed = append(holed, data[second+16:]...)
+	src := filepath.Join(t.TempDir(), "holed.mkv")
+	writeAll(t, src, holed)
+
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	if _, err := Salvage(ctx, src, dst); err != nil {
+		t.Fatalf("Salvage: %v", err)
+	}
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := map[uint64]int64{}
+	n := 0
+	for {
+		b, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prev, ok := last[b.TrackNumber]; ok && b.Timecode <= prev {
+			t.Fatalf("track %d steps back from %d ms to %d ms: a later cluster's blocks were timed against the broken one", b.TrackNumber, prev, b.Timecode)
+		}
+		last[b.TrackNumber] = b.Timecode
+		n++
+	}
+	// The first and the third cluster, whole; the headerless blocks of the
+	// second cannot be timed and are left out.
+	if want := 2 * livefixture.BlocksPerTrack * livefixture.Tracks; n != want {
+		t.Errorf("%d blocks recovered, want %d (the two clusters whose timestamps are known)", n, want)
+	}
+}
+
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a
 // file that has neither Duration nor Cues; head junk used to leave every track
 // "never seen".

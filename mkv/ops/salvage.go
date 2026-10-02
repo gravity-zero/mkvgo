@@ -359,10 +359,25 @@ func (w *salvageWalker) skipToNextCluster() (ended bool, err error) {
 // skipTo is skipToNextCluster with the anchor left to resync: the bounded scan
 // that finds where the walk resumes.
 func (w *salvageWalker) skipTo(resync func(r io.ReadSeeker, limit int64) (int64, error)) (ended bool, err error) {
-	if _, err := w.raw.Seek(w.consumed, io.SeekStart); err != nil {
+	// A zeroed region - the pieces a download never received - is not garbage
+	// to search through: nothing starts in it, and measuring it is one linear
+	// pass. It is walked to its end whatever its length, and the scan cap
+	// bounds only the search behind it. Without this a file missing 80 MiB in
+	// its middle was refused outright, the 640 MiB of sound media after the
+	// hole included.
+	scanFrom, err := zeroRunEnd(w.raw, w.consumed, w.fileSize)
+	if err != nil {
 		return false, fmt.Errorf("salvage: seek for resync: %w", err)
 	}
-	capLimit := w.consumed + salvageResyncCap
+	// Never from w.consumed itself: that is the element that could not be
+	// used. When it is a Cluster with a valid-looking header (an unknown-size
+	// one whose recovery found nothing in range), a scan starting on it would
+	// "find" it again and the walk would never leave it.
+	scanFrom = max(scanFrom, w.consumed+1)
+	if _, err := w.raw.Seek(scanFrom, io.SeekStart); err != nil {
+		return false, fmt.Errorf("salvage: seek for resync: %w", err)
+	}
+	capLimit := scanFrom + salvageResyncCap
 	reachesEOF := capLimit >= w.fileSize
 	if reachesEOF {
 		capLimit = w.fileSize
@@ -381,6 +396,31 @@ func (w *salvageWalker) skipTo(resync func(r io.ReadSeeker, limit int64) (int64,
 	w.recordDamage(w.consumed, off, w.lastGoodMs, peekClusterTimestampMs(w.raw, off, w.scale))
 	w.restoreStreamAt(off)
 	return false, nil
+}
+
+// zeroRunEnd returns the offset of the first non-zero byte at or after from
+// (end when the zeros run to it). from itself when the byte there is not zero.
+func zeroRunEnd(r io.ReadSeeker, from, end int64) (int64, error) {
+	if _, err := r.Seek(from, io.SeekStart); err != nil {
+		return from, err
+	}
+	buf := make([]byte, 1<<20)
+	for pos := from; pos < end; {
+		n, err := io.ReadFull(r, buf[:min(int64(len(buf)), end-pos)])
+		for i := 0; i < n; i++ {
+			if buf[i] != 0 {
+				return pos + int64(i), nil
+			}
+		}
+		pos += int64(n)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return pos, nil
+			}
+			return pos, err
+		}
+	}
+	return end, nil
 }
 
 // restoreStreamAt repositions raw at off and rebuilds the buffered reader
