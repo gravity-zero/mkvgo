@@ -607,6 +607,23 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		return false, nil
 	}
 
+	if endsInZeros(body) {
+		// A cluster that parses to its end, closes on zeros, and is followed
+		// by zeros: a zeroed hole began inside its last block, which the
+		// structure cannot show. The surgical scan drops that block with the
+		// hole (trimZeroedTail) and keeps the rest.
+		if next, _ := w.r.Peek(zeroedTailMin); len(next) == zeroedTailMin && endsInZeros(next) {
+			recovered, ended, err := w.surgical(elemStart, bodyStart)
+			if err != nil || ended {
+				return ended, err
+			}
+			if recovered {
+				return false, nil
+			}
+			w.restoreStreamAt(clusterEnd) // nothing to cut after all: copied as it is
+		}
+	}
+
 	if err := w.emitClusterWithRollback(srcHdr, hdrBytes, body); err != nil {
 		return false, err
 	}

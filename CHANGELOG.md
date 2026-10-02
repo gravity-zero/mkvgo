@@ -151,7 +151,9 @@ All notable changes to mkvgo are documented here. The format is based on
   chokes on at the leading edge of every hole. Measured on a real file with 9
   holes: 9 decode errors, present in the source and carried into the repair;
   none now, and with `CleanCut` the repaired file decodes without a single
-  complaint.
+  complaint. That includes the case the structure cannot show - the cut block
+  being the last of a cluster that otherwise parses to its end - recognised
+  by the zeros on both sides of the cluster's end.
 - **Measuring an unknown-size Cluster no longer re-reads a window per
   cluster.** The measure runs on a second handle, so the copy's reader keeps
   its buffer: a live recording is read about twice, whatever its cluster size.

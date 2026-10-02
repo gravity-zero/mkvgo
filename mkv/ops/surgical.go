@@ -468,6 +468,19 @@ func trimZeroedTail(raw io.ReadSeeker, run surgicalRun, fileSize int64) (surgica
 	return run, nil
 }
 
+// endsInZeros reports whether b closes on zeroedTailMin zero bytes.
+func endsInZeros(b []byte) bool {
+	if len(b) < zeroedTailMin {
+		return false
+	}
+	for _, x := range b[len(b)-zeroedTailMin:] {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // stepsBack reports whether any track of a candidate run starts before the
 // timecode that track had reached (seen). A video track may step back by tol,
 // the reach of frame reordering; any other track, not at all.

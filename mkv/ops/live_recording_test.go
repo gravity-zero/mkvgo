@@ -771,7 +771,19 @@ func TestTolerantWalkReadsAHoledFileOnce(t *testing.T) {
 // hole (measured on a real file: 9 holes, 9 decode errors, present in the
 // source and carried into the repair). It is dropped with the hole.
 func TestBlockCutByAZeroedHoleIsDropped(t *testing.T) {
-	data := livefixture.Build(livefixture.Options{PayloadBytes: 4096})
+	for name, o := range map[string]livefixture.Options{
+		// The chain walk breaks on the hole and trims the block it cut.
+		"live clusters": {PayloadBytes: 4096},
+		// The cluster parses to its declared end - the cut block is its last
+		// one - so only the zeros on both sides of that end give it away.
+		"sized clusters": {PayloadBytes: 4096, SizedClusters: true},
+	} {
+		t.Run(name, func(t *testing.T) { blockCutByAZeroedHole(t, o) })
+	}
+}
+
+func blockCutByAZeroedHole(t *testing.T, o livefixture.Options) {
+	data := livefixture.Build(o)
 	cluster := []byte{0x1F, 0x43, 0xB6, 0x75}
 	first := bytes.Index(data, cluster)
 	second := first + 4 + bytes.Index(data[first+4:], cluster)

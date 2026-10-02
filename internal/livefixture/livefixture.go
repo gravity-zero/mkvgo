@@ -84,6 +84,9 @@ type Options struct {
 	// PayloadBytes pads every block's payload to this size (0: the minimal 3
 	// bytes), for a fixture whose clusters have the weight of real ones.
 	PayloadBytes int
+	// SizedClusters gives every cluster its real size (and the Segment too):
+	// an ordinary finished file rather than a live recording.
+	SizedClusters bool
 }
 
 // StrayTrack is the undeclared track number a Stray block names.
@@ -113,18 +116,18 @@ func Build(o Options) []byte {
 		track(2, 2, "A_PCM/INT/LIT", elem(0xE1, join(floatElem(0xB5, 48000), uintElem(0x9F, 2, 1)))),
 	)))
 	for c := 0; c < Clusters; c++ {
-		body.Write(unknownSizeHeader(mkv.IDCluster, o.ShortUnknown))
-		body.Write(uintElem(mkv.IDTimestamp, uint64(FirstTimestampMs+c*1000), 2))
+		var cl bytes.Buffer
+		cl.Write(uintElem(mkv.IDTimestamp, uint64(FirstTimestampMs+c*1000), 2))
 		if o.PositionHints {
-			body.Write(uintElem(0xA7, 0x7777, 2)) // Position
-			body.Write(uintElem(0xAB, 0x6666, 2)) // PrevSize
+			cl.Write(uintElem(0xA7, 0x7777, 2)) // Position
+			cl.Write(uintElem(0xAB, 0x6666, 2)) // PrevSize
 		}
 		for b := 0; b < BlocksPerTrack; b++ {
 			if o.Stray && c == 1 && b == BlocksPerTrack/2 {
-				body.Write(elem(mkv.IDSimpleBlock, []byte{0x80 | StrayTrack, 0x00, 0x00, 0x80, 0xDE, 0xAD}))
+				cl.Write(elem(mkv.IDSimpleBlock, []byte{0x80 | StrayTrack, 0x00, 0x00, 0x80, 0xDE, 0xAD}))
 			}
 			if o.Overrun && c == 1 && b == BlocksPerTrack/2 {
-				body.Write([]byte{0xEC, 0x01, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF}) // Void, 2 GiB
+				cl.Write([]byte{0xEC, 0x01, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF}) // Void, 2 GiB
 			}
 			rel := b * 250
 			for trk := byte(1); trk <= Tracks; trk++ {
@@ -149,7 +152,7 @@ func Build(o Options) []byte {
 					payload = join([]byte{0x01}, payload, payload)
 				}
 				if !o.BlockGroups {
-					body.Write(elem(mkv.IDSimpleBlock, join(header, []byte{0x80 | lacing}, payload)))
+					cl.Write(elem(mkv.IDSimpleBlock, join(header, []byte{0x80 | lacing}, payload)))
 					continue
 				}
 				group := elem(mkv.IDBlock, join(header, []byte{lacing}, payload))
@@ -159,9 +162,15 @@ func Build(o Options) []byte {
 				if !keyframe {
 					group = join(group, elem(mkv.IDReferenceBlock, []byte{0xFF, 0x06})) // -250: the previous frame
 				}
-				body.Write(elem(mkv.IDBlockGroup, group))
+				cl.Write(elem(mkv.IDBlockGroup, group))
 			}
 		}
+		if o.SizedClusters {
+			body.Write(elem(mkv.IDCluster, cl.Bytes()))
+			continue
+		}
+		body.Write(unknownSizeHeader(mkv.IDCluster, o.ShortUnknown))
+		body.Write(cl.Bytes())
 	}
 	if o.TailTags {
 		simple := elem(0x67C8, join(elem(0x45A3, []byte("TITLE")), elem(0x4487, []byte("tail"))))
@@ -173,7 +182,7 @@ func Build(o Options) []byte {
 		uintElem(0x4286, 1, 1), uintElem(0x42F7, 1, 1), uintElem(0x42F2, 4, 1), uintElem(0x42F3, 8, 1),
 		elem(0x4282, []byte("matroska")), uintElem(0x4287, 2, 1), uintElem(0x4285, 2, 1),
 	)))
-	if o.SizedSegment {
+	if o.SizedSegment || o.SizedClusters {
 		out.Write(elem(mkv.IDSegment, body.Bytes()))
 		return out.Bytes()
 	}
