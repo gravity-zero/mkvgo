@@ -658,6 +658,12 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("reindex create dst: %w", err)
 	}
+	// A copy that does not complete leaves a truncated file under the output's
+	// name - worse than no file, since a later step can take it for the
+	// result. Remove it (after the close below: deferred calls run in reverse
+	// order). A copy that completes and then fails a VERIFICATION is kept, as
+	// documented: that is the caller's decision.
+	defer removeUnfinished(fs, dstPath, &err)
 	defer closeWithErr(out, &err)
 
 	r := bufio.NewReaderSize(raw, reindexBufSize)
@@ -944,6 +950,15 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 		return nil, 0, nil, err
 	}
 	return mw.Cues, timecodeScale, dropped, nil
+}
+
+// removeUnfinished removes the output of a copy that returned an error.
+// Deferred right after the output is created, so it never touches a file the
+// operation did not create.
+func removeUnfinished(fs *mkv.FS, dstPath string, err *error) {
+	if *err != nil && dstPath != "" {
+		_ = fs.DoRemove(dstPath)
+	}
 }
 
 // unknownSizeClusterSize measures the body of an unknown-size Cluster whose

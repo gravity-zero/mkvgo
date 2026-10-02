@@ -370,6 +370,33 @@ func TestResyncRollbackDeltaStaysSmall(t *testing.T) {
 	}
 }
 
+// TestRefusedReindexLeavesNoOutput: a copy that is refused part-way used to
+// leave what it had written - a truncated file under the output's name, which
+// a later step can take for the result. It is removed. A file the operation
+// never created is not touched: a source that cannot even be opened leaves a
+// pre-existing output as it was.
+func TestRefusedReindexLeavesNoOutput(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "out.mkv")
+
+	src := liveFile(t, livefixture.Options{JunkHead: 134})
+	if err := Reindex(ctx, src, dst); err == nil {
+		t.Fatal("strict Reindex accepted the junk")
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("the refused reindex left an output behind (stat: %v)", err)
+	}
+
+	writeAll(t, dst, []byte("somebody else's file"))
+	if err := Reindex(ctx, filepath.Join(dir, "missing.mkv"), dst); err == nil {
+		t.Fatal("Reindex of a missing source succeeded")
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "somebody else's file" {
+		t.Errorf("a reindex that never created its output altered the file already there: %q", got)
+	}
+}
+
 // TestTrackEndsBehindHeadJunk: the tail walk reads blocks from the start of a
 // file that has neither Duration nor Cues; head junk used to leave every track
 // "never seen".

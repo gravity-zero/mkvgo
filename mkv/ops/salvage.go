@@ -183,6 +183,9 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: create dst: %w", err)
 	}
+	// As in reindexCopy: a walk that gives up must not leave a truncated file
+	// under the output's name (runs after the close below).
+	defer removeUnfinished(fs, dstPath, &err)
 	defer closeWithErr(out, &err)
 
 	r := bufio.NewReaderSize(raw, reindexBufSize)
