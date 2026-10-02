@@ -263,15 +263,16 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	}
 
 	if meta.ResyncedBytes > 0 {
-		// Junk ahead of the metadata: the head read resynced past it, a strict
-		// rewrite will not. Every remedy naming the strict reindex would be
-		// refused on this file - name the one that works.
+		// Junk in the head - ahead of the metadata, or between it and the first
+		// Cluster: the head read resynced past it, a strict rewrite will not.
+		// Every remedy naming the strict reindex would be refused on this file
+		// - name the one that works.
 		for i := range d.Findings {
 			d.Findings[i].Remedy = adviseResync(meta, d.Findings[i].Remedy)
 		}
 		d.Findings = append(d.Findings, Finding{
 			Kind: "damaged",
-			Detail: fmt.Sprintf("%d undecodable byte(s) in the head of the Segment were skipped to reach the metadata; a reader that does not resynchronize sees no track",
+			Detail: fmt.Sprintf("%d undecodable byte(s) ahead of the first Cluster were skipped to read the head of the file; a reader that does not resynchronize stops there, and a strict rewrite refuses the file",
 				meta.ResyncedBytes),
 			Remedy: "mkvgo reindex --resync",
 		})
