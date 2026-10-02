@@ -630,6 +630,9 @@ var (
 	ErrUnknownTrack = ops.ErrUnknownTrack
 	// ErrTrackHasNoBlocks: the named track exists but has nothing to shift.
 	ErrTrackHasNoBlocks = ops.ErrTrackHasNoBlocks
+	// ErrNoCues: a subtitle file with content in it yielded no cue
+	// (SubtitleFileToWebVTT) - another encoding, or not subtitles at all.
+	ErrNoCues = subtitle.ErrNoCues
 	// ErrShiftNotRepresentable: the shift is smaller than one timecode unit at
 	// the file's TimecodeScale, so it rounds to no shift at all. A shift that
 	// is merely not an exact multiple of a unit is applied to the nearest one,

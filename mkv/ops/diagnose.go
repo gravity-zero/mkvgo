@@ -18,9 +18,11 @@ import (
 // audio-delay probe, a damage dry-run) per file, one call classifies the
 // file and names the remedy for each finding. Head-mostly: the track list,
 // index and declared size are read from the head, the audio delays from the
-// first cluster(s); the full tolerant walk (MapDamage) runs only when the
-// cheap checks find the declared size and the real size disagree - the
-// head-visible signature of truncation or trailing junk.
+// first cluster(s), the track ends from a tail walk bounded by the index; the
+// full tolerant walk (MapDamage) runs only when the cheap checks find the
+// declared size and the real size disagree - the head-visible signature of
+// truncation or trailing junk. A file with no Cues is the exception: its
+// tail walk starts at the first cluster and reads it whole.
 
 // audioDelayFindingThresholdNs is the delay above which an audio track's
 // late start becomes a finding (the raw per-track values are always in the
@@ -75,29 +77,30 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	d.TimecodeScale = meta.Info.TimecodeScale
 
 	// Index health (head-only), then where each track's content really ends
-	// (statistics tags, else a bounded tail walk from the index - so only when
-	// there is one). The walked picture end is handed back to the index
-	// verdict: a file that states no statistics had its tail measured against
-	// the declared duration - an audio track's end, on real files - and this is
-	// where that last guess is replaced by the picture's real end.
+	// (statistics tags, else a tail walk: bounded, from the index, when there
+	// is one; from the first cluster when there is none - a file with no Cues
+	// cannot be judged from its head, and the reindex it needs reads it whole
+	// anyway, so the damage the walk may pass over is found here rather than
+	// by that reindex's refusal). The walked picture end is handed back to the
+	// index verdict: a file that states no statistics had its tail measured
+	// against the declared duration - an audio track's end, on real files -
+	// and this is where that last guess is replaced by the picture's real end.
 	ch := cueHealthFrom(meta, 0)
-	if ch.TotalCues > 0 {
-		ends, err := trackEndsFrom(ctx, path, fs, meta)
-		if err != nil {
-			return nil, fmt.Errorf("diagnose: %w", err)
-		}
-		d.TrackEnds = ends
-		if ends.SkippedBytes > 0 {
-			d.Findings = append(d.Findings, Finding{
-				Kind: "damaged",
-				Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
-					ends.SkippedBytes),
-				Remedy: "mkvgo reindex --resync",
-			})
-		}
-		if !ch.VideoEndExact && ends.VideoEndMs > 0 {
-			ch = cueHealthFrom(meta, ends.VideoEndMs)
-		}
+	ends, err := trackEndsFrom(ctx, path, fs, meta)
+	if err != nil {
+		return nil, fmt.Errorf("diagnose: %w", err)
+	}
+	d.TrackEnds = ends
+	if ends.SkippedBytes > 0 {
+		d.Findings = append(d.Findings, Finding{
+			Kind: "damaged",
+			Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
+				ends.SkippedBytes),
+			Remedy: "mkvgo reindex --resync",
+		})
+	}
+	if !ch.VideoEndExact && ends.VideoEndMs > 0 {
+		ch = cueHealthFrom(meta, ends.VideoEndMs)
 	}
 	d.CueHealth = ch
 	switch {

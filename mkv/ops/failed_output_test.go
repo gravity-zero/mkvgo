@@ -232,3 +232,28 @@ func TestValidate_StaleCuesNotJudgedPastDamage(t *testing.T) {
 		t.Errorf("want the damage reported, got %v", issues)
 	}
 }
+
+// TestDiagnose_CueLessDamagedFileIsWalked: a file with no Cues cannot be
+// judged from its head; the walk starts at the first cluster, so damage in it
+// is found and the no-index remedy names the reindex that will not be refused.
+func TestDiagnose_CueLessDamagedFileIsWalked(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "damaged.mkv")
+	writeAll(t, src, livefixture.Build(livefixture.Options{Overrun: true, SizedClusters: true, PayloadBytes: 1024}))
+
+	d, err := Diagnose(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasFinding(d, "damaged") == nil {
+		t.Errorf("want the damage found, got %v", findingKinds(d))
+	}
+	if f := hasFinding(d, "no-index"); f == nil {
+		t.Errorf("want the no-index finding, got %v", findingKinds(d))
+	} else if !strings.Contains(f.Remedy, "--resync") {
+		t.Errorf("no-index remedy must name the reindex the file accepts, got %q", f.Remedy)
+	}
+	if d.TrackEnds == nil || d.TrackEnds.SkippedBytes == 0 {
+		t.Errorf("want the walk's skipped bytes in the report, got %+v", d.TrackEnds)
+	}
+}

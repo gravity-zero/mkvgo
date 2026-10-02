@@ -43,6 +43,19 @@ All notable changes to mkvgo are documented here. The format is based on
   file damaged at its second cluster), with a strict reindex as the advice -
   the one operation the file refuses. The cues the walk could not reach are
   left unjudged; `cluster-read-error` already names the break.
+- **`SubtitleFileToWebVTT` (CLI `to-vtt`) refuses a file it recognizes no cue
+  in.** The parsers skip what they do not understand, so an SRT in UTF-16 or
+  a file that is not subtitles converted to an empty WebVTT and reported
+  success; it now refuses with `ErrNoCues`, naming the encoding to check. A
+  blank file still converts to an empty WebVTT.
+- **`Diagnose` walks a file that has no Cues.** The tail walk that finds
+  damage inside a file was bounded by the index, so it did not run on a file
+  without one: a damaged cue-less file came out with a single `no-index`
+  finding whose remedy, the strict reindex, is now the operation that refuses
+  it. Such a file is walked from its first cluster (it cannot be judged from
+  its head, and the reindex it needs reads it whole anyway), so `damaged` is
+  reported and every remedy names `reindex --resync`. Files with an index
+  keep the bounded walk.
 
 ### Changed
 

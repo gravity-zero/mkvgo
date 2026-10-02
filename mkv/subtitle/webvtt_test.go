@@ -1,6 +1,7 @@
 package subtitle
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,5 +157,41 @@ func TestResolveCueEnds(t *testing.T) {
 	ResolveCueEnds(cues, 3000)
 	if cues[0].EndMs != 1000 || cues[1].EndMs != 1500 || cues[2].EndMs != 5000 {
 		t.Errorf("ResolveCueEnds = %+v", cues)
+	}
+}
+
+// TestFileToWebVTT_RefusesInputWithNoCue: text that is not subtitles (a file
+// in the wrong encoding, a wrong file) converts to nothing - that is refused,
+// not delivered as an empty WebVTT with success. A genuinely empty file still
+// converts to an empty WebVTT.
+func TestFileToWebVTT_RefusesInputWithNoCue(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, content []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	var b strings.Builder
+	for _, name := range []string{"junk.srt", "junk.ass"} {
+		p := write(name, []byte("not a subtitle\x00\x01"))
+		err := FileToWebVTT(p, &b)
+		if !errors.Is(err, ErrNoCues) {
+			t.Errorf("%s: want ErrNoCues, got %v (output %q)", name, err, b.String())
+		}
+		b.Reset()
+	}
+	// UTF-16 SRT: the most common real shape of "no cue recognized".
+	utf16 := []byte{0xFF, 0xFE}
+	for _, r := range "1\r\n00:00:01,000 --> 00:00:02,000\r\nHello\r\n\r\n" {
+		utf16 = append(utf16, byte(r), 0)
+	}
+	if err := FileToWebVTT(write("u16.srt", utf16), &b); !errors.Is(err, ErrNoCues) {
+		t.Errorf("utf-16 srt: want ErrNoCues, got %v", err)
+	}
+	b.Reset()
+	if err := FileToWebVTT(write("empty.srt", []byte("  \n\n")), &b); err != nil || !strings.HasPrefix(b.String(), "WEBVTT") {
+		t.Errorf("blank srt: want an empty WebVTT, got %v %q", err, b.String())
 	}
 }

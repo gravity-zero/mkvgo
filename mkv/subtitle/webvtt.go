@@ -2,6 +2,8 @@ package subtitle
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -178,9 +180,17 @@ func ResolveCueEnds(cues []Cue, defaultDurMs int64) {
 	}
 }
 
+// ErrNoCues: a subtitle file with content in it yielded no cue. The parsers
+// skip what they do not understand, so a file in another encoding (UTF-16
+// SRT, the common case) or that is not subtitles at all converts to nothing;
+// delivering that as an empty WebVTT with success would hide it.
+var ErrNoCues = errors.New("no subtitle cue recognized")
+
 // FileToWebVTT reads an external subtitle file and writes it as WebVTT to w. The
 // format is detected from the extension: .srt, .ass/.ssa, or .vtt (already WebVTT,
-// streamed through). It replaces an external conversion fork for sidecars.
+// streamed through). It replaces an external conversion fork for sidecars. A
+// file with content that yields no cue is refused with ErrNoCues; a blank file
+// converts to an empty WebVTT.
 func FileToWebVTT(srcPath string, w io.Writer) error {
 	switch strings.ToLower(filepath.Ext(srcPath)) {
 	case ".vtt":
@@ -196,14 +206,38 @@ func FileToWebVTT(srcPath string, w io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("parse ASS: %w", err)
 		}
-		return WriteWebVTT(w, ASSToCues(ass.Events))
+		cues := ASSToCues(ass.Events)
+		if err := noCueCheck(srcPath, len(cues), "ASS"); err != nil {
+			return err
+		}
+		return WriteWebVTT(w, cues)
 	case ".srt", "":
 		entries, err := ParseSRT(srcPath)
 		if err != nil {
 			return fmt.Errorf("parse SRT: %w", err)
 		}
-		return WriteWebVTT(w, SRTToCues(entries))
+		cues := SRTToCues(entries)
+		if err := noCueCheck(srcPath, len(cues), "SRT"); err != nil {
+			return err
+		}
+		return WriteWebVTT(w, cues)
 	default:
 		return fmt.Errorf("unsupported subtitle file extension %q", filepath.Ext(srcPath))
 	}
+}
+
+// noCueCheck refuses with ErrNoCues when a parse produced no cue out of a file
+// that has content (anything but whitespace) in it.
+func noCueCheck(srcPath string, cues int, format string) error {
+	if cues > 0 {
+		return nil
+	}
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s: %w (%d bytes of content, none of it %s text - is the file UTF-8 %s?)", srcPath, ErrNoCues, len(data), format, format)
 }
