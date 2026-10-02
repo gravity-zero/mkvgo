@@ -15,6 +15,12 @@ All notable changes to mkvgo are documented here. The format is based on
   that timeline, so a file that declares no duration has one after all: the
   latest end minus the start.
 
+- **`Track.FFprobeCodecName()`** - the prober's `codec_name` for a track,
+  with the whole track to go by: a `V_MS/VFW/FOURCC` track is named by the
+  FourCC in its CodecPrivate (`msmpeg4v2`, `mpeg4`, `mjpeg`... where the lookup
+  by name could only say `vfw`), a PCM track by its bit depth (`pcm_s24le`),
+  and the CodecIDs carrying a `/` are resolved (`A_MPEG/L3` is `mp3`). What it
+  cannot resolve is returned as the raw CodecID, never as a guess.
 - **`Container.ResyncedBytes`** (`resynced_bytes` in JSON, omitted at 0) - how
   many undecodable bytes the reader skipped to resume on the next valid
   element. The read succeeded; the count says the file is padded or damaged
