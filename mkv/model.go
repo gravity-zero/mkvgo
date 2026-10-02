@@ -528,6 +528,12 @@ type Block struct {
 	// consumers that partition frames (segment windows) key on it so a lace is
 	// never split. Equal to Timecode for unlaced blocks; set by the BlockReader.
 	BlockTimecode int64
+	// Laced marks a frame that was stored in a laced block with other frames
+	// (set by the BlockReader). When the track states no frame duration those
+	// frames all carry the block's timecode - nothing in the file says where
+	// each one plays - and the writer keeps them in one laced block rather than
+	// spreading them into blocks that would all claim the same instant.
+	Laced bool
 	// Size is the frame's payload byte length. It always equals len(Data) when
 	// Data was read; a structure-only walk (BlockReader.SetHeaderOnly) leaves
 	// Data nil and reports the size here alone, so a caller that only needs

@@ -84,3 +84,69 @@ func TestWriteSintElement(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteClusterKeepsLaces: frames read from one laced block of a track that
+// states no frame duration all carry the block's timecode. Written back as
+// separate blocks they all claimed the same instant - 3762 audio frames on 487
+// distinct timestamps in a real rewrite. They go back into one laced block:
+// fixed-size lacing when the frames are the same size, Xiph lacing otherwise
+// (a frame of 255 bytes or more included), and the frames come back unchanged.
+func TestWriteClusterKeepsLaces(t *testing.T) {
+	big := bytes.Repeat([]byte{0x5A}, 600)
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte{0x01}},
+		// A lace of three frames of different sizes.
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Laced: true, Data: []byte{0xA1, 0xA2}},
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Laced: true, Data: big},
+		{TrackNumber: 2, Timecode: 0, Keyframe: true, Laced: true, Data: []byte{0xA3}},
+		// The next lace of the same track: two frames of the same size.
+		{TrackNumber: 2, Timecode: 64, Keyframe: true, Laced: true, Data: []byte{0xB1, 0xB2}},
+		{TrackNumber: 2, Timecode: 64, Keyframe: true, Laced: true, Data: []byte{0xB3, 0xB4}},
+		{TrackNumber: 1, Timecode: 40, Keyframe: false, Data: []byte{0x02}},
+		// Laced at the source, but the reader knew the stride: frames with
+		// their own timecodes stay separate blocks.
+		{TrackNumber: 2, Timecode: 128, Keyframe: true, Laced: true, Data: []byte{0xC1}},
+		{TrackNumber: 2, Timecode: 149, Keyframe: true, Laced: true, Data: []byte{0xC2}},
+	}
+	var buf seekBuffer
+	m := NewMKVWriter(&buf)
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	c := &mkv.Container{
+		Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "test", WritingApp: "test"},
+		Tracks: []mkv.Track{
+			{ID: 1, Type: mkv.VideoTrack, Codec: "h264", Language: "eng"},
+			{ID: 2, Type: mkv.AudioTrack, Codec: "vorbis", Language: "eng"},
+		},
+	}
+	if err := m.WriteMetadata(c, c.Tracks, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCluster(m.W, 0, 1000000, blocks); err != nil {
+		t.Fatal(err)
+	}
+
+	br, err := reader.NewBlockReader(bytes.NewReader(buf.buf), 1000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Laced on the way back exactly where the frames shared a timecode.
+	wantLaced := []bool{false, true, true, true, true, true, false, false, false}
+	for i, want := range blocks {
+		got, err := br.Next()
+		if err != nil {
+			t.Fatalf("block %d: %v", i, err)
+		}
+		if got.TrackNumber != want.TrackNumber || got.Timecode != want.Timecode || !bytes.Equal(got.Data, want.Data) || got.Keyframe != want.Keyframe {
+			t.Errorf("block %d: track %d at %d ms, %d bytes, keyframe=%v; want track %d at %d ms, %d bytes, keyframe=%v",
+				i, got.TrackNumber, got.Timecode, len(got.Data), got.Keyframe, want.TrackNumber, want.Timecode, len(want.Data), want.Keyframe)
+		}
+		if got.Laced != wantLaced[i] {
+			t.Errorf("block %d: laced = %v, want %v", i, got.Laced, wantLaced[i])
+		}
+	}
+	if _, err := br.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after the last block: %v, want EOF", err)
+	}
+}

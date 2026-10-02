@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,6 +281,56 @@ func TestEditMetadataBehindHeadJunk(t *testing.T) {
 				t.Errorf("title = %q, resynced bytes = %d; want the edit applied and a clean file", c.Info.Title, c.ResyncedBytes)
 			}
 		})
+	}
+}
+
+// TestRewriteKeepsLacedAudio: a block-by-block rewrite of a live source keeps
+// each audio lace as a lace. Delaced, the frames of one block - which share
+// its timecode when the track states no frame duration - became separate
+// blocks all claiming the same instant.
+func TestRewriteKeepsLacedAudio(t *testing.T) {
+	ctx := context.Background()
+	src := liveFile(t, livefixture.Options{LacedAudio: true})
+	dst := filepath.Join(t.TempDir(), "edited.mkv")
+	if err := EditMetadata(ctx, src, dst, func(c *mkv.Container) { c.Info.Title = "edited" }); err != nil {
+		t.Fatalf("EditMetadata: %v", err)
+	}
+	type frame struct {
+		track    uint64
+		timecode int64
+		laced    bool
+		size     int
+	}
+	frames := func(path string) []frame {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		br, err := reader.NewBlockReader(f, 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []frame
+		for {
+			b, err := br.Next()
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			out = append(out, frame{b.TrackNumber, b.Timecode, b.Laced, len(b.Data)})
+		}
+	}
+	want, got := frames(src), frames(dst)
+	if len(want) != len(got) {
+		t.Fatalf("frames: %d in the source, %d after the rewrite", len(want), len(got))
+	}
+	for i := range want {
+		if want[i] != got[i] {
+			t.Fatalf("frame %d: %+v in the source, %+v after the rewrite", i, want[i], got[i])
+		}
 	}
 }
 

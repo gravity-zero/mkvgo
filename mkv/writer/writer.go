@@ -629,7 +629,7 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 	// lastTC is each track's previous block in this cluster, for the
 	// ReferenceBlock of a non-keyframe BlockGroup.
 	lastTC := map[uint64]int64{}
-	for i := range blocks {
+	for i := 0; i < len(blocks); i++ {
 		b := &blocks[i]
 		// Block timecodes are milliseconds internally; the SimpleBlock offset is
 		// stored in raw timecode-scale units, like the cluster Timestamp above.
@@ -662,10 +662,92 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 			lastTC[b.TrackNumber] = b.Timecode
 			continue
 		}
+		if n := lacedRun(blocks[i:]); n > 1 {
+			// Frames of one source lace that share its timecode: written back
+			// as one laced block. As separate blocks they would all claim the
+			// same instant, and the timing the lace implied would be lost.
+			e.err = writeLacedSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, blocks[i:i+n])
+			lastTC[b.TrackNumber] = b.Timecode
+			i += n - 1
+			continue
+		}
 		e.err = WriteSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, b.Data)
 		lastTC[b.TrackNumber] = b.Timecode
 	}
 	return e.flush(w, mkv.IDCluster)
+}
+
+// maxLaceFrames is the most frames one laced block can hold: the count is
+// stored on one byte, minus one.
+const maxLaceFrames = 256
+
+// lacedRun returns how many leading blocks form one lace to write back: frames
+// read from a laced block (Block.Laced) of the same track, all at the same
+// timecode, none carrying a duration. 1 when blocks[0] stands alone.
+func lacedRun(blocks []mkv.Block) int {
+	first := &blocks[0]
+	if !first.Laced || first.Duration > 0 {
+		return 1
+	}
+	n := 1
+	for n < len(blocks) && n < maxLaceFrames {
+		b := &blocks[n]
+		if !b.Laced || b.Duration > 0 || b.TrackNumber != first.TrackNumber ||
+			b.Timecode != first.Timecode || b.Keyframe != first.Keyframe {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// writeLacedSimpleBlock writes frames as one laced SimpleBlock: fixed-size
+// lacing when every frame has the same size, Xiph lacing otherwise.
+func writeLacedSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, frames []mkv.Block) error {
+	fixed := true
+	total := 0
+	for i := range frames {
+		fixed = fixed && len(frames[i].Data) == len(frames[0].Data)
+		total += len(frames[i].Data)
+	}
+	// The lacing header: the frame count minus one, then - Xiph lacing only -
+	// the size of every frame but the last, each as a run of 255s closed by a
+	// smaller byte.
+	lace := []byte{byte(len(frames) - 1)}
+	flags := byte(0x04) // fixed-size lacing
+	if !fixed {
+		flags = 0x02 // Xiph lacing
+		for i := range frames[:len(frames)-1] {
+			sz := len(frames[i].Data)
+			for ; sz >= 255; sz -= 255 {
+				lace = append(lace, 255)
+			}
+			lace = append(lace, byte(sz))
+		}
+	}
+	if keyframe {
+		flags |= 0x80
+	}
+	trackVINT := ebml.DataSizeLen(int64(trackNum))
+	bodySize := int64(trackVINT + 2 + 1 + len(lace) + total)
+	if _, err := ebml.WriteElementHeader(w, mkv.IDSimpleBlock, bodySize); err != nil {
+		return err
+	}
+	if _, err := ebml.WriteDataSize(w, int64(trackNum)); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte{byte(uint16(relTC) >> 8), byte(relTC), flags}); err != nil {
+		return err
+	}
+	if _, err := w.Write(lace); err != nil {
+		return err
+	}
+	for i := range frames {
+		if _, err := w.Write(frames[i].Data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WriteBlockGroup writes a BlockGroup containing a Block and a BlockDuration

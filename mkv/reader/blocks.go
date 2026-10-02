@@ -872,7 +872,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		}
 		blocks[i] = mkv.Block{
 			TrackNumber: uint64(trackNum), Timecode: tcI, BlockTimecode: tc,
-			Keyframe: keyframe, Size: int64(frameSizes[i]),
+			Keyframe: keyframe, Size: int64(frameSizes[i]), Laced: frameCount > 1,
 		}
 		if !br.headerOnly {
 			// A laced block's frames still needed the payload read to decode
