@@ -54,4 +54,11 @@ func TestOutputCloseErrorSurfaced(t *testing.T) {
 			t.Errorf("%s: want the simulated close failure surfaced, got %v", tc.name, err)
 		}
 	}
+	// An output that could not be completed is not left behind under the
+	// output's name, where a later step would take it for the result.
+	for _, name := range []string{"a.mkv", "b.mkv", "c.mkv", "d.mkv"} {
+		if _, err := os.Stat(out(name)); !os.IsNotExist(err) {
+			t.Errorf("%s: the failed operation left its output behind (stat: %v)", name, err)
+		}
+	}
 }

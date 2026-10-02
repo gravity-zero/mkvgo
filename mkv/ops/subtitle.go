@@ -51,6 +51,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	if err != nil {
 		return err
 	}
+	defer removeUnfinished(fs, outPath, &err) // a failed write leaves no truncated output
 	defer closeWithErr(out, &err)
 
 	seq := 1
@@ -224,6 +225,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	if err != nil {
 		return err
 	}
+	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
 	defer closeWithErr(out, &err)
 
 	mw := writer.NewMKVWriter(out)
