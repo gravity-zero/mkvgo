@@ -60,6 +60,8 @@ export interface Track {
   hdr?: unknown
   dolby_vision?: unknown
   /** Derived display fields (same as the CLI -json output). */
+  /** The prober's codec_name for the track (resolves VFW FourCCs, PCM depths...); a raw CodecID when unresolved. */
+  codec_name?: string
   codec_long_name?: string
   channel_layout?: string
   avg_frame_rate?: number

@@ -149,4 +149,50 @@ echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" -f from-mp4 "$TMP/src.mov" "$TMP/mov.mkv" >/dev/null
 decode_ok "$TMP/mov.mkv"
 
+echo "== codec names: one real file per encoder, mkvgo's codec_name vs the prober's"
+# A table of names is only as good as the files it was read from: every name
+# is checked here on a stream a real encoder produced and the prober decodes.
+# An encoder the local build lacks is skipped. A name mkvgo does not resolve
+# comes back as the raw Matroska CodecID (V_/A_/S_/D_...) and is only counted;
+# a name that DIFFERS from the prober's fails the run.
+gen() { # gen <name> <ffmpeg args...> -> $TMP/<name>.mkv, non-zero when the encoder is unavailable
+  name=$1; shift
+  if [ -n "$DOCKER_CONTAINER" ]; then
+    docker exec "$DOCKER_CONTAINER" ffmpeg -nostdin -v quiet -y "$@" -strict -2 "/tmp/mkvgo-e2e/$name.mkv" 2>/dev/null || return 1
+    unstage "$name.mkv" "$TMP/$name.mkv"
+  else
+    ffmpeg -nostdin -v quiet -y "$@" -strict -2 "$TMP/$name.mkv" 2>/dev/null || return 1
+  fi
+}
+printf '1\n00:00:00,000 --> 00:00:00,400\nhi\n' > "$TMP/cn.srt"
+SRT=$(stage "$TMP/cn.srt")
+same=0; unresolved=0; skipped=0
+check_name() { # check_name <name>
+  want=$(ffp -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$(stage "$TMP/$1.mkv")" | head -1)
+  got=$("$MKVGO" -json probe "$TMP/$1.mkv" | grep -m1 '"codec_name"' | sed 's/.*: "\(.*\)".*/\1/')
+  [ -n "$got" ] || got=$("$MKVGO" -json probe "$TMP/$1.mkv" | grep -m1 '"codec"' | sed 's/.*: "\(.*\)".*/\1/')
+  if [ "$got" = "$want" ]; then same=$((same+1)); return; fi
+  case "$got" in
+    [VASD]_*) unresolved=$((unresolved+1)); echo "  unresolved: $1 is $want, mkvgo keeps $got" ;;
+    *) echo "e2e: codec name mismatch on $1: prober says '$want', mkvgo says '$got'" >&2; exit 1 ;;
+  esac
+}
+for e in libx264 libx265 mpeg4 msmpeg4v2 msmpeg4 mjpeg mpeg1video mpeg2video prores ffv1 libtheora libvpx libvpx-vp9 \
+         wmv1 wmv2 huffyuv utvideo rawvideo dvvideo cinepak snow vc2 h263 flv; do
+  size=320x240
+  case $e in h263) size=352x288 ;; dvvideo) size=720x576 ;; esac
+  if gen "v_$e" -f lavfi -i "testsrc=size=$size:rate=25" -frames:v 8 -c:v "$e"; then check_name "v_$e"; else skipped=$((skipped+1)); fi
+done
+for e in aac ac3 eac3 flac alac libmp3lame mp2 libopus libvorbis pcm_u8 pcm_s16le pcm_s24le pcm_s32le pcm_s16be \
+         pcm_f32le pcm_f64le pcm_alaw tta wavpack truehd dca mlp wmav2 adpcm_ms; do
+  rate=48000
+  case $e in pcm_alaw) rate=8000 ;; wmav2) rate=44100 ;; esac
+  if gen "a_$e" -f lavfi -i "sine=frequency=440:sample_rate=$rate" -ac 2 -t 0.5 -c:a "$e"; then check_name "a_$e"; else skipped=$((skipped+1)); fi
+done
+for e in subrip ass webvtt; do
+  if gen "s_$e" -i "$SRT" -c:s "$e"; then check_name "s_$e"; else skipped=$((skipped+1)); fi
+done
+[ "$same" -ge 20 ] || { echo "e2e: only $same codec names could be compared" >&2; exit 1; }
+echo "  codec names OK: $same identical, $unresolved unresolved, $skipped encoder(s) unavailable"
+
 echo "e2e: ALL PASS"

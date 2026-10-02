@@ -234,6 +234,9 @@ func CmdProbe(path string) {
 			fmt.Printf("  codec_private=%d bytes", len(t.CodecPrivate))
 		}
 		fmt.Println()
+		if cn := t.FFprobeCodecName(); cn != t.Codec {
+			fmt.Printf("        codec_name: %s\n", cn)
+		}
 		if ln := t.CodecLongName(); ln != "" {
 			fmt.Printf("        codec_long_name: %s\n", ln)
 		}
