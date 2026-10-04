@@ -787,6 +787,26 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 
 // buildSegmentFile returns one rendition segment's styp + moof + mdat header;
 // the caller appends the seg.dataLen sample bytes after it.
+// segmentFileLen is len(buildSegmentFile(seq, seg)) for a segment with no CENC
+// data, computed from the box layout instead of building it: a plan needs the
+// length of every segment head of every rendition (BANDWIDTH, the I-frame byte
+// ranges) and none of their bytes.
+func segmentFileLen(seg trackSegment) int64 {
+	perSample := int64(12) // duration, size, flags
+	if seg.hasCTS {
+		perSample += 4
+	}
+	const (
+		styp = smallBoxHeaderLen + 4 + 4 + 3*4
+		mfhd = smallBoxHeaderLen + 4 + 4
+		tfhd = smallBoxHeaderLen + 4 + 4
+		tfdt = smallBoxHeaderLen + 4 + 8
+		trun = smallBoxHeaderLen + 4 + 4 + 4 // + the samples
+	)
+	traf := int64(smallBoxHeaderLen + tfhd + tfdt + trun)
+	return styp + smallBoxHeaderLen + mfhd + traf + int64(len(seg.samples))*perSample + mdatHeaderLen
+}
+
 func buildSegmentFile(seq uint32, seg trackSegment) []byte {
 	moof := buildMoof(seq, []trackSegment{seg})
 	out := make([]byte, 0, len(moof)+32)

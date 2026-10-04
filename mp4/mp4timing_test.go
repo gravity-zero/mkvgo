@@ -50,3 +50,20 @@ func TestVideoIsNeverGridTimed(t *testing.T) {
 		t.Errorf("on-demand window lasts %d ms for fields spanning 233 ms: the video was grid-timed", windowTotal)
 	}
 }
+
+// A plan needs every segment head's length and none of its bytes:
+// segmentFileLen must say what buildSegmentFile would have built.
+func TestSegmentFileLenMatchesTheBuiltHead(t *testing.T) {
+	for _, n := range []int{0, 1, 2, 150, 4000} {
+		for _, cts := range []bool{false, true} {
+			seg := trackSegment{trackID: 2, baseDecodeTS: 1 << 40, hasCTS: cts, dataLen: int64(n) * 5000,
+				samples: make([]fragSample, n)}
+			for i := range seg.samples {
+				seg.samples[i] = fragSample{size: 5000, durTS: 1001, ctsTS: int32(i % 3), sync: i == 0}
+			}
+			if got, want := segmentFileLen(seg), int64(len(buildSegmentFile(7, seg))); got != want {
+				t.Errorf("%d samples, hasCTS=%v: segmentFileLen = %d, built head = %d", n, cts, got, want)
+			}
+		}
+	}
+}
