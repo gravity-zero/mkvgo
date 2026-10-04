@@ -55,14 +55,14 @@ type HLSPlan struct {
 	master   []byte
 	mpd      []byte
 	segCount int
-	opts     Options        // Encrypt / RewriteURL ride along for Resource builds
-	subs     []hlsSubTrack  // declared renditions; cues fetched lazily, then cached
-	subMu    []sync.Mutex   // serialises each track's cue scans
-	subScan  []subScanState // per-track incremental cue scan state
-	segs     []segInfo      // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
-	mp4src   bool           // MP4 source: windows sliced from the (fully timed) sample arrays
-	mp4offs  [][]int64      // per track, per sample: absolute file offset (MP4 source)
-	iframe   []byte         // trick-play playlist: MP4 plans build it eagerly (free, head-only);
+	opts     Options         // Encrypt / RewriteURL ride along for Resource builds
+	subs     []hlsSubTrack   // declared renditions; cues fetched lazily, then cached
+	subMu    []sync.Mutex    // serialises each track's cue scans
+	subScan  []subScanState  // per-track incremental cue scan state
+	segs     []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
+	mp4src   bool            // MP4 source: windows cut from the sample table, exact by construction
+	mp4tabs  []*mp4PlanTable // per track: the compact sample table the windows are built from (MP4 source)
+	iframe   []byte          // trick-play playlist: MP4 plans build it eagerly (free, head-only);
 	// Matroska plans build it lazily (see hasIframe/iframeMu/iframeErr) - the
 	// exact byte ranges need every segment's sample count/flags, which only a
 	// full pass over the video track's block headers can give.
@@ -2030,7 +2030,6 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	if err != nil {
 		return nil, err
 	}
-	p.mp4offs = offs
 	for _, ft := range fts {
 		p.tracks = append(p.tracks, &planTrack{ft: ft, firstPtsMs: ft.offsetMs})
 	}
@@ -2047,6 +2046,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	// the master playlist and the DASH manifest - equal the full pass.
 	video := pickVideoFrag(fts)
 	cursors := make([]int, len(fts))
+	starts := make([][]int32, len(fts)) // per track, per segment: the window's first sample
 	segs := make([]segInfo, 0, p.segCount)
 	var iframes []iframeRef
 	p.durs = make([]float64, p.segCount)
@@ -2058,6 +2058,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		}
 		var segBytes int64
 		for i, ft := range fts {
+			starts[i] = append(starts[i], int32(cursors[i]))
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			head := buildSegmentFile(uint32(k+1), seg)
 			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
@@ -2097,56 +2098,51 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		p.medias = append(p.medias, buildMediaPlaylist(o, p.durs, renditionInit(fts, i),
 			func(k int) string { return renditionSegment(fts, i, k) }, chs))
 	}
+	// Everything above worked on the full sample arrays; the plan itself keeps
+	// only the compact tables (it is cached for as long as a viewer may come
+	// back), plus the audio bandwidth the arrays measured, for a master built
+	// from this plan later.
+	p.mp4tabs = make([]*mp4PlanTable, len(fts))
+	for i, ft := range fts {
+		p.mp4tabs[i] = newMP4PlanTable(ft.samples, offs[i], starts[i])
+		ft.sampleBps, ft.sampleBpsKnown = sampleBandwidth(ft.samples)
+		ft.samples = nil
+	}
 	return p, nil
 }
 
 // mp4SegmentTrack builds one rendition segment from the sample-table plan:
-// the window is a slice of the fully timed sample array (identical values to
-// the full pass) and the bytes are ranged reads at the recorded offsets.
+// the window comes out of the compact table with the values the full pass
+// computed (its cursor semantics: each window starts where the previous one
+// stopped, at the first sample in decode order at/past its boundary) and the
+// bytes are ranged reads at the recorded offsets.
 func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
-	fts := p.fts()
-	ft := fts[ti]
-	// Window bounds under the full pass's cursor semantics: each window
-	// starts where the previous one stopped - at the first sample (decode
-	// order) at/past its boundary.
-	start := 0
-	for k := 1; k <= n; k++ {
-		for start < len(ft.samples) && ft.samples[start].blockPtsMs < p.bounds[k] {
-			start++
-		}
-	}
-	end := start
-	if n+1 < p.segCount {
-		for end < len(ft.samples) && ft.samples[end].blockPtsMs < p.bounds[n+1] {
-			end++
-		}
-	} else {
-		end = len(ft.samples)
-	}
+	ft := p.tracks[ti].ft
+	samples, offs := p.mp4tabs[ti].window(n)
 
 	seg := trackSegment{trackID: ft.outTrack.mp4ID, baseDecodeTS: ft.durMediaTS}
-	if end > start {
-		seg.samples = ft.samples[start:end]
-		seg.baseDecodeTS = ft.samples[start].dtsTS
+	if len(samples) > 0 {
+		seg.samples = samples
+		seg.baseDecodeTS = samples[0].dtsTS
 		seg.hasCTS = windowHasCTS(seg.samples)
-		for x := start; x < end; x++ {
-			seg.dataLen += int64(ft.samples[x].size)
+		for x := range samples {
+			seg.dataLen += int64(samples[x].size)
 		}
 	}
 
 	var plain []byte
-	if end > start {
+	if len(samples) > 0 {
 		plain = make([]byte, 0, seg.dataLen)
 		src, err := p.fs.DoOpen(p.srcPath)
 		if err != nil {
 			return nil, err
 		}
 		defer src.Close()
-		for x := start; x < end; x++ {
+		for x := range samples {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			data, err := readSample(src, p.mp4offs[ti][x], ft.samples[x].size)
+			data, err := readSample(src, offs[x], samples[x].size)
 			if err != nil {
 				return nil, errf("read sample: %w", err)
 			}

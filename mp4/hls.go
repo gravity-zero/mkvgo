@@ -104,6 +104,10 @@ type fragTrack struct {
 	// composition offsets stay non-negative (compositionShiftTS); the init's
 	// edit list takes exactly this much back out.
 	ctsShiftTS int64
+	// sampleBps is the bit rate the samples measured (sampleBandwidth), kept
+	// by an MP4 plan that releases its sample arrays once built.
+	sampleBps      int64
+	sampleBpsKnown bool
 }
 
 // hlsSubTrack is one text subtitle track carried as a segmented WebVTT

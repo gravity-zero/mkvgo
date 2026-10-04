@@ -160,23 +160,39 @@ func dashLangAttr(t *mkv.Track) string {
 
 // dashAudioBandwidth is an audio Representation's bandwidth attribute: the
 // track's own bit rate when it is known - from its samples when the plan
-// holds them, else the container's figure (the Matroska BPS tag, the MP4
-// btrt/esds average) - and 0 only when neither says. 0 is what every audio
-// Representation declared before, known or not.
+// holds them (or measured them before releasing them), else the container's
+// figure (the Matroska BPS tag, the MP4 btrt/esds average) - and 0 only when
+// neither says. 0 is what every audio Representation declared before, known
+// or not.
 func dashAudioBandwidth(ft *fragTrack) int64 {
-	if n := len(ft.samples); n > 1 {
-		if span := ft.samples[n-1].ptsMs - ft.samples[0].ptsMs; span > 0 {
-			var bytes int64
-			for _, s := range ft.samples {
-				bytes += int64(s.size)
-			}
-			return bytes * 8 * 1000 / span
-		}
+	if ft.sampleBpsKnown {
+		return ft.sampleBps
+	}
+	if bps, ok := sampleBandwidth(ft.samples); ok {
+		return bps
 	}
 	if b := ft.outTrack.mkv.Bitrate; b != nil && *b > 0 {
 		return int64(*b)
 	}
 	return 0
+}
+
+// sampleBandwidth is the bit rate a track's samples measure - their bytes over
+// the span of their timestamps; ok is false when they span no time.
+func sampleBandwidth(samples []fragSample) (bps int64, ok bool) {
+	n := len(samples)
+	if n < 2 {
+		return 0, false
+	}
+	span := samples[n-1].ptsMs - samples[0].ptsMs
+	if span <= 0 {
+		return 0, false
+	}
+	var bytes int64
+	for _, s := range samples {
+		bytes += int64(s.size)
+	}
+	return bytes * 8 * 1000 / span, true
 }
 
 // dashLabel is the AdaptationSet's Label element (one line, indented) for a
