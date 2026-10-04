@@ -60,11 +60,21 @@ func (ts *trackSamples) addChunk(offset uint64, count int) {
 // duplicate a DTS whenever a lace's last frame rounds onto the next block's
 // timecode, and drift one frame short per segment.
 func audioGridTS(t *outTrack, mts uint32) int64 {
-	if t.mkv.Type != mkv.AudioTrack || t.mkv.DefaultDurationNs <= 0 {
+	if t.mkv.Type != mkv.AudioTrack {
+		return noGridTS
+	}
+	if t.mkv.DefaultDurationNs <= 0 {
 		return 0
 	}
 	return (t.mkv.DefaultDurationNs*int64(mts) + 500_000_000) / 1_000_000_000
 }
+
+// noGridTS is the grid stride of a track that has no grid and must not be
+// given one: video and text. 0 means "not declared" - an audio track whose
+// stride may still be recovered from its samples (deriveGridTS) - and a video
+// track must never take that path: two fields stamped with the same time look
+// exactly like the collapsed lace deriveGridTS recovers a stride from.
+const noGridTS = -1
 
 // gridIndex maps a scaled block timestamp (relative to the track's first
 // block) to its frame index on the grid. True frame positions are exact
@@ -168,7 +178,7 @@ func reconstructTiming(samples []sample, lastDurMs int64, mts uint32, gridTS int
 		}
 		return ptsMs * int64(mts) / int64(movieTimescale)
 	}
-	if gridTS <= 0 { // laced audio with no DefaultDuration: recover the stride
+	if gridTS == 0 { // laced audio with no DefaultDuration: recover the stride
 		gridTS = deriveGridTS(n, func(i int) int64 { return samples[i].blockPts }, mts)
 	}
 

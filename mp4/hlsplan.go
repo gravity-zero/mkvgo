@@ -877,7 +877,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseD
 	// collapsed laces (the stride is uniform, so every window measures the same
 	// value the full pass derives from all samples - parity by construction).
 	gridTS := pt.gridTS
-	if gridTS <= 0 {
+	if gridTS <= 0 && pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
 		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
 	}
 	if gridTS > 0 {

@@ -348,7 +348,7 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 		}
 		return ms * int64(mts) / int64(movieTimescale)
 	}
-	if gridTS <= 0 { // laced audio with no DefaultDuration: recover the stride
+	if gridTS == 0 { // laced audio with no DefaultDuration: recover the stride
 		gridTS = deriveGridTS(n, func(i int) int64 { return samples[i].blockPtsMs }, mts)
 	}
 
