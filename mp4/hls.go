@@ -104,6 +104,11 @@ type fragTrack struct {
 	// composition offsets stay non-negative (compositionShiftTS); the init's
 	// edit list takes exactly this much back out.
 	ctsShiftTS int64
+	// ptsTS, when not nil, holds each sample's presentation time in the
+	// track's own timescale (an MP4 source's video keeps its native ticks: see
+	// mp4NativeTimescale); the timing derivation then works on it instead of
+	// the millisecond times, and releases it.
+	ptsTS []int64
 	// sampleBps is the bit rate the samples measured (sampleBandwidth), kept
 	// by an MP4 plan that releases its sample arrays once built.
 	sampleBps      int64
@@ -237,6 +242,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			return nil, cerr
 		}
 		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t), tmp: tmp, tmpPath: tmpPath}
+		if ts := mp4NativeTimescale(ps, t); ts != 0 {
+			fts[i].timescale, fts[i].ptsTS = ts, []int64{}
+		}
 		routing[t.mkv.ID] = fts[i]
 	}
 	// Best-effort cleanup of the per-track temp files.
@@ -271,7 +279,8 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale, grid)
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid)
+		ft.ptsTS = nil
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS

@@ -166,6 +166,7 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 		}
 		samples[i].dtsMs = ticksToMs(dts, ts)
 		samples[i].ctsMs = cts
+		samples[i].ctsTicks = dts + int64(cttsOffsets[i])
 		samples[i].durMs = ticksToMs(int64(durations[i]), ts)
 		samples[i].sync = syncSet == nil || syncSet[i+1]
 		dts += int64(durations[i])

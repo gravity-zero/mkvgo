@@ -32,11 +32,14 @@ const (
 // and its decode/composition times already converted to milliseconds.
 type inSample struct {
 	offset int64
-	size   uint32
 	dtsMs  int64
 	ctsMs  int64
 	durMs  int64
-	sync   bool
+	// ctsTicks is the composition time as the file states it: decode time plus
+	// composition offset, in the track's timescale, edit list not applied.
+	ctsTicks int64
+	size     uint32
+	sync     bool
 }
 
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.

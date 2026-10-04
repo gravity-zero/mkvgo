@@ -338,9 +338,22 @@ func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
 func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
+	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS)
+}
+
+// fillFragTimingTS is fillFragTiming with, when ptsTS is not nil, each
+// sample's presentation time given in the mts timescale itself instead of
+// derived from its millisecond time: an MP4 source's video is timed in its
+// own ticks, so a 24000/1001 stream keeps 1001-tick frames rather than a run
+// of 41 and 42 ms ones. The final sample then takes the duration of the one
+// before it. The presentation offset stays the smallest millisecond time.
+func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
 	n := len(samples)
 	if n == 0 {
 		return 0, false, 0, 0
+	}
+	if ptsTS != nil {
+		lastDurMs = 0
 	}
 	scale := func(ms int64) int64 {
 		if mts == movieTimescale {
@@ -350,6 +363,12 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 	}
 	if gridTS == 0 { // laced audio with no DefaultDuration: recover the stride
 		gridTS = deriveGridTS(n, func(i int) int64 { return samples[i].blockPtsMs }, mts)
+	}
+	pts := func(i int) int64 {
+		if ptsTS != nil {
+			return ptsTS[i]
+		}
+		return scale(samples[i].ptsMs)
 	}
 
 	// Constant-rate audio rides the sample-exact grid (see audioGridTS): frame
@@ -390,7 +409,7 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 	// smallest presentation time. Rebase to 0.
 	dts := make([]int64, n)
 	for i := range samples {
-		dts[i] = scale(samples[i].ptsMs)
+		dts[i] = pts(i)
 	}
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
 	base := dts[0]
@@ -400,13 +419,13 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 	// The shift that keeps every composition offset non-negative, measured over
 	// the SAME bounded prefix the on-demand plan measures it over, so both derive
 	// the same init.
-	ptsTS := make([]int64, 0, compositionPrefix)
+	prefix := make([]int64, 0, compositionPrefix)
 	syncs := make([]bool, 0, compositionPrefix)
 	for i := 0; i < n && i < compositionPrefix; i++ {
-		ptsTS = append(ptsTS, scale(samples[i].ptsMs))
+		prefix = append(prefix, pts(i))
 		syncs = append(syncs, samples[i].sync)
 	}
-	ctsShiftTS = compositionShiftTS(ptsTS, syncs)
+	ctsShiftTS = compositionShiftTS(prefix, syncs)
 	for i := 0; i < n-1; i++ {
 		samples[i].durTS = dts[i+1] - dts[i]
 	}
@@ -423,7 +442,7 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 		if samples[i].ptsMs < offsetMs {
 			offsetMs = samples[i].ptsMs
 		}
-		off := scale(samples[i].ptsMs) - dts[i] + ctsShiftTS
+		off := pts(i) - dts[i] + ctsShiftTS
 		if off < 0 {
 			// Only a stream that reorders deeper later than it does in its first
 			// GOPs can land here. Clamping keeps the offsets non-negative - the

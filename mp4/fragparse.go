@@ -352,12 +352,13 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 			cts = 0
 		}
 		t.samples = append(t.samples, inSample{
-			offset: sampleOff,
-			size:   sz,
-			dtsMs:  ticksToMs(dts, t.timescale),
-			ctsMs:  cts,
-			durMs:  ticksToMs(int64(dur), t.timescale),
-			sync:   sflags&sampleNonSync == 0,
+			offset:   sampleOff,
+			size:     sz,
+			dtsMs:    ticksToMs(dts, t.timescale),
+			ctsMs:    cts,
+			ctsTicks: dts + ctsOff,
+			durMs:    ticksToMs(int64(dur), t.timescale),
+			sync:     sflags&sampleNonSync == 0,
 		})
 		sampleOff += int64(sz)
 		dts += int64(dur)

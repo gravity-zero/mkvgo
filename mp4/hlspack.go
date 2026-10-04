@@ -127,12 +127,43 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		// size is the written (possibly converted) byte count; processed tracks
 		// progress against the source, so it keeps the source sample size.
 		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)), ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
+		if ft.ptsTS != nil {
+			ft.ptsTS = append(ft.ptsTS, s.ctsTicks)
+		}
 		processed += int64(s.size)
 		if progress != nil {
 			progress(processed, ps.size)
 		}
 	}
 	return nil
+}
+
+// mp4NativeTimescale is the timescale an MP4 source's video track keeps in the
+// fragments - its own - or 0 to time the track on the millisecond timeline
+// like any other (a Matroska source, a non-video track, a table that spans
+// more ticks than a 32-bit media duration holds). The source states each
+// frame's time in its own ticks; taking them through milliseconds and back
+// turns a constant 1001/24000 s frame into a run of 41 and 42 ms ones.
+func mp4NativeTimescale(ps *packagingSource, t *outTrack) uint32 {
+	if ps.mv == nil || !t.spec.video {
+		return 0
+	}
+	ti := int(t.mkv.ID) - 1
+	if ti < 0 || ti >= len(ps.mv.tracks) {
+		return 0
+	}
+	tk := &ps.mv.tracks[ti]
+	if tk.timescale == 0 || len(tk.samples) == 0 {
+		return 0
+	}
+	lo, hi := tk.samples[0].ctsTicks, tk.samples[0].ctsTicks
+	for i := range tk.samples {
+		lo, hi = min(lo, tk.samples[i].ctsTicks), max(hi, tk.samples[i].ctsTicks)
+	}
+	if hi-lo >= 1<<30 {
+		return 0
+	}
+	return tk.timescale
 }
 
 // mp4PlanTracks builds the on-demand plan state for an MP4 source: each
@@ -147,12 +178,19 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 		}
 		samples := ps.mv.tracks[ti].samples
 		ft := &fragTrack{outTrack: t, timescale: mediaTimescale(t)}
+		var ptsTS []int64
+		if ts := mp4NativeTimescale(ps, t); ts != 0 {
+			ft.timescale, ptsTS = ts, make([]int64, len(samples))
+		}
 		offs := make([]int64, len(samples))
 		ft.samples = make([]fragSample, len(samples))
 		for i := range samples {
 			ft.samples[i] = fragSample{size: samples[i].size, ptsMs: samples[i].ctsMs,
 				blockPtsMs: samples[i].ctsMs, sync: samples[i].sync}
 			offs[i] = samples[i].offset
+			if ptsTS != nil {
+				ptsTS[i] = samples[i].ctsTicks
+			}
 		}
 		if len(ft.samples) == 0 {
 			return nil, nil, errf("track %d produced no samples", t.mp4ID)
@@ -173,7 +211,7 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 		if grid == 0 {
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, t.frameDurMs, ft.timescale, grid)
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid)
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS
