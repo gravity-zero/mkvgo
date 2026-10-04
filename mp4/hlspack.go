@@ -169,8 +169,11 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 			}
 			t.sampleEntry = entry
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, t.frameDurMs, ft.timescale,
-			audioGridTS(t, ft.timescale))
+		grid := audioGridTS(t, ft.timescale)
+		if grid == 0 {
+			grid = mp4FrameGridTS(ps, t, ft.timescale)
+		}
+		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, t.frameDurMs, ft.timescale, grid)
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS

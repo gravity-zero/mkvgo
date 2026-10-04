@@ -267,8 +267,11 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			return nil, cerr
 		}
 		ft.tmp = nil
-		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale,
-			audioGridTS(ft.outTrack, ft.timescale))
+		grid := audioGridTS(ft.outTrack, ft.timescale)
+		if grid == 0 && ps.mv != nil {
+			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
+		}
+		off, hasCTS, totalTS, ctsShift := fillFragTiming(ft.samples, ft.outTrack.frameDurMs, ft.timescale, grid)
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS

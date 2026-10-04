@@ -59,9 +59,13 @@ type inTrack struct {
 	frameCount       int64   // sample count from stsz (the conventional nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
 	timescale        uint32
-	samples          []inSample
-	keyframesMs      []int64 // sync-sample presentation times (sampleKeyframes mode); nil otherwise
-	sampleEndMs      int64   // last sample's cts (sampleKeyframes mode), for the movie duration
+	// sttsLo/sttsHi are the smallest and largest sample duration an audio
+	// track's stts declares, in timescale ticks (a lone final sample aside:
+	// muxers close a track on whatever is left); 0 when there is no stts.
+	sttsLo, sttsHi uint32
+	samples        []inSample
+	keyframesMs    []int64 // sync-sample presentation times (sampleKeyframes mode); nil otherwise
+	sampleEndMs    int64   // last sample's cts (sampleKeyframes mode), for the movie duration
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -1189,6 +1193,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		// the Matroska DefaultDuration, which downstream grid-times the audio
 		// (sample-exact fMP4/HLS timing survives the millisecond timeline).
 		tr.frameDurNs = headerConstantFrameDurNs(stblBoxes, tr.timescale)
+		tr.sttsLo, tr.sttsHi = sttsDeltaRange(stblBoxes)
 	}
 
 	switch mode {
@@ -1350,6 +1355,35 @@ func headerConstantFrameDurNs(stblBoxes []memBox, timescale uint32) int64 {
 		return 0
 	}
 	return (int64(delta)*1_000_000_000 + int64(timescale)/2) / int64(timescale)
+}
+
+// sttsDeltaRange returns the smallest and largest sample duration the stts
+// declares, leaving out a final entry of one sample when others precede it
+// (the last sample's duration is whatever closes the track). 0, 0 when the
+// table is absent or empty.
+func sttsDeltaRange(stblBoxes []memBox) (lo, hi uint32) {
+	stts, ok := findMemBox(stblBoxes, "stts")
+	if !ok || len(stts.payload) < 8 {
+		return 0, 0
+	}
+	entries := binary.BigEndian.Uint32(stts.payload[4:8])
+	if entries == 0 || uint64(len(stts.payload)) < 8+8*uint64(entries) {
+		return 0, 0
+	}
+	for i := uint32(0); i < entries; i++ {
+		count := binary.BigEndian.Uint32(stts.payload[8+8*i:])
+		delta := binary.BigEndian.Uint32(stts.payload[12+8*i:])
+		if count == 0 || (i > 0 && i == entries-1 && count == 1) {
+			continue
+		}
+		if lo == 0 || delta < lo {
+			lo = delta
+		}
+		if delta > hi {
+			hi = delta
+		}
+	}
+	return lo, hi
 }
 
 // headerFrameCount returns the sample count (= frame count for a video track)
