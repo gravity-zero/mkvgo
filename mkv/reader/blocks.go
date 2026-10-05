@@ -697,6 +697,9 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if err == nil || errors.Is(err, io.EOF) || errors.Is(err, ErrClusterLimit) {
 			return b, err
 		}
+		if br.zeroTail(br.elemStart) {
+			return mkv.Block{}, io.EOF
+		}
 		if !br.skipDamage && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return b, err // a decode error is already its own refusal
 		}
@@ -728,6 +731,52 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		br.inCluster, br.clusterEnd = false, -1
 		br.pending, br.peeked, br.awaitLimit = nil, nil, false
 	}
+}
+
+// maxZeroTail is the longest run of null bytes closing a file that is taken
+// for its end when it follows the last element: some muxers write a few there
+// (1 to 68 on real files, which every player reads to the end), and nothing
+// the file declares is missing. A longer run is a tail that was never
+// written, and stays the error it is.
+const maxZeroTail = 4096
+
+// maxZeroTailInCluster is the same allowance inside a Cluster of declared
+// size, where the null bytes stand in for blocks the Cluster says it holds:
+// only the few a muxer's own padding accounts for.
+const maxZeroTailInCluster = 64
+
+// zeroTail reports whether everything from off to the end of the source is
+// null bytes, few enough to be a muxer's closing padding (see maxZeroTail).
+// An element cannot start on 0x00, so a walk that fails there has either
+// reached such a closing run - the end of the file - or a zeroed region,
+// which this refuses. It leaves the source where it was.
+func (br *BlockReader) zeroTail(off int64) bool {
+	if br.raw == nil {
+		return false
+	}
+	limit := maxZeroTail
+	if br.inCluster && br.clusterEnd >= 0 {
+		limit = maxZeroTailInCluster
+	}
+	cur, err := br.raw.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false
+	}
+	defer br.raw.Seek(cur, io.SeekStart) //nolint:errcheck // best effort: the walk is over either way
+	if _, err := br.raw.Seek(off, io.SeekStart); err != nil {
+		return false
+	}
+	var tail [maxZeroTail + 1]byte
+	n, err := io.ReadFull(br.raw, tail[:limit+1])
+	if n == 0 || n > limit || (err != io.ErrUnexpectedEOF && err != io.EOF) {
+		return false
+	}
+	for _, b := range tail[:n] {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // clusterAfter looks for a valid Cluster past off (the start of an element the
