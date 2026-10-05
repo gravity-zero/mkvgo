@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"math"
 	"strconv"
@@ -179,11 +180,51 @@ func findMemBox(boxes []memBox, typ string) (memBox, bool) {
 // size is wrong sends it into the mdat (some real files have a slightly-off mdat
 // size) - it falls back to a bounded backward scan for the moov, which sits near
 // the end in those files. That tolerance matches mainstream probers, which still read those files.
+//
+// A file that does not open on a box an ISO base media file can open with is
+// refused on its first bytes (ErrNotMP4): the backward scan is a tolerance for
+// a damaged MP4, not a way to find out that an MPEG-TS has no moov.
 func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
+	if err := checkISOBMFFHead(r, size); err != nil {
+		return 0, 0, err
+	}
 	if dataOff, plen, ferr := findMoovForward(r, size); ferr == nil {
 		return dataOff, plen, nil
 	}
 	return findMoovBackward(r, size)
+}
+
+// ErrNotMP4 is returned when a source handed to the MP4 reader does not open
+// on an ISO base media box: it is some other container, whatever its name
+// says. errors.Is-able, so a caller can route the file elsewhere.
+var ErrNotMP4 = errors.New("not an MP4/MOV file (it does not start with an ISO base media box)")
+
+// isoBMFFOpeners are the box types an ISO base media or QuickTime file - or a
+// fragment of one - opens with.
+var isoBMFFOpeners = map[string]bool{
+	"ftyp": true, "styp": true, "moov": true, "moof": true, "mdat": true,
+	"free": true, "skip": true, "wide": true, "pnot": true, "uuid": true,
+	"sidx": true, "emsg": true, "prft": true, "meta": true,
+}
+
+// checkISOBMFFHead refuses with ErrNotMP4 a source whose first box header
+// does not name a box such a file opens with. A source too short to hold a
+// box header is left to the walk, which says what it lacks.
+func checkISOBMFFHead(r io.ReadSeeker, size int64) error {
+	if size < 8 {
+		return nil
+	}
+	var hdr [8]byte
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return errf("read box header: %w", err)
+	}
+	if !isoBMFFOpeners[string(hdr[4:8])] {
+		return errf("%w", ErrNotMP4)
+	}
+	return nil
 }
 
 func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
@@ -223,39 +264,43 @@ func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64,
 // even for a long movie, so growing past this means there is genuinely no moov.
 const maxMoovScanWindow = 256 << 20
 
+// moovScanChunk is how much of the file the backward scan holds at a time.
+const moovScanChunk = 1 << 20
+
 // findMoovBackward scans back from EOF for the last moov box, validated by its
 // first child being a real moov child (mvhd/trak/…), so a "moov" byte sequence
-// inside the mdat is not mistaken for it.
+// inside the mdat is not mistaken for it. The tail is read one chunk at a
+// time, highest first, so the scan holds a chunk whatever the file: each chunk
+// is read with the 7 bytes that follow it, and judges the candidates whose
+// type starts at least 4 bytes into it - the size field before a type that
+// starts sooner lies in the chunk below, which reads those bytes too.
 func findMoovBackward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
-	for window := int64(1 << 20); ; window *= 4 {
-		start := size - window
-		atStart := false
-		if start <= 0 {
-			start, atStart = 0, true
-		}
+	lowest := max(size-maxMoovScanWindow, 0)
+	buf := make([]byte, moovScanChunk+7)
+	for end := size; end > lowest; {
+		start := max(end-moovScanChunk, lowest)
+		chunk := buf[:min(end+7, size)-start]
 		if _, err := r.Seek(start, io.SeekStart); err != nil {
 			return 0, 0, err
 		}
-		buf, err := readExact(r, size-start)
-		if err != nil {
+		if _, err := io.ReadFull(r, chunk); err != nil {
 			return 0, 0, err
 		}
-		for end := len(buf); ; {
-			i := bytes.LastIndex(buf[:end], []byte("moov"))
+		for hi := len(chunk); ; {
+			i := bytes.LastIndex(chunk[:hi], []byte("moov"))
 			if i < 4 { // need the 4-byte size field before the type
 				break
 			}
 			boxStart := start + int64(i-4)
-			boxSize := int64(binary.BigEndian.Uint32(buf[i-4 : i]))
+			boxSize := int64(binary.BigEndian.Uint32(chunk[i-4 : i]))
 			if boxSize >= 16 && boxStart+boxSize <= size && validMoovAt(r, boxStart, boxSize, size) {
 				return boxStart + 8, boxSize - 8, nil
 			}
-			end = i
+			hi = i
 		}
-		if atStart || window >= maxMoovScanWindow {
-			return 0, 0, errf("no moov box found")
-		}
+		end = start
 	}
+	return 0, 0, errf("no moov box found")
 }
 
 // validMoovAt confirms a moov candidate by reading its first child header: a real
@@ -289,6 +334,11 @@ func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readMoovAt(r, dataOff, payloadLen)
+}
+
+// readMoovAt reads the whole moov payload findMoov located.
+func readMoovAt(r io.ReadSeeker, dataOff, payloadLen int64) ([]byte, error) {
 	if _, err := r.Seek(dataOff, io.SeekStart); err != nil {
 		return nil, err
 	}
@@ -334,6 +384,11 @@ func readMoovLazy(r io.ReadSeeker, size int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readMoovLazyAt(r, dataOff, payloadLen)
+}
+
+// readMoovLazyAt is readMoovLazy on the moov payload findMoov located.
+func readMoovLazyAt(r io.ReadSeeker, dataOff, payloadLen int64) ([]byte, error) {
 	// This buffer is the real moov size and is filled sparsely (large sample
 	// tables are seeked over, not read), so unlike readMoov it cannot grow
 	// incrementally - the boxes must sit at their true offsets. payloadLen is a
@@ -733,10 +788,16 @@ func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode) ([]byte, erro
 	if mode == sampleFull {
 		return readMoov(r, size)
 	}
-	if payload, err := readMoovLazy(r, size); err == nil {
+	// The moov is looked for once: a file that has none is not scanned again
+	// for the fallback.
+	dataOff, payloadLen, err := findMoov(r, size)
+	if err != nil {
+		return nil, err
+	}
+	if payload, err := readMoovLazyAt(r, dataOff, payloadLen); err == nil {
 		return payload, nil
 	}
-	return readMoov(r, size)
+	return readMoovAt(r, dataOff, payloadLen)
 }
 
 // parseMoov parses an in-memory moov payload into a movie. Splitting it from the
