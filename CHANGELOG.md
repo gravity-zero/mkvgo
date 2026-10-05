@@ -4,6 +4,66 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.39.0] - 2026-10-05
+
+### Added
+
+- **`HLSPlan.Stats()` counts what serving a plan's segments costs in walks of
+  the source.** A Matroska window is read once for every rendition of it;
+  the counters say how often that held: `WindowBuilds`, `WindowRebuilds` (a
+  window this plan had already built - each one a full read of it),
+  `SharedRenditions`, `WaitedBuilds`, `Evictions`, and `BuiltBytes` /
+  `ServedBytes` / `DroppedBytes`. A plan whose rebuilds grow with its
+  audience is reading its source more than once per viewer. An MP4-source
+  plan counts nothing here.
+- **`reader.BlockReader.SetBlockBuffer`** lets a caller choose where the
+  payload of an unlaced block is read - the tail of the buffer it is
+  assembling - instead of receiving a buffer per block and copying each.
+- **`mp4.ErrNotMP4`**, see below.
+
+### Changed
+
+- **A source that does not open on an ISO base media box is refused on its
+  first bytes**, with `ErrNotMP4`: "not an MP4/MOV file (it does not start
+  with an ISO base media box)". Such a file - an MPEG-TS carrying an `.mp4`
+  name - used to be scanned for a `moov` over its last 256 MiB, read into
+  one buffer, on every call, before the same refusal under another message
+  ("no moov box found"): 341 MiB read and 1.3 GiB allocated for one
+  `PlanHLS` of a 1.25 GiB file, twice that for `OpenMeta` and
+  `ops.Playability`. Every entry that reads an MP4 is covered. The boxes a
+  file may open with: `ftyp`, `styp`, `moov`, `moof`, `mdat`, `free`,
+  `skip`, `wide`, `pnot`, `uuid`, `sidx`, `emsg`, `prft`, `meta`. An MP4
+  preceded by bytes that are not a box was found by that scan, and is now
+  refused.
+
+### Fixed
+
+- **The backward scan for a `moov` holds one megabyte.** It remains for an
+  MP4 whose box walk desyncs (a slightly wrong `mdat` size), reads the tail
+  once instead of in growing windows, and no longer keeps it in memory;
+  a metadata read looks for the `moov` once, not once per attempt.
+- **A few null bytes after the last element end a Matroska file.** Some
+  muxers write 1 to 68 of them there, and every player reads such a file to
+  its end; a reader seated in mid-file - every on-demand path - took them for
+  an element and failed with "invalid VINT: leading zero byte", refusing the
+  whole plan (78 files of one real library). Up to 4096 null bytes after the
+  last element are the end of the file; inside a Cluster of declared size,
+  where they stand in for blocks the Cluster says it holds, 64 at most. A
+  longer run is still the error it was.
+- **A Matroska window's video is read into the buffer its segment is served
+  from.** Every block was read into a buffer of its own and then copied into
+  the segment: a segment cost a little over twice its size in memory to
+  build, for every viewer. It now costs about once (153 MiB became 89 MiB
+  for three consecutive 2160p segments), with every served byte identical.
+  Laced blocks, stripped headers, CENC and block-ordered sources keep the
+  copy.
+- **A segment of an MP4 source is read by runs of samples, straight into the
+  served buffer.** One read and one buffer per sample, then two copies, made
+  a segment cost three times its size and 144 reads; it costs once and 14.
+  Runs a small gap separates are read as one stream only when the gap is no
+  longer than the run behind it, so a source interleaved sample by sample
+  never reads its video to serve its audio.
+
 ## [0.38.0] - 2026-10-05
 
 ### Changed
