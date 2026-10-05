@@ -4,6 +4,52 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.38.0] - 2026-10-05
+
+### Changed
+
+- **The video of an MP4 or MOV source keeps its own timescale in the HLS/DASH
+  fragments.** The source states each frame's time in its track's ticks;
+  taking them through milliseconds and back turned a constant 1001/24000 s
+  frame into a run of 41 and 42 ms ones, and a variable-rate phone recording
+  into 33, 34 and 35 ms where the file says 20 and 21 ticks at 600. The init
+  segment now declares the source's timescale and every fragment carries the
+  source's own durations (`PlanHLS` and the full pass alike, still
+  byte-identical to each other). Every video init and segment of an MP4
+  source therefore changes; the last segment's listed duration can move by a
+  millisecond. A Matroska source is unchanged - its timeline is in
+  milliseconds by nature - and so is track metadata.
+- **AC-3 and E-AC-3 from an MP4 source ride the exact frame grid when the
+  sample table strays a tick around it.** A real muxer's table reads 1535,
+  1536, 1537 around a frame that always holds 1536 samples; through the
+  millisecond timeline each stray tick became a whole millisecond (1488 and
+  1584 in the fragments, one frame in twelve on a real file). The frame
+  header says how many blocks the frame holds and at what rate: when every
+  duration the table declares lies within a tick of that, the fragments carry
+  the frame's own duration. A table further off (packets of several sizes, a
+  real gap) keeps its timing as it is. Total duration is unchanged.
+
+### Fixed
+
+- **A video track is never timed on the grid meant for laced audio.** Two
+  video samples stamped with the same time at the start of a track - the two
+  fields of an interlaced frame stored one per sample - read as a collapsed
+  audio lace, and the whole track was put on the stride derived from it: a
+  59 s interlaced MP4 came out 238 s long, its video four times too slow
+  against its audio. Affected the HLS/DASH full pass, `PlanHLS` on MP4 and
+  Matroska sources, and the Matroska to MP4 remux.
+- **An MP4-source `PlanHLS` plan keeps a few hundred kilobytes instead of
+  tens of megabytes.** The plan held the full per-sample arrays (64 bytes a
+  sample) for as long as it lived: 16 to 25 MB for an hour of 2160p, against
+  0.1 MB for the same film in Matroska, which is what a server caching a few
+  hundred plans paid. It now keeps each segment's samples packed, lossless,
+  and unpacks one segment when it is asked for: 16.2 MB became 0.55 MB on a
+  real episode, with every served byte identical.
+- **Building an MP4-source plan allocates a third of what it did.** Every
+  segment head of every rendition was built in full to learn its length (for
+  `BANDWIDTH` and the I-frame byte ranges); the length is now computed. 109 MB
+  allocated for one plan of a real episode became 37 MB.
+
 ## [0.37.0] - 2026-10-03
 
 ### Added
