@@ -1,7 +1,6 @@
 package reader
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -118,6 +117,38 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	c.r += n
 	c.pos += int64(n)
 	return n, nil
+}
+
+// ReadByte returns the next byte. It makes the reader an io.ByteReader, which
+// is what lets the EBML number readers take a byte at a time from the window
+// instead of passing a slice through io.Reader - an allocation per number.
+func (c *countingReader) ReadByte() (byte, error) {
+	if c.r == c.w {
+		if err := c.fill(); err != nil {
+			return 0, err
+		}
+	}
+	b := c.buf[c.r]
+	c.r++
+	c.pos++
+	return b, nil
+}
+
+// readBE reads n bytes (8 at most) as a big-endian value, with io.ReadFull's
+// errors: io.EOF before the first byte, io.ErrUnexpectedEOF after it.
+func (c *countingReader) readBE(n int) (uint64, error) {
+	var val uint64
+	for i := 0; i < n; i++ {
+		b, err := c.ReadByte()
+		if err != nil {
+			if err == io.EOF && i > 0 {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		val = val<<8 | uint64(b)
+	}
+	return val, nil
 }
 
 // discard advances the reader by exactly n bytes without delivering them.
@@ -1013,17 +1044,16 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		return mkv.Block{}, errFilteredBlock
 	}
 
-	var tcBuf [2]byte
-	if _, err := io.ReadFull(br.r, tcBuf[:]); err != nil {
+	tc16, err := br.r.readBE(2)
+	if err != nil {
 		return mkv.Block{}, err
 	}
-	relTC := int16(binary.BigEndian.Uint16(tcBuf[:]))
+	relTC := int16(uint16(tc16))
 
-	var flagsBuf [1]byte
-	if _, err := io.ReadFull(br.r, flagsBuf[:]); err != nil {
+	flags, err := br.r.ReadByte()
+	if err != nil {
 		return mkv.Block{}, err
 	}
-	flags := flagsBuf[0]
 	keyframe := simple && flags&0x80 != 0
 	lacing := (flags >> 1) & 0x03
 

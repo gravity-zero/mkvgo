@@ -23,6 +23,9 @@ func ReadUint(r io.Reader, size int64) (uint64, error) {
 	if size < 0 || size > 8 {
 		return 0, fmt.Errorf("invalid uint size %d", size)
 	}
+	if br, ok := r.(io.ByteReader); ok {
+		return readBE(br, int(size)) // no buffer to allocate: see ReadVINT
+	}
 	buf := make([]byte, size)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return 0, err

@@ -5,8 +5,51 @@ import (
 	"io"
 )
 
+// readBE reads n bytes (8 at most) from br as a big-endian value, with
+// io.ReadFull's convention: io.EOF when the source ends before the first
+// byte, io.ErrUnexpectedEOF when it ends after it.
+func readBE(br io.ByteReader, n int) (uint64, error) {
+	var val uint64
+	for i := 0; i < n; i++ {
+		b, err := br.ReadByte()
+		if err != nil {
+			if err == io.EOF && i > 0 {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		val = val<<8 | uint64(b)
+	}
+	return val, nil
+}
+
 // ReadVINT reads a variable-length integer. Returns value and bytes consumed.
+//
+// A source that hands out single bytes (io.ByteReader) is read that way: a
+// slice passed to an io.Reader escapes to the heap, which made every number
+// read an allocation - some ten thousand per media segment walked.
 func ReadVINT(r io.Reader) (uint64, int, error) {
+	if br, ok := r.(io.ByteReader); ok {
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, 0, err
+		}
+		if b == 0 {
+			return 0, 0, fmt.Errorf("invalid VINT: leading zero byte")
+		}
+		width := 1
+		for i := 7; i >= 0; i-- {
+			if b&(1<<uint(i)) != 0 {
+				width = 8 - i
+				break
+			}
+		}
+		rest, err := readBE(br, width-1)
+		if err != nil {
+			return 0, 0, err
+		}
+		return uint64(b)<<(8*uint(width-1)) | rest, width, nil
+	}
 	var first [1]byte
 	if _, err := io.ReadFull(r, first[:]); err != nil {
 		return 0, 0, err
