@@ -508,6 +508,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 	type gridProbe struct {
 		firstTC, frames, secondTC int64
 		haveFirst, haveSecond     bool
+		single                    bool // the first block held one frame: nothing to derive
 	}
 	probes := map[*planTrack]*gridProbe{}
 	// Leading PTS in decode order, per track: the composition shift is measured
@@ -536,7 +537,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 			pt.firstPtsMs = b.Timecode
 			needFirst--
 		}
-		if pr := probes[pt]; pr != nil && !pr.haveSecond {
+		if pr := probes[pt]; pr != nil && !pr.haveSecond && !pr.single {
 			switch {
 			case !pr.haveFirst:
 				pr.firstTC, pr.frames, pr.haveFirst = b.BlockTimecode, 1, true
@@ -544,6 +545,20 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 				pr.frames++
 			default:
 				pr.secondTC, pr.haveSecond = b.BlockTimecode, true
+				needGrid--
+			}
+		}
+		// A lace hands out all its frames in a row: once another track's
+		// block follows a probed track's first block, that block is complete.
+		// Holding a single frame, it has no collapsed lace to recover a stride
+		// from (deriveGridTS needs two or more frames on one timecode, and
+		// returns 0 otherwise, in the full pass too): the probe is settled
+		// there, instead of waiting for the track's NEXT block - which a
+		// source storing that track far from the video keeps hundreds of
+		// megabytes on (480 MB on a real 4 GB file).
+		for opt, pr := range probes {
+			if opt != pt && pr.haveFirst && !pr.haveSecond && !pr.single && pr.frames == 1 {
+				pr.single = true
 				needGrid--
 			}
 		}
