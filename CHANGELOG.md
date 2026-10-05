@@ -4,6 +4,43 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.40.0] - 2026-10-06
+
+### Added
+
+- **`Options.SubtitleIndex`: an on-demand plan serves WebVTT from a prebuilt
+  subtitle index.** A Matroska file indexes its video, not its subtitles, so
+  a plan reached a subtitle track by walking the clusters around a segment -
+  and the video in them: the first subtitle segment after a start or a seek
+  read two to four minutes of the file (92 MiB on a real 1080p film, 244 MiB
+  on a 2160p one) and the whole-track `subN.vtt` read the film. Given the
+  index `matroska.BuildSubtitleIndex` builds once per file, the plan seeks
+  straight to the track's blocks: the same WebVTT for a few kilobytes read.
+  An index that is not the file's - another size, Segment UID or timecode
+  scale, a track it does not cover, a position that does not hold what it
+  recorded - is set aside and the walk serves; it never yields a wrong cue.
+  `SubtitleIndex.Matches` and `SubtitleIndex.TrackBlocks` (with
+  `reader.IndexedBlock`) are what the plan reads, through the
+  `mp4.SubtitleBlockIndex` interface.
+- **`HLSPlanStats.SubtitleWalks` and `SubtitleIndexedBlocks`** say which of
+  the two paths served a plan's subtitles.
+
+### Fixed
+
+- **Planning a Matroska source no longer walks toward an audio track's
+  second block.** An audio track without a declared frame duration had the
+  plan read on until that track's next block, to learn a stride from it -
+  which is only ever learned when the first block is a lace of several
+  frames. A real 4 GB file stores its second audio track's next block 480 MB
+  in: planning it read 481 MB and took 3.3 s before the first segment could
+  be served. It now stops once that first block is known to hold one frame
+  (the full pass applies the same rule): 0.5 MB, 14 ms. Every output is
+  unchanged.
+- **Reading an EBML number no longer allocates.** Every element and block
+  header of a walk passed a small buffer through an `io.Reader`, which put it
+  on the heap: some 35,000 allocations for one 2160p segment. A source that
+  hands out single bytes is read byte by byte: about 650.
+
 ## [0.39.0] - 2026-10-05
 
 ### Added
