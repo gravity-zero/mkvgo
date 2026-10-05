@@ -983,10 +983,11 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 // reached yet, and change its bytes), and the walk runs until EVERY track has
 // crossed the end - one track's window can hold blocks stored after another
 // track already left the window.
-func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64) ([][]segSample, []int64, error) {
+func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64) ([][]segSample, []int64, windowInPlace, error) {
+	none := windowInPlace{track: -1}
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, none, err
 	}
 	defer src.Close()
 
@@ -1000,7 +1001,8 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	// Every track's own opening block known and far apart: a block-ordered
 	// source, read track by track (see trackPos).
 	if starts := p.trackPosAt(n); p.scatteredWindow(n, starts) {
-		return p.walkScatteredWindow(ctx, src, n, starts, keep, segStart, segEnd)
+		windows, nextPts, err := p.walkScatteredWindow(ctx, src, n, starts, keep, segStart, segEnd)
+		return windows, nextPts, none, err
 	}
 
 	// The window's opening block, when a previous walk revealed it: the FIRST
@@ -1017,10 +1019,24 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.offsets[n])
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, none, err
 	}
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(keep...)
+
+	// The video is most of a window's bytes: its blocks are read straight
+	// into the buffer its segment is served from (see windowInPlace), not
+	// into a buffer each and then copied there.
+	inPlace := p.newWindowInPlace(n)
+	if inPlace.buf != nil {
+		vid := p.tracks[inPlace.track].ft.outTrack.mkv.ID
+		br.SetBlockBuffer(func(track uint64, size int) []byte {
+			if track != vid {
+				return nil
+			}
+			return inPlace.next(size)
+		})
+	}
 
 	windows := make([][]segSample, len(p.tracks))
 	nextPts := make([]int64, len(p.tracks))
@@ -1034,14 +1050,14 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	remaining := len(p.tracks)
 	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, none, err
 		}
 		b, err := br.Next()
 		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			break
 		}
 		if err != nil {
-			return nil, nil, errf("read block: %w", err)
+			return nil, nil, none, errf("read block: %w", err)
 		}
 		ti, ok := index[b.TrackNumber]
 		if !ok || crossed[ti] {
@@ -1068,13 +1084,93 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		}
 		pt := p.tracks[ti]
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+		if ti == inPlace.track {
+			inPlace.keep(data)
+		}
 		windows[ti] = append(windows[ti], segSample{
 			fragSample: fragSample{size: uint32(len(data)),
 				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
 			data: data,
 		})
 	}
-	return windows, nextPts, nil
+	return windows, nextPts, inPlace, nil
+}
+
+// windowHeadroom is the room kept ahead of a window's video bytes for the
+// segment head (styp + moof + mdat header): 16 bytes a sample at most, so
+// some two thousand samples - far more than a segment holds.
+const windowHeadroom = 32 << 10
+
+// maxWindowInPlace caps the buffer reserved for one window's video. A window
+// is a few megabytes to a few tens; a span past this is a source the Cues
+// describe oddly, and is built the ordinary way.
+const maxWindowInPlace = 256 << 20
+
+// windowInPlace is the buffer one window's video is read into and served
+// from. The walk hands its tail to the BlockReader for each video block
+// (next); a block the window keeps is then committed (keep) - one it does not
+// keep (the previous window's leftovers, the block that crosses into the next
+// window) simply has its bytes overwritten by the following block. When every
+// kept block was committed in order, the buffer holds the segment's media
+// back to back behind the headroom, and buildTrackSegment writes the head in
+// front of it: no buffer per block, no copy. Anything else - a block that did
+// not fit, a laced block, a track whose stripped header had to be put back -
+// marks it broken, and the segment is assembled by copy as before.
+type windowInPlace struct {
+	track  int    // plan-track index it serves; -1 for none
+	buf    []byte // headroom + the committed media
+	broken bool
+}
+
+// newWindowInPlace reserves the buffer for window n's video: the source bytes
+// between the window's two boundaries bound what it holds. No buffer when the
+// plan has no video, when CENC needs the plaintext apart, or when that span
+// is unknown or implausible.
+func (p *HLSPlan) newWindowInPlace(n int) windowInPlace {
+	w := windowInPlace{track: -1}
+	vi := p.videoIndex()
+	if vi >= len(p.tracks) || !p.tracks[vi].ft.outTrack.spec.video || p.opts.CENC != nil {
+		return w
+	}
+	span := p.windowSpan(n)
+	if span <= 0 || span > maxWindowInPlace {
+		return w
+	}
+	w.track = vi
+	w.buf = make([]byte, windowHeadroom, windowHeadroom+int(span))
+	return w
+}
+
+// next returns the uncommitted tail of the buffer for a block of size bytes,
+// or nil when it does not fit.
+func (w *windowInPlace) next(size int) []byte {
+	if w.broken || size <= 0 || size > cap(w.buf)-len(w.buf) {
+		return nil
+	}
+	return w.buf[len(w.buf) : len(w.buf)+size]
+}
+
+// keep commits a block the window keeps. data must be the slice next handed
+// out for it; if it is anything else the media is no longer back to back in
+// the buffer.
+func (w *windowInPlace) keep(data []byte) {
+	if w.broken || w.buf == nil || len(data) == 0 {
+		return
+	}
+	if tail := w.next(len(data)); tail == nil || &tail[0] != &data[0] {
+		w.broken = true
+		return
+	}
+	w.buf = w.buf[:len(w.buf)+len(data)]
+}
+
+// media returns the committed media, or nil when the buffer cannot serve the
+// segment in place.
+func (w *windowInPlace) media() []byte {
+	if w.broken || w.buf == nil {
+		return nil
+	}
+	return w.buf[windowHeadroom:]
 }
 
 // walkScatteredWindow reads the n-th window one track at a time, each from
@@ -1426,7 +1522,11 @@ func (p *HLSPlan) learnSegPos(n int, at reader.BlockPos) {
 
 // buildTrackSegment frames one rendition's window as a media segment - styp +
 // moof + mdat - from the samples the walk read for it.
-func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64) ([]byte, error) {
+//
+// arena, when not nil, is the buffer the walk read this rendition's blocks
+// into, back to back behind windowHeadroom bytes of room (windowInPlace): the
+// head is then written in front of them and that buffer is the segment.
+func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64, arena []byte) ([]byte, error) {
 	pt := p.tracks[ti]
 
 	// Fragment timing - fillFragTiming's DTS derivation applied to the window,
@@ -1468,11 +1568,20 @@ func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64
 		cipherData = cipher
 	}
 	head := buildSegmentFile(uint32(n+1), seg)
-	out := make([]byte, 0, int64(len(head))+seg.dataLen)
-	out = append(out, head...)
-	if p.opts.CENC != nil {
+	var out []byte
+	switch {
+	case p.opts.CENC != nil:
+		out = make([]byte, 0, int64(len(head))+seg.dataLen)
+		out = append(out, head...)
 		out = append(out, cipherData...)
-	} else {
+	case len(arena) > windowHeadroom && int64(len(arena)-windowHeadroom) == seg.dataLen && len(head) <= windowHeadroom:
+		// Every sample of the window sits in the arena, in order: the head
+		// goes right before them.
+		out = arena[windowHeadroom-len(head):]
+		copy(out, head)
+	default:
+		out = make([]byte, 0, int64(len(head))+seg.dataLen)
+		out = append(out, head...)
 		for x := range window {
 			out = append(out, window[x].data...)
 		}

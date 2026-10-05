@@ -86,7 +86,7 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	windows, nextPts, err := p.walkWindow(ctx, n, segStart, segEnd)
+	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,11 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 		pending: len(p.tracks),
 	}
 	for ti := range p.tracks {
-		data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti])
+		var arena []byte
+		if ti == inPlace.track && inPlace.media() != nil {
+			arena = inPlace.buf
+		}
+		data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], arena)
 		if err != nil {
 			return nil, err
 		}

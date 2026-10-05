@@ -229,6 +229,9 @@ type BlockReader struct {
 	timecodeScale int64
 	pending       []mkv.Block
 	keep          map[uint64]bool // when non-nil, blocks of other tracks are skipped unread
+	// blockBuf, when set, is asked for the buffer an unlaced block's payload
+	// is read into (see SetBlockBuffer).
+	blockBuf func(track uint64, size int) []byte
 	// headerOnly, when set, discards the payload of an unlaced kept block
 	// instead of reading it: Block.Data stays nil and Block.Size reports the
 	// byte length alone. A laced block still needs its lacing header decoded
@@ -431,6 +434,17 @@ func (br *BlockReader) KeepTracks(tracks ...uint64) {
 		br.keep[id] = true
 	}
 }
+
+// SetBlockBuffer lets the caller choose where the payload of an unlaced block
+// is read: before reading one, the walk asks buf for a slice of exactly size
+// bytes for that track, and reads into it instead of into a buffer of its own
+// (it allocates as usual when buf returns anything else, nil included). A
+// caller assembling consecutive blocks into one buffer - a media segment -
+// hands out the tail of that buffer and saves a buffer per block and a copy
+// of every one. The Block's Data is then that slice: what the caller does
+// with the memory afterwards is the caller's business. Laced blocks are read
+// as before.
+func (br *BlockReader) SetBlockBuffer(buf func(track uint64, size int) []byte) { br.blockBuf = buf }
 
 // SetHeaderOnly enables a structure-only walk: an unlaced kept block's
 // payload is seek-skipped instead of read, and Next reports its size on
@@ -1022,7 +1036,13 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 				Keyframe: keyframe, Size: dataSize,
 			}, nil
 		}
-		data := make([]byte, dataSize)
+		var data []byte
+		if br.blockBuf != nil {
+			data = br.blockBuf(uint64(trackNum), int(dataSize))
+		}
+		if int64(len(data)) != dataSize {
+			data = make([]byte, dataSize)
+		}
 		if _, err := io.ReadFull(br.r, data); err != nil {
 			return mkv.Block{}, err
 		}
