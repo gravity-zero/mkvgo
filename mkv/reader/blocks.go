@@ -212,6 +212,16 @@ type BlockPos struct {
 // the EBML header, never a block).
 func (p BlockPos) Valid() bool { return p.Off > 0 }
 
+// IndexedBlock is one block as a seek index records it: where it is, the
+// timecode of its first frame in milliseconds, and how many frames it holds
+// (more than one for a laced block, all behind the same position). A reader
+// seated on Pos (NewBlockReaderFrom, SeekTo) delivers those frames next.
+type IndexedBlock struct {
+	Pos    BlockPos
+	TimeMs int64
+	Frames int64
+}
+
 // BlockReader reads MKV blocks sequentially from an io.ReadSeeker.
 // Internally it uses a buffered reader and tracks position by counting bytes
 // so that Seek(0, SeekCurrent) syscalls are eliminated on the hot path.

@@ -482,6 +482,26 @@ st := plan.Stats()
 log.Printf("windows: %d walks, %d of them rebuilds, %d shared", st.WindowBuilds, st.WindowRebuilds, st.SharedRenditions)
 ```
 
+**Subtitles without walking the file: `Options.SubtitleIndex`.** A Matroska
+file indexes its video, not its subtitles: to serve a WebVTT segment the plan
+walks the clusters around it - and the video in them. The first subtitle
+segment after a start or a seek reads two to four minutes of the file (92 MiB
+on a real 1080p film, 244 MiB on a 2160p one), and the whole-track `subN.vtt`
+reads the film. Hand the plan the index `matroska.BuildSubtitleIndex` builds
+once per file (a few tens of KiB, stored by you) and it seeks straight to the
+track's blocks: the same WebVTT, for a few kilobytes read.
+
+```go
+ix, _ := matroska.BuildSubtitleIndex(ctx, "movie.mkv", nil)   // once; keep ix.MarshalBinary()
+plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000, SubtitleIndex: ix})
+```
+
+An index that is not this file's - another size, Segment UID or timecode
+scale, a track it does not cover, a position that does not hold the block it
+recorded - is set aside and the walk serves: it costs its saving, never a
+wrong cue. `plan.Stats()` says which path served (`SubtitleWalks`,
+`SubtitleIndexedBlocks`).
+
 **Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
 time: the moov sample table already has every segment's exact sample count,
 sizes and sync flags, so it costs nothing extra. A Matroska plan instead

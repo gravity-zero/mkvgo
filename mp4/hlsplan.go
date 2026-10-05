@@ -131,6 +131,9 @@ type HLSPlan struct {
 	// guarded by winMu.
 	stats    HLSPlanStats
 	winBuilt []uint64
+	// subIndex is Options.SubtitleIndex when it matches the source's
+	// fingerprint; nil otherwise, and the subtitle scans walk.
+	subIndex SubtitleBlockIndex
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -232,6 +235,11 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil}
+	if o.SubtitleIndex != nil {
+		if st, serr := fs.DoStat(srcPath); serr == nil && o.SubtitleIndex.Matches(st.Size(), c.Info.SegmentUID, c.Info.TimecodeScale) {
+			p.subIndex = o.SubtitleIndex
+		}
+	}
 	if !o.VideoOnly {
 		p.subs = filterSubTracks(planSubTracks(c, o), keep)
 	}
@@ -1749,6 +1757,12 @@ type subScanState struct {
 	window *subCursor // fast-seek island; replaced when a jump lands before it
 	noFast bool       // a duration-less or over-cap cue was observed: prefix only
 	err    error      // permanent (non-context) scan error, replayed
+	// indexed holds the track's blocks from Options.SubtitleIndex, loaded on
+	// the track's first scan; indexOff is set once the index has been set
+	// aside for this track (not covered, or found stale), and the walk serves.
+	indexed    []reader.IndexedBlock
+	indexAsked bool
+	indexOff   bool
 }
 
 const (
@@ -1918,6 +1932,19 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	if start == 0 {
 		start = p.offsets[0]
 	}
+	// Options.SubtitleIndex: the same scan, reading the track's blocks where
+	// the index says they are instead of walking the clusters to find them.
+	if entries := p.subIndexed(i); entries != nil {
+		served, err := p.extendCursorIndexed(ctx, i, cur, src, entries, start, target, uptoMs)
+		if served || err != nil {
+			return err
+		}
+		// The index did not hold for this track: the walk below serves, from
+		// the cursor as it stood.
+	}
+	p.winMu.Lock()
+	p.stats.SubtitleWalks++
+	p.winMu.Unlock()
 	br, err := reader.NewBlockReaderAt(src, p.tcScale, start)
 	if err != nil {
 		st.err = err
@@ -1972,6 +1999,115 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 			return err
 		}
 	}
+}
+
+// subIndexed returns the i-th subtitle track's blocks from the plan's
+// subtitle index, nil when there is none, it does not cover the track, or it
+// was found stale. Caller holds subMu[i].
+func (p *HLSPlan) subIndexed(i int) []reader.IndexedBlock {
+	st := &p.subScan[i]
+	if p.subIndex == nil || st.indexOff {
+		return nil
+	}
+	if !st.indexAsked {
+		st.indexAsked = true
+		st.indexed = p.subIndex.TrackBlocks(p.subs[i].track.ID)
+		st.indexOff = len(st.indexed) == 0
+	}
+	return st.indexed
+}
+
+// extendCursorIndexed is extendCursorLocked's scan served from the subtitle
+// index: stride by stride, it reads the track's blocks that sit at or past
+// start in clusters stamped up to the stride's limit - the very blocks the
+// walk would have delivered, in the same order - by seeking to each. Every
+// block read is checked against what the index recorded (track, timecode);
+// one that does not match means the index is not this file's: nothing of the
+// stride is kept, the index is set aside for the track and served is false,
+// so the caller walks instead. Caller holds subMu[i].
+func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor, src io.ReadSeeker,
+	entries []reader.IndexedBlock, start, target, uptoMs int64) (served bool, err error) {
+	st := &p.subScan[i]
+	track := &p.subs[i]
+	stale := func() (bool, error) {
+		st.indexOff, st.indexed = true, nil
+		return false, nil
+	}
+	var br *reader.BlockReader
+	var read int64
+	defer func() {
+		p.winMu.Lock()
+		p.stats.SubtitleIndexedBlocks += read
+		p.winMu.Unlock()
+	}()
+	for {
+		stopAt := cur.scanned + subScanStrideMs
+		if stopAt < cur.scanned {
+			stopAt = math.MaxInt64
+		}
+		from := start
+		if cur.next != 0 {
+			from = cur.next
+		}
+		j := sort.Search(len(entries), func(k int) bool { return entries[k].Pos.ClusterStart >= from })
+		var local []subtitle.Cue
+		for ; j < len(entries); j++ {
+			if err := ctx.Err(); err != nil {
+				return true, err
+			}
+			e := &entries[j]
+			clusterMs, ok := p.clusterMs(e.Pos.ClusterTS)
+			if !ok || !e.Pos.Valid() || e.Frames < 1 {
+				return stale()
+			}
+			if clusterMs > stopAt {
+				break
+			}
+			if br == nil {
+				if br, err = reader.NewBlockReaderFrom(src, p.tcScale, e.Pos); err != nil {
+					return stale()
+				}
+				br.SetTrackDefaultDurations(p.trackDurs)
+				br.KeepTracks(track.track.ID)
+			} else if err := br.SeekTo(e.Pos); err != nil {
+				return stale()
+			}
+			for f := int64(0); f < e.Frames; f++ {
+				b, err := br.Next()
+				if err != nil || b.TrackNumber != track.track.ID || (f == 0 && b.Timecode != e.TimeMs) {
+					return stale()
+				}
+				if cue, ok := subCueFromBlock(track.track.Codec, b); ok {
+					if cue.EndMs <= cue.StartMs || cue.EndMs-cue.StartMs > subFastMaxCueDurMs {
+						st.noFast = true
+					}
+					local = append(local, cue)
+				}
+			}
+			read++
+		}
+		cur.cues = append(cur.cues, local...)
+		if j == len(entries) {
+			cur.done = true
+			return true, nil
+		}
+		cur.next, cur.scanned = entries[j].Pos.ClusterStart, stopAt
+		if st.noFast && cur.baseMs > 0 {
+			return true, nil // the island is doomed; the caller falls back to the prefix
+		}
+		if cur.scanned >= target && !subNeedsNextCue(cur.cues, uptoMs) {
+			return true, nil
+		}
+	}
+}
+
+// clusterMs converts a cluster's raw Timestamp to milliseconds with the
+// plan's timecode scale; ok is false when it does not fit.
+func (p *HLSPlan) clusterMs(raw int64) (ms int64, ok bool) {
+	if raw < 0 || p.tcScale <= 0 || raw > math.MaxInt64/p.tcScale {
+		return 0, false
+	}
+	return raw * p.tcScale / 1_000_000, true
 }
 
 // subNeedsNextCue reports whether serving cues starting before uptoMs still

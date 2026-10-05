@@ -277,6 +277,14 @@ type HLSPlanStats struct {
 	BuiltBytes   int64
 	ServedBytes  int64
 	DroppedBytes int64
+	// SubtitleWalks is the number of times a subtitle rendition had to walk
+	// the clusters for its cues (each walk reads a minute or more of the
+	// file); SubtitleIndexedBlocks, the subtitle blocks read straight from
+	// their position through Options.SubtitleIndex. A plan given an index
+	// that still counts walks is serving a track the index does not hold, or
+	// an index that is not this file's.
+	SubtitleWalks         int64
+	SubtitleIndexedBlocks int64
 }
 
 // Stats returns the plan's window counters. Safe to call while segments are

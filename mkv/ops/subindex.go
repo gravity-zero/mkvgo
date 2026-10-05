@@ -87,6 +87,36 @@ func (ix *SubtitleIndex) Blocks(trackID uint64) int {
 	return len(ix.entries[trackID])
 }
 
+// Matches reports whether the index was built from a file of this size,
+// Segment UID and timecode scale - the fingerprint a Matroska file cheaply
+// offers. It is not proof on its own (see ErrIndexStale): a consumer still
+// checks each block it reads against what the index recorded.
+func (ix *SubtitleIndex) Matches(size int64, segmentUID []byte, timecodeScale int64) bool {
+	if ix == nil || ix.fileSize != size || ix.tcScale != timecodeScale {
+		return false
+	}
+	return len(ix.segmentUID) == 0 || len(segmentUID) == 0 || bytes.Equal(ix.segmentUID, segmentUID)
+}
+
+// TrackBlocks returns the blocks the index holds for a track, in file order
+// (nil when the track is not covered). It is what lets a consumer other than
+// the extractors here - an on-demand plan serving WebVTT segments - seek
+// straight to a track's blocks.
+func (ix *SubtitleIndex) TrackBlocks(trackID uint64) []reader.IndexedBlock {
+	if ix == nil {
+		return nil
+	}
+	entries := ix.entries[trackID]
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]reader.IndexedBlock, len(entries))
+	for i, e := range entries {
+		out[i] = reader.IndexedBlock{Pos: e.pos, TimeMs: e.timeMs, Frames: e.frames}
+	}
+	return out
+}
+
 // SourceSize returns the size of the file the index was built from - the first
 // half of the fingerprint a caller keying its own cache will want to compare.
 func (ix *SubtitleIndex) SourceSize() int64 {

@@ -1,6 +1,9 @@
 package mp4
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+)
 
 // options.go - the option type shared by RemuxToMP4 and RemuxFromMP4.
 
@@ -11,6 +14,17 @@ type DroppedTrack struct {
 	Type   mkv.TrackType
 	Codec  string
 	Reason string
+}
+
+// SubtitleBlockIndex is what an on-demand plan needs from a subtitle index;
+// *matroska.SubtitleIndex implements it. See Options.SubtitleIndex.
+type SubtitleBlockIndex interface {
+	// Matches reports whether the index was built from a file of this size,
+	// Segment UID and timecode scale.
+	Matches(size int64, segmentUID []byte, timecodeScale int64) bool
+	// TrackBlocks returns the track's indexed blocks in file order, nil when
+	// the index does not cover the track.
+	TrackBlocks(trackID uint64) []reader.IndexedBlock
 }
 
 // Options configures a remux. The zero value is valid: the real OS filesystem,
@@ -47,6 +61,24 @@ type Options struct {
 	// Only the on-demand plans (PlanHLS, PlanABR, PlanGrowingHLS) honour this; a
 	// full pass writes every rendition from one walk by construction.
 	WindowCacheBytes int64
+	// SubtitleIndex, when set, is a prebuilt index of the source's subtitle
+	// blocks (a *matroska.SubtitleIndex, built once by
+	// matroska.BuildSubtitleIndex and stored by the caller). An on-demand plan
+	// then serves a text subtitle rendition by seeking straight to that
+	// track's blocks. Without it, a Matroska file gives no way to reach a
+	// subtitle track but to walk the clusters, and the video with them: the
+	// first subtitle segment after a start or a seek reads two to four minutes
+	// of the file - tens to hundreds of megabytes - for a few bytes of cues.
+	// The WebVTT served is the same either way.
+	//
+	// The index must describe the source. One built from another file (a
+	// different size, Segment UID or timecode scale), one that does not cover
+	// a track, or one whose recorded positions do not hold the blocks it says,
+	// is set aside and that track is served by the walk: a stale index costs
+	// its saving, never a wrong cue. HLSPlan.Stats tells which path served.
+	//
+	// Only the on-demand plans honour this, on a Matroska source.
+	SubtitleIndex SubtitleBlockIndex
 	// SkipUnsupported drops audio/video tracks whose codec cannot be carried in
 	// the output instead of failing the whole remux. The remux still fails if no
 	// supported track remains. Every dropped track is reported via OnDrop.
