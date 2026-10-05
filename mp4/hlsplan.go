@@ -2196,9 +2196,8 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 const (
 	// sampleGapReadThrough is the largest gap between two runs of samples that
 	// is read through instead of seeked over: the trade the Matroska reader
-	// makes (seekSkipMin). A read costs a round trip on a network filesystem
-	// on top of its bytes, so a source interleaved sample by sample is read as
-	// one forward stream, not as one read per sample.
+	// makes (seekSkipMin). A gap is read through only when it is also no
+	// longer than the run behind it - see readSampleRuns.
 	sampleGapReadThrough = 64 << 10
 	// sampleSpanBuf is the read-ahead over such a stream.
 	sampleSpanBuf = 256 << 10
@@ -2206,8 +2205,14 @@ const (
 
 // readSampleRuns reads the samples' bytes into dst, which holds exactly their
 // total size. A run of samples stored back to back is one read, straight into
-// dst; runs separated by small gaps are read as one buffered stream that
-// stops where the last of them ends.
+// dst. Runs are read as one buffered stream, through the gap between them,
+// when that gap is small AND no longer than the run it leads to: the stream
+// then reads at most twice the bytes it serves. That is the video of a source
+// interleaved sample by sample (a 28 KiB frame after a 1.5 KiB audio sample).
+// The audio of the same source is the opposite case - 1.5 KiB of it behind
+// 28 KiB of video - and is read run by run: small forward reads, which a
+// disk's read-ahead serves, rather than every video byte in between (6 times
+// the audio, measured, on a disk that is the bottleneck).
 func readSampleRuns(ctx context.Context, src io.ReadSeeker, samples []fragSample, offs []int64, dst []byte) error {
 	// run returns the run of back-to-back samples starting at sample x: its
 	// file offset, its length, and the sample after it.
@@ -2219,7 +2224,11 @@ func readSampleRuns(ctx context.Context, src io.ReadSeeker, samples []fragSample
 		return off, n, x
 	}
 	near := func(end int64, x int) bool {
-		return x < len(samples) && offs[x] >= end && offs[x]-end <= sampleGapReadThrough
+		if x >= len(samples) || offs[x] < end {
+			return false
+		}
+		_, n, _ := run(x)
+		return offs[x]-end <= min(sampleGapReadThrough, n)
 	}
 	fail := func(err error) error {
 		if err == io.EOF {
