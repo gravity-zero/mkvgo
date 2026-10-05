@@ -23,6 +23,7 @@ package mp4
 // always-exact prefix path.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -2130,28 +2131,28 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		}
 	}
 
-	var plain []byte
-	if len(samples) > 0 {
-		plain = make([]byte, 0, seg.dataLen)
+	// The samples go straight into the buffer that is served: the head does
+	// not depend on their bytes, so it is built first and the media read in
+	// behind it. Only CENC needs the plaintext apart, to derive the auxiliary
+	// data the head carries.
+	read := func(dst []byte) error {
+		if len(samples) == 0 {
+			return nil
+		}
 		src, err := p.fs.DoOpen(p.srcPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		defer src.Close()
-		for x := range samples {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			data, err := readSample(src, offs[x], samples[x].size)
-			if err != nil {
-				return nil, errf("read sample: %w", err)
-			}
-			plain = append(plain, data...)
-		}
+		return readSampleRuns(ctx, src, samples, offs, dst)
 	}
 
-	cipherData := plain
+	var out []byte
 	if p.opts.CENC != nil {
+		plain := make([]byte, seg.dataLen)
+		if err := read(plain); err != nil {
+			return nil, err
+		}
 		// Same requirement as the full pass and the Matroska on-demand path:
 		// CENC needs the plaintext bytes before the head is built.
 		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
@@ -2159,15 +2160,107 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 			return nil, err
 		}
 		seg.cenc = td
-		cipherData = cipher
+		head := buildSegmentFile(uint32(n+1), seg)
+		out = make([]byte, 0, int64(len(head))+int64(len(cipher)))
+		out = append(out, head...)
+		out = append(out, cipher...)
+	} else {
+		head := buildSegmentFile(uint32(n+1), seg)
+		out = make([]byte, int64(len(head))+seg.dataLen)
+		copy(out, head)
+		if err := read(out[len(head):]); err != nil {
+			return nil, err
+		}
 	}
-	head := buildSegmentFile(uint32(n+1), seg)
-	out := make([]byte, 0, int64(len(head))+int64(len(cipherData)))
-	out = append(out, head...)
-	out = append(out, cipherData...)
 
 	if p.opts.Encrypt != nil {
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
 	}
 	return out, nil
+}
+
+// Reading a segment's samples out of an MP4 source. The source stores some
+// samples back to back and others apart - another track's samples lie between
+// them - and says where each one is.
+const (
+	// sampleGapReadThrough is the largest gap between two runs of samples that
+	// is read through instead of seeked over: the trade the Matroska reader
+	// makes (seekSkipMin). A read costs a round trip on a network filesystem
+	// on top of its bytes, so a source interleaved sample by sample is read as
+	// one forward stream, not as one read per sample.
+	sampleGapReadThrough = 64 << 10
+	// sampleSpanBuf is the read-ahead over such a stream.
+	sampleSpanBuf = 256 << 10
+)
+
+// readSampleRuns reads the samples' bytes into dst, which holds exactly their
+// total size. A run of samples stored back to back is one read, straight into
+// dst; runs separated by small gaps are read as one buffered stream that
+// stops where the last of them ends.
+func readSampleRuns(ctx context.Context, src io.ReadSeeker, samples []fragSample, offs []int64, dst []byte) error {
+	// run returns the run of back-to-back samples starting at sample x: its
+	// file offset, its length, and the sample after it.
+	run := func(x int) (off, n int64, next int) {
+		off, n = offs[x], int64(samples[x].size)
+		for x++; x < len(samples) && offs[x] == off+n; x++ {
+			n += int64(samples[x].size)
+		}
+		return off, n, x
+	}
+	near := func(end int64, x int) bool {
+		return x < len(samples) && offs[x] >= end && offs[x]-end <= sampleGapReadThrough
+	}
+	fail := func(err error) error {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		return errf("read sample: %w", err)
+	}
+
+	var buffered *bufio.Reader
+	at := int64(0)
+	for x := 0; x < len(samples); {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		off, n, next := run(x)
+		if _, err := src.Seek(off, io.SeekStart); err != nil {
+			return fail(err)
+		}
+		if !near(off+n, next) {
+			if _, err := io.ReadFull(src, dst[at:at+n]); err != nil {
+				return fail(err)
+			}
+			at, x = at+n, next
+			continue
+		}
+		// A span of runs with small gaps: where it ends, then one stream over
+		// it.
+		end := off + n
+		for y := next; near(end, y); {
+			o, m, z := run(y)
+			end, y = o+m, z
+		}
+		limited := &io.LimitedReader{R: src, N: end - off}
+		if buffered == nil {
+			buffered = bufio.NewReaderSize(limited, sampleSpanBuf)
+		} else {
+			buffered.Reset(limited)
+		}
+		for {
+			if _, err := io.ReadFull(buffered, dst[at:at+n]); err != nil {
+				return fail(err)
+			}
+			at, x = at+n, next
+			pos := off + n
+			if pos == end {
+				break
+			}
+			off, n, next = run(x)
+			if _, err := buffered.Discard(int(off - pos)); err != nil {
+				return fail(err)
+			}
+		}
+	}
+	return nil
 }
