@@ -126,6 +126,11 @@ type HLSPlan struct {
 	// then refined by the bundles actually built - which is what a growing plan,
 	// whose segments do not exist yet at construction, relies on entirely.
 	winPeak int64
+	// stats counts what the windows cost (see HLSPlanStats); winBuilt has one
+	// bit per segment index, set once that window has been built. Both are
+	// guarded by winMu.
+	stats    HLSPlanStats
+	winBuilt []uint64
 }
 
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
@@ -1490,11 +1495,11 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if p.mp4src {
 		return p.mp4SegmentTrack(ctx, ti, n)
 	}
-	b, err := p.window(ctx, n)
+	b, built, err := p.window(ctx, n)
 	if err != nil {
 		return nil, err
 	}
-	if data := p.takeRendition(n, ti, b); data != nil {
+	if data := p.takeRendition(n, ti, b, !built); data != nil {
 		return data, nil
 	}
 	// Another request collected this rendition and its bytes were released with
@@ -1503,7 +1508,13 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return fresh.segs[ti], nil
+	data := fresh.segs[ti]
+	p.winMu.Lock()
+	p.noteBuild(n, fresh)
+	p.stats.ServedBytes += int64(len(data))
+	p.stats.DroppedBytes += fresh.bytes - int64(len(data)) // the rest of this walk is kept for nobody
+	p.winMu.Unlock()
+	return data, nil
 }
 
 // Resources returns every resource name the plan serves - the HLS master, the

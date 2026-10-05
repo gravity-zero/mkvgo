@@ -40,20 +40,23 @@ type windowFlight struct {
 // racing, and otherwise from a fresh walk. A miss is always safe - it just
 // walks the source, exactly as an uncached plan does - which is what keeps
 // serving stateless in effect: no request depends on another having happened.
-func (p *HLSPlan) window(ctx context.Context, n int) (*windowBundle, error) {
+//
+// built reports whether this call walked the source itself.
+func (p *HLSPlan) window(ctx context.Context, n int) (b *windowBundle, built bool, err error) {
 	p.winMu.Lock()
 	if b := p.windows[n]; b != nil {
 		p.winMu.Unlock()
-		return b, nil
+		return b, false, nil
 	}
 	if f := p.winFlight[n]; f != nil {
+		p.stats.WaitedBuilds++
 		p.winMu.Unlock()
 		select {
 		case <-f.done:
-			return f.bundle, f.err
+			return f.bundle, false, f.err
 		case <-ctx.Done():
 			// This caller gave up; the build carries on for the others.
-			return nil, ctx.Err()
+			return nil, false, ctx.Err()
 		}
 	}
 	f := &windowFlight{done: make(chan struct{})}
@@ -68,11 +71,12 @@ func (p *HLSPlan) window(ctx context.Context, n int) (*windowBundle, error) {
 	p.winMu.Lock()
 	delete(p.winFlight, n)
 	if f.err == nil {
+		p.noteBuild(n, f.bundle)
 		p.store(n, f.bundle)
 	}
 	p.winMu.Unlock()
 	close(f.done)
-	return f.bundle, f.err
+	return f.bundle, true, f.err
 }
 
 // buildWindow reads the n-th window once and frames every rendition of it.
@@ -104,13 +108,18 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 // store publishes a bundle and trims the cache to its byte budget, oldest
 // first. Caller holds winMu.
 func (p *HLSPlan) store(n int, b *windowBundle) {
-	if p.winBudget < 0 || b == nil {
-		return // caching disabled
+	if b == nil {
+		return
+	}
+	if p.winBudget < 0 {
+		p.stats.DroppedBytes += b.bytes // caching disabled: kept for nobody but the caller
+		return
 	}
 	if p.windows == nil {
 		p.windows = make(map[int]*windowBundle)
 	}
 	if _, dup := p.windows[n]; dup {
+		p.stats.DroppedBytes += b.bytes
 		return
 	}
 	// The budget follows the source: a window this big has now been seen, so it
@@ -123,6 +132,7 @@ func (p *HLSPlan) store(n int, b *windowBundle) {
 	p.winOrder = append(p.winOrder, n)
 	p.winBytes += b.bytes
 	for p.winBytes > p.budget() && len(p.winOrder) > 0 {
+		p.stats.Evictions++
 		p.dropLocked(p.winOrder[0])
 	}
 }
@@ -138,7 +148,10 @@ func (p *HLSPlan) store(n int, b *windowBundle) {
 // Returns nil when the rendition has already been collected and freed - two
 // viewers landing on the same segment at once. The caller then rebuilds it: a
 // miss is always safe, which is the property this whole cache rests on.
-func (p *HLSPlan) takeRendition(n, ti int, b *windowBundle) []byte {
+//
+// shared says the bundle was built by another request: the rendition then
+// cost this one no walk, and is counted as such.
+func (p *HLSPlan) takeRendition(n, ti int, b *windowBundle, shared bool) []byte {
 	p.winMu.Lock()
 	defer p.winMu.Unlock()
 	if b == nil || ti < 0 || ti >= len(b.segs) {
@@ -148,14 +161,23 @@ func (p *HLSPlan) takeRendition(n, ti int, b *windowBundle) []byte {
 	if data == nil {
 		return nil
 	}
+	if shared {
+		p.stats.SharedRenditions++
+	}
 	b.segs[ti] = nil
 	b.pending--
 	b.bytes -= int64(len(data))
+	p.stats.ServedBytes += int64(len(data))
 	if p.windows[n] == b {
 		p.winBytes -= int64(len(data))
 		if b.pending <= 0 || p.consumed(b) {
 			p.dropLocked(n)
 		}
+	} else {
+		// The bundle left the cache before this rendition was collected (the
+		// budget, or caching off): it was counted as dropped then, and is
+		// served after all.
+		p.stats.DroppedBytes -= int64(len(data))
 	}
 	return data
 }
@@ -196,6 +218,7 @@ func (p *HLSPlan) dropLocked(n int) {
 	}
 	delete(p.windows, n)
 	p.winBytes -= b.bytes
+	p.stats.DroppedBytes += b.bytes // what nobody came for
 	for i, k := range p.winOrder {
 		if k == n {
 			p.winOrder = append(p.winOrder[:i], p.winOrder[i+1:]...)
@@ -222,4 +245,64 @@ func (p *HLSPlan) budget() int64 {
 		b = twice
 	}
 	return b
+}
+
+// HLSPlanStats counts, since the plan was built, what serving its segments
+// cost in walks of the source. A Matroska source interleaves its tracks, so a
+// window is read once for every rendition of it (see Options.WindowCacheBytes):
+// these counters say how often that sharing held, and how often a window was
+// read again. An MP4-source plan reads each rendition's samples on their own
+// and counts nothing here.
+type HLSPlanStats struct {
+	// WindowBuilds is the number of walks of the source that built a window;
+	// WindowRebuilds, how many of them built a window this plan had already
+	// built - a second viewer on the same segment, a rendition asked for after
+	// the window was collected or evicted. Each is a full read of the window.
+	WindowBuilds   int64
+	WindowRebuilds int64
+	// SharedRenditions is the number of requests answered from a window
+	// another request had built (or was building); WaitedBuilds, those that
+	// waited on a build in flight instead of starting a walk of their own.
+	SharedRenditions int64
+	WaitedBuilds     int64
+	// Evictions is the number of windows the byte budget pushed out before
+	// their renditions were collected.
+	Evictions int64
+	// BuiltBytes is the media the walks framed, ServedBytes what was handed
+	// out, DroppedBytes what was built and released without being served.
+	BuiltBytes   int64
+	ServedBytes  int64
+	DroppedBytes int64
+}
+
+// Stats returns the plan's window counters. Safe to call while segments are
+// being served.
+func (p *HLSPlan) Stats() HLSPlanStats {
+	p.winMu.Lock()
+	defer p.winMu.Unlock()
+	return p.stats
+}
+
+// heldBytes is the media the plan's windows hold right now.
+func (p *HLSPlan) heldBytes() int64 {
+	p.winMu.Lock()
+	defer p.winMu.Unlock()
+	return p.winBytes
+}
+
+// noteBuild counts one walk that built window n. Caller holds winMu, and b
+// still holds everything the walk framed.
+func (p *HLSPlan) noteBuild(n int, b *windowBundle) {
+	p.stats.WindowBuilds++
+	p.stats.BuiltBytes += b.bytes
+	if p.winBuilt == nil {
+		p.winBuilt = make([]uint64, (p.segCount+63)/64)
+	}
+	if n/64 >= len(p.winBuilt) { // a growing plan has gained segments since
+		p.winBuilt = append(p.winBuilt, make([]uint64, n/64+1-len(p.winBuilt))...)
+	}
+	if p.winBuilt[n/64]&(1<<(n%64)) != 0 {
+		p.stats.WindowRebuilds++
+	}
+	p.winBuilt[n/64] |= 1 << (n % 64)
 }

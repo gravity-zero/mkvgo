@@ -463,6 +463,25 @@ plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000})
 data, mime, err := plan.Resource(ctx, "iframe.m3u8")
 ```
 
+**What serving costs: `HLSPlan.Stats()`.** A Matroska source interleaves its
+tracks, so the plan reads a segment's window once and frames every rendition
+of it from that one walk; the video and the audio a player asks for side by
+side share it. `Stats()` returns the counters behind that, since the plan was
+built: `WindowBuilds` (walks of the source), `WindowRebuilds` (walks of a
+window this plan had already built - a second viewer on the same segment, a
+rendition asked for after its window was collected or evicted),
+`SharedRenditions` and `WaitedBuilds` (requests that cost no walk),
+`Evictions` (windows the `Options.WindowCacheBytes` budget pushed out
+uncollected) and `BuiltBytes` / `ServedBytes` / `DroppedBytes`. A rebuild is a
+full read of the window: a plan whose `WindowRebuilds` grows with its audience
+is reading its source more than once per viewer. An MP4-source plan reads each
+rendition's samples on their own and counts nothing here.
+
+```go
+st := plan.Stats()
+log.Printf("windows: %d walks, %d of them rebuilds, %d shared", st.WindowBuilds, st.WindowRebuilds, st.SharedRenditions)
+```
+
 **Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
 time: the moov sample table already has every segment's exact sample count,
 sizes and sync flags, so it costs nothing extra. A Matroska plan instead
