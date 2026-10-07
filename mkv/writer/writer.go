@@ -336,6 +336,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 					if t.ColorPrimaries != nil {
 						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
 					}
+					writeHDRStatic(c, t.HDR)
 				})
 			}
 		})
@@ -803,7 +804,36 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 
 // hasColour reports whether a track carries any colour code points.
 func hasColour(t *mkv.Track) bool {
-	return t.ColorPrimaries != nil || t.ColorTransfer != nil || t.ColorSpace != nil || t.ColorRange != nil
+	return t.ColorPrimaries != nil || t.ColorTransfer != nil || t.ColorSpace != nil || t.ColorRange != nil ||
+		t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
+}
+
+// writeHDRStatic writes MaxCLL/MaxFALL and MasteringMetadata, each only when known.
+func writeHDRStatic(c *ew, h *mkv.HDRStaticMetadata) {
+	if h.HasContentLightLevel() {
+		if h.MaxCLL != 0 {
+			c.uint(mkv.IDColourMaxCLL, uint64(h.MaxCLL))
+		}
+		if h.MaxFALL != 0 {
+			c.uint(mkv.IDColourMaxFALL, uint64(h.MaxFALL))
+		}
+	}
+	if !h.HasMasteringDisplay() {
+		return
+	}
+	md := h.MasteringDisplay
+	c.master(mkv.IDMasteringMetadata, func(m *ew) {
+		m.float64(mkv.IDPrimaryRChromaX, md.RedX)
+		m.float64(mkv.IDPrimaryRChromaY, md.RedY)
+		m.float64(mkv.IDPrimaryGChromaX, md.GreenX)
+		m.float64(mkv.IDPrimaryGChromaY, md.GreenY)
+		m.float64(mkv.IDPrimaryBChromaX, md.BlueX)
+		m.float64(mkv.IDPrimaryBChromaY, md.BlueY)
+		m.float64(mkv.IDWhitePointChromaX, md.WhiteX)
+		m.float64(mkv.IDWhitePointChromaY, md.WhiteY)
+		m.float64(mkv.IDLuminanceMax, md.LuminanceMax)
+		m.float64(mkv.IDLuminanceMin, md.LuminanceMin)
+	})
 }
 
 func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {

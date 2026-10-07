@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -282,6 +283,7 @@ func visualSampleEntry(typ string, t *mkv.Track, config []byte) []byte {
 		if colr := colrBox(t); colr != nil {
 			w.bytes(colr)
 		}
+		w.bytes(hdrStaticBoxes(t))
 		if pasp := paspBox(t); pasp != nil {
 			w.bytes(pasp)
 		}
@@ -363,6 +365,40 @@ func cicp(p *uint16) uint16 {
 		return 2 // unspecified
 	}
 	return *p
+}
+
+// hdrStaticBoxes builds clli (MaxCLL/MaxFALL) and mdcv (SMPTE ST 2086, G,B,R
+// order, 0.00002 chromaticity / 0.0001 cd/m² units), each only when known and,
+// for mdcv, complete; a clli field left at 0 means unknown (CTA-861.3).
+func hdrStaticBoxes(t *mkv.Track) []byte {
+	h := t.HDR
+	var out []byte
+	if h.HasContentLightLevel() {
+		out = append(out, boxf("clli", func(w *bw) {
+			w.u16(fixedU16(float64(h.MaxCLL), 1))
+			w.u16(fixedU16(float64(h.MaxFALL), 1))
+		})...)
+	}
+	if h.HasMasteringDisplay() {
+		md := h.MasteringDisplay
+		out = append(out, boxf("mdcv", func(w *bw) {
+			for _, c := range [...]float64{md.GreenX, md.GreenY, md.BlueX, md.BlueY, md.RedX, md.RedY, md.WhiteX, md.WhiteY} {
+				w.u16(fixedU16(c, 50000))
+			}
+			w.u32(fixedU32(md.LuminanceMax, 10000))
+			w.u32(fixedU32(md.LuminanceMin, 10000))
+		})...)
+	}
+	return out
+}
+
+// fixedU16 rounds v*unitsPerOne and clamps it to the field's range.
+func fixedU16(v, unitsPerOne float64) uint16 {
+	return uint16(math.Min(math.Max(math.Round(v*unitsPerOne), 0), math.MaxUint16))
+}
+
+func fixedU32(v, unitsPerOne float64) uint32 {
+	return uint32(math.Min(math.Max(math.Round(v*unitsPerOne), 0), math.MaxUint32))
 }
 
 // audioSampleEntry assembles an AudioSampleEntry (ISO/IEC 14496-12 §12.2.3)

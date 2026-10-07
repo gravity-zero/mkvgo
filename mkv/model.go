@@ -300,6 +300,27 @@ type HDRStaticMetadata struct {
 	MasteringDisplay *MasteringDisplay `json:"mastering_display,omitempty"`
 }
 
+// HasContentLightLevel reports a non-zero MaxCLL or MaxFALL; nil-safe.
+func (h *HDRStaticMetadata) HasContentLightLevel() bool {
+	return h != nil && (h.MaxCLL != 0 || h.MaxFALL != 0)
+}
+
+// HasMasteringDisplay reports a complete MasteringDisplay: every chromaticity and
+// LuminanceMax non-zero (0 is never a valid value for them, so a partial source
+// element reads as incomplete); LuminanceMin may legitimately be 0. Nil-safe.
+func (h *HDRStaticMetadata) HasMasteringDisplay() bool {
+	if h == nil || h.MasteringDisplay == nil {
+		return false
+	}
+	md := h.MasteringDisplay
+	for _, v := range [...]float64{md.RedX, md.RedY, md.GreenX, md.GreenY, md.BlueX, md.BlueY, md.WhiteX, md.WhiteY, md.LuminanceMax} {
+		if v <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // MasteringDisplay is the SMPTE ST 2086 mastering display colour volume: the
 // display's R/G/B primaries and white point as CIE 1931 (x,y) chromaticities
 // (0..1), and the display luminance range in cd/m². It mirrors the Matroska
