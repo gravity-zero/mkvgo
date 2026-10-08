@@ -34,8 +34,10 @@ func TestNeedsInBandColour(t *testing.T) {
 		{"short codec id", mkv.Track{Type: mkv.VideoTrack, Codec: "V_MPEGH/ISO/HEVC", CodecPrivate: bareHvcC()}, true},
 		{"audio track", mkv.Track{Type: mkv.AudioTrack, Codec: "hevc", CodecPrivate: bareHvcC()}, false},
 		{"non-hevc", mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: bareHvcC()}, false},
-		{"already has transfer", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC(), ColorTransfer: u16ptr(16)}, false},
+		{"already has transfer (SDR)", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC(), ColorTransfer: u16ptr(1)}, false},
 		{"already has primaries", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC(), ColorPrimaries: u16ptr(9)}, false},
+		// Colour known but PQ with no static metadata: the HDR10 SEI may complete it.
+		{"PQ, no static metadata", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: full, ColorTransfer: u16ptr(16)}, true},
 		{"hvcC carries an SPS", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: full}, false},
 		{"too-short hvcC", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3}}, false},
 		{"no codec private", mkv.Track{Type: mkv.VideoTrack, Codec: "hevc"}, false},
@@ -61,22 +63,25 @@ func TestIsHEVCCodec(t *testing.T) {
 func TestApplyInBandColour(t *testing.T) {
 	sps := extractHEVCSPSNAL(t, mustHex(t, hevcHDRPrivateHex))
 
+	// A bare-hvcC HEVC video track with no colour: the sample is what names it.
+	bare := func() mkv.Track { return mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC()} }
+
 	// SPS only → colour from the VUI (PQ).
-	tr := mkv.Track{CodecPrivate: bareHvcC()}
+	tr := bare()
 	ApplyInBandColour(&tr, lenPrefixed4(sps))
 	if tr.ColorTransferName() != "smpte2084" || tr.ColorSpaceName() != "bt2020nc" {
 		t.Errorf("SPS-only: transfer=%q space=%q, want smpte2084/bt2020nc", tr.ColorTransferName(), tr.ColorSpaceName())
 	}
 
 	// SPS + ATC SEI → transfer overridden to HLG.
-	tr2 := mkv.Track{CodecPrivate: bareHvcC()}
+	tr2 := bare()
 	ApplyInBandColour(&tr2, append(lenPrefixed4(sps), lenPrefixed4(atcSEINAL(18))...))
 	if tr2.ColorTransferName() != "arib-std-b67" {
 		t.Errorf("SPS+ATC SEI: transfer=%q, want arib-std-b67", tr2.ColorTransferName())
 	}
 
 	// No SPS in the frame → colour stays nil, no panic.
-	tr3 := mkv.Track{CodecPrivate: bareHvcC()}
+	tr3 := bare()
 	ApplyInBandColour(&tr3, []byte{0, 0, 0, 1, 0x00})
 	if tr3.ColorTransfer != nil {
 		t.Errorf("no SPS: transfer = %v, want nil", tr3.ColorTransfer)

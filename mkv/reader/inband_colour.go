@@ -143,7 +143,13 @@ func WithSampledKeyframes(n int) ReadOption {
 //     VUI parsed;
 //   - VP9 with no vpcC in CodecPrivate - how WebM is normally muxed - whose
 //     profile, bit depth and chroma subsampling (Profile, VideoBitDepth,
-//     PixelFormat, ColorRange) exist only in the keyframe's uncompressed header.
+//     PixelFormat, ColorRange) exist only in the keyframe's uncompressed header;
+//   - an HDR (PQ or HLG) HEVC or AV1 track whose static metadata is incomplete
+//     in the container - no MasteringMetadata, or no MaxCLL/MaxFALL - as most
+//     HDR10 muxes write it, keeping only the in-band copy (HEVC SEI 137/144, AV1
+//     HDR_MDCV/HDR_CLL metadata OBUs): the missing part is filled from the first
+//     sample, so Track.HDR - and the mdcv/clli an MP4 or fMP4 init carries - no
+//     longer depend on which copy the muxer kept. The container wins per part.
 //
 // The cost is paid only for those tracks; files that carry the description in
 // the header never read a frame. The read is bounded to the first sample per
@@ -158,14 +164,16 @@ func WithInBandColourFallback() ReadOption {
 const maxInBandBlocks = 128
 
 // fillColourFromFirstSample is the WithInBandColourFallback worker. For every
-// video track that still lacks colour and carries a bare hvcC (no in-record SPS),
-// it reads that track's first sample, extracts the SPS NAL and parses its VUI.
-// Best-effort: any failure (no such track, unreadable cluster, no SPS in the
-// frame) silently leaves the colour unset, exactly as before the option.
+// video track whose description is incomplete head-only - colour behind a bare
+// hvcC (no in-record SPS), a VP9 profile with no vpcC, HDR10 static metadata the
+// container does not carry - it reads that track's first sample and fills what
+// the bitstream states. Best-effort: any failure (no such track, unreadable
+// cluster, nothing usable in the frame) silently leaves the fields unset,
+// exactly as before the option.
 func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Container) {
 	need := make(map[uint64]*mkv.Track)
 	for i := range c.Tracks {
-		if t := &c.Tracks[i]; needsInBandColour(t) {
+		if t := &c.Tracks[i]; needsInBandColour(t) || needsInBandHDR(t) {
 			need[t.ID] = t
 		}
 	}
@@ -197,17 +205,20 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 }
 
 // NeedsInBandColour reports whether t is a video track whose stream
-// description can only come from its first sample: an HEVC track with a bare
-// hvcC and no colour, or a VP9 track with no vpcC (see
+// description can only be completed from its first sample: an HEVC track with a
+// bare hvcC and no colour, a VP9 track with no vpcC, or an HDR HEVC/AV1 track
+// whose static metadata the container does not carry (see
 // WithInBandColourFallback). Exposed so the mp4 package can drive the same
 // fallback off its sample table.
-func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) }
+func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needsInBandHDR(t) }
 
 // ApplyInBandColour fills t from its first sample: for HEVC, one
-// length-prefixed access unit - the SPS VUI and an Alternative Transfer
-// Characteristics SEI override if present; for VP9, the keyframe's
-// uncompressed header - profile, bit depth, chroma subsampling, range. Safe on
-// any input; leaves the fields unset on failure.
+// length-prefixed access unit - the SPS VUI, an Alternative Transfer
+// Characteristics SEI override if present, and the HDR10 static-metadata SEI
+// messages; for VP9, the keyframe's uncompressed header - profile, bit depth,
+// chroma subsampling, range; for AV1, the HDR10 metadata OBUs of the temporal
+// unit. Only what the container left unknown is filled. Safe on any input;
+// leaves the fields unset on failure.
 func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame) }
 
 // needsInBandColour reports whether t is a video track whose description can
@@ -232,15 +243,22 @@ func needsInBandColour(t *mkv.Track) bool {
 	return len(cp) >= 23 && cp[0] == 1 && cp[22] == 0
 }
 
-// applyInBandHeader dispatches the first-sample parse on the codec.
+// applyInBandHeader dispatches the first-sample parse on the codec: the colour
+// description first (it may be what names the transfer), then the HDR10 static
+// metadata for a track that turns out to need it.
 func applyInBandHeader(t *mkv.Track, frame []byte) {
-	if isVP9Codec(t.Codec) {
+	switch {
+	case isVP9Codec(t.Codec):
 		if h, err := ParseVP9KeyframeHeader(frame); err == nil {
 			mergeBitstreamColour(t, vp9HeaderColour(h))
 		}
 		return
+	case needsInBandColour(t):
+		applyInBandSPSColour(t, frame)
 	}
-	applyInBandSPSColour(t, frame)
+	if needsInBandHDR(t) {
+		applyInBandHDR(t, frame)
+	}
 }
 
 func isHEVCCodec(codec string) bool {
@@ -332,22 +350,13 @@ func atcTransferFromFrame(frame []byte, nalLen int) (transfer uint16, ok bool) {
 // atcFromSEI scans an SEI RBSP's messages for payload type 147 (Alternative
 // Transfer Characteristics) and returns its single byte,
 // preferred_transfer_characteristics.
-func atcFromSEI(rbsp []byte) (uint16, bool) {
-	for i := 0; i+1 < len(rbsp); { // need at least a type and a size byte
-		pt, ok := readSEIValue(rbsp, &i)
-		if !ok {
-			return 0, false
+func atcFromSEI(rbsp []byte) (transfer uint16, ok bool) {
+	forEachSEIMessage(rbsp, func(pt int, payload []byte) {
+		if pt == 147 && len(payload) >= 1 && !ok {
+			transfer, ok = uint16(payload[0]), true
 		}
-		ps, ok := readSEIValue(rbsp, &i)
-		if !ok || i+ps > len(rbsp) {
-			return 0, false
-		}
-		if pt == 147 && ps >= 1 {
-			return uint16(rbsp[i]), true
-		}
-		i += ps
-	}
-	return 0, false
+	})
+	return transfer, ok
 }
 
 // readSEIValue reads an SEI ff-coded value (sum of 0xFF bytes plus the final
