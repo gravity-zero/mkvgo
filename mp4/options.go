@@ -113,8 +113,12 @@ type Options struct {
 	// InBandColour, on the metadata probe (OpenMeta/ReadMeta), recovers a video
 	// track's colour from the first sample's in-band SPS (and Alternative Transfer
 	// Characteristics SEI) when it is absent from both the colr box and a bare
-	// hvcC - the MP4 counterpart of reader.WithInBandColourFallback. Off by
-	// default; only a track that needs it reads one bounded sample.
+	// hvcC, and the HDR10 static metadata (SEI / AV1 metadata OBUs) when the
+	// sample entry carries no mdcv/clli - the MP4 counterpart of
+	// reader.WithInBandColourFallback. Off by default on the probe; only a track
+	// that needs it reads one bounded sample. The remux and plan entry points
+	// always apply it, so the colr/mdcv/clli they write describe the stream
+	// whichever copy the source muxer kept.
 	InBandColour bool
 	// SegmentMs is the target media-segment duration for RemuxToHLS, in
 	// milliseconds. Segments are cut on video keyframes, so the actual duration

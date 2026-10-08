@@ -196,7 +196,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, errf("%s: play-while-downloading is Matroska/WebM-only in this version", srcPath)
 	}
 
-	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData())
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
 	if err != nil {
 		return nil, err
 	}

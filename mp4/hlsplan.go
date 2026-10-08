@@ -175,7 +175,10 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 
 	// WithBitrate: each track's BPS statistic (the Tags are read anyway) -
 	// the DASH manifest's audio bandwidth, which read 0 without it.
-	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithBitrate()}
+	// WithInBandColourFallback: the init's colr/mdcv/clli come from the track
+	// description, and an HDR10 mux often keeps the static metadata only
+	// in-band; one bounded read of the first sample, for such a track only.
+	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithBitrate(), reader.WithInBandColourFallback()}
 	if o.ChapterMarkers {
 		// Only fetched when the opt-in is set: an extra bounded SeekHead ->
 		// Chapters read a plan otherwise has no use for.
@@ -2247,7 +2250,17 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 		f.Close()
 		return nil, err
 	}
-	return &packagingSource{c: containerFromMovie(mv), mv: mv, src: f, size: st.Size()}, nil
+	return newPackagingSource(f, mv, st.Size()), nil
+}
+
+// newPackagingSource wraps a parsed MP4 for the packager. The track description
+// is completed from the first sample where the sample entry left it short
+// (colour behind a bare hvcC, HDR10 static metadata kept in-band only), so the
+// init written carries the same colr/mdcv/clli a Matroska source would yield.
+func newPackagingSource(f mkv.ReadSeekCloser, mv *movie, size int64) *packagingSource {
+	c := containerFromMovie(mv)
+	fillInBandColour(f, mv, c)
+	return &packagingSource{c: c, mv: mv, src: f, size: size}
 }
 
 // planHLSFromMP4 builds the on-demand plan from an MP4 source's sample table:

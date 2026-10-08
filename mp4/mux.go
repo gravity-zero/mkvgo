@@ -131,8 +131,10 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	fs := o.FS
 
 	// The attachment payloads stay on disk: only the cover art is carried into
-	// the MP4, and it is read on its own below (loadCoverArt).
-	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
+	// the MP4, and it is read on its own below (loadCoverArt). The in-band
+	// fallback completes the colour and HDR10 static metadata the sample entry
+	// is written from, for a track whose container left them short.
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
 	if err != nil {
 		return err
 	}

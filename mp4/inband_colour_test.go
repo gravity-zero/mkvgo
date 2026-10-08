@@ -83,6 +83,25 @@ func TestMP4InBandColourFallback(t *testing.T) {
 	mkvPath := buildMKV(t, tracks, []genBlock{{track: 1, pts: 0, key: true, data: frame}})
 	mp4Bytes, _ := remux(t, mkvPath)
 
+	// The remux itself applies the in-band fallback, so the MP4 it writes carries
+	// a colr box with the recovered colour - the ATC SEI's transfer included.
+	written, _, err := ReadMeta(context.Background(), bytes.NewReader(mp4Bytes), "x.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written.Tracks) == 0 {
+		t.Fatal("video track was dropped by the remux")
+	}
+	if tr := written.Tracks[0]; tr.ColorTransferName() != "arib-std-b67" || tr.ColorSpaceName() != "bt2020nc" {
+		t.Fatalf("remux must write the in-band colour as colr, got transfer=%q space=%q", tr.ColorTransferName(), tr.ColorSpaceName())
+	}
+	// Neutralise that colr (same-size rename to a free box) to get the MP4 a
+	// muxer that kept the colour in-band writes: bare hvcC, no colr.
+	if n := bytes.Count(mp4Bytes, []byte("colr")); n != 1 {
+		t.Fatalf("expected exactly one colr box in the fixture, found %d", n)
+	}
+	mp4Bytes = bytes.Replace(mp4Bytes, []byte("colr"), []byte("free"), 1)
+
 	// Default: head-only, bare hvcC + no colr → no colour.
 	base, _, err := ReadMeta(context.Background(), bytes.NewReader(mp4Bytes), "x.mp4")
 	if err != nil {

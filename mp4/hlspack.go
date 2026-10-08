@@ -51,7 +51,7 @@ func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS) (*pack
 		f.Close() // Matroska: the existing reader owns its own handle
 		// Attachment payloads stay on disk: the packager carries only the
 		// cover art, read on its own by loadCoverArt.
-		c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
+		c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +67,7 @@ func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS) (*pack
 		f.Close()
 		return nil, err
 	}
-	return &packagingSource{c: containerFromMovie(mv), mv: mv, src: f, size: st.Size()}, nil
+	return newPackagingSource(f, mv, st.Size()), nil
 }
 
 // collectFromMP4 is the MP4 counterpart of collectFragSamples: every media
