@@ -4,6 +4,47 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.41.0] - 2026-10-08
+
+### Added
+
+- **HDR10 static metadata is completed from the first sample when the
+  container leaves it out.** Most HDR10 muxes write the Colour code points
+  (PQ, BT.2020) and keep the mastering display and the content light level
+  only in the bitstream - the HEVC SEI messages 137 and 144, the AV1 metadata
+  OBUs `HDR_MDCV` and `HDR_CLL`. A head-only read of such a file saw an HDR
+  track with no static metadata, and an MP4 or fMP4 init written from it
+  carried no `mdcv`/`clli`. Under `WithInBandColourFallback` (and
+  `mp4.Options.InBandColour`), a PQ or HLG HEVC/AV1 track whose static
+  metadata is incomplete reads its first sample - the bounded read the colour
+  fallback already makes - and fills `Track.HDR` from the bitstream, each
+  part only where the container said nothing. Measured on a real 2160p
+  HDR10+ episode whose Matroska Colour holds the code points alone: the MP4,
+  the HLS init and the on-demand plan's init now carry the SEI's mastering
+  display (BT.2020 / D65, 0.0001-1000 cd/m²) and MaxCLL/MaxFALL (957/143);
+  a source whose container carries them is written from the container,
+  unchanged. A content light level the SEI declares as 0/0 (unknown) yields
+  no `clli`.
+- **`mkvgo probe -in-band`** (also `info`, `tracks`): the CLI counterpart of
+  the in-band fallback, so the `colour:` and `hdr10:` lines show what the
+  remux and plan entry points will write. Off by default; ignored on stdin.
+- **`matroska.Open` and `matroska.Read` take the same read options as
+  `OpenMeta`** (`WithInBandColourFallback`, ...). Existing calls are
+  unchanged.
+
+### Fixed
+
+- **The MP4 sample entry carries the source's HDR10 static metadata as
+  `mdcv` and `clli`** - from the Matroska Colour element's MasteringMetadata
+  and MaxCLL/MaxFALL, in the fixed-point G,B,R order the boxes use; a partial
+  mastering element yields no box. The MKV writer carries the same fields
+  back into the Colour element. Same boxes in the fMP4 init of HLS/DASH/CMAF.
+- **`RemuxToMP4`, `RemuxToHLS`, `PlanHLS`, `PlanGrowingHLS` and the MP4
+  packaging source always apply the in-band fallback**, so the `colr`,
+  `mdcv` and `clli` they write describe the stream whichever copy the source
+  muxer kept. A track whose header already carries its description reads no
+  frame.
+
 ## [0.40.0] - 2026-10-06
 
 ### Added
