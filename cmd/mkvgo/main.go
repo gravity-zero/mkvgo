@@ -20,6 +20,8 @@ func main() {
 		switch a {
 		case "-json":
 			commands.JsonOutput = true
+		case "-in-band", "--in-band":
+			commands.InBand = true
 		case "-f", "--force", "-force":
 			commands.Force = true
 		case "--version", "-version":
@@ -59,7 +61,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo tags [-json] <file.mkv>")
 		commands.CmdTags(args[0])
 	case "probe":
-		commands.RequireArgs(args, 1, "mkvgo probe [-json] <file.mkv|.mp4>")
+		commands.RequireArgs(args, 1, "mkvgo probe [-json] [-in-band] <file.mkv|.mp4>")
 		commands.CmdProbe(args[0])
 	case "keyframes":
 		commands.RequireArgs(args, 1, "mkvgo keyframes [-json] <file.mkv|.mp4>")
@@ -257,6 +259,10 @@ ingest        One-call serving plan: direct-play, remux-hls (optionally reindexi
 Global flags:
   -json         Output as JSON (info, tracks, chapters, attachments, tags,
                 probe, keyframes, validate, compare; ignored elsewhere)
+  -in-band      Complete a video track's description from its first sample
+                when the header leaves it short: colour behind a bare hvcC,
+                VP9 profile with no vpcC, HDR10 static metadata kept in-band
+                (info, tracks, probe; one bounded read; ignored elsewhere)
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
 

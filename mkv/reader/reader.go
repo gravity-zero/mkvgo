@@ -14,13 +14,13 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-func Open(ctx context.Context, path string) (*mkv.Container, error) {
+func Open(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	return Read(ctx, f, path)
+	return Read(ctx, f, path, opts...)
 }
 
 func OpenWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {

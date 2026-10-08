@@ -24,6 +24,11 @@ import (
 
 var JsonOutput bool
 
+// InBand is the global -in-band flag: the inspection commands complete a video
+// track's description from its first sample where the header leaves it short
+// (reader.WithInBandColourFallback / mp4.Options.InBandColour).
+var InBand bool
+
 // Force is the global -f/--force flag: allow overwriting an existing output
 // file. Without it, commands that write a new file refuse to clobber one.
 var Force bool
@@ -50,7 +55,7 @@ var CmdUsage = map[string]string{
 	"chapters":           "mkvgo chapters [-json] <file.mkv|.mp4|->",
 	"attachments":        "mkvgo attachments [-json] <file.mkv|.mp4|->",
 	"tags":               "mkvgo tags [-json] <file.mkv|.mp4|->",
-	"probe":              "mkvgo probe [-json] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate)",
+	"probe":              "mkvgo probe [-json] [-in-band] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate; -in-band reads one sample to complete colour / HDR10 static metadata the header left out)",
 	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
@@ -256,7 +261,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	// are actually ISO base media (a .mkv that is really an MP4/MOV - mislabeled
 	// rips happen), route to the mp4 reader transparently instead of failing
 	// with a cryptic EBML error.
-	c, err := matroska.Open(context.Background(), path)
+	c, err := matroska.Open(context.Background(), path, inBandReadOptions()...)
 	if err != nil {
 		if errors.Is(err, matroska.ErrNotMatroska) {
 			return loadMP4Meta(path, keyframes)
@@ -266,15 +271,19 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	return c, nil
 }
 
+// inBandReadOptions is the Matroska read option the -in-band flag adds.
+func inBandReadOptions() []matroska.ReadOption {
+	if InBand {
+		return []matroska.ReadOption{matroska.WithInBandColourFallback()}
+	}
+	return nil
+}
+
 // loadMP4Meta reads MP4/MOV metadata (mp4.OpenMeta), optionally building the
 // keyframe index. Shared by the extension dispatch and the mislabeled-container
 // fallback in loadContainer.
 func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	var opts []mp4.Options
-	if keyframes {
-		opts = append(opts, mp4.Options{Keyframes: true})
-	}
-	c, dropped, err := mp4.OpenMeta(context.Background(), path, opts...)
+	c, dropped, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: keyframes, InBandColour: InBand})
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -307,13 +316,13 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 	fs := remotePort(url)
 	if isMP4Path(url) {
 		c, dropped, err := mp4.OpenMeta(context.Background(), url,
-			mp4.Options{Keyframes: keyframes, FS: fs})
+			mp4.Options{Keyframes: keyframes, InBandColour: InBand, FS: fs})
 		if err != nil {
 			Fatal(err.Error())
 		}
 		return c, dropped
 	}
-	var ro []matroska.ReadOption
+	ro := inBandReadOptions()
 	if keyframes {
 		ro = append(ro, matroska.WithKeyframeIndex())
 	}

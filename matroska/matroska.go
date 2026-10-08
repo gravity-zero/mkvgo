@@ -95,17 +95,18 @@ var FFprobeCodecName = mkv.FFprobeCodecName
 // Chapters, Attachments (with data), Tags and the Cues seek index, walking the
 // whole Segment (Clusters are skipped by seeking, block payloads are not read).
 // For a cheap head-only read (streaming indexers, probes), use OpenMeta instead.
+// opts are the same read options OpenMeta takes (WithInBandColourFallback...).
 // Returns ErrNotMatroska when the file is not an EBML/Matroska container.
-func Open(ctx context.Context, path string) (*Container, error) {
-	return reader.Open(ctx, path)
+func Open(ctx context.Context, path string, opts ...ReadOption) (*Container, error) {
+	return reader.Open(ctx, path, opts...)
 }
 
 // Read is Open over a caller-provided io.ReadSeeker (a seekable source is
 // required: the parser follows SeekHead and skips Clusters by seeking; for a
 // pure forward-only io.Reader use reader.ReadStream). path is informational
 // (Container.Path, error messages).
-func Read(ctx context.Context, r io.ReadSeeker, path string) (*Container, error) {
-	return reader.Read(ctx, r, path)
+func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*Container, error) {
+	return reader.Read(ctx, r, path, opts...)
 }
 
 // OpenMeta is the fast metadata-only counterpart of Open: it returns Tracks +

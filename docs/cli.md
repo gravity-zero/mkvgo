@@ -9,6 +9,7 @@ mkvgo <command> [options]
 
 Global flags:
 - `-json` -- structured JSON output (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare, analyze; accepted but ignored by writing commands)
+- `-in-band` -- the inspection commands (`info`, `tracks`, `probe`) complete a video track's description from its first sample where the header leaves it short: colour behind a bare `hvcC`, a VP9 profile with no `vpcC`, HDR10 static metadata (MaxCLL/MaxFALL, mastering display) kept only in the HEVC SEI / AV1 metadata OBUs. One bounded read, only for such a track; the container wins per field. The library's `WithInBandColourFallback` / `mp4.Options.InBandColour`. Ignored on stdin (`-`) and by the writing commands, which always apply it
 - `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`). `edit-inplace` is the exception: it modifies its input file by design.
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
@@ -141,7 +142,7 @@ cat video.mkv | mkvgo tags -
 Full dump of all metadata: info, tracks, chapters, attachments, tags, the keyframe index, and - for MP4 - any dropped (non-carried) tracks such as cover art. Per track it prints the standard-prober stream fields read head-only: codec long name, profile/level, pixel format, colour code points, HDR10 static metadata (MaxCLL/MaxFALL + mastering display), Dolby Vision, display rotation, sample/display aspect ratio, frame rate, frame count, per-track duration, bitrate, field order, channel count/layout, sample rate (with the SBR output rate), and bit depth. `-json` carries the same fields plus every derived string as its own key, so a scanner consumes the shape directly with no post-processing: `codec_long_name`, `channel_layout`, `avg_frame_rate`, `sample_aspect_ratio`/`display_aspect_ratio`, the colour code points as conventional names (`color_space_name` "bt2020nc", `color_transfer_name` "smpte2084", `color_primaries_name`, `color_range_name`), `stereo_mode_name`, `resolved_language` (BCP-47 when present, else the legacy tag), `effective_sample_rate` (the decoder's rate, SBR applied), and **`hdr_format`** - the one-word dynamic-range classification a tonemap-or-direct-play decision keys on: `dolby-vision` | `hdr10` | `hlg` | `sdr` (absent when unknown). Dolby Vision profile 8 (the cross-compatible flavour) classifies by its BASE layer - `bl_signal_compatibility_id` 1/2/4 → `hdr10`/`sdr`/`hlg`, since that layer plays without a DoVi decoder; only a stream that genuinely needs the DoVi rendering path reports `dolby-vision`, and the raw `dolby_vision` fields ride alongside for consumers applying their own policy. Both MKV/WebM and MP4/MOV, one JSON shape.
 
 ```
-mkvgo probe [-json] <file.mkv|.mp4|->
+mkvgo probe [-json] [-in-band] <file.mkv|.mp4|->
 ```
 
 `info`, `tracks`, `chapters` and `probe` accept an MP4/MOV path as well as MKV/WebM (read via the head-only MP4 probe; `probe` additionally builds the keyframe index). Pass `-` to read MKV from stdin. A Matroska file's `DocType` (`doc_type`, `doc_type_version`, `doc_type_read_version` in JSON) tells WebM from MKV, see `info`.
