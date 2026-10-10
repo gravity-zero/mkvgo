@@ -4,6 +4,103 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.42.0] - 2026-10-10
+
+### Added
+
+- **`HLSPlan.Open` serves a media segment without holding it.** `Open(ctx,
+  name)` returns a `ResourceHandle` (`ContentType`, `Size`, `ETag`,
+  `WriteTo`, `WriteRange`, `Bytes`, `Close`): the plan walks the window's
+  structure once (no video payload read), keeps a small table per window
+  (sample positions, segment heads, and the audio renditions when they weigh
+  under 2 MiB), and writes the segment from the source through one 256 KiB
+  buffer, merging reads across gaps under 8 KiB. A slow client holds a
+  buffer, not a segment: sixteen clients at 2 MB/s on a 57 Mbit/s 2160p remux
+  went from 940 MiB to 28 MiB of resident memory. Tables are budgeted per
+  plan (16 MiB) and per process (`SetTableCacheBytes`, 128 MiB). `Open` falls
+  back to the buffered build, counted in `Stats().StreamFallbacks`, for MP4
+  sources, encrypted or CENC output, converted tracks, custom `Options.FS`
+  without `Options.StreamFromFS`, and compressed video tracks.
+- **`mkvhttp.Handler` streams the segments of a plan that implements
+  `Opener`**: exact `Content-Length`, a weak ETag from the source's size and
+  mtime, one `Range` at a time, `HEAD`; an error after the status line closes
+  the connection rather than ending a short body cleanly. `Options.Buffered`
+  (CLI `serve --buffered`) keeps the previous path with its strong ETag.
+- **`mp4.SetMaxConcurrentWalks(n)`** caps the window walks in flight across
+  every plan of the process; the rest queue or give up with their context.
+  `WalksInFlight()` reports the count, `Stats().SlotWaits` the walks that
+  queued. CLI `serve --max-walks N`. Zero lifts the cap (the default).
+- **A subtitle index derived from the Cues, without a walk.** Muxers cue every
+  block of a subtitle track with its position inside the cluster
+  (`CueRelativePosition`, now read into `CuePoint.RelativePos` and written
+  back by the writer). `matroska.SubtitleIndexFromCues` builds the index from
+  the metadata alone and reports, per track, whether its cue count matches a
+  trusted `NUMBER_OF_FRAMES` statistic; the caller decides what to do with an
+  unverified track. `Resolve` reads one cluster header per cued cluster and
+  the index then serves and marshals like a built one. On a 2160p remux with
+  6,371 cued PGS blocks the derived index matched the walked one block for
+  block, for 0.1 MiB read against 14.6 GiB. The on-demand plan derives it by
+  itself when no `Options.SubtitleIndex` is given and serves the verified
+  tracks from it (`Stats().SubtitleCueIndexed`, `SubtitleCueUnverified`); a
+  cue that does not land on its block falls back to the walk. CLI
+  `subtitle-index -from-cues`. `mkv.TrustedTrackStatistics` is the shared
+  statistics-tag check.
+- **`Track.DecodePayload`** returns a block's content: inflated for zlib and
+  bzlib, the stripped header restored, bounded at 8 MiB. `Block.DataOffset`
+  gives the payload's absolute offset, in header-only mode too;
+  `BlockReader.SetHeaderOnlyTracks` limits header-only mode to some tracks;
+  `reader.ResolveClusterBlock` seats a reader from a cluster position and a
+  relative offset.
+- **Stats**: `ArenaFallbacks`, `TableBuilds`, `TableEvictions`,
+  `StreamedSegments`, `StreamFallbacks`, `UndeclaredZlibBlocks`.
+
+### Changed
+
+- **Compressed tracks are decoded wherever their content is consumed.** The
+  MP4 remux, the full HLS pass, the on-demand plans, the growing plan,
+  `Demux`, keyframe extraction and the WebVTT renditions all inflate zlib and
+  bzlib payloads and restore stripped headers; before, zlib audio and video
+  reached the MP4 samples still compressed, and a zlib SRT track rendered
+  garbage cues. lzo, which mkvgo cannot decode, is refused with a message
+  naming the remedy, or dropped under `SkipUnsupported`. MKV-to-MKV copies
+  still carry the blocks as stored, with their declaration.
+- **`Fingerprint` hashes decoded content**: a header-stripped or compressed
+  track now fingerprints the same as its plain remux. `CompareBlocks`, the
+  `CONTENT_SHA256` tags, `Verify`, Join and Split keep hashing the stored
+  bytes, so every file already tagged still verifies.
+- **The master playlist of an on-demand plan declares its I-frame stream** at
+  build time, with the first keyframe's size as the BANDWIDTH estimate; the
+  line used to appear only after the I-frame playlist had been built.
+- **The window arena is sized on the video's share of the span**: the other
+  renditions' lightest rate seen comes off the buffer, so the arena no longer
+  carries the audio's bytes as slack. A window the estimate undershoots is
+  assembled by copy and lowers the estimate (`Stats().ArenaFallbacks`).
+
+### Fixed
+
+- **On-demand fragments overlapped by one frame duration at open-GOP
+  boundaries.** The window's end time was the first PTS stored after the
+  boundary, a leading picture's; it is now the lowest PTS of the next window,
+  found by a bounded peek (16 blocks) that stops at the first trailing picture
+  or keyframe. The I-frame playlist derives the same value from its windows.
+- **The full pass shortened the last segment** when the final sample in
+  decode order was not the highest PTS: the end is now the highest PTS plus
+  the last duration.
+- **A track that ended before the presentation's tail was given an invented
+  final pair**: the tail probe now walks back one segment at a time,
+  header-only, until it finds the track's own last blocks.
+- **Grid-timed audio jittered by one frame at some window starts**: the
+  running frame index now carries across windows like the full pass's clock,
+  learned from the window before or wound up over it when the timecodes leave
+  the grid.
+- **Undeclared zlib on subtitle tracks.** Some muxers compressed PGS and text
+  subtitles and dropped the `ContentEncodings`; the blocks then read as
+  invalid display sets. A subtitle block whose track declares no compression
+  but inflates to its end with a valid checksum is now served inflated
+  (`Stats().UndeclaredZlibBlocks`), and `diagnose` reports the track as
+  `undeclared-compression`. Audio and video are never sniffed; raw text that
+  happens to open on a zlib header pair stays raw.
+
 ## [0.41.0] - 2026-10-08
 
 ### Added
