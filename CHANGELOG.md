@@ -104,9 +104,12 @@ All notable changes to mkvgo are documented here. The format is based on
   TrueHD by specification - and the measured stride yields to it; a codec the
   stream does not size snaps to a known frame size within a percent, and one
   no table knows is measured over the whole track from a trusted
-  NUMBER_OF_FRAMES count instead of two neighbouring blocks. A permanent
-  drift control in the tests compares every output presentation time with
-  the source timecodes, in both modes.
+  NUMBER_OF_FRAMES count instead of two neighbouring blocks. A laced track
+  nothing sizes at all has its frames spread over each block's span, the same
+  in both modes, bounded to a block (`Stats().SpreadLacedTracks`; `diagnose`
+  reports it as `unsized-laced-audio`). A permanent drift control in the
+  tests compares every output presentation time with the source timecodes
+  and every fixed-frame audio duration with the frame, in both modes.
 - **Undeclared zlib on subtitle tracks.** Some muxers compressed PGS and text
   subtitles and dropped the `ContentEncodings`; the blocks then read as
   invalid display sets. A subtitle block whose track declares no compression
