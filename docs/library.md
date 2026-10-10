@@ -521,8 +521,8 @@ a plan's walks had to queue. Zero lifts the cap.
 process's behaviour unchanged but lets a burst of first requests hold as many
 windows as there are requests. Measured on the buffered path, 300 simultaneous
 cold requests for 300 distinct windows: a 4 Mbit/s 1080p film peaks at 2.1 to
-2.7 GiB of heap without a cap and 205 MiB with a cap of 8; a 20 Mbit/s 2160p
-remux at 2.3 to 2.7 GiB without, 138 MiB with. A cold window also reads from
+2.7 GiB of heap without a cap and 205 MiB with a cap of 8; a 4 Mbit/s 2160p
+encode at 2.3 to 2.7 GiB without, 138 MiB with. A cold window also reads from
 the cued cluster before its boundary (audio stored ahead of the video would
 otherwise be missed), so a burst of cold windows reads more than the windows
 it serves; the cap bounds that too. A cap of `runtime.GOMAXPROCS(0)` costs
