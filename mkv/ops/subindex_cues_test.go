@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -173,5 +174,67 @@ func TestResolveClusterBlock(t *testing.T) {
 	b, err := br.Next()
 	if err != nil || b.Timecode != 2000 || len(b.Data) != 50 {
 		t.Errorf("seated block: %+v err %v", b, err)
+	}
+}
+
+type failAfterReads struct {
+	mkv.ReadSeekCloser
+	left int
+}
+
+func (f *failAfterReads) Read(p []byte) (int, error) {
+	if f.left <= 0 {
+		return 0, errors.New("interrupted")
+	}
+	f.left--
+	return f.ReadSeekCloser.Read(p)
+}
+
+// A Resolve interrupted midway leaves the index unresolved; the next call must
+// settle the remaining entries without shifting the ones already settled.
+func TestResolveInterruptedThenResumed(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var sets [][]mkv.Block
+	for c := 0; c < 6; c++ {
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: int64(c) * 1000, Keyframe: true, Data: make([]byte, 200)},
+			{TrackNumber: 2, Timecode: int64(c)*1000 + 100, Keyframe: true, Duration: 500, Data: []byte("cue")},
+		})
+	}
+	src := buildMKVCuedBlocks(t, t.TempDir(), "r.mkv", []mkv.Track{
+		{ID: 1, UID: 11, Type: mkv.VideoTrack, Codec: "h264", Width: &w, Height: &h},
+		{ID: 2, UID: 22, Type: mkv.SubtitleTrack, Codec: "srt"},
+	}, sets, 6000, nil)
+	ctx := context.Background()
+	c, err := reader.OpenMetaWithFS(ctx, src, nil, reader.WithCues())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, _, err := SubtitleIndexFromCues(c, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &mkv.FS{Open: func(path string) (mkv.ReadSeekCloser, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return &failAfterReads{ReadSeekCloser: f, left: 3}, nil
+	}}
+	if err := ix.Resolve(ctx, src, mkv.Options{FS: failing}); err == nil {
+		t.Fatal("the interrupted Resolve must fail")
+	}
+	if !ix.Unresolved() {
+		t.Fatal("an interrupted index must stay unresolved")
+	}
+	if err := ix.Resolve(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	walked, err := BuildSubtitleIndex(ctx, src, []uint64{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ix.TrackBlocks(2), walked.TrackBlocks(2); !reflect.DeepEqual(got, want) {
+		t.Errorf("resumed index differs from the walk:\n got %+v\nwant %+v", got, want)
 	}
 }

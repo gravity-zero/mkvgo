@@ -587,7 +587,8 @@ func (ix *SubtitleIndex) Unresolved() bool { return ix != nil && ix.unresolved }
 // Resolve turns a Cues-derived index into a usable one: it reads each cued
 // cluster's header once (a few bytes per cluster, nothing of the media) to
 // learn where the cluster's data starts, its timestamp and its end, and
-// settles every entry's position from them.
+// settles every entry's position from them. An interrupted call leaves the
+// index unresolved; the next one settles the entries it did not reach.
 func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mkv.Options) error {
 	if ix == nil || !ix.unresolved {
 		return nil
@@ -606,6 +607,9 @@ func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mk
 				return err
 			}
 			e := &entries[i]
+			if e.pos.ClusterTS >= 0 {
+				continue // settled by a call that was interrupted later
+			}
 			base, ok := clusters[e.pos.ClusterStart]
 			if !ok {
 				if base, err = reader.ResolveClusterBlock(f, e.pos.ClusterStart, 0); err != nil {
