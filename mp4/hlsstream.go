@@ -499,9 +499,7 @@ func (c *spanCopier) flush(w io.Writer) error {
 	pending := c.pending
 	c.pending, c.pendingN = c.pending[:0], 0
 	if len(pending) == 1 {
-		m, err := w.Write(pending[0])
-		c.written += int64(m)
-		return err
+		return c.write(w, pending[0])
 	}
 	if c.stage == nil {
 		c.stage = stageBufs.Get().(*[]byte)
@@ -511,8 +509,16 @@ func (c *spanCopier) flush(w io.Writer) error {
 		st = append(st, b...)
 	}
 	*c.stage = st[:0]
-	m, err := w.Write(st)
+	return c.write(w, st)
+}
+
+// write hands b to the writer; fewer bytes taken without an error is io.ErrShortWrite.
+func (c *spanCopier) write(w io.Writer, b []byte) error {
+	m, err := w.Write(b)
 	c.written += int64(m)
+	if err == nil && m < len(b) {
+		err = io.ErrShortWrite
+	}
 	return err
 }
 
