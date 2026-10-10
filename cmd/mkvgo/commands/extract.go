@@ -260,8 +260,11 @@ func CmdSubtitleIndex(args []string) {
 	source := args[0]
 	var outPath string
 	var trackIDs []uint64
+	fromCues := false
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
+		case "-from-cues":
+			fromCues = true
 		case "-o":
 			i++
 			if i >= len(args) {
@@ -290,6 +293,9 @@ func CmdSubtitleIndex(args []string) {
 	GuardOverwrite(outPath)
 
 	ix, err := matroska.BuildSubtitleIndex(context.Background(), source, trackIDs)
+	if fromCues {
+		ix, err = subtitleIndexFromCues(source, trackIDs)
+	}
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -306,4 +312,29 @@ func CmdSubtitleIndex(args []string) {
 	}
 	fmt.Printf("indexed %d blocks over %d subtitle track(s) → %s (%d bytes)\n",
 		total, len(ix.Tracks()), outPath, len(blob))
+}
+
+// subtitleIndexFromCues derives the index from the Cues and refuses when a track's completeness cannot be verified.
+func subtitleIndexFromCues(source string, trackIDs []uint64) (*matroska.SubtitleIndex, error) {
+	ctx := context.Background()
+	ix, verified, err := matroska.SubtitleIndexFromCues(ctx, source, trackIDs)
+	if err != nil {
+		return nil, err
+	}
+	var unverified []string
+	for _, id := range ix.Tracks() {
+		if !verified[id] {
+			unverified = append(unverified, strconv.FormatUint(id, 10))
+		}
+	}
+	if len(ix.Tracks()) == 0 {
+		return nil, fmt.Errorf("the Cues index no subtitle block: build the index without -from-cues")
+	}
+	if len(unverified) > 0 {
+		return nil, fmt.Errorf("the Cues of track(s) %s cannot be verified complete (no trusted NUMBER_OF_FRAMES statistic, or another count): build the index without -from-cues", strings.Join(unverified, ","))
+	}
+	if err := ix.Resolve(ctx, source); err != nil {
+		return nil, err
+	}
+	return ix, nil
 }

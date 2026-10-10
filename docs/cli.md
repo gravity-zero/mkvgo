@@ -415,13 +415,14 @@ itself from the second extraction of that file onwards, and one build covers
 every track it names.
 
 ```
-mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5]
+mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5] [-from-cues]
 ```
 
 | Flag | Description |
 |---|---|
 | `-o` | Output index file (required) |
 | `-t` | Comma-separated track IDs to index (default: every subtitle track) |
+| `-from-cues` | Derive the index from the file's own `Cues` instead of walking: metadata and one cluster header per cued cluster are read, nothing else. Muxers cue every subtitle block, and the command checks it - each track's cue count must match its trusted `NUMBER_OF_FRAMES` statistic - and refuses otherwise, naming the tracks to index with a walk |
 
 ```bash
 mkvgo subtitle-index video.mkv -o video.mkvsix              # every subtitle track

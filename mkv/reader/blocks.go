@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -1342,4 +1343,44 @@ func safeTimecodeMs(v, scale int64) (int64, error) {
 		return 0, fmt.Errorf("timecode overflow: %d * %d", v, scale)
 	}
 	return v * scale / 1_000_000, nil
+}
+
+// ResolveClusterBlock locates a block by its cluster and its offset inside the
+// cluster's data (a Cues entry's CueClusterPosition and CueRelativePosition):
+// one read of the cluster header and its Timestamp gives the BlockPos a
+// BlockReader seats on. relative 0 names the data start itself.
+func ResolveClusterBlock(r io.ReadSeeker, clusterStart, relative int64) (BlockPos, error) {
+	if _, err := r.Seek(clusterStart, io.SeekStart); err != nil {
+		return BlockPos{}, err
+	}
+	var head [24]byte
+	n, err := io.ReadFull(r, head[:])
+	if err != nil && n < 12 {
+		return BlockPos{}, fmt.Errorf("cluster header at %d: %w", clusterStart, err)
+	}
+	br := bytes.NewReader(head[:n])
+	h, hdrLen, err := ebml.ReadElementHeader(br)
+	if err != nil {
+		return BlockPos{}, fmt.Errorf("cluster header at %d: %w", clusterStart, err)
+	}
+	if h.ID != mkv.IDCluster {
+		return BlockPos{}, fmt.Errorf("no cluster at %d (element %#x)", clusterStart, h.ID)
+	}
+	dataStart := clusterStart + int64(hdrLen)
+	pos := BlockPos{Off: dataStart + relative, ClusterStart: clusterStart, ClusterEnd: -1}
+	if h.Size >= 0 {
+		pos.ClusterEnd = dataStart + h.Size
+		if relative > 0 && pos.Off >= pos.ClusterEnd {
+			return BlockPos{}, fmt.Errorf("block offset %d lies past the cluster at %d", relative, clusterStart)
+		}
+	}
+	th, thLen, err := ebml.ReadElementHeader(br)
+	if err == nil && th.ID == mkv.IDTimestamp && th.Size > 0 && th.Size <= 8 && int64(hdrLen)+int64(thLen)+th.Size <= int64(n) {
+		ts, err := ebml.ReadUint(br, th.Size)
+		if err != nil {
+			return BlockPos{}, err
+		}
+		pos.ClusterTS = int64(ts)
+	}
+	return pos, nil
 }

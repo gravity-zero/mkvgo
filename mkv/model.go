@@ -677,6 +677,10 @@ type CuePoint struct {
 	TimeMs     int64
 	Track      uint64
 	ClusterPos int64 // relative to the Segment body (Container.SegmentStart)
+	// RelativePos is the block's offset inside the cluster's data, counted
+	// from its first element (CueRelativePosition); 0 when the file does not
+	// say - a block never sits there, the Timestamp does.
+	RelativePos int64
 }
 
 type MuxOptions struct {

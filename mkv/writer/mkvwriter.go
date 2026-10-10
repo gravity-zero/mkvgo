@@ -96,13 +96,14 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 	// target, skewing every consumer of the index (same bug class as the
 	// reindex fix; here in the writer).
 	cued := false
+	cueAt := -1 // the cued block, whose offset inside the cluster the write below reveals
 	for i := range blocks {
 		if blocks[i].Keyframe && (m.videoTracks == nil || m.videoTracks[blocks[i].TrackNumber]) {
 			m.Cues = append(m.Cues, mkv.CuePoint{
 				TimeMs: blocks[i].Timecode, Track: blocks[i].TrackNumber,
 				ClusterPos: clusterOffset,
 			})
-			cued = true
+			cued, cueAt = true, i
 			break
 		}
 	}
@@ -120,10 +121,15 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 				TimeMs: blocks[0].Timecode, Track: blocks[0].TrackNumber,
 				ClusterPos: clusterOffset,
 			})
+			cueAt = 0
 		}
 	}
 
-	return WriteCluster(m.W, clusterTS, timecodeScale, blocks)
+	offsets, err := WriteClusterOffsets(m.W, clusterTS, timecodeScale, blocks)
+	if err == nil && cueAt >= 0 {
+		m.Cues[len(m.Cues)-1].RelativePos = offsets[cueAt]
+	}
+	return err
 }
 
 // WriteTagsElement writes a Tags element at the current position (typically

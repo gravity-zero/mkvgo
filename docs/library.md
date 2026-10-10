@@ -541,6 +541,17 @@ recorded - is set aside and the walk serves: it costs its saving, never a
 wrong cue. `plan.Stats()` says which path served (`SubtitleWalks`,
 `SubtitleIndexedBlocks`).
 
+Without an index, the plan first looks at the source's own `Cues`: muxers cue
+every block of a subtitle track with its position inside the cluster, which is
+the whole index, read already when the plan was built. A track is served from
+it only when the Cues are verified complete - its cue count matches a trusted
+`NUMBER_OF_FRAMES` statistic - because a track cued in part would lose cues
+silently where the walk finds them all; the others walk as before. The
+positions settle on the track's first request, one cluster header read per cued
+cluster, and each block read is checked against its cue like an index's. The
+plan counts both outcomes (`SubtitleCueIndexed`, `SubtitleCueUnverified`);
+`matroska.SubtitleIndexFromCues` is the same derivation for your own use.
+
 **Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
 time: the moov sample table already has every segment's exact sample count,
 sizes and sync flags, so it costs nothing extra. A Matroska plan instead
@@ -1178,6 +1189,24 @@ blob, err := ix.MarshalBinary()                               // store these byt
 var ix2 matroska.SubtitleIndex
 err = ix2.UnmarshalBinary(blob)
 err = matroska.ExtractSubtitleWebVTTFrom(ctx, "movie.mkv", trackID, &ix2, w)
+```
+
+**From the Cues, without the pass.** Muxers cue every block of a subtitle
+track - time, cluster and position inside the cluster - which is exactly what
+an entry records. `SubtitleIndexFromCues` reads the metadata only and derives
+the index from them; `Resolve` then reads one cluster header per cued cluster
+(a few bytes each, no payload) and the index serves and marshals like a built
+one. The guard is per track: a track's cue count must match its trusted
+`NUMBER_OF_FRAMES` statistic to be reported verified - a muxer that cued some
+of the blocks, or none, leaves the track to `BuildSubtitleIndex`, and so does a
+file without the statistic; the caller decides.
+
+```go
+ix, verified, err := matroska.SubtitleIndexFromCues(ctx, "movie.mkv", nil)
+for _, id := range ix.Tracks() {
+	if !verified[id] { /* build this one with BuildSubtitleIndex, or accept the risk */ }
+}
+err = ix.Resolve(ctx, "movie.mkv") // one small read per cued cluster
 ```
 
 Measured on a 15.8 GB 2160p source with eight subtitle tracks (12.2 M blocks),

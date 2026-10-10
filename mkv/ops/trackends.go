@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -353,55 +351,11 @@ type trackStatistics struct {
 	frames     int64 // NUMBER_OF_FRAMES, 0 when absent
 }
 
-// trustedTrackStatistics returns, by track number, the statistics of every
-// track whose tags describe THIS file. A tag survives remuxes that do not
-// rewrite it - copied verbatim by a muxer, it certifies frames the file no
-// longer holds - so, as a muxer does before trusting one, the tag's writing
-// application must be the file's, its writing date the file's when both are
-// stated, and its duration not past the declared one.
+// trustedTrackStatistics is mkv.TrustedTrackStatistics in this package's terms.
 func trustedTrackStatistics(c *mkv.Container) map[uint64]trackStatistics {
 	out := map[uint64]trackStatistics{}
-	for i := range c.Tracks {
-		t := &c.Tracks[i]
-		for _, tag := range c.Tags {
-			if tag.TargetID == 0 || tag.TargetID != trackUID(t) || !statisticsDescribeFile(c, tag.SimpleTags) {
-				continue
-			}
-			durMs, err := mkv.ParseClockTime(simpleTagValue(tag.SimpleTags, "DURATION"))
-			if err != nil || durMs <= 0 || (c.DurationMs > 0 && durMs > c.DurationMs+1000) {
-				continue
-			}
-			st := trackStatistics{durationMs: durMs}
-			if n, err := strconv.ParseInt(strings.TrimSpace(simpleTagValue(tag.SimpleTags, "NUMBER_OF_FRAMES")), 10, 64); err == nil && n > 0 {
-				st.frames = n
-			}
-			out[t.ID] = st
-		}
+	for id, st := range mkv.TrustedTrackStatistics(c) {
+		out[id] = trackStatistics{durationMs: st.DurationMs, frames: st.Frames}
 	}
 	return out
-}
-
-// statisticsDescribeFile is the freshness check on a statistics tag set: the
-// application that measured it must be the one that wrote the file, and, when
-// both state a date, the same date.
-func statisticsDescribeFile(c *mkv.Container, tags []mkv.SimpleTag) bool {
-	app := simpleTagValue(tags, "_STATISTICS_WRITING_APP")
-	if app == "" || app != c.Info.WritingApp {
-		return false
-	}
-	if date := simpleTagValue(tags, "_STATISTICS_WRITING_DATE_UTC"); date != "" && c.Info.DateUTC != nil {
-		return date == c.Info.DateUTC.UTC().Format("2006-01-02 15:04:05")
-	}
-	return true
-}
-
-// simpleTagValue returns the value of the named SimpleTag (case-insensitive), or
-// "" when absent.
-func simpleTagValue(tags []mkv.SimpleTag, name string) string {
-	for _, st := range tags {
-		if strings.EqualFold(st.Name, name) {
-			return st.Value
-		}
-	}
-	return ""
 }

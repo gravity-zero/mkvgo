@@ -734,6 +734,26 @@ func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, 
 	return ops.BuildSubtitleIndex(ctx, srcPath, trackIDs, opts...)
 }
 
+// SubtitleIndexFromCues derives the subtitle index from the source's own Cues,
+// reading its metadata only: no walk. Muxers cue every block of a subtitle
+// track, so the index names the same blocks a walk finds - when the Cues are
+// complete. verified marks the tracks whose cue count matches a trusted
+// NUMBER_OF_FRAMES statistic; for the others the caller chooses between the
+// index and BuildSubtitleIndex. The index must be Resolve'd (one cluster header
+// read per cued cluster) before it serves or marshals. See ops.SubtitleIndexFromCues.
+func SubtitleIndexFromCues(ctx context.Context, srcPath string, trackIDs []uint64, opts ...Options) (ix *SubtitleIndex, verified map[uint64]bool, err error) {
+	fs := mkv.FSFrom(opts)
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithCues(), reader.WithTags())
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := fs.DoStat(srcPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ops.SubtitleIndexFromCues(c, st.Size(), trackIDs)
+}
+
 // ExtractSubtitleWebVTTFrom is ExtractSubtitleWebVTT served from a prebuilt
 // index. See ops.ExtractSubtitleWebVTTFrom.
 func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, w io.Writer, opts ...Options) error {

@@ -78,7 +78,7 @@ var CmdUsage = map[string]string{
 	"extract-chapters":   "mkvgo extract-chapters <file.mkv|.mp4> [-o <chapters.txt>] (OGM format, stdout by default)",
 	"remove-attachment":  "mkvgo remove-attachment <file.mkv> -o <out.mkv> <attachmentID|name>",
 	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt|pgs (default: srt; pgs writes a directory of PNGs + cues.json)] [-index <index.mkvsix> (vtt/pgs, MKV only)]",
-	"subtitle-index":     "mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5 (default: every subtitle track)]",
+	"subtitle-index":     "mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5 (default: every subtitle track)] [-from-cues]",
 	"split":              "mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00] [-pattern part_%03d.mkv ({title} = chapter title)]",
 	"join":               "mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...",
 	"reindex":            "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--strict] [--rollback-delta <file>] (rebuild the seek index; --resync repairs corrupted regions surgically)",

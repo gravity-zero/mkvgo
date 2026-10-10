@@ -186,6 +186,7 @@ const (
 	IDCueTrackPositions = 0xB7
 	IDCueTrack          = 0xF7
 	IDCueClusterPos     = 0xF1
+	IDCueRelativePos    = 0xF0
 )
 
 const (

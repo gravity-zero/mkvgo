@@ -160,7 +160,8 @@ type HLSPlan struct {
 	stats    HLSPlanStats
 	winBuilt []uint64
 	// subIndex is Options.SubtitleIndex when it matches the source's
-	// fingerprint; nil otherwise, and the subtitle scans walk.
+	// fingerprint, else the index derived from the source's Cues when they
+	// cue its subtitle blocks; nil otherwise, and the subtitle scans walk.
 	subIndex SubtitleBlockIndex
 }
 
@@ -273,6 +274,12 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	if !o.VideoOnly {
 		p.subs = filterSubTracks(planSubTracks(c, o), keep)
+	}
+	if p.subIndex == nil {
+		if ix, verified, unverified := cueSubtitleIndexFrom(c, p.subs); ix != nil {
+			p.subIndex = ix
+			p.stats.SubtitleCueIndexed, p.stats.SubtitleCueUnverified = verified, unverified
+		}
 	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
@@ -2433,6 +2440,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 	}
 	var br *reader.BlockReader
 	var read int64
+	var cues cueResolver
 	defer func() {
 		p.winMu.Lock()
 		p.stats.SubtitleIndexedBlocks += read
@@ -2454,6 +2462,9 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 				return true, err
 			}
 			e := &entries[j]
+			if err := cues.resolve(src, e); err != nil {
+				return stale()
+			}
 			clusterMs, ok := p.clusterMs(e.Pos.ClusterTS)
 			if !ok || !e.Pos.Valid() || e.Frames < 1 {
 				return stale()

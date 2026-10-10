@@ -621,22 +621,30 @@ func WriteSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, 
 }
 
 func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mkv.Block) error {
+	_, err := WriteClusterOffsets(w, clusterTS, timecodeScale, blocks)
+	return err
+}
+
+// WriteClusterOffsets is WriteCluster that also returns each block's offset inside the cluster's data (what a CueRelativePosition records).
+func WriteClusterOffsets(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mkv.Block) ([]int64, error) {
 	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
 		timecodeScale = 1000000
 	}
 	rawTS := uint64(clusterTS * 1000000 / timecodeScale)
 	var e ew
 	e.uint(mkv.IDTimestamp, rawTS)
+	offsets := make([]int64, len(blocks))
 	// lastTC is each track's previous block in this cluster, for the
 	// ReferenceBlock of a non-keyframe BlockGroup.
 	lastTC := map[uint64]int64{}
 	for i := 0; i < len(blocks); i++ {
 		b := &blocks[i]
+		offsets[i] = int64(e.Len())
 		// Block timecodes are milliseconds internally; the SimpleBlock offset is
 		// stored in raw timecode-scale units, like the cluster Timestamp above.
 		delta := (b.Timecode - clusterTS) * 1000000 / timecodeScale
 		if delta < math.MinInt16 || delta > math.MaxInt16 {
-			return fmt.Errorf("block timecode %dms is %+d timecode units from cluster start %dms, outside SimpleBlock's int16 range", b.Timecode, delta, clusterTS)
+			return nil, fmt.Errorf("block timecode %dms is %+d timecode units from cluster start %dms, outside SimpleBlock's int16 range", b.Timecode, delta, clusterTS)
 		}
 		relTC := int16(delta)
 		if e.err != nil {
@@ -669,13 +677,16 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 			// same instant, and the timing the lace implied would be lost.
 			e.err = writeLacedSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, blocks[i:i+n])
 			lastTC[b.TrackNumber] = b.Timecode
+			for k := i + 1; k < i+n; k++ {
+				offsets[k] = offsets[i] // the lace's frames share its block
+			}
 			i += n - 1
 			continue
 		}
 		e.err = WriteSimpleBlock(&e.Buffer, b.TrackNumber, relTC, b.Keyframe, b.Data)
 		lastTC[b.TrackNumber] = b.Timecode
 	}
-	return e.flush(w, mkv.IDCluster)
+	return offsets, e.flush(w, mkv.IDCluster)
 }
 
 // maxLaceFrames is the most frames one laced block can hold: the count is
@@ -850,6 +861,9 @@ func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {
 			ce.master(mkv.IDCueTrackPositions, func(tp *ew) {
 				tp.uint(mkv.IDCueTrack, cp.Track)
 				tp.uint(mkv.IDCueClusterPos, uint64(cp.ClusterPos))
+				if cp.RelativePos > 0 {
+					tp.uint(mkv.IDCueRelativePos, uint64(cp.RelativePos))
+				}
 			})
 		})
 	}

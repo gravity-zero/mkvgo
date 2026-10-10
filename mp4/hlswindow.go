@@ -330,6 +330,12 @@ type HLSPlanStats struct {
 	// an index that is not this file's.
 	SubtitleWalks         int64
 	SubtitleIndexedBlocks int64
+	// SubtitleCueIndexed counts the subtitle renditions served from the
+	// source's own Cues (every block cued, count matching the track's trusted
+	// NUMBER_OF_FRAMES statistic); SubtitleCueUnverified, those whose Cues
+	// name some blocks but could not be verified complete, which walk.
+	SubtitleCueIndexed    int64
+	SubtitleCueUnverified int64
 }
 
 // Stats returns the plan's window counters. Safe to call while segments are

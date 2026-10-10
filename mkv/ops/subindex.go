@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -66,6 +67,10 @@ type SubtitleIndex struct {
 	segmentUID []byte
 	order      []uint64 // track IDs, in the order they were indexed
 	entries    map[uint64][]subEntry
+	// unresolved marks an index derived from the Cues (SubtitleIndexFromCues):
+	// each entry's Off is still the block's offset inside its cluster's data,
+	// its ClusterTS and ClusterEnd unknown, until Resolve reads the cluster headers.
+	unresolved bool
 }
 
 // Tracks returns the track IDs the index covers, in index order.
@@ -103,6 +108,9 @@ func (ix *SubtitleIndex) Matches(size int64, segmentUID []byte, timecodeScale in
 // the extractors here - an on-demand plan serving WebVTT segments - seek
 // straight to a track's blocks.
 func (ix *SubtitleIndex) TrackBlocks(trackID uint64) []reader.IndexedBlock {
+	if ix == nil || ix.unresolved {
+		return nil
+	}
 	if ix == nil {
 		return nil
 	}
@@ -384,6 +392,9 @@ func textSubtitleCodec(c *mkv.Container, trackID uint64) (string, error) {
 // previous entry - a 10 331-block index over eight tracks comes to ~150 KiB
 // rather than the ~400 KiB the raw int64s would take.
 func (ix *SubtitleIndex) MarshalBinary() ([]byte, error) {
+	if ix.unresolved {
+		return nil, fmt.Errorf("subtitle index derived from the Cues is not resolved yet (call Resolve first)")
+	}
 	if ix == nil {
 		return nil, fmt.Errorf("nil subtitle index")
 	}
@@ -523,4 +534,88 @@ func errTruncatedIndex(err error) error {
 		return fmt.Errorf("corrupt subtitle index: %w", err)
 	}
 	return fmt.Errorf("truncated subtitle index")
+}
+
+// SubtitleIndexFromCues derives a subtitle index from the Cues the source
+// already carries - no walk, no read past the metadata - for the given
+// subtitle tracks (all of them when none are named). Muxers cue every block of
+// a subtitle track with its position inside the cluster, which is all an
+// entry needs. The index is unresolved until Resolve reads each cued cluster's
+// header; verified marks the tracks whose cue count matches a trusted
+// NUMBER_OF_FRAMES statistic - a track without one, or with another count, may
+// be cued only in part, and the caller decides whether a walk replaces it.
+func SubtitleIndexFromCues(c *mkv.Container, size int64, trackIDs []uint64) (*SubtitleIndex, map[uint64]bool, error) {
+	keep, err := resolveIndexTracks(c, trackIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	ix := &SubtitleIndex{fileSize: size, tcScale: c.Info.TimecodeScale, segmentUID: c.Info.SegmentUID, entries: map[uint64][]subEntry{}, unresolved: true}
+	verified := map[uint64]bool{}
+	stats := trustedTrackStatistics(c)
+	for _, id := range keep {
+		var entries []subEntry
+		for k := range c.Cues {
+			cue := &c.Cues[k]
+			if cue.Track != id || cue.RelativePos <= 0 {
+				continue
+			}
+			entries = append(entries, subEntry{
+				pos:    reader.BlockPos{Off: cue.RelativePos, ClusterStart: c.SegmentStart + cue.ClusterPos, ClusterEnd: -1, ClusterTS: -1},
+				timeMs: cue.TimeMs, frames: 1,
+			})
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		sort.SliceStable(entries, func(a, b int) bool {
+			if entries[a].pos.ClusterStart != entries[b].pos.ClusterStart {
+				return entries[a].pos.ClusterStart < entries[b].pos.ClusterStart
+			}
+			return entries[a].pos.Off < entries[b].pos.Off
+		})
+		ix.order = append(ix.order, id)
+		ix.entries[id] = entries
+		st, ok := stats[id]
+		verified[id] = ok && st.frames > 0 && st.frames == int64(len(entries))
+	}
+	return ix, verified, nil
+}
+
+// Unresolved reports whether the index still needs Resolve before it can seat a reader.
+func (ix *SubtitleIndex) Unresolved() bool { return ix != nil && ix.unresolved }
+
+// Resolve turns a Cues-derived index into a usable one: it reads each cued
+// cluster's header once (a few bytes per cluster, nothing of the media) to
+// learn where the cluster's data starts, its timestamp and its end, and
+// settles every entry's position from them.
+func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mkv.Options) error {
+	if ix == nil || !ix.unresolved {
+		return nil
+	}
+	fs := mkv.FSFrom(opts)
+	f, err := fs.DoOpen(srcPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	clusters := map[int64]reader.BlockPos{} // data start, end and timestamp per cluster, read once
+	for _, id := range ix.order {
+		entries := ix.entries[id]
+		for i := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			e := &entries[i]
+			base, ok := clusters[e.pos.ClusterStart]
+			if !ok {
+				if base, err = reader.ResolveClusterBlock(f, e.pos.ClusterStart, 0); err != nil {
+					return fmt.Errorf("subtitle index from cues: %w", err)
+				}
+				clusters[e.pos.ClusterStart] = base
+			}
+			e.pos = reader.BlockPos{Off: base.Off + e.pos.Off, ClusterStart: base.ClusterStart, ClusterEnd: base.ClusterEnd, ClusterTS: base.ClusterTS}
+		}
+	}
+	ix.unresolved = false
+	return nil
 }

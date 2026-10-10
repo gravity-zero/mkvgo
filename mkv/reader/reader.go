@@ -2140,6 +2140,12 @@ func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
 				return err
 			}
 			cp.ClusterPos = int64(v)
+		case mkv.IDCueRelativePos:
+			v, err := ebml.ReadUint(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			cp.RelativePos = int64(v)
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return err
