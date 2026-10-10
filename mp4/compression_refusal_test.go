@@ -92,6 +92,10 @@ func TestCompressedTracksInflated(t *testing.T) {
 			}
 		}
 	}
+	assertOpenMatchesResource(t, plan)
+	if st := plan.Stats(); st.StreamedSegments == 0 {
+		t.Errorf("the video must stream: %+v", st)
+	}
 }
 
 // A scheme mkvgo cannot decode is refused, or dropped when asked to skip it.

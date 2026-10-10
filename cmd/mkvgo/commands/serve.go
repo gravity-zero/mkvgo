@@ -39,6 +39,8 @@ func CmdServe(args []string) {
 	var windowCache int64
 	// maxWalks: how many windows the process builds at once (0 = no cap).
 	maxWalks := 0
+	// buffered: hold each segment whole while it is sent, instead of streaming it.
+	buffered := false
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -56,6 +58,8 @@ func CmdServe(args []string) {
 			if i < len(args) {
 				targetName = args[i]
 			}
+		case "-buffered", "--buffered":
+			buffered = true
 		case "-max-walks", "--max-walks":
 			i++
 			if i < len(args) {
@@ -121,7 +125,7 @@ func CmdServe(args []string) {
 		Fatal(err.Error())
 	}
 
-	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: true})}
+	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: true, Buffered: buffered})}
 
 	fmt.Printf("serving %s\n  %s\n", src, playableURL(addr))
 	runServer(srv)

@@ -482,6 +482,31 @@ st := plan.Stats()
 log.Printf("windows: %d walks, %d of them rebuilds, %d shared", st.WindowBuilds, st.WindowRebuilds, st.SharedRenditions)
 ```
 
+**Serving a segment without holding it: `HLSPlan.Open`.** `Resource` hands
+back a segment whole, and a slow client keeps those bytes alive until it has
+read them - sixteen clients at 2 MB/s on a 57 Mbit/s UHD remux hold 900 MiB.
+`Open` returns a handle instead: its `ContentType` and exact `Size` up front
+(for Content-Length), and `WriteTo` / `WriteRange` that write the bytes from
+the source as they go, through one pooled 256 KiB buffer. The first request
+for a window walks it structure-only (block headers, no payloads) and keeps a
+small table - where each sample sits, the timed `moof` - shared by every
+rendition and every client of that window; each write then copies the sample
+ranges straight from the file. The bytes equal `Resource`'s exactly, playlists
+and init segments come back whole as before, and a plan that cannot stream
+(an MP4 source, `Encrypt`/`CENC`, a `FrameConverter`, a custom `Options.FS`
+without `StreamFromFS`) serves `Open` from memory and counts it in
+`Stats().StreamFallbacks`. `mkvhttp.Handler` uses `Open` on its own; a write
+that fails midway must end as a broken connection, never a short body a player
+could take for a whole segment.
+
+```go
+h, err := plan.Open(ctx, "seg00042.m4s")
+if err != nil { return err }
+defer h.Close()
+w.Header().Set("Content-Length", strconv.FormatInt(h.Size(), 10))
+if _, err := h.WriteTo(ctx, w); err != nil { panic(http.ErrAbortHandler) }
+```
+
 **Bounding memory under load: `mp4.SetMaxConcurrentWalks`.** A window in
 flight holds its media - 6 to 10 MiB of 1080p, ~15 MiB of 20 Mbit/s 2160p -
 from the start of its walk until the segment is sent. Nothing in a plan bounds

@@ -31,6 +31,9 @@ const (
 	CompressionHeaderStrip                    // ContentCompAlgo 3 - see Track.HeaderStripping
 )
 
+// Verbatim reports whether a block's bytes on disk are the payload, a stripped header aside: what a copy from the source may serve.
+func (c Compression) Verbatim() bool { return c == CompressionNone || c == CompressionHeaderStrip }
+
 // CompressionFromAlgo maps a Matroska ContentCompAlgo value to a Compression.
 // An algorithm this build does not know maps to CompressionNone, so an unknown
 // scheme reads as "nothing declared" rather than as the wrong codec.
@@ -550,6 +553,10 @@ type Block struct {
 	// BlockDuration element. It is 0 when absent (e.g. SimpleBlocks, which never
 	// carry one). Subtitle cues store their on-screen time here.
 	Duration int64
+	// DataOffset is the absolute file offset of Data's first byte (a laced
+	// frame's own), set by the BlockReader in header-only mode too: what lets a
+	// consumer come back for the payload without holding it.
+	DataOffset int64
 	// BlockTimecode is the STORED timecode of the enclosing (Simple)Block. For
 	// a frame of a laced block Timecode is the frame's own play time (blockTS +
 	// i×DefaultDuration) while BlockTimecode stays the lace's shared value -

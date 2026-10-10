@@ -61,6 +61,12 @@ type Options struct {
 	// Only the on-demand plans (PlanHLS, PlanABR, PlanGrowingHLS) honour this; a
 	// full pass writes every rendition from one walk by construction.
 	WindowCacheBytes int64
+	// StreamFromFS lets HLSPlan.Open write segments straight from a source
+	// opened through Options.FS. Off, a plan over a custom FS serves Open the
+	// buffered way: streaming reads a window twice (its structure, then its
+	// bytes), and over a remote source that is two network reads. A local
+	// file (no Options.FS) always streams.
+	StreamFromFS bool
 	// SubtitleIndex, when set, is a prebuilt index of the source's subtitle
 	// blocks (a *matroska.SubtitleIndex, built once by
 	// matroska.BuildSubtitleIndex and stored by the caller). An on-demand plan

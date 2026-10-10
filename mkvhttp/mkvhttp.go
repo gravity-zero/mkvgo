@@ -21,9 +21,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // Resolver builds one named resource on demand.
@@ -51,6 +55,17 @@ type Options struct {
 	// exposed headers for Range/ETag, and a 204 response to an OPTIONS
 	// preflight request.
 	AllowCORS bool
+	// Buffered serves every resource from its bytes even when the Resolver
+	// can stream (Opener): the behaviour before streaming existed, a strong
+	// ETag included.
+	Buffered bool
+}
+
+// Opener is what a plan that writes a resource on demand offers
+// (mp4.HLSPlan.Open): Handler then streams a media segment from the source
+// through one buffer instead of holding the segment while the client reads it.
+type Opener interface {
+	Open(ctx context.Context, name string) (*mp4.ResourceHandle, error)
 }
 
 // Handler serves r's resources over HTTP with static-VOD semantics:
@@ -67,6 +82,10 @@ type Options struct {
 //     ServeContent's own name-extension detection never overrides it.
 //   - Range requests are served by http.ServeContent (over a bytes.Reader, no
 //     modtime - the ETag already identifies the exact bytes).
+//   - A Resolver that is also an Opener (mp4.HLSPlan) has its media segments
+//     streamed from the source through one buffer, never held whole: exact
+//     Content-Length, a weak ETag, single Range, and a connection cut short
+//     when the source fails midway. Options.Buffered keeps the old path.
 //   - Cache-Control: a playlist/manifest (.m3u8/.mpd) gets "no-cache" (its
 //     bytes name segments that can be re-derived as the plan evolves);
 //     every other resource gets "public, max-age=31536000, immutable" - safe
@@ -115,7 +134,22 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	data, contentType, err := h.resolver.Resource(req.Context(), name)
+	var data []byte
+	var contentType string
+	var err error
+	if op, ok := h.resolver.(Opener); ok && !h.opts.Buffered {
+		var rh *mp4.ResourceHandle
+		rh, err = op.Open(req.Context(), name)
+		if err == nil && rh.Bytes() == nil {
+			h.serveStreamed(w, req, name, rh)
+			return
+		}
+		if err == nil {
+			data, contentType = rh.Bytes(), rh.ContentType()
+		}
+	} else {
+		data, contentType, err = h.resolver.Resource(req.Context(), name)
+	}
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "mkvhttp: resource not found", http.StatusNotFound)
@@ -139,6 +173,78 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", cacheControlFor(name))
 
 	http.ServeContent(w, req, name, time.Time{}, bytes.NewReader(data))
+}
+
+// serveStreamed answers from a streaming handle: exact Content-Length, a weak
+// ETag (the bytes are never in hand), one Range at a time, and on an error
+// after the status line a connection cut short - a player must never take a
+// truncated segment for a whole one.
+func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name string, rh *mp4.ResourceHandle) {
+	defer rh.Close()
+	size := rh.Size()
+	etag := rh.ETag()
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Accept-Ranges", "bytes")
+	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if ct := rh.ContentType(); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("Cache-Control", cacheControlFor(name))
+	start, n, status, ok := byteRange(req.Header.Get("Range"), size)
+	if !ok {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+		http.Error(w, "mkvhttp: range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	if status == http.StatusPartialContent {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+n-1, size))
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(n, 10))
+	w.WriteHeader(status)
+	if req.Method == http.MethodHead {
+		return
+	}
+	if _, err := rh.WriteRange(req.Context(), w, start, n); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// byteRange parses a single "bytes=a-b" Range header against size: the span to
+// write and the status (200 when there is no Range, 206 otherwise); ok is false
+// when the range cannot be satisfied. A multi-range request is served whole.
+func byteRange(header string, size int64) (start, n int64, status int, ok bool) {
+	spec, found := strings.CutPrefix(strings.TrimSpace(header), "bytes=")
+	if !found || strings.Contains(spec, ",") {
+		return 0, size, http.StatusOK, true
+	}
+	a, b, _ := strings.Cut(spec, "-")
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	switch {
+	case a == "" && b != "": // the last b bytes
+		k, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || k <= 0 {
+			return 0, 0, 0, false
+		}
+		k = min(k, size)
+		return size - k, k, http.StatusPartialContent, true
+	case a != "":
+		s, err := strconv.ParseInt(a, 10, 64)
+		if err != nil || s < 0 || s >= size {
+			return 0, 0, 0, false
+		}
+		e := size - 1
+		if b != "" {
+			if e, err = strconv.ParseInt(b, 10, 64); err != nil || e < s {
+				return 0, 0, 0, false
+			}
+			e = min(e, size-1)
+		}
+		return s, e - s + 1, http.StatusPartialContent, true
+	}
+	return 0, 0, 0, false
 }
 
 // methodNotAllowed answers a non-GET/HEAD/OPTIONS request; shared by Handler

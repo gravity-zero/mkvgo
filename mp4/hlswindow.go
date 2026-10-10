@@ -97,7 +97,7 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd)
+	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +301,15 @@ type HLSPlanStats struct {
 	// the span less the other tracks' lightest share seen, came out too small
 	// and were assembled by copy instead: each one lowers that share.
 	ArenaFallbacks int64
+	// TableBuilds is the number of structure-only walks that built a window
+	// table (Open); TableEvictions, the tables the budgets pushed out;
+	// StreamedSegments, the segments written from the source through a table;
+	// StreamFallbacks, the segments Open had to build in memory because the
+	// plan cannot stream (see HLSPlan.Open).
+	TableBuilds      int64
+	TableEvictions   int64
+	StreamedSegments int64
+	StreamFallbacks  int64
 	// UndeclaredZlibBlocks is the number of subtitle blocks the plan inflated
 	// although their track declares no compression: a muxer compressed the
 	// track and lost the ContentEncodings (mkvgo diagnose reports such tracks).
@@ -331,7 +340,14 @@ func (p *HLSPlan) Stats() HLSPlanStats {
 	return p.stats
 }
 
-// learnOtherRateLocked folds one window's non-video payload bytes into the lightest rate seen (otherRate); caller holds winMu.
+// learnOtherRate folds one window's non-video payload bytes into the lightest rate seen (otherRate).
+func (p *HLSPlan) learnOtherRate(n int, other int64) {
+	p.winMu.Lock()
+	defer p.winMu.Unlock()
+	p.learnOtherRateLocked(n, other)
+}
+
+// learnOtherRateLocked is learnOtherRate with winMu held.
 func (p *HLSPlan) learnOtherRateLocked(n int, other int64) {
 	if ms := p.windowMs(n); ms > 0 {
 		if rate := float64(other) / float64(ms); p.otherRate == 0 || rate < p.otherRate {

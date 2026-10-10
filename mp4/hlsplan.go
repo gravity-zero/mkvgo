@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -105,6 +106,22 @@ type HLSPlan struct {
 	// per track from its own block instead. The bytes are the same either way;
 	// only the first window after a seek pays the traversal.
 	trackPos [][]reader.BlockPos
+	// stamp identifies the source without reading it (size and mtime, else the
+	// plan's birth): what a streamed segment's ETag carries.
+	stamp string
+	// firstKeyBytes is the first video keyframe's size: the master's I-frame
+	// BANDWIDTH estimate (the master never changes once built, like every
+	// other bandwidth it carries).
+	firstKeyBytes int64
+	// tables are the window tables Open streams from (hlsstream.go), budgeted
+	// by tableCacheBytes per plan and tableTotalBudget per process, one build
+	// at a time per window (tabFlight).
+	tabMu     sync.Mutex
+	tabAcct   *tableAccount
+	tables    map[int]*windowTable
+	tabOrder  []int
+	tabBytes  int64
+	tabFlight map[int]*tableFlight
 	// gridStart holds, per segment, per grid-timed audio track, the frame index
 	// its window opens on (-1 unknown): learned by the window before it, as the
 	// full pass's running clock has it, or wound up from the window before (warmGridStart).
@@ -438,7 +455,13 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// full pass derives fts[primaryIndex(fts)].presentMs, so the same source
 	// and option yield the same chapters (byte parity full-pass <-> plan).
 	chapters := chapterMarkers(&o, c.Chapters, video.ft.presentMs)
-	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, nil)
+	var est []iframeRef // the first keyframe stands for the trick-play bitrate, an estimate like the master's others
+	if p.hasIframe && p.firstKeyBytes > 0 {
+		est = []iframeRef{{seg: 0, length: p.firstKeyBytes}}
+	}
+	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, est)
+	p.stamp = sourceStamp(p.fs, srcPath)
+	p.tabAcct = newTableAccount(p)
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
 	}
@@ -556,6 +579,9 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 					return false, err
 				}
 				pt.ft.outTrack.sampleEntry = entry
+			}
+			if pt.ft.outTrack.spec.video && p.firstKeyBytes == 0 {
+				p.firstKeyBytes = int64(len(data))
 			}
 			pt.firstPtsMs = b.Timecode
 			needFirst--
@@ -885,6 +911,14 @@ func (p *HLSPlan) noteRecovered(recovered bool) {
 	p.winMu.Unlock()
 }
 
+// sourceStamp identifies the source without reading it: its size and mtime, else the moment the plan was built.
+func sourceStamp(fs *mkv.FS, path string) string {
+	if fi, err := fs.DoStat(path); err == nil {
+		return fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
+	}
+	return fmt.Sprintf("t%x", time.Now().UnixNano())
+}
+
 // buildMatroskaIframePlaylist performs the one-time structure-only walk: for
 // every segment it collects the video track's samples (size/pts/blockPts/
 // sync, never the bytes) and feeds them to timeSegmentWindow - the very
@@ -949,6 +983,22 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 type segSample struct {
 	fragSample
 	data []byte
+	off  int64 // where the payload sits in the source (structure-only walks, which hold no data)
+}
+
+// sampleOf frames one walked block as a window sample: its decoded bytes, or when the walk skipped its payload its place in the source.
+func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
+	meta := fragSample{ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe}
+	if structure {
+		meta.size = uint32(len(pt.ft.outTrack.mkv.HeaderStripping) + int(b.Size))
+		return segSample{fragSample: meta, off: b.DataOffset}, nil
+	}
+	data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+	if err != nil {
+		return segSample{}, err
+	}
+	meta.size = uint32(len(data))
+	return segSample{fragSample: meta, data: data}, nil
 }
 
 // timeSegmentWindow derives one segment window's per-sample dtsTS/ctsTS/durTS
@@ -1102,7 +1152,12 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 // reached yet, and change its bytes), and the walk runs until EVERY track has
 // crossed the end - one track's window can hold blocks stored after another
 // track already left the window.
-func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64) ([][]segSample, []int64, windowInPlace, error) {
+//
+// structure asks for a structure-only walk: no video payload is read, each
+// sample records where its bytes sit instead (segSample.off), and no arena is
+// kept; keepAudio then still reads the other tracks' payloads (a light
+// window's audio is served from the table rather than by a second pass).
+func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64, structure, keepAudio bool) ([][]segSample, []int64, windowInPlace, error) {
 	none := windowInPlace{track: -1}
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
@@ -1120,7 +1175,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	// Every track's own opening block known and far apart: a block-ordered
 	// source, read track by track (see trackPos).
 	if starts := p.trackPosAt(n); p.scatteredWindow(n, starts) {
-		windows, nextPts, err := p.walkScatteredWindow(ctx, src, n, starts, keep, segStart, segEnd)
+		windows, nextPts, err := p.walkScatteredWindow(ctx, src, n, starts, keep, segStart, segEnd, structure, keepAudio)
 		return windows, nextPts, none, err
 	}
 
@@ -1142,11 +1197,18 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	}
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(keep...)
+	br.SetHeaderOnly(structure)
+	if keepAudio {
+		br.SetHeaderOnlyTracks(p.tracks[p.videoIndex()].ft.outTrack.mkv.ID)
+	}
 
 	// The video is most of a window's bytes: its blocks are read straight
 	// into the buffer its segment is served from (see windowInPlace), not
 	// into a buffer each and then copied there.
-	inPlace := p.newWindowInPlace(n)
+	inPlace := none
+	if !structure {
+		inPlace = p.newWindowInPlace(n)
+	}
 	if inPlace.buf != nil {
 		vid := p.tracks[inPlace.track].ft.outTrack.mkv.ID
 		br.SetBlockBuffer(func(track uint64, size int) []byte {
@@ -1218,18 +1280,14 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			p.learnTrackPos(n+1, ti, br.Pos())
 			continue
 		}
-		data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+		s, err := sampleOf(pt, b, structure && (!keepAudio || pt.ft.outTrack.spec.video))
 		if err != nil {
 			return nil, nil, none, err
 		}
 		if ti == inPlace.track {
-			inPlace.keep(data)
+			inPlace.keep(s.data)
 		}
-		windows[ti] = append(windows[ti], segSample{
-			fragSample: fragSample{size: uint32(len(data)),
-				ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
-			data: data,
-		})
+		windows[ti] = append(windows[ti], s)
 	}
 	for ti := range peeks {
 		if crossed[ti] {
@@ -1394,7 +1452,7 @@ func (w *windowInPlace) media() []byte {
 // timecode >= segStart, everything after it up to the crossing block belongs
 // to the window whatever its PTS, so the samples - and the segment bytes -
 // are identical to the linear walk's.
-func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n int, starts []reader.BlockPos, keep []uint64, segStart, segEnd int64) ([][]segSample, []int64, error) {
+func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n int, starts []reader.BlockPos, keep []uint64, segStart, segEnd int64, structure, keepAudio bool) ([][]segSample, []int64, error) {
 	windows := make([][]segSample, len(p.tracks))
 	nextPts := make([]int64, len(p.tracks))
 	for ti, pt := range p.tracks {
@@ -1405,6 +1463,8 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 		}
 		br.SetTrackDefaultDurations(p.trackDurs)
 		br.KeepTracks(keep[ti])
+		skip := structure && (!keepAudio || pt.ft.outTrack.spec.video)
+		br.SetHeaderOnly(skip)
 		var peek nextPtsPeek
 		crossed := false
 		for {
@@ -1438,15 +1498,11 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 				br.SetHeaderOnly(true) // the peek wants timecodes, never payloads
 				continue
 			}
-			data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+			s, err := sampleOf(pt, b, skip)
 			if err != nil {
 				return nil, nil, err
 			}
-			windows[ti] = append(windows[ti], segSample{
-				fragSample: fragSample{size: uint32(len(data)),
-					ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
-				data: data,
-			})
+			windows[ti] = append(windows[ti], s)
 		}
 		if crossed {
 			nextPts[ti] = peek.min

@@ -278,7 +278,8 @@ type BlockReader struct {
 	// byte length alone. A laced block still needs its lacing header decoded
 	// to size its frames, so it is read normally and the bytes dropped right
 	// after (real muxers do not lace video, the track this mode targets).
-	headerOnly bool
+	headerOnly    bool
+	headerOnlyFor map[uint64]bool
 	// trackDurNs maps track number → DefaultDuration (ns), the per-frame stride
 	// that times the frames of a laced block (they share one stored timecode).
 	// Filled by SetTrackDefaultDurations, or opportunistically from the Tracks
@@ -494,6 +495,22 @@ func (br *BlockReader) SetBlockBuffer(buf func(track uint64, size int) []byte) {
 // the kept track's block-header count, never by any payload bytes.
 func (br *BlockReader) SetHeaderOnly(on bool) {
 	br.headerOnly = on
+}
+
+// SetHeaderOnlyTracks limits header-only mode to these tracks: the others' kept blocks keep their payload. None lifts the limit.
+func (br *BlockReader) SetHeaderOnlyTracks(tracks ...uint64) {
+	br.headerOnlyFor = nil
+	if len(tracks) > 0 {
+		br.headerOnlyFor = make(map[uint64]bool, len(tracks))
+		for _, id := range tracks {
+			br.headerOnlyFor[id] = true
+		}
+	}
+}
+
+// skipsPayload reports whether header-only mode applies to this track's blocks.
+func (br *BlockReader) skipsPayload(track uint64) bool {
+	return br.headerOnly && (br.headerOnlyFor == nil || br.headerOnlyFor[track])
 }
 
 // maxLacedFrameDurNs bounds a plausible per-frame duration (10 s): a larger
@@ -1067,13 +1084,14 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		if err != nil {
 			return mkv.Block{}, err
 		}
-		if br.headerOnly {
+		dataOff := br.r.tell()
+		if br.skipsPayload(uint64(trackNum)) {
 			if err := br.r.discard(dataSize); err != nil {
 				return mkv.Block{}, err
 			}
 			return mkv.Block{
 				TrackNumber: uint64(trackNum), Timecode: tc, BlockTimecode: tc,
-				Keyframe: keyframe, Size: dataSize,
+				Keyframe: keyframe, Size: dataSize, DataOffset: dataOff,
 			}, nil
 		}
 		var data []byte
@@ -1088,10 +1106,11 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		}
 		return mkv.Block{
 			TrackNumber: uint64(trackNum), Timecode: tc, BlockTimecode: tc,
-			Keyframe: keyframe, Data: data, Size: dataSize,
+			Keyframe: keyframe, Data: data, Size: dataSize, DataOffset: dataOff,
 		}, nil
 	}
 
+	laceOff := br.r.tell()
 	raw := make([]byte, dataSize)
 	if _, err := io.ReadFull(br.r, raw); err != nil {
 		return mkv.Block{}, err
@@ -1111,6 +1130,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		return mkv.Block{}, fmt.Errorf("laced block header (%d bytes) exceeds data (%d bytes)", headerBytes, len(raw))
 	}
 	raw = raw[headerBytes:]
+	framesOff := laceOff + 1 + int64(headerBytes)
 
 	tc, err := safeTimecodeMs(br.clusterTS+int64(relTC), br.timecodeScale)
 	if err != nil {
@@ -1136,8 +1156,9 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		blocks[i] = mkv.Block{
 			TrackNumber: uint64(trackNum), Timecode: tcI, BlockTimecode: tc,
 			Keyframe: keyframe, Size: int64(frameSizes[i]), Laced: frameCount > 1,
+			DataOffset: framesOff + int64(offset),
 		}
-		if !br.headerOnly {
+		if !br.skipsPayload(uint64(trackNum)) {
 			// A laced block's frames still needed the payload read to decode
 			// their sizes (the lacing header sits ahead of them): header-only
 			// mode still transiently held it above, but drops the bytes here
