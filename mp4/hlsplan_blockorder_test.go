@@ -20,6 +20,11 @@ import (
 // follow buildInterleavedSource's measured figures, so every payload sits
 // under the reader's seek threshold.
 func buildBlockOrderedSource(tb testing.TB, seconds, blockSec int) string {
+	return buildBlockOrderedSourceOpenGOP(tb, seconds, blockSec, false)
+}
+
+// buildBlockOrderedSourceOpenGOP is buildBlockOrderedSource with, when openGOP, two leading B-frames after every keyframe but the first.
+func buildBlockOrderedSourceOpenGOP(tb testing.TB, seconds, blockSec int, openGOP bool) string {
 	tb.Helper()
 	const (
 		fps        = 25
@@ -65,12 +70,23 @@ func buildBlockOrderedSource(tb testing.TB, seconds, blockSec int) string {
 		for cs := bs; cs < be; cs += clusterMs { // the block's video clusters ...
 			clusterPos := m.RelPos()
 			var blks []mkv.Block
+			var frames []int64
 			for fr := cs * fps / 1000; fr*1000/fps < cs+clusterMs; fr++ {
-				ms := fr * 1000 / fps
-				if ms < cs {
-					continue
+				if fr*1000/fps >= cs {
+					frames = append(frames, fr)
 				}
+			}
+			if openGOP && cs > 0 {
+				for i := 0; i+2 < len(frames); i += 3 { // anchor first, then its two B-frames
+					frames[i], frames[i+2] = frames[i+2], frames[i]
+				}
+			}
+			for _, fr := range frames {
+				ms := fr * 1000 / fps
 				key := fr%(gopSec*fps) == 0
+				if openGOP && cs > 0 {
+					key = fr == cs*fps/1000+2
+				}
 				data := sample(deltaBytes, byte(fr))
 				if key {
 					data = sample(keyBytes, byte(fr))

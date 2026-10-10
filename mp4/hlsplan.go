@@ -50,6 +50,7 @@ type HLSPlan struct {
 	tracks   []*planTrack
 	bounds   []int64 // segment start times (ms); bounds[0] == 0
 	offsets  []int64 // absolute file offset of the cluster holding bounds[k]
+	clusters []int64 // absolute offsets of every cued cluster, ascending: a cold walk opens one cluster ahead of its boundary
 	durs     []float64
 	inits    [][]byte // one init segment per track (video first, per fts order)
 	medias   [][]byte // one media playlist per track
@@ -104,6 +105,10 @@ type HLSPlan struct {
 	// per track from its own block instead. The bytes are the same either way;
 	// only the first window after a seek pays the traversal.
 	trackPos [][]reader.BlockPos
+	// gridStart holds, per segment, per grid-timed audio track, the frame index
+	// its window opens on (-1 unknown): learned by the window before it, as the
+	// full pass's running clock has it, or wound up from the window before (warmGridStart).
+	gridStart [][]int64
 
 	// windows caches, per segment index, the media of EVERY rendition - built
 	// by the one walk that had to read all of it. That walk is the unit of I/O:
@@ -293,6 +298,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
 	last := int64(0)
 	for _, cue := range cues {
+		p.noteCluster(c.SegmentStart + cue.ClusterPos)
 		if cue.TimeMs >= last+segMs {
 			p.bounds = append(p.bounds, cue.TimeMs)
 			p.offsets = append(p.offsets, c.SegmentStart+cue.ClusterPos)
@@ -527,7 +533,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 			needGrid++
 		}
 	}
-	err := p.walkBlocks(ctx, p.offsets[0], func(b mkv.Block, pt *planTrack) (bool, error) {
+	err := p.walkBlocks(ctx, p.offsets[0], -1, false, func(b mkv.Block, pt *planTrack) (bool, error) {
 		if pt.firstPtsMs < 0 {
 			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
 			if pt.ft.outTrack.sampleEntry == nil {
@@ -589,20 +595,27 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 // the frame count of the final Block (frames sharing the largest block
 // timecode). lastFrames lets the grid duration correct a collapsed no-
 // DefaultDuration lace, whose frames all report the block timecode as their PTS.
+//
+// A track absent from that tail ended earlier: it is looked for one segment
+// back at a time, header-only, so its final pair is its own, not invented.
 func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts, lastFrames []int64, err error) {
 	lastPts = make([]int64, len(p.tracks))
 	prevPts = make([]int64, len(p.tracks))
 	lastFrames = make([]int64, len(p.tracks))
 	lastBlockTC := make([]int64, len(p.tracks))
+	missing := make([]bool, len(p.tracks))
 	for i := range lastPts {
-		lastPts[i], prevPts[i], lastBlockTC[i] = -1, -1, -1
+		lastPts[i], prevPts[i], lastBlockTC[i], missing[i] = -1, -1, -1, true
 	}
 	idx := map[*planTrack]int{}
 	for i, pt := range p.tracks {
 		idx[pt] = i
 	}
-	err = p.walkBlocks(ctx, off, func(b mkv.Block, pt *planTrack) (bool, error) {
+	fold := func(b mkv.Block, pt *planTrack) (bool, error) {
 		i := idx[pt]
+		if !missing[i] {
+			return true, nil
+		}
 		switch {
 		case b.Timecode > lastPts[i]:
 			prevPts[i], lastPts[i] = lastPts[i], b.Timecode
@@ -616,13 +629,33 @@ func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts, la
 			lastFrames[i]++
 		}
 		return true, nil
-	})
-	return lastPts, prevPts, lastFrames, err
+	}
+	if err = p.walkBlocks(ctx, off, -1, true, fold); err != nil {
+		return nil, nil, nil, err
+	}
+	starts := append([]int64(nil), p.offsets...)
+	if n := len(starts); n == 0 || starts[n-1] < off {
+		starts = append(starts, off)
+	}
+	for k := len(starts) - 2; k >= 0; k-- {
+		absent := false
+		for i := range missing {
+			missing[i] = lastPts[i] < 0
+			absent = absent || missing[i]
+		}
+		if !absent {
+			break
+		}
+		if err = p.walkBlocks(ctx, starts[k], starts[k+1], true, fold); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return lastPts, prevPts, lastFrames, nil
 }
 
-// walkBlocks runs fn over the media-track blocks from the cluster at off until
-// fn returns false or the stream ends. Blocks of non-plan tracks are skipped.
-func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, *planTrack) (bool, error)) error {
+// walkBlocks runs fn over the media-track blocks from the cluster at off until fn returns false,
+// a block at or past end (when end > 0) or the stream ends; headerOnly hands fn timecodes and sizes, never payloads.
+func (p *HLSPlan) walkBlocks(ctx context.Context, off, end int64, headerOnly bool, fn func(mkv.Block, *planTrack) (bool, error)) error {
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
 		return err
@@ -633,6 +666,7 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, 
 		return err
 	}
 	br.SetTrackDefaultDurations(p.trackDurs)
+	br.SetHeaderOnly(headerOnly)
 	routing := make(map[uint64]*planTrack, len(p.tracks))
 	for _, pt := range p.tracks {
 		routing[pt.ft.outTrack.mkv.ID] = pt
@@ -647,6 +681,9 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off int64, fn func(mkv.Block, 
 		}
 		if err != nil {
 			return errf("read block: %w", err)
+		}
+		if end > 0 && br.Pos().Off >= end {
+			return nil
 		}
 		pt, ok := routing[b.TrackNumber]
 		if !ok {
@@ -859,12 +896,12 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 		nextPts := int64(-1)
 		for next := seg + 1; next < len(windows); next++ {
 			if len(windows[next]) > 0 {
-				nextPts = windows[next][0].ptsMs
+				nextPts = windowNextPts(windows[next])
 				break
 			}
 		}
 		ts := trackSegment{trackID: pt.ft.outTrack.mp4ID}
-		ts.baseDecodeTS, ts.hasCTS = timeSegmentWindow(window, pt, nextPts)
+		ts.baseDecodeTS, ts.hasCTS, _ = timeSegmentWindow(window, pt, nextPts, -1)
 		if len(window) > 0 {
 			ts.samples = window
 			for _, s := range window {
@@ -895,15 +932,21 @@ type segSample struct {
 // sync - never the sample bytes, applying fillFragTiming's rule window-local:
 // grid-timed audio re-derives each frame's index from its block's stored
 // timecode, otherwise samples are DTS-sorted and CTS is the PTS/DTS gap.
-// nextPts is the first sample of the window that follows (-1 for the
-// presentation's last window, which closes on pt.lastDurTS instead). It
+// nextPts is the decode time the next window opens on - its lowest PTS, as
+// the walks' boundary peek finds it (-1 for the presentation's last window,
+// which closes on pt.lastDurTS instead). It
 // returns the window's base decode time and whether any sample carries a
 // non-zero CTS. Shared by segmentTrack (the window's bytes ride along in a
 // parallel slice) and the structure-only I-frame builder (bytes never read
 // at all), so both derive byte-identical segment heads from the same math.
-func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseDecodeTS int64, hasCTS bool) {
+//
+// startK, when not negative, is the frame index a grid-timed window opens on
+// (gridStart); nextK returns the index the window after it opens on, -1 when
+// there is none or the track is not grid-timed.
+func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64) (baseDecodeTS int64, hasCTS bool, nextK int64) {
+	nextK = -1
 	if len(window) == 0 {
-		return pt.ft.durMediaTS, false
+		return pt.ft.durMediaTS, false, nextK
 	}
 	// gridTS from the DefaultDuration, else recovered from the window's own
 	// collapsed laces (the stride is uniform, so every window measures the same
@@ -913,41 +956,26 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseD
 		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
 	}
 	if gridTS > 0 {
-		// Grid-timed audio: each frame's index re-derived from its block's
-		// stored timecode (then +1 within a lace) - fillFragTiming's grid
-		// branch applied to the window, window-local by construction.
-		scale := tsScale(pt.ft.timescale)
-		anchor := scale(pt.firstPtsMs)
-		k := int64(0)
+		// Grid-timed audio: fillFragTiming's running clock applied to the
+		// window, opening on startK when the window before it settled it.
+		clock := newGridClock(pt, gridTS)
+		if startK >= 0 {
+			clock.pin(startK)
+		}
 		for x := range window {
-			switch {
-			case x == 0:
-				k = gridIndex(scale(window[0].blockPtsMs)-anchor, gridTS)
-			case window[x].blockPtsMs != window[x-1].blockPtsMs:
-				nk := gridIndex(scale(window[x].blockPtsMs)-anchor, gridTS)
-				if nk <= k {
-					nk = k + 1
-				}
-				k = nk
-			default:
-				k++
-			}
-			window[x].dtsTS = k * gridTS
+			window[x].dtsTS = clock.advance(window[x].blockPtsMs) * gridTS
 			window[x].ctsTS = 0
 			if x > 0 {
 				window[x-1].durTS = window[x].dtsTS - window[x-1].dtsTS
 			}
 		}
 		if nextPts >= 0 {
-			nk := gridIndex(scale(nextPts)-anchor, gridTS)
-			if nk <= k {
-				nk = k + 1
-			}
-			window[len(window)-1].durTS = nk*gridTS - k*gridTS
+			nextK = clock.peek(nextPts)
+			window[len(window)-1].durTS = nextK*gridTS - clock.k*gridTS
 		} else { // the track's final sample (fillFragTiming's grid rule)
 			window[len(window)-1].durTS = gridTS
 		}
-		return window[0].dtsTS, false
+		return window[0].dtsTS, false, nextK
 	}
 	scale := tsScale(pt.ft.timescale)
 	base := scale(pt.firstPtsMs)
@@ -972,7 +1000,48 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64) (baseD
 	} else { // the track's final sample (fillFragTiming's rule)
 		window[len(window)-1].durTS = pt.lastDurTS
 	}
-	return dts[0] - base, windowHasCTS(window)
+	return dts[0] - base, windowHasCTS(window), nextK
+}
+
+// gridClock is fillFragTiming's running frame index for grid-timed audio: re-derived from each block's timecode, never stepping back, one slot per lace frame.
+type gridClock struct {
+	anchor, gridTS int64
+	scale          func(int64) int64
+	k, prevBlock   int64
+	started        bool
+	pinned         bool
+}
+
+func newGridClock(pt *planTrack, gridTS int64) gridClock {
+	scale := tsScale(pt.ft.timescale)
+	return gridClock{anchor: scale(pt.firstPtsMs), gridTS: gridTS, scale: scale}
+}
+
+// pin makes the next frame take index k exactly (the value the window before learned).
+func (c *gridClock) pin(k int64) { c.k, c.pinned = k, true }
+
+// peek returns the index the next frame of block blockPts would take.
+func (c *gridClock) peek(blockPts int64) int64 {
+	switch {
+	case c.pinned:
+		return c.k
+	case !c.started:
+		return gridIndex(c.scale(blockPts)-c.anchor, c.gridTS)
+	case blockPts != c.prevBlock:
+		if nk := gridIndex(c.scale(blockPts)-c.anchor, c.gridTS); nk > c.k {
+			return nk
+		}
+		return c.k + 1
+	default:
+		return c.k + 1
+	}
+}
+
+// advance assigns the next frame of block blockPts its index.
+func (c *gridClock) advance(blockPts int64) int64 {
+	c.k = c.peek(blockPts)
+	c.prevBlock, c.started, c.pinned = blockPts, true, false
+	return c.k
 }
 
 // Segment builds the n-th (0-based) VIDEO media segment (segNNNNN.m4s)  -
@@ -983,9 +1052,9 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 }
 
 // walkWindow reads the n-th window of EVERY rendition in ONE pass and returns
-// each track's samples plus the PTS of its first sample past the window (-1
-// when the track ends inside it) - the boundary lookahead the fragment timing
-// needs.
+// each track's samples plus the lowest PTS past the window (-1 when the track
+// ends inside it) - the boundary lookahead the fragment timing needs, found
+// by nextPtsPeek.
 //
 // One pass, not one per rendition, because the source cannot give a rendition
 // its bytes without handing over the others': the tracks are interleaved block
@@ -1042,7 +1111,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 	if from.Valid() {
 		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
 	} else {
-		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.offsets[n])
+		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.coldStart(n))
 	}
 	if err != nil {
 		return nil, nil, none, err
@@ -1066,6 +1135,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 
 	windows := make([][]segSample, len(p.tracks))
 	nextPts := make([]int64, len(p.tracks))
+	peeks := make([]nextPtsPeek, len(p.tracks))
 	started := make([]bool, len(p.tracks))
 	crossed := make([]bool, len(p.tracks))
 	opened := make([]bool, len(p.tracks)) // the track's own opening block is recorded
@@ -1074,6 +1144,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 		started[i] = n == 0
 	}
 	remaining := len(p.tracks)
+	peeking := 0
 	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, none, err
@@ -1086,7 +1157,14 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			return nil, nil, none, errf("read block: %w", err)
 		}
 		ti, ok := index[b.TrackNumber]
-		if !ok || crossed[ti] {
+		if !ok {
+			continue
+		}
+		if crossed[ti] {
+			if peeks[ti].observe(b.Timecode, b.Keyframe) {
+				remaining--
+				peeking--
+			}
 			continue
 		}
 		if !started[ti] {
@@ -1100,15 +1178,22 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			opened[ti] = true
 			p.learnTrackPos(n, ti, br.Pos()) // this track's own first block of the window
 		}
+		pt := p.tracks[ti]
 		if b.BlockTimecode >= segEnd {
-			nextPts[ti] = b.Timecode
 			crossed[ti] = true
-			remaining--
+			peeks[ti] = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
+			if peeks[ti].pending() {
+				peeking++
+			} else {
+				remaining--
+			}
+			if remaining == peeking {
+				br.SetHeaderOnly(true) // only peeks remain: timecodes, never payloads
+			}
 			p.learnSegPos(n+1, br.Pos()) // first past segEnd: where the next one opens
 			p.learnTrackPos(n+1, ti, br.Pos())
 			continue
 		}
-		pt := p.tracks[ti]
 		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
 		if ti == inPlace.track {
 			inPlace.keep(data)
@@ -1119,7 +1204,59 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			data: data,
 		})
 	}
+	for ti := range peeks {
+		if crossed[ti] {
+			nextPts[ti] = peeks[ti].min
+		}
+	}
 	return windows, nextPts, inPlace, nil
+}
+
+// reorderLookahead bounds the blocks a peek reads past a boundary (no codec reorders deeper).
+const reorderLookahead = 16
+
+// nextPtsPeek finds the next window's lowest PTS: the crossing block's or a leading picture's after it.
+type nextPtsPeek struct {
+	cross, min int64
+	left       int
+}
+
+// startPeek opens a peek on the crossing block; only video reorders, so any other track's is over at once.
+func startPeek(crossPts int64, video bool) nextPtsPeek {
+	p := nextPtsPeek{cross: crossPts, min: crossPts}
+	if video {
+		p.left = reorderLookahead
+	}
+	return p
+}
+
+// observe folds one block in and reports whether it ended the peek: the first trailing picture, a keyframe or the bound.
+func (p *nextPtsPeek) observe(pts int64, keyframe bool) bool {
+	if p.left <= 0 {
+		return false
+	}
+	if pts < p.min {
+		p.min = pts
+	}
+	if pts > p.cross || keyframe {
+		p.left = 0
+	} else {
+		p.left--
+	}
+	return p.left == 0
+}
+
+func (p *nextPtsPeek) pending() bool { return p.left > 0 }
+
+// windowNextPts runs the boundary peek over a window held whole, so the I-frame builder derives what the walks do.
+func windowNextPts(window []fragSample) int64 {
+	peek := startPeek(window[0].ptsMs, true)
+	for _, s := range window[1:] {
+		if peek.observe(s.ptsMs, s.sync) {
+			break
+		}
+	}
+	return peek.min
 }
 
 // windowHeadroom is the room kept ahead of a window's video bytes for the
@@ -1217,6 +1354,8 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 		}
 		br.SetTrackDefaultDurations(p.trackDurs)
 		br.KeepTracks(keep[ti])
+		var peek nextPtsPeek
+		crossed := false
 		for {
 			if err := ctx.Err(); err != nil {
 				return nil, nil, err
@@ -1231,11 +1370,22 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 			if b.TrackNumber != keep[ti] {
 				continue
 			}
+			if crossed {
+				if peek.observe(b.Timecode, b.Keyframe) {
+					break
+				}
+				continue
+			}
 			if b.BlockTimecode >= segEnd {
-				nextPts[ti] = b.Timecode
+				crossed = true
+				peek = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
 				p.learnSegPos(n+1, br.Pos())
 				p.learnTrackPos(n+1, ti, br.Pos())
-				break
+				if !peek.pending() {
+					break
+				}
+				br.SetHeaderOnly(true) // the peek wants timecodes, never payloads
+				continue
 			}
 			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
 			windows[ti] = append(windows[ti], segSample{
@@ -1243,6 +1393,9 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 					ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
 				data: data,
 			})
+		}
+		if crossed {
+			nextPts[ti] = peek.min
 		}
 	}
 	return windows, nextPts, nil
@@ -1328,6 +1481,71 @@ func (p *HLSPlan) learnTrackPos(n, ti int, at reader.BlockPos) {
 		return
 	}
 	p.trackPos[n][ti] = at
+}
+
+// gridStartAt returns the frame index track ti's window n opens on, -1 when no walk settled it yet.
+func (p *HLSPlan) gridStartAt(n, ti int) int64 {
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	if n < 0 || n >= len(p.gridStart) || p.gridStart[n] == nil {
+		return -1
+	}
+	return p.gridStart[n][ti]
+}
+
+// learnGridStart records where track ti's window n opens on the grid; the first value kept, so a window's bytes never change between requests.
+func (p *HLSPlan) learnGridStart(n, ti int, k int64) {
+	if k < 0 || n < 0 || n >= p.segCount {
+		return
+	}
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	for len(p.gridStart) <= n {
+		p.gridStart = append(p.gridStart, nil)
+	}
+	if p.gridStart[n] == nil {
+		p.gridStart[n] = make([]int64, len(p.tracks))
+		for i := range p.gridStart[n] {
+			p.gridStart[n][i] = -1
+		}
+	}
+	if p.gridStart[n][ti] < 0 {
+		p.gridStart[n][ti] = k
+	}
+}
+
+// gridJitter reports whether a window's blocks leave the grid: a timecode stepping back or jumping ahead of the next slot.
+func gridJitter(window []segSample, pt *planTrack) bool {
+	clock := newGridClock(pt, pt.gridTS)
+	for x := range window {
+		if x > 0 && window[x].blockPtsMs != window[x-1].blockPtsMs {
+			if raw := gridIndex(clock.scale(window[x].blockPtsMs)-clock.anchor, clock.gridTS); raw != clock.k+1 {
+				return true
+			}
+		}
+		clock.advance(window[x].blockPtsMs)
+	}
+	return false
+}
+
+// warmGridStart winds track ti's grid clock over the window before n, header-only, to the index window n opens on (-1 when it cannot).
+func (p *HLSPlan) warmGridStart(ctx context.Context, n, ti int, first int64) (int64, error) {
+	pt := p.tracks[ti]
+	end := p.trackPosAt(n)[ti]
+	if n <= 0 || !end.Valid() {
+		return -1, nil
+	}
+	clock := newGridClock(pt, pt.gridTS)
+	err := p.walkBlocks(ctx, p.offsets[n-1], end.Off, true, func(b mkv.Block, bpt *planTrack) (bool, error) {
+		if bpt == pt {
+			clock.advance(b.BlockTimecode)
+		}
+		return true, nil
+	})
+	if err != nil || !clock.started {
+		return -1, err
+	}
+	return clock.peek(first), nil
 }
 
 // boundSegmentSpans makes the cue-offset estimate of each segment's bytes
@@ -1511,6 +1729,29 @@ func spanHoldsForeignBlock(src io.ReadSeeker, from, end int64) bool {
 	return false
 }
 
+// noteCluster records a cued cluster's offset, kept ascending and unique.
+func (p *HLSPlan) noteCluster(off int64) {
+	if n := len(p.clusters); n == 0 || p.clusters[n-1] < off {
+		p.clusters = append(p.clusters, off)
+	}
+}
+
+// coldStart is where a walk with nothing learned opens the n-th window: the
+// cluster before its boundary's, since a muxer writes the audio of an instant
+// a little ahead of its video and the window's first audio blocks can sit
+// there (the full pass, in track order, keeps them; so must the plan).
+func (p *HLSPlan) coldStart(n int) int64 {
+	off := p.offsets[n]
+	if n == 0 {
+		return off
+	}
+	i := sort.Search(len(p.clusters), func(k int) bool { return p.clusters[k] >= off })
+	if i > 0 && i < len(p.clusters) && p.clusters[i] == off {
+		return p.clusters[i-1]
+	}
+	return off
+}
+
 // segPosAt returns the known opening block of the n-th window, if a walk has
 // revealed it (zero BlockPos otherwise: walk from the segment's cluster).
 func (p *HLSPlan) segPosAt(n int) reader.BlockPos {
@@ -1552,30 +1793,9 @@ func (p *HLSPlan) learnSegPos(n int, at reader.BlockPos) {
 // arena, when not nil, is the buffer the walk read this rendition's blocks
 // into, back to back behind windowHeadroom bytes of room (windowInPlace): the
 // head is then written in front of them and that buffer is the segment.
-func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64, arena []byte) ([]byte, error) {
+func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts, startK int64, arena []byte) ([]byte, error) {
 	pt := p.tracks[ti]
-
-	// Fragment timing - fillFragTiming's DTS derivation applied to the window,
-	// anchored on the track's global first PTS, with the boundary lookahead
-	// supplying the window's final sample duration. An empty window (the track
-	// ended before the presentation) becomes an empty trun with the decode
-	// time parked at the stream end, keeping the rendition's segments aligned.
-	// timeSegmentWindow derives this from metadata alone (size/pts/blockPts/
-	// sync), so it is shared verbatim with the structure-only I-frame builder,
-	// which never reads the window's sample bytes at all.
-	seg := trackSegment{trackID: pt.ft.outTrack.mp4ID}
-	metas := make([]fragSample, len(window))
-	for x := range window {
-		metas[x] = window[x].fragSample
-	}
-	seg.baseDecodeTS, seg.hasCTS = timeSegmentWindow(metas, pt, nextPts)
-	if len(window) > 0 {
-		for x := range window {
-			window[x].fragSample = metas[x]
-			seg.dataLen += int64(window[x].size)
-		}
-		seg.samples = metas
-	}
+	seg := p.timeWindow(ti, n, window, nextPts, startK)
 
 	var cipherData []byte
 	if p.opts.CENC != nil {
@@ -1616,6 +1836,50 @@ func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
 	}
 	return out, nil
+}
+
+// timeWindow times one rendition's window as a media segment's track fragment:
+// fillFragTiming's DTS derivation applied to the window, anchored on the
+// track's global first PTS, the boundary lookahead supplying the final
+// sample's duration. An empty window (the track ended before the presentation)
+// becomes an empty trun with the decode time parked at the stream end.
+// Metadata only, so the buffered and the streamed paths share it verbatim.
+func (p *HLSPlan) timeWindow(ti, n int, window []segSample, nextPts, startK int64) trackSegment {
+	pt := p.tracks[ti]
+	seg := trackSegment{trackID: pt.ft.outTrack.mp4ID}
+	metas := make([]fragSample, len(window))
+	for x := range window {
+		metas[x] = window[x].fragSample
+	}
+	var nextK int64
+	seg.baseDecodeTS, seg.hasCTS, nextK = timeSegmentWindow(metas, pt, nextPts, startK)
+	if nextK >= 0 {
+		p.learnGridStart(n+1, ti, nextK) // where the next window's clock opens, as the full pass has it
+	}
+	if len(window) > 0 {
+		for x := range window {
+			window[x].fragSample = metas[x]
+			seg.dataLen += int64(window[x].size)
+		}
+		seg.samples = metas
+	}
+	return seg
+}
+
+// gridStartFor is the grid clock track ti's window n opens on: the value the
+// window before learned, else - when the window's timecodes leave the grid, so
+// a transient may straddle its start - wound up over the window before; kept,
+// so a repeat serves the same bytes. -1 when the track is not grid-timed.
+func (p *HLSPlan) gridStartFor(ctx context.Context, n, ti int, window []segSample) (int64, error) {
+	k := p.gridStartAt(n, ti)
+	if pt := p.tracks[ti]; k < 0 && pt.gridTS > 0 && len(window) > 0 && gridJitter(window, pt) {
+		var err error
+		if k, err = p.warmGridStart(ctx, n, ti, window[0].blockPtsMs); err != nil {
+			return -1, err
+		}
+		p.learnGridStart(n, ti, k)
+	}
+	return k, nil
 }
 
 // segmentTrack builds the n-th segment of the ti-th track, reading only that

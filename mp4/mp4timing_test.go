@@ -46,7 +46,7 @@ func TestVideoIsNeverGridTimed(t *testing.T) {
 
 	window := fieldPairSamples()
 	pt := &planTrack{ft: &fragTrack{outTrack: video, timescale: movieTimescale}, gridTS: noGridTS}
-	timeSegmentWindow(window, pt, 233)
+	timeSegmentWindow(window, pt, 233, -1)
 	var windowTotal int64
 	for i := range window {
 		windowTotal += window[i].durTS

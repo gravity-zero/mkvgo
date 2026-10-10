@@ -532,6 +532,7 @@ func (p *GrowingHLSPlan) resolveHeadLocked() {
 // re-testing cues[0] against last=0) that reaches segMs past the last accepted
 // boundary opens a new one.
 func (p *GrowingHLSPlan) recordKeyframeLocked(ms, clusterOffset int64) {
+	p.full.noteCluster(clusterOffset)
 	if !p.haveFirstKF {
 		p.full.bounds = []int64{0}
 		p.full.offsets = []int64{clusterOffset}

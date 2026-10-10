@@ -264,21 +264,6 @@ func TestPlanHLSIframeMatroska_ReorderedPTS(t *testing.T) {
 	for g := 0; g < gops; g++ {
 		base := int64(g) * gopMs
 		gblocks = append(gblocks, genBlock{track: 1, pts: base, key: true, data: iframeTestFrame(g*5, true)})
-		if g == gops-1 {
-			// The last GOP is left in decode == presentation order: the
-			// on-demand plan's final-segment duration is derived from the
-			// two highest PTS values it sees (peekTail) while the full pass
-			// derives it from the decode-order-last sample's own duration -
-			// they only agree when that sample is also the highest-PTS one,
-			// a pre-existing, general trait of open-GOP reordering unrelated
-			// to trick-play. Keeping this one GOP unreordered isolates what
-			// this test is actually about: picking the right leading sample.
-			gblocks = append(gblocks, genBlock{track: 1, pts: base + 240, key: false, data: iframeTestFrame(g*5+1, false)})
-			gblocks = append(gblocks, genBlock{track: 1, pts: base + 480, key: false, data: iframeTestFrame(g*5+2, false)})
-			gblocks = append(gblocks, genBlock{track: 1, pts: base + 720, key: false, data: iframeTestFrame(g*5+3, false)})
-			gblocks = append(gblocks, genBlock{track: 1, pts: base + 960, key: false, data: iframeTestFrame(g*5+4, false)})
-			continue
-		}
 		gblocks = append(gblocks, genBlock{track: 1, pts: base + 960, key: false, data: iframeTestFrame(g*5+1, false)})
 		gblocks = append(gblocks, genBlock{track: 1, pts: base + 240, key: false, data: iframeTestFrame(g*5+2, false)})
 		gblocks = append(gblocks, genBlock{track: 1, pts: base + 480, key: false, data: iframeTestFrame(g*5+3, false)})

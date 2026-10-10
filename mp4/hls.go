@@ -853,7 +853,7 @@ func windowHasCTS(samples []fragSample) bool {
 }
 
 // segEndOrLast returns the presentation end of segment k: the next boundary, or
-// the primary track's last PTS+duration for the final segment.
+// the primary track's highest PTS plus its final sample's duration for the final segment.
 func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 	if k+1 < len(bounds) {
 		return bounds[k+1]
@@ -863,11 +863,17 @@ func segEndOrLast(bounds []int64, k int, fts []*fragTrack) int64 {
 		return bounds[len(bounds)-1]
 	}
 	last := v.samples[len(v.samples)-1]
+	endPts := last.ptsMs
+	for i := range v.samples {
+		if v.samples[i].ptsMs > endPts {
+			endPts = v.samples[i].ptsMs
+		}
+	}
 	durMs := last.durTS
 	if v.timescale != movieTimescale {
 		durMs = last.durTS * int64(movieTimescale) / int64(v.timescale)
 	}
-	return last.ptsMs + durMs
+	return endPts + durMs
 }
 
 // writeMediaPlaylist writes a VOD HLS media playlist. mapURI, when non-empty,
