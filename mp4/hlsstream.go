@@ -326,7 +326,7 @@ func (h *ResourceHandle) WriteTo(ctx context.Context, w io.Writer) (int64, error
 // output short, which the caller must turn into a broken connection, never a
 // clean end.
 func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int64) (int64, error) {
-	if off < 0 || n < 0 || off+n > h.size {
+	if off < 0 || n < 0 || off > h.size || n > h.size-off {
 		return 0, errors.New("mp4: range outside the resource")
 	}
 	if h.data != nil {
