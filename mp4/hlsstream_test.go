@@ -155,8 +155,12 @@ func TestSpanCopier(t *testing.T) {
 			break
 		}
 		var out bytes.Buffer
-		if m, err := c.copy(&out, off, n); err != nil || m != n {
-			t.Fatalf("copy(%d,%d): m=%d err=%v", off, n, m, err)
+		before := c.written
+		if err := c.copy(&out, off, n); err != nil {
+			t.Fatalf("copy(%d,%d): %v", off, n, err)
+		}
+		if err := c.flush(&out); err != nil || c.written-before != n {
+			t.Fatalf("copy(%d,%d): written=%d err=%v", off, n, c.written-before, err)
 		}
 		if !bytes.Equal(out.Bytes(), src[off:off+n]) {
 			t.Fatalf("copy(%d,%d) differs", off, n)
@@ -164,7 +168,7 @@ func TestSpanCopier(t *testing.T) {
 		pos = off + n
 	}
 	var out bytes.Buffer
-	if _, err := c.copy(&out, int64(len(src))-10, 20); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err := c.copy(&out, int64(len(src))-10, 20); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Errorf("past the end: err=%v", err)
 	}
 }

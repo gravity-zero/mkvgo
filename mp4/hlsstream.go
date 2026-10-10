@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -58,6 +59,14 @@ var audioExactReads = false
 const streamBufBytes = 256 << 10
 
 var streamBufs = sync.Pool{New: func() any { b := make([]byte, streamBufBytes); return &b }}
+
+// sendfileMin is the span length from which the copier hands the source file itself to a writer that takes one (sendfile on a socket); shorter spans go through the buffer.
+const sendfileMin = 16 << 10
+
+// stageBytes is how much the copier gathers before one write.
+const stageBytes = 64 << 10
+
+var stageBufs = sync.Pool{New: func() any { b := make([]byte, 0, stageBytes+64<<10); return &b }}
 
 // windowTable is one window's structure: every rendition timed, its segment
 // head framed, and where each sample's bytes sit in the source - enough to
@@ -329,14 +338,11 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 
 // writeSpans writes [off, off+n) of track ti's segment in table t: the head
 // first, then each sample as its stripped header (if any) and its bytes from
-// the source, consecutive samples read through one buffer.
+// the source, through one copier that gathers the small spans and hands the
+// large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, ti int, off, n int64) (int64, error) {
-	var written int64
-	emit := func(b []byte) error {
-		m, err := w.Write(b)
-		written += int64(m)
-		return err
-	}
+	c := &spanCopier{exact: audioExactReads && !p.tracks[ti].ft.outTrack.spec.video}
+	defer c.release()
 	// cut writes the part of a piece spanning [pos, pos+size) that falls in the range, through fn.
 	cut := func(pos, size int64, fn func(from, to int64) error) error {
 		from, to := max(off, pos), min(off+n, pos+size)
@@ -346,80 +352,109 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 		return fn(from-pos, to-pos)
 	}
 	head := t.heads[ti]
-	if err := cut(0, int64(len(head)), func(a, b int64) error { return emit(head[a:b]) }); err != nil {
-		return written, err
+	if err := cut(0, int64(len(head)), func(a, b int64) error { return c.emit(w, head[a:b]) }); err != nil {
+		return c.written, err
 	}
 	pos := int64(len(head))
 	if pos >= off+n {
-		return written, nil
+		return c.written, c.flush(w)
 	}
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
-		return written, err
+		return c.written, err
 	}
 	defer src.Close()
 	bufp := streamBufs.Get().(*[]byte)
 	defer streamBufs.Put(bufp)
-	c := spanCopier{src: src, buf: *bufp, exact: audioExactReads && !p.tracks[ti].ft.outTrack.spec.video}
+	c.src, c.buf = src, *bufp
+	if f, ok := src.(*os.File); ok {
+		c.file = f
+	}
 	prefix := p.tracks[ti].ft.outTrack.mkv.HeaderStripping
 	for x, s := range t.segs[ti].samples {
 		if pos >= off+n {
 			break
 		}
 		if err := ctx.Err(); err != nil {
-			return written, err
+			return c.written, err
 		}
-		if err := cut(pos, int64(len(prefix)), func(a, b int64) error { return emit(prefix[a:b]) }); err != nil {
-			return written, err
+		if err := cut(pos, int64(len(prefix)), func(a, b int64) error { return c.emit(w, prefix[a:b]) }); err != nil {
+			return c.written, err
 		}
 		pos += int64(len(prefix))
 		raw := int64(s.size) - int64(len(prefix))
-		err := cut(pos, raw, func(a, b int64) error {
-			m, err := c.copy(w, t.offs[ti][x]+a, b-a)
-			written += m
-			return err
-		})
-		if err != nil {
-			return written, err
+		if err := cut(pos, raw, func(a, b int64) error { return c.copy(w, t.offs[ti][x]+a, b-a) }); err != nil {
+			return c.written, err
 		}
 		pos += raw
 	}
-	return written, nil
+	return c.written, c.flush(w)
 }
 
-// spanCopier copies ranges of a source to a writer through one buffer, reading
-// forward across small holes and seeking over large ones.
+// spanCopier copies ranges of a source to a writer: through one buffer,
+// reading forward across small holes and seeking over large ones, the small
+// spans packed into writes of stageBytes; a span of sendfileMin or more goes
+// to a writer that can read from the file itself.
 type spanCopier struct {
 	src      io.ReadSeeker
+	file     *os.File // the source as a file, for the spans the writer takes itself
 	buf      []byte
 	bufStart int64 // source offset of buf[0]
 	bufLen   int   // valid bytes in buf
 	pos      int64 // the source's current offset
 	seeked   bool
-	exact    bool // read each span alone, never ahead of it
+	exact    bool     // read each span alone, never ahead of it
+	pending  [][]byte // queued, not yet written: slices of buf and of emitted bytes
+	pendingN int
+	stage    *[]byte
+	written  int64
 }
 
-// copy writes the source's bytes [off, off+n) to w.
-func (c *spanCopier) copy(w io.Writer, off, n int64) (int64, error) {
-	var written int64
+// emit queues bytes the caller holds (a head, a stripped header).
+func (c *spanCopier) emit(w io.Writer, b []byte) error {
+	return c.queue(w, b)
+}
+
+// copy queues the source's bytes [off, off+n), or hands them to the writer from the file.
+func (c *spanCopier) copy(w io.Writer, off, n int64) error {
 	for n > 0 {
 		if off >= c.bufStart && off < c.bufStart+int64(c.bufLen) {
 			b := c.buf[off-c.bufStart : c.bufLen]
 			if int64(len(b)) > n {
 				b = b[:n]
 			}
-			m, err := w.Write(b)
-			written += int64(m)
-			if err != nil {
-				return written, err
+			if err := c.queue(w, b); err != nil {
+				return err
 			}
-			off += int64(m)
-			n -= int64(m)
+			off += int64(len(b))
+			n -= int64(len(b))
 			continue
+		}
+		if err := c.flush(w); err != nil { // the buffer is about to be refilled, or skipped
+			return err
+		}
+		if c.file != nil && n >= sendfileMin {
+			if rf, ok := w.(io.ReaderFrom); ok {
+				if _, err := c.file.Seek(off, io.SeekStart); err != nil {
+					return err
+				}
+				m, err := rf.ReadFrom(io.LimitReader(c.file, n))
+				c.written += m
+				off += m
+				n -= m
+				c.pos, c.seeked = off, true
+				if err != nil {
+					return err
+				}
+				if m == 0 {
+					return io.ErrUnexpectedEOF
+				}
+				continue
+			}
 		}
 		if c.exact || !c.seeked || off < c.pos || off-c.pos > spanMergeGap {
 			if _, err := c.src.Seek(off, io.SeekStart); err != nil {
-				return written, err
+				return err
 			}
 			c.pos, c.seeked = off, true
 		}
@@ -432,13 +467,58 @@ func (c *spanCopier) copy(w io.Writer, off, n int64) (int64, error) {
 			if err == nil || errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF // the source ends before the sample does
 			}
-			return written, err
+			return err
 		}
 		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-			return written, err
+			return err
 		}
 		c.bufStart, c.bufLen = c.pos, m
 		c.pos += int64(m)
 	}
-	return written, nil
+	return nil
+}
+
+// queue adds b to the pending writes, flushing when they reach the stage size.
+func (c *spanCopier) queue(w io.Writer, b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+	c.pending = append(c.pending, b)
+	c.pendingN += len(b)
+	if c.pendingN >= stageBytes {
+		return c.flush(w)
+	}
+	return nil
+}
+
+// flush writes what is pending in one write, packed through the stage when it is several pieces.
+func (c *spanCopier) flush(w io.Writer) error {
+	if len(c.pending) == 0 {
+		return nil
+	}
+	pending := c.pending
+	c.pending, c.pendingN = c.pending[:0], 0
+	if len(pending) == 1 {
+		m, err := w.Write(pending[0])
+		c.written += int64(m)
+		return err
+	}
+	if c.stage == nil {
+		c.stage = stageBufs.Get().(*[]byte)
+	}
+	st := (*c.stage)[:0]
+	for _, b := range pending {
+		st = append(st, b...)
+	}
+	*c.stage = st[:0]
+	m, err := w.Write(st)
+	c.written += int64(m)
+	return err
+}
+
+func (c *spanCopier) release() {
+	if c.stage != nil {
+		stageBufs.Put(c.stage)
+		c.stage = nil
+	}
 }

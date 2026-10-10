@@ -8,6 +8,19 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **A streamed segment reaches the socket by `sendfile` above 16 KiB and by
+  packed writes below.** `HLSPlan.Open`'s copier hands any span of 16 KiB or
+  more to a writer that can read the source file itself (`net/http` turns it
+  into `sendfile` on a plain TCP connection) and packs the smaller spans, the
+  segment head and the stripped headers into 64 KiB writes instead of one
+  `Write` per sample. Server CPU per video segment served over loopback, the
+  same segments compared byte for byte with the pre-written files: a 43
+  Mbit/s 2160p remux (37.6 MiB per segment) went from 8.6 ms to 2.3 ms, under
+  `http.FileServer`'s 2.4 to 2.7 ms on the pre-written files; a 4.3 Mbit/s
+  1080p encode (4.5 MiB) from 1.9 ms to 1.5 ms against 0.8 to 0.9 ms. A
+  vectored write through `net.Buffers` was tried for the small spans and
+  changed nothing: `http.ResponseWriter` does not expose `writev`.
+
 - **`RemuxToHLS` writes each track's temp file through a 1 MiB buffer.** The
   first pass issued one `write` call per sample; a 28-minute 1080p episode
   made 145 000 of them, now 974, and its first pass dropped from 0.72 s to
