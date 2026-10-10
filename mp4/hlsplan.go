@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -45,13 +46,18 @@ import (
 // per-segment window index. It is immutable after PlanHLS returns and safe for
 // concurrent Segment calls (each opens its own reader).
 type HLSPlan struct {
-	srcPath  string
-	fs       *mkv.FS
-	tcScale  int64
-	tracks   []*planTrack
-	bounds   []int64 // segment start times (ms); bounds[0] == 0
-	offsets  []int64 // absolute file offset of the cluster holding bounds[k]
-	clusters []int64 // absolute offsets of every cued cluster, ascending: a cold walk opens one cluster ahead of its boundary
+	srcPath       string
+	fs            *mkv.FS
+	tcScale       int64
+	tracks        []*planTrack
+	bounds        []int64 // segment start times (ms); bounds[0] == 0
+	offsets       []int64 // absolute file offset of the cluster holding bounds[k]
+	clusters      []int64 // absolute offsets of every cued cluster, ascending
+	clusterOpenMs []int64 // the cue time each cued cluster opens on, parallel to clusters
+	// aheadMs is the furthest a non-video block has been seen stored ahead of
+	// the cued cluster that follows the one holding it (audio a muxer writes
+	// ahead of its video): how far before its boundary a cold walk must open.
+	aheadMs  atomic.Int64
 	durs     []float64
 	inits    [][]byte // one init segment per track (video first, per fts order)
 	medias   [][]byte // one media playlist per track
@@ -333,7 +339,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
 	last := int64(0)
 	for _, cue := range cues {
-		p.noteCluster(c.SegmentStart + cue.ClusterPos)
+		p.noteCluster(c.SegmentStart+cue.ClusterPos, cue.TimeMs)
 		if cue.TimeMs >= last+segMs {
 			p.bounds = append(p.bounds, cue.TimeMs)
 			p.offsets = append(p.offsets, c.SegmentStart+cue.ClusterPos)
@@ -346,6 +352,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// the sample entries lazy codecs derive from their first frame; the last
 	// cued cluster fixes each track's final PTS pair (exact init durations).
 	if err := p.peekHead(ctx); err != nil {
+		return nil, err
+	}
+	if err := p.learnAheadHead(ctx); err != nil {
 		return nil, err
 	}
 	lastPts, prevPts, lastFrames, err := p.peekTail(ctx, c.SegmentStart+cues[len(cues)-1].ClusterPos)
@@ -717,6 +726,11 @@ func (p *HLSPlan) peekTail(ctx context.Context, off int64) (lastPts, prevPts, la
 // walkBlocks runs fn over the media-track blocks from the cluster at off until fn returns false,
 // a block at or past end (when end > 0) or the stream ends; headerOnly hands fn timecodes and sizes, never payloads.
 func (p *HLSPlan) walkBlocks(ctx context.Context, off, end int64, headerOnly bool, fn func(mkv.Block, *planTrack) (bool, error)) error {
+	return p.walkBlocksPos(ctx, off, end, headerOnly, func(b mkv.Block, pt *planTrack, _ reader.BlockPos) (bool, error) { return fn(b, pt) })
+}
+
+// walkBlocksPos is walkBlocks handing fn each block's position as well.
+func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly bool, fn func(mkv.Block, *planTrack, reader.BlockPos) (bool, error)) error {
 	src, err := p.fs.DoOpen(p.srcPath)
 	if err != nil {
 		return err
@@ -750,7 +764,7 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off, end int64, headerOnly boo
 		if !ok {
 			continue
 		}
-		more, err := fn(b, pt)
+		more, err := fn(b, pt, br.Pos())
 		if err != nil {
 			return err
 		}
@@ -1218,6 +1232,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	// are long enough to hold the whole window, this is what keeps the prefix
 	// ahead of it from being read. A miss simply walks from the cluster.
 	var br *reader.BlockReader
+	var ahead [][]aheadBlock
 	from := p.segPosAt(n)
 	if from.Valid() {
 		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
@@ -1229,6 +1244,14 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	}
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(keep...)
+	if !from.Valid() && p.coldStart(n) < p.offsets[n] { // the clusters before the window's own, header-only, then the window's
+		if ahead, err = p.coldAhead(ctx, src, br, n, index, segStart, structure, keepAudio); err != nil {
+			return nil, nil, none, err
+		}
+		if err = br.RestartAt(p.offsets[n]); err != nil {
+			return nil, nil, none, err
+		}
+	}
 	br.SetHeaderOnly(structure)
 	if keepAudio {
 		br.SetHeaderOnlyTracks(p.tracks[p.videoIndex()].ft.outTrack.mkv.ID)
@@ -1240,6 +1263,11 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	inPlace := none
 	if !structure {
 		inPlace = p.newWindowInPlace(n)
+		for ti := range ahead { // a video block ahead of its cluster (never seen) would sit outside the arena
+			if len(ahead[ti]) > 0 && p.tracks[ti].ft.outTrack.spec.video {
+				inPlace = none
+			}
+		}
 	}
 	if inPlace.buf != nil {
 		vid := p.tracks[inPlace.track].ft.outTrack.mkv.ID
@@ -1260,6 +1288,20 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	for i := range p.tracks {
 		nextPts[i] = -1
 		started[i] = n == 0
+	}
+	for ti := range ahead { // the window's blocks stored before its cluster open their tracks
+		for k, a := range ahead[ti] {
+			if k == 0 {
+				p.learnSegPos(n, a.pos)
+				p.learnTrackPos(n, ti, a.pos)
+				started[ti], opened[ti] = true, true
+			}
+			s, err := sampleOf(p.tracks[ti], a.b, structure && (!keepAudio || p.tracks[ti].ft.outTrack.spec.video))
+			if err != nil {
+				return nil, nil, none, err
+			}
+			windows[ti] = append(windows[ti], s)
+		}
 	}
 	remaining := len(p.tracks)
 	peeking := 0
@@ -1297,6 +1339,9 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			p.learnTrackPos(n, ti, br.Pos()) // this track's own first block of the window
 		}
 		pt := p.tracks[ti]
+		if !pt.ft.outTrack.spec.video {
+			p.learnAhead(br.Pos(), b)
+		}
 		if b.BlockTimecode >= segEnd {
 			crossed[ti] = true
 			peeks[ti] = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
@@ -1518,6 +1563,9 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 					break
 				}
 				continue
+			}
+			if !pt.ft.outTrack.spec.video {
+				p.learnAhead(br.Pos(), b)
 			}
 			if b.BlockTimecode >= segEnd {
 				crossed = true
@@ -1871,16 +1919,54 @@ func spanHoldsForeignBlock(src io.ReadSeeker, from, end int64) bool {
 	return false
 }
 
-// noteCluster records a cued cluster's offset, kept ascending and unique.
-func (p *HLSPlan) noteCluster(off int64) {
+// noteCluster records a cued cluster's offset and opening time, kept ascending and unique.
+func (p *HLSPlan) noteCluster(off, ms int64) {
 	if n := len(p.clusters); n == 0 || p.clusters[n-1] < off {
 		p.clusters = append(p.clusters, off)
+		p.clusterOpenMs = append(p.clusterOpenMs, ms)
 	}
 }
 
-// coldStart is where a walk with nothing learned opens the n-th window: the
-// cluster before its boundary's, since a muxer writes the audio of an instant
-// a little ahead of its video and the window's first audio blocks can sit
+// learnAhead folds one non-video block in: how far its time runs past the
+// start of the cued cluster after the one holding it, when it does.
+func (p *HLSPlan) learnAhead(pos reader.BlockPos, b mkv.Block) {
+	i := sort.Search(len(p.clusters), func(k int) bool { return p.clusters[k] > pos.ClusterStart })
+	if i >= len(p.clusterOpenMs) {
+		return
+	}
+	if adv := b.Timecode - p.clusterOpenMs[i]; adv > 0 {
+		for {
+			cur := p.aheadMs.Load()
+			if adv <= cur || p.aheadMs.CompareAndSwap(cur, adv) {
+				return
+			}
+		}
+	}
+}
+
+// learnAheadHead walks the first cued cluster header-only once, so the
+// advance a muxer gives its audio over its video is known before any cold
+// window opens.
+func (p *HLSPlan) learnAheadHead(ctx context.Context) error {
+	if len(p.clusters) < 2 {
+		return nil
+	}
+	return p.walkBlocksPos(ctx, p.clusters[0], p.clusters[1], true, func(b mkv.Block, pt *planTrack, pos reader.BlockPos) (bool, error) {
+		if !pt.ft.outTrack.spec.video {
+			p.learnAhead(pos, b)
+		}
+		return true, nil
+	})
+}
+
+// coldStart is where a walk with nothing learned starts looking for the n-th
+// window's blocks: the cued cluster before its boundary's (a muxer writes the
+// audio of an instant a little ahead of its video, and a few milliseconds of
+// advance already put a block of the window in the cluster before; measured on
+// 2 % of a real library, never visible at the head of the file), further back
+// when the source has shown a larger advance (aheadMs). The clusters before
+// the boundary's are walked header-only (coldAhead); the window's first audio
+// blocks can sit
 // there (the full pass, in track order, keeps them; so must the plan).
 func (p *HLSPlan) coldStart(n int) int64 {
 	off := p.offsets[n]
@@ -1888,10 +1974,74 @@ func (p *HLSPlan) coldStart(n int) int64 {
 		return off
 	}
 	i := sort.Search(len(p.clusters), func(k int) bool { return p.clusters[k] >= off })
-	if i > 0 && i < len(p.clusters) && p.clusters[i] == off {
-		return p.clusters[i-1]
+	if i == 0 || i >= len(p.clusters) || p.clusters[i] != off {
+		return off
 	}
-	return off
+	i--
+	for ahead := p.aheadMs.Load(); i > 0 && p.clusterOpenMs[i] > p.bounds[n]-ahead; {
+		i--
+	}
+	return p.clusters[i]
+}
+
+// aheadBlock is a block of window n stored before the window's own cluster, found by coldAhead.
+type aheadBlock struct {
+	b   mkv.Block
+	pos reader.BlockPos
+}
+
+// coldAhead walks br, seated on the clusters before the window's own,
+// header-only up to that cluster and returns, per track, the blocks already
+// belonging to the window (timecode past segStart), with their payload fetched
+// when the walk needs payloads. Everything else in those clusters costs its
+// headers only. br is left for the caller to re-seat.
+func (p *HLSPlan) coldAhead(ctx context.Context, src io.ReadSeeker, br *reader.BlockReader, n int, index map[uint64]int, segStart int64, structure, keepAudio bool) ([][]aheadBlock, error) {
+	br.SetHeaderOnly(true)
+	ahead := make([][]aheadBlock, len(p.tracks))
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b, err := br.Next()
+		if isBlockWalkEnd(err) {
+			break
+		}
+		if err != nil {
+			return nil, errf("read block: %w", err)
+		}
+		pos := br.Pos()
+		if pos.ClusterStart >= p.offsets[n] {
+			break
+		}
+		ti, ok := index[b.TrackNumber]
+		if !ok {
+			continue
+		}
+		if !p.tracks[ti].ft.outTrack.spec.video {
+			p.learnAhead(pos, b)
+		}
+		if b.BlockTimecode >= segStart {
+			ahead[ti] = append(ahead[ti], aheadBlock{b: b, pos: pos})
+		}
+	}
+	for ti := range ahead {
+		pt := p.tracks[ti]
+		if structure && (!keepAudio || pt.ft.outTrack.spec.video) {
+			continue // the window records positions only
+		}
+		for k := range ahead[ti] {
+			b := &ahead[ti][k].b
+			data := make([]byte, b.Size)
+			if _, err := src.Seek(b.DataOffset, io.SeekStart); err != nil {
+				return nil, err
+			}
+			if _, err := io.ReadFull(src, data); err != nil {
+				return nil, errf("read block ahead of its cluster: %w", err)
+			}
+			b.Data = data
+		}
+	}
+	return ahead, nil
 }
 
 // segPosAt returns the known opening block of the n-th window, if a walk has

@@ -379,6 +379,30 @@ func NewBlockReaderFrom(r io.ReadSeeker, timecodeScale int64, p BlockPos) (*Bloc
 	return br, nil
 }
 
+// RestartAt re-seats an existing reader at the Cluster element at offset, the
+// way NewBlockReaderAt seats a new one, reusing this reader's window and its
+// KeepTracks/header-only settings.
+func (br *BlockReader) RestartAt(offset int64) error {
+	if br.raw == nil {
+		return fmt.Errorf("restart: reader is not seekable")
+	}
+	if err := br.r.reset(offset); err != nil {
+		return err
+	}
+	if br.segEnd >= 0 && offset >= br.segEnd {
+		br.segEnd = -1
+	}
+	br.inCluster = false
+	br.clusterEnd = -1
+	br.clusterTS = 0
+	br.clusterStart = 0
+	br.pending = nil
+	br.peeked = nil
+	br.awaitLimit = false
+	br.blockStart = 0
+	return nil
+}
+
 // SeekTo re-seats an existing reader at p, the way NewBlockReaderFrom seats a
 // new one - but reusing this reader's window and its KeepTracks/header-only
 // settings. A caller holding many recorded positions in one file (a subtitle
