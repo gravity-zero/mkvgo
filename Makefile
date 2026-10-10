@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 # The golangci-lint the CI lint job runs (.github/workflows/ci.yml); preflight uses the same.
-GOLANGCI_LINT_VERSION = v2.13.2
+GOLANGCI_LINT_VERSION := v2.14.0
 BIN = mkvgo
 
 .PHONY: build test vet fuzz bench clean release wasm wasm-smoke preflight ci-status

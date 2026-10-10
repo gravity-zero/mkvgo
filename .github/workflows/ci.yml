@@ -64,13 +64,15 @@ jobs:
           go-version: stable
           cache: false
 
-      # The linter binary is built against one Go release and panics on sources
-      # compiled by a newer one ("file requires newer Go version"): its version
-      # moves with the toolchain (v2.13.2 is built with go1.27.0).
+      # A prebuilt linter binary type-checks with the Go it was built with and
+      # cannot load the standard library of a newer toolchain ("could not import
+      # fmt" once stable moved from 1.27.0 to 1.27.2): the linter is built here
+      # with the job's own toolchain instead.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.13.2
+          version: v2.14.0
+          install-mode: goinstall
 
   vulncheck:
     runs-on: ubuntu-latest
