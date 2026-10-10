@@ -283,7 +283,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			for i := len(ft.samples) - 1; i >= 0 && ft.samples[i].blockPtsMs == last; i-- {
 				lastFrames++
 			}
-			grid = refineStride(grid, ps.c, ft.outTrack, ft.timescale, ft.samples[0].blockPtsMs, last, lastFrames)
+			grid = settleStride(grid, ps.c, ft.outTrack, ft.timescale, ft.samples[0].blockPtsMs, last, lastFrames)
 		}
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)

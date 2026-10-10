@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,22 +24,28 @@ type driftFrame struct {
 	start bool
 }
 
-// sourceFrames walks the source header-only: per track its frames in order, and the renditions' track order (video, then audio).
-func sourceFrames(t testing.TB, src string) (map[uint64][]driftFrame, []uint64) {
+// fixedFrameCodec names the codecs whose frames all hold the same number of samples.
+var fixedFrameCodec = map[string]bool{"aac": true, "ac3": true, "eac3": true, "dts": true, "mp3": true}
+
+// sourceFrames walks the source header-only: per track its frames in order, the renditions' track order (video, then audio) and each track's codec.
+func sourceFrames(t testing.TB, src string) (map[uint64][]driftFrame, []uint64, map[uint64]string) {
 	t.Helper()
 	c, err := reader.OpenMeta(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var order []uint64
+	codecs := map[uint64]string{}
 	for _, tr := range c.Tracks {
 		if tr.Type == mkv.VideoTrack {
 			order = append(order, tr.ID)
+			codecs[tr.ID] = tr.Codec
 		}
 	}
 	for _, tr := range c.Tracks {
 		if tr.Type == mkv.AudioTrack {
 			order = append(order, tr.ID)
+			codecs[tr.ID] = tr.Codec
 		}
 	}
 	f, err := os.Open(src)
@@ -63,13 +70,13 @@ func sourceFrames(t testing.TB, src string) (map[uint64][]driftFrame, []uint64) 
 		frames[b.TrackNumber] = append(frames[b.TrackNumber], driftFrame{tc: b.Timecode, start: !seen || b.BlockTimecode != prev})
 		lastBlock[b.TrackNumber] = b.BlockTimecode
 	}
-	return frames, order
+	return frames, order, codecs
 }
 
-// segmentPTS returns a media segment's per-sample presentation times in ticks (tfdt + decode durations + composition offsets).
-func segmentPTS(seg []byte) []int64 {
+// segmentTimes returns a media segment's per-sample presentation times and decode durations, in ticks.
+func segmentTimes(seg []byte) (pts, durs []int64) {
 	var tfdt int64
-	var durs, cts []int64
+	var cts []int64
 	var walk func(b []byte)
 	walk = func(b []byte) {
 		for len(b) >= 8 {
@@ -128,13 +135,13 @@ func segmentPTS(seg []byte) []int64 {
 		}
 	}
 	walk(seg)
-	pts := make([]int64, len(durs))
+	pts = make([]int64, len(durs))
 	clock := tfdt
 	for i := range durs {
 		pts[i] = clock + cts[i]
 		clock += durs[i]
 	}
-	return pts
+	return pts, durs
 }
 
 // mdhdTimescale reads the first mdhd's timescale of an init segment.
@@ -156,7 +163,7 @@ func mdhdTimescale(init []byte) int64 {
 // a resource's bytes; mode names the path under test in failures.
 func assertNoDrift(t testing.TB, src, mode string, fetch func(name string) []byte) {
 	t.Helper()
-	frames, order := sourceFrames(t, src)
+	frames, order, codecs := sourceFrames(t, src)
 	master := string(fetch("master.m3u8"))
 	var playlists []string
 	for _, l := range strings.Split(master, "\n") {
@@ -195,9 +202,10 @@ func assertNoDrift(t testing.TB, src, mode string, fetch func(name string) []byt
 			}
 		}
 		ts := mdhdTimescale(fetch(initName))
-		var pts []int64
+		var pts, durs []int64
 		for _, s := range segs {
-			pts = append(pts, segmentPTS(fetch(s))...)
+			p, d := segmentTimes(fetch(s))
+			pts, durs = append(pts, p...), append(durs, d...)
 		}
 		src := frames[id]
 		if len(pts) != len(src) {
@@ -235,6 +243,20 @@ func assertNoDrift(t testing.TB, src, mode string, fetch func(name string) []byt
 		}
 		if maxDev > frameMs+1 {
 			t.Errorf("%s %s: output drifts %.3f ms from the source at %d ms (frame %.3f ms)", mode, pl, maxDev, at, frameMs)
+		}
+		// Fixed-frame audio: every decode duration is the frame, save the
+		// track's first and last samples.
+		if strings.HasPrefix(pl, "audio") && len(durs) > 2 && fixedFrameCodec[codecs[id]] {
+			frame := durs[len(durs)/2]
+			irregular := 0
+			for i := 1; i < len(durs)-1; i++ {
+				if durs[i] != frame {
+					irregular++
+				}
+			}
+			if irregular > 0 {
+				t.Errorf("%s %s: %d sample durations differ from the frame (%d ticks) inside the track", mode, pl, irregular, frame)
+			}
 		}
 	}
 }
@@ -386,12 +408,17 @@ func TestUnknownCodecStrideMeasuredOverTheWholeTrack(t *testing.T) {
 			assertNoDriftBothModes(t, src, 2000)
 			continue
 		}
-		// Without a count both modes measure the same local stride and open
-		// alike; further on they part, the full pass on a running clock the
-		// unconfirmed stride lets drift, the plan on each window's timecodes.
-		// This is the one class left to a trusted count: a codec no header or
-		// table sizes, laced, without a DefaultDuration.
-		for _, name := range []string{"seg_a1_00001.m4s", "seg_a1_00002.m4s"} {
+		// Without a count nothing confirms the stride: both modes spread each
+		// block's frames over its span (gridSpread), identical byte for byte,
+		// bounded to a block, counted, and the audio lasts its blocks.
+		if st := plan.Stats(); st.SpreadLacedTracks != 1 {
+			t.Errorf("without statistics: SpreadLacedTracks=%d, want 1", st.SpreadLacedTracks)
+		}
+		names := []string{"init_a1.mp4"}
+		for n := 1; n <= plan.NumSegments(); n++ {
+			names = append(names, fmt.Sprintf("seg_a1_%05d.m4s", n))
+		}
+		for _, name := range names {
 			got, _, err := plan.Resource(ctx, name)
 			if err != nil {
 				t.Fatal(err)
@@ -404,5 +431,6 @@ func TestUnknownCodecStrideMeasuredOverTheWholeTrack(t *testing.T) {
 				t.Errorf("without statistics: %s differs between the plan and the full pass", name)
 			}
 		}
+		assertNoDriftBothModes(t, src, 2000)
 	}
 }

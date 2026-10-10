@@ -213,6 +213,16 @@ func reconstructTiming(samples []sample, lastDurMs int64, mts uint32, gridTS int
 		return t
 	}
 
+	if gridTS == gridSpread {
+		t := timing{durations: make([]int64, n), ctts: make([]int32, n)}
+		blockPts := func(i int) int64 { return samples[i].blockPts }
+		span, frames := firstLace(n, blockPts, scale)
+		spreadLaced(n, blockPts, scale, -1, func(m int64) int64 { return lastBlockSpan(span, frames, m) }, func(i int, _, dur int64) {
+			t.durations[i] = dur
+			t.total += dur
+		})
+		return t
+	}
 	dts := make([]int64, n)
 	for i := range samples {
 		dts[i] = scale(samples[i].pts)

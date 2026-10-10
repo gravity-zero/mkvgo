@@ -155,17 +155,107 @@ func longStrideTS(c *mkv.Container, t *outTrack, mts uint32, firstTC, lastTC, la
 	return (span + slots/2) / slots
 }
 
-// refineStride settles a measured stride the stream could not confirm: a
-// header or table match stands; otherwise the whole-track measurement, when
-// it lies within a percent of the local one, replaces it.
-func refineStride(measured int64, c *mkv.Container, t *outTrack, mts uint32, firstTC, lastTC, lastFrames int64) int64 {
-	if measured <= 0 || snapGridTS(measured, t, mts) != measured || t.frameSamples > 0 {
+// gridSpread is the grid stride of a laced track whose frame size nothing
+// confirms: its frames are spread over each block's span instead of riding a
+// measured stride that drifts (see spreadLaced).
+const gridSpread = -2
+
+// strideConfirmed reports whether the stream or a codec table vouches for the stride.
+func strideConfirmed(stride int64, t *outTrack, mts uint32) bool {
+	if t == nil || t.mkv.SampleRate == nil || *t.mkv.SampleRate <= 0 {
+		return false
+	}
+	if t.frameSamples > 0 {
+		return true
+	}
+	for _, n := range codecFrameSamples(t.mkv.Codec) {
+		if within(int64(float64(n)*float64(mts)/(*t.mkv.SampleRate)+0.5), stride, 1) {
+			return true
+		}
+	}
+	return false
+}
+
+// settleStride turns a measured lace stride into the one the timing runs on:
+// confirmed by the stream or a codec table it stands; else the whole-track
+// measurement within a percent of it; else gridSpread, the bounded fallback.
+// 0 (no collapsed lace) passes through.
+func settleStride(measured int64, c *mkv.Container, t *outTrack, mts uint32, firstTC, lastTC, lastFrames int64) int64 {
+	if measured <= 0 || strideConfirmed(measured, t, mts) {
 		return measured
 	}
 	if long := longStrideTS(c, t, mts, firstTC, lastTC, lastFrames); long > 0 && within(measured, long, 1) {
 		return long
 	}
-	return measured
+	return gridSpread
+}
+
+// spreadLaced times collapsed laces without a confirmed stride: a block's
+// frames share evenly the span from its timecode to the next block's, so no
+// error can build up past one block; the last block runs to nextMs when the
+// caller knows the block that follows, else to lastSpan(frames), the span the
+// caller gives a final lace of that many frames (lastBlockSpan at the track's
+// first pace, the rule the plan's init duration applies). Decode times are
+// strictly increasing by construction. set receives each frame's decode time
+// (ticks past the first block) and duration.
+func spreadLaced(n int, blockPts func(int) int64, scale func(int64) int64, nextMs int64, lastSpan func(frames int64) int64, set func(i int, dts, dur int64)) {
+	base := scale(blockPts(0))
+	for a := 0; a < n; {
+		b := a + 1
+		for b < n && blockPts(b) == blockPts(a) {
+			b++
+		}
+		m := int64(b - a)
+		start := scale(blockPts(a)) - base
+		var end int64
+		switch {
+		case b < n:
+			end = scale(blockPts(b)) - base
+		case nextMs >= 0:
+			end = scale(nextMs) - base
+		default:
+			end = start + lastSpan(m)
+		}
+		if end < start+m {
+			end = start + m
+		}
+		for i := int64(0); i < m; i++ {
+			dts := start + i*(end-start)/m
+			next := start + (i+1)*(end-start)/m
+			set(a+int(i), dts, next-dts)
+		}
+		a = b
+	}
+}
+
+// lastBlockSpan is the span a track's final lace takes when nothing follows it: its frames at the first block's pace.
+func lastBlockSpan(firstSpan, firstFrames, frames int64) int64 {
+	if firstFrames <= 0 || firstSpan <= 0 {
+		return frames
+	}
+	return firstSpan * frames / firstFrames
+}
+
+// firstLace describes a track's first collapsed lace: the span to the second block and the frames the first block holds.
+func firstLace(n int, blockPts func(int) int64, scale func(int64) int64) (span, frames int64) {
+	m := 1
+	for m < n && blockPts(m) == blockPts(0) {
+		m++
+	}
+	if m >= n {
+		return 0, int64(m)
+	}
+	return scale(blockPts(m)) - scale(blockPts(0)), int64(m)
+}
+
+// AudioFrameSamples is the samples one frame of an audio track covers at its
+// sample rate, as its configuration or its first frame states it; 0 when
+// neither says (a diagnosis then knows the frame size is unknown).
+func AudioFrameSamples(t *mkv.Track, firstFrame []byte) int64 {
+	if n := frameSamplesFromHeader(t); n > 0 {
+		return n
+	}
+	return frameSamplesFromPayload(t.Codec, firstFrame)
 }
 
 // laceGridTS is deriveGridTS snapped to the track's frame size.

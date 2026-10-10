@@ -168,9 +168,14 @@ type HLSPlan struct {
 // planTrack is one media track's plan state: the outTrack (sample entry ready)
 // plus the timing anchors the per-segment DTS derivation needs.
 type planTrack struct {
-	ft         *fragTrack
-	firstPtsMs int64 // the track's first sample PTS - the global DTS origin
-	lastDurTS  int64 // the track's final sample duration (fillFragTiming's rule)
+	// laceSecondMs and laceFirstFrames describe the first collapsed lace peekHead
+	// saw (the second block's timecode and the first block's frames): the pace
+	// a spread track's final block takes (lastBlockSpan).
+	laceSecondMs    int64
+	laceFirstFrames int64
+	ft              *fragTrack
+	firstPtsMs      int64 // the track's first sample PTS - the global DTS origin
+	lastDurTS       int64 // the track's final sample duration (fillFragTiming's rule)
 	// gridTS is the sample-exact frame stride of a constant-rate audio track
 	// (audioGridTS); windows are then timed on the grid, exactly like
 	// fillFragTiming's grid branch, instead of on the ms-rounded timecodes.
@@ -359,13 +364,18 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		if pt.gridTS <= 0 { // peekHead may already have recovered a no-DefaultDuration stride
 			pt.gridTS = audioGridTS(ft.outTrack, ft.timescale)
 		} else if ft.outTrack.mkv.DefaultDurationNs <= 0 {
-			pt.gridTS = refineStride(pt.gridTS, c, ft.outTrack, ft.timescale, pt.firstPtsMs, lastPts[i], lastFrames[i])
+			pt.gridTS = settleStride(pt.gridTS, c, ft.outTrack, ft.timescale, pt.firstPtsMs, lastPts[i], lastFrames[i])
+			if pt.gridTS == gridSpread {
+				p.stats.SpreadLacedTracks++
+			}
 		}
 		switch {
 		case pt.gridTS > 0:
 			// Grid-timed audio: the final frame's index recovers its exact
 			// slot from the ms timecode (fillFragTiming's grid rule).
 			pt.lastDurTS = pt.gridTS
+		case pt.gridTS == gridSpread:
+			pt.lastDurTS = lastBlockSpan(scale(pt.laceSecondMs)-scale(pt.firstPtsMs), pt.laceFirstFrames, lastFrames[i]) // spreadLaced's final lace
 		case ft.outTrack.frameDurMs > 0:
 			pt.lastDurTS = scale(ft.outTrack.frameDurMs)
 		case prevPts[i] >= 0 && lastPts[i] > prevPts[i]:
@@ -636,6 +646,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 			}
 			return pr.secondTC
 		}, pt.ft.timescale)
+		pt.laceSecondMs, pt.laceFirstFrames = pr.secondTC, pr.frames
 	}
 	return nil
 }
@@ -1036,8 +1047,19 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 	// collapsed laces (the stride is uniform, so every window measures the same
 	// value the full pass derives from all samples - parity by construction).
 	gridTS := pt.gridTS
-	if gridTS <= 0 && pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
+	if gridTS == 0 && pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
 		gridTS = laceGridTS(pt.ft.outTrack, len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
+	}
+	if gridTS == gridSpread { // the full pass's spreadLaced, window-local: the next window's first block closes the last lace
+		scale := tsScale(pt.ft.timescale)
+		anchor := scale(pt.firstPtsMs) - scale(window[0].blockPtsMs)
+		lastSpan := func(m int64) int64 {
+			return lastBlockSpan(scale(pt.laceSecondMs)-scale(pt.firstPtsMs), pt.laceFirstFrames, m)
+		}
+		spreadLaced(len(window), func(i int) int64 { return window[i].blockPtsMs }, scale, nextPts, lastSpan, func(i int, dts, dur int64) {
+			window[i].dtsTS, window[i].durTS, window[i].ctsTS = dts-anchor, dur, 0
+		})
+		return window[0].dtsTS, false, nextK
 	}
 	if gridTS > 0 {
 		// Grid-timed audio: fillFragTiming's running clock applied to the

@@ -378,6 +378,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		grid := audioGridTS(t, mts)
 		if grid == 0 {
 			grid = laceGridTS(t, len(t.samples.samples), func(i int) int64 { return t.samples.samples[i].blockPts }, mts)
+			grid = settleStride(grid, nil, t, mts, 0, 0, 0)
 		}
 		tim = reconstructTiming(t.samples.samples, t.frameDurMs, mts, grid)
 	}

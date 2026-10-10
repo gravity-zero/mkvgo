@@ -407,6 +407,19 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 	}
 	// DTS = sorted PTS: the i-th stored sample (decode order) gets the i-th
 	// smallest presentation time. Rebase to 0.
+	if gridTS == gridSpread { // laced audio whose stride nothing confirms: block spans shared among their frames
+		offsetMs = samples[0].ptsMs
+		blockPts := func(i int) int64 { return samples[i].blockPtsMs }
+		span, frames := firstLace(n, blockPts, scale)
+		spreadLaced(n, blockPts, scale, -1, func(m int64) int64 { return lastBlockSpan(span, frames, m) }, func(i int, dts, dur int64) {
+			samples[i].dtsTS, samples[i].durTS, samples[i].ctsTS = dts, dur, 0
+			if samples[i].ptsMs < offsetMs {
+				offsetMs = samples[i].ptsMs
+			}
+			totalTS += dur
+		})
+		return offsetMs, false, totalTS, 0
+	}
 	dts := make([]int64, n)
 	for i := range samples {
 		dts[i] = pts(i)

@@ -336,6 +336,12 @@ type HLSPlanStats struct {
 	// name some blocks but could not be verified complete, which walk.
 	SubtitleCueIndexed    int64
 	SubtitleCueUnverified int64
+	// SpreadLacedTracks counts the laced audio tracks whose frame size nothing
+	// confirmed (no DefaultDuration, no frame size in the stream or a codec
+	// table, no trusted frame count): their frames are spread over each
+	// block's span rather than timed on a measured stride that would drift.
+	// mkvgo diagnose reports such tracks as unsized-laced-audio.
+	SpreadLacedTracks int64
 }
 
 // Stats returns the plan's window counters. Safe to call while segments are

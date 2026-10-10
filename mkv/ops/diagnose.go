@@ -11,6 +11,7 @@ import (
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // diagnose.go - Diagnose is the one-call triage a media library scan needs:
@@ -123,6 +124,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	}
 
 	d.Findings = append(d.Findings, undeclaredCompressionFindings(ctx, path, fs, meta)...)
+	d.Findings = append(d.Findings, unsizedLacedAudioFindings(ctx, path, fs, meta)...)
 
 	ch := cueHealthFrom(meta, 0)
 	// A file with no Cues is walked from its first cluster - unless the
@@ -492,4 +494,82 @@ func probeUndeclaredZlib(ctx context.Context, path string, fs *mkv.FS, meta *mkv
 		_, recovered, err := t.DecodePayloadRecovered(blk.Data)
 		return recovered, err
 	}
+}
+
+// unsizedLacedAudioFindings reports the audio tracks that lace frames under
+// one timecode without a DefaultDuration, whose frame size neither their
+// configuration nor their first frame states, and whose frame count no
+// trusted statistic gives: the MP4 paths can then only spread each block's
+// frames over its span, never time them on an exact grid.
+func unsizedLacedAudioFindings(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container) []Finding {
+	var candidates []*mkv.Track
+	stats := mkv.TrustedTrackStatistics(meta)
+	for i := range meta.Tracks {
+		t := &meta.Tracks[i]
+		if t.Type == mkv.AudioTrack && t.DefaultDurationNs <= 0 && stats[t.ID].Frames == 0 && mp4.AudioFrameSamples(t, nil) == 0 {
+			candidates = append(candidates, t)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReaderAt(f, meta.Info.TimecodeScale, meta.SegmentStart)
+	if err != nil {
+		return nil
+	}
+	ids := make([]uint64, len(candidates))
+	for i, t := range candidates {
+		ids[i] = t.ID
+	}
+	br.KeepTracks(ids...)
+	type probe struct {
+		first   []byte
+		blockTC int64
+		frames  int
+		laced   bool
+	}
+	probes := map[uint64]*probe{}
+	for n := 0; n < 4096; n++ {
+		if ctx.Err() != nil {
+			return nil
+		}
+		b, err := br.Next()
+		if err != nil {
+			break
+		}
+		pr := probes[b.TrackNumber]
+		if pr == nil {
+			pr = &probe{first: b.Data, blockTC: b.BlockTimecode}
+			probes[b.TrackNumber] = pr
+		}
+		if b.BlockTimecode == pr.blockTC {
+			pr.frames++
+			pr.laced = pr.frames > 1
+		}
+		done := len(probes) == len(candidates)
+		for _, p := range probes {
+			done = done && p.laced || done && p.blockTC != b.BlockTimecode
+		}
+		if done {
+			break
+		}
+	}
+	var out []Finding
+	for _, t := range candidates {
+		pr := probes[t.ID]
+		if pr == nil || !pr.laced || mp4.AudioFrameSamples(t, pr.first) > 0 {
+			continue
+		}
+		out = append(out, Finding{
+			Kind:   "unsized-laced-audio",
+			Detail: fmt.Sprintf("audio track %d (%s) laces its frames under one timecode with no DefaultDuration, and nothing states its frame size or frame count: MP4 outputs spread each block's frames over its span instead of timing them exactly", t.ID, t.Codec),
+			Remedy: "re-mux the track with a DefaultDuration, or write track statistics tags (NUMBER_OF_FRAMES)",
+		})
+	}
+	return out
 }
