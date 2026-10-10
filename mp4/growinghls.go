@@ -518,7 +518,7 @@ func (p *GrowingHLSPlan) resolveHeadLocked() {
 		if !pr.haveSecond {
 			continue
 		}
-		pt.gridTS = deriveGridTS(int(pr.frames)+1, func(i int) int64 {
+		pt.gridTS = laceGridTS(pt.ft.outTrack, int(pr.frames)+1, func(i int) int64 {
 			if int64(i) < pr.frames {
 				return pr.firstTC
 			}

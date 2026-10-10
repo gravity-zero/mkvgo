@@ -375,7 +375,11 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 		mts = movieTimescale
 		tim = textTiming(t.samples.samples)
 	} else {
-		tim = reconstructTiming(t.samples.samples, t.frameDurMs, mts, audioGridTS(t, mts))
+		grid := audioGridTS(t, mts)
+		if grid == 0 {
+			grid = laceGridTS(t, len(t.samples.samples), func(i int) int64 { return t.samples.samples[i].blockPts }, mts)
+		}
+		tim = reconstructTiming(t.samples.samples, t.frameDurMs, mts, grid)
 	}
 	durMedia := uint32(tim.total)
 	durMovie := durMedia

@@ -123,6 +123,41 @@ func deriveGridTS(count int, blockPtsAt func(int) int64, mts uint32) int64 {
 	return (span + int64(n)/2) / int64(n)
 }
 
+// codecFrameSamples lists the samples a frame of the codec may hold at a fixed rate, the usual size first.
+func codecFrameSamples(codec string) []int64 {
+	switch codec {
+	case "aac":
+		return []int64{1024, 960, 2048, 512, 480}
+	case "mp3":
+		return []int64{1152, 576, 384}
+	case "ac3", "eac3":
+		return []int64{1536}
+	}
+	return nil
+}
+
+// snapGridTS replaces a stride measured from millisecond block timecodes by
+// the codec's exact frame duration when one lies within a percent of it: the
+// measurement carries the rounding of two timecodes, up to a tick a frame,
+// and a tick a frame is eleven seconds over a two-hour film.
+func snapGridTS(measured int64, t *outTrack, mts uint32) int64 {
+	if measured <= 0 || t == nil || t.mkv.SampleRate == nil || *t.mkv.SampleRate <= 0 {
+		return measured
+	}
+	for _, n := range codecFrameSamples(t.mkv.Codec) {
+		exact := int64(float64(n)*float64(mts)/(*t.mkv.SampleRate) + 0.5)
+		if diff := exact - measured; diff*100 <= exact && -diff*100 <= exact {
+			return exact
+		}
+	}
+	return measured
+}
+
+// laceGridTS is deriveGridTS snapped to the track's codec frame size.
+func laceGridTS(t *outTrack, count int, blockPtsAt func(int) int64, mts uint32) int64 {
+	return snapGridTS(deriveGridTS(count, blockPtsAt, mts), t, mts)
+}
+
 // timing holds the decode-time/composition-time information derived from the
 // samples' presentation timestamps.
 type timing struct {

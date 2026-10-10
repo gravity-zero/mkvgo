@@ -627,7 +627,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 		if !pr.haveSecond {
 			continue
 		}
-		pt.gridTS = deriveGridTS(int(pr.frames)+1, func(i int) int64 {
+		pt.gridTS = laceGridTS(pt.ft.outTrack, int(pr.frames)+1, func(i int) int64 {
 			if int64(i) < pr.frames {
 				return pr.firstTC
 			}
@@ -1034,7 +1034,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 	// value the full pass derives from all samples - parity by construction).
 	gridTS := pt.gridTS
 	if gridTS <= 0 && pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
-		gridTS = deriveGridTS(len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
+		gridTS = laceGridTS(pt.ft.outTrack, len(window), func(i int) int64 { return window[i].blockPtsMs }, pt.ft.timescale)
 	}
 	if gridTS > 0 {
 		// Grid-timed audio: fillFragTiming's running clock applied to the

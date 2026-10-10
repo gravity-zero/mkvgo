@@ -276,6 +276,9 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 		ft.tmp = nil
 		grid := audioGridTS(ft.outTrack, ft.timescale)
+		if grid == 0 {
+			grid = laceGridTS(ft.outTrack, len(ft.samples), func(i int) int64 { return ft.samples[i].blockPtsMs }, ft.timescale)
+		}
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
 		}

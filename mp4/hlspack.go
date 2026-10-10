@@ -209,6 +209,9 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 		}
 		grid := audioGridTS(t, ft.timescale)
 		if grid == 0 {
+			grid = laceGridTS(t, len(ft.samples), func(i int) int64 { return ft.samples[i].blockPtsMs }, ft.timescale)
+		}
+		if grid == 0 {
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
 		}
 		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid)

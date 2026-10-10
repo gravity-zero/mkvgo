@@ -93,6 +93,14 @@ All notable changes to mkvgo are documented here. The format is based on
   running frame index now carries across windows like the full pass's clock,
   learned from the window before or wound up over it when the timecodes leave
   the grid.
+- **Laced audio without a DefaultDuration drifted a tick a frame.** The
+  frame stride was measured between the first two block timecodes, which are
+  rounded to the millisecond: eight AAC frames read as 171 ms, 1026 ticks
+  instead of 1024, and the audio timeline ran 0.2 % slow - 11 s late at the
+  end of a two-hour film, the plan's init declaring a different duration than
+  the full pass's. The measured stride now snaps to the codec's frame size
+  (AAC, MP3, AC-3, E-AC-3) when it lies within a percent of it; the
+  measurement stays for anything else.
 - **Undeclared zlib on subtitle tracks.** Some muxers compressed PGS and text
   subtitles and dropped the `ContentEncodings`; the blocks then read as
   invalid display sets. A subtitle block whose track declares no compression
