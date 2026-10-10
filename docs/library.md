@@ -517,8 +517,23 @@ walks in flight across every plan of the process; the others wait their turn
 `WalksInFlight()` reports the current count, `Stats().SlotWaits` how many of
 a plan's walks had to queue. Zero lifts the cap.
 
+**Set it in every server.** The default is no cap, which keeps a single
+process's behaviour unchanged but lets a burst of first requests hold as many
+windows as there are requests. Measured on the buffered path, 300 simultaneous
+cold requests for 300 distinct windows: a 4 Mbit/s 1080p film peaks at 2.1 to
+2.7 GiB of heap without a cap and 205 MiB with a cap of 8; a 20 Mbit/s 2160p
+remux at 2.3 to 2.7 GiB without, 138 MiB with. A cold window also reads from
+the cued cluster before its boundary (audio stored ahead of the video would
+otherwise be missed), so a burst of cold windows reads more than the windows
+it serves; the cap bounds that too. A cap of `runtime.GOMAXPROCS(0)` costs
+nothing on throughput (a walk is CPU-bound once its bytes are in the page
+cache) and bounds the heap to that many windows whatever the number of
+viewers; a process serving one slow spindle gains nothing from more walks than
+the disk can feed. `mkvgo serve --max-walks N` is the same setting on the
+command line.
+
 ```go
-mp4.SetMaxConcurrentWalks(runtime.NumCPU())
+mp4.SetMaxConcurrentWalks(runtime.GOMAXPROCS(0)) // in main(), before the first plan
 ```
 
 **Subtitles without walking the file: `Options.SubtitleIndex`.** A Matroska
