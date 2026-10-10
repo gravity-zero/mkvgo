@@ -23,6 +23,7 @@ type windowBundle struct {
 	segs    [][]byte // per plan-track index; nil once that rendition is delivered
 	pending int      // renditions not yet handed out
 	bytes   int64    // the media still held (delivered renditions no longer count)
+	other   int64    // the non-video samples' payload bytes, as the source holds them
 }
 
 // windowFlight is a build in progress: whoever asks for the same window while
@@ -100,11 +101,21 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 	if err != nil {
 		return nil, err
 	}
+	if inPlace.buf != nil && inPlace.media() == nil {
+		p.winMu.Lock()
+		p.stats.ArenaFallbacks++
+		p.winMu.Unlock()
+	}
 	b := &windowBundle{
 		segs:    make([][]byte, len(p.tracks)),
 		pending: len(p.tracks),
 	}
 	for ti := range p.tracks {
+		if !p.tracks[ti].ft.outTrack.spec.video {
+			for _, s := range windows[ti] {
+				b.other += int64(s.size)
+			}
+		}
 		var arena []byte
 		if ti == inPlace.track && inPlace.media() != nil {
 			arena = inPlace.buf
@@ -286,6 +297,10 @@ type HLSPlanStats struct {
 	// SlotWaits is the number of walks that queued for a process slot
 	// (SetMaxConcurrentWalks) before they could read.
 	SlotWaits int64
+	// ArenaFallbacks is the number of windows whose video buffer, sized on
+	// the span less the other tracks' lightest share seen, came out too small
+	// and were assembled by copy instead: each one lowers that share.
+	ArenaFallbacks int64
 	// Evictions is the number of windows the byte budget pushed out before
 	// their renditions were collected.
 	Evictions int64
@@ -312,6 +327,15 @@ func (p *HLSPlan) Stats() HLSPlanStats {
 	return p.stats
 }
 
+// learnOtherRateLocked folds one window's non-video payload bytes into the lightest rate seen (otherRate); caller holds winMu.
+func (p *HLSPlan) learnOtherRateLocked(n int, other int64) {
+	if ms := p.windowMs(n); ms > 0 {
+		if rate := float64(other) / float64(ms); p.otherRate == 0 || rate < p.otherRate {
+			p.otherRate = rate
+		}
+	}
+}
+
 // heldBytes is the media the plan's windows hold right now.
 func (p *HLSPlan) heldBytes() int64 {
 	p.winMu.Lock()
@@ -324,6 +348,7 @@ func (p *HLSPlan) heldBytes() int64 {
 func (p *HLSPlan) noteBuild(n int, b *windowBundle) {
 	p.stats.WindowBuilds++
 	p.stats.BuiltBytes += b.bytes
+	p.learnOtherRateLocked(n, b.other)
 	if p.winBuilt == nil {
 		p.winBuilt = make([]uint64, (p.segCount+63)/64)
 	}

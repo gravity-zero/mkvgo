@@ -125,6 +125,12 @@ type HLSPlan struct {
 	winOrder  []int // insertion order, for the byte-budget trim
 	winBytes  int64
 	winBudget int64 // 0 = derive from the source (see budget); negative = sharing off
+	// otherRate is the lightest bytes per ms a window's non-video renditions
+	// have shown (half the tracks' BPS tags before any walk, 0 unknown): what
+	// newWindowInPlace takes off the span, which counts them too. A lower
+	// bound, so the arena stays large enough; a quieter window than any seen
+	// falls back to assembly by copy (ArenaFallbacks) and lowers it.
+	otherRate float64
 	// winPeak is the largest window this plan has met - the budget is twice it.
 	// It is seeded from the Cues (the source bytes between two segment boundaries
 	// bound the window they hold) so that the FIRST window is already covered,
@@ -402,6 +408,11 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	closeConfirm()
 	p.segs = segs
 	p.winBudget = o.WindowCacheBytes
+	for _, pt := range p.tracks { // half the tagged bit rates: a lower bound until a walk measures
+		if mk := &pt.ft.outTrack.mkv; !pt.ft.outTrack.spec.video && mk.Bitrate != nil {
+			p.otherRate += float64(*mk.Bitrate) / 8000 / 2
+		}
+	}
 	for _, s := range segs {
 		if s.bytes > p.winPeak {
 			p.winPeak = s.bytes
@@ -1299,9 +1310,33 @@ func (p *HLSPlan) newWindowInPlace(n int) windowInPlace {
 	if span <= 0 || span > maxWindowInPlace {
 		return w
 	}
+	// The span counts every track; the arena keeps only the video: the
+	// others' lightest share seen comes off.
+	if other := p.otherEstimate(n); other > 0 && other < span {
+		span -= other
+	}
 	w.track = vi
 	w.buf = make([]byte, windowHeadroom, windowHeadroom+int(span))
 	return w
+}
+
+// otherEstimate is the fewest bytes window n's non-video renditions should run to (0 when nothing is known).
+func (p *HLSPlan) otherEstimate(n int) int64 {
+	p.winMu.Lock()
+	rate := p.otherRate
+	p.winMu.Unlock()
+	return int64(rate * float64(p.windowMs(n)))
+}
+
+// windowMs is window n's presentation length in ms, 0 when unknown.
+func (p *HLSPlan) windowMs(n int) int64 {
+	switch {
+	case n+1 < len(p.bounds):
+		return p.bounds[n+1] - p.bounds[n]
+	case n < len(p.durs):
+		return int64(p.durs[n] * 1000)
+	}
+	return 0
 }
 
 // next returns the uncommitted tail of the buffer for a block of size bytes,
