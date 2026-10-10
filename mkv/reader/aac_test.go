@@ -165,7 +165,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 	// cc=0 → false immediately (program_config_element).
 	{
 		r := &bitReader{data: []byte{}}
-		if got := skipGASpecificConfig(r, 2, 0); got {
+		if got := skipGASpecificConfig(r, 2, 0, new(uint32)); got {
 			t.Error("cc=0: want false")
 		}
 	}
@@ -177,7 +177,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 14) // coreCoderDelay
 		bw.write(0, 1)  // extensionFlag=0
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 2, 2); !got {
+		if got := skipGASpecificConfig(r, 2, 2, new(uint32)); !got {
 			t.Error("dependsOnCoreCoder=1: want true")
 		}
 	}
@@ -189,7 +189,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 1) // extensionFlag=0
 		bw.write(0, 3) // layerNr
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 6, 2); !got {
+		if got := skipGASpecificConfig(r, 6, 2, new(uint32)); !got {
 			t.Error("aot=6 (layerNr): want true")
 		}
 	}
@@ -203,7 +203,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 11) // layer_length
 		bw.write(0, 1)  // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 22, 2); !got {
+		if got := skipGASpecificConfig(r, 22, 2, new(uint32)); !got {
 			t.Error("aot=22 extensionFlag=1: want true")
 		}
 	}
@@ -216,7 +216,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 3) // section/scalefactor/spectral data resilience flags
 		bw.write(0, 1) // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 17, 2); !got {
+		if got := skipGASpecificConfig(r, 17, 2, new(uint32)); !got {
 			t.Error("aot=17 extensionFlag=1: want true")
 		}
 	}
@@ -232,7 +232,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 3) // resilience flags
 		bw.write(0, 1) // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 20, 2); !got {
+		if got := skipGASpecificConfig(r, 20, 2, new(uint32)); !got {
 			t.Error("aot=20 extensionFlag=1: want true")
 		}
 	}

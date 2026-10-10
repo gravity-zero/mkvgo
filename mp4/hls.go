@@ -486,6 +486,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if err != nil {
 			return errf("convert frame: %w", err)
 		}
+		ft.outTrack.learnFrame(data)
 		if ft.outTrack.sampleEntry == nil {
 			entry, err := ft.outTrack.spec.sampleEntry(&ft.outTrack.mkv, data)
 			if err != nil {

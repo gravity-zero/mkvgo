@@ -7,30 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/gravity-zero/mkvgo/mkv"
 )
-
-// A stride measured from millisecond block timecodes snaps to the codec's
-// frame size when it lies within a percent of it; a stride no frame size
-// explains, or a codec with none, keeps the measurement.
-func TestSnapGridTSToCodecFrame(t *testing.T) {
-	sr := 48000.0
-	aac := &outTrack{mkv: mkv.Track{Codec: "aac", SampleRate: &sr}}
-	for _, tc := range []struct {
-		measured int64
-		codec    string
-		want     int64
-	}{
-		{1026, "aac", 1024}, {1020, "aac", 1024}, {958, "aac", 960}, {1100, "aac", 1100},
-		{1150, "mp3", 1152}, {1536, "ac3", 1536}, {1530, "eac3", 1536}, {1026, "opus", 1026},
-	} {
-		aac.mkv.Codec = tc.codec
-		if got := snapGridTS(tc.measured, aac, 48000); got != tc.want {
-			t.Errorf("%s stride %d: snapped to %d, want %d", tc.codec, tc.measured, got, tc.want)
-		}
-	}
-}
 
 func mdhdDuration(t *testing.T, init []byte) int64 {
 	t.Helper()

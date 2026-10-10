@@ -486,6 +486,7 @@ func (p *GrowingHLSPlan) extendHeadLocked(pt *planTrack, b mkv.Block) error {
 		if err != nil {
 			return err
 		}
+		pt.ft.outTrack.learnFrame(data)
 		if pt.ft.outTrack.sampleEntry == nil {
 			entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
 			if err != nil {

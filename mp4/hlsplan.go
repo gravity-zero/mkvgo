@@ -580,6 +580,7 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 			if err != nil {
 				return false, err
 			}
+			pt.ft.outTrack.learnFrame(data)
 			if pt.ft.outTrack.sampleEntry == nil {
 				entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
 				if err != nil {

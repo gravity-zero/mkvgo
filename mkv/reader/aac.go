@@ -21,6 +21,9 @@ type AACConfig struct {
 	// 0 when no SBR is signalled.
 	SampleRate, OutputRate float64
 	SBR, PS                bool
+	// FrameLength is the samples a core frame covers (1024, or 960 when the
+	// GASpecificConfig sets frameLengthFlag); 1024 when the config does not say.
+	FrameLength uint32
 }
 
 // aacConfigChannels maps an AAC channelConfiguration to a channel count. Index
@@ -56,7 +59,7 @@ var aacSampleRates = [16]uint32{
 func ParseAACConfig(asc []byte) AACConfig {
 	r := &bitReader{data: asc}
 	aot := getAudioObjectType(r)
-	c := AACConfig{ObjectType: aot, CoreObjectType: aot}
+	c := AACConfig{ObjectType: aot, CoreObjectType: aot, FrameLength: 1024}
 	baseRate := readSamplingFrequency(r)
 	cc := r.bits(4)
 
@@ -77,7 +80,7 @@ func ParseAACConfig(asc []byte) AACConfig {
 	// GASpecificConfig. Mainstream decoders only look for it when SBR was not
 	// already signalled explicitly, so walk the GASpecificConfig to position the
 	// reader, then probe.
-	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc) {
+	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc, &c.FrameLength) {
 		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
 			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
 				c.SBR = true
@@ -178,11 +181,13 @@ func isGAObjectType(aot uint32) bool {
 // §4.4.1) so the reader is positioned at any trailing sync extension. It returns
 // false - and leaves the position unusable - when the layout cannot be walked
 // (a program config element) or the buffer runs out.
-func skipGASpecificConfig(r *bitReader, aot, cc uint32) bool {
+func skipGASpecificConfig(r *bitReader, aot, cc uint32, frameLength *uint32) bool {
 	if cc == 0 {
 		return false // program_config_element: not walked
 	}
-	r.bits(1)           // frameLengthFlag
+	if r.bits(1) == 1 { // frameLengthFlag: 960-sample frames
+		*frameLength = 960
+	}
 	if r.bits(1) == 1 { // dependsOnCoreCoder
 		r.bits(14) // coreCoderDelay
 	}

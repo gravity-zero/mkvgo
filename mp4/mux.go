@@ -35,7 +35,11 @@ type outTrack struct {
 	mp4ID       uint32 // 1-based MP4 track_ID
 	sampleEntry []byte // pre-built stsd sample entry (validated up front)
 	frameDurMs  int64  // duration hint for the final sample (0 = unknown)
-	mp3Delay    bool   // Options.MP3ContainerDelay: carry an MP3 delay as an edit list
+	// frameSamples is the samples one frame covers at the track's rate, from
+	// its header (frameSamplesFromHeader) or its first payload (learnFrame); 0 unknown.
+	frameSamples int64
+	frameLearned bool
+	mp3Delay     bool // Options.MP3ContainerDelay: carry an MP3 delay as an edit list
 	// conv, when non-nil (Options.FrameConverter claimed this track), re-encodes
 	// each frame just before it is written to a segment. The track's identity
 	// (Codec, CodecPrivate, spec) has already been rebound to the output codec.
@@ -283,6 +287,7 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			frameDurMs: frameDurationMs(t),
 			mp3Delay:   o.MP3ContainerDelay,
 		}
+		ot.frameSamples = frameSamplesFromHeader(&t)
 		if o.ContentHashes {
 			ot.hasher = sha256.New()
 		}
@@ -455,6 +460,7 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 		if err != nil {
 			return 0, err
 		}
+		t.learnFrame(data)
 		// Codecs without CodecPrivate derive their config box from the first frame.
 		if t.sampleEntry == nil {
 			entry, err := t.spec.sampleEntry(&t.mkv, data)
