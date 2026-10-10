@@ -266,6 +266,18 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 
 	fts := make([]*fragTrack, len(media))
 	routing := make(map[uint64]*fragTrack, len(media))
+	// Best-effort cleanup of the per-track temp files, armed before the first is created.
+	defer func() {
+		for _, ft := range fts {
+			if ft == nil {
+				continue
+			}
+			if ft.tmp != nil {
+				ft.tmp.Close()
+			}
+			_ = fs.DoRemove(ft.tmpPath)
+		}
+	}()
 	for i, t := range media {
 		tmpPath := filepath.Join(outputDir, fmt.Sprintf(".mkvgo-hls-t%d.tmp", t.mp4ID))
 		tmp, cerr := fs.DoCreate(tmpPath)
@@ -278,15 +290,6 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 		routing[t.mkv.ID] = fts[i]
 	}
-	// Best-effort cleanup of the per-track temp files.
-	defer func() {
-		for _, ft := range fts {
-			if ft.tmp != nil {
-				ft.tmp.Close()
-			}
-			_ = fs.DoRemove(ft.tmpPath)
-		}
-	}()
 
 	// Phase 1 - stream every sample, buffering media bytes to the per-track
 	// temp files and collecting subtitle cues (source-specific walk).
