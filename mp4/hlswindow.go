@@ -81,6 +81,16 @@ func (p *HLSPlan) window(ctx context.Context, n int) (b *windowBundle, built boo
 
 // buildWindow reads the n-th window once and frames every rendition of it.
 func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error) {
+	release, waited, err := acquireWalk(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if waited {
+		p.winMu.Lock()
+		p.stats.SlotWaits++
+		p.winMu.Unlock()
+	}
 	segStart := p.bounds[n]
 	var segEnd int64 = 1<<63 - 1
 	if n+1 < p.segCount {
@@ -273,6 +283,9 @@ type HLSPlanStats struct {
 	// waited on a build in flight instead of starting a walk of their own.
 	SharedRenditions int64
 	WaitedBuilds     int64
+	// SlotWaits is the number of walks that queued for a process slot
+	// (SetMaxConcurrentWalks) before they could read.
+	SlotWaits int64
 	// Evictions is the number of windows the byte budget pushed out before
 	// their renditions were collected.
 	Evictions int64

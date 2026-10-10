@@ -37,6 +37,8 @@ func CmdServe(args []string) {
 	// windowCache: what the plan may hold for a window's un-collected renditions.
 	// 0 lets it size itself from the source (see mp4.Options.WindowCacheBytes).
 	var windowCache int64
+	// maxWalks: how many windows the process builds at once (0 = no cap).
+	maxWalks := 0
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -53,6 +55,15 @@ func CmdServe(args []string) {
 			i++
 			if i < len(args) {
 				targetName = args[i]
+			}
+		case "-max-walks", "--max-walks":
+			i++
+			if i < len(args) {
+				n, err := strconv.Atoi(args[i])
+				if err != nil || n < 0 {
+					Fatal("-max-walks: expected a non-negative count, got " + args[i])
+				}
+				maxWalks = n
 			}
 		case "-window-cache", "--window-cache":
 			i++
@@ -101,6 +112,7 @@ func CmdServe(args []string) {
 
 	opts := f.options(src)
 	opts.WindowCacheBytes = windowCache
+	mp4.SetMaxConcurrentWalks(maxWalks)
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}

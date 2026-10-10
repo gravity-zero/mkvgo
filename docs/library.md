@@ -482,6 +482,20 @@ st := plan.Stats()
 log.Printf("windows: %d walks, %d of them rebuilds, %d shared", st.WindowBuilds, st.WindowRebuilds, st.SharedRenditions)
 ```
 
+**Bounding memory under load: `mp4.SetMaxConcurrentWalks`.** A window in
+flight holds its media - 6 to 10 MiB of 1080p, ~15 MiB of 20 Mbit/s 2160p -
+from the start of its walk until the segment is sent. Nothing in a plan bounds
+how many windows the process builds at once, so when the CPU saturates and
+requests queue, memory follows the queue. `SetMaxConcurrentWalks(n)` caps the
+walks in flight across every plan of the process; the others wait their turn
+(or give up with their context), and memory is bounded by n windows.
+`WalksInFlight()` reports the current count, `Stats().SlotWaits` how many of
+a plan's walks had to queue. Zero lifts the cap.
+
+```go
+mp4.SetMaxConcurrentWalks(runtime.NumCPU())
+```
+
 **Subtitles without walking the file: `Options.SubtitleIndex`.** A Matroska
 file indexes its video, not its subtitles: to serve a WebVTT segment the plan
 walks the clusters around it - and the video in them. The first subtitle
