@@ -135,7 +135,7 @@ func TestFingerprint_MatchesCompareBlocksDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, digests, err := digestTracks(context.Background(), path, mkv.FSFrom(nil), nil)
+	_, digests, err := digestTracks(context.Background(), path, mkv.FSFrom(nil), nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

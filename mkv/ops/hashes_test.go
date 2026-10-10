@@ -45,7 +45,7 @@ func TestContentHashesRoundTrip(t *testing.T) {
 	}
 
 	// Exactly one CONTENT_SHA256 tag after the double hash (replaced, not stacked).
-	c, _, err := digestTracks(ctx, hashed, nil, nil)
+	c, _, err := digestTracks(ctx, hashed, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ const ContentHashTag = "CONTENT_SHA256"
 // replaced, so the operation is idempotent.
 func WriteContentHashes(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
-	c, digests, err := digestTracks(ctx, srcPath, fs, mkv.ProgressFrom(opts))
+	c, digests, err := digestTracks(ctx, srcPath, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func (m HashMismatch) String() string {
 // content hashes at all (run WriteContentHashes first).
 func VerifyContentHashes(ctx context.Context, path string, opts ...mkv.Options) ([]HashMismatch, error) {
 	fs := mkv.FSFrom(opts)
-	c, digests, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts))
+	c, digests, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
 		return nil, err
 	}

@@ -301,6 +301,10 @@ type HLSPlanStats struct {
 	// the span less the other tracks' lightest share seen, came out too small
 	// and were assembled by copy instead: each one lowers that share.
 	ArenaFallbacks int64
+	// UndeclaredZlibBlocks is the number of subtitle blocks the plan inflated
+	// although their track declares no compression: a muxer compressed the
+	// track and lost the ContentEncodings (mkvgo diagnose reports such tracks).
+	UndeclaredZlibBlocks int64
 	// Evictions is the number of windows the byte budget pushed out before
 	// their renditions were collected.
 	Evictions int64

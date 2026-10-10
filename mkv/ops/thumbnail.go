@@ -87,7 +87,10 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 		if b.TrackNumber != video.ID || !b.Keyframe {
 			continue
 		}
-		data := video.RestoreHeader(b.Data)
+		data, err := video.DecodePayload(b.Data)
+		if err != nil {
+			return nil, err
+		}
 		return packKeyframe(video, b.Timecode, data)
 	}
 }

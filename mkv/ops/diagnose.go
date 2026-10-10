@@ -122,6 +122,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		needWalk = true // trailing bytes: junk, or a crashed in-place journal
 	}
 
+	d.Findings = append(d.Findings, undeclaredCompressionFindings(ctx, path, fs, meta)...)
+
 	ch := cueHealthFrom(meta, 0)
 	// A file with no Cues is walked from its first cluster - unless the
 	// tolerant walk is about to read it whole anyway, which finds the same
@@ -429,4 +431,65 @@ func discardN(r *bufio.Reader, n int64) error {
 		n -= step
 	}
 	return nil
+}
+
+// undeclaredCompressionFindings probes the first cued block of each subtitle
+// track that declares no compression: a zlib stream there means the muxer
+// compressed the track and lost its ContentEncodings. One cluster read per track.
+func undeclaredCompressionFindings(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container) []Finding {
+	var out []Finding
+	for i := range meta.Tracks {
+		t := &meta.Tracks[i]
+		if t.Type != mkv.SubtitleTrack || t.Compression != mkv.CompressionNone {
+			continue
+		}
+		var cue *mkv.CuePoint
+		for k := range meta.Cues {
+			if meta.Cues[k].Track == t.ID {
+				cue = &meta.Cues[k]
+				break
+			}
+		}
+		if cue == nil {
+			continue // no cue to seat on: a walk would be the only way, and diagnose stays head-only here
+		}
+		recovered, err := probeUndeclaredZlib(ctx, path, fs, meta, t, cue)
+		if err != nil || !recovered {
+			continue
+		}
+		out = append(out, Finding{
+			Kind:   "undeclared-compression",
+			Detail: fmt.Sprintf("subtitle track %d (%s) stores zlib-compressed blocks but declares no ContentCompression; mkvgo inflates them on read", t.ID, t.Codec),
+			Remedy: "re-mux the track so the file declares the compression, or decompress it",
+		})
+	}
+	return out
+}
+
+// probeUndeclaredZlib reads the cued block of t and reports whether it inflated as an undeclared zlib stream.
+func probeUndeclaredZlib(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container, t *mkv.Track, cue *mkv.CuePoint) (bool, error) {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReaderAt(f, meta.Info.TimecodeScale, meta.SegmentStart+cue.ClusterPos)
+	if err != nil {
+		return false, err
+	}
+	br.KeepTracks(t.ID)
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		blk, err := br.Next()
+		if err != nil {
+			return false, err
+		}
+		if blk.TrackNumber != t.ID {
+			continue
+		}
+		_, recovered, err := t.DecodePayloadRecovered(blk.Data)
+		return recovered, err
+	}
 }

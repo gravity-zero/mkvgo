@@ -1,7 +1,11 @@
 package mkv
 
 import (
+	"bytes"
+	"compress/bzip2"
+	"compress/zlib"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -566,6 +570,76 @@ type Block struct {
 }
 
 // RestoreHeader prepends the stripped header bytes to block data.
+// DecodePayload returns a block's payload as content: inflated when the track
+// declares zlib or bzlib compression, its stripped header put back, untouched
+// otherwise. An MKV-to-MKV copy must NOT call it (it copies compressed blocks
+// with their declaration); a consumer that interprets the bytes must.
+func (t *Track) DecodePayload(data []byte) ([]byte, error) {
+	out, _, err := t.DecodePayloadRecovered(data)
+	return out, err
+}
+
+// DecodePayloadRecovered is DecodePayload that also reports a subtitle block
+// inflated without a declaration (an undeclared zlib stream, see below).
+func (t *Track) DecodePayloadRecovered(data []byte) (out []byte, recovered bool, err error) {
+	switch t.Compression {
+	case CompressionZlib:
+		out, err = inflatePayload(data, func(r io.Reader) (io.Reader, error) {
+			zr, err := zlib.NewReader(r)
+			if err != nil {
+				return nil, fmt.Errorf("track %d: the block is declared zlib-compressed but does not start a zlib stream: %w", t.ID, err)
+			}
+			return zr, nil
+		})
+		return out, false, err
+	case CompressionBzlib:
+		out, err = inflatePayload(data, func(r io.Reader) (io.Reader, error) { return bzip2.NewReader(r), nil })
+		return out, false, err
+	case CompressionNone:
+		// A subtitle block that opens with a zlib header where no PGS segment
+		// type nor cue text can: a muxer compressed the track and lost the
+		// declaration (seen on several UHD remuxes). Only a stream that inflates
+		// to its end with a valid checksum counts; anything else stays as is.
+		if t.Type == SubtitleTrack && looksZlib(data) {
+			if out, err := inflatePayload(data, func(r io.Reader) (io.Reader, error) { return zlib.NewReader(r) }); err == nil {
+				return out, true, nil
+			}
+		}
+		return data, false, nil
+	case CompressionHeaderStrip:
+		return t.RestoreHeader(data), false, nil
+	default:
+		return nil, false, fmt.Errorf("track %d is compressed with %s, which mkvgo cannot decode (zlib and bzlib are supported)", t.ID, t.Compression)
+	}
+}
+
+// looksZlib reports a zlib stream header: deflate method, window, and the CMF/FLG check that no PGS segment type (0x14-0x17, 0x80) ever passes.
+func looksZlib(b []byte) bool {
+	return len(b) >= 2 && b[0]&0x0F == 8 && b[0]>>4 <= 7 && (int(b[0])<<8|int(b[1]))%31 == 0
+}
+
+// MaxDecodedPayload bounds one inflated block: a PGS display set runs to a few hundred KiB, and a stream may claim any expansion ratio.
+const MaxDecodedPayload = 8 << 20
+
+// inflatePayload decompresses one block through the reader open builds, bounded.
+func inflatePayload(data []byte, open func(io.Reader) (io.Reader, error)) ([]byte, error) {
+	zr, err := open(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if c, ok := zr.(io.Closer); ok {
+		defer c.Close()
+	}
+	out, err := io.ReadAll(io.LimitReader(zr, MaxDecodedPayload+1)) // one byte past the ceiling tells "at" from "over" it
+	if err != nil {
+		return nil, fmt.Errorf("inflating the block: %w", err)
+	}
+	if len(out) > MaxDecodedPayload {
+		return nil, fmt.Errorf("a block inflates past %d bytes, which no frame or cue does", MaxDecodedPayload)
+	}
+	return out, nil
+}
+
 func (t *Track) RestoreHeader(data []byte) []byte {
 	if len(t.HeaderStripping) == 0 {
 		return data

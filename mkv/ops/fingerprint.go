@@ -30,9 +30,11 @@ type FingerprintReport struct {
 	Tracks []TrackFingerprint `json:"tracks"`
 }
 
-// TrackFingerprint is one track's content identity: SHA256 is the same
-// payload digest (in decode order) CompareBlocks computes to prove a
-// round-trip byte-identical.
+// TrackFingerprint is one track's content identity: SHA256 digests the
+// frames as CONTENT - a compressed track inflated, a stripped header put back
+// - so the same frames hash the same whatever the container did to them. It
+// equals the stored-bytes digest CompareBlocks and the CONTENT_SHA256 tags use
+// only for a track stored as is.
 type TrackFingerprint struct {
 	TrackID uint64 `json:"track_id"`
 	Type    string `json:"type"`
@@ -108,7 +110,7 @@ func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 	if isMP4Ext(path) {
 		return digestTracksMP4(ctx, path, fs, progress)
 	}
-	c, digests, err := digestTracks(ctx, path, fs, progress)
+	c, digests, err := digestTracks(ctx, path, fs, progress, true)
 	if err != nil && errors.Is(err, reader.ErrNotMatroska) {
 		return digestTracksMP4(ctx, path, fs, progress)
 	}
@@ -142,5 +144,5 @@ func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 	if err := mp4.RemuxFromMP4(ctx, "src.mp4", "out.mkv", mp4.Options{FS: mem.FS(), Progress: progress}); err != nil {
 		return nil, nil, fmt.Errorf("remux to in-memory matroska: %w", err)
 	}
-	return digestTracks(ctx, "out.mkv", mem.FS(), nil)
+	return digestTracks(ctx, "out.mkv", mem.FS(), nil, true)
 }

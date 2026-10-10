@@ -262,6 +262,18 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 				}
 				return nil, nil, errf("track %d: codec %q cannot be remuxed to MP4 (set Options.SkipUnsupported to drop it)", t.ID, t.Codec)
 			}
+			// zlib and bzlib payloads are inflated into the samples; a scheme
+			// mkvgo cannot decode would reach the player still compressed.
+			switch t.Compression {
+			case mkv.CompressionNone, mkv.CompressionHeaderStrip, mkv.CompressionZlib, mkv.CompressionBzlib:
+			default:
+				if o.SkipUnsupported {
+					o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+						Reason: "ContentCompression " + t.Compression.String() + " cannot be decoded"})
+					continue
+				}
+				return nil, nil, errf("track %d: ContentCompression %s cannot be decoded for MP4 (zlib and bzlib are) - re-mux the track uncompressed first, or set Options.SkipUnsupported to drop it", t.ID, t.Compression)
+			}
 			spec = s
 		}
 		ot := &outTrack{
@@ -439,7 +451,10 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 			}
 			continue
 		}
-		data := t.mkv.RestoreHeader(b.Data)
+		data, err := t.mkv.DecodePayload(b.Data)
+		if err != nil {
+			return 0, err
+		}
 		// Codecs without CodecPrivate derive their config box from the first frame.
 		if t.sampleEntry == nil {
 			entry, err := t.spec.sampleEntry(&t.mkv, data)

@@ -78,7 +78,10 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 			continue
 		}
 		w := writers[blk.TrackNumber]
-		data := track.RestoreHeader(blk.Data)
+		data, err := track.DecodePayload(blk.Data)
+		if err != nil {
+			return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
+		}
 		if _, err := w.Write(data); err != nil {
 			return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
 		}

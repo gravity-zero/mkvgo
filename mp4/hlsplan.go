@@ -546,7 +546,10 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 	}
 	err := p.walkBlocks(ctx, p.offsets[0], -1, false, func(b mkv.Block, pt *planTrack) (bool, error) {
 		if pt.firstPtsMs < 0 {
-			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+			data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+			if err != nil {
+				return false, err
+			}
 			if pt.ft.outTrack.sampleEntry == nil {
 				entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
 				if err != nil {
@@ -870,6 +873,16 @@ func (p *HLSPlan) iframePlaylist(ctx context.Context) ([]byte, error) {
 	p.iframe = pl
 	p.iframes = iframes
 	return pl, nil
+}
+
+// noteRecovered counts a subtitle block inflated without a declaration (Stats.UndeclaredZlibBlocks).
+func (p *HLSPlan) noteRecovered(recovered bool) {
+	if !recovered {
+		return
+	}
+	p.winMu.Lock()
+	p.stats.UndeclaredZlibBlocks++
+	p.winMu.Unlock()
 }
 
 // buildMatroskaIframePlaylist performs the one-time structure-only walk: for
@@ -1205,7 +1218,10 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64)
 			p.learnTrackPos(n+1, ti, br.Pos())
 			continue
 		}
-		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+		data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+		if err != nil {
+			return nil, nil, none, err
+		}
 		if ti == inPlace.track {
 			inPlace.keep(data)
 		}
@@ -1422,7 +1438,10 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 				br.SetHeaderOnly(true) // the peek wants timecodes, never payloads
 				continue
 			}
-			data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+			data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+			if err != nil {
+				return nil, nil, err
+			}
 			windows[ti] = append(windows[ti], segSample{
 				fragSample: fragSample{size: uint32(len(data)),
 					ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe},
@@ -2299,7 +2318,13 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 			if b.TrackNumber != track.track.ID {
 				continue
 			}
-			if cue, ok := subCueFromBlock(track.track.Codec, b); ok {
+			cue, ok, recovered, err := subCueFromBlockRecovered(&track.track, b)
+			if err != nil {
+				st.err = err
+				return st.err
+			}
+			p.noteRecovered(recovered)
+			if ok {
 				if cue.EndMs <= cue.StartMs || cue.EndMs-cue.StartMs > subFastMaxCueDurMs {
 					st.noFast = true
 				}
@@ -2394,7 +2419,12 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 				if err != nil || b.TrackNumber != track.track.ID || (f == 0 && b.Timecode != e.TimeMs) {
 					return stale()
 				}
-				if cue, ok := subCueFromBlock(track.track.Codec, b); ok {
+				cue, ok, recovered, err := subCueFromBlockRecovered(&track.track, b)
+				if err != nil {
+					return true, err
+				}
+				p.noteRecovered(recovered)
+				if ok {
 					if cue.EndMs <= cue.StartMs || cue.EndMs-cue.StartMs > subFastMaxCueDurMs {
 						st.noFast = true
 					}

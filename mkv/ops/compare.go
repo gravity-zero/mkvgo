@@ -39,11 +39,11 @@ type trackDigest struct {
 // byte-identically - beyond what the metadata compare can show.
 func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
 	fs := mkv.FSFrom(opts)
-	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts))
+	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", pathA, err)
 	}
-	_, b, err := digestTracks(ctx, pathB, fs, nil)
+	_, b, err := digestTracks(ctx, pathB, fs, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", pathB, err)
 	}
@@ -68,7 +68,7 @@ func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts 
 		return nil, fmt.Errorf("no parts to compare against")
 	}
 	fs := mkv.FSFrom(opts)
-	_, whole, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts))
+	_, whole, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", path, err)
 	}
@@ -96,7 +96,7 @@ func digestConcat(ctx context.Context, paths []string, fs *mkv.FS) ([]trackDiges
 		for j, t := range c.Tracks {
 			order[t.ID] = j
 		}
-		if err := digestBlocksInto(ctx, p, fs, c.Info.TimecodeScale, order, accs, nil); err != nil {
+		if err := digestBlocksInto(ctx, p, fs, c.Info.TimecodeScale, order, accs, nil, nil); err != nil {
 			return nil, fmt.Errorf("digest part %d (%s): %w", i+1, p, err)
 		}
 	}
@@ -158,7 +158,8 @@ func sealTrackAccs(accs []*digestAcc) []trackDigest {
 // digestBlocksInto walks one file's blocks and folds each payload into the
 // accumulator its track maps to. The accumulators are the caller's, so several
 // files can be hashed as one stream (see digestConcat).
-func digestBlocksInto(ctx context.Context, path string, fs *mkv.FS, timecodeScale int64, order map[uint64]int, accs []*digestAcc, progress mkv.ProgressFunc) error {
+// decode, when not nil, names the tracks whose payloads are hashed as content (inflated, header restored) rather than as stored.
+func digestBlocksInto(ctx context.Context, path string, fs *mkv.FS, timecodeScale int64, order map[uint64]int, accs []*digestAcc, progress mkv.ProgressFunc, decode map[uint64]*mkv.Track) error {
 	f, err := fs.DoOpen(path)
 	if err != nil {
 		return err
@@ -188,25 +189,41 @@ func digestBlocksInto(ctx context.Context, path string, fs *mkv.FS, timecodeScal
 		if !ok {
 			continue // block for an undeclared track: not attributable
 		}
+		payload := blk.Data
+		if t := decode[blk.TrackNumber]; t != nil {
+			if payload, err = t.DecodePayload(blk.Data); err != nil {
+				return err
+			}
+		}
 		accs[i].d.blocks++
-		accs[i].d.bytes += int64(len(blk.Data))
-		_, _ = accs[i].h.Write(blk.Data) // hash.Hash.Write never errors
+		accs[i].d.bytes += int64(len(payload))
+		_, _ = accs[i].h.Write(payload) // hash.Hash.Write never errors
 	}
 }
 
 // digestTracks walks every block of the file and returns the parsed container
 // plus one digest per track, ordered like Container.Tracks.
-func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
+// decoded hashes each track as content - inflated, stripped header restored -
+// the way Fingerprint does; false hashes the bytes as stored, the way the
+// CONTENT_SHA256 tags and CompareBlocks do.
+func digestTracks(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, decoded bool) (*mkv.Container, []trackDigest, error) {
 	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, nil, err
 	}
 	order := make(map[uint64]int, len(c.Tracks))
-	for i, t := range c.Tracks {
-		order[t.ID] = i
+	var decode map[uint64]*mkv.Track
+	if decoded {
+		decode = make(map[uint64]*mkv.Track, len(c.Tracks))
+	}
+	for i := range c.Tracks {
+		order[c.Tracks[i].ID] = i
+		if decoded {
+			decode[c.Tracks[i].ID] = &c.Tracks[i]
+		}
 	}
 	accs := newTrackAccs(len(c.Tracks))
-	if err := digestBlocksInto(ctx, path, fs, c.Info.TimecodeScale, order, accs, progress); err != nil {
+	if err := digestBlocksInto(ctx, path, fs, c.Info.TimecodeScale, order, accs, progress, decode); err != nil {
 		return nil, nil, err
 	}
 	return c, sealTrackAccs(accs), nil

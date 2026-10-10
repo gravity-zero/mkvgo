@@ -482,7 +482,10 @@ func (p *GrowingHLSPlan) settleLeadLocked() {
 // HLSPlan.peekHead's per-block logic exactly, applied incrementally.
 func (p *GrowingHLSPlan) extendHeadLocked(pt *planTrack, b mkv.Block) error {
 	if pt.firstPtsMs < 0 {
-		data := pt.ft.outTrack.mkv.RestoreHeader(b.Data)
+		data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+		if err != nil {
+			return err
+		}
 		if pt.ft.outTrack.sampleEntry == nil {
 			entry, err := pt.ft.outTrack.spec.sampleEntry(&pt.ft.outTrack.mkv, data)
 			if err != nil {

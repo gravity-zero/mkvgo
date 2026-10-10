@@ -462,7 +462,11 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 			return errf("read block: %w", err)
 		}
 		if st, ok := subRouting[b.TrackNumber]; ok {
-			if cue, ok := subCueFromBlock(st.track.Codec, b); ok {
+			cue, ok, err := subCueFromBlock(&st.track, b)
+			if err != nil {
+				return err
+			}
+			if ok {
 				st.cues = append(st.cues, cue)
 			}
 			continue
@@ -471,7 +475,10 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if !ok {
 			continue
 		}
-		data := ft.outTrack.mkv.RestoreHeader(b.Data)
+		data, err := ft.outTrack.mkv.DecodePayload(b.Data)
+		if err != nil {
+			return err
+		}
 		data, err = ft.outTrack.convertFrame(data)
 		if err != nil {
 			return errf("convert frame: %w", err)
@@ -495,22 +502,32 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 // subCueFromBlock converts one Matroska subtitle block into a WebVTT cue. ASS
 // dialogue lines are flattened to their plain text (styling is lost - WebVTT
 // has no ASS form); SRT and WebVTT payloads pass through.
-func subCueFromBlock(codec string, b mkv.Block) (subtitle.Cue, bool) {
+func subCueFromBlock(t *mkv.Track, b mkv.Block) (subtitle.Cue, bool, error) {
+	cue, ok, _, err := subCueFromBlockRecovered(t, b)
+	return cue, ok, err
+}
+
+// subCueFromBlockRecovered is subCueFromBlock that also reports an undeclared zlib block it inflated.
+func subCueFromBlockRecovered(t *mkv.Track, b mkv.Block) (subtitle.Cue, bool, bool, error) {
+	data, recovered, err := t.DecodePayloadRecovered(b.Data)
+	if err != nil {
+		return subtitle.Cue{}, false, false, err
+	}
 	var text string
-	switch canonicalSubCodec(codec) {
+	switch canonicalSubCodec(t.Codec) {
 	case "ass", "ssa":
-		text = subtitle.FlattenASSBlock(b.Data)
+		text = subtitle.FlattenASSBlock(data)
 	default: // srt, webvtt: the block payload is the cue text
-		text = strings.TrimRight(string(b.Data), "\n\r\x00")
+		text = strings.TrimRight(string(data), "\n\r\x00")
 	}
 	if strings.TrimSpace(text) == "" {
-		return subtitle.Cue{}, false
+		return subtitle.Cue{}, false, recovered, nil
 	}
 	cue := subtitle.Cue{StartMs: b.Timecode, Text: text}
 	if b.Duration > 0 {
 		cue.EndMs = b.Timecode + b.Duration
 	}
-	return cue, true
+	return cue, true, recovered, nil
 }
 
 // pickVideoFrag returns the first video track, the one whose keyframes drive the
