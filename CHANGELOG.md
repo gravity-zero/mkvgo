@@ -98,9 +98,15 @@ All notable changes to mkvgo are documented here. The format is based on
   rounded to the millisecond: eight AAC frames read as 171 ms, 1026 ticks
   instead of 1024, and the audio timeline ran 0.2 % slow - 11 s late at the
   end of a two-hour film, the plan's init declaring a different duration than
-  the full pass's. The measured stride now snaps to the codec's frame size
-  (AAC, MP3, AC-3, E-AC-3) when it lies within a percent of it; the
-  measurement stays for anything else.
+  the full pass's. The frame size now comes from the stream itself - the AAC
+  configuration's frame length and SBR rate, the E-AC-3 syncframe's block
+  count, the DTS core header, the MP3 version, a fixed FLAC block size,
+  TrueHD by specification - and the measured stride yields to it; a codec the
+  stream does not size snaps to a known frame size within a percent, and one
+  no table knows is measured over the whole track from a trusted
+  NUMBER_OF_FRAMES count instead of two neighbouring blocks. A permanent
+  drift control in the tests compares every output presentation time with
+  the source timecodes, in both modes.
 - **Undeclared zlib on subtitle tracks.** Some muxers compressed PGS and text
   subtitles and dropped the `ContentEncodings`; the blocks then read as
   invalid display sets. A subtitle block whose track declares no compression

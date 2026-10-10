@@ -110,20 +110,18 @@ func codecFrameSamples(codec string) []int64 {
 }
 
 // snapGridTS replaces a stride measured from millisecond block timecodes by
-// the frame duration the stream states (within ten percent of the
-// measurement, against a gap), else by a frame size the codec is known to
-// use when one lies within a percent of it: the measurement carries the
-// rounding of two timecodes, up to a tick a frame, and a tick a frame is
-// eleven seconds over a two-hour film.
+// the frame duration the stream states, else by a frame size the codec is
+// known to use when one lies within a percent of it: the measurement carries
+// the rounding of two timecodes, up to a tick a frame, and a tick a frame is
+// eleven seconds over a two-hour film; a frame shorter than a millisecond
+// (TrueHD) cannot be measured from timecodes at all.
 func snapGridTS(measured int64, t *outTrack, mts uint32) int64 {
 	if measured <= 0 || t == nil || t.mkv.SampleRate == nil || *t.mkv.SampleRate <= 0 {
 		return measured
 	}
 	ticks := func(n int64) int64 { return int64(float64(n)*float64(mts)/(*t.mkv.SampleRate) + 0.5) }
 	if t.frameSamples > 0 {
-		if exact := ticks(t.frameSamples); within(exact, measured, 10) {
-			return exact
-		}
+		return ticks(t.frameSamples)
 	}
 	for _, n := range codecFrameSamples(t.mkv.Codec) {
 		if exact := ticks(n); within(exact, measured, 1) {
@@ -137,6 +135,37 @@ func snapGridTS(measured int64, t *outTrack, mts uint32) int64 {
 func within(a, b, pct int64) bool {
 	d := a - b
 	return d*100 <= a*pct && -d*100 <= a*pct
+}
+
+// longStrideTS measures the frame stride over the whole track - the span from
+// the first block to the last one over the frames between them, the count a
+// trusted NUMBER_OF_FRAMES statistic gives - for a codec whose frame size no
+// header or table knows: the rounding of two timecodes weighs nothing over
+// hours. 0 without a trusted count or a span.
+func longStrideTS(c *mkv.Container, t *outTrack, mts uint32, firstTC, lastTC, lastFrames int64) int64 {
+	if c == nil || t == nil {
+		return 0
+	}
+	st, ok := mkv.TrustedTrackStatistics(c)[t.mkv.ID]
+	slots := st.Frames - lastFrames
+	if !ok || slots <= 0 || lastTC <= firstTC {
+		return 0
+	}
+	span := tsScale(mts)(lastTC) - tsScale(mts)(firstTC)
+	return (span + slots/2) / slots
+}
+
+// refineStride settles a measured stride the stream could not confirm: a
+// header or table match stands; otherwise the whole-track measurement, when
+// it lies within a percent of the local one, replaces it.
+func refineStride(measured int64, c *mkv.Container, t *outTrack, mts uint32, firstTC, lastTC, lastFrames int64) int64 {
+	if measured <= 0 || snapGridTS(measured, t, mts) != measured || t.frameSamples > 0 {
+		return measured
+	}
+	if long := longStrideTS(c, t, mts, firstTC, lastTC, lastFrames); long > 0 && within(measured, long, 1) {
+		return long
+	}
+	return measured
 }
 
 // laceGridTS is deriveGridTS snapped to the track's frame size.

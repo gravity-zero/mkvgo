@@ -67,10 +67,9 @@ func TestFrameSamplesFromStream(t *testing.T) {
 	}
 }
 
-// A measured stride snaps to the frame the stream states even when the
-// millisecond rounding pushed it several percent off (a 5.33 ms frame read
-// as 5 or 6 ms), to a known codec size within a percent otherwise, and stays
-// as measured when neither applies.
+// A measured stride yields to the frame the stream states whatever the
+// millisecond rounding or a gap did to the measurement, snaps to a known codec
+// size within a percent otherwise, and stays as measured when neither applies.
 func TestSnapGridTSToCodecFrame(t *testing.T) {
 	rate := 48000.0
 	mk := func(codec string, frame int64) *outTrack {
@@ -89,7 +88,8 @@ func TestSnapGridTSToCodecFrame(t *testing.T) {
 		{"E-AC-3 768-sample frames, exact", mk("eac3", 768), 768, 768},
 		{"DTS 512, 86 ms / 8", mk("dts", 512), 516, 512},
 		{"DTS unknown header, 86 ms / 8 by the codec list", mk("dts", 0), 516, 512},
-		{"header contradicted by a gap keeps the measurement", mk("aac", 1024), 1500, 1500},
+		{"header stands against a gap between the first blocks", mk("aac", 1024), 1500, 1024},
+		{"TrueHD frames under the timecode resolution", mk("truehd", 40), 24, 40},
 		{"codec list only, AAC", mk("aac", 0), 1026, 1024},
 		{"MP3 LSF by the list", mk("mp3", 0), 574, 576},
 		{"no size known", mk("opus", 0), 1026, 1026},

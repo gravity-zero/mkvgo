@@ -358,6 +358,8 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		scale := tsScale(ft.timescale)
 		if pt.gridTS <= 0 { // peekHead may already have recovered a no-DefaultDuration stride
 			pt.gridTS = audioGridTS(ft.outTrack, ft.timescale)
+		} else if ft.outTrack.mkv.DefaultDurationNs <= 0 {
+			pt.gridTS = refineStride(pt.gridTS, c, ft.outTrack, ft.timescale, pt.firstPtsMs, lastPts[i], lastFrames[i])
 		}
 		switch {
 		case pt.gridTS > 0:
