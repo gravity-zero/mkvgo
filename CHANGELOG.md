@@ -4,6 +4,19 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`RemuxToHLS` writes each track's temp file through a 1 MiB buffer.** The
+  first pass issued one `write` call per sample; a 28-minute 1080p episode
+  made 145 000 of them, now 974, and its first pass dropped from 0.72 s to
+  0.26 s of system time with the output byte-identical (1 311 and 3 879
+  files compared on two real sources). The segment copy itself was measured
+  and left alone: one `copy_file_range` per segment at 2 to 4 GiB/s, and a
+  user-space buffer costs the same; the idle time seen at the end of a run
+  is the kernel's dirty-page writeback, not the copy.
+
 ## [0.42.0] - 2026-10-10
 
 ### Added

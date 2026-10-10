@@ -15,6 +15,7 @@ package mp4
 // are held in RAM. Nothing holds the whole media.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -85,6 +86,36 @@ func filterSubTracks(subs []hlsSubTrack, keep map[uint64]bool) []hlsSubTrack {
 }
 
 const defaultSegmentMs = 6000
+
+// tempWriteBuf batches a track's per-sample temp-file writes into 1 MiB write calls.
+const tempWriteBuf = 1 << 20
+
+// bufferedTemp is a track's temp file behind a write buffer, flushed before a seek and on close.
+type bufferedTemp struct {
+	f mkv.WriteSeekCloser
+	w *bufio.Writer
+}
+
+func newBufferedTemp(f mkv.WriteSeekCloser) *bufferedTemp {
+	return &bufferedTemp{f: f, w: bufio.NewWriterSize(f, tempWriteBuf)}
+}
+
+func (b *bufferedTemp) Write(p []byte) (int, error) { return b.w.Write(p) }
+
+func (b *bufferedTemp) Seek(off int64, whence int) (int64, error) {
+	if err := b.w.Flush(); err != nil {
+		return 0, err
+	}
+	return b.f.Seek(off, whence)
+}
+
+func (b *bufferedTemp) Close() error {
+	err := b.w.Flush()
+	if cerr := b.f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
 
 // fragTrack augments an outTrack with the fragmented-writer state: the media
 // timescale, the collected samples, the temp file holding their bytes, and the
@@ -241,7 +272,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if cerr != nil {
 			return nil, cerr
 		}
-		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t), tmp: tmp, tmpPath: tmpPath}
+		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t), tmp: newBufferedTemp(tmp), tmpPath: tmpPath}
 		if ts := mp4NativeTimescale(ps, t); ts != 0 {
 			fts[i].timescale, fts[i].ptsTS = ts, []int64{}
 		}
