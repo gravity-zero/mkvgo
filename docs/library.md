@@ -499,6 +499,72 @@ without `StreamFromFS`) serves `Open` from memory and counts it in
 that fails midway must end as a broken connection, never a short body a player
 could take for a whole segment.
 
+**A plan is bound to the file it was built on: `mp4.ErrSourceChanged`.** The
+plan's offsets are the source's; read against another file they yield that
+file's bytes under the old names and ETags. Every read of the source for a
+media segment (`Open`, `Resource`, `Segment`) or a subtitle resource (`.vtt`,
+whole or windowed) is bound to the file the plan saw when built, and a
+mismatch ends the call with an error that
+`errors.Is(err, mp4.ErrSourceChanged)` (the same value as
+`mkv.ErrSourceChanged`) matches:
+
+- A local file is verified on the open file itself at every read (`fstat`:
+  size, mtime and the OS file identity, so a file renamed over the source
+  with the same size and mtime counts as changed): no byte of another file is
+  ever copied. Its path is also stat'ed before a request, at most once a
+  second per plan, so a change is usually refused before the status line
+  goes out; within that second it is caught by the read's `fstat`, and a
+  streamed segment then ends as a cut connection. On a network mount the
+  path stat is a round trip: per served segment, open + `fstat` measured
+  1.8 ms and open + `fstat` + path stat 2.6 ms on an SMB share mounted in
+  WSL (35 µs either way on a local disk).
+- Once seen, the change is final for the plan: every later media or
+  subtitle request answers `ErrSourceChanged` before reading anything.
+- A source whose FS declares an identity (`mkv.FileIdentity` on its
+  `FileInfo`: `httpfs` and `s3fs` give the object's ETag, else its
+  `Last-Modified`) and whose reader takes a pin (`mkv.PinnedReader`) has
+  every read asked for that version (`If-Match` on an ETag,
+  `If-Unmodified-Since` on a date) and refused when the response does not
+  carry that validator: a replaced object answers `412` or a different
+  validator, nothing of it is returned, and no `Stat` is made per request -
+  the reads verify the source themselves. How far that goes depends on the
+  identity (`FileIdentity.Strong`): a strong ETag rules out two versions
+  mixed only if the server derives it from the bytes - S3 and MinIO do (an
+  MD5), nginx and Caddy do not: theirs come from size and mtime, and a file
+  replaced with the same size and mtime keeps its ETag (measured: the new
+  bytes are read under the old ETag). A `Last-Modified` date does not tell
+  apart two versions written within its second.
+- Any other FS is checked with one `DoStat` per request against the size,
+  mtime and identity recorded at build.
+- A plan that could not stat its source when built, and a growing source
+  (`PlanGrowingHLS`, whose file changes by design), are never checked.
+
+The contract for a server holding plans in a cache:
+
+- The error is final for that plan: it never serves a media or subtitle
+  segment again. Playlists, the init segment and the DASH manifest, built
+  once, still come back - they are not evidence the source is intact.
+- Drop the plan and build a new one over the same path (`PlanHLS`); the new
+  plan's resource names are the same, so a player already on the playlist
+  carries on. `mkvhttp.Handler` answers it as any resolver error (`502`) or,
+  once the status line is out, cuts the connection; a server that wants to
+  rebuild on its own calls `Open`/`Resource` itself.
+- `plan.SourceID()` names what the plan's URLs serve: the source (size,
+  mtime, identity), the packaging (its playlists and init segments, so the
+  options that shape them: segment duration, tracks, encryption) and the
+  mkvgo version that cuts the bytes, hashed once per plan (78 µs on a
+  1082-segment film, then free). The streamed segments' weak ETag carries
+  it. A segment name alone does not: `seg00042.m4s` of a replaced source is other bytes
+  under the same URL, which is why `mkvhttp` serves segments `no-cache` by
+  default. Mount the handler under the SourceID (`/hls/<SourceID>/...`) and a
+  replaced file gets new segment URLs; only then is
+  `mkvhttp.Options{Immutable: true}` safe. SourceID changes with the file
+  exactly as far as its identity does: not across an in-place rewrite of a
+  local file that restores the mtime, nor across a same-size, same-mtime
+  replacement behind nginx or Caddy.
+- Not caught: those two cases, and a server that sends neither an ETag nor
+  a `Last-Modified` (then only the size is compared).
+
 ```go
 h, err := plan.Open(ctx, "seg00042.m4s")
 if err != nil { return err }
@@ -2211,6 +2277,10 @@ mm, err := mp4.VerifyContentHashes(ctx, "out.mp4")
 
 The `mkv.FS` struct lets you swap out OS file operations. Pass it via `Options` to any operation. When `nil`, operations use the real filesystem.
 
+Two optional interfaces let an FS bind a reader to one version of a file, which an on-demand plan (`mp4.PlanHLS`) uses to refuse a replaced source instead of mixing it in: the `FileInfo` your `Stat` returns may implement `mkv.FileIdentity` (`Identity() string`, a token for the version: an ETag, a version id, a date; `Strong() bool`, true only for a token that changes with every change of the bytes), and the reader your `Open` returns may implement `mkv.PinnedReader` (`Pin(identity string)`, after which a read of any other version fails with `mkv.ErrSourceChanged`). `httpfs` and `s3fs` implement both; without them the plan stats the file before each read and compares size, mtime and identity.
+
+`mkv.FS.OpenContext`, when set, opens a reader whose reads end with a context; `DoOpenContext` falls back to `Open`. The on-demand plans open their source through it with the walk's context, so a remote read in flight is abandoned when every client waiting on the walk has gone. `httpfs` and `s3fs` set it.
+
 ```go
 import "github.com/gravity-zero/mkvgo/mkv"
 
@@ -2286,9 +2356,34 @@ fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file s
 
 Reads are cached in 512 KiB windows (configurable). The server must answer
 `206 Partial Content`; one that ignores `Range` gets an explicit error rather
-than a silent full download. The FS is read-only - for a remux whose source is
-remote and destination local, `httpfs.Hybrid()` routes URLs to HTTP and
-everything else (including writes) to the OS:
+than a silent full download. A `206` is taken only when it is coherent: its
+`Content-Range` starts at the offset asked, ends within the request and
+before its total, the total has not moved since the reader's first window
+(a moved total is `mkv.ErrSourceChanged`), and the body is exactly that many
+bytes - read through a cap, so an over-long body is refused, not buffered.
+`Stat` is one `HEAD` (one single-byte ranged `GET` where `HEAD` is not
+served): no window is transferred, and the `FileInfo` carries the size,
+`Last-Modified` as its mtime and the object's version (`mkv.FileIdentity`:
+the strong ETag, else `Last-Modified`, else a weak ETag; `Strong()` is true
+for a strong ETag only). Every window after a reader's first is asked for
+the version the first one declared (`If-Match` on a strong ETag,
+`If-Unmodified-Since` on `Last-Modified`), or the one `Pin`
+(`mkv.PinnedReader`) set before the first read, and must carry that
+validator: a different one, or a `412`, is `mkv.ErrSourceChanged`, a missing
+one an error. Once a reader has seen a version (or `Pin` set one), a `416`
+inside the size it knew means the object shrank and a `404` or `410` that it
+is gone: both are `mkv.ErrSourceChanged` - an on-demand plan's cache drops
+the plan, and rebuilding it reports the not-found plainly. A fresh reader's
+`404` stays a plain not-found error. Only a strong ETag derived from the bytes rules out a mix of
+versions (see `mp4.ErrSourceChanged` above for what nginx and Caddy send).
+
+Each request is bounded by `Options.RequestTimeout` (60 s by default,
+negative for none), and a reader opened through `DoOpenContext` - which an
+on-demand plan does for every read of its source - abandons its request in
+flight when the context ends, so a client that leaves frees the walk it was
+waiting on. The FS is read-only - for a remux whose source is remote and
+destination local, `httpfs.Hybrid()` routes URLs to HTTP and everything else
+(including writes) to the OS:
 
 ```go
 err := mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4",
@@ -2341,13 +2436,33 @@ Semantics:
 | --- | --- |
 | Methods | `GET`/`HEAD` only; `405` (with `Allow`) otherwise. `OPTIONS` gets a `204` CORS preflight response when `Options.AllowCORS` is set. |
 | Resource name | The request path with its leading slash trimmed. Mount under a prefix with `http.StripPrefix`. |
-| ETag | Strong: the SHA-256 of the resource's bytes, quoted. Deterministic -- two independent handlers over the same plan produce the identical ETag. |
-| Conditional GET | A matching `If-None-Match` gets a bare `304`. |
+| ETag | Strong for bytes in hand: the SHA-256 of the resource's bytes, quoted. Deterministic -- two independent handlers over the same plan produce the identical ETag. A streamed segment's is weak (size, `plan.SourceID()`, name). |
+| Conditional GET | A matching `If-None-Match` (weak comparison: `W/` prefixes do not count) gets a bare `304` that carries the `ETag` and `Cache-Control` of the `200`. |
 | Content-Type | From the `Resolver`, set on the response before `http.ServeContent` runs, so its own name-extension sniffing never overrides it. |
-| Range | Served by `http.ServeContent` over a `bytes.Reader` (no modtime -- the ETag already identifies the exact bytes). |
-| Cache-Control | `.m3u8`/`.mpd` get `no-cache` (their bytes name segments that can be re-derived); every other resource gets `public, max-age=31536000, immutable` -- safe because a segment/init name always maps to the same bytes for a given source (see "Deterministic outputs" below). |
+| Range | Served by `http.ServeContent` over a `bytes.Reader` (no modtime -- the ETag already identifies the exact bytes). A streamed segment (`Open`) takes one range at a time under a weak ETag; a `Range` sent with `If-Range` is ignored there, since a weak ETag never satisfies `If-Range`'s strong comparison and there is no `Last-Modified`: the whole resource comes back as `200`. |
+| Cache-Control | `no-cache` by default: a client keeps a resource and revalidates it on its ETag (a bare `304` when unchanged). A segment name maps to the same bytes for a given source, but not across a source replaced under the same path, and the name does not say which source it is. `Options{Immutable: true}` announces the init and media segments `public, max-age=31536000, immutable` -- set it only when the handler is mounted where the URL names the source's version (under `plan.SourceID()`); playlists and manifests stay `no-cache`. |
 | Errors | A `Resolver` error that is (or wraps, via `%w`) `mkvhttp.ErrNotFound` answers `404`; any other error answers `502` with a terse body. |
 | CORS | `Options{AllowCORS: true}` adds `Access-Control-Allow-Origin: *` and exposes the headers a player needs (`Content-Length`, `Content-Range`, `ETag`, `Accept-Ranges`), plus the `OPTIONS` preflight response above. |
+
+**Versioned URLs are the caller's to check.** `Handler` serves resource names; it neither builds nor routes URLs that carry a version, so it cannot refuse an old one. A server that mounts plans under `plan.SourceID()` (what makes `Options{Immutable: true}` safe) must answer an ID that is not the current plan's with `410` (or `404`) before serving anything, and drop the plan when it reports `mp4.ErrSourceChanged`: the rebuilt plan has another SourceID, so every URL of the old generation goes on answering `410` and none ever serves the new bytes. A request on the old plan while the file is being replaced is refused by the plan's own read checks, never served from the new file.
+
+```go
+// /hls/<SourceID>/<name>; current() returns the cached plan, building one when there is none.
+mux.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
+    id, name, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/hls/"), "/")
+    plan, err := current(r.Context())
+    if err != nil { http.Error(w, "unavailable", http.StatusServiceUnavailable); return }
+    if id != plan.SourceID() { http.Error(w, "gone", http.StatusGone); return }
+    if _, err := plan.Open(r.Context(), name); errors.Is(err, mp4.ErrSourceChanged) {
+        drop(plan) // the next request plans the new file, under a new SourceID
+        http.Error(w, "gone", http.StatusGone); return
+    }
+    r2 := r.Clone(r.Context()); r2.URL.Path = "/" + name
+    mkvhttp.Handler(plan, mkvhttp.Options{Immutable: true}).ServeHTTP(w, r2)
+})
+```
+
+This is what `mkvhttp/versioned_test.go` runs: an old URL answers `410` after the replacement (plain, ranged and conditional requests alike) and the new SourceID serves the new bytes. Limit: a SourceID changes only when the source's identity does - not after a rewrite in place that keeps the inode and the size and restores the mtime to the nanosecond; there the old URLs would serve the new bytes, and so would the plan itself.
 
 The CLI's `mkvgo serve` (see `docs/cli.md`) is this package wired to `mp4.PlanHLS` with a graceful-shutdown `net/http.Server`.
 
@@ -2364,11 +2479,12 @@ It streams straight from an `*os.File` via `http.ServeContent` -- the file is ne
 | Aspect | Behaviour |
 | --- | --- |
 | Methods | `GET`/`HEAD` only; `405` (with `Allow`) otherwise. `OPTIONS` gets a `204` CORS preflight response when `Options.AllowCORS` is set. |
-| Range | Full support (seeking/scrubbing), served by `http.ServeContent` directly over the open file. |
-| ETag | Strong, but O(1) in file size: the SHA-256 of `"<size>-<mtime-unix-nano>"` from a single `os.Stat`, never the file's content -- hashing a multi-gigabyte source on every request would defeat the point of a fast direct-play handler. |
+| Range | Full support (seeking/scrubbing), served by `http.ServeContent` directly over the open file. A `Range` with an `If-Range` on the current ETag gets its `206`; on another ETag, or on a date, the whole file (`200`). |
+| ETag | Strong, O(1) in file size: the SHA-256 of the size, the mtime to the nanosecond and the OS file identity (device and inode), taken by `fstat` on the descriptor whose bytes the response sends - never a stat of the path, so a file renamed over the served one between two requests or during one never puts one file's ETag on the other's bytes - and never the file's content -- hashing a multi-gigabyte source on every request would defeat the point of a fast direct-play handler. Like nginx's, Apache's and Caddy's (size and mtime), plus the identity: a file renamed over the served one changes it even with the same size and mtime. Not caught: a rewrite in place - same inode, same size - that restores the mtime to the nanosecond, before or during a transfer; on Windows, where there is no identity, a replacement with the same size and mtime. |
+| Last-Modified | Not sent, and `If-Modified-Since` is not honoured: a date to the second cannot tell apart two versions written within one second, and a client would take a `304` or a range of the other. The ETag validates instead. |
 | Conditional GET | A matching `If-None-Match` gets a bare `304`. |
 | Content-Type | From the extension, set before `http.ServeContent` runs so its own sniffing never overrides it: `.mkv` &rarr; `video/x-matroska`, `.webm` &rarr; `video/webm`, `.mp4`/`.m4v` &rarr; `video/mp4`, else `application/octet-stream`. |
-| Cache-Control | `public, max-age=31536000, immutable` -- the bytes at a given path never change. |
+| Cache-Control | `no-cache` (revalidated on the ETag); `Options{Immutable: true}` for a URL that names the file's version. |
 | Errors | Missing file answers `404`; any other open/stat error answers `500`. |
 | CORS | Same as `Handler`: `Options{AllowCORS: true}`. |
 

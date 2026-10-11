@@ -4,6 +4,122 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.44.0] - 2026-10-11
+
+### Changed
+
+- **`mkvhttp` serves init and media segments `no-cache` by default**, and
+  `FileHandler` its file, instead of `public, max-age=31536000, immutable`.
+  A segment name is the same for a source replaced under the same path, so a
+  year of immutable caching served the old file's segments against the new
+  playlist; a client now revalidates on the ETag (a bare `304` when
+  unchanged). `Options.Immutable` restores the old header for a handler
+  mounted where the URL names the source's version, under the new
+  `HLSPlan.SourceID()`; playlists and manifests stay `no-cache` either way.
+  `examples/hls-server`, which announced `immutable` on its playlists too,
+  now serves under `/hls/<SourceID>/` and redirects its entry points there.
+- **`FileHandler`'s ETag adds the file's identity and it no longer sends
+  `Last-Modified`.** The ETag stays strong, from the size and the mtime to the
+  nanosecond as nginx, Apache and Caddy do, plus the device and inode: a file
+  renamed over the served one with the same size and mtime answered `304`
+  and a range of itself to a client holding the old one. A date validator
+  cannot tell apart two versions within one second: `If-Modified-Since`
+  answered `304`, and a dated `If-Range` a range, for a file replaced within
+  that second; without `Last-Modified` both fall back to the whole file. A
+  `Range` with `If-Range` on the current ETag still gets its `206`.
+
+### Added
+
+- `mkv.FS.OpenContext` and `DoOpenContext`: a reader whose requests end with
+  a context. `httpfs` and `s3fs` set it, and the on-demand plans open their
+  source through it with the walk's context, so a remote read in flight is
+  abandoned once every client waiting on the walk has gone.
+- `httpfs.Options.RequestTimeout` and `s3fs.Options.RequestTimeout`: each
+  request is bounded, 60 s by default (`http.DefaultClient` has no timeout:
+  a server that stopped answering held a walk and its slot for good).
+- `mkv.FileIdentity` (`Identity`, `Strong`), `mkv.PinnedReader`,
+  `mkv.ErrSourceChanged`, `HLSPlan.SourceID()`: what the plan's URLs serve,
+  the source, the packaging (playlists and init segments, so the options) and
+  the mkvgo version hashed, so two packagings of one file never share it.
+
+### Fixed
+
+- **A client that gives up on the window build it started no longer fails
+  the clients waiting on that build.** The first request for a window ran the
+  walk under its own context; when that client went away the walk was
+  cancelled and every request waiting on it (a player fetching video and
+  audio in parallel) got `context canceled` too. The build now runs under a
+  context kept alive while anyone waits for it and cancelled only once the
+  last of them has gone, for `Resource` windows and `Open` tables alike.
+- **A plan refuses its media and subtitle segments once the source has
+  changed.** Every read of the source for `Open`, `Resource`, `Segment` and
+  the `.vtt` resources is bound to the file the plan was built on: a local
+  file is verified on the open file itself at every read (`fstat`: size,
+  mtime and the OS file identity, so a file renamed over the source with the
+  same size and mtime counts) and its path stat'ed at most once a second per
+  plan, a round trip on a network mount (open + `fstat` 1.8 ms, plus the path
+  stat 2.6 ms per segment on an SMB share); a remote object (`httpfs`,
+  `s3fs`) is read with `If-Match` on the ETag the plan saw, so a replaced
+  object answers `412` and nothing of it is returned; any other FS is
+  stat'ed before each read. A mismatch is `mp4.ErrSourceChanged` (the same
+  value as the new `mkv.ErrSourceChanged`) instead of another file's bytes at
+  the old offsets under the old ETag. `plan.SourceID()` names the file the
+  plan was built on, for a URL prefix or cache key, and the streamed
+  segments' weak ETag carries it. A plan without a stamp (`PlanGrowingHLS`,
+  a source the plan could not stat) is not checked. Once seen, the change is
+  final for the plan. The contract for a plan cache is in `docs/library.md`.
+- **`httpfs` stats with one `HEAD`, never a window download.** `Stat` fetched
+  the first 512 KiB window through a ranged `GET` to learn the size; it now
+  sends one `HEAD` (one single-byte ranged `GET` where `HEAD` is not served)
+  and reports `Last-Modified` as the mtime and the object's version
+  (`mkv.FileIdentity`: the strong ETag, else `Last-Modified`). A plan over
+  `httpfs` served through `Open` paid that window on every segment request.
+- **An `httpfs` reader is bound to one version of an object.** Every window
+  after the first is asked for the version the first one declared
+  (`If-Match` on a strong ETag, `If-Unmodified-Since` on `Last-Modified`), or
+  the one `Pin` (`mkv.PinnedReader`) set, and must carry that validator: a
+  different one or a `412` is `mkv.ErrSourceChanged`, a missing one an error
+  (a response without it was taken as the right version). Only a strong ETag
+  derived from the bytes rules out mixed versions: S3 and MinIO send one;
+  nginx and Caddy derive theirs from size and mtime, and a same-size,
+  same-mtime replacement behind them is read as the old version (measured,
+  documented).
+- **An `httpfs` `206` is taken only when it is coherent.** Its
+  `Content-Range` must start at the offset asked, end within the request and
+  before its total, keep the total of the reader's first window (a moved
+  total is `mkv.ErrSourceChanged`), and come with exactly that many bytes,
+  read through a cap. A short body, an over-long body, an end past the
+  request or the total, and a misplaced start were accepted; an empty `206`
+  made `Read` return no bytes and no error forever, so `io.ReadFull` spun.
+- **`PlanHLS` refuses a source replaced while it builds the plan.** The
+  plan was stamped with the source's size, mtime and identity after it had
+  read the file: a replacement between the two left a plan cut from one file
+  and stamped with the other, whose later reads passed the check and applied
+  the old offsets to the new bytes (reproduced by renaming another file over
+  the source at each of the build's opens). The source is now stat'ed before
+  the first read too, and a difference is `ErrSourceChanged`, also when the
+  build failed on the new file's bytes. One more stat per plan: a `HEAD` over
+  `httpfs`/`s3fs`, nothing per segment.
+- **An `httpfs` reader no longer panics on an object that shrank.** A `416`
+  for a range inside the size the reader knew left it without a window and
+  `Read` sliced past it (`slice bounds out of range`); it is now
+  `mkv.ErrSourceChanged`, and so is a `404` or `410` once the reader has seen
+  a version or been pinned. A fresh reader's `404` stays a plain not-found.
+- **`mkvhttp` conditional requests follow RFC 9110**: `If-None-Match` uses
+  the weak comparison (a `W/` prefix on either side does not count), a `304`
+  carries the `Cache-Control` of the `200` on every handler, and a streamed
+  segment's `Range` is ignored under an `If-Range`, which its weak ETag can
+  never satisfy, so the client gets the whole resource rather than a range of
+  bytes it cannot validate.
+- **The streaming copier's stage no longer grows past its pooled size.** A
+  buffered span of a stage or more (a keyframe found in the read-ahead buffer
+  when `sendfile` is not available) was packed with the small pieces before
+  it, growing the stage to the span's size; it is now written on its own.
+- **`RemuxToHLS` treats a segment head the writer takes short without an
+  error as `io.ErrShortWrite`**, as the segment media already was.
+- **`WriteRange` no longer relies on an unspecified evaluation order** for the
+  count it returns after the final flush.
+
 ## [0.43.1] - 2026-10-11
 
 ### Fixed
