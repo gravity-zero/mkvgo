@@ -14,9 +14,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`ResourceHandle.WriteRange` refuses a range whose end overflows `int64`**
   instead of letting `off+n` wrap: with bytes in hand the old check let the
   slice expression panic, with a streamed segment it wrote the whole segment.
-- **A streamed segment's writer that takes fewer bytes than offered without
-  an error ends the write with `io.ErrShortWrite`**, so the caller cuts the
-  connection instead of reporting a clean, short body.
+- **A writer that takes fewer bytes than offered without an error ends
+  `WriteRange` with `io.ErrShortWrite`**, for a streamed segment and for a
+  resource held in memory alike, so the caller cuts the connection instead of
+  reporting a clean, short body.
 
 ## [0.43.0] - 2026-10-11
 

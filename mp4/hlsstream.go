@@ -331,6 +331,9 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 	}
 	if h.data != nil {
 		m, err := w.Write(h.data[off : off+n])
+		if err == nil && int64(m) < n {
+			err = io.ErrShortWrite
+		}
 		return int64(m), err
 	}
 	return h.plan.writeSpans(ctx, w, h.table, h.ti, off, n)

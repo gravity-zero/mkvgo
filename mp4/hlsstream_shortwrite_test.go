@@ -7,20 +7,22 @@ import (
 	"testing"
 )
 
-// A writer that takes fewer bytes than asked without an error is a short write, never a clean end.
+// A writer that takes fewer bytes than asked without an error is a short write, never a clean end: for a streamed segment and for bytes in hand.
 func TestWriteToReportsShortWrite(t *testing.T) {
 	src := openGOPSource(t, 3, false, false)
 	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: openGOPMs})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := plan.Open(context.Background(), "seg00001.m4s")
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := h.WriteTo(context.Background(), &halfWriter{})
-	if !errors.Is(err, io.ErrShortWrite) || m >= h.Size() {
-		t.Fatalf("wrote %d of %d, err %v, want io.ErrShortWrite", m, h.Size(), err)
+	for _, name := range []string{"seg00001.m4s", "init.mp4"} {
+		h, err := plan.Open(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := h.WriteTo(context.Background(), &halfWriter{})
+		if !errors.Is(err, io.ErrShortWrite) || m >= h.Size() {
+			t.Fatalf("%s: wrote %d of %d, err %v, want io.ErrShortWrite", name, m, h.Size(), err)
+		}
 	}
 }
 
