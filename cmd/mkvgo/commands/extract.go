@@ -292,10 +292,7 @@ func CmdSubtitleIndex(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	ix, err := matroska.BuildSubtitleIndex(context.Background(), source, trackIDs)
-	if fromCues {
-		ix, err = subtitleIndexFromCues(source, trackIDs)
-	}
+	ix, err := buildSubtitleIndex(source, trackIDs, fromCues)
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -314,10 +311,19 @@ func CmdSubtitleIndex(args []string) {
 		total, len(ix.Tracks()), outPath, len(blob))
 }
 
+// buildSubtitleIndex walks the source, or with fromCues derives the index from
+// its Cues alone: the walk is never run then.
+func buildSubtitleIndex(source string, trackIDs []uint64, fromCues bool, opts ...matroska.Options) (*matroska.SubtitleIndex, error) {
+	if fromCues {
+		return subtitleIndexFromCues(source, trackIDs, opts...)
+	}
+	return matroska.BuildSubtitleIndex(context.Background(), source, trackIDs, opts...)
+}
+
 // subtitleIndexFromCues derives the index from the Cues and refuses when a track's completeness cannot be verified.
-func subtitleIndexFromCues(source string, trackIDs []uint64) (*matroska.SubtitleIndex, error) {
+func subtitleIndexFromCues(source string, trackIDs []uint64, opts ...matroska.Options) (*matroska.SubtitleIndex, error) {
 	ctx := context.Background()
-	ix, verified, err := matroska.SubtitleIndexFromCues(ctx, source, trackIDs)
+	ix, verified, err := matroska.SubtitleIndexFromCues(ctx, source, trackIDs, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +339,7 @@ func subtitleIndexFromCues(source string, trackIDs []uint64) (*matroska.Subtitle
 	if len(unverified) > 0 {
 		return nil, fmt.Errorf("the Cues of track(s) %s cannot be verified complete (no trusted NUMBER_OF_FRAMES statistic, or another count): build the index without -from-cues", strings.Join(unverified, ","))
 	}
-	if err := ix.Resolve(ctx, source); err != nil {
+	if err := ix.Resolve(ctx, source, opts...); err != nil {
 		return nil, err
 	}
 	return ix, nil

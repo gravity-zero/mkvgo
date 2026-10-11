@@ -11,3 +11,6 @@ func SetExit(f func(int)) (restore func()) {
 	osExit = f
 	return func() { osExit = old }
 }
+
+// BuildSubtitleIndex is the subtitle-index command's index step.
+var BuildSubtitleIndex = buildSubtitleIndex
