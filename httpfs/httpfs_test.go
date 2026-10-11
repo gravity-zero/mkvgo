@@ -279,6 +279,7 @@ func TestWindowBoundsRequestsAndAccounting(t *testing.T) {
 	if len(ranges) != 1 || ranges[0] != "bytes=0-511" {
 		t.Fatalf("first read asked %v, want a single bytes=0-511", ranges)
 	}
+	f.Close() // the rest of a small response is read out, to keep the connection
 	if n := fs.BytesFetched(); n != 512 {
 		t.Errorf("BytesFetched = %d, want 512 (one window)", n)
 	}

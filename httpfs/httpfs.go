@@ -5,21 +5,26 @@
 //
 //	c, err := matroska.OpenMetaWithFS(ctx, url, httpfs.New().Port())
 //
-// Reads are served from a cached window (default 512 KiB) fetched with
-// `Range: bytes=…`, so a parser's many small reads don't each become a
-// request. The server must honour Range requests (respond 206); one that
+// Reads stream the body of a ranged GET (`Range: bytes=…`), so a parser's many
+// small reads don't each become a request and nothing is buffered: a request
+// is one window (default 512 KiB), doubles while the reads run on where the
+// last one ended, and covers at once a range the caller announced
+// (mkv.RangeHinter). The server must honour Range requests (respond 206); one that
 // replies 200 to a ranged request gets an explicit error rather than a silent
 // full download. The FS is read-only: write operations return an error.
 package httpfs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,9 +38,10 @@ const defaultWindow = 512 << 10
 type Options struct {
 	// Client is the HTTP client to use; nil means http.DefaultClient.
 	Client *http.Client
-	// WindowSize is the ranged-fetch granularity in bytes; <= 0 means 512 KiB.
-	// Smaller windows transfer less for sparse access; larger ones make fewer
-	// requests for sequential access.
+	// WindowSize is the first request's length in bytes; <= 0 means 512 KiB.
+	// A request that continues where the last one ended asks for twice as
+	// much, up to 32 windows; a hinted range (mkv.RangeHinter) is asked for
+	// whole. Smaller windows transfer less for sparse access.
 	WindowSize int
 	// Header is added to every request (e.g. Authorization).
 	Header http.Header
@@ -48,6 +54,74 @@ type Options struct {
 type FS struct {
 	opts    Options
 	fetched atomic.Int64
+}
+
+// recentReads holds the last responses of a window or less read under a
+// strong ETag, for the readers opened under one mkv.ShareReads scope: a reader
+// pinned to that version reads them again for no request (a parser's readers
+// go over the same head of the file). Outside such a scope nothing is kept:
+// every read asks the server, which is how a replaced object is noticed.
+type recentReads struct {
+	mu     sync.Mutex
+	recent []*recentRange
+}
+
+// recentRange is the bytes [off, off+len(data)) of one version of a URL. Its
+// reader appends to data as the response arrives, within a capacity set up
+// front, so a slice taken under FS.mu stays valid.
+type recentRange struct {
+	url, id string
+	off     int64
+	size    int64 // the object's total size
+	data    []byte
+}
+
+// recentMax bounds the responses kept for rereads.
+const recentMax = 8
+
+// remember keeps a response, as it is read, for rereads.
+func (f *recentReads) remember(e *recentRange) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.recent) == recentMax {
+		f.recent = append(f.recent[:0], f.recent[1:]...)
+	}
+	f.recent = append(f.recent, e)
+}
+
+// forget drops a response that failed.
+func (f *recentReads) forget(e *recentRange) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, x := range f.recent {
+		if x == e {
+			f.recent = append(f.recent[:i], f.recent[i+1:]...)
+			return
+		}
+	}
+}
+
+// grow appends what e's reader received.
+func (f *recentReads) grow(e *recentRange, b []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if room := cap(e.data) - len(e.data); len(b) > room {
+		b = b[:room]
+	}
+	e.data = append(e.data, b...)
+}
+
+// lookup returns the kept bytes of version id of url that hold off.
+func (f *recentReads) lookup(url, id string, off int64) (recentRange, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.recent) - 1; i >= 0; i-- {
+		e := *f.recent[i]
+		if e.url == url && e.id == id && off >= e.off && off < e.off+int64(len(e.data)) {
+			return e, true
+		}
+	}
+	return recentRange{}, false
 }
 
 // New returns an HTTP Range-backed FS. Paths passed to the returned port must
@@ -134,7 +208,11 @@ func (f *FS) open(ctx context.Context, url string) (mkv.ReadSeekCloser, error) {
 	if !IsURL(url) {
 		return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", url)
 	}
-	return &reader{fs: f, ctx: ctx, url: url, size: -1}, nil
+	r := &reader{fs: f, ctx: ctx, url: url, size: -1}
+	if share := mkv.ReadShareFrom(ctx); share != nil {
+		r.share = share.LoadOrStore(f, &recentReads{}).(*recentReads)
+	}
+	return r, nil
 }
 
 // do sends one request bound to ctx and RequestTimeout, with the FS's headers,
@@ -245,38 +323,183 @@ func lastModified(h http.Header) time.Time {
 	return t
 }
 
-// reader is a ReadSeekCloser over one URL: Seek is local, Read serves from the
-// current window, fetching a new one on miss. Every window after the first is
-// asked for the version the first one declared (If-Match on a strong ETag,
-// If-Unmodified-Since on Last-Modified), or the version Pin set, and must
-// carry that validator. Only a strong ETag rules out two versions mixed; a
-// Last-Modified date does not tell apart two versions written within its second.
+// reader is a ReadSeekCloser over one URL. Seek is local; Read streams the
+// body of a ranged GET, so the bytes are consumed as they arrive and never
+// held. A read that is not where the response stands - backwards, past its
+// end, or far ahead in it - starts another request. A request is one window long,
+// doubles on each request that continues where the last one ended (up to 32
+// windows), and covers a range set by HintRange in one go. A read up to a
+// mebibyte ahead within the response reads through to it. Every response
+// after the first is asked for the version the first one declared (If-Match
+// on a strong ETag, If-Unmodified-Since on Last-Modified), or the version Pin
+// set, and must carry that validator. Only a strong ETag rules out two
+// versions mixed; a Last-Modified date does not tell apart two versions
+// written within its second.
 type reader struct {
 	fs   *FS
 	ctx  context.Context // ends the requests in flight (OpenContext)
 	url  string
 	size int64 // -1 until learned from the first Content-Range
 	pos  int64
-	buf  []byte
-	off  int64  // buf's start offset
-	id   string // the version every window must be of: pinned, else the first window's
+	id   string // the version every response must be of: pinned, else the first response's
+
+	body     io.ReadCloser      // the response being read, nil when none
+	done     context.CancelFunc // releases body's request
+	bodyPos  int64              // source offset of body's next byte
+	bodyEnd  int64              // source offset past body's last byte
+	span     int64              // length asked by the last request
+	breaks   int                // responses that broke midway and were resumed
+	hintOff  int64
+	hintEnd  int64        // [hintOff, hintEnd): the range the next reads cover (HintRange); empty when equal
+	lastStop int64        // where the last response ended: a request starting there continues a sequential run
+	share    *recentReads // the responses shared under the mkv.ShareReads scope the reader was opened in, nil outside one
+	kept     bool         // body serves bytes kept from an earlier response, not the network
+	keep     *recentRange // body's bytes, kept for rereads as they arrive (a response of a window or less)
 }
+
+// skipMax is the most of a response read through to reach a byte further in
+// it, rather than ask for that byte with a new request.
+const skipMax = 1 << 20
+
+// maxBreaks bounds the responses of one reader resumed after breaking midway.
+const maxBreaks = 4
+
+// drainMax is the most of an abandoned response read out to keep its
+// connection for the next request: closing it unread drops the connection,
+// and the next request pays a new handshake (TCP, and TLS) for bytes that
+// were mostly on their way already. A larger rest is dropped with it.
+const drainMax = 1 << 20
 
 func (r *reader) Read(p []byte) (int, error) {
 	if r.size >= 0 && r.pos >= r.size {
 		return 0, io.EOF
 	}
-	if r.buf == nil || r.pos < r.off || r.pos >= r.off+int64(len(r.buf)) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// Ahead of the response but within it: its bytes are on their way, read
+	// through the gap rather than pay a round trip (up to skipMax or a window).
+	if r.body != nil && r.pos > r.bodyPos && r.pos < r.bodyEnd && r.pos-r.bodyPos <= max(skipMax, int64(r.fs.opts.WindowSize)) {
+		if err := r.skip(r.pos - r.bodyPos); err != nil {
+			return 0, err
+		}
+	}
+	if r.body == nil || r.pos != r.bodyPos || r.pos >= r.bodyEnd {
 		if err := r.fetch(r.pos); err != nil {
 			return 0, err
 		}
-		if r.pos >= r.size {
+		if r.body == nil { // at or past the end
 			return 0, io.EOF
 		}
 	}
-	n := copy(p, r.buf[r.pos-r.off:])
+	if rest := r.bodyEnd - r.bodyPos; int64(len(p)) > rest {
+		p = p[:rest]
+	}
+	n, err := r.body.Read(p)
+	r.bodyPos += int64(n)
 	r.pos += int64(n)
+	r.account(p[:n])
+	switch {
+	case r.bodyPos == r.bodyEnd:
+		// The whole range came: the body must end here.
+		if err == nil {
+			var one [1]byte
+			m, e := io.ReadFull(r.body, one[:])
+			r.fs.fetched.Add(int64(m))
+			if m > 0 || (e != io.EOF && e != io.ErrUnexpectedEOF) {
+				// The last bytes are withheld: nothing shows the response is what was asked.
+				r.abandon()
+				r.pos -= int64(n)
+				if m > 0 {
+					return 0, fmt.Errorf("httpfs: %s: 206 of %d bytes carried more", r.url, r.span)
+				}
+				return 0, fmt.Errorf("httpfs: %s: read body: %w", r.url, e)
+			}
+		}
+		r.release()
+		return n, nil
+	case err == io.EOF:
+		r.abandon()
+		return n, fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", r.url, r.bodyEnd-r.bodyPos)
+	case err != nil:
+		// A response that broke midway (a timeout over a slow reader, a
+		// dropped connection) is resumed from where it stopped, a few times
+		// in the reader's life.
+		// The resumption is asked for the version read so far (If-Match): with
+		// no version known, nothing would tell two versions apart, so none.
+		r.abandon()
+		if r.ctx.Err() != nil || r.breaks >= maxBreaks || r.id == "" {
+			return n, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+		}
+		r.breaks++
+		if n > 0 {
+			return n, nil
+		}
+		return r.Read(p)
+	}
 	return n, nil
+}
+
+// account counts bytes taken off the network, and keeps them for rereads when the response is small.
+func (r *reader) account(b []byte) {
+	if r.kept {
+		return
+	}
+	r.fs.fetched.Add(int64(len(b)))
+	if r.keep != nil {
+		r.share.grow(r.keep, b)
+	}
+}
+
+// sink is where bytes read through go: accounted and kept like the bytes read.
+func (r *reader) sink() io.Writer { return sinkFunc(func(b []byte) { r.account(b) }) }
+
+type sinkFunc func([]byte)
+
+func (f sinkFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
+
+// skip reads n bytes of the response through, unread.
+func (r *reader) skip(n int64) error {
+	m, err := io.CopyN(r.sink(), r.body, n)
+	r.bodyPos += m
+	if err != nil {
+		r.abandon()
+		if err == io.EOF {
+			return fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", r.url, r.bodyEnd-r.bodyPos)
+		}
+		if r.ctx.Err() != nil {
+			return fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+		}
+	}
+	return nil
+}
+
+// abandon releases a response that failed: none of it is kept for rereads.
+func (r *reader) abandon() {
+	if r.keep != nil {
+		r.share.forget(r.keep)
+		r.keep = nil
+	}
+	r.release()
+}
+
+// release ends the response being read: a small rest is read out so the
+// connection serves the next request, a large one is dropped with it.
+func (r *reader) release() {
+	if r.body == nil {
+		return
+	}
+	// A response kept for rereads is read out whole: the next reader of these bytes takes them from it.
+	if rest := r.bodyEnd - r.bodyPos; rest <= drainMax || r.keep != nil {
+		m, _ := io.CopyN(r.sink(), r.body, rest+1)
+		r.bodyPos += m
+	}
+	r.body.Close()
+	r.done()
+	r.keep, r.kept = nil, false
+	r.bodyPos = min(r.bodyPos, r.bodyEnd)
+	r.lastStop = r.bodyPos
+	r.body, r.done = nil, nil
 }
 
 func (r *reader) Seek(offset int64, whence int) (int64, error) {
@@ -304,31 +527,62 @@ func (r *reader) Seek(offset int64, whence int) (int64, error) {
 	return next, nil
 }
 
-func (r *reader) Close() error { return nil }
+func (r *reader) Close() error {
+	r.release()
+	return nil
+}
 
-// Pin binds the reader to one version of the object (mkv.PinnedReader): a window of another ends the read with mkv.ErrSourceChanged.
+// Pin binds the reader to one version of the object (mkv.PinnedReader): a response of another ends the read with mkv.ErrSourceChanged.
 func (r *reader) Pin(identity string) { r.id = identity }
 
-// fetch loads the window starting at off via a ranged GET and records the
-// total size from the Content-Range header.
+// HintRange tells the reader its next reads cover [off, end) (mkv.RangeHinter): the request that reaches into it asks for the rest of it at once.
+func (r *reader) HintRange(off, end int64) { r.hintOff, r.hintEnd = off, end }
+
+// fetch starts the ranged GET of the response that serves off, and records
+// the total size from its Content-Range header.
 func (r *reader) fetch(off int64) error {
-	end := off + int64(r.fs.opts.WindowSize) - 1
+	r.release()
+	window := int64(r.fs.opts.WindowSize)
+	span := window
+	hinted := off >= r.hintOff && off < r.hintEnd
+	switch {
+	case hinted:
+		span = max(r.hintEnd-off, window)
+	case off == r.lastStop && r.span > 0:
+		span = min(2*r.span, 32*window)
+	}
+	end := off + span - 1
 	if r.size >= 0 {
 		if off >= r.size {
-			r.buf, r.off = nil, 0
 			return nil
 		}
 		if end >= r.size {
 			end = r.size - 1
 		}
 	}
-	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, fmt.Sprintf("bytes=%d-%d", off, end), r.id)
+	if r.share != nil && strongIdentity(r.id) {
+		if e, ok := r.share.lookup(r.url, r.id, off); ok && (r.size < 0 || r.size == e.size) {
+			r.size = e.size
+			r.body, r.done = io.NopCloser(bytes.NewReader(e.data[off-e.off:])), func() {}
+			r.bodyPos, r.bodyEnd, r.kept = off, e.off+int64(len(e.data)), true
+			return nil
+		}
+	}
+	rng := fmt.Sprintf("bytes=%d-%d", off, end)
+	if end >= math.MaxInt64/2 { // a hint to the end of an object of unknown size
+		rng = fmt.Sprintf("bytes=%d-", off)
+	}
+	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, rng, r.id)
 	if err != nil {
 		return err
 	}
-	defer done()
-	defer resp.Body.Close()
-	var want int64
+	ok := false
+	defer func() {
+		if !ok {
+			resp.Body.Close()
+			done()
+		}
+	}()
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
@@ -344,7 +598,7 @@ func (r *reader) fetch(off int64) error {
 		if r.size >= 0 && total != r.size {
 			return fmt.Errorf("httpfs: %s: the size went from %d to %d: %w", r.url, r.size, total, mkv.ErrSourceChanged)
 		}
-		want = last - start + 1
+		want := last - start + 1
 		if resp.ContentLength >= 0 && resp.ContentLength != want {
 			return fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
 		}
@@ -352,6 +606,17 @@ func (r *reader) fetch(off int64) error {
 			r.id = identityOf(resp.Header)
 		}
 		r.size = total
+		r.span = want
+		if hinted { // past a hinted range, a run starts over from one window
+			r.span = window
+		}
+		r.body, r.done, r.bodyPos, r.bodyEnd = resp.Body, done, off, last+1
+		if r.share != nil && want <= window && strongIdentity(r.id) {
+			r.keep = &recentRange{url: r.url, id: r.id, off: off, size: total, data: make([]byte, 0, want)}
+			r.share.remember(r.keep)
+		}
+		ok = true
+		return nil
 	case http.StatusPreconditionFailed:
 		return fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
 	case http.StatusRequestedRangeNotSatisfiable:
@@ -368,19 +633,8 @@ func (r *reader) fetch(off int64) error {
 		return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
 	case http.StatusOK:
 		return errIgnoresRange(r.url)
-	default:
-		return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
 	}
-	buf, err := io.ReadAll(io.LimitReader(resp.Body, want+1))
-	if err != nil {
-		return fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
-	}
-	r.fs.fetched.Add(int64(len(buf)))
-	if int64(len(buf)) != want {
-		return fmt.Errorf("httpfs: %s: 206 of %d bytes carried %d", r.url, want, len(buf))
-	}
-	r.buf, r.off = buf, off
-	return nil
+	return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
 }
 
 // fileInfo is the os.FileInfo Stat returns: size, Last-Modified, and the version as mkv.FileIdentity.

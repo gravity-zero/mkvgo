@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 )
 
 // ErrSourceChanged is returned by a read or a plan bound to one file once the
@@ -24,6 +25,44 @@ type FileIdentity interface {
 // PinnedReader is a reader that can be bound to one identity (FileIdentity)
 // and then fails every read of another version with ErrSourceChanged.
 type PinnedReader interface{ Pin(identity string) }
+
+// RangeHinter is a reader that can be told the byte range [off, end) its next
+// reads will cover, so a remote one fetches it with one request instead of a
+// window at a time. A hint is advice: reads outside it work as before.
+type RangeHinter interface{ HintRange(off, end int64) }
+
+// ShareReads returns a context under which the readers an FS opens may serve
+// each other the bytes one of them already fetched, without asking the source
+// again: for a burst of reads of one version (a plan being built), never for
+// reads that must notice a source replaced since. An FS that keeps nothing
+// ignores it.
+func ShareReads(ctx context.Context) context.Context {
+	return WithReadShare(ctx, &ReadShare{})
+}
+
+// WithReadShare returns ctx under the scope s (opened by ShareReads): readers
+// opened with it share with the others of s, and end when ctx does.
+func WithReadShare(ctx context.Context, s *ReadShare) context.Context {
+	return context.WithValue(ctx, readShareKey{}, s)
+}
+
+// ReadShare is the scope ShareReads opens: an FS keeps there, under a key of
+// its own, what its readers share.
+type ReadShare struct{ m sync.Map }
+
+// LoadOrStore returns the value kept under key, storing v first when there is none.
+func (s *ReadShare) LoadOrStore(key, v any) any {
+	got, _ := s.m.LoadOrStore(key, v)
+	return got
+}
+
+// ReadShareFrom returns the scope ShareReads opened on ctx, nil when none.
+func ReadShareFrom(ctx context.Context) *ReadShare {
+	s, _ := ctx.Value(readShareKey{}).(*ReadShare)
+	return s
+}
+
+type readShareKey struct{}
 
 // ReadSeekCloser combines io.ReadSeeker and io.Closer.
 type ReadSeekCloser interface {

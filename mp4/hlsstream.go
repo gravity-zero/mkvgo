@@ -433,6 +433,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 		c.file = f
 	}
 	prefix := p.tracks[ti].ft.outTrack.mkv.HeaderStripping
+	c.end = spansEnd(src, t, ti, pos, off, off+n, int64(len(prefix)))
 	for x, s := range t.segs[ti].samples {
 		if pos >= off+n {
 			break
@@ -454,6 +455,31 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 	return c.written, err
 }
 
+// spansEnd is where in the source the bytes of track ti's samples falling in
+// [off, end) of the resource end, the samples starting at pos in it (0 when
+// none do). A source that can take it (a remote one) is told where they
+// start and end: one request for them instead of a window at a time.
+func spansEnd(src io.Reader, t *windowTable, ti int, pos, off, end, prefix int64) int64 {
+	from, to := int64(-1), int64(0)
+	for x, s := range t.segs[ti].samples {
+		if pos >= end {
+			break
+		}
+		next := pos + int64(s.size)
+		if max(off, pos+prefix) < min(end, next) {
+			if from < 0 {
+				from = t.offs[ti][x]
+			}
+			to = t.offs[ti][x] + int64(s.size) - prefix
+		}
+		pos = next
+	}
+	if h, ok := src.(mkv.RangeHinter); ok && from >= 0 {
+		h.HintRange(from, to)
+	}
+	return to
+}
+
 // spanCopier copies ranges of a source to a writer: through one buffer,
 // reading forward across small holes and seeking over large ones, the small
 // spans packed into writes of stageBytes; a span of sendfileMin or more goes
@@ -467,6 +493,7 @@ type spanCopier struct {
 	pos      int64 // the source's current offset
 	seeked   bool
 	exact    bool     // read each span alone, never ahead of it
+	end      int64    // where the last span ends in the source: no read goes past it (0: no bound)
 	pending  [][]byte // queued, not yet written: slices of buf and of emitted bytes
 	pendingN int
 	stage    *[]byte
@@ -524,6 +551,9 @@ func (c *spanCopier) copy(w io.Writer, off, n int64) error {
 		want := c.buf
 		if c.exact && n < int64(len(want)) {
 			want = want[:n]
+		}
+		if rest := c.end - c.pos; rest >= n && rest < int64(len(want)) { // never read past the last span
+			want = want[:rest]
 		}
 		m, err := io.ReadFull(c.src, want)
 		if m == 0 {

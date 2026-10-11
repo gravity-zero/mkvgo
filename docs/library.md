@@ -2279,6 +2279,8 @@ The `mkv.FS` struct lets you swap out OS file operations. Pass it via `Options` 
 
 Two optional interfaces let an FS bind a reader to one version of a file, which an on-demand plan (`mp4.PlanHLS`) uses to refuse a replaced source instead of mixing it in: the `FileInfo` your `Stat` returns may implement `mkv.FileIdentity` (`Identity() string`, a token for the version: an ETag, a version id, a date; `Strong() bool`, true only for a token that changes with every change of the bytes), and the reader your `Open` returns may implement `mkv.PinnedReader` (`Pin(identity string)`, after which a read of any other version fails with `mkv.ErrSourceChanged`). `httpfs` and `s3fs` implement both; without them the plan stats the file before each read and compares size, mtime and identity.
 
+A reader may also implement `mkv.RangeHinter` (`HintRange(off, end int64)`): the on-demand plans announce the byte range a walk or a copy is about to read, and a remote reader fetches it with one request. `mkv.ShareReads(ctx)` opens a scope in which the readers an FS opens may serve each other what one of them fetched (an FS keeps its share under its own key through `mkv.ReadShareFrom(ctx).LoadOrStore`); `mp4.PlanHLS` opens one for the planning of a remote source only, never for serving, whose reads must notice a replaced source.
+
 `mkv.FS.OpenContext`, when set, opens a reader whose reads end with a context; `DoOpenContext` falls back to `Open`. The on-demand plans open their source through it with the walk's context, so a remote read in flight is abandoned when every client waiting on the walk has gone. `httpfs` and `s3fs` set it.
 
 ```go
@@ -2354,18 +2356,30 @@ c, err := matroska.OpenMetaWithFS(ctx, "https://nas/movie.mkv", f.Port())
 fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file size
 ```
 
-Reads are cached in 512 KiB windows (configurable). The server must answer
+Reads stream the body of a ranged `GET`, never buffered: a request is one
+window (512 KiB, `WindowSize`), twice the last one while the reads run on
+where it ended (up to 32 windows), and a whole range at once when the caller
+announced it (`mkv.RangeHinter`: an on-demand plan announces the bytes of the
+window it walks, so a segment is one request, two when streamed). A read up
+to 1 MiB ahead within the response reads through to it; a response that
+breaks midway (a timeout, a dropped connection) is resumed from where it
+stopped. Readers opened under one `mkv.ShareReads` context share the
+responses of a window or less they fetched under one strong ETag (a plan
+being built reads the head of the file through several readers); outside
+such a scope every read asks the server. `mp4.PlanHLS` over such an FS stats
+the source once and pins every read of the planning to that version. The
+server must answer
 `206 Partial Content`; one that ignores `Range` gets an explicit error rather
 than a silent full download. A `206` is taken only when it is coherent: its
 `Content-Range` starts at the offset asked, ends within the request and
-before its total, the total has not moved since the reader's first window
+before its total, the total has not moved since the reader's first response
 (a moved total is `mkv.ErrSourceChanged`), and the body is exactly that many
-bytes - read through a cap, so an over-long body is refused, not buffered.
+bytes - an over-long body is refused, a chunked body ending short too.
 `Stat` is one `HEAD` (one single-byte ranged `GET` where `HEAD` is not
-served): no window is transferred, and the `FileInfo` carries the size,
+served): no body is transferred, and the `FileInfo` carries the size,
 `Last-Modified` as its mtime and the object's version (`mkv.FileIdentity`:
 the strong ETag, else `Last-Modified`, else a weak ETag; `Strong()` is true
-for a strong ETag only). Every window after a reader's first is asked for
+for a strong ETag only). Every response after a reader's first is asked for
 the version the first one declared (`If-Match` on a strong ETag,
 `If-Unmodified-Since` on `Last-Modified`), or the one `Pin`
 (`mkv.PinnedReader`) set before the first read, and must carry that

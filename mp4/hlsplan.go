@@ -210,9 +210,32 @@ type planTrack struct {
 // The source is stat'ed before the first read and again once the plan is
 // built: a source replaced while the plan read it is ErrSourceChanged, never
 // a plan of one file stamped with another.
+//
+// A source whose FS declares a version for it and pins its readers (a remote
+// one) is stat'ed once: every read of the planning is pinned to that version,
+// so a source replaced meanwhile fails a read rather than mix in, and the
+// planning's readers share what they fetch (mkv.ShareReads).
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
-	fs := optionsFrom(opts).FS
-	before, known := sourceSig(fs, srcPath)
+	o := optionsFrom(opts)
+	fs := o.FS
+	fi, statErr := fs.DoStat(srcPath)
+	known := statErr == nil
+	var before, id string
+	osStat := false
+	if known {
+		id, osStat = statIdentity(fi)
+		before = statStamp(fi) + "|" + id
+	}
+	if known && !osStat && id != "" && pinsReaders(fs, srcPath) {
+		po := o
+		po.FS = pinnedPlanningFS(&mkv.ReadShare{}, fs, srcPath, fi, id)
+		p, err := planHLS(ctx, srcPath, po)
+		if err != nil {
+			return nil, err
+		}
+		p.fs, p.opts.FS = fs, fs // serving stats and opens the source itself
+		return p, nil
+	}
 	p, err := planHLS(ctx, srcPath, opts...)
 	if !known {
 		return p, err
@@ -227,6 +250,63 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, ErrSourceChanged
 	}
 	return p, nil
+}
+
+// hintsRanges reports whether path opens as a reader that takes range hints (mkv.RangeHinter): a remote one.
+func hintsRanges(fs *mkv.FS, path string) bool {
+	if fs == nil {
+		return false
+	}
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, ok := f.(mkv.RangeHinter)
+	return ok
+}
+
+// pinsReaders reports whether path opens as a reader that can be pinned to a version (mkv.PinnedReader).
+func pinsReaders(fs *mkv.FS, path string) bool {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, ok := f.(mkv.PinnedReader)
+	return ok
+}
+
+// pinnedPlanningFS is fs with every reader of path pinned to version id and
+// opened under share (mkv.ShareReads), and path's stat answered by fi, the
+// stat that version was read from.
+func pinnedPlanningFS(share *mkv.ReadShare, fs *mkv.FS, path string, fi os.FileInfo, id string) *mkv.FS {
+	pin := func(f mkv.ReadSeekCloser, err error) (mkv.ReadSeekCloser, error) {
+		if pr, ok := f.(mkv.PinnedReader); ok && err == nil {
+			pr.Pin(id)
+		}
+		return f, err
+	}
+	w := *fs
+	w.Open = func(p string) (mkv.ReadSeekCloser, error) {
+		if p != path {
+			return fs.DoOpen(p)
+		}
+		return pin(fs.DoOpenContext(mkv.WithReadShare(context.Background(), share), p))
+	}
+	w.OpenContext = func(ctx context.Context, p string) (mkv.ReadSeekCloser, error) {
+		if p != path {
+			return fs.DoOpenContext(ctx, p)
+		}
+		return pin(fs.DoOpenContext(mkv.WithReadShare(ctx, share), p))
+	}
+	w.Stat = func(p string) (os.FileInfo, error) {
+		if p != path {
+			return fs.DoStat(p)
+		}
+		return fi, nil
+	}
+	return &w
 }
 
 // sourceSig is what stampSource records of the source, as one string; known is false when it cannot be stat'ed.
@@ -410,15 +490,35 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// Bounded peeks: the first cluster fixes each track's first PTS and builds
 	// the sample entries lazy codecs derive from their first frame; the last
 	// cued cluster fixes each track's final PTS pair (exact init durations).
-	if err := p.peekHead(ctx); err != nil {
-		return nil, err
+	// The two ends share nothing: over a remote source (one whose readers
+	// take range hints, where each read is a round trip) the tail is read
+	// while the head is.
+	var (
+		lastPts, prevPts, lastFrames []int64
+		tailErr                      error
+		tailDone                     = make(chan struct{})
+	)
+	peekTail := func() {
+		defer close(tailDone)
+		lastPts, prevPts, lastFrames, tailErr = p.peekTail(ctx, c.SegmentStart+cues[len(cues)-1].ClusterPos)
 	}
-	if err := p.learnAheadHead(ctx); err != nil {
-		return nil, err
+	parallel := hintsRanges(fs, srcPath)
+	if parallel {
+		go peekTail()
 	}
-	lastPts, prevPts, lastFrames, err := p.peekTail(ctx, c.SegmentStart+cues[len(cues)-1].ClusterPos)
-	if err != nil {
-		return nil, err
+	headErr := p.peekHead(ctx)
+	if headErr == nil {
+		headErr = p.learnAheadHead(ctx)
+	}
+	if !parallel {
+		peekTail()
+	}
+	<-tailDone
+	if headErr != nil {
+		return nil, headErr
+	}
+	if tailErr != nil {
+		return nil, tailErr
 	}
 
 	// Per-track durations, exactly as fillFragTiming derives them.
@@ -795,6 +895,17 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 		return err
 	}
 	defer src.Close()
+	if h, ok := src.(mkv.RangeHinter); ok {
+		// Unbounded, the walk runs until fn has seen enough: up to the next window's cluster, or the end past the last.
+		to := end
+		if to < 0 {
+			to = math.MaxInt64
+			if i := sort.Search(len(p.offsets), func(k int) bool { return p.offsets[k] > off }); i < len(p.offsets) {
+				to = p.offsets[i] + windowPeekBytes
+			}
+		}
+		h.HintRange(off, to)
+	}
 	br, err := reader.NewBlockReaderAt(src, p.tcScale, off)
 	if err != nil {
 		return err
@@ -1333,8 +1444,10 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	var ahead [][]aheadBlock
 	from := p.segPosAt(n)
 	if from.Valid() {
+		p.hintWindow(src, n, from.Off)
 		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
 	} else {
+		p.hintWindow(src, n, p.coldStart(n))
 		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.coldStart(n))
 	}
 	if err != nil {
@@ -2056,6 +2169,25 @@ func (p *HLSPlan) learnAheadHead(ctx context.Context) error {
 		return true, nil
 	})
 }
+
+// hintWindow tells a source that can take it (a remote one) the bytes a walk
+// of window n reads from start: up to the cluster that opens the next window,
+// plus the look past it, fetched with one request.
+func (p *HLSPlan) hintWindow(src io.Reader, n int, start int64) {
+	h, ok := src.(mkv.RangeHinter)
+	if !ok {
+		return
+	}
+	end := int64(math.MaxInt64)
+	if n+1 < len(p.offsets) {
+		end = p.offsets[n+1] + windowPeekBytes
+	}
+	h.HintRange(start, end)
+}
+
+// windowPeekBytes is how far past the next window's cluster a walk is
+// expected to read: that cluster's opening blocks, peeked for the window's end.
+const windowPeekBytes = 512 << 10
 
 // coldStart is where a walk with nothing learned starts looking for the n-th
 // window's blocks: the cued cluster before its boundary's (a muxer writes the
