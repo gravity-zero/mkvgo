@@ -122,7 +122,7 @@ type HLSPlan struct {
 	srcID   string // the source's identity beyond its stamp: an ETag or version id the FS declares, else the OS file id
 	osStat  bool   // srcInfo is the OS's own stat: os.SameFile and fstat apply
 	pinned  bool   // every read verifies the source itself (fstat on an OS file, a PinnedReader elsewhere): no stat before reading
-	// srcStatAt is when the path was last stat'ed clean (unix ns), srcChanged
+	// srcStatAt is when the path was last stat'ed clean (monotonic ns since clockBase, 0 never), srcChanged
 	// that the source was once found changed: final for the plan.
 	srcStatAt  atomic.Int64
 	srcChanged atomic.Bool

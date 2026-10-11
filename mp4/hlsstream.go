@@ -642,8 +642,8 @@ func (p *HLSPlan) checkSource() error {
 		return nil
 	}
 	// An OS file is fstat'ed on every read: the path stat only fails a request before its first byte, once per interval is enough.
-	now := time.Now().UnixNano()
-	if p.pinned && now-p.srcStatAt.Load() < sourceStatEvery.Load() {
+	now := int64(time.Since(clockBase)) + 1 // monotonic: the wall clock steps back (a VM resyncing it)
+	if at := p.srcStatAt.Load(); p.pinned && at != 0 && now-at < sourceStatEvery.Load() {
 		return nil
 	}
 	fi, err := p.fs.DoStat(p.srcPath)
@@ -668,3 +668,6 @@ func (p *HLSPlan) checkSource() error {
 var sourceStatEvery atomic.Int64
 
 func init() { sourceStatEvery.Store(int64(time.Second)) }
+
+// clockBase anchors the monotonic times srcStatAt holds.
+var clockBase = time.Now()
