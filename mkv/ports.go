@@ -1,9 +1,29 @@
 package mkv
 
 import (
+	"context"
+	"errors"
 	"io"
 	"os"
 )
+
+// ErrSourceChanged is returned by a read or a plan bound to one file once the
+// path serves another version of it: open or plan the source again.
+var ErrSourceChanged = errors.New("mkv: the source changed since it was opened or planned: open or plan it again")
+
+// FileIdentity is what a FileInfo may offer beyond size and mtime: a token
+// for the version of the file (an ETag, a version id, a Last-Modified date).
+// Strong reports a token that changes with every change of the bytes (a
+// strong ETag, a version id); a timestamp is not, two versions written within
+// its resolution share it. Only a strong identity rules out mixing versions.
+type FileIdentity interface {
+	Identity() string
+	Strong() bool
+}
+
+// PinnedReader is a reader that can be bound to one identity (FileIdentity)
+// and then fails every read of another version with ErrSourceChanged.
+type PinnedReader interface{ Pin(identity string) }
 
 // ReadSeekCloser combines io.ReadSeeker and io.Closer.
 type ReadSeekCloser interface {
@@ -35,9 +55,20 @@ type FS struct {
 	WriteFile func(path string, data []byte, perm os.FileMode) error
 	Remove    func(path string) error
 	Rename    func(oldpath, newpath string) error
+	// OpenContext, when set, opens a reader whose reads end when ctx does
+	// (a network request in flight is abandoned); DoOpenContext falls back to Open.
+	OpenContext func(ctx context.Context, path string) (ReadSeekCloser, error)
 }
 
 // Default FS operations - fallback to os package.
+
+// DoOpenContext opens path for reads bound to ctx (OpenContext), else as DoOpen.
+func (fs *FS) DoOpenContext(ctx context.Context, path string) (ReadSeekCloser, error) {
+	if fs != nil && fs.OpenContext != nil {
+		return fs.OpenContext(ctx, path)
+	}
+	return fs.DoOpen(path)
+}
 
 func (fs *FS) DoOpen(path string) (ReadSeekCloser, error) {
 	if fs != nil && fs.Open != nil {
