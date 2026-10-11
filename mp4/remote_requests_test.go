@@ -8,7 +8,8 @@ import (
 	"github.com/gravity-zero/mkvgo/httpfs"
 )
 
-// Over a remote source, a plan stats it once and a segment is one request per
+// Over a remote source, a plan stats it with no HEAD (its first responses tell
+// the size and version) and a segment is one request per
 // pass over its window (structure, then bytes when streamed), whatever the
 // window size: each request covers the byte range the walk is about to read.
 // Before the change: 3 HEAD for the plan, and here 4 to 16 requests a segment.
@@ -24,8 +25,8 @@ func TestRemotePlanRequestCount(t *testing.T) {
 		}
 		gets, heads, _ := rs.counts()
 		t.Logf("stream=%v plan: %d GET, %d HEAD", stream, gets, heads)
-		if heads != 1 {
-			t.Errorf("stream=%v: the plan made %d HEAD, want 1", stream, heads)
+		if heads != 0 {
+			t.Errorf("stream=%v: the plan made %d HEAD, want none", stream, heads)
 		}
 		for n := 2; n <= 4; n++ {
 			g0, _, _ := rs.counts()

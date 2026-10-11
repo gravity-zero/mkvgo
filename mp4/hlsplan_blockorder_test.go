@@ -3,12 +3,14 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
@@ -363,5 +365,48 @@ func TestSpanHoldsForeignBlock(t *testing.T) {
 		if got := spanHoldsForeignBlock(f, plan.offsets[c.k], end); got != c.want {
 			t.Errorf("segment %d (span %d bytes): foreign = %v, want %v", c.k, raw[c.k].bytes, got, c.want)
 		}
+	}
+}
+
+// Over a remote source the foreign-block checks read exact cluster headers,
+// all at once, and decide exactly what the local walk decides: the plan's
+// playlists and spans are the local plan's, byte for byte.
+func TestRemoteForeignChecksMatchLocal(t *testing.T) {
+	src := buildBlockOrderedSource(t, 240, 120) // the fixture TestPlanHLSBlockOrderedBandwidth bounds
+	ctx := context.Background()
+	local, err := PlanHLS(ctx, src, Options{SegmentMs: 6000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := newRemoteSource(t, src)
+	remote, err := PlanHLS(ctx, rs.srv.URL+"/s.mkv", Options{SegmentMs: 6000, FS: httpfs.New().Port()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(remote.MasterPlaylist(), local.MasterPlaylist()) {
+		t.Fatalf("remote master differs:\n%s\nlocal:\n%s", remote.MasterPlaylist(), local.MasterPlaylist())
+	}
+	st, _ := os.Stat(src)
+	raw, bounded := rawSpans(local, st.Size()), 0
+	for k := range remote.segs {
+		if remote.segs[k] != local.segs[k] {
+			t.Errorf("span %d: remote %+v, local %+v", k, remote.segs[k], local.segs[k])
+		}
+		if local.segs[k].bytes != raw[k].bytes {
+			bounded++
+		}
+	}
+	if bounded == 0 {
+		t.Fatal("no span was bounded: the checks were not exercised")
+	}
+	exact := 0
+	for _, r := range rs.ranges {
+		var a, b int64
+		if _, err := fmt.Sscanf(r, "bytes=%d-%d", &a, &b); err == nil && b-a+1 == foreignHeaderBytes {
+			exact++
+		}
+	}
+	if exact == 0 {
+		t.Errorf("no exact header read among %v", rs.ranges)
 	}
 }

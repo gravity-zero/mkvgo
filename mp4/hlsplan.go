@@ -218,7 +218,11 @@ type planTrack struct {
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
 	o := optionsFrom(opts)
 	fs := o.FS
-	fi, statErr := fs.DoStat(srcPath)
+	share := &mkv.ReadShare{}
+	fi, shared, statErr := statShared(ctx, fs, srcPath, share)
+	if !shared {
+		fi, statErr = fs.DoStat(srcPath)
+	}
 	known := statErr == nil
 	var before, id string
 	osStat := false
@@ -226,9 +230,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		id, osStat = statIdentity(fi)
 		before = statStamp(fi) + "|" + id
 	}
-	if known && !osStat && id != "" && pinsReaders(fs, srcPath) {
+	if known && !osStat && id != "" && (shared || pinsReaders(fs, srcPath)) {
 		po := o
-		po.FS = pinnedPlanningFS(&mkv.ReadShare{}, fs, srcPath, fi, id)
+		po.FS = pinnedPlanningFS(share, fs, srcPath, fi, id)
 		p, err := planHLS(ctx, srcPath, po)
 		if err != nil {
 			return nil, err
@@ -250,6 +254,23 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, ErrSourceChanged
 	}
 	return p, nil
+}
+
+// statShared stats path through a reader opened under share when that reader
+// pins versions and answers Stat (a remote one): it fetches the bytes the
+// planning reads first along with the answer. shared is false otherwise.
+func statShared(ctx context.Context, fs *mkv.FS, path string, share *mkv.ReadShare) (fi os.FileInfo, shared bool, err error) {
+	f, oerr := fs.DoOpenContext(mkv.WithReadShare(ctx, share), path)
+	if oerr != nil {
+		return nil, false, nil
+	}
+	defer f.Close()
+	st, ok := f.(interface{ Stat() (os.FileInfo, error) })
+	if _, pins := f.(mkv.PinnedReader); !ok || !pins {
+		return nil, false, nil
+	}
+	fi, err = st.Stat()
+	return fi, true, err
 }
 
 // hintsRanges reports whether path opens as a reader that takes range hints (mkv.RangeHinter): a remote one.
@@ -607,7 +628,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		segs = append(segs, segInfo{durSec: p.durs[k], bytes: end - p.offsets[k]})
 	}
-	confirm, closeConfirm := p.foreignBlockChecker(srcPath, fs)
+	confirm, closeConfirm := p.foreignBlockChecker(ctx, srcPath, fs, segs)
 	segs = boundSegmentSpans(segs, confirm)
 	closeConfirm()
 	p.segs = segs
@@ -1971,28 +1992,46 @@ func (p *HLSPlan) warmGridStart(ctx context.Context, n, ti int, first int64) (in
 // reads on a remote source; blocks short enough to stay under the trigger
 // over-declare by less than 3x and are left alone.
 func boundSegmentSpans(segs []segInfo, confirm func(k int) bool) []segInfo {
+	if confirm == nil {
+		return segs
+	}
+	candidates, median := spanCandidates(segs)
+	if len(candidates) == 0 {
+		return segs
+	}
+	out := make([]segInfo, len(segs))
+	copy(out, segs)
+	var removed float64
+	for _, k := range candidates {
+		if confirm(k) {
+			out[k].bytes = int64(median * segs[k].durSec)
+			removed += float64(segs[k].bytes - out[k].bytes)
+		}
+	}
+	return handBack(segs, out, removed)
+}
+
+// spanCandidates returns the spans past three times the median byte rate, largest rate first (at most maxForeignChecks), and that median.
+func spanCandidates(segs []segInfo) ([]int, float64) {
 	rates := make([]float64, 0, len(segs))
 	for _, s := range segs {
 		if s.durSec > 0 && s.bytes > 0 {
 			rates = append(rates, float64(s.bytes)/s.durSec)
 		}
 	}
-	if len(rates) < 3 || confirm == nil {
-		return segs
+	if len(rates) < 3 {
+		return nil, 0
 	}
 	sort.Float64s(rates)
 	median := rates[len(rates)/2]
 	if median <= 0 {
-		return segs
+		return nil, 0
 	}
 	var candidates []int
 	for k, s := range segs {
 		if s.durSec > 0 && float64(s.bytes) > 3*median*s.durSec {
 			candidates = append(candidates, k)
 		}
-	}
-	if len(candidates) == 0 {
-		return segs
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		a, b := segs[candidates[i]], segs[candidates[j]]
@@ -2001,18 +2040,15 @@ func boundSegmentSpans(segs []segInfo, confirm func(k int) bool) []segInfo {
 	if len(candidates) > maxForeignChecks {
 		candidates = candidates[:maxForeignChecks]
 	}
-	out := make([]segInfo, len(segs))
-	copy(out, segs)
-	var removed, totalDur float64
-	for _, k := range candidates {
-		if confirm(k) {
-			out[k].bytes = int64(median * segs[k].durSec)
-			removed += float64(segs[k].bytes - out[k].bytes)
-		}
-	}
+	return candidates, median
+}
+
+// handBack spreads the bytes taken out of the confirmed spans over every segment.
+func handBack(segs, out []segInfo, removed float64) []segInfo {
 	if removed <= 0 {
 		return out
 	}
+	var totalDur float64
 	// The bytes taken out of the confirmed spans are the other tracks' media
 	// (their blocks), which every span of a block-ordered file lacks - the
 	// spans there measure the video alone. Hand them back to every segment at
@@ -2045,7 +2081,12 @@ const maxForeignClusterHeaders = 16
 // foreignBlockChecker returns the confirm callback boundSegmentSpans uses on
 // this plan's source (opened on first use; the returned close releases it)
 // and a no-op close when nothing was opened.
-func (p *HLSPlan) foreignBlockChecker(srcPath string, fs *mkv.FS) (func(k int) bool, func()) {
+func (p *HLSPlan) foreignBlockChecker(ctx context.Context, srcPath string, fs *mkv.FS, segs []segInfo) (func(k int) bool, func()) {
+	if hintsRanges(fs, srcPath) { // remote: every header read is a round trip, read them all at once
+		cands, _ := spanCandidates(segs)
+		verdicts := p.foreignVerdicts(ctx, srcPath, fs, cands)
+		return func(k int) bool { return verdicts[k] }, func() {}
+	}
 	var (
 		src  mkv.ReadSeekCloser
 		size int64
@@ -2082,6 +2123,151 @@ func (p *HLSPlan) foreignBlockChecker(srcPath string, fs *mkv.FS) (func(k int) b
 	}
 }
 
+// foreignHeaderBytes is what one cluster header read takes: ID, size and Timestamp.
+const foreignHeaderBytes = 32
+
+// foreignReadParallel bounds the header reads in flight on a remote source.
+const foreignReadParallel = 2
+
+// foreignVerdicts is spanHoldsForeignBlock over each candidate span of a
+// remote source, with the round trips taken at once: the headers at each
+// span's start and its cued clusters are read together first (exact ranges,
+// contiguous ones in one request), then each span walks its clusters, the
+// spans side by side, reading only the headers no cue pointed at.
+func (p *HLSPlan) foreignVerdicts(ctx context.Context, srcPath string, fs *mkv.FS, cands []int) map[int]bool {
+	verdicts := make(map[int]bool, len(cands))
+	if len(cands) == 0 {
+		return verdicts
+	}
+	st, err := fs.DoStat(srcPath)
+	if err != nil {
+		return verdicts
+	}
+	ends := make(map[int]int64, len(cands))
+	var offs []int64
+	for _, k := range cands {
+		end := st.Size()
+		if k+1 < len(p.offsets) {
+			end = p.offsets[k+1]
+		}
+		ends[k] = end
+		offs = append(offs, p.offsets[k])
+		i := sort.Search(len(p.clusters), func(j int) bool { return p.clusters[j] > p.offsets[k] })
+		for n := 1; i < len(p.clusters) && p.clusters[i] < end && n < maxForeignClusterHeaders; i, n = i+1, n+1 {
+			offs = append(offs, p.clusters[i])
+		}
+	}
+	known := p.readHeadersAt(ctx, srcPath, fs, offs)
+	var mu sync.Mutex
+	sem := make(chan struct{}, foreignReadParallel)
+	var wg sync.WaitGroup
+	for _, k := range cands {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var src mkv.ReadSeekCloser
+			defer func() {
+				if src != nil {
+					src.Close()
+				}
+			}()
+			read := func(off int64, buf []byte) (int, error) {
+				if h, ok := known[off]; ok {
+					n := copy(buf, h)
+					if n < len(buf) {
+						return n, io.ErrUnexpectedEOF
+					}
+					return n, nil
+				}
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				if src == nil {
+					f, err := fs.DoOpenContext(ctx, srcPath)
+					if err != nil {
+						return 0, err
+					}
+					src = f
+				}
+				return readFullAt(src, buf, off)
+			}
+			v := spanHoldsForeignBlockAt(read, p.offsets[k], ends[k])
+			mu.Lock()
+			verdicts[k] = v
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return verdicts
+}
+
+// readHeadersAt reads foreignHeaderBytes at each of offs (exact ranges, the
+// ones a few KiB apart merged into one), foreignReadParallel at a time; a
+// header that failed to read is left out.
+func (p *HLSPlan) readHeadersAt(ctx context.Context, srcPath string, fs *mkv.FS, offs []int64) map[int64][]byte {
+	sort.Slice(offs, func(i, j int) bool { return offs[i] < offs[j] })
+	type run struct{ off, end int64 }
+	var runs []run
+	for _, o := range offs {
+		if n := len(runs); n > 0 && o <= runs[n-1].end+foreignMergeGap {
+			runs[n-1].end = max(runs[n-1].end, o+foreignHeaderBytes)
+			continue
+		}
+		runs = append(runs, run{o, o + foreignHeaderBytes})
+	}
+	known := make(map[int64][]byte, len(offs))
+	var mu sync.Mutex
+	sem := make(chan struct{}, foreignReadParallel)
+	var wg sync.WaitGroup
+	for _, r := range runs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			src, err := fs.DoOpenContext(ctx, srcPath)
+			if err != nil {
+				return
+			}
+			defer src.Close()
+			buf := make([]byte, r.end-r.off)
+			n, _ := readFullAt(src, buf, r.off)
+			mu.Lock()
+			defer mu.Unlock()
+			for _, o := range offs {
+				if o >= r.off && o < r.end && o-r.off < int64(n) {
+					known[o] = buf[o-r.off : min(int64(n), o-r.off+foreignHeaderBytes)]
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return known
+}
+
+// foreignMergeGap is the most bytes between two headers read in one request rather than two.
+const foreignMergeGap = 4 << 10
+
+// readFullAt reads len(buf) bytes at off, io.ReadFull's contract: by ReadAt when the reader has it, else by seeking.
+func readFullAt(src mkv.ReadSeekCloser, buf []byte, off int64) (int, error) {
+	if ra, ok := src.(io.ReaderAt); ok {
+		n, err := ra.ReadAt(buf, off)
+		if n == len(buf) {
+			return n, nil
+		}
+		if err == nil || err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		if n == 0 && err == io.ErrUnexpectedEOF {
+			err = io.EOF
+		}
+		return n, err
+	}
+	if _, err := src.Seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return io.ReadFull(src, buf)
+}
+
 // spanHoldsForeignBlock walks the cluster headers of [from, end) - the ID,
 // size and Timestamp of each cluster, one small read per cluster, no block
 // read - and reports whether a cluster's timestamp steps BACK from the
@@ -2093,14 +2279,21 @@ func (p *HLSPlan) foreignBlockChecker(srcPath string, fs *mkv.FS) (func(k int) b
 // anything that is not a cluster ends the walk undecided (false: the span is
 // left as measured).
 func spanHoldsForeignBlock(src io.ReadSeeker, from, end int64) bool {
-	var buf [32]byte
+	return spanHoldsForeignBlockAt(func(off int64, buf []byte) (int, error) {
+		if _, err := src.Seek(off, io.SeekStart); err != nil {
+			return 0, err
+		}
+		return io.ReadFull(src, buf)
+	}, from, end)
+}
+
+// spanHoldsForeignBlockAt is spanHoldsForeignBlock reading each cluster header through read (io.ReadFull's contract).
+func spanHoldsForeignBlockAt(read func(off int64, buf []byte) (int, error), from, end int64) bool {
+	var buf [foreignHeaderBytes]byte
 	off := from
 	var prev int64 = -1
 	for n := 0; n < maxForeignClusterHeaders && off+8 < end; n++ {
-		if _, err := src.Seek(off, io.SeekStart); err != nil {
-			return false
-		}
-		got, err := io.ReadFull(src, buf[:])
+		got, err := read(off, buf[:])
 		if err != nil && got < 12 {
 			return false
 		}
