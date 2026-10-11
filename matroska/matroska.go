@@ -369,9 +369,9 @@ type AnalyzeReport = ops.AnalyzeReport
 // Analyze walks path's block headers - never a decoded sample - to compute
 // per-track and container-wide stream statistics: exact frame/keyframe
 // counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and
-// a declared-vs-true duration reconciliation. The walk is head-only: a
-// block's payload is seek-skipped, so the cost is proportional to the
-// block-header count, never the media volume. See ops.Analyze.
+// a declared-vs-true duration reconciliation. No sample is decoded, but every
+// block header is visited and the payloads between them are mostly read
+// through: plan on a full read of the file. See ops.Analyze.
 func Analyze(ctx context.Context, path string, opts ...Options) (*AnalyzeReport, error) {
 	return ops.Analyze(ctx, path, opts...)
 }

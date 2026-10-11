@@ -11,7 +11,8 @@ import (
 // CmdAnalyze prints a file's stream statistics: exact per-track frame/keyframe
 // counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and a
 // declared-vs-true duration reconciliation - computed from block headers
-// alone, a fast structural pass that never decodes a sample. MP4 is not
+// alone, a structural pass that never decodes a sample but reads about the
+// whole file (the payloads between the headers are read through). MP4 is not
 // supported yet (Matroska/WebM only) - see docs/library.md.
 func CmdAnalyze(args []string) {
 	var rest []string

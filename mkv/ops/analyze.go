@@ -351,10 +351,11 @@ func (a *trackAcc) addToWindow(tsMs, size int64) int64 {
 // counts, byte totals, average/peak bitrate, GOP spans and a duration
 // reconciliation - the mkvgo equivalent of a frame-accurate stream-stats probe.
 //
-// The walk is HEAD-ONLY: BlockReader.SetHeaderOnly discards each unlaced
-// block's payload instead of reading it (Block.Size is still reported), so
-// the cost is proportional to the block-HEADER count, never the media
-// volume. A laced block's lacing header still has to be decoded to size its
+// BlockReader.SetHeaderOnly discards each unlaced block's payload instead of
+// handing it out (Block.Size is still reported), so the CPU cost is
+// proportional to the block-HEADER count, never the media volume. The I/O is
+// not: the payloads between the headers are mostly read through, about the
+// whole file. A laced block's lacing header still has to be decoded to size its
 // frames, but its payload is dropped right after, never held. Memory is
 // bounded: only small per-track counters and a trailing-1-second bitrate
 // window are kept, never the blocks themselves.

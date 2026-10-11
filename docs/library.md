@@ -1955,7 +1955,7 @@ The facade re-exports `matroska.ApplyRollback` and `matroska.RollbackInfo`.
 
 `ops.Analyze` walks a Matroska/WebM file's block HEADERS - track, timecode, keyframe flag, byte size, duration - to compute the frame-accurate stream statistics a `-count_frames`/`-show_packets`-style probe reports, without ever decoding a sample: no pixel or audio decoding happens anywhere in the walk.
 
-The walk is head-only: `BlockReader.SetHeaderOnly` discards each unlaced block's payload instead of reading it (`Block.Size` is still reported), so the cost is proportional to the block-HEADER count, never the media volume - a two-hour 4K file and a two-hour 480p file with the same frame count cost the same to analyze. A laced block's lacing header still has to be decoded to size its frames, but the payload is dropped right after, never held. Memory stays bounded: only small per-track counters and a trailing-1-second bitrate window are kept, never the blocks themselves - `Analyze` scales to files with millions of blocks.
+`BlockReader.SetHeaderOnly` discards each unlaced block's payload instead of handing it out (`Block.Size` is still reported), so the CPU and memory cost is proportional to the block-HEADER count, never the media volume. The I/O is not: every block header is visited, and the payloads between them are mostly read through by the read-ahead rather than seeked over - a 6.2 GB 1080p film reads 97 % of its bytes. Plan on a full read of the file, remote sources included. A laced block's lacing header still has to be decoded to size its frames, but the payload is dropped right after, never held. Memory stays bounded: only small per-track counters and a trailing-1-second bitrate window are kept, never the blocks themselves - `Analyze` scales to files with millions of blocks.
 
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/ops"
@@ -2023,7 +2023,7 @@ MP4 support is a follow-up: an MP4's sample table (`stsz`/`stss`/`stts`) already
 
 MP4/MOV sources are hashed by remuxing to a temporary Matroska file first (`RemuxFromMP4` copies every audio/video sample's compressed bytes verbatim), then running the exact same digest engine on that file - so an MP4 and an MKV carrying the same encode fingerprint identically. The one normalization: subtitle tracks are decoded to plain UTF-8 text (tx3g/WebVTT) rather than digesting the raw MP4 sample framing, so a subtitle track's digest reflects its decoded text, not its MP4 container bytes. A track in a codec `RemuxFromMP4` cannot carry is absent from the report.
 
-Unlike `Analyze`, this is a FULL read: every track's frame payload is read and hashed, so the cost is proportional to the media volume, not just the block-header count.
+Like `Analyze`, this reads the whole file, but here every track's frame payload is also hashed.
 
 ```go
 import "github.com/gravity-zero/mkvgo/mkv/ops"
