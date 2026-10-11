@@ -13,6 +13,7 @@
 package httpfs
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,8 @@ type Options struct {
 	WindowSize int
 	// Header is added to every request (e.g. Authorization).
 	Header http.Header
+	// RequestTimeout bounds each request, body included; 0 means 60 s, negative none.
+	RequestTimeout time.Duration
 }
 
 // FS is the HTTP-backed filesystem. It also counts the bytes fetched, which
@@ -71,17 +74,14 @@ func (f *FS) Port() *mkv.FS {
 	roErr := func(op string) error { return fmt.Errorf("httpfs: %s: read-only filesystem", op) }
 	return &mkv.FS{
 		Open: func(url string) (mkv.ReadSeekCloser, error) {
+			return f.open(context.Background(), url)
+		},
+		OpenContext: f.open,
+		Stat: func(url string) (os.FileInfo, error) {
 			if !IsURL(url) {
 				return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", url)
 			}
-			return &reader{fs: f, url: url, size: -1}, nil
-		},
-		Stat: func(url string) (os.FileInfo, error) {
-			r := &reader{fs: f, url: url, size: -1}
-			if err := r.fetch(0); err != nil {
-				return nil, err
-			}
-			return fileInfo{name: url, size: r.size}, nil
+			return f.stat(url)
 		},
 		Create:    func(string) (mkv.WriteSeekCloser, error) { return nil, roErr("create") },
 		OpenFile:  func(string, int, os.FileMode) (mkv.ReadWriteSeekCloser, error) { return nil, roErr("open-file") },
@@ -96,15 +96,170 @@ func IsURL(path string) bool {
 	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }
 
+// stat asks the server about the object with one HEAD, or one single-byte
+// ranged GET where HEAD is not served; nothing of the body is transferred.
+func (f *FS) stat(url string) (os.FileInfo, error) {
+	resp, done, err := f.do(context.Background(), http.MethodHead, url, "", "")
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	done()
+	if resp.StatusCode == http.StatusOK && resp.ContentLength >= 0 {
+		return fileInfo{name: url, size: resp.ContentLength, modTime: lastModified(resp.Header), id: identityOf(resp.Header)}, nil
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusNotImplemented {
+		return nil, fmt.Errorf("httpfs: %s: HTTP %s", url, resp.Status)
+	}
+	resp, done, err = f.do(context.Background(), http.MethodGet, url, "bytes=0-0", "")
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		_, _, total, err := parseContentRange(resp.Header.Get("Content-Range"))
+		if err != nil {
+			return nil, fmt.Errorf("httpfs: %s: %w", url, err)
+		}
+		return fileInfo{name: url, size: total, modTime: lastModified(resp.Header), id: identityOf(resp.Header)}, nil
+	case http.StatusOK:
+		return nil, errIgnoresRange(url)
+	}
+	return nil, fmt.Errorf("httpfs: %s: HTTP %s", url, resp.Status)
+}
+
+func (f *FS) open(ctx context.Context, url string) (mkv.ReadSeekCloser, error) {
+	if !IsURL(url) {
+		return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", url)
+	}
+	return &reader{fs: f, ctx: ctx, url: url, size: -1}, nil
+}
+
+// do sends one request bound to ctx and RequestTimeout, with the FS's headers,
+// a Range, and the precondition an identity calls for; done releases it once
+// the body is read.
+func (f *FS) do(ctx context.Context, method, url, rng, identity string) (resp *http.Response, done context.CancelFunc, err error) {
+	done = func() {}
+	switch t := f.opts.RequestTimeout; {
+	case t == 0:
+		ctx, done = context.WithTimeout(ctx, defaultRequestTimeout)
+	case t > 0:
+		ctx, done = context.WithTimeout(ctx, t)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		done()
+		return nil, nil, err
+	}
+	for k, vs := range f.opts.Header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	if rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	switch {
+	case strings.HasPrefix(identity, `"`):
+		req.Header.Set("If-Match", identity)
+	case identity != "" && !strings.HasPrefix(identity, "W/"):
+		req.Header.Set("If-Unmodified-Since", identity)
+	}
+	resp, err = f.opts.Client.Do(req)
+	if err != nil {
+		done()
+		return nil, nil, fmt.Errorf("httpfs: %s: %w", url, err)
+	}
+	return resp, done, nil
+}
+
+const defaultRequestTimeout = 60 * time.Second
+
+func errIgnoresRange(url string) error {
+	return fmt.Errorf("httpfs: %s: server ignores Range requests (refusing a full download; the server must support ranged GETs)", url)
+}
+
+// parseContentRange reads "bytes <start>-<end>/<total>" and checks start <= end < total.
+func parseContentRange(cr string) (start, end, total int64, err error) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(cr), "bytes ")
+	if !ok {
+		return 0, 0, 0, fmt.Errorf("206 without a usable Content-Range total (%q)", cr)
+	}
+	span, tot, ok := strings.Cut(rest, "/")
+	if !ok {
+		return 0, 0, 0, fmt.Errorf("206 without a usable Content-Range total (%q)", cr)
+	}
+	if total, err = strconv.ParseInt(tot, 10, 64); err != nil || total < 0 {
+		return 0, 0, 0, fmt.Errorf("206 without a usable Content-Range total (%q)", cr)
+	}
+	first, last, _ := strings.Cut(span, "-")
+	start, err1 := strconv.ParseInt(first, 10, 64)
+	end, err2 := strconv.ParseInt(last, 10, 64)
+	if err1 != nil || err2 != nil || start < 0 || end < start || end >= total {
+		return 0, 0, 0, fmt.Errorf("206 with an unusable Content-Range span (%q)", cr)
+	}
+	return start, end, total, nil
+}
+
+// identityOf is the version a response declares: a strong ETag, else Last-Modified, else a weak ETag, else nothing.
+func identityOf(h http.Header) string {
+	etag, lm := h.Get("ETag"), h.Get("Last-Modified")
+	switch {
+	case strings.HasPrefix(etag, `"`):
+		return etag
+	case lm != "":
+		return lm
+	}
+	return etag
+}
+
+// strongIdentity reports an identity that is a strong ETag: the only one that changes with every change of the bytes.
+func strongIdentity(id string) bool { return strings.HasPrefix(id, `"`) }
+
+// checkVersion verifies a response carries the identity's validator, equal:
+// a different one is another version, a missing one proves nothing.
+func checkVersion(url, identity string, h http.Header) error {
+	if identity == "" {
+		return nil
+	}
+	field := "Last-Modified"
+	if strings.HasPrefix(identity, `"`) || strings.HasPrefix(identity, "W/") {
+		field = "ETag"
+	}
+	switch got := h.Get(field); got {
+	case identity:
+		return nil
+	case "":
+		return fmt.Errorf("httpfs: %s: the response carries no %s: nothing shows it is the version read so far", url, field)
+	}
+	return fmt.Errorf("httpfs: %s: %w", url, mkv.ErrSourceChanged)
+}
+
+func lastModified(h http.Header) time.Time {
+	t, err := http.ParseTime(h.Get("Last-Modified"))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 // reader is a ReadSeekCloser over one URL: Seek is local, Read serves from the
-// current window, fetching a new one on miss.
+// current window, fetching a new one on miss. Every window after the first is
+// asked for the version the first one declared (If-Match on a strong ETag,
+// If-Unmodified-Since on Last-Modified), or the version Pin set, and must
+// carry that validator. Only a strong ETag rules out two versions mixed; a
+// Last-Modified date does not tell apart two versions written within its second.
 type reader struct {
 	fs   *FS
+	ctx  context.Context // ends the requests in flight (OpenContext)
 	url  string
 	size int64 // -1 until learned from the first Content-Range
 	pos  int64
 	buf  []byte
-	off  int64 // buf's start offset
+	off  int64  // buf's start offset
+	id   string // the version every window must be of: pinned, else the first window's
 }
 
 func (r *reader) Read(p []byte) (int, error) {
@@ -151,6 +306,9 @@ func (r *reader) Seek(offset int64, whence int) (int64, error) {
 
 func (r *reader) Close() error { return nil }
 
+// Pin binds the reader to one version of the object (mkv.PinnedReader): a window of another ends the read with mkv.ErrSourceChanged.
+func (r *reader) Pin(identity string) { r.id = identity }
+
 // fetch loads the window starting at off via a ranged GET and records the
 // total size from the Content-Range header.
 func (r *reader) fetch(off int64) error {
@@ -164,66 +322,87 @@ func (r *reader) fetch(off int64) error {
 			end = r.size - 1
 		}
 	}
-	req, err := http.NewRequest(http.MethodGet, r.url, nil)
+	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, fmt.Sprintf("bytes=%d-%d", off, end), r.id)
 	if err != nil {
 		return err
 	}
-	for k, vs := range r.fs.opts.Header {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, end))
-	resp, err := r.fs.opts.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("httpfs: %s: %w", r.url, err)
-	}
+	defer done()
 	defer resp.Body.Close()
+	var want int64
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
-		// Content-Range: bytes <start>-<end>/<total>
-		cr := resp.Header.Get("Content-Range")
-		if i := strings.LastIndexByte(cr, '/'); i >= 0 {
-			if total, perr := strconv.ParseInt(cr[i+1:], 10, 64); perr == nil {
-				r.size = total
-			}
+		start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
+		if err != nil {
+			return fmt.Errorf("httpfs: %s: %w", r.url, err)
 		}
-		if r.size < 0 {
-			return fmt.Errorf("httpfs: %s: 206 without a usable Content-Range total (%q)", r.url, cr)
+		if start != off || last > end {
+			return fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", r.url, start, last, off, end)
 		}
+		if err := checkVersion(r.url, r.id, resp.Header); err != nil {
+			return err
+		}
+		if r.size >= 0 && total != r.size {
+			return fmt.Errorf("httpfs: %s: the size went from %d to %d: %w", r.url, r.size, total, mkv.ErrSourceChanged)
+		}
+		want = last - start + 1
+		if resp.ContentLength >= 0 && resp.ContentLength != want {
+			return fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
+		}
+		if r.id == "" {
+			r.id = identityOf(resp.Header)
+		}
+		r.size = total
+	case http.StatusPreconditionFailed:
+		return fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
 	case http.StatusRequestedRangeNotSatisfiable:
-		// Reading at/past EOF; keep the known size if any, else this is an error.
+		// fetch never asks past a known size: a 416 then means the object shrank.
 		if r.size >= 0 {
-			r.buf, r.off = nil, 0
-			return nil
+			return fmt.Errorf("httpfs: %s: offset %d is past the object's end now: %w", r.url, off, mkv.ErrSourceChanged)
 		}
 		return fmt.Errorf("httpfs: %s: range not satisfiable", r.url)
+	case http.StatusNotFound, http.StatusGone:
+		// Gone under a reader bound to a version is a changed source; a fresh reader's is a plain not-found.
+		if r.id != "" || r.size >= 0 {
+			return fmt.Errorf("httpfs: %s: HTTP %s: %w", r.url, resp.Status, mkv.ErrSourceChanged)
+		}
+		return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
 	case http.StatusOK:
-		return fmt.Errorf("httpfs: %s: server ignores Range requests (refusing a full download; the server must support ranged GETs)", r.url)
+		return errIgnoresRange(r.url)
 	default:
 		return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
 	}
-	buf, err := io.ReadAll(resp.Body)
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, want+1))
 	if err != nil {
 		return fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
 	}
 	r.fs.fetched.Add(int64(len(buf)))
+	if int64(len(buf)) != want {
+		return fmt.Errorf("httpfs: %s: 206 of %d bytes carried %d", r.url, want, len(buf))
+	}
 	r.buf, r.off = buf, off
 	return nil
 }
 
-// fileInfo is the minimal os.FileInfo Stat returns.
+// fileInfo is the os.FileInfo Stat returns: size, Last-Modified, and the version as mkv.FileIdentity.
 type fileInfo struct {
-	name string
-	size int64
+	name    string
+	size    int64
+	modTime time.Time
+	id      string
 }
 
 func (i fileInfo) Name() string       { return i.name }
 func (i fileInfo) Size() int64        { return i.size }
 func (i fileInfo) Mode() os.FileMode  { return 0o444 }
-func (i fileInfo) ModTime() time.Time { return time.Time{} }
+func (i fileInfo) ModTime() time.Time { return i.modTime }
 func (i fileInfo) IsDir() bool        { return false }
 func (i fileInfo) Sys() any           { return nil }
+
+// Identity is the object's version: its strong ETag, else its Last-Modified, else a weak ETag; what Pin takes.
+func (i fileInfo) Identity() string { return i.id }
+
+// Strong reports an identity that is a strong ETag.
+func (i fileInfo) Strong() bool { return strongIdentity(i.id) }
 
 // Hybrid returns an FS that reads http(s) URLs through HTTP Range requests and
 // passes every other path - including all writes - to the operating system.
@@ -240,6 +419,12 @@ func Hybrid(opts ...Options) *mkv.FS {
 		Open: func(path string) (mkv.ReadSeekCloser, error) {
 			if IsURL(path) {
 				return remote.DoOpen(path)
+			}
+			return os.Open(path)
+		},
+		OpenContext: func(ctx context.Context, path string) (mkv.ReadSeekCloser, error) {
+			if IsURL(path) {
+				return remote.DoOpenContext(ctx, path)
 			}
 			return os.Open(path)
 		},

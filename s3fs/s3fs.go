@@ -14,10 +14,12 @@
 package s3fs
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -45,6 +47,8 @@ type Options struct {
 	// WindowSize is the ranged-fetch granularity in bytes, passed through to
 	// httpfs.Options.WindowSize; <= 0 means httpfs's default (512 KiB).
 	WindowSize int
+	// RequestTimeout bounds each request, passed through to httpfs.Options.RequestTimeout: 0 means 60 s, negative none.
+	RequestTimeout time.Duration
 }
 
 // S3FS is the S3-backed read-only filesystem. Construct with New; use Port to
@@ -110,7 +114,7 @@ func New(opts Options) *S3FS {
 		scheme: scheme,
 		host:   host,
 		client: client,
-		hfs:    httpfs.New(httpfs.Options{Client: client, WindowSize: opts.WindowSize}),
+		hfs:    httpfs.New(httpfs.Options{Client: client, WindowSize: opts.WindowSize, RequestTimeout: opts.RequestTimeout}),
 	}
 }
 
@@ -140,6 +144,13 @@ func (s *S3FS) Port() *mkv.FS {
 				return nil, err
 			}
 			return inner.DoOpen(u)
+		},
+		OpenContext: func(ctx context.Context, path string) (mkv.ReadSeekCloser, error) {
+			u, err := s.resolveURL(path)
+			if err != nil {
+				return nil, err
+			}
+			return inner.DoOpenContext(ctx, u)
 		},
 		Stat: func(path string) (os.FileInfo, error) {
 			u, err := s.resolveURL(path)
