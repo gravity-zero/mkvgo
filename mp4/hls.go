@@ -889,7 +889,11 @@ func buildSegmentFile(seq uint32, seg trackSegment) []byte {
 // writeSegmentFile writes the built head then streams dataLen sample bytes
 // from the track's sequential temp-file reader.
 func writeSegmentFile(out io.Writer, head []byte, dataLen int64, r io.Reader) error {
-	if _, err := out.Write(head); err != nil {
+	m, err := out.Write(head)
+	if err == nil && m < len(head) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		return err
 	}
 	if dataLen > 0 {

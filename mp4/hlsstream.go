@@ -9,8 +9,14 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/gravity-zero/mkvgo/internal/fileid"
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // tableCacheBytes bounds the window tables one plan keeps: a table is the video's structure plus the window's audio segments, a few MiB at most.
@@ -80,7 +86,7 @@ type windowTable struct {
 }
 
 type tableFlight struct {
-	done  chan struct{}
+	*flight
 	table *windowTable
 	err   error
 }
@@ -108,30 +114,41 @@ func (p *HLSPlan) table(ctx context.Context, n int) (*windowTable, error) {
 		return t, nil
 	}
 	if f := p.tabFlight[n]; f != nil {
+		f.join()
 		p.tabMu.Unlock()
 		select {
 		case <-f.done:
 			return f.table, f.err
 		case <-ctx.Done():
+			p.tabMu.Lock()
+			f.leave()
+			p.tabMu.Unlock()
 			return nil, ctx.Err()
 		}
 	}
-	f := &tableFlight{done: make(chan struct{})}
+	f := &tableFlight{}
+	f.flight = newFlight(&p.tabMu, ctx, func() {
+		if p.tabFlight[n] == f {
+			delete(p.tabFlight, n)
+		}
+	})
 	if p.tabFlight == nil {
 		p.tabFlight = make(map[int]*tableFlight)
 	}
 	p.tabFlight[n] = f
 	p.tabMu.Unlock()
 
-	f.table, f.err = p.buildTable(ctx, n)
+	f.table, f.err = p.buildTable(f.ctx, n)
 
 	p.tabMu.Lock()
-	delete(p.tabFlight, n)
+	if p.tabFlight[n] == f {
+		delete(p.tabFlight, n)
+	}
 	if f.err == nil {
 		p.storeTable(n, f.table)
 	}
 	p.tabMu.Unlock()
-	close(f.done)
+	f.finish()
 	return f.table, f.err
 }
 
@@ -265,6 +282,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		}
 		return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
 	}
+	if err := p.checkSource(); err != nil {
+		return nil, err
+	}
 	t, err := p.table(ctx, n)
 	if err != nil {
 		return nil, err
@@ -278,14 +298,52 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(t.heads[ti])) + t.segs[ti].dataLen, plan: p, table: t, ti: ti}, nil
 }
 
-// ETag identifies the resource's bytes: strong for bytes in hand, else weak from the size, the source's stamp and the name.
+// ETag identifies the resource's bytes: strong for bytes in hand, else weak from the size, the source's SourceID and the name.
 func (h *ResourceHandle) ETag() string {
 	if h.data != nil {
 		sum := sha256.Sum256(h.data)
 		return `"` + hex.EncodeToString(sum[:]) + `"`
 	}
-	return fmt.Sprintf("W/\"%x-%s-%s\"", h.size, h.plan.stamp, h.name)
+	return fmt.Sprintf("W/\"%x-%s-%s\"", h.size, h.plan.SourceID(), h.name)
 }
+
+// SourceID names what the plan's URLs serve - the source's size, mtime and
+// identity, the packaging (playlists, init segments, so the options) and the
+// mkvgo version, hashed - for a URL prefix or a cache key that changes with
+// any of them; empty for a plan without a stamp (a growing source).
+func (p *HLSPlan) SourceID() string {
+	if p.stamp == "" {
+		return ""
+	}
+	p.sourceIDOnce.Do(func() {
+		h := sha256.New()
+		fmt.Fprintf(h, "%s|%s|%s|", p.stamp, p.srcID, packagerVersion())
+		for _, b := range append(append([][]byte{p.master, p.mpd}, p.medias...), p.inits...) {
+			fmt.Fprintf(h, "%d:", len(b))
+			h.Write(b)
+		}
+		p.sourceID = hex.EncodeToString(h.Sum(nil)[:8])
+	})
+	return p.sourceID
+}
+
+// packagerVersion is the mkvgo build that packages: another version may cut other bytes under the same names.
+var packagerVersion = sync.OnceValue(func() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	mods := append([]*debug.Module{&bi.Main}, bi.Deps...)
+	for _, m := range mods {
+		if m.Path == "github.com/gravity-zero/mkvgo" {
+			if m.Replace != nil {
+				m = m.Replace
+			}
+			return m.Version + " " + m.Sum
+		}
+	}
+	return ""
+})
 
 // segmentName parses a media segment's resource name into its track index and 0-based window.
 func (p *HLSPlan) segmentName(name string) (ti, n int, ok bool) {
@@ -360,9 +418,10 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 	}
 	pos := int64(len(head))
 	if pos >= off+n {
-		return c.written, c.flush(w)
+		err := c.flush(w)
+		return c.written, err
 	}
-	src, err := p.fs.DoOpen(p.srcPath)
+	src, err := p.openSource(ctx)
 	if err != nil {
 		return c.written, err
 	}
@@ -391,7 +450,8 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 		}
 		pos += raw
 	}
-	return c.written, c.flush(w)
+	err = c.flush(w)
+	return c.written, err
 }
 
 // spanCopier copies ranges of a source to a writer: through one buffer,
@@ -486,6 +546,12 @@ func (c *spanCopier) queue(w io.Writer, b []byte) error {
 	if len(b) == 0 {
 		return nil
 	}
+	if len(b) >= stageBytes { // a stage's worth on its own: packing it would only copy it
+		if err := c.flush(w); err != nil {
+			return err
+		}
+		return c.write(w, b)
+	}
 	c.pending = append(c.pending, b)
 	c.pendingN += len(b)
 	if c.pendingN >= stageBytes {
@@ -531,3 +597,44 @@ func (c *spanCopier) release() {
 		c.stage = nil
 	}
 }
+
+// ErrSourceChanged is returned for a media or subtitle segment once the source
+// is not the file the plan was built on (its size, mtime or identity moved):
+// the plan's offsets belong to another file. Build a new plan.
+var ErrSourceChanged = mkv.ErrSourceChanged
+
+// checkSource refuses the source once its stamp or identity moved. Not run for a plan without a stamp (growing source, or one it could not stat at birth), nor for a remote source whose reads are pinned: they verify it themselves, a stat there is a round trip for nothing.
+func (p *HLSPlan) checkSource() error {
+	if p.srcChanged.Load() {
+		return ErrSourceChanged
+	}
+	if p.stamp == "" || strings.HasPrefix(p.stamp, "t") || (p.pinned && !p.osStat) {
+		return nil
+	}
+	// An OS file is fstat'ed on every read: the path stat only fails a request before its first byte, once per interval is enough.
+	now := time.Now().UnixNano()
+	if p.pinned && now-p.srcStatAt.Load() < sourceStatEvery.Load() {
+		return nil
+	}
+	fi, err := p.fs.DoStat(p.srcPath)
+	if err != nil {
+		return err
+	}
+	id := p.srcID
+	if fid, ok := fi.(mkv.FileIdentity); ok {
+		id = fid.Identity()
+	} else if p.osStat {
+		id = fileid.Of(fi)
+	}
+	if statStamp(fi) != p.stamp || id != p.srcID || (p.osStat && !os.SameFile(p.srcInfo, fi)) {
+		p.srcChanged.Store(true)
+		return ErrSourceChanged
+	}
+	p.srcStatAt.Store(now)
+	return nil
+}
+
+// sourceStatEvery spaces the path stat of a source whose reads verify it themselves (ns): a stat is a round trip on a network mount.
+var sourceStatEvery atomic.Int64
+
+func init() { sourceStatEvery.Store(int64(time.Second)) }

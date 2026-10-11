@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/fileid"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -113,8 +115,20 @@ type HLSPlan struct {
 	// only the first window after a seek pays the traversal.
 	trackPos [][]reader.BlockPos
 	// stamp identifies the source without reading it (size and mtime, else the
-	// plan's birth): what a streamed segment's ETag carries.
-	stamp string
+	// plan's birth): what a streamed segment's ETag carries. srcInfo is the
+	// stat behind it, for the file's identity (checkSource).
+	stamp   string
+	srcInfo os.FileInfo
+	srcID   string // the source's identity beyond its stamp: an ETag or version id the FS declares, else the OS file id
+	osStat  bool   // srcInfo is the OS's own stat: os.SameFile and fstat apply
+	pinned  bool   // every read verifies the source itself (fstat on an OS file, a PinnedReader elsewhere): no stat before reading
+	// srcStatAt is when the path was last stat'ed clean (unix ns), srcChanged
+	// that the source was once found changed: final for the plan.
+	srcStatAt  atomic.Int64
+	srcChanged atomic.Bool
+	// sourceID is SourceID, computed once.
+	sourceIDOnce sync.Once
+	sourceID     string
 	// firstKeyBytes is the first video keyframe's size: the master's I-frame
 	// BANDWIDTH estimate (the master never changes once built, like every
 	// other bandwidth it carries).
@@ -192,7 +206,52 @@ type planTrack struct {
 // bounded reads, head-only in spirit - and returns a plan that serves an HLS
 // presentation segment by segment. The source must carry a Cues index (every
 // real muxer writes one; `mkvgo reindex` adds one). See HLSPlan.Segment.
+//
+// The source is stat'ed before the first read and again once the plan is
+// built: a source replaced while the plan read it is ErrSourceChanged, never
+// a plan of one file stamped with another.
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
+	fs := optionsFrom(opts).FS
+	before, known := sourceSig(fs, srcPath)
+	p, err := planHLS(ctx, srcPath, opts...)
+	if !known {
+		return p, err
+	}
+	if err != nil {
+		if after, _ := sourceSig(fs, srcPath); after != before {
+			return nil, fmt.Errorf("%w (while planning: %v)", ErrSourceChanged, err)
+		}
+		return nil, err
+	}
+	if p.stamp+"|"+p.srcID != before {
+		return nil, ErrSourceChanged
+	}
+	return p, nil
+}
+
+// sourceSig is what stampSource records of the source, as one string; known is false when it cannot be stat'ed.
+func sourceSig(fs *mkv.FS, path string) (sig string, known bool) {
+	fi, err := fs.DoStat(path)
+	if err != nil {
+		return "", false
+	}
+	id, _ := statIdentity(fi)
+	return statStamp(fi) + "|" + id, true
+}
+
+// statIdentity is a source's identity beyond its stamp - the version its FS declares, else the OS file id - and whether fi is the OS's own stat.
+func statIdentity(fi os.FileInfo) (id string, osStat bool) {
+	osStat = os.SameFile(fi, fi) // SameFile knows only the OS's own stat
+	if v, ok := fi.(mkv.FileIdentity); ok {
+		return v.Identity(), osStat
+	}
+	if osStat {
+		return fileid.Of(fi), true
+	}
+	return "", false
+}
+
+func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
 	o := optionsFrom(opts)
 	fs := o.FS
 	segMs := o.SegmentMs
@@ -488,7 +547,7 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		est = []iframeRef{{seg: 0, length: p.firstKeyBytes}}
 	}
 	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, est)
-	p.stamp = sourceStamp(p.fs, srcPath)
+	p.stampSource()
 	p.tabAcct = newTableAccount(p)
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
@@ -731,7 +790,7 @@ func (p *HLSPlan) walkBlocks(ctx context.Context, off, end int64, headerOnly boo
 
 // walkBlocksPos is walkBlocks handing fn each block's position as well.
 func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly bool, fn func(mkv.Block, *planTrack, reader.BlockPos) (bool, error)) error {
-	src, err := p.fs.DoOpen(p.srcPath)
+	src, err := p.openSource(ctx)
 	if err != nil {
 		return err
 	}
@@ -781,7 +840,7 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 // the video track's block-header count, never by any payload bytes.
 func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (bool, error)) error {
 	vid := p.tracks[p.videoIndex()].ft.outTrack.mkv.ID
-	src, err := p.fs.DoOpen(p.srcPath)
+	src, err := p.openSource(ctx)
 	if err != nil {
 		return err
 	}
@@ -946,12 +1005,51 @@ func (p *HLSPlan) noteRecovered(recovered bool) {
 	p.winMu.Unlock()
 }
 
-// sourceStamp identifies the source without reading it: its size and mtime, else the moment the plan was built.
-func sourceStamp(fs *mkv.FS, path string) string {
-	if fi, err := fs.DoStat(path); err == nil {
-		return fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
+// openSource opens the source for reads bound to ctx and binds the open file to the one the plan was
+// built on: an OS file is fstat'ed, a PinnedReader is pinned to the identity.
+func (p *HLSPlan) openSource(ctx context.Context) (mkv.ReadSeekCloser, error) {
+	f, err := p.fs.DoOpenContext(ctx, p.srcPath)
+	if err != nil || p.stamp == "" || strings.HasPrefix(p.stamp, "t") {
+		return f, err
 	}
-	return fmt.Sprintf("t%x", time.Now().UnixNano())
+	if of, ok := f.(*os.File); ok && p.osStat {
+		fi, err := of.Stat()
+		if err == nil && (statStamp(fi) != p.stamp || !os.SameFile(fi, p.srcInfo)) {
+			p.srcChanged.Store(true)
+			err = ErrSourceChanged
+		}
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		return f, nil
+	}
+	if pr, ok := f.(mkv.PinnedReader); ok && p.srcID != "" {
+		pr.Pin(p.srcID)
+	}
+	return f, nil
+}
+
+// stampSource records what the plan holds the source to: its stamp (size and mtime, else the moment the plan was built), its identity, and whether reads verify it themselves.
+func (p *HLSPlan) stampSource() {
+	fi, err := p.fs.DoStat(p.srcPath)
+	if err != nil {
+		p.stamp = fmt.Sprintf("t%x", time.Now().UnixNano())
+		return
+	}
+	p.stamp, p.srcInfo = statStamp(fi), fi
+	p.srcID, p.osStat = statIdentity(fi)
+	p.pinned = p.osStat
+	if !p.pinned && p.srcID != "" {
+		if f, err := p.fs.DoOpen(p.srcPath); err == nil {
+			_, p.pinned = f.(mkv.PinnedReader)
+			f.Close()
+		}
+	}
+}
+
+func statStamp(fi os.FileInfo) string {
+	return fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
 }
 
 // buildMatroskaIframePlaylist performs the one-time structure-only walk: for
@@ -1205,7 +1303,7 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 // window's audio is served from the table rather than by a second pass).
 func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64, structure, keepAudio bool) ([][]segSample, []int64, windowInPlace, error) {
 	none := windowInPlace{track: -1}
-	src, err := p.fs.DoOpen(p.srcPath)
+	src, err := p.openSource(ctx)
 	if err != nil {
 		return nil, nil, none, err
 	}
@@ -2183,6 +2281,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
+	if err := p.checkSource(); err != nil {
+		return nil, err
+	}
 	if p.mp4src {
 		return p.mp4SegmentTrack(ctx, ti, n)
 	}
@@ -2497,7 +2598,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	}
 
 	track := &p.subs[i]
-	src, err := p.fs.DoOpen(p.srcPath)
+	src, err := p.openSource(ctx)
 	if err != nil {
 		return err
 	}
@@ -2725,6 +2826,9 @@ func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
 		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
 	}
+	if err := p.checkSource(); err != nil {
+		return nil, err
+	}
 	cues, err := p.subCuesThrough(ctx, i, math.MaxInt64)
 	if err != nil {
 		return nil, err
@@ -2754,6 +2858,9 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 	}
 	if n < 0 || n >= p.segCount {
 		return nil, errf("subtitle segment %d out of range (0..%d)", n, p.segCount-1)
+	}
+	if err := p.checkSource(); err != nil {
+		return nil, err
 	}
 	segStart := p.bounds[n]
 	var segEnd int64 = math.MaxInt64
@@ -2964,6 +3071,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		ft.sampleBps, ft.sampleBpsKnown = sampleBandwidth(ft.samples)
 		ft.samples = nil
 	}
+	p.stampSource()
 	return p, nil
 }
 
@@ -2994,7 +3102,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		if len(samples) == 0 {
 			return nil
 		}
-		src, err := p.fs.DoOpen(p.srcPath)
+		src, err := p.openSource(ctx)
 		if err != nil {
 			return err
 		}

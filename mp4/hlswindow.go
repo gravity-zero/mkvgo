@@ -31,7 +31,7 @@ type windowBundle struct {
 // A player fetching video and audio in parallel (hls.js does) lands here - and
 // the two requests share one read of the source.
 type windowFlight struct {
-	done   chan struct{}
+	*flight
 	bundle *windowBundle
 	err    error
 }
@@ -51,32 +51,43 @@ func (p *HLSPlan) window(ctx context.Context, n int) (b *windowBundle, built boo
 	}
 	if f := p.winFlight[n]; f != nil {
 		p.stats.WaitedBuilds++
+		f.join()
 		p.winMu.Unlock()
 		select {
 		case <-f.done:
 			return f.bundle, false, f.err
 		case <-ctx.Done():
 			// This caller gave up; the build carries on for the others.
+			p.winMu.Lock()
+			f.leave()
+			p.winMu.Unlock()
 			return nil, false, ctx.Err()
 		}
 	}
-	f := &windowFlight{done: make(chan struct{})}
+	f := &windowFlight{}
+	f.flight = newFlight(&p.winMu, ctx, func() {
+		if p.winFlight[n] == f {
+			delete(p.winFlight, n)
+		}
+	})
 	if p.winFlight == nil {
 		p.winFlight = make(map[int]*windowFlight)
 	}
 	p.winFlight[n] = f
 	p.winMu.Unlock()
 
-	f.bundle, f.err = p.buildWindow(ctx, n)
+	f.bundle, f.err = p.buildWindow(f.ctx, n)
 
 	p.winMu.Lock()
-	delete(p.winFlight, n)
+	if p.winFlight[n] == f {
+		delete(p.winFlight, n)
+	}
 	if f.err == nil {
 		p.noteBuild(n, f.bundle)
 		p.store(n, f.bundle)
 	}
 	p.winMu.Unlock()
-	close(f.done)
+	f.finish()
 	return f.bundle, true, f.err
 }
 
