@@ -17,6 +17,7 @@ package httpfs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -537,6 +538,133 @@ func (r *reader) Pin(identity string) { r.id = identity }
 
 // HintRange tells the reader its next reads cover [off, end) (mkv.RangeHinter): the request that reaches into it asks for the rest of it at once.
 func (r *reader) HintRange(off, end int64) { r.hintOff, r.hintEnd = off, end }
+
+// ReadAt reads len(p) bytes at off with one ranged GET of exactly that span
+// (io.ReaderAt), of the version the reader is pinned to; it leaves the
+// reader's position and response alone, so several may run at once.
+func (r *reader) ReadAt(p []byte, off int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.share != nil && strongIdentity(r.id) {
+		if e, ok := r.share.lookup(r.url, r.id, off); ok && off+int64(len(p)) <= e.off+int64(len(e.data)) {
+			return copy(p, e.data[off-e.off:]), nil
+		}
+	}
+	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1), r.id)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+	case http.StatusPreconditionFailed:
+		return 0, fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
+	case http.StatusRequestedRangeNotSatisfiable:
+		return 0, io.EOF
+	case http.StatusOK:
+		return 0, errIgnoresRange(r.url)
+	default:
+		return 0, fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+	}
+	start, last, _, err := parseContentRange(resp.Header.Get("Content-Range"))
+	if err != nil {
+		return 0, fmt.Errorf("httpfs: %s: %w", r.url, err)
+	}
+	if start != off || last >= off+int64(len(p)) {
+		return 0, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", r.url, start, last, off, off+int64(len(p))-1)
+	}
+	if err := checkVersion(r.url, r.id, resp.Header); err != nil {
+		return 0, err
+	}
+	n, err := io.ReadFull(resp.Body, p[:last-start+1])
+	r.fs.fetched.Add(int64(n))
+	if err != nil {
+		return n, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+	}
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// Stat answers for the object the reader reads. Opened under a mkv.ShareReads
+// scope, it asks for the first and the last window at once instead of a HEAD
+// - a parser reads both ends next - and keeps them for the scope's readers:
+// the size and version come from the first response. Outside a scope it is
+// FS.Stat.
+func (r *reader) Stat() (os.FileInfo, error) {
+	if r.share == nil {
+		return r.fs.stat(r.url)
+	}
+	w := int64(r.fs.opts.WindowSize)
+	var tail *keptRange
+	var tailErr error
+	tailDone := make(chan struct{})
+	go func() {
+		defer close(tailDone)
+		tail, tailErr = r.fetchKept(fmt.Sprintf("bytes=-%d", w))
+	}()
+	head, err := r.fetchKept(fmt.Sprintf("bytes=0-%d", w-1))
+	<-tailDone
+	if err != nil {
+		if errors.Is(err, errNotRanged) {
+			return r.fs.stat(r.url)
+		}
+		return nil, err
+	}
+	if tailErr == nil && (tail.id != head.id || tail.size != head.size) { // the two ends are of two versions
+		return nil, fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
+	}
+	if !strongIdentity(head.id) {
+		return fileInfo{name: r.url, size: head.size, modTime: head.mod, id: head.id}, nil
+	}
+	r.share.remember(&head.recentRange)
+	if tailErr == nil {
+		r.share.remember(&tail.recentRange)
+	}
+	return fileInfo{name: r.url, size: head.size, modTime: head.mod, id: head.id}, nil
+}
+
+// errNotRanged is a 416 to a first request: an empty object, whose stat a HEAD answers.
+var errNotRanged = errors.New("httpfs: range not satisfiable")
+
+// keptRange is a whole response read for a ReadShare scope, with the Last-Modified it declared.
+type keptRange struct {
+	recentRange
+	mod time.Time
+}
+
+// fetchKept reads the whole response to a ranged GET of rng.
+func (r *reader) fetchKept(rng string) (*keptRange, error) {
+	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, rng, "")
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+	case http.StatusRequestedRangeNotSatisfiable:
+		return nil, errNotRanged
+	case http.StatusOK:
+		return nil, errIgnoresRange(r.url)
+	default:
+		return nil, fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+	}
+	start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
+	if err != nil {
+		return nil, fmt.Errorf("httpfs: %s: %w", r.url, err)
+	}
+	data := make([]byte, last-start+1)
+	n, err := io.ReadFull(resp.Body, data)
+	r.fs.fetched.Add(int64(n))
+	if err != nil {
+		return nil, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+	}
+	return &keptRange{recentRange: recentRange{url: r.url, id: identityOf(resp.Header), off: start, size: total, data: data}, mod: lastModified(resp.Header)}, nil
+}
 
 // fetch starts the ranged GET of the response that serves off, and records
 // the total size from its Content-Range header.

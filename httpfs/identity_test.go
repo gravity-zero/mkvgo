@@ -1,10 +1,13 @@
 package httpfs
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -190,5 +193,115 @@ func TestFetchRejectsMisplacedContentRange(t *testing.T) {
 	}
 	if _, err := f.Read(make([]byte, 5)); err == nil {
 		t.Fatal("a window served from the wrong offset was accepted")
+	}
+}
+
+// Under a ShareReads scope a reader's Stat is no HEAD: it asks for both ends
+// at once, takes the size and version from them, and the scope's readers
+// then read both ends for no request.
+func TestSharedStatFetchesBothEnds(t *testing.T) {
+	body := pattern(4<<20, 3)
+	o := newObjectServer(t, body, `"v1"`)
+	fs := New(Options{WindowSize: 64 << 10})
+	ctx := mkv.ShareReads(context.Background())
+	f, err := fs.Port().DoOpenContext(ctx, o.srv.URL+"/o.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fi, err := f.(interface{ Stat() (os.FileInfo, error) }).Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gets, heads, _ := o.counts(); gets != 2 || heads != 0 {
+		t.Fatalf("Stat made %d GET, %d HEAD; want the two ends, no HEAD", gets, heads)
+	}
+	if id, _ := fi.(mkv.FileIdentity); fi.Size() != int64(len(body)) || id == nil || id.Identity() != `"v1"` {
+		t.Fatalf("Stat = size %d identity %v", fi.Size(), id)
+	}
+	g, err := fs.Port().DoOpenContext(ctx, o.srv.URL+"/o.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	g.(mkv.PinnedReader).Pin(`"v1"`)
+	for _, off := range []int64{0, 1000, int64(len(body)) - 1000} {
+		buf := make([]byte, 500)
+		if _, err := g.Seek(off, io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadFull(g, buf); err != nil || !bytes.Equal(buf, body[off:off+500]) {
+			t.Fatalf("read at %d: %v", off, err)
+		}
+	}
+	if gets, _, _ := o.counts(); gets != 2 {
+		t.Errorf("reads of both ends made %d more requests, want none", gets-2)
+	}
+}
+
+// ReadAt is one request of exactly the bytes asked, of the pinned version.
+func TestReadAtIsExactAndPinned(t *testing.T) {
+	body := pattern(1<<20, 5)
+	o := newObjectServer(t, body, `"v1"`)
+	f, err := New().Port().DoOpen(o.srv.URL + "/o.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.(mkv.PinnedReader).Pin(`"v1"`)
+	buf := make([]byte, 32)
+	if n, err := f.(io.ReaderAt).ReadAt(buf, 500000); n != 32 || err != nil || !bytes.Equal(buf, body[500000:500032]) {
+		t.Fatalf("ReadAt = %d, %v", n, err)
+	}
+	if _, _, sent := o.counts(); sent != 32 {
+		t.Errorf("ReadAt of 32 bytes transferred %d", sent)
+	}
+	if n, err := f.(io.ReaderAt).ReadAt(buf, int64(len(body))-10); n != 10 || err != io.EOF {
+		t.Errorf("ReadAt across the end = %d, %v; want 10, io.EOF", n, err)
+	}
+	o.swap(pattern(1<<20, 6), `"v2"`)
+	if _, err := f.(io.ReaderAt).ReadAt(buf, 0); !errors.Is(err, mkv.ErrSourceChanged) {
+		t.Errorf("ReadAt of a replaced object: %v, want ErrSourceChanged", err)
+	}
+}
+
+// The two ends a shared Stat fetches must be of one version: an object
+// replaced between the two responses (another ETag, or another total size) is
+// ErrSourceChanged, and neither end is kept for the scope's readers.
+func TestSharedStatRefusesTwoVersions(t *testing.T) {
+	old, repl := pattern(2<<20, 1), pattern(3<<20, 2)
+	for _, c := range []struct {
+		name       string
+		tail       []byte
+		etag, tEtg string
+	}{
+		{"another ETag", old, `"v1"`, `"v2"`},
+		{"another size", repl, `"v1"`, `"v1"`},
+		{"another Last-Modified, no ETag", old, "", ""},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, etag, mod := old, c.etag, time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+			if strings.HasPrefix(r.Header.Get("Range"), "bytes=-") { // the suffix is served by the replacement
+				body, etag, mod = c.tail, c.tEtg, mod.Add(time.Hour)
+			}
+			if etag != "" {
+				w.Header().Set("ETag", etag)
+			}
+			http.ServeContent(w, r, "o.bin", mod, strings.NewReader(string(body)))
+		}))
+		share := &mkv.ReadShare{}
+		fs := New(Options{WindowSize: 64 << 10})
+		f, err := fs.Port().DoOpenContext(mkv.WithReadShare(context.Background(), share), srv.URL+"/o.bin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.(interface{ Stat() (os.FileInfo, error) }).Stat(); !errors.Is(err, mkv.ErrSourceChanged) {
+			t.Errorf("%s: Stat = %v, want ErrSourceChanged", c.name, err)
+		}
+		if kept, ok := share.LoadOrStore(fs, &recentReads{}).(*recentReads); !ok || len(kept.recent) != 0 {
+			t.Errorf("%s: %d responses kept for the scope after a refusal", c.name, len(kept.recent))
+		}
+		f.Close()
+		srv.Close()
 	}
 }
