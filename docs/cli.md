@@ -994,7 +994,7 @@ Remux an MKV/WebM file to MP4 without transcoding. Compressed samples are copied
 mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>
 ```
 
-- `--faststart` writes the `moov` box before `mdat` (one extra pass), for progressive HTTP playback.
+- `--faststart` writes the `moov` box before `mdat`, for progressive HTTP playback. From a local source the output is written in one pass with no temporary file (a first read of the source sizes the `moov`, a second writes the file); a URL source is downloaded once, through a temporary file next to the output.
 - `--skip-unsupported` drops tracks whose codec MP4 cannot carry (e.g. TrueHD) and reports each, instead of failing the whole remux.
 - `--flatten-subs` carries ASS/SSA subtitles (which have no native MP4 form) as plain `tx3g` timed text. Lossy - all styling, positioning and karaoke is discarded.
 - `--webvtt-native` carries WebVTT as native `wvtt` (ISO/IEC 14496-30) instead of the default `tx3g`. `wvtt` is lossless and read by Apple/Safari/CMAF, but **not** by every mainstream demuxer; leave it off for the widest compatibility.

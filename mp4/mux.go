@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -151,23 +152,34 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		return err
 	}
 
-	src, err := fs.DoOpen(srcPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	br, err := reader.NewBlockReader(src, c.Info.TimecodeScale)
-	if err != nil {
-		return err
-	}
-	br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
+	total := int64(-1)
 	if o.Progress != nil {
-		total := int64(-1)
 		if fi, e := fs.DoStat(srcPath); e == nil {
 			total = fi.Size()
 		}
-		br.SetProgress(o.Progress, total)
+	}
+	// openBlocks opens one pass over the source's blocks; with several passes
+	// the progress runs once from 0 to the end over all of them.
+	openBlocks := func(pass, passes int) (*reader.BlockReader, func(), error) {
+		src, err := fs.DoOpen(srcPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		br, err := reader.NewBlockReader(src, c.Info.TimecodeScale)
+		if err != nil {
+			src.Close()
+			return nil, nil, err
+		}
+		br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
+		if o.Progress != nil {
+			if total < 0 {
+				br.SetProgress(o.Progress, total)
+			} else {
+				base, all := int64(pass)*total, int64(passes)*total
+				br.SetProgress(func(done, _ int64) { o.Progress(base+done, all) }, total)
+			}
+		}
+		return br, func() { src.Close() }, nil
 	}
 
 	dst, err := fs.DoCreate(dstPath)
@@ -193,7 +205,9 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		chapters: c.Chapters,
 		cover:    cover,
 	}
-	return writeMP4(ctx, dst, dstPath, br, tracks, brands, meta, o)
+	// A remote source is read once: its fast start goes through a temporary file.
+	remote := o.FastStart && hintsRanges(fs, srcPath)
+	return writeMP4(ctx, dst, dstPath, remote, c, openBlocks, tracks, brands, meta, o)
 }
 
 // movieMeta bundles the file-level metadata carried into the moov box.
@@ -335,15 +349,31 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 // mdatHeaderLen is the fixed size of the 64-bit-largesize mdat box header.
 const mdatHeaderLen = 16
 
-func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, brands []string, meta movieMeta, o Options) error {
-	ftyp := buildFtyp(brands)
+// blockOpener opens pass number pass (0-based) of passes over the source's blocks.
+type blockOpener func(pass, passes int) (*reader.BlockReader, func(), error)
+
+// routeTracks maps each source track number to its output track.
+func routeTracks(tracks []*outTrack) map[uint64]*outTrack {
 	routing := make(map[uint64]*outTrack, len(tracks))
 	for _, t := range tracks {
 		routing[t.mkv.ID] = t
 	}
-	if o.FastStart {
-		return writeFastStart(ctx, dst, dstPath, br, tracks, ftyp, routing, meta, o)
+	return routing
+}
+
+func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, remote bool, c *mkv.Container, open blockOpener, tracks []*outTrack, brands []string, meta movieMeta, o Options) error {
+	ftyp := buildFtyp(brands)
+	switch {
+	case o.FastStart && remote:
+		return writeFastStartViaTemp(ctx, dst, dstPath, open, tracks, ftyp, meta, o)
+	case o.FastStart:
+		return writeFastStart(ctx, dst, c, open, tracks, ftyp, meta, o)
 	}
+	br, done, err := open(0, 1)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	// Normal layout: ftyp, mdat (header + data), then moov at the end. The mdat
 	// box size is backpatched once the data length is known.
@@ -355,7 +385,7 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *
 		return errf("write mdat header: %w", err)
 	}
 	cw := &countWriter{w: buf} // pos counts mdat payload only (relative offsets)
-	dataLen, err := streamSamples(ctx, br, tracks, routing, cw)
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw)
 	if err != nil {
 		return err
 	}
@@ -373,10 +403,67 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *
 }
 
 // writeFastStart produces a "fast start" file (ftyp, moov, mdat) so a player can
-// begin before the whole file is available. The media is streamed to a temporary
-// file first; the moov (whose size is fixed once the chunk-offset width is known)
-// is then written ahead of it, with chunk offsets pointing past it.
-func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, br *reader.BlockReader, tracks []*outTrack, ftyp []byte, routing map[uint64]*outTrack, meta movieMeta, o Options) (err error) {
+// begin before the whole file is available. A sizing pass runs the sample
+// pipeline into a discarding writer: the sample tables, hence the moov, are
+// then exact before a byte of media is written. The write pass streams the
+// media straight behind the moov, in one pass, with no temporary file and no
+// copy of the mdat. It costs a second read of the source instead, which is
+// why a remote source goes through writeFastStartViaTemp.
+func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, c *mkv.Container, open blockOpener, tracks []*outTrack, ftyp []byte, meta movieMeta, o Options) error {
+	br, done, err := open(0, 2)
+	if err != nil {
+		return err
+	}
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), &countWriter{w: io.Discard})
+	done()
+	if err != nil {
+		return err
+	}
+	co64 := needCo64(dataLen)
+	meta.hashes = collectHashes(tracks)
+	moovSize := int64(len(buildMoov(tracks, 0, co64, meta))) // size is base-independent
+	base := int64(len(ftyp)) + moovSize + mdatHeaderLen
+	moov := buildMoov(tracks, base, co64, meta)
+
+	// The write pass runs on fresh track state; the drops were reported once.
+	wo := o
+	wo.OnDrop = nil
+	wtracks, _, err := planTracks(c, wo)
+	if err != nil {
+		return err
+	}
+	br, done, err = open(1, 2)
+	if err != nil {
+		return err
+	}
+	defer done()
+	out := bufio.NewWriterSize(dst, 256<<10)
+	if _, err := out.Write(ftyp); err != nil {
+		return errf("write ftyp: %w", err)
+	}
+	if _, err := out.Write(moov); err != nil {
+		return errf("write moov: %w", err)
+	}
+	if _, err := out.Write(mdatHeader(dataLen)); err != nil {
+		return errf("write mdat header: %w", err)
+	}
+	n, err := streamSamples(ctx, br, wtracks, routeTracks(wtracks), &countWriter{w: out})
+	if err != nil {
+		return err
+	}
+	// The moov written up front must describe the media written behind it.
+	meta.hashes = collectHashes(wtracks)
+	if n != dataLen || !bytes.Equal(buildMoov(wtracks, base, co64, meta), moov) {
+		return errf("fast start: the media differs between the sizing and the write pass: %w", ErrSourceChanged)
+	}
+	return out.Flush()
+}
+
+// writeFastStartViaTemp is the fast start of a source read once (a remote
+// one, which a second pass would download again): the media goes to a
+// temporary file first, then the moov is written ahead of it and the media
+// copied behind.
+func writeFastStartViaTemp(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, open blockOpener, tracks []*outTrack, ftyp []byte, meta movieMeta, o Options) (err error) {
 	fs := o.FS
 	tmpPath := dstPath + ".mdat.tmp"
 	tmp, err := fs.DoCreate(tmpPath)
@@ -391,9 +478,14 @@ func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string
 		_ = fs.DoRemove(tmpPath) // best-effort cleanup of the temporary mdat file
 	}()
 
+	br, done, err := open(0, 1)
+	if err != nil {
+		return err
+	}
+	defer done()
 	tbuf := bufio.NewWriterSize(tmp, 256<<10)
 	cw := &countWriter{w: tbuf}
-	dataLen, err := streamSamples(ctx, br, tracks, routing, cw)
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw)
 	if err != nil {
 		return err
 	}
@@ -512,8 +604,12 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 // payload length alone (with a safety margin for the preceding boxes) so the moov
 // size is stable for the fast-start two-build layout.
 func needCo64(mdatDataLen int64) bool {
-	return mdatDataLen > 0xFFFFFFFF-(256<<20)
+	return mdatDataLen > co64Above
 }
+
+// co64Above is the payload length past which chunk offsets are 64-bit: 4 GiB
+// less a margin for the boxes ahead of the mdat (a variable for the tests).
+var co64Above int64 = 0xFFFFFFFF - (256 << 20)
 
 // flushChunk writes a track's buffered samples to mdat as one chunk and records
 // its mdat-relative offset.

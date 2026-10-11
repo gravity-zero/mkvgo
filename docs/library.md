@@ -205,7 +205,7 @@ Other behaviour:
 - **B-frame** reordering is preserved via a signed `ctts` box.
 - **Colour/HDR** code points are written as a `colr` (nclx) box, followed by `mdcv` (Matroska MasteringMetadata, only when complete: a partial element yields no box) and `clli` (MaxCLL/MaxFALL) when the source carries them - in its Colour element, or only in-band (HEVC SEI, AV1 metadata OBUs), read from the first sample - same boxes in the fMP4 init of HLS/DASH/CMAF. The MKV writer carries the same fields back into the Colour element.
 - **Chapters** are written both as a Nero `chpl` box and as a QuickTime chapter track linked from the media tracks with `tref`/`chap`.
-- `moov` is placed after `mdat` by default. Set `Options.FastStart` to write `moov` first (one extra pass over the media, via a temporary file), for progressive HTTP playback.
+- `moov` is placed after `mdat` by default. Set `Options.FastStart` to write `moov` first, for progressive HTTP playback. A local source is read twice (a sizing pass computes the exact `moov`, then the file is written in one pass, with no temporary file and no copy of the `mdat`); a remote one is read once, its media through a temporary file next to the output.
 
 Memory use scales with the sample count, not the file size: sample data is streamed to `mdat` while only the sample tables are held in memory.
 
@@ -2403,6 +2403,8 @@ destination local, `httpfs.Hybrid()` routes URLs to HTTP and everything else
 err := mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4",
     mp4.Options{FS: httpfs.Hybrid(), FastStart: true})   // a streamed download
 ```
+
+A remote source (one whose reader takes range hints: `httpfs`, `s3fs`) is downloaded once even with `FastStart`: its media goes through a temporary file next to the output, then behind the `moov`. A local source is read twice instead, and the output written in one pass.
 
 ### Remote files over S3 (`s3fs`)
 

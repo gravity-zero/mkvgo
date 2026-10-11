@@ -95,8 +95,11 @@ type Options struct {
 	OnDrop func(DroppedTrack)
 	// FastStart writes the moov box before the mdat box ("fast start"), so a
 	// player can begin without first reading to the end of the file - useful for
-	// progressive HTTP streaming. It costs one extra pass over the media (written
-	// to a temporary file first). Only RemuxToMP4 honours this.
+	// progressive HTTP streaming. From a local source the output is written in
+	// one pass with no temporary file, the source read twice (a sizing pass
+	// computes the moov first); a remote source (its reader takes range hints)
+	// is read once, its media through a temporary file next to the output.
+	// Only RemuxToMP4 honours this.
 	FastStart bool
 	// FlattenStyledSubs carries styled text subtitles that have no plain-text-safe
 	// default - ASS/SSA - as tx3g timed text instead of dropping them. Flattening
