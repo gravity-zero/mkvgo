@@ -8,12 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/gravity-zero/mkvgo/internal/fileid"
 )
 
 // FileHandler serves a single local file over HTTP for direct-play clients:
 // GET/HEAD only, full Range support (seeking/scrubbing), a strong ETag, the
-// right Content-Type from the extension, and a long-lived immutable cache
-// header (the bytes never change). It never reads the whole file into
+// right Content-Type from the extension, a strong ETag from the size, mtime
+// and file identity (not the bytes), no Last-Modified (a date cannot tell
+// apart two versions within one second) and "no-cache" (Options.Immutable for
+// a URL that names the file's version). It never reads the whole file into
 // memory - it streams straight from an *os.File via http.ServeContent, which
 // handles Range, Content-Range, 206, If-Range and If-Modified-Since.
 //
@@ -77,27 +82,24 @@ func (h *fileHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	etag := fileETag(fi)
 	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", cacheControlFor(h.path, h.opts.Immutable))
 	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 
 	w.Header().Set("Content-Type", contentTypeFor(h.path))
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 
-	http.ServeContent(w, req, filepath.Base(h.path), fi.ModTime(), f)
+	// No modtime: a date validator (If-Modified-Since, a dated If-Range) cannot tell apart two versions within one second, the ETag can.
+	http.ServeContent(w, req, filepath.Base(h.path), time.Time{}, f)
 }
 
-// fileETag derives a strong ETag from a file's size and modification time -
-// two fields os.Stat already returns for free - hashed together so the
-// header stays an opaque, collision-resistant token instead of leaking raw
-// inode/mtime bits. This is O(1) in file size: no content is ever read to
-// compute it (unlike Handler's resolver ETag, which hashes in-memory bytes
-// that a Resolver already built; a source file on disk can be gigabytes,
-// so hashing its content here would defeat the point of a fast, streaming
-// direct-play handler).
+// fileETag is a strong ETag from the file's size, mtime to the nanosecond and
+// OS identity, in O(1) like nginx's, Apache's and Caddy's, and one step past
+// them: a file renamed over the served one changes it even with the same size
+// and mtime. Not caught: a rewrite in place that restores the mtime.
 func fileETag(fi os.FileInfo) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", fi.Size(), fi.ModTime().UnixNano())))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d-%d-%s", fi.Size(), fi.ModTime().UnixNano(), fileid.Of(fi))))
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 

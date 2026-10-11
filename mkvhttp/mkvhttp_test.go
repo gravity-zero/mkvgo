@@ -71,8 +71,8 @@ func TestHandler_GetResourceClasses(t *testing.T) {
 		wantCache string
 	}{
 		{"master.m3u8", "application/vnd.apple.mpegurl", "no-cache"},
-		{"init.mp4", "video/mp4", "public, max-age=31536000, immutable"},
-		{"seg00001.m4s", "video/iso.segment", "public, max-age=31536000, immutable"},
+		{"init.mp4", "video/mp4", "no-cache"},
+		{"seg00001.m4s", "video/iso.segment", "no-cache"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

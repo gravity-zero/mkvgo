@@ -46,7 +46,7 @@ func TestFileHandler_GetWholeFile(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "video/x-matroska" {
 		t.Errorf("Content-Type = %q, want video/x-matroska", got)
 	}
-	if got := resp.Header.Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
 		t.Errorf("Cache-Control = %q", got)
 	}
 	if resp.Header.Get("ETag") == "" {

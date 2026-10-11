@@ -24,6 +24,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/httpfs"
@@ -56,8 +57,11 @@ func main() {
 
 	// The whole streaming endpoint: name → bytes + Content-Type. The name is
 	// exactly the URI a player requests (master.m3u8, manifest.mpd,
-	// seg00042.m4s, audio1.m3u8, sub1.vtt, iframe.m3u8, …).
-	mux.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
+	// seg00042.m4s, audio1.m3u8, sub1.vtt, iframe.m3u8, …). It is mounted
+	// under the source's version, so a segment URL never names two files:
+	// that is what makes a year of immutable caching safe.
+	base := "/hls/" + plan.SourceID() + "/"
+	mux.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
 		name := path.Base(r.URL.Path)
 		data, contentType, err := plan.Resource(r.Context(), name)
 		if err != nil {
@@ -66,9 +70,17 @@ func main() {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Access-Control-Allow-Origin", "*") // let a browser player fetch cross-origin
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		cache := "public, max-age=31536000, immutable"
+		if strings.HasSuffix(name, ".m3u8") || strings.HasSuffix(name, ".mpd") {
+			cache = "no-cache" // a playlist names the segments of the current source
+		}
+		w.Header().Set("Cache-Control", cache)
 		_, _ = w.Write(data)
 	})
+	// The stable entry points redirect to the current version.
+	for _, m := range []string{"master.m3u8", "manifest.mpd"} {
+		mux.Handle("/hls/"+m, http.RedirectHandler(base+m, http.StatusFound))
+	}
 
 	// A tiny landing page that plays the output in real players (hls.js and
 	// dash.js from a CDN) - proof both manifests work end to end.

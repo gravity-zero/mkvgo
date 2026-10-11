@@ -55,6 +55,11 @@ type Options struct {
 	// exposed headers for Range/ETag, and a 204 response to an OPTIONS
 	// preflight request.
 	AllowCORS bool
+	// Immutable announces the init and media segments as cacheable for a
+	// year without revalidation. Set it only when the URL names the source's
+	// version (mounted under its plan.SourceID(), say); without it they are
+	// served "no-cache": a client revalidates them on their ETag.
+	Immutable bool
 	// Buffered serves every resource from its bytes even when the Resolver
 	// can stream (Opener): the behaviour before streaming existed, a strong
 	// ETag included.
@@ -84,13 +89,18 @@ type Opener interface {
 //     modtime - the ETag already identifies the exact bytes).
 //   - A Resolver that is also an Opener (mp4.HLSPlan) has its media segments
 //     streamed from the source through one buffer, never held whole: exact
-//     Content-Length, a weak ETag, single Range, and a connection cut short
+//     Content-Length, a weak ETag, single Range (ignored under an If-Range,
+//     which a weak ETag never satisfies), and a connection cut short
 //     when the source fails midway. Options.Buffered keeps the old path.
-//   - Cache-Control: a playlist/manifest (.m3u8/.mpd) gets "no-cache" (its
-//     bytes name segments that can be re-derived as the plan evolves);
-//     every other resource gets "public, max-age=31536000, immutable" - safe
-//     because a segment/init name always maps to the exact same bytes for a
-//     given source (PlanHLS/PlanABR's determinism guarantee).
+//   - Cache-Control: "no-cache" by default - a client keeps a resource and
+//     revalidates it on its ETag (a bare 304 when unchanged). A segment name
+//     maps to the same bytes for a given source, but not across a source
+//     replaced under the same path, and the name does not say which source it
+//     is: a year of immutable caching there would serve the old file's
+//     segments against the new playlist. Options.Immutable announces the
+//     init and media segments "public, max-age=31536000, immutable" for a
+//     handler mounted where the URL names the source's version (under its
+//     plan.SourceID()); playlists and manifests stay "no-cache".
 //   - A Resolver error that is (or wraps) ErrNotFound answers 404; any other
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
@@ -162,6 +172,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	sum := sha256.Sum256(data)
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", cacheControlFor(name, h.opts.Immutable))
 	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -170,7 +181,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
-	w.Header().Set("Cache-Control", cacheControlFor(name))
 
 	http.ServeContent(w, req, name, time.Time{}, bytes.NewReader(data))
 }
@@ -185,6 +195,7 @@ func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name s
 	etag := rh.ETag()
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", cacheControlFor(name, h.opts.Immutable))
 	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -192,8 +203,11 @@ func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name s
 	if ct := rh.ContentType(); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Cache-Control", cacheControlFor(name))
-	start, n, status, ok := byteRange(req.Header.Get("Range"), size)
+	rangeHeader := req.Header.Get("Range")
+	if req.Header.Get("If-Range") != "" {
+		rangeHeader = "" // a weak ETag never matches If-Range's strong comparison and there is no Last-Modified: the whole resource (RFC 9110 13.1.5)
+	}
+	start, n, status, ok := byteRange(rangeHeader, size)
 	if !ok {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
 		http.Error(w, "mkvhttp: range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
@@ -254,14 +268,15 @@ func methodNotAllowed(w http.ResponseWriter) {
 	http.Error(w, "mkvhttp: method not allowed", http.StatusMethodNotAllowed)
 }
 
-// etagMatches reports whether etag appears in the (possibly comma-separated)
-// If-None-Match header value, or that value is the wildcard "*".
+// etagMatches reports whether etag matches a member of the If-None-Match list
+// under the weak comparison (RFC 9110 8.8.3.2, W/ prefixes do not count), or that list is "*".
 func etagMatches(header, etag string) bool {
 	if strings.TrimSpace(header) == "*" {
 		return true
 	}
+	want := strings.TrimPrefix(etag, "W/")
 	for _, part := range strings.Split(header, ",") {
-		if strings.TrimSpace(part) == etag {
+		if strings.TrimPrefix(strings.TrimSpace(part), "W/") == want {
 			return true
 		}
 	}
@@ -270,9 +285,11 @@ func etagMatches(header, etag string) bool {
 
 // cacheControlFor returns the Cache-Control value for a resource name; see
 // the Handler doc for the reasoning.
-func cacheControlFor(name string) string {
-	if strings.HasSuffix(name, ".m3u8") || strings.HasSuffix(name, ".mpd") {
+func cacheControlFor(name string, immutable bool) string {
+	if !immutable || strings.HasSuffix(name, ".m3u8") || strings.HasSuffix(name, ".mpd") {
 		return "no-cache"
 	}
-	return "public, max-age=31536000, immutable"
+	return immutableCache
 }
+
+const immutableCache = "public, max-age=31536000, immutable"
