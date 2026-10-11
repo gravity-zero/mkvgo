@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -34,8 +35,12 @@ func TestFileHandlerETagMatchesBytesSent(t *testing.T) {
 		t.Fatal("first response is not v1")
 	}
 
-	// Between two requests.
-	placeFile(t, path, v2, when)
+	// Between two requests. Windows has no file identity: v2 differs by its mtime there.
+	when2 := when
+	if runtime.GOOS == "windows" {
+		when2 = when.Add(time.Second)
+	}
+	placeFile(t, path, v2, when2)
 	resp, b = fetch(nil)
 	if e := resp.Header.Get("ETag"); !bytes.Equal(b, v2) || etagOf[e] != nil {
 		t.Fatalf("after the rename: v2 %v, ETag %s already named other bytes", bytes.Equal(b, v2), e)
@@ -52,7 +57,14 @@ func TestFileHandlerETagMatchesBytesSent(t *testing.T) {
 	if _, err := io.ReadFull(slow.Body, head); err != nil {
 		t.Fatal(err)
 	}
-	placeFile(t, path, v1, when)
+	if err := os.WriteFile(path+".tmp", v1, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chtimes(path+".tmp", when, when)
+	if err := os.Rename(path+".tmp", path); err != nil {
+		slow.Body.Close()
+		t.Skipf("a file being sent cannot be replaced here (%v)", err)
+	}
 	rest, err := io.ReadAll(slow.Body)
 	slow.Body.Close()
 	got := append(head, rest...)

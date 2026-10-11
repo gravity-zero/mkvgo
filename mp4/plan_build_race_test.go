@@ -30,13 +30,14 @@ func planAcrossReplacement(t *testing.T, at int32) {
 		t.Fatal(err)
 	}
 	var opens atomic.Int32
+	var renameErr error
 	fs := &mkv.FS{
 		Open: func(p string) (mkv.ReadSeekCloser, error) {
 			f, err := os.Open(p)
 			if err == nil && opens.Add(1) == at { // the build holds this handle: the file is replaced under it
 				other, _ := os.ReadFile(v2)
 				os.WriteFile(path+".tmp", other, 0o644)
-				os.Rename(path+".tmp", path)
+				renameErr = os.Rename(path+".tmp", path)
 			}
 			return f, err
 		},
@@ -44,6 +45,9 @@ func planAcrossReplacement(t *testing.T, at int32) {
 	}
 	ctx := context.Background()
 	plan, err := PlanHLS(ctx, path, Options{SegmentMs: openGOPMs, FS: fs, StreamFromFS: true})
+	if renameErr != nil {
+		t.Skipf("an open file cannot be replaced here (%v): no race to build across", renameErr)
+	}
 	if errors.Is(err, ErrSourceChanged) {
 		return
 	}

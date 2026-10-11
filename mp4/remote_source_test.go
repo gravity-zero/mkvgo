@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -180,6 +181,9 @@ func TestSourceIDAndETagFollowIdentity(t *testing.T) {
 	}
 	if again, _ := os.Stat(src); again.Size() != fi.Size() || !again.ModTime().Equal(fi.ModTime()) {
 		t.Skip("the filesystem did not keep the stamp")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("no file identity on Windows: a same-stamp replacement keeps the SourceID (documented)")
 	}
 	c, _ := PlanHLS(ctx, src, Options{SegmentMs: openGOPMs})
 	hc, _ := c.Open(ctx, "seg00001.m4s")

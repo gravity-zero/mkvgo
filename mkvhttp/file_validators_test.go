@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -24,9 +25,14 @@ func placeFile(t *testing.T, path string, data []byte, when time.Time) {
 	if err := os.Chtimes(tmp, when, when); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		t.Fatal(err)
+	var err error
+	for try := 0; try < 50; try++ { // Windows refuses a rename over a file the last response may not have closed yet
+		if err = os.Rename(tmp, path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	t.Fatal(err)
 }
 
 func fill(n int, b byte) []byte { return bytes.Repeat([]byte{b}, n) }
@@ -63,8 +69,13 @@ func TestFileHandlerRenamedOverSameStamp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.mkv")
 	when := time.Now().Add(-time.Hour)
 	placeFile(t, path, fill(4096, 'a'), when)
+	if runtime.GOOS == "windows" {
+		t.Skip("no file identity on Windows: a same-stamp replacement keeps the ETag (documented)")
+	}
 	srv := serveFile(t, path)
-	old := get(t, srv.URL+"/", nil).Header.Get("ETag")
+	first := get(t, srv.URL+"/", nil)
+	body(t, first)
+	old := first.Header.Get("ETag")
 	placeFile(t, path, fill(4096, 'b'), when)
 	if fi, _ := os.Stat(path); !fi.ModTime().Equal(when) {
 		t.Skip("the filesystem did not keep the mtime")
