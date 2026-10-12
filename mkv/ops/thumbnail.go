@@ -55,9 +55,16 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 		return nil, fmt.Errorf("%s: no video track", srcPath)
 	}
 
-	// The cue at or before atMs (cues are video-keyframe-keyed and ascending).
-	cue := c.Cues[0]
-	for _, cu := range c.Cues {
+	// The video cue at or before atMs. Cues of other tracks (subtitles, often
+	// more numerous than the video's) name clusters whose first video keyframe
+	// may lie past atMs - or past the cue's own cluster. A file cueing no
+	// video at all keeps the old any-cue lookup.
+	cues := videoCues(c, video.ID)
+	if len(cues) == 0 {
+		cues = c.Cues
+	}
+	cue := cues[0]
+	for _, cu := range cues {
 		if cu.TimeMs > atMs {
 			break
 		}
@@ -117,6 +124,13 @@ func packKeyframe(t *mkv.Track, ptsMs int64, data []byte) (*KeyframeSample, erro
 		ks.Codec, ks.Ext = t.Codec, ".ivf"
 		ks.Data = ivfWrap(t, ptsMs, data)
 	case "av1":
+		// A temporal unit without its own sequence header is undecodable
+		// alone: give it the av1C one.
+		if _, hasSeq, _ := av1Access(data); !hasSeq {
+			if seq := av1SequenceHeaderOBU(t.CodecPrivate); seq != nil {
+				data = append(append([]byte(nil), seq...), data...)
+			}
+		}
 		ks.Codec, ks.Ext = "av1", ".ivf"
 		ks.Data = ivfWrap(t, ptsMs, data)
 	default:

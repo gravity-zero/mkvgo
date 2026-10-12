@@ -141,6 +141,45 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
 }
 
+// KeyframeSelect, KeyframeBatchSample and KeyframeStats describe a batch
+// keyframe extraction. See ExtractKeyframes.
+type KeyframeSelect = ops.KeyframeSelect
+type KeyframeBatchSample = ops.KeyframeBatchSample
+type KeyframeStats = ops.KeyframeStats
+
+// Access point kinds of KeyframeBatchSample.Access.
+const (
+	AccessIDR   = ops.AccessIDR
+	AccessCRA   = ops.AccessCRA
+	AccessBLA   = ops.AccessBLA
+	AccessIntra = ops.AccessIntra
+	AccessKey   = ops.AccessKey
+)
+
+// Batch keyframe extraction errors, for errors.Is.
+var (
+	ErrNoKeyframeIndex  = ops.ErrNoKeyframeIndex
+	ErrNoVideo          = ops.ErrNoVideo
+	ErrUnsupportedCodec = ops.ErrUnsupportedCodec
+)
+
+// ExtractKeyframes is the batch form of ExtractKeyframeSample, for trickplay
+// strips: the selected cued keyframes of the first video track, read with one
+// metadata + Cues read and one source handle, in ascending order, each checked
+// on its bitstream to be a picture a decoder can start on. fn gets each sample;
+// its buffers are reused after fn returns.
+func ExtractKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, fn func(*KeyframeBatchSample) error, opts ...Options) (KeyframeStats, error) {
+	return ops.ExtractKeyframes(ctx, srcPath, sel, fn, opts...)
+}
+
+// WriteKeyframeStream writes the selected keyframes as a keyframe-only
+// Matroska stream (the video track alone, real timestamps, colour and Dolby
+// Vision configuration kept) to w, one Cluster per keyframe as it is read: a
+// decoder reading w outputs exactly KeyframeStats.Samples pictures.
+func WriteKeyframeStream(ctx context.Context, srcPath string, sel KeyframeSelect, w io.Writer, opts ...Options) (KeyframeStats, error) {
+	return ops.WriteKeyframeStream(ctx, srcPath, sel, w, opts...)
+}
+
 // --- Playability / ABR ladder ---
 
 // Target, TrackVerdict and PlayabilityReport are the playability decision

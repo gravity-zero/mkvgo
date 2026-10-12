@@ -174,6 +174,8 @@ func main() {
 		commands.CmdConcatSegment(args)
 	case "extract-frame":
 		commands.CmdExtractFrame(args)
+	case "extract-frames":
+		commands.CmdExtractFrames(args)
 	case "analyze":
 		commands.RequireArgs(args, 1, "mkvgo analyze [-json] <file.mkv|url>")
 		commands.CmdAnalyze(args)
@@ -250,6 +252,7 @@ Commands:
   concat-hls    Package several sources as ONE continuous HLS session (no player reload)
   concat-segment  Serve one concat-hls resource on demand, no pre-generation
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
+extract-frames  Write a keyframe-only Matroska stream (one keyframe every -every, or at -at times) for a decoder: trickplay strips in one pass
 analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr (head-only, no decode; Matroska/WebM only)
 fingerprint   Container-independent content identity hash for cross-format dedup (full read of every track's payload; Matroska/WebM only)
 playability   Per-track and overall direct-play/remux/transcode verdict against a target (no probe, no decode)

@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -116,4 +118,89 @@ func CmdExtractFrame(args []string) {
 	}
 	fmt.Fprintf(os.Stderr, "keyframe @ %s (%s) → %s (%d bytes, decoder-ready)\n",
 		FmtMs(ks.PtsMs), ks.Codec, outPath, len(ks.Data))
+}
+
+// CmdExtractFrames writes a keyframe-only Matroska stream - the batch form of
+// extract-frame, for trickplay strips: one keyframe every -every, or the
+// keyframe at or before each -at time, read in one pass over the Cues. The
+// stream goes to -o (- for stdout, e.g. piped into a decoder); the extraction
+// stats go to stderr, as JSON with -json.
+func CmdExtractFrames(args []string) {
+	var outPath string
+	var sel matroska.KeyframeSelect
+	asJSON := false
+	var rest []string
+	timeArg := func(i *int, flag string) int64 {
+		*i++
+		if *i >= len(args) {
+			Fatal("usage: " + CmdUsage["extract-frames"])
+		}
+		ms, err := ParseTimePoint(args[*i])
+		if err != nil {
+			Fatal(fmt.Sprintf("%s: %v", flag, err))
+		}
+		return ms
+	}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-o":
+			i++
+			if i < len(args) {
+				outPath = args[i]
+			}
+		case "-every":
+			sel.EveryMs = timeArg(&i, "-every")
+		case "-start":
+			sel.StartMs = timeArg(&i, "-start")
+		case "-end":
+			sel.EndMs = timeArg(&i, "-end")
+		case "-at":
+			i++
+			if i >= len(args) {
+				Fatal("usage: " + CmdUsage["extract-frames"])
+			}
+			for _, s := range strings.Split(args[i], ",") {
+				ms, err := ParseTimePoint(s)
+				if err != nil {
+					Fatal(fmt.Sprintf("-at: %v", err))
+				}
+				sel.TargetsMs = append(sel.TargetsMs, ms)
+			}
+		case "-json", "--json":
+			asJSON = true
+		default:
+			rejectFlagArg(args[i])
+			rest = append(rest, args[i])
+		}
+	}
+	if len(rest) != 1 || outPath == "" || (sel.EveryMs <= 0) == (len(sel.TargetsMs) == 0) {
+		Fatal("usage: " + CmdUsage["extract-frames"])
+	}
+	src := rest[0]
+	var opts []mkv.Options
+	if isRemoteURL(src) {
+		opts = append(opts, mkv.Options{FS: remotePort(src)})
+	}
+	var st matroska.KeyframeStats
+	write := func(out io.Writer) error {
+		var err error
+		st, err = matroska.WriteKeyframeStream(context.Background(), src, sel, out, opts...)
+		return err
+	}
+	var err error
+	if outPath == "-" {
+		err = write(os.Stdout)
+	} else {
+		GuardOverwrite(outPath)
+		err = writeFileFrom(outPath, write)
+	}
+	if err != nil {
+		Fatal(err.Error())
+	}
+	if asJSON || JsonOutput {
+		_ = json.NewEncoder(os.Stderr).Encode(st)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%d keyframes (%d skipped, %d video cues, median cue gap %s) → %s, %d bytes read in %d reads\n",
+		st.Samples, st.Skipped, st.Cues, FmtMs(st.MedianCueGapMs), outPath, st.BytesRead+st.MetaBytesRead, st.Reads)
 }

@@ -4,6 +4,39 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Batch keyframe extraction for trickplay strips**:
+  `matroska.ExtractKeyframes` (a callback per sample) and
+  `matroska.WriteKeyframeStream` (a keyframe-only Matroska stream for one
+  decoder), CLI `mkvgo extract-frames`, for Matroska/WebM and MP4
+  (progressive or fragmented: the sync samples stand for the cues, each read
+  with one exact range; `mp4.VideoSyncSamples`). One metadata + Cues read and one
+  source handle for the whole strip, keyframes read in ascending order, each
+  payload once, buffers reused. Selection on the video cues: one keyframe every
+  N ms (FFmpeg's `prev_selected_t` rule) or the keyframe at or before given
+  times. Against a loop of `ExtractKeyframeSample` on 780-800 keyframes of a
+  1080p and a 2160p film: bytes read 475/501 MB → 61/80 MB, 1562 opens → 2,
+  CPU 1.3-1.4 s → 0.08-0.09 s, allocations 2 GB → 4-7 MB. Every sample is
+  checked on its bitstream to be a picture a decoder can start on (a cue on
+  anything else is counted as skipped, never emitted), and the samples decode
+  back to back in order, one picture each: HEVC CRA and H.264 open-GOP
+  keyframes get their picture-order fields renumbered in place (fed as is,
+  FFmpeg output 740 pictures out of 795 CRA samples, out of order). Typed
+  errors `ErrNoKeyframeIndex`, `ErrNoVideo`, `ErrUnsupportedCodec`.
+  `scripts/keyframes_verify.sh` checks a source's stream against a full decode.
+
+### Fixed
+
+- **`ExtractKeyframeSample` could return a keyframe after the time asked**: it
+  took the cue at or before the time among the cues of every track, and a
+  subtitle cue between two video keyframes points at the next keyframe's
+  cluster. It now looks at the video track's cues (a file that cues no video
+  keeps the old lookup).
+- **`ExtractKeyframeSample` on AV1** gives a temporal unit without its own
+  sequence header OBU the `av1C` one: the IVF was undecodable alone.
 ## [0.45.0] - 2026-10-12
 
 ### Added

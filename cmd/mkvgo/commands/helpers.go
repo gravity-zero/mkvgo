@@ -105,6 +105,7 @@ var CmdUsage = map[string]string{
 	"concat-hls":         "mkvgo concat-hls <in1> <in2> [...] -o <dir> [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (concatenate sources into one continuous HLS session)",
 	"concat-segment":     "mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (build one concat resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",
+	"extract-frames":     "mkvgo extract-frames <file.mkv|.mp4|url> (-every <time> | -at <t1,t2,...>) [-start <time>] [-end <time>] [-json] -o <out.mkv|-> (keyframe-only Matroska stream; stats on stderr)",
 	"analyze":            "mkvgo analyze [-json] <file.mkv|url> (per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr - walks every block header: reads about the whole file, no decode)",
 	"fingerprint":        "mkvgo fingerprint [-json] <file.mkv|.mp4|url> (container-independent content identity: Presentation hash + per-track payload SHA-256, full read)",
 	"playability":        "mkvgo playability [-target safari|chrome|firefox|chromecast-gen3|mse-generic|chromium-generic|brave|opera|vivaldi|samsung-internet|edge] [-json] <file.mkv|.mp4|url> (default target: mse-generic)",

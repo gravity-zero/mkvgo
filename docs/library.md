@@ -717,7 +717,120 @@ ks, err := matroska.ExtractKeyframeSample(ctx, "movie.mkv", 12*60*1000+30*1000)
 
 Seeked through the Cues (bounded reads - works over `httpfs` too), never
 decoded: pipe `ks.Data` to a decoder (`ffmpeg -i - -frames:v 1 thumb.jpg`) for
-the image. A storyboard is this in a loop over `Container.Keyframes`.
+the image. For a whole storyboard use the batch form below: a loop of this
+call re-reads the metadata and the Cues once per thumbnail.
+
+### Trickplay strips (`matroska.ExtractKeyframes`, `matroska.WriteKeyframeStream`)
+
+```go
+sel := matroska.KeyframeSelect{EveryMs: 7000} // or TargetsMs: []int64{...}
+
+// A keyframe-only Matroska stream, straight into one decoder:
+cmd := exec.CommandContext(ctx, "ffmpeg", "-copyts", "-f", "matroska", "-i", "pipe:0",
+	"-fps_mode", "passthrough", "-vf", "scale=320:-1,showinfo,tile=5x5", "-c:v", "libwebp", "sprite_%03d.webp")
+stdin, _ := cmd.StdinPipe()
+cmd.Start()
+st, err := matroska.WriteKeyframeStream(ctx, "movie.mkv", sel, stdin)
+stdin.Close()
+cmd.Wait()
+// st.Samples pictures come out of the decoder, at st.PtsMs, in that order.
+
+// Or one sample at a time (Annex-B / IVF in s.Data, as ExtractKeyframeSample):
+st, err = matroska.ExtractKeyframes(ctx, "movie.mkv", sel, func(s *matroska.KeyframeBatchSample) error {
+	// s.Data and s.Payload are reused after the call: copy what you keep.
+	return nil
+})
+```
+
+The batch form of `ExtractKeyframeSample` for scrubbing strips: one metadata +
+Cues read, one source handle, one block reader whose window is reused from
+keyframe to keyframe, offsets visited in ascending order, each keyframe
+payload read once. MKVGo parses, selects and extracts; decoding and scaling
+stay the decoder's job.
+
+Matroska/WebM and MP4 (progressive or fragmented) are both taken - the source
+is sniffed. For an MP4 the sync samples of the first video track stand for
+the cues (`mp4.VideoSyncSamples`): the sample table gives each one's exact
+byte range, so each keyframe is one read of exactly its bytes; the movie
+header (and a fragmented file's fragment headers) is the metadata read.
+
+**Selection** - on the video track's cues only (subtitle cues are not seek
+points for the picture), or an MP4's sync samples:
+
+- `EveryMs > 0`: the first cued keyframe at or after `StartMs`, then the first
+  one at least `EveryMs` after the previous one **kept** - what
+  `select='isnan(prev_selected_t)+gte(t-prev_selected_t,N)'` does over
+  `-skip_frame nokey`. A cue that is skipped leaves the next cue candidate for
+  the same slot.
+- `TargetsMs`: the cued keyframe at or before each time (the first one for a
+  time before it), any order, duplicates collapsed.
+- `StartMs`/`EndMs` bound the cue times kept (`EndMs` 0 = to the end).
+
+**Guarantees**
+
+- `PtsMs` is the block's presentation time in ms; samples are emitted strictly
+  ascending, and `KeyframeStats.PtsMs` lists them.
+- Every sample is a picture a decoder can start on, checked on its bitstream
+  and not only on the Matroska keyframe flag: H.264 IDR or all-I slices
+  (`AccessIDR`, `AccessIntra`), HEVC IRAP (`AccessIDR`, `AccessCRA`,
+  `AccessBLA`), VP8/VP9/AV1 shown key frames (`AccessKey`). A cue that lands on
+  anything else is counted in `Skipped`, never emitted.
+- The samples decode **back to back**, in order, one picture each. Keyframes
+  picked seconds apart break the counters a decoder keeps across pictures when
+  they are not IDR: an HEVC CRA's picture order count, an H.264 open-GOP I
+  picture's `frame_num` and POC. Fed as is, FFmpeg outputs them out of order
+  and drops or duplicates some (measured: 740 pictures out of 795 CRA samples,
+  15 out of 18 open-GOP samples - FFmpeg's own `-skip_frame nokey` decode of
+  the source has the same failure). So those fields are rewritten in place,
+  same width, nothing else touched: HEVC `slice_pic_order_cnt_lsb` of
+  CRA/BLA slices; H.264 `frame_num` and (POC type 0) `pic_order_cnt_lsb` of
+  non-IDR slices. `Payload`/`Data` therefore carry these headers, not the
+  source block byte for byte (`Offset`/`Size` locate the source block). An
+  H.264 field-coded non-IDR keyframe, or a slice naming a parameter set the
+  stream never carried, is skipped.
+- AV1: a temporal unit without its own sequence header OBU gets the `av1C` one.
+- The stream holds the video track alone with the source's codec private data,
+  dimensions, Colour (with mastering metadata and content light level) and Dolby
+  Vision configuration; payloads are written decompressed (no
+  `ContentEncoding`). In-band data stays in the frame (a Dolby Vision RPU NAL
+  is), Matroska `BlockAdditions` are not carried.
+- Verified with `scripts/keyframes_verify.sh`: one decoded picture per sample,
+  in order, each identical (checksum) to the picture a full decode of the
+  source shows at that PTS - H.264 IDR and open-GOP, HEVC 10-bit CRA, HDR10,
+  Dolby Vision 7.6, VP8, VP9, AV1 10-bit.
+
+**Errors** (`errors.Is`): `ErrNoKeyframeIndex` (no video cues - a `reindex`
+adds them), `ErrNoVideo`, `ErrUnsupportedCodec` (H.264, HEVC, VP8, VP9, AV1
+only). An error from `fn` or from `w` stops the walk and is returned as is;
+so is `ctx`'s, checked between keyframes.
+
+**Streaming** - `WriteKeyframeStream` writes the header with the first cluster
+and then one `Write` per cluster as soon as its keyframe is read; a `Write`
+that blocks (a paused decoder) holds the walk, with no timeout. Nothing is
+buffered beyond one keyframe, and `w` is never closed. Pass `-copyts` to FFmpeg:
+without it the PTS it prints are rebased on the first sample's.
+
+**I/O** - `KeyframeStats` reports `BytesRead`/`Reads`/`Seeks` on the source
+handle (what was asked of the FS) and `MetaBytesRead` for the metadata read;
+`MedianCueGapMs` says how dense the index is. A keyframe deep in its cluster
+(a `CueRelativePosition` past 64 KiB) is read from its own position, not from
+the cluster start. Over `httpfs`, the walker hints each keyframe's expected
+range (`mkv.RangeHinter`); hints only widen requests, so give the `httpfs.FS`
+a small `WindowSize` (16 KiB) for this job.
+
+Measured against a loop of `ExtractKeyframeSample` over the same selection
+(`go test ./mkv/ops/ -run TestKeyframesRealFileReport`, 7 s, cold local disk):
+
+| source | keyframes | bytes read | reads / seeks / opens | CPU | allocated | wall |
+|---|---|---|---|---|---|---|
+| 1080p H.264, 5 GB | 781 | 475 MB → 61 MB | 4680 / 3905 / 1562 → 1560 / 785 / 2 | 1.32 s → 0.08 s | 1.93 GB → 3.6 MB | 1.38 s → 0.38 s |
+| 2160p HEVC HDR10, 9 GB | 795 | 501 MB → 80 MB | 4749 / 3975 / 1590 → 1573 / 799 / 2 | 1.41 s → 0.09 s | 2.0 GB → 6.9 MB | 1.40 s → 0.38 s |
+
+Over HTTP (`httpfs`, 16 KiB window, local server adding 20 ms per request), on
+the 1080p file: 7743 requests / 511 MB / 2 min 44 s → 826 requests / 96 MB /
+17.2 s. With the default 512 KiB window the batch makes 783 requests but
+fetches 410 MB. A 6 GB 2160p MP4: 379 keyframes in 379 reads of 79 MB, plus a
+1.6 MB movie header.
 
 ### Single-file byte-range serving
 

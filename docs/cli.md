@@ -1471,12 +1471,38 @@ mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf>
 ```bash
 mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264
 ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
-
-# storyboard: one thumbnail per keyframe
-for t in $(mkvgo keyframes -json movie.mkv | jq -r '.[]'); do
-  mkvgo extract-frame movie.mkv ${t}ms -o f.h264 -f && ffmpeg -y -i f.h264 -frames:v 1 -vf scale=160:-1 thumb_${t}.jpg
-done
 ```
+
+For a whole storyboard, use `extract-frames`: one pass instead of one call
+(and one metadata + Cues read) per thumbnail.
+
+### extract-frames
+
+Write the selected keyframes as a **keyframe-only Matroska stream** - the video
+track alone, real timestamps, colour/HDR/Dolby Vision metadata kept - from a
+Matroska/WebM or MP4 source, for one decoder to turn into a trickplay strip. `-every` keeps the first cued keyframe,
+then the first one at least that long after the previous one kept; `-at` takes
+the cued keyframe at or before each time. Each keyframe is checked to be a
+picture a decoder can start on, and HEVC CRA / H.264 open-GOP keyframes get
+their picture-order fields renumbered so they decode back to back, in order,
+one picture each (see the library's *Trickplay strips*). The stats go to
+stderr (JSON with `-json`).
+
+```
+mkvgo extract-frames <file.mkv|.mp4|url> (-every <time> | -at <t1,t2,...>) [-start <time>] [-end <time>] [-json] -o <out.mkv|->
+```
+
+```bash
+# a 5x5 WebP sprite sheet every 7 s of keyframes, in one decoder
+mkvgo extract-frames movie.mkv -every 7000 -json -o - 2>stats.json |
+  ffmpeg -copyts -f matroska -i pipe:0 -fps_mode passthrough \
+    -vf scale=320:-1,tile=5x5 -c:v libwebp sprite_%03d.webp
+# stats.json: {"Samples":781,"PtsMs":[...],"Skipped":0,"Cues":1476,...}
+```
+
+`scripts/keyframes_verify.sh <file> [every_ms] [limit_s]` checks a source's
+stream against FFmpeg: one picture per sample, in order, each identical to a
+full decode of the source at that time.
 
 ## Playability, ABR Ladder and Ingest
 
