@@ -73,6 +73,7 @@ type HLSPlan struct {
 	segs     []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
 	mp4src   bool            // MP4 source: windows cut from the sample table, exact by construction
 	mp4tabs  []*mp4PlanTable // per track: the compact sample table the windows are built from (MP4 source)
+	mp4subs  []*mp4SubTable  // per subtitle rendition: its samples, text read on first use (MP4 source)
 	iframe   []byte          // trick-play playlist: MP4 plans build it eagerly (free, head-only);
 	// Matroska plans build it lazily (see hasIframe/iframeMu/iframeErr) - the
 	// exact byte ranges need every segment's sample count/flags, which only a
@@ -2808,7 +2809,7 @@ func (p *HLSPlan) relTCMaxMs() int64 {
 // advancing the prefix cursor as far as that requires and no further.
 func (p *HLSPlan) subCuesThrough(ctx context.Context, i int, uptoMs int64) ([]subtitle.Cue, error) {
 	if p.mp4src {
-		return p.subs[i].cues, nil // decoded at plan time from the sample table
+		return p.mp4SubWindow(ctx, i, math.MinInt64, uptoMs)
 	}
 	p.subMu[i].Lock()
 	cues, err := p.subPrefixLocked(ctx, i, uptoMs)
@@ -2821,6 +2822,13 @@ func (p *HLSPlan) subCuesThrough(ctx context.Context, i int, uptoMs int64) ([]su
 	// (which duration-less ends resolve on) are in the prefix.
 	subtitle.ResolveCueEnds(cues, 2000)
 	return cues, nil
+}
+
+// mp4SubWindow is an MP4 source's cues meeting [from, to), the text read the first time a window needs it.
+func (p *HLSPlan) mp4SubWindow(ctx context.Context, i int, from, to int64) ([]subtitle.Cue, error) {
+	p.subMu[i].Lock()
+	defer p.subMu[i].Unlock()
+	return p.mp4subs[i].window(ctx, p.openSource, from, to)
 }
 
 // subPrefixLocked extends the prefix cursor to cover cues starting before
@@ -2845,7 +2853,7 @@ func (p *HLSPlan) subPrefixLocked(ctx context.Context, i int, uptoMs int64) ([]s
 // (subFastMaxCueDurMs) and the relative-timecode spread of their blocks.
 func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd int64) ([]subtitle.Cue, error) {
 	if p.mp4src {
-		return p.subs[i].cues, nil
+		return p.mp4SubWindow(ctx, i, segStart, segEnd)
 	}
 	relMax := p.relTCMaxMs()
 	target := segEnd
@@ -3322,9 +3330,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))
-	if err := mp4SubCues(ps, p.subs); err != nil {
-		return nil, err
-	}
+	p.mp4subs = mp4SubTables(ps, p.subs)
 
 	fts, offs, err := mp4PlanSamples(ps, media)
 	if err != nil {

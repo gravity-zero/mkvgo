@@ -4,6 +4,22 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **An MP4 source's on-demand plan reads no subtitle text.** `PlanHLS` lists
+  each text track's samples (mov_text/tx3g, wvtt) from the sample table alone
+  and reads none of them; a WebVTT segment reads the cues of its own window
+  the first time it is requested, then keeps them. A sample too short to hold
+  text (tx3g of 2 bytes or less, wvtt of 16 or less) is skipped unread. On a
+  2160p episode with two French tracks the plan went from 1,740 scattered
+  reads to 10; the playlists, the master, the DASH manifest and every WebVTT
+  resource are byte-identical. **Behaviour change:** a subtitle sample that
+  cannot be read no longer fails `PlanHLS`; the error comes back from the
+  request for that subtitle resource (`Resource`, `Subtitle`, a windowed
+  `subN_NNNNN.vtt`), and the video and audio keep serving.
+
 ## [0.47.0] - 2026-10-12
 
 ### Added

@@ -22,14 +22,14 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// --- hlspack.go: MP4-source packaging (collectFromMP4/mp4PlanSamples/mp4SubCues) ---
+// --- hlspack.go: MP4-source packaging (collectFromMP4/mp4PlanSamples/mp4SubTables) ---
 
 // pkgcovMP4SourceWithSubAndAC3 builds an MKV with an h264 video track, an
 // AC-3 audio track (needsFirstFrame: its MP4 sample entry is built lazily
 // from the first frame, never from CodecPrivate) and an SRT subtitle track,
 // then remuxes it to MP4. RemuxToHLS/PlanHLS run against the resulting MP4
 // path exercise the MP4-source packaging code in hlspack.go
-// (collectFromMP4, mp4PlanSamples, mp4SubCues) - never reached when the
+// (collectFromMP4, mp4PlanSamples, mp4SubTables) - never reached when the
 // packaging source is Matroska itself.
 func pkgcovMP4SourceWithSubAndAC3(t *testing.T) string {
 	t.Helper()
@@ -93,7 +93,7 @@ func TestPkgcovMP4SourceRemuxToHLS_SubtitleAndLazyAC3Entry(t *testing.T) {
 }
 
 // TestPkgcovMP4SourcePlanHLS_SubCuesAndLazyAC3Entry pins hlspack.go's
-// mp4PlanSamples (lazy sample entry from the first frame) and mp4SubCues
+// mp4PlanSamples (lazy sample entry from the first frame) and mp4SubTables
 // (subtitle sample decode + cue.EndMs), the on-demand-plan counterparts of
 // the full-pass branches above.
 func TestPkgcovMP4SourcePlanHLS_SubCuesAndLazyAC3Entry(t *testing.T) {
@@ -114,7 +114,7 @@ func TestPkgcovMP4SourcePlanHLS_SubCuesAndLazyAC3Entry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(vtt, []byte("cue one")) {
-		t.Errorf("plan subtitle segment missing the cue text (mp4SubCues not run):\n%s", vtt)
+		t.Errorf("plan subtitle segment missing the cue text (mp4SubTable.window not run):\n%s", vtt)
 	}
 }
 

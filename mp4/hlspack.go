@@ -11,6 +11,7 @@ package mp4
 import (
 	"context"
 	"io"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -228,30 +229,143 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 	return fts, offsets, nil
 }
 
-// mp4SubCues decodes every subtitle sample of the plan's text tracks (small
-// text, held in RAM - the MP4 plan has no lazy pass to defer to).
-func mp4SubCues(ps *packagingSource, subs []hlsSubTrack) error {
+// mp4SubTable is an MP4 text track's samples as its sample table states them; the text is read on first use (mp4SubWindow).
+type mp4SubTable struct {
+	codec   string
+	samples []fragSample // size only, the shape readSampleRuns reads
+	offs    []int64
+	startMs []int64
+	durMs   []int64
+	state   []uint8 // subUnread, subEmpty or subText
+	text    []string
+}
+
+const (
+	subUnread uint8 = iota
+	subEmpty
+	subText
+)
+
+// mp4SubTables lists each text track's samples from the sample table alone; a sample too short to hold text is left out unread.
+func mp4SubTables(ps *packagingSource, subs []hlsSubTrack) []*mp4SubTable {
+	out := make([]*mp4SubTable, len(subs))
 	for i := range subs {
+		t := &mp4SubTable{}
+		out[i] = t
 		ti := int(subs[i].track.ID) - 1
 		if ti < 0 || ti >= len(ps.mv.tracks) {
 			continue
 		}
 		tk := &ps.mv.tracks[ti]
+		t.codec = tk.codec
 		for si := range tk.samples {
 			s := &tk.samples[si]
-			data, err := readSample(ps.src, s.offset, s.size)
-			if err != nil {
-				return errf("read subtitle sample: %w", err)
+			if s.size <= minSubSampleSize(tk.codec) {
+				continue
 			}
-			if text, ok := decodeSubtitleSample(tk.codec, data); ok {
-				cue := subtitle.Cue{StartMs: s.ctsMs, Text: string(text)}
-				if s.durMs > 0 {
-					cue.EndMs = s.ctsMs + s.durMs
-				}
-				subs[i].cues = append(subs[i].cues, cue)
-			}
+			t.samples = append(t.samples, fragSample{size: s.size})
+			t.offs = append(t.offs, s.offset)
+			t.startMs = append(t.startMs, s.ctsMs)
+			t.durMs = append(t.durMs, s.durMs)
 		}
-		subtitle.ResolveCueEnds(subs[i].cues, 2000)
+		t.state = make([]uint8, len(t.samples))
+		t.text = make([]string, len(t.samples))
+	}
+	return out
+}
+
+// minSubSampleSize is the largest sample that decodes to no text: a tx3g length prefix alone, a wvtt vttc+payl without payload.
+func minSubSampleSize(codec string) uint32 {
+	if codec == "webvtt" {
+		return 16
+	}
+	return 2
+}
+
+// load reads and decodes the samples at idx that are still unread, in file order.
+func (t *mp4SubTable) load(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), idx []int) error {
+	var todo []int
+	for _, j := range idx {
+		if t.state[j] == subUnread {
+			todo = append(todo, j)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	sort.Slice(todo, func(a, b int) bool { return t.offs[todo[a]] < t.offs[todo[b]] })
+	samples := make([]fragSample, len(todo))
+	offs := make([]int64, len(todo))
+	var total int64
+	for k, j := range todo {
+		samples[k], offs[k] = t.samples[j], t.offs[j]
+		total += int64(t.samples[j].size)
+	}
+	src, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	buf := make([]byte, total)
+	if err := readSampleRuns(ctx, src, samples, offs, buf); err != nil {
+		return errf("read subtitle sample: %w", err)
+	}
+	for k, j := range todo {
+		data := buf[:samples[k].size]
+		buf = buf[samples[k].size:]
+		t.state[j] = subEmpty
+		if text, ok := decodeSubtitleSample(t.codec, data); ok {
+			t.state[j], t.text[j] = subText, string(text)
+		}
 	}
 	return nil
+}
+
+// window returns the cues meeting [from, to), each ended as subtitle.ResolveCueEnds ends it over the whole track, reading only the text that decides them.
+func (t *mp4SubTable) window(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), from, to int64) ([]subtitle.Cue, error) {
+	var idx []int
+	for j := range t.samples {
+		if t.startMs[j] < to && (t.durMs[j] <= 0 || t.startMs[j]+t.durMs[j] > from) {
+			idx = append(idx, j)
+		}
+	}
+	if err := t.load(ctx, open, idx); err != nil {
+		return nil, err
+	}
+	var cues []subtitle.Cue
+	for _, j := range idx {
+		if t.state[j] != subText {
+			continue
+		}
+		end := t.startMs[j] + t.durMs[j]
+		if t.durMs[j] <= 0 {
+			next, err := t.nextText(ctx, open, j)
+			if err != nil {
+				return nil, err
+			}
+			end = t.startMs[j] + 2000
+			if next >= 0 && t.startMs[next] > t.startMs[j] {
+				end = t.startMs[next]
+			}
+		}
+		if end > from {
+			cues = append(cues, subtitle.Cue{StartMs: t.startMs[j], EndMs: end, Text: t.text[j]})
+		}
+	}
+	return cues, nil
+}
+
+// nextText is the first sample after j that holds text (-1 for none), reading ahead as far as that takes.
+func (t *mp4SubTable) nextText(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), j int) (int, error) {
+	for k := j + 1; k < len(t.samples); k++ {
+		if t.state[k] == subUnread {
+			if err := t.load(ctx, open, []int{k}); err != nil {
+				return -1, err
+			}
+		}
+		if t.state[k] == subText {
+			return k, nil
+		}
+	}
+	return -1, nil
 }
