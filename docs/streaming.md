@@ -523,6 +523,14 @@ few bounded reads. The lazy pass walks the video track's block headers only --
 sizes, timecodes, sync flags -- never the sample bytes, so its cost is bounded
 by the video track's block *count*, not by any payload volume.
 
+**Turning it off.** `Options.NoIFrames` (CLI `--no-iframes`) drops the
+I-frame stream everywhere: no `EXT-X-I-FRAME-STREAM-INF` in the master (single
+or ABR), no `iframe.m3u8` written, listed by `Resources` or served
+(`Resource` refuses it), and no Matroska keyframe walk behind it. For a server
+whose players scrub with their own trickplay images, so that a stray
+`iframe.m3u8` request from a player cannot start that walk. Segments and the
+other playlists are byte-identical with or without it.
+
 ```bash
 mkvgo extract-frame movie.mkv 00:12:30 -o frame.h264
 ffmpeg -i frame.h264 -frames:v 1 thumb.jpg

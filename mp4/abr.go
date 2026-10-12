@@ -168,7 +168,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	// for fast scrubbing; a variant without one (Matroska plan, encryption) is
 	// simply omitted.
 	for vi, res := range results {
-		if len(res.iframes) == 0 {
+		if len(res.iframes) == 0 || o.NoIFrames {
 			continue
 		}
 		uri := fmt.Sprintf("v%d/iframe.m3u8", vi+1)

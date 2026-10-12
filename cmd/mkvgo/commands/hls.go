@@ -25,6 +25,7 @@ type hlsFlags struct {
 	keepLangs      []string
 	subOffset      int64
 	chapterMarkers bool
+	noIFrames      bool
 	synthIndex     bool
 	audioShift     map[uint64]int64
 	rest           []string
@@ -134,6 +135,8 @@ func parseHLSFlags(args []string) hlsFlags {
 			}
 		case "--chapter-markers":
 			f.chapterMarkers = true
+		case "--no-iframes":
+			f.noIFrames = true
 		case "--synthesize-index":
 			f.synthIndex = true
 		case "--audio-shift":
@@ -229,6 +232,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		KeepTracks:             keep,
 		SubtitleOffsetMs:       f.subOffset,
 		ChapterMarkers:         f.chapterMarkers,
+		NoIFrames:              f.noIFrames,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,
 	}

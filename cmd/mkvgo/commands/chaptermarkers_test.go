@@ -20,3 +20,14 @@ func TestParseHLSFlagsChapterMarkers(t *testing.T) {
 		t.Error("options().ChapterMarkers must be true")
 	}
 }
+
+// TestParseHLSFlagsNoIFrames checks --no-iframes is a boolean switch (absent =
+// false, the default) that rides through to Options.NoIFrames.
+func TestParseHLSFlagsNoIFrames(t *testing.T) {
+	if got := parseHLSFlags([]string{"in.mkv"}).options("in.mkv").NoIFrames; got {
+		t.Error("options().NoIFrames must default to false")
+	}
+	if got := parseHLSFlags([]string{"in.mkv", "--no-iframes"}).options("in.mkv").NoIFrames; !got {
+		t.Error("--no-iframes must set options().NoIFrames")
+	}
+}

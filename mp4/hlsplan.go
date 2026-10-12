@@ -433,7 +433,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, err
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
-		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil}
+		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil && !o.NoIFrames}
 	if o.SubtitleIndex != nil {
 		if st, serr := fs.DoStat(srcPath); serr == nil && o.SubtitleIndex.Matches(st.Size(), c.Info.SegmentUID, c.Info.TimecodeScale) {
 			p.subIndex = o.SubtitleIndex
@@ -1090,6 +1090,9 @@ func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
 // cancelled first request must not poison every later one - the same fix as
 // the subtitle-cue scan's).
 func (p *HLSPlan) iframePlaylist(ctx context.Context) ([]byte, error) {
+	if p.opts.NoIFrames {
+		return nil, errf("no I-frame playlist for this plan (Options.NoIFrames is set)")
+	}
 	if p.mp4src {
 		if p.iframe == nil {
 			return nil, errf("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
@@ -3358,7 +3361,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 			starts[i] = append(starts[i], int32(cursors[i]))
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			head := segmentFileLen(seg)
-			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
+			if ft == video && !o.NoIFrames && len(seg.samples) > 0 && seg.samples[0].sync {
 				iframes = append(iframes, iframeRef{seg: k, length: head + int64(seg.samples[0].size)})
 			}
 			segBytes += head + seg.dataLen

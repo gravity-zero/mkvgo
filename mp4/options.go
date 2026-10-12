@@ -256,6 +256,17 @@ type Options struct {
 	// or off, and full-pass/on-demand-plan output stays byte-identical for the
 	// same setting. A source with no chapters emits nothing extra either way.
 	ChapterMarkers bool
+
+	// NoIFrames drops the trick-play I-frame stream from HLS packaging
+	// (RemuxToHLS, RemuxToABR, PlanHLS, PlanABR): no EXT-X-I-FRAME-STREAM-INF in
+	// the master, no iframe.m3u8 written, listed or served (Resource refuses
+	// it), and no I-frame collection or Matroska keyframe walk behind it. For a
+	// server whose players scrub with their own trickplay images and must not
+	// trigger the keyframe walk an I-frame request costs. Off by default (the
+	// stream is offered whenever the presentation has keyframes and is not
+	// encrypted); the media segments and the other playlists are the same
+	// either way.
+	NoIFrames bool
 }
 
 // wantsEditList reports whether a codec's container delay should be carried as an

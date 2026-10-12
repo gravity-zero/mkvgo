@@ -4,6 +4,19 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`Options.NoIFrames`** (CLI `--no-iframes` on `to-hls`, `hls-segment`,
+  `to-abr`, `abr-segment`): drops the trick-play I-frame stream from HLS
+  packaging. No `EXT-X-I-FRAME-STREAM-INF` in the master (single and ABR), no
+  `iframe.m3u8` written, listed or served (`Resource` refuses it), and no
+  Matroska keyframe walk or I-frame collection behind it. Off by default; the
+  segments and the other playlists are byte-identical either way. For servers
+  whose players scrub with their own trickplay images, where a stray
+  `iframe.m3u8` request would start a keyframe walk over the source.
+
 ## [0.46.0] - 2026-10-12
 
 ### Added

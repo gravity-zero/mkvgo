@@ -798,7 +798,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				cipherData = cipher
 			}
 			head := buildSegmentFile(uint32(k+1), seg)
-			if ft == video && len(seg.samples) > 0 && seg.samples[0].sync {
+			if ft == video && !o.NoIFrames && len(seg.samples) > 0 && seg.samples[0].sync {
 				iframes = append(iframes, iframeRef{seg: k, length: int64(len(head)) + int64(seg.samples[0].size)})
 			}
 			var fileBytes int64
@@ -1171,7 +1171,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		inf += ",SUBTITLES=\"subs\""
 	}
 	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
-	if len(iframes) > 0 && o != nil && o.Encrypt == nil && o.CENC == nil {
+	if len(iframes) > 0 && o != nil && o.Encrypt == nil && o.CENC == nil && !o.NoIFrames {
 		b = append(b, iframeStreamInf(o, fts, dursOf(segs), iframes)...)
 	}
 	return b
