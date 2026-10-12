@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.47.0] - 2026-10-12
 
 ### Added
 
@@ -16,6 +16,14 @@ All notable changes to mkvgo are documented here. The format is based on
   segments and the other playlists are byte-identical either way. For servers
   whose players scrub with their own trickplay images, where a stray
   `iframe.m3u8` request would start a keyframe walk over the source.
+
+### Fixed
+
+- **A Matroska plan's master declared an I-frame `BANDWIDTH` below its own
+  I-frames.** It was estimated from the first keyframe alone; a larger
+  keyframe later in the film made the declared bit rate too low. It is now
+  the plan's peak segment bit rate, which bounds every I-frame (each lies
+  inside its segment, over the same duration).
 
 ## [0.46.0] - 2026-10-12
 
