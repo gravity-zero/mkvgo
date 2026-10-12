@@ -4,6 +4,52 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.45.0] - 2026-10-12
+
+### Added
+
+- **`mkv.RangeHinter`**: a reader told the byte range `[off, end)` its next
+  reads cover. `httpfs` (and so `s3fs`) fetches it with one request instead
+  of a window at a time; a hint is advice, reads outside it work as before.
+  `mp4.PlanHLS` announces each window's range and the streamed copy its spans.
+- **`mkv.ShareReads`** (`WithReadShare`, `ReadShareFrom`, `ReadShare`): a
+  scope under which readers opened by an FS pass each other the bytes one of
+  them already fetched. `PlanHLS` opens one while it builds a plan, never for
+  segment reads, which must still notice a replaced source.
+
+### Changed
+
+- **Remote reads (`httpfs`, `s3fs`) stream the response body** instead of
+  buffering a window, and a sequential read doubles its request (up to 32
+  windows). A broken response resumes on the pinned version (`If-Match`, 4
+  attempts at most, refused without a validator) and a short abandoned rest
+  is drained so the connection is reused.
+- **A remote `PlanHLS` makes no HEAD**: a reader's `Stat` under a read share
+  fetches both ends of the file, its first responses give the size and the
+  version, and two answers of different versions (ETag, `Last-Modified`
+  without ETag, or total size) fail with `ErrSourceChanged` instead of
+  mixing them. `ReadAt` reads one exact pinned range.
+- **The bandwidth spans of a remote plan are checked with exact header
+  reads, two at a time**, the head and the tail read in parallel. On a 50 ms
+  link this step alone takes the master playlist of a film with Cues at the
+  end from about 1.9 s to 0.9 s, and 9.9 to 1.0 MiB read; the playlist is
+  byte-identical.
+  A segment is one request per pass over its window (two when streamed).
+- **`to-mp4 --faststart` writes a local source's output in one pass**: a
+  sizing pass then a single `ftyp`+`moov`+`mdat` write, with no temporary
+  `mdat` (half the bytes written, output byte-identical). A remote source
+  keeps the temporary file, since it would be downloaded twice.
+
+### Fixed
+
+- **`subtitle-index -from-cues` no longer runs the full walk first**: the
+  index came from the Cues but the CLI walked the file before using them.
+- **The source stat interval of a plan runs on the monotonic clock**: a wall
+  clock stepping back (seen every 30 s under WSL2) skipped the path stat,
+  so a source replaced in that time was only caught by the read itself.
+- `analyze`'s help and docs said it reads the head only; the walk reads
+  about the whole file.
+
 ## [0.44.0] - 2026-10-11
 
 ### Changed
