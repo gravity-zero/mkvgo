@@ -129,10 +129,6 @@ type HLSPlan struct {
 	// sourceID is SourceID, computed once.
 	sourceIDOnce sync.Once
 	sourceID     string
-	// firstKeyBytes is the first video keyframe's size: the master's I-frame
-	// BANDWIDTH estimate (the master never changes once built, like every
-	// other bandwidth it carries).
-	firstKeyBytes int64
 	// tables are the window tables Open streams from (hlsstream.go), budgeted
 	// by tableCacheBytes per plan and tableTotalBudget per process, one build
 	// at a time per window (tabFlight).
@@ -663,9 +659,9 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// full pass derives fts[primaryIndex(fts)].presentMs, so the same source
 	// and option yield the same chapters (byte parity full-pass <-> plan).
 	chapters := chapterMarkers(&o, c.Chapters, video.ft.presentMs)
-	var est []iframeRef // the first keyframe stands for the trick-play bitrate, an estimate like the master's others
-	if p.hasIframe && p.firstKeyBytes > 0 {
-		est = []iframeRef{{seg: 0, length: p.firstKeyBytes}}
+	var est []iframeRef // the peak segment bounds the trick-play bitrate: each I-frame lies inside its segment, over the same duration
+	if p.hasIframe {
+		est = peakSegmentIframe(segs)
 	}
 	p.master = buildMasterPlaylist(&o, fts, p.subs, segs, est)
 	p.stampSource()
@@ -788,9 +784,6 @@ func (p *HLSPlan) peekHead(ctx context.Context) error {
 					return false, err
 				}
 				pt.ft.outTrack.sampleEntry = entry
-			}
-			if pt.ft.outTrack.spec.video && p.firstKeyBytes == 0 {
-				p.firstKeyBytes = int64(len(data))
 			}
 			pt.firstPtsMs = b.Timecode
 			needFirst--
@@ -1182,6 +1175,22 @@ func (p *HLSPlan) stampSource() {
 
 func statStamp(fi os.FileInfo) string {
 	return fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
+}
+
+// peakSegmentIframe returns the segment of highest bit rate as a whole-segment I-frame, nil when no segment has a duration.
+func peakSegmentIframe(segs []segInfo) []iframeRef {
+	best, peak := -1, 0.0
+	for k, s := range segs {
+		if s.durSec > 0 {
+			if bps := float64(s.bytes) / s.durSec; bps > peak {
+				best, peak = k, bps
+			}
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return []iframeRef{{seg: best, length: segs[best].bytes}}
 }
 
 // buildMatroskaIframePlaylist performs the one-time structure-only walk: for

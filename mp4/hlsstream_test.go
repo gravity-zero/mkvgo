@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -204,8 +205,8 @@ func (f *failAfter) Write(p []byte) (int, error) {
 }
 
 // The master declares trick play on demand - resolution, codecs and URI as the
-// full pass does, the bitrate an estimate from the first keyframe - and keeps
-// its bytes whether or not the I-frame playlist has been built.
+// full pass does, the bitrate the variant's peak, never below the I-frames' -
+// and keeps its bytes whether or not the I-frame playlist has been built.
 func TestOpenMasterDeclaresIframesOnDemand(t *testing.T) {
 	src := openGOPSource(t, 6, false, true)
 	ctx := context.Background()
@@ -222,16 +223,29 @@ func TestOpenMasterDeclaresIframesOnDemand(t *testing.T) {
 	if !bytes.Contains(early, []byte("#EXT-X-I-FRAME-STREAM-INF:")) {
 		t.Fatalf("on-demand master lacks the trick-play line before any I-frame request:\n%s", early)
 	}
-	if _, _, err := plan.Resource(ctx, "iframe.m3u8"); err != nil {
+	pl, _, err := plan.Resource(ctx, "iframe.m3u8")
+	if err != nil {
 		t.Fatal(err)
 	}
-	line := func(b []byte) string {
+	lineOf := func(b []byte, prefix string) string {
 		for _, l := range strings.Split(string(b), "\n") {
-			if strings.HasPrefix(l, "#EXT-X-I-FRAME-STREAM-INF:") {
+			if strings.HasPrefix(l, prefix) {
 				return l
 			}
 		}
 		return ""
+	}
+	line := func(b []byte) string { return lineOf(b, "#EXT-X-I-FRAME-STREAM-INF:") }
+	bw := func(l string) int64 {
+		n, _ := strconv.ParseInt(strings.TrimPrefix(bwHLS.FindString(l), "BANDWIDTH="), 10, 64)
+		return n
+	}
+	declared, variant := bw(line(early)), bw(lineOf(early, "#EXT-X-STREAM-INF:"))
+	if declared != variant {
+		t.Errorf("I-frame BANDWIDTH %d, want the variant's %d", declared, variant)
+	}
+	if peak := iframePeakBps(t, pl); declared < peak || peak <= 0 {
+		t.Errorf("I-frame BANDWIDTH %d below the I-frames' measured peak %d", declared, peak)
 	}
 	strip := func(l string) string { return bwHLS.ReplaceAllString(l, "") }
 	if got, want := strip(line(early)), strip(line(full)); got != want || got == "" {
@@ -243,6 +257,24 @@ func TestOpenMasterDeclaresIframesOnDemand(t *testing.T) {
 }
 
 var bwHLS = regexp.MustCompile(`BANDWIDTH=\d+`)
+
+// iframePeakBps is an I-frame playlist's highest byte range over its EXTINF, in bits per second.
+func iframePeakBps(t *testing.T, pl []byte) int64 {
+	t.Helper()
+	var dur, peak float64
+	for _, l := range strings.Split(string(pl), "\n") {
+		switch {
+		case strings.HasPrefix(l, "#EXTINF:"):
+			dur, _ = strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(l, "#EXTINF:"), ","), 64)
+		case strings.HasPrefix(l, "#EXT-X-BYTERANGE:"):
+			n, _ := strconv.ParseFloat(strings.SplitN(strings.TrimPrefix(l, "#EXT-X-BYTERANGE:"), "@", 2)[0], 64)
+			if dur > 0 && n*8/dur > peak {
+				peak = n * 8 / dur
+			}
+		}
+	}
+	return int64(peak)
+}
 
 // A streamed segment's ETag carries the source's stamp: the same name and size
 // over a replaced file (another mtime) yield another ETag; the same file, the same.
