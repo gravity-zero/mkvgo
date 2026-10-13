@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -451,6 +452,44 @@ func TestPlanHLSResourcesSurviveCancelledFirstRequest(t *testing.T) {
 		_, _, _ = plan.Resource(cctx, name) // may fail - must not leave state behind
 		if _, _, err := plan.Resource(context.Background(), name); err != nil {
 			t.Errorf("%s: request after a cancelled one failed: %v - a transient context error was cached", name, err)
+		}
+	}
+}
+
+// TestPlanHLSSegmentCancelledBeforeCallRejects checks that a request whose context is already cancelled fails instead of serving, built or cached.
+func TestPlanHLSSegmentCancelledBeforeCallRejects(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var gblocks []genBlock
+	for i := 0; i < 150; i++ {
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0,
+			data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	}
+	src := buildPlanFixture(t,
+		[]mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}},
+		gblocks, nil)
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for n := 0; n < plan.NumSegments(); n++ {
+		if _, err := plan.Segment(cancelled, n); !errors.Is(err, context.Canceled) {
+			t.Fatalf("segment %d, never built: err = %v, want context.Canceled", n, err)
+		}
+		if _, err := plan.Segment(context.Background(), n); err != nil {
+			t.Fatalf("segment %d after a cancelled request: %v", n, err)
+		}
+		if _, err := plan.Segment(cancelled, n); !errors.Is(err, context.Canceled) {
+			t.Fatalf("segment %d, already built: err = %v, want context.Canceled", n, err)
+		}
+	}
+	for _, name := range plan.Resources() {
+		if !strings.HasSuffix(name, ".m4s") {
+			continue
+		}
+		if _, _, err := plan.Resource(cancelled, name); !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s: err = %v, want context.Canceled", name, err)
 		}
 	}
 }

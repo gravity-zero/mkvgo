@@ -2619,6 +2619,9 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := p.checkSource(); err != nil {
 		return nil, err
 	}
