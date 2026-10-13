@@ -19,8 +19,9 @@ import (
 // MemFS is an in-memory filesystem for the FS port. The zero value is not
 // usable; create one with NewMemFS. Safe for concurrent use.
 type MemFS struct {
-	mu    sync.Mutex
-	files map[string]*memFile
+	mu      sync.Mutex
+	files   map[string]*memFile
+	reserve map[string]int // Reserve: the capacity the next Create of a path starts with
 }
 
 type memFile struct {
@@ -72,6 +73,17 @@ func (m *MemFS) Put(path string, data []byte) {
 	m.files[memKey(path)] = &memFile{data: append([]byte(nil), data...)}
 }
 
+// Reserve makes the next Create of path start with room for n bytes, so an
+// output of known or estimated size is not grown and copied as it is written.
+func (m *MemFS) Reserve(path string, n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reserve == nil {
+		m.reserve = map[string]int{}
+	}
+	m.reserve[memKey(path)] = n
+}
+
 // Get returns the content stored under path, or nil when absent.
 func (m *MemFS) Get(path string) []byte {
 	m.mu.Lock()
@@ -110,6 +122,10 @@ func (m *MemFS) FS() *FS {
 		Create: func(path string) (WriteSeekCloser, error) {
 			f := &memFile{}
 			m.mu.Lock()
+			if n, ok := m.reserve[memKey(path)]; ok {
+				f.data = make([]byte, 0, n)
+				delete(m.reserve, memKey(path))
+			}
 			m.files[memKey(path)] = f
 			m.mu.Unlock()
 			return &memWriter{f: f}, nil

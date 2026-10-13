@@ -76,6 +76,22 @@ const movBytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testda
 const probeMov = await MkvGo.probe(movBytes)
 check(probeMov.format === 'mp4', `probe .mov format mp4 (got ${probeMov.format})`)
 
+// --- remux from a Blob: ranged reads, the same bytes as from a Uint8Array ---
+{
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
+  const fromBytes = await MkvGo.remuxToMP4(mkvBytes, { fastStart: true })
+  const fromBlob = await MkvGo.remuxToMP4(new Blob([mkvBytes]), { fastStart: true })
+  check(same(fromBlob.data, fromBytes.data), `remuxToMP4(Blob) matches remuxToMP4(Uint8Array) (${fromBlob.data.length} bytes)`)
+  const backBlob = await MkvGo.remuxFromMP4(new Blob([fromBytes.data]))
+  const backBytes = await MkvGo.remuxFromMP4(fromBytes.data)
+  check(same(backBlob.data, backBytes.data), 'remuxFromMP4(Blob) matches remuxFromMP4(Uint8Array)')
+  const hlsBlob = await MkvGo.remuxToHLS(new Blob([mkvBytes]))
+  const hlsBytes = await MkvGo.remuxToHLS(mkvBytes)
+  const names = Object.keys(hlsBytes.files)
+  check(names.length > 0 && Object.keys(hlsBlob.files).length === names.length &&
+    names.every((n) => same(hlsBlob.files[n], hlsBytes.files[n])), `remuxToHLS(Blob) matches (${names.length} files)`)
+}
+
 // --- MKV -> MP4 -> MKV round-trip ---
 const mp4 = await MkvGo.remuxToMP4(mkvBytes, { fastStart: true })
 check(mp4.data instanceof Uint8Array && mp4.data.length > 0, `remuxToMP4 output (${mp4.data.length} bytes)`)

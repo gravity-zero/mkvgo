@@ -515,29 +515,28 @@ func remuxResult(data []byte, dropped []mp4.DroppedTrack) (any, error) {
 
 // remuxToMP4JS(input: Uint8Array, opts?) → Promise<{data, droppedTracks}>
 func remuxToMP4JS(_ js.Value, args []js.Value) any {
-	return remuxCall(args, func(ctx context.Context, m *mkv.MemFS, o mp4.Options) (string, error) {
-		return "out.mp4", mp4.RemuxToMP4(ctx, "in", "out.mp4", o)
+	return remuxCall(args, "out.mp4", func(ctx context.Context, o mp4.Options) error {
+		return mp4.RemuxToMP4(ctx, "in", "out.mp4", o)
 	})
 }
 
 // remuxFromMP4JS(input: Uint8Array, opts?) → Promise<{data, droppedTracks}>
 func remuxFromMP4JS(_ js.Value, args []js.Value) any {
-	return remuxCall(args, func(ctx context.Context, m *mkv.MemFS, o mp4.Options) (string, error) {
-		return "out.mkv", mp4.RemuxFromMP4(ctx, "in", "out.mkv", o)
+	return remuxCall(args, "out.mkv", func(ctx context.Context, o mp4.Options) error {
+		return mp4.RemuxFromMP4(ctx, "in", "out.mkv", o)
 	})
 }
 
 // remuxToWebMJS(input: Uint8Array) → Promise<{data, droppedTracks}>
 func remuxToWebMJS(_ js.Value, args []js.Value) any {
-	return remuxCall(args, func(ctx context.Context, m *mkv.MemFS, o mp4.Options) (string, error) {
-		return "out.webm", matroska.RemuxToWebM(ctx, "in", "out.webm",
-			matroska.Options{FS: o.FS})
+	return remuxCall(args, "out.webm", func(ctx context.Context, o mp4.Options) error {
+		return matroska.RemuxToWebM(ctx, "in", "out.webm", matroska.Options{FS: o.FS})
 	})
 }
 
-// remuxCall factors the shared shape: input bytes into a MemFS as "in", run
-// the operation, return the named output plus the dropped tracks.
-func remuxCall(args []js.Value, run func(context.Context, *mkv.MemFS, mp4.Options) (string, error)) any {
+// remuxCall factors the shared shape: the input as "in" (see inputFS), run
+// the operation, return the output plus the dropped tracks.
+func remuxCall(args []js.Value, out string, run func(context.Context, mp4.Options) error) any {
 	if len(args) < 1 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("missing input") })
 	}
@@ -546,16 +545,16 @@ func remuxCall(args []js.Value, run func(context.Context, *mkv.MemFS, mp4.Option
 	ctx, release := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer release()
-		if isBlob(input) {
-			return nil, fmt.Errorf("remux needs a Uint8Array (the whole file in memory); Blob input is probe-only")
-		}
-		m := mkv.NewMemFS()
-		m.Put("in", toGoBytes(input))
-		var dropped []mp4.DroppedTrack
-		opts.FS = m.FS()
-		opts.OnDrop = func(d mp4.DroppedTrack) { dropped = append(dropped, d) }
-		out, err := run(ctx, m, opts)
+		m, fs, size, err := inputFS(input)
 		if err != nil {
+			return nil, err
+		}
+		// A remux writes about what it reads: room for that keeps the output from growing by copies.
+		m.Reserve(out, int(size+size/32+1<<20))
+		var dropped []mp4.DroppedTrack
+		opts.FS = fs
+		opts.OnDrop = func(d mp4.DroppedTrack) { dropped = append(dropped, d) }
+		if err := run(ctx, opts); err != nil {
 			return nil, err
 		}
 		return remuxResult(m.Get(out), dropped)
@@ -572,13 +571,12 @@ func remuxToHLSJS(_ js.Value, args []js.Value) any {
 	ctx, release := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer release()
-		if isBlob(input) {
-			return nil, fmt.Errorf("remuxToHLS needs a Uint8Array; Blob input is probe-only")
+		m, fs, _, err := inputFS(input)
+		if err != nil {
+			return nil, err
 		}
-		m := mkv.NewMemFS()
-		m.Put("in", toGoBytes(input))
 		var dropped []mp4.DroppedTrack
-		opts.FS = m.FS()
+		opts.FS = fs
 		opts.OnDrop = func(d mp4.DroppedTrack) { dropped = append(dropped, d) }
 		if err := mp4.RemuxToHLS(ctx, "in", "hls", opts); err != nil {
 			return nil, err
@@ -645,6 +643,44 @@ func blobFS(blob js.Value) *mkv.FS {
 		Stat: func(p string) (os.FileInfo, error) { return blobInfo{name: p, size: size}, nil },
 	}
 }
+
+// inputFS is a MemFS for an operation's outputs whose "in" is the input
+// itself, never copied into it: a Blob/File read through ranged slices, or a
+// Uint8Array copied once into Go and read in place.
+func inputFS(input js.Value) (*mkv.MemFS, *mkv.FS, int64, error) {
+	rs, err := inputReadSeeker(input)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	size, err := rs.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	open := func() mkv.ReadSeekCloser { return newBlobReader(input) }
+	if b, ok := rs.(*bytes.Reader); ok {
+		open = func() mkv.ReadSeekCloser { return nopCloser{io.NewSectionReader(b, 0, size)} }
+	}
+	m := mkv.NewMemFS()
+	fs := m.FS()
+	openOut, statOut := fs.Open, fs.Stat
+	fs.Open = func(p string) (mkv.ReadSeekCloser, error) {
+		if p == "in" {
+			return open(), nil
+		}
+		return openOut(p)
+	}
+	fs.Stat = func(p string) (os.FileInfo, error) {
+		if p == "in" {
+			return blobInfo{name: p, size: size}, nil
+		}
+		return statOut(p)
+	}
+	return m, fs, size, nil
+}
+
+type nopCloser struct{ io.ReadSeeker }
+
+func (nopCloser) Close() error { return nil }
 
 type blobInfo struct {
 	name string

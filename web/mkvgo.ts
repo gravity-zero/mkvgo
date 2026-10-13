@@ -777,14 +777,17 @@ export interface MkvGoApi {
    * larger than memory (a 40 GB File transfers a few hundred kilobytes).
    */
   probe(input: Uint8Array | Blob, options?: ProbeOptions): Promise<ProbeResult>
-  /** Remux MKV/WebM → MP4 (no transcoding). Input must fit in memory. */
-  remuxToMP4(input: Uint8Array, options?: RemuxOptions): Promise<RemuxResult>
-  /** Remux MP4/MOV → MKV (no transcoding). */
-  remuxFromMP4(input: Uint8Array, options?: RemuxOptions): Promise<RemuxResult>
-  /** Remux MKV → WebM (VP8/VP9/AV1 + Opus/Vorbis only). */
-  remuxToWebM(input: Uint8Array): Promise<RemuxResult>
-  /** Package MKV/WebM as fragmented-MP4 HLS (master + media playlists + segments). */
-  remuxToHLS(input: Uint8Array, options?: RemuxOptions): Promise<HLSResult>
+  /**
+   * Remux MKV/WebM → MP4 (no transcoding). A Blob/File input is read through
+   * ranged slices instead of being held in memory; the output is.
+   */
+  remuxToMP4(input: Uint8Array | Blob, options?: RemuxOptions): Promise<RemuxResult>
+  /** Remux MP4/MOV → MKV (no transcoding). Blob/File: ranged reads, as remuxToMP4. */
+  remuxFromMP4(input: Uint8Array | Blob, options?: RemuxOptions): Promise<RemuxResult>
+  /** Remux MKV → WebM (VP8/VP9/AV1 + Opus/Vorbis only). Blob/File: ranged reads. */
+  remuxToWebM(input: Uint8Array | Blob): Promise<RemuxResult>
+  /** Package MKV/WebM as fragmented-MP4 HLS (master + media playlists + segments). Blob/File: ranged reads. */
+  remuxToHLS(input: Uint8Array | Blob, options?: RemuxOptions): Promise<HLSResult>
   /**
    * Open an on-demand HLS presentation: resources are built as requested
    * instead of all at once. A Blob/File input is read through ranged slices,

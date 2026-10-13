@@ -11,8 +11,9 @@ What it enables:
   through ranged slices, and mkvgo's probe is head-only - inspecting a 40 GB
   MKV in a `<input type=file>` transfers a few hundred kilobytes and takes
   milliseconds. No upload, no server.
-- **Remux MKV → MP4 (and back), package HLS, extract subtitles** - for files
-  that fit in memory - without transcoding: the original frames are copied
+- **Remux MKV → MP4 (and back), package HLS, extract subtitles** - for
+  outputs that fit in memory, a `File` input being read through ranged
+  slices - without transcoding: the original frames are copied
   into the new container.
 - **Play an MKV in a `<video>` tag** with no server and no transcoding:
   `openHLS(file)` builds fragmented-MP4 segments **on demand from ranged
@@ -41,10 +42,10 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | Method | Input | Result |
 |---|---|---|
 | `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object - same shape as the CLI `-json` output (chapters, tags and the attachment list - name, MIME type, size - included; the attachment payloads are not read), plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`) |
-| `remuxToMP4(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ data: Uint8Array, droppedTracks }` |
-| `remuxFromMP4(input, opts?)` | `Uint8Array` (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
-| `remuxToWebM(input)` | `Uint8Array` (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
-| `remuxToHLS(input, opts?)` | `Uint8Array` (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` - `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
+| `remuxToMP4(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (MKV/WebM) | `{ data: Uint8Array, droppedTracks }` |
+| `remuxFromMP4(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
+| `remuxToWebM(input)` | `Uint8Array` **or `Blob`/`File`** (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
+| `remuxToHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (MKV/WebM) | `{ files: {name → Uint8Array}, droppedTracks }` - `master.m3u8`, `playlist.m3u8`, `init.mp4`, `seg*.m4s`, subtitle renditions |
 | `openHLS(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (ranged reads - no size limit) | on-demand handle: `{ numSegments, resources, resource(name) → {data, contentType}, segment(n), close() }` |
 | `openABR(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - pre-encoded quality variants, best first | on-demand ABR handle: `{ numVariants, resources, resource(name) → {data, contentType}, close() }` - `resource("master.m3u8")` or `resource("v2/seg00007.m4s")` |
 | `openConcat(inputs, opts?)` | array of `Uint8Array`/`Blob`/`File` - sources in playback order | on-demand concatenated handle: `{ numParts, resources, resource(name) → {data, contentType}, close() }` - one continuous HLS session over several sources, `resource("master.m3u8")` or `resource("p1/seg00007.m4s")` |
@@ -631,8 +632,12 @@ in a worker (`importScripts('/wasm_exec.js')` or a module worker), and
 
 ## Limits
 
-- **Remux needs the whole file in memory** (input + output simultaneously  - 
-  wasm32 addresses 4 GB; in practice keep inputs under ~1.5 GB). `probe`,
+- **Remux holds its whole output in memory** (wasm32 addresses 4 GB; in
+  practice keep files under ~1.5 GB). A `Blob`/`File` input is read through
+  ranged slices and never held whole; a `Uint8Array` input is copied once
+  into the module. The output is sized from the input up front, so it is not
+  grown by copies: `remuxToMP4` with `fastStart` on a 143 MB MKV leaves the
+  module at 165 MB of memory from a `File` (306 MB from a `Uint8Array`). `probe`,
   `playability`, `ladder` and `ingest` (unless `opts.analyze` is set) accept a
   `Blob`/`File` and have **no size limit** - they read head-only. `analyze`
   and `fingerprint` also accept a `Blob`/`File` (they walk every block header

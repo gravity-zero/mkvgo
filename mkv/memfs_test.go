@@ -185,3 +185,29 @@ func TestMemFSGapAfterTruncateIsZero(t *testing.T) {
 		t.Errorf("write past the end: %q, want %q", got, "0123\x00\x00Z")
 	}
 }
+
+// TestMemFSReserve: a reserved output is written without growing.
+func TestMemFSReserve(t *testing.T) {
+	m := NewMemFS()
+	const total = 16 << 20
+	m.Reserve("out", total)
+	w, err := m.FS().Create("out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 64<<10)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for n := 0; n < total; n += len(chunk) {
+		if _, err := w.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime.ReadMemStats(&after)
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 1<<20 {
+		t.Errorf("writing a reserved %d-byte file allocated %d bytes", total, alloc)
+	}
+	if len(m.Get("out")) != total {
+		t.Errorf("file is %d bytes, want %d", len(m.Get("out")), total)
+	}
+}

@@ -6,6 +6,21 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **The WebAssembly remuxes take a `Blob`/`File`.** `remuxToMP4`,
+  `remuxFromMP4`, `remuxToWebM` and `remuxToHLS` refused anything but a
+  `Uint8Array`, so the whole input sat in memory twice (in JavaScript, then
+  copied into the module) and was copied a third time into the in-memory
+  filesystem. A `Blob`/`File` is now read through ranged slices, a
+  `Uint8Array` is copied into the module once and read in place, and the
+  output is reserved at about the input's size (`mkv.MemFS.Reserve`, new) so
+  it is not grown by copies. `remuxToMP4` with `fastStart` on a 143 MB MKV
+  under Node 22: the module's memory goes from 701 MB to 306 MB from a
+  `Uint8Array`, and to 165 MB from a `File`; the peak RSS of the process from
+  950 MB (1,798 MB before the in-memory output fix below) to 666 to 680 MB.
+  The outputs are byte-identical.
+
 ### Changed
 
 - **Writing an MKV allocates its cluster buffer once.** The MKV writer

@@ -2454,6 +2454,11 @@ err = mp4.RemuxToHLS(ctx, "in.mkv", "hls", mp4.Options{FS: m.FS()})
 for _, p := range m.Paths() { … }   // hls/master.m3u8, hls/init.mp4, hls/seg00001.m4s, …
 ```
 
+A file grows by doubling as it is written. When its size is known or can be
+estimated - a remux writes about what it reads - `m.Reserve("out.mp4", n)`
+makes the next `Create` of that path start with room for `n` bytes, so it is
+written without being grown and copied.
+
 ### Remote files over HTTP Range (`httpfs`)
 
 `github.com/gravity-zero/mkvgo/httpfs` implements the port over HTTP(S) Range
