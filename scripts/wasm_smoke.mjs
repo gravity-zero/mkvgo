@@ -58,6 +58,19 @@ check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.len
   }
 }
 
+// --- probe(Blob) starts with a small read: a whole 512 KiB window cost more than the probe itself ---
+{
+  const sizes = []
+  const slice = Blob.prototype.slice
+  Blob.prototype.slice = function (start, end, ...rest) { sizes.push(end - start); return slice.call(this, start, end, ...rest) }
+  try {
+    await MkvGo.probe(new Blob([new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/regfix.mkv')))]))
+  } finally {
+    Blob.prototype.slice = slice
+  }
+  check(sizes.length > 0 && sizes[0] <= 64 << 10, `probe(Blob) first read ${sizes[0]} bytes (<= 64 KiB)`)
+}
+
 // --- probe (MP4/QuickTime) ---
 const movBytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/quicktime.mov')))
 const probeMov = await MkvGo.probe(movBytes)

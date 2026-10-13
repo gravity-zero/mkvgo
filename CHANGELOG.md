@@ -20,6 +20,14 @@ All notable changes to mkvgo are documented here. The format is based on
   block by block take the same path: `to-webm`, `split`, `join`, `mux`,
   `merge-ass` and the edits that rewrite the file (`RemoveTrack`, `AddTrack`,
   `EditMetadata`).
+- **`MkvGo.probe` of a `Blob` starts with a 64 KiB read.** Every Blob read
+  was a 512 KiB window, and on a file-backed Blob under Node 22 that read
+  alone cost 0.74 ms where the whole probe of a small MP4 took 0.97 ms. The
+  window now starts at 64 KiB, doubles while the reads run on, up to
+  512 KiB, and starts small again after a jump; its buffer is reused. Probe
+  per call: a 0.5 MB faststart MP4 1.14 ms down to 0.47 ms, the same file as
+  MKV 1.06 ms down to 0.49 ms, a 6.9 MB MKV with 13 chapters and a font 1.99
+  ms down to 0.68 ms.
 - **`to-mp4` reads its samples into one buffer.** Each block was read into
   a buffer of its own, then copied into its track's chunk at once: the whole
   source allocated again on every pass (two for `--faststart`), and a chunk

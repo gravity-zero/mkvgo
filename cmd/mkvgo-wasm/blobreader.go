@@ -19,9 +19,8 @@ type blobReader struct {
 	pos  int64
 	buf  []byte // cached window
 	off  int64  // buf's start offset in the blob
+	win  int    // size of the last read, see nextBlobWindow
 }
-
-const blobWindow = 512 << 10
 
 func newBlobReader(blob js.Value) *blobReader {
 	return &blobReader{blob: blob, size: int64(blob.Get("size").Float())}
@@ -67,16 +66,18 @@ func (r *blobReader) Close() error { return nil }
 // arrayBuffer promise - legal here because every export runs its work on its
 // own goroutine, leaving the JS event loop free to complete the read.
 func (r *blobReader) fetch(off int64) error {
-	end := off + blobWindow
-	if end > r.size {
-		end = r.size
-	}
+	r.win = nextBlobWindow(r.off+int64(len(r.buf)), off, r.win)
+	end := min(off+int64(r.win), r.size)
 	ab, err := await(r.blob.Call("slice", off, end).Call("arrayBuffer"))
 	if err != nil {
 		return fmt.Errorf("blob read [%d:%d): %w", off, end, err)
 	}
 	u8 := js.Global().Get("Uint8Array").New(ab)
-	r.buf = make([]byte, u8.Get("length").Int())
+	if n := u8.Get("length").Int(); cap(r.buf) >= n {
+		r.buf = r.buf[:n]
+	} else {
+		r.buf = make([]byte, n)
+	}
 	js.CopyBytesToGo(r.buf, u8)
 	r.off = off
 	return nil
