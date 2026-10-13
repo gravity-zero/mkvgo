@@ -42,6 +42,7 @@ type MKVWriter struct {
 	infoDurMs     int64           // the duration WriteMetadata was given
 	infoWritten   bool
 	attachOpen    func(*mkv.Attachment) (io.Reader, error)
+	clusterBuf    ew // every cluster is assembled here, so its storage is allocated once
 }
 
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
@@ -125,7 +126,7 @@ func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, b
 		}
 	}
 
-	offsets, err := WriteClusterOffsets(m.W, clusterTS, timecodeScale, blocks)
+	offsets, err := writeClusterOffsets(m.W, &m.clusterBuf, clusterTS, timecodeScale, blocks)
 	if err == nil && cueAt >= 0 {
 		m.Cues[len(m.Cues)-1].RelativePos = offsets[cueAt]
 	}

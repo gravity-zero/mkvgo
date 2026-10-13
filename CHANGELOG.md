@@ -8,6 +8,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **Writing an MKV allocates its cluster buffer once.** The MKV writer
+  assembled every cluster in a fresh buffer grown by doubling, about twice the
+  media it wrote in allocations, and the memory the runtime handed back to the
+  system came back as page faults on the next clusters. It now keeps one
+  buffer for the whole file. On a 1.8 GiB file (warm cache): `from-mp4` goes
+  from 4.2 s (2.8 s system, 355,000 minor faults, 6.7 GB allocated) to 1.1 to
+  1.7 s (0.8 s system, 15,000 faults, 2.0 GB), `merge-subtitle` from 3.8 s
+  (2.5 s system, 291,000 faults, 7.1 GB) to 1.3 to 1.8 s (0.7 s system, 16,000
+  to 26,000 faults, 2.0 GB). The other operations that write clusters
+  block by block take the same path: `to-webm`, `split`, `join`, `mux`,
+  `merge-ass` and the edits that rewrite the file (`RemoveTrack`, `AddTrack`,
+  `EditMetadata`).
 - **`split` reads its source once.** Every part opened the source again and
   read it from the top up to its own start, so the reads grew with the square
   of the part count: 13 parts of a 1.73 GiB file read 12.66 GiB. A part now

@@ -627,11 +627,18 @@ func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mk
 
 // WriteClusterOffsets is WriteCluster that also returns each block's offset inside the cluster's data (what a CueRelativePosition records).
 func WriteClusterOffsets(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mkv.Block) ([]int64, error) {
+	var e ew
+	return writeClusterOffsets(w, &e, clusterTS, timecodeScale, blocks)
+}
+
+// writeClusterOffsets is WriteClusterOffsets assembling the cluster in e, which it resets first.
+func writeClusterOffsets(w io.Writer, e *ew, clusterTS int64, timecodeScale int64, blocks []mkv.Block) ([]int64, error) {
 	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
 		timecodeScale = 1000000
 	}
 	rawTS := uint64(clusterTS * 1000000 / timecodeScale)
-	var e ew
+	e.Reset()
+	e.err = nil
 	e.uint(mkv.IDTimestamp, rawTS)
 	offsets := make([]int64, len(blocks))
 	// lastTC is each track's previous block in this cluster, for the
