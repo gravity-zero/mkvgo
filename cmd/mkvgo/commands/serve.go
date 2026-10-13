@@ -156,11 +156,12 @@ func serveModeLabel(direct bool) string {
 func runServer(srv *http.Server) {
 	fmt.Println("press Ctrl-C to stop")
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt) // before serving, so a Ctrl-C sent once a request is answered reaches this server
+	defer signal.Stop(sigCh)
+
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
 
 	select {
 	case err := <-errCh:

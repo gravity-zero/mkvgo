@@ -28,6 +28,10 @@ All notable changes to mkvgo are documented here. The format is based on
   they now return the context's error first, built or cached. In WebAssembly a
   `segment()` given an aborted `AbortSignal` rejects again (broken since
   0.44.0).
+- **`mkvgo serve` always shuts down cleanly on Ctrl-C.** It started listening
+  before registering for the interrupt, so a Ctrl-C landing in between killed
+  the process without the graceful shutdown; the interrupt is now registered
+  first. Same for the growing-file server.
 
 ## [0.47.0] - 2026-10-12
 
