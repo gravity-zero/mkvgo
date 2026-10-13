@@ -62,6 +62,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The documented artifact sizes are the real ones.** The README stated a
+  binary of about 8 MB and release binaries of ~2.3 MB (the figure of the
+  first commit), and the README and `docs/wasm.md` a WebAssembly module of
+  ~6 MB, ~1.6 MB gzipped. Measured with the Makefile's flags: 10.6 MB for the
+  linux/amd64 binary, 9.0 MB for the module, 2.4 MB gzipped. `make
+  preflight` now runs `scripts/sizes.sh`, which builds both and fails when a
+  stated size is more than 15% off.
 - **An in-memory output grows like `append`.** A file written through
   `MemFS` (the WebAssembly build writes every output there) was reallocated
   and copied whole on each write that extended it, so writing an output cost

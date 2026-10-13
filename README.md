@@ -10,8 +10,8 @@
 Matroska/WebM/MP4, then package them for HLS **and** DASH - all in-process, with
 no external tools, no cgo and zero dependencies.
 
-One static binary (about 8 MB, or an imported Go library, or a WebAssembly
-module of about 6 MB that gzips to about 1.6 MB) that inspects media, converts between
+One static binary (about 11 MB, or an imported Go library, or a WebAssembly
+module of about 9 MB that gzips to about 2.4 MB) that inspects media, converts between
 containers without re-encoding, and turns a file into a ready-to-stream CMAF
 presentation. It never transcodes: every operation copies the compressed
 samples verbatim.
@@ -324,7 +324,7 @@ make fuzz           # run the parser fuzzers locally
 make release        # cross-compile all platforms → dist/
 ```
 
-`make release` produces stripped ~2.3 MB binaries for Linux (amd64/arm64),
+`make release` produces stripped ~11 MB binaries for Linux (amd64/arm64),
 Windows (amd64) and macOS (amd64/arm64). Version is injected via
 `-ldflags="-X main.version=…"`.
 

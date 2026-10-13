@@ -2,7 +2,7 @@
 
 mkvgo compiles to WebAssembly - the whole probe/remux/HLS engine runs
 client-side, in browsers, web workers and Node. Zero dependencies carries over:
-the artifact is **~6 MB raw, ~1.6 MB gzipped**, and nothing ever leaves the
+the artifact is **~9 MB raw, ~2.4 MB gzipped**, and nothing ever leaves the
 user's machine.
 
 What it enables:

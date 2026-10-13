@@ -75,6 +75,7 @@ preflight:
 	  CGO_ENABLED=0 "$$lint" run ./... || exit 1
 	@echo "== tests =="; CGO_ENABLED=0 go test ./...
 	@echo "== tests (386, 32-bit int) =="; GOARCH=386 CGO_ENABLED=0 go test ./...
+	@echo "== doc sizes =="; sh scripts/sizes.sh
 	@echo "preflight OK - cross-platform compile + tests pass locally; confirm the real matrix with 'make ci-status' after pushing"
 
 # ci-status: report the real GitHub Actions matrix result (all OSes) for the
