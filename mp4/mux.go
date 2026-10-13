@@ -101,6 +101,9 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, blockPts, dur i
 	if t.hasher != nil {
 		_, _ = t.hasher.Write(data) // hash.Hash.Write never errors
 	}
+	if t.pending == nil {
+		t.pending = make([]byte, 0, chunkByteThreshold+len(data)) // a chunk flushes past the threshold
+	}
 	t.pending = append(t.pending, data...)
 	t.pendingCnt++
 	if len(t.pending) >= chunkByteThreshold || t.pendingCnt >= chunkSampleThreshold {
@@ -527,6 +530,18 @@ func writeFastStartViaTemp(ctx context.Context, dst mkv.WriteSeekCloser, dstPath
 // the mdat-relative offset), and fills each track's sample table. It returns the
 // total payload length and errors if no track produced any sample.
 func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTrack, routing map[uint64]*outTrack, cw *countWriter) (int64, error) {
+	// emitSample copies each sample into its chunk at once, so one buffer serves every block of a
+	// track whose sample entry is built (text cues and a first-frame config may hold on to theirs).
+	var blockBuf []byte
+	br.SetBlockBuffer(func(track uint64, size int) []byte {
+		if t := routing[track]; t == nil || t.spec.text || t.sampleEntry == nil {
+			return nil
+		}
+		if cap(blockBuf) < size {
+			blockBuf = make([]byte, size)
+		}
+		return blockBuf[:size]
+	})
 	for {
 		if err := ctx.Err(); err != nil {
 			return 0, err

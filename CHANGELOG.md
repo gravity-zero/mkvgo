@@ -20,6 +20,15 @@ All notable changes to mkvgo are documented here. The format is based on
   block by block take the same path: `to-webm`, `split`, `join`, `mux`,
   `merge-ass` and the edits that rewrite the file (`RemoveTrack`, `AddTrack`,
   `EditMetadata`).
+- **`to-mp4` reads its samples into one buffer.** Each block was read into
+  a buffer of its own, then copied into its track's chunk at once: the whole
+  source allocated again on every pass (two for `--faststart`), and a chunk
+  buffer that regrew from nothing on each pass. The walk now reuses one
+  buffer for the blocks of a track whose sample entry is built, and the
+  chunk buffer is allocated once at its flush size. On a 1.8 GiB file with
+  `--faststart` (warm cache): 63,000 to 102,000 minor faults down to 5,000 to
+  6,000, 0.4 s user down to 0.1 s, 1.1 to 1.3 s system down to 0.8 to 0.9 s;
+  the output is byte-identical.
 - **`split` reads its source once.** Every part opened the source again and
   read it from the top up to its own start, so the reads grew with the square
   of the part count: 13 parts of a 1.73 GiB file read 12.66 GiB. A part now
