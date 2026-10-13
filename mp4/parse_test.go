@@ -370,6 +370,9 @@ func TestTkhdRotation(t *testing.T) {
 		{"90° CW", 0, one, 90},
 		{"180°", neg, 0, 180},
 		{"270° CW", 0, neg, 270},
+		// The matrix an encoder writes for a 90° counterclockwise display rotation
+		// (side data 90): Rotation counts clockwise, so it reads 270.
+		{"90° CCW side data", 0, neg, 270},
 	} {
 		if got := tkhdRotation(buildTkhd(tt.a, tt.b)); got != tt.want {
 			t.Errorf("%s: rotation = %d, want %d", tt.name, got, tt.want)

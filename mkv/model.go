@@ -234,9 +234,10 @@ type Track struct {
 	// frame i plays at blockTS + i*DefaultDuration). 0 when absent.
 	DefaultDurationNs int64   `json:"default_duration_ns,omitempty"`
 	VideoBitDepth     *uint16 `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
-	// Rotation is the clockwise display rotation in degrees (0/90/180/270) from the
-	// MP4 tkhd display matrix; 0 when none/unknown. Phone videos commonly encode 90
-	// or 270 (portrait). probers expose the same matrix as Display Matrix side data.
+	// Rotation is how many degrees CLOCKWISE (0/90/180/270) the decoded picture
+	// turns to display upright, from the MP4 tkhd display matrix; 0 when none,
+	// unknown or Matroska. Display Matrix side data states the same matrix
+	// counterclockwise: -Rotation folded into [-180, 180) (270 -> 90, 90 -> -90).
 	Rotation int `json:"rotation,omitempty"`
 	// Display dimensions for anamorphic video, nil when pixels are square. Their
 	// ratio is the display aspect: literal pixels from the Matroska

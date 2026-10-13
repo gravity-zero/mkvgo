@@ -62,6 +62,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`Track.Rotation` says which way it turns.** It counts degrees clockwise
+  (a file made with a 90-degree counterclockwise display rotation reads
+  270), where the Display Matrix side data it was documented against counts
+  counterclockwise (90). The value is unchanged; the godoc, `docs/library.md`
+  and `docs/cli.md` now state the clockwise convention, the conversion
+  (`-Rotation` folded into [-180, 180)) and that Matroska rotation is not
+  read.
 - **The documented artifact sizes are the real ones.** The README stated a
   binary of about 8 MB and release binaries of ~2.3 MB (the figure of the
   first commit), and the README and `docs/wasm.md` a WebAssembly module of

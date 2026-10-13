@@ -1285,7 +1285,7 @@ Each `Track` carries the stream metadata probers report, read head-only from the
 | `Bitrate` | `bit_rate` | MP4 `btrt` / esds `avgBitrate` |
 | `Width`, `Height` | `width`, `height` | sample entry / `PixelWidth` |
 | `DisplayAspectRatio()`, `SampleAspectRatio()` | `display_aspect_ratio`, `sample_aspect_ratio` | MP4 `pasp` / Matroska `DisplayWidth` / H.264-HEVC VUI `aspect_ratio_info` (bounded rational reduction, prober-conventional) |
-| `Rotation` | Display Matrix side data | MP4 `tkhd` matrix (0/90/180/270) |
+| `Rotation` | Display Matrix side data, which counts counterclockwise: `-Rotation` folded into [-180, 180) (`Rotation` 270 is side data 90, 90 is -90, 180 is -180) | MP4 `tkhd` matrix: the degrees **clockwise** (0/90/180/270) the decoded picture turns to display upright; not read from Matroska (0) |
 | `FrameRate` | `r_frame_rate` | MP4 `stts` (timescale ÷ first delta) / Matroska `DefaultDuration` |
 | `AvgFrameRate()` | `avg_frame_rate` | frame count ÷ duration (MP4 video; 0 for Matroska) |
 | `FrameCount` | `nb_frames` | MP4 `stsz` count (0 for Matroska) |
