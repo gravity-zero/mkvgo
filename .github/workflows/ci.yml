@@ -31,6 +31,15 @@ jobs:
         shell: bash
         run: GOOS=js GOARCH=wasm go build ./cmd/mkvgo-wasm/
 
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22.12.0'
+
+      - name: Smoke (WebAssembly, Node)
+        if: runner.os == 'Linux'
+        run: make wasm-smoke
+
       - name: Build (32-bit)
         shell: bash
         run: GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...
