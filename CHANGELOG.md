@@ -4,7 +4,7 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.48.0] - 2026-10-13
 
 ### Changed
 
@@ -13,12 +13,21 @@ All notable changes to mkvgo are documented here. The format is based on
   and reads none of them; a WebVTT segment reads the cues of its own window
   the first time it is requested, then keeps them. A sample too short to hold
   text (tx3g of 2 bytes or less, wvtt of 16 or less) is skipped unread. On a
-  2160p episode with two French tracks the plan went from 1,740 scattered
-  reads to 10; the playlists, the master, the DASH manifest and every WebVTT
-  resource are byte-identical. **Behaviour change:** a subtitle sample that
+  2160p episode with two French tracks the plan went from 1,746 reads to 10;
+  the playlists, the master, the DASH manifest and every WebVTT resource are
+  byte-identical. **Behaviour change:** a subtitle sample that
   cannot be read no longer fails `PlanHLS`; the error comes back from the
   request for that subtitle resource (`Resource`, `Subtitle`, a windowed
   `subN_NNNNN.vtt`), and the video and audio keep serving.
+
+### Fixed
+
+- **A segment request whose context is already cancelled fails.** `Segment`
+  and `Resource` on a plan returned the segment anyway, because the window
+  build runs detached from the requester and noticed the cancellation too late;
+  they now return the context's error first, built or cached. In WebAssembly a
+  `segment()` given an aborted `AbortSignal` rejects again (broken since
+  0.44.0).
 
 ## [0.47.0] - 2026-10-12
 
