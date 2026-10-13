@@ -20,6 +20,13 @@ All notable changes to mkvgo are documented here. The format is based on
   mainstream decoder used for the measurement ignores it on fragmented Opus,
   so its reading of the HLS output stays 6.5 ms late. `make e2e` checks the
   flash and the beep for AAC and Opus in both directions, within 1 ms.
+- **A remote `probe` of a Matroska file without Cues reads the head only.**
+  `probe` asked for the complete keyframe index, which on a file without Cues
+  is a walk of every Cluster: over HTTP or S3 that downloaded the whole file
+  (measured on a 151.6 MB file: 15 requests, 152.1 MB transferred). A remote
+  Matroska `probe` now takes its keyframes from the Cues alone and reports
+  none without them: 1 request, 512 KiB. A local `probe` and `keyframes` (on
+  a local or remote file) are unchanged.
 
 ## [0.48.1] - 2026-10-13
 

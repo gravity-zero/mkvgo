@@ -27,8 +27,10 @@ is fully head-only) and as the **source** of `to-mp4`, `from-mp4` and
 kilobytes whatever the file size; a remux reads sequentially (a streamed
 download). The server must honour `Range` (S3, nginx, caddy… do); one that
 ignores it gets an explicit error, never a silent full download. Remote
-Matroska metadata is head-only (Info/Tracks/keyframes) -- chapters,
-attachments and tags need the local file.
+Matroska metadata is head-only (Info/Tracks, keyframes from the Cues: `probe`
+of a file without Cues reports no keyframes rather than read every Cluster,
+which over a remote source is a full download; `keyframes` still builds that
+index on request) -- chapters, attachments and tags need the local file.
 
 `s3://` sources are signed with AWS Signature Version 4 (stdlib
 `crypto/hmac`/`crypto/sha256` only, no SDK). Credentials, region and endpoint
