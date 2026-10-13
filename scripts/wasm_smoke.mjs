@@ -46,6 +46,18 @@ const probeBlob = await MkvGo.probe(new Blob([mkvBytes]))
 check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.length,
   'probe(Blob) matches probe(Uint8Array)')
 
+// --- probe metadata parity with the CLI -json: chapters, tags, attachment list ---
+{
+  const metaBytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/meta.mkv')))
+  for (const [label, input] of [['Uint8Array', metaBytes], ['Blob', new Blob([metaBytes])]]) {
+    const p = await MkvGo.probe(input)
+    const a = p.attachments?.[0]
+    check(p.chapters?.length === 2 && p.tags?.length > 0 && p.attachments?.length === 1 &&
+      a.name === 'notes.txt' && a.mime_type === 'text/plain' && a.size === 25,
+      `probe(${label}) chapters/tags/attachments (${p.chapters?.length}/${p.tags?.length}/${p.attachments?.length})`)
+  }
+}
+
 // --- probe (MP4/QuickTime) ---
 const movBytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/quicktime.mov')))
 const probeMov = await MkvGo.probe(movBytes)

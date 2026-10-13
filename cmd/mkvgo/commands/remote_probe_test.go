@@ -3,8 +3,11 @@ package commands_test
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -71,6 +74,42 @@ func TestRemoteProbeCuelessReadsHeadOnly(t *testing.T) {
 	}
 	if n := served.Load(); n >= 2<<20 {
 		t.Errorf("remote probe read %d bytes of a %d-byte file without Cues, want < 2 MiB", n, len(file))
+	}
+}
+
+// TestRemoteProbeMetadataParity: a remote probe reports the chapters, tags and
+// attachment list a local one does, without loading the attachment payloads.
+func TestRemoteProbeMetadataParity(t *testing.T) {
+	file, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "testdata", "meta.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "meta.mkv", time.Time{}, bytes.NewReader(file))
+	}))
+	defer srv.Close()
+
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	out := capture(t, func() { commands.CmdProbe(srv.URL + "/meta.mkv") })
+	var got struct {
+		Chapters    []json.RawMessage `json:"chapters"`
+		Tags        []json.RawMessage `json:"tags"`
+		Attachments []struct {
+			Name     string `json:"name"`
+			MIMEType string `json:"mime_type"`
+			Size     int64  `json:"size"`
+		} `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("probe -json: %v\n%s", err, out)
+	}
+	if len(got.Chapters) != 2 || len(got.Tags) == 0 || len(got.Attachments) != 1 {
+		t.Fatalf("remote probe: %d chapters, %d tags, %d attachments, want 2, >0, 1",
+			len(got.Chapters), len(got.Tags), len(got.Attachments))
+	}
+	if a := got.Attachments[0]; a.Name != "notes.txt" || a.MIMEType != "text/plain" || a.Size != 25 {
+		t.Errorf("attachment = %+v, want notes.txt text/plain 25 bytes", a)
 	}
 }
 

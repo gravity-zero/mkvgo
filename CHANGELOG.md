@@ -27,6 +27,17 @@ All notable changes to mkvgo are documented here. The format is based on
   Matroska `probe` now takes its keyframes from the Cues alone and reports
   none without them: 1 request, 512 KiB. A local `probe` and `keyframes` (on
   a local or remote file) are unchanged.
+- **A WebAssembly or remote probe reports chapters, tags and attachments.**
+  `MkvGo.probe` promised the shape of the CLI `-json` output but read Info and
+  Tracks only: a file with 13 chapters, 3 tags and a 760 KB font came back
+  with none of them. The remote CLI (`probe`, `chapters`, `tags`, `attachments`
+  on an `http(s)://` or `s3://` Matroska file) said they needed the local file.
+  Both now read them head-only through the SeekHead or the bounded tail read,
+  with the attachment list (name, MIME type, size) and not its payloads: the
+  remote probe of that file reads 1 MiB in 3 requests, the font left on the
+  server. `docs/library.md` gives the same read for a library scan: on that
+  file it allocates 13 KB in 16 µs where `Open`, which reads every attachment
+  payload, allocates 825 KB in 160 µs.
 
 ## [0.48.1] - 2026-10-13
 

@@ -21,16 +21,16 @@ they can gate scripts (`mkvgo validate f.mkv && ...`).
 
 **Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
 is accepted as the input by the inspection commands (`info`, `tracks`,
-`probe`, `keyframes`, `analyze` -- and `chapters`/`tags`/`attachments` on MP4, whose probe
-is fully head-only) and as the **source** of `to-mp4`, `from-mp4` and
-`to-hls`. Reads go through ranged requests: inspection transfers a few ranged
+`probe`, `keyframes`, `analyze`, `chapters`, `tags`, `attachments`) and as
+the **source** of `to-mp4`, `from-mp4` and `to-hls`. Reads go through ranged requests: inspection transfers a few ranged
 kilobytes whatever the file size; a remux reads sequentially (a streamed
 download). The server must honour `Range` (S3, nginx, caddy… do); one that
 ignores it gets an explicit error, never a silent full download. Remote
-Matroska metadata is head-only (Info/Tracks, keyframes from the Cues: `probe`
-of a file without Cues reports no keyframes rather than read every Cluster,
-which over a remote source is a full download; `keyframes` still builds that
-index on request) -- chapters, attachments and tags need the local file.
+Matroska metadata is head-only: Info, Tracks, chapters, tags and the
+attachment list (name, MIME type, size - the payloads are not transferred),
+with keyframes from the Cues (`probe` of a file without Cues reports no
+keyframes rather than read every Cluster, which over a remote source is a full
+download; `keyframes` still builds that index on request).
 
 `s3://` sources are signed with AWS Signature Version 4 (stdlib
 `crypto/hmac`/`crypto/sha256` only, no SDK). Credentials, region and endpoint

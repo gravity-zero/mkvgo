@@ -186,7 +186,7 @@ func s3Hybrid() *mkv.FS {
 
 func OpenMKV(path string) *matroska.Container {
 	if isRemoteURL(path) {
-		Fatal("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes - and chapters/tags on MP4)")
+		Fatal("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes, chapters, tags, attachments)")
 	}
 	c, err := matroska.Open(context.Background(), path)
 	if err != nil {
@@ -310,10 +310,10 @@ func sourceFS(src string) *mkv.FS {
 // loadRemote reads a remote file's metadata over ranged reads - the head-only
 // probe, so only a few ranged kilobytes are transferred whatever the file
 // size. The MP4 probe is fully head-only (chapters/tags included); a remote
-// Matroska read is metadata-only (Info/Tracks, keyframes from the Cues alone:
-// without Cues the index is a walk of every Cluster, a full download -
-// chapters, attachments and tags live in a full read, which stays local). url
-// may be an http(s):// or an s3://bucket/key reference.
+// Matroska read takes Info, Tracks, chapters, tags and the attachment list (no
+// payload), and its keyframes from the Cues alone: without Cues the index is a
+// walk of every Cluster, a full download. url may be an http(s):// or an
+// s3://bucket/key reference.
 func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
 	fs := remotePort(url)
 	if isMP4Path(url) {
@@ -324,11 +324,13 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 		}
 		return c, dropped
 	}
-	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, inBandReadOptions()...)
+	ro := append(inBandReadOptions(), matroska.WithChapters(), matroska.WithTags(),
+		matroska.WithAttachments(), matroska.WithoutAttachmentData())
+	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, ro...)
 	if err != nil {
 		Fatal(err.Error())
 	}
-	fmt.Fprintln(os.Stderr, "note: remote Matroska reads are metadata-only (info/tracks, keyframes from the Cues); chapters, attachments and tags need the local file")
+	fmt.Fprintln(os.Stderr, "note: remote Matroska reads are metadata-only (keyframes from the Cues, attachment payloads stay remote)")
 	return c, nil
 }
 

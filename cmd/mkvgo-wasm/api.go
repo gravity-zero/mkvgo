@@ -242,7 +242,9 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 	res := probeResult{Format: format}
 	switch format {
 	case "mkv":
-		var ro []matroska.ReadOption
+		// Chapters, tags and the attachment list (no payload) complete the CLI -json shape.
+		ro := []matroska.ReadOption{matroska.WithChapters(), matroska.WithTags(),
+			matroska.WithAttachments(), matroska.WithoutAttachmentData()}
 		if opts.keyframes {
 			ro = append(ro, matroska.WithKeyframeIndex())
 		}
