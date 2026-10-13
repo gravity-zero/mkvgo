@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"math"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -86,6 +87,74 @@ type streamOpts struct {
 	// rebase against the same instant - has to be told.
 	bounds   *streamBounds
 	progress mkv.ProgressFunc
+	// walk, when non-nil, carries the source walk across consecutive calls (Split's parts).
+	walk *sourceWalk
+}
+
+// sourceWalk carries one source walk across consecutive keyframe-aligned calls:
+// a call whose range starts at or after the previous call's end opens on the
+// block that call stopped at, the first cut keyframe at or after its end, which
+// is where a walk from the top would open the gate too.
+type sourceWalk struct {
+	f      mkv.ReadSeekCloser
+	br     *reader.BlockReader
+	carry  *mkv.Block // the block the previous call stopped on, if it stopped before EOF
+	stopMs int64      // the end that call was cut on
+	maxMs  int64      // the latest timecode read before carry: every such block is no cut keyframe
+}
+
+// walkReader is a BlockReader that may outlive the call that opened it.
+type walkReader struct {
+	*reader.BlockReader
+	f mkv.ReadSeekCloser
+}
+
+func (r walkReader) Close() error { return r.f.Close() }
+
+// reader returns the walk for a range starting at startMs, and the block to
+// deliver before the reader's next one.
+func (w *sourceWalk) reader(fs *mkv.FS, srcPath string, scale, startMs int64, progress mkv.ProgressFunc) (walkReader, *mkv.Block, error) {
+	if w != nil && w.carry != nil && startMs >= w.stopMs {
+		first := w.carry
+		w.carry = nil
+		return walkReader{w.br, w.f}, first, nil
+	}
+	f, err := fs.DoOpen(srcPath)
+	if err != nil {
+		return walkReader{}, nil, err
+	}
+	br, err := reader.NewBlockReader(f, scale)
+	if err != nil {
+		f.Close()
+		return walkReader{}, nil, err
+	}
+	if progress != nil {
+		if stat, _ := fs.DoStat(srcPath); stat != nil {
+			br.SetProgress(progress, stat.Size())
+		}
+	}
+	if w != nil {
+		w.Close()
+		w.f, w.br = f, br
+	}
+	return walkReader{br, f}, nil, nil
+}
+
+// stopped records the block a call cut its range on, for the next call to open on.
+func (w *sourceWalk) stopped(blk mkv.Block, endMs, maxMs int64) {
+	if w != nil {
+		w.carry, w.stopMs, w.maxMs = &blk, endMs, maxMs
+	}
+}
+
+// Close releases the source.
+func (w *sourceWalk) Close() error {
+	if w == nil || w.f == nil {
+		return nil
+	}
+	err := w.f.Close()
+	w.f, w.br, w.carry = nil, nil, nil
+	return err
 }
 
 // streamBounds reports where a segment's own timeline starts in its source, and
@@ -127,28 +196,24 @@ type trackEndState struct {
 }
 
 func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, timecodeScale int64, fs *mkv.FS, opts streamOpts) error {
-	f, err := fs.DoOpen(srcPath)
+	br, carry, err := opts.walk.reader(fs, srcPath, timecodeScale, opts.timeStart, opts.progress)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	br, err := reader.NewBlockReader(f, timecodeScale)
-	if err != nil {
-		return err
-	}
-
-	if opts.progress != nil {
-		stat, _ := fs.DoStat(srcPath)
-		if stat != nil {
-			br.SetProgress(opts.progress, stat.Size())
-		}
+	if opts.walk == nil {
+		defer br.Close()
 	}
 
 	var cluster []mkv.Block
 	clusterTS := int64(-1)
 	subIdx := 0
 	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
+	maxMs := int64(math.MinInt64)
+	if carry != nil {
+		// A walk from the top would have dropped the blocks read before carry at the gate.
+		maxMs = opts.walk.maxMs
+		gateSkipped = opts.timeStart > 0 && maxMs >= opts.timeStart
+	}
 	endStates := map[uint64]*trackEndState{}
 
 	// The output's timebase decides how long a cluster may run: block offsets
@@ -273,7 +338,13 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		blk, err := br.Next()
+		var blk mkv.Block
+		prevMax := maxMs
+		if carry != nil {
+			blk, carry = *carry, nil
+		} else if blk, err = br.Next(); err == nil && blk.Timecode > maxMs {
+			maxMs = blk.Timecode
+		}
 		if err == io.EOF {
 			if clusterTS < 0 && gateSkipped {
 				return noCutKeyframeErr(opts.timeStart)
@@ -310,6 +381,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			}
 			if !opts.keyframeAlign || cutKeyframe {
 				cutEnd = blk.Timecode
+				opts.walk.stopped(blk, opts.timeEnd, prevMax)
 				break
 			}
 			// keyframeAlign: the cut lands on the next cut keyframe at/after

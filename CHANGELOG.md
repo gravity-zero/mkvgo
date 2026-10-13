@@ -6,6 +6,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **`split` reads its source once.** Every part opened the source again and
+  read it from the top up to its own start, so the reads grew with the square
+  of the part count: 13 parts of a 1.73 GiB file read 12.66 GiB. A part now
+  continues the walk on the block the previous part stopped on, which is the
+  keyframe a walk from the top would open on: the same split reads 1.79 GiB,
+  and its 13 parts are byte-identical to before. Ranges that go back in time
+  (an explicit `-range` list out of order) still read from the top.
+
 ### Fixed
 
 - **An Opus track keeps its sync across MKV <-> MP4.** Opus-in-ISOBMFF makes

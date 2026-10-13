@@ -743,6 +743,11 @@ chaining segments loses no frame). A range that contains media but no video
 keyframe is an explicit error. Audio-only files cut exactly at the requested
 times.
 
+The source is read once from start to end: each part continues the walk where
+the previous one stopped, as long as the ranges come in order (`-every` and
+`-chapters` always do; a `-range` that goes back reads the source again from
+the top).
+
 A segment's timeline starts at the first frame it actually keeps, not at the
 time it was asked for: those differ by however far the source's next keyframe
 was, and counting from the requested time would open the segment on a hole of

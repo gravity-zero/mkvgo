@@ -62,6 +62,8 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 
 	var outputs []string
 	used := map[string]bool{}
+	walk := &sourceWalk{}
+	defer walk.Close()
 	for i, r := range ranges {
 		if ctx.Err() != nil {
 			return outputs, ctx.Err()
@@ -91,7 +93,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 			durationMs = c.DurationMs - r.StartMs
 		}
 
-		if err := splitRange(ctx, c, outPath, r, remap, durationMs, chapterWindowEnd(ranges, i), linkAt(uids, i, &c.Info), fs, mkv.ProgressFrom(extra)); err != nil {
+		if err := splitRange(ctx, c, outPath, r, remap, durationMs, chapterWindowEnd(ranges, i), linkAt(uids, i, &c.Info), fs, walk, mkv.ProgressFrom(extra)); err != nil {
 			return outputs, fmt.Errorf("part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, outPath)
@@ -269,7 +271,7 @@ func chapterWindowEnd(ranges []mkv.TimeRange, i int) int64 {
 	return ranges[i+1].EndMs
 }
 
-func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs, windowEndMs int64, link segmentLink, fs *mkv.FS, progress mkv.ProgressFunc) (err error) {
+func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs, windowEndMs int64, link segmentLink, fs *mkv.FS, walk *sourceWalk, progress mkv.ProgressFunc) (err error) {
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
 		return err
@@ -339,6 +341,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 		trackEnds: trackEnds,
 		bounds:    &bounds,
 		progress:  progress,
+		walk:      walk,
 	}); err != nil {
 		return err
 	}
