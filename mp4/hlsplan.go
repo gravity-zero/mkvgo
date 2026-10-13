@@ -213,6 +213,9 @@ type planTrack struct {
 // so a source replaced meanwhile fails a read rather than mix in, and the
 // planning's readers share what they fetch (mkv.ShareReads).
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	fs := o.FS
 	share := &mkv.ReadShare{}
@@ -242,6 +245,9 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return p, err
 	}
 	if err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, cerr
+		}
 		if after, _ := sourceSig(fs, srcPath); after != before {
 			return nil, fmt.Errorf("%w (while planning: %v)", ErrSourceChanged, err)
 		}
@@ -3247,7 +3253,7 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 // sniffMP4ForPlan opens srcPath as an MP4 packaging source when it is one,
 // nil when it is Matroska (the caller then takes the Cues path).
 func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagingSource, error) {
-	f, err := fs.DoOpen(srcPath)
+	f, err := fs.DoOpenContext(ctx, srcPath)
 	if err != nil {
 		return nil, err
 	}
@@ -3271,12 +3277,35 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 	}
 	// sampleFull builds the sample table from the moof fragments for a
 	// fragmented/CMAF source, so the packager reads it like a progressive file.
-	mv, err := parseMP4(f, st.Size(), sampleFull)
+	mv, err := parseMP4(ctxReadSeeker{f, ctx}, st.Size(), sampleFull)
+	if cerr := ctx.Err(); cerr != nil {
+		f.Close()
+		return nil, cerr
+	}
 	if err != nil {
 		f.Close()
 		return nil, err
 	}
 	return newPackagingSource(f, mv, st.Size()), nil
+}
+
+// ctxReadMax caps one Read of ctxReadSeeker, so a large moov is read in pieces with a check before each.
+const ctxReadMax = 1 << 20
+
+// ctxReadSeeker fails every Read once ctx is done, so a walk that reads each fragment stops within one read.
+type ctxReadSeeker struct {
+	io.ReadSeeker
+	ctx context.Context
+}
+
+func (r ctxReadSeeker) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > ctxReadMax {
+		p = p[:ctxReadMax]
+	}
+	return r.ReadSeeker.Read(p)
 }
 
 // newPackagingSource wraps a parsed MP4 for the packager. The track description
@@ -3335,7 +3364,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	p.subScan = make([]subScanState, len(p.subs))
 	p.mp4subs = mp4SubTables(ps, p.subs)
 
-	fts, offs, err := mp4PlanSamples(ps, media)
+	fts, offs, err := mp4PlanSamples(ctx, ps, media)
 	if err != nil {
 		return nil, err
 	}
@@ -3360,6 +3389,9 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	var iframes []iframeRef
 	p.durs = make([]float64, p.segCount)
 	for k := 0; k < p.segCount; k++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		segStart := p.bounds[k]
 		var segEnd int64 = 1<<63 - 1
 		if k+1 < p.segCount {
@@ -3413,6 +3445,9 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	// from this plan later.
 	p.mp4tabs = make([]*mp4PlanTable, len(fts))
 	for i, ft := range fts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		p.mp4tabs[i] = newMP4PlanTable(ft.samples, offs[i], starts[i])
 		ft.sampleBps, ft.sampleBpsKnown = sampleBandwidth(ft.samples)
 		ft.samples = nil

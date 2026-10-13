@@ -167,12 +167,18 @@ func mp4NativeTimescale(ps *packagingSource, t *outTrack) uint32 {
 	return tk.timescale
 }
 
+// planCtxEvery is how many samples a plan loop handles between two checks of its context.
+const planCtxEvery = 4096
+
 // mp4PlanTracks builds the on-demand plan state for an MP4 source: each
 // track's fragment samples fully timed from the sample table (head-only) plus
 // the parallel file offsets Segment reads through. Returns the fragTracks in
 // planTracks order and the per-track sample offsets.
-func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, offsets [][]int64, err error) {
+func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack) (fts []*fragTrack, offsets [][]int64, err error) {
 	for _, t := range media {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		ti := int(t.mkv.ID) - 1
 		if ti < 0 || ti >= len(ps.mv.tracks) {
 			return nil, nil, errf("track %d out of range", t.mkv.ID)
@@ -186,6 +192,11 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 		offs := make([]int64, len(samples))
 		ft.samples = make([]fragSample, len(samples))
 		for i := range samples {
+			if i%planCtxEvery == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, nil, err
+				}
+			}
 			ft.samples[i] = fragSample{size: samples[i].size, ptsMs: samples[i].ctsMs,
 				blockPtsMs: samples[i].ctsMs, sync: samples[i].sync}
 			offs[i] = samples[i].offset
@@ -216,6 +227,9 @@ func mp4PlanSamples(ps *packagingSource, media []*outTrack) (fts []*fragTrack, o
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
 		}
 		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid)
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
 		ft.durMovieMs = totalTS

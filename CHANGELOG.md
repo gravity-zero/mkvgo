@@ -4,6 +4,25 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`PlanHLS` on an MP4 source stops when its context is cancelled.** It
+  never checked the context: a plan cancelled before the call, or while it
+  walked the file's fragments, ran to the end and returned a plan. The context
+  is now checked on entry (before the source is opened), before each read of
+  the sample-table walk (a fragmented file reads each fragment, a large moov
+  is read in pieces of 1 MiB), every 4,096 samples of the sample-table copy
+  and once per track and per segment of the plan's later steps, and its error
+  comes back as is (`context.Canceled`, not wrapped). Measured with a cancel
+  at 20 points of a plan (warm cache): a 1,814-fragment file now returns
+  within 3.4 ms of the cancel and a progressive 2160p file within 3.9 ms,
+  where both ran to the end before; a cancel after the last check still
+  returns the finished plan. Plan time is unchanged and every resource is
+  byte-identical (2,219 and 3,892 resources). A Matroska plan whose context
+  is already cancelled also returns the bare context error now.
+
 ## [0.48.0] - 2026-10-13
 
 ### Changed
