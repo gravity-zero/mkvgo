@@ -27,6 +27,30 @@ type memFile struct {
 	data []byte
 }
 
+// writeAt writes p at off, growing the file the way append does.
+func (f *memFile) writeAt(p []byte, off int64) {
+	end := off + int64(len(p))
+	f.resize(max(end, int64(len(f.data))))
+	copy(f.data[off:end], p)
+}
+
+// resize sets the file's length; bytes it adds are zero, even where a truncate left old ones in the capacity.
+func (f *memFile) resize(size int64) {
+	n := int64(len(f.data))
+	if size <= n {
+		f.data = f.data[:size]
+		return
+	}
+	if size > int64(cap(f.data)) {
+		grown := make([]byte, size, max(size, 2*int64(cap(f.data))))
+		copy(grown, f.data)
+		f.data = grown
+		return
+	}
+	f.data = f.data[:size]
+	clear(f.data[n:])
+}
+
 // memKey normalises a path to forward slashes so keys are independent of the
 // host OS separator: a caller writing filepath.Join("hls", "init.mp4") gets
 // "hls\\init.mp4" on Windows and "hls/init.mp4" elsewhere, but both must hit
@@ -150,14 +174,8 @@ type memWriter struct {
 }
 
 func (w *memWriter) Write(p []byte) (int, error) {
-	end := w.pos + int64(len(p))
-	if end > int64(len(w.f.data)) {
-		grown := make([]byte, end)
-		copy(grown, w.f.data)
-		w.f.data = grown
-	}
-	copy(w.f.data[w.pos:end], p)
-	w.pos = end
+	w.f.writeAt(p, w.pos)
+	w.pos += int64(len(p))
 	return len(p), nil
 }
 
@@ -198,14 +216,8 @@ func (rw *memRW) Read(p []byte) (int, error) {
 }
 
 func (rw *memRW) Write(p []byte) (int, error) {
-	end := rw.pos + int64(len(p))
-	if end > int64(len(rw.f.data)) {
-		grown := make([]byte, end)
-		copy(grown, rw.f.data)
-		rw.f.data = grown
-	}
-	copy(rw.f.data[rw.pos:end], p)
-	rw.pos = end
+	rw.f.writeAt(p, rw.pos)
+	rw.pos += int64(len(p))
 	return len(p), nil
 }
 
@@ -233,13 +245,7 @@ func (rw *memRW) Truncate(size int64) error {
 	if size < 0 {
 		return fmt.Errorf("memfs: negative truncate %d", size)
 	}
-	if size <= int64(len(rw.f.data)) {
-		rw.f.data = rw.f.data[:size]
-		return nil
-	}
-	grown := make([]byte, size)
-	copy(grown, rw.f.data)
-	rw.f.data = grown
+	rw.f.resize(size)
 	return nil
 }
 

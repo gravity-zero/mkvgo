@@ -3,6 +3,7 @@ package mkv
 import (
 	"io"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -118,4 +119,69 @@ func filepathHasBackslash(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestMemFSWriteGrowsAmortized: a file written piece by piece grows like append;
+// it was reallocated and copied whole on every write that extended it, which
+// made an in-memory remux quadratic in its output size.
+func TestMemFSWriteGrowsAmortized(t *testing.T) {
+	fs := NewMemFS().FS()
+	w, err := fs.Create("out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 64<<10)
+	const total = 16 << 20
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for n := 0; n < total; n += len(chunk) {
+		if _, err := w.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime.ReadMemStats(&after)
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 4*total {
+		t.Errorf("writing %d bytes allocated %d, want <= %d", total, alloc, 4*total)
+	}
+}
+
+// TestMemFSGapAfterTruncateIsZero: bytes a truncate dropped never come back
+// when the file is extended past them again.
+func TestMemFSGapAfterTruncateIsZero(t *testing.T) {
+	fs := NewMemFS().FS()
+	rw, err := fs.OpenFile("f", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rw.Write([]byte("abcdefgh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := rw.(interface{ Truncate(int64) error }).Truncate(2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rw.Seek(6, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rw.Write([]byte("XY")); err != nil {
+		t.Fatal(err)
+	}
+	w, _ := fs.Create("g")
+	if _, err := w.Write([]byte("0123")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Seek(6, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("Z")); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := fs.Open("f")
+	got, _ := io.ReadAll(r)
+	if string(got) != "ab\x00\x00\x00\x00XY" {
+		t.Errorf("after truncate and extend: %q, want %q", got, "ab\x00\x00\x00\x00XY")
+	}
+	r, _ = fs.Open("g")
+	if got, _ = io.ReadAll(r); string(got) != "0123\x00\x00Z" {
+		t.Errorf("write past the end: %q, want %q", got, "0123\x00\x00Z")
+	}
 }

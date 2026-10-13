@@ -39,6 +39,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An in-memory output grows like `append`.** A file written through
+  `MemFS` (the WebAssembly build writes every output there) was reallocated
+  and copied whole on each write that extended it, so writing an output cost
+  time and memory in the square of its size. It now doubles its capacity, and
+  a write past the end still reads back zeros between the old end and the
+  write, even after a `Truncate`. `MkvGo.remuxToMP4` with `fastStart` on a
+  143 MB MKV under Node 22: peak RSS 1,798 MB down to 950 MB, 1.5 s down to
+  0.4 to 0.6 s, the output byte-identical.
 - **An Opus track keeps its sync across MKV <-> MP4.** Opus-in-ISOBMFF makes
   the edit list (`media_time` = pre-skip) the trim of the priming samples, the
   `dOps` pre-skip being informative only, but `to-mp4` wrote no edit list for
