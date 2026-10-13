@@ -1016,7 +1016,7 @@ mkvgo to-mp4 --webvtt-native web.mkv web.mp4            # WebVTT → lossless wv
 
 ### from-mp4
 
-Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour, chapters, the movie title, the other global tags (ARTIST/ALBUM/…), per-track names and language round-trip back to Matroska (and back out to MP4 with `to-mp4`). Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (their delay is handled by the decoder from the bitstream). Accepts `--mp3-container-delay` (see `to-mp4`).
+Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour, chapters, the movie title, the other global tags (ARTIST/ALBUM/…), per-track names and language round-trip back to Matroska (and back out to MP4 with `to-mp4`). Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (the Opus pre-skip travels as the edit list <-> `CodecDelay`, like AAC; MP3's delay is handled by the decoder from the bitstream). Accepts `--mp3-container-delay` (see `to-mp4`).
 
 ```
 mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>

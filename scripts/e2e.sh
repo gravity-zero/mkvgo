@@ -149,6 +149,54 @@ echo "== QuickTime .mov (non-faststart) -> MKV -> decode"
 "$MKVGO" -f from-mp4 "$TMP/src.mov" "$TMP/mov.mkv" >/dev/null
 decode_ok "$TMP/mov.mkv"
 
+echo "== A/V sync: a white flash and a 1 kHz beep both at t=2 s survive every remux to within 1 ms"
+# ffi <args...>: ffmpeg at info level (the filters below report on stderr there).
+ffi() {
+  if [ -n "$DOCKER_CONTAINER" ]; then docker exec "$DOCKER_CONTAINER" ffmpeg -nostdin -v info "$@"
+  else ffmpeg -nostdin -v info "$@"; fi
+}
+# av_offset <file>: decoded beep start minus decoded flash time, in ms.
+av_offset() {
+  p=$(stage "$1")
+  flash=$(ffi -i "$p" -map 0:v:0 -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG" -f null - 2>&1 |
+    awk '/pts_time:/{match($0,/pts_time:[-0-9.]+/);t=substr($0,RSTART+9,RLENGTH-9)} /YAVG=/{split($0,a,"YAVG=");if(a[2]+0>128){print t;exit}}')
+  beep=$(ffi -i "$p" -map 0:a:0 -af silencedetect=n=-40dB:d=0.5 -f null - 2>&1 |
+    awk '/silence_end:/{split($0,a,"silence_end: ");split(a[2],b," ");print b[1];exit}')
+  [ -n "$flash" ] && [ -n "$beep" ] || { echo "e2e: no flash/beep found in $(basename "$1")" >&2; exit 1; }
+  awk -v f="$flash" -v b="$beep" 'BEGIN{printf "%.2f", (b-f)*1000}'
+}
+# same_sync <ref ms> <file>: the file's offset must match the reference to within 1 ms.
+same_sync() {
+  got=$(av_offset "$2")
+  awk -v r="$1" -v g="$got" 'BEGIN{d=g-r; exit !(d<=1 && d>=-1)}' ||
+    { echo "e2e: A/V sync of $(basename "$2") is $got ms, source $1 ms" >&2; exit 1; }
+  echo "  sync OK: $(basename "$2") $got ms (source $1 ms)"
+}
+for a in aac opus; do
+  enc="aac -b:a 128k"; [ $a = opus ] && enc="libopus -b:a 96k"
+  # shellcheck disable=SC2086
+  if [ -n "$DOCKER_CONTAINER" ]; then
+    ff -f lavfi -i "color=c=black:s=320x240:r=25:d=4,drawbox=enable='between(t,2,2.039)':c=white:t=fill" \
+       -f lavfi -i "aevalsrc='if(between(t,2,2.2),0.8*sin(2*PI*1000*t),0)':s=48000:d=4" \
+       -c:v libx264 -preset ultrafast -g 50 -pix_fmt yuv420p -c:a $enc -y "/tmp/mkvgo-e2e/sync_$a.mkv"
+    ff -i "/tmp/mkvgo-e2e/sync_$a.mkv" -c copy -y "/tmp/mkvgo-e2e/sync_$a.mp4"
+    unstage "sync_$a.mkv" "$TMP/sync_$a.mkv"; unstage "sync_$a.mp4" "$TMP/sync_$a.mp4"
+  else
+    ff -f lavfi -i "color=c=black:s=320x240:r=25:d=4,drawbox=enable='between(t,2,2.039)':c=white:t=fill" \
+       -f lavfi -i "aevalsrc='if(between(t,2,2.2),0.8*sin(2*PI*1000*t),0)':s=48000:d=4" \
+       -c:v libx264 -preset ultrafast -g 50 -pix_fmt yuv420p -c:a $enc -y "$TMP/sync_$a.mkv"
+    ff -i "$TMP/sync_$a.mkv" -c copy -y "$TMP/sync_$a.mp4"
+  fi
+  ref=$(av_offset "$TMP/sync_$a.mkv")
+  "$MKVGO" -f to-mp4 --faststart "$TMP/sync_$a.mkv" "$TMP/sync_$a.to.mp4" >/dev/null
+  same_sync "$ref" "$TMP/sync_$a.to.mp4"
+  "$MKVGO" -f from-mp4 "$TMP/sync_$a.to.mp4" "$TMP/sync_$a.back.mkv" >/dev/null
+  same_sync "$ref" "$TMP/sync_$a.back.mkv"
+  ref=$(av_offset "$TMP/sync_$a.mp4")
+  "$MKVGO" -f from-mp4 "$TMP/sync_$a.mp4" "$TMP/sync_$a.from.mkv" >/dev/null
+  same_sync "$ref" "$TMP/sync_$a.from.mkv"
+done
+
 echo "== codec names: one real file per encoder, mkvgo's codec_name vs the prober's"
 # A table of names is only as good as the files it was read from: every name
 # is checked here on a stream a real encoder produced and the prober decodes.

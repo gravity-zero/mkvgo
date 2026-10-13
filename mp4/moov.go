@@ -295,16 +295,16 @@ func buildMvhd(durationMs, nextTrackID uint32) []byte {
 //     edit list. mainstream demuxers only trim it when the edit list is sample-exact, which is
 //     why audio tracks are written on a sample-rate media timescale (mediaTimescale)
 //     rather than the millisecond movie timescale.
-//   - Opus, Vorbis, MP3: the delay is intrinsic to the bitstream (Opus pre-skip in
-//     the OpusHead, MP3 encoder delay in the in-band Xing/LAME header) and mainstream demuxers'
-//     decoder applies it regardless of the container. A derived edit list ADDS to
-//     that, over-trimming and desyncing the head - a native-MKV MP3 lost ~20 ms of
-//     real audio at the start before this. mainstream muxers likewise write no useful edit
-//     list when copying a native MP3/Opus to MP4.
+//   - Opus: Opus-in-ISOBMFF 4.4 makes the edit list (media_time = pre-skip) the
+//     trim; dOps PreSkip is informative only. Without it the audio plays late.
+//   - Vorbis, MP3: the delay is intrinsic to the bitstream (MP3 encoder delay in the
+//     in-band Xing/LAME header) and the decoder applies it regardless of the
+//     container; a derived edit list ADDS to that, over-trimming the head - a
+//     native-MKV MP3 lost ~20 ms of real audio at the start before this.
 //   - FLAC/DTS/PCM: no encoder priming.
 func hasContainerPriming(codec string) bool {
 	switch codec {
-	case "aac", "ac3", "eac3":
+	case "aac", "ac3", "eac3", "opus":
 		return true
 	}
 	return false

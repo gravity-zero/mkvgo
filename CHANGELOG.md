@@ -4,6 +4,23 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **An Opus track keeps its sync across MKV <-> MP4.** Opus-in-ISOBMFF makes
+  the edit list (`media_time` = pre-skip) the trim of the priming samples, the
+  `dOps` pre-skip being informative only, but `to-mp4` wrote no edit list for
+  Opus and `from-mp4` dropped one it read. The pre-skip now travels as the
+  edit list <-> Matroska `CodecDelay`, like AAC, in the progressive MP4, the
+  HLS/DASH init and the MKV read back. Measured with a flash and a beep both
+  at 2 s, decoded: `to-mp4` put the audio 6.5 ms late (now 0.02 ms, the
+  source's), and `from-mp4` on an MP4 carrying the Opus edit list 7 ms late
+  (now 0.02 ms). The fragmented init now carries the same edit list; the
+  mainstream decoder used for the measurement ignores it on fragmented Opus,
+  so its reading of the HLS output stays 6.5 ms late. `make e2e` checks the
+  flash and the beep for AAC and Opus in both directions, within 1 ms.
+
 ## [0.48.1] - 2026-10-13
 
 ### Fixed

@@ -293,20 +293,24 @@ func TestMP3ContainerDelayOptIn(t *testing.T) {
 	}
 }
 
-// TestRoundTripOpusNoDerivedCodecDelay guards the rule that only codecs whose delay
-// is container-signalled (AAC/AC-3/E-AC-3 - see hasContainerPriming) get a
-// container-derived delay. Opus carries its pre-skip in the OpusHead (and MP3 in its
-// in-band Xing/LAME header), so they must NOT acquire a second delay via an MP4 edit
-// list / Matroska CodecDelay - doing so double-counts it and shifts the decoded audio.
-func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
-	opusHead := makeOpusHead(2, 312, 48000, 0, 0, nil) // pre-skip 312 samples, in the OpusHead
+// TestRoundTripOpusPrimingEditList: Opus priming (Matroska CodecDelay = pre-skip)
+// becomes an edit list whose media_time is the pre-skip, as Opus-in-ISOBMFF 4.4
+// requires (dOps PreSkip is informative only), on the progressive MP4 and the HLS
+// init alike, and comes back as CodecDelay. Without it the audio played 6.5 ms late.
+func TestRoundTripOpusPrimingEditList(t *testing.T) {
+	const preSkip = 312
+	opusHead := makeOpusHead(2, preSkip, 48000, 0, 0, nil)
 	tracks := []mkv.Track{
-		{ID: 1, Type: mkv.AudioTrack, Codec: "opus", CodecPrivate: opusHead,
-			Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: 6_500_000}, // even with a CodecDelay set
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
+			Width: u32p(64), Height: u32p(64), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "opus", CodecPrivate: opusHead,
+			Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: 6_500_000},
 	}
 	blocks := []genBlock{
-		{track: 1, pts: 0, key: true, data: []byte{1, 2}},
-		{track: 1, pts: 20, key: true, data: []byte{3, 4}},
+		{track: 1, pts: 0, key: true, data: []byte{1}},
+		{track: 2, pts: 0, key: true, data: []byte{1, 2}},
+		{track: 2, pts: 20, key: true, data: []byte{3, 4}},
+		{track: 1, pts: 40, key: false, data: []byte{2}},
 	}
 	srcMKV := buildMKV(t, tracks, blocks)
 
@@ -314,8 +318,18 @@ func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
 	if err := RemuxToMP4(context.Background(), srcMKV, mp4Path); err != nil {
 		t.Fatalf("RemuxToMP4: %v", err)
 	}
-	if b, _ := os.ReadFile(mp4Path); bytes.Contains(b, []byte("elst")) {
-		t.Error("RemuxToMP4 must not emit an edit list for Opus (pre-skip already in dOps)")
+	data, _ := os.ReadFile(mp4Path)
+	if _, mt, _ := audioEditList(t, data); mt != preSkip {
+		t.Errorf("RemuxToMP4 Opus edit-list media_time = %d, want the pre-skip %d", mt, preSkip)
+	}
+
+	hlsDir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), srcMKV, hlsDir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatalf("RemuxToHLS: %v", err)
+	}
+	init, _ := os.ReadFile(filepath.Join(hlsDir, "init_a1.mp4"))
+	if _, mt, _ := audioEditList(t, init); mt != preSkip {
+		t.Errorf("HLS Opus init edit-list media_time = %d, want the pre-skip %d", mt, preSkip)
 	}
 
 	outMKV := filepath.Join(t.TempDir(), "out.mkv")
@@ -324,8 +338,8 @@ func TestRoundTripOpusNoDerivedCodecDelay(t *testing.T) {
 	}
 	c, _ := readMKV(t, outMKV)
 	for i := range c.Tracks {
-		if tr := c.Tracks[i]; tr.Type == mkv.AudioTrack && tr.CodecDelay != 0 {
-			t.Errorf("Opus acquired CodecDelay=%d ns on round trip; its pre-skip would be double-counted", tr.CodecDelay)
+		if tr := c.Tracks[i]; tr.Type == mkv.AudioTrack && tr.CodecDelay != 6_500_000 {
+			t.Errorf("Opus CodecDelay after the round trip = %d ns, want 6500000", tr.CodecDelay)
 		}
 	}
 }
