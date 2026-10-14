@@ -411,6 +411,9 @@ func codecFrameRate(t *mkv.Track) (float64, bool) {
 	if fps < 1 || fps > 1000 { // a timing that names no picture rate (a 90 kHz clock left in num_units_in_tick)
 		return 0, false
 	}
+	if !bc.fpsFixed && !isStandardRate(fps) { // a clock (2000 Hz reads as 1000 frames per second), not a frame rate
+		return 0, false
+	}
 	return fps, true
 }
 
@@ -446,4 +449,14 @@ func codecFrameRates(c *mkv.Container) {
 			t.EstimatedFrameRate = &fps
 		}
 	}
+}
+
+// isStandardRate tells whether fps is one of standardRates within 2e-4.
+func isStandardRate(fps float64) bool {
+	for _, s := range standardRates {
+		if std := float64(s[0]) / float64(s[1]); math.Abs(fps-std) <= 2e-4*std {
+			return true
+		}
+	}
+	return false
 }

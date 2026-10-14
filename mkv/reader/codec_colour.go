@@ -26,6 +26,7 @@ type bitstreamColour struct {
 	spsDepth   bool    // bitDepth comes from the SPS, not a configuration record header
 	fpsNum     uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
 	fpsDen     uint32
+	fpsFixed   bool    // the timing is a frame rate, not a clock that may tick faster (H.264 fixed_frame_rate_flag)
 	profile    string  // e.g. "Main 10"
 	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
@@ -502,6 +503,7 @@ func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
 	}
 	if r.bit() == 1 { // timing_info_present_flag: an H.264 frame lasts 2 ticks, an HEVC picture 1
 		units, scale := r.bits(32), r.bits(32)
+		bc.fpsFixed = hevc || r.bit() == 1 // fixed_frame_rate_flag: without it an H.264 timing may be a mere clock
 		if !r.err && units > 0 && scale > 0 {
 			bc.fpsNum, bc.fpsDen = scale, units
 			if !hevc {

@@ -265,3 +265,35 @@ func TestCodecFrameRate(t *testing.T) {
 		}
 	}
 }
+
+// TestCodecFrameRateNeedsFixedFlag: an H.264 SPS timing without
+// fixed_frame_rate_flag may be a clock (a 2000 Hz tick reads as 1000 frames
+// per second): it states a frame rate only when it names a standard one.
+func TestCodecFrameRateNeedsFixedFlag(t *testing.T) {
+	for _, c := range []struct {
+		units, scale, fixed uint32
+		want                float64
+	}{{1001, 48000, 1, 24000.0 / 1001}, {1001, 48000, 0, 24000.0 / 1001}, {1, 2000, 0, 0}, {1, 2000, 1, 1000}} {
+		b := spsPrefix()
+		b.u(0, 1) // aspect_ratio_info_present_flag
+		b.u(0, 1) // overscan_info_present_flag
+		b.u(0, 1) // video_signal_type_present_flag
+		b.u(0, 1) // chroma_loc_info_present_flag
+		b.u(1, 1) // timing_info_present_flag
+		b.u(c.units, 32)
+		b.u(c.scale, 32)
+		b.u(c.fixed, 1) // fixed_frame_rate_flag
+		b.u(0, 1)       // nal_hrd_parameters_present_flag
+		b.u(0, 1)       // vcl_hrd_parameters_present_flag
+		b.u(0, 1)       // pic_struct_present_flag
+		b.u(0, 1)       // bitstream_restriction_flag
+		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: wrapAvcC(b)}
+		got, ok := codecFrameRate(&tr)
+		if c.want == 0 && ok {
+			t.Errorf("%d/%d fixed %d: %v, want none", c.scale, c.units, c.fixed, got)
+		}
+		if c.want != 0 && (!ok || math.Abs(got-c.want) > 1e-9) {
+			t.Errorf("%d/%d fixed %d: %v %v, want %v", c.scale, c.units, c.fixed, got, ok, c.want)
+		}
+	}
+}

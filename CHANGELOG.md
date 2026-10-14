@@ -22,12 +22,17 @@ All notable changes to mkvgo are documented here. The format is based on
   DefaultDuration takes its frame rate from its CodecPrivate: the VUI timing
   of the SPS in an avcC (time_scale / 2 num_units_in_tick) or an hvcC
   (time_scale / num_units_in_tick), an MPEG-2 sequence header's
-  frame_rate_code with its extension. It costs no read and is reported as
-  `EstimatedFrameRate` (`frame_rate` with `frame_rate_estimated: true`),
-  over the statistics tags and the timestamp fit, which the track then skips.
-  Of the 394 real and test files without DefaultDuration whose local probe
-  reported no frame rate, 165 now do (101 H.264, 55 MPEG-2, 9 HEVC), each
-  equal to the prober's; the VP9 files have no rate in their header.
+  frame_rate_code with its extension. An H.264 timing without
+  fixed_frame_rate_flag counts only when it names a standard rate: it may be
+  a clock (a 2000 Hz tick would read as 1000 frames per second). It costs no
+  read and is reported as `EstimatedFrameRate` (`frame_rate` with
+  `frame_rate_estimated: true`), over the statistics tags and the timestamp
+  fit, which the track then skips. Of the 394 real and test files without
+  DefaultDuration whose local probe reported no frame rate, 165 now do (101
+  H.264, 55 MPEG-2, 9 HEVC); the VP9 files have no rate in their header. A
+  header can contradict its stream: one real H.264 file states 24000/1001
+  over timestamps at 25 and 24.42 frames per second, and reports the
+  header's rate.
 
 ### Changed
 
