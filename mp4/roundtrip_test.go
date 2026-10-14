@@ -545,3 +545,99 @@ func nextIndex(b, sep []byte, after int) int {
 	}
 	return -1
 }
+
+// TestEditListBeyondMedia: edits that present more than the media holds (a
+// muxer that wrote the same full-length edit twice) end the track with its
+// media, the empty edits aside.
+func TestEditListBeyondMedia(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: 21_000_000},
+	}
+	var blocks []genBlock
+	for ms := int64(0); ms < 10000; ms += 40 {
+		blocks = append(blocks, genBlock{track: 1, pts: ms, key: ms == 0, data: []byte{1}})
+		blocks = append(blocks, genBlock{track: 2, pts: ms, key: true, data: []byte{2}})
+	}
+	mp4Path := filepath.Join(t.TempDir(), "twice.mp4")
+	if err := RemuxToMP4(context.Background(), buildMKV(t, tracks, blocks), mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := false
+	for i := bytes.Index(b, []byte("elst")); i >= 0; i = nextIndex(b, []byte("elst"), i) {
+		if b[i+4] == 0 && binary.BigEndian.Uint32(b[i+12:]) > 9000 { // v0: the audio edit, about 10 s
+			binary.BigEndian.PutUint32(b[i+12:], 2*binary.BigEndian.Uint32(b[i+12:]))
+			patched = true
+		}
+	}
+	if !patched {
+		t.Fatal("no audio edit list to stretch")
+	}
+	if err := os.WriteFile(mp4Path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := OpenMeta(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs > 10100 || c.Tracks[1].DurationMs > 10100 {
+		t.Errorf("probe: file %d ms, audio %d ms; want about 10000, the media's", c.DurationMs, c.Tracks[1].DurationMs)
+	}
+}
+
+// TestEditListEmptyEditOutsideTkhd: an empty edit delays the track even when
+// the tkhd duration leaves it out (as a mainstream muxer writes it).
+func TestEditListEmptyEditOutsideTkhd(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, Channels: u8p(2), SampleRate: f64p(48000)},
+	}
+	var blocks []genBlock
+	for ms := int64(0); ms < 10000; ms += 40 {
+		blocks = append(blocks, genBlock{track: 1, pts: ms, key: ms == 0, data: []byte{1}})
+		if ms+500 < 10500 {
+			blocks = append(blocks, genBlock{track: 2, pts: ms + 500, key: true, data: []byte{2}})
+		}
+	}
+	sort.SliceStable(blocks, func(i, j int) bool { return blocks[i].pts < blocks[j].pts })
+	mp4Path := filepath.Join(t.TempDir(), "late.mp4")
+	if err := RemuxToMP4(context.Background(), buildMKV(t, tracks, blocks), mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := int64(-1)
+	for i := bytes.Index(b, []byte("elst")); i >= 0; i = nextIndex(b, []byte("elst"), i) {
+		if b[i+4] == 0 && binary.BigEndian.Uint32(b[i+8:]) == 2 && int32(binary.BigEndian.Uint32(b[i+16:])) == -1 {
+			empty = int64(binary.BigEndian.Uint32(b[i+12:]))
+		}
+	}
+	if empty <= 0 {
+		t.Skip("the writer delays the late track without an empty edit")
+	}
+	audioTkhd := -1
+	for i := bytes.Index(b, []byte("tkhd")); i >= 0; i = nextIndex(b, []byte("tkhd"), i) {
+		audioTkhd = i // the audio trak comes second
+	}
+	if b[audioTkhd+4] != 0 {
+		t.Fatal("want a v0 tkhd")
+	}
+	d := binary.BigEndian.Uint32(b[audioTkhd+4+20:])
+	binary.BigEndian.PutUint32(b[audioTkhd+4+20:], d-uint32(empty))
+	if err := os.WriteFile(mp4Path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := OpenMeta(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Tracks[1].DurationMs; got < 10400 {
+		t.Errorf("audio %d ms; want about 10500, the 500 ms empty edit and the media", got)
+	}
+}

@@ -114,10 +114,12 @@ All notable changes to mkvgo are documented here. The format is based on
   duration (`mdhd`), and the file the movie header's or its last sample's:
   the probe and `from-mp4` did not even agree with each other. The track
   duration is now its edit list's presentation (all segments, empty edits
-  included), and the file's the longest track presentation when an edit list
-  sets one; `from-mp4` writes that same duration in the Segment. Of 25 real
-  MP4 files whose duration disagreed with the prober's by 0.1 to 2 s, 7 now
-  agree.
+  included, the edits that show media never adding up to more than the media
+  holds: 3 real files repeat their one full-length edit), and the file's the
+  longest track presentation when an edit list sets one; `from-mp4` writes
+  that same duration in the Segment. Of 25 real MP4 files whose duration
+  disagreed with the prober's by 0.1 to 2 s, 7 now agree, and none of the
+  520 real and test MP4 files that agreed now disagrees.
 
 - **The CLI JSON carries `effective_sample_rate`.** `probe -json` and
   `tracks -json` declared the decoder's rate (the SBR output rate of an

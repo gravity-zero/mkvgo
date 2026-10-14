@@ -1191,11 +1191,19 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 			}
 		}
 		if entries, err := trakElstEntries(trakBoxes); err == nil && movieTS > 0 {
-			var ticks int64
+			var empty, media int64
 			for _, e := range entries {
-				ticks += e.segDur
+				if e.mediaTime < 0 {
+					empty += e.segDur
+				} else {
+					media += e.segDur
+				}
 			}
-			tr.presentMs = ticksToMs(ticks, movieTS)
+			mediaMs := ticksToMs(media, movieTS)
+			if tr.durationMs > 0 && mediaMs > tr.durationMs {
+				mediaMs = tr.durationMs // edits presenting more than the media repeat it by mistake
+			}
+			tr.presentMs = ticksToMs(empty, movieTS) + mediaMs
 		}
 	}
 	// An elng box (ISO 14496-12) overrides mdhd with a full BCP-47 tag.
