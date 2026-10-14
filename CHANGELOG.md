@@ -72,6 +72,18 @@ All notable changes to mkvgo are documented here. The format is based on
   waits for its reads (p95 38 ms cold): its block headers are only found one
   after the other.
 
+### Fixed
+
+- **`WithInBandChannels` counts an E-AC-3 7.1 as 8 channels.** It read the
+  first frame of the track's first block only: the access unit's independent
+  substream - an E-AC-3 one, or an AC-3 core - carrying the 5.1, and not the
+  dependent substream after it that adds the back pair. A 7.1 then read 6,
+  `ChannelsMismatch` set against the container's 8. The speakers of the
+  dependent substreams that follow (their `chanmap`, else their acmod) are now
+  added, up to the next independent substream. On a library of 497 Matroska
+  files (971 AC-3 and E-AC-3 tracks), the 6 7.1 tracks that read 6 read 8,
+  three on an E-AC-3 core and three on an AC-3 core; no other track changed.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added
