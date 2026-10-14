@@ -103,6 +103,9 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 			c.Keyframes = p.sampleClusterKeyframes(o.sampledKeyframes, c.Info.TimecodeScale, videoTrackID(c))
 		}
 	}
+	if o.inBandChannels {
+		fillStreamChannels(ctx, r, c)
+	}
 	if o.inBandColour {
 		// Opted-in, and only for tracks that need it: recover colour from the
 		// first sample's in-band SPS. The head parse above stays untouched.

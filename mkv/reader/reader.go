@@ -76,6 +76,9 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	promoteTrackBitrate(c)
 	statsFrameRates(c)
 	codecFrameRates(c)
+	if o.inBandChannels {
+		fillStreamChannels(ctx, r, c)
+	}
 	if o.inBandColour {
 		// Same opt-in as the metadata path: one bounded read of the first sample,
 		// only for a track whose description the head left incomplete.

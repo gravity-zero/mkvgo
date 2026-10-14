@@ -22,6 +22,16 @@ type readOpts struct {
 	lazyAttachments  bool // record where payloads live instead of loading them
 	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
 	frameRateReads   bool // let the frame-rate estimate read the block headers it needs (WithFrameRateReads)
+	inBandChannels   bool // read the channel count the audio streams state (WithInBandChannels)
+}
+
+// WithInBandChannels reads the channel count each AC-3, E-AC-3 and AAC track's
+// stream states - the first frame header of AC-3 and E-AC-3, the
+// AudioSpecificConfig of AAC - into Track.StreamChannels, and sets
+// Track.ChannelsMismatch when it contradicts the container's Channels. AC-3 and
+// E-AC-3 cost one read of their first block; AAC none. Matroska only.
+func WithInBandChannels() ReadOption {
+	return func(o *readOpts) { o.inBandChannels = true }
 }
 
 // WithFrameRateReads lets the frame-rate estimate of a video track without

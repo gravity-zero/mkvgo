@@ -8,6 +8,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **`WithInBandChannels`: the channel count the audio stream states.** With
+  the CLI `-in-band` (and the WebAssembly `inbandColour` option), each
+  Matroska AC-3 and E-AC-3 track's first frame header is read (one block),
+  and an AAC track's AudioSpecificConfig: `Track.StreamChannels`
+  (`stream_channels`), with `Track.ChannelsMismatch` (`channels_mismatch`)
+  when it contradicts the container's `Channels`. On 42 real AC-3 tracks
+  whose container said 6 channels over a stereo stream, the stream count is
+  now reported, equal to the prober's, and the mismatch flagged.
+
 - **The frame rate the codec header states, for a track without
   DefaultDuration.** Before any estimate, a video track without
   DefaultDuration takes its frame rate from its CodecPrivate: the VUI timing

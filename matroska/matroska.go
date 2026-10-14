@@ -265,6 +265,11 @@ func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallb
 // exact read each; off by default. See reader.WithFrameRateReads.
 func WithFrameRateReads() ReadOption { return reader.WithFrameRateReads() }
 
+// WithInBandChannels reads the channel count each AC-3, E-AC-3 and AAC stream
+// states into Track.StreamChannels and flags a contradicted container count
+// (Track.ChannelsMismatch). See reader.WithInBandChannels.
+func WithInBandChannels() ReadOption { return reader.WithInBandChannels() }
+
 // WithSampledKeyframes enables a bounded, coarse keyframe index for a Matroska
 // that carries no Cues: it samples Cluster timestamps at n evenly-spaced byte
 // offsets (n ≤ 0 uses a default), so a Cues-less file still reports Keyframes

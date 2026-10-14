@@ -45,6 +45,9 @@ export interface Track {
   display_width?: number
   display_height?: number
   channels?: number
+  /** With inbandColour: the channel count the stream states (AC-3/E-AC-3 frame header, AAC config); channels_mismatch when it contradicts `channels`. */
+  stream_channels?: number
+  channels_mismatch?: boolean
   sample_rate?: number
   output_sample_rate?: number
   bit_depth?: number

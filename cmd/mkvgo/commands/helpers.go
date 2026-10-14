@@ -281,7 +281,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 func globalReadOptions() []matroska.ReadOption {
 	var o []matroska.ReadOption
 	if InBand {
-		o = append(o, matroska.WithInBandColourFallback())
+		o = append(o, matroska.WithInBandColourFallback(), matroska.WithInBandChannels())
 	}
 	if FrameRateReads {
 		o = append(o, matroska.WithFrameRateReads())

@@ -260,7 +260,7 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 			ro = append(ro, matroska.WithBitrate())
 		}
 		if opts.inBandColour {
-			ro = append(ro, matroska.WithInBandColourFallback())
+			ro = append(ro, matroska.WithInBandColourFallback(), matroska.WithInBandChannels())
 		}
 		c, err := matroska.ReadMeta(ctx, rs, "input", ro...)
 		if err != nil {
