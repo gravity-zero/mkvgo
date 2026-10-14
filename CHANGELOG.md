@@ -179,6 +179,21 @@ All notable changes to mkvgo are documented here. The format is based on
   server. `docs/library.md` gives the same read for a library scan: on that
   file it allocates 13 KB in 16 µs where `Open`, which reads every attachment
   payload, allocates 825 KB in 160 µs.
+- **A cancelled Matroska plan stops reading.** The BANDWIDTH check, which
+  reads the cluster headers of a segment whose span looks too large (up to 16
+  headers for each of up to 32 spans), did not look at the context: a plan
+  cancelled during it read every remaining header first. It now tests the
+  context before each span and each header, and `PlanHLS` returns the
+  context's error rather than a plan with spans left unchecked. On a 2160p
+  film whose plan reads 262 cluster headers (cache warm): up to 261 reads
+  after the cancel, returning after 18 ms median and 40 ms at most, down to
+  none, returning after 0.22 ms median and 0.57 ms at most. `OpenMetaWithFS`
+  now opens the file through `FS.OpenContext`: a plan cancelled before it
+  no longer opens a remote source for its metadata. The cover-art attachment is read only
+  while the context is live: a plan cancelled right before it read the
+  picture (2 MiB on the test file) and returned a plan; it now returns the
+  context's error. Without a cancel, the 7,066 resources of the plan
+  (playlists, init, manifest and every segment) are byte-identical.
 
 ## [0.48.1] - 2026-10-13
 
