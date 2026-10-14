@@ -136,6 +136,7 @@ type HLSPlan struct {
 	// by tableCacheBytes per plan and tableTotalBudget per process, one build
 	// at a time per window (tabFlight).
 	tabMu     sync.Mutex
+	netSrc    atomic.Int32 // networkSrc's answer: 0 not known yet, 1 local, 2 network
 	tabAcct   *tableAccount
 	tables    map[int]*windowTable
 	tabOrder  []int

@@ -52,6 +52,17 @@ All notable changes to mkvgo are documented here. The format is based on
   still allocates per request is its moof (the senc and subsample tables are
   the segment's own) and a CTR state per sample.
 
+- **A network source keeps its round trips down.** On a network mount (NFS,
+  SMB, 9p, FUSE...) or a source that is no local file, read-ahead is not
+  asked for (it would fetch whole ranges across the network ahead of need),
+  an audio segment's reads go out together (8 at a time, into one buffer of
+  at most 4 MiB), and a Matroska window's light audio is kept with the walk
+  that reads it, as before, rather than read again from the file: there each
+  read is a round trip, not a page-cache copy. Measured on a NAS over SMB,
+  every segment of two Matroska files requested once, cold: audio p50/p95
+  150/317 ms in 0.51.0, 175/314 ms with the audio copied from the file, and
+  139/287 ms now.
+
 - **A Matroska source's audio is copied from the file too.** `Open` kept a
   window's audio, read with the structure walk, built whole in the window's
   table; the walk now reads every track's block headers only - a laced

@@ -72,6 +72,7 @@ type windowTable struct {
 	segs  []trackSegment
 	heads [][]byte
 	offs  [][]int64
+	data  [][]byte // a network source's light audio segment, built whole by the walk that read it
 	bytes int64
 }
 
@@ -185,8 +186,12 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	// Headers only, every track: each sample's bytes are copied from the file at its offset when served.
-	windows, nextPts, _, err := p.walkWindow(ctx, n, segStart, segEnd, true, false)
+	// Headers only, every track: each sample's bytes are copied from the file
+	// at its offset when served. On a network source a light window's audio
+	// rides in the table instead: read with the walk, it costs no round trip
+	// of its own (a heavy one, lossless or many tracks, is streamed).
+	keepAudio := p.networkSrc(ctx) && p.otherEstimate(n) <= audioInTableBytes
+	windows, nextPts, _, err := p.walkWindow(ctx, n, segStart, segEnd, true, keepAudio)
 	if err != nil {
 		return nil, err
 	}
@@ -199,11 +204,20 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		}
 	}
 	p.learnOtherRate(n, otherBytes)
-	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks))}
+	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
 	for ti := range p.tracks {
 		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
 		if err != nil {
 			return nil, err
+		}
+		if keepAudio && !p.tracks[ti].ft.outTrack.spec.video {
+			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, nil)
+			if err != nil {
+				return nil, err
+			}
+			t.data[ti] = data
+			t.bytes += int64(len(data))
+			continue
 		}
 		t.segs[ti] = p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
 		t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
@@ -222,12 +236,38 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	return t, nil
 }
 
+// audioInTableBytes is the most a network source's window may hold of
+// non-video payloads for its walk to keep them in the table.
+var audioInTableBytes int64 = 2 << 20
+
+// networkSrc reports, once per plan, whether the source sits behind a network:
+// a file on a network mount, or a source that is no local file at all.
+func (p *HLSPlan) networkSrc(ctx context.Context) bool {
+	switch p.netSrc.Load() {
+	case 1:
+		return false
+	case 2:
+		return true
+	}
+	src, err := p.openSource(ctx)
+	if err != nil {
+		return true // not decided: asked again next time
+	}
+	defer src.Close()
+	net := true
+	if f, ok := src.(*os.File); ok {
+		net = networkSource(f)
+	}
+	p.netSrc.Store(map[bool]int32{false: 1, true: 2}[net])
+	return net
+}
+
 // mp4Table is segment n of an MP4 source's track ti as a table: the sample table holds its timing and offsets, nothing is walked or kept.
 func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
-	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks))}
+	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
 	t.segs[ti], t.offs[ti] = p.mp4Segment(ti, n)
 	t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
 	return t, nil
@@ -286,6 +326,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		}
 	} else if t, err = p.table(ctx, n); err != nil {
 		return nil, err
+	}
+	if d := t.data[ti]; d != nil { // a network source's audio: built whole by the walk
+		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
 	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
 	if p.opts.CENC != nil {
@@ -467,6 +510,12 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		pos += raw
 	}
 	if c.file != nil {
+		if c.exact && networkSource(c.file) {
+			// Each read is a round trip on a network mount: the reads go out together.
+			if ok, err := c.copyParallel(ctx, w, pieces); ok || err != nil {
+				return c.written, err
+			}
+		}
 		prefetch(c.file, pieces, c.exact, len(c.buf))
 	}
 	for i, pc := range pieces {
@@ -533,6 +582,87 @@ func prefetch(f *os.File, pieces []span, exact bool, bufLen int) {
 			i++ // within that read
 		}
 	}
+}
+
+// networkSource is onNetwork, swappable for a test.
+var networkSource = onNetwork
+
+// Reads in flight at once for one segment on a network mount, and the most
+// bytes they may hold: a light rendition's (audio) whole segment.
+const (
+	parallelReads    = 8
+	parallelMaxBytes = 4 << 20
+)
+
+// copyParallel copies an exact rendition's pieces with their reads in flight
+// together (parallelReads at a time), into one buffer, then written in order.
+// It declines (false, nil) when the reads would hold more than parallelMaxBytes.
+func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []span) (bool, error) {
+	type read struct{ off, end, at int64 }
+	var reads []read
+	var total int64
+	for i := 0; i < len(pieces); {
+		if pieces[i].emit != nil {
+			i++
+			continue
+		}
+		end := exactReach(pieces, i, len(c.buf))
+		reads = append(reads, read{pieces[i].off, end, total})
+		total += end - pieces[i].off
+		i++
+		for i < len(pieces) && (pieces[i].emit != nil || pieces[i].off+pieces[i].n <= end) {
+			i++ // within that read
+		}
+	}
+	if total > parallelMaxBytes {
+		return false, nil
+	}
+	buf := make([]byte, total)
+	defer func() {
+		if c.wipe {
+			clear(buf)
+		}
+	}()
+	errs := make([]error, len(reads))
+	sem := make(chan struct{}, parallelReads)
+	var wg sync.WaitGroup
+	for k, r := range reads {
+		if err := ctx.Err(); err != nil {
+			wg.Wait()
+			return true, err
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(k int, r read) {
+			defer func() { <-sem; wg.Done() }()
+			if n, err := c.file.ReadAt(buf[r.at:r.at+r.end-r.off], r.off); err != nil && (err != io.EOF || int64(n) < r.end-r.off) {
+				errs[k] = err
+			}
+		}(k, r)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return true, err
+		}
+	}
+	k := 0
+	for _, pc := range pieces {
+		if pc.emit != nil {
+			if err := c.emit(w, pc.emit); err != nil {
+				return true, err
+			}
+			continue
+		}
+		for pc.off >= reads[k].end {
+			k++
+		}
+		at := reads[k].at + pc.off - reads[k].off
+		if err := c.queue(w, buf[at:at+pc.n]); err != nil {
+			return true, err
+		}
+	}
+	return true, c.flush(w) // before buf is wiped: the queued writes are slices of it
 }
 
 // exactReach is how far one read for run i may go: through the runs after it

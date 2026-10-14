@@ -569,3 +569,33 @@ func TestPrefetchRanges(t *testing.T) {
 		t.Fatalf("exact: %v", will)
 	}
 }
+
+// On a network mount an exact rendition's reads go out together into one
+// buffer, and a Matroska window's light audio comes with its walk: every
+// resource keeps Resource's bytes, in the clear and encrypted.
+func TestOpenParallelReadsOnNetworkSource(t *testing.T) {
+	defer func(f func(*os.File) bool) { networkSource = f }(networkSource)
+	networkSource = func(*os.File) bool { return true }
+	mkvSrc := filepath.Join(t.TempDir(), "interleaved.mkv")
+	if err := RemuxFromMP4(context.Background(), interleavedMP4, mkvSrc); err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range []string{interleavedMP4, mkvSrc} {
+		for _, o := range []Options{{SegmentMs: 2000}, {SegmentMs: 2000, Encrypt: &HLSEncryption{Key: []byte("0123456789abcdef"), KeyURI: "k"}}} {
+			plan, err := PlanHLS(context.Background(), src, o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOpenMatchesResource(t, plan)
+			if src == mkvSrc { // a Matroska window's light audio rides in the table, read with the walk
+				h, err := plan.Open(context.Background(), "seg_a1_00001.m4s")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if h.Bytes() == nil {
+					t.Error("a network source's light audio must come from its window's table")
+				}
+			}
+		}
+	}
+}
