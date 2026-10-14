@@ -6,6 +6,30 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### BREAKING
+
+- **The WebAssembly results carry the 64-bit UIDs as strings.** `JSON.parse`
+  turns an integer into a JavaScript number, which keeps 53 bits: a track
+  UID, chapter UID, attachment UID or tag target of 7454167688999517126 read
+  back as 7454167688999517000, and could not be matched or written back. The
+  track `uid`, chapter `id`, attachment `id` and tag `target_id` are now
+  decimal strings by field, whatever the value (a `uid` of 1 is `"1"`); any
+  other integer beyond 2^53 - 1 in any result is a string too, and track
+  numbers and the other fields stay numbers.
+  The TypeScript types say so (`Track.uid`, `Chapter.id`, the attachment
+  `id`, the new `Tag`). A caller that compared these fields with numbers
+  compares strings now. The rewrite is one pass over the JSON bytes: a probe
+  under Node 22 takes 1.19 ms on a 237 MB MKV and 1.86 ms on a 237 MB MP4
+  with a 697 KB moov, against 1.15 and 1.80 ms without it.
+- **A remote `probe` of a Matroska file without Cues reads the head only.**
+  `probe` asked for the complete keyframe index, which on a file without Cues
+  is a walk of every Cluster: over HTTP or S3 that downloaded the whole file
+  (measured on a 151.6 MB file: 15 requests, 152.1 MB transferred). A remote
+  Matroska `probe` now takes its keyframes from the Cues alone and reports
+  none without them: 1 request, 512 KiB. Its JSON therefore has no `keyframes`
+  key on such a file, where it had one: the local `probe` never had it, and
+  `keyframes` (on a local or remote file) still builds that index.
+
 ### Added
 
 - **`HLSPlan.CueDensity()` says what a Matroska plan cut on.** A plan cuts
@@ -16,21 +40,49 @@ All notable changes to mkvgo are documented here. The format is based on
   plan reports `ok == false` (its sample table is exact). On a 13-minute file
   with a keyframe every 2 s whose Cues hold 312 of its 390 keyframes: 312 cue
   points, a 4000 ms widest gap against a 2000 ms median.
+
+### Changed
+
+- **An Opus track keeps its sync across MKV <-> MP4.** Opus-in-ISOBMFF makes
+  the edit list (`media_time` = pre-skip) the trim of the priming samples, the
+  `dOps` pre-skip being informative only, but `to-mp4` wrote no edit list for
+  Opus and `from-mp4` dropped one it read. The pre-skip now travels as the
+  edit list <-> Matroska `CodecDelay`, like AAC, in the progressive MP4, the
+  HLS/DASH init and the MKV read back. Measured with a flash and a beep both
+  at 2 s, decoded: `to-mp4` put the audio 6.5 ms late (now 0.02 ms, the
+  source's), and `from-mp4` on an MP4 carrying the Opus edit list 7 ms late
+  (now 0.02 ms). The fragmented init now carries the same edit list; the
+  mainstream decoder used for the measurement ignores it on fragmented Opus,
+  so its reading of the HLS output stays 6.5 ms late. `make e2e` checks the
+  flash and the beep for AAC and Opus in both directions, within 1 ms.
+- **A display rotation survives every remux.** Matroska carries it as
+  `Video>Projection>ProjectionPoseRoll` (degrees counterclockwise), which was
+  not read: `probe` of such an MKV showed no rotation. And no output carried
+  one: `from-mp4` wrote no Projection, `to-mp4` and the HLS/DASH init segments
+  an identity `tkhd` matrix, so a phone video played sideways after any of
+  them. The roll of a flat video (rectangular projection, no yaw or pitch) is
+  now read into `Track.Rotation` by both MKV parsers, the MKV writer writes it
+  back (folded into (-180, 180]), and every `tkhd` the MP4 writer builds
+  carries the matching display matrix. With display rotations of 90, 180 and
+  270: `probe`, `from-mp4`, `to-mp4` (with and without `--faststart`) and
+  `to-hls` (from MP4 and from MKV) report the source's angle on every output.
+  `probe` prints the angle as "clockwise".
 - **The WebAssembly remuxes take a `Blob`/`File`.** `remuxToMP4`,
   `remuxFromMP4`, `remuxToWebM` and `remuxToHLS` refused anything but a
   `Uint8Array`, so the whole input sat in memory twice (in JavaScript, then
   copied into the module) and was copied a third time into the in-memory
   filesystem. A `Blob`/`File` is now read through ranged slices, a
   `Uint8Array` is copied into the module once and read in place, and the
-  output is reserved at about the input's size (`mkv.MemFS.Reserve`, new) so
-  it is not grown by copies. `remuxToMP4` with `fastStart` on a 143 MB MKV
+  output is reserved at about the input's size (`mkv.MemFS.Reserve`, below)
+  so it is not grown by copies. `remuxToMP4` with `fastStart` on a 143 MB MKV
   under Node 22: the module's memory goes from 701 MB to 306 MB from a
   `Uint8Array`, and to 165 MB from a `File`; the peak RSS of the process from
   950 MB (1,798 MB before the in-memory output fix below) to 666 to 680 MB.
   The outputs are byte-identical.
-
-### Changed
-
+- **`mkv.MemFS.Reserve` (new) sizes an in-memory output up front.** A writer
+  that knows about how much it will write reserves it once, and the file is
+  not grown by copies; the WebAssembly remuxes reserve their output at the
+  input's size.
 - **A WebAssembly remux from a `Blob` keeps a window on each region it reads.**
   The Blob reader cached one window, so an MP4 whose video and audio chunks
   sit in two regions of the file (not interleaved) dropped it on every jump
@@ -39,18 +91,6 @@ All notable changes to mkvgo are documented here. The format is based on
   recently used one replaced on a miss, each doubling while its region is
   read on: 294 reads for 143 MiB, 1.48 s down to 0.78 s and a peak RSS of
   878 MB down to 679 MB under Node 22. The outputs are byte-identical.
-- **The WebAssembly results carry the 64-bit UIDs as strings.** `JSON.parse`
-  turns an integer into a JavaScript number, which keeps 53 bits: a track
-  UID, chapter UID, attachment UID or tag target of 7454167688999517126 read
-  back as 7454167688999517000, and could not be matched or written back. The
-  track `uid`, chapter `id`, attachment `id` and tag `target_id` are now
-  decimal strings, exact, and any other integer beyond 2^53 - 1 in any
-  result is a string too; track numbers and the other fields stay numbers.
-  The TypeScript types say so (`Track.uid`, `Chapter.id`, the attachment
-  `id`, the new `Tag`). A caller that compared these fields with numbers
-  compares strings now. The rewrite is one pass over the JSON bytes: a probe
-  under Node 22 takes 1.19 ms on a 237 MB MKV and 1.86 ms on a 237 MB MP4
-  with a 697 KB moov, against 1.15 and 1.80 ms without it.
 - **Writing an MKV allocates its cluster buffer once.** The MKV writer
   assembled every cluster in a fresh buffer grown by doubling, about twice the
   media it wrote in allocations, and the memory the runtime handed back to the
@@ -99,18 +139,6 @@ All notable changes to mkvgo are documented here. The format is based on
   390 keyframes plans 8 s segments where the full pass cuts at 6 s: 117
   segments against 130). The docs now state the condition, the remedy
   (`reindex`) and that `SynthesizeIndex` does not replace sparse Cues.
-- **A display rotation survives every remux.** Matroska carries it as
-  `Video>Projection>ProjectionPoseRoll` (degrees counterclockwise), which was
-  not read: `probe` of such an MKV showed no rotation. And no output carried
-  one: `from-mp4` wrote no Projection, `to-mp4` and the HLS/DASH init segments
-  an identity `tkhd` matrix, so a phone video played sideways after any of
-  them. The roll of a flat video (rectangular projection, no yaw or pitch) is
-  now read into `Track.Rotation` by both MKV parsers, the MKV writer writes it
-  back (folded into (-180, 180]), and every `tkhd` the MP4 writer builds
-  carries the matching display matrix. With display rotations of 90, 180 and
-  270: `probe`, `from-mp4`, `to-mp4` (with and without `--faststart`) and
-  `to-hls` (from MP4 and from MKV) report the source's angle on every output.
-  `probe` prints the angle as "clockwise".
 - **`probe` of a Matroska file without Cues says it has no keyframe index.**
   The text output printed nothing at all, as if the line had been forgotten;
   it now prints `Keyframes: none (no Cues ...)`, with `mkvgo reindex` as the
@@ -140,25 +168,6 @@ All notable changes to mkvgo are documented here. The format is based on
   write, even after a `Truncate`. `MkvGo.remuxToMP4` with `fastStart` on a
   143 MB MKV under Node 22: peak RSS 1,798 MB down to 950 MB, 1.5 s down to
   0.4 to 0.6 s, the output byte-identical.
-- **An Opus track keeps its sync across MKV <-> MP4.** Opus-in-ISOBMFF makes
-  the edit list (`media_time` = pre-skip) the trim of the priming samples, the
-  `dOps` pre-skip being informative only, but `to-mp4` wrote no edit list for
-  Opus and `from-mp4` dropped one it read. The pre-skip now travels as the
-  edit list <-> Matroska `CodecDelay`, like AAC, in the progressive MP4, the
-  HLS/DASH init and the MKV read back. Measured with a flash and a beep both
-  at 2 s, decoded: `to-mp4` put the audio 6.5 ms late (now 0.02 ms, the
-  source's), and `from-mp4` on an MP4 carrying the Opus edit list 7 ms late
-  (now 0.02 ms). The fragmented init now carries the same edit list; the
-  mainstream decoder used for the measurement ignores it on fragmented Opus,
-  so its reading of the HLS output stays 6.5 ms late. `make e2e` checks the
-  flash and the beep for AAC and Opus in both directions, within 1 ms.
-- **A remote `probe` of a Matroska file without Cues reads the head only.**
-  `probe` asked for the complete keyframe index, which on a file without Cues
-  is a walk of every Cluster: over HTTP or S3 that downloaded the whole file
-  (measured on a 151.6 MB file: 15 requests, 152.1 MB transferred). A remote
-  Matroska `probe` now takes its keyframes from the Cues alone and reports
-  none without them: 1 request, 512 KiB. A local `probe` and `keyframes` (on
-  a local or remote file) are unchanged.
 - **A WebAssembly or remote probe reports chapters, tags and attachments.**
   `MkvGo.probe` promised the shape of the CLI `-json` output but read Info and
   Tracks only: a file with 13 chapters, 3 tags and a 760 KB font came back
