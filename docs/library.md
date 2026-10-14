@@ -511,9 +511,14 @@ rendition and every client of that window; each write then copies the sample
 ranges straight from the file. An MP4 source needs no walk: its sample table,
 kept by the plan, already holds every sample's timing and offset. The bytes
 equal `Resource`'s exactly, playlists and init segments come back whole as
-before, and a plan that cannot stream (`Encrypt`/`CENC`, a `FrameConverter`, a
-custom `Options.FS` without `StreamFromFS`) serves `Open` from memory and
-counts it in `Stats().StreamFallbacks`. `mkvhttp.Handler` uses `Open` on its own; a write
+before. An AES-128 segment (`Options.Encrypt`) streams too: its size is known
+up front (PKCS#7 pads to the next 16-byte block), it is encrypted with CBC as
+it is written, and a range is encrypted from the segment's start, what comes
+before the range thrown away. A plan that cannot stream (`CENC`, a
+`FrameConverter`, a custom `Options.FS` without `StreamFromFS`) serves `Open`
+from memory and counts it in `Stats().StreamFallbacks`; an encrypted segment
+is never served in the clear, and the pooled buffers that held its plaintext
+go back zeroed. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player
 could take for a whole segment.
 

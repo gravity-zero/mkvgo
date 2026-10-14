@@ -327,7 +327,7 @@ func TestOpenStreamsHeaderStripping(t *testing.T) {
 	assertOpenMatchesResource(t, plan)
 }
 
-// Plans that cannot stream (encryption, a custom FS without StreamFromFS)
+// Plans that cannot stream (a custom FS without StreamFromFS)
 // serve Open from memory, counted as fallbacks, bytes still identical.
 func TestOpenFallsBackWhenNotStreamable(t *testing.T) {
 	src := openGOPSource(t, 3, false, true)

@@ -6,6 +6,20 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **`HLSPlan.Open` streams AES-128 segments.** A plan with `Options.Encrypt`
+  built every segment in memory to encrypt it (the plaintext, then a padded
+  copy). Its segments are now written from the source and encrypted with CBC
+  as they go: the size is known before the first byte (PKCS#7 pads to the next
+  16-byte block), keys, IVs and rotation are unchanged, and a range is
+  encrypted from the segment's start, what precedes it thrown away. A failing
+  source ends the write with an error after ciphertext only, and the pooled
+  buffers that held plaintext go back zeroed. Measured on a 2 GB 1080p H.264
+  source, 16 segments built at once for 15 s: MP4 peak memory 791 to 31 MB,
+  16.9 to 12.9 ms a segment; Matroska 1,549 to 105 MB, 53 to 13 ms. The bytes
+  are `Resource`'s; ffmpeg decrypts them to the source's packets.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

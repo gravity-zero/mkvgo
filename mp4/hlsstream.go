@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"context"
+	"crypto/aes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -92,10 +93,10 @@ type tableFlight struct {
 }
 
 // streams reports whether this plan can write segments from the source: the
-// served bytes must be the source's own (no encryption, no conversion), from a
-// file the plan may read twice.
+// served bytes must be the source's own, AES-128 encrypted or not (no CENC,
+// no conversion), from a file the plan may read twice.
 func (p *HLSPlan) streams() bool {
-	if p.opts.Encrypt != nil || p.opts.CENC != nil || (p.opts.FS != nil && !p.opts.StreamFromFS) {
+	if p.opts.CENC != nil || (p.opts.FS != nil && !p.opts.StreamFromFS) {
 		return false
 	}
 	for _, pt := range p.tracks {
@@ -273,12 +274,14 @@ type ResourceHandle struct {
 	plan        *HLSPlan
 	table       *windowTable
 	ti          int
+	n           int    // the segment's 0-based window
+	head        []byte // the segment's head
 }
 
 // Open opens the named resource (the same names Resource serves); the handle's
 // bytes equal Resource's exactly. A segment streams when the plan can read its
-// source twice and serves the source's own bytes: a Matroska or MP4 file, no
-// encryption, no track conversion, local or Options.StreamFromFS.
+// source twice: a Matroska or MP4 file, no CENC, no track conversion, local or
+// Options.StreamFromFS. An AES-128 segment is encrypted as it is written.
 func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
 	ti, n, isSeg := p.segmentName(name)
 	if !isSeg || !p.streams() || (p.tracks[ti].ft.outTrack.spec.video && !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim()) {
@@ -310,10 +313,15 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	if d := t.data[ti]; d != nil { // an audio rendition: built whole by the structure walk
 		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
+	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
+	h.size = int64(len(h.head)) + t.segs[ti].dataLen
+	if p.opts.Encrypt != nil {
+		h.size = h.size/aes.BlockSize*aes.BlockSize + aes.BlockSize // PKCS#7 pads to the next block, a whole one when aligned
+	}
 	p.winMu.Lock()
 	p.stats.StreamedSegments++
 	p.winMu.Unlock()
-	return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(t.heads[ti])) + t.segs[ti].dataLen, plan: p, table: t, ti: ti}, nil
+	return h, nil
 }
 
 // ETag identifies the resource's bytes: strong for bytes in hand, else weak from the size, the source's SourceID and the name.
@@ -412,23 +420,25 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 		}
 		return int64(m), err
 	}
-	return h.plan.writeSpans(ctx, w, h.table, h.ti, off, n)
+	if h.plan.opts.Encrypt != nil {
+		return h.plan.writeAES(ctx, w, h, off, n)
+	}
+	return h.plan.writeSpans(ctx, w, h.head, h.table, h.ti, off, n)
 }
 
 // writeSpans writes [off, off+n) of track ti's segment in table t: the head
 // first, then each sample as its stripped header (if any) and its bytes from
 // the source, through one copier that gathers the small spans and hands the
 // large ones to the writer straight from the file.
-func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, ti int, off, n int64) (int64, error) {
+func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti int, off, n int64) (int64, error) {
 	// An MP4 source's audio sits in short runs between video frames: read run by run, through the small frames only.
-	c := &spanCopier{exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video}
+	c := &spanCopier{exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts()}
 	defer c.release()
 	// clip is the part [a, b) of a piece spanning [pos, pos+size) that falls in the range.
 	clip := func(pos, size int64) (a, b int64, ok bool) {
 		from, to := max(off, pos), min(off+n, pos+size)
 		return from - pos, to - pos, from < to
 	}
-	head := t.heads[ti]
 	if a, b, ok := clip(0, int64(len(head))); ok {
 		if err := c.emit(w, head[a:b]); err != nil {
 			return c.written, err
@@ -445,7 +455,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 	}
 	defer src.Close()
 	bufp := streamBufs.Get().(*[]byte)
-	defer streamBufs.Put(bufp)
+	defer putStreamBuf(bufp, c.wipe)
 	c.src, c.buf = src, *bufp
 	if f, ok := src.(*os.File); ok {
 		c.file = f
@@ -559,6 +569,7 @@ type spanCopier struct {
 	bufLen   int   // valid bytes in buf
 	pos      int64 // the source's current offset
 	seeked   bool
+	wipe     bool     // the bytes are an encrypted segment's plaintext: pooled buffers go back zeroed
 	exact    bool     // read each span alone, never ahead of it - but up to reach
 	reach    int64    // where an exact read may stop at the furthest (0: the span's end)
 	end      int64    // where the last span ends in the source: no read goes past it (0: no bound)
@@ -691,10 +702,24 @@ func (c *spanCopier) write(w io.Writer, b []byte) error {
 
 func (c *spanCopier) release() {
 	if c.stage != nil {
+		if c.wipe {
+			clear((*c.stage)[:cap(*c.stage)])
+		}
 		stageBufs.Put(c.stage)
 		c.stage = nil
 	}
 }
+
+// putStreamBuf returns a copier buffer to its pool, zeroed when it held an encrypted segment's plaintext.
+func putStreamBuf(bufp *[]byte, wipe bool) {
+	if wipe {
+		clear(*bufp)
+	}
+	streamBufs.Put(bufp)
+}
+
+// encrypts reports whether the plan's segments are encrypted (AES-128 or CENC).
+func (p *HLSPlan) encrypts() bool { return p.opts.Encrypt != nil || p.opts.CENC != nil }
 
 // ErrSourceChanged is returned for a media or subtitle segment once the source
 // is not the file the plan was built on (its size, mtime or identity moved):
