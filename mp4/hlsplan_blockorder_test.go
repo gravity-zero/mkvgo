@@ -362,7 +362,7 @@ func TestSpanHoldsForeignBlock(t *testing.T) {
 		if c.k+1 < plan.segCount {
 			end = plan.offsets[c.k+1]
 		}
-		if got := spanHoldsForeignBlock(f, plan.offsets[c.k], end); got != c.want {
+		if got := spanHoldsForeignBlock(context.Background(), f, plan.offsets[c.k], end); got != c.want {
 			t.Errorf("segment %d (span %d bytes): foreign = %v, want %v", c.k, raw[c.k].bytes, got, c.want)
 		}
 	}

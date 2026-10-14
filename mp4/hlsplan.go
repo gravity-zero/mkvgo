@@ -634,6 +634,9 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	confirm, closeConfirm := p.foreignBlockChecker(ctx, srcPath, fs, segs)
 	segs = boundSegmentSpans(segs, confirm)
 	closeConfirm()
+	if err := ctx.Err(); err != nil { // a span left unchecked must not reach the master
+		return nil, err
+	}
 	p.segs = segs
 	p.winBudget = o.WindowCacheBytes
 	for _, pt := range p.tracks { // half the tagged bit rates: a lower bound until a walk measures
@@ -2112,11 +2115,11 @@ func (p *HLSPlan) foreignBlockChecker(ctx context.Context, srcPath string, fs *m
 		bad  bool
 	)
 	confirm := func(k int) bool {
-		if bad {
+		if bad || ctx.Err() != nil {
 			return false
 		}
 		if src == nil {
-			f, err := fs.DoOpen(srcPath)
+			f, err := fs.DoOpenContext(ctx, srcPath)
 			if err != nil {
 				bad = true
 				return false
@@ -2133,7 +2136,7 @@ func (p *HLSPlan) foreignBlockChecker(ctx context.Context, srcPath string, fs *m
 		if k+1 < len(p.offsets) {
 			end = p.offsets[k+1]
 		}
-		return spanHoldsForeignBlock(src, p.offsets[k], end)
+		return spanHoldsForeignBlock(ctx, src, p.offsets[k], end)
 	}
 	return confirm, func() {
 		if src != nil {
@@ -2191,6 +2194,9 @@ func (p *HLSPlan) foreignVerdicts(ctx context.Context, srcPath string, fs *mkv.F
 				}
 			}()
 			read := func(off int64, buf []byte) (int, error) {
+				if err := ctx.Err(); err != nil {
+					return 0, err
+				}
 				if h, ok := known[off]; ok {
 					n := copy(buf, h)
 					if n < len(buf) {
@@ -2297,8 +2303,11 @@ func readFullAt(src mkv.ReadSeekCloser, buf []byte, off int64) (int, error) {
 // legitimately starts before its keyframe. An unknown-size cluster or
 // anything that is not a cluster ends the walk undecided (false: the span is
 // left as measured).
-func spanHoldsForeignBlock(src io.ReadSeeker, from, end int64) bool {
+func spanHoldsForeignBlock(ctx context.Context, src io.ReadSeeker, from, end int64) bool {
 	return spanHoldsForeignBlockAt(func(off int64, buf []byte) (int, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		if _, err := src.Seek(off, io.SeekStart); err != nil {
 			return 0, err
 		}
