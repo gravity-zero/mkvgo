@@ -350,20 +350,24 @@ func PrintJSON(v any) {
 // shape is the Track plus these extras.
 type trackJSON struct {
 	matroska.Track
-	CodecName           string  `json:"codec_name,omitempty"`
-	CodecLongName       string  `json:"codec_long_name,omitempty"`
-	ChannelLayout       string  `json:"channel_layout,omitempty"`
-	AvgFrameRate        float64 `json:"avg_frame_rate,omitempty"`
-	SampleAspectRatio   string  `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio  string  `json:"display_aspect_ratio,omitempty"`
-	ColorSpaceName      string  `json:"color_space_name,omitempty"`
-	ColorTransferName   string  `json:"color_transfer_name,omitempty"`
-	ColorPrimariesName  string  `json:"color_primaries_name,omitempty"`
-	ColorRangeName      string  `json:"color_range_name,omitempty"`
-	HDRFormat           string  `json:"hdr_format,omitempty"`
-	StereoModeName      string  `json:"stereo_mode_name,omitempty"`
-	ResolvedLanguage    string  `json:"resolved_language,omitempty"`
-	EffectiveSampleRate float64 `json:"effective_sample_rate,omitempty"`
+	// FrameRate is the Track's, else its EstimatedFrameRate with FrameRateEstimated set.
+	FrameRate           *float64 `json:"frame_rate,omitempty"`
+	FrameRateEstimated  bool     `json:"frame_rate_estimated,omitempty"`
+	EstimatedFrameRate  *float64 `json:"estimated_frame_rate,omitempty"` // folded into frame_rate
+	CodecName           string   `json:"codec_name,omitempty"`
+	CodecLongName       string   `json:"codec_long_name,omitempty"`
+	ChannelLayout       string   `json:"channel_layout,omitempty"`
+	AvgFrameRate        float64  `json:"avg_frame_rate,omitempty"`
+	SampleAspectRatio   string   `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio  string   `json:"display_aspect_ratio,omitempty"`
+	ColorSpaceName      string   `json:"color_space_name,omitempty"`
+	ColorTransferName   string   `json:"color_transfer_name,omitempty"`
+	ColorPrimariesName  string   `json:"color_primaries_name,omitempty"`
+	ColorRangeName      string   `json:"color_range_name,omitempty"`
+	HDRFormat           string   `json:"hdr_format,omitempty"`
+	StereoModeName      string   `json:"stereo_mode_name,omitempty"`
+	ResolvedLanguage    string   `json:"resolved_language,omitempty"`
+	EffectiveSampleRate float64  `json:"effective_sample_rate,omitempty"`
 }
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
@@ -385,6 +389,10 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 			HDRFormat:          t.HDRFormat(),
 			StereoModeName:     t.StereoModeName(),
 			ResolvedLanguage:   c.TrackLanguage(&t),
+		}
+		out[i].FrameRate, out[i].FrameRateEstimated = t.FrameRate, t.FrameRate == nil && t.EstimatedFrameRate != nil
+		if out[i].FrameRateEstimated {
+			out[i].FrameRate = t.EstimatedFrameRate
 		}
 	}
 	return out

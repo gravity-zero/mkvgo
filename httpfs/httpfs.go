@@ -536,6 +536,11 @@ func (r *reader) Close() error {
 // Pin binds the reader to one version of the object (mkv.PinnedReader): a response of another ends the read with mkv.ErrSourceChanged.
 func (r *reader) Pin(identity string) { r.id = identity }
 
+// Free reports whether n bytes at off come with the response being read, with no new request.
+func (r *reader) Free(off, n int64) bool {
+	return r.body != nil && off >= r.bodyPos && off+n <= r.bodyEnd && off-r.bodyPos <= max(skipMax, int64(r.fs.opts.WindowSize))
+}
+
 // HintRange tells the reader its next reads cover [off, end) (mkv.RangeHinter): the request that reaches into it asks for the rest of it at once.
 func (r *reader) HintRange(off, end int64) { r.hintOff, r.hintEnd = off, end }
 

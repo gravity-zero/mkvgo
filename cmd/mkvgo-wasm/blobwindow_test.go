@@ -58,3 +58,24 @@ func TestBlobCacheTwoRegions(t *testing.T) {
 		t.Errorf("%d fetches, %d bytes fetched for %d bytes read: want each region read about once", fetches, fetched, read)
 	}
 }
+
+// TestBlobCacheHolds: holds tells a range inside a window already read from one
+// that would cost a Blob read, so the frame-rate estimate reads nothing more.
+func TestBlobCacheHolds(t *testing.T) {
+	var c blobCache
+	fetch := func(dst []byte, off int64) ([]byte, error) { return dst, nil }
+	if c.holds(0, 1) {
+		t.Fatal("an empty cache holds nothing")
+	}
+	if _, err := c.read(make([]byte, 16), 0, 1<<20, fetch); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		off, n int64
+		want   bool
+	}{{0, 32, true}, {64<<10 - 32, 32, true}, {64<<10 - 16, 32, false}, {64 << 10, 1, false}} {
+		if got := c.holds(r.off, r.n); got != r.want {
+			t.Errorf("holds(%d, %d) = %v, want %v", r.off, r.n, got, r.want)
+		}
+	}
+}

@@ -6,6 +6,26 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **An estimated frame rate for a Matroska track without DefaultDuration.**
+  Such a track had no `frame_rate` at all. The reader now fits the
+  timestamps of its first blocks to a standard rate (23.976, 24, 25, 29.97,
+  30, 48, 50, 59.94, 60, 100, 119.88, 120): on the grid started at the first
+  frame within a tick, else with 90% of them on one phase of it, a frame to a
+  slot; the multiples of a fitting rate are set aside, and when several
+  rates still fit (24 and 23.976 on a few frames) there is no estimate. It
+  reads nothing more: only the block headers the head read already holds,
+  the first response over HTTP, a Blob window already read in WebAssembly,
+  the read buffer of a local file. `Track.EstimatedFrameRate`; `FrameRate`
+  stays nil, so a remux, a manifest or a written DefaultDuration never
+  takes an estimate. The probe JSON, CLI and WebAssembly, reports it as
+  `frame_rate` with `frame_rate_estimated: true`. Over 497 real Matroska
+  files, the 63 without DefaultDuration probed remotely all get one, equal to
+  the prober's `r_frame_rate`, with the same requests and bytes; probed from
+  the local disk 4 of them do (their first frames sit in the 32 KiB head
+  buffer), and in WebAssembly 23, with the same reads.
+
 ### Changed
 
 - **The read back from the end of a file without SeekHead starts at 64 KiB.**

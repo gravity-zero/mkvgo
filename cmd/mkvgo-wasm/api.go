@@ -154,24 +154,32 @@ func readProbeOpts(args []js.Value, idx int) probeOpts {
 // names, aspect ratios, colour names and the one-word HDR classification.
 type trackJSON struct {
 	matroska.Track
-	CodecLongName       string  `json:"codec_long_name,omitempty"`
-	ChannelLayout       string  `json:"channel_layout,omitempty"`
-	AvgFrameRate        float64 `json:"avg_frame_rate,omitempty"`
-	SampleAspectRatio   string  `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio  string  `json:"display_aspect_ratio,omitempty"`
-	ColorSpaceName      string  `json:"color_space_name,omitempty"`
-	ColorTransferName   string  `json:"color_transfer_name,omitempty"`
-	ColorPrimariesName  string  `json:"color_primaries_name,omitempty"`
-	ColorRangeName      string  `json:"color_range_name,omitempty"`
-	HDRFormat           string  `json:"hdr_format,omitempty"`
-	StereoModeName      string  `json:"stereo_mode_name,omitempty"`
-	ResolvedLanguage    string  `json:"resolved_language,omitempty"`
-	EffectiveSampleRate float64 `json:"effective_sample_rate,omitempty"`
+	// FrameRate is the Track's, else its EstimatedFrameRate with FrameRateEstimated set.
+	FrameRate           *float64 `json:"frame_rate,omitempty"`
+	FrameRateEstimated  bool     `json:"frame_rate_estimated,omitempty"`
+	EstimatedFrameRate  *float64 `json:"estimated_frame_rate,omitempty"` // folded into frame_rate
+	CodecLongName       string   `json:"codec_long_name,omitempty"`
+	ChannelLayout       string   `json:"channel_layout,omitempty"`
+	AvgFrameRate        float64  `json:"avg_frame_rate,omitempty"`
+	SampleAspectRatio   string   `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio  string   `json:"display_aspect_ratio,omitempty"`
+	ColorSpaceName      string   `json:"color_space_name,omitempty"`
+	ColorTransferName   string   `json:"color_transfer_name,omitempty"`
+	ColorPrimariesName  string   `json:"color_primaries_name,omitempty"`
+	ColorRangeName      string   `json:"color_range_name,omitempty"`
+	HDRFormat           string   `json:"hdr_format,omitempty"`
+	StereoModeName      string   `json:"stereo_mode_name,omitempty"`
+	ResolvedLanguage    string   `json:"resolved_language,omitempty"`
+	EffectiveSampleRate float64  `json:"effective_sample_rate,omitempty"`
 }
 
 // trackJSONOf fills every derived field from the Track's methods.
 func trackJSONOf(c *matroska.Container, t matroska.Track) trackJSON {
-	return trackJSON{Track: t,
+	fr, estimated := t.FrameRate, t.FrameRate == nil && t.EstimatedFrameRate != nil
+	if estimated {
+		fr = t.EstimatedFrameRate
+	}
+	return trackJSON{Track: t, FrameRate: fr, FrameRateEstimated: estimated,
 		CodecLongName:       t.CodecLongName(),
 		ChannelLayout:       t.ChannelLayout(),
 		AvgFrameRate:        t.AvgFrameRate(),

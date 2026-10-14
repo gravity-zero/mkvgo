@@ -253,3 +253,77 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 		t.Logf("%s: %d requests, %d bytes of %d", c.name, requests.Load(), served.Load(), len(c.file))
 	}
 }
+
+// noDefaultDurationMKV writes 2 s of a 25 fps video track that declares no frame
+// rate (no DefaultDuration), in two clusters with Cues.
+func noDefaultDurationMKV(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "nodd.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	w, h := uint32(64), uint32(64)
+	m := writer.NewMKVWriter(f)
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}},
+		[]mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "vp9", Width: &w, Height: &h}}, 2000); err != nil {
+		t.Fatal(err)
+	}
+	for c := int64(0); c < 2; c++ {
+		var blocks []mkv.Block
+		for i := int64(0); i < 25; i++ {
+			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: c*1000 + i*40, Keyframe: i == 0, Data: make([]byte, 1000)})
+		}
+		if err := m.WriteClusterWithCues(c*1000, 1_000_000, blocks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestProbeEstimatedFrameRate: a video track without DefaultDuration reports the
+// frame rate its first block timestamps fit, flagged as estimated, from a local
+// file and over HTTP alike, the remote probe making no extra request for it.
+func TestProbeEstimatedFrameRate(t *testing.T) {
+	file := noDefaultDurationMKV(t)
+	path := filepath.Join(t.TempDir(), "nodd.mkv")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.ServeContent(w, r, "f.mkv", time.Time{}, bytes.NewReader(file))
+	}))
+	defer srv.Close()
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	for name, src := range map[string]string{"local": path, "remote": srv.URL + "/f.mkv"} {
+		var got struct {
+			Tracks []struct {
+				FrameRate *float64 `json:"frame_rate"`
+				Estimated bool     `json:"frame_rate_estimated"`
+			} `json:"tracks"`
+		}
+		if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(src) })), &got); err != nil {
+			t.Fatal(err)
+		}
+		if v := got.Tracks[0]; v.FrameRate == nil || *v.FrameRate != 25 || !v.Estimated {
+			t.Errorf("%s: frame_rate %v, frame_rate_estimated %v; want 25, true", name, v.FrameRate, v.Estimated)
+		}
+	}
+	if n := requests.Load(); n > 2 {
+		t.Errorf("the remote probe made %d requests, want 2 (the head, then the Cues)", n)
+	}
+}

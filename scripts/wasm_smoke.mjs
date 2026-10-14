@@ -49,6 +49,18 @@ check(probe.tracks[0].codec_long_name?.length > 0, `derived codec_long_name (${p
     `track without Language: language_present ${v?.language_present}, resolved_language ${v?.resolved_language} (want false, eng)`)
 }
 
+// --- without DefaultDuration the frame rate is estimated from the timestamps the head read holds ---
+{
+  const bytes = new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/sample.mkv')))
+  const at = bytes.findIndex((b, i) => b === 0x23 && bytes[i + 1] === 0xe3 && bytes[i + 2] === 0x83 && bytes[i + 3] === 0x84)
+  bytes.set([0xec, 0x86, 0, 0, 0, 0, 0, 0], at) // DefaultDuration (8 bytes) -> Void
+  for (const [label, input] of [['Uint8Array', bytes], ['Blob', new Blob([bytes])]]) {
+    const v = (await MkvGo.probe(input)).tracks.find((t) => t.type === 'video')
+    check(at > 0 && v.default_duration_ns === undefined && v.frame_rate === 25 && v.frame_rate_estimated === true,
+      `probe(${label}) without DefaultDuration: frame_rate ${v.frame_rate}, frame_rate_estimated ${v.frame_rate_estimated} (want 25, true)`)
+  }
+}
+
 // --- probe (Blob) - the ranged-read path used for large browser files ---
 const probeBlob = await MkvGo.probe(new Blob([mkvBytes]))
 check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.length,

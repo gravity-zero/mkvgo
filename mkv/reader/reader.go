@@ -146,6 +146,8 @@ type parser struct {
 	// It is 0 for the file reader and non-zero only while a tail BUFFER stands
 	// in for it, so a position recorded as an offset in the file stays one.
 	posBase int64
+	// firstCluster is the offset of the first Cluster the Segment walk met, 0 before.
+	firstCluster int64
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -325,6 +327,10 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			}
 			seekOffsets = append(seekOffsets, offs...)
 		case mkv.IDCluster:
+			if p.firstCluster == 0 {
+				p.firstCluster = elemStart
+				p.estimateFrameRates(c, p.pos(), clusterEnd(p.pos(), eh.Size))
+			}
 			// Reaching the media is where a sequential walk gets expensive: the
 			// Cues/Tags/Attachments that sit AFTER the clusters are only found by
 			// reading one header per cluster - thousands on a long file, each a

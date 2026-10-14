@@ -227,6 +227,12 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			}
 			offs.merge(found)
 		case mkv.IDCluster:
+			if p.firstCluster == 0 {
+				p.firstCluster = elemStart
+				if gotTracks && p.skippedPayload < skipToExactReads {
+					p.estimateFrameRates(c, p.pos(), clusterEnd(p.pos(), eh.Size))
+				}
+			}
 			// Media reached. If Info/Tracks are still missing, the only cheap way
 			// to get them is a SeekHead jump; otherwise skip this cluster and keep
 			// scanning (rare: head metadata after the first cluster, no SeekHead).
@@ -287,9 +293,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 // headWantsMore reports whether an element the caller asked for is still missing,
 // so the head scan must keep going to the first Cluster rather than stop at
 // Info+Tracks. Callers that asked for nothing extra (the plain metadata probe)
-// always stop early, exactly as before.
+// stop early, unless a video track without DefaultDuration needs the first
+// cluster's timestamps and the next header is already held.
 func (p *parser) headWantsMore(c *mkv.Container, o readOpts) bool {
-	return (o.cues && len(c.Cues) == 0) ||
+	return p.wantsFrameRate(c) || (o.cues && len(c.Cues) == 0) ||
 		((o.tags || o.bitrate) && c.Tags == nil) ||
 		(o.chapters && c.Chapters == nil) ||
 		(o.attachments && c.Attachments == nil)

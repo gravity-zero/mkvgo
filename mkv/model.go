@@ -228,6 +228,8 @@ type Track struct {
 	// codec bitstream (H.264/HEVC SPS VUI, AV1 color_config, VP9 vpcC) when the
 	// container Colour element is absent - the container value still wins per field.
 	FrameRate *float64 `json:"frame_rate,omitempty"` // from DefaultDuration (0x23E383): 1e9/ns
+	// EstimatedFrameRate is the standard rate the first block timestamps fit when DefaultDuration is absent, from the bytes the head read already holds; nil when they fit none or more than one.
+	EstimatedFrameRate *float64 `json:"estimated_frame_rate,omitempty"`
 	// DefaultDurationNs is the raw DefaultDuration (0x23E383) in nanoseconds, kept
 	// for every track type: video derives FrameRate from it, and audio needs it to
 	// time the frames of a laced block (which share a single stored timecode -

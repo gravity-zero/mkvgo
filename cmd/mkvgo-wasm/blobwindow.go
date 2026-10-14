@@ -66,3 +66,13 @@ func (c *blobCache) read(p []byte, pos, size int64, fetch func(dst []byte, off i
 	w.used = c.tick
 	return copy(p, w.buf[pos-w.off:]), nil
 }
+
+// holds reports whether one window already read covers n bytes at off.
+func (c *blobCache) holds(off, n int64) bool {
+	for _, w := range c.wins {
+		if off >= w.off && off+n <= w.off+int64(len(w.buf)) {
+			return true
+		}
+	}
+	return false
+}

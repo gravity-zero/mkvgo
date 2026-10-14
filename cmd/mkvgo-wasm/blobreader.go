@@ -68,6 +68,9 @@ func (r *blobReader) ReadAt(p []byte, off int64) (int, error) {
 	return len(buf), nil
 }
 
+// Free reports whether n bytes at off lie in a window already read, so reading them costs no Blob read.
+func (r *blobReader) Free(off, n int64) bool { return r.cache.holds(off, n) }
+
 // Close satisfies mkv.ReadSeekCloser; a Blob slice holds no OS resource.
 func (r *blobReader) Close() error { return nil }
 
