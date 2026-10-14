@@ -51,6 +51,18 @@ All notable changes to mkvgo are documented here. The format is based on
   80 ms. Locally (page cache), audio p50 0.56 to 0.44 ms. The bytes served are
   unchanged.
 
+### Fixed
+
+- **The channel count of an AAC track whose layout is in a program config
+  element.** An AudioSpecificConfig with `channelConfiguration` 0 describes
+  its channels in a program_config_element, which was not read: an MP4 track
+  kept its sample entry's count (2) and a Matroska track without a Channels
+  element had none. The element is now walked and its channels counted (one
+  per single channel or LFE element, two per channel pair), and a trailing SBR
+  extension after it is still found. Nine conformance files that read 2 now
+  read 1, 3, 6 or 8, as decoded. Parametric Stereo signalled only in the audio
+  frames stays invisible from the header (a mono core reads 1).
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

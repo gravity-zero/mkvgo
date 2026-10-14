@@ -80,7 +80,8 @@ func ParseAACConfig(asc []byte) AACConfig {
 	// GASpecificConfig. Mainstream decoders only look for it when SBR was not
 	// already signalled explicitly, so walk the GASpecificConfig to position the
 	// reader, then probe.
-	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc, &c.FrameLength) {
+	var pceChannels uint8
+	if !explicitExt && isGAObjectType(aot) && skipGASpecificConfig(r, aot, cc, &c.FrameLength, &pceChannels) {
 		if bitsLeft(r) >= 16 && r.bits(11) == 0x2b7 { // syncExtensionType: SBR
 			if getAudioObjectType(r) == 5 && r.bits(1) == 1 { // ext AOT SBR + sbrPresentFlag
 				c.SBR = true
@@ -99,6 +100,12 @@ func ParseAACConfig(asc []byte) AACConfig {
 	c.SampleRate = baseRate
 	c.OutputRate = outputRate
 	c.Channels = aacChannelsFrom(cc, c.PS)
+	if cc == 0 && !r.err {
+		c.Channels = pceChannels
+		if c.PS && c.Channels == 1 {
+			c.Channels = 2
+		}
+	}
 	c.Profile = aacProfileName(c.CoreObjectType, c.SBR, c.PS)
 	return c
 }
@@ -178,13 +185,11 @@ func isGAObjectType(aot uint32) bool {
 }
 
 // skipGASpecificConfig advances r past a GASpecificConfig (ISO/IEC 14496-3
-// §4.4.1) so the reader is positioned at any trailing sync extension. It returns
-// false - and leaves the position unusable - when the layout cannot be walked
-// (a program config element) or the buffer runs out.
-func skipGASpecificConfig(r *bitReader, aot, cc uint32, frameLength *uint32) bool {
-	if cc == 0 {
-		return false // program_config_element: not walked
-	}
+// §4.4.1) so the reader is positioned at any trailing sync extension, the
+// channels of a channelConfiguration 0 counted from its program_config_element
+// into pceChannels. It returns false - and leaves the position unusable - when
+// the buffer runs out.
+func skipGASpecificConfig(r *bitReader, aot, cc uint32, frameLength *uint32, pceChannels *uint8) bool {
 	if r.bits(1) == 1 { // frameLengthFlag: 960-sample frames
 		*frameLength = 960
 	}
@@ -192,6 +197,9 @@ func skipGASpecificConfig(r *bitReader, aot, cc uint32, frameLength *uint32) boo
 		r.bits(14) // coreCoderDelay
 	}
 	extensionFlag := r.bits(1)
+	if cc == 0 {
+		*pceChannels = pceChannelCount(r)
+	}
 	if aot == 6 || aot == 20 {
 		r.bits(3) // layerNr
 	}
@@ -205,6 +213,43 @@ func skipGASpecificConfig(r *bitReader, aot, cc uint32, frameLength *uint32) boo
 		r.bits(1) // extensionFlag3
 	}
 	return !r.err
+}
+
+// pceChannelCount walks a program_config_element (ISO/IEC 14496-3 §4.4.1.1)
+// and counts its channels: one per single channel or LFE element, two per
+// channel pair. Its byte alignment is relative to the AudioSpecificConfig's start.
+func pceChannelCount(r *bitReader) uint8 {
+	r.bits(4 + 2 + 4) // element_instance_tag, object_type, sampling_frequency_index
+	front, side, back := r.bits(4), r.bits(4), r.bits(4)
+	lfe, assoc, cc := r.bits(2), r.bits(3), r.bits(4)
+	for range 2 { // mono, then stereo mixdown
+		if r.bits(1) == 1 {
+			r.bits(4)
+		}
+	}
+	if r.bits(1) == 1 { // matrix_mixdown_idx_present
+		r.bits(2 + 1)
+	}
+	ch := lfe
+	for range front + side + back {
+		ch += 1 + r.bits(1) // is_cpe
+		r.bits(4)           // element_tag_select
+	}
+	skipBits(r, int(4*lfe+4*assoc+5*cc)) // tag selects; cc_element_is_ind_sw
+	skipBits(r, (8-r.pos%8)%8)           // byte_alignment
+	skipBits(r, 8*int(r.bits(8)))        // comment_field_bytes, then the comment
+	if r.err || ch > 255 {
+		return 0
+	}
+	return uint8(ch)
+}
+
+// skipBits advances r by n bits, flagging a read past the end.
+func skipBits(r *bitReader, n int) {
+	r.pos += n
+	if r.pos > len(r.data)*8 {
+		r.err = true
+	}
 }
 
 func isAACCodec(codec string) bool {

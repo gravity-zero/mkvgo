@@ -162,10 +162,10 @@ func TestReadSamplingFrequencyExplicit(t *testing.T) {
 // layerNr, extensionFlag+aot=22 (numOfSubFrame/layer_length), and
 // extensionFlag+aot=17 (resilience flags) branches.
 func TestSkipGASpecificConfigPaths(t *testing.T) {
-	// cc=0 → false immediately (program_config_element).
+	// cc=0 on an empty buffer → false: the program_config_element runs out.
 	{
 		r := &bitReader{data: []byte{}}
-		if got := skipGASpecificConfig(r, 2, 0, new(uint32)); got {
+		if got := skipGASpecificConfig(r, 2, 0, new(uint32), new(uint8)); got {
 			t.Error("cc=0: want false")
 		}
 	}
@@ -177,7 +177,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 14) // coreCoderDelay
 		bw.write(0, 1)  // extensionFlag=0
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 2, 2, new(uint32)); !got {
+		if got := skipGASpecificConfig(r, 2, 2, new(uint32), new(uint8)); !got {
 			t.Error("dependsOnCoreCoder=1: want true")
 		}
 	}
@@ -189,7 +189,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 1) // extensionFlag=0
 		bw.write(0, 3) // layerNr
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 6, 2, new(uint32)); !got {
+		if got := skipGASpecificConfig(r, 6, 2, new(uint32), new(uint8)); !got {
 			t.Error("aot=6 (layerNr): want true")
 		}
 	}
@@ -203,7 +203,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 11) // layer_length
 		bw.write(0, 1)  // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 22, 2, new(uint32)); !got {
+		if got := skipGASpecificConfig(r, 22, 2, new(uint32), new(uint8)); !got {
 			t.Error("aot=22 extensionFlag=1: want true")
 		}
 	}
@@ -216,7 +216,7 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 3) // section/scalefactor/spectral data resilience flags
 		bw.write(0, 1) // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 17, 2, new(uint32)); !got {
+		if got := skipGASpecificConfig(r, 17, 2, new(uint32), new(uint8)); !got {
 			t.Error("aot=17 extensionFlag=1: want true")
 		}
 	}
@@ -232,9 +232,73 @@ func TestSkipGASpecificConfigPaths(t *testing.T) {
 		bw.write(0, 3) // resilience flags
 		bw.write(0, 1) // extensionFlag3
 		r := &bitReader{data: bw.bytes()}
-		if got := skipGASpecificConfig(r, 20, 2, new(uint32)); !got {
+		if got := skipGASpecificConfig(r, 20, 2, new(uint32), new(uint8)); !got {
 			t.Error("aot=20 extensionFlag=1: want true")
 		}
+	}
+}
+
+// pceASC is an AAC-LC 48 kHz AudioSpecificConfig with channelConfiguration 0
+// and a program_config_element: front SCE + CPE + CPE, back CPE, one LFE (8
+// channels), byte-aligned, a 3-byte comment, then a trailing SBR sync extension.
+func pceASC() []byte {
+	var bw bitWriter
+	bw.write(2, 5) // audioObjectType: AAC LC
+	bw.write(3, 4) // samplingFrequencyIndex: 48000
+	bw.write(0, 4) // channelConfiguration: in the PCE
+	bw.write(0, 1) // frameLengthFlag
+	bw.write(0, 1) // dependsOnCoreCoder
+	bw.write(0, 1) // extensionFlag
+	bw.write(0, 4) // element_instance_tag
+	bw.write(1, 2) // object_type
+	bw.write(3, 4) // sampling_frequency_index
+	bw.write(3, 4) // num_front_channel_elements
+	bw.write(0, 4) // num_side_channel_elements
+	bw.write(1, 4) // num_back_channel_elements
+	bw.write(1, 2) // num_lfe_channel_elements
+	bw.write(1, 3) // num_assoc_data_elements
+	bw.write(1, 4) // num_valid_cc_elements
+	bw.write(1, 1) // mono_mixdown_present
+	bw.write(0, 4) // mono_mixdown_element_number
+	bw.write(0, 1) // stereo_mixdown_present
+	bw.write(1, 1) // matrix_mixdown_idx_present
+	bw.write(0, 3) // matrix_mixdown_idx + pseudo_surround_enable
+	for i, cpe := range []uint32{0, 1, 1} {
+		bw.write(cpe, 1)       // front_element_is_cpe
+		bw.write(uint32(i), 4) // front_element_tag_select
+	}
+	bw.write(1, 1) // back_element_is_cpe
+	bw.write(2, 4) // back_element_tag_select
+	bw.write(0, 4) // lfe_element_tag_select
+	bw.write(0, 4) // assoc_data_element_tag_select
+	bw.write(0, 5) // cc_element_is_ind_sw + valid_cc_element_tag_select
+	for bw.nbits != 0 {
+		bw.write(0, 1) // byte_alignment
+	}
+	bw.write(3, 8) // comment_field_bytes
+	for _, c := range []byte("abc") {
+		bw.write(uint32(c), 8)
+	}
+	bw.write(0x2b7, 11) // syncExtensionType: SBR
+	bw.write(5, 5)      // extensionAudioObjectType
+	bw.write(1, 1)      // sbrPresentFlag
+	bw.write(0, 4)      // extensionSamplingFrequencyIndex: 96000
+	return bw.bytes()
+}
+
+// The channel count of channelConfiguration 0 is the program_config_element's,
+// and the walk resumes behind it: the trailing SBR extension is still found.
+func TestParseAACConfigProgramConfigElement(t *testing.T) {
+	c := ParseAACConfig(pceASC())
+	if c.Channels != 8 {
+		t.Errorf("channels = %d, want 8 (front SCE+CPE+CPE, back CPE, LFE)", c.Channels)
+	}
+	if !c.SBR || c.OutputRate != 96000 || c.SampleRate != 48000 {
+		t.Errorf("SBR %v, rates %v/%v, want the extension read behind the PCE (96000 over 48000)", c.SBR, c.OutputRate, c.SampleRate)
+	}
+	asc := pceASC()
+	if got := ParseAACConfig(asc[:4]).Channels; got != 0 {
+		t.Errorf("truncated PCE: channels = %d, want 0 (unknown)", got)
 	}
 }
 
