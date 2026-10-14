@@ -34,6 +34,10 @@ export interface Track {
   language?: string
   language_bcp47?: string
   name?: string
+  /** An MP4 track's hdlr name, often a muxer default ("SoundHandler"); never taken as name when it is one. */
+  handler_name?: string
+  /** True when the file stores a Language or LanguageBCP47 element. */
+  language_present?: boolean
   is_default: boolean
   is_forced: boolean
   width?: number
@@ -47,7 +51,10 @@ export interface Track {
   video_bit_depth?: number
   codec_delay?: number
   seek_pre_roll?: number
+  /** From DefaultDuration; or, when frame_rate_estimated, the rate fitted to the first block timestamps or the statistics tags. */
   frame_rate?: number
+  /** True when frame_rate is an estimate (a Matroska track without DefaultDuration). */
+  frame_rate_estimated?: boolean
   frame_count?: number
   duration_ms?: number
   bitrate?: number
@@ -86,7 +93,7 @@ export interface Track {
    */
   hdr_format?: string
   stereo_mode_name?: string
-  /** The track's effective language (BCP-47 when present, else the legacy tag). */
+  /** The track's effective language (BCP-47 when present, else the legacy tag; "eng" for a Matroska/WebM track that stores neither, with language_present false). */
   resolved_language?: string
   /** Remaining probe fields; see docs/library.md for the full Track reference. */
   [key: string]: unknown

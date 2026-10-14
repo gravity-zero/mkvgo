@@ -92,6 +92,9 @@ reported keyframes, now 493 (the 4 others have no Cues).
   what only the container knows (`mov_text` for an MP4 timed-text track).
   `Track.FFprobeCodecName()` is unchanged.
 
+- **The TypeScript `Track` type** (`web/mkvgo.ts`) has `frame_rate_estimated`,
+  `handler_name` and `language_present`.
+
 ### Changed
 
 - **`resolved_language` is "eng" for a Matroska track that stores no
