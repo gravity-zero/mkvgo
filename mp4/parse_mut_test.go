@@ -717,6 +717,15 @@ func TestParseTrakGenericHandlerNames(t *testing.T) {
 		"Mainconcept MP4 Sound Media Handler":                             "",
 		"Core Media Text":                                                 "",
 		"Commentary":                                                      "Commentary",
+		"text":                                                            "",
+		"VideoHandle":                                                     "",
+		"\x07":                                                            "",
+		"ISO Media file produced by Google Inc.":                          "",
+		"Ambarella AVC":                                                   "",
+		"Video":                                                           "",
+		"Stereo":                                                          "Stereo",
+		"VFF E-AC3 5.1 @640kbps":                                          "VFF E-AC3 5.1 @640kbps",
+		"French AAC 5.1":                                                  "French AAC 5.1",
 	} {
 		trak := craftMinimalSubtitleTrak(1, 0, "")
 		at := bytes.Index(trak, []byte("hdlr")) - 4

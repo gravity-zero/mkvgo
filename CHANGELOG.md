@@ -8,6 +8,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **More MP4 default handler names are not titles.** The `hdlr` names that
+  are a muxer's default are now told by rule instead of by list: a control
+  character, the track type's fourcc (`soun`), a `Handler` or `Handle`
+  suffix, a single word tagged with `@` or `#` (`srt@GPAC...`), a bare media
+  word (`Video`), a known tool name (GPAC, L-SMASH, Mainconcept, Core Media,
+  Ambarella, "ISO Media file produced by"). A title with spaces stays a
+  title (`VFF E-AC3 5.1 @640kbps`, written by HandBrake). On 460 test and 9
+  real MP4 files, 52 more tracks lose a default name as their title; the
+  HandBrake titles are kept.
+
 - **The bit depth of an HEVC track whose hvcC header contradicts it.** Some
   muxers write a Main 10 hvcC whose header says 8 bits over a 10-bit stream;
   mkvgo reported 8 bits and `yuv420p` next to the "Main 10" profile. The

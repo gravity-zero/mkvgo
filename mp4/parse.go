@@ -155,15 +155,35 @@ func iterBoxes(buf []byte) ([]memBox, error) {
 	return out, nil
 }
 
-// genericHandlerName reports whether an hdlr name is a muxer's default (any case of "handler", a GPAC, L-SMASH, Mainconcept or Core Media tag) rather than a track name.
-func genericHandlerName(s string) bool {
-	l := strings.ToLower(s)
-	for _, tag := range []string{"handler", "gpac", "l-smash", "mainconcept", "core media"} {
-		if strings.Contains(l, tag) {
+// genericHandlerName reports whether an hdlr name is a muxer's default rather than a track title: by rule, not by a list of names.
+func genericHandlerName(s, handlerType string) bool {
+	if strings.TrimSpace(s) == "" {
+		return true
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f { // a control character, a leftover length byte
 			return true
 		}
 	}
-	return s == ""
+	l := strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case l == strings.ToLower(handlerType): // the track type's fourcc: "soun", "vide"
+		return true
+	case strings.HasSuffix(l, "handler"), strings.HasSuffix(l, "handle"):
+		return true
+	case !strings.ContainsAny(l, " \t") && strings.ContainsAny(l, "@#"): // one token tagged with a tool: "srt@GPAC..."
+		return true
+	}
+	switch l {
+	case "video", "audio", "sound", "subtitle", "subtitles", "text", "timed text":
+		return true
+	}
+	for _, tool := range []string{"gpac", "l-smash", "mainconcept", "core media", "ambarella", "iso media file produced by"} {
+		if strings.Contains(l, tool) {
+			return true
+		}
+	}
+	return false
 }
 
 func findMemBox(boxes []memBox, typ string) (memBox, bool) {
@@ -1186,7 +1206,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		if n := tr.handlerName; len(n) > 1 && int(n[0]) == len(n)-1 { // a QuickTime Pascal string: length byte first
 			tr.handlerName = n[1:]
 		}
-		if tr.name == "" && !genericHandlerName(tr.handlerName) {
+		if tr.name == "" && !genericHandlerName(tr.handlerName, string(hdlr.payload[8:12])) {
 			tr.name = tr.handlerName
 		}
 	}
