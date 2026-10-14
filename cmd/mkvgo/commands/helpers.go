@@ -385,19 +385,20 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 	out := make([]trackJSON, len(c.Tracks))
 	for i, t := range c.Tracks {
 		out[i] = trackJSON{Track: t,
-			CodecName:          c.TrackCodecName(&t),
-			CodecLongName:      t.CodecLongName(),
-			ChannelLayout:      t.ChannelLayout(),
-			AvgFrameRate:       t.AvgFrameRate(),
-			SampleAspectRatio:  t.SampleAspectRatio(),
-			DisplayAspectRatio: t.DisplayAspectRatio(),
-			ColorSpaceName:     t.ColorSpaceName(),
-			ColorTransferName:  t.ColorTransferName(),
-			ColorPrimariesName: t.ColorPrimariesName(),
-			ColorRangeName:     t.ColorRangeName(),
-			HDRFormat:          t.HDRFormat(),
-			StereoModeName:     t.StereoModeName(),
-			ResolvedLanguage:   c.TrackLanguage(&t),
+			CodecName:           c.TrackCodecName(&t),
+			CodecLongName:       t.CodecLongName(),
+			ChannelLayout:       t.ChannelLayout(),
+			AvgFrameRate:        t.AvgFrameRate(),
+			SampleAspectRatio:   t.SampleAspectRatio(),
+			DisplayAspectRatio:  t.DisplayAspectRatio(),
+			ColorSpaceName:      t.ColorSpaceName(),
+			ColorTransferName:   t.ColorTransferName(),
+			ColorPrimariesName:  t.ColorPrimariesName(),
+			ColorRangeName:      t.ColorRangeName(),
+			HDRFormat:           t.HDRFormat(),
+			StereoModeName:      t.StereoModeName(),
+			ResolvedLanguage:    c.TrackLanguage(&t),
+			EffectiveSampleRate: t.EffectiveSampleRate(),
 		}
 		out[i].FrameRate, out[i].FrameRateEstimated = t.FrameRate, t.FrameRate == nil && t.EstimatedFrameRate != nil
 		if out[i].FrameRateEstimated {

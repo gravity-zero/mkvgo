@@ -8,6 +8,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The CLI JSON carries `effective_sample_rate`.** `probe -json` and
+  `tracks -json` declared the decoder's rate (the SBR output rate of an
+  HE-AAC track) but never filled it; the WebAssembly probe did. Of 7,765
+  real and test files, 446 have an HE-AAC track whose JSON gave only the
+  core rate (24 kHz for 48 kHz).
+
 - **A local probe no longer walks the file when a SeekHead at its end
   indexes the Clusters (a regression of 0.50.0).** The full read goes back
   for the elements a SeekHead at the end of the file indexes before itself;

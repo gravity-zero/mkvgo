@@ -387,3 +387,25 @@ func TestCmdProbeJSONMovTextCodecName(t *testing.T) {
 		}
 	}
 }
+
+// TestCmdProbeJSONEffectiveSampleRate: the JSON carries the rate a decoder
+// produces, the SBR output rate of an HE-AAC track, as the WebAssembly probe does.
+func TestCmdProbeJSONEffectiveSampleRate(t *testing.T) {
+	path := writeMKV(t, &matroska.Container{Info: matroska.SegmentInfo{TimecodeScale: 1_000_000}, Tracks: []matroska.Track{
+		{ID: 1, Type: matroska.AudioTrack, Codec: "aac", SampleRate: ptrF64(24000), OutputSampleRate: ptrF64(48000), Channels: ptrU8(2)},
+	}})
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	var got struct {
+		Tracks []struct {
+			SampleRate float64 `json:"sample_rate"`
+			Effective  float64 `json:"effective_sample_rate"`
+		} `json:"tracks"`
+	}
+	if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(path) })), &got); err != nil {
+		t.Fatal(err)
+	}
+	if a := got.Tracks[0]; a.SampleRate != 24000 || a.Effective != 48000 {
+		t.Errorf("sample_rate %v, effective_sample_rate %v; want 24000 and 48000", a.SampleRate, a.Effective)
+	}
+}
