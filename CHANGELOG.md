@@ -31,6 +31,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **The local probe no longer reads attachment payloads.** `probe`, `info`,
+  `tracks`, `attachments`, `tags` and `chapters` on a local Matroska file
+  read every attachment whole to list it; they now leave the payloads on
+  disk (the list, sizes and names are unchanged). On 7,714 real and test
+  files, 76 read more than 2 MiB per probe because of a cover of up to
+  19 MB.
+
 - **Chapter editions are no longer mixed into one list.** A Matroska file
   with several chapter editions had all their chapters in
   `Container.Chapters`, and `to-mp4` wrote them all into the MP4, two lists

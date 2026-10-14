@@ -267,7 +267,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	// are actually ISO base media (a .mkv that is really an MP4/MOV - mislabeled
 	// rips happen), route to the mp4 reader transparently instead of failing
 	// with a cryptic EBML error.
-	c, err := matroska.Open(context.Background(), path, globalReadOptions()...)
+	c, err := matroska.Open(context.Background(), path, append(globalReadOptions(), matroska.WithoutAttachmentData())...) // the listing, not the payloads
 	if err != nil {
 		if errors.Is(err, matroska.ErrNotMatroska) {
 			return loadMP4Meta(path, keyframes)
