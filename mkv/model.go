@@ -358,7 +358,9 @@ type MasteringDisplay struct {
 //
 // The two elements use different vocabularies: BCP47 is e.g. "fr" / "pt-BR",
 // the legacy element is ISO 639-2 e.g. "fre" / "por". mkvgo returns the raw
-// stored value; a consumer normalizing to one scheme must convert.
+// stored value; a consumer normalizing to one scheme must convert. It does not
+// apply the Matroska "eng" default (Container.TrackLanguage does): the HLS and
+// DASH manifests use it, so a track that states no language gets none.
 func (t *Track) ResolvedLanguage() string {
 	if t.LanguageBCP47 != "" {
 		return t.LanguageBCP47
