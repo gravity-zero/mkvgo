@@ -207,3 +207,45 @@ func TestReadBacksUpOnceWithoutRereading(t *testing.T) {
 		t.Errorf("found %d cues and %d tags, want 50 and 1", len(c.Cues), len(c.Tags))
 	}
 }
+
+// readCounter counts the Read calls a source receives.
+type readCounter struct {
+	*bytes.Reader
+	calls int
+}
+
+func (r *readCounter) Read(p []byte) (int, error) { r.calls++; return r.Reader.Read(p) }
+
+// TestReadIgnoresClustersATailSeekHeadIndexes: a SeekHead at the end of the
+// file that indexes every Cluster (as older muxers wrote it) does not send the
+// full read back to the second cluster: it reads the tail, in a few calls.
+func TestReadIgnoresClustersATailSeekHeadIndexes(t *testing.T) {
+	rng := rand.New(rand.NewSource(6))
+	info, tracks := infoElem(), tracksElem()
+	headSH := func(cues, sh uint64) []byte {
+		return seekHeadElem(seekEntry(mkv.IDCues, cues), seekEntry(mkv.IDSeekHead, sh))
+	}
+	start := uint64(len(headSH(0, 0)) + len(info) + len(tracks))
+	var clusters []byte
+	var entries [][]byte
+	for i := 0; i < 3000; i++ {
+		entries = append(entries, seekEntry(mkv.IDCluster, start+uint64(len(clusters))))
+		clusters = append(clusters, mediaCluster(rng, 4<<10)...)
+	}
+	cues, tags := cuesElem(50), tagsElem("BPS", "24494738")
+	cuesPos := start + uint64(len(clusters))
+	tailSH := seekHeadElem(append(entries, seekEntry(mkv.IDCues, cuesPos), seekEntry(mkv.IDTags, cuesPos+uint64(len(cues))))...)
+	data := segmentMKV(headSH(cuesPos, cuesPos+uint64(len(cues)+len(tags))), info, tracks, clusters, cues, tags, tailSH)
+	src := &readCounter{Reader: bytes.NewReader(data)}
+	c, err := Read(context.Background(), src, "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Cues) != 50 || len(c.Tags) != 1 {
+		t.Errorf("found %d cues and %d tags, want 50 and 1", len(c.Cues), len(c.Tags))
+	}
+	if src.calls > 40 {
+		t.Errorf("%d read calls for a %d-byte file, want at most 40: the read walked the clusters", src.calls, len(data))
+	}
+	t.Logf("%d read calls", src.calls)
+}

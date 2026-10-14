@@ -332,14 +332,14 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
 		case mkv.IDSeekHead:
-			offs, err := p.parseSeekHeadOffsets(eh.Size, segStart, endPos)
+			offs, meta, err := p.parseSeekHeadRefs(eh.Size, segStart, endPos)
 			if err != nil {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
 			seekOffsets = append(seekOffsets, offs...)
 			// A SeekHead reached by the jump past the clusters may index elements
-			// written before it (Cues, Tags, then this SeekHead): go back for them once.
-			if back, ok := minOffsetAtOrAfter(offs, p.firstCluster+1); jumpedToTail && !backedUp && ok && back < walkedFrom {
+			// written before it (Cues, Tags, then this SeekHead): go back for them once, never for a Cluster.
+			if back, ok := minOffsetAtOrAfter(meta, p.firstCluster+1); jumpedToTail && !backedUp && ok && back < walkedFrom {
 				valid, err := p.offsetIsSegmentElement(back)
 				if err != nil {
 					return err
@@ -464,30 +464,30 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	return nil
 }
 
-// parseSeekHeadOffsets reads a SeekHead and returns the absolute file offset of
+// parseSeekHeadRefs reads a SeekHead and returns the absolute file offset of
 // every element it references (Info, Tracks, Cues, Tags, a nested SeekHead, …),
 // reusing parseSeekEntry. SeekPosition is relative to the Segment data start
 // (segStart). Entries that fall outside [segStart, endPos) are dropped.
-func (p *parser) parseSeekHeadOffsets(size, segStart, endPos int64) ([]int64, error) {
-	var offs []int64
+// meta holds apart the offsets of the Cues, Tags, Chapters and Attachments, the elements a read goes back for.
+func (p *parser) parseSeekHeadRefs(size, segStart, endPos int64) (offs, meta []int64, err error) {
 	end := p.pos() + size
 	for p.pos() < end {
 		eh, _, e := p.readHeader()
 		if e != nil {
-			return offs, e
+			return offs, meta, e
 		}
 		if eh.ID != mkv.IDSeek {
 			if eh.Size < 0 {
-				return offs, nil
+				return offs, meta, nil
 			}
 			if e := p.skip(eh.Size); e != nil {
-				return offs, e
+				return offs, meta, e
 			}
 			continue
 		}
-		_, pos, ok, e := p.parseSeekEntry(eh.Size)
+		id, pos, ok, e := p.parseSeekEntry(eh.Size)
 		if e != nil {
-			return offs, e
+			return offs, meta, e
 		}
 		if !ok {
 			continue
@@ -497,8 +497,12 @@ func (p *parser) parseSeekHeadOffsets(size, segStart, endPos int64) ([]int64, er
 			continue // out-of-range or overflowed (huge SeekPosition) entry
 		}
 		offs = append(offs, abs)
+		switch id {
+		case mkv.IDCues, mkv.IDTags, mkv.IDChapters, mkv.IDAttachments:
+			meta = append(meta, abs)
+		}
 	}
-	return offs, nil
+	return offs, meta, nil
 }
 
 // minOffsetAtOrAfter returns the smallest offset in offs that is >= floor - the

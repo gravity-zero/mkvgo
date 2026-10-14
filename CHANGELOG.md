@@ -6,6 +6,19 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **A local probe no longer walks the file when a SeekHead at its end
+  indexes the Clusters (a regression of 0.50.0).** The full read goes back
+  for the elements a SeekHead at the end of the file indexes before itself;
+  older muxers list every Cluster in that SeekHead, and the read went back
+  to the second cluster and walked them all, a few bytes per read: on 51 of
+  7,297 files of a network share, 0.04 s became 1 to 60 s (70,625 reads for
+  371 KiB on one of them). It now goes back only for Cues, Tags, Chapters
+  and Attachments. On those 51 files: median 0.048 s, no probe over 0.32 s,
+  keyframes equal to 0.49.0's. `OpenMeta`, the remote probe and WebAssembly
+  were not affected.
+
 ## [0.50.0] - 2026-10-14
 
 Measured on 497 real Matroska files (the remote probe served over HTTP with a
