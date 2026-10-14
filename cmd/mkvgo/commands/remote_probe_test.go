@@ -256,8 +256,11 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 }
 
 // noDefaultDurationMKV writes 2 s of a 25 fps video track that declares no frame
-// rate (no DefaultDuration), in two clusters with Cues.
-func noDefaultDurationMKV(t *testing.T) []byte {
+// rate (no DefaultDuration), in two clusters with Cues, frames of 1000 bytes.
+func noDefaultDurationMKV(t *testing.T) []byte { return noDefaultDurationMKVOf(t, 1000) }
+
+// noDefaultDurationMKVOf is noDefaultDurationMKV with frames of size bytes.
+func noDefaultDurationMKVOf(t *testing.T, size int) []byte {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "nodd.mkv")
 	f, err := os.Create(path)
@@ -277,7 +280,7 @@ func noDefaultDurationMKV(t *testing.T) []byte {
 	for c := int64(0); c < 2; c++ {
 		var blocks []mkv.Block
 		for i := int64(0); i < 25; i++ {
-			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: c*1000 + i*40, Keyframe: i == 0, Data: make([]byte, 1000)})
+			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: c*1000 + i*40, Keyframe: i == 0, Data: make([]byte, size)})
 		}
 		if err := m.WriteClusterWithCues(c*1000, 1_000_000, blocks); err != nil {
 			t.Fatal(err)
@@ -380,6 +383,31 @@ func TestRemoteKeyframesMatchLocal(t *testing.T) {
 		srv.Close()
 		if len(local) == 0 || fmt.Sprint(local) != fmt.Sprint(remote) {
 			t.Errorf("%s: %d local keyframes, %d remote; want the same, not none", name, len(local), len(remote))
+		}
+	}
+}
+
+// TestProbeFrameRateReadsFlag: frames past the head buffer give no estimate
+// locally by default; -fps-reads lets the probe read their headers.
+func TestProbeFrameRateReadsFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.mkv")
+	if err := os.WriteFile(path, noDefaultDurationMKVOf(t, 40<<10), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput, commands.FrameRateReads = false, false })
+	for _, reads := range []bool{false, true} {
+		commands.FrameRateReads = reads
+		var got struct {
+			Tracks []struct {
+				FrameRate *float64 `json:"frame_rate"`
+			} `json:"tracks"`
+		}
+		if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(path) })), &got); err != nil {
+			t.Fatal(err)
+		}
+		if fr := got.Tracks[0].FrameRate; (fr != nil) != reads || reads && *fr != 25 {
+			t.Errorf("-fps-reads %v: frame_rate %v, want it %v (25)", reads, fr, reads)
 		}
 	}
 }

@@ -50,7 +50,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path}
+	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path, rateReads: o.frameRateReads}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(c); err != nil {
@@ -149,6 +149,8 @@ type parser struct {
 	posBase int64
 	// firstCluster is the offset of the first Cluster the Segment walk met, 0 before.
 	firstCluster int64
+	// rateReads lets the frame-rate estimate read what the source does not hold (WithFrameRateReads).
+	rateReads bool
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /

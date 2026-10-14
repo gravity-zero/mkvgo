@@ -36,6 +36,18 @@ All notable changes to mkvgo are documented here. The format is based on
   real files without DefaultDuration, 12 now get a frame rate (4 before),
   each equal to the prober's.
 
+- **`WithFrameRateReads` and `-fps-reads`: the frame-rate estimate may read
+  what it needs.** Off by default, the estimate uses only the bytes the head
+  read holds and the statistics tags: on a local file the head buffer is
+  32 KiB and seldom holds enough frames. With the option (CLI `-fps-reads`
+  on `info`, `tracks`, `probe`), it reads the block headers it needs in the
+  first 512 KiB, one exact 32-byte read (`io.ReaderAt`) each. On 63 real
+  files without DefaultDuration, copied to a local ext4 disk: 12 estimated
+  by default, 63 with the option, each equal to the prober's; about 126
+  more reads (4 KiB) per file; median probe 5.0 ms, 7.8 ms with the option,
+  page cache dropped per file (4.5 ms both when cached). Over HTTP each of
+  those reads is a request.
+
 ### Changed
 
 - **The read back from the end of a file without SeekHead starts at 64 KiB.**

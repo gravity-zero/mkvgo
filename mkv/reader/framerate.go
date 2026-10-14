@@ -128,7 +128,10 @@ func (p *parser) collectBlockTimes(pos, end int64, want map[uint64][]int64) {
 func (p *parser) peekAt(off int64, buf []byte) []byte {
 	b, ok := p.r.(*bufReadSeeker)
 	if !ok {
-		if !freeAt(p.r, off, int64(len(buf))) || !p.forwardTo(off) {
+		if !freeAt(p.r, off, int64(len(buf))) {
+			return p.exactAt(p.r, off, buf)
+		}
+		if !p.forwardTo(off) {
 			return nil
 		}
 		n, _ := io.ReadFull(p.r, buf)
@@ -140,6 +143,9 @@ func (p *parser) peekAt(off int64, buf []byte) []byte {
 	if in := off - b.off; in < int64(b.br.Buffered()) { // in the buffer, or straddling its end: the read continues forward
 		end := b.off + int64(b.br.Buffered())
 		if off+int64(len(buf)) > end && !freeAt(b.rs, end, off+int64(len(buf))-end) {
+			if d := p.exactAt(b.rs, off, buf); d != nil {
+				return d
+			}
 			buf = buf[:end-off]
 		}
 		b.br.Discard(int(in)) //nolint:errcheck // within Buffered
@@ -148,7 +154,7 @@ func (p *parser) peekAt(off int64, buf []byte) []byte {
 		return d
 	}
 	if !freeAt(b.rs, off, int64(len(buf))) {
-		return nil
+		return p.exactAt(b.rs, off, buf)
 	}
 	if _, err := b.rs.Seek(off, io.SeekStart); err != nil {
 		return nil
@@ -307,8 +313,21 @@ func freeAt(rs io.ReadSeeker, off, n int64) bool {
 	return false
 }
 
-// holds reports whether n bytes at off are in the read buffer or held by the source.
+// exactAt reads buf at off with one exact read when WithFrameRateReads allows it and the source offers io.ReaderAt, else returns nil.
+func (p *parser) exactAt(rs io.ReadSeeker, off int64, buf []byte) []byte {
+	ra, ok := rs.(io.ReaderAt)
+	if !p.rateReads || !ok {
+		return nil
+	}
+	n, _ := ra.ReadAt(buf, off)
+	return buf[:n]
+}
+
+// holds reports whether n bytes at off are in the read buffer or held by the source, or may be read under WithFrameRateReads.
 func (p *parser) holds(off, n int64) bool {
+	if p.rateReads {
+		return true
+	}
 	b, ok := p.r.(*bufReadSeeker)
 	if !ok {
 		return freeAt(p.r, off, n)

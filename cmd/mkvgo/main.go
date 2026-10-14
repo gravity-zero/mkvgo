@@ -22,6 +22,8 @@ func main() {
 			commands.JsonOutput = true
 		case "-in-band", "--in-band":
 			commands.InBand = true
+		case "-fps-reads", "--fps-reads":
+			commands.FrameRateReads = true
 		case "-f", "--force", "-force":
 			commands.Force = true
 		case "--version", "-version":
@@ -61,7 +63,7 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo tags [-json] <file.mkv>")
 		commands.CmdTags(args[0])
 	case "probe":
-		commands.RequireArgs(args, 1, "mkvgo probe [-json] [-in-band] <file.mkv|.mp4>")
+		commands.RequireArgs(args, 1, "mkvgo probe [-json] [-in-band] [-fps-reads] <file.mkv|.mp4>")
 		commands.CmdProbe(args[0])
 	case "keyframes":
 		commands.RequireArgs(args, 1, "mkvgo keyframes [-json] <file.mkv|.mp4>")
@@ -266,6 +268,10 @@ Global flags:
                 when the header leaves it short: colour behind a bare hvcC,
                 VP9 profile with no vpcC, HDR10 static metadata kept in-band
                 (info, tracks, probe; one bounded read; ignored elsewhere)
+  -fps-reads    Let the frame-rate estimate of a Matroska track without
+                DefaultDuration read the block headers it needs in the first
+                512 KiB, one 32-byte read each (info, tracks, probe; off by
+                default: only the bytes already read are used)
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
 

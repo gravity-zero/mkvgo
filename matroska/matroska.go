@@ -260,6 +260,11 @@ type ReadOption = reader.ReadOption
 // passed. See reader.WithInBandColourFallback.
 func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallback() }
 
+// WithFrameRateReads lets the frame-rate estimate of a video track without
+// DefaultDuration read the block headers it needs within the first 512 KiB, one
+// exact read each; off by default. See reader.WithFrameRateReads.
+func WithFrameRateReads() ReadOption { return reader.WithFrameRateReads() }
+
 // WithSampledKeyframes enables a bounded, coarse keyframe index for a Matroska
 // that carries no Cues: it samples Cluster timestamps at n evenly-spaced byte
 // offsets (n ≤ 0 uses a default), so a Cues-less file still reports Keyframes

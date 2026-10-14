@@ -29,6 +29,11 @@ var JsonOutput bool
 // (reader.WithInBandColourFallback / mp4.Options.InBandColour).
 var InBand bool
 
+// FrameRateReads is the global -fps-reads flag: the frame-rate estimate of a
+// track without DefaultDuration may read the block headers it needs
+// (reader.WithFrameRateReads).
+var FrameRateReads bool
+
 // Force is the global -f/--force flag: allow overwriting an existing output
 // file. Without it, commands that write a new file refuse to clobber one.
 var Force bool
@@ -55,7 +60,7 @@ var CmdUsage = map[string]string{
 	"chapters":           "mkvgo chapters [-json] <file.mkv|.mp4|->",
 	"attachments":        "mkvgo attachments [-json] <file.mkv|.mp4|->",
 	"tags":               "mkvgo tags [-json] <file.mkv|.mp4|->",
-	"probe":              "mkvgo probe [-json] [-in-band] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate; -in-band reads one sample to complete colour / HDR10 static metadata the header left out)",
+	"probe":              "mkvgo probe [-json] [-in-band] [-fps-reads] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate; -in-band reads one sample to complete colour / HDR10 static metadata the header left out)",
 	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
@@ -262,7 +267,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	// are actually ISO base media (a .mkv that is really an MP4/MOV - mislabeled
 	// rips happen), route to the mp4 reader transparently instead of failing
 	// with a cryptic EBML error.
-	c, err := matroska.Open(context.Background(), path, inBandReadOptions()...)
+	c, err := matroska.Open(context.Background(), path, globalReadOptions()...)
 	if err != nil {
 		if errors.Is(err, matroska.ErrNotMatroska) {
 			return loadMP4Meta(path, keyframes)
@@ -272,12 +277,16 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	return c, nil
 }
 
-// inBandReadOptions is the Matroska read option the -in-band flag adds.
-func inBandReadOptions() []matroska.ReadOption {
+// globalReadOptions are the Matroska read options the -in-band and -fps-reads flags add.
+func globalReadOptions() []matroska.ReadOption {
+	var o []matroska.ReadOption
 	if InBand {
-		return []matroska.ReadOption{matroska.WithInBandColourFallback()}
+		o = append(o, matroska.WithInBandColourFallback())
 	}
-	return nil
+	if FrameRateReads {
+		o = append(o, matroska.WithFrameRateReads())
+	}
+	return o
 }
 
 // loadMP4Meta reads MP4/MOV metadata (mp4.OpenMeta), optionally building the
@@ -324,7 +333,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 		}
 		return c, dropped
 	}
-	ro := append(inBandReadOptions(), matroska.WithChapters(), matroska.WithTags(),
+	ro := append(globalReadOptions(), matroska.WithChapters(), matroska.WithTags(),
 		matroska.WithAttachments(), matroska.WithoutAttachmentData())
 	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, ro...)
 	if err != nil {

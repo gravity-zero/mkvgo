@@ -21,6 +21,15 @@ type readOpts struct {
 	attachments      bool // keep the Attachments on the metadata path (WithAttachments)
 	lazyAttachments  bool // record where payloads live instead of loading them
 	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
+	frameRateReads   bool // let the frame-rate estimate read the block headers it needs (WithFrameRateReads)
+}
+
+// WithFrameRateReads lets the frame-rate estimate of a video track without
+// DefaultDuration read the block headers it needs within the first 512 KiB, one
+// exact read (io.ReaderAt) of 32 bytes each, when the head read does not already
+// hold them. Off by default: the estimate then uses only the bytes already read.
+func WithFrameRateReads() ReadOption {
+	return func(o *readOpts) { o.frameRateReads = true }
 }
 
 // WithoutAttachmentData parses the attachment list but leaves the payloads on

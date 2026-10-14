@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"io"
 	"math"
 	"testing"
 
@@ -190,6 +191,50 @@ func TestFrameRateFromStatisticsTags(t *testing.T) {
 			t.Errorf("%s frames in %s for track %d: EstimatedFrameRate = %v, want none", c.frames, c.duration, c.uid, *v.EstimatedFrameRate)
 		case c.want != 0 && (v.EstimatedFrameRate == nil || math.Abs(*v.EstimatedFrameRate-c.want) > 1e-9):
 			t.Errorf("%s frames in %s: EstimatedFrameRate = %v, want %v", c.frames, c.duration, v.EstimatedFrameRate, c.want)
+		}
+	}
+}
+
+// atSource is a source that says nothing of what it holds and offers exact reads (io.ReaderAt), as a local file does.
+type atSource struct {
+	plainSource
+	at int
+}
+
+func (s *atSource) ReadAt(p []byte, off int64) (int, error) { s.at++; return s.r.ReadAt(p, off) }
+
+// TestFrameRateReadsOption: by default the estimate reads nothing the source
+// does not hold; WithFrameRateReads lets it read each block header it needs,
+// exactly, within the head window.
+func TestFrameRateReadsOption(t *testing.T) {
+	data := segmentMKV(infoElem(), videoNoDurationTracks(), gopClustersOf(60, 24, 6, 40<<10))
+	for _, c := range []struct {
+		opts []ReadOption
+		want bool
+	}{{nil, false}, {[]ReadOption{WithFrameRateReads()}, true}} {
+		for name, read := range map[string]func(io.ReadSeeker, ...ReadOption) (*mkv.Container, error){
+			"ReadMeta": func(r io.ReadSeeker, o ...ReadOption) (*mkv.Container, error) {
+				return ReadMeta(context.Background(), r, "x.mkv", o...)
+			},
+			"Read": func(r io.ReadSeeker, o ...ReadOption) (*mkv.Container, error) {
+				return Read(context.Background(), r, "x.mkv", o...)
+			},
+		} {
+			src := &atSource{plainSource: plainSource{r: bytes.NewReader(data)}}
+			got, err := read(src, c.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			est := got.Tracks[0].EstimatedFrameRate
+			if (est != nil) != c.want || c.want && *est != 24 {
+				t.Errorf("%s with %d options: EstimatedFrameRate %v, want it %v (24)", name, len(c.opts), est, c.want)
+			}
+			if !c.want && src.at != 0 {
+				t.Errorf("%s by default: %d exact reads, want none", name, src.at)
+			}
+			if c.want && (src.at == 0 || src.at > 64) {
+				t.Errorf("%s with the option: %d exact reads, want one per block header, at most 64", name, src.at)
+			}
 		}
 	}
 }
