@@ -60,6 +60,7 @@ type inTrack struct {
 	frameRate        float64 // nominal (CFR) frame rate from stts[0]; 0 when unknown
 	frameDurNs       int64   // constant frame duration (single-entry stts, or a video one rounded to the timescale); 0 when not constant
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
+	hflip            bool    // the tkhd matrix also mirrors the picture horizontally
 	frameCount       int64   // sample count from stsz (the conventional nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
 	presentMs        int64   // presentation duration from the edit list (its segments, movie timebase); 0 when none
@@ -1131,7 +1132,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		tr.flagsKnown = true
 		tr.trackID = tkhdTrackID(tkhd.payload)
 		trackID = uint64(tr.trackID)
-		tr.rotation = tkhdRotation(tkhd.payload)
+		tr.rotation, tr.hflip = tkhdOrientation(tkhd.payload)
 	}
 	// MP4 has no native "forced" flag; mainstream muxers record it as a track-level kind box
 	// with the DASH role scheme (e.g. value "forced-subtitle"), which its demuxer
@@ -1714,29 +1715,25 @@ func tkhdTrackID(payload []byte) uint32 {
 	return binary.BigEndian.Uint32(payload[off : off+4])
 }
 
-// tkhdRotation reads the 3×3 display matrix from a track header and returns the
-// clockwise display rotation in degrees, normalised to [0,360). The angle comes
-// from the matrix's a,b entries (16.16 fixed point): rotation = atan2(b, a). The
-// matrix sits after the (version-dependent) timing fields, the reserved/layer/
-// group/volume block. Returns 0 on an identity matrix or a short box.
-func tkhdRotation(payload []byte) int {
+// tkhdOrientation reads the display matrix of a track header (16.16 fixed point, after the version-dependent timing fields) as a clockwise rotation and a horizontal mirror; none on an identity matrix or a short box.
+func tkhdOrientation(payload []byte) (int, bool) {
 	if len(payload) < 1 {
-		return 0
+		return 0, false
 	}
 	matOff := 40 // v0: 4 + (4+4+4+4+4) + 8 + (2+2+2+2)
 	if payload[0] == 1 {
 		matOff = 52 // v1: timing fields are 8-byte
 	}
 	if len(payload) < matOff+8 {
-		return 0
+		return 0, false
 	}
-	a := int32(binary.BigEndian.Uint32(payload[matOff : matOff+4]))
-	b := int32(binary.BigEndian.Uint32(payload[matOff+4 : matOff+8]))
-	if a == 0 && b == 0 {
-		return 0
+	at := func(i int) float64 {
+		if len(payload) < matOff+4*i+4 {
+			return 0
+		}
+		return float64(int32(binary.BigEndian.Uint32(payload[matOff+4*i:]))) / 0x10000
 	}
-	deg := int(math.Round(math.Atan2(float64(b), float64(a)) * 180 / math.Pi))
-	return ((deg % 360) + 360) % 360
+	return mkv.OrientationFromMatrix(at(0), at(1), at(3), at(4))
 }
 
 // quoteFourcc renders a four-character box type for a reason string, escaping any

@@ -430,18 +430,27 @@ func TestRoundTripColourAndSubtitles(t *testing.T) {
 	}
 }
 
-// TestRoundTripRotation checks that a clockwise Track.Rotation becomes the tkhd
-// display matrix a muxer writes for it and survives MKV -> MP4 -> MKV.
+// TestRoundTripRotation checks that a clockwise Track.Rotation, mirrored or not,
+// becomes the tkhd display matrix ffmpeg writes for it and survives MKV -> MP4 -> MKV.
 func TestRoundTripRotation(t *testing.T) {
-	// tkhd a,b,c,d (16.16) for each clockwise rotation, as written for display_rotation -rot.
-	want := map[int][4]uint32{
-		90:  {0, 0x00010000, 0xffff0000, 0},
-		180: {0xffff0000, 0, 0, 0xffff0000},
-		270: {0, 0xffff0000, 0x00010000, 0},
+	// tkhd a,b,c,d (16.16), as ffmpeg writes them for -display_rotation -rot and -display_hflip.
+	cases := []struct {
+		rot   int
+		hflip bool
+		m     [4]uint32
+	}{
+		{90, false, [4]uint32{0, 0x00010000, 0xffff0000, 0}},
+		{180, false, [4]uint32{0xffff0000, 0, 0, 0xffff0000}},
+		{270, false, [4]uint32{0, 0xffff0000, 0x00010000, 0}},
+		{0, true, [4]uint32{0xffff0000, 0, 0, 0x00010000}},
+		{90, true, [4]uint32{0, 0x00010000, 0x00010000, 0}},
+		{180, true, [4]uint32{0x00010000, 0, 0, 0xffff0000}},
+		{270, true, [4]uint32{0, 0xffff0000, 0xffff0000, 0}},
 	}
-	for rot, m := range want {
+	for _, tc := range cases {
+		rot, m := tc.rot, tc.m
 		tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: []byte{0x01, 0x64, 0x00, 0x1f},
-			Width: u32p(1280), Height: u32p(720), FrameRate: f64p(25), Rotation: rot}}
+			Width: u32p(1280), Height: u32p(720), FrameRate: f64p(25), Rotation: rot, HFlip: tc.hflip}}
 		blocks := []genBlock{{track: 1, pts: 0, key: true, data: []byte{1}}, {track: 1, pts: 40, data: []byte{2}}}
 		mp4Path := filepath.Join(t.TempDir(), "rot.mp4")
 		if err := RemuxToMP4(context.Background(), buildMKV(t, tracks, blocks), mp4Path); err != nil {
@@ -458,21 +467,21 @@ func TestRoundTripRotation(t *testing.T) {
 		mat := data[i+4+40:]
 		got := [4]uint32{binary.BigEndian.Uint32(mat), binary.BigEndian.Uint32(mat[4:]), binary.BigEndian.Uint32(mat[12:]), binary.BigEndian.Uint32(mat[16:])}
 		if got != m {
-			t.Errorf("rotation %d: tkhd matrix a,b,c,d = %08x, want %08x", rot, got, m)
+			t.Errorf("rotation %d hflip %v: tkhd matrix a,b,c,d = %08x, want %08x", rot, tc.hflip, got, m)
 		}
 		c, _, err := OpenMeta(context.Background(), mp4Path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c.Tracks[0].Rotation != rot {
-			t.Errorf("rotation %d: MP4 reads back %d", rot, c.Tracks[0].Rotation)
+		if tr := c.Tracks[0]; tr.Rotation != rot || tr.HFlip != tc.hflip {
+			t.Errorf("rotation %d hflip %v: MP4 reads back %d %v", rot, tc.hflip, tr.Rotation, tr.HFlip)
 		}
 		outMKV := filepath.Join(t.TempDir(), "out.mkv")
 		if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
 			t.Fatalf("RemuxFromMP4: %v", err)
 		}
-		if back, _ := readMKV(t, outMKV); back.Tracks[0].Rotation != rot {
-			t.Errorf("rotation %d: MKV after the round trip reads %d", rot, back.Tracks[0].Rotation)
+		if back, _ := readMKV(t, outMKV); back.Tracks[0].Rotation != rot || back.Tracks[0].HFlip != tc.hflip {
+			t.Errorf("rotation %d hflip %v: MKV after the round trip reads %d %v", rot, tc.hflip, back.Tracks[0].Rotation, back.Tracks[0].HFlip)
 		}
 	}
 }

@@ -381,7 +381,7 @@ func TestTkhdTrackIDBoundary(t *testing.T) {
 	}
 }
 
-// ── parse.go:727 - tkhdRotation ARITHMETIC_BASE ───────────────────────────────
+// ── parse.go:727 - tkhdOrientation ARITHMETIC_BASE ───────────────────────────────
 
 // TestTkhdRotationExactOffset kills the ARITHMETIC_BASE mutant on the
 // arithmetic in `matOff+8`.  We verify the matrix is read from the exact right
@@ -396,11 +396,11 @@ func TestTkhdRotationExactOffset(t *testing.T) {
 	// b (matOff+4): 0x00010000 → atan2(1, 0) = 90°.
 	binary.BigEndian.PutUint32(p[40:44], 0)          // a=0
 	binary.BigEndian.PutUint32(p[44:48], 0x00010000) // b=1.0
-	if got := tkhdRotation(p); got != 90 {
+	if got, _ := tkhdOrientation(p); got != 90 {
 		t.Errorf("b=1.0, a=0: rotation = %d, want 90", got)
 	}
 	// 47-byte payload: one short → must return 0.
-	if got := tkhdRotation(p[:47]); got != 0 {
+	if got, _ := tkhdOrientation(p[:47]); got != 0 {
 		t.Errorf("47-byte tkhd: rotation = %d, want 0", got)
 	}
 }

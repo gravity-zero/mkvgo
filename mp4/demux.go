@@ -149,7 +149,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			// without it an MKV written from this track leaves its frame rate
 			// to be guessed from millisecond timecodes (23.81 fps for 24).
 			mt.DefaultDurationNs = t.frameDurNs
-			mt.Rotation = t.rotation
+			mt.Rotation, mt.HFlip = t.rotation, t.hflip
 			mt.FrameCount = t.frameCount
 		case mkv.AudioTrack:
 			if t.channels > 0 {

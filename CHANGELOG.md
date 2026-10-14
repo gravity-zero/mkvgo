@@ -53,6 +53,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A mirrored video keeps its mirror.** A display matrix that mirrors the
+  picture (a `tkhd` matrix with a negative determinant, a Matroska pose with
+  `ProjectionPoseYaw` or `ProjectionPosePitch` 180) is now read as
+  `Track.HFlip` (`hflip`) with the clockwise `Rotation` left after it (a
+  vertical mirror is a horizontal one turned 180), and every remux writes
+  the same matrix back: the `tkhd` matrix in MP4, `ProjectionPoseYaw` 180
+  with the roll in Matroska. On 24 mirrored MP4 and Matroska test files
+  written with each rotation and mirror, 16 lost their mirror through
+  `to-mp4` or `from-mp4`; all 32 test files (mirrored or not) now come out
+  with the source's display matrix through `to-mp4`, `to-mp4 --faststart`,
+  `from-mp4` and a Matroska rewrite.
+
 - **`codec_name` of a VC-1 track stored as `V_MS/VFW/FOURCC` is `vc1`.**
   The `WVC1` FourCC was missing from the table, and the track reported its
   raw CodecID.

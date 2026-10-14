@@ -503,7 +503,7 @@ func buildTkhd(t *outTrack, durationMs uint32) []byte {
 		w.u16(0)   // alternate_group
 		w.u16(volume)
 		w.u16(0) // reserved
-		w.matrix(rotationMatrix(t.mkv.Rotation))
+		w.matrix(orientationMatrix(t.mkv.Rotation, t.mkv.HFlip))
 		if t.spec.video {
 			w.u32(fixed16_16(derefU32(t.mkv.Width)))
 			w.u32(fixed16_16(derefU32(t.mkv.Height)))
@@ -602,4 +602,16 @@ func mdhdLanguage(t mkv.Track) string {
 		return t.Language
 	}
 	return "und"
+}
+
+// orientationMatrix is the tkhd display matrix of a clockwise rotation and an optional horizontal mirror, as ffmpeg writes it.
+func orientationMatrix(deg int, hflip bool) [9]uint32 {
+	if deg%360 == 0 && !hflip {
+		return unityMatrix
+	}
+	a, b, c, d := mkv.OrientationMatrix(deg, hflip)
+	fx := func(v float64) uint32 { return uint32(int32(v * 0x10000)) }
+	m := unityMatrix
+	m[0], m[1], m[3], m[4] = fx(a), fx(b), fx(c), fx(d)
+	return m
 }

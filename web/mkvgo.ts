@@ -67,6 +67,8 @@ export interface Track {
   field_order?: string
   /** Degrees clockwise the picture turns to display upright; Display Matrix side data is -rotation. */
   rotation?: number
+  /** The picture is also mirrored horizontally (the display matrix's first column negated); a vertical mirror is this one with rotation 180. */
+  hflip?: boolean
   color_space?: string
   color_transfer?: string
   color_primaries?: string

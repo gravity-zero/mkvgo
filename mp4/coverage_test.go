@@ -102,7 +102,7 @@ func TestHeaderFrameCountStz2(t *testing.T) {
 	}
 }
 
-// ── parse.go:725 - tkhdRotation version=1 ────────────────────────────────────
+// ── parse.go:725 - tkhdOrientation version=1 ────────────────────────────────────
 
 // TestTkhdRotationV1 covers the version=1 path (matOff=52).
 func TestTkhdRotationV1(t *testing.T) {
@@ -111,7 +111,7 @@ func TestTkhdRotationV1(t *testing.T) {
 	const one = uint32(0x00010000)
 	binary.BigEndian.PutUint32(p[52:56], one) // a=1.0
 	binary.BigEndian.PutUint32(p[56:60], 0)   // b=0 → identity (0°)
-	if got := tkhdRotation(p); got != 0 {
+	if got, _ := tkhdOrientation(p); got != 0 {
 		t.Errorf("v1 identity: rotation = %d, want 0", got)
 	}
 	// 90° CW with v1.
@@ -119,11 +119,11 @@ func TestTkhdRotationV1(t *testing.T) {
 	p2[0] = 1
 	binary.BigEndian.PutUint32(p2[52:56], 0)          // a=0
 	binary.BigEndian.PutUint32(p2[56:60], 0x00010000) // b=1.0 → 90°
-	if got := tkhdRotation(p2); got != 90 {
+	if got, _ := tkhdOrientation(p2); got != 90 {
 		t.Errorf("v1 90°: rotation = %d, want 90", got)
 	}
 	// Too short for v1 → 0.
-	if got := tkhdRotation(p[:51]); got != 0 {
+	if got, _ := tkhdOrientation(p[:51]); got != 0 {
 		t.Errorf("v1 short: rotation = %d, want 0", got)
 	}
 }

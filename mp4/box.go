@@ -3,7 +3,6 @@ package mp4
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 )
 
 // box.go - low-level ISO base media file format (ISO/IEC 14496-12) box encoding.
@@ -94,18 +93,6 @@ var unityMatrix = [9]uint32{
 }
 
 // rotationMatrix returns the tkhd display matrix turning the picture clockwise by deg degrees.
-func rotationMatrix(deg int) [9]uint32 {
-	if deg%360 == 0 {
-		return unityMatrix
-	}
-	rad := float64(deg) * math.Pi / 180
-	fx := func(v float64) uint32 { return uint32(int32(v * 0x10000)) }
-	cos, sin := fx(math.Cos(rad)), fx(math.Sin(rad))
-	m := unityMatrix
-	m[0], m[1], m[3], m[4] = cos, sin, fx(-math.Sin(rad)), cos
-	return m
-}
-
 func (w *bw) matrix(m [9]uint32) {
 	for _, v := range m {
 		w.u32(v)

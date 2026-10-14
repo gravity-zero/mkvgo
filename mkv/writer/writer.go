@@ -308,7 +308,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.IsForced {
 		e.uint(mkv.IDFlagForced, 1)
 	}
-	rollable := t.Rotation%360 != 0 && (t.Projection == "" || t.Projection == "rectangular")
+	rollable := (t.Rotation%360 != 0 || t.HFlip) && (t.Projection == "" || t.Projection == "rectangular")
 	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t) || rollable) {
 		e.master(mkv.IDVideo, func(v *ew) {
 			if t.Width != nil {
@@ -343,7 +343,13 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			if rollable {
 				v.master(mkv.IDProjection, func(pr *ew) {
 					pr.uint(mkv.IDProjectionType, 0)
-					pr.float64(mkv.IDProjectionPoseRoll, mkv.ProjectionRoll(t.Rotation))
+					yaw, roll := mkv.ProjectionPose(t.Rotation, t.HFlip)
+					if yaw != 0 {
+						pr.float64(mkv.IDProjectionPoseYaw, yaw)
+					}
+					if roll != 0 {
+						pr.float64(mkv.IDProjectionPoseRoll, roll)
+					}
 				})
 			}
 		})

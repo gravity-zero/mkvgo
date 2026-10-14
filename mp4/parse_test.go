@@ -374,11 +374,11 @@ func TestTkhdRotation(t *testing.T) {
 		// (side data 90): Rotation counts clockwise, so it reads 270.
 		{"90° CCW side data", 0, neg, 270},
 	} {
-		if got := tkhdRotation(buildTkhd(tt.a, tt.b)); got != tt.want {
+		if got, _ := tkhdOrientation(buildTkhd(tt.a, tt.b)); got != tt.want {
 			t.Errorf("%s: rotation = %d, want %d", tt.name, got, tt.want)
 		}
 	}
-	if got := tkhdRotation([]byte{0, 0, 0}); got != 0 {
+	if got, _ := tkhdOrientation([]byte{0, 0, 0}); got != 0 {
 		t.Errorf("short tkhd should be 0, got %d", got)
 	}
 }

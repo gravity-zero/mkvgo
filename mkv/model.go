@@ -248,6 +248,8 @@ type Track struct {
 	// ProjectionPoseRoll (stored counterclockwise); 0 when none. Display Matrix
 	// side data counts counterclockwise: -Rotation folded into [-180, 180).
 	Rotation int `json:"rotation,omitempty"`
+	// HFlip says the picture is also mirrored horizontally: the display matrix is the rotation's with its first column negated, as ffmpeg's -display_hflip writes it (a vertical mirror is a horizontal one turned 180).
+	HFlip bool `json:"hflip,omitempty"`
 	// Display dimensions for anamorphic video, nil when pixels are square. Their
 	// ratio is the display aspect: literal pixels from the Matroska
 	// DisplayWidth/DisplayHeight (0x54B0/0x54BA), or the reduced (codedW·hSpacing):

@@ -13,21 +13,26 @@ import (
 // Track.Rotation, through the seekable and the streaming parser.
 func TestProjectionPoseRollRotation(t *testing.T) {
 	cases := []struct {
-		name string
-		proj []byte
-		want int
+		name  string
+		proj  []byte
+		want  int
+		hflip bool
 	}{
-		{"roll 90", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, 90)), 270},
-		{"roll -90", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, -90)), 90},
-		{"roll 180", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, 180)), 180},
-		{"roll -180", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, -180)), 180},
+		{"roll 90", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, 90)), 270, false},
+		{"roll -90", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, -90)), 90, false},
+		{"roll 180", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, 180)), 180, false},
+		{"roll -180", masterElem(mkv.IDProjection, floatElem(mkv.IDProjectionPoseRoll, -180)), 180, false},
 		{"rectangular type, roll 90", masterElem(mkv.IDProjection,
-			uintElem(mkv.IDProjectionType, 0, 1), floatElem(mkv.IDProjectionPoseRoll, 90)), 270},
-		{"yaw 180 is a flip, not a rotation", masterElem(mkv.IDProjection,
-			floatElem(mkv.IDProjectionPoseYaw, 180), floatElem(mkv.IDProjectionPoseRoll, 90)), 0},
+			uintElem(mkv.IDProjectionType, 0, 1), floatElem(mkv.IDProjectionPoseRoll, 90)), 270, false},
+		{"yaw 180 mirrors, the roll then turns clockwise", masterElem(mkv.IDProjection,
+			floatElem(mkv.IDProjectionPoseYaw, 180), floatElem(mkv.IDProjectionPoseRoll, 90)), 90, true},
+		{"pitch 180 mirrors vertically: a horizontal mirror turned 180", masterElem(mkv.IDProjection,
+			floatElem(mkv.IDProjectionPosePitch, 180)), 180, true},
+		{"yaw 90 is no flat orientation", masterElem(mkv.IDProjection,
+			floatElem(mkv.IDProjectionPoseYaw, 90), floatElem(mkv.IDProjectionPoseRoll, 90)), 0, false},
 		{"equirectangular roll orients the sphere", masterElem(mkv.IDProjection,
-			uintElem(mkv.IDProjectionType, 1, 1), floatElem(mkv.IDProjectionPoseRoll, 90)), 0},
-		{"no roll", masterElem(mkv.IDProjection, uintElem(mkv.IDProjectionType, 0, 1)), 0},
+			uintElem(mkv.IDProjectionType, 1, 1), floatElem(mkv.IDProjectionPoseRoll, 90)), 0, false},
+		{"no roll", masterElem(mkv.IDProjection, uintElem(mkv.IDProjectionType, 0, 1)), 0, false},
 	}
 	for _, c := range cases {
 		te := trackEntry(
@@ -36,8 +41,8 @@ func TestProjectionPoseRollRotation(t *testing.T) {
 			strElem(mkv.IDCodecID, "V_MPEG2"),
 			masterElem(mkv.IDVideo, uintElem(mkv.IDPixelWidth, 720, 2), uintElem(mkv.IDPixelHeight, 576, 2), c.proj),
 		)
-		if got := readFirstTrack(t, buildMKV(te)).Rotation; got != c.want {
-			t.Errorf("%s (seekable): Rotation = %d, want %d", c.name, got, c.want)
+		if tr := readFirstTrack(t, buildMKV(te)); tr.Rotation != c.want || tr.HFlip != c.hflip {
+			t.Errorf("%s (seekable): Rotation, HFlip = %d, %v, want %d, %v", c.name, tr.Rotation, tr.HFlip, c.want, c.hflip)
 		}
 
 		var seg bytes.Buffer
@@ -47,8 +52,8 @@ func TestProjectionPoseRollRotation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: ReadStream: %v", c.name, err)
 		}
-		if got := cont.Tracks[0].Rotation; got != c.want {
-			t.Errorf("%s (stream): Rotation = %d, want %d", c.name, got, c.want)
+		if tr := cont.Tracks[0]; tr.Rotation != c.want || tr.HFlip != c.hflip {
+			t.Errorf("%s (stream): Rotation, HFlip = %d, %v, want %d, %v", c.name, tr.Rotation, tr.HFlip, c.want, c.hflip)
 		}
 	}
 }

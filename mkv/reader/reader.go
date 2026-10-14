@@ -1351,7 +1351,7 @@ func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 			}
 		}
 	}
-	t.Rotation = mkv.RotationFromProjection(typ, pose[0], pose[1], pose[2])
+	t.Rotation, t.HFlip = mkv.OrientationFromProjection(typ, pose[0], pose[1], pose[2])
 	return nil
 }
 
