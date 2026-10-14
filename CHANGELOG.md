@@ -101,8 +101,9 @@ All notable changes to mkvgo are documented here. The format is based on
   turn: the few hundred reads of an audio segment interleaved sample by
   sample, a video segment's frame-sized sendfile calls, and the header hops
   of a Matroska window's first walk. The ranges they will read are now asked
-  for up front with posix_fadvise WILLNEED, in 128 KiB pieces (the kernel
-  reads at most its read-ahead size per call and drops the rest): a
+  for up front with posix_fadvise WILLNEED, in pieces of the device's
+  read-ahead size (its read_ahead_kb, 128 KiB when it has none: the kernel
+  reads at most that per call and drops the rest): a
   segment's requested range only, a Matroska window's span before its walk.
   Measured against 0.51.0 (the Matroska figures include the audio change
   above) with the server on 2 cores (GOMAXPROCS=2), page cache dropped, 60
