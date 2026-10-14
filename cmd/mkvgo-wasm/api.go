@@ -276,10 +276,13 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 }
 
 // toJSObject marshals v to JSON and parses it on the JS side, yielding a plain
-// object (numbers/strings/arrays) the caller uses directly.
+// object (numbers/strings/arrays) the caller uses directly; 64-bit UIDs stay exact as strings.
 func toJSObject(v any) (any, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
+		return nil, err
+	}
+	if raw, err = jsSafeJSON(raw); err != nil {
 		return nil, err
 	}
 	return js.Global().Get("JSON").Call("parse", string(raw)), nil

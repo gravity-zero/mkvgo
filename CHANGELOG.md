@@ -23,6 +23,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **The WebAssembly results carry the 64-bit UIDs as strings.** `JSON.parse`
+  turns an integer into a JavaScript number, which keeps 53 bits: a track
+  UID, chapter UID, attachment UID or tag target of 7454167688999517126 read
+  back as 7454167688999517000, and could not be matched or written back. The
+  track `uid`, chapter `id`, attachment `id` and tag `target_id` are now
+  decimal strings, exact, and any other integer beyond 2^53 - 1 in any
+  result is a string too; track numbers and the other fields stay numbers.
+  The TypeScript types say so (`Track.uid`, `Chapter.id`, the attachment
+  `id`, the new `Tag`). A caller that compared these fields with numbers
+  compares strings now.
 - **Writing an MKV allocates its cluster buffer once.** The MKV writer
   assembled every cluster in a fresh buffer grown by doubling, about twice the
   media it wrote in allocations, and the memory the runtime handed back to the

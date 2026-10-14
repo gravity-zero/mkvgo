@@ -58,6 +58,33 @@ check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.len
   }
 }
 
+// --- 64-bit UIDs reach JavaScript as exact strings (a number keeps only 53 bits) ---
+{
+  const UID = 7454167688999517126n
+  const vint = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n)); b[0] = 0x01; return b }
+  const idBytes = (id) => { const b = []; for (let s = 24; s >= 0; s -= 8) if ((id >>> s) & 0xff || b.length) b.push((id >>> s) & 0xff); return b }
+  const el = (id, ...kids) => {
+    const body = kids.map((k) => (typeof k === 'string' ? new TextEncoder().encode(k) : k))
+    const len = body.reduce((n, k) => n + k.length, 0)
+    return Uint8Array.from([...idBytes(id), ...vint(len), ...body.flatMap((k) => [...k])])
+  }
+  const u = (id, v) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(v)); return el(id, b) }
+  const file = Uint8Array.from([
+    ...el(0x1A45DFA3, el(0x4282, 'matroska'), u(0x4287, 4), u(0x4285, 2)),
+    ...el(0x18538067,
+      el(0x1549A966, u(0x2AD7B1, 1000000)),
+      el(0x1654AE6B, el(0xAE, u(0xD7, 1), u(0x73C5, UID), u(0x83, 1), el(0x86, 'V_VP9'), el(0xE0, u(0xB0, 64), u(0xBA, 64)))),
+      el(0x1043A770, el(0x45B9, el(0xB6, u(0x73C4, UID), u(0x91, 0), el(0x80, el(0x85, 'One'))))),
+      el(0x1941A469, el(0x61A7, el(0x466E, 'a.txt'), el(0x4660, 'text/plain'), el(0x465C, 'x'), u(0x46AE, UID))),
+      el(0x1254C367, el(0x7373, el(0x63C0, u(0x68CA, 50), u(0x63C5, UID)), el(0x67C8, el(0x45A3, 'TITLE'), el(0x4487, 't'))))),
+  ])
+  const p = await MkvGo.probe(file)
+  const want = UID.toString()
+  const got = [p.tracks?.[0]?.uid, p.chapters?.[0]?.id, p.attachments?.[0]?.id, p.tags?.find((t) => t.target_id !== '0')?.target_id]
+  check(got.every((v) => v === want) && p.tracks[0].id === 1,
+    `UID ${want} intact as a string on track uid, chapter id, attachment id, tag target_id (got ${got.join(', ')}; track id ${p.tracks?.[0]?.id})`)
+}
+
 // --- probe(Blob) starts with a small read: a whole 512 KiB window cost more than the probe itself ---
 {
   const sizes = []

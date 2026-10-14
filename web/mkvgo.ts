@@ -25,7 +25,10 @@ export type TrackType = 'video' | 'audio' | 'subtitle'
 
 /** One media track. Optional fields are omitted when absent, like the CLI JSON. */
 export interface Track {
+  /** Track number (small): a JavaScript number. */
   id: number
+  /** Matroska TrackUID, a 64-bit integer: a decimal string, exact (a number keeps only 53 bits). */
+  uid?: string
   type: TrackType
   codec: string
   language?: string
@@ -90,7 +93,8 @@ export interface Track {
 }
 
 export interface Chapter {
-  id: number
+  /** ChapterUID, a 64-bit integer: a decimal string, exact. */
+  id: string
   title: string
   start_ms: number
   end_ms: number
@@ -111,12 +115,21 @@ export interface ProbeResult {
   resynced_bytes?: number
   tracks: Track[]
   chapters: Chapter[]
-  attachments: { id: number; name: string; mime_type: string; size: number; [key: string]: unknown }[]
-  tags: unknown[]
+  /** `id` is the FileUID, a 64-bit integer: a decimal string, exact. */
+  attachments: { id: string; name: string; mime_type: string; size: number; [key: string]: unknown }[]
+  tags: Tag[]
   /** Video keyframe timestamps (ms), when requested via options.keyframes. */
   keyframes?: number[]
   /** MP4 only: tracks the probe saw but does not carry (e.g. cover art). */
   dropped_tracks?: DroppedTrack[]
+  [key: string]: unknown
+}
+
+/** One Matroska tag; `target_id` is the UID of what it targets ("0" for the whole file), a decimal string. */
+export interface Tag {
+  target_type: string
+  target_id: string
+  simple_tags: { name: string; value?: string; [key: string]: unknown }[]
   [key: string]: unknown
 }
 

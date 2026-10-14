@@ -41,7 +41,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 
 | Method | Input | Result |
 |---|---|---|
-| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object - same shape as the CLI `-json` output (chapters, tags and the attachment list - name, MIME type, size - included; the attachment payloads are not read), plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`) |
+| `probe(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, any size) | metadata object - same shape as the CLI `-json` output (chapters, tags and the attachment list - name, MIME type, size - included; the attachment payloads are not read), plus `format: "mkv"\|"mp4"`; every derived track string is a key (`codec_long_name`, `channel_layout`, aspect ratios, colour names, `resolved_language`, `effective_sample_rate`, and `hdr_format`: `dolby-vision`\|`hdr10`\|`hlg`\|`sdr`). The 64-bit Matroska UIDs are decimal **strings**, exact: track `uid`, chapter `id`, attachment `id`, tag `target_id` (a JavaScript number keeps 53 bits, so `7454167688999517126` would read back as `7454167688999517000`); any other integer beyond 2^53 - 1, in this or any other result, is a string too |
 | `remuxToMP4(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (MKV/WebM) | `{ data: Uint8Array, droppedTracks }` |
 | `remuxFromMP4(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (MP4/MOV) | `{ data, droppedTracks }` (MKV) |
 | `remuxToWebM(input)` | `Uint8Array` **or `Blob`/`File`** (MKV) | `{ data, droppedTracks }` (VP8/VP9/AV1 + Opus/Vorbis only) |
