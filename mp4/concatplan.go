@@ -23,7 +23,7 @@ import (
 )
 
 // ConcatPlan serves a concatenated multi-source HLS session on demand. It is
-// immutable after PlanConcat returns; Resource calls are safe to run
+// immutable after PlanConcat returns; Resource and Open calls are safe to run
 // concurrently (each part plan opens its own reader per segment/subtitle
 // scan).
 type ConcatPlan struct {
@@ -204,6 +204,29 @@ func (cp *ConcatPlan) Resource(ctx context.Context, name string) ([]byte, string
 		return data, mimeVTT, err
 	}
 	return cp.parts[k].Resource(ctx, rest)
+}
+
+// Open opens the named resource (the names Resource serves); the handle's
+// bytes equal Resource's exactly. A part's resource is its plan's Open - a
+// media segment streams from that part's source as HLSPlan.Open does - and
+// the concatenated playlists and subtitles, rewritten onto the session's
+// timeline, come back whole.
+func (cp *ConcatPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
+	if k, rest, ok := parsePartPath(name); ok && k >= 0 && k < len(cp.parts) && !isWindowedSubtitle(rest) {
+		return cp.parts[k].Open(ctx, rest)
+	}
+	data, ct, err := cp.Resource(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
+}
+
+// isWindowedSubtitle reports whether a part's resource name is a windowed subtitle segment, re-served shifted.
+func isWindowedSubtitle(rest string) bool {
+	var j, n int
+	_, err := fmt.Sscanf(rest, "sub%d_%d.vtt", &j, &n)
+	return err == nil && rest == fmt.Sprintf("sub%d_%05d.vtt", j, n)
 }
 
 // windowedSubtitle builds part k's n-th windowed subtitle segment (sub{j+1}_

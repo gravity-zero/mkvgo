@@ -1096,7 +1096,12 @@ since WebVTT cue times (unlike the CMAF fragments) are not reset by
 `"audio{j}.m3u8"`, `"sub{j}.m3u8"`/`"sub{j}.vtt"`, or any `"p{k}/<name>"`
 (`k` 0-based) for a specific part's own resource, byte-identical to the file
 `RemuxConcatToHLS` would have written; `ConcatPlan.Resources()` lists them
-all. `ConcatPlan.NumParts()`/`ConcatPlan.Part(k)` expose the underlying
+all. `ConcatPlan.Open(ctx, name)` returns the same bytes through a
+`ResourceHandle` (exact `Size` first, then `WriteTo`/`WriteRange`): a
+`"p{k}/<name>"` resource is part k's own `HLSPlan.Open`, so its media segments
+stream from that part's source, while the concatenated playlists and the
+shifted subtitles come back whole; `mkvhttp.Handler` uses it on its own.
+`ConcatPlan.NumParts()`/`ConcatPlan.Part(k)` expose the underlying
 per-source `HLSPlan`s directly.
 
 **v1 limits.** `Options.Encrypt` and `Options.SingleFile` are refused

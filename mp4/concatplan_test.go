@@ -140,3 +140,42 @@ func TestPlanConcatMismatchedSubsDropped(t *testing.T) {
 		t.Error("sub1.m3u8 should error when subtitle layouts mismatch")
 	}
 }
+
+// Open serves every resource of a 2- and a 3-part concatenation, Matroska and
+// MP4 parts, byte for byte like Resource, a middle range included; the parts'
+// media segments stream from their sources.
+func TestPlanConcatOpenMatchesResource(t *testing.T) {
+	ctx := context.Background()
+	mkvs := []string{
+		buildConcatSource(t, 4000, "eng", "part0 cue", 500),
+		buildConcatSource(t, 2000, "eng", "part1 cue", 300),
+		buildConcatSource(t, 3000, "eng", "part2 cue", 700),
+	}
+	mp4s := make([]string, len(mkvs))
+	for i, src := range mkvs {
+		mp4s[i] = filepath.Join(t.TempDir(), "part.mp4")
+		if err := RemuxToMP4(ctx, src, mp4s[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, sources := range map[string][]string{"mkv-2": mkvs[:2], "mkv-3": mkvs, "mp4-2": mp4s[:2], "mp4-3": mp4s} {
+		t.Run(name, func(t *testing.T) {
+			plan, err := PlanConcat(ctx, sources, Options{SegmentMs: 1000})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOpenMatchesResource(t, plan)
+			var streamed int64
+			for k := 0; k < plan.NumParts(); k++ {
+				st := plan.Part(k).Stats()
+				streamed += st.StreamedSegments
+				if st.StreamFallbacks != 0 {
+					t.Errorf("part %d: %d segments built in memory", k, st.StreamFallbacks)
+				}
+			}
+			if streamed == 0 {
+				t.Error("no segment streamed from its part")
+			}
+		})
+	}
+}

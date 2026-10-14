@@ -17,9 +17,16 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// openPlan is what serves resources both whole and through a handle: HLSPlan, ConcatPlan.
+type openPlan interface {
+	Resources() []string
+	Resource(ctx context.Context, name string) ([]byte, string, error)
+	Open(ctx context.Context, name string) (*ResourceHandle, error)
+}
+
 // assertOpenMatchesResource opens every resource and checks the handle's size,
-// its whole write and a few sub-ranges against Resource's bytes.
-func assertOpenMatchesResource(t *testing.T, plan *HLSPlan) {
+// its whole write, its middle third and a few sub-ranges against Resource's bytes.
+func assertOpenMatchesResource(t *testing.T, plan openPlan) {
 	t.Helper()
 	ctx := context.Background()
 	rng := rand.New(rand.NewSource(3))
@@ -41,6 +48,12 @@ func assertOpenMatchesResource(t *testing.T, plan *HLSPlan) {
 		}
 		if !bytes.Equal(got.Bytes(), want) {
 			t.Errorf("%s: streamed bytes differ from Resource (%d vs %d)", name, got.Len(), len(want))
+		}
+		if third := int64(len(want)) / 3; third > 0 {
+			var mid bytes.Buffer
+			if m, err := h.WriteRange(ctx, &mid, third, third); err != nil || m != third || !bytes.Equal(mid.Bytes(), want[third:2*third]) {
+				t.Errorf("%s: WriteRange(%d,%d) wrote %d, err %v, or differs", name, third, third, m, err)
+			}
 		}
 		for i := 0; i < 3 && len(want) > 1; i++ {
 			off := rng.Int63n(int64(len(want)))

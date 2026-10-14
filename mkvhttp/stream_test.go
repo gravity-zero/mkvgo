@@ -17,6 +17,12 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
+// Both plans stream through Handler: they resolve and open resources.
+var (
+	_ Opener = (*mp4.HLSPlan)(nil)
+	_ Opener = (*mp4.ConcatPlan)(nil)
+)
+
 // streamFixture writes 10 s of fake H.264 (keyframe every second) with 20 ms AAC audio.
 func streamFixture(t *testing.T) string {
 	t.Helper()

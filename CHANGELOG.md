@@ -6,6 +6,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`ConcatPlan.Open`: a concatenated session served without holding a
+  segment.** Like `HLSPlan.Open`, it gives a resource's exact size up front,
+  then writes it; a part's resource (`p{k}/<name>`) is that part's own
+  `Open`, its media segments streamed from its source, and the concatenated
+  playlists and the subtitles shifted onto the session's timeline come back
+  whole. The bytes are `Resource`'s, any range included. `mkvhttp.Handler`
+  streams a `ConcatPlan` through it.
+
 ### Changed
 
 - **The `hls-server` example serves through `HLSPlan.Open`.** Each resource
