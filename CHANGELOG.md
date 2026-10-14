@@ -63,6 +63,16 @@ All notable changes to mkvgo are documented here. The format is based on
   150/317 ms in 0.51.0, 175/314 ms with the audio copied from the file, and
   139/287 ms now.
 
+- **A cached window table keeps its samples packed.** A Matroska window's
+  table held, for every sample, a full fragment record and its offset - 86
+  bytes a frame measured - and the plan's byte budget counted a third less
+  than that. The samples now sit as varints, times and offsets as deltas,
+  unpacked for the one rendition a request serves; the segment head stays as
+  built, and the budget counts what is really kept. Measured on the 2 GB
+  Matroska source, all 117 windows cached: 6.7 MiB to 0.9 MiB (12 bytes a
+  frame); the `hls-server` example under 16 connections, peak memory 39-40 to
+  29-31 MB at the same throughput (2,920-3,130 requests/s).
+
 - **A Matroska source's audio is copied from the file too.** `Open` kept a
   window's audio, read with the structure walk, built whole in the window's
   table; the walk now reads every track's block headers only - a laced

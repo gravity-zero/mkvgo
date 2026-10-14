@@ -73,7 +73,10 @@ type windowTable struct {
 	heads [][]byte
 	offs  [][]int64
 	data  [][]byte // a network source's light audio segment, built whole by the walk that read it
-	bytes int64
+	// packed holds a cached table's renditions' samples (see tablecodec.go),
+	// unpacked into segs and offs per request, for the one served (view).
+	packed [][]byte
+	bytes  int64
 }
 
 type tableFlight struct {
@@ -204,7 +207,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		}
 	}
 	p.learnOtherRate(n, otherBytes)
-	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	t := &windowTable{packed: make([][]byte, len(p.tracks)), heads: make([][]byte, len(p.tracks)), data: make([][]byte, len(p.tracks))}
 	for ti := range p.tracks {
 		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
 		if err != nil {
@@ -219,13 +222,14 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 			t.bytes += int64(len(data))
 			continue
 		}
-		t.segs[ti] = p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
-		t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
-		t.offs[ti] = make([]int64, len(windows[ti]))
+		seg := p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
+		offs := make([]int64, len(windows[ti]))
 		for x := range windows[ti] {
-			t.offs[ti][x] = windows[ti][x].off
+			offs[x] = windows[ti][x].off
 		}
-		t.bytes += int64(len(t.heads[ti])) + int64(len(windows[ti]))*(8+int64(fragSampleBytes))
+		t.packed[ti] = packTrack(seg, offs)
+		t.heads[ti] = buildSegmentFile(uint32(n+1), seg)
+		t.bytes += int64(cap(t.packed[ti])+cap(t.heads[ti])) + tableTrackOverhead
 	}
 	p.winMu.Lock()
 	p.stats.TableBuilds++
@@ -273,8 +277,8 @@ func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
 	return t, nil
 }
 
-// fragSampleBytes is a table's cost per sample, for the budget.
-const fragSampleBytes = 40
+// tableTrackOverhead is what a cached table costs per rendition besides its packed samples (headers of the slices), for the budget.
+const tableTrackOverhead = 64
 
 // ResourceHandle is an open resource: its type and exact size up front, its
 // bytes written on demand. A media segment of a plan that streams is read from
@@ -321,10 +325,11 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		err error
 	)
 	if p.mp4src {
-		if t, err = p.mp4Table(ti, n); err != nil {
-			return nil, err
-		}
-	} else if t, err = p.table(ctx, n); err != nil {
+		t, err = p.mp4Table(ti, n)
+	} else if t, err = p.table(ctx, n); err == nil {
+		t = t.view(ti)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if d := t.data[ti]; d != nil { // a network source's audio: built whole by the walk
