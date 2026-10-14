@@ -44,6 +44,14 @@ All notable changes to mkvgo are documented here. The format is based on
   segment, 170 to 78-86 MB; Matroska 43 to 8.8-8.9 ms, 261 to 181-238 MB.
   `Resource` and the full pass gain the same way.
 
+- **A streamed CENC segment reuses its sample and write buffers.** Each
+  request allocated a 64 KiB write buffer and grew a sample buffer of its own;
+  both now come from pools, the sample buffer zeroed on its way back (it held
+  plaintext). Measured as above, 16 segments built at once: cenc Matroska 98
+  to 81-84 MB, MP4 120 to 66 MB; cbcs Matroska 59 MB. What a CENC segment
+  still allocates per request is its moof (the senc and subsample tables are
+  the segment's own) and a CTR state per sample.
+
 - **A Matroska source's audio is copied from the file too.** `Open` kept a
   window's audio, read with the structure walk, built whole in the window's
   table; the walk now reads every track's block headers only - a laced

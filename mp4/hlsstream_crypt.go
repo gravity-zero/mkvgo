@@ -8,10 +8,24 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 )
 
 // hlsstream_crypt.go - encrypted segments written from the source as Open's
 // handles serve them, byte for byte what Resource builds in memory.
+
+// sampleBufs hold one sample at a time for the CENC passes; cencWriters gather a CENC segment's writes.
+var (
+	sampleBufs  = sync.Pool{New: func() any { b := make([]byte, 0, 256<<10); return &b }}
+	cencWriters = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, stageBytes) }}
+)
+
+// putSampleBuf returns a sample buffer to its pool, zeroed: it held a sample's plaintext.
+func putSampleBuf(bufp *[]byte) {
+	clear((*bufp)[:cap(*bufp)])
+	*bufp = (*bufp)[:0]
+	sampleBufs.Put(bufp)
+}
 
 // cencStream is a CENC segment's state between Open and its writes: the
 // track's cipher and the senc entries the first pass derived.
@@ -38,7 +52,9 @@ func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 		}
 		defer rd.close()
 	}
-	var buf []byte
+	bufp := sampleBufs.Get().(*[]byte)
+	defer putSampleBuf(bufp)
+	buf := (*bufp)[:0]
 	for x, s := range seg.samples {
 		if k.isVideo {
 			if err := ctx.Err(); err != nil {
@@ -47,6 +63,7 @@ func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 			if buf, err = rd.read(x, buf); err != nil {
 				return err
 			}
+			*bufp = buf
 		}
 		if td.entries[x], err = k.entry(buf, s.dtsTS); err != nil {
 			return err
@@ -63,7 +80,12 @@ func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 // the range are neither read nor encrypted.
 func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle, off, n int64) (int64, error) {
 	cw := &countWriter{w: w}
-	bw := bufio.NewWriterSize(cw, stageBytes)
+	bw := cencWriters.Get().(*bufio.Writer)
+	bw.Reset(cw)
+	defer func() {
+		bw.Reset(nil) // its buffer held ciphertext and clear headers only
+		cencWriters.Put(bw)
+	}()
 	end := off + n
 	write := func(b []byte, pos int64) error {
 		from, to := max(off, pos), min(end, pos+int64(len(b)))
@@ -78,7 +100,9 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 	}
 	pos := int64(len(h.head))
 	var rd *sampleReader
-	var buf []byte
+	bufp := sampleBufs.Get().(*[]byte)
+	defer putSampleBuf(bufp)
+	buf := (*bufp)[:0]
 	for x, s := range h.table.segs[h.ti].samples {
 		size := int64(s.size)
 		if pos+size <= off {
@@ -102,6 +126,7 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 		if buf, err = rd.read(x, buf); err != nil {
 			return cw.pos, err
 		}
+		*bufp = buf
 		h.cenc.k.encrypt(buf, h.cenc.td.entries[x])
 		if err := write(buf, pos); err != nil {
 			return cw.pos, err
