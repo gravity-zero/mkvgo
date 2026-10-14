@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -1136,25 +1137,45 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	}
 
 	laceOff := br.r.tell()
-	raw := make([]byte, dataSize)
-	if _, err := io.ReadFull(br.r, raw); err != nil {
-		return mkv.Block{}, err
+	var raw []byte
+	var frameCount, headerBytes int
+	var frameSizes []int
+	if br.skipsPayload(uint64(trackNum)) {
+		// The lace header alone gives every frame's size and place: the frames are skipped, never read.
+		if dataSize == 0 {
+			return mkv.Block{}, fmt.Errorf("laced block missing lacing header byte")
+		}
+		count, err := br.r.ReadByte()
+		if err != nil {
+			return mkv.Block{}, err
+		}
+		frameCount = int(count) + 1
+		if frameSizes, headerBytes, err = readLaceHeader(br.r, lacing, frameCount, dataSize-1); err != nil {
+			return mkv.Block{}, fmt.Errorf("decode lacing: %w", err)
+		}
+		if err := br.r.discard(dataSize - 1 - int64(headerBytes)); err != nil {
+			return mkv.Block{}, err
+		}
+	} else {
+		raw = make([]byte, dataSize)
+		if _, err := io.ReadFull(br.r, raw); err != nil {
+			return mkv.Block{}, err
+		}
+		if len(raw) == 0 {
+			return mkv.Block{}, fmt.Errorf("laced block missing lacing header byte")
+		}
+		frameCount = int(raw[0]) + 1 // Matroska lace count byte = number of frames minus 1
+		raw = raw[1:]
+		frameSizes, headerBytes, err = decodeLacingSizes(lacing, raw, frameCount)
+		if err != nil {
+			return mkv.Block{}, fmt.Errorf("decode lacing: %w", err)
+		}
+		if headerBytes < 0 || headerBytes > len(raw) {
+			return mkv.Block{}, fmt.Errorf("laced block header (%d bytes) exceeds data (%d bytes)", headerBytes, len(raw))
+		}
+		raw = raw[headerBytes:]
 	}
-
-	if len(raw) == 0 {
-		return mkv.Block{}, fmt.Errorf("laced block missing lacing header byte")
-	}
-	frameCount := int(raw[0]) + 1 // Matroska lace count byte = number of frames minus 1
-	raw = raw[1:]
-
-	frameSizes, headerBytes, err := decodeLacingSizes(lacing, raw, frameCount)
-	if err != nil {
-		return mkv.Block{}, fmt.Errorf("decode lacing: %w", err)
-	}
-	if headerBytes < 0 || headerBytes > len(raw) {
-		return mkv.Block{}, fmt.Errorf("laced block header (%d bytes) exceeds data (%d bytes)", headerBytes, len(raw))
-	}
-	raw = raw[headerBytes:]
+	framesLen := dataSize - 1 - int64(headerBytes)
 	framesOff := laceOff + 1 + int64(headerBytes)
 
 	tc, err := safeTimecodeMs(br.clusterTS+int64(relTC), br.timecodeScale)
@@ -1171,8 +1192,8 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	offset := 0
 	for i := 0; i < frameCount; i++ {
 		end := offset + frameSizes[i]
-		if end > len(raw) {
-			return mkv.Block{}, fmt.Errorf("laced frame %d overflows: need %d, have %d", i, end, len(raw))
+		if int64(end) > framesLen {
+			return mkv.Block{}, fmt.Errorf("laced frame %d overflows: need %d, have %d", i, end, framesLen)
 		}
 		tcI := tc
 		if durNs > 0 && durNs <= maxLacedFrameDurNs {
@@ -1183,12 +1204,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 			Keyframe: keyframe, Size: int64(frameSizes[i]), Laced: frameCount > 1,
 			DataOffset: framesOff + int64(offset),
 		}
-		if !br.skipsPayload(uint64(trackNum)) {
-			// A laced block's frames still needed the payload read to decode
-			// their sizes (the lacing header sits ahead of them): header-only
-			// mode still transiently held it above, but drops the bytes here
-			// rather than keeping them - real muxers do not lace video, the
-			// only track this mode targets, so this path is not the hot one.
+		if raw != nil {
 			blocks[i].Data = append([]byte(nil), raw[offset:end]...)
 		}
 		offset = end
@@ -1266,7 +1282,73 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 // parseBlock slices the frame data right after them. Returning the consumed
 // length (instead of re-deriving it from the sizes) stays correct even when a
 // muxer encoded a size or diff in a wider-than-minimal VINT.
+// readLaceHeader reads a lace header (after its count byte) from r and returns
+// each frame's size and the header's length, the last frame sized from
+// dataLen - the bytes the header and frames take together - as
+// decodeLacingSizes does from the whole payload.
+func readLaceHeader(r io.ByteReader, lacing byte, frameCount int, dataLen int64) (sizes []int, headerLen int, err error) {
+	if lacing == lacingFixed {
+		if dataLen%int64(frameCount) != 0 {
+			return nil, 0, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", dataLen, frameCount)
+		}
+		sizes = make([]int, frameCount)
+		for i := range sizes {
+			sizes[i] = int(dataLen / int64(frameCount))
+		}
+		return sizes, 0, nil
+	}
+	// The header is gathered byte by byte - a Xiph size ends at its first byte
+	// under 255, an EBML VINT's width is in its first byte - then decoded as
+	// decodeLacingSizes decodes a whole payload, which sizes the last frame.
+	var hdr []byte
+	next := func() error {
+		if int64(len(hdr)) >= dataLen {
+			return fmt.Errorf("lace header overruns its %d data bytes", dataLen)
+		}
+		b, err := r.ReadByte()
+		hdr = append(hdr, b)
+		return err
+	}
+	for i := 0; i < frameCount-1; i++ {
+		switch lacing {
+		case lacingXiph:
+			for {
+				if err := next(); err != nil {
+					return nil, 0, err
+				}
+				if hdr[len(hdr)-1] < 255 {
+					break
+				}
+			}
+		case lacingEBML:
+			if err := next(); err != nil {
+				return nil, 0, err
+			}
+			first := hdr[len(hdr)-1]
+			if first == 0 {
+				return nil, 0, fmt.Errorf("ebml lacing: invalid size vint at frame %d", i)
+			}
+			for w := bits.LeadingZeros8(first); w > 0; w-- {
+				if err := next(); err != nil {
+					return nil, 0, err
+				}
+			}
+		default:
+			return nil, 0, fmt.Errorf("unknown lacing type %d", lacing)
+		}
+	}
+	// decodeLacingSizes sizes the last frame from the payload's length: hand it the header in front of a stand-in for the frames' length.
+	sizes, headerLen, err = decodeLacingSizesLen(lacing, hdr, frameCount, dataLen)
+	return sizes, headerLen, err
+}
+
 func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, headerLen int, err error) {
+	return decodeLacingSizesLen(lacing, raw, frameCount, int64(len(raw)))
+}
+
+// decodeLacingSizesLen decodes a lace header from raw, the last frame sized from total, the payload's length (raw may hold only the header).
+func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64) (sizes []int, headerLen int, err error) {
+	n := int(total64)
 	sizes = make([]int, frameCount)
 	switch lacing {
 	case lacingXiph:
@@ -1285,17 +1367,17 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, he
 			sizes[i] = sz
 			total += sz
 		}
-		last := len(raw) - pos - total
+		last := n - pos - total
 		if last < 0 {
-			return nil, 0, fmt.Errorf("xiph lacing: total %d exceeds data %d", total, len(raw)-pos)
+			return nil, 0, fmt.Errorf("xiph lacing: total %d exceeds data %d", total, n-pos)
 		}
 		sizes[frameCount-1] = last
 		return sizes, pos, nil
 	case lacingFixed:
-		if len(raw)%frameCount != 0 {
-			return nil, 0, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", len(raw), frameCount)
+		if n%frameCount != 0 {
+			return nil, 0, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", n, frameCount)
 		}
-		sz := len(raw) / frameCount
+		sz := n / frameCount
 		for i := range sizes {
 			sizes[i] = sz
 		}
@@ -1333,9 +1415,9 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, he
 			}
 			total += sizes[i]
 		}
-		last := len(raw) - pos - total
+		last := n - pos - total
 		if last < 0 {
-			return nil, 0, fmt.Errorf("ebml lacing: total %d exceeds data %d", total, len(raw)-pos)
+			return nil, 0, fmt.Errorf("ebml lacing: total %d exceeds data %d", total, n-pos)
 		}
 		sizes[frameCount-1] = last
 		return sizes, pos, nil
