@@ -130,6 +130,58 @@ func TestOpenStreamsMP4Sources(t *testing.T) {
 	}
 }
 
+// takeWriter records what a writer was given by Write and what it took from the file through ReadFrom.
+type takeWriter struct {
+	bytes.Buffer
+	fromFile int64
+}
+
+func (w *takeWriter) ReadFrom(r io.Reader) (int64, error) {
+	n, err := w.Buffer.ReadFrom(r)
+	w.fromFile += n
+	return n, err
+}
+
+// Samples stored back to back, each shorter than the sendfile threshold, go
+// to the writer as one run from the file, not through the buffer.
+func TestOpenCopiesContiguousSamplesAsOneRun(t *testing.T) {
+	ctx := context.Background()
+	w, h := uint32(320), uint32(240)
+	var blocks []genBlock
+	for i := 0; i < 100; i++ {
+		f := make([]byte, 4000)
+		copy(f, iframeTestFrame(i, i%25 == 0))
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: f})
+	}
+	mkvSrc := buildMKV(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}, blocks)
+	src := filepath.Join(t.TempDir(), "v.mp4")
+	if err := RemuxToMP4(ctx, mkvSrc, src); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _, err := plan.Resource(ctx, "seg00001.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hd, err := plan.Open(ctx, "seg00001.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got takeWriter
+	if _, err := hd.WriteTo(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Bytes(), want) {
+		t.Fatal("streamed bytes differ from Resource")
+	}
+	if media := int64(50 * 4000); got.fromFile != media {
+		t.Errorf("%d of the segment's %d sample bytes taken from the file, want all of them in one run", got.fromFile, media)
+	}
+}
+
 // A header-stripped track streams its prefix before each sample's bytes.
 func TestOpenStreamsHeaderStripping(t *testing.T) {
 	w, h := uint32(320), uint32(240)

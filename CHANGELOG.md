@@ -30,6 +30,17 @@ All notable changes to mkvgo are documented here. The format is based on
   p95 6.1 to 2.4 ms (p50 0.46 to 0.71 ms: an audio segment, 0.4 to 0.6 ms).
   All 393 resources are byte for byte those of `Resource`.
 
+### Performance
+
+- **Samples stored back to back are copied as one run.** A streamed segment
+  copied each sample on its own, so a sample under 16 KiB went through the
+  buffer even when its neighbours followed it in the file; a run of them now
+  goes to the writer in one piece, from the file (sendfile on a socket).
+  Measured with the `hls-server` example on a 2 Mbit/s 1080p video-only MP4
+  (frames of 9 KiB): 10,300 to 12,600 requests/s, p99 5.0 to 2.9 ms, a
+  segment requested alone p50 0.62 to 0.37 ms. No change on the 20 Mbit/s
+  sources, whose frames already went by sendfile one at a time.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

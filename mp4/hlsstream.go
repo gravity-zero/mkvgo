@@ -453,6 +453,16 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 	}
 	prefix := p.tracks[ti].ft.outTrack.mkv.HeaderStripping
 	c.end = spansEnd(src, t, ti, pos, off, off+n, int64(len(prefix)))
+	// Samples stored back to back in the source are copied as one run.
+	var runOff, runN int64
+	flushRun := func() error {
+		if runN == 0 {
+			return nil
+		}
+		err := c.copy(w, runOff, runN)
+		runN = 0
+		return err
+	}
 	for x, s := range t.segs[ti].samples {
 		if pos >= off+n {
 			break
@@ -460,15 +470,34 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 		if err := ctx.Err(); err != nil {
 			return c.written, err
 		}
-		if err := cut(pos, int64(len(prefix)), func(a, b int64) error { return c.emit(w, prefix[a:b]) }); err != nil {
+		if err := cut(pos, int64(len(prefix)), func(a, b int64) error {
+			if err := flushRun(); err != nil {
+				return err
+			}
+			return c.emit(w, prefix[a:b])
+		}); err != nil {
 			return c.written, err
 		}
 		pos += int64(len(prefix))
 		raw := int64(s.size) - int64(len(prefix))
-		if err := cut(pos, raw, func(a, b int64) error { return c.copy(w, t.offs[ti][x]+a, b-a) }); err != nil {
+		if err := cut(pos, raw, func(a, b int64) error {
+			o := t.offs[ti][x] + a
+			if runN > 0 && runOff+runN == o {
+				runN += b - a
+				return nil
+			}
+			if err := flushRun(); err != nil {
+				return err
+			}
+			runOff, runN = o, b-a
+			return nil
+		}); err != nil {
 			return c.written, err
 		}
 		pos += raw
+	}
+	if err := flushRun(); err != nil {
+		return c.written, err
 	}
 	err = c.flush(w)
 	return c.written, err
