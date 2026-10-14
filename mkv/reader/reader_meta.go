@@ -36,7 +36,7 @@ func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*mkv.Contai
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS.
 func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
-	f, err := fs.DoOpen(path)
+	f, err := fs.DoOpenContext(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}

@@ -683,6 +683,9 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if o.Encrypt == nil {
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
 	}
+	if err := ctx.Err(); err != nil { // the cover read does not see ctx
+		return nil, err
+	}
 	cover, err := loadCoverArt(fs, c.Attachments)
 	if err != nil {
 		return nil, err
