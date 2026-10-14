@@ -4,6 +4,22 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **The read back from the end of a file without SeekHead starts at 64 KiB.**
+  A Matroska file whose tail metadata (Cues, Tags, Chapters) no SeekHead
+  indexes was read 512 KiB back from its end in one go, whatever it held. The
+  read now starts at 64 KiB and doubles, up to 512 KiB, only while the window
+  ends inside metadata that starts before it (the last CuePoints, Tags,
+  chapters or attachments of an element cut by the window); a file ending on
+  a cluster stops at 64 KiB. A remote probe of a 4 MiB file without Cues nor
+  SeekHead: 2 requests and 1 MiB down to 2 requests and 576 KiB. Over 497
+  real Matroska files probed remotely the JSON is identical and the bytes
+  read go from 319.5 MiB to 302.5 MiB; 42 files whose tail metadata exceeds
+  64 KiB make 1 or 2 more requests (1,022 requests in all, now 1,071).
+
 ## [0.49.0] - 2026-10-14
 
 ### Breaking

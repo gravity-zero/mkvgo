@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -518,48 +519,167 @@ func (p *parser) unbuffer() error {
 // of a SeekHead-less file to locate the Cues index without walking the clusters.
 var cuesMagic = []byte{0x1C, 0x53, 0xBB, 0x6B}
 
-// tailScanWindow is the slice read from the real file end when hunting for a
-// trailing Cues index. One bounded read: it covers a typical Cues+Tags
-// (~100-300 KiB) so the common case is found immediately, while a file that has
-// no tail Cues wastes only this much before falling back to the cluster walk. A
-// Cues index that starts further than this from EOF is left to the walk.
-const tailScanWindow = 512 << 10
+// tailScanWindow is the most read back from the real file end when hunting
+// for a trailing Cues index; tailScanFirst is the first read. The read doubles
+// from tailScanFirst while the window ends inside metadata that starts before
+// it, so a file ending on a cluster costs tailScanFirst and a typical
+// Cues+Tags (~100-300 KiB) is read whole. A Cues index that starts further
+// than tailScanWindow from EOF is left to the walk.
+const (
+	tailScanFirst  = 64 << 10
+	tailScanWindow = 512 << 10
+)
 
-// scanTailForCues locates a SeekHead-less file's trailing Cues by reading one
-// window at the real end of the file and scanning it for a Cues element whose
-// top-level elements tile exactly to EOF. On a hit it parses the whole tail
-// (Cues plus any following Tags/Chapters/…) straight from that buffer - no
-// re-read - and returns true; the caller is then done. On a miss it returns
+// scanTailForCues locates a SeekHead-less file's trailing Cues by reading a
+// window at the real end of the file and scanning it for a run of tail
+// elements, holding a Cues, that tiles exactly to EOF. On a hit it parses the
+// whole run (Cues plus the Tags/Chapters/… around it) straight from that
+// buffer and returns true; the caller is then done. On a miss it returns
 // false and the caller walks the clusters. Using the real EOF (not the declared
 // segment size) keeps it safe on truncated files: a short read or a tail that
 // does not tile simply misses and defers to the resync-tolerant walk.
 func (p *parser) scanTailForCues(c *mkv.Container) (bool, error) {
-	start := p.pos() // current cluster body - never scan before here
+	floor := p.pos() // current cluster body - never scan before here
 	end, err := p.r.Seek(0, io.SeekEnd)
 	if err != nil {
 		return false, err
 	}
-	if end-start > tailScanWindow {
-		start = end - tailScanWindow
+	for win := int64(tailScanFirst); ; win *= 2 {
+		start := max(floor, end-min(win, tailScanWindow))
+		if end <= start {
+			return false, nil
+		}
+		buf := make([]byte, end-start)
+		if _, err := p.r.Seek(start, io.SeekStart); err != nil {
+			return false, err
+		}
+		if _, err := io.ReadFull(p.r, buf); err != nil {
+			return false, nil // truncated/short tail: defer to the walk
+		}
+		rel, cues, ok := tailRun(buf, start, end)
+		whole := (!ok || rel > 0) && !metaEndsAt(buf, rel)
+		if ok && cues && (whole || start == floor || win >= tailScanWindow) {
+			if err := p.parseTailBuffer(c, buf[rel:], start+int64(rel)); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if whole || start == floor || win >= tailScanWindow {
+			return false, nil
+		}
 	}
-	if end <= start {
-		return false, nil
+}
+
+// tailRun returns where in buf (covering [bufStart, end)) the earliest run of
+// segment-level elements other than clusters tiling exactly to end starts,
+// whether it holds a Cues element, and whether there is one; without one, at
+// is len(buf).
+func tailRun(buf []byte, bufStart, end int64) (at int, cues, ok bool) {
+	for i, b := range buf {
+		if b != 0x1C && b != 0x12 && b != 0x10 && b != 0x19 && b != 0xEC && b != 0x11 && b != 0x15 && b != 0x16 { // first byte of a tail element ID
+			continue
+		}
+		if c, ok := metaRunTiles(buf[i:], bufStart+int64(i), end); ok {
+			return i, c, true
+		}
 	}
-	buf := make([]byte, end-start)
-	if _, err := p.r.Seek(start, io.SeekStart); err != nil {
-		return false, err
+	return len(buf), false, false
+}
+
+// metaRunTiles reports whether buf starts a run of tail metadata elements tiling exactly to end, and whether it holds a Cues.
+func metaRunTiles(buf []byte, abs, end int64) (cues, ok bool) {
+	for off := 0; abs < end; {
+		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(buf[off:]))
+		if err != nil || eh.Size < 0 || !isTailMeta(eh.ID) {
+			return false, false
+		}
+		step := int64(hlen) + eh.Size
+		if abs+step > end {
+			return false, false
+		}
+		cues = cues || eh.ID == mkv.IDCues
+		abs += step
+		off += int(step)
 	}
-	if _, err := io.ReadFull(p.r, buf); err != nil {
-		return false, nil // truncated/short tail: defer to the walk
+	return cues, abs == end
+}
+
+// isTailMeta accepts the elements a muxer writes after the clusters: any segment-level element but a Cluster, or Void.
+func isTailMeta(id uint32) bool { return id != mkv.IDCluster && isTailElement(id) }
+
+// metaEndsAt reports whether buf[:x] ends with the last children of a tail
+// metadata element that started before buf: a run of CuePoints, Tags,
+// EditionEntries, ChapterAtoms or AttachedFiles, or of their children, tiling
+// exactly to x. Media payload ends no such run, so a window ending on a
+// cluster stops the tail scan.
+func metaEndsAt(buf []byte, x int) bool {
+	for i := 0; i < x; i++ {
+		if !innerFirstByte[buf[i]] {
+			continue
+		}
+		if innerRunTiles(buf[i:x]) {
+			return true
+		}
 	}
-	rel, ok := tailAnchor(buf, start, end)
-	if !ok {
-		return false, nil
+	return false
+}
+
+// innerFirstByte marks the first bytes of the IDs innerElement accepts.
+var innerFirstByte = func() (t [256]bool) {
+	for _, b := range []byte{0x73, 0x67, 0x63, 0x45, 0x44, 0x68, 0x6E, 0x61, 0x46, 0xBB, 0xB6} {
+		t[b] = true
 	}
-	if err := p.parseTailBuffer(c, buf[rel:], start+int64(rel)); err != nil {
-		return false, err
+	return t
+}()
+
+// innerRunTiles reports whether b is exactly a run of tail-metadata children.
+func innerRunTiles(b []byte) bool {
+	for off := 0; off < len(b); {
+		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(b[off:]))
+		if err != nil || eh.Size < 0 || int64(off)+int64(hlen)+eh.Size > int64(len(b)) {
+			return false
+		}
+		body := b[off+hlen : off+hlen+int(eh.Size)]
+		if !innerElement(eh.ID, body) {
+			return false
+		}
+		off += hlen + int(eh.Size)
 	}
-	return true, nil
+	return len(b) > 0
+}
+
+// innerElement accepts a child of a tail metadata element: a multi-byte ID of
+// one, or a CuePoint/ChapterAtom whose own children check out (their one-byte
+// IDs alone are too common in media payload).
+func innerElement(id uint32, body []byte) bool {
+	switch id {
+	case mkv.IDTag, mkv.IDSimpleTag, mkv.IDTargets, mkv.IDTagName, mkv.IDTagString, mkv.IDTagLanguage,
+		mkv.IDTagBinary, mkv.IDTargetTypeValue, mkv.IDTagTrackUID, mkv.IDEditionEntry, mkv.IDEditionUID,
+		mkv.IDEditionFlagHidden, mkv.IDEditionFlagDefault, mkv.IDEditionFlagOrdered, mkv.IDChapterUID,
+		mkv.IDChapterSegmentUID, mkv.IDAttachedFile, mkv.IDFileName, mkv.IDFileMimeType, mkv.IDFileData,
+		mkv.IDFileUID, mkv.IDFileDescription:
+		return true
+	case mkv.IDCuePoint:
+		return childrenAre(body, mkv.IDCueTime, mkv.IDCueTime, mkv.IDCueTrackPositions)
+	case mkv.IDChapterAtom:
+		return childrenAre(body, mkv.IDChapterUID, mkv.IDChapterUID, mkv.IDChapterTimeStart, mkv.IDChapterTimeEnd,
+			mkv.IDChapterDisplay, mkv.IDChapterFlagHidden, mkv.IDChapterSegmentUID, mkv.IDChapterAtom)
+	}
+	return false
+}
+
+// childrenAre reports whether body tiles exactly into elements whose IDs are all in ids, one of them must.
+func childrenAre(body []byte, must uint32, ids ...uint32) bool {
+	seen := false
+	for off := 0; off < len(body); {
+		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(body[off:]))
+		if err != nil || eh.Size < 0 || int64(off)+int64(hlen)+eh.Size > int64(len(body)) || !slices.Contains(ids, eh.ID) {
+			return false
+		}
+		seen = seen || eh.ID == must
+		off += hlen + int(eh.Size)
+	}
+	return seen
 }
 
 // tailAnchor scans buf (covering [bufStart, end)) for the earliest Cues element

@@ -2854,7 +2854,8 @@ case matroska.StrategyTranscode:
   `remux-hls`).
 - `HasSeekIndex`, `NeedsReindex`: whether the source already carries a Cues
   index reachable without a cluster walk (`reader.WithCues`: through the
-  SeekHead, or - since most muxers write none - one bounded read back from EOF),
+  SeekHead, or - since most muxers write none - a bounded read back from EOF,
+  64 KiB first, doubled up to 512 KiB while it ends inside the tail metadata),
   checked only when the strategy is `remux-hls` (on-demand HLS needs to seek
   into the source).
 - `Reindexed`: true when `Ingest` itself performed an in-place reindex during

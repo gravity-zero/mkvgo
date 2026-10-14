@@ -181,7 +181,7 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 		keys     bool
 	}{
 		{"with Cues", cuedMKV(t, 16), 2, 512<<10 + 64<<10, true},
-		{"without Cues", cuelessMKV(16), 2, 1 << 20, false},
+		{"without Cues", cuelessMKV(16), 2, 600 << 10, false},
 	}
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
