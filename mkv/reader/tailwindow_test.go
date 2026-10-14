@@ -128,3 +128,31 @@ func TestMetaAttachmentOffsetsPastExactReads(t *testing.T) {
 		}
 	}
 }
+
+// TestMetaFollowsSecondarySeekHead: a head SeekHead that only points at a
+// second SeekHead at the end of the file; the elements that one indexes are
+// read at their offsets, with no read back from EOF.
+func TestMetaFollowsSecondarySeekHead(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	var clusters []byte
+	for i := 0; i < 4; i++ {
+		clusters = append(clusters, mediaCluster(rng, 200<<10)...)
+	}
+	info, tracks := infoElem(), tracksElem()
+	cues, tags, chapters := cuesElem(12000), tagsElem("BPS", "24494738"), chaptersElem()
+	headSH := func(pos uint64) []byte { return seekHeadElem(seekEntry(mkv.IDSeekHead, pos)) }
+	cuesPos := uint64(len(headSH(0)) + len(info) + len(tracks) + len(clusters))
+	tagsPos := cuesPos + uint64(len(cues))
+	chaptersPos := tagsPos + uint64(len(tags))
+	tailSH := seekHeadElem(seekEntry(mkv.IDCues, cuesPos), seekEntry(mkv.IDTags, tagsPos), seekEntry(mkv.IDChapters, chaptersPos))
+	tailLen := len(cues) + len(tags) + len(chapters) + len(tailSH)
+	data := segmentMKV(headSH(chaptersPos+uint64(len(chapters))), info, tracks, clusters, cues, tags, chapters, tailSH)
+
+	c, tail := tailReadBytes(t, data, int64(len(data)-tailLen), WithCues(), WithTags(), WithChapters(), WithAttachments(), WithoutAttachmentData())
+	if len(c.Cues) != 12000 || len(c.Tags) != 1 || len(c.Chapters) != 1 {
+		t.Errorf("found %d cues, %d tags, %d chapters; want 12000, 1, 1", len(c.Cues), len(c.Tags), len(c.Chapters))
+	}
+	if tail > int64(tailLen)+4<<10 {
+		t.Errorf("read %d bytes of a %d-byte tail, want the indexed elements only", tail, tailLen)
+	}
+}

@@ -56,6 +56,28 @@ func cuelessMKV(n int) []byte {
 	return append(head, seg...)
 }
 
+// tailIndexedMKV is cuelessMKV followed by about 150 KB of Cues and a tag, both
+// indexed by a SeekHead at the very end that the head SeekHead points at.
+func tailIndexedMKV(n int) []byte {
+	file := cuelessMKV(n)
+	seg := bytes.Index(file, []byte{0x18, 0x53, 0x80, 0x67}) + 12
+	seek := func(id []byte, pos uint64) []byte {
+		return ebmlElem(0x4DBB, ebmlElem(0x53AB, id), ebmlUint(0x53AC, pos))
+	}
+	headSH := func(pos uint64) []byte { return ebmlElem(0x114D9B74, seek([]byte{0x11, 0x4D, 0x9B, 0x74}, pos)) }
+	var points [][]byte
+	for i := 0; i < 2200; i++ {
+		points = append(points, ebmlElem(0xBB, ebmlUint(0xB3, uint64(i)*1000),
+			ebmlElem(0xB7, ebmlUint(0xF7, 1), ebmlUint(0xF1, uint64(len(headSH(0)))))))
+	}
+	cues := ebmlElem(0x1C53BB6B, points...)
+	tags := ebmlElem(0x1254C367, ebmlElem(0x7373, ebmlElem(0x63C0),
+		ebmlElem(0x67C8, ebmlElem(0x45A3, []byte("TITLE")), ebmlElem(0x4487, []byte("tail test")))))
+	cuesPos := uint64(len(headSH(0)) + len(file) - seg)
+	tailSH := ebmlElem(0x114D9B74, seek([]byte{0x1C, 0x53, 0xBB, 0x6B}, cuesPos), seek([]byte{0x12, 0x54, 0xC3, 0x67}, cuesPos+uint64(len(cues))))
+	return bytes.Join([][]byte{file[:seg], headSH(cuesPos + uint64(len(cues)+len(tags))), file[seg:], cues, tags, tailSH}, nil)
+}
+
 // TestRemoteProbeCuelessReadsHeadOnly: a remote probe of a Matroska file without
 // Cues reads the head, not every Cluster for a keyframe index (it downloaded the
 // whole file).
@@ -203,6 +225,7 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 		{"without Cues", cuelessMKV(16), 2, 600 << 10, false},
 		{"with a 760 KB font", cuedMKVWithFont(t, 16, 760_000), 3, 600 << 10, true},
 		{"with a 100 KB font", cuedMKVWithFont(t, 16, 100_000), 2, 600 << 10, true},
+		{"with a SeekHead at the end", tailIndexedMKV(16), 3, 512<<10 + 160<<10, true},
 	}
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
@@ -216,6 +239,9 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 		srv.Close()
 		if strings.Contains(c.name, "font") && (!strings.Contains(out, `"font.ttf"`) || !strings.Contains(out, `"size": 760000`) && !strings.Contains(out, `"size": 100000`) || !strings.Contains(out, `"font test"`)) {
 			t.Errorf("%s: the attachment list or the tags are missing:\n%s", c.name, out)
+		}
+		if strings.Contains(c.name, "SeekHead") && !strings.Contains(out, `"tail test"`) {
+			t.Errorf("%s: the tag is missing:\n%s", c.name, out)
 		}
 		if got := strings.Contains(out, `"keyframes"`); got != c.keys {
 			t.Errorf("%s: keyframes in the JSON = %v, want %v", c.name, got, c.keys)

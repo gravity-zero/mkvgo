@@ -18,7 +18,22 @@ All notable changes to mkvgo are documented here. The format is based on
   SeekHead: 2 requests and 1 MiB down to 2 requests and 576 KiB. Over 497
   real Matroska files probed remotely the JSON is identical and the bytes
   read go from 319.5 MiB to 302.5 MiB; 42 files whose tail metadata exceeds
-  64 KiB make 1 or 2 more requests (1,022 requests in all, now 1,071).
+  64 KiB make 1 or 2 more requests (1,022 requests in all, now 1,073).
+
+- **A SeekHead at the end of the file is followed, and a file it indexes is
+  not read back from its end.** When the head SeekHead points only at a
+  second SeekHead written after the Cues and Tags, `ReadMeta`/`OpenMeta`
+  read that one, then the elements it indexes at their offsets, in file
+  order, so elements stored together come in one read. A file whose SeekHead
+  indexes the Cues, with no stale entry, no longer gets the read back from
+  EOF: an element the SeekHead does not name is not looked for. The read
+  back is kept for files without SeekHead. A remote probe of a 4 MiB file
+  with 150 KB of Cues and a tag indexed that way: 4 requests and 960 KiB
+  down to 3 requests and 660 KiB, and its keyframes are now reported. Over
+  497 real Matroska files probed remotely: 1,073 requests and 302.5 MiB
+  down to 1,072 requests and 302.4 MiB; the one file in that layout goes
+  from 704 KiB to 580 KiB and gains its keyframes, the other JSON outputs
+  are identical.
 
 - **A metadata read steps over a large attachment without fetching what
   follows it a window at a time.** With `WithoutAttachmentData` the reader

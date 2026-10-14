@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -301,32 +302,46 @@ func (p *parser) headWantsMore(c *mkv.Container, o readOpts) bool {
 // path's contract - exposing only the derived Keyframes and Track.Bitrate; with
 // o.cues the raw CuePoints are kept too (WithCues), for cue-driven seeking.
 func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts) error {
-	if len(c.Cues) == 0 && offs.cues >= 0 {
-		if _, err := p.parseElementAt(offs.cues, mkv.IDCues, c, p.parseCues); err != nil {
+	wantsTail := o.cues || o.tags || o.bitrate || o.attachments || o.chapters
+	if wantsTail {
+		if err := p.followSeekHeads(c, &offs); err != nil {
 			return err
 		}
 	}
-	if (o.bitrate || o.tags) && c.Tags == nil && offs.tags >= 0 {
-		if _, err := p.parseElementAt(offs.tags, mkv.IDTags, c, p.parseTags); err != nil {
-			return err
-		}
+	reads := []struct {
+		off  int64
+		id   uint32
+		want bool
+		fn   func(int64, *mkv.Container) error
+	}{
+		{offs.cues, mkv.IDCues, len(c.Cues) == 0, p.parseCues},
+		{offs.tags, mkv.IDTags, (o.bitrate || o.tags) && c.Tags == nil, p.parseTags},
+		{offs.attachments, mkv.IDAttachments, o.attachments && c.Attachments == nil, p.parseAttachments},
+		{offs.chapters, mkv.IDChapters, o.chapters && c.Chapters == nil, p.parseChapters},
 	}
-	if o.attachments && c.Attachments == nil && offs.attachments >= 0 {
-		if _, err := p.parseElementAt(offs.attachments, mkv.IDAttachments, c, p.parseAttachments); err != nil {
+	// In file order, so elements stored together come in one forward read.
+	sort.Slice(reads, func(i, j int) bool { return reads[i].off < reads[j].off })
+	indexed := offs.cues >= 0
+	for _, r := range reads {
+		if !r.want || r.off < 0 {
+			continue
+		}
+		ok, err := p.parseElementAt(r.off, r.id, c, r.fn)
+		if err != nil {
 			return err
 		}
-	}
-	if o.chapters && c.Chapters == nil && offs.chapters >= 0 {
-		if _, err := p.parseElementAt(offs.chapters, mkv.IDChapters, c, p.parseChapters); err != nil {
-			return err
-		}
+		indexed = indexed && ok
 	}
 	// Whatever the SeekHead did not hand over, the tail can: everything the
 	// metadata path serves past the head (Cues, Tags, Chapters, Attachments)
 	// lives in the SAME contiguous region at the file end, and most muxers index
 	// none of it. One bounded read recovers the lot.
-	if err := p.tailElements(c, o); err != nil {
-		return err
+	// A SeekHead that indexes the Cues, with no stale entry, is the file's index:
+	// an element it does not name is not there, and the tail scan is for files without one.
+	if !indexed {
+		if err := p.tailElements(c, o); err != nil {
+			return err
+		}
 	}
 	// Same single conversion the full read does, at this path's own "the Cues
 	// are final" point - the tail scan above is the last thing that can add any.
@@ -395,6 +410,26 @@ func (p *parser) tailElements(c *mkv.Container, o readOpts) error {
 	return nil
 }
 
+// followSeekHeads merges the entries of the SeekHeads the head one points at, as a muxer indexes its tail.
+func (p *parser) followSeekHeads(c *mkv.Container, offs *headOffsets) error {
+	seen := map[int64]bool{}
+	for i := 0; i < len(offs.seekHeads) && i < 8; i++ {
+		off := offs.seekHeads[i]
+		if seen[off] {
+			continue
+		}
+		seen[off] = true
+		if _, err := p.parseElementAt(off, mkv.IDSeekHead, c, func(size int64, _ *mkv.Container) error {
+			found, err := p.parseSeekHeadMeta(size, p.segStart, p.segEnd)
+			offs.merge(found)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // parseElementAt seeks to off, verifies the element there has the expected ID,
 // and parses it with fn. It returns (false, nil) - not an error - when the offset
 // points at a different element (a stale/odd SeekHead entry), so the caller can
@@ -426,6 +461,7 @@ func (p *parser) parseElementAt(off int64, id uint32, c *mkv.Container, fn func(
 // points at, -1 each when absent.
 type headOffsets struct {
 	info, tracks, cues, tags, attachments, chapters int64
+	seekHeads                                       []int64 // further SeekHeads this one points at
 }
 
 // merge keeps the other SeekHead's entries where this one has none.
@@ -441,6 +477,7 @@ func (h *headOffsets) merge(o headOffsets) {
 			*p.dst = p.src
 		}
 	}
+	h.seekHeads = append(h.seekHeads, o.seekHeads...)
 }
 
 // parseSeekHeadMeta reads a SeekHead and returns the absolute file offsets of
@@ -487,6 +524,8 @@ func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (headOffsets, e
 			offs.attachments = abs
 		case mkv.IDChapters:
 			offs.chapters = abs
+		case mkv.IDSeekHead:
+			offs.seekHeads = append(offs.seekHeads, abs)
 		}
 	}
 	return offs, nil
