@@ -20,6 +20,19 @@ All notable changes to mkvgo are documented here. The format is based on
   read go from 319.5 MiB to 302.5 MiB; 42 files whose tail metadata exceeds
   64 KiB make 1 or 2 more requests (1,022 requests in all, now 1,071).
 
+- **A metadata read steps over a large attachment without fetching what
+  follows it a window at a time.** With `WithoutAttachmentData` the reader
+  already skipped the payloads, but over HTTP the headers right after a
+  skipped font (its UID, the next element) opened a new 512 KiB window: a
+  remote probe of a file with a 760 KB font made 3 requests for 1,025 KiB.
+  Once the skipped payloads reach 256 KiB, `ReadMeta`/`OpenMeta` read through
+  exact ranges (`io.ReaderAt`) of 4 KiB, doubled while the reads run on:
+  3 requests for 516 KiB. A smaller attachment, still inside the window
+  already streamed, reads as before. The WebAssembly `Blob` reader offers the
+  same exact reads: the probe of that file goes from 3 Blob reads of 128 KiB
+  in all to 3 reads of 68 KiB. Over 497 real Matroska files probed remotely
+  the JSON and the requests are unchanged.
+
 ## [0.49.0] - 2026-10-14
 
 ### Breaking

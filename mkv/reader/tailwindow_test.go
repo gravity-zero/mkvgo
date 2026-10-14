@@ -101,3 +101,30 @@ func TestTailScanRunWithTrailingSeekHeads(t *testing.T) {
 		t.Errorf("found %d cues and %d tags, want 5000 and 1", len(c.Cues), len(c.Tags))
 	}
 }
+
+// TestMetaAttachmentOffsetsPastExactReads: past 256 KiB of skipped payload a
+// metadata read goes through exact windows; each attachment still records
+// where its payload is, and the elements after them are still read.
+func TestMetaAttachmentOffsetsPastExactReads(t *testing.T) {
+	file := func(name string, n int) []byte {
+		var data bytes.Buffer
+		ebml.WriteElementHeader(&data, mkv.IDFileData, int64(n))
+		data.Write(bytes.Repeat([]byte{byte(n)}, n))
+		return masterElem(mkv.IDAttachedFile, strElem(mkv.IDFileName, name), strElem(mkv.IDFileMimeType, "font/ttf"),
+			data.Bytes(), uintElem(mkv.IDFileUID, uint64(n), 8))
+	}
+	atts := masterElem(mkv.IDAttachments, file("a.ttf", 300<<10), file("b.ttf", 200<<10), file("c.ttf", 5))
+	data := segmentMKV(infoElem(), tracksElem(), atts, tagsElem("TITLE", "t"), clusterElem())
+	c, err := ReadMeta(context.Background(), bytes.NewReader(data), "x.mkv", WithAttachments(), WithoutAttachmentData(), WithTags())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Attachments) != 3 || len(c.Tags) != 1 {
+		t.Fatalf("%d attachments and %d tags, want 3 and 1", len(c.Attachments), len(c.Tags))
+	}
+	for _, a := range c.Attachments {
+		if got := data[a.DataOffset : a.DataOffset+a.Size]; !bytes.Equal(got, bytes.Repeat([]byte{byte(a.Size)}, int(a.Size))) || a.ID != uint64(a.Size) {
+			t.Errorf("%s: DataOffset %d, size %d, UID %d do not name its payload", a.Name, a.DataOffset, a.Size, a.ID)
+		}
+	}
+}

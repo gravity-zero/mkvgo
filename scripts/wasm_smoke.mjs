@@ -79,6 +79,24 @@ check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.len
       el(0x1254C367, el(0x7373, el(0x63C0, u(0x68CA, 50), u(0x63C5, UID)), el(0x67C8, el(0x45A3, 'TITLE'), el(0x4487, 't'))))),
   ])
   const p = await MkvGo.probe(file)
+  {
+    // the same file with a 760 KB font and a cluster after: the probe lists the font and reads past its payload
+    const font = el(0x1941A469, el(0x61A7, el(0x466E, 'font.ttf'), el(0x4660, 'font/ttf'), el(0x465C, new Uint8Array(760000)), u(0x46AE, UID)))
+    const big = Uint8Array.from([
+      ...el(0x1A45DFA3, el(0x4282, 'matroska'), u(0x4287, 4), u(0x4285, 2)),
+      ...el(0x18538067, el(0x1549A966, u(0x2AD7B1, 1000000)),
+        el(0x1654AE6B, el(0xAE, u(0xD7, 1), u(0x73C5, UID), u(0x83, 1), el(0x86, 'V_VP9'), el(0xE0, u(0xB0, 64), u(0xBA, 64)))),
+        font, el(0x1254C367, el(0x7373, el(0x63C0, u(0x68CA, 50)), el(0x67C8, el(0x45A3, 'TITLE'), el(0x4487, 'font test')))),
+        el(0x1F43B675, u(0xE7, 0), el(0xA3, Uint8Array.from([0x81, 0, 0, 0x80]), new Uint8Array(600000)))),
+    ])
+    let reads = 0, bytes = 0
+    const slice = Blob.prototype.slice
+    Blob.prototype.slice = function (s, e, ...r) { reads++; bytes += e - s; return slice.call(this, s, e, ...r) }
+    const q = await MkvGo.probe(new Blob([big]))
+    Blob.prototype.slice = slice
+    check(q.attachments?.[0]?.size === 760000 && q.tags?.length === 1 && reads <= 3 && bytes <= 136 << 10,
+      `probe(Blob) of an MKV with a 760 KB font: ${q.attachments?.length} attachment, ${q.tags?.length} tag, ${reads} Blob reads, ${bytes} bytes (head 64 KiB + 4 KiB past the font + 64 KiB tail, <= 136 KiB)`)
+  }
   const want = UID.toString()
   const got = [p.tracks?.[0]?.uid, p.chapters?.[0]?.id, p.attachments?.[0]?.id, p.tags?.find((t) => t.target_id !== '0')?.target_id]
   check(got.every((v) => v === want) && p.tracks[0].id === 1,

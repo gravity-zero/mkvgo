@@ -139,6 +139,9 @@ type parser struct {
 	// loading it (reader.WithoutAttachmentData); path is the file it refers to.
 	lazyAttachments bool
 	path            string
+	// metaRead is set by ReadMeta: once skippedPayload passes skipToExactReads, reads go through exact windows.
+	metaRead       bool
+	skippedPayload int64
 	// posBase is the file offset the current reader's offset 0 corresponds to.
 	// It is 0 for the file reader and non-zero only while a tail BUFFER stands
 	// in for it, so a position recorded as an offset in the file stays one.
@@ -1819,6 +1822,11 @@ func (p *parser) parseAttachments(size int64, c *mkv.Container) error {
 	return nil
 }
 
+// skipToExactReads is how much attachment payload a metadata read skips
+// before it reads through exact windows: a smaller skip stays inside the
+// window a remote reader is already streaming.
+const skipToExactReads = 256 << 10
+
 func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
@@ -1867,6 +1875,10 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 				att.DataPath, att.DataOffset = p.path, p.posBase+at
 				if err := p.skip(eh.Size); err != nil {
 					return att, err
+				}
+				p.skippedPayload += eh.Size
+				if br, ok := p.r.(*bufReadSeeker); ok && p.metaRead && p.skippedPayload >= skipToExactReads {
+					br.readAtWindows()
 				}
 				continue
 			}

@@ -76,7 +76,7 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path}
+	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path, metaRead: true}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(c); err != nil {
@@ -612,6 +612,79 @@ func (b *bufReadSeeker) Seek(offset int64, whence int) (int64, error) {
 // offset, so a caller can continue reading from exactly where the buffered view
 // left off - without the buffer. Any bytes still buffered ahead are discarded;
 // they will be re-read from the underlying reader on demand.
+// readAtWindows switches the underlying reads to exact windows through io.ReaderAt (atWindows), when the source offers it.
+func (b *bufReadSeeker) readAtWindows() {
+	ra, ok := b.rs.(io.ReaderAt)
+	if _, done := b.rs.(*atWindows); !ok || done {
+		return
+	}
+	size, err := b.rs.Seek(0, io.SeekEnd)
+	if err != nil {
+		return
+	}
+	b.rs = &atWindows{ra: ra, size: size, pos: b.off}
+	b.br.Reset(b.rs)
+}
+
+// atWindows reads an io.ReaderAt through one window of exact ReadAt calls:
+// 4 KiB after a jump, doubled while the reads run on, up to 512 KiB, and a
+// read larger than the window asks for just that read. Behind a skipped
+// payload it fetches the headers that follow, not a remote reader's window.
+type atWindows struct {
+	ra             io.ReaderAt
+	size, pos, off int64
+	buf            []byte
+	win            int
+}
+
+func (w *atWindows) Read(p []byte) (int, error) {
+	if w.pos >= w.size {
+		return 0, io.EOF
+	}
+	if w.pos < w.off || w.pos >= w.off+int64(len(w.buf)) {
+		if w.win > 0 && w.pos == w.off+int64(len(w.buf)) {
+			w.win = min(2*w.win, 512<<10)
+		} else {
+			w.win = 4 << 10
+		}
+		if len(p) >= w.win { // a large read goes straight through
+			n, err := w.ra.ReadAt(p[:min(int64(len(p)), w.size-w.pos)], w.pos)
+			w.pos += int64(n)
+			if n > 0 {
+				err = nil
+			}
+			return n, err
+		}
+		n := int(min(int64(w.win), w.size-w.pos))
+		if cap(w.buf) < n {
+			w.buf = make([]byte, n)
+		}
+		m, err := w.ra.ReadAt(w.buf[:n], w.pos)
+		if m == 0 {
+			w.buf = w.buf[:0]
+			return 0, err
+		}
+		w.buf, w.off = w.buf[:m], w.pos
+	}
+	n := copy(p, w.buf[w.pos-w.off:])
+	w.pos += int64(n)
+	return n, nil
+}
+
+func (w *atWindows) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekCurrent:
+		offset += w.pos
+	case io.SeekEnd:
+		offset += w.size
+	}
+	if offset < 0 {
+		return 0, errors.New("atWindows: negative position")
+	}
+	w.pos = offset
+	return offset, nil
+}
+
 func (b *bufReadSeeker) raw() (io.ReadSeeker, error) {
 	if _, err := b.rs.Seek(b.off, io.SeekStart); err != nil {
 		return nil, err

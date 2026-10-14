@@ -52,6 +52,22 @@ func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
 	return next, nil
 }
 
+// ReadAt reads len(p) bytes at off with one exact Blob slice (io.ReaderAt), leaving the windows and the position alone.
+func (r *blobReader) ReadAt(p []byte, off int64) (int, error) {
+	if off >= r.size {
+		return 0, io.EOF
+	}
+	n := int(min(int64(len(p)), r.size-off))
+	buf, err := r.fetch(p[:n], off)
+	if err != nil {
+		return 0, err
+	}
+	if len(buf) < len(p) {
+		return len(buf), io.EOF
+	}
+	return len(buf), nil
+}
+
 // Close satisfies mkv.ReadSeekCloser; a Blob slice holds no OS resource.
 func (r *blobReader) Close() error { return nil }
 

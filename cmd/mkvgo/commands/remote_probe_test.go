@@ -133,9 +133,28 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// cuedMKVWithFont is cuedMKV with a font of size bytes attached and a tag, written
+// before the clusters as a muxer does.
+func cuedMKVWithFont(t *testing.T, n, size int) []byte {
+	t.Helper()
+	font := make([]byte, size)
+	for i := range font {
+		font[i] = byte(i * 7)
+	}
+	return cuedMKVMeta(t, n, &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000},
+		Attachments: []mkv.Attachment{{ID: 7454167688999517126, Name: "font.ttf", MIMEType: "font/ttf", Data: font}},
+		Tags:        []mkv.Tag{{TargetType: "MOVIE", SimpleTags: []mkv.SimpleTag{{Name: "TITLE", Value: "font test"}}}}})
+}
+
 // cuedMKV writes n one-second clusters of one 256 KiB video keyframe each,
 // with Cues and the SeekHead that points at them, as a muxer finalizes a file.
 func cuedMKV(t *testing.T, n int) []byte {
+	t.Helper()
+	return cuedMKVMeta(t, n, &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}})
+}
+
+// cuedMKVMeta is cuedMKV with the head metadata of c.
+func cuedMKVMeta(t *testing.T, n int, c *mkv.Container) []byte {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cued.mkv")
 	f, err := os.Create(path)
@@ -149,7 +168,7 @@ func cuedMKV(t *testing.T, n int) []byte {
 	if err := m.WriteStart(); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}}, tracks, int64(n)*1000); err != nil {
+	if err := m.WriteMetadata(c, tracks, int64(n)*1000); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
@@ -182,6 +201,8 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 	}{
 		{"with Cues", cuedMKV(t, 16), 2, 512<<10 + 64<<10, true},
 		{"without Cues", cuelessMKV(16), 2, 600 << 10, false},
+		{"with a 760 KB font", cuedMKVWithFont(t, 16, 760_000), 3, 600 << 10, true},
+		{"with a 100 KB font", cuedMKVWithFont(t, 16, 100_000), 2, 600 << 10, true},
 	}
 	commands.JsonOutput = true
 	t.Cleanup(func() { commands.JsonOutput = false })
@@ -193,6 +214,9 @@ func TestRemoteProbeReadBudget(t *testing.T) {
 		}))
 		out := capture(t, func() { commands.CmdProbe(srv.URL + "/f.mkv") })
 		srv.Close()
+		if strings.Contains(c.name, "font") && (!strings.Contains(out, `"font.ttf"`) || !strings.Contains(out, `"size": 760000`) && !strings.Contains(out, `"size": 100000`) || !strings.Contains(out, `"font test"`)) {
+			t.Errorf("%s: the attachment list or the tags are missing:\n%s", c.name, out)
+		}
 		if got := strings.Contains(out, `"keyframes"`); got != c.keys {
 			t.Errorf("%s: keyframes in the JSON = %v, want %v", c.name, got, c.keys)
 		}
