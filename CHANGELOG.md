@@ -4,9 +4,9 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.49.0] - 2026-10-14
 
-### BREAKING
+### Breaking
 
 - **The WebAssembly results carry the 64-bit UIDs as strings.** `JSON.parse`
   turns an integer into a JavaScript number, which keeps 53 bits: a track
@@ -21,6 +21,14 @@ All notable changes to mkvgo are documented here. The format is based on
   compares strings now. The rewrite is one pass over the JSON bytes: a probe
   under Node 22 takes 1.19 ms on a 237 MB MKV and 1.86 ms on a 237 MB MP4
   with a 697 KB moov, against 1.15 and 1.80 ms without it.
+  **Migration for JavaScript consumers:** with `web/mkvgo.ts`, `Track.uid`,
+  `Chapter.id`, the attachment `id` and `Tag.target_id` are now typed
+  `string`, so the compiler points at each use. Compare them with strings
+  (`track.uid === '7454167688999517126'`, `chapter.id === '1'`), not with
+  numbers; use `BigInt(track.uid)` where arithmetic is needed; pass them back
+  as strings. A UID stored from an earlier release was already rounded and
+  matches nothing: read it again from the file. Track numbers (`Track.id`,
+  `track_id` options) stay numbers.
 - **A remote `probe` of a Matroska file without Cues reads the head only.**
   `probe` asked for the complete keyframe index, which on a file without Cues
   is a walk of every Cluster: over HTTP or S3 that downloaded the whole file
@@ -189,8 +197,8 @@ All notable changes to mkvgo are documented here. The format is based on
   after the cancel, returning after 18 ms median and 40 ms at most, down to
   none, returning after 0.22 ms median and 0.57 ms at most. `OpenMetaWithFS`
   now opens the file through `FS.OpenContext`: a plan cancelled before it
-  no longer opens a remote source for its metadata. The cover-art attachment is read only
-  while the context is live: a plan cancelled right before it read the
+  no longer opens a remote source for its metadata. The cover-art attachment
+  is read only while the context is live: a plan cancelled right before it read the
   picture (2 MiB on the test file) and returned a plan; it now returns the
   context's error. Without a cancel, the 7,066 resources of the plan
   (playlists, init, manifest and every segment) are byte-identical.
