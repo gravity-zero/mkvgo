@@ -27,9 +27,11 @@ func willNeed(f *os.File, off, n int64) {
 }
 
 // networkFS are the filesystem magics of network mounts (NFS, SMB, CIFS,
-// SMB2, 9p, FUSE, Ceph, AFS): read-ahead asked there is read across the
-// network ahead of need, a round trip and bytes the read itself does not want.
-var networkFS = map[int64]bool{0x6969: true, 0x517B: true, 0xFF534D42: true, 0xFE534D42: true, 0x01021997: true, 0x65735546: true, 0x00C36400: true, 0x5346414F: true}
+// SMB2, 9p, Ceph, AFS): read-ahead asked there is read across the network
+// ahead of need, a round trip and bytes the read itself does not want. FUSE
+// is left out: a media library behind one is mostly local disks pooled by
+// mergerfs; a network FUSE (sshfs, rclone) is served as a local disk is.
+var networkFS = map[int64]bool{0x6969: true, 0x517B: true, 0xFF534D42: true, 0xFE534D42: true, 0x01021997: true, 0x00C36400: true, 0x5346414F: true}
 
 // onNetwork reports whether f sits on a network mount.
 func onNetwork(f *os.File) bool {
