@@ -37,6 +37,7 @@ package mp4
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -474,7 +475,8 @@ func cencCTREncrypt(block cipher.Block, counterBlock []byte, sample []byte, subs
 // audio sample), never carrying it across NAL boundaries within a sample.
 func cbcsPatternEncrypt(block cipher.Block, iv []byte, region []byte, cryptBlocks, skipBlocks int) {
 	full := len(region) / aes.BlockSize * aes.BlockSize
-	chain := append([]byte(nil), iv...)
+	var chain [aes.BlockSize]byte
+	copy(chain[:], iv)
 	pos := 0
 	for pos < full {
 		n := cryptBlocks * aes.BlockSize
@@ -482,8 +484,13 @@ func cbcsPatternEncrypt(block cipher.Block, iv []byte, region []byte, cryptBlock
 			n = full - pos
 		}
 		if n > 0 {
-			cipher.NewCBCEncrypter(block, chain).CryptBlocks(region[pos:pos+n], region[pos:pos+n])
-			chain = append(chain[:0:0], region[pos+n-aes.BlockSize:pos+n]...)
+			// CBC by hand, block after block: a crypt run of the 1:9 pattern is one block, an encrypter per run is an allocation per block.
+			for b := pos; b < pos+n; b += aes.BlockSize {
+				blk := region[b : b+aes.BlockSize]
+				subtle.XORBytes(blk, blk, chain[:])
+				block.Encrypt(blk, blk)
+				copy(chain[:], blk)
+			}
 			pos += n
 		}
 		if skipBlocks <= 0 {

@@ -34,6 +34,16 @@ All notable changes to mkvgo are documented here. The format is based on
   files, p95 unchanged or lower; its audio, read through the gaps, 213 to 72
   ms and 44 to 20 ms.
 
+### Performance
+
+- **cbcs encryption no longer allocates per block.** The 1:9 pattern
+  encrypted each one-block crypt run through a new CBC encrypter, one
+  allocation per protected block: thousands a segment, and the collector
+  behind them. The chain now runs block by block in place, the bytes
+  unchanged. Measured as above, cbcs through `Open`: MP4 37.7 to 5.6-6.1 ms a
+  segment, 170 to 78-86 MB; Matroska 43 to 8.8-8.9 ms, 261 to 181-238 MB.
+  `Resource` and the full pass gain the same way.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added
