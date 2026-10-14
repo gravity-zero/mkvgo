@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/cmd/mkvgo/commands"
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
 // ebmlElem encodes one EBML element with an 8-byte size.
@@ -129,4 +131,75 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.ResponseWriter.Write(p)
 	c.n.Add(int64(n))
 	return n, err
+}
+
+// cuedMKV writes n one-second clusters of one 256 KiB video keyframe each,
+// with Cues and the SeekHead that points at them, as a muxer finalizes a file.
+func cuedMKV(t *testing.T, n int) []byte {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cued.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	w, h := uint32(64), uint32(64)
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "vp9", Width: &w, Height: &h}}
+	m := writer.NewMKVWriter(f)
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}}, tracks, int64(n)*1000); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		b := []mkv.Block{{TrackNumber: 1, Timecode: int64(i) * 1000, Keyframe: true, Data: make([]byte, 256<<10)}}
+		if err := m.WriteClusterWithCues(int64(i)*1000, 1_000_000, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestRemoteProbeReadBudget pins what a remote probe costs on a multi-MiB
+// Matroska file: with Cues, the 512 KiB head and the exact range of the Cues
+// the SeekHead points at; without Cues nor SeekHead, the head and one bounded
+// 512 KiB tail read for the tags and chapters a muxer writes last.
+func TestRemoteProbeReadBudget(t *testing.T) {
+	cases := []struct {
+		name     string
+		file     []byte
+		requests int64
+		bytes    int64
+		keys     bool
+	}{
+		{"with Cues", cuedMKV(t, 16), 2, 512<<10 + 64<<10, true},
+		{"without Cues", cuelessMKV(16), 2, 1 << 20, false},
+	}
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	for _, c := range cases {
+		var served, requests atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			http.ServeContent(&countingWriter{ResponseWriter: w, n: &served}, r, "f.mkv", time.Time{}, bytes.NewReader(c.file))
+		}))
+		out := capture(t, func() { commands.CmdProbe(srv.URL + "/f.mkv") })
+		srv.Close()
+		if got := strings.Contains(out, `"keyframes"`); got != c.keys {
+			t.Errorf("%s: keyframes in the JSON = %v, want %v", c.name, got, c.keys)
+		}
+		if requests.Load() > c.requests || served.Load() > c.bytes {
+			t.Errorf("%s (%d-byte file): %d requests, %d bytes; want at most %d and %d",
+				c.name, len(c.file), requests.Load(), served.Load(), c.requests, c.bytes)
+		}
+		t.Logf("%s: %d requests, %d bytes of %d", c.name, requests.Load(), served.Load(), len(c.file))
+	}
 }
