@@ -93,9 +93,9 @@ type tableFlight struct {
 
 // streams reports whether this plan can write segments from the source: the
 // served bytes must be the source's own (no encryption, no conversion), from a
-// Matroska file the plan may read twice.
+// file the plan may read twice.
 func (p *HLSPlan) streams() bool {
-	if p.mp4src || p.opts.Encrypt != nil || p.opts.CENC != nil || (p.opts.FS != nil && !p.opts.StreamFromFS) {
+	if p.opts.Encrypt != nil || p.opts.CENC != nil || (p.opts.FS != nil && !p.opts.StreamFromFS) {
 		return false
 	}
 	for _, pt := range p.tracks {
@@ -247,6 +247,17 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	return t, nil
 }
 
+// mp4Table is segment n of an MP4 source's track ti as a table: the sample table holds its timing and offsets, nothing is walked or kept.
+func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
+	if n < 0 || n >= p.segCount {
+		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
+	}
+	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	t.segs[ti], t.offs[ti] = p.mp4Segment(ti, n)
+	t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
+	return t, nil
+}
+
 // fragSampleBytes is a table's cost per sample, for the budget.
 const fragSampleBytes = 40
 
@@ -266,7 +277,7 @@ type ResourceHandle struct {
 
 // Open opens the named resource (the same names Resource serves); the handle's
 // bytes equal Resource's exactly. A segment streams when the plan can read its
-// source twice and serves the source's own bytes: a Matroska file, no
+// source twice and serves the source's own bytes: a Matroska or MP4 file, no
 // encryption, no track conversion, local or Options.StreamFromFS.
 func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
 	ti, n, isSeg := p.segmentName(name)
@@ -285,8 +296,15 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	if err := p.checkSource(); err != nil {
 		return nil, err
 	}
-	t, err := p.table(ctx, n)
-	if err != nil {
+	var (
+		t   *windowTable
+		err error
+	)
+	if p.mp4src {
+		if t, err = p.mp4Table(ti, n); err != nil {
+			return nil, err
+		}
+	} else if t, err = p.table(ctx, n); err != nil {
 		return nil, err
 	}
 	if d := t.data[ti]; d != nil { // an audio rendition: built whole by the structure walk
@@ -402,7 +420,8 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 // the source, through one copier that gathers the small spans and hands the
 // large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, ti int, off, n int64) (int64, error) {
-	c := &spanCopier{exact: audioExactReads && !p.tracks[ti].ft.outTrack.spec.video}
+	// An MP4 source's audio sits in short runs between video frames: each run is read alone, the frames between never read.
+	c := &spanCopier{exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video}
 	defer c.release()
 	// cut writes the part of a piece spanning [pos, pos+size) that falls in the range, through fn.
 	cut := func(pos, size int64, fn func(from, to int64) error) error {

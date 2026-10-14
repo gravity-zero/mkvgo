@@ -18,6 +18,18 @@ All notable changes to mkvgo are documented here. The format is based on
   68 to 11 ms; every segment requested once in turn: p95 8.1 to 3.9 ms. The
   served bytes are unchanged. `docs/streaming.md` shows the same handler.
 
+- **`HLSPlan.Open` streams the segments of an MP4 source.** An MP4 source
+  fell back to building each segment in memory (`Stats().StreamFallbacks`);
+  its sample table, kept by the plan, already says where every sample sits,
+  so its segments are now written from the file like a Matroska source's,
+  with nothing walked. An audio rendition is read run by run, exactly, never
+  through the video frames stored between its samples. Measured with the
+  `hls-server` example on a 2 GB MP4 (the same 1080p H.264 at 20 Mbit/s,
+  two audio tracks), 16 connections: peak memory 615 to 23 MB, 1,574 to
+  3,846 requests/s, p99 41 to 9 ms; every segment requested once in turn:
+  p95 6.1 to 2.4 ms (p50 0.46 to 0.71 ms: an audio segment, 0.4 to 0.6 ms).
+  All 393 resources are byte for byte those of `Resource`.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

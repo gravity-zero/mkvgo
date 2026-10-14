@@ -508,11 +508,12 @@ the source as they go, through one pooled 256 KiB buffer. The first request
 for a window walks it structure-only (block headers, no payloads) and keeps a
 small table - where each sample sits, the timed `moof` - shared by every
 rendition and every client of that window; each write then copies the sample
-ranges straight from the file. The bytes equal `Resource`'s exactly, playlists
-and init segments come back whole as before, and a plan that cannot stream
-(an MP4 source, `Encrypt`/`CENC`, a `FrameConverter`, a custom `Options.FS`
-without `StreamFromFS`) serves `Open` from memory and counts it in
-`Stats().StreamFallbacks`. `mkvhttp.Handler` uses `Open` on its own; a write
+ranges straight from the file. An MP4 source needs no walk: its sample table,
+kept by the plan, already holds every sample's timing and offset. The bytes
+equal `Resource`'s exactly, playlists and init segments come back whole as
+before, and a plan that cannot stream (`Encrypt`/`CENC`, a `FrameConverter`, a
+custom `Options.FS` without `StreamFromFS`) serves `Open` from memory and
+counts it in `Stats().StreamFallbacks`. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player
 could take for a whole segment.
 

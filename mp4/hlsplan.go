@@ -3479,17 +3479,8 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 // bytes are ranged reads at the recorded offsets.
 func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	ft := p.tracks[ti].ft
-	samples, offs := p.mp4tabs[ti].window(n)
-
-	seg := trackSegment{trackID: ft.outTrack.mp4ID, baseDecodeTS: ft.durMediaTS}
-	if len(samples) > 0 {
-		seg.samples = samples
-		seg.baseDecodeTS = samples[0].dtsTS
-		seg.hasCTS = windowHasCTS(seg.samples)
-		for x := range samples {
-			seg.dataLen += int64(samples[x].size)
-		}
-	}
+	seg, offs := p.mp4Segment(ti, n)
+	samples := seg.samples
 
 	// The samples go straight into the buffer that is served: the head does
 	// not depend on their bytes, so it is built first and the media read in
@@ -3537,6 +3528,22 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		return p.opts.Encrypt.encryptSegment(out, uint32(n))
 	}
 	return out, nil
+}
+
+// mp4Segment is track ti's segment n of an MP4 source, timed from the sample table, and each sample's file offset.
+func (p *HLSPlan) mp4Segment(ti, n int) (trackSegment, []int64) {
+	ft := p.tracks[ti].ft
+	samples, offs := p.mp4tabs[ti].window(n)
+	seg := trackSegment{trackID: ft.outTrack.mp4ID, baseDecodeTS: ft.durMediaTS}
+	if len(samples) > 0 {
+		seg.samples = samples
+		seg.baseDecodeTS = samples[0].dtsTS
+		seg.hasCTS = windowHasCTS(seg.samples)
+		for x := range samples {
+			seg.dataLen += int64(samples[x].size)
+		}
+	}
+	return seg, offs
 }
 
 // Reading a segment's samples out of an MP4 source. The source stores some

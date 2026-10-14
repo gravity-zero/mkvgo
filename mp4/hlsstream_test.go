@@ -99,6 +99,37 @@ func TestOpenStreamsIdenticalBytes(t *testing.T) {
 	}
 }
 
+// An MP4 source streams every rendition's segments from the file, byte for
+// byte like Resource: progressive, fast-start and fragmented.
+func TestOpenStreamsMP4Sources(t *testing.T) {
+	ctx := context.Background()
+	mkvSrc, _ := buildLacedFixture(t)
+	frag, _ := makeFragmentedMP4(t)
+	dir := t.TempDir()
+	srcs := map[string]string{"fragmented": filepath.Join(dir, "frag.mp4")}
+	if err := os.WriteFile(srcs["fragmented"], frag, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, fast := range map[string]bool{"progressive": false, "faststart": true} {
+		srcs[name] = filepath.Join(dir, name+".mp4")
+		if err := RemuxToMP4(ctx, mkvSrc, srcs[name], Options{FastStart: fast}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, src := range srcs {
+		t.Run(name, func(t *testing.T) {
+			plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOpenMatchesResource(t, plan)
+			if st := plan.Stats(); st.StreamedSegments == 0 || st.StreamFallbacks != 0 {
+				t.Errorf("stats: %+v", st)
+			}
+		})
+	}
+}
+
 // A header-stripped track streams its prefix before each sample's bytes.
 func TestOpenStreamsHeaderStripping(t *testing.T) {
 	w, h := uint32(320), uint32(240)
