@@ -368,9 +368,9 @@ type trackJSON struct {
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
 // fields alongside the raw values.
-func tracksForJSON(tracks []matroska.Track) []trackJSON {
-	out := make([]trackJSON, len(tracks))
-	for i, t := range tracks {
+func tracksForJSON(c *matroska.Container) []trackJSON {
+	out := make([]trackJSON, len(c.Tracks))
+	for i, t := range c.Tracks {
 		out[i] = trackJSON{Track: t,
 			CodecName:          t.FFprobeCodecName(),
 			CodecLongName:      t.CodecLongName(),
@@ -384,7 +384,7 @@ func tracksForJSON(tracks []matroska.Track) []trackJSON {
 			ColorRangeName:     t.ColorRangeName(),
 			HDRFormat:          t.HDRFormat(),
 			StereoModeName:     t.StereoModeName(),
-			ResolvedLanguage:   t.ResolvedLanguage(),
+			ResolvedLanguage:   c.TrackLanguage(&t),
 		}
 	}
 	return out
@@ -396,7 +396,7 @@ func containerForJSON(c *matroska.Container) any {
 	return struct {
 		*matroska.Container
 		Tracks []trackJSON `json:"tracks"`
-	}{Container: c, Tracks: tracksForJSON(c.Tracks)}
+	}{Container: c, Tracks: tracksForJSON(c)}
 }
 
 // splitTrackSpec splits a "file:trackID" argument on its LAST colon, so a path

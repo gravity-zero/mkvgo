@@ -48,6 +48,17 @@ All notable changes to mkvgo are documented here. The format is based on
   in all to 3 reads of 68 KiB. Over 497 real Matroska files probed remotely
   the JSON and the requests are unchanged.
 
+### Fixed
+
+- **`resolved_language` reports "eng" for a Matroska track that stores no
+  language.** RFC 9559 makes "eng" the default of the Language element (and
+  LanguageBCP47, when present, wins over it); the probe and `tracks` JSON,
+  CLI and WebAssembly, returned no `resolved_language` for such a track. It
+  now resolves to "eng" on a Matroska or WebM file, with `language_present`
+  still false; an MP4 track without language is unchanged. Library:
+  `Container.TrackLanguage(t)`. `Track.ResolvedLanguage()` and the HLS and
+  DASH manifests are unchanged (no `LANGUAGE` for such a track).
+
 ## [0.49.0] - 2026-10-14
 
 ### Breaking

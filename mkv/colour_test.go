@@ -165,3 +165,24 @@ func TestResolvedLanguage(t *testing.T) {
 		})
 	}
 }
+
+// TestContainerTrackLanguage: in a Matroska or WebM file a track without
+// Language nor LanguageBCP47 is English (RFC 9559 5.1.4.1.19); in MP4 it stays unknown.
+func TestContainerTrackLanguage(t *testing.T) {
+	cases := []struct {
+		docType, legacy, bcp47, want string
+	}{
+		{"matroska", "", "", "eng"},
+		{"webm", "", "", "eng"},
+		{"matroska", "fre", "", "fre"},
+		{"matroska", "fre", "fr-CA", "fr-CA"},
+		{"matroska", "", "pt-BR", "pt-BR"},
+		{"", "", "", ""},
+	}
+	for _, c := range cases {
+		tr := &Track{Language: c.legacy, LanguageBCP47: c.bcp47, LanguagePresent: c.legacy != "" || c.bcp47 != ""}
+		if got := (&Container{DocType: c.docType}).TrackLanguage(tr); got != c.want {
+			t.Errorf("%q file, Language %q, LanguageBCP47 %q: TrackLanguage = %q, want %q", c.docType, c.legacy, c.bcp47, got, c.want)
+		}
+	}
+}

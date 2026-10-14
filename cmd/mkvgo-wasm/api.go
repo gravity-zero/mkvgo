@@ -170,7 +170,7 @@ type trackJSON struct {
 }
 
 // trackJSONOf fills every derived field from the Track's methods.
-func trackJSONOf(t matroska.Track) trackJSON {
+func trackJSONOf(c *matroska.Container, t matroska.Track) trackJSON {
 	return trackJSON{Track: t,
 		CodecLongName:       t.CodecLongName(),
 		ChannelLayout:       t.ChannelLayout(),
@@ -183,7 +183,7 @@ func trackJSONOf(t matroska.Track) trackJSON {
 		ColorRangeName:      t.ColorRangeName(),
 		HDRFormat:           t.HDRFormat(),
 		StereoModeName:      t.StereoModeName(),
-		ResolvedLanguage:    t.ResolvedLanguage(),
+		ResolvedLanguage:    c.TrackLanguage(&t),
 		EffectiveSampleRate: t.EffectiveSampleRate(),
 	}
 }
@@ -270,7 +270,7 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 	}
 	res.Tracks = make([]trackJSON, len(res.Container.Tracks))
 	for i, t := range res.Container.Tracks {
-		res.Tracks[i] = trackJSONOf(t)
+		res.Tracks[i] = trackJSONOf(res.Container, t)
 	}
 	return toJSObject(res)
 }

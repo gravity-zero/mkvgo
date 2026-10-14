@@ -980,7 +980,9 @@ init's track flags say "enabled", not "default"). CLI: `mkvgo cmaf-hls`.
 Across every DASH manifest mkvgo writes (`RemuxToHLS`, `RemuxToABR`/`PlanABR`,
 single-file, `DASHFromCMAF`) and every HLS master, a track's language is its
 `Track.ResolvedLanguage()` - the BCP-47 tag (`elng` box, Matroska
-`LanguageBCP47`) when present, else the legacy three-letter code - and each
+`LanguageBCP47`) when present, else the legacy three-letter code, and no
+`LANGUAGE`/`lang` when the track stores neither (the Matroska default "eng"
+is `Container.TrackLanguage`, what the probe JSON reports) - and each
 audio Representation carries an `AudioChannelConfiguration` element when the
 channel count is known: the Dolby scheme
 (`tag:dolby.com,2014:dash:audio_channel_configuration:2011`, channel mask of

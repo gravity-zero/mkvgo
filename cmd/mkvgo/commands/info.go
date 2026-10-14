@@ -47,7 +47,7 @@ func CmdInfo(path string) {
 func CmdTracks(path string) {
 	c, _ := loadContainer(path, false)
 	if JsonOutput {
-		PrintJSON(tracksForJSON(c.Tracks))
+		PrintJSON(tracksForJSON(c))
 		return
 	}
 	for _, t := range c.Tracks {
@@ -152,7 +152,7 @@ func CmdProbe(path string) {
 			*matroska.Container
 			Tracks  []trackJSON        `json:"tracks"`
 			Dropped []mp4.DroppedTrack `json:"dropped_tracks"`
-		}{c, tracksForJSON(c.Tracks), dropped})
+		}{c, tracksForJSON(c), dropped})
 		return
 	}
 	fmt.Printf("File:        %s\n", c.Path)

@@ -41,6 +41,14 @@ check(probe.tracks[0].codec_long_name?.length > 0, `derived codec_long_name (${p
     `derived probe fields (sar=${v?.sample_aspect_ratio} dar=${v?.display_aspect_ratio} hdr=${v?.hdr_format ?? 'n/a'})`)
 }
 
+// --- a Matroska track that stores no language is English (RFC 9559 default) ---
+{
+  const p = await MkvGo.probe(new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/sample_subs.mkv'))))
+  const v = p.tracks.find((t) => t.type === 'video')
+  check(v && v.language_present === false && v.resolved_language === 'eng',
+    `track without Language: language_present ${v?.language_present}, resolved_language ${v?.resolved_language} (want false, eng)`)
+}
+
 // --- probe (Blob) - the ranged-read path used for large browser files ---
 const probeBlob = await MkvGo.probe(new Blob([mkvBytes]))
 check(probeBlob.format === 'mkv' && probeBlob.tracks.length === probe.tracks.length,

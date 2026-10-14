@@ -362,6 +362,14 @@ func (t *Track) ResolvedLanguage() string {
 	return t.Language
 }
 
+// TrackLanguage is t's ResolvedLanguage with the Matroska default applied: "eng" for a Matroska or WebM track that stores neither Language nor LanguageBCP47 (RFC 9559), "" for an MP4 one.
+func (c *Container) TrackLanguage(t *Track) string {
+	if l := t.ResolvedLanguage(); l != "" || c.DocType == "" {
+		return l
+	}
+	return "eng"
+}
+
 // EffectiveSampleRate returns the audio sample rate a decoder produces - the
 // value probers report as sample_rate. For SBR streams (HE-AAC / HE-AACv2) the
 // coded core runs at half rate and the decoder doubles it, so OutputSampleRate

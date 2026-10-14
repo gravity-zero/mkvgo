@@ -3,6 +3,7 @@ package commands_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -324,5 +325,37 @@ func TestCmdProbeColorFields(t *testing.T) {
 				t.Errorf("probe %s: expected 'colour:' in output\n%s", tt.name, out)
 			}
 		})
+	}
+}
+
+// TestCmdProbeJSONDefaultLanguage: a Matroska track that stores no language is
+// English by the spec default; the JSON keeps language_present false and
+// resolves "eng", and LanguageBCP47 still wins over Language.
+func TestCmdProbeJSONDefaultLanguage(t *testing.T) {
+	path := writeMKV(t, &matroska.Container{Info: matroska.SegmentInfo{TimecodeScale: 1_000_000}, Tracks: []matroska.Track{
+		{ID: 1, Type: matroska.AudioTrack, Codec: "aac", SampleRate: ptrF64(48000), Channels: ptrU8(2)},
+		{ID: 2, Type: matroska.AudioTrack, Codec: "aac", SampleRate: ptrF64(48000), Channels: ptrU8(2), Language: "fre", LanguageBCP47: "fr-CA"},
+	}})
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	type track struct {
+		Present  bool   `json:"language_present"`
+		Resolved string `json:"resolved_language"`
+	}
+	want := []track{{false, "eng"}, {true, "fr-CA"}}
+	var probe struct {
+		Tracks []track `json:"tracks"`
+	}
+	if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(path) })), &probe); err != nil {
+		t.Fatal(err)
+	}
+	var tracks []track
+	if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdTracks(path) })), &tracks); err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string][]track{"probe": probe.Tracks, "tracks": tracks} {
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("%s -json: language_present/resolved_language = %v, want %v", name, got, want)
+		}
 	}
 }
