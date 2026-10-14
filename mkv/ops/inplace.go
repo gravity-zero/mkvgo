@@ -57,9 +57,9 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 			return err
 		}
 	}
-	if len(c.Chapters) > 0 {
+	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
 		mark(mkv.IDChapters)
-		if err := writer.WriteChapters(&newMeta, c.Chapters); err != nil {
+		if err := writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions); err != nil {
 			return err
 		}
 	}

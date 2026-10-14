@@ -1673,6 +1673,8 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 func (p *parser) parseChapters(size int64, c *mkv.Container) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
+	var eds []mkv.Edition
+	defer func() { placeEditions(c, eds) }()
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -1683,9 +1685,11 @@ func (p *parser) parseChapters(size int64, c *mkv.Container) error {
 			return err
 		}
 		if eh.ID == mkv.IDEditionEntry {
-			if err := p.parseEditionEntry(eh.Size, c); err != nil {
+			ed, err := p.parseEditionEntry(eh.Size)
+			if err != nil {
 				return err
 			}
+			eds = append(eds, ed)
 		} else {
 			if err := p.skip(eh.Size); err != nil {
 				return err
@@ -1695,11 +1699,10 @@ func (p *parser) parseChapters(size int64, c *mkv.Container) error {
 	return nil
 }
 
-func (p *parser) parseEditionEntry(size int64, c *mkv.Container) error {
+func (p *parser) parseEditionEntry(size int64) (mkv.Edition, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
-	var ordered bool
-	var chapters []mkv.Chapter
+	var ed mkv.Edition
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -1707,35 +1710,59 @@ func (p *parser) parseEditionEntry(size int64, c *mkv.Container) error {
 		}
 		eh, _, err := p.readHeader()
 		if err != nil {
-			return err
+			return ed, err
 		}
 		switch eh.ID {
-		case mkv.IDEditionFlagOrdered:
+		case mkv.IDEditionUID:
+			if ed.UID, err = ebml.ReadUint(p.r, eh.Size); err != nil {
+				return ed, err
+			}
+		case mkv.IDEditionFlagDefault, mkv.IDEditionFlagHidden, mkv.IDEditionFlagOrdered:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {
-				return err
+				return ed, err
 			}
-			ordered = v == 1
+			switch eh.ID {
+			case mkv.IDEditionFlagDefault:
+				ed.Default = v == 1
+			case mkv.IDEditionFlagHidden:
+				ed.Hidden = v == 1
+			default:
+				ed.Ordered = v == 1
+			}
 		case mkv.IDChapterAtom:
 			ch, err := p.parseChapterAtom(eh.Size, 0)
 			if err != nil {
-				return err
+				return ed, err
 			}
-			chapters = append(chapters, ch)
+			ed.Chapters = append(ed.Chapters, ch)
 		default:
 			if err := p.skip(eh.Size); err != nil {
-				return err
+				return ed, err
 			}
 		}
 	}
-	// EditionFlagOrdered is read but deliberately dropped, not pending: an
-	// ordered edition plays chapters in its own order and leans on segment
-	// linking (ChapterSegmentUID), which mkvgo neither follows nor writes.
-	// Carrying the flag onto a rewrite whose links are gone would promise a
-	// playback order nothing can honour.
-	_ = ordered
-	c.Chapters = append(c.Chapters, chapters...)
-	return nil
+	return ed, nil
+}
+
+// placeEditions puts the default edition's chapters (EditionFlagDefault, else the first edition) in Chapters and the others in OtherEditions.
+func placeEditions(c *mkv.Container, eds []mkv.Edition) {
+	if len(eds) == 0 {
+		return
+	}
+	def := 0
+	for i, ed := range eds {
+		if ed.Default {
+			def = i
+			break
+		}
+	}
+	c.Chapters = append(c.Chapters, eds[def].Chapters...)
+	for i, ed := range eds {
+		if i != def {
+			c.OtherEditions = append(c.OtherEditions, ed)
+		}
+	}
 }
 
 func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {

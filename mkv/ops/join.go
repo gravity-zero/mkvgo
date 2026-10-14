@@ -79,7 +79,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// only; the joined one measures its own while streaming and states them
 	// after the clusters.
 	meta := metaForNewDuration(first)
-	meta.Chapters = nil
+	meta.Chapters, meta.OtherEditions = nil, nil // the other editions' times are the first part's
 	// The joined file is a new segment, not the first part wearing its name: the
 	// identity copied along with the Info would have it claim to BE that part,
 	// and its NextUID would send a player looking for the second one - which is

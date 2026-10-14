@@ -112,8 +112,8 @@ func writeSegment(w io.Writer, c *mkv.Container) error {
 			return err
 		}
 	}
-	if len(c.Chapters) > 0 {
-		if err := WriteChapters(&seg, c.Chapters); err != nil {
+	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
+		if err := WriteEditions(&seg, c.Chapters, c.OtherEditions); err != nil {
 			return err
 		}
 	}
@@ -400,12 +400,33 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 }
 
 func WriteChapters(w io.Writer, chapters []mkv.Chapter) error {
+	return WriteEditions(w, chapters, nil)
+}
+
+// WriteEditions writes chapters as the default edition and each of others as its own edition, never mixed.
+func WriteEditions(w io.Writer, chapters []mkv.Chapter, others []mkv.Edition) error {
 	var e ew
-	e.master(mkv.IDEditionEntry, func(ed *ew) {
-		for i := range chapters {
-			writeChapterAtom(ed, &chapters[i], 0)
-		}
-	})
+	edition := func(ed mkv.Edition) {
+		e.master(mkv.IDEditionEntry, func(x *ew) {
+			if ed.UID != 0 {
+				x.uint(mkv.IDEditionUID, ed.UID)
+			}
+			if ed.Default {
+				x.uint(mkv.IDEditionFlagDefault, 1)
+			}
+			if ed.Hidden {
+				x.uint(mkv.IDEditionFlagHidden, 1)
+			}
+			for i := range ed.Chapters {
+				writeChapterAtom(x, &ed.Chapters[i], 0)
+			}
+		})
+	}
+	edition(mkv.Edition{Default: len(others) > 0, Chapters: chapters})
+	for _, ed := range others {
+		ed.Default = false
+		edition(ed)
+	}
 	return e.flush(w, mkv.IDChapters)
 }
 

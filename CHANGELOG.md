@@ -6,6 +6,21 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Chapter editions are no longer mixed into one list.** A Matroska file
+  with several chapter editions had all their chapters in
+  `Container.Chapters`, and `to-mp4` wrote them all into the MP4, two lists
+  interleaved (8 chapters became 14 on one file). `Chapters` now holds the
+  default edition's (EditionFlagDefault, else the first edition), which the
+  probe reports and `to-mp4` writes; the others are in
+  `Container.OtherEditions` (JSON `other_editions`), each with its UID and
+  its default and hidden flags. A Matroska rewrite keeps every edition
+  apart, the default one flagged; `split` and `join`, which move the
+  timeline, keep the default edition only. Of 51 real files whose chapter
+  count disagreed with the prober's, 32 have several editions; 19 of those
+  now agree (the prober takes the first edition, not the default one).
+
 ### Fixed
 
 - **`codec_name` of a VC-1 track stored as `V_MS/VFW/FOURCC` is `vc1`.**

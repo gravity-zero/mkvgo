@@ -204,7 +204,7 @@ Other behaviour:
 
 - **B-frame** reordering is preserved via a signed `ctts` box.
 - **Colour/HDR** code points are written as a `colr` (nclx) box, followed by `mdcv` (Matroska MasteringMetadata, only when complete: a partial element yields no box) and `clli` (MaxCLL/MaxFALL) when the source carries them - in its Colour element, or only in-band (HEVC SEI, AV1 metadata OBUs), read from the first sample - same boxes in the fMP4 init of HLS/DASH/CMAF. The MKV writer carries the same fields back into the Colour element.
-- **Chapters** are written both as a Nero `chpl` box and as a QuickTime chapter track linked from the media tracks with `tref`/`chap`.
+- **Chapters** are written both as a Nero `chpl` box and as a QuickTime chapter track linked from the media tracks with `tref`/`chap`. They are the default edition's: a Matroska file with several chapter editions keeps them apart, `Container.Chapters` holding the default one (EditionFlagDefault, else the first) and `Container.OtherEditions` the others, each with its UID and its default and hidden flags (JSON `other_editions`); a Matroska rewrite writes every edition back, `split` and `join` the default one only.
 - `moov` is placed after `mdat` by default. Set `Options.FastStart` to write `moov` first, for progressive HTTP playback. A local source is read twice (a sizing pass computes the exact `moov`, then the file is written in one pass, with no temporary file and no copy of the `mdat`); a remote one is read once, its media through a temporary file next to the output.
 
 Memory use scales with the sample count, not the file size: sample data is streamed to `mdat` while only the sample tables are held in memory.

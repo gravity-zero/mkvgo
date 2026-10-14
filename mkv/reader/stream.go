@@ -730,26 +730,46 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 }
 
 func (p *streamParser) parseStreamChapters(size int64, c *mkv.Container) error {
+	var eds []mkv.Edition
+	defer func() { placeEditions(c, eds) }()
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		if h.ID == mkv.IDEditionEntry {
-			return p.parseStreamEdition(h.Size, c)
+			ed, err := p.parseStreamEdition(h.Size)
+			eds = append(eds, ed)
+			return err
 		}
 		return p.skip(h.Size)
 	})
 }
 
-func (p *streamParser) parseStreamEdition(size int64, c *mkv.Container) error {
-	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
-		if h.ID == mkv.IDChapterAtom {
+func (p *streamParser) parseStreamEdition(size int64) (mkv.Edition, error) {
+	var ed mkv.Edition
+	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		switch h.ID {
+		case mkv.IDChapterAtom:
 			ch, err := p.parseStreamChapterAtom(h.Size, 0)
 			if err != nil {
 				return err
 			}
-			c.Chapters = append(c.Chapters, ch)
+			ed.Chapters = append(ed.Chapters, ch)
 			return nil
+		case mkv.IDEditionUID, mkv.IDEditionFlagDefault, mkv.IDEditionFlagHidden, mkv.IDEditionFlagOrdered:
+			v, err := ebml.ReadUint(p.r, h.Size)
+			switch h.ID {
+			case mkv.IDEditionUID:
+				ed.UID = v
+			case mkv.IDEditionFlagDefault:
+				ed.Default = v == 1
+			case mkv.IDEditionFlagHidden:
+				ed.Hidden = v == 1
+			default:
+				ed.Ordered = v == 1
+			}
+			return err
 		}
 		return p.skip(h.Size)
 	})
+	return ed, err
 }
 
 func (p *streamParser) parseStreamChapterAtom(size int64, depth int) (mkv.Chapter, error) {

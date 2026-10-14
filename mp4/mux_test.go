@@ -99,6 +99,12 @@ func buildMKVTitled(t testing.TB, title string, tracks []mkv.Track, blocks []gen
 
 func buildMKVWithChapters(t testing.TB, tracks []mkv.Track, blocks []genBlock, chapters []mkv.Chapter) string {
 	t.Helper()
+	return buildMKVWithEditions(t, tracks, blocks, chapters, nil)
+}
+
+// buildMKVWithEditions is buildMKVWithChapters with other chapter editions besides the default one.
+func buildMKVWithEditions(t testing.TB, tracks []mkv.Track, blocks []genBlock, chapters []mkv.Chapter, others []mkv.Edition) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "in.mkv")
 	f, err := os.Create(path)
 	if err != nil {
@@ -115,7 +121,7 @@ func buildMKVWithChapters(t testing.TB, tracks []mkv.Track, blocks []genBlock, c
 		}
 	}
 
-	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}, Chapters: chapters}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}, Chapters: chapters, OtherEditions: others}
 	m := writer.NewMKVWriter(f)
 	if err := m.WriteStart(); err != nil {
 		f.Close()

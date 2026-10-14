@@ -249,3 +249,45 @@ func TestReadIgnoresClustersATailSeekHeadIndexes(t *testing.T) {
 	}
 	t.Logf("%d read calls", src.calls)
 }
+
+// editionElem is one EditionEntry with n chapters starting at base seconds; def sets EditionFlagDefault.
+func editionElem(uid uint64, def bool, base, n int) []byte {
+	kids := [][]byte{uintElem(mkv.IDEditionUID, uid, 8)}
+	if def {
+		kids = append(kids, uintElem(mkv.IDEditionFlagDefault, 1, 1))
+	}
+	for i := 0; i < n; i++ {
+		kids = append(kids, masterElem(mkv.IDChapterAtom,
+			uintElem(mkv.IDChapterUID, uid*100+uint64(i), 8),
+			uintElem(mkv.IDChapterTimeStart, uint64(base+i)*1_000_000_000, 8)))
+	}
+	return masterElem(mkv.IDEditionEntry, kids...)
+}
+
+// TestChapterEditions: the chapters are the default edition's (EditionFlagDefault,
+// else the first), and the other editions come apart, never mixed into them.
+func TestChapterEditions(t *testing.T) {
+	for name, c := range map[string]struct {
+		chapters      []byte
+		want, wantOne int
+	}{
+		"second edition default": {masterElem(mkv.IDChapters, editionElem(1, false, 0, 2), editionElem(2, true, 100, 3)), 3, 2},
+		"no default edition":     {masterElem(mkv.IDChapters, editionElem(1, false, 0, 2), editionElem(2, false, 100, 3)), 2, 3},
+	} {
+		data := segmentMKV(infoElem(), tracksElem(), c.chapters, clusterElem())
+		for how, read := range map[string]func() (*mkv.Container, error){
+			"Read": func() (*mkv.Container, error) { return Read(context.Background(), bytes.NewReader(data), "x.mkv") },
+			"ReadMeta": func() (*mkv.Container, error) {
+				return ReadMeta(context.Background(), bytes.NewReader(data), "x.mkv", WithChapters())
+			},
+		} {
+			got, err := read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Chapters) != c.want || len(got.OtherEditions) != 1 || len(got.OtherEditions[0].Chapters) != c.wantOne {
+				t.Errorf("%s %s: %d chapters and %d other editions, want %d and 1 of %d", name, how, len(got.Chapters), len(got.OtherEditions), c.want, c.wantOne)
+			}
+		}
+	}
+}

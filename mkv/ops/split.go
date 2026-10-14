@@ -315,7 +315,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// (the slot is sized for the widest timestamp EBML can encode, so only the
 	// LIST has to be bounded, never the values), and the real selection is made
 	// against the cut once the blocks have said where it fell.
-	segMeta.Chapters = nil
+	segMeta.Chapters, segMeta.OtherEditions = nil, nil // the other editions are not clipped to the part
 	// A part holds a slice of the source, so the source's content hash and
 	// statistics describe something it does not contain. They are measured
 	// again while the blocks go by and written after the clusters, in ONE Tags

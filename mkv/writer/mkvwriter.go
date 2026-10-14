@@ -248,9 +248,9 @@ func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, duration
 			return err
 		}
 	}
-	if len(c.Chapters) > 0 {
+	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
 		m.ChaptersPos = m.RelPos()
-		if err := WriteChapters(m.W, c.Chapters); err != nil {
+		if err := WriteEditions(m.W, c.Chapters, c.OtherEditions); err != nil {
 			return err
 		}
 	}

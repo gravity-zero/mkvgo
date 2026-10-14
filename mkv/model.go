@@ -77,14 +77,16 @@ const (
 )
 
 type Container struct {
-	Path        string       `json:"path"`
-	Info        SegmentInfo  `json:"info"`
-	Tracks      []Track      `json:"tracks"`
-	Chapters    []Chapter    `json:"chapters"`
-	Attachments []Attachment `json:"attachments"`
-	Tags        []Tag        `json:"tags"`
-	Cues        []CuePoint   `json:"cues,omitempty"`
-	DurationMs  int64        `json:"duration_ms"`
+	Path     string      `json:"path"`
+	Info     SegmentInfo `json:"info"`
+	Tracks   []Track     `json:"tracks"`
+	Chapters []Chapter   `json:"chapters"`
+	// OtherEditions are the chapter editions besides the one Chapters holds (EditionFlagDefault, else the first), in file order.
+	OtherEditions []Edition    `json:"other_editions,omitempty"`
+	Attachments   []Attachment `json:"attachments"`
+	Tags          []Tag        `json:"tags"`
+	Cues          []CuePoint   `json:"cues,omitempty"`
+	DurationMs    int64        `json:"duration_ms"`
 
 	// ResyncedBytes counts the undecodable bytes the reader skipped to resume
 	// on the next valid element - junk between the Segment header and the
@@ -533,6 +535,9 @@ type Chapter struct {
 }
 
 type Edition struct {
+	UID      uint64    `json:"uid,omitempty"`
+	Default  bool      `json:"default,omitempty"`
+	Hidden   bool      `json:"hidden,omitempty"`
 	Ordered  bool      `json:"ordered"`
 	Chapters []Chapter `json:"chapters"`
 }

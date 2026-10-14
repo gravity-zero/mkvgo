@@ -255,3 +255,25 @@ func TestRemuxToMP4WritesChapters(t *testing.T) {
 		t.Errorf("chapter titles missing from chpl")
 	}
 }
+
+// TestToMP4TakesTheDefaultEdition: an MKV with two chapter editions gives the
+// MP4 the default edition's chapters only, not the two lists mixed.
+func TestToMP4TakesTheDefaultEdition(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+	}
+	blocks := []genBlock{{track: 1, pts: 0, key: true, data: []byte{1}}, {track: 1, pts: 40, data: []byte{2}}}
+	chapters := []mkv.Chapter{{StartMs: 0, Title: "Alpha"}, {StartMs: 49000, Title: "Bravo"}}
+	others := []mkv.Edition{{Chapters: []mkv.Chapter{{StartMs: 0, Title: "X"}, {StartMs: 10000, Title: "Y"}, {StartMs: 20000, Title: "Z"}}}}
+	mp4Path := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), buildMKVWithEditions(t, tracks, blocks, chapters, others), mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := OpenMeta(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Chapters) != 2 || c.Chapters[0].Title != "Alpha" || c.Chapters[1].Title != "Bravo" {
+		t.Errorf("MP4 chapters %+v, want Alpha and Bravo only", c.Chapters)
+	}
+}

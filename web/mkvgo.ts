@@ -109,6 +109,16 @@ export interface Chapter {
   [key: string]: unknown
 }
 
+/** A chapter edition besides the default one, which `chapters` holds. */
+export interface Edition {
+  /** EditionUID, a 64-bit integer: a decimal string, exact. */
+  uid?: string
+  default?: boolean
+  hidden?: boolean
+  ordered: boolean
+  chapters: Chapter[]
+}
+
 export interface ProbeResult {
   /** Sniffed container: 'mkv' covers Matroska/WebM, 'mp4' covers MP4/MOV. */
   format: 'mkv' | 'mp4'
@@ -121,7 +131,10 @@ export interface ProbeResult {
    */
   resynced_bytes?: number
   tracks: Track[]
+  /** The default chapter edition's chapters (EditionFlagDefault, else the first edition). */
   chapters: Chapter[]
+  /** The other chapter editions, never mixed into `chapters`. */
+  other_editions?: Edition[]
   /** `id` is the FileUID, a 64-bit integer: a decimal string, exact. */
   attachments: { id: string; name: string; mime_type: string; size: number; [key: string]: unknown }[]
   tags: Tag[]
