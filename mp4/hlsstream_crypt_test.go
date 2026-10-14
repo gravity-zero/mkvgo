@@ -350,3 +350,39 @@ func TestEncryptedStreamLeavesNothingInPooledBuffers(t *testing.T) {
 		}
 	}
 }
+
+// A large segment served in the clear, then a far shorter encrypted one of
+// another source (cenc, AES-128): the pooled buffers the first filled with
+// plaintext give the second none of it - it is exactly its own ciphertext.
+func TestEncryptedAfterClearCarriesNoStaleBytes(t *testing.T) {
+	ctx := context.Background()
+	serve := func(src string, o Options) []byte {
+		h, err := mustPlan(t, src, o).Open(ctx, "seg00001.m4s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b bytes.Buffer
+		if _, err := h.WriteTo(ctx, &b); err != nil {
+			t.Fatal(err)
+		}
+		return b.Bytes()
+	}
+	small := filepath.Join(cryptVecDir, "src.mkv")
+	for _, mode := range []string{"cenc", "aes-128"} {
+		clear := serve(interleavedMP4, Options{SegmentMs: 2000})
+		enc := serve(small, cryptVecOptions(mode))
+		want, _, err := mustPlan(t, small, cryptVecOptions(mode)).Resource(ctx, "seg00001.m4s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(enc) >= len(clear) || !bytes.Equal(enc, want) {
+			t.Fatalf("%s: %d bytes after a %d-byte clear segment, its own ciphertext %v", mode, len(enc), len(clear), bytes.Equal(enc, want))
+		}
+		media := clear[bytes.Index(clear, []byte("mdat"))+4:]
+		for i := 0; i+32 <= len(media); i += 16 {
+			if bytes.Contains(enc, media[i:i+32]) {
+				t.Fatalf("%s: 32 clear bytes at %d of the first segment reappear in the encrypted one", mode, i)
+			}
+		}
+	}
+}
