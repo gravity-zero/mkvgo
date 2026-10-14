@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -325,5 +326,60 @@ func TestProbeEstimatedFrameRate(t *testing.T) {
 	}
 	if n := requests.Load(); n > 2 {
 		t.Errorf("the remote probe made %d requests, want 2 (the head, then the Cues)", n)
+	}
+}
+
+// tailCuesMKV is cuelessMKV with Cues indexing its clusters and a tag at the end,
+// and no SeekHead, as most muxers leave a file.
+func tailCuesMKV(n int) []byte {
+	file := cuelessMKV(n)
+	seg := bytes.Index(file, []byte{0x18, 0x53, 0x80, 0x67}) + 12
+	var points [][]byte
+	for i, off := 0, seg; ; i++ {
+		at := bytes.Index(file[off:], []byte{0x1F, 0x43, 0xB6, 0x75})
+		if at < 0 {
+			break
+		}
+		off += at
+		points = append(points, ebmlElem(0xBB, ebmlUint(0xB3, uint64(i)*1000),
+			ebmlElem(0xB7, ebmlUint(0xF7, 1), ebmlUint(0xF1, uint64(off-seg)))))
+		off += 4
+	}
+	tags := ebmlElem(0x1254C367, ebmlElem(0x7373, ebmlElem(0x63C0),
+		ebmlElem(0x67C8, ebmlElem(0x45A3, []byte("TITLE")), ebmlElem(0x4487, []byte("tail test")))))
+	return bytes.Join([][]byte{file, ebmlElem(0x1C53BB6B, points...), tags}, nil)
+}
+
+// TestRemoteKeyframesMatchLocal: the keyframes a remote probe reports are the
+// local probe's, whether the Cues come through a SeekHead or the read back from the end.
+func TestRemoteKeyframesMatchLocal(t *testing.T) {
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	keyframes := func(src string) []int64 {
+		var got struct {
+			Keyframes []int64 `json:"keyframes"`
+		}
+		if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(src) })), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Keyframes
+	}
+	for name, file := range map[string][]byte{
+		"Cues through the SeekHead":          cuedMKV(t, 16),
+		"Cues at the end, no SeekHead":       tailCuesMKV(16),
+		"Cues through a SeekHead at the end": tailIndexedMKV(16),
+	} {
+		path := filepath.Join(t.TempDir(), "f.mkv")
+		if err := os.WriteFile(path, file, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.ServeContent(w, r, "f.mkv", time.Time{}, bytes.NewReader(file))
+		}))
+		local, remote := keyframes(path), keyframes(srv.URL+"/f.mkv")
+		srv.Close()
+		if len(local) == 0 || fmt.Sprint(local) != fmt.Sprint(remote) {
+			t.Errorf("%s: %d local keyframes, %d remote; want the same, not none", name, len(local), len(remote))
+		}
 	}
 }

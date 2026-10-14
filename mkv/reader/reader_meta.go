@@ -402,7 +402,7 @@ func (p *parser) tailElements(c *mkv.Container, o readOpts) error {
 	if _, err := p.scanTailForCues(&tail); err != nil {
 		return err
 	}
-	if wantCues {
+	if len(c.Cues) == 0 { // Cues read on the way fill the keyframe index, asked for or not
 		c.Cues = tail.Cues
 	}
 	if wantTags {

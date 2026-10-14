@@ -80,6 +80,18 @@ All notable changes to mkvgo are documented here. The format is based on
   `mkvinfo` sees Cues or Tags the local probe misses go from 1 to 0; the
   other JSON outputs are identical.
 
+- **A remote probe reports the keyframes of the Cues it reads at the end of
+  the file.** A metadata read that found the Cues by the read back from the
+  end (no SeekHead indexing them) kept them only when `WithCues` was set, so
+  the remote probe, which reads Chapters, Tags and attachments but not
+  `WithCues`, reported no keyframes for those files. Since 0.49.0 no longer
+  walks every cluster of a remote file for its keyframes (2ed1513 found them
+  by downloading the whole file: 576 requests and 9.5 GB on one of them),
+  this showed as keyframes missing. Cues read on the way now fill the
+  keyframe index whatever was asked. Over 497 real Matroska files probed
+  remotely, 437 had keyframes, now 493 (the 4 others have no Cues), each
+  equal to the local probe's, with the same 1,072 requests and 302.4 MiB.
+
 - **`resolved_language` reports "eng" for a Matroska track that stores no
   language.** RFC 9559 makes "eng" the default of the Language element (and
   LanguageBCP47, when present, wins over it); the probe and `tracks` JSON,

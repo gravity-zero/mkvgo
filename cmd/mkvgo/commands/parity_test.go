@@ -22,11 +22,12 @@ func capture(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	os.Stdout = w
+	done := make(chan []byte)
+	go func() { out, _ := io.ReadAll(r); done <- out }() // drained as written: past the pipe buffer fn would block
 	fn()
 	w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
-	return string(out)
+	return string(<-done)
 }
 
 // TestCLIKeyframes checks the keyframes command works for both MKV (Cues) and MP4.
