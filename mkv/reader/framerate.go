@@ -5,6 +5,8 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -319,4 +321,55 @@ func (p *parser) holds(off, n int64) bool {
 		return freeAt(b.rs, end, off+n-end)
 	}
 	return off >= end && freeAt(b.rs, off, n)
+}
+
+// statsFrameRates sets EstimatedFrameRate on the video tracks without DefaultDuration from their NUMBER_OF_FRAMES and DURATION statistics tags, snapped to a standard rate within 2e-4.
+func statsFrameRates(c *mkv.Container) {
+	for i := range c.Tracks {
+		t := &c.Tracks[i]
+		if t.Type != mkv.VideoTrack || t.FrameRate != nil || t.UID == 0 {
+			continue
+		}
+		for _, tag := range c.Tags {
+			if tag.TargetID != t.UID {
+				continue
+			}
+			var frames, seconds float64
+			for _, st := range tag.SimpleTags {
+				switch strings.ToUpper(st.Name) {
+				case "NUMBER_OF_FRAMES":
+					if n, err := strconv.ParseUint(strings.TrimSpace(st.Value), 10, 64); err == nil {
+						frames = float64(n)
+					}
+				case "DURATION":
+					seconds = tagSeconds(st.Value)
+				}
+			}
+			if frames < 2 || seconds <= 0 {
+				continue
+			}
+			r := frames / seconds
+			for _, s := range standardRates {
+				if std := float64(s[0]) / float64(s[1]); math.Abs(r-std) <= 2e-4*std {
+					r = std
+				}
+			}
+			t.EstimatedFrameRate = &r
+		}
+	}
+}
+
+// tagSeconds parses a statistics DURATION, HH:MM:SS.nnnnnnnnn, into seconds; 0 when malformed.
+func tagSeconds(v string) float64 {
+	parts := strings.Split(strings.TrimSpace(v), ":")
+	if len(parts) != 3 {
+		return 0
+	}
+	h, e1 := strconv.ParseUint(parts[0], 10, 32)
+	m, e2 := strconv.ParseUint(parts[1], 10, 32)
+	s, e3 := strconv.ParseFloat(parts[2], 64)
+	if e1 != nil || e2 != nil || e3 != nil || m > 59 || s < 0 || s >= 60 {
+		return 0
+	}
+	return float64(h)*3600 + float64(m)*60 + s
 }

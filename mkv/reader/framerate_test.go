@@ -15,6 +15,7 @@ import (
 func videoNoDurationTracks() []byte {
 	return masterElem(mkv.IDTracks, trackEntry(
 		uintElem(mkv.IDTrackNumber, 1, 1),
+		uintElem(mkv.IDTrackUID, 1, 1),
 		uintElem(mkv.IDTrackType, mkv.TrackTypeVideo, 1),
 		strElem(mkv.IDCodecID, "V_MPEG4/ISO/AVC"),
 		masterElem(mkv.IDVideo, uintElem(mkv.IDPixelWidth, 1920, 2), uintElem(mkv.IDPixelHeight, 1080, 2)),
@@ -149,5 +150,46 @@ func TestEstimatedFrameRateReadsNothingMore(t *testing.T) {
 	with, without := cost(uintElem(mkv.IDDefaultDuration, 40_000_000, 4)), cost(voidElem(6))
 	if without != with {
 		t.Errorf("without DefaultDuration the read cost %d bytes, with it %d: the estimate read more", without, with)
+	}
+}
+
+// statsTags is the per-track statistics tag a muxer writes: NUMBER_OF_FRAMES and DURATION for track uid.
+func statsTags(uid uint64, frames, duration string) []byte {
+	st := func(name, value string) []byte {
+		return masterElem(mkv.IDSimpleTag, strElem(mkv.IDTagName, name), strElem(mkv.IDTagString, value))
+	}
+	return masterElem(mkv.IDTags, masterElem(mkv.IDTag,
+		masterElem(mkv.IDTargets, uintElem(mkv.IDTargetTypeValue, 50, 1), uintElem(mkv.IDTagTrackUID, uid, 8)),
+		st("NUMBER_OF_FRAMES", frames), st("DURATION", duration)))
+}
+
+// TestFrameRateFromStatisticsTags: the track's NUMBER_OF_FRAMES and DURATION
+// statistics give its frame rate, a standard one when the ratio is within
+// 2e-4 of it, with no read beyond the tags; they win over the timestamps.
+func TestFrameRateFromStatisticsTags(t *testing.T) {
+	cases := []struct {
+		frames, duration string
+		uid              uint64
+		want             float64
+	}{
+		{"63274", "00:43:59.053000000", 1, 24000.0 / 1001},
+		{"196351", "02:16:29.518000000", 1, 24000.0 / 1001},
+		{"1000", "00:00:40.000000000", 1, 25},
+		{"1000", "00:00:41.000000000", 1, 1000.0 / 41},
+		{"1000", "00:00:40.000000000", 99, 0}, // a tag of another track
+	}
+	for _, c := range cases {
+		data := segmentMKV(infoElem(), videoNoDurationTracks(), voidElem(600<<10), gopClusters(4, 24), statsTags(c.uid, c.frames, c.duration))
+		got, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := got.Tracks[0]
+		switch {
+		case c.want == 0 && v.EstimatedFrameRate != nil:
+			t.Errorf("%s frames in %s for track %d: EstimatedFrameRate = %v, want none", c.frames, c.duration, c.uid, *v.EstimatedFrameRate)
+		case c.want != 0 && (v.EstimatedFrameRate == nil || math.Abs(*v.EstimatedFrameRate-c.want) > 1e-9):
+			t.Errorf("%s frames in %s: EstimatedFrameRate = %v, want %v", c.frames, c.duration, v.EstimatedFrameRate, c.want)
+		}
 	}
 }

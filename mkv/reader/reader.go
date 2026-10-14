@@ -74,6 +74,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	// Surface the per-track "BPS" bitrate tag (mainstream muxers write it; probers report
 	// it as bit_rate) as the typed Track.Bitrate, now that Tags are parsed.
 	promoteTrackBitrate(c)
+	statsFrameRates(c)
 	if o.inBandColour {
 		// Same opt-in as the metadata path: one bounded read of the first sample,
 		// only for a track whose description the head left incomplete.

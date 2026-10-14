@@ -360,6 +360,7 @@ func (p *parser) finalizeHeadMeta(c *mkv.Container, offs headOffsets, o readOpts
 	if o.bitrate {
 		promoteTrackBitrate(c)
 	}
+	statsFrameRates(c)
 	if !o.tags {
 		c.Tags = nil
 	}

@@ -26,6 +26,16 @@ All notable changes to mkvgo are documented here. The format is based on
   the local disk 4 of them do (their first frames sit in the 32 KiB head
   buffer), and in WebAssembly 23, with the same reads.
 
+- **The frame rate from the statistics tags.** A video track without
+  DefaultDuration whose per-track statistics tags (NUMBER_OF_FRAMES and
+  DURATION, as mkvmerge writes them) the read has gathered gets
+  `EstimatedFrameRate` = frames / duration, snapped to the standard rate
+  within 2e-4 of it (196351 frames in 02:16:29.518 is 23.976), else the
+  ratio itself; it wins over the timestamp fit and costs no read. Tags whose
+  target is no track of the file are not used. On the local disk, of the 63
+  real files without DefaultDuration, 12 now get a frame rate (4 before),
+  each equal to the prober's.
+
 ### Changed
 
 - **The read back from the end of a file without SeekHead starts at 64 KiB.**
