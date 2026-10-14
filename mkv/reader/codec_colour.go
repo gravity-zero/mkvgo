@@ -23,6 +23,7 @@ type bitstreamColour struct {
 	matrix     *uint16 // CICP matrix_coefficients (conventional color_space)
 	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
 	bitDepth   *uint16 // luma bit depth (8/10/12)
+	spsDepth   bool    // bitDepth comes from the SPS, not a configuration record header
 	profile    string  // e.g. "Main 10"
 	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
@@ -591,6 +592,10 @@ func hevcColour(cp []byte) *bitstreamColour {
 			}
 		}
 	}
+	// A Main 10 header saying 8 bits contradicts its profile (seen on real files whose stream is 10-bit): the profile wins.
+	if !bc.spsDepth && cp[1]&0x1f == 2 && bc.bitDepth != nil && *bc.bitDepth == 8 {
+		bc.bitDepth = u16p(10)
+	}
 	return bc
 }
 
@@ -635,7 +640,9 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 		r.ue()
 		r.ue()
 	}
-	r.ue() // bit_depth_luma_minus8 (also in hvcC)
+	if d := r.ue(); !r.err { // bit_depth_luma_minus8: the stream's own, over the hvcC header's
+		bc.bitDepth, bc.spsDepth = validBitDepth(d+8), true
+	}
 	r.ue() // bit_depth_chroma_minus8
 	log2PocLsb := r.ue() + 4
 	subOrdering := r.bit()

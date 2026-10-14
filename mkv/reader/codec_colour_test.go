@@ -218,3 +218,19 @@ func TestColourFromCodecPrivateRobustness(t *testing.T) {
 		}
 	}
 }
+
+// TestHEVCBitDepthHeaderContradicted: an hvcC whose header says 8 bits while
+// its stream is 10 (seen on real Main 10 files): the SPS it carries gives the
+// depth; without an SPS, the Main 10 profile wins over the header's 8.
+func TestHEVCBitDepthHeaderContradicted(t *testing.T) {
+	withSPS := mustHex(t, hevcHDRPrivateHex)
+	withSPS[17] &^= 0x07 // bitDepthLumaMinus8 = 0
+	headerOnly := append([]byte(nil), withSPS[:23]...)
+	headerOnly[22] = 0 // no NAL arrays: the SPS is in-band
+	for name, cp := range map[string][]byte{"with the SPS": withSPS, "header only": headerOnly} {
+		bc := hevcColour(cp)
+		if bc == nil || bc.bitDepth == nil || *bc.bitDepth != 10 {
+			t.Errorf("%s: bit depth %v, want 10", name, bc.bitDepth)
+		}
+	}
+}

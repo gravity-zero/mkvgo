@@ -8,6 +8,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The bit depth of an HEVC track whose hvcC header contradicts it.** Some
+  muxers write a Main 10 hvcC whose header says 8 bits over a 10-bit stream;
+  mkvgo reported 8 bits and `yuv420p` next to the "Main 10" profile. The
+  bit depth of the SPS the hvcC carries now wins over its header, and
+  without an SPS a Main 10 header that says 8 bits reads as 10. The 15 real
+  and test HEVC files whose bit depth disagreed with the prober's now agree.
+
 - **The frame rate of an MP4 whose stts deltas swing around the frame
   duration.** Several tools store 23.976 fps on a 16 kHz timescale as deltas
   of 672 and 656 ticks; the first delta read 23.988 fps (the most frequent
