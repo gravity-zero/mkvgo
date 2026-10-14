@@ -1,5 +1,7 @@
 package mkv
 
+import "math"
+
 // stereo.go - names for the 3D stereo arrangement and the video projection.
 
 // StereoModeName maps the track's StereoMode to a human-readable arrangement
@@ -51,3 +53,22 @@ func projectionTypeName(v uint64) string {
 // ProjectionTypeName is projectionTypeName, exported for the readers that decode
 // the raw container value (Matroska ProjectionType, MP4 sv3d) into Track.Projection.
 func ProjectionTypeName(v uint64) string { return projectionTypeName(v) }
+
+// RotationFromProjection returns the clockwise Track.Rotation a flat video's
+// ProjectionPoseRoll (degrees counterclockwise) states; 0 for a 360 projection or a flip.
+func RotationFromProjection(typ *uint64, yaw, pitch, roll float64) int {
+	if (typ != nil && *typ != 0) || yaw != 0 || pitch != 0 {
+		return 0
+	}
+	deg := int(math.Round(-roll))
+	return ((deg % 360) + 360) % 360
+}
+
+// ProjectionRoll returns the ProjectionPoseRoll for a clockwise rotation, folded into (-180, 180].
+func ProjectionRoll(rotation int) float64 {
+	r := ((-rotation % 360) + 360) % 360
+	if r > 180 {
+		r -= 360
+	}
+	return float64(r)
+}

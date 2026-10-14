@@ -1152,11 +1152,13 @@ func scanFromVideo(t *mkv.Track, flagInterlaced uint64, fieldOrder *uint64) {
 	}
 }
 
-// parseProjection reads the Video>Projection element and records its
-// ProjectionType (360/spherical layout) as the track's Projection name.
+// parseProjection reads the Video>Projection element: its ProjectionType as the
+// track's Projection name and a flat video's pose roll as its Rotation.
 func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
+	var typ *uint64
+	var pose [3]float64 // yaw, pitch, roll
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -1172,13 +1174,21 @@ func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
+			typ = &v
 			t.Projection = mkv.ProjectionTypeName(v)
+		case mkv.IDProjectionPoseYaw, mkv.IDProjectionPosePitch, mkv.IDProjectionPoseRoll:
+			v, err := ebml.ReadFloat(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			pose[eh.ID-mkv.IDProjectionPoseYaw] = v
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}
 		}
 	}
+	t.Rotation = mkv.RotationFromProjection(typ, pose[0], pose[1], pose[2])
 	return nil
 }
 

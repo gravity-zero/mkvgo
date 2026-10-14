@@ -235,9 +235,9 @@ type Track struct {
 	DefaultDurationNs int64   `json:"default_duration_ns,omitempty"`
 	VideoBitDepth     *uint16 `json:"video_bit_depth,omitempty"` // Colour>BitsPerChannel (0x55B2) or SPS bit_depth
 	// Rotation is how many degrees CLOCKWISE (0/90/180/270) the decoded picture
-	// turns to display upright, from the MP4 tkhd display matrix; 0 when none,
-	// unknown or Matroska. Display Matrix side data states the same matrix
-	// counterclockwise: -Rotation folded into [-180, 180) (270 -> 90, 90 -> -90).
+	// turns to display upright, from the MP4 tkhd display matrix or the Matroska
+	// ProjectionPoseRoll (stored counterclockwise); 0 when none. Display Matrix
+	// side data counts counterclockwise: -Rotation folded into [-180, 180).
 	Rotation int `json:"rotation,omitempty"`
 	// Display dimensions for anamorphic video, nil when pixels are square. Their
 	// ratio is the display aspect: literal pixels from the Matroska

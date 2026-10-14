@@ -70,6 +70,10 @@ const (
 	IDStereoMode     = 0x53B8 // 3D stereo arrangement (0 = mono)
 	IDProjection     = 0x7670 // video projection (360/spherical) container
 	IDProjectionType = 0x7671 // 0 rectangular, 1 equirectangular, 2 cubemap, 3 mesh
+
+	IDProjectionPoseYaw   = 0x7673 // float degrees; 180 with roll 0 flips horizontally
+	IDProjectionPosePitch = 0x7674 // float degrees
+	IDProjectionPoseRoll  = 0x7675 // float degrees counterclockwise; a flat video's display rotation
 )
 
 // BlockAdditionMapping (TrackEntry sub-element) and its children. It carries

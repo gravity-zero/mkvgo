@@ -609,11 +609,41 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			t.DisplayHeight = &dh
 		case mkv.IDColour:
 			return p.parseStreamColour(h.Size, t)
+		case mkv.IDProjection:
+			return p.parseStreamProjection(h.Size, t)
 		default:
 			return p.skip(h.Size)
 		}
 		return nil
 	})
+}
+
+// parseStreamProjection mirrors the seekable parser's parseProjection.
+func (p *streamParser) parseStreamProjection(size int64, t *mkv.Track) error {
+	var typ *uint64
+	var pose [3]float64 // yaw, pitch, roll
+	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		switch h.ID {
+		case mkv.IDProjectionType:
+			v, err := p.readUint(h.Size)
+			if err != nil {
+				return err
+			}
+			typ = &v
+			t.Projection = mkv.ProjectionTypeName(v)
+		case mkv.IDProjectionPoseYaw, mkv.IDProjectionPosePitch, mkv.IDProjectionPoseRoll:
+			v, err := p.readFloat(h.Size)
+			if err != nil {
+				return err
+			}
+			pose[h.ID-mkv.IDProjectionPoseYaw] = v
+		default:
+			return p.skip(h.Size)
+		}
+		return nil
+	})
+	t.Rotation = mkv.RotationFromProjection(typ, pose[0], pose[1], pose[2])
+	return err
 }
 
 // parseStreamColour mirrors the seekable parser's parseColour: it reads the

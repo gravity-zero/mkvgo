@@ -503,7 +503,7 @@ func buildTkhd(t *outTrack, durationMs uint32) []byte {
 		w.u16(0)   // alternate_group
 		w.u16(volume)
 		w.u16(0) // reserved
-		w.matrix(unityMatrix)
+		w.matrix(rotationMatrix(t.mkv.Rotation))
 		if t.spec.video {
 			w.u32(fixed16_16(derefU32(t.mkv.Width)))
 			w.u32(fixed16_16(derefU32(t.mkv.Height)))

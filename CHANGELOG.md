@@ -62,13 +62,24 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A display rotation survives every remux.** Matroska carries it as
+  `Video>Projection>ProjectionPoseRoll` (degrees counterclockwise), which was
+  not read: `probe` of such an MKV showed no rotation. And no output carried
+  one: `from-mp4` wrote no Projection, `to-mp4` and the HLS/DASH init segments
+  an identity `tkhd` matrix, so a phone video played sideways after any of
+  them. The roll of a flat video (rectangular projection, no yaw or pitch) is
+  now read into `Track.Rotation` by both MKV parsers, the MKV writer writes it
+  back (folded into (-180, 180]), and every `tkhd` the MP4 writer builds
+  carries the matching display matrix. With display rotations of 90, 180 and
+  270: `probe`, `from-mp4`, `to-mp4` (with and without `--faststart`) and
+  `to-hls` (from MP4 and from MKV) report the source's angle on every output.
+  `probe` prints the angle as "clockwise".
 - **`Track.Rotation` says which way it turns.** It counts degrees clockwise
   (a file made with a 90-degree counterclockwise display rotation reads
   270), where the Display Matrix side data it was documented against counts
   counterclockwise (90). The value is unchanged; the godoc, `docs/library.md`
-  and `docs/cli.md` now state the clockwise convention, the conversion
-  (`-Rotation` folded into [-180, 180)) and that Matroska rotation is not
-  read.
+  and `docs/cli.md` now state the clockwise convention and the conversion
+  (`-Rotation` folded into [-180, 180)).
 - **The documented artifact sizes are the real ones.** The README stated a
   binary of about 8 MB and release binaries of ~2.3 MB (the figure of the
   first commit), and the README and `docs/wasm.md` a WebAssembly module of

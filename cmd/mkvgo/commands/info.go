@@ -244,7 +244,7 @@ func CmdProbe(path string) {
 			fmt.Printf("        aspect: sar=%s dar=%s\n", t.SampleAspectRatio(), t.DisplayAspectRatio())
 		}
 		if t.Rotation != 0 {
-			fmt.Printf("        rotation: %d°\n", t.Rotation)
+			fmt.Printf("        rotation: %d° clockwise\n", t.Rotation)
 		}
 		if t.Profile != "" || t.Level != nil || t.PixelFormat != "" || t.ScanType != "" || t.FieldOrder != "" {
 			fmt.Printf("        codec: profile=%q", t.Profile)

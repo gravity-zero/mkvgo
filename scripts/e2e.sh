@@ -197,6 +197,38 @@ for a in aac opus; do
   same_sync "$ref" "$TMP/sync_$a.from.mkv"
 done
 
+echo "== display rotation: the prober reads the source's angle on every remux output"
+# rot <file>: the Display Matrix rotation the prober reports (counterclockwise).
+rot() { ffp -select_streams v -show_entries stream_side_data=rotation -of csv=p=0 "$(stage "$1")" | head -1; }
+same_rot() { # same_rot <want> <file>
+  got=$(rot "$2")
+  [ "$got" = "$1" ] || { echo "e2e: rotation of $(basename "$2") is '$got', source $1" >&2; exit 1; }
+}
+for r in 90 180 270; do
+  if [ -n "$DOCKER_CONTAINER" ]; then
+    ff -display_rotation $r -i "$(stage "$TMP/out.mp4")" -c copy -y "/tmp/mkvgo-e2e/rot$r.mp4"
+    ff -i "/tmp/mkvgo-e2e/rot$r.mp4" -c copy -y "/tmp/mkvgo-e2e/rot$r.mkv"
+    unstage "rot$r.mp4" "$TMP/rot$r.mp4"; unstage "rot$r.mkv" "$TMP/rot$r.mkv"
+  else
+    ff -display_rotation $r -i "$TMP/out.mp4" -c copy -y "$TMP/rot$r.mp4"
+    ff -i "$TMP/rot$r.mp4" -c copy -y "$TMP/rot$r.mkv"
+  fi
+  want=$(rot "$TMP/rot$r.mp4")
+  same_rot "$want" "$TMP/rot$r.mkv"
+  cw=$("$MKVGO" -json probe "$TMP/rot$r.mkv" | grep -m1 '"rotation"' | sed 's/[^0-9]//g')
+  [ $(( (360 - ${cw:-0}) % 360 )) -eq $(( (want + 360) % 360 )) ] ||
+    { echo "e2e: mkvgo probe reads rotation ${cw:-none} clockwise on rot$r.mkv, prober $want" >&2; exit 1; }
+  "$MKVGO" -f from-mp4 "$TMP/rot$r.mp4" "$TMP/rot$r.from.mkv" >/dev/null
+  same_rot "$want" "$TMP/rot$r.from.mkv"
+  "$MKVGO" -f to-mp4 --faststart "$TMP/rot$r.mkv" "$TMP/rot$r.to.mp4" >/dev/null
+  same_rot "$want" "$TMP/rot$r.to.mp4"
+  "$MKVGO" -f to-hls "$TMP/rot$r.mp4" -o "$TMP/rot$r.hls" >/dev/null
+  same_rot "$want" "$TMP/rot$r.hls/init.mp4"
+  "$MKVGO" -f to-hls "$TMP/rot$r.mkv" -o "$TMP/rot$r.hlsk" >/dev/null
+  same_rot "$want" "$TMP/rot$r.hlsk/init.mp4"
+  echo "  rotation OK: $want (prober) on probe, from-mp4, to-mp4, to-hls from MP4 and from MKV"
+done
+
 echo "== codec names: one real file per encoder, mkvgo's codec_name vs the prober's"
 # A table of names is only as good as the files it was read from: every name
 # is checked here on a stream a real encoder produced and the prober decodes.

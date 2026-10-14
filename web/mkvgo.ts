@@ -52,6 +52,7 @@ export interface Track {
   level?: number
   pixel_format?: string
   field_order?: string
+  /** Degrees clockwise the picture turns to display upright; Display Matrix side data is -rotation. */
   rotation?: number
   color_space?: string
   color_transfer?: string

@@ -308,7 +308,8 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.IsForced {
 		e.uint(mkv.IDFlagForced, 1)
 	}
-	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t)) {
+	rollable := t.Rotation%360 != 0 && (t.Projection == "" || t.Projection == "rectangular")
+	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t) || rollable) {
 		e.master(mkv.IDVideo, func(v *ew) {
 			if t.Width != nil {
 				v.uint(mkv.IDPixelWidth, uint64(*t.Width))
@@ -337,6 +338,12 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
 					}
 					writeHDRStatic(c, t.HDR)
+				})
+			}
+			if rollable {
+				v.master(mkv.IDProjection, func(pr *ew) {
+					pr.uint(mkv.IDProjectionType, 0)
+					pr.float64(mkv.IDProjectionPoseRoll, mkv.ProjectionRoll(t.Rotation))
 				})
 			}
 		})
