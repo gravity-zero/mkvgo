@@ -75,6 +75,7 @@ type inTrack struct {
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
 	languageBCP47 string // BCP-47 from an elng box; "" when absent
 	name          string // track name from the QuickTime udta/name box; "" when absent
+	handlerName   string // the hdlr name, kept apart from name: muxers mostly write a default there
 	languageKnown bool   // a usable language was read (mdhd or elng)
 	enabled       bool   // tkhd track_enabled flag (the conventional "default" disposition)
 	flagsKnown    bool   // a tkhd was parsed, so enabled is meaningful
@@ -154,16 +155,15 @@ func iterBoxes(buf []byte) ([]memBox, error) {
 	return out, nil
 }
 
-// genericHandlerName reports whether an hdlr name is a generic handler description
-// (the default muxers write) rather than a meaningful track name, so it is not
-// imported as Track.Name. Most muxers' defaults contain "Handler".
+// genericHandlerName reports whether an hdlr name is a muxer's default (any case of "handler", a GPAC, L-SMASH, Mainconcept or Core Media tag) rather than a track name.
 func genericHandlerName(s string) bool {
-	switch s {
-	case "", "SoundHandler", "VideoHandler", "SubtitleHandler", "DataHandler",
-		"Core Media Audio", "Core Media Video", "Core Media Text":
-		return true
+	l := strings.ToLower(s)
+	for _, tag := range []string{"handler", "gpac", "l-smash", "mainconcept", "core media"} {
+		if strings.Contains(l, tag) {
+			return true
+		}
 	}
-	return strings.Contains(s, "Handler")
+	return s == ""
 }
 
 func findMemBox(boxes []memBox, typ string) (memBox, bool) {
@@ -1181,9 +1181,13 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	handler := string(hdlr.payload[8:12])
 	// Fallback track name: when no udta/name box was present, a non-generic hdlr name
 	// (the conventional handler_name field) is the track's human-readable name.
-	if tr.name == "" && len(hdlr.payload) > 24 {
-		if hn := string(bytes.TrimRight(hdlr.payload[24:], "\x00")); !genericHandlerName(hn) {
-			tr.name = hn
+	if len(hdlr.payload) > 24 {
+		tr.handlerName = string(bytes.TrimRight(hdlr.payload[24:], "\x00"))
+		if n := tr.handlerName; len(n) > 1 && int(n[0]) == len(n)-1 { // a QuickTime Pascal string: length byte first
+			tr.handlerName = n[1:]
+		}
+		if tr.name == "" && !genericHandlerName(tr.handlerName) {
+			tr.name = tr.handlerName
 		}
 	}
 	switch handler {

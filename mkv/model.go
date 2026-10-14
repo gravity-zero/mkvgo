@@ -182,6 +182,8 @@ type Track struct {
 	// track as English. Write "und" explicitly for "undetermined".
 	Language string `json:"language"`
 	Name     string `json:"name"`
+	// HandlerName is an MP4 track's hdlr name, often a muxer's default ("SoundHandler", "srt@GPAC..."), which Name then leaves out; "" for Matroska.
+	HandlerName string `json:"handler_name,omitempty"`
 	// IsDefault false is written as an explicit FlagDefault=0 (the spec default
 	// is 1, so omitting the element would mean "default"). DefaultPresent/
 	// ForcedPresent are read-side only; they are not consulted at write time.

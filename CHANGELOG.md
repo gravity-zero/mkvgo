@@ -92,6 +92,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An MP4 muxer's default handler name is no longer a track title.** An
+  MP4 track without a `udta/name` took its `hdlr` name as its title unless
+  it contained "Handler": `video handler`, `srt@GPAC0.9.0-...` and the like
+  came out as track names (and became the Matroska track name in a remux).
+  Any case of "handler" and the GPAC, L-SMASH, Mainconcept and Core Media
+  tags now mark a default, and a QuickTime name stored as a Pascal string
+  loses its length byte. The `hdlr` name is exposed apart as
+  `Track.HandlerName` (JSON `handler_name`), as probers report it. On 9 real
+  MP4 files, the 24 tracks titled that way now have no title.
+
 - **`codec_name` of an MP4 timed-text subtitle is `mov_text`.** A `tx3g`
   track is read as `srt` (it becomes S_TEXT/UTF8 in a remux), and the probe
   JSON reported it as `subrip`, where probers say `mov_text`. The JSON now

@@ -703,3 +703,50 @@ func TestHugeLargesizeRejected(t *testing.T) {
 		}
 	}
 }
+
+// TestParseTrakGenericHandlerNames: a muxer's default hdlr name is not a track
+// title, whatever its case or its tool tag; it is kept as the handler name, and
+// a real name written there (mkvgo writes Track.Name to it) is still the title.
+func TestParseTrakGenericHandlerNames(t *testing.T) {
+	for hn, title := range map[string]string{
+		"video handler": "",
+		"srt@GPAC0.9.0-DEV-rev2671-g6d57ee94-filters":                     "",
+		"srt#subtitle:lang=fr-FR@GPAC0.9.0-DEV-rev2671-g6d57ee94-filters": "",
+		"L-SMASH Video Handler":                                           "",
+		"Mainconcept MP4 Sound Media Handler":                             "",
+		"Core Media Text":                                                 "",
+		"Commentary":                                                      "Commentary",
+	} {
+		trak := craftMinimalSubtitleTrak(1, 0, "")
+		at := bytes.Index(trak, []byte("hdlr")) - 4
+		size := int(binary.BigEndian.Uint32(trak[at:]))
+		named := box("hdlr", append(craftHdlrPayload("text", 0), hn...))
+		trak = bytes.Join([][]byte{trak[:at], named, trak[at+size:]}, nil)
+		binary.BigEndian.PutUint32(trak[bytes.Index(trak, []byte("mdia"))-4:], uint32(int(binary.BigEndian.Uint32(trak[bytes.Index(trak, []byte("mdia"))-4:]))+len(named)-size))
+		tr, _, err := parseTrak(trak, 1<<20, 1000, sampleNone)
+		if err != nil {
+			t.Fatalf("%q: parseTrak: %v", hn, err)
+		}
+		if tr.name != title || tr.handlerName != hn {
+			t.Errorf("hdlr %q: name %q, handler name %q; want %q and the hdlr name", hn, tr.name, tr.handlerName, title)
+		}
+	}
+}
+
+// TestParseTrakPascalHandlerName: a QuickTime hdlr name stored as a Pascal string loses its length byte.
+func TestParseTrakPascalHandlerName(t *testing.T) {
+	trak := craftMinimalSubtitleTrak(1, 0, "")
+	at := bytes.Index(trak, []byte("hdlr")) - 4
+	size := int(binary.BigEndian.Uint32(trak[at:]))
+	named := box("hdlr", append(craftHdlrPayload("text", 0), "\x0cVideoHandler"...))
+	trak = bytes.Join([][]byte{trak[:at], named, trak[at+size:]}, nil)
+	m := bytes.Index(trak, []byte("mdia")) - 4
+	binary.BigEndian.PutUint32(trak[m:], binary.BigEndian.Uint32(trak[m:])+uint32(len(named)-size))
+	tr, _, err := parseTrak(trak, 1<<20, 1000, sampleNone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.handlerName != "VideoHandler" || tr.name != "" {
+		t.Errorf("handler name %q, name %q; want VideoHandler and none", tr.handlerName, tr.name)
+	}
+}
