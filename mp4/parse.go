@@ -112,15 +112,16 @@ type inTrack struct {
 // movie is the parsed result: the tracks RemuxFromMP4 will emit, plus any tracks
 // that were recognised but not carried (so callers can surface them).
 type movie struct {
-	tracks     []inTrack
-	chapters   []mkv.Chapter
-	dropped    []DroppedTrack
-	durationMs int64             // from mvhd, used when the sample table was not built
-	tags       []mkv.SimpleTag   // file-level metadata from udta/meta/ilst
-	title      string            // ©nam, for Info.Title
-	cover      *mkv.Attachment   // covr cover art, carried as an MKV attachment
-	hashes     map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
-	fragmented bool              // an mvex box is present → sample data is in moof fragments
+	tracks         []inTrack
+	chapters       []mkv.Chapter
+	dropped        []DroppedTrack
+	durationMs     int64             // from mvhd, used when the sample table was not built
+	tags           []mkv.SimpleTag   // file-level metadata from udta/meta/ilst
+	title          string            // ©nam, for Info.Title
+	cover          *mkv.Attachment   // covr cover art, carried as an MKV attachment
+	hashes         map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
+	fragmented     bool              // an mvex box is present → sample data is in moof fragments
+	chapterSamples []inSample        // the samples of a QuickTime chapter track (tref/chap), read when there is no chpl
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -539,6 +540,9 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(mv.chapters) == 0 && len(mv.chapterSamples) > 0 {
+		mv.chapters = readChapterTrack(r, mv.chapterSamples)
+	}
 	if mode == sampleKeyframes && mv.fragmented {
 		// A fragmented file's keyframes live in the moof fragments; recover them
 		// head-only from a random-access index, preferring the mfra/tfra at the
@@ -865,6 +869,8 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		if dropped != nil {
 			if !chapterTrackIDs[uint32(dropped.ID)] {
 				mv.dropped = append(mv.dropped, *dropped)
+			} else if mv.chapterSamples == nil {
+				mv.chapterSamples = chapterTrackSamples(b.payload, size)
 			}
 			continue
 		}

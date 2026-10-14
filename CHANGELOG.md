@@ -84,6 +84,14 @@ All notable changes to mkvgo are documented here. The format is based on
   and test MP4 files whose frame rate disagreed with the prober's, 62 now
   agree.
 
+- **MP4 chapters stored only in a QuickTime chapter track.** mkvgo read the
+  Nero `chpl` box only; a file whose chapters live in a chapter track (a
+  text track referenced by `tref`/`chap`) reported none. Without a `chpl`,
+  the chapter track's samples are now read, contiguous ones in one ranged
+  read: on a test file, one read more locally and one request more over
+  HTTP. On 9 real MP4 files, the chapters (10 on one) are now reported, as
+  many as the prober's.
+
 - **The colour of an MPEG-2 track.** Its colour primaries, transfer and
   matrix are read from the sequence_display_extension of the sequence header
   in CodecPrivate, head-only. On 10 real MPEG-2 files with no colour in the

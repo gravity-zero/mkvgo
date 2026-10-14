@@ -2,9 +2,11 @@ package commands_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/gravity-zero/mkvgo/mp4"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -411,3 +413,131 @@ func TestProbeFrameRateReadsFlag(t *testing.T) {
 		}
 	}
 }
+
+// qtChaptersMP4 is an MP4 whose chapters live only in a QuickTime chapter track
+// (tref/chap), its Nero chpl renamed away, as some muxers write them.
+func qtChaptersMP4(t *testing.T) []byte {
+	t.Helper()
+	return chaptersMP4(t, true)
+}
+
+// chaptersMP4 is an MP4 with three chapters in a chpl and a QuickTime chapter track; noChpl renames the chpl away.
+func chaptersMP4(t *testing.T, noChpl bool) []byte {
+	t.Helper()
+	chapters := []mkv.Chapter{{ID: 1, Title: "Alpha", StartMs: 0}, {ID: 2, Title: "Bravo", StartMs: 4000}, {ID: 3, Title: "Charlie", StartMs: 9000}}
+	src := filepath.Join(t.TempDir(), "ch.mkv")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr, ch := 48000.0, uint8(2)
+	m := writer.NewMKVWriter(f)
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}, Chapters: chapters},
+		[]mkv.Track{{ID: 1, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: []byte{0x11, 0x90}, SampleRate: &sr, Channels: &ch}}, 12000); err != nil {
+		t.Fatal(err)
+	}
+	for c := int64(0); c < 12; c++ {
+		var blocks []mkv.Block
+		for i := int64(0); i < 1000; i += 25 {
+			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: c*1000 + i, Keyframe: true, Data: make([]byte, 20000)})
+		}
+		if err := m.WriteClusterWithCues(c*1000, 1_000_000, blocks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	dst := filepath.Join(t.TempDir(), "ch.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), src, dst, mp4.Options{FastStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := bytes.Index(b, []byte("chpl")); noChpl && i >= 0 {
+		copy(b[i:], "free")
+	} else if noChpl {
+		t.Fatal("no chpl to remove")
+	}
+	return b
+}
+
+// TestProbeQuickTimeChapterTrack: chapters stored only in a QuickTime chapter
+// track are read, locally and over HTTP, their samples in one ranged read.
+func TestProbeQuickTimeChapterTrack(t *testing.T) {
+	remoteRequests := func(file []byte) int64 {
+		var n atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n.Add(1)
+			http.ServeContent(w, r, "ch.mp4", time.Time{}, bytes.NewReader(file))
+		}))
+		defer srv.Close()
+		commands.JsonOutput = true
+		capture(t, func() { commands.CmdProbe(srv.URL + "/ch.mp4") })
+		commands.JsonOutput = false
+		return n.Load()
+	}
+	if a, b := remoteRequests(chaptersMP4(t, false)), remoteRequests(chaptersMP4(t, true)); a != chplRequests || b != qtChapterRequests {
+		t.Errorf("remote probe: %d requests with a chpl, %d with the chapter track only; want %d and %d", a, b, chplRequests, qtChapterRequests)
+	}
+	localReads := func(file []byte) int {
+		src := &readCalls{Reader: bytes.NewReader(file)}
+		if _, _, err := mp4.ReadMeta(context.Background(), src, "ch.mp4"); err != nil {
+			t.Fatal(err)
+		}
+		return src.calls
+	}
+	if a, b := localReads(chaptersMP4(t, false)), localReads(chaptersMP4(t, true)); a != chplReads || b != qtChapterReads {
+		t.Errorf("local read: %d read calls with a chpl, %d with the chapter track only; want %d and %d", a, b, chplReads, qtChapterReads)
+	}
+	file := qtChaptersMP4(t)
+	path := filepath.Join(t.TempDir(), "ch.mp4")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.ServeContent(w, r, "ch.mp4", time.Time{}, bytes.NewReader(file))
+	}))
+	defer srv.Close()
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	for name, src := range map[string]string{"local": path, "remote": srv.URL + "/ch.mp4"} {
+		var got struct {
+			Chapters []struct {
+				Title   string `json:"title"`
+				StartMs int64  `json:"start_ms"`
+			} `json:"chapters"`
+		}
+		if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(src) })), &got); err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(got.Chapters) != "[{Alpha 0} {Bravo 4000} {Charlie 9000}]" {
+			t.Errorf("%s: chapters %v, want Alpha 0, Bravo 4000, Charlie 9000", name, got.Chapters)
+		}
+	}
+	if n := requests.Load(); n != qtChapterRequests {
+		t.Errorf("remote probe: %d requests, want %d (the head, then the chapter samples in one range)", n, qtChapterRequests)
+	}
+}
+
+// chplRequests and qtChapterRequests are what a remote probe of chaptersMP4 costs, with its chpl and without it.
+const chplRequests, qtChapterRequests = 2, 3
+
+// chplReads and qtChapterReads are the read calls of a local metadata read of chaptersMP4, with its chpl and without it.
+const chplReads, qtChapterReads = 4, 5
+
+// readCalls counts the Read calls a source receives.
+type readCalls struct {
+	*bytes.Reader
+	calls int
+}
+
+func (r *readCalls) Read(p []byte) (int, error) { r.calls++; return r.Reader.Read(p) }

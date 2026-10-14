@@ -1274,7 +1274,7 @@ The same two operations are exposed on the CLI as `mkvgo to-mp4` and
 
 ### Probe MP4 metadata (no remux)
 
-To read an MP4's codecs, colour, chapters and duration without converting it, use the metadata-only probe - the counterpart of `matroska.OpenMeta` for MKV. It parses only the `moov` box and never reads sample data (`mdat`) or writes an output file, so it is fast and bounded regardless of file size - the path to use when indexing or scanning a library.
+To read an MP4's codecs, colour, chapters and duration without converting it, use the metadata-only probe - the counterpart of `matroska.OpenMeta` for MKV. It parses only the `moov` box and never reads sample data (`mdat`) - except the titles of a QuickTime chapter track when the file has no `chpl`, contiguous samples in one read - or writes an output file, so it is fast and bounded regardless of file size - the path to use when indexing or scanning a library.
 
 ```go
 c, dropped, err := mp4.OpenMeta(ctx, "video.mp4")  // *mkv.Container, []mp4.DroppedTrack

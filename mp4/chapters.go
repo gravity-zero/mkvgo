@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -164,4 +165,67 @@ func buildChpl(chapters []mkv.Chapter) []byte {
 			w.bytes(title)
 		}
 	})
+}
+
+// chapterTrackSamples returns the samples of a QuickTime chapter trak (titles and start times), nil when its tables do not read.
+func chapterTrackSamples(trak []byte, fileSize int64) []inSample {
+	tb, err := iterBoxes(trak)
+	if err != nil {
+		return nil
+	}
+	mdia, ok := findMemBox(tb, "mdia")
+	if !ok {
+		return nil
+	}
+	mb, err := iterBoxes(mdia.payload)
+	if err != nil {
+		return nil
+	}
+	var tr inTrack
+	if mdhd, ok := findMemBox(mb, "mdhd"); ok {
+		tr.timescale, _ = parseMdhd(mdhd.payload)
+	}
+	minf, ok := findMemBox(mb, "minf")
+	if !ok || tr.timescale == 0 {
+		return nil
+	}
+	nb, err := iterBoxes(minf.payload)
+	if err != nil {
+		return nil
+	}
+	stbl, ok := findMemBox(nb, "stbl")
+	if !ok {
+		return nil
+	}
+	sb, err := iterBoxes(stbl.payload)
+	if err != nil || buildSampleTable(&tr, sb, fileSize) != nil || len(tr.samples) > maxChapters {
+		return nil
+	}
+	return tr.samples
+}
+
+// readChapterTrack reads the chapter titles of a QuickTime chapter track, one ranged read per run of contiguous samples.
+func readChapterTrack(r io.ReadSeeker, samples []inSample) []mkv.Chapter {
+	var chapters []mkv.Chapter
+	for i := 0; i < len(samples); {
+		j, end := i+1, samples[i].offset+int64(samples[i].size)
+		for j < len(samples) && samples[j].offset == end && end-samples[i].offset < 1<<20 {
+			end += int64(samples[j].size)
+			j++
+		}
+		buf := make([]byte, end-samples[i].offset)
+		if _, err := r.Seek(samples[i].offset, io.SeekStart); err != nil {
+			return nil
+		}
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil
+		}
+		for k := i; k < j; k++ {
+			d := buf[samples[k].offset-samples[i].offset:][:samples[k].size]
+			title, _ := decodeTx3g(d)
+			chapters = append(chapters, mkv.Chapter{ID: uint64(len(chapters) + 1), Title: string(title), StartMs: samples[k].ctsMs, EndMs: samples[k].ctsMs + samples[k].durMs})
+		}
+		i = j
+	}
+	return chapters
 }
