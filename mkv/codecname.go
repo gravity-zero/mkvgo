@@ -44,7 +44,7 @@ var ffprobeCodecNameByFourCC = map[string]string{
 	"MP41": "msmpeg4v1", "MPG4": "msmpeg4v1", "MP42": "msmpeg4v2",
 	"MP43": "msmpeg4v3", "DIV3": "msmpeg4v3", "DIV4": "msmpeg4v3",
 	"MJPG": "mjpeg", "LJPG": "mjpeg", "MJLS": "jpegls", "MJP2": "jpeg2000", "MPNG": "png",
-	"WMV1": "wmv1", "WMV2": "wmv2",
+	"WMV1": "wmv1", "WMV2": "wmv2", "WVC1": "vc1",
 	"MPG1": "mpeg1video", "MPG2": "mpeg2video",
 	"H261": "h261", "H263": "h263", "FLV1": "flv1", "FSV1": "flashsv",
 	"VP80": "vp8", "VP90": "vp9", "AV01": "av1", "VP60": "vp6", "VP62": "vp6",

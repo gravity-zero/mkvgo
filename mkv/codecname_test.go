@@ -31,9 +31,10 @@ func TestTrackFFprobeCodecName(t *testing.T) {
 		{"VFW avc1", Track{Codec: "vfw", CodecPrivate: vfwPrivate("avc1")}, "h264"},
 		{"VFW HuffYUV", Track{Codec: "vfw", CodecPrivate: vfwPrivate("HFYU")}, "huffyuv"},
 		{"VFW unknown FourCC", Track{Codec: "vfw", CodecPrivate: vfwPrivate("ZZZZ")}, "V_MS/VFW/FOURCC"},
-		// No file to measure these on (no encoder for them here): unresolved.
+		// Measured on a real VC-1 Matroska file: the prober reads vc1.
+		{"VFW WVC1", Track{Codec: "vfw", CodecPrivate: vfwPrivate("WVC1")}, "vc1"},
+		// No file to measure this one on (no encoder for it here): unresolved.
 		{"VFW WMV3", Track{Codec: "vfw", CodecPrivate: vfwPrivate("WMV3")}, "V_MS/VFW/FOURCC"},
-		{"VFW WVC1", Track{Codec: "vfw", CodecPrivate: vfwPrivate("WVC1")}, "V_MS/VFW/FOURCC"},
 		{"ACM WMA v2", Track{Codec: "A_MS/ACM", CodecPrivate: []byte{0x61, 0x01, 2, 0}}, "wmav2"},
 		{"ACM a-law", Track{Codec: "A_MS/ACM", CodecPrivate: []byte{0x06, 0x00, 2, 0}}, "pcm_alaw"},
 		{"ACM plain PCM tag", Track{Codec: "A_MS/ACM", CodecPrivate: []byte{0x01, 0x00, 2, 0}}, "A_MS/ACM"},

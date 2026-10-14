@@ -8,6 +8,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`codec_name` of a VC-1 track stored as `V_MS/VFW/FOURCC` is `vc1`.**
+  The `WVC1` FourCC was missing from the table, and the track reported its
+  raw CodecID.
+
 - **More MP4 default handler names are not titles.** The `hdlr` names that
   are a muxer's default are now told by rule instead of by list: a control
   character, the track type's fourcc (`soun`), a `Handler` or `Handle`
