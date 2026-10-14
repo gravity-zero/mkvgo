@@ -74,6 +74,14 @@ All notable changes to mkvgo are documented here. The format is based on
   270: `probe`, `from-mp4`, `to-mp4` (with and without `--faststart`) and
   `to-hls` (from MP4 and from MKV) report the source's angle on every output.
   `probe` prints the angle as "clockwise".
+- **`probe` of a Matroska file without Cues says it has no keyframe index.**
+  The text output printed nothing at all, as if the line had been forgotten;
+  it now prints `Keyframes: none (no Cues ...)`, with `mkvgo reindex` as the
+  way to write one. Local and remote probes return the same index: none
+  without Cues, in the JSON as in the text (before the remote-probe fix below, a
+  remote probe of a 151.6 MB file without Cues returned 30 keyframes for 15
+  requests and 152 MB read, where the local probe of the same file returned
+  none).
 - **`Track.Rotation` says which way it turns.** It counts degrees clockwise
   (a file made with a 90-degree counterclockwise display rotation reads
   270), where the Display Matrix side data it was documented against counts

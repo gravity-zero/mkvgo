@@ -304,6 +304,8 @@ func CmdProbe(path string) {
 	if len(c.Keyframes) > 0 {
 		fmt.Printf("\nKeyframes: %d (first %s, last %s)\n",
 			len(c.Keyframes), FmtMs(c.Keyframes[0]), FmtMs(c.Keyframes[len(c.Keyframes)-1]))
+	} else if c.DocType != "" && hasVideoTrack(c) {
+		fmt.Printf("\nKeyframes: none (no Cues: probe reads the index, it does not walk the clusters; `mkvgo reindex` writes one)\n")
 	}
 	if c.Fragmented {
 		fmt.Printf("\nFragmented MP4 (frame rate from trex, keyframes from mfra/sidx; fall back if either is empty)\n")
@@ -329,4 +331,14 @@ func CmdProbe(path string) {
 			}
 		}
 	}
+}
+
+// hasVideoTrack reports whether the container carries a video track.
+func hasVideoTrack(c *matroska.Container) bool {
+	for i := range c.Tracks {
+		if c.Tracks[i].Type == matroska.VideoTrack {
+			return true
+		}
+	}
+	return false
 }

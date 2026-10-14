@@ -180,11 +180,10 @@ func TestCmdProbeEmptySections(t *testing.T) {
 		}
 	}
 
-	// No Cues in synthetic MKV → no Keyframes.  The Keyframes boundary mutation
-	// (>= 0, always true) would try to access c.Keyframes[0] on an empty slice →
-	// panic.  The assertion below is a safety check; the panic is the primary kill.
-	if strings.Contains(out, "Keyframes:") {
-		t.Errorf("probe empty MKV: should not contain 'Keyframes:'\nfull output:\n%s", out)
+	// No Cues in synthetic MKV → no Keyframes, and the probe says so rather than
+	// staying silent (a remote probe reads the same Cues and no more).
+	if !strings.Contains(out, "Keyframes: none (no Cues") {
+		t.Errorf("probe empty MKV: should state that no keyframe index exists\nfull output:\n%s", out)
 	}
 }
 

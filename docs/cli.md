@@ -28,9 +28,11 @@ download). The server must honour `Range` (S3, nginx, caddy… do); one that
 ignores it gets an explicit error, never a silent full download. Remote
 Matroska metadata is head-only: Info, Tracks, chapters, tags and the
 attachment list (name, MIME type, size - the payloads are not transferred),
-with keyframes from the Cues (`probe` of a file without Cues reports no
-keyframes rather than read every Cluster, which over a remote source is a full
-download; `keyframes` still builds that index on request).
+with keyframes from the Cues. `probe` of a file without Cues reports no
+keyframes, locally as remotely (the same read, never a walk of every Cluster,
+which over a remote source is a full download): the text output says
+`Keyframes: none (no Cues ...)` and the JSON has no `keyframes` key. `keyframes`
+still builds that index on request, and `reindex` writes the Cues.
 
 `s3://` sources are signed with AWS Signature Version 4 (stdlib
 `crypto/hmac`/`crypto/sha256` only, no SDK). Credentials, region and endpoint

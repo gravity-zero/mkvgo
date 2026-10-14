@@ -75,6 +75,13 @@ func TestRemoteProbeCuelessReadsHeadOnly(t *testing.T) {
 	if n := served.Load(); n >= 2<<20 {
 		t.Errorf("remote probe read %d bytes of a %d-byte file without Cues, want < 2 MiB", n, len(file))
 	}
+	local := filepath.Join(t.TempDir(), "nocues.mkv")
+	if err := os.WriteFile(local, file, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if lo := capture(t, func() { commands.CmdProbe(local) }); strings.Contains(lo, `"keyframes"`) != strings.Contains(out, `"keyframes"`) {
+		t.Errorf("local and remote probes disagree on the keyframe index:\nlocal:\n%s\nremote:\n%s", lo, out)
+	}
 }
 
 // TestRemoteProbeMetadataParity: a remote probe reports the chapters, tags and
