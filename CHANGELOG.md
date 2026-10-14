@@ -6,138 +6,135 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-14
+
+Measured on 497 real Matroska files (the remote probe served over HTTP with a
+request counter, the local probe from disk) and synthetic files built for the
+tests. Over the 497 files probed remotely, 0.49.0 against this release: 1,022
+requests and 319.5 MiB read, now 1,072 requests and 302.4 MiB; 437 files
+reported keyframes, now 493 (the 4 others have no Cues).
+
+### Fixed
+
+- **Keyframes lost by the remote probe (a regression of 0.49.0: update).**
+  A metadata read that found the Cues by the read back from the end of the
+  file (no SeekHead indexing them) kept them only when `WithCues` was set,
+  and the remote probe, which reads Chapters, Tags and attachments but not
+  `WithCues`, reported no keyframes for those files. Before 0.49.0 the
+  remote probe walked every cluster of such a file for its keyframes (576
+  requests and 9.5 GB on one of them); 0.49.0 stopped the walk and the
+  keyframes went missing. Cues read on the way now fill the keyframe index
+  whatever was asked. Over the 497 files probed remotely: 437 with
+  keyframes in 0.49.0, now 493, each list equal to the local probe's, with
+  the same 1,072 requests and 302.4 MiB as before the fix. Remote
+  `probe`/`OpenMeta` users of 0.49.0 should update.
+
+- **Cues and Tags missed by a full read when the SeekHead at the end of the
+  file is stored after them.** When the head SeekHead points only at a
+  second SeekHead written after the Cues and Tags, `Read`/`Open` (the local
+  probe) jumped to it past the clusters and never went back: the file read
+  as having no Cues, no keyframes and no tags. The read now goes back once
+  for the elements that SeekHead indexes before itself, without reading
+  twice what it already read. Over the 497 files, the files where
+  `mkvinfo -o` sees Cues or Tags the local probe misses: 1 before, 0 now;
+  the other local JSON outputs are identical.
+
+- **`codec_name` of an MP4 timed-text subtitle is `mov_text`.** A `tx3g`
+  track is read as `srt` (it becomes S_TEXT/UTF8 in a remux) and the probe
+  JSON reported it as `subrip`, where probers say `mov_text`. It now says
+  `mov_text`; a Matroska SRT stays `subrip`.
+
+- **An MP4 muxer's default handler name is no longer a track title.** An
+  MP4 track without a `udta/name` took its `hdlr` name as its title unless
+  it contained "Handler": `video handler`, `srt@GPAC0.9.0-...` and the like
+  came out as track names, and became the Matroska track name in a remux.
+  Any case of "handler" and the GPAC, L-SMASH, Mainconcept and Core Media
+  tags now mark a default, and a QuickTime name stored as a Pascal string
+  loses its length byte. On 9 real MP4 files, the 24 tracks titled that way
+  now have no title.
+
 ### Added
 
-- **An estimated frame rate for a Matroska track without DefaultDuration.**
-  Such a track had no `frame_rate` at all. The reader now fits the
-  timestamps of its first blocks to a standard rate (23.976, 24, 25, 29.97,
-  30, 48, 50, 59.94, 60, 100, 119.88, 120): on the grid started at the first
-  frame within a tick, else with 90% of them on one phase of it, a frame to a
-  slot; the multiples of a fitting rate are set aside, and when several
-  rates still fit (24 and 23.976 on a few frames) there is no estimate. It
-  reads nothing more: only the block headers the head read already holds,
-  the first response over HTTP, a Blob window already read in WebAssembly,
-  the read buffer of a local file. `Track.EstimatedFrameRate`; `FrameRate`
-  stays nil, so a remux, a manifest or a written DefaultDuration never
-  takes an estimate. The probe JSON, CLI and WebAssembly, reports it as
-  `frame_rate` with `frame_rate_estimated: true`. Over 497 real Matroska
-  files, the 63 without DefaultDuration probed remotely all get one, equal to
-  the prober's `r_frame_rate`, with the same requests and bytes; probed from
-  the local disk 4 of them do (their first frames sit in the 32 KiB head
-  buffer), and in WebAssembly 23, with the same reads.
+- **`Track.EstimatedFrameRate` and `frame_rate_estimated`.** A Matroska
+  video track without DefaultDuration had no frame rate. It now gets an
+  estimate, reported by the probe JSON (CLI and WebAssembly) as
+  `frame_rate` with `frame_rate_estimated: true`; `Track.FrameRate` stays
+  nil, so a remux, a manifest or a written DefaultDuration never takes an
+  estimate. The estimate is, in that order: NUMBER_OF_FRAMES / DURATION
+  from the track's statistics tags when the read has them, snapped to the
+  standard rate within 2e-4 (196351 frames in 02:16:29.518 is 23.976), else
+  the ratio; else the one standard rate (23.976 to 120) the first block
+  timestamps fit, a frame to a grid slot, with no estimate when several
+  still fit (24 and 23.976 on a few frames). By default it reads nothing
+  more: only the bytes the head read holds (the first HTTP response, a Blob
+  window already read, the 32 KiB read buffer of a local file) and the
+  tags. Of the 63 files without DefaultDuration among the 497: 63 estimated
+  over HTTP, 27 in WebAssembly, 12 from the local disk (4 before the
+  statistics tags), each equal to the prober's `r_frame_rate` or
+  `avg_frame_rate`, with the same requests, Blob reads and local reads as
+  without the estimate.
 
-- **The frame rate from the statistics tags.** A video track without
-  DefaultDuration whose per-track statistics tags (NUMBER_OF_FRAMES and
-  DURATION, as mkvmerge writes them) the read has gathered gets
-  `EstimatedFrameRate` = frames / duration, snapped to the standard rate
-  within 2e-4 of it (196351 frames in 02:16:29.518 is 23.976), else the
-  ratio itself; it wins over the timestamp fit and costs no read. Tags whose
-  target is no track of the file are not used. On the local disk, of the 63
-  real files without DefaultDuration, 12 now get a frame rate (4 before),
-  each equal to the prober's.
+- **`WithFrameRateReads` and `-fps-reads`.** The estimate may read the
+  block headers it needs in the first 512 KiB, one exact 32-byte read
+  (`io.ReaderAt`) each; off by default. CLI `-fps-reads` on `info`, `tracks`,
+  `probe`. On the 63 files copied to a local ext4 disk: 12 estimated by
+  default, 63 with the option; about 126 more reads (4 KiB) per file; median
+  probe 5.0 ms, 7.8 ms with the option, page cache dropped per file (4.5 ms
+  both when cached). Over HTTP each of those reads is a request.
 
-- **`WithFrameRateReads` and `-fps-reads`: the frame-rate estimate may read
-  what it needs.** Off by default, the estimate uses only the bytes the head
-  read holds and the statistics tags: on a local file the head buffer is
-  32 KiB and seldom holds enough frames. With the option (CLI `-fps-reads`
-  on `info`, `tracks`, `probe`), it reads the block headers it needs in the
-  first 512 KiB, one exact 32-byte read (`io.ReaderAt`) each. On 63 real
-  files without DefaultDuration, copied to a local ext4 disk: 12 estimated
-  by default, 63 with the option, each equal to the prober's; about 126
-  more reads (4 KiB) per file; median probe 5.0 ms, 7.8 ms with the option,
-  page cache dropped per file (4.5 ms both when cached). Over HTTP each of
-  those reads is a request.
+- **`Track.HandlerName`** (JSON `handler_name`): an MP4 track's `hdlr` name,
+  as probers report it, apart from the title.
+
+- **`Container.TrackLanguage(t)`**: the track's language with the Matroska
+  default applied, the probe JSON's `resolved_language` (see Changed).
+
+- **`Container.TrackCodecName(t)`**: the track's prober `codec_name` with
+  what only the container knows (`mov_text` for an MP4 timed-text track).
+  `Track.FFprobeCodecName()` is unchanged.
 
 ### Changed
 
-- **The read back from the end of a file without SeekHead starts at 64 KiB.**
-  A Matroska file whose tail metadata (Cues, Tags, Chapters) no SeekHead
-  indexes was read 512 KiB back from its end in one go, whatever it held. The
-  read now starts at 64 KiB and doubles, up to 512 KiB, only while the window
-  ends inside metadata that starts before it (the last CuePoints, Tags,
-  chapters or attachments of an element cut by the window); a file ending on
-  a cluster stops at 64 KiB. A remote probe of a 4 MiB file without Cues nor
-  SeekHead: 2 requests and 1 MiB down to 2 requests and 576 KiB. Over 497
-  real Matroska files probed remotely the JSON is identical and the bytes
-  read go from 319.5 MiB to 302.5 MiB; 42 files whose tail metadata exceeds
-  64 KiB make 1 or 2 more requests (1,022 requests in all, now 1,073).
+- **`resolved_language` is "eng" for a Matroska track that stores no
+  language.** RFC 9559 makes "eng" the default of the Language element
+  (LanguageBCP47, when present, wins over it). The probe and `tracks` JSON,
+  CLI and WebAssembly, returned no `resolved_language` for such a track; it
+  now resolves to "eng" on a Matroska or WebM file, with `language_present`
+  still false. An MP4 track without language is unchanged.
+  `Track.ResolvedLanguage()` and the HLS and DASH manifests are unchanged:
+  a track that states no language gets no `LANGUAGE`, since it is often
+  not English.
 
 - **A SeekHead at the end of the file is followed, and a file it indexes is
   not read back from its end.** When the head SeekHead points only at a
   second SeekHead written after the Cues and Tags, `ReadMeta`/`OpenMeta`
   read that one, then the elements it indexes at their offsets, in file
-  order, so elements stored together come in one read. A file whose SeekHead
-  indexes the Cues, with no stale entry, no longer gets the read back from
-  EOF: an element the SeekHead does not name is not looked for. The read
-  back is kept for files without SeekHead. A remote probe of a 4 MiB file
-  with 150 KB of Cues and a tag indexed that way: 4 requests and 960 KiB
-  down to 3 requests and 660 KiB, and its keyframes are now reported. Over
-  497 real Matroska files probed remotely: 1,073 requests and 302.5 MiB
-  down to 1,072 requests and 302.4 MiB; the one file in that layout goes
-  from 704 KiB to 580 KiB and gains its keyframes, the other JSON outputs
-  are identical.
+  order, so elements stored together come in one read. A file whose
+  SeekHead indexes the Cues, with no stale entry, no longer gets the read
+  back from EOF; the read back is kept for files without SeekHead. A remote
+  probe of a 4 MiB test file with 150 KB of Cues and a tag indexed that
+  way: 4 requests and 960 KiB, now 3 requests and 660 KiB. Over the 497
+  files probed remotely: the one file in that layout goes from 704 KiB to
+  580 KiB, one other from 3 requests to 2.
 
-- **A metadata read steps over a large attachment without fetching what
-  follows it a window at a time.** With `WithoutAttachmentData` the reader
-  already skipped the payloads, but over HTTP the headers right after a
-  skipped font (its UID, the next element) opened a new 512 KiB window: a
-  remote probe of a file with a 760 KB font made 3 requests for 1,025 KiB.
-  Once the skipped payloads reach 256 KiB, `ReadMeta`/`OpenMeta` read through
-  exact ranges (`io.ReaderAt`) of 4 KiB, doubled while the reads run on:
-  3 requests for 516 KiB. A smaller attachment, still inside the window
-  already streamed, reads as before. The WebAssembly `Blob` reader offers the
-  same exact reads: the probe of that file goes from 3 Blob reads of 128 KiB
-  in all to 3 reads of 68 KiB. Over 497 real Matroska files probed remotely
-  the JSON and the requests are unchanged.
+- **The read back from the end of a file without SeekHead starts at
+  64 KiB.** It read 512 KiB back from the end in one go, whatever the tail
+  held. It now starts at 64 KiB and doubles, up to 512 KiB, only while the
+  window ends inside metadata that starts before it; a file ending on a
+  cluster stops at 64 KiB. A remote probe of a 4 MiB test file without Cues
+  nor SeekHead: 2 requests and 1 MiB, now 2 requests and 576 KiB. Over the
+  497 files probed remotely, bytes read go from 319.5 MiB to 302.5 MiB; 42
+  files whose tail metadata exceeds 64 KiB make 1 or 2 more requests
+  (1,022 requests in all, then 1,073).
 
-### Fixed
-
-- **An MP4 muxer's default handler name is no longer a track title.** An
-  MP4 track without a `udta/name` took its `hdlr` name as its title unless
-  it contained "Handler": `video handler`, `srt@GPAC0.9.0-...` and the like
-  came out as track names (and became the Matroska track name in a remux).
-  Any case of "handler" and the GPAC, L-SMASH, Mainconcept and Core Media
-  tags now mark a default, and a QuickTime name stored as a Pascal string
-  loses its length byte. The `hdlr` name is exposed apart as
-  `Track.HandlerName` (JSON `handler_name`), as probers report it. On 9 real
-  MP4 files, the 24 tracks titled that way now have no title.
-
-- **`codec_name` of an MP4 timed-text subtitle is `mov_text`.** A `tx3g`
-  track is read as `srt` (it becomes S_TEXT/UTF8 in a remux), and the probe
-  JSON reported it as `subrip`, where probers say `mov_text`. The JSON now
-  says `mov_text` for it; a Matroska SRT stays `subrip`. Library:
-  `Container.TrackCodecName(t)`; `Track.FFprobeCodecName()` is unchanged.
-
-- **A full read finds the Cues and Tags a SeekHead at the end of the file
-  indexes before itself.** When the head SeekHead points only at a second
-  SeekHead written after the Cues and Tags, `Read`/`Open` (the local probe)
-  jumped to it past the clusters and never went back: the file read as
-  having no Cues, no keyframes and no tags. The read now goes back once for
-  the elements that SeekHead indexes before itself, without walking twice
-  what it already read. Over 497 real Matroska files, the files where
-  `mkvinfo` sees Cues or Tags the local probe misses go from 1 to 0; the
-  other JSON outputs are identical.
-
-- **A remote probe reports the keyframes of the Cues it reads at the end of
-  the file.** A metadata read that found the Cues by the read back from the
-  end (no SeekHead indexing them) kept them only when `WithCues` was set, so
-  the remote probe, which reads Chapters, Tags and attachments but not
-  `WithCues`, reported no keyframes for those files. Since 0.49.0 no longer
-  walks every cluster of a remote file for its keyframes (2ed1513 found them
-  by downloading the whole file: 576 requests and 9.5 GB on one of them),
-  this showed as keyframes missing. Cues read on the way now fill the
-  keyframe index whatever was asked. Over 497 real Matroska files probed
-  remotely, 437 had keyframes, now 493 (the 4 others have no Cues), each
-  equal to the local probe's, with the same 1,072 requests and 302.4 MiB.
-
-- **`resolved_language` reports "eng" for a Matroska track that stores no
-  language.** RFC 9559 makes "eng" the default of the Language element (and
-  LanguageBCP47, when present, wins over it); the probe and `tracks` JSON,
-  CLI and WebAssembly, returned no `resolved_language` for such a track. It
-  now resolves to "eng" on a Matroska or WebM file, with `language_present`
-  still false; an MP4 track without language is unchanged. Library:
-  `Container.TrackLanguage(t)`. `Track.ResolvedLanguage()` and the HLS and
-  DASH manifests are unchanged (no `LANGUAGE` for such a track).
+- **A metadata read steps over a large attachment with exact reads.** Over
+  HTTP the headers right after a skipped font opened a new 512 KiB window: a
+  remote probe of a test file with a 760 KB font made 3 requests for
+  1,025 KiB. Once the skipped payloads reach 256 KiB, `ReadMeta`/`OpenMeta`
+  read through exact ranges (`io.ReaderAt`) of 4 KiB, doubled while the
+  reads run on: 3 requests for 516 KiB. The WebAssembly `Blob` reader offers
+  the same exact reads: 3 Blob reads of 128 KiB in all, now 3 of 68 KiB.
+  Over the 497 files probed remotely the JSON and the requests are
+  unchanged.
 
 ## [0.49.0] - 2026-10-14
 
