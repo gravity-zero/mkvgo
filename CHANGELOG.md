@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-14
+
 ### Added
 
 - **`WithInBandChannels`: the channel count the audio stream states.** With
@@ -27,12 +29,13 @@ All notable changes to mkvgo are documented here. The format is based on
   a clock (a 2000 Hz tick would read as 1000 frames per second). It costs no
   read and is reported as `EstimatedFrameRate` (`frame_rate` with
   `frame_rate_estimated: true`), over the statistics tags and the timestamp
-  fit, which the track then skips. Of the 394 real and test files without
-  DefaultDuration whose local probe reported no frame rate, 165 now do (101
-  H.264, 55 MPEG-2, 9 HEVC); the VP9 files have no rate in their header. A
-  header can contradict its stream: one real H.264 file states 24000/1001
-  over timestamps at 25 and 24.42 frames per second, and reports the
-  header's rate.
+  fit, which the track then skips. Of the 392 real and test Matroska files
+  without DefaultDuration whose local probe reported no frame rate, 165 now
+  do (101 H.264, 55 MPEG-2, 9 HEVC), each equal to the prober's; the VP9
+  files have no rate in their header. A header can contradict its stream:
+  one real H.264 file states 24000/1001 over timestamps at 25 and 24.42
+  frames per second, and now reports the header's rate where the timestamp
+  fit read 25.
 
 ### Changed
 
