@@ -527,18 +527,9 @@ func cbcsEncryptWholeSample(block cipher.Block, iv []byte, sample []byte) {
 // as segmentWindow/segmentTrack lay them out; samples' dtsTS values are what
 // the per-sample 'cenc' IV derives from (see this file's doc comment).
 func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
-	block, err := aes.NewCipher(c.Key)
+	k, err := newCENCCipher(c, isVideo, codec)
 	if err != nil {
 		return nil, nil, err
-	}
-	if isVideo && !cencSupportsCodec(codec) {
-		return nil, nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
-	}
-	var splitter videoSubsampleSplitter
-	if isVideo {
-		if splitter, err = newVideoSubsampleSplitter(codec); err != nil {
-			return nil, nil, err
-		}
 	}
 	out := append([]byte(nil), data...)
 	td := &cencTrafData{hasSubsample: isVideo}
@@ -546,29 +537,72 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fr
 	for i := range samples {
 		size := int(samples[i].size)
 		sample := out[pos : pos+size]
-		var subs []cencSubsample
-		if isVideo {
-			subs, err = splitter.split(sample)
-			if err != nil {
-				return nil, nil, err
-			}
+		e, err := k.entry(sample, samples[i].dtsTS)
+		if err != nil {
+			return nil, nil, err
 		}
-		var ivField []byte
-		switch c.Scheme {
-		case "cenc":
-			ivField = cencSampleIV(c.IV, samples[i].dtsTS)
-			cencCTREncrypt(block, cencCounterBlock(ivField), sample, subs)
-		default: // cbcs
-			if isVideo {
-				cbcsEncryptVideoSubsamples(block, c.IV, sample, subs)
-			} else {
-				cbcsEncryptWholeSample(block, c.IV, sample)
-			}
-		}
-		td.entries = append(td.entries, sencEntry{iv: ivField, subs: subs})
+		k.encrypt(sample, e)
+		td.entries = append(td.entries, e)
 		pos += size
 	}
 	return td, out, nil
+}
+
+// cencCipher encrypts one track's samples: the key's cipher and, for video,
+// the codec's subsample splitter. Every sample is encrypted on its own, so a
+// segment can be encrypted one sample at a time.
+type cencCipher struct {
+	c        *CENCOptions
+	block    cipher.Block
+	isVideo  bool
+	splitter videoSubsampleSplitter
+}
+
+func newCENCCipher(c *CENCOptions, isVideo bool, codec string) (*cencCipher, error) {
+	block, err := aes.NewCipher(c.Key)
+	if err != nil {
+		return nil, err
+	}
+	if isVideo && !cencSupportsCodec(codec) {
+		return nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
+	}
+	k := &cencCipher{c: c, block: block, isVideo: isVideo}
+	if isVideo {
+		if k.splitter, err = newVideoSubsampleSplitter(codec); err != nil {
+			return nil, err
+		}
+	}
+	return k, nil
+}
+
+// entry is a plaintext sample's senc entry: its IV ('cenc') and, for video, its clear/protected subsamples.
+func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
+	var e sencEntry
+	if k.isVideo {
+		subs, err := k.splitter.split(sample)
+		if err != nil {
+			return e, err
+		}
+		e.subs = subs
+	}
+	if k.c.Scheme == "cenc" {
+		e.iv = cencSampleIV(k.c.IV, dtsTS)
+	}
+	return e, nil
+}
+
+// encrypt encrypts a plaintext sample in place as its entry says.
+func (k *cencCipher) encrypt(sample []byte, e sencEntry) {
+	switch k.c.Scheme {
+	case "cenc":
+		cencCTREncrypt(k.block, cencCounterBlock(e.iv), sample, e.subs)
+	default: // cbcs
+		if k.isVideo {
+			cbcsEncryptVideoSubsamples(k.block, k.c.IV, sample, e.subs)
+		} else {
+			cbcsEncryptWholeSample(k.block, k.c.IV, sample)
+		}
+	}
 }
 
 // --- HLS/DASH signaling ------------------------------------------------------

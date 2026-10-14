@@ -20,6 +20,20 @@ All notable changes to mkvgo are documented here. The format is based on
   16.9 to 12.9 ms a segment; Matroska 1,549 to 105 MB, 53 to 13 ms. The bytes
   are `Resource`'s; ffmpeg decrypts them to the source's packets.
 
+- **`HLSPlan.Open` streams CENC segments, cenc and cbcs.** `Open` reads a
+  segment's video samples once to find their subsamples and frame the `moof`
+  with its `senc`, `saiz` and `saio`; each write then reads the samples again
+  and encrypts them one at a time, so memory is bounded by the largest sample,
+  and a range skips the samples before it. IVs, counters and subsamples are
+  `Resource`'s, ranges included, and ffmpeg's `-decryption_key` decrypts them
+  to the source's packets (four-slice H.264 included). Measured as above: cenc
+  MP4 1,162 to 129 MB, 16.6 to 5.6 ms a segment; Matroska 2,054 to 250 MB,
+  64.6 to 7.2 ms; cbcs MP4 1,081 to 170 MB, Matroska 1,775 to 261 MB and 118
+  to 43 ms, but MP4 37.7 to 42.7 ms (see below). On a NAS over SMB, a video
+  segment pays the second read: p50 95 to 106 ms and 75 to 79 ms on two
+  files, p95 unchanged or lower; its audio, read through the gaps, 213 to 72
+  ms and 44 to 20 ms.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

@@ -514,9 +514,13 @@ equal `Resource`'s exactly, playlists and init segments come back whole as
 before. An AES-128 segment (`Options.Encrypt`) streams too: its size is known
 up front (PKCS#7 pads to the next 16-byte block), it is encrypted with CBC as
 it is written, and a range is encrypted from the segment's start, what comes
-before the range thrown away. A plan that cannot stream (`CENC`, a
-`FrameConverter`, a custom `Options.FS` without `StreamFromFS`) serves `Open`
-from memory and counts it in `Stats().StreamFallbacks`; an encrypted segment
+before the range thrown away. A CENC segment (`Options.CENC`, cenc or cbcs)
+streams as well: `Open` reads its video samples once to find their
+subsamples and frame the `moof` (`senc`, `saiz`, `saio`), then each write
+reads the samples again and encrypts them one at a time - memory bounded by
+the largest sample - skipping the samples before a range. A plan that cannot
+stream (a `FrameConverter`, a custom `Options.FS` without `StreamFromFS`)
+serves `Open` from memory and counts it in `Stats().StreamFallbacks`; an encrypted segment
 is never served in the clear, and the pooled buffers that held its plaintext
 go back zeroed. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player

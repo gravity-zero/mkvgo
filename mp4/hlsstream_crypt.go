@@ -1,15 +1,116 @@
 package mp4
 
 import (
+	"bufio"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
 	"io"
+	"os"
 )
 
-// hlsstream_crypt.go - AES-128 segments written from the source as Open's
+// hlsstream_crypt.go - encrypted segments written from the source as Open's
 // handles serve them, byte for byte what Resource builds in memory.
+
+// cencStream is a CENC segment's state between Open and its writes: the
+// track's cipher and the senc entries the first pass derived.
+type cencStream struct {
+	k  *cencCipher
+	td *cencTrafData
+}
+
+// openCENC reads h's samples once to derive their senc entries (a video
+// sample's subsamples come from its own bytes) and frames the segment's head
+// with them: the moof must hold them before the first media byte goes out.
+func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
+	pt := p.tracks[h.ti]
+	k, err := newCENCCipher(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec)
+	if err != nil {
+		return err
+	}
+	seg := h.table.segs[h.ti]
+	td := &cencTrafData{hasSubsample: k.isVideo, entries: make([]sencEntry, len(seg.samples))}
+	var rd *sampleReader
+	if k.isVideo {
+		if rd, err = p.newSampleReader(ctx, h.table, h.ti); err != nil {
+			return err
+		}
+		defer rd.close()
+	}
+	var buf []byte
+	for x, s := range seg.samples {
+		if k.isVideo {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if buf, err = rd.read(x, buf); err != nil {
+				return err
+			}
+		}
+		if td.entries[x], err = k.entry(buf, s.dtsTS); err != nil {
+			return err
+		}
+	}
+	seg.cenc = td
+	h.head = buildSegmentFile(uint32(h.n+1), seg)
+	h.cenc = &cencStream{k: k, td: td}
+	return nil
+}
+
+// writeCENC writes [off, off+n) of a CENC segment: the head, then each sample
+// the range meets read, encrypted on its own and written; the samples before
+// the range are neither read nor encrypted.
+func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle, off, n int64) (int64, error) {
+	cw := &countWriter{w: w}
+	bw := bufio.NewWriterSize(cw, stageBytes)
+	end := off + n
+	write := func(b []byte, pos int64) error {
+		from, to := max(off, pos), min(end, pos+int64(len(b)))
+		if from >= to {
+			return nil
+		}
+		_, err := bw.Write(b[from-pos : to-pos])
+		return err
+	}
+	if err := write(h.head, 0); err != nil {
+		return cw.pos, err
+	}
+	pos := int64(len(h.head))
+	var rd *sampleReader
+	var buf []byte
+	for x, s := range h.table.segs[h.ti].samples {
+		size := int64(s.size)
+		if pos+size <= off {
+			pos += size
+			continue
+		}
+		if pos >= end {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return cw.pos, err
+		}
+		if rd == nil {
+			var err error
+			if rd, err = p.newSampleReader(ctx, h.table, h.ti); err != nil {
+				return cw.pos, err
+			}
+			defer rd.close()
+		}
+		var err error
+		if buf, err = rd.read(x, buf); err != nil {
+			return cw.pos, err
+		}
+		h.cenc.k.encrypt(buf, h.cenc.td.entries[x])
+		if err := write(buf, pos); err != nil {
+			return cw.pos, err
+		}
+		pos += size
+	}
+	err := bw.Flush()
+	return cw.pos, err
+}
 
 // writeAES writes [off, off+n) of an AES-128 segment: the plaintext segment,
 // head and samples from the source, goes through CBC as it is produced, from
@@ -99,4 +200,64 @@ func (c *cbcWriter) close() error {
 	}
 	c.nc = 0
 	return c.emit(s)
+}
+
+// sampleReader reads one sample of a segment at a time, whole and as served:
+// a stripped header first, then its bytes from the source, through a pooled
+// copier buffer.
+type sampleReader struct {
+	p      *HLSPlan
+	t      *windowTable
+	ti     int
+	c      *spanCopier
+	src    io.Closer
+	bufp   *[]byte
+	prefix []byte
+	pieces []span // one per sample, for the copier's read-ahead bound
+}
+
+func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (*sampleReader, error) {
+	src, err := p.openSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r := &sampleReader{p: p, t: t, ti: ti, src: src, bufp: streamBufs.Get().(*[]byte), prefix: p.tracks[ti].ft.outTrack.mkv.HeaderStripping}
+	r.c = &spanCopier{src: src, buf: *r.bufp, exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video, wipe: true}
+	if f, ok := src.(*os.File); ok {
+		r.c.file = f
+	}
+	samples := t.segs[ti].samples
+	r.c.end = spansEnd(src, t, ti, 0, 0, 1<<62, int64(len(r.prefix)))
+	r.pieces = make([]span, len(samples))
+	for x, s := range samples {
+		r.pieces[x] = span{off: t.offs[ti][x], n: int64(s.size) - int64(len(r.prefix))}
+	}
+	return r, nil
+}
+
+// read returns sample x's bytes in dst's storage.
+func (r *sampleReader) read(x int, dst []byte) ([]byte, error) {
+	a := &appendWriter{b: append(dst[:0], r.prefix...)}
+	if r.c.exact {
+		r.c.reach = exactReach(r.pieces, x, len(r.c.buf))
+	}
+	if err := r.c.copy(a, r.pieces[x].off, r.pieces[x].n); err != nil {
+		return a.b, err
+	}
+	err := r.c.flush(a)
+	return a.b, err
+}
+
+func (r *sampleReader) close() {
+	r.c.release()
+	putStreamBuf(r.bufp, true)
+	r.src.Close()
+}
+
+// appendWriter appends what it is given to b.
+type appendWriter struct{ b []byte }
+
+func (a *appendWriter) Write(p []byte) (int, error) {
+	a.b = append(a.b, p...)
+	return len(p), nil
 }

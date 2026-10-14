@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -15,7 +16,7 @@ import (
 )
 
 // encryptionModes are the encrypted packagings Open streams: AES-128 with one
-// key and with a key rotated every segment.
+// key and with a key rotated every segment, CENC as cenc and as cbcs.
 func encryptionModes() map[string]Options {
 	key, kid := []byte("0123456789abcdef"), []byte("fedcba9876543210")
 	iv := []byte("ivivivivivivivi!")
@@ -23,6 +24,8 @@ func encryptionModes() map[string]Options {
 		"aes-128": {Encrypt: &HLSEncryption{Key: key, KeyURI: "key.bin"}},
 		"aes-128-rotating": {Encrypt: &HLSEncryption{RotateEverySegments: 1, Keys: []HLSKey{
 			{Key: key, KeyURI: "k1.bin"}, {Key: kid, KeyURI: "k2.bin", IV: iv}}}},
+		"cenc": {CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: kid, IV: iv[:8]}},
+		"cbcs": {CENC: &CENCOptions{Scheme: "cbcs", Key: key, KeyID: kid, IV: iv}},
 	}
 }
 
@@ -49,9 +52,9 @@ func encryptedSources(t *testing.T) []string {
 }
 
 // Open streams the encrypted segments of MP4 and Matroska sources (real
-// H.264, one and four slices a frame, and AAC) byte for byte like Resource:
-// whole, a middle range and random ranges, every rendition, with no segment
-// built in memory.
+// H.264, one and four slices a frame, and AAC) byte for byte like Resource -
+// every sample's IV, counter and subsamples included: whole, a middle range
+// and random ranges, every rendition, with no segment built in memory.
 func TestOpenStreamsEncryptedSegments(t *testing.T) {
 	ctx := context.Background()
 	for _, src := range encryptedSources(t) {
@@ -63,6 +66,17 @@ func TestOpenStreamsEncryptedSegments(t *testing.T) {
 					t.Fatal(err)
 				}
 				assertOpenMatchesResource(t, plan)
+				if strings.HasPrefix(filepath.Base(src), "slices") && o.CENC != nil {
+					h, err := plan.Open(ctx, "seg00002.m4s")
+					if err != nil {
+						t.Fatal(err)
+					}
+					for x, e := range h.cenc.td.entries {
+						if len(e.subs) < 4 {
+							t.Fatalf("sample %d: %d subsamples, want the 4 slices", x, len(e.subs))
+						}
+					}
+				}
 				if st := plan.Stats(); st.StreamedSegments == 0 || st.StreamFallbacks != 0 {
 					t.Errorf("stats: %+v", st)
 				}
@@ -88,8 +102,9 @@ func streamHashes(t *testing.T, ffmpeg string, args ...string) map[string]string
 }
 
 // Each encrypted mode, streamed through Open from an MP4 and a Matroska
-// source, decrypts with ffmpeg to the source's packets, through the HLS
-// playlists and their key files. Opt-in: MKVGO_FFMPEG names the ffmpeg to use.
+// source, decrypts with ffmpeg to the source's packets: AES-128 through the
+// HLS playlists and their key files, CENC with -decryption_key on each
+// rendition's init and segments. Opt-in: MKVGO_FFMPEG names the ffmpeg to use.
 func TestOpenEncryptedDecryptsWithFFmpeg(t *testing.T) {
 	ffmpeg := os.Getenv("MKVGO_FFMPEG")
 	if ffmpeg == "" {
@@ -124,7 +139,7 @@ func TestOpenEncryptedDecryptsWithFFmpeg(t *testing.T) {
 					}
 					f.Close()
 				}
-				{
+				if o.Encrypt != nil {
 					keys := o.Encrypt.Keys
 					if len(keys) == 0 {
 						keys = []HLSKey{{Key: o.Encrypt.Key, KeyURI: o.Encrypt.KeyURI}}
@@ -137,7 +152,14 @@ func TestOpenEncryptedDecryptsWithFFmpeg(t *testing.T) {
 				}
 				got := map[string]string{}
 				for kind, pl := range map[string]string{"v": "playlist.m3u8", "a": "audio1.m3u8"} {
-					h := streamHashes(t, ffmpeg, "-allowed_extensions", "ALL", "-i", filepath.Join(dir, pl), "-map", "0:"+kind)
+					var h map[string]string
+					if o.Encrypt != nil {
+						h = streamHashes(t, ffmpeg, "-allowed_extensions", "ALL", "-i", filepath.Join(dir, pl), "-map", "0:"+kind)
+					} else {
+						joined := filepath.Join(dir, kind+".mp4")
+						concatRendition(t, dir, pl, joined)
+						h = streamHashes(t, ffmpeg, "-decryption_key", hex.EncodeToString(o.CENC.Key), "-i", joined, "-map", "0:"+kind)
+					}
 					got[kind] = h[kind]
 				}
 				for kind := range want {
@@ -147,6 +169,34 @@ func TestOpenEncryptedDecryptsWithFFmpeg(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// concatRendition writes a media playlist's init segment and its segments, in order, to dst.
+func concatRendition(t *testing.T, dir, playlist, dst string) {
+	t.Helper()
+	pl, err := os.ReadFile(filepath.Join(dir, playlist))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []string
+	for _, l := range strings.Split(string(pl), "\n") {
+		if i := strings.Index(l, `#EXT-X-MAP:URI="`); i >= 0 {
+			parts = append(parts, strings.TrimSuffix(l[i+len(`#EXT-X-MAP:URI="`):], `"`))
+		} else if l != "" && !strings.HasPrefix(l, "#") {
+			parts = append(parts, l)
+		}
+	}
+	var all []byte
+	for _, p := range parts {
+		b, err := os.ReadFile(filepath.Join(dir, p))
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, b...)
+	}
+	if err := os.WriteFile(dst, all, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -257,7 +307,7 @@ func mustPlan(t *testing.T, src string, o Options) *HLSPlan {
 func TestEncryptedStreamLeavesNothingInPooledBuffers(t *testing.T) {
 	ctx := context.Background()
 	modes := encryptionModes()
-	first := modes["aes-128-rotating"]
+	first := modes["cenc"]
 	first.SegmentMs = 2000
 	second := modes["aes-128"]
 	second.SegmentMs = 2000

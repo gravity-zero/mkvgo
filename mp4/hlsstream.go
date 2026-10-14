@@ -93,10 +93,10 @@ type tableFlight struct {
 }
 
 // streams reports whether this plan can write segments from the source: the
-// served bytes must be the source's own, AES-128 encrypted or not (no CENC,
-// no conversion), from a file the plan may read twice.
+// served bytes must be the source's own, encrypted or not (no conversion),
+// from a file the plan may read twice.
 func (p *HLSPlan) streams() bool {
-	if p.opts.CENC != nil || (p.opts.FS != nil && !p.opts.StreamFromFS) {
+	if p.opts.FS != nil && !p.opts.StreamFromFS {
 		return false
 	}
 	for _, pt := range p.tracks {
@@ -274,14 +274,17 @@ type ResourceHandle struct {
 	plan        *HLSPlan
 	table       *windowTable
 	ti          int
-	n           int    // the segment's 0-based window
-	head        []byte // the segment's head
+	n           int         // the segment's 0-based window
+	head        []byte      // the segment's head when it is not the table's (CENC: framed with its senc)
+	cenc        *cencStream // a CENC segment's cipher and auxiliary data
 }
 
 // Open opens the named resource (the same names Resource serves); the handle's
 // bytes equal Resource's exactly. A segment streams when the plan can read its
-// source twice: a Matroska or MP4 file, no CENC, no track conversion, local or
-// Options.StreamFromFS. An AES-128 segment is encrypted as it is written.
+// source twice: a Matroska or MP4 file, no track conversion, local or
+// Options.StreamFromFS. An AES-128 segment is encrypted as it is written; a
+// CENC segment's samples are read once by Open, to frame its moof, then again
+// as they are encrypted and written, one at a time.
 func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
 	ti, n, isSeg := p.segmentName(name)
 	if !isSeg || !p.streams() || (p.tracks[ti].ft.outTrack.spec.video && !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim()) {
@@ -314,6 +317,11 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
 	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
+	if p.opts.CENC != nil {
+		if err := p.openCENC(ctx, h); err != nil {
+			return nil, err
+		}
+	}
 	h.size = int64(len(h.head)) + t.segs[ti].dataLen
 	if p.opts.Encrypt != nil {
 		h.size = h.size/aes.BlockSize*aes.BlockSize + aes.BlockSize // PKCS#7 pads to the next block, a whole one when aligned
@@ -420,7 +428,10 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 		}
 		return int64(m), err
 	}
-	if h.plan.opts.Encrypt != nil {
+	switch {
+	case h.cenc != nil:
+		return h.plan.writeCENC(ctx, w, h, off, n)
+	case h.plan.opts.Encrypt != nil:
 		return h.plan.writeAES(ctx, w, h, off, n)
 	}
 	return h.plan.writeSpans(ctx, w, h.head, h.table, h.ti, off, n)
