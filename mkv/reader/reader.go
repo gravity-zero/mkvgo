@@ -245,6 +245,8 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	var seekOffsets []int64 // absolute offsets of the elements a head SeekHead points at
 	jumpedToTail := false
 	triedTailScan := false
+	backedUp := false              // went back once for elements a tail SeekHead indexes before itself
+	var walkedFrom, walkedTo int64 // the tail already walked when going back, not walked again
 	// The spec allows exactly one Info and one Tracks. Some non-conformant muxers
 	// write more; take the FIRST of each and skip the rest, so a duplicate Tracks
 	// does not append a second set of tracks (and so Read matches ReadMeta).
@@ -257,6 +259,12 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 		elemStart := p.pos()
 		if endPos >= 0 && elemStart >= endPos {
 			break
+		}
+		if backedUp && elemStart >= walkedFrom && elemStart < walkedTo {
+			if _, err := p.r.Seek(walkedTo, io.SeekStart); err != nil {
+				return err
+			}
+			continue
 		}
 		eh, _, err := p.readHeader()
 		if err != nil {
@@ -326,6 +334,21 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
 			seekOffsets = append(seekOffsets, offs...)
+			// A SeekHead reached by the jump past the clusters may index elements
+			// written before it (Cues, Tags, then this SeekHead): go back for them once.
+			if back, ok := minOffsetAtOrAfter(offs, p.firstCluster+1); jumpedToTail && !backedUp && ok && back < walkedFrom {
+				valid, err := p.offsetIsSegmentElement(back)
+				if err != nil {
+					return err
+				}
+				if valid {
+					backedUp, walkedTo = true, elemStart
+					if _, err := p.r.Seek(back, io.SeekStart); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 		case mkv.IDCluster:
 			if p.firstCluster == 0 {
 				p.firstCluster = elemStart
@@ -347,7 +370,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 						return err
 					}
 					if valid {
-						jumpedToTail = true
+						jumpedToTail, walkedFrom = true, tailStart
 						if _, err := p.r.Seek(tailStart, io.SeekStart); err != nil {
 							return err
 						}

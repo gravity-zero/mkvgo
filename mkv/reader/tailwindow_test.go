@@ -156,3 +156,54 @@ func TestMetaFollowsSecondarySeekHead(t *testing.T) {
 		t.Errorf("read %d bytes of a %d-byte tail, want the indexed elements only", tail, tailLen)
 	}
 }
+
+// TestReadBacksUpToElementsBeforeTailSeekHead: the head SeekHead points only at
+// a second SeekHead written after the Cues and Tags; the full read, jumping to
+// it past the clusters, goes back for the elements it indexes.
+func TestReadBacksUpToElementsBeforeTailSeekHead(t *testing.T) {
+	rng := rand.New(rand.NewSource(4))
+	var clusters []byte
+	for i := 0; i < 4; i++ {
+		clusters = append(clusters, mediaCluster(rng, 200<<10)...)
+	}
+	info, tracks := infoElem(), tracksElem()
+	cues, tags := cuesElem(50), tagsElem("BPS", "24494738")
+	headSH := func(pos uint64) []byte { return seekHeadElem(seekEntry(mkv.IDSeekHead, pos)) }
+	cuesPos := uint64(len(headSH(0)) + len(info) + len(tracks) + len(clusters))
+	tailSH := seekHeadElem(seekEntry(mkv.IDCues, cuesPos), seekEntry(mkv.IDTags, cuesPos+uint64(len(cues))))
+	data := segmentMKV(headSH(cuesPos+uint64(len(cues)+len(tags))), info, tracks, clusters, cues, tags, tailSH)
+	c, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Cues) != 50 || len(c.Tags) != 1 || len(c.Keyframes) == 0 {
+		t.Errorf("found %d cues, %d tags, %d keyframes; want 50, 1 and the keyframes", len(c.Cues), len(c.Tags), len(c.Keyframes))
+	}
+}
+
+// TestReadBacksUpOnceWithoutRereading: when the jump past the clusters landed on
+// the Cues and a later SeekHead indexes Tags before them, the read goes back for
+// the Tags and does not parse the Cues it already walked a second time.
+func TestReadBacksUpOnceWithoutRereading(t *testing.T) {
+	rng := rand.New(rand.NewSource(5))
+	var clusters []byte
+	for i := 0; i < 4; i++ {
+		clusters = append(clusters, mediaCluster(rng, 200<<10)...)
+	}
+	info, tracks := infoElem(), tracksElem()
+	tags, cues := tagsElem("BPS", "24494738"), cuesElem(50)
+	headSH := func(cuesPos, shPos uint64) []byte {
+		return seekHeadElem(seekEntry(mkv.IDCues, cuesPos), seekEntry(mkv.IDSeekHead, shPos))
+	}
+	tagsPos := uint64(len(headSH(0, 0)) + len(info) + len(tracks) + len(clusters))
+	cuesPos := tagsPos + uint64(len(tags))
+	tailSH := seekHeadElem(seekEntry(mkv.IDTags, tagsPos), seekEntry(mkv.IDCues, cuesPos))
+	data := segmentMKV(headSH(cuesPos, cuesPos+uint64(len(cues))), info, tracks, clusters, tags, cues, tailSH)
+	c, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Cues) != 50 || len(c.Tags) != 1 {
+		t.Errorf("found %d cues and %d tags, want 50 and 1", len(c.Cues), len(c.Tags))
+	}
+}

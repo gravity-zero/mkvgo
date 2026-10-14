@@ -70,6 +70,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A full read finds the Cues and Tags a SeekHead at the end of the file
+  indexes before itself.** When the head SeekHead points only at a second
+  SeekHead written after the Cues and Tags, `Read`/`Open` (the local probe)
+  jumped to it past the clusters and never went back: the file read as
+  having no Cues, no keyframes and no tags. The read now goes back once for
+  the elements that SeekHead indexes before itself, without walking twice
+  what it already read. Over 497 real Matroska files, the files where
+  `mkvinfo` sees Cues or Tags the local probe misses go from 1 to 0; the
+  other JSON outputs are identical.
+
 - **`resolved_language` reports "eng" for a Matroska track that stores no
   language.** RFC 9559 makes "eng" the default of the Language element (and
   LanguageBCP47, when present, wins over it); the probe and `tracks` JSON,
