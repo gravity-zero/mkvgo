@@ -73,14 +73,17 @@ data, contentType, _ := plan.Resource(ctx, "seg00042.m4s")
 names := plan.Resources()        // every servable name
 ```
 
-An HTTP handler is one call:
+An HTTP handler is one call. `Open` gives the exact size before the first
+byte, then writes a media segment from the source as it goes, so a client
+holds a pooled buffer, never a segment:
 
 ```go
 http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
-    data, mime, err := plan.Resource(r.Context(), path.Base(r.URL.Path))
+    h, err := plan.Open(r.Context(), path.Base(r.URL.Path))
     if err != nil { http.NotFound(w, r); return }
-    w.Header().Set("Content-Type", mime)
-    w.Write(data)
+    w.Header().Set("Content-Type", h.ContentType())
+    w.Header().Set("Content-Length", strconv.FormatInt(h.Size(), 10))
+    if _, err := h.WriteTo(r.Context(), w); err != nil { panic(http.ErrAbortHandler) }
 })
 ```
 
@@ -88,7 +91,7 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 > complete on-demand server (this handler + a landing page that plays the
 > output in hls.js and dash.js). `go run ./examples/hls-server -src movie.mkv`.
 
-**Serving over HTTP.** The hand-rolled handler above is the idea in five
+**Serving over HTTP.** The hand-rolled handler above is the idea in a few
 lines; `mkvhttp.Handler(plan)` (package `github.com/gravity-zero/mkvgo/mkvhttp`)
 is the batteries-included version -- strong ETag, conditional GET, Range,
 per-resource `Cache-Control`, CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already

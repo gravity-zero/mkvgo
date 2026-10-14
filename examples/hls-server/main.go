@@ -14,7 +14,7 @@
 //	http://localhost:8080/hls/manifest.mpd   (DASH - dash.js)
 //
 // The whole server is the plan() helper and one handler around
-// plan.Resource(name). That is the entire integration surface.
+// plan.Open(name). That is the entire integration surface.
 package main
 
 import (
@@ -24,6 +24,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ func main() {
 		log.Fatal("usage: hls-server -src <file|url> [-addr :8080] [-segment 6]")
 	}
 
-	// One plan per source. It is immutable and safe for concurrent Resource
+	// One plan per source. It is immutable and safe for concurrent Open
 	// calls, so a real server would cache one plan per title (keyed by URL);
 	// here we build a single plan at startup.
 	opts := mp4.Options{SegmentMs: int64(*segment * 1000)}
@@ -55,7 +56,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// The whole streaming endpoint: name → bytes + Content-Type. The name is
+	// The whole streaming endpoint: name → type, exact size, bytes. The name is
 	// exactly the URI a player requests (master.m3u8, manifest.mpd,
 	// seg00042.m4s, audio1.m3u8, sub1.vtt, iframe.m3u8, …). It is mounted
 	// under the source's version, so a segment URL never names two files:
@@ -63,19 +64,25 @@ func main() {
 	base := "/hls/" + plan.SourceID() + "/"
 	mux.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
 		name := path.Base(r.URL.Path)
-		data, contentType, err := plan.Resource(r.Context(), name)
+		h, err := plan.Open(r.Context(), name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", contentType)
+		defer h.Close()
+		w.Header().Set("Content-Type", h.ContentType())
+		w.Header().Set("Content-Length", strconv.FormatInt(h.Size(), 10))
 		w.Header().Set("Access-Control-Allow-Origin", "*") // let a browser player fetch cross-origin
 		cache := "public, max-age=31536000, immutable"
 		if strings.HasSuffix(name, ".m3u8") || strings.HasSuffix(name, ".mpd") {
 			cache = "no-cache" // a playlist names the segments of the current source
 		}
 		w.Header().Set("Cache-Control", cache)
-		_, _ = w.Write(data)
+		// A segment is written from the source as it goes: an error midway
+		// must break the connection, never end a short body cleanly.
+		if _, err := h.WriteTo(r.Context(), w); err != nil {
+			panic(http.ErrAbortHandler)
+		}
 	})
 	// The stable entry points redirect to the current version.
 	for _, m := range []string{"master.m3u8", "manifest.mpd"} {

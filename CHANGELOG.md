@@ -6,6 +6,18 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **The `hls-server` example serves through `HLSPlan.Open`.** Each resource
+  goes out with its exact `Content-Length` before the first byte, a media
+  segment written from the source as it goes; an error midway breaks the
+  connection. `Resource` returned every segment whole, so each request in
+  flight held one. Measured on a 2 GB Matroska source (1080p H.264 at
+  20 Mbit/s, two audio tracks, 6 s segments, page cache warm), 16 connections
+  on random segments: peak memory 895 to 90 MB, 666 to 3,348 requests/s, p99
+  68 to 11 ms; every segment requested once in turn: p95 8.1 to 3.9 ms. The
+  served bytes are unchanged. `docs/streaming.md` shows the same handler.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

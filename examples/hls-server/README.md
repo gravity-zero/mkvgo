@@ -33,14 +33,17 @@ plan, _ := mp4.PlanHLS(ctx, src, opts)          // once per title
 
 http.HandleFunc("/hls/", func(w, r) {
     name := path.Base(r.URL.Path)               // master.m3u8, seg00042.m4s, sub1.vtt…
-    data, contentType, err := plan.Resource(r.Context(), name)
-    // …write data with contentType
+    h, err := plan.Open(r.Context(), name)
+    // …Content-Type h.ContentType(), Content-Length h.Size(), then h.WriteTo(ctx, w)
 })
 ```
 
-`plan.Resource(name)` builds whatever a player asks for - playlists, the DASH
+`plan.Open(name)` serves whatever a player asks for - playlists, the DASH
 manifest, init segments, media segments, audio renditions, subtitle WebVTT, the
-I-frame playlist (MP4 sources) - reading only that resource's bytes. The plan is
+I-frame playlist - reading only that resource's bytes. Its exact size is known
+before the first byte, and a media segment is written from the source as it
+goes, so a client costs a pooled buffer, never a segment. The bytes are those
+of `plan.Resource(name)`, which returns the resource whole. The plan is
 immutable and safe for concurrent requests; a production server caches one plan
 per title (keyed by source URL).
 
