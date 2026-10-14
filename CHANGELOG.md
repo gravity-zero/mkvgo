@@ -44,6 +44,19 @@ All notable changes to mkvgo are documented here. The format is based on
   segment, 170 to 78-86 MB; Matroska 43 to 8.8-8.9 ms, 261 to 181-238 MB.
   `Resource` and the full pass gain the same way.
 
+- **A Matroska source's audio is copied from the file too.** `Open` kept a
+  window's audio, read with the structure walk, built whole in the window's
+  table; the walk now reads every track's block headers only - a laced
+  block's lace header, its frames skipped - and an audio segment is copied
+  from each frame's place in the file, read through the small gaps as an MP4
+  source's is. Measured on the 2 GB Matroska source: 16 segments built at
+  once, peak memory 156-218 to 40 MB and 3.9 to 1.8 ms a segment (an MP4
+  source: 41 MB, 2.0 ms), AES-128 105 to 39 MB, cenc 250 to 117 MB; the
+  `hls-server` example under 16 connections, 76 to 40 MB at the same
+  throughput (2,850 to 2,830-2,920 requests/s), every segment requested once
+  in turn p95 4.7-5.0 to 3.9-4.0 ms. A track whose blocks are compressed
+  (zlib) is served from memory, as its video always was.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

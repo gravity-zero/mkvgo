@@ -23,11 +23,6 @@ import (
 // tableCacheBytes bounds the window tables one plan keeps: a table is the video's structure plus the window's audio segments, a few MiB at most.
 const tableCacheBytes = 16 << 20
 
-// audioInTableBytes is the most a window's non-video payloads may weigh for the
-// structure walk to keep them and serve those renditions from the table; a
-// heavier window has them written from the source by ranges, like the video.
-var audioInTableBytes int64 = 2 << 20
-
 // tableTotalBudget bounds the tables every plan of the process keeps together (SetTableCacheBytes); tableBytesTotal is what they hold now.
 var (
 	tableTotalBudget atomic.Int64
@@ -57,11 +52,6 @@ func newTableAccount(p *HLSPlan) *tableAccount {
 // through rather than seeks over.
 const spanMergeGap = 8 << 10
 
-// audioExactReads has a non-video rendition's copier read each payload exactly
-// - a seek and a read per sample, never through the holes - instead of
-// reading forward through the video frames between them.
-var audioExactReads = false
-
 // streamBufBytes is the copier's buffer: what a streamed segment costs a client.
 const streamBufBytes = 256 << 10
 
@@ -82,7 +72,6 @@ type windowTable struct {
 	segs  []trackSegment
 	heads [][]byte
 	offs  [][]int64
-	data  [][]byte // a non-video rendition's whole segment, built by the structure walk that kept its payloads
 	bytes int64
 }
 
@@ -196,11 +185,8 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	// A light window's audio rides in the table; a heavy one (lossless, many
-	// tracks) is streamed like the video. Unknown yet means light: most are.
-	other := p.otherEstimate(n)
-	keepAudio := other <= audioInTableBytes
-	windows, nextPts, _, err := p.walkWindow(ctx, n, segStart, segEnd, true, keepAudio)
+	// Headers only, every track: each sample's bytes are copied from the file at its offset when served.
+	windows, nextPts, _, err := p.walkWindow(ctx, n, segStart, segEnd, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -213,23 +199,11 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		}
 	}
 	p.learnOtherRate(n, otherBytes)
-	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks))}
 	for ti := range p.tracks {
 		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
 		if err != nil {
 			return nil, err
-		}
-		if keepAudio && !p.tracks[ti].ft.outTrack.spec.video {
-			// The walk kept this rendition's payloads: its segment is built
-			// now, once, and served whole - a second pass over the window to
-			// pick its blocks out from between the video's would read it all again.
-			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, nil)
-			if err != nil {
-				return nil, err
-			}
-			t.data[ti] = data
-			t.bytes += int64(len(data))
-			continue
 		}
 		t.segs[ti] = p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
 		t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
@@ -253,7 +227,7 @@ func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
-	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks))}
 	t.segs[ti], t.offs[ti] = p.mp4Segment(ti, n)
 	t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
 	return t, nil
@@ -287,7 +261,7 @@ type ResourceHandle struct {
 // as they are encrypted and written, one at a time.
 func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
 	ti, n, isSeg := p.segmentName(name)
-	if !isSeg || !p.streams() || (p.tracks[ti].ft.outTrack.spec.video && !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim()) {
+	if !isSeg || !p.streams() || !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim() {
 		data, ct, err := p.Resource(ctx, name)
 		if err != nil {
 			return nil, err
@@ -312,9 +286,6 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		}
 	} else if t, err = p.table(ctx, n); err != nil {
 		return nil, err
-	}
-	if d := t.data[ti]; d != nil { // an audio rendition: built whole by the structure walk
-		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
 	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
 	if p.opts.CENC != nil {
@@ -442,8 +413,8 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 // the source, through one copier that gathers the small spans and hands the
 // large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti int, off, n int64) (int64, error) {
-	// An MP4 source's audio sits in short runs between video frames: read run by run, through the small frames only.
-	c := &spanCopier{exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts()}
+	// Audio sits in short runs between video frames: read run by run, through the small frames only.
+	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts()}
 	defer c.release()
 	// clip is the part [a, b) of a piece spanning [pos, pos+size) that falls in the range.
 	clip := func(pos, size int64) (a, b int64, ok bool) {
