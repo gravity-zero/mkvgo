@@ -31,6 +31,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **A WebAssembly remux from a `Blob` keeps a window on each region it reads.**
+  The Blob reader cached one window, so an MP4 whose video and audio chunks
+  sit in two regions of the file (not interleaved) dropped it on every jump
+  between them and read it again: `remuxFromMP4` of a 143 MB `File` made
+  4,499 Blob reads for 372 MiB. The reader now keeps four windows, the least
+  recently used one replaced on a miss, each doubling while its region is
+  read on: 294 reads for 143 MiB, 1.48 s down to 0.78 s and a peak RSS of
+  878 MB down to 679 MB under Node 22. The outputs are byte-identical.
 - **The WebAssembly results carry the 64-bit UIDs as strings.** `JSON.parse`
   turns an integer into a JavaScript number, which keeps 53 bits: a track
   UID, chapter UID, attachment UID or tag target of 7454167688999517126 read

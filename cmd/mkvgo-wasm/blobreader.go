@@ -9,17 +9,15 @@ import (
 )
 
 // blobReader adapts a JS Blob/File to io.ReadSeeker through ranged
-// blob.slice(...).arrayBuffer() calls, cached in a window so the many small
+// blob.slice(...).arrayBuffer() calls, cached in a few windows so the many small
 // reads a parser makes don't each cross the JS boundary. Head-only probing of
 // an arbitrarily large file stays head-only: only the windows actually read
 // are ever transferred.
 type blobReader struct {
-	blob js.Value
-	size int64
-	pos  int64
-	buf  []byte // cached window
-	off  int64  // buf's start offset in the blob
-	win  int    // size of the last read, see nextBlobWindow
+	blob  js.Value
+	size  int64
+	pos   int64
+	cache blobCache
 }
 
 func newBlobReader(blob js.Value) *blobReader {
@@ -30,14 +28,9 @@ func (r *blobReader) Read(p []byte) (int, error) {
 	if r.pos >= r.size {
 		return 0, io.EOF
 	}
-	if r.pos < r.off || r.pos >= r.off+int64(len(r.buf)) {
-		if err := r.fetch(r.pos); err != nil {
-			return 0, err
-		}
-	}
-	n := copy(p, r.buf[r.pos-r.off:])
+	n, err := r.cache.read(p, r.pos, r.size, r.fetch)
 	r.pos += int64(n)
-	return n, nil
+	return n, err
 }
 
 func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
@@ -62,25 +55,18 @@ func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
 // Close satisfies mkv.ReadSeekCloser; a Blob slice holds no OS resource.
 func (r *blobReader) Close() error { return nil }
 
-// fetch loads the window starting at off. Blocks the calling goroutine on the
+// fetch fills dst from the Blob at off. Blocks the calling goroutine on the
 // arrayBuffer promise - legal here because every export runs its work on its
 // own goroutine, leaving the JS event loop free to complete the read.
-func (r *blobReader) fetch(off int64) error {
-	r.win = nextBlobWindow(r.off+int64(len(r.buf)), off, r.win)
-	end := min(off+int64(r.win), r.size)
+func (r *blobReader) fetch(dst []byte, off int64) ([]byte, error) {
+	end := off + int64(len(dst))
 	ab, err := await(r.blob.Call("slice", off, end).Call("arrayBuffer"))
 	if err != nil {
-		return fmt.Errorf("blob read [%d:%d): %w", off, end, err)
+		return nil, fmt.Errorf("blob read [%d:%d): %w", off, end, err)
 	}
 	u8 := js.Global().Get("Uint8Array").New(ab)
-	if n := u8.Get("length").Int(); cap(r.buf) >= n {
-		r.buf = r.buf[:n]
-	} else {
-		r.buf = make([]byte, n)
-	}
-	js.CopyBytesToGo(r.buf, u8)
-	r.off = off
-	return nil
+	n := js.CopyBytesToGo(dst, u8)
+	return dst[:n], nil
 }
 
 // await blocks the current goroutine until the JS promise settles.
