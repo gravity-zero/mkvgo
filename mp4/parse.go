@@ -1315,7 +1315,38 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 		}
 		return float64(timescale) * float64(samples) / float64(ticks)
 	}
+	// Uneven deltas that swing around a standard rate (672 and 656 ticks for
+	// 667.33) average to it; a table that averages to none is a variable rate.
+	if samples, ticks := sttsTotals(stts.payload); samples > 1 && ticks > 0 {
+		if fps, ok := snapStandardRate(float64(timescale) * float64(samples) / float64(ticks)); ok {
+			return fps
+		}
+	}
 	return float64(timescale) / float64(delta)
+}
+
+// sttsTotals returns the samples an stts describes and the ticks they cover, 0 and 0 when it is short.
+func sttsTotals(payload []byte) (samples, ticks uint64) {
+	entries := binary.BigEndian.Uint32(payload[4:8])
+	if entries < 2 || uint64(len(payload)) < 8+8*uint64(entries) {
+		return 0, 0
+	}
+	for i := uint32(0); i < entries; i++ {
+		count := uint64(binary.BigEndian.Uint32(payload[8+8*i:]))
+		samples += count
+		ticks += count * uint64(binary.BigEndian.Uint32(payload[12+8*i:]))
+	}
+	return samples, ticks
+}
+
+// snapStandardRate returns the standard frame rate within 2e-4 of fps, and whether there is one.
+func snapStandardRate(fps float64) (float64, bool) {
+	for _, r := range [][2]float64{{24000, 1001}, {24, 1}, {25, 1}, {30000, 1001}, {30, 1}, {48, 1}, {50, 1}, {60000, 1001}, {60, 1}, {100, 1}, {120000, 1001}, {120, 1}} {
+		if std := r[0] / r[1]; math.Abs(fps-std) <= 2e-4*std {
+			return std, true
+		}
+	}
+	return 0, false
 }
 
 // standardFrameRate names the standard frame rate a rounded constant stts

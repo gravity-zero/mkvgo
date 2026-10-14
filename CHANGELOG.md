@@ -8,6 +8,16 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The frame rate of an MP4 whose stts deltas swing around the frame
+  duration.** Several tools store 23.976 fps on a 16 kHz timescale as deltas
+  of 672 and 656 ticks; the first delta read 23.988 fps (the most frequent
+  one would read 23.81). When the deltas differ by more than a tick, the rate
+  is now the samples over the ticks of the whole table, already read, when
+  that average is within 2e-4 of a standard rate; a table that averages to
+  none is a variable rate and keeps the first delta, as before. Of 66 real
+  and test MP4 files whose frame rate disagreed with the prober's, 62 now
+  agree.
+
 - **The CLI JSON carries `effective_sample_rate`.** `probe -json` and
   `tracks -json` declared the decoder's rate (the SBR output rate of an
   HE-AAC track) but never filled it; the WebAssembly probe did. Of 7,765

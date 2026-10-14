@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -748,5 +749,27 @@ func TestParseTrakPascalHandlerName(t *testing.T) {
 	}
 	if tr.handlerName != "VideoHandler" || tr.name != "" {
 		t.Errorf("handler name %q, name %q; want VideoHandler and none", tr.handlerName, tr.name)
+	}
+}
+
+// TestHeaderFrameRateUnevenDeltas: deltas that swing around the frame duration
+// (672 and 656 ticks for 667.33) give the rate of the whole table, snapped to the
+// standard one, not the first delta (23.988) nor the most frequent (23.81).
+func TestHeaderFrameRateUnevenDeltas(t *testing.T) {
+	cases := []struct {
+		name      string
+		timescale uint32
+		entries   [][2]uint32
+		want      float64
+	}{
+		{"swinging deltas", 16000, [][2]uint32{{1, 667}, {1, 672}, {1, 656}, {3, 672}, {1, 656}, {47073, 672}, {19388, 656}}, 24000.0 / 1001},
+		{"a 1-tick first delta", 90000, [][2]uint32{{1, 1}, {30000, 3000}}, 30},
+		{"a variable rate keeps its first delta", 1000, [][2]uint32{{10, 40}, {10, 80}}, 25},
+		{"one exact delta", 12800, [][2]uint32{{5000, 512}}, 25},
+	}
+	for _, c := range cases {
+		if got := headerFrameRate(sttsBox(c.entries...), c.timescale); math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("%s: headerFrameRate = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
