@@ -15,17 +15,15 @@ func TestJSSafeJSONKeepsUIDs(t *testing.T) {
 		Tracks:      []mkv.Track{{ID: 1, UID: uid, Type: mkv.VideoTrack}},
 		Chapters:    []mkv.Chapter{{ID: uid, SubChapters: []mkv.Chapter{{ID: 3}}}},
 		Attachments: []mkv.Attachment{{ID: uid, Size: 25}},
-		Tags:        []mkv.Tag{{TargetType: "TRACK", TargetID: uid}},
-		DurationMs:  1 << 60,
+		Tags: []mkv.Tag{{TargetType: "TRACK", TargetID: uid, SimpleTags: []mkv.SimpleTag{
+			{Name: `quote " and \\ "uid":1`, Value: "-12.5e3"}}}},
+		DurationMs: 1 << 60,
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := jsSafeJSON(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := jsSafeJSON(raw)
 	var got struct {
 		Tracks      []map[string]any `json:"tracks"`
 		Chapters    []map[string]any `json:"chapters"`
@@ -55,6 +53,9 @@ func TestJSSafeJSONKeepsUIDs(t *testing.T) {
 	}
 	if size := got.Attachments[0]["size"]; size != float64(25) {
 		t.Errorf("attachment size = %#v, want the number 25", size)
+	}
+	if st := got.Tags[0]["simple_tags"].([]any)[0].(map[string]any); st["name"] != `quote " and \\ "uid":1` || st["value"] != "-12.5e3" {
+		t.Errorf("strings must pass through untouched: %#v", st)
 	}
 	if d := got.DurationMs; d != "1152921504606846976" {
 		t.Errorf("duration_ms past 2^53 = %#v, want a string", d)

@@ -40,7 +40,9 @@ All notable changes to mkvgo are documented here. The format is based on
   result is a string too; track numbers and the other fields stay numbers.
   The TypeScript types say so (`Track.uid`, `Chapter.id`, the attachment
   `id`, the new `Tag`). A caller that compared these fields with numbers
-  compares strings now.
+  compares strings now. The rewrite is one pass over the JSON bytes: a probe
+  under Node 22 takes 1.19 ms on a 237 MB MKV and 1.86 ms on a 237 MB MP4
+  with a 697 KB moov, against 1.15 and 1.80 ms without it.
 - **Writing an MKV allocates its cluster buffer once.** The MKV writer
   assembled every cluster in a fresh buffer grown by doubling, about twice the
   media it wrote in allocations, and the memory the runtime handed back to the

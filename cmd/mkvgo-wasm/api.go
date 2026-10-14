@@ -282,10 +282,7 @@ func toJSObject(v any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if raw, err = jsSafeJSON(raw); err != nil {
-		return nil, err
-	}
-	return js.Global().Get("JSON").Call("parse", string(raw)), nil
+	return js.Global().Get("JSON").Call("parse", string(jsSafeJSON(raw))), nil
 }
 
 // remuxOpts reads the optional remux options object.
