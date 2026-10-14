@@ -385,7 +385,7 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 	out := make([]trackJSON, len(c.Tracks))
 	for i, t := range c.Tracks {
 		out[i] = trackJSON{Track: t,
-			CodecName:          t.FFprobeCodecName(),
+			CodecName:          c.TrackCodecName(&t),
 			CodecLongName:      t.CodecLongName(),
 			ChannelLayout:      t.ChannelLayout(),
 			AvgFrameRate:       t.AvgFrameRate(),

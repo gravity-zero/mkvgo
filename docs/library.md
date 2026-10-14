@@ -1297,7 +1297,7 @@ Each `Track` carries the stream metadata probers report, read head-only from the
 
 | `Track` field / method | conventional prober field | Source |
 |---|---|---|
-| `Codec` / `CodecLongName()` | `codec_name` / `codec_long_name` | container codec id. `Codec` keeps mkvgo's own short names (`srt`, `pgs`, `vfw`...) and the raw Matroska CodecID where it has none; `Track.FFprobeCodecName()` gives the prober's `codec_name` for the track, resolving what the CodecID alone cannot say - a `V_MS/VFW/FOURCC` track by its FourCC, PCM by its bit depth - and returns the raw CodecID, never a guess, for what it cannot resolve. `FFprobeCodecName(name)` is the same lookup by name only. |
+| `Codec` / `CodecLongName()` | `codec_name` / `codec_long_name` | container codec id. `Codec` keeps mkvgo's own short names (`srt`, `pgs`, `vfw`...) and the raw Matroska CodecID where it has none; `Track.FFprobeCodecName()` gives the prober's `codec_name` for the track, resolving what the CodecID alone cannot say - a `V_MS/VFW/FOURCC` track by its FourCC, PCM by its bit depth - and returns the raw CodecID, never a guess, for what it cannot resolve. `FFprobeCodecName(name)` is the same lookup by name only; `Container.TrackCodecName(t)` adds what only the container knows: an MP4 timed-text (`tx3g`) track, which mkvgo reads as `srt`, is `mov_text` (the probe JSON's `codec_name`). |
 | `Language`, `LanguageBCP47` | `tags:language` | `mdhd`/`elng`, Matroska language |
 | `IsDefault`, `IsForced` | `disposition` | `tkhd` flags / DASH-role `kind`; Matroska flags |
 | `DurationMs` | per-stream `duration` | MP4 `mdhd` (per-track; 0 for Matroska) |

@@ -186,3 +186,16 @@ func TestContainerTrackLanguage(t *testing.T) {
 		}
 	}
 }
+
+// TestContainerTrackCodecName: an MP4 timed-text track (read as srt) is mov_text, a Matroska SRT subrip.
+func TestContainerTrackCodecName(t *testing.T) {
+	tr := &Track{Type: SubtitleTrack, Codec: "srt"}
+	for docType, want := range map[string]string{"": "mov_text", "matroska": "subrip", "webm": "subrip"} {
+		if got := (&Container{DocType: docType}).TrackCodecName(tr); got != want {
+			t.Errorf("DocType %q: TrackCodecName = %q, want %q", docType, got, want)
+		}
+	}
+	if got := (&Container{}).TrackCodecName(&Track{Type: VideoTrack, Codec: "h264"}); got != "h264" {
+		t.Errorf("MP4 h264: TrackCodecName = %q, want h264", got)
+	}
+}

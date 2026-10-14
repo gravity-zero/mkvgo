@@ -359,3 +359,31 @@ func TestCmdProbeJSONDefaultLanguage(t *testing.T) {
 		}
 	}
 }
+
+// TestCmdProbeJSONMovTextCodecName: an MP4 timed-text (tx3g) subtitle track is
+// mov_text for codec_name, as a prober reports it; a Matroska SRT stays subrip.
+func TestCmdProbeJSONMovTextCodecName(t *testing.T) {
+	const src = "../../../internal/testdata/sample_subs.mkv"
+	mp4Path := filepath.Join(t.TempDir(), "subs.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), src, mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	for path, want := range map[string]string{src: "subrip", mp4Path: "mov_text"} {
+		var got struct {
+			Tracks []struct {
+				Type      string `json:"type"`
+				CodecName string `json:"codec_name"`
+			} `json:"tracks"`
+		}
+		if err := json.Unmarshal([]byte(capture(t, func() { commands.CmdProbe(path) })), &got); err != nil {
+			t.Fatal(err)
+		}
+		for _, tr := range got.Tracks {
+			if tr.Type == "subtitle" && tr.CodecName != want {
+				t.Errorf("%s: subtitle codec_name %q, want %q", filepath.Base(path), tr.CodecName, want)
+			}
+		}
+	}
+}

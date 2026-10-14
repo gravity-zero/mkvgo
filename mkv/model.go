@@ -364,6 +364,14 @@ func (t *Track) ResolvedLanguage() string {
 	return t.Language
 }
 
+// TrackCodecName is t's FFprobeCodecName in this container: an MP4 timed-text track, read as "srt", is "mov_text".
+func (c *Container) TrackCodecName(t *Track) string {
+	if c.DocType == "" && t.Type == SubtitleTrack && t.Codec == "srt" {
+		return "mov_text"
+	}
+	return t.FFprobeCodecName()
+}
+
 // TrackLanguage is t's ResolvedLanguage with the Matroska default applied: "eng" for a Matroska or WebM track that stores neither Language nor LanguageBCP47 (RFC 9559), "" for an MP4 one.
 func (c *Container) TrackLanguage(t *Track) string {
 	if l := t.ResolvedLanguage(); l != "" || c.DocType == "" {

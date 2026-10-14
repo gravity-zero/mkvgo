@@ -92,6 +92,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`codec_name` of an MP4 timed-text subtitle is `mov_text`.** A `tx3g`
+  track is read as `srt` (it becomes S_TEXT/UTF8 in a remux), and the probe
+  JSON reported it as `subrip`, where probers say `mov_text`. The JSON now
+  says `mov_text` for it; a Matroska SRT stays `subrip`. Library:
+  `Container.TrackCodecName(t)`; `Track.FFprobeCodecName()` is unchanged.
+
 - **A full read finds the Cues and Tags a SeekHead at the end of the file
   indexes before itself.** When the head SeekHead points only at a second
   SeekHead written after the Cues and Tags, `Read`/`Open` (the local probe)
