@@ -62,6 +62,7 @@ type inTrack struct {
 	rotation         int     // clockwise display rotation from the tkhd matrix (0/90/180/270)
 	frameCount       int64   // sample count from stsz (the conventional nb_frames); 0 when unknown
 	durationMs       int64   // per-track duration from mdhd; 0 when unknown
+	presentMs        int64   // presentation duration from the edit list (its segments, movie timebase); 0 when none
 	timescale        uint32
 	// sttsLo/sttsHi are the smallest and largest sample duration an audio
 	// track's stts declares, in timescale ticks (a lone final sample aside:
@@ -1181,6 +1182,13 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 			if elst, ok := findMemBox(eb, "elst"); ok {
 				editMediaTime, editEmptyDur, hasEdit = parseElst(elst.payload)
 			}
+		}
+		if entries, err := trakElstEntries(trakBoxes); err == nil && movieTS > 0 {
+			var ticks int64
+			for _, e := range entries {
+				ticks += e.segDur
+			}
+			tr.presentMs = ticksToMs(ticks, movieTS)
 		}
 	}
 	// An elng box (ISO 14496-12) overrides mdhd with a full BCP-47 tag.

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -474,4 +475,64 @@ func TestRoundTripRotation(t *testing.T) {
 			t.Errorf("rotation %d: MKV after the round trip reads %d", rot, back.Tracks[0].Rotation)
 		}
 	}
+}
+
+// TestEditListBoundsDuration: an edit list that ends the presentation before
+// the media (an audio track cut at 6 s over 10 s of samples) sets the track's
+// and the file's duration, in the probe and in the Segment from-mp4 writes.
+func TestEditListBoundsDuration(t *testing.T) {
+	tracks := []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, Channels: u8p(2), SampleRate: f64p(48000), CodecDelay: 21_000_000},
+	}
+	var blocks []genBlock
+	for ms := int64(0); ms < 5000; ms += 40 {
+		blocks = append(blocks, genBlock{track: 1, pts: ms, key: ms == 0, data: []byte{1}})
+	}
+	for ms := int64(0); ms < 10000; ms += 21 {
+		blocks = append(blocks, genBlock{track: 2, pts: ms, key: true, data: []byte{2}})
+	}
+	sort.SliceStable(blocks, func(i, j int) bool { return blocks[i].pts < blocks[j].pts })
+	mp4Path := filepath.Join(t.TempDir(), "mid.mp4")
+	if err := RemuxToMP4(context.Background(), buildMKV(t, tracks, blocks), mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := false
+	for i := bytes.Index(b, []byte("elst")); i >= 0; i = nextIndex(b, []byte("elst"), i) {
+		if b[i+4] == 0 && binary.BigEndian.Uint32(b[i+12:]) > 9000 { // v0: the audio edit, about 10 s
+			binary.BigEndian.PutUint32(b[i+12:], 6000)
+			patched = true
+		}
+	}
+	if !patched {
+		t.Fatal("no audio edit list to cut")
+	}
+	if err := os.WriteFile(mp4Path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := OpenMeta(context.Background(), mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DurationMs != 6000 || c.Tracks[1].DurationMs != 6000 {
+		t.Errorf("probe: file %d ms, audio %d ms; want 6000 and 6000", c.DurationMs, c.Tracks[1].DurationMs)
+	}
+	outMKV := filepath.Join(t.TempDir(), "out.mkv")
+	if err := RemuxFromMP4(context.Background(), mp4Path, outMKV); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := readMKV(t, outMKV); m.DurationMs != 6000 {
+		t.Errorf("from-mp4 Segment duration %d ms, want 6000", m.DurationMs)
+	}
+}
+
+func nextIndex(b, sep []byte, after int) int {
+	if j := bytes.Index(b[after+1:], sep); j >= 0 {
+		return after + 1 + j
+	}
+	return -1
 }

@@ -175,6 +175,9 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			mt.Bitrate = &br
 		}
 		mt.DurationMs = t.durationMs
+		if t.presentMs > 0 { // the edit list ends the presentation, not the media
+			mt.DurationMs = t.presentMs
+		}
 		if wantsEditList(t.codec, mp3Delay) {
 			mt.CodecDelay = t.codecDelayNs
 		}
@@ -319,6 +322,30 @@ func minTimecode(blocks []mkv.Block) int64 {
 	return min
 }
 
+// editedDurationMs is the longest track presentation when an edit list sets one, each other track ending with its media; 0 when no track has an edit list.
+func editedDurationMs(mv *movie) int64 {
+	var max int64
+	edited := false
+	for i := range mv.tracks {
+		t := &mv.tracks[i]
+		end := t.presentMs
+		if end > 0 {
+			edited = true
+		} else if s := t.samples; len(s) > 0 {
+			end = s[len(s)-1].ctsMs
+		} else if t.sampleEndMs > 0 {
+			end = t.sampleEndMs
+		} else {
+			end = t.durationMs
+		}
+		max = maxInt64(max, end)
+	}
+	if !edited {
+		return 0
+	}
+	return max
+}
+
 func movieDurationMs(mv *movie) int64 {
 	var max int64
 	for i := range mv.tracks {
@@ -359,4 +386,11 @@ func readSample(r io.ReadSeeker, off int64, size uint32) ([]byte, error) {
 		return nil, err
 	}
 	return buf, nil
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

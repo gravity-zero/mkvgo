@@ -91,7 +91,10 @@ func containerFromMovie(mv *movie) *mkv.Container {
 	const scale = 1_000_000 // 1 ms per timecode unit
 	// Prefer the sample-derived duration when the sample table was built; otherwise
 	// (metadata-only probe) use the mvhd movie duration.
-	durMs := movieDurationMs(mv)
+	durMs := editedDurationMs(mv)
+	if durMs == 0 {
+		durMs = movieDurationMs(mv)
+	}
 	if durMs == 0 {
 		durMs = mv.durationMs
 	}
