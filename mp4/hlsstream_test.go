@@ -248,6 +248,68 @@ func TestExactCopierReadsThroughSmallGaps(t *testing.T) {
 	}
 }
 
+// interleaved.mp4: 12 s of 320x240 H.264 at 150 kb/s and mono AAC at 48 kb/s,
+// written by a mainstream muxer that interleaves sample by sample (564 audio
+// samples in 299 runs, holes of 0.6 KiB median, 3.7 KiB at most).
+//
+//	ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 12 \
+//	  -c:v libx264 -preset veryfast -b:v 150k -g 50 -c:a aac -b:a 48k -ac 1 -map_metadata -1 \
+//	  -fflags +bitexact -flags:v +bitexact -flags:a +bitexact interleaved.mp4
+const interleavedMP4 = "../internal/testdata/interleaved.mp4"
+
+// Streamed through Open, an audio segment of a source interleaved sample by
+// sample is read in one or two reads through the video frames between its
+// samples, not one per run, and every resource keeps Resource's bytes.
+func TestOpenInterleavedMP4ReadsAudioThroughGaps(t *testing.T) {
+	ctx := context.Background()
+	open := func(gap int64) (*HLSPlan, *readTally) {
+		exactReadGap = gap
+		tally := &readTally{}
+		plan, err := PlanHLS(ctx, interleavedMP4, Options{SegmentMs: 6000, FS: countingFS(tally), StreamFromFS: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan, tally
+	}
+	defer func(old int64) { exactReadGap = old }(exactReadGap)
+	reads := func(gap int64, name string) (int, []byte) {
+		plan, tally := open(gap)
+		want, _, err := plan.Resource(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := plan.Open(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := tally.reads
+		var got bytes.Buffer
+		if _, err := h.WriteTo(ctx, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Fatalf("%s (gap %d): streamed bytes differ from Resource", name, gap)
+		}
+		return tally.reads - before, got.Bytes()
+	}
+	for _, name := range []string{"seg_a1_00001.m4s", "seg_a1_00002.m4s"} {
+		exact, a := reads(0, name)
+		through, b := reads(64<<10, name)
+		if !bytes.Equal(a, b) {
+			t.Fatalf("%s: the bytes depend on the read rule", name)
+		}
+		t.Logf("%s: %d reads one run at a time, %d through the gaps", name, exact, through)
+		if exact < 50 || through > 2 {
+			t.Errorf("%s: %d reads one run at a time, %d through the gaps; want many, then at most 2", name, exact, through)
+		}
+	}
+	plan, _ := open(64 << 10)
+	assertOpenMatchesResource(t, plan)
+	if st := plan.Stats(); st.StreamedSegments == 0 || st.StreamFallbacks != 0 {
+		t.Errorf("stats: %+v", st)
+	}
+}
+
 // A header-stripped track streams its prefix before each sample's bytes.
 func TestOpenStreamsHeaderStripping(t *testing.T) {
 	w, h := uint32(320), uint32(240)
