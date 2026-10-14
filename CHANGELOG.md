@@ -63,6 +63,14 @@ All notable changes to mkvgo are documented here. The format is based on
   read 1, 3, 6 or 8, as decoded. Parametric Stereo signalled only in the audio
   frames stays invisible from the header (a mono core reads 1).
 
+- **An MP4 whose stts states a negative delta.** Some muxers write a sample
+  delta that goes back in time as an unsigned 32-bit value (2^32 - 479,970):
+  added as such, it pushed the next samples 13 hours further and the file's
+  duration to 47,753 s instead of 31.5 s. A delta past 2^31 - 1 is now one
+  tick, as reference decoders clip it (the timeline stays increasing), and
+  such a track's duration is its header's (mdhd), the samples' timeline no
+  longer adding up to it.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

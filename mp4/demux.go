@@ -331,6 +331,8 @@ func editedDurationMs(mv *movie) int64 {
 		end := t.presentMs
 		if end > 0 {
 			edited = true
+		} else if t.sttsClipped && t.durationMs > 0 {
+			end = t.durationMs
 		} else if s := t.samples; len(s) > 0 {
 			end = s[len(s)-1].ctsMs
 		} else if t.sampleEndMs > 0 {
@@ -351,7 +353,9 @@ func movieDurationMs(mv *movie) int64 {
 	for i := range mv.tracks {
 		t := &mv.tracks[i]
 		var end int64
-		if s := t.samples; len(s) > 0 {
+		if t.sttsClipped && t.durationMs > 0 {
+			end = t.durationMs // its header's: the timeline was clipped
+		} else if s := t.samples; len(s) > 0 {
 			end = s[len(s)-1].ctsMs
 		} else {
 			// sampleKeyframes mode builds no sample table but records the end.

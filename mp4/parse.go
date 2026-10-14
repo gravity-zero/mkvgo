@@ -72,6 +72,7 @@ type inTrack struct {
 	samples        []inSample
 	keyframesMs    []int64 // sync-sample presentation times (sampleKeyframes mode); nil otherwise
 	sampleEndMs    int64   // last sample's cts (sampleKeyframes mode), for the movie duration
+	sttsClipped    bool    // the stts states a negative delta: the samples' timeline does not give the duration
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -1307,6 +1308,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		tr.sttsLo, tr.sttsHi = sttsDeltaRange(stblBoxes)
 	}
 
+	tr.sttsClipped = sttsHasNegativeDelta(stblBoxes)
 	switch mode {
 	case sampleKeyframes:
 		// Only the keyframe index is needed: derive sync-sample times from

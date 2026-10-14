@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"math"
 	"sort"
 )
 
@@ -321,12 +322,32 @@ func parseStts(payload []byte, n int) ([]uint32, error) {
 		base := 8 + i*8
 		run := binary.BigEndian.Uint32(payload[base : base+4])
 		delta := binary.BigEndian.Uint32(payload[base+4 : base+8])
+		if delta > math.MaxInt32 {
+			delta = 1 // a negative delta stored unsigned: one tick keeps the timeline increasing
+		}
 		for j := uint32(0); j < run && idx < n; j++ {
 			durations[idx] = delta
 			idx++
 		}
 	}
 	return durations, nil
+}
+
+// sttsHasNegativeDelta reports whether an stts states a negative delta stored
+// unsigned, which parseStts clips: the samples' timeline then no longer adds
+// up to the track's duration.
+func sttsHasNegativeDelta(stblBoxes []memBox) bool {
+	stts, ok := findMemBox(stblBoxes, "stts")
+	if !ok || len(stts.payload) < 8 {
+		return false
+	}
+	count := binary.BigEndian.Uint32(stts.payload[4:8])
+	for i := uint32(0); i < count && 16+int(i)*8 <= len(stts.payload); i++ {
+		if binary.BigEndian.Uint32(stts.payload[12+i*8:]) > math.MaxInt32 {
+			return true
+		}
+	}
+	return false
 }
 
 // parseCtts expands the composition offset box (version 0 unsigned or version 1
