@@ -218,9 +218,29 @@ func parseCodecColour(codec string, cp []byte) (bc *bitstreamColour) {
 		return av1Colour(cp)
 	case "vp9", "V_VP9":
 		return vp9Colour(cp)
+	case "V_MPEG2", "mpeg2":
+		return mpeg2Colour(cp)
 	default:
 		return nil
 	}
+}
+
+// mpeg2Colour reads the colour_description of the sequence_display_extension (extension id 2) following an MPEG-2 sequence header.
+func mpeg2Colour(cp []byte) *bitstreamColour {
+	for i := 0; i+5 <= len(cp); i++ {
+		if cp[i] != 0 || cp[i+1] != 0 || cp[i+2] != 1 || cp[i+3] != 0xB5 || cp[i+4]>>4 != 2 {
+			continue
+		}
+		r := &bitReader{data: cp[i+4:]}
+		r.bits(4) // extension_start_code_identifier
+		r.bits(3) // video_format
+		p, t, m := readColourDescription(r)
+		if r.err {
+			return nil
+		}
+		return &bitstreamColour{primaries: p, transfer: t, matrix: m, determined: true}
+	}
+	return nil
 }
 
 // --- bit reader (MSB-first) with Exp-Golomb, over-read tracked in err ----------

@@ -84,6 +84,11 @@ All notable changes to mkvgo are documented here. The format is based on
   and test MP4 files whose frame rate disagreed with the prober's, 62 now
   agree.
 
+- **The colour of an MPEG-2 track.** Its colour primaries, transfer and
+  matrix are read from the sequence_display_extension of the sequence header
+  in CodecPrivate, head-only. On 10 real MPEG-2 files with no colour in the
+  container, the colour (smpte170m) is now reported, equal to the prober's.
+
 - **An MP4 edit list sets the duration.** A track whose edit list ends the
   presentation before (or delays it after) its media reported the media's
   duration (`mdhd`), and the file the movie header's or its last sample's:

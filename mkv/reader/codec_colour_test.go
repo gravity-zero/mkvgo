@@ -234,3 +234,18 @@ func TestHEVCBitDepthHeaderContradicted(t *testing.T) {
 		}
 	}
 }
+
+// TestMPEG2ColourFromDisplayExtension: an MPEG-2 track's colour comes from the
+// sequence_display_extension of the sequence header in its CodecPrivate.
+func TestMPEG2ColourFromDisplayExtension(t *testing.T) {
+	cp := []byte{0, 0, 1, 0xB3, 0x2D, 0x01, 0xE0, 0x24, 0xFF, 0xFF, 0xE0, 0x18, // 720x480, 29.97
+		0, 0, 1, 0xB5, 0x14, 0x8A, 0x00, 0x01, 0x00, 0x00, // sequence extension
+		0, 0, 1, 0xB5, 0x25, 0x06, 0x06, 0x06, 0x0B, 0x42, 0x12, 0x00} // display extension: smpte170m x3
+	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "V_MPEG2", CodecPrivate: cp}
+	fillColourFromCodecPrivate(&tr)
+	for name, v := range map[string]*uint16{"primaries": tr.ColorPrimaries, "transfer": tr.ColorTransfer, "matrix": tr.ColorSpace} {
+		if v == nil || *v != 6 {
+			t.Errorf("%s = %v, want 6 (smpte170m)", name, v)
+		}
+	}
+}
