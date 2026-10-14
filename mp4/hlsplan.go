@@ -66,15 +66,17 @@ type HLSPlan struct {
 	master   []byte
 	mpd      []byte
 	segCount int
-	opts     Options         // Encrypt / RewriteURL ride along for Resource builds
-	subs     []hlsSubTrack   // declared renditions; cues fetched lazily, then cached
-	subMu    []sync.Mutex    // serialises each track's cue scans
-	subScan  []subScanState  // per-track incremental cue scan state
-	segs     []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
-	mp4src   bool            // MP4 source: windows cut from the sample table, exact by construction
-	mp4tabs  []*mp4PlanTable // per track: the compact sample table the windows are built from (MP4 source)
-	mp4subs  []*mp4SubTable  // per subtitle rendition: its samples, text read on first use (MP4 source)
-	iframe   []byte          // trick-play playlist: MP4 plans build it eagerly (free, head-only);
+	// cueDensity measures the video cue points the bounds were cut on (CueDensity).
+	cueDensity CueDensity
+	opts       Options         // Encrypt / RewriteURL ride along for Resource builds
+	subs       []hlsSubTrack   // declared renditions; cues fetched lazily, then cached
+	subMu      []sync.Mutex    // serialises each track's cue scans
+	subScan    []subScanState  // per-track incremental cue scan state
+	segs       []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
+	mp4src     bool            // MP4 source: windows cut from the sample table, exact by construction
+	mp4tabs    []*mp4PlanTable // per track: the compact sample table the windows are built from (MP4 source)
+	mp4subs    []*mp4SubTable  // per subtitle rendition: its samples, text read on first use (MP4 source)
+	iframe     []byte          // trick-play playlist: MP4 plans build it eagerly (free, head-only);
 	// Matroska plans build it lazily (see hasIframe/iframeMu/iframeErr) - the
 	// exact byte ranges need every segment's sample count/flags, which only a
 	// full pass over the video track's block headers can give.
@@ -482,7 +484,8 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			cues = append(cues, cue)
 		}
 	}
-	if len(cues) == 0 {
+	synthesized := len(cues) == 0
+	if synthesized {
 		// Options.SynthesizeIndex: serve the unindexed (or misskeyed-index)
 		// source anyway - walk the clusters once, structure only, and build
 		// the video cue points in memory. The synthesized index replaces
@@ -498,6 +501,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, errf("%s: no video keyframes found to synthesize an index from", srcPath)
 		}
 	}
+	p.cueDensity = cueDensityOf(cues, synthesized)
 	p.bounds = []int64{0}
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
 	last := int64(0)

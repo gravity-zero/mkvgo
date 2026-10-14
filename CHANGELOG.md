@@ -8,6 +8,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **`HLSPlan.CueDensity()` says what a Matroska plan cut on.** A plan cuts
+  only where a video cue points, so it matches the full pass only when the
+  Cues index every keyframe. The new report gives the number of video cue
+  points, the widest gap between two of them (and where it opens), the median
+  gap, the last cue point, and whether `SynthesizeIndex` built them; an MP4
+  plan reports `ok == false` (its sample table is exact). On a 13-minute file
+  with a keyframe every 2 s whose Cues hold 312 of its 390 keyframes: 312 cue
+  points, a 4000 ms widest gap against a 2000 ms median.
 - **The WebAssembly remuxes take a `Blob`/`File`.** `remuxToMP4`,
   `remuxFromMP4`, `remuxToWebM` and `remuxToHLS` refused anything but a
   `Uint8Array`, so the whole input sat in memory twice (in JavaScript, then
@@ -72,6 +80,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The on-demand plan's byte-identity with the full pass is stated with its
+  condition.** `docs/library.md` and `docs/cli.md` promised that every
+  resource of a Matroska plan is byte-identical to `RemuxToHLS`/`to-hls`.
+  That holds only when the Cues index every video keyframe: the plan cuts
+  where a cue points, the full pass at every keyframe, so a boundary due on
+  an uncued keyframe moves to the next cue (a file whose Cues hold 312 of its
+  390 keyframes plans 8 s segments where the full pass cuts at 6 s: 117
+  segments against 130). The docs now state the condition, the remedy
+  (`reindex`) and that `SynthesizeIndex` does not replace sparse Cues.
 - **A display rotation survives every remux.** Matroska carries it as
   `Video>Projection>ProjectionPoseRoll` (degrees counterclockwise), which was
   not read: `probe` of such an MKV showed no rotation. And no output carried

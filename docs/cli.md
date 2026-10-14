@@ -1175,9 +1175,17 @@ value for the two modes to stay byte-identical. `--audio-shift` (see `to-hls`)
 cancels a constant A/V desync in the served segments via the init's edit list,
 nothing rewritten.
 
-The output is **byte-identical** to the corresponding file `to-hls` writes
-(same boundaries, same fragments, cover art and global tags in the init), so
-pre-generated and on-demand serving can be mixed transparently. Text subtitle
+For a Matroska source whose Cues index every video keyframe, the output is
+**byte-identical** to the corresponding file `to-hls` writes (same boundaries,
+same fragments, cover art and global tags in the init), so pre-generated and
+on-demand serving can be mixed transparently. The plan can only cut where a
+cue points, while `to-hls` sees every keyframe: when the Cues skip keyframes,
+a boundary due on an uncued keyframe moves to the next cue and the two
+presentations differ (a 13-minute file with a keyframe every 2 s whose Cues
+hold 312 of its 390 keyframes: 8 s segments where `to-hls` cuts at 6 s, 117
+segments against 130).
+`--synthesize-index` does not change that while the Cues exist; `reindex`
+writes Cues on every keyframe, after which the two match again. Text subtitle
 tracks are declared in the master playlist and served as segmented WebVTT
 renditions (`subN.m3u8` + windowed `subN_00001.vtt`…, plus the whole track as
 `subN.vtt`); text blocks have no cue index, so the cues come from scanning

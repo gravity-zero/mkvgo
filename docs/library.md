@@ -292,9 +292,26 @@ sharing. A miss - a seek, a cold plan, an evicted bundle - simply walks the sour
 so serving stays stateless in effect and no request depends on another having
 happened.
 
-The fragments are built by the same code as `RemuxToHLS`, so every resource is
-**byte-identical** to the full pass (regression-tested) - pre-generated and
-on-demand serving mix transparently. Cover art and global tags ride in the
+The fragments are built by the same code as `RemuxToHLS`, so when the Cues
+index **every video keyframe** every resource is **byte-identical** to the
+full pass (regression-tested) - pre-generated and on-demand serving mix
+transparently. The plan cuts only where a cue points; the full pass sees every
+keyframe. When the Cues skip keyframes, a boundary due on an uncued keyframe
+moves to the next cue and the two presentations differ (a 13-minute file
+with a keyframe every 2 s whose Cues hold 312 of its 390 keyframes plans 8 s
+segments where the full pass cuts at 6 s: 117 segments against 130).
+`HLSPlan.CueDensity()` reports what the plan cut on - the number of video cue
+points, the widest gap between two of them and where it opens, the median
+gap, the last one, and whether `SynthesizeIndex` built them (then every
+keyframe is indexed). On that file: 312 cue points, `MaxGapMs` 4000 against
+a `MedianGapMs` of 2000. A widest gap well above the median says keyframes
+were skipped (an irregular GOP shows it too; only a walk proves it), and the
+caller decides: `reindex` the file (Cues on every keyframe), or serve the
+full pass.
+`SynthesizeIndex` only stands in for Cues that are missing or hold no video
+keyframe; it does not replace sparse ones. An MP4
+plan reports `ok == false`: its sample table is the index, exact by
+construction. Cover art and global tags ride in the
 init segment (`WithAttachments`/`WithTags` reach them through the SeekHead,
 still head-only). Text subtitle tracks are declared in the master playlist and
 served as segmented WebVTT renditions (`subN.m3u8` + windowed `subN_00001.vtt`…,
