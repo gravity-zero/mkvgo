@@ -57,6 +57,21 @@ All notable changes to mkvgo are documented here. The format is based on
   in turn p95 4.7-5.0 to 3.9-4.0 ms. A track whose blocks are compressed
   (zlib) is served from memory, as its video always was.
 
+- **A segment's bytes are read ahead before they are copied (Linux).** On a
+  cold page cache each read waited for the disk in turn: an audio segment
+  interleaved sample by sample made a few hundred of them, and a video
+  segment's frame-sized sendfile calls each did small reads of their own.
+  The video's whole range is now read ahead first (readahead(2): large
+  sequential reads, next to nothing when cached) and each read of an audio
+  segment is started in the background at once (posix_fadvise WILLNEED).
+  Measured with the server on 2 cores (GOMAXPROCS=2), every segment of the
+  2 GB sources requested once, page cache dropped: MP4 audio p50 16.1 to
+  1.1 ms and p95 34.7 to 1.7 ms, video 18.7 / 24.0 to 15.9 / 17.8 ms;
+  Matroska video 26.2 / 36.2 to 21.4 / 27.9 ms. Cached, unchanged (MP4 video
+  p95 3.1 to 2.3 ms). A Matroska window walked for the first time still
+  waits for its reads (p95 38 ms cold): its block headers are only found one
+  after the other.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

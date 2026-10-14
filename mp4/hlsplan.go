@@ -2402,15 +2402,16 @@ func (p *HLSPlan) learnAheadHead(ctx context.Context) error {
 // of window n reads from start: up to the cluster that opens the next window,
 // plus the look past it, fetched with one request.
 func (p *HLSPlan) hintWindow(src io.Reader, n int, start int64) {
-	h, ok := src.(mkv.RangeHinter)
-	if !ok {
-		return
-	}
 	end := int64(math.MaxInt64)
 	if n+1 < len(p.offsets) {
 		end = p.offsets[n+1] + windowPeekBytes
 	}
-	h.HintRange(start, end)
+	if f, ok := src.(*os.File); ok && end != math.MaxInt64 { // the walk reads through the window: have it all coming in at once
+		adviseWillNeed(f, start, end-start)
+	}
+	if h, ok := src.(mkv.RangeHinter); ok {
+		h.HintRange(start, end)
+	}
 }
 
 // windowPeekBytes is how far past the next window's cluster a walk is

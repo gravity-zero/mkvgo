@@ -232,6 +232,9 @@ func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (
 	for x, s := range samples {
 		r.pieces[x] = span{off: t.offs[ti][x], n: int64(s.size) - int64(len(r.prefix))}
 	}
+	if r.c.file != nil {
+		prefetch(r.c.file, r.pieces, r.c.exact, len(r.c.buf))
+	}
 	return r, nil
 }
 

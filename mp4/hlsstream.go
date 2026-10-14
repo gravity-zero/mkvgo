@@ -466,6 +466,9 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		}
 		pos += raw
 	}
+	if c.file != nil {
+		prefetch(c.file, pieces, c.exact, len(c.buf))
+	}
 	for i, pc := range pieces {
 		if err := ctx.Err(); err != nil {
 			return c.written, err
@@ -496,6 +499,42 @@ type span struct {
 // exactReadGap is the largest hole an exact copier reads through to take the
 // next runs in the same read: a read costs a round trip on a network mount.
 var exactReadGap int64 = 64 << 10
+
+// adviseWillNeed and adviseReadAhead are willNeed and readAhead, swappable for a test.
+var adviseWillNeed, adviseReadAhead = willNeed, readAhead
+
+// prefetch brings the pieces' source bytes in before the copy asks for them.
+// A dense rendition (video) is read ahead across its whole range, in large
+// sequential reads, before sendfile copies it frame by frame (on a cold disk,
+// frame-sized sendfile calls each wait for their own small reads); an exact
+// one (audio) has each of its reads started in the background at once.
+func prefetch(f *os.File, pieces []span, exact bool, bufLen int) {
+	first, last := -1, -1
+	for i, pc := range pieces {
+		if pc.emit == nil {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first < 0 {
+		return
+	}
+	if !exact {
+		adviseReadAhead(f, pieces[first].off, pieces[last].off+pieces[last].n-pieces[first].off)
+		return
+	}
+	i := first
+	for i <= last {
+		reach := exactReach(pieces, i, bufLen)
+		adviseWillNeed(f, pieces[i].off, reach-pieces[i].off)
+		i++
+		for i <= last && (pieces[i].emit != nil || pieces[i].off+pieces[i].n <= reach) {
+			i++ // within that read
+		}
+	}
+}
 
 // exactReach is how far one read for run i may go: through the runs after it
 // while the hole before each is at most exactReadGap and the read fits the
