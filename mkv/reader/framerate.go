@@ -28,8 +28,8 @@ var standardRates = [][2]int64{
 // estimateFrameRates sets EstimatedFrameRate on the video tracks without DefaultDuration from the blocks of the cluster whose body starts at body (ending at end, -1 unknown) and of the clusters after it.
 func (p *parser) estimateFrameRates(c *mkv.Container, body, end int64) {
 	want := map[uint64][]int64{}
-	for _, t := range c.Tracks {
-		if t.Type == mkv.VideoTrack && t.FrameRate == nil {
+	for i, t := range c.Tracks {
+		if _, stated := codecFrameRate(&c.Tracks[i]); t.Type == mkv.VideoTrack && t.FrameRate == nil && !stated {
 			want[t.ID] = nil
 		}
 	}
@@ -391,4 +391,59 @@ func tagSeconds(v string) float64 {
 		return 0
 	}
 	return float64(h)*3600 + float64(m)*60 + s
+}
+
+// codecFrameRate returns the frame rate the codec header in CodecPrivate states: the SPS VUI timing of an avcC or hvcC, an MPEG-2 frame_rate_code.
+func codecFrameRate(t *mkv.Track) (float64, bool) {
+	var bc *bitstreamColour
+	switch t.Codec {
+	case "h264":
+		bc = avcColour(t.CodecPrivate)
+	case "hevc":
+		bc = hevcColour(t.CodecPrivate)
+	case "V_MPEG2", "mpeg2":
+		return mpeg2FrameRate(t.CodecPrivate)
+	}
+	if bc == nil || bc.fpsNum == 0 || bc.fpsDen == 0 {
+		return 0, false
+	}
+	fps := float64(bc.fpsNum) / float64(bc.fpsDen)
+	if fps < 1 || fps > 1000 { // a timing that names no picture rate (a 90 kHz clock left in num_units_in_tick)
+		return 0, false
+	}
+	return fps, true
+}
+
+// mpeg2FrameRate reads frame_rate_code from an MPEG-2 sequence header, with the sequence extension's frame_rate_extension when present.
+func mpeg2FrameRate(cp []byte) (float64, bool) {
+	i := bytes.Index(cp, []byte{0, 0, 1, 0xB3})
+	if i < 0 || len(cp) < i+8 {
+		return 0, false
+	}
+	rates := [9][2]float64{{}, {24000, 1001}, {24, 1}, {25, 1}, {30000, 1001}, {30, 1}, {50, 1}, {60000, 1001}, {60, 1}}
+	code := cp[i+7] & 0x0f
+	if code == 0 || int(code) >= len(rates) {
+		return 0, false
+	}
+	fps := rates[code][0] / rates[code][1]
+	if j := bytes.Index(cp[i:], []byte{0, 0, 1, 0xB5}); j >= 0 && len(cp) >= i+j+10 && cp[i+j+4]>>4 == 1 {
+		ext := cp[i+j:]
+		n := float64((ext[9]>>5)&0x03) + 1 // frame_rate_extension_n
+		d := float64(ext[9]&0x1f) + 1      // frame_rate_extension_d
+		fps = fps * n / d
+	}
+	return fps, true
+}
+
+// codecFrameRates sets EstimatedFrameRate from the codec header of every video track without DefaultDuration that states one, over any other estimate.
+func codecFrameRates(c *mkv.Container) {
+	for i := range c.Tracks {
+		t := &c.Tracks[i]
+		if t.Type != mkv.VideoTrack || t.FrameRate != nil {
+			continue
+		}
+		if fps, ok := codecFrameRate(t); ok {
+			t.EstimatedFrameRate = &fps
+		}
+	}
 }

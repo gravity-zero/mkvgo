@@ -6,6 +6,20 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **The frame rate the codec header states, for a track without
+  DefaultDuration.** Before any estimate, a video track without
+  DefaultDuration takes its frame rate from its CodecPrivate: the VUI timing
+  of the SPS in an avcC (time_scale / 2 num_units_in_tick) or an hvcC
+  (time_scale / num_units_in_tick), an MPEG-2 sequence header's
+  frame_rate_code with its extension. It costs no read and is reported as
+  `EstimatedFrameRate` (`frame_rate` with `frame_rate_estimated: true`),
+  over the statistics tags and the timestamp fit, which the track then skips.
+  Of the 394 real and test files without DefaultDuration whose local probe
+  reported no frame rate, 165 now do (101 H.264, 55 MPEG-2, 9 HEVC), each
+  equal to the prober's; the VP9 files have no rate in their header.
+
 ### Changed
 
 - **Chapter editions are no longer mixed into one list.** A Matroska file

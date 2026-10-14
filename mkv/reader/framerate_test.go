@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"os"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -235,6 +236,32 @@ func TestFrameRateReadsOption(t *testing.T) {
 			if c.want && (src.at == 0 || src.at > 64) {
 				t.Errorf("%s with the option: %d exact reads, want one per block header, at most 64", name, src.at)
 			}
+		}
+	}
+}
+
+// TestCodecFrameRate: without DefaultDuration, the frame rate the codec header
+// states (the SPS timing of an avcC or hvcC, an MPEG-2 frame_rate_code) comes
+// first, read from CodecPrivate with no read at all.
+func TestCodecFrameRate(t *testing.T) {
+	src, err := os.ReadFile("../../internal/testdata/sample.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Read(context.Background(), bytes.NewReader(src), "sample.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	avc := c.Tracks[0]
+	mpeg2 := mkv.Track{Type: mkv.VideoTrack, Codec: "V_MPEG2",
+		CodecPrivate: []byte{0, 0, 1, 0xB3, 0x2D, 0x02, 0x40, 0x34, 0xFF, 0xFF, 0xE0, 0x18}} // 720x576, 4:3, frame_rate_code 4
+	for name, c := range map[string]struct {
+		tr   mkv.Track
+		want float64
+	}{"H.264 SPS timing": {avc, 25}, "MPEG-2 frame_rate_code": {mpeg2, 30000.0 / 1001}} {
+		got, ok := codecFrameRate(&c.tr)
+		if !ok || math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("%s: %v %v, want %v", name, got, ok, c.want)
 		}
 	}
 }

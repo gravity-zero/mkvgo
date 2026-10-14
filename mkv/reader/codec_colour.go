@@ -24,6 +24,8 @@ type bitstreamColour struct {
 	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
 	bitDepth   *uint16 // luma bit depth (8/10/12)
 	spsDepth   bool    // bitDepth comes from the SPS, not a configuration record header
+	fpsNum     uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
+	fpsDen     uint32
 	profile    string  // e.g. "Main 10"
 	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
@@ -457,6 +459,36 @@ func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 	if !r.err {
 		bc.determined = true // VUI colour signalling parsed (explicit, or confirmed unspecified)
 	}
+	vuiTiming(*r, bc, false)
+}
+
+// vuiTiming reads the VUI timing after the colour on a copy of r, so a VUI cut short there loses nothing read before; hevc says which layout.
+func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
+	if r.err {
+		return
+	}
+	if r.bit() == 1 { // chroma_loc_info_present_flag
+		r.ue()
+		r.ue()
+	}
+	if hevc {
+		r.bits(3)         // neutral_chroma_indication, field_seq, frame_field_info_present
+		if r.bit() == 1 { // default_display_window_flag
+			r.ue()
+			r.ue()
+			r.ue()
+			r.ue()
+		}
+	}
+	if r.bit() == 1 { // timing_info_present_flag: an H.264 frame lasts 2 ticks, an HEVC picture 1
+		units, scale := r.bits(32), r.bits(32)
+		if !r.err && units > 0 && scale > 0 {
+			bc.fpsNum, bc.fpsDen = scale, units
+			if !hevc {
+				bc.fpsDen = 2 * units
+			}
+		}
+	}
 }
 
 // readVUIAspectRatio reads aspect_ratio_idc (after aspect_ratio_info_present_flag)
@@ -817,6 +849,7 @@ func parseHEVCVUI(r *bitReader, bc *bitstreamColour) {
 	if !r.err {
 		bc.determined = true // VUI colour signalling parsed (explicit, or confirmed unspecified)
 	}
+	vuiTiming(*r, bc, true)
 }
 
 func hevcProfileName(profileIDC byte) string {
