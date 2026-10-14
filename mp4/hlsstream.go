@@ -500,14 +500,13 @@ type span struct {
 // next runs in the same read: a read costs a round trip on a network mount.
 var exactReadGap int64 = 64 << 10
 
-// adviseWillNeed and adviseReadAhead are willNeed and readAhead, swappable for a test.
-var adviseWillNeed, adviseReadAhead = willNeed, readAhead
+// adviseWillNeed is willNeed, swappable for a test.
+var adviseWillNeed = willNeed
 
-// prefetch brings the pieces' source bytes in before the copy asks for them.
-// A dense rendition (video) is read ahead across its whole range, in large
-// sequential reads, before sendfile copies it frame by frame (on a cold disk,
-// frame-sized sendfile calls each wait for their own small reads); an exact
-// one (audio) has each of its reads started in the background at once.
+// prefetch has the kernel start reading the pieces' source bytes before the
+// copy asks for them: a dense rendition (video) across its whole range - on a
+// cold disk, sendfile calls of a frame each would otherwise wait for their own
+// small reads - an exact one (audio) read by read.
 func prefetch(f *os.File, pieces []span, exact bool, bufLen int) {
 	first, last := -1, -1
 	for i, pc := range pieces {
@@ -522,7 +521,7 @@ func prefetch(f *os.File, pieces []span, exact bool, bufLen int) {
 		return
 	}
 	if !exact {
-		adviseReadAhead(f, pieces[first].off, pieces[last].off+pieces[last].n-pieces[first].off)
+		adviseWillNeed(f, pieces[first].off, pieces[last].off+pieces[last].n-pieces[first].off)
 		return
 	}
 	i := first

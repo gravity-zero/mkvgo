@@ -551,22 +551,21 @@ func TestTableCacheProcessBudget(t *testing.T) {
 	}
 }
 
-// prefetch reads a dense rendition's whole range ahead once, and starts each
-// read of an exact one (runs gathered through holes up to exactReadGap).
+// prefetch asks for a dense rendition's whole range at once, and for each read
+// of an exact one (runs gathered through holes up to exactReadGap).
 func TestPrefetchRanges(t *testing.T) {
 	type rng struct{ off, n int64 }
-	var will, ahead []rng
-	defer func(w, a func(*os.File, int64, int64)) { adviseWillNeed, adviseReadAhead = w, a }(adviseWillNeed, adviseReadAhead)
+	var will []rng
+	defer func(w func(*os.File, int64, int64)) { adviseWillNeed = w }(adviseWillNeed)
 	adviseWillNeed = func(_ *os.File, off, n int64) { will = append(will, rng{off, n}) }
-	adviseReadAhead = func(_ *os.File, off, n int64) { ahead = append(ahead, rng{off, n}) }
 	pieces := []span{{emit: []byte("head")}, {off: 1000, n: 100}, {off: 1200, n: 100}, {off: 1300 + 200<<10, n: 50}}
 	prefetch(nil, pieces, false, streamBufBytes)
-	if len(ahead) != 1 || ahead[0] != (rng{1000, 200<<10 + 350}) || len(will) != 0 {
-		t.Fatalf("dense: read ahead %v, will need %v", ahead, will)
+	if len(will) != 1 || will[0] != (rng{1000, 200<<10 + 350}) {
+		t.Fatalf("dense: %v", will)
 	}
-	ahead = nil
+	will = nil
 	prefetch(nil, pieces, true, streamBufBytes)
-	if len(will) != 2 || will[0] != (rng{1000, 300}) || will[1] != (rng{1300 + 200<<10, 50}) || len(ahead) != 0 {
-		t.Fatalf("exact: will need %v, read ahead %v", will, ahead)
+	if len(will) != 2 || will[0] != (rng{1000, 300}) || will[1] != (rng{1300 + 200<<10, 50}) {
+		t.Fatalf("exact: %v", will)
 	}
 }

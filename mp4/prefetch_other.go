@@ -4,7 +4,5 @@ package mp4
 
 import "os"
 
-// willNeed and readAhead are no-ops where they are not called (see prefetch_linux.go).
+// willNeed is a no-op where posix_fadvise is not called (see prefetch_linux.go).
 func willNeed(*os.File, int64, int64) {}
-
-func readAhead(*os.File, int64, int64) {}

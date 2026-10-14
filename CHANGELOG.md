@@ -57,20 +57,22 @@ All notable changes to mkvgo are documented here. The format is based on
   in turn p95 4.7-5.0 to 3.9-4.0 ms. A track whose blocks are compressed
   (zlib) is served from memory, as its video always was.
 
-- **A segment's bytes are read ahead before they are copied (Linux).** On a
-  cold page cache each read waited for the disk in turn: an audio segment
-  interleaved sample by sample made a few hundred of them, and a video
-  segment's frame-sized sendfile calls each did small reads of their own.
-  The video's whole range is now read ahead first (readahead(2): large
-  sequential reads, next to nothing when cached) and each read of an audio
-  segment is started in the background at once (posix_fadvise WILLNEED).
-  Measured with the server on 2 cores (GOMAXPROCS=2), every segment of the
-  2 GB sources requested once, page cache dropped: MP4 audio p50 16.1 to
-  1.1 ms and p95 34.7 to 1.7 ms, video 18.7 / 24.0 to 15.9 / 17.8 ms;
-  Matroska video 26.2 / 36.2 to 21.4 / 27.9 ms. Cached, unchanged (MP4 video
-  p95 3.1 to 2.3 ms). A Matroska window walked for the first time still
-  waits for its reads (p95 38 ms cold): its block headers are only found one
-  after the other.
+- **A segment's bytes, and a Matroska window's, are asked for before they
+  are read (Linux).** On a cold page cache each read waited for the disk in
+  turn: the few hundred reads of an audio segment interleaved sample by
+  sample, a video segment's frame-sized sendfile calls, and the header hops
+  of a Matroska window's first walk. The ranges they will read are now asked
+  for up front with posix_fadvise WILLNEED, in 128 KiB pieces (the kernel
+  reads at most its read-ahead size per call and drops the rest): a
+  segment's requested range only, a Matroska window's span before its walk.
+  Measured against 0.51.0 (the Matroska figures include the audio change
+  above) with the server on 2 cores (GOMAXPROCS=2), page cache dropped, 60
+  segments drawn at random over every rendition of the 2 GB sources, then the
+  same 60 again: MP4 cold p50/p95 29.5/31.6 to 1.8/9.1 ms, warm 0.9/7.1 to
+  0.9/6.6 ms; Matroska cold 43.1/80.4 to 4.9/12.0 ms, warm 1.2/7.9 to
+  0.8/6.2 ms; a Matroska window's first walk, cold, 40-50 to 4-7 ms. Under
+  16 connections, on 2 cores: MP4 2,934 to 2,937 requests/s; Matroska 2,390
+  to 2,945 requests/s, p99 28.4 to 20.8 ms, peak memory 61 to 34 MB.
 
 ### Fixed
 
