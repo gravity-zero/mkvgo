@@ -6,7 +6,36 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-14
+
 ### Added
+
+- **`WithInBandChannels`: the channel count the audio stream states.** With
+  the CLI `-in-band` (and the WebAssembly `inbandColour` option), each
+  Matroska AC-3 and E-AC-3 track's first frame header is read (one block),
+  and an AAC track's AudioSpecificConfig: `Track.StreamChannels`
+  (`stream_channels`), with `Track.ChannelsMismatch` (`channels_mismatch`)
+  when it contradicts the container's `Channels`. On 42 real AC-3 tracks
+  whose container said 6 channels over a stereo stream, the stream count is
+  now reported, equal to the prober's, and the mismatch flagged.
+
+- **The frame rate the codec header states, for a track without
+  DefaultDuration.** Before any estimate, a video track without
+  DefaultDuration takes its frame rate from its CodecPrivate: the VUI timing
+  of the SPS in an avcC (time_scale / 2 num_units_in_tick) or an hvcC
+  (time_scale / num_units_in_tick), an MPEG-2 sequence header's
+  frame_rate_code with its extension. An H.264 timing without
+  fixed_frame_rate_flag counts only when it names a standard rate: it may be
+  a clock (a 2000 Hz tick would read as 1000 frames per second). It costs no
+  read and is reported as `EstimatedFrameRate` (`frame_rate` with
+  `frame_rate_estimated: true`), over the statistics tags and the timestamp
+  fit, which the track then skips. Of the 392 real and test Matroska files
+  without DefaultDuration whose local probe reported no frame rate, 165 now
+  do (101 H.264, 55 MPEG-2, 9 HEVC), each equal to the prober's; the VP9
+  files have no rate in their header. A header can contradict its stream:
+  one real H.264 file states 24000/1001 over timestamps at 25 and 24.42
+  frames per second, and now reports the header's rate where the timestamp
+  fit read 25.
 
 - **`ConcatPlan.Open`: a concatenated session served without holding a
   segment.** Like `HLSPlan.Open`, it gives a resource's exact size up front,
@@ -17,6 +46,26 @@ All notable changes to mkvgo are documented here. The format is based on
   streams a `ConcatPlan` through it.
 
 ### Changed
+
+- **The local probe no longer reads attachment payloads.** `probe`, `info`,
+  `tracks`, `attachments`, `tags` and `chapters` on a local Matroska file
+  read every attachment whole to list it; they now leave the payloads on
+  disk (the list, sizes and names are unchanged). On 7,714 real and test
+  files, 76 read more than 2 MiB per probe because of a cover of up to
+  19 MB.
+
+- **Chapter editions are no longer mixed into one list.** A Matroska file
+  with several chapter editions had all their chapters in
+  `Container.Chapters`, and `to-mp4` wrote them all into the MP4, two lists
+  interleaved (8 chapters became 14 on one file). `Chapters` now holds the
+  default edition's (EditionFlagDefault, else the first edition), which the
+  probe reports and `to-mp4` writes; the others are in
+  `Container.OtherEditions` (JSON `other_editions`), each with its UID and
+  its default and hidden flags. A Matroska rewrite keeps every edition
+  apart, the default one flagged; `split` and `join`, which move the
+  timeline, keep the default edition only. Of 51 real files whose chapter
+  count disagreed with the prober's, 32 have several editions; 19 of those
+  now agree (the prober takes the first edition, not the default one).
 
 - **The `hls-server` example serves through `HLSPlan.Open`.** Each resource
   goes out with its exact `Content-Length` before the first byte, a media
@@ -60,79 +109,6 @@ All notable changes to mkvgo are documented here. The format is based on
   p50 133 to 64 ms and 119 to 48 ms on two of them; all audio p95 158 to
   80 ms. Locally (page cache), audio p50 0.56 to 0.44 ms. The bytes served are
   unchanged.
-
-### Fixed
-
-- **The channel count of an AAC track whose layout is in a program config
-  element.** An AudioSpecificConfig with `channelConfiguration` 0 describes
-  its channels in a program_config_element, which was not read: an MP4 track
-  kept its sample entry's count (2) and a Matroska track without a Channels
-  element had none. The element is now walked and its channels counted (one
-  per single channel or LFE element, two per channel pair), and a trailing SBR
-  extension after it is still found. Nine conformance files that read 2 now
-  read 1, 3, 6 or 8, as decoded. Parametric Stereo signalled only in the audio
-  frames stays invisible from the header (a mono core reads 1).
-
-- **An MP4 whose stts states a negative delta.** Some muxers write a sample
-  delta that goes back in time as an unsigned 32-bit value (2^32 - 479,970):
-  added as such, it pushed the next samples 13 hours further and the file's
-  duration to 47,753 s instead of 31.5 s. A delta past 2^31 - 1 is now one
-  tick, as reference decoders clip it (the timeline stays increasing), and
-  such a track's duration is its header's (mdhd), the samples' timeline no
-  longer adding up to it.
-
-## [0.51.0] - 2026-10-14
-
-### Added
-
-- **`WithInBandChannels`: the channel count the audio stream states.** With
-  the CLI `-in-band` (and the WebAssembly `inbandColour` option), each
-  Matroska AC-3 and E-AC-3 track's first frame header is read (one block),
-  and an AAC track's AudioSpecificConfig: `Track.StreamChannels`
-  (`stream_channels`), with `Track.ChannelsMismatch` (`channels_mismatch`)
-  when it contradicts the container's `Channels`. On 42 real AC-3 tracks
-  whose container said 6 channels over a stereo stream, the stream count is
-  now reported, equal to the prober's, and the mismatch flagged.
-
-- **The frame rate the codec header states, for a track without
-  DefaultDuration.** Before any estimate, a video track without
-  DefaultDuration takes its frame rate from its CodecPrivate: the VUI timing
-  of the SPS in an avcC (time_scale / 2 num_units_in_tick) or an hvcC
-  (time_scale / num_units_in_tick), an MPEG-2 sequence header's
-  frame_rate_code with its extension. An H.264 timing without
-  fixed_frame_rate_flag counts only when it names a standard rate: it may be
-  a clock (a 2000 Hz tick would read as 1000 frames per second). It costs no
-  read and is reported as `EstimatedFrameRate` (`frame_rate` with
-  `frame_rate_estimated: true`), over the statistics tags and the timestamp
-  fit, which the track then skips. Of the 392 real and test Matroska files
-  without DefaultDuration whose local probe reported no frame rate, 165 now
-  do (101 H.264, 55 MPEG-2, 9 HEVC), each equal to the prober's; the VP9
-  files have no rate in their header. A header can contradict its stream:
-  one real H.264 file states 24000/1001 over timestamps at 25 and 24.42
-  frames per second, and now reports the header's rate where the timestamp
-  fit read 25.
-
-### Changed
-
-- **The local probe no longer reads attachment payloads.** `probe`, `info`,
-  `tracks`, `attachments`, `tags` and `chapters` on a local Matroska file
-  read every attachment whole to list it; they now leave the payloads on
-  disk (the list, sizes and names are unchanged). On 7,714 real and test
-  files, 76 read more than 2 MiB per probe because of a cover of up to
-  19 MB.
-
-- **Chapter editions are no longer mixed into one list.** A Matroska file
-  with several chapter editions had all their chapters in
-  `Container.Chapters`, and `to-mp4` wrote them all into the MP4, two lists
-  interleaved (8 chapters became 14 on one file). `Chapters` now holds the
-  default edition's (EditionFlagDefault, else the first edition), which the
-  probe reports and `to-mp4` writes; the others are in
-  `Container.OtherEditions` (JSON `other_editions`), each with its UID and
-  its default and hidden flags. A Matroska rewrite keeps every edition
-  apart, the default one flagged; `split` and `join`, which move the
-  timeline, keep the default edition only. Of 51 real files whose chapter
-  count disagreed with the prober's, 32 have several editions; 19 of those
-  now agree (the prober takes the first edition, not the default one).
 
 ### Fixed
 
@@ -220,6 +196,24 @@ All notable changes to mkvgo are documented here. The format is based on
   and Attachments. On those 51 files: median 0.048 s, no probe over 0.32 s,
   keyframes equal to 0.49.0's. `OpenMeta`, the remote probe and WebAssembly
   were not affected.
+
+- **The channel count of an AAC track whose layout is in a program config
+  element.** An AudioSpecificConfig with `channelConfiguration` 0 describes
+  its channels in a program_config_element, which was not read: an MP4 track
+  kept its sample entry's count (2) and a Matroska track without a Channels
+  element had none. The element is now walked and its channels counted (one
+  per single channel or LFE element, two per channel pair), and a trailing SBR
+  extension after it is still found. Nine conformance files that read 2 now
+  read 1, 3, 6 or 8, as decoded. Parametric Stereo signalled only in the audio
+  frames stays invisible from the header (a mono core reads 1).
+
+- **An MP4 whose stts states a negative delta.** Some muxers write a sample
+  delta that goes back in time as an unsigned 32-bit value (2^32 - 479,970):
+  added as such, it pushed the next samples 13 hours further and the file's
+  duration to 47,753 s instead of 31.5 s. A delta past 2^31 - 1 is now one
+  tick, as reference decoders clip it (the timeline stays increasing), and
+  such a track's duration is its header's (mdhd), the samples' timeline no
+  longer adding up to it.
 
 ## [0.50.0] - 2026-10-14
 
