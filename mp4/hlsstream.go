@@ -420,20 +420,19 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 // the source, through one copier that gathers the small spans and hands the
 // large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, ti int, off, n int64) (int64, error) {
-	// An MP4 source's audio sits in short runs between video frames: each run is read alone, the frames between never read.
+	// An MP4 source's audio sits in short runs between video frames: read run by run, through the small frames only.
 	c := &spanCopier{exact: (audioExactReads || p.mp4src) && !p.tracks[ti].ft.outTrack.spec.video}
 	defer c.release()
-	// cut writes the part of a piece spanning [pos, pos+size) that falls in the range, through fn.
-	cut := func(pos, size int64, fn func(from, to int64) error) error {
+	// clip is the part [a, b) of a piece spanning [pos, pos+size) that falls in the range.
+	clip := func(pos, size int64) (a, b int64, ok bool) {
 		from, to := max(off, pos), min(off+n, pos+size)
-		if from >= to {
-			return nil
-		}
-		return fn(from-pos, to-pos)
+		return from - pos, to - pos, from < to
 	}
 	head := t.heads[ti]
-	if err := cut(0, int64(len(head)), func(a, b int64) error { return c.emit(w, head[a:b]) }); err != nil {
-		return c.written, err
+	if a, b, ok := clip(0, int64(len(head))); ok {
+		if err := c.emit(w, head[a:b]); err != nil {
+			return c.written, err
+		}
 	}
 	pos := int64(len(head))
 	if pos >= off+n {
@@ -453,54 +452,74 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, t *windowTable, t
 	}
 	prefix := p.tracks[ti].ft.outTrack.mkv.HeaderStripping
 	c.end = spansEnd(src, t, ti, pos, off, off+n, int64(len(prefix)))
-	// Samples stored back to back in the source are copied as one run.
-	var runOff, runN int64
-	flushRun := func() error {
-		if runN == 0 {
-			return nil
-		}
-		err := c.copy(w, runOff, runN)
-		runN = 0
-		return err
-	}
+	// The pieces in the range, in order: stripped headers to emit, and source
+	// runs, samples stored back to back merged into one.
+	var pieces []span
 	for x, s := range t.segs[ti].samples {
 		if pos >= off+n {
 			break
 		}
-		if err := ctx.Err(); err != nil {
-			return c.written, err
-		}
-		if err := cut(pos, int64(len(prefix)), func(a, b int64) error {
-			if err := flushRun(); err != nil {
-				return err
-			}
-			return c.emit(w, prefix[a:b])
-		}); err != nil {
-			return c.written, err
+		if a, b, ok := clip(pos, int64(len(prefix))); ok {
+			pieces = append(pieces, span{emit: prefix[a:b]})
 		}
 		pos += int64(len(prefix))
 		raw := int64(s.size) - int64(len(prefix))
-		if err := cut(pos, raw, func(a, b int64) error {
+		if a, b, ok := clip(pos, raw); ok {
 			o := t.offs[ti][x] + a
-			if runN > 0 && runOff+runN == o {
-				runN += b - a
-				return nil
+			if k := len(pieces) - 1; k >= 0 && pieces[k].emit == nil && pieces[k].off+pieces[k].n == o {
+				pieces[k].n += b - a
+			} else {
+				pieces = append(pieces, span{off: o, n: b - a})
 			}
-			if err := flushRun(); err != nil {
-				return err
-			}
-			runOff, runN = o, b-a
-			return nil
-		}); err != nil {
-			return c.written, err
 		}
 		pos += raw
 	}
-	if err := flushRun(); err != nil {
-		return c.written, err
+	for i, pc := range pieces {
+		if err := ctx.Err(); err != nil {
+			return c.written, err
+		}
+		if pc.emit != nil {
+			if err := c.emit(w, pc.emit); err != nil {
+				return c.written, err
+			}
+			continue
+		}
+		if c.exact {
+			c.reach = exactReach(pieces, i, len(c.buf))
+		}
+		if err := c.copy(w, pc.off, pc.n); err != nil {
+			return c.written, err
+		}
 	}
 	err = c.flush(w)
 	return c.written, err
+}
+
+// span is one piece of a streamed segment: bytes to emit as they are, or the source's [off, off+n).
+type span struct {
+	emit   []byte
+	off, n int64
+}
+
+// exactReadGap is the largest hole an exact copier reads through to take the
+// next runs in the same read: a read costs a round trip on a network mount.
+var exactReadGap int64 = 64 << 10
+
+// exactReach is how far one read for run i may go: through the runs after it
+// while the hole before each is at most exactReadGap and the read fits the
+// buffer.
+func exactReach(pieces []span, i, bufLen int) int64 {
+	start, end := pieces[i].off, pieces[i].off+pieces[i].n
+	for _, pc := range pieces[i+1:] {
+		if pc.emit != nil {
+			continue
+		}
+		if pc.off < end || pc.off-end > exactReadGap || pc.off+pc.n-start > int64(bufLen) {
+			break
+		}
+		end = pc.off + pc.n
+	}
+	return end
 }
 
 // spansEnd is where in the source the bytes of track ti's samples falling in
@@ -540,7 +559,8 @@ type spanCopier struct {
 	bufLen   int   // valid bytes in buf
 	pos      int64 // the source's current offset
 	seeked   bool
-	exact    bool     // read each span alone, never ahead of it
+	exact    bool     // read each span alone, never ahead of it - but up to reach
+	reach    int64    // where an exact read may stop at the furthest (0: the span's end)
 	end      int64    // where the last span ends in the source: no read goes past it (0: no bound)
 	pending  [][]byte // queued, not yet written: slices of buf and of emitted bytes
 	pendingN int
@@ -597,8 +617,8 @@ func (c *spanCopier) copy(w io.Writer, off, n int64) error {
 			c.pos, c.seeked = off, true
 		}
 		want := c.buf
-		if c.exact && n < int64(len(want)) {
-			want = want[:n]
+		if lim := max(n, c.reach-off); c.exact && lim < int64(len(want)) {
+			want = want[:lim]
 		}
 		if rest := c.end - c.pos; rest >= n && rest < int64(len(want)) { // never read past the last span
 			want = want[:rest]

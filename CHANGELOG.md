@@ -41,6 +41,16 @@ All notable changes to mkvgo are documented here. The format is based on
   segment requested alone p50 0.62 to 0.37 ms. No change on the 20 Mbit/s
   sources, whose frames already went by sendfile one at a time.
 
+- **An MP4 source's audio is read through the small video frames between
+  its samples.** Streamed, an audio rendition was read one run of samples at a
+  time, a round trip each on a network mount; runs separated by at most 64 KiB
+  now come in one read, bounded by the copier's 256 KiB buffer. Measured on a
+  NAS over SMB, every segment requested once (cold), five MP4 files: an audio
+  segment of a file interleaved sample by sample went from 193 reads to 9,
+  p50 133 to 64 ms and 119 to 48 ms on two of them; all audio p95 158 to
+  80 ms. Locally (page cache), audio p50 0.56 to 0.44 ms. The bytes served are
+  unchanged.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

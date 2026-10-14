@@ -182,6 +182,59 @@ func TestOpenCopiesContiguousSamplesAsOneRun(t *testing.T) {
 	}
 }
 
+// countingSeeker counts the reads of a source.
+type countingSeeker struct {
+	io.ReadSeeker
+	reads int
+}
+
+func (c *countingSeeker) Read(p []byte) (int, error) {
+	c.reads++
+	return c.ReadSeeker.Read(p)
+}
+
+// An exact copier reads runs separated by holes of at most exactReadGap in one
+// read, bounded by its buffer, and copies the same bytes as one read per run.
+func TestExactCopierReadsThroughSmallGaps(t *testing.T) {
+	src := make([]byte, 1<<20)
+	rand.New(rand.NewSource(1)).Read(src)
+	var pieces []span
+	var want []byte
+	for off := int64(0); off+200 <= int64(len(src)); off += 3200 { // 200-byte runs, 3000-byte holes
+		pieces = append(pieces, span{off: off, n: 200})
+		want = append(want, src[off:off+200]...)
+	}
+	copyAll := func(gap int64) ([]byte, int) {
+		defer func(old int64) { exactReadGap = old }(exactReadGap)
+		exactReadGap = gap
+		cs := &countingSeeker{ReadSeeker: bytes.NewReader(src)}
+		c := &spanCopier{src: cs, buf: make([]byte, streamBufBytes), exact: true}
+		var out bytes.Buffer
+		for i, pc := range pieces {
+			c.reach = exactReach(pieces, i, len(c.buf))
+			if err := c.copy(&out, pc.off, pc.n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := c.flush(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes(), cs.reads
+	}
+	exact, nExact := copyAll(0)
+	through, nThrough := copyAll(64 << 10)
+	if !bytes.Equal(exact, want) || !bytes.Equal(through, want) {
+		t.Fatal("copied bytes differ from the runs")
+	}
+	if nExact != len(pieces) || nThrough > len(src)/streamBufBytes+1 {
+		t.Errorf("%d runs: %d reads one run at a time (want %d), %d through the holes (want at most %d)",
+			len(pieces), nExact, len(pieces), nThrough, len(src)/streamBufBytes+1)
+	}
+	if _, n := copyAll(2000); n != len(pieces) {
+		t.Errorf("holes wider than exactReadGap: %d reads, want one per run (%d)", n, len(pieces))
+	}
+}
+
 // A header-stripped track streams its prefix before each sample's bytes.
 func TestOpenStreamsHeaderStripping(t *testing.T) {
 	w, h := uint32(320), uint32(240)
