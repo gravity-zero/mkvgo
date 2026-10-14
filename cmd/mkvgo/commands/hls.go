@@ -26,6 +26,7 @@ type hlsFlags struct {
 	subOffset      int64
 	chapterMarkers bool
 	noIFrames      bool
+	sourceAccess   mp4.SourceAccess
 	synthIndex     bool
 	audioShift     map[uint64]int64
 	rest           []string
@@ -137,6 +138,21 @@ func parseHLSFlags(args []string) hlsFlags {
 			f.chapterMarkers = true
 		case "--no-iframes":
 			f.noIFrames = true
+		case "--source-access":
+			if i+1 >= len(args) {
+				Fatal("--source-access needs auto, local or network")
+			}
+			i++
+			switch args[i] {
+			case "auto":
+				f.sourceAccess = mp4.SourceAuto
+			case "local":
+				f.sourceAccess = mp4.SourceLocal
+			case "network":
+				f.sourceAccess = mp4.SourceNetwork
+			default:
+				Fatal("--source-access takes auto, local or network, not " + args[i])
+			}
 		case "--synthesize-index":
 			f.synthIndex = true
 		case "--audio-shift":
@@ -235,6 +251,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		NoIFrames:              f.noIFrames,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,
+		SourceAccess:           f.sourceAccess,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix

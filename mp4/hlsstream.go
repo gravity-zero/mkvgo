@@ -253,17 +253,34 @@ func (p *HLSPlan) networkSrc(ctx context.Context) bool {
 	case 2:
 		return true
 	}
+	switch p.opts.SourceAccess {
+	case SourceLocal:
+		return false
+	case SourceNetwork:
+		return true
+	}
 	src, err := p.openSource(ctx)
 	if err != nil {
 		return true // not decided: asked again next time
 	}
 	defer src.Close()
-	net := true
-	if f, ok := src.(*os.File); ok {
-		net = networkSource(f)
-	}
+	net := p.onNetwork(src)
 	p.netSrc.Store(map[bool]int32{false: 1, true: 2}[net])
 	return net
+}
+
+// onNetwork says whether reads of the opened source src go across a network:
+// Options.SourceAccess when set, else what the file's filesystem is (a source
+// that is no local file is a network one).
+func (p *HLSPlan) onNetwork(src io.Reader) bool {
+	switch p.opts.SourceAccess {
+	case SourceLocal:
+		return false
+	case SourceNetwork:
+		return true
+	}
+	f, ok := src.(*os.File)
+	return !ok || networkSource(f)
 }
 
 // mp4Table is segment n of an MP4 source's track ti as a table: the sample table holds its timing and offsets, nothing is walked or kept.
@@ -515,13 +532,15 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		pos += raw
 	}
 	if c.file != nil {
-		if c.exact && networkSource(c.file) {
+		if c.exact && p.onNetwork(c.file) {
 			// Each read is a round trip on a network mount: the reads go out together.
 			if ok, err := c.copyParallel(ctx, w, pieces); ok || err != nil {
 				return c.written, err
 			}
 		}
-		prefetch(c.file, pieces, c.exact, len(c.buf))
+		if !p.onNetwork(c.file) {
+			prefetch(c.file, pieces, c.exact, len(c.buf))
+		}
 	}
 	for i, pc := range pieces {
 		if err := ctx.Err(); err != nil {

@@ -6,6 +6,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`Options.SourceAccess`: how the source is reached.** `SourceAuto` (the
+  default) decides from the source whether a streamed segment is read as
+  from a local disk or across a network (see the network entry below);
+  `SourceLocal` and `SourceNetwork` impose it, for a caller that knows its
+  library. CLI: `serve --source-access auto|local|network`.
+
 ### Changed
 
 - **`HLSPlan.Open` streams AES-128 segments.** A plan with `Options.Encrypt`
@@ -53,8 +61,9 @@ All notable changes to mkvgo are documented here. The format is based on
   the segment's own) and a CTR state per sample.
 
 - **A network source keeps its round trips down.** On a network mount (NFS,
-  SMB, 9p, Ceph, AFS - not FUSE, which mostly pools local disks, as mergerfs
-  does) or a source that is no local file, read-ahead is not
+  SMB, 9p, Ceph, AFS, or a FUSE mount of a network kind - rclone, sshfs, s3fs,
+  gcsfuse, davfs... - told by its subtype in mountinfo; a mergerfs pool is
+  local) or a source that is no local file, read-ahead is not
   asked for (it would fetch whole ranges across the network ahead of need),
   an audio segment's reads go out together (8 at a time, into one buffer of
   at most 4 MiB), and a Matroska window's light audio is kept with the walk

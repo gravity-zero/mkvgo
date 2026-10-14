@@ -2407,7 +2407,7 @@ func (p *HLSPlan) hintWindow(src io.Reader, n int, start int64) {
 	if n+1 < len(p.offsets) {
 		end = p.offsets[n+1] + windowPeekBytes
 	}
-	if f, ok := src.(*os.File); ok && end != math.MaxInt64 { // the walk reads through the window: have it all coming in at once
+	if f, ok := src.(*os.File); ok && end != math.MaxInt64 && !p.onNetwork(f) { // the walk reads through the window: have it all coming in at once
 		adviseWillNeed(f, start, end-start)
 	}
 	if h, ok := src.(mkv.RangeHinter); ok {

@@ -67,6 +67,16 @@ type Options struct {
 	// bytes), and over a remote source that is two network reads. A local
 	// file (no Options.FS) always streams.
 	StreamFromFS bool
+	// SourceAccess says how the source is reached, which sets how a streamed
+	// segment reads it. SourceAuto (the default) decides from the source: a
+	// network mount (NFS, SMB, 9p, Ceph, AFS, or a FUSE mount of a network
+	// kind - rclone, sshfs, s3fs, gcsfuse, davfs... - read off mountinfo; a
+	// mergerfs pool is local) or a source that is no local file is a network
+	// one. SourceLocal and SourceNetwork impose the answer, for a caller that
+	// knows its library. Local: read-ahead is asked for, audio copied from the
+	// file; network: no read-ahead, audio reads sent together, a Matroska
+	// window's light audio kept with the walk that reads it.
+	SourceAccess SourceAccess
 	// SubtitleIndex, when set, is a prebuilt index of the source's subtitle
 	// blocks (a *matroska.SubtitleIndex, built once by
 	// matroska.BuildSubtitleIndex and stored by the caller). An on-demand plan
@@ -289,3 +299,12 @@ func (o Options) report(d DroppedTrack) {
 		o.OnDrop(d)
 	}
 }
+
+// SourceAccess is how a source is reached (Options.SourceAccess).
+type SourceAccess int
+
+const (
+	SourceAuto    SourceAccess = iota // decided from the source
+	SourceLocal                       // a local disk
+	SourceNetwork                     // across a network
+)

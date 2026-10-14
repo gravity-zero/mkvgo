@@ -526,6 +526,19 @@ go back zeroed. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player
 could take for a whole segment.
 
+**How the source is read: `Options.SourceAccess`.** A streamed segment is read
+one way from a local disk and another across a network. Local: the byte ranges
+a segment or a Matroska window's walk will read are asked from the kernel
+first (posix_fadvise WILLNEED, in pieces of the device's read-ahead size), so
+a cold disk serves them in parallel. Network: nothing is asked ahead (it
+would fetch whole ranges across the network), an audio segment's reads go out
+together (8 at a time, into one buffer of at most 4 MiB), and a Matroska
+window's light audio is kept with the walk that reads it. `SourceAuto`, the
+default, decides from the source: a network mount (NFS, SMB, 9p, Ceph, AFS, or
+a FUSE mount of a network kind - rclone, sshfs, s3fs, gcsfuse, davfs... - told
+by its subtype in mountinfo; a mergerfs pool is local) or a source that is no
+local file is a network one. `SourceLocal` and `SourceNetwork` impose it.
+
 **A plan is bound to the file it was built on: `mp4.ErrSourceChanged`.** The
 plan's offsets are the source's; read against another file they yield that
 file's bytes under the old names and ETags. Every read of the source for a

@@ -4,6 +4,7 @@ package mp4
 
 import (
 	"os"
+	"sync"
 	"syscall"
 )
 
@@ -18,26 +19,52 @@ const willNeedChunk = 128 << 10
 // turn. Advisory: any failure is ignored.
 func willNeed(f *os.File, off, n int64) {
 	const fadvWillNeed = 3
-	if n <= 0 || onNetwork(f) {
-		return
-	}
 	for end := off + n; off < end; off += willNeedChunk {
 		_, _, _ = syscall.Syscall6(syscall.SYS_FADVISE64, f.Fd(), uintptr(off), uintptr(min(willNeedChunk, end-off)), fadvWillNeed, 0, 0)
 	}
 }
 
-// networkFS are the filesystem magics of network mounts (NFS, SMB, CIFS,
-// SMB2, 9p, Ceph, AFS): read-ahead asked there is read across the network
-// ahead of need, a round trip and bytes the read itself does not want. FUSE
-// is left out: a media library behind one is mostly local disks pooled by
-// mergerfs; a network FUSE (sshfs, rclone) is served as a local disk is.
+// fsByDev caches, per device, what the filesystem behind it is (fsInfo).
+var fsByDev sync.Map
+
+type fsInfo struct {
+	network bool
+}
+
+// fileFS is what f's filesystem is: a network one (statfs magic, a FUSE
+// mount's subtype from mountinfo) or not.
+func fileFS(f *os.File) fsInfo {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(f.Fd()), &st); err != nil {
+		return fsInfo{network: true}
+	}
+	if v, ok := fsByDev.Load(st.Dev); ok {
+		return v.(fsInfo)
+	}
+	major := (st.Dev>>8)&0xfff | (st.Dev>>32)&^0xfff
+	minor := st.Dev&0xff | (st.Dev>>12)&^0xff
+	var info fsInfo
+	var sfs syscall.Statfs_t
+	switch err := syscall.Fstatfs(int(f.Fd()), &sfs); {
+	case err != nil:
+		info.network = true
+	case sfs.Type == fuseMagic:
+		mi, _ := os.ReadFile("/proc/self/mountinfo")
+		info.network = networkFSType(mountFSType(mi, uint64(major), uint64(minor)))
+	default:
+		info.network = networkFS[int64(sfs.Type)]
+	}
+	fsByDev.Store(st.Dev, info)
+	return info
+}
+
+const fuseMagic = 0x65735546
+
+// networkFS are the statfs magics of network mounts (NFS, SMB, CIFS, SMB2,
+// 9p, Ceph, AFS): read-ahead asked there is read across the network ahead of
+// need, a round trip and bytes the read itself does not want. FUSE is told by
+// its subtype (mountinfo.go).
 var networkFS = map[int64]bool{0x6969: true, 0x517B: true, 0xFF534D42: true, 0xFE534D42: true, 0x01021997: true, 0x00C36400: true, 0x5346414F: true}
 
 // onNetwork reports whether f sits on a network mount.
-func onNetwork(f *os.File) bool {
-	var st syscall.Statfs_t
-	if err := syscall.Fstatfs(int(f.Fd()), &st); err != nil {
-		return true
-	}
-	return networkFS[int64(st.Type)]
-}
+func onNetwork(f *os.File) bool { return fileFS(f).network }

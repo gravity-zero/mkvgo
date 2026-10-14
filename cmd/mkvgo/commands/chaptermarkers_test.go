@@ -1,6 +1,10 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gravity-zero/mkvgo/mp4"
+)
 
 // TestParseHLSFlagsChapterMarkers checks --chapter-markers is a boolean
 // switch (absent = false, the default) that rides through to
@@ -29,5 +33,18 @@ func TestParseHLSFlagsNoIFrames(t *testing.T) {
 	}
 	if got := parseHLSFlags([]string{"in.mkv", "--no-iframes"}).options("in.mkv").NoIFrames; !got {
 		t.Error("--no-iframes must set options().NoIFrames")
+	}
+}
+
+// --source-access sets options().SourceAccess; absent, it is automatic.
+func TestParseHLSFlagsSourceAccess(t *testing.T) {
+	for flag, want := range map[string]mp4.SourceAccess{"": mp4.SourceAuto, "auto": mp4.SourceAuto, "local": mp4.SourceLocal, "network": mp4.SourceNetwork} {
+		args := []string{"in.mkv"}
+		if flag != "" {
+			args = append(args, "--source-access", flag)
+		}
+		if got := parseHLSFlags(args).options("in.mkv").SourceAccess; got != want {
+			t.Errorf("--source-access %q: %d, want %d", flag, got, want)
+		}
 	}
 }

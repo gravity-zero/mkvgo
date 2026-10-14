@@ -599,3 +599,37 @@ func TestOpenParallelReadsOnNetworkSource(t *testing.T) {
 		}
 	}
 }
+
+// Options.SourceAccess imposes how a source is read: told network, a local
+// Matroska file's light audio rides in the window table; told local, it is
+// copied from the file; the bytes are the same either way.
+func TestSourceAccessOption(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "interleaved.mkv")
+	if err := RemuxFromMP4(ctx, interleavedMP4, src); err != nil {
+		t.Fatal(err)
+	}
+	var want []byte
+	for _, c := range []struct {
+		access  SourceAccess
+		inTable bool
+	}{{SourceNetwork, true}, {SourceLocal, false}, {SourceAuto, false}} {
+		plan := mustPlan(t, src, Options{SegmentMs: 2000, SourceAccess: c.access})
+		h, err := plan.Open(ctx, "seg_a1_00001.m4s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (h.Bytes() != nil) != c.inTable {
+			t.Errorf("SourceAccess %d: audio from the table %v, want %v", c.access, h.Bytes() != nil, c.inTable)
+		}
+		var got bytes.Buffer
+		if _, err := h.WriteTo(ctx, &got); err != nil {
+			t.Fatal(err)
+		}
+		if want == nil {
+			want = got.Bytes()
+		} else if !bytes.Equal(got.Bytes(), want) {
+			t.Errorf("SourceAccess %d: the bytes differ", c.access)
+		}
+	}
+}
