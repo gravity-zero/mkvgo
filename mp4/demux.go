@@ -157,6 +157,10 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			mt.DefaultDurationNs = t.frameDurNs
 			mt.Rotation, mt.HFlip = t.rotation, t.hflip
 			mt.FrameCount = t.frameCount
+			if t.videoBitDepth > 0 && mt.VideoBitDepth == nil {
+				bd := t.videoBitDepth
+				mt.VideoBitDepth = &bd
+			}
 		case mkv.AudioTrack:
 			if t.channels > 0 {
 				ch := t.channels

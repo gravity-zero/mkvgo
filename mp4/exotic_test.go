@@ -782,3 +782,26 @@ func TestRemuxDropsUncarriableSubtitles(t *testing.T) {
 		t.Errorf("output tracks = %+v, want the aac track alone", c.Tracks)
 	}
 }
+
+// TestProResBitDepthFromFourcc: a ProRes entry states its bit depth by its
+// fourcc - 10 up to HQ, 12 for 4444 - and ProRes RAW or an unknown fourcc
+// states none, as the mainstream decoder reads them.
+func TestProResBitDepthFromFourcc(t *testing.T) {
+	for _, tc := range []struct {
+		fourcc string
+		depth  uint16
+	}{
+		{"apco", 10}, {"apcs", 10}, {"apcn", 10}, {"apch", 10}, {"ap4h", 12}, {"ap4x", 12}, {"aprn", 0}, {"aprh", 0}, {"xxxx", 0},
+	} {
+		entry := visualSampleEntry(tc.fourcc, &mkv.Track{Width: u32p(720), Height: u32p(576)}, nil)
+		data := append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), container("moov", mvhdBox(0), videoTrak(1, entry))...)
+		c, _ := probeMovie(t, data)
+		got := c.Tracks[0].VideoBitDepth
+		switch {
+		case tc.depth == 0 && got != nil:
+			t.Errorf("%s: video_bit_depth %d, want none", tc.fourcc, *got)
+		case tc.depth != 0 && (got == nil || *got != tc.depth):
+			t.Errorf("%s: video_bit_depth %v, want %d", tc.fourcc, got, tc.depth)
+		}
+	}
+}

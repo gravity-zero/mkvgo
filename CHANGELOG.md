@@ -15,7 +15,9 @@ All notable changes to mkvgo are documented here. The format is based on
   3GP, TTML). Such a track is now listed with what its entry states - the
   codec or the raw fourcc, language, duration, channels and rate or picture
   size (an AMR entry is mono whatever its reserved channelcount says; an
-  MPEG-H entry's channel count comes from its `mhaC` reference layout) - and
+  MPEG-H entry's channel count comes from its `mhaC` reference layout; a
+  ProRes entry's bit depth is its fourcc's, 10 up to HQ and 12 for 4444,
+  none for ProRes RAW) - and
   a protected entry is read through its original format (`sinf`/`frma`) with
   `Track.Encryption` naming the scheme (`cenc`, `cbcs`; JSON `encryption`). `RemuxFromMP4` refuses such a track by name (set
   `Options.SkipUnsupported`, the CLI's `from-mp4 --skip-unsupported`, to drop

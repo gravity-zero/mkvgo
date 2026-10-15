@@ -62,6 +62,18 @@ func describeEntry(tr *inTrack, payload []byte) {
 	}
 }
 
+// proResBitDepth is the bit depth a ProRes fourcc states, as the mainstream decoder reads it: 10 for the
+// proxy, LT, standard and HQ profiles, 12 for 4444 and 4444 XQ; 0 for a fourcc stating none (ProRes RAW).
+func proResBitDepth(fourcc string) uint16 {
+	switch fourcc {
+	case "apco", "apcs", "apcn", "apch":
+		return 10
+	case "ap4h", "ap4x":
+		return 12
+	}
+	return 0
+}
+
 // cicpChannelCounts is the channel count of each ChannelConfiguration of ISO/IEC 23001-8 (CICP), 1 to 20.
 var cicpChannelCounts = [21]uint8{0, 1, 2, 3, 4, 5, 6, 8, 2, 3, 4, 7, 8, 24, 8, 12, 10, 12, 14, 12, 14}
 

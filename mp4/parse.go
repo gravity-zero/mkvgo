@@ -78,6 +78,7 @@ type inTrack struct {
 	unsupported    string  // why a remux cannot carry the track; "" when it can
 	encryption     string  // the protected sample entry's scheme (schm); "" when the samples are clear
 	bitDepth       uint8   // PCM bits per sample; 0 otherwise
+	videoBitDepth  uint16  // the bit depth a video entry's fourcc states (ProRes); 0 when it states none
 	pcmFrame       uint32  // PCM bytes per frame (one sample of every channel); 0 when not PCM
 	fragDecodeEnd  int64   // where the track's last fragment ended (ticks): the next one's base when it has no tfdt
 
@@ -1934,6 +1935,11 @@ func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 		extractWVTTConfig(tr, payload)
 	case "twos", "sowt", "raw ", "in24", "in32", "fl32", "fl64", "ipcm", "fpcm", "lpcm":
 		parsePCM(tr, typ, payload, audioHdr)
+	case "apco", "apcs", "apcn", "apch", "ap4h", "ap4x":
+		// ProRes: the fourcc states the profile's bit depth (10 up to HQ, 12 for 4444); ProRes RAW states none.
+		describeEntry(tr, payload)
+		tr.videoBitDepth = proResBitDepth(typ)
+		tr.unsupported = "sample entry " + quoteFourcc(typ) + " has no Matroska form in mkvgo"
 	case "samr", "sawb", "sawp":
 		// AMR is mono by definition; the 3GPP AMRSampleEntry's channelcount is a reserved 2.
 		describeEntry(tr, payload)
