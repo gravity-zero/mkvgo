@@ -41,6 +41,7 @@ type inSample struct {
 	ctsTicks int64
 	size     uint32
 	sync     bool
+	run      bool // the first sample of a chunk or trun: where the file's runs of samples start
 }
 
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.
@@ -75,6 +76,8 @@ type inTrack struct {
 	sttsClipped    bool    // the stts states a negative delta: the samples' timeline does not give the duration
 	unsupported    string  // why a remux cannot carry the track; "" when it can
 	encryption     string  // the protected sample entry's scheme (schm); "" when the samples are clear
+	bitDepth       uint8   // PCM bits per sample; 0 otherwise
+	pcmFrame       uint32  // PCM bytes per frame (one sample of every channel); 0 when not PCM
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -570,6 +573,11 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 		}
 		if err := readFragmentSamples(r, size, mv, moovBoxes); err != nil {
 			return nil, errf("fragmented MP4: %w", err)
+		}
+	}
+	if mode == sampleFull {
+		for i := range mv.tracks {
+			coalescePCM(&mv.tracks[i])
 		}
 	}
 	return mv, nil
@@ -1877,6 +1885,8 @@ func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 	case "wvtt":
 		tr.codec = "webvtt" // native WebVTT → S_TEXT/WEBVTT
 		extractWVTTConfig(tr, payload)
+	case "twos", "sowt", "raw ", "in24", "in32", "fl32", "fl64", "ipcm", "fpcm", "lpcm":
+		parsePCM(tr, typ, payload, audioHdr)
 	case "samr", "sawb", "sawp":
 		// AMR is mono by definition; the 3GPP AMRSampleEntry's channelcount is a reserved 2.
 		describeEntry(tr, payload)

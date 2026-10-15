@@ -24,6 +24,16 @@ All notable changes to mkvgo are documented here. The format is based on
   (VobSub in MP4) is a subtitle track, described and refused by name rather
   than dropped as a non-media handler. Only a still picture (cover art) and a
   non-media handler remain `DroppedTrack`s.
+- **PCM in MP4/MOV is carried into Matroska**: `twos`, `sowt`, `raw `,
+  `in24`/`in32`/`fl32`/`fl64` (with the `enda` byte order), `ipcm`/`fpcm`
+  (ISO 23003-5, by their `pcmC`) and the QuickTime version 2 `lpcm` map to
+  `A_PCM/INT/BIG`, `A_PCM/INT/LIT` and `A_PCM/FLOAT/IEEE` with the bit
+  depth. The one-frame samples are gathered into blocks of at most 1024
+  frames that never cross a chunk, the packets the mainstream demuxer reads
+  such a track in, so the remux is packet-identical. A layout Matroska has no
+  form for (a big-endian float, a signed 8-bit or unsigned 16-bit integer,
+  non-interleaved channels) is described and refused by name - never dropped
+  in silence, as it was.
 
 ### Changed
 

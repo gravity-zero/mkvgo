@@ -145,6 +145,7 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 			}
 			samples[si].offset = pos
 			samples[si].size = size
+			samples[si].run = k == 0
 			pos = end
 			si++
 		}

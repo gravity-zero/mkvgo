@@ -159,6 +159,10 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 				ch := t.channels
 				mt.Channels = &ch
 			}
+			if t.bitDepth > 0 {
+				bd := t.bitDepth
+				mt.BitDepth = &bd
+			}
 			if t.sampleRate > 0 {
 				sr := t.sampleRate
 				mt.SampleRate = &sr

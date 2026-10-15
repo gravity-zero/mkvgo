@@ -1026,13 +1026,13 @@ mkvgo to-mp4 --webvtt-native web.mkv web.mp4            # WebVTT → lossless wv
 
 ### from-mp4
 
-Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour, chapters, the movie title, the other global tags (ARTIST/ALBUM/…), per-track names and language round-trip back to Matroska (and back out to MP4 with `to-mp4`). Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (the Opus pre-skip travels as the edit list <-> `CodecDelay`, like AAC; MP3's delay is handled by the decoder from the bitstream). Accepts `--mp3-container-delay` (see `to-mp4`).
+Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3, FLAC, PCM (`twos`/`sowt`/`raw `/`in24`/`in32`/`fl32`/`fl64`/`ipcm`/`fpcm`/`lpcm` → `A_PCM/INT/BIG`, `A_PCM/INT/LIT`, `A_PCM/FLOAT/IEEE`, in blocks of at most 1024 frames that never cross a chunk - the packets the mainstream demuxer reads such a track in), tx3g subtitles (→ SRT) and wvtt subtitles (→ WebVTT); colour, chapters, the movie title, the other global tags (ARTIST/ALBUM/…), per-track names and language round-trip back to Matroska (and back out to MP4 with `to-mp4`). Audio decodes bit-identically across the round trip for AAC/AC-3/E-AC-3/FLAC; Opus and MP3 stay in sync (the Opus pre-skip travels as the edit list <-> `CodecDelay`, like AAC; MP3's delay is handled by the decoder from the bitstream). Accepts `--mp3-container-delay` (see `to-mp4`).
 
 ```
 mkvgo from-mp4 [--skip-unsupported] [--mp3-container-delay] <input.mp4> <output.mkv>
 ```
 
-A track Matroska cannot carry - an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR), one whose configuration is not what its codec needs - fails the remux by name; `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others.
+A track Matroska cannot carry - an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR, a big-endian float or signed 8-bit PCM), one whose configuration is not what its codec needs - fails the remux by name; `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others.
 
 QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
 (`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).

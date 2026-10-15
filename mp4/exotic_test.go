@@ -3,6 +3,8 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +178,173 @@ func TestRemuxRefusesUncarriableTracksByName(t *testing.T) {
 	if len(drops) != 2 {
 		t.Errorf("PlanHLS drops = %+v, want the two uncarriable tracks", drops)
 	}
+}
+
+// TestPCMEntriesMapToMatroska: every PCM sample entry maps to the Matroska
+// PCM CodecID its layout has, or names the layout Matroska cannot hold.
+func TestPCMEntriesMapToMatroska(t *testing.T) {
+	mono := mkv.Track{Channels: u8p(1), SampleRate: f64p(44100)}
+	pcmC := func(flags, bits uint8) []byte {
+		return fullBox("pcmC", 0, 0, func(w *bw) { w.u8(flags); w.u8(bits) })
+	}
+	lpcm := func(bits, flags uint32) []byte {
+		return boxf("lpcm", func(w *bw) {
+			w.zeros(6)
+			w.u16(1)
+			w.u16(2) // version 2
+			w.u16(0)
+			w.u32(0)
+			w.u16(3)
+			w.u16(16)
+			w.u16(0)
+			w.u16(0)
+			w.u32(0x00010000)
+			w.u32(72)
+			w.u64(math.Float64bits(48000))
+			w.u32(2)
+			w.u32(0x7F000000)
+			w.u32(bits)
+			w.u32(flags)
+			w.u32(2 * bits / 8)
+			w.u32(1)
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		entry []byte
+		codec string
+		bits  uint8
+		frame uint32
+		bad   string
+	}{
+		{"twos", audioSampleEntry("twos", &mono, nil), "A_PCM/INT/BIG", 16, 2, ""},
+		{"sowt", audioSampleEntry("sowt", &stereo48k, nil), "pcm", 16, 4, ""},
+		{"ipcm le 24", audioSampleEntry("ipcm", &mono, pcmC(1, 24)), "pcm", 24, 3, ""},
+		{"ipcm be 16", audioSampleEntry("ipcm", &mono, pcmC(0, 16)), "A_PCM/INT/BIG", 16, 2, ""},
+		{"fpcm le 32", audioSampleEntry("fpcm", &mono, pcmC(1, 32)), "A_PCM/FLOAT/IEEE", 32, 4, ""},
+		{"fpcm be 32", audioSampleEntry("fpcm", &mono, pcmC(0, 32)), "", 0, 0, "big-endian float"},
+		{"fl64 quicktime be", audioSampleEntry("fl64", &mono, nil), "", 0, 0, "big-endian float"},
+		{"sowt 8-bit signed", audioSampleEntry8("sowt", &mono), "", 0, 0, "signed 8-bit"},
+		{"raw 8-bit unsigned", audioSampleEntry8("raw ", &mono), "pcm", 8, 1, ""},
+		{"ipcm without pcmC", audioSampleEntry("ipcm", &mono, nil), "", 0, 0, "pcmC"},
+		{"lpcm float le", lpcm(32, lpcmFloat), "A_PCM/FLOAT/IEEE", 32, 8, ""},
+		{"lpcm float be", lpcm(64, lpcmFloat|lpcmBigEndian), "", 0, 0, "big-endian float"},
+		{"lpcm int le 16", lpcm(16, lpcmSignedInteger), "pcm", 16, 4, ""},
+		{"lpcm signed 8", lpcm(8, lpcmSignedInteger), "", 0, 0, "signed 8-bit"},
+		{"lpcm int be 24", lpcm(24, lpcmBigEndian|lpcmSignedInteger), "A_PCM/INT/BIG", 24, 6, ""},
+		{"lpcm non-interleaved", lpcm(16, lpcmSignedInteger|lpcmNonInterleaved), "", 0, 0, "non-interleaved"},
+		{"lpcm unsigned 16", lpcm(16, 0), "", 0, 0, "unsigned"},
+	} {
+		var tr inTrack
+		tr.trackType = mkv.AudioTrack
+		described, _, err := parseSampleEntry(&tr, fullBox("stsd", 0, 0, func(w *bw) { w.u32(1); w.bytes(tc.entry) })[8:])
+		if err != nil || !described {
+			t.Fatalf("%s: described=%v err=%v", tc.name, described, err)
+		}
+		if tc.bad != "" {
+			if !strings.Contains(tr.unsupported, tc.bad) {
+				t.Errorf("%s: unsupported = %q, want it to mention %q", tc.name, tr.unsupported, tc.bad)
+			}
+			continue
+		}
+		if tr.unsupported != "" || tr.codec != tc.codec || tr.bitDepth != tc.bits || tr.pcmFrame != tc.frame {
+			t.Errorf("%s: codec %q bits %d frame %d unsupported %q; want %q %d %d", tc.name, tr.codec, tr.bitDepth, tr.pcmFrame, tr.unsupported, tc.codec, tc.bits, tc.frame)
+		}
+	}
+}
+
+// audioSampleEntry8 is audioSampleEntry with an 8-bit samplesize.
+func audioSampleEntry8(typ string, t *mkv.Track) []byte {
+	e := audioSampleEntry(typ, t, nil)
+	binary.BigEndian.PutUint16(e[8+18:], 8)
+	return e
+}
+
+// pcmMP4 builds a progressive MP4 holding one twos track of one-frame samples laid out in chunks of the given frame counts.
+func pcmMP4(t *testing.T, chunkFrames []int) ([]byte, []byte) {
+	t.Helper()
+	const frameBytes = 2
+	var total int
+	for _, n := range chunkFrames {
+		total += n
+	}
+	pcm := make([]byte, total*frameBytes)
+	for i := range pcm {
+		pcm[i] = byte(i * 7)
+	}
+	mono := mkv.Track{Channels: u8p(1), SampleRate: f64p(44100)}
+	build := func(firstChunk uint32) []byte {
+		stts := fullBox("stts", 0, 0, func(w *bw) { w.u32(1); w.u32(uint32(total)); w.u32(1) })
+		stsc := fullBox("stsc", 0, 0, func(w *bw) {
+			w.u32(uint32(len(chunkFrames)))
+			for i, n := range chunkFrames {
+				w.u32(uint32(i + 1))
+				w.u32(uint32(n))
+				w.u32(1)
+			}
+		})
+		stsz := fullBox("stsz", 0, 0, func(w *bw) { w.u32(frameBytes); w.u32(uint32(total)) })
+		stco := fullBox("stco", 0, 0, func(w *bw) {
+			w.u32(uint32(len(chunkFrames)))
+			off := firstChunk
+			for _, n := range chunkFrames {
+				w.u32(off)
+				off += uint32(n * frameBytes)
+			}
+		})
+		moov := container("moov", mvhdBox(uint32(total*1000/44100)),
+			soundTrak(1, 44100, uint32(total), audioSampleEntry("twos", &mono, nil), stts, stsc, stsz, stco))
+		return append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), moov...)
+	}
+	head := build(0)
+	head = build(uint32(len(head)) + 8)
+	return append(head, box("mdat", pcm)...), pcm
+}
+
+// TestRemuxPCMPacketsMatchTheSource: a PCM track's one-frame samples become
+// blocks of at most 1024 frames that never cross a chunk boundary - the
+// packets the mainstream demuxer reads the source in - carrying every byte.
+func TestRemuxPCMPacketsMatchTheSource(t *testing.T) {
+	data, pcm := pcmMP4(t, []int{1500, 600, 2048})
+	dir := t.TempDir()
+	src := filepath.Join(dir, "pcm.mp4")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "pcm.mkv")
+	if err := RemuxFromMP4(context.Background(), src, out); err != nil {
+		t.Fatalf("RemuxFromMP4(pcm): %v", err)
+	}
+	c, blocks := readMKV(t, out)
+	tr := c.Tracks[0]
+	if tr.Codec != "A_PCM/INT/BIG" || tr.BitDepth == nil || *tr.BitDepth != 16 || tr.Channels == nil || *tr.Channels != 1 {
+		t.Errorf("track = codec %q bits %v channels %v, want A_PCM/INT/BIG 16 1", tr.Codec, tr.BitDepth, tr.Channels)
+	}
+	var sizes []int
+	var got []byte
+	for _, b := range blocks {
+		sizes = append(sizes, len(b.Data)/2)
+		got = append(got, b.Data...)
+	}
+	want := []int{1024, 476, 600, 1024, 1024}
+	if len(sizes) != len(want) || !equalInts(sizes, want) {
+		t.Errorf("block frames = %v, want %v", sizes, want)
+	}
+	if !bytes.Equal(got, pcm) {
+		t.Error("the blocks do not carry the source's PCM bytes")
+	}
+	if blocks[1].Timecode != 1024*1000/44100 {
+		t.Errorf("second block at %d ms, want %d", blocks[1].Timecode, 1024*1000/44100)
+	}
+}
+
+func equalInts(a, b []int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func trexBox(trackID uint32) []byte {

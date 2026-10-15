@@ -359,6 +359,7 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 			ctsTicks: dts + ctsOff,
 			durMs:    ticksToMs(int64(dur), t.timescale),
 			sync:     sflags&sampleNonSync == 0,
+			run:      i == 0,
 		})
 		sampleOff += int64(sz)
 		dts += int64(dur)
