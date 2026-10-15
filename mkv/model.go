@@ -210,7 +210,7 @@ type Track struct {
 	Channels         *uint8      `json:"channels,omitempty"`
 	SampleRate       *float64    `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
 	OutputSampleRate *float64    `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
-	// StreamChannels is the channel count the stream itself states (first AC-3/E-AC-3 frame header, AAC AudioSpecificConfig), read under reader.WithInBandChannels; ChannelsMismatch says it contradicts Channels.
+	// StreamChannels is the channel count the stream itself states (first AC-3/E-AC-3 frame header, AAC AudioSpecificConfig), read under reader.WithInBandChannels from the first block only; ChannelsMismatch says it contradicts Channels, the caller choosing which to trust.
 	StreamChannels   *uint8 `json:"stream_channels,omitempty"`
 	ChannelsMismatch bool   `json:"channels_mismatch,omitempty"`
 	BitDepth         *uint8 `json:"bit_depth,omitempty"` // audio bits/sample (0x6264); video uses VideoBitDepth

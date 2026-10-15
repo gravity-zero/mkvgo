@@ -267,7 +267,9 @@ func WithFrameRateReads() ReadOption { return reader.WithFrameRateReads() }
 
 // WithInBandChannels reads the channel count each AC-3, E-AC-3 and AAC stream
 // states into Track.StreamChannels and flags a contradicted container count
-// (Track.ChannelsMismatch). See reader.WithInBandChannels.
+// (Track.ChannelsMismatch), from the track's first block only: a stream whose
+// configuration changes mid-file can state fewer channels than the container.
+// See reader.WithInBandChannels.
 func WithInBandChannels() ReadOption { return reader.WithInBandChannels() }
 
 // WithSampledKeyframes enables a bounded, coarse keyframe index for a Matroska

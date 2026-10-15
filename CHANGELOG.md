@@ -126,6 +126,14 @@ All notable changes to mkvgo are documented here. The format is based on
   files (971 AC-3 and E-AC-3 tracks), the 6 7.1 tracks that read 6 read 8,
   three on an E-AC-3 core and three on an AC-3 core; no other track changed.
 
+### Documentation
+
+- **`WithInBandChannels` reads the first block's count.** `StreamChannels`
+  is what the track's first block states: a stream whose configuration
+  changes mid-file, such as a TV capture opening on a stereo advert, can
+  state fewer channels than the container. `ChannelsMismatch` is then set,
+  and which count to trust is the caller's choice. The code is unchanged.
+
 ## [0.51.0] - 2026-10-14
 
 ### Added

@@ -29,7 +29,11 @@ type readOpts struct {
 // stream states - the first frame header of AC-3 and E-AC-3, the
 // AudioSpecificConfig of AAC - into Track.StreamChannels, and sets
 // Track.ChannelsMismatch when it contradicts the container's Channels. AC-3 and
-// E-AC-3 cost one read of their first block; AAC none. Matroska only.
+// E-AC-3 cost one read of their first block; AAC none. Matroska only. The
+// count is the first block's: a stream whose configuration changes mid-file (a
+// TV capture opening on a stereo advert) can state fewer channels than the
+// container, ChannelsMismatch then set, and which one to trust is the caller's
+// choice.
 func WithInBandChannels() ReadOption {
 	return func(o *readOpts) { o.inBandChannels = true }
 }
