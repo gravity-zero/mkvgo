@@ -342,6 +342,15 @@ func carriableTracks(mv *movie, o *Options) error {
 	return nil
 }
 
+// sampleCount is how many samples a movie's tracks hold.
+func sampleCount(mv *movie) int {
+	var n int
+	for i := range mv.tracks {
+		n += len(mv.tracks[i].samples)
+	}
+	return n
+}
+
 // clusterSpanMax is the widest timecode spread a cluster's SimpleBlocks can
 // encode at the millisecond timecode scale.
 const clusterSpanMax = math.MaxInt16

@@ -579,6 +579,22 @@ func TestClusterSplitsOnWideComposition(t *testing.T) {
 	}
 }
 
+// TestRemuxRefusesAnInitSegment: a fragmented moov without fragments holds no samples: nothing to remux, said so.
+func TestRemuxRefusesAnInitSegment(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "init.mp4")
+	if err := os.WriteFile(src, fragmentedAAC(0), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := RemuxFromMP4(context.Background(), src, filepath.Join(dir, "init.mkv"))
+	if err == nil || !strings.Contains(err.Error(), "no samples") {
+		t.Errorf("err = %v, want the absence of samples named", err)
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "init.mkv")); serr == nil {
+		t.Error("an output was left behind")
+	}
+}
+
 // encryptedWebM writes a WebM whose one track declares AES-CTR ContentEncryption around one block.
 func encryptedWebM(t *testing.T, codecID string) string {
 	t.Helper()

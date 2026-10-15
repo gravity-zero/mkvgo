@@ -65,6 +65,8 @@ All notable changes to mkvgo are documented here. The format is based on
   traf anchored on the moof before); when that places its samples past the
   fragment's data - files anchor such a traf on the moof anyway - the moof
   anchor is used, as the muxer meant.
+- **`from-mp4` refuses a source without samples** (an initialisation
+  segment) instead of writing a Matroska file without clusters.
 - **Matroska audio defaults**: an audio track without `Channels` reads 1,
   without `SamplingFrequency` 8000 Hz (48000 for Opus) - the spec defaults
   every demuxer applies - once the codec's own header had its say: Vorbis,

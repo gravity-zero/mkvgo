@@ -57,6 +57,9 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	if err := carriableTracks(mv, &o); err != nil {
 		return err
 	}
+	if sampleCount(mv) == 0 {
+		return errf("the source holds no samples (an initialisation segment?): nothing to remux")
+	}
 	tracks := buildMKVTracks(mv, o.MP3ContainerDelay)
 
 	dst, err := fs.DoCreate(dstPath)
