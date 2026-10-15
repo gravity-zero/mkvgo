@@ -78,6 +78,10 @@ All notable changes to mkvgo are documented here. The format is based on
   its CuePoints of unknown size too) is walked to the element that ends it
   (RFC 8794: the first segment-level ID, the Segment's end or EOF) instead
   of refusing the file; its content is not read.
+- **A video entry stating a 0x0 picture takes its size from the SPS** (H.264
+  avcC, HEVC hvcC) and is refused by name when the codec configuration states
+  none: Matroska PixelWidth/PixelHeight are mandatory and never 0 (a crashtest
+  fixture went out as a 0x64530 track).
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it

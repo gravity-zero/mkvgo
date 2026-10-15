@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // dashRoleScheme is the schemeURI of the DASH role kind box (ISO/IEC 23009-1)
@@ -1944,6 +1945,14 @@ func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 		// The entry's configuration is not what its codec needs: described as it stands, not carried.
 		describeEntry(tr, payload)
 		tr.codec, tr.codecPrivate, tr.unsupported = typ, nil, err.Error()
+	}
+	if tr.trackType == mkv.VideoTrack && tr.unsupported == "" && (tr.width == 0 || tr.height == 0) {
+		// Matroska PixelWidth/PixelHeight are mandatory and not 0: the SPS states the size, or the track is not carried.
+		if w, h, ok := reader.PictureSizeFromCodecPrivate(tr.codec, tr.codecPrivate); ok {
+			tr.width, tr.height = w, h
+		} else {
+			tr.unsupported = "video entry " + quoteFourcc(typ) + " states a " + strconv.Itoa(int(tr.width)) + "x" + strconv.Itoa(int(tr.height)) + " picture and its codec configuration no size"
+		}
 	}
 	return true, typ, nil
 }

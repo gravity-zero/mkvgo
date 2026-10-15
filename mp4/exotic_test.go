@@ -700,3 +700,54 @@ func TestFragmentsWithoutTfdtContinue(t *testing.T) {
 		t.Errorf("probe DurationMs = %d, want %d", c.DurationMs, 5120*1000/48000)
 	}
 }
+
+// baselineSPSAvcC is an avcC whose SPS states a 320x240 picture (20x15 macroblocks, no cropping).
+func baselineSPSAvcC() []byte {
+	bits := "1" + "1" + "1" + "1" + "010" + "0" + "000010100" + "0001111" + "1" + "1" + "0" + "0" + "1" // ids and counts, 20x15 MBs, frame_mbs_only, no crop, no VUI, trailing bit
+	var sps []byte
+	for i := 0; i < len(bits); i += 8 {
+		var b byte
+		for k := 0; k < 8; k++ {
+			b <<= 1
+			if i+k < len(bits) && bits[i+k] == '1' {
+				b |= 1
+			}
+		}
+		sps = append(sps, b)
+	}
+	sps = append([]byte{0x67, 66, 0, 30}, sps...) // NAL header, profile_idc 66, constraints, level_idc
+	avcC := []byte{1, 66, 0, 30, 0xFF, 0xE1, byte(len(sps) >> 8), byte(len(sps))}
+	avcC = append(avcC, sps...)
+	return append(avcC, 1, 0, 4, 0x68, 0xCE, 0x3C, 0x80) // one PPS
+}
+
+// videoTrak builds a trak of handler "vide" around one sample entry.
+func videoTrak(trackID uint32, entry []byte) []byte {
+	trak := soundTrak(trackID, 30000, 30000, entry, emptyTables()...)
+	return bytes.Replace(trak, []byte("soun"), []byte("vide"), 1)
+}
+
+// TestZeroPictureSizeFromSPSOrRefused: a video entry stating a 0x0 picture
+// takes its size from the SPS, and is refused by name when the codec
+// configuration states none - Matroska PixelWidth/PixelHeight are never 0.
+func TestZeroPictureSizeFromSPSOrRefused(t *testing.T) {
+	zeroAVC := visualSampleEntry("avc1", &mkv.Track{Width: u32p(0), Height: u32p(0)}, box("avcC", baselineSPSAvcC()))
+	zeroVP9 := visualSampleEntry("vp09", &mkv.Track{Width: u32p(0), Height: u32p(64530)}, fullBox("vpcC", 1, 0, func(w *bw) { w.u32(0); w.u32(0); w.u16(0) }))
+	data := append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), container("moov", mvhdBox(0), videoTrak(1, zeroAVC), videoTrak(2, zeroVP9))...)
+	c, _ := probeMovie(t, data)
+	if len(c.Tracks) != 2 {
+		t.Fatalf("tracks = %d, want 2", len(c.Tracks))
+	}
+	if avc := c.Tracks[0]; avc.Width == nil || *avc.Width != 320 || avc.Height == nil || *avc.Height != 240 {
+		t.Errorf("avc1 0x0: size %v x %v, want 320x240 from the SPS", avc.Width, avc.Height)
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "zero.mp4")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := RemuxFromMP4(context.Background(), src, filepath.Join(dir, "zero.mkv"))
+	if err == nil || !strings.Contains(err.Error(), "track 2 (vp9)") || !strings.Contains(err.Error(), "0x64530") {
+		t.Errorf("remux err = %v, want the vp09 track refused for its 0x64530 picture", err)
+	}
+}

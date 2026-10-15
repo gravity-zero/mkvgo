@@ -31,6 +31,8 @@ type bitstreamColour struct {
 	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
 	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
 	sarHeight  uint32  // VUI sample aspect ratio height
+	width      uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
+	height     uint32
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
 	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag or the hvcC source flags; "" unknown
 	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
@@ -375,6 +377,38 @@ func avcColour(cp []byte) *bitstreamColour {
 	return nil
 }
 
+// chromaSubsampling is the width and height of a chroma sample in luma samples (SubWidthC, SubHeightC) for a
+// chroma_format_idc; 4:2:0 when the SPS states none.
+func chromaSubsampling(idc *uint16) (uint32, uint32) {
+	if idc == nil {
+		return 2, 2
+	}
+	switch *idc {
+	case 1:
+		return 2, 2
+	case 2:
+		return 2, 1
+	}
+	return 1, 1
+}
+
+// PictureSizeFromCodecPrivate returns the coded picture size an H.264 avcC or
+// HEVC hvcC states in its SPS, cropping applied; ok is false when the record
+// holds no readable SPS or the codec carries none.
+func PictureSizeFromCodecPrivate(codec string, cp []byte) (width, height uint32, ok bool) {
+	var bc *bitstreamColour
+	switch codec {
+	case "h264", "V_MPEG4/ISO/AVC":
+		bc = avcColour(cp)
+	case "hevc", "V_MPEGH/ISO/HEVC":
+		bc = hevcColour(cp)
+	}
+	if bc == nil || bc.width == 0 || bc.height == 0 {
+		return 0, 0, false
+	}
+	return bc.width, bc.height, true
+}
+
 func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	r := &bitReader{data: rbsp}
 	bc := &bitstreamColour{}
@@ -434,8 +468,8 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	}
 	r.ue()                       // max_num_ref_frames
 	r.bit()                      // gaps_in_frame_num_value_allowed_flag
-	r.ue()                       // pic_width_in_mbs_minus1
-	r.ue()                       // pic_height_in_map_units_minus1
+	widthMbs := r.ue() + 1       // pic_width_in_mbs_minus1
+	heightMapUnits := r.ue() + 1 // pic_height_in_map_units_minus1
 	frameMbsOnly := r.bit() == 1 // 1 → progressive
 	bc.scanType = "progressive"
 	if !frameMbsOnly {
@@ -443,11 +477,16 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 		r.bit()                    // mb_adaptive_frame_field_flag
 	}
 	r.bit() // direct_8x8_inference_flag
-	if r.bit() == 1 {
-		r.ue()
-		r.ue()
-		r.ue()
-		r.ue() // frame_crop_*
+	heightUnits := uint32(2)
+	if frameMbsOnly {
+		heightUnits = 1
+	}
+	bc.width, bc.height = widthMbs*16, heightUnits*heightMapUnits*16
+	if r.bit() == 1 { // frame_cropping_flag: the crop is counted in chroma units
+		left, right, top, bottom := r.ue(), r.ue(), r.ue(), r.ue()
+		cropX, cropY := chromaSubsampling(bc.chroma)
+		bc.width -= cropX * (left + right)
+		bc.height -= cropY * heightUnits * (top + bottom)
 	}
 	if r.bit() == 1 { // vui_parameters_present_flag
 		parseAVCVUI(r, bc)
@@ -686,13 +725,13 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 	if cf == 3 {
 		r.bit() // separate_colour_plane_flag
 	}
-	r.ue()            // pic_width_in_luma_samples
-	r.ue()            // pic_height_in_luma_samples
-	if r.bit() == 1 { // conformance_window_flag
-		r.ue()
-		r.ue()
-		r.ue()
-		r.ue()
+	bc.width = r.ue()  // pic_width_in_luma_samples
+	bc.height = r.ue() // pic_height_in_luma_samples
+	if r.bit() == 1 {  // conformance_window_flag: the window is counted in chroma units
+		left, right, top, bottom := r.ue(), r.ue(), r.ue(), r.ue()
+		cropX, cropY := chromaSubsampling(bc.chroma)
+		bc.width -= cropX * (left + right)
+		bc.height -= cropY * (top + bottom)
 	}
 	if d := r.ue(); !r.err { // bit_depth_luma_minus8: the stream's own, over the hvcC header's
 		bc.bitDepth, bc.spsDepth = validBitDepth(d+8), true
