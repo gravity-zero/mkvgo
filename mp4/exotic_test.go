@@ -260,6 +260,15 @@ func audioSampleEntry8(typ string, t *mkv.Track) []byte {
 	return e
 }
 
+// TestCttsVersion0NegativeOffsetIsSigned: a version 0 ctts offset reads signed, like a trun's.
+func TestCttsVersion0NegativeOffsetIsSigned(t *testing.T) {
+	ctts := fullBox("ctts", 0, 0, func(w *bw) { w.u32(2); w.u32(1); w.u32(0xFFFFFE70); w.u32(1); w.u32(400) })
+	got := parseCtts([]memBox{{typ: "ctts", payload: ctts[8:]}}, 2)
+	if got[0] != -400 || got[1] != 400 {
+		t.Errorf("ctts offsets = %v, want [-400 400]", got)
+	}
+}
+
 // pcmMP4 builds a progressive MP4 holding one twos track of one-frame samples laid out in chunks of the given frame counts.
 func pcmMP4(t *testing.T, chunkFrames []int) ([]byte, []byte) {
 	t.Helper()
@@ -453,4 +462,28 @@ func withMvex(t *testing.T, data []byte) []byte {
 		binary.BigEndian.PutUint32(out[p:], binary.BigEndian.Uint32(out[p:])+uint32(len(mvex)))
 	}
 	return out
+}
+
+// TestTrunVersion0NegativeOffsetIsSigned: a version 0 trun's composition
+// offsets read signed, as muxers write and demuxers read them; the remux
+// then succeeds instead of placing a frame hours away.
+func TestTrunVersion0NegativeOffsetIsSigned(t *testing.T) {
+	moof, mdat := oneFragment(1, 0, []uint32{10, 10, 10}, []uint32{960, 960, 960}, []uint32{1920, uint32(0xFFFFFC40), 0}, 0) // +1920, -960, 0
+	data := fragmentedAAC(0, moof, mdat)
+	mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), sampleFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []int64{mv.tracks[0].samples[0].ctsMs, mv.tracks[0].samples[1].ctsMs, mv.tracks[0].samples[2].ctsMs}
+	if want := []int64{40, 0, 40}; got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("cts ms = %v, want %v", got, want)
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "v0.mp4")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemuxFromMP4(context.Background(), src, filepath.Join(dir, "v0.mkv")); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
 }

@@ -281,7 +281,6 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 	if len(p) < 8 {
 		return dataCursor, dts, errf("trun too short")
 	}
-	version := p[0]
 	flags := binary.BigEndian.Uint32(p[0:4]) & 0xFFFFFF
 	count := binary.BigEndian.Uint32(p[4:8])
 	off := 8
@@ -338,12 +337,9 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 			if !need(4) {
 				return dataCursor, dts, errf("trun truncated composition_offset")
 			}
-			raw := binary.BigEndian.Uint32(p[off : off+4])
-			if version == 0 {
-				ctsOff = int64(raw)
-			} else {
-				ctsOff = int64(int32(raw))
-			}
+			// Signed in both versions: a version 0 trun's offset is unsigned by the letter of the standard, but
+			// muxers write negative offsets in it and demuxers read them so.
+			ctsOff = int64(int32(binary.BigEndian.Uint32(p[off : off+4])))
 			off += 4
 		}
 
