@@ -100,7 +100,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it
-  stands and the remux refuses it by name.
+  stands and the remux refuses it by name. The same for a track whose sample
+  table the file cannot hold (a forged `stsz`, a moov cut from its media): a
+  probe that used to pass because the track was ignored keeps passing now
+  that its codec is carried.
 
 - **`RemuxToHLS` reads the source once and writes the output once.** A full
   pass streamed every sample's bytes to one temp file per track, then copied

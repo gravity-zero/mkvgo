@@ -426,13 +426,16 @@ func TestParseTrakEditShiftArithmetic(t *testing.T) {
 }
 
 // TestParseTrakSampleFullPropagatesBuildSampleTableError kills the
-// CONDITIONALS_NEGATION on `err != nil` around buildSampleTable
-// (parse.go:1210): a malformed stbl (missing stsz) must fail sampleFull
-// parsing, not be silently swallowed.
+// CONDITIONALS_NEGATION on `err != nil` around buildSampleTable: a malformed
+// stbl (missing stsz) is not silently swallowed - the track is described as
+// one a remux cannot carry, naming the table, and holds no samples.
 func TestParseTrakSampleFullPropagatesBuildSampleTableError(t *testing.T) {
-	_, _, err := parseTrak(craftTrak("text", "tx3g", "", 9), 1<<20, 1000, sampleFull)
-	if err == nil {
-		t.Error("a stbl without stsz must fail sampleFull parsing")
+	tr, _, err := parseTrak(craftTrak("text", "tx3g", "", 9), 1<<20, 1000, sampleFull)
+	if err != nil {
+		t.Fatalf("a stbl without stsz fails the file: %v", err)
+	}
+	if !strings.Contains(tr.unsupported, "stsz") || len(tr.samples) != 0 {
+		t.Errorf("unsupported = %q, samples %d; want the stsz named and no sample", tr.unsupported, len(tr.samples))
 	}
 }
 

@@ -1367,19 +1367,30 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		// tracks); only video collects the sync-sample keyframe times.
 		isVideo := tr.trackType == mkv.VideoTrack
 		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo, fileSize)
-		if err != nil && tr.unsupported == "" {
-			return tr, nil, err
+		if err != nil {
+			// A sample table the file cannot hold (a forged one, a moov cut from its media): the track is
+			// described, and refused by name should a remux want its samples.
+			tr.describedOnly(err)
+			break
 		}
 		tr.sampleEndMs = endMs
 		if isVideo {
 			tr.keyframesMs = kf
 		}
 	case sampleFull:
-		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil && tr.unsupported == "" {
-			return tr, nil, err
+		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
+			tr.describedOnly(err)
+			tr.samples = nil
 		}
 	}
 	return tr, nil, nil
+}
+
+// describedOnly marks the track as one a remux cannot carry, for the reason given, keeping an earlier reason.
+func (tr *inTrack) describedOnly(err error) {
+	if tr.unsupported == "" {
+		tr.unsupported = "sample table: " + err.Error()
+	}
 }
 
 // headerFrameRate derives the nominal (constant) frame rate from the first stts
