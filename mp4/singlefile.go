@@ -60,28 +60,19 @@ func buildSidx(trackID, timescale uint32, earliestPTS int64, sizes []int64, durT
 // writeSingleFileRenditions writes one progressive file per rendition and
 // returns the aggregate per-boundary segInfo plus each rendition's byte map.
 func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir string,
-	fts []*fragTrack, bounds []int64, meta movieMeta) ([]segInfo, []sfRendition, error) {
-	readers := make([]mkv.ReadSeekCloser, len(fts))
-	for i, ft := range fts {
-		r, err := fs.DoOpen(ft.tmpPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		readers[i] = r
+	fts []*fragTrack, bounds []int64, meta movieMeta, src mkv.ReadSeekCloser) ([]segInfo, []sfRendition, error) {
+	media, err := openTrackMedia(fs, fts, src, make([]byte, fullPassBuf), false)
+	if err != nil {
+		return nil, nil, err
 	}
-	defer func() {
-		for _, r := range readers {
-			if r != nil {
-				r.Close()
-			}
-		}
-	}()
+	defer closeTrackMedia(media)
 
 	// Pass 1 (in memory): per rendition, the fragment heads and sizes - the
 	// builders are deterministic, so no media is read yet.
 	type plan struct {
 		heads [][]byte
 		segs  []trackSegment
+		froms []int
 	}
 	plans := make([]plan, len(fts))
 	cursors := make([]int, len(fts))
@@ -99,6 +90,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		endMs := segEndOrLast(bounds, k, fts)
 		var segBytes int64
 		for i, ft := range fts {
+			plans[i].froms = append(plans[i].froms, cursors[i])
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			head := buildSegmentFile(uint32(k+1), seg)
 			plans[i].heads = append(plans[i].heads, head)
@@ -142,7 +134,8 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 			}
 			off := r.sidxEnd
 			for k := range plans[i].heads {
-				if err := writeSegmentFile(out, plans[i].heads[k], plans[i].segs[k].dataLen, readers[i]); err != nil {
+				seg := &plans[i].segs[k]
+				if err := media[i].write(out, plans[i].heads[k], seg.samples, plans[i].froms[k], seg.dataLen); err != nil {
 					return err
 				}
 				r.ranges = append(r.ranges, [2]int64{off, sizes[k]})

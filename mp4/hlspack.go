@@ -107,6 +107,28 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		if !ok {
 			continue
 		}
+		if ft.offs != nil {
+			// Read from the source when the segments are written: the table says where.
+			if ft.outTrack.sampleEntry == nil {
+				data, err := readSample(ps.src, s.offset, s.size)
+				if err != nil {
+					return errf("read sample: %w", err)
+				}
+				if ft.outTrack.sampleEntry, err = ft.outTrack.spec.sampleEntry(&ft.outTrack.mkv, data); err != nil {
+					return err
+				}
+			}
+			ft.offs = append(ft.offs, s.offset)
+			ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
+			if ft.ptsTS != nil {
+				ft.ptsTS = append(ft.ptsTS, s.ctsTicks)
+			}
+			processed += int64(s.size)
+			if progress != nil {
+				progress(processed, ps.size)
+			}
+			continue
+		}
 		data, err := readSample(ps.src, s.offset, s.size)
 		if err != nil {
 			return errf("read sample: %w", err)

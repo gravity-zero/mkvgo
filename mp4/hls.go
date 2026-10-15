@@ -8,11 +8,14 @@ package mp4
 // multi-audio (VF/VO) selection for free. This is the "copy rung" of an ABR
 // ladder: mkvgo does the packaging; bitrate variants remain a transcoder's job.
 //
-// Memory is bounded: per-sample metadata (size/pts/sync - the same order of
-// magnitude the progressive muxer already holds) is kept in RAM, while the
-// sample *bytes* are streamed to one temp file per track and read back
-// sequentially when the segments are written. Subtitle cues are small text and
-// are held in RAM. Nothing holds the whole media.
+// Memory is bounded: per-sample metadata (size/pts/sync/offset - the same
+// order of magnitude the progressive muxer already holds) is kept in RAM,
+// while the sample *bytes* stay in the source until the segments are written:
+// a local file is walked by its block headers, then read once, at the recorded
+// offsets. A network source (each read a round trip) or a track that is not
+// stored as it is written (compressed, converted) streams its bytes to one
+// temp file per track, read back sequentially. Subtitle cues are small text
+// and are held in RAM. Nothing holds the whole media.
 
 import (
 	"bufio"
@@ -20,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"strings"
 
@@ -121,11 +125,14 @@ func (b *bufferedTemp) Close() error {
 // timescale, the collected samples, the temp file holding their bytes, and the
 // derived durations/offset.
 type fragTrack struct {
-	outTrack   *outTrack
-	timescale  uint32
-	samples    []fragSample
-	tmp        mkv.WriteSeekCloser
-	tmpPath    string
+	outTrack  *outTrack
+	timescale uint32
+	samples   []fragSample
+	tmp       mkv.WriteSeekCloser
+	tmpPath   string
+	// offs, for a track read from the source directly (no temp file), holds
+	// each sample's offset there: its stored bytes, after any stripped header.
+	offs       []int64
 	offsetMs   int64
 	durMediaTS int64
 	durMovieMs int64
@@ -264,12 +271,27 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		return nil, err
 	}
 
+	// A local source is read again for the segments, at the offsets the walk
+	// records; a track it cannot give as stored goes through a temp file.
+	src, err := openDirectSource(&o, fs, srcPath)
+	if err != nil {
+		return nil, err
+	}
+	var srcStamp string
+	if src != nil {
+		defer src.Close()
+		fi, err := fs.DoStat(srcPath)
+		if err != nil {
+			return nil, err
+		}
+		srcStamp = statStamp(fi)
+	}
 	fts := make([]*fragTrack, len(media))
 	routing := make(map[uint64]*fragTrack, len(media))
 	// Best-effort cleanup of the per-track temp files, armed before the first is created.
 	defer func() {
 		for _, ft := range fts {
-			if ft == nil {
+			if ft == nil || ft.tmpPath == "" {
 				continue
 			}
 			if ft.tmp != nil {
@@ -279,12 +301,17 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}()
 	for i, t := range media {
-		tmpPath := filepath.Join(outputDir, fmt.Sprintf(".mkvgo-hls-t%d.tmp", t.mp4ID))
-		tmp, cerr := fs.DoCreate(tmpPath)
-		if cerr != nil {
-			return nil, cerr
+		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t)}
+		if src != nil && directTrack(t) {
+			fts[i].offs = []int64{}
+		} else {
+			tmpPath := filepath.Join(outputDir, fmt.Sprintf(".mkvgo-hls-t%d.tmp", t.mp4ID))
+			tmp, cerr := fs.DoCreate(tmpPath)
+			if cerr != nil {
+				return nil, cerr
+			}
+			fts[i].tmp, fts[i].tmpPath = newBufferedTemp(tmp), tmpPath
 		}
-		fts[i] = &fragTrack{outTrack: t, timescale: mediaTimescale(t), tmp: newBufferedTemp(tmp), tmpPath: tmpPath}
 		if ts := mp4NativeTimescale(ps, t); ts != 0 {
 			fts[i].timescale, fts[i].ptsTS = ts, []int64{}
 		}
@@ -296,7 +323,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if ps.mv != nil {
 		err = collectFromMP4(ctx, ps, routing, subs, o.Progress)
 	} else {
-		err = collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress)
+		err = collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress, src)
 	}
 	if err != nil {
 		return nil, err
@@ -305,10 +332,12 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if len(ft.samples) == 0 {
 			return nil, errf("track %d produced no samples", ft.outTrack.mp4ID)
 		}
-		if cerr := ft.tmp.Close(); cerr != nil {
-			return nil, cerr
+		if ft.tmp != nil {
+			if cerr := ft.tmp.Close(); cerr != nil {
+				return nil, cerr
+			}
+			ft.tmp = nil
 		}
-		ft.tmp = nil
 		grid := audioGridTS(ft.outTrack, ft.timescale)
 		if grid == 0 {
 			grid = laceGridTS(ft.outTrack, len(ft.samples), func(i int) int64 { return ft.samples[i].blockPtsMs }, ft.timescale)
@@ -356,7 +385,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if o.SingleFile {
 		// One progressive file per rendition (init + sidx + fragments); the
 		// playlists reference it by byte ranges.
-		segs, rends, err = writeSingleFileRenditions(ctx, &o, fs, outputDir, fts, bounds, meta)
+		segs, rends, err = writeSingleFileRenditions(ctx, &o, fs, outputDir, fts, bounds, meta, src)
 		if err != nil {
 			return nil, err
 		}
@@ -373,7 +402,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 				return nil, err
 			}
 		}
-		segs, iframesAll, err = writeSegments(ctx, &o, fs, outputDir, fts, bounds)
+		segs, iframesAll, err = writeSegments(ctx, &o, fs, outputDir, fts, bounds, src)
 		if err != nil {
 			return nil, err
 		}
@@ -386,6 +415,16 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			if err := fs.DoWriteFile(filepath.Join(outputDir, "iframe.m3u8"), pl, 0o644); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if src != nil {
+		// The segments were read from the source after the walk: it must still be the file walked.
+		fi, err := fs.DoStat(srcPath)
+		if err != nil {
+			return nil, err
+		}
+		if statStamp(fi) != srcStamp {
+			return nil, errf("the source changed during the remux: %w", ErrSourceChanged)
 		}
 	}
 	durs := make([]float64, len(segs))
@@ -470,7 +509,7 @@ func planSubTracks(c *mkv.Container, o Options) []hlsSubTrack {
 // WebVTT cues. Lazily builds the sample entry for codecs that derive it from the
 // first frame.
 func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container,
-	routing map[uint64]*fragTrack, subs []hlsSubTrack, progress mkv.ProgressFunc) error {
+	routing map[uint64]*fragTrack, subs []hlsSubTrack, progress mkv.ProgressFunc, direct io.ReadSeeker) error {
 	src, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return err
@@ -492,6 +531,23 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 	subRouting := make(map[uint64]*hlsSubTrack, len(subs))
 	for i := range subs {
 		subRouting[subs[i].track.ID] = &subs[i]
+	}
+	// The tracks read from the source later are walked by their headers alone.
+	var headerOnly, kept []uint64
+	for id, ft := range routing {
+		kept = append(kept, id)
+		if ft.offs != nil {
+			headerOnly = append(headerOnly, id)
+		}
+	}
+	if len(headerOnly) > 0 {
+		for id := range subRouting {
+			kept = append(kept, id)
+		}
+		br.KeepTracks(kept...)
+		br.SetHeaderOnly(true)
+		br.SetHeaderOnlyTracks(headerOnly...)
+		br.SetSparse(true)
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -518,6 +574,12 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if !ok {
 			continue
 		}
+		if ft.offs != nil {
+			if err := collectDirectSample(ft, b, direct); err != nil {
+				return err
+			}
+			continue
+		}
 		data, err := ft.outTrack.mkv.DecodePayload(b.Data)
 		if err != nil {
 			return err
@@ -540,6 +602,24 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)),
 			ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe})
 	}
+	return nil
+}
+
+// collectDirectSample records a block read by its header alone: its size and
+// place in the source. The track's first frame is read, for what is learned
+// from it.
+func collectDirectSample(ft *fragTrack, b mkv.Block, src io.ReadSeeker) error {
+	t := ft.outTrack
+	size := int64(len(t.mkv.HeaderStripping)) + b.Size
+	if size > math.MaxUint32 {
+		return errf("track %d: sample of %d bytes exceeds MP4 sample size limit", t.mkv.ID, size)
+	}
+	if err := learnFirstFrame(t, b, src); err != nil {
+		return err
+	}
+	ft.offs = append(ft.offs, b.DataOffset)
+	ft.samples = append(ft.samples, fragSample{size: uint32(size),
+		ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe})
 	return nil
 }
 
@@ -740,25 +820,14 @@ type iframeRef struct {
 // writeSegments writes each rendition's .m4s per boundary interval and returns
 // the per-boundary aggregate duration/bytes (across renditions) plus the
 // video I-frame references, for the playlists.
-func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64) ([]segInfo, []iframeRef, error) {
-	// A sequential reader over each track's temp file: samples are stored in
-	// decode order, segments are emitted in order and keyframe-aligned (closed
-	// GOPs), so each segment's bytes are a contiguous forward run.
-	readers := make([]mkv.ReadSeekCloser, len(fts))
-	for i, ft := range fts {
-		r, err := fs.DoOpen(ft.tmpPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		readers[i] = r
+func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts []*fragTrack, bounds []int64, src mkv.ReadSeekCloser) ([]segInfo, []iframeRef, error) {
+	// Each track's samples in decode order: segments are emitted in order and
+	// keyframe-aligned (closed GOPs), so a temp file is read as one forward run.
+	media, err := openTrackMedia(fs, fts, src, make([]byte, fullPassBuf), o.Encrypt != nil || o.CENC != nil)
+	if err != nil {
+		return nil, nil, err
 	}
-	defer func() {
-		for _, r := range readers {
-			if r != nil {
-				r.Close()
-			}
-		}
-	}()
+	defer closeTrackMedia(media)
 
 	video := pickVideoFrag(fts)
 	cursors := make([]int, len(fts)) // next unwritten sample index per track
@@ -776,6 +845,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 
 		var segBytes int64
 		for i, ft := range fts {
+			from := cursors[i]
 			seg := segmentWindow(ft, &cursors[i], segEnd)
 			var cipherData []byte
 			if o.CENC != nil {
@@ -784,11 +854,9 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				// samples themselves), computed here - the same "know the size
 				// before the size is needed" two-pass principle buildMoof
 				// already applies to trun's data_offset.
-				plain := make([]byte, seg.dataLen)
-				if seg.dataLen > 0 {
-					if _, err := io.ReadFull(readers[i], plain); err != nil {
-						return nil, nil, errf("read segment media: %w", err)
-					}
+				plain, err := media[i].read(seg.samples, from, seg.dataLen)
+				if err != nil {
+					return nil, nil, err
 				}
 				td, cipher, err := prepareCENCSegment(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
 				if err != nil {
@@ -806,15 +874,13 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 			case o.Encrypt != nil:
 				// Whole-segment AES-128-CBC: assemble in memory (one segment at
 				// a time), encrypt, write.
+				buf, err := media[i].read(seg.samples, from, seg.dataLen)
+				if err != nil {
+					return nil, nil, err
+				}
 				plain := make([]byte, 0, int64(len(head))+seg.dataLen)
 				plain = append(plain, head...)
-				if seg.dataLen > 0 {
-					buf := make([]byte, seg.dataLen)
-					if _, err := io.ReadFull(readers[i], buf); err != nil {
-						return nil, nil, errf("read segment media: %w", err)
-					}
-					plain = append(plain, buf...)
-				}
+				plain = append(plain, buf...)
 				enc, err := o.Encrypt.encryptSegment(plain, uint32(k))
 				if err != nil {
 					return nil, nil, err
@@ -836,7 +902,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				if err != nil {
 					return nil, nil, err
 				}
-				werr := writeSegmentFile(out, head, seg.dataLen, readers[i])
+				werr := media[i].write(out, head, seg.samples, from, seg.dataLen)
 				if cerr := out.Close(); werr == nil {
 					werr = cerr
 				}

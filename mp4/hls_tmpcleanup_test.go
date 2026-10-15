@@ -12,7 +12,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// A temp file created before DoCreate fails for the next track is closed and removed.
+// A network source goes through temp files: one created before DoCreate fails for the next track is closed and removed.
 func TestRemuxToHLSCleansTempsWhenCreateFails(t *testing.T) {
 	src := openGOPSource(t, 3, false, true)
 	out := t.TempDir()
@@ -26,7 +26,7 @@ func TestRemuxToHLSCleansTempsWhenCreateFails(t *testing.T) {
 		}
 		return os.Create(p)
 	}}
-	err := RemuxToHLS(context.Background(), src, out, Options{SegmentMs: openGOPMs, FS: ffs})
+	err := RemuxToHLS(context.Background(), src, out, Options{SegmentMs: openGOPMs, FS: ffs, SourceAccess: SourceNetwork})
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("err = %v, want the create failure", err)
 	}

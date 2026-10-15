@@ -39,6 +39,10 @@ const (
 	// threshold reading forward through the growing window is cheaper, and the
 	// walk stays a bulk sequential read.
 	seekSkipMin = 64 << 10
+
+	// sparseChunk is every read of a sparse walk (SetSparse): a few block
+	// headers, never the payload behind them.
+	sparseChunk = 256
 )
 
 // errFilteredBlock is parseBlock's signal that the block belongs to a track
@@ -66,6 +70,8 @@ type countingReader struct {
 	pos   int64  // logical position of the next byte the caller consumes
 	end   int64  // source size, resolved on the first seek-skip; -1 until then
 	chunk int    // current read-ahead size; grows sequentially, shrinks on jumps
+	// sparse seeks over every skipped byte past the window and keeps reads at sparseChunk (SetSparse).
+	sparse bool
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
@@ -80,6 +86,10 @@ func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
 
 // growChunk doubles the read-ahead after a sequential fill, up to bufSize.
 func (c *countingReader) growChunk() {
+	if c.sparse {
+		c.chunk = sparseChunk
+		return
+	}
 	if c.chunk < len(c.buf) {
 		c.chunk *= 2
 		if c.chunk > len(c.buf) {
@@ -171,7 +181,7 @@ func (c *countingReader) discard(n int64) error {
 		c.pos += n
 		return nil
 	}
-	if n-avail <= seekSkipMin {
+	if n-avail <= seekSkipMin && !c.sparse {
 		_, err := io.CopyN(io.Discard, c, n)
 		return err
 	}
@@ -200,8 +210,16 @@ func (c *countingReader) discard(n int64) error {
 		return err
 	}
 	c.pos = target
-	c.chunk = minChunk
+	c.chunk = c.restartChunk()
 	return nil
+}
+
+// restartChunk is the read-ahead after a jump.
+func (c *countingReader) restartChunk() int {
+	if c.sparse {
+		return sparseChunk
+	}
+	return minChunk
 }
 
 // reset re-seats the reader at pos, keeping the window storage. A walk that
@@ -213,7 +231,7 @@ func (c *countingReader) reset(pos int64) error {
 	}
 	c.r, c.w = 0, 0
 	c.pos = pos
-	c.chunk = minChunk
+	c.chunk = c.restartChunk()
 	return nil
 }
 
@@ -532,6 +550,15 @@ func (br *BlockReader) SetHeaderOnlyTracks(tracks ...uint64) {
 			br.headerOnlyFor[id] = true
 		}
 	}
+}
+
+// SetSparse makes a header-only walk of a local file seek over every payload
+// it skips, however small, reading a few KiB at a time: the walk reads the
+// block headers and little else. A network source pays a round trip per read
+// and keeps the default.
+func (br *BlockReader) SetSparse(on bool) {
+	br.r.sparse = on
+	br.r.chunk = br.r.restartChunk()
 }
 
 // skipsPayload reports whether header-only mode applies to this track's blocks.

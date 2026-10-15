@@ -4,6 +4,21 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`RemuxToHLS` reads the source once and writes the output once.** A full
+  pass streamed every sample's bytes to one temp file per track, then copied
+  them into the segments: the source was read once but the media written
+  twice and read back once (a 4.4 GB source: 9.2 GB read, 9.2 GB written for
+  a 4.6 GB presentation). A local source is now walked by its block headers
+  alone, each sample's place recorded, and read once at those offsets as the
+  segments are written, in 1 MiB writes - 4.7 GB read, 4.6 GB written,
+  segments byte-identical, half the system time. A network source
+  (`Options.SourceAccess`, else the file's mount), a compressed track or a
+  converted one keeps the temp file.
+
 ## [0.52.0] - 2026-10-15
 
 ### Added
