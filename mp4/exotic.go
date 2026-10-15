@@ -3,6 +3,7 @@ package mp4
 import (
 	"encoding/binary"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -337,3 +338,7 @@ func carriableTracks(mv *movie, o *Options) error {
 	}
 	return nil
 }
+
+// clusterSpanMax is the widest timecode spread a cluster's SimpleBlocks can
+// encode at the millisecond timecode scale.
+const clusterSpanMax = math.MaxInt16

@@ -487,3 +487,24 @@ func TestTrunVersion0NegativeOffsetIsSigned(t *testing.T) {
 		t.Fatalf("RemuxFromMP4: %v", err)
 	}
 }
+
+// TestClusterSplitsOnWideComposition: two blocks of one decode window whose
+// presentation times lie further apart than a SimpleBlock's int16 offset go
+// to separate clusters instead of failing the remux.
+func TestClusterSplitsOnWideComposition(t *testing.T) {
+	moof, mdat := oneFragment(1, 0, []uint32{10, 10}, []uint32{1024, 1024}, []uint32{0, 1920000}, 1) // the second frame shown 40 s later
+	data := fragmentedAAC(0, moof, mdat)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "wide.mp4")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "wide.mkv")
+	if err := RemuxFromMP4(context.Background(), src, out); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
+	_, blocks := readMKV(t, out)
+	if len(blocks) != 2 || blocks[0].Timecode != 0 || blocks[1].Timecode != (1024+1920000)*1000/48000 {
+		t.Errorf("blocks = %+v, want two at 0 and 40021 ms", blocks)
+	}
+}

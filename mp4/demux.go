@@ -238,6 +238,8 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 	var (
 		group        []mkv.Block
 		groupStart   int64
+		groupLo      int64 // the group's lowest and highest block timecode: a SimpleBlock's offset is an int16
+		groupHi      int64
 		groupHasData bool
 		processed    int64
 	)
@@ -280,15 +282,18 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 			block.Duration = s.durMs
 		}
 
-		if groupHasData && s.dtsMs-groupStart >= clusterWindowMs {
+		if groupHasData && (s.dtsMs-groupStart >= clusterWindowMs ||
+			max(groupHi, block.Timecode)-min(groupLo, block.Timecode) > clusterSpanMax) {
 			if err := flush(); err != nil {
 				return err
 			}
 		}
 		if !groupHasData {
 			groupStart = s.dtsMs
+			groupLo, groupHi = block.Timecode, block.Timecode
 			groupHasData = true
 		}
+		groupLo, groupHi = min(groupLo, block.Timecode), max(groupHi, block.Timecode)
 		group = append(group, block)
 	}
 	if err := flush(); err != nil {

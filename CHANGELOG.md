@@ -47,6 +47,8 @@ All notable changes to mkvgo are documented here. The format is based on
 - **A version 0 trun's composition offsets read signed**, as muxers write and
   demuxers read them: a negative offset read unsigned placed a frame 99 hours
   away and the remux failed ("outside SimpleBlock's int16 range").
+- **`from-mp4` opens a new cluster when a decode window's presentation times
+  spread wider than a SimpleBlock's offset can say**, instead of failing.
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it
