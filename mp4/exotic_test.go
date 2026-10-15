@@ -751,3 +751,34 @@ func TestZeroPictureSizeFromSPSOrRefused(t *testing.T) {
 		t.Errorf("remux err = %v, want the vp09 track refused for its 0x64530 picture", err)
 	}
 }
+
+// TestRemuxDropsUncarriableSubtitles: a subtitle track the output cannot
+// carry never fails from-mp4; it is dropped with its reason, as every
+// operation that writes MP4 drops an ASS or PGS track.
+func TestRemuxDropsUncarriableSubtitles(t *testing.T) {
+	stpp := box("stpp", append(make([]byte, 8), "\x00\x00\x00"...)) // an XMLSubtitleSampleEntry: namespace, schema, mime
+	ttml := soundTrak(2, 1000, 1000, stpp, emptyTables()...)
+	ttml = bytes.Replace(ttml, []byte("soun"), []byte("subt"), 1)
+	moof, mdat := oneFragment(1, 0, []uint32{10, 10}, []uint32{1024, 1024}, nil, 1)
+	data := append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), container("moov", mvhdBox(0),
+		soundTrak(1, 48000, 0, audioSampleEntry("mp4a", &stereo48k, esdsBox(0x40, fakeASC)), emptyTables()...),
+		ttml, container("mvex", trexBox(1), trexBox(2)))...)
+	data = append(append(data, moof...), mdat...)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "ttml.mp4")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var drops []DroppedTrack
+	err := RemuxFromMP4(context.Background(), src, filepath.Join(dir, "out.mkv"), Options{OnDrop: func(d DroppedTrack) { drops = append(drops, d) }})
+	if err != nil {
+		t.Fatalf("RemuxFromMP4 with a TTML track: %v, want the track dropped, not the remux refused", err)
+	}
+	if len(drops) != 1 || drops[0].ID != 2 || drops[0].Type != mkv.SubtitleTrack || drops[0].Codec != "stpp" || !strings.Contains(drops[0].Reason, "stpp") {
+		t.Errorf("drops = %+v, want the stpp subtitle track 2 with its reason", drops)
+	}
+	c, _ := readMKV(t, filepath.Join(dir, "out.mkv"))
+	if len(c.Tracks) != 1 || c.Tracks[0].Codec != "aac" {
+		t.Errorf("output tracks = %+v, want the aac track alone", c.Tracks)
+	}
+}

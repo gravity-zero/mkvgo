@@ -44,6 +44,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **One rule for every remux, in both directions**: an audio or video track
+  the output cannot carry fails the remux by name unless
+  `Options.SkipUnsupported` drops it; a subtitle track it cannot carry never
+  fails it and is dropped with its reason. `from-mp4` applied the first half
+  to subtitles too and refused a file for its TTML (`stpp`) or VobSub track,
+  where `to-mp4` and the HLS packaging drop an ASS or PGS track with a reason.
 - **A fragmented MP4's duration is the fragments'.** The head-only probe read
   it from the mvhd, which a fragmented file leaves at 0 (67 files of the test
   corpora without a duration) or at its moov part alone (a partially

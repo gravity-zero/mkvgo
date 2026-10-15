@@ -1289,7 +1289,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		tr.trackType = mkv.VideoTrack
 	case "soun":
 		tr.trackType = mkv.AudioTrack
-	case "text", "sbtl", "subp":
+	case "text", "sbtl", "subp", "subt": // subt: TTML (stpp) and other XML subtitles
 		tr.trackType = mkv.SubtitleTrack
 	default:
 		// hint/timecode/metadata - not media; surface it rather than dropping it.

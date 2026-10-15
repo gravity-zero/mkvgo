@@ -1011,7 +1011,7 @@ mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-nativ
 - `--hash` computes each track's content SHA-256 while the samples stream (no extra I/O) and stores them as freeform `ilst` atoms - the MP4 becomes self-verifying via `mkvgo verify`.
 - `--mp3-container-delay` carries an MP3 track's encoder delay as an edit list (like AAC). **Off by default**, because MP3's delay is already in its in-band Xing/LAME header - a derived edit list over-trims and desyncs a native MKV/WebM MP3. Opt in only to round-trip an MP3 that originated in an MP4 (rare), and pass it to `from-mp4` too.
 
-Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason.
+Subtitles never fail the remux: SRT and WebVTT are carried as `tx3g` by default; a subtitle whose format cannot be carried (e.g. ASS without `--flatten-subs`, or bitmap PGS/VOBSUB) is dropped with a reason. That is the one rule of every remux, `from-mp4` included: audio and video the output cannot carry fail it by name unless `--skip-unsupported` drops them, subtitles are dropped with a reason.
 
 Cover art IS carried: the first JPEG/PNG image attachment (one named `cover.*` preferred) becomes the iTunes `covr` atom, and `from-mp4` brings it back as an attachment.
 
@@ -1032,7 +1032,7 @@ Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3
 mkvgo from-mp4 [--skip-unsupported] [--mp3-container-delay] <input.mp4> <output.mkv>
 ```
 
-A track Matroska cannot carry - an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR, a big-endian float or signed 8-bit PCM), one whose configuration is not what its codec needs - fails the remux by name; `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others. A fragmented MP4's duration is its `mehd`'s, else the end of its fragments. A source without samples (an initialisation segment) is refused.
+The one rule of every remux, in both directions: an audio or video track the output cannot carry - here an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR, a big-endian float or signed 8-bit PCM), one whose configuration is not what its codec needs - fails the remux by name, and `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others; a subtitle track the output cannot carry (TTML `stpp`, VobSub `mp4s`, an encrypted one) never fails the remux and is dropped with its reason. A fragmented MP4's duration is its `mehd`'s, else the end of its fragments. A source without samples (an initialisation segment) is refused.
 
 QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
 (`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).

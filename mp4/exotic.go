@@ -316,8 +316,10 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 	}
 }
 
-// carriableTracks keeps the tracks a remux can carry, dropping the others
-// under Options.SkipUnsupported and refusing the remux otherwise.
+// carriableTracks keeps the tracks a remux can carry. An audio or video track
+// it cannot refuses the remux, or is dropped under Options.SkipUnsupported; a
+// subtitle track never does - it is dropped with its reason, the rule of every
+// operation that writes MP4.
 func carriableTracks(mv *movie, o *Options) error {
 	kept := mv.tracks[:0]
 	for i := range mv.tracks {
@@ -330,7 +332,7 @@ func carriableTracks(mv *movie, o *Options) error {
 			kept = append(kept, t)
 			continue
 		}
-		if !o.SkipUnsupported {
+		if !o.SkipUnsupported && t.trackType != mkv.SubtitleTrack {
 			return errf("track %d (%s): %s (set Options.SkipUnsupported to drop it)", t.trackID, t.codec, reason)
 		}
 		o.report(DroppedTrack{ID: uint64(t.trackID), Type: t.trackType, Codec: t.codec, Reason: reason})
