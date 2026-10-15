@@ -17,7 +17,7 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Stats(); got != (HLSPlanStats{}) {
+	if got := windowStats(plan); got != (HLSPlanStats{}) {
 		t.Fatalf("a plan nobody asked a segment of reports %+v", got)
 	}
 	get := func(name string) int64 {
@@ -32,7 +32,7 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 	video := get("seg00001.m4s")
 	audio := get("seg_a1_00001.m4s")
 	want := HLSPlanStats{WindowBuilds: 1, SharedRenditions: 1, BuiltBytes: video + audio, ServedBytes: video + audio}
-	if got := plan.Stats(); got != want {
+	if got := windowStats(plan); got != want {
 		t.Errorf("video then audio of one segment:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -42,13 +42,13 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 	want.WindowBuilds, want.WindowRebuilds = 2, 1
 	want.BuiltBytes += video + audio
 	want.ServedBytes += video
-	if got := plan.Stats(); got != want {
+	if got := windowStats(plan); got != want {
 		t.Errorf("the same video a second time:\n got %+v\nwant %+v", got, want)
 	}
 	get("seg_a1_00001.m4s") // served from the window the second video request built
 	want.SharedRenditions++
 	want.ServedBytes += audio
-	if got := plan.Stats(); got != want {
+	if got := windowStats(plan); got != want {
 		t.Errorf("then its audio:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -63,7 +63,7 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := tight.Stats()
+	got := windowStats(tight)
 	if got.WindowBuilds != 3 || got.WindowRebuilds != 0 || got.Evictions < 2 || got.DroppedBytes == 0 {
 		t.Errorf("three videos under a one-byte budget: %+v, want 3 builds, no rebuild, at least 2 evictions and dropped bytes", got)
 	}
@@ -82,11 +82,19 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got = off.Stats()
+	got = windowStats(off)
 	if got.WindowBuilds != 2 || got.WindowRebuilds != 1 || got.SharedRenditions != 0 {
 		t.Errorf("sharing off, video then audio: %+v, want 2 builds of which 1 rebuild, nothing shared", got)
 	}
 	if got.BuiltBytes != got.ServedBytes+got.DroppedBytes || got.ServedBytes != video+audio {
 		t.Errorf("sharing off: built %d, served %d (want %d), dropped %d", got.BuiltBytes, got.ServedBytes, video+audio, got.DroppedBytes)
 	}
+}
+
+// windowStats is the plan's counters without SourceReadBytes, whose value depends on the walks' read sizes and
+// has its own test (TestSourceReadBytesCountsEveryRead).
+func windowStats(p *HLSPlan) HLSPlanStats {
+	s := p.Stats()
+	s.SourceReadBytes = 0
+	return s
 }

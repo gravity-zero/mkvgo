@@ -179,6 +179,7 @@ type HLSPlan struct {
 	// guarded by winMu.
 	stats    HLSPlanStats
 	winBuilt []uint64
+	srcRead  atomic.Int64 // HLSPlanStats.SourceReadBytes
 	// subIndex is Options.SubtitleIndex when it matches the source's
 	// fingerprint, else the index derived from the source's Cues when they
 	// cue its subtitle blocks; nil otherwise, and the subtitle scans walk.
@@ -241,9 +242,13 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, err
 		}
 		p.fs, p.opts.FS = fs, fs // serving stats and opens the source itself
+		p.srcRead.Store(0)       // SourceReadBytes counts the requests, not the build
 		return p, nil
 	}
 	p, err := planHLS(ctx, srcPath, opts...)
+	if p != nil {
+		p.srcRead.Store(0)
+	}
 	if !known {
 		return p, err
 	}
@@ -942,6 +947,7 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 	if err != nil {
 		return err
 	}
+	defer p.countWalk(&br)()
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.SetHeaderOnly(headerOnly)
 	routing := make(map[uint64]*planTrack, len(p.tracks))
@@ -992,6 +998,7 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 	if err != nil {
 		return err
 	}
+	defer p.countWalk(&br)()
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(vid)
 	br.SetHeaderOnly(true)
@@ -1492,6 +1499,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	// are long enough to hold the whole window, this is what keeps the prefix
 	// ahead of it from being read. A miss simply walks from the cluster.
 	var br *reader.BlockReader
+	defer p.countWalk(&br)()
 	var ahead [][]aheadBlock
 	from := p.segPosAt(n)
 	if from.Valid() {
@@ -1800,6 +1808,7 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 		if err != nil {
 			return nil, nil, err
 		}
+		defer p.countWalk(&br)()
 		br.SetTrackDefaultDurations(p.trackDurs)
 		br.KeepTracks(keep[ti])
 		skip := structure && (!keepAudio || pt.ft.outTrack.spec.video)
@@ -2144,7 +2153,7 @@ func (p *HLSPlan) foreignBlockChecker(ctx context.Context, srcPath string, fs *m
 		if k+1 < len(p.offsets) {
 			end = p.offsets[k+1]
 		}
-		return spanHoldsForeignBlock(ctx, src, p.offsets[k], end)
+		return spanHoldsForeignBlock(ctx, countedSource{src, &p.srcRead}, p.offsets[k], end)
 	}
 	return confirm, func() {
 		if src != nil {
@@ -2498,6 +2507,7 @@ func (p *HLSPlan) coldAhead(ctx context.Context, src io.ReadSeeker, br *reader.B
 			if _, err := io.ReadFull(src, data); err != nil {
 				return nil, errf("read block ahead of its cluster: %w", err)
 			}
+			p.srcRead.Add(int64(len(data)))
 			b.Data = data
 		}
 	}
@@ -2997,6 +3007,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 		st.err = err
 		return err
 	}
+	defer p.countWalk(&br)()
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(track.track.ID)
 	var local []subtitle.Cue
@@ -3087,6 +3098,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 		return false, nil
 	}
 	var br *reader.BlockReader
+	defer p.countWalk(&br)()
 	var read int64
 	var cues cueResolver
 	defer func() {
@@ -3110,7 +3122,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 				return true, err
 			}
 			e := &entries[j]
-			if err := cues.resolve(src, e); err != nil {
+			if err := cues.resolve(countedSource{src, &p.srcRead}, e); err != nil {
 				return stale()
 			}
 			clusterMs, ok := p.clusterMs(e.Pos.ClusterTS)
@@ -3497,7 +3509,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 			return err
 		}
 		defer src.Close()
-		return readSampleRuns(ctx, src, samples, offs, dst)
+		return readSampleRuns(ctx, countedSource{src, &p.srcRead}, samples, offs, dst)
 	}
 
 	var out []byte

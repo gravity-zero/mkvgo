@@ -42,6 +42,12 @@ All notable changes to mkvgo are documented here. The format is based on
   WebM was remuxed into an MP4 no player decodes. The Matroska writer
   refuses to write a track it cannot keep encrypted.
 
+- **`HLSPlanStats.SourceReadBytes`**: what the plan's requests have read from
+  the source since it was built - every window walk, table, streamed segment
+  and subtitle scan, through whatever reader the plan opens - so a server
+  can sum what it reads over its plans where the process's I/O counters are
+  out of reach.
+
 ### Changed
 
 - **One rule for every remux, in both directions**: an audio or video track

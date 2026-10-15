@@ -2,6 +2,9 @@ package mp4
 
 import (
 	"context"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"io"
+	"sync/atomic"
 )
 
 // minWindowCacheBytes is the FLOOR of the default budget, not the whole of it:
@@ -353,6 +356,11 @@ type HLSPlanStats struct {
 	// block's span rather than timed on a measured stride that would drift.
 	// mkvgo diagnose reports such tracks as unsized-laced-audio.
 	SpreadLacedTracks int64
+	// SourceReadBytes is how many bytes the plan's requests have read from the
+	// source since the plan was built - every window, table, streamed segment
+	// and subtitle scan, through whatever reader the plan opens - cumulative;
+	// the build's own walks are not counted.
+	SourceReadBytes int64
 }
 
 // Stats returns the plan's window counters. Safe to call while segments are
@@ -360,7 +368,30 @@ type HLSPlanStats struct {
 func (p *HLSPlan) Stats() HLSPlanStats {
 	p.winMu.Lock()
 	defer p.winMu.Unlock()
-	return p.stats
+	s := p.stats
+	s.SourceReadBytes = p.srcRead.Load()
+	return s
+}
+
+// countWalk returns the deferred step that adds what a block reader read of the source to SourceReadBytes.
+func (p *HLSPlan) countWalk(br **reader.BlockReader) func() {
+	return func() {
+		if *br != nil {
+			p.srcRead.Add((*br).BytesRead())
+		}
+	}
+}
+
+// countedSource is the plan's source with every Read added to SourceReadBytes.
+type countedSource struct {
+	io.ReadSeeker
+	n *atomic.Int64
+}
+
+func (c countedSource) Read(p []byte) (int, error) {
+	n, err := c.ReadSeeker.Read(p)
+	c.n.Add(int64(n))
+	return n, err
 }
 
 // learnOtherRate folds one window's non-video payload bytes into the lightest rate seen (otherRate).

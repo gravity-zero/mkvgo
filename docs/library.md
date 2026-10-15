@@ -492,7 +492,13 @@ rendition asked for after its window was collected or evicted),
 uncollected) and `BuiltBytes` / `ServedBytes` / `DroppedBytes`. A rebuild is a
 full read of the window: a plan whose `WindowRebuilds` grows with its audience
 is reading its source more than once per viewer. An MP4-source plan reads each
-rendition's samples on their own and counts nothing here.
+rendition's samples on their own and counts nothing of the windows here.
+`SourceReadBytes` is what the plan's requests have read from the source since
+it was built (the build's own walks are not counted), cumulative and whatever
+the source (Matroska or MP4, a local file or a custom FS): every window walk,
+table, streamed segment and subtitle scan - the figure a server sums over its
+live and evicted plans to know what it reads, where the process's own I/O
+counters are out of reach.
 
 ```go
 st := plan.Stats()

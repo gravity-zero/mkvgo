@@ -479,7 +479,7 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 // large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti int, off, n int64) (int64, error) {
 	// Audio sits in short runs between video frames: read run by run, through the small frames only.
-	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts()}
+	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts(), read: &p.srcRead}
 	defer c.release()
 	// clip is the part [a, b) of a piece spanning [pos, pos+size) that falls in the range.
 	clip := func(pos, size int64) (a, b int64, ok bool) {
@@ -659,7 +659,9 @@ func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []spa
 		wg.Add(1)
 		go func(k int, r read) {
 			defer func() { <-sem; wg.Done() }()
-			if n, err := c.file.ReadAt(buf[r.at:r.at+r.end-r.off], r.off); err != nil && (err != io.EOF || int64(n) < r.end-r.off) {
+			n, err := c.file.ReadAt(buf[r.at:r.at+r.end-r.off], r.off)
+			c.count(int64(n))
+			if err != nil && (err != io.EOF || int64(n) < r.end-r.off) {
 				errs[k] = err
 			}
 		}(k, r)
@@ -751,6 +753,14 @@ type spanCopier struct {
 	pendingN int
 	stage    *[]byte
 	written  int64
+	read     *atomic.Int64 // the plan's SourceReadBytes, when the copier serves a plan
+}
+
+// count adds n source bytes read to the plan's SourceReadBytes.
+func (c *spanCopier) count(n int64) {
+	if c.read != nil {
+		c.read.Add(n)
+	}
 }
 
 // emit queues bytes the caller holds (a head, a stripped header).
@@ -782,6 +792,7 @@ func (c *spanCopier) copy(w io.Writer, off, n int64) error {
 					return err
 				}
 				m, err := rf.ReadFrom(io.LimitReader(c.file, n))
+				c.count(m)
 				c.written += m
 				off += m
 				n -= m
@@ -809,6 +820,7 @@ func (c *spanCopier) copy(w io.Writer, off, n int64) error {
 			want = want[:rest]
 		}
 		m, err := io.ReadFull(c.src, want)
+		c.count(int64(m))
 		if m == 0 {
 			if err == nil || errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF // the source ends before the sample does

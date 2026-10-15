@@ -247,7 +247,7 @@ func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (
 		return nil, err
 	}
 	r := &sampleReader{p: p, t: t, ti: ti, src: src, bufp: streamBufs.Get().(*[]byte), prefix: p.tracks[ti].ft.outTrack.mkv.HeaderStripping}
-	r.c = &spanCopier{src: src, buf: *r.bufp, exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: true}
+	r.c = &spanCopier{src: src, buf: *r.bufp, exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: true, read: &p.srcRead}
 	if f, ok := src.(*os.File); ok {
 		r.c.file = f
 	}

@@ -72,6 +72,7 @@ type countingReader struct {
 	chunk int    // current read-ahead size; grows sequentially, shrinks on jumps
 	// sparse seeks over every skipped byte past the window and keeps reads at sparseChunk (SetSparse).
 	sparse bool
+	nread  int64 // bytes read from src so far
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
@@ -101,6 +102,7 @@ func (c *countingReader) growChunk() {
 // fill loads the next chunk into the (empty) window.
 func (c *countingReader) fill() error {
 	n, err := c.src.Read(c.buf[:c.chunk])
+	c.nread += int64(n)
 	if n == 0 {
 		if err == nil {
 			err = io.ErrNoProgress
@@ -118,6 +120,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 			// Large read with an empty window: straight into p.
 			n, err := c.src.Read(p)
 			c.pos += int64(n)
+			c.nread += int64(n)
 			c.growChunk()
 			return n, err
 		}
@@ -813,6 +816,14 @@ func (br *BlockReader) SetSkipDamage(on bool) { br.skipDamage = on }
 // SkippedBytes is how many bytes of damaged regions a SetSkipDamage walk has
 // passed over so far.
 func (br *BlockReader) SkippedBytes() int64 { return br.skippedBytes }
+
+// BytesRead is how many bytes the reader has read from its source so far.
+func (br *BlockReader) BytesRead() int64 {
+	if br.r == nil {
+		return 0
+	}
+	return br.r.nread
+}
 
 // Next returns the next block, io.EOF at the clean end of the walk. See
 // DamageError and SetSkipDamage for an unreadable element in mid-file.
