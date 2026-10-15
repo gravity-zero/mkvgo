@@ -73,6 +73,8 @@ type inTrack struct {
 	keyframesMs    []int64 // sync-sample presentation times (sampleKeyframes mode); nil otherwise
 	sampleEndMs    int64   // last sample's cts (sampleKeyframes mode), for the movie duration
 	sttsClipped    bool    // the stts states a negative delta: the samples' timeline does not give the duration
+	unsupported    string  // why a remux cannot carry the track; "" when it can
+	encryption     string  // the protected sample entry's scheme (schm); "" when the samples are clear
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"
@@ -870,18 +872,20 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		if err != nil {
 			return nil, err
 		}
-		if dropped != nil {
-			if !chapterTrackIDs[uint32(dropped.ID)] {
-				mv.dropped = append(mv.dropped, *dropped)
-			} else if mv.chapterTrak == nil {
-				mv.chapterTrak = b.payload
+		if chapterTrackIDs[tr.trackID] && (dropped != nil || tr.unsupported != "") {
+			if mv.chapterTrak == nil {
+				mv.chapterTrak = b.payload // the titles are read from it when there is no chpl
 			}
+			continue
+		}
+		if dropped != nil {
+			mv.dropped = append(mv.dropped, *dropped)
 			continue
 		}
 		mv.tracks = append(mv.tracks, tr)
 	}
-	if len(mv.tracks) == 0 {
-		return nil, errf("no convertible tracks found in MP4")
+	if len(mv.tracks) == 0 && len(mv.dropped) == 0 {
+		return nil, errf("no tracks found in MP4")
 	}
 	if mv.fragmented {
 		// The moov's sample tables are empty, so headerFrameRate gave 0. The
@@ -1241,7 +1245,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		tr.trackType = mkv.VideoTrack
 	case "soun":
 		tr.trackType = mkv.AudioTrack
-	case "text", "sbtl":
+	case "text", "sbtl", "subp":
 		tr.trackType = mkv.SubtitleTrack
 	default:
 		// hint/timecode/metadata - not media; surface it rather than dropping it.
@@ -1279,19 +1283,18 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		return tr, nil, err
 	}
 
-	stsd, ok := findMemBox(stblBoxes, "stsd")
-	if !ok {
-		return tr, nil, errf("stbl without stsd")
-	}
-	codecOK, fourcc, err := parseSampleEntry(&tr, stsd.payload)
-	if err != nil {
-		return tr, nil, err
-	}
-	if !codecOK {
-		// Recognised media handler but an unsupported sample entry - typically cover
-		// art (an attached picture in a jpeg/png/… video track). Surface it.
-		return tr, &DroppedTrack{ID: trackID, Type: tr.trackType, Codec: fourcc,
-			Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
+	if stsd, ok := findMemBox(stblBoxes, "stsd"); !ok {
+		tr.unsupported = "stbl without stsd: the track states no codec"
+	} else {
+		described, fourcc, err := parseSampleEntry(&tr, stsd.payload)
+		if err != nil {
+			return tr, nil, err
+		}
+		if !described {
+			// A still picture (cover art, an attached picture in a jpeg/png/… video track) is no media track.
+			return tr, &DroppedTrack{ID: trackID, Type: tr.trackType, Codec: fourcc,
+				Reason: "unsupported sample entry " + quoteFourcc(fourcc)}, nil
+		}
 	}
 
 	// The nominal frame rate (stts) and the frame count (stsz) are in the header, so
@@ -1320,7 +1323,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 		// tracks); only video collects the sync-sample keyframe times.
 		isVideo := tr.trackType == mkv.VideoTrack
 		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo, fileSize)
-		if err != nil {
+		if err != nil && tr.unsupported == "" {
 			return tr, nil, err
 		}
 		tr.sampleEndMs = endMs
@@ -1328,7 +1331,7 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 			tr.keyframesMs = kf
 		}
 	case sampleFull:
-		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
+		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil && tr.unsupported == "" {
 			return tr, nil, err
 		}
 	}
@@ -1784,11 +1787,12 @@ func parseKind(payload []byte) (scheme, value string) {
 	return scheme, string(rest)
 }
 
-// parseSampleEntry reads the first sample entry from an stsd box and fills the
-// track's codec, codec private data and dimensions. It returns ok=false for a
-// recognised-but-unsupported codec, along with the sample entry's fourcc so the
-// caller can report it.
-func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
+// parseSampleEntry describes the first sample entry of an stsd on the track:
+// a protected one through its original format, a PCM one by its layout, any
+// other by its fourcc, tr.unsupported naming what a remux cannot carry. It
+// reports false for a still picture (cover art), which the caller surfaces as
+// a dropped track instead. An error is a malformed stsd.
+func parseSampleEntry(tr *inTrack, stsdPayload []byte) (described bool, fourcc string, err error) {
 	if len(stsdPayload) < 8 {
 		return false, "", errf("stsd too short")
 	}
@@ -1800,67 +1804,103 @@ func parseSampleEntry(tr *inTrack, stsdPayload []byte) (bool, string, error) {
 	if len(entries) == 0 {
 		return false, "", errf("stsd has no sample entry")
 	}
-	entry := entries[0]
+	return parseEntry(tr, entries[0].typ, entries[0].payload)
+}
 
+// parseEntry is parseSampleEntry on one entry; a protected entry recurses on its original format.
+func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 	const visualHdr = 78
-	audioHdr := audioExtOffset(entry.payload)
-
-	switch entry.typ {
+	audioHdr := audioExtOffset(payload)
+	tr.codec = typ
+	var err error
+	switch typ {
+	case "encv", "enca", "encs", "enct":
+		original, scheme := protectedEntry(payload, visualHdr, audioHdr, 8, 16)
+		tr.encryption = scheme
+		if original == "" || original == typ {
+			describeEntry(tr, payload)
+			tr.unsupported = "protected sample entry " + quoteFourcc(typ) + " without an original format (sinf/frma)"
+			return true, typ, nil
+		}
+		_, _, err := parseEntry(tr, original, payload)
+		return true, typ, err
+	case "jpeg", "png ", "gif ", "tiff", "jpg ":
+		return false, typ, nil
 	case "avc1", "avc3", "dvav", "dva1":
 		// dvav/dva1 are Dolby Vision over AVC: an avcC plus a dvcC/dvvC box.
 		tr.codec = "h264"
-		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "avcC")
+		err = extractVisual(tr, payload, visualHdr, "avcC")
 	case "hvc1", "hev1", "dvhe", "dvh1":
 		// dvhe/dvh1 are Dolby Vision over HEVC: an hvcC plus a dvcC/dvvC box.
 		tr.codec = "hevc"
-		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "hvcC")
+		err = extractVisual(tr, payload, visualHdr, "hvcC")
 	case "av01", "dav1":
 		// dav1 is Dolby Vision over AV1: an av1C plus a dvvC box.
 		tr.codec = "av1"
-		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "av1C")
+		err = extractVisual(tr, payload, visualHdr, "av1C")
 	case "vp09":
 		// The vpcC (FullBox form) becomes the Matroska CodecPrivate, so the
 		// colour/bit-depth it carries survives into MKV (the reader parses both
 		// forms).
 		tr.codec = "vp9"
-		return true, entry.typ, extractVisual(tr, entry.payload, visualHdr, "vpcC")
+		err = extractVisual(tr, payload, visualHdr, "vpcC")
 	case "mp4a":
-		ok, err := parseMP4A(tr, entry.payload, audioHdr)
-		return ok, entry.typ, err
+		var ok bool
+		ok, err = parseMP4A(tr, payload, audioHdr)
+		if err == nil && !ok {
+			tr.unsupported = "mp4a entry of an audio object type mkvgo has no Matroska form for"
+		}
 	case "Opus":
 		tr.codec = "opus"
-		return true, entry.typ, extractOpus(tr, entry.payload, audioHdr)
+		err = extractOpus(tr, payload, audioHdr)
 	case "ac-3":
 		tr.codec = "ac3"
-		parseAudioFields(tr, entry.payload)
-		if dac3, err := childConfig(entry.payload, audioHdr, "dac3"); err == nil {
+		parseAudioFields(tr, payload)
+		if dac3, err := childConfig(payload, audioHdr, "dac3"); err == nil {
 			if ch := ac3Channels(dac3); ch > 0 {
 				tr.channels = ch
 			}
 		}
-		return true, entry.typ, nil
 	case "ec-3":
 		tr.codec = "eac3"
-		parseAudioFields(tr, entry.payload)
-		if dec3, err := childConfig(entry.payload, audioHdr, "dec3"); err == nil {
+		parseAudioFields(tr, payload)
+		if dec3, err := childConfig(payload, audioHdr, "dec3"); err == nil {
 			if ch := eac3Channels(dec3); ch > 0 {
 				tr.channels = ch
 			}
 		}
-		return true, entry.typ, nil
 	case "fLaC":
 		tr.codec = "flac"
-		return true, entry.typ, extractFLAC(tr, entry.payload, audioHdr)
+		err = extractFLAC(tr, payload, audioHdr)
 	case "tx3g":
 		tr.codec = "srt" // tx3g timed text → S_TEXT/UTF8
-		return true, entry.typ, nil
 	case "wvtt":
 		tr.codec = "webvtt" // native WebVTT → S_TEXT/WEBVTT
-		extractWVTTConfig(tr, entry.payload)
-		return true, entry.typ, nil
+		extractWVTTConfig(tr, payload)
+	case "samr", "sawb", "sawp":
+		// AMR is mono by definition; the 3GPP AMRSampleEntry's channelcount is a reserved 2.
+		describeEntry(tr, payload)
+		tr.channels = 1
+		tr.unsupported = "sample entry " + quoteFourcc(typ) + " has no Matroska form in mkvgo"
+	case "mhm1", "mha1", "mhm2", "mha2":
+		// MPEG-H: the entry's channelcount is 0; the mhaC's reference layout (CICP) gives the count.
+		describeEntry(tr, payload)
+		if mhaC, err := childConfig(payload, audioHdr, "mhaC"); err == nil && len(mhaC) >= 3 {
+			if ch := cicpChannels(mhaC[2]); ch > 0 {
+				tr.channels = ch
+			}
+		}
+		tr.unsupported = "sample entry " + quoteFourcc(typ) + " has no Matroska form in mkvgo"
 	default:
-		return false, entry.typ, nil
+		describeEntry(tr, payload)
+		tr.unsupported = "sample entry " + quoteFourcc(typ) + " has no Matroska form in mkvgo"
 	}
+	if err != nil {
+		// The entry's configuration is not what its codec needs: described as it stands, not carried.
+		describeEntry(tr, payload)
+		tr.codec, tr.codecPrivate, tr.unsupported = typ, nil, err.Error()
+	}
+	return true, typ, nil
 }
 
 // parseMP4A resolves an mp4a entry to either AAC or MP3 by reading the esds

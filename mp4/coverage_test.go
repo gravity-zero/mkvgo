@@ -213,12 +213,13 @@ func TestParseTrakStructuralErrors(t *testing.T) {
 		t.Error("minf without stbl: want error")
 	}
 
-	// stbl without stsd → error.
+	// stbl without stsd → a track described without a codec, which a remux cannot carry.
 	stblNoStsd := container("stbl", box("stts", nil))
-	minfNoStsd := container("minf", container("stbl", stblNoStsd))
+	minfNoStsd := container("minf", stblNoStsd)
 	mdiaNoStsd := container("mdia", mdhd, hdlr, minfNoStsd)
-	if _, _, err := parseTrak(append(tkhd, mdiaNoStsd...), 1<<20, 1000, sampleNone); err == nil {
-		t.Error("stbl without stsd: want error")
+	tr, dropped, err := parseTrak(append(tkhd, mdiaNoStsd...), 1<<20, 1000, sampleNone)
+	if err != nil || dropped != nil || tr.codec != "" || tr.unsupported == "" {
+		t.Errorf("stbl without stsd: err=%v dropped=%v codec=%q unsupported=%q, want a described track with no codec", err, dropped, tr.codec, tr.unsupported)
 	}
 }
 

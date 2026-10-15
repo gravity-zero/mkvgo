@@ -54,6 +54,9 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	for _, d := range mv.dropped {
 		o.report(d) // cover art / non-media tracks the MKV output does not carry
 	}
+	if err := carriableTracks(mv, &o); err != nil {
+		return err
+	}
 	tracks := buildMKVTracks(mv, o.MP3ContainerDelay)
 
 	dst, err := fs.DoCreate(dstPath)
@@ -174,6 +177,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			br := t.bitrate
 			mt.Bitrate = &br
 		}
+		mt.Encryption = t.encryption
 		mt.DurationMs = t.durationMs
 		if t.presentMs > 0 { // the edit list ends the presentation, not the media
 			mt.DurationMs = t.presentMs

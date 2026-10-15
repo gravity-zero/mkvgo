@@ -204,12 +204,16 @@ type Track struct {
 	// Compression is how the track's block payloads are encoded, from its
 	// ContentCompression element. CompressionNone is the zero value, so a Track
 	// built in code is uncompressed unless it says otherwise.
-	Compression      Compression `json:"-"`
-	Width            *uint32     `json:"width,omitempty"`
-	Height           *uint32     `json:"height,omitempty"`
-	Channels         *uint8      `json:"channels,omitempty"`
-	SampleRate       *float64    `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
-	OutputSampleRate *float64    `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
+	Compression Compression `json:"-"`
+	// Encryption names the scheme the track's payloads are encrypted with, as the source states it: a Matroska
+	// ContentEncryption ("AES-CTR", "AES-CBC", "AES", "DES", "3DES", "Twofish", "Blowfish", "unspecified") or an
+	// MP4 protected sample entry's schm ("cenc", "cbcs", "cbc1", "cens"). "" when the track is clear.
+	Encryption       string   `json:"encryption,omitempty"`
+	Width            *uint32  `json:"width,omitempty"`
+	Height           *uint32  `json:"height,omitempty"`
+	Channels         *uint8   `json:"channels,omitempty"`
+	SampleRate       *float64 `json:"sample_rate,omitempty"`        // base/core rate (Matroska SamplingFrequency 0xB5, MP4 AudioSampleEntry)
+	OutputSampleRate *float64 `json:"output_sample_rate,omitempty"` // SBR-doubled output rate (Matroska OutputSamplingFrequency 0x78B5, MP4 AAC SBR ext) - see EffectiveSampleRate
 	// StreamChannels is the channel count the stream itself states (first AC-3/E-AC-3 frame header, AAC AudioSpecificConfig), read under reader.WithInBandChannels from the first block only; ChannelsMismatch says it contradicts Channels, the caller choosing which to trust.
 	StreamChannels   *uint8 `json:"stream_channels,omitempty"`
 	ChannelsMismatch bool   `json:"channels_mismatch,omitempty"`

@@ -15,21 +15,22 @@ import (
 // hlsFlags holds the flags to-hls and hls-segment share; they must match
 // between the two for byte-identical output.
 type hlsFlags struct {
-	outDir         string
-	segMs          int64
-	encrypt        *mp4.HLSEncryption
-	cenc           *mp4.CENCOptions
-	prefix         string
-	singleFile     bool
-	keepTracks     []uint64
-	keepLangs      []string
-	subOffset      int64
-	chapterMarkers bool
-	noIFrames      bool
-	sourceAccess   mp4.SourceAccess
-	synthIndex     bool
-	audioShift     map[uint64]int64
-	rest           []string
+	outDir          string
+	segMs           int64
+	encrypt         *mp4.HLSEncryption
+	cenc            *mp4.CENCOptions
+	prefix          string
+	singleFile      bool
+	keepTracks      []uint64
+	keepLangs       []string
+	subOffset       int64
+	chapterMarkers  bool
+	noIFrames       bool
+	skipUnsupported bool
+	sourceAccess    mp4.SourceAccess
+	synthIndex      bool
+	audioShift      map[uint64]int64
+	rest            []string
 }
 
 func parseHLSFlags(args []string) hlsFlags {
@@ -136,6 +137,8 @@ func parseHLSFlags(args []string) hlsFlags {
 			}
 		case "--chapter-markers":
 			f.chapterMarkers = true
+		case "--skip-unsupported", "-skip-unsupported":
+			f.skipUnsupported = true
 		case "--no-iframes":
 			f.noIFrames = true
 		case "--source-access":
@@ -249,6 +252,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		SubtitleOffsetMs:       f.subOffset,
 		ChapterMarkers:         f.chapterMarkers,
 		NoIFrames:              f.noIFrames,
+		SkipUnsupported:        f.skipUnsupported,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,
 		SourceAccess:           f.sourceAccess,

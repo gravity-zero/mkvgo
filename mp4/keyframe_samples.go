@@ -39,7 +39,7 @@ func VideoSyncSamples(ctx context.Context, r io.ReadSeeker) (track *mkv.Track, s
 	tracks := buildMKVTracks(mv, false)
 	for i := range mv.tracks {
 		t := &mv.tracks[i]
-		if t.trackType != mkv.VideoTrack {
+		if t.trackType != mkv.VideoTrack || t.unsupported != "" || t.encryption != "" {
 			continue
 		}
 		for _, s := range t.samples {

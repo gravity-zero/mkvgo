@@ -67,22 +67,25 @@ func CmdToMP4(args []string) {
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }
 
-// CmdFromMP4 remuxes an MP4 file to MKV. --mp3-container-delay carries an MP3's
-// edit-list delay into Matroska CodecDelay (opt-in; see Options.MP3ContainerDelay).
+// CmdFromMP4 remuxes an MP4 file to MKV. --skip-unsupported drops the tracks Matroska cannot carry (an encrypted
+// track, a sample entry without a Matroska form); --mp3-container-delay carries an MP3's edit-list delay into
+// Matroska CodecDelay (opt-in; see Options.MP3ContainerDelay).
 func CmdFromMP4(args []string) {
-	var mp3delay bool
+	var mp3delay, skip bool
 	var rest []string
 	for _, a := range args {
 		switch a {
 		case "--mp3-container-delay", "-mp3-container-delay":
 			mp3delay = true
+		case "--skip-unsupported", "-skip-unsupported":
+			skip = true
 		default:
 			rejectFlagArg(a)
 			rest = append(rest, a)
 		}
 	}
 	if len(rest) < 2 {
-		Fatal("usage: mkvgo from-mp4 [--mp3-container-delay] <input.mp4> <output.mkv>")
+		Fatal("usage: " + CmdUsage["from-mp4"])
 	}
 	src, dst := rest[0], rest[1]
 	GuardOverwrite(dst)
@@ -90,6 +93,7 @@ func CmdFromMP4(args []string) {
 	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
+		SkipUnsupported:   skip,
 		MP3ContainerDelay: mp3delay,
 		OnDrop: func(d mp4.DroppedTrack) {
 			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)

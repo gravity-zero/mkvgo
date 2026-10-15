@@ -6,7 +6,31 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **The MP4 probe describes every track**, whatever a remux can do with it.
+  A file whose tracks were all protected or of a codec mkvgo cannot carry was
+  refused ("no convertible tracks found in MP4": 146 of 900 files of the
+  public test corpora - CENC/cbcs `encv`/`enca`, MPEG-H, AC-4, IAMF, AMR in
+  3GP, TTML). Such a track is now listed with what its entry states - the
+  codec or the raw fourcc, language, duration, channels and rate or picture
+  size (an AMR entry is mono whatever its reserved channelcount says; an
+  MPEG-H entry's channel count comes from its `mhaC` reference layout) - and
+  a protected entry is read through its original format (`sinf`/`frma`) with
+  `Track.Encryption` naming the scheme (`cenc`, `cbcs`; JSON `encryption`). `RemuxFromMP4` refuses such a track by name (set
+  `Options.SkipUnsupported`, the CLI's `from-mp4 --skip-unsupported`, to drop
+  it with a reason); the on-demand plans and `to-hls` refuse it through the
+  same track plan (`to-hls --skip-unsupported` drops it). A `subp` handler
+  (VobSub in MP4) is a subtitle track, described and refused by name rather
+  than dropped as a non-media handler. Only a still picture (cover art) and a
+  non-media handler remain `DroppedTrack`s.
+
 ### Changed
+
+- **A sample entry whose configuration is not what its codec needs** (an
+  `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
+  `stsd`) no longer fails the whole file: the track is described as it
+  stands and the remux refuses it by name.
 
 - **`RemuxToHLS` reads the source once and writes the output once.** A full
   pass streamed every sample's bytes to one temp file per track, then copied

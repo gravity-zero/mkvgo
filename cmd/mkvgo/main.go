@@ -246,7 +246,7 @@ Commands:
   serve         Serve one file's on-demand HLS plan over HTTP (ETag/Range/Cache-Control), no pre-generation; --direct/--auto serve the raw file for a direct-play client
   serve-growing Play while downloading: serve a still-growing file as HLS (EVENT playlist, VOD once it finishes)
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)
-  from-mp4      Remux an MP4 to MKV (--mp3-container-delay)
+  from-mp4      Remux an MP4 to MKV (--skip-unsupported, --mp3-container-delay)
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
   hls-segment   Serve one HLS resource on demand (master/playlist/init/N) - no pre-generation

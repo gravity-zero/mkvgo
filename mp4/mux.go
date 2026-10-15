@@ -278,6 +278,15 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 	for i := range c.Tracks {
 		t := c.Tracks[i]
 
+		// An encrypted track's bytes are not its frames: mkvgo does not decrypt.
+		if t.Encryption != "" {
+			reason := "encrypted (" + t.Encryption + "): mkvgo does not decrypt"
+			if o.SkipUnsupported {
+				o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: reason})
+				continue
+			}
+			return nil, nil, errf("track %d (%s) is %s (set Options.SkipUnsupported to drop it)", t.ID, t.Codec, reason)
+		}
 		// Subtitles never fail the remux: they are either carried or dropped with a
 		// reason, so a stray subtitle codec cannot block an otherwise-fine file.
 		var spec codecSpec

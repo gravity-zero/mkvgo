@@ -215,6 +215,9 @@ func CmdProbe(path string) {
 		if t.IsForced {
 			fmt.Print("  [forced]")
 		}
+		if t.Encryption != "" {
+			fmt.Printf("  [encrypted: %s]", t.Encryption)
+		}
 		if t.Commentary {
 			fmt.Print("  [comment]")
 		}

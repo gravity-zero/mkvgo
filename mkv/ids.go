@@ -269,6 +269,21 @@ var ffprobeCodecName = map[string]string{
 	"S_ASS":          "ass",
 	"S_SSA":          "ass",
 	"S_ARIBSUB":      "arib_caption",
+
+	// MP4 sample entries a probe describes by their raw fourcc (mkvgo carries none of them).
+	"s263": "h263",
+	"mp4v": "mpeg4",
+	"vvc1": "vvc",
+	"vvi1": "vvc",
+	"samr": "amr_nb",
+	"sawb": "amr_wb",
+	"mhm1": "mpegh_3d_audio",
+	"mha1": "mpegh_3d_audio",
+	"ac-4": "ac4",
+	"alac": "alac",
+	"ulaw": "pcm_mulaw",
+	"alaw": "pcm_alaw",
+	"stpp": "ttml",
 }
 
 // FFprobeCodecName returns the codec_name an external prober reports for a track whose
