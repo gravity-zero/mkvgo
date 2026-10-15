@@ -128,6 +128,7 @@ type movie struct {
 	cover       *mkv.Attachment   // covr cover art, carried as an MKV attachment
 	hashes      map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
 	fragmented  bool              // an mvex box is present → sample data is in moof fragments
+	mehdKnown   bool              // the mvex's mehd stated the fragments' total duration
 	chapterTrak []byte            // the trak of a QuickTime chapter track (tref/chap), read when there is no chpl
 }
 
@@ -574,6 +575,10 @@ func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
 		if err := readFragmentSamples(r, size, mv, moovBoxes); err != nil {
 			return nil, errf("fragmented MP4: %w", err)
 		}
+	} else if mv.fragmented && !mv.mehdKnown {
+		if moovBoxes, berr := iterBoxes(moovPayload); berr == nil {
+			fragmentEnds(r, size, moovBoxes, mv)
+		}
 	}
 	if mode == sampleFull {
 		for i := range mv.tracks {
@@ -896,6 +901,9 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		return nil, errf("no tracks found in MP4")
 	}
 	if mv.fragmented {
+		if ms := mehdDurationMs(moovBoxes, movieTS); ms > 0 {
+			mv.durationMs, mv.mehdKnown = max(mv.durationMs, ms), true
+		}
 		// The moov's sample tables are empty, so headerFrameRate gave 0. The
 		// per-fragment default sample duration in mvex>trex yields the (CFR) frame
 		// rate head-only - what probers report for a constant-rate fragmented stream.
@@ -918,6 +926,32 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		}
 	}
 	return &mv, nil
+}
+
+// mehdDurationMs reads the fragments' total duration an mvex>mehd states (movie timescale); 0 when absent.
+func mehdDurationMs(moovBoxes []memBox, movieTS uint32) int64 {
+	mvex, ok := findMemBox(moovBoxes, "mvex")
+	if !ok {
+		return 0
+	}
+	boxes, err := iterBoxes(mvex.payload)
+	if err != nil {
+		return 0
+	}
+	mehd, ok := findMemBox(boxes, "mehd")
+	if !ok || len(mehd.payload) < 8 {
+		return 0
+	}
+	var ticks uint64
+	if mehd.payload[0] == 1 && len(mehd.payload) >= 12 {
+		ticks = binary.BigEndian.Uint64(mehd.payload[4:12])
+	} else {
+		ticks = uint64(binary.BigEndian.Uint32(mehd.payload[4:8]))
+	}
+	if ticks == 0 || ticks >= 1<<62 || ticks == 0xFFFFFFFF {
+		return 0
+	}
+	return int64(ticks) * 1000 / int64(movieTS)
 }
 
 // trexDefaultDurations reads mvex>trex and returns each track's

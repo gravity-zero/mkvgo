@@ -95,8 +95,8 @@ func containerFromMovie(mv *movie) *mkv.Container {
 	if durMs == 0 {
 		durMs = movieDurationMs(mv)
 	}
-	if durMs == 0 {
-		durMs = mv.durationMs
+	if durMs == 0 || mv.fragmented {
+		durMs = max(durMs, mv.durationMs) // the fragments run past what the moov's edit lists and tables state
 	}
 	// The Nero chpl box carries no end times; parseChpl closes each chapter at the
 	// next one's start and leaves the last open. Close the last at the movie end so

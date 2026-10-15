@@ -117,9 +117,9 @@ func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []mem
 		if n := int64(len(t.samples)); n > 0 {
 			t.frameCount = n
 			last := t.samples[n-1]
-			if end := last.ctsMs + last.durMs; end > mv.durationMs {
-				mv.durationMs = end
-			}
+			end := last.ctsMs + last.durMs
+			t.durationMs = max(t.durationMs, end)
+			mv.durationMs = max(mv.durationMs, end)
 		}
 	}
 	return nil

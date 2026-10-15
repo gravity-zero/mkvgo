@@ -382,3 +382,75 @@ func oneFragment(trackID uint32, tfdt uint64, sizes, durs []uint32, cts []uint32
 	moof = build(int32(len(moof)) + 8)
 	return moof, box("mdat", payload)
 }
+
+// fragmentedAAC builds a fragmented one-track AAC file: a moov (mehd when
+// mehdMs > 0) followed by the given fragments.
+func fragmentedAAC(mehdMs uint32, frags ...[]byte) []byte {
+	mvex := [][]byte{}
+	if mehdMs > 0 {
+		mvex = append(mvex, fullBox("mehd", 0, 0, func(w *bw) { w.u32(mehdMs) }))
+	}
+	mvex = append(mvex, trexBox(1))
+	data := append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), container("moov", mvhdBox(0),
+		soundTrak(1, 48000, 0, audioSampleEntry("mp4a", &stereo48k, esdsBox(0x40, fakeASC)), emptyTables()...),
+		container("mvex", mvex...))...)
+	for _, f := range frags {
+		data = append(data, f...)
+	}
+	return data
+}
+
+// TestFragmentedDurationFromFragments: a fragmented file's duration is the
+// mehd's, else the end of its fragments (last tfdt plus its trun's durations),
+// on the head-only probe as on the keyframe probe.
+func TestFragmentedDurationFromFragments(t *testing.T) {
+	moof1, mdat1 := oneFragment(1, 0, []uint32{10, 10, 10}, []uint32{1024, 1024, 1024}, nil, 1)
+	moof2, mdat2 := oneFragment(1, 3072, []uint32{10, 10}, []uint32{1024, 1024}, nil, 1)
+	walked := fragmentedAAC(0, moof1, mdat1, moof2, mdat2)
+	stated := fragmentedAAC(250, moof1, mdat1, moof2, mdat2)
+	for _, tc := range []struct {
+		name string
+		data []byte
+		opts Options
+		want int64
+	}{
+		{"walked", walked, Options{}, 5120 * 1000 / 48000},
+		{"walked, keyframes", walked, Options{Keyframes: true}, 5120 * 1000 / 48000},
+		{"mehd", stated, Options{}, 250},
+	} {
+		c, _ := probeMovie(t, tc.data, tc.opts)
+		if c.DurationMs != tc.want {
+			t.Errorf("%s: DurationMs = %d, want %d", tc.name, c.DurationMs, tc.want)
+		}
+		if tc.name == "walked" && c.Tracks[0].DurationMs != tc.want {
+			t.Errorf("%s: track DurationMs = %d, want %d", tc.name, c.Tracks[0].DurationMs, tc.want)
+		}
+	}
+	// A moov that holds samples and fragments that run past them: the fragments' end wins.
+	data, _ := pcmMP4(t, []int{441})
+	moof, mdat := oneFragment(1, 441, []uint32{2, 2}, []uint32{22050, 22050}, nil, 1)
+	partial := withMvex(t, append(append(append([]byte{}, data...), moof...), mdat...))
+	if c, _ := probeMovie(t, partial); c.DurationMs != 1010 {
+		t.Errorf("partially fragmented: DurationMs = %d, want 1010 (441 moov frames then two 0.5 s fragments)", c.DurationMs)
+	}
+}
+
+// withMvex appends an mvex (trex for track 1) to the file's moov so its fragments are read.
+func withMvex(t *testing.T, data []byte) []byte {
+	t.Helper()
+	off := bytes.Index(data, []byte("moov")) - 4
+	size := int(binary.BigEndian.Uint32(data[off:]))
+	mvex := container("mvex", trexBox(1))
+	out := append([]byte{}, data[:off+size]...)
+	out = append(out, mvex...)
+	out = append(out, data[off+size:]...)
+	binary.BigEndian.PutUint32(out[off:], uint32(size+len(mvex)))
+	// the stco offsets moved by len(mvex)
+	i := bytes.Index(out, []byte("stco"))
+	n := int(binary.BigEndian.Uint32(out[i+8:]))
+	for k := 0; k < n; k++ {
+		p := i + 12 + 4*k
+		binary.BigEndian.PutUint32(out[p:], binary.BigEndian.Uint32(out[p:])+uint32(len(mvex)))
+	}
+	return out
+}

@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"io"
 	"strconv"
 	"strings"
 
@@ -206,6 +207,109 @@ func coalescePCM(t *inTrack) {
 // ticksOf converts a millisecond duration back to ticks, the inverse of ticksToMs for a PCM sample's own duration.
 func ticksOf(ms int64, timescale uint32) int64 {
 	return ms * int64(timescale) / 1000
+}
+
+// fragmentEnds walks a fragmented file's moof boxes for each track's decode
+// end (tfdt plus its trun durations), the duration a moov without mehd does
+// not state; media bytes are never read.
+func fragmentEnds(r io.ReadSeeker, size int64, moovBoxes []memBox, mv *movie) {
+	trex := parseTrexDefaults(moovBoxes)
+	ends := map[uint32]int64{}
+	var hdr [16]byte
+	for off := int64(0); off+8 <= size; {
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
+			break
+		}
+		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
+			break
+		}
+		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
+		typ := string(hdr[4:8])
+		headerLen := int64(8)
+		switch boxSize {
+		case 1:
+			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
+				return
+			}
+			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
+			headerLen = 16
+		case 0:
+			boxSize = size - off
+		}
+		if boxSize < headerLen || off+boxSize > size {
+			break
+		}
+		if typ == "moof" && boxSize-headerLen <= maxFragMoofBytes {
+			payload, err := readExact(r, boxSize-headerLen)
+			if err != nil {
+				break
+			}
+			moofEnds(payload, trex, ends)
+		}
+		off += boxSize
+	}
+	for id, end := range ends {
+		t := trackByID(mv, id)
+		if t == nil || t.timescale == 0 {
+			continue
+		}
+		endMs := ticksToMs(end, t.timescale)
+		t.durationMs = max(t.durationMs, endMs)
+		mv.durationMs = max(mv.durationMs, endMs)
+	}
+}
+
+// moofEnds raises each track's decode end from the trafs of one moof.
+func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
+	boxes, err := iterBoxes(moof)
+	if err != nil {
+		return
+	}
+	for _, b := range boxes {
+		if b.typ != "traf" {
+			continue
+		}
+		trafBoxes, err := iterBoxes(b.payload)
+		if err != nil {
+			continue
+		}
+		var h tfhd
+		var haveTfhd bool
+		var start int64
+		for _, tb := range trafBoxes {
+			switch tb.typ {
+			case "tfhd":
+				if h, err = parseTfhd(tb.payload); err == nil {
+					haveTfhd = true
+				}
+			case "tfdt":
+				start = parseTfdt(tb.payload)
+			}
+		}
+		if !haveTfhd {
+			continue
+		}
+		td := trex[h.trackID]
+		if !h.haveDur {
+			h.defDur = td.duration
+		}
+		if !h.haveFlags {
+			h.defFlags = td.flags
+		}
+		var dur int64
+		for _, tb := range trafBoxes {
+			if tb.typ == "trun" {
+				d, _, _, err := trunSpan(tb.payload, h.defDur, h.defFlags)
+				if err != nil {
+					return
+				}
+				dur += d
+			}
+		}
+		if end := start + dur; end > ends[h.trackID] {
+			ends[h.trackID] = end
+		}
+	}
 }
 
 // carriableTracks keeps the tracks a remux can carry, dropping the others

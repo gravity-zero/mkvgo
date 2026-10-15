@@ -1032,7 +1032,7 @@ Remux an MP4 file to MKV. Reads H.264/HEVC/AV1/VP9, AAC/MP3/DTS/Opus/AC-3/E-AC-3
 mkvgo from-mp4 [--skip-unsupported] [--mp3-container-delay] <input.mp4> <output.mkv>
 ```
 
-A track Matroska cannot carry - an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR, a big-endian float or signed 8-bit PCM), one whose configuration is not what its codec needs - fails the remux by name; `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others.
+A track Matroska cannot carry - an encrypted one (`encv`/`enca`: mkvgo does not decrypt), a sample entry with no Matroska form (MPEG-H, AC-4, IAMF, AMR, a big-endian float or signed 8-bit PCM), one whose configuration is not what its codec needs - fails the remux by name; `--skip-unsupported` drops it with a reason (printed as `dropped track N (codec): reason`) and keeps the others. A fragmented MP4's duration is its `mehd`'s, else the end of its fragments.
 
 QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
 (`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).

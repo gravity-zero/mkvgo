@@ -37,6 +37,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- **A fragmented MP4's duration is the fragments'.** The head-only probe read
+  it from the mvhd, which a fragmented file leaves at 0 (67 files of the test
+  corpora without a duration) or at its moov part alone (a partially
+  fragmented file: 0.2 s for 1.16). It is now the `mehd`'s when the mvex
+  states one, else the end of the fragments (last `tfdt` plus its trun's
+  durations, per track), read from the moof headers alone; per-track
+  durations follow.
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it
