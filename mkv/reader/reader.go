@@ -2166,6 +2166,7 @@ func (p *parser) parseContentEncodings(size int64, t *mkv.Track) error {
 func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
+	var encType uint64
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -2175,17 +2176,79 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
-		if eh.ID == mkv.IDContentCompression {
-			if err := p.parseContentCompression(eh.Size, t); err != nil {
-				return err
-			}
-		} else {
-			if err := p.skip(eh.Size); err != nil {
-				return err
-			}
+		switch eh.ID {
+		case mkv.IDContentCompression:
+			err = p.parseContentCompression(eh.Size, t)
+		case mkv.IDContentEncryption:
+			err = p.parseContentEncryption(eh.Size, t)
+		case mkv.IDContentEncodingType:
+			encType, err = ebml.ReadUint(p.r, eh.Size)
+		default:
+			err = p.skip(eh.Size)
+		}
+		if err != nil {
+			return err
 		}
 	}
+	if encType == 1 && t.Encryption == "" {
+		t.Encryption = encryptionName(0, 0)
+	}
 	return nil
+}
+
+// parseContentEncryption names the track's encryption from ContentEncAlgo and the AES cipher mode.
+func (p *parser) parseContentEncryption(size int64, t *mkv.Track) error {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	var algo, mode uint64
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			break
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return err
+		}
+		switch eh.ID {
+		case mkv.IDContentEncAlgo:
+			algo, err = ebml.ReadUint(p.r, eh.Size)
+		case mkv.IDContentEncAESSettings:
+			mode, err = p.parseAESCipherMode(eh.Size)
+		default:
+			err = p.skip(eh.Size)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	t.Encryption = encryptionName(algo, mode)
+	return nil
+}
+
+// parseAESCipherMode reads the AESSettingsCipherMode of a ContentEncAESSettings element.
+func (p *parser) parseAESCipherMode(size int64) (uint64, error) {
+	cur, _ := p.r.Seek(0, io.SeekCurrent)
+	end := cur + size
+	var mode uint64
+	for {
+		pos, _ := p.r.Seek(0, io.SeekCurrent)
+		if pos >= end {
+			return mode, nil
+		}
+		eh, _, err := p.readHeader()
+		if err != nil {
+			return 0, err
+		}
+		if eh.ID == mkv.IDAESSettingsCipherMode {
+			mode, err = ebml.ReadUint(p.r, eh.Size)
+		} else {
+			err = p.skip(eh.Size)
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
 }
 
 func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {

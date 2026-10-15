@@ -248,6 +248,9 @@ func WriteSegmentInfo(w io.Writer, info *mkv.SegmentInfo, durationMs int64) erro
 func WriteTracks(w io.Writer, tracks []mkv.Track) error {
 	var e ew
 	for i := range tracks {
+		if enc := tracks[i].Encryption; enc != "" {
+			return fmt.Errorf("track %d is encrypted (%s): mkvgo does not carry encrypted tracks", tracks[i].ID, enc)
+		}
 		e.master(mkv.IDTrackEntry, func(te *ew) {
 			writeTrackFields(te, &tracks[i])
 		})

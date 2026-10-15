@@ -34,6 +34,13 @@ All notable changes to mkvgo are documented here. The format is based on
   form for (a big-endian float, a signed 8-bit or unsigned 16-bit integer,
   non-interleaved channels) is described and refused by name - never dropped
   in silence, as it was.
+- **A Matroska `ContentEncryption` is read**: `Track.Encryption` names it
+  (`AES-CTR`, `AES-CBC`, `DES`, ...; `unspecified` for a ContentEncodingType
+  of 1 alone). `to-mp4`, `to-hls` and the plans refuse the track by name
+  (`Options.SkipUnsupported` drops it) before touching a frame - an encrypted
+  VP9 track was refused as a "bad frame_marker", an encrypted Opus or AV1
+  WebM was remuxed into an MP4 no player decodes. The Matroska writer
+  refuses to write a track it cannot keep encrypted.
 
 ### Changed
 

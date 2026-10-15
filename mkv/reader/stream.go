@@ -528,12 +528,51 @@ func (p *streamParser) parseStreamContentEncodings(size int64, t *mkv.Track) err
 }
 
 func (p *streamParser) parseStreamContentEncoding(size int64, t *mkv.Track) error {
-	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
-		if h.ID == mkv.IDContentCompression {
+	var encType uint64
+	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		switch h.ID {
+		case mkv.IDContentCompression:
 			return p.parseStreamContentCompression(h.Size, t)
+		case mkv.IDContentEncryption:
+			return p.parseStreamContentEncryption(h.Size, t)
+		case mkv.IDContentEncodingType:
+			v, err := p.readUint(h.Size)
+			encType = v
+			return err
 		}
 		return p.skip(h.Size)
 	})
+	if err == nil && encType == 1 && t.Encryption == "" {
+		t.Encryption = encryptionName(0, 0)
+	}
+	return err
+}
+
+// parseStreamContentEncryption mirrors the seekable parser: the scheme from ContentEncAlgo and the AES cipher mode.
+func (p *streamParser) parseStreamContentEncryption(size int64, t *mkv.Track) error {
+	var algo, mode uint64
+	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
+		switch h.ID {
+		case mkv.IDContentEncAlgo:
+			v, err := p.readUint(h.Size)
+			algo = v
+			return err
+		case mkv.IDContentEncAESSettings:
+			return p.boundedLoop(h.Size, func(h ebml.ElementHeader) error {
+				if h.ID == mkv.IDAESSettingsCipherMode {
+					v, err := p.readUint(h.Size)
+					mode = v
+					return err
+				}
+				return p.skip(h.Size)
+			})
+		}
+		return p.skip(h.Size)
+	})
+	if err == nil {
+		t.Encryption = encryptionName(algo, mode)
+	}
+	return err
 }
 
 func (p *streamParser) parseStreamContentCompression(size int64, t *mkv.Track) error {

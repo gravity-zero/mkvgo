@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
 // exotic_test.go - the sample entries and layouts of public test corpora a
@@ -506,5 +508,75 @@ func TestClusterSplitsOnWideComposition(t *testing.T) {
 	_, blocks := readMKV(t, out)
 	if len(blocks) != 2 || blocks[0].Timecode != 0 || blocks[1].Timecode != (1024+1920000)*1000/48000 {
 		t.Errorf("blocks = %+v, want two at 0 and 40021 ms", blocks)
+	}
+}
+
+// encryptedWebM writes a WebM whose one track declares AES-CTR ContentEncryption around one block.
+func encryptedWebM(t *testing.T, codecID string) string {
+	t.Helper()
+	el := func(id uint32, body []byte) []byte {
+		var b bytes.Buffer
+		ebml.WriteElementHeader(&b, id, int64(len(body)))
+		b.Write(body)
+		return b.Bytes()
+	}
+	uint := func(id uint32, v uint64) []byte {
+		var b bytes.Buffer
+		ebml.WriteElementHeader(&b, id, 1)
+		ebml.WriteUint(&b, v, 1)
+		return b.Bytes()
+	}
+	str := func(id uint32, s string) []byte { return el(id, []byte(s)) }
+	enc := el(mkv.IDContentEncodings, el(mkv.IDContentEncoding,
+		append(uint(mkv.IDContentEncodingType, 1),
+			el(mkv.IDContentEncryption, append(uint(mkv.IDContentEncAlgo, 5),
+				el(mkv.IDContentEncAESSettings, uint(mkv.IDAESSettingsCipherMode, 1))...))...)))
+	trackType := uint64(mkv.TrackTypeAudio)
+	if strings.HasPrefix(codecID, "V_") {
+		trackType = mkv.TrackTypeVideo
+	}
+	var te []byte
+	te = append(te, uint(mkv.IDTrackNumber, 1)...)
+	te = append(te, uint(mkv.IDTrackType, trackType)...)
+	te = append(te, str(mkv.IDCodecID, codecID)...)
+	if trackType == mkv.TrackTypeVideo {
+		te = append(te, el(mkv.IDVideo, append(uint(mkv.IDPixelWidth, 16), uint(mkv.IDPixelHeight, 16)...))...)
+	}
+	te = append(te, enc...)
+	var info bytes.Buffer
+	ebml.WriteElementHeader(&info, mkv.IDTimecodeScale, 4)
+	ebml.WriteUint(&info, 1_000_000, 4)
+	block := append([]byte{0x81, 0, 0, 0x80}, 1, 0x22, 0x33, 0x44) // track 1, timecode 0, keyframe, a signal byte and bytes
+	cluster := el(mkv.IDCluster, append(uint(mkv.IDTimestamp, 0), el(mkv.IDSimpleBlock, block)...))
+	var seg bytes.Buffer
+	seg.Write(el(mkv.IDInfo, info.Bytes()))
+	seg.Write(el(mkv.IDTracks, el(mkv.IDTrackEntry, te)))
+	seg.Write(cluster)
+	var f bytes.Buffer
+	if err := writer.WriteEBMLHeader(&f); err != nil {
+		t.Fatal(err)
+	}
+	f.Write(el(mkv.IDSegment, seg.Bytes()))
+	path := filepath.Join(t.TempDir(), "enc.webm")
+	if err := os.WriteFile(path, f.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestRemuxToMP4RefusesEncryptedTracks: an encrypted Matroska track is
+// refused by name - before any frame is parsed, so an encrypted VP9 track is
+// not reported as a bad frame.
+func TestRemuxToMP4RefusesEncryptedTracks(t *testing.T) {
+	for _, codec := range []string{"A_OPUS", "V_VP9"} {
+		src := encryptedWebM(t, codec)
+		err := RemuxToMP4(context.Background(), src, filepath.Join(t.TempDir(), "out.mp4"))
+		if err == nil || !strings.Contains(err.Error(), "encrypted (AES-CTR)") {
+			t.Errorf("%s: RemuxToMP4 err = %v, want the track named encrypted (AES-CTR)", codec, err)
+		}
+		err = RemuxToHLS(context.Background(), src, t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), "encrypted (AES-CTR)") {
+			t.Errorf("%s: RemuxToHLS err = %v, want the track named encrypted (AES-CTR)", codec, err)
+		}
 	}
 }

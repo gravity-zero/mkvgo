@@ -52,11 +52,16 @@ const (
 )
 
 const (
-	IDContentEncodings    = 0x6D80
-	IDContentEncoding     = 0x6240
-	IDContentCompression  = 0x5034
-	IDContentCompAlgo     = 0x4254
-	IDContentCompSettings = 0x4255
+	IDContentEncodings      = 0x6D80
+	IDContentEncoding       = 0x6240
+	IDContentCompression    = 0x5034
+	IDContentCompAlgo       = 0x4254
+	IDContentCompSettings   = 0x4255
+	IDContentEncodingType   = 0x5033 // 0 compression, 1 encryption
+	IDContentEncryption     = 0x5035
+	IDContentEncAlgo        = 0x47E1 // 0 none, 1 DES, 2 3DES, 3 Twofish, 4 Blowfish, 5 AES
+	IDContentEncAESSettings = 0x47E7
+	IDAESSettingsCipherMode = 0x47E8 // 1 CTR, 2 CBC
 )
 
 const (
