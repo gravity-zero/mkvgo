@@ -94,7 +94,7 @@ func TestParseMoofSamplesPropagatesTrafError(t *testing.T) {
 	moof := container("moof", traf)
 
 	mv := &movie{}
-	if err := parseMoofSamples(moof[8:], 0, nil, mv); err == nil {
+	if err := parseMoofSamples(moof[8:], 0, nil, mv, 1<<40); err == nil {
 		t.Error("a traf error must fail the moof parse, not be swallowed")
 	}
 }
@@ -115,7 +115,7 @@ func TestParseTrafSamplesDefaultsFromTfhd(t *testing.T) {
 	traf := append(append(append([]byte{}, tfhd...), tfdt...), trun...)
 
 	mv := &movie{tracks: []inTrack{{trackID: 1, timescale: 1000}}}
-	if err := parseTrafSamples(traf, 500, map[uint32]trexDefault{}, mv); err != nil {
+	if _, err := parseTrafSamples(traf, 500, -1, 1<<40, map[uint32]trexDefault{}, mv); err != nil {
 		t.Fatalf("parseTrafSamples: %v", err)
 	}
 	if len(mv.tracks[0].samples) != 1 {
@@ -150,7 +150,7 @@ func TestParseTrafSamplesTfdtLengthBoundary(t *testing.T) {
 	validTfdt := box("tfdt", []byte{0, 0, 0, 0, 0, 0, 3, 9}) // vf(4) + baseDecodeTime=0x0309=777
 	traf := append(append(append([]byte{}, tfhd...), validTfdt...), trun...)
 	mv := &movie{tracks: []inTrack{{trackID: 1, timescale: 1000}}}
-	if err := parseTrafSamples(traf, 0, nil, mv); err != nil {
+	if _, err := parseTrafSamples(traf, 0, -1, 1<<40, nil, mv); err != nil {
 		t.Fatalf("parseTrafSamples: %v", err)
 	}
 	if got := mv.tracks[0].samples[0].dtsMs; got != 777 {
@@ -160,7 +160,7 @@ func TestParseTrafSamplesTfdtLengthBoundary(t *testing.T) {
 	shortTfdt := box("tfdt", []byte{0, 0, 0, 0, 0, 0, 3}) // 7-byte payload
 	traf2 := append(append(append([]byte{}, tfhd...), shortTfdt...), trun...)
 	mv2 := &movie{tracks: []inTrack{{trackID: 1, timescale: 1000}}}
-	if err := parseTrafSamples(traf2, 0, nil, mv2); err != nil {
+	if _, err := parseTrafSamples(traf2, 0, -1, 1<<40, nil, mv2); err != nil {
 		t.Fatalf("parseTrafSamples: %v", err)
 	}
 	if got := mv2.tracks[0].samples[0].dtsMs; got != 0 {

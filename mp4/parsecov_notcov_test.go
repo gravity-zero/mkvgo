@@ -392,7 +392,7 @@ func TestParseTrafSamplesBaseDataOffsetRead(t *testing.T) {
 	traf := append(append([]byte{}, tfhd...), trun...)
 
 	mv := &movie{tracks: []inTrack{{trackID: 1, timescale: 1000}}}
-	if err := parseTrafSamples(traf, 500, nil, mv); err != nil {
+	if _, err := parseTrafSamples(traf, 500, -1, 1<<40, nil, mv); err != nil {
 		t.Fatalf("parseTrafSamples: %v", err)
 	}
 	if got := mv.tracks[0].samples[0].offset; got != 9000 {

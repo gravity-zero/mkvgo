@@ -271,6 +271,74 @@ func TestCttsVersion0NegativeOffsetIsSigned(t *testing.T) {
 	}
 }
 
+// twoTrafMoof builds a moof with a traf for track 1 then one for track 2 whose tfhd states no anchor: its trun's
+// data_offset is relative to the end of the first traf's data when chained, to the moof start otherwise.
+func twoTrafMoof(sizes1, sizes2 []uint32, chained bool) ([]byte, []byte) {
+	var payload []byte
+	for _, s := range append(append([]uint32{}, sizes1...), sizes2...) {
+		payload = append(payload, make([]byte, s)...)
+	}
+	var total1 int32
+	for _, s := range sizes1 {
+		total1 += int32(s)
+	}
+	traf := func(trackID uint32, sizes []uint32, dataOffset int32) []byte {
+		tfhd := fullBox("tfhd", 0, 0, func(w *bw) { w.u32(trackID) })
+		tfdt := fullBox("tfdt", 1, 0, func(w *bw) { w.u64(0) })
+		trun := fullBox("trun", 1, trunDataOffset|trunSampleDuration|trunSampleSize, func(w *bw) {
+			w.u32(uint32(len(sizes)))
+			w.i32(dataOffset)
+			for _, s := range sizes {
+				w.u32(1024)
+				w.u32(s)
+			}
+		})
+		return container("traf", tfhd, tfdt, trun)
+	}
+	build := func(moofLen int32) []byte {
+		second := moofLen + 8 + total1 // moof-relative: right after the first traf's data
+		if chained {
+			second = 0 // relative to the end of the first traf's data
+		}
+		return container("moof", fullBox("mfhd", 0, 0, func(w *bw) { w.u32(1) }), traf(1, sizes1, moofLen+8), traf(2, sizes2, second))
+	}
+	moof := build(0)
+	moof = build(int32(len(moof)))
+	return moof, box("mdat", payload)
+}
+
+// twoTrackAAC is fragmentedAAC with two audio tracks.
+func twoTrackAAC(frags ...[]byte) []byte {
+	entry := audioSampleEntry("mp4a", &stereo48k, esdsBox(0x40, fakeASC))
+	data := append(box("ftyp", []byte("isom\x00\x00\x02\x00isom")), container("moov", mvhdBox(0),
+		soundTrak(1, 48000, 0, entry, emptyTables()...),
+		soundTrak(2, 48000, 0, entry, emptyTables()...),
+		container("mvex", trexBox(1), trexBox(2)))...)
+	for _, f := range frags {
+		data = append(data, f...)
+	}
+	return data
+}
+
+// TestTrafDataAnchor: a traf after the first that states no anchor is read
+// per ISO 14496-12, from the previous traf's data end; one whose samples would
+// then fall past the fragment's data is anchored on the moof, as its muxer meant.
+func TestTrafDataAnchor(t *testing.T) {
+	for _, chained := range []bool{true, false} {
+		moof, mdat := twoTrafMoof([]uint32{100, 50}, []uint32{30, 20}, chained)
+		data := twoTrackAAC(moof, mdat)
+		mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), sampleFull)
+		if err != nil {
+			t.Fatalf("chained=%v: %v", chained, err)
+		}
+		mdatStart := int64(bytes.Index(data, []byte("mdat"))) + 4
+		s := mv.tracks[1].samples
+		if len(s) != 2 || s[0].offset != mdatStart+150 || s[1].offset != mdatStart+180 {
+			t.Errorf("chained=%v: track 2 samples %+v, want offsets %d and %d", chained, s, mdatStart+150, mdatStart+180)
+		}
+	}
+}
+
 // pcmMP4 builds a progressive MP4 holding one twos track of one-frame samples laid out in chunks of the given frame counts.
 func pcmMP4(t *testing.T, chunkFrames []int) ([]byte, []byte) {
 	t.Helper()

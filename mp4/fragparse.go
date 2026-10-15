@@ -104,7 +104,7 @@ func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []mem
 			if err != nil {
 				return err
 			}
-			if err := parseMoofSamples(payload, off, trex, mv); err != nil {
+			if err := parseMoofSamples(payload, off, trex, mv, mdatEnd(r, off+boxSize, size)); err != nil {
 				return err
 			}
 		}
@@ -127,19 +127,50 @@ func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []mem
 
 // parseMoofSamples parses one Movie Fragment: each traf inside contributes its
 // samples, located relative to moofStart (the default-base-is-moof anchor).
-func parseMoofSamples(moof []byte, moofStart int64, trex map[uint32]trexDefault, mv *movie) error {
+// limit bounds the fragment's data (the end of the mdat that follows it, else
+// the file): a traf anchored by the standard's chained rule whose samples fall
+// outside it is anchored on the moof instead, as its muxer meant.
+func parseMoofSamples(moof []byte, moofStart int64, trex map[uint32]trexDefault, mv *movie, limit int64) error {
 	boxes, err := iterBoxes(moof)
 	if err != nil {
 		return err
 	}
+	prevEnd := int64(-1) // where the previous traf's data ended; -1 before the first
 	for _, b := range boxes {
-		if b.typ == "traf" {
-			if err := parseTrafSamples(b.payload, moofStart, trex, mv); err != nil {
-				return err
-			}
+		if b.typ != "traf" {
+			continue
+		}
+		end, err := parseTrafSamples(b.payload, moofStart, prevEnd, limit, trex, mv)
+		if err != nil {
+			return err
+		}
+		if end > 0 {
+			prevEnd = end
 		}
 	}
 	return nil
+}
+
+// mdatEnd returns the end of the mdat box starting at off, or size when no mdat starts there.
+func mdatEnd(r io.ReadSeeker, off, size int64) int64 {
+	var hdr [16]byte
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return size
+	}
+	if _, err := io.ReadFull(r, hdr[:8]); err != nil || string(hdr[4:8]) != "mdat" {
+		return size
+	}
+	boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
+	switch boxSize {
+	case 1:
+		if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
+			return size
+		}
+		boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
+	case 0:
+		return size
+	}
+	return min(off+boxSize, size)
 }
 
 // tfhd is a parsed Track Fragment Header: the track the fragment belongs to,
@@ -147,7 +178,8 @@ func parseMoofSamples(moof []byte, moofStart int64, trex map[uint32]trexDefault,
 type tfhd struct {
 	trackID                      uint32
 	baseDataOffset               int64
-	haveBaseOffset               bool // else the data anchor is the moof start (default-base-is-moof, and the pre-CMAF default alike)
+	haveBaseOffset               bool // the tfhd states the anchor
+	defaultBaseIsMoof            bool // else the anchor is the moof start; without either flag, a traf after the first anchors on the previous traf's data end
 	defDur, defSize, defFlags    uint32
 	haveDur, haveSize, haveFlags bool
 }
@@ -160,6 +192,7 @@ func parseTfhd(p []byte) (tfhd, error) {
 	}
 	flags := binary.BigEndian.Uint32(p[0:4]) & 0xFFFFFF
 	h.trackID = binary.BigEndian.Uint32(p[4:8])
+	h.defaultBaseIsMoof = flags&tfhdDefaultBaseIsMoof != 0
 	off := 8
 	read4 := func() (uint32, bool) {
 		if off+4 > len(p) {
@@ -205,11 +238,12 @@ func parseTfdt(p []byte) int64 {
 
 // parseTrafSamples reads a Track Fragment (tfhd + tfdt + one or more trun) and
 // appends its samples to the track, in the same units the progressive parser
-// uses (ms, edit-list shift folded into cts).
-func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault, mv *movie) error {
+// uses (ms, edit-list shift folded into cts). It returns where the traf's data
+// ends (0 when it placed nothing): the next traf's anchor when it states none.
+func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uint32]trexDefault, mv *movie) (int64, error) {
 	boxes, err := iterBoxes(traf)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var (
@@ -222,17 +256,17 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 			continue
 		}
 		if h, err = parseTfhd(b.payload); err != nil {
-			return err
+			return 0, err
 		}
 		haveTfhd = true
 	}
 	if !haveTfhd {
-		return nil // fragment with no tfhd: nothing to place
+		return 0, nil // fragment with no tfhd: nothing to place
 	}
 	trackID := h.trackID
 	t := trackByID(mv, trackID)
 	if t == nil || t.timescale == 0 {
-		return nil // fragment for a track we do not carry
+		return 0, nil // fragment for a track we do not carry
 	}
 
 	baseDecodeTime = t.fragDecodeEnd // without a tfdt, a fragment continues where the track's previous one ended
@@ -254,12 +288,34 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 		h.defFlags = td.flags
 	}
 
+	// The anchor: stated, else the moof start, else - ISO 14496-12 - the previous traf's data end for a traf after the
+	// first. Files anchor such a traf on the moof anyway; when the chained anchor puts its samples past the fragment's
+	// data, that is what they meant.
 	base := moofStart
-	if h.haveBaseOffset {
+	chained := false
+	switch {
+	case h.haveBaseOffset:
 		base = h.baseDataOffset
+	case !h.defaultBaseIsMoof && prevEnd > 0:
+		base, chained = prevEnd, true
 	}
+	first := len(t.samples)
+	dataEnd, dts, err := placeTrafSamples(boxes, t, base, baseDecodeTime, h)
+	if err != nil {
+		return 0, err
+	}
+	if chained && (dataEnd > limit || sampleBefore(t.samples[first:], prevEnd)) {
+		t.samples = t.samples[:first]
+		if dataEnd, dts, err = placeTrafSamples(boxes, t, moofStart, baseDecodeTime, h); err != nil {
+			return 0, err
+		}
+	}
+	t.fragDecodeEnd = dts
+	return dataEnd, nil
+}
 
-	dts := baseDecodeTime
+// placeTrafSamples appends the samples of a traf's truns anchored on base; it returns the data end and decode end.
+func placeTrafSamples(boxes []memBox, t *inTrack, base, dts int64, h tfhd) (int64, int64, error) {
 	dataCursor := base // where the next trun's data continues when it omits data_offset
 	for _, b := range boxes {
 		if b.typ != "trun" {
@@ -267,13 +323,22 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 		}
 		sampleOff, newDTS, err := appendTrunSamples(b.payload, t, base, dataCursor, dts, h.defDur, h.defSize, h.defFlags)
 		if err != nil {
-			return err
+			return 0, 0, err
 		}
 		dataCursor = sampleOff
 		dts = newDTS
 	}
-	t.fragDecodeEnd = dts
-	return nil
+	return dataCursor, dts, nil
+}
+
+// sampleBefore reports a sample placed before off.
+func sampleBefore(samples []inSample, off int64) bool {
+	for i := range samples {
+		if samples[i].offset < off {
+			return true
+		}
+	}
+	return false
 }
 
 // appendTrunSamples decodes one trun and appends its samples to the track. It

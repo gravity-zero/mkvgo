@@ -59,6 +59,12 @@ All notable changes to mkvgo are documented here. The format is based on
 - **A fragment without `tfdt` continues where the track's previous fragment
   ended** (every such fragment restarted at 0, collapsing a 7.9 s file onto
   1.8 s), for the remux as for the probe's duration.
+- **A track fragment that states no data anchor is read per ISO 14496-12**:
+  a traf after the first, without `base_data_offset` and without
+  `default-base-is-moof`, anchors on the previous traf's data end (every
+  traf anchored on the moof before); when that places its samples past the
+  fragment's data - files anchor such a traf on the moof anyway - the moof
+  anchor is used, as the muxer meant.
 - **Matroska audio defaults**: an audio track without `Channels` reads 1,
   without `SamplingFrequency` 8000 Hz (48000 for Opus) - the spec defaults
   every demuxer applies - once the codec's own header had its say: Vorbis,
