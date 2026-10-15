@@ -225,6 +225,7 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 
 	// Merge all tracks' samples into one decode-ordered stream.
 	merged := mergeByDTS(mv)
+	sr := newTrackWindows(src, size, len(mv.tracks))
 
 	var (
 		group        []mkv.Block
@@ -251,7 +252,7 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		}
 		tk := &mv.tracks[ref.track]
 		s := &tk.samples[ref.idx]
-		data, err := readSample(src, s.offset, s.size)
+		data, err := sr.read(ref.track, tk.samples, ref.idx)
 		if err != nil {
 			return errf("read sample: %w", err)
 		}
@@ -289,6 +290,108 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		return errf("finalize: %w", err)
 	}
 	return nil
+}
+
+// trackWindowBytes is what trackWindows reads at once: a track's samples are
+// stored in runs (its chunks), so one read serves a run where a read a sample
+// cost a call each.
+const trackWindowBytes = 1 << 20
+
+// trackWindows reads a movie's samples through as many windows as tracks; a
+// sample any window holds is served from it, so an interleaved file is read
+// once, in order, the windows a ring over its last megabytes.
+type trackWindows struct {
+	src  io.ReadSeeker
+	at   io.ReaderAt
+	size int64
+	wins []trackWindow
+}
+
+type trackWindow struct {
+	off int64
+	buf []byte // the source's bytes from off
+}
+
+func newTrackWindows(src io.ReadSeeker, size int64, tracks int) *trackWindows {
+	sr := &trackWindows{src: src, size: size, wins: make([]trackWindow, tracks)}
+	sr.at, _ = src.(io.ReaderAt)
+	return sr
+}
+
+// read returns a copy of track ti's sample idx: from the windows holding its
+// bytes, the oldest window refilled from the first byte none holds.
+func (sr *trackWindows) read(ti int, samples []inSample, idx int) ([]byte, error) {
+	off, end := samples[idx].offset, samples[idx].offset+int64(samples[idx].size)
+	out := make([]byte, 0, end-off)
+	for pos := off; pos < end; {
+		if w := sr.holding(pos); w != nil {
+			k := min(end, w.off+int64(len(w.buf)))
+			out = append(out, w.buf[pos-w.off:k-w.off]...)
+			pos = k
+			continue
+		}
+		n := min(int64(trackWindowBytes), sr.size-pos)
+		for i := range sr.wins {
+			if w := &sr.wins[i]; w.off > pos && w.off < pos+n {
+				n = w.off - pos // what that window holds is not read again
+			}
+		}
+		if n < end-pos && n == sr.size-pos || n <= 0 {
+			return nil, io.ErrUnexpectedEOF // the source ends before the sample does
+		}
+		if end-pos > n && n == trackWindowBytes {
+			rest, err := readSample(sr.src, pos, uint32(end-pos)) // larger than a window: read as it is
+			if err != nil {
+				return nil, err
+			}
+			return append(out, rest...), nil
+		}
+		w := sr.oldest()
+		if cap(w.buf) < int(n) {
+			w.buf = make([]byte, n)
+		}
+		w.buf, w.off = w.buf[:n], pos
+		if err := sr.fill(w); err != nil {
+			w.buf = w.buf[:0]
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// oldest returns the window to refill: the one ending first in the file, as
+// the samples are asked for in decode order - the bytes the other tracks will
+// still ask for sit in the windows ending last.
+func (sr *trackWindows) oldest() *trackWindow {
+	w := &sr.wins[0]
+	for i := range sr.wins {
+		if o := &sr.wins[i]; o.off+int64(len(o.buf)) < w.off+int64(len(w.buf)) {
+			w = o
+		}
+	}
+	return w
+}
+
+// holding returns the window holding the byte at pos, nil when none does.
+func (sr *trackWindows) holding(pos int64) *trackWindow {
+	for i := range sr.wins {
+		if w := &sr.wins[i]; pos >= w.off && pos < w.off+int64(len(w.buf)) {
+			return w
+		}
+	}
+	return nil
+}
+
+func (sr *trackWindows) fill(w *trackWindow) error {
+	if sr.at != nil {
+		_, err := sr.at.ReadAt(w.buf, w.off)
+		return err
+	}
+	if _, err := sr.src.Seek(w.off, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := io.ReadFull(sr.src, w.buf)
+	return err
 }
 
 // mergeByDTS returns references to every sample across all tracks, ordered by

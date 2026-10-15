@@ -138,3 +138,29 @@ func TestFastStartReadsOnce(t *testing.T) {
 		t.Errorf("wrote %.3fx the output, want at most 1.01x", writeRatio)
 	}
 }
+
+// TestRemuxFromMP4ReadsInRuns: an MP4's samples are stored in runs, read as
+// runs - not one read call per sample.
+func TestRemuxFromMP4ReadsInRuns(t *testing.T) {
+	mkvSrc := buildInterleavedSource(t, 60)
+	src := filepath.Join(t.TempDir(), "src.mp4")
+	if err := RemuxToMP4(context.Background(), mkvSrc, src); err != nil {
+		t.Fatal(err)
+	}
+	var tally readTally
+	dst := filepath.Join(t.TempDir(), "out.mkv")
+	if err := RemuxFromMP4(context.Background(), src, dst, Options{FS: countingFS(&tally)}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("source %d: %d reads, %d bytes", st.Size(), tally.reads, tally.bytes)
+	if limit := int(st.Size()/(256<<10)) + 64; tally.reads > limit {
+		t.Errorf("%d read calls for a %d-byte source, want at most %d", tally.reads, st.Size(), limit)
+	}
+	if ratio := float64(tally.bytes) / float64(st.Size()); ratio > 1.05 {
+		t.Errorf("read %.3fx the source, want at most 1.05x", ratio)
+	}
+}

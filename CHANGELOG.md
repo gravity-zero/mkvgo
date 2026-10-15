@@ -23,6 +23,12 @@ All notable changes to mkvgo are documented here. The format is based on
   walks the block headers now, reading each track's first frame alone (a
   4.4 GB source: 9.2 to 4.7 GB read), a hashed track (`--hash`) still
   reading its bytes.
+- **`RemuxFromMP4` reads a track's samples by runs.** An MP4 stores a
+  track's samples in runs (its chunks); `from-mp4` read them one call each,
+  two system calls a sample. The samples are now read through one 1 MiB
+  window per track, a sample served by whichever window holds it, so an
+  interleaved file is read once, in order: 5,346 to 46 read calls on a
+  30 MB file, the bytes read unchanged, the output byte-identical.
 
 ## [0.52.0] - 2026-10-15
 
