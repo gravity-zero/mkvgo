@@ -63,6 +63,8 @@ type streamParser struct {
 	r          io.Reader
 	pos        int64 // bytes consumed from r (tracks sub-element boundaries)
 	metaBudget int64 // remaining bytes allowed for in-memory metadata (parity with the seekable parser)
+	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
+	rateRejected bool
 }
 
 // chargeMeta debits the cumulative metadata budget, bounding the TOTAL bytes a
@@ -401,6 +403,7 @@ func (p *streamParser) parseStreamTracks(size int64, c *mkv.Container) error {
 
 func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	t := mkv.Track{}
+	p.rateRejected = false
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTrackNumber:
@@ -512,6 +515,7 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	// bitstream when the container Colour element is absent (container wins).
 	fillColourFromCodecPrivate(&t)
 	fillCodecDerived(&t)
+	audioDefaults(&t, p.rateRejected)
 	return t, err
 }
 
@@ -740,13 +744,19 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			t.SampleRate = &v
+			if validSampleRate(v) {
+				t.SampleRate = &v
+			} else {
+				p.rateRejected = true
+			}
 		case mkv.IDOutputSamplingFreq:
 			v, err := p.readFloat(h.Size)
 			if err != nil {
 				return err
 			}
-			t.OutputSampleRate = &v
+			if validSampleRate(v) {
+				t.OutputSampleRate = &v
+			}
 		case mkv.IDChannels:
 			v, err := p.readUint(h.Size)
 			if err != nil {

@@ -6,12 +6,14 @@ import "github.com/gravity-zero/mkvgo/mkv"
 // or from its configuration record once the container has had its say: the
 // VP9 level (fillVP9Level), the scan type of codecs that have no interlaced
 // coding tools (fillProgressiveOnly), the AAC profile and SBR output rate
-// (fillAACFromASC). Called after fillColourFromCodecPrivate on every reader
+// (fillAACFromASC), the Vorbis, FLAC and Opus header fields
+// (fillAudioHeaders). Called after fillColourFromCodecPrivate on every reader
 // path; container values always win per field.
 func fillCodecDerived(t *mkv.Track) {
 	fillVP9Level(t)
 	fillProgressiveOnly(t)
 	fillAACFromASC(t)
+	fillAudioHeaders(t)
 }
 
 // FillFromCodecPrivate fills any nil field of a track from its codec

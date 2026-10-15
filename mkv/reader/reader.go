@@ -155,6 +155,8 @@ type parser struct {
 	firstCluster int64
 	// rateReads lets the frame-rate estimate read what the source does not hold (WithFrameRateReads).
 	rateReads bool
+	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
+	rateRejected bool
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -1107,6 +1109,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	t := mkv.Track{}
+	p.rateRejected = false
 
 	for {
 		if err := p.checkCtx(); err != nil {
@@ -1291,6 +1294,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	// Colour element didn't (container values, parsed above, still win per field).
 	fillColourFromCodecPrivate(&t)
 	fillCodecDerived(&t)
+	audioDefaults(&t, p.rateRejected)
 	return t, nil
 }
 
@@ -1644,13 +1648,19 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			t.SampleRate = &v
+			if validSampleRate(v) {
+				t.SampleRate = &v
+			} else {
+				p.rateRejected = true
+			}
 		case mkv.IDOutputSamplingFreq:
 			v, err := ebml.ReadFloat(p.r, eh.Size)
 			if err != nil {
 				return err
 			}
-			t.OutputSampleRate = &v
+			if validSampleRate(v) {
+				t.OutputSampleRate = &v
+			}
 		case mkv.IDChannels:
 			v, err := ebml.ReadUint(p.r, eh.Size)
 			if err != nil {

@@ -56,6 +56,13 @@ All notable changes to mkvgo are documented here. The format is based on
   away and the remux failed ("outside SimpleBlock's int16 range").
 - **`from-mp4` opens a new cluster when a decode window's presentation times
   spread wider than a SimpleBlock's offset can say**, instead of failing.
+- **Matroska audio defaults**: an audio track without `Channels` reads 1,
+  without `SamplingFrequency` 8000 Hz (48000 for Opus) - the spec defaults
+  every demuxer applies - once the codec's own header had its say: Vorbis,
+  FLAC and Opus headers now fill the channels, rate and bit depth the
+  container leaves out, like the AAC configuration did. A `SamplingFrequency`
+  no file can mean (a corrupt float: 1.4e-37 Hz) is rejected, reported as
+  unknown rather than as a value.
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it

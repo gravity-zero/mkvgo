@@ -1315,7 +1315,8 @@ func TestValidate_MissingCodec(t *testing.T) {
 
 func TestValidate_AudioWithoutSampleRate(t *testing.T) {
 	dir := t.TempDir()
-	noRate := mkv.Track{ID: 1, Type: mkv.AudioTrack, Codec: "aac", Language: "eng", Channels: u8(2)}
+	absurd := 1e-40 // a corrupt SamplingFrequency: rejected by the reader, where an absent one reads as the spec default
+	noRate := mkv.Track{ID: 1, Type: mkv.AudioTrack, Codec: "aac", Language: "eng", Channels: u8(2), SampleRate: &absurd}
 	src := buildMinimalMKV(t, dir, "norate.mkv",
 		[]mkv.Track{noRate},
 		[]mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("a")}},

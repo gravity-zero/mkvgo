@@ -71,7 +71,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "video-no-codecprivate", Track: t.ID, Message: fmt.Sprintf("track %d: video without CodecPrivate", t.ID)})
 		}
 		if t.Type == mkv.AudioTrack && t.SampleRate == nil {
-			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "audio-no-samplerate", Track: t.ID, Message: fmt.Sprintf("track %d: audio without sample rate", t.ID)})
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "audio-no-samplerate", Track: t.ID, Message: fmt.Sprintf("track %d: audio without a usable sample rate", t.ID)})
 		}
 		if t.Language == "" {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "track-no-language", Track: t.ID, Message: fmt.Sprintf("track %d: no language set", t.ID)})
