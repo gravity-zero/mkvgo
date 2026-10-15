@@ -110,3 +110,31 @@ func TestRemuxToHLSReadsAndWritesOnce(t *testing.T) {
 		})
 	}
 }
+
+// TestFastStartReadsOnce: the sizing pass of a fast start walks the block
+// headers; the source's payloads are read once, by the write pass.
+func TestFastStartReadsOnce(t *testing.T) {
+	src := buildInterleavedSource(t, 60)
+	st, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tally ioTally
+	dst := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(context.Background(), src, dst, Options{FS: tallyFS(&tally), FastStart: true, SourceAccess: SourceLocal}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readRatio := float64(tally.read) / float64(st.Size())
+	writeRatio := float64(tally.written) / float64(out.Size())
+	t.Logf("source %d, read %d (%.3fx), output %d, written %d (%.3fx)", st.Size(), tally.read, readRatio, out.Size(), tally.written, writeRatio)
+	if readRatio > 1.1 {
+		t.Errorf("read %.3fx the source, want at most 1.1x", readRatio)
+	}
+	if writeRatio > 1.01 {
+		t.Errorf("wrote %.3fx the output, want at most 1.01x", writeRatio)
+	}
+}

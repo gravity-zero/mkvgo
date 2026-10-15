@@ -49,6 +49,8 @@ type outTrack struct {
 	samples    trackSamples
 	pending    []byte // current chunk's sample bytes, not yet written to mdat
 	pendingCnt int
+	// pendingSized counts the chunk's bytes known by size alone (a sizing pass walked by block headers).
+	pendingSized int64
 	// hasher accumulates the track's content SHA-256 while its samples stream
 	// (Options.ContentHashes); stored as a freeform ilst atom for `verify`.
 	hasher hash.Hash
@@ -106,7 +108,21 @@ func (t *outTrack) emitSample(cw *countWriter, data []byte, pts, blockPts, dur i
 	}
 	t.pending = append(t.pending, data...)
 	t.pendingCnt++
-	if len(t.pending) >= chunkByteThreshold || t.pendingCnt >= chunkSampleThreshold {
+	if int64(len(t.pending))+t.pendingSized >= chunkByteThreshold || t.pendingCnt >= chunkSampleThreshold {
+		return flushChunk(cw, t)
+	}
+	return nil
+}
+
+// emitSized is emitSample for a sample known by its size alone: the sizing pass of a fast start.
+func (t *outTrack) emitSized(cw *countWriter, size, pts, blockPts, dur int64, sync bool) error {
+	if size > math.MaxUint32 {
+		return errf("track %d: sample of %d bytes exceeds MP4 sample size limit", t.mkv.ID, size)
+	}
+	t.samples.addDur(uint32(size), pts, blockPts, dur, sync)
+	t.pendingSized += size
+	t.pendingCnt++
+	if int64(len(t.pending))+t.pendingSized >= chunkByteThreshold || t.pendingCnt >= chunkSampleThreshold {
 		return flushChunk(cw, t)
 	}
 	return nil
@@ -210,7 +226,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	}
 	// A remote source is read once: its fast start goes through a temporary file.
 	remote := o.FastStart && hintsRanges(fs, srcPath)
-	return writeMP4(ctx, dst, dstPath, remote, c, openBlocks, tracks, brands, meta, o)
+	return writeMP4(ctx, dst, srcPath, dstPath, remote, c, openBlocks, tracks, brands, meta, o)
 }
 
 // movieMeta bundles the file-level metadata carried into the moov box.
@@ -355,6 +371,29 @@ const mdatHeaderLen = 16
 // blockOpener opens pass number pass (0-based) of passes over the source's blocks.
 type blockOpener func(pass, passes int) (*reader.BlockReader, func(), error)
 
+// sizeByHeaders makes a sizing pass walk the block headers alone of every
+// track whose samples are its stored bytes: nothing of their payloads is
+// read but each track's first frame. A hashed track reads its bytes.
+func sizeByHeaders(br *reader.BlockReader, tracks []*outTrack) {
+	var ids, sized []uint64
+	for _, t := range tracks {
+		if t.isChapter {
+			continue
+		}
+		ids = append(ids, t.mkv.ID)
+		if !t.spec.text && t.hasher == nil && t.mkv.Compression.Verbatim() {
+			sized = append(sized, t.mkv.ID)
+		}
+	}
+	if len(sized) == 0 {
+		return
+	}
+	br.KeepTracks(ids...)
+	br.SetHeaderOnly(true)
+	br.SetHeaderOnlyTracks(sized...)
+	br.SetSparse(true)
+}
+
 // routeTracks maps each source track number to its output track.
 func routeTracks(tracks []*outTrack) map[uint64]*outTrack {
 	routing := make(map[uint64]*outTrack, len(tracks))
@@ -364,13 +403,13 @@ func routeTracks(tracks []*outTrack) map[uint64]*outTrack {
 	return routing
 }
 
-func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, remote bool, c *mkv.Container, open blockOpener, tracks []*outTrack, brands []string, meta movieMeta, o Options) error {
+func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, srcPath, dstPath string, remote bool, c *mkv.Container, open blockOpener, tracks []*outTrack, brands []string, meta movieMeta, o Options) error {
 	ftyp := buildFtyp(brands)
 	switch {
 	case o.FastStart && remote:
 		return writeFastStartViaTemp(ctx, dst, dstPath, open, tracks, ftyp, meta, o)
 	case o.FastStart:
-		return writeFastStart(ctx, dst, c, open, tracks, ftyp, meta, o)
+		return writeFastStart(ctx, dst, srcPath, c, open, tracks, ftyp, meta, o)
 	}
 	br, done, err := open(0, 1)
 	if err != nil {
@@ -388,7 +427,7 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, remo
 		return errf("write mdat header: %w", err)
 	}
 	cw := &countWriter{w: buf} // pos counts mdat payload only (relative offsets)
-	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw)
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw, nil)
 	if err != nil {
 		return err
 	}
@@ -410,14 +449,25 @@ func writeMP4(ctx context.Context, dst mkv.WriteSeekCloser, dstPath string, remo
 // pipeline into a discarding writer: the sample tables, hence the moov, are
 // then exact before a byte of media is written. The write pass streams the
 // media straight behind the moov, in one pass, with no temporary file and no
-// copy of the mdat. It costs a second read of the source instead, which is
-// why a remote source goes through writeFastStartViaTemp.
-func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, c *mkv.Container, open blockOpener, tracks []*outTrack, ftyp []byte, meta movieMeta, o Options) error {
+// copy of the mdat. It costs a second walk of the source instead - by the
+// block headers alone (sizeByHeaders) - which is why a remote source goes
+// through writeFastStartViaTemp.
+func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, srcPath string, c *mkv.Container, open blockOpener, tracks []*outTrack, ftyp []byte, meta movieMeta, o Options) error {
 	br, done, err := open(0, 2)
 	if err != nil {
 		return err
 	}
-	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), &countWriter{w: io.Discard})
+	// The first frames are read through their own handle: the walk's keeps its place.
+	src, err := o.FS.DoOpen(srcPath)
+	if err != nil {
+		done()
+		return err
+	}
+	if directReads(&o, src) {
+		sizeByHeaders(br, tracks)
+	}
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), &countWriter{w: io.Discard}, src)
+	src.Close()
 	done()
 	if err != nil {
 		return err
@@ -450,7 +500,7 @@ func writeFastStart(ctx context.Context, dst mkv.WriteSeekCloser, c *mkv.Contain
 	if _, err := out.Write(mdatHeader(dataLen)); err != nil {
 		return errf("write mdat header: %w", err)
 	}
-	n, err := streamSamples(ctx, br, wtracks, routeTracks(wtracks), &countWriter{w: out})
+	n, err := streamSamples(ctx, br, wtracks, routeTracks(wtracks), &countWriter{w: out}, nil)
 	if err != nil {
 		return err
 	}
@@ -488,7 +538,7 @@ func writeFastStartViaTemp(ctx context.Context, dst mkv.WriteSeekCloser, dstPath
 	defer done()
 	tbuf := bufio.NewWriterSize(tmp, 256<<10)
 	cw := &countWriter{w: tbuf}
-	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw)
+	dataLen, err := streamSamples(ctx, br, tracks, routeTracks(tracks), cw, nil)
 	if err != nil {
 		return err
 	}
@@ -528,8 +578,10 @@ func writeFastStartViaTemp(ctx context.Context, dst mkv.WriteSeekCloser, dstPath
 
 // streamSamples reads every block, writes the media payload to cw (whose pos is
 // the mdat-relative offset), and fills each track's sample table. It returns the
-// total payload length and errors if no track produced any sample.
-func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTrack, routing map[uint64]*outTrack, cw *countWriter) (int64, error) {
+// total payload length and errors if no track produced any sample. A block
+// walked by its header alone (sizeByHeaders) is sized, its first frame read
+// from src.
+func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTrack, routing map[uint64]*outTrack, cw *countWriter, src io.ReadSeeker) (int64, error) {
 	// emitSample copies each sample into its chunk at once, so one buffer serves every block of a
 	// track whose sample entry is built (text cues and a first-frame config may hold on to theirs).
 	var blockBuf []byte
@@ -559,6 +611,15 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 		}
 		if t.spec.text {
 			if err := t.addTextBlock(cw, b); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if b.Data == nil {
+			if err := learnFirstFrame(t, b, src); err != nil {
+				return 0, err
+			}
+			if err := t.emitSized(cw, int64(len(t.mkv.HeaderStripping))+b.Size, b.Timecode, b.BlockTimecode, 0, b.Keyframe); err != nil {
 				return 0, err
 			}
 			continue
@@ -636,9 +697,10 @@ func flushChunk(cw *countWriter, t *outTrack) error {
 	if _, err := cw.Write(t.pending); err != nil {
 		return errf("write mdat: %w", err)
 	}
+	cw.pos += t.pendingSized // bytes known by size alone: the sizing pass writes nothing
 	t.samples.addChunk(offset, t.pendingCnt)
 	t.pending = t.pending[:0]
-	t.pendingCnt = 0
+	t.pendingCnt, t.pendingSized = 0, 0
 	return nil
 }
 

@@ -18,6 +18,11 @@ All notable changes to mkvgo are documented here. The format is based on
   segments byte-identical, half the system time. A network source
   (`Options.SourceAccess`, else the file's mount), a compressed track or a
   converted one keeps the temp file.
+- **`to-mp4 --faststart` reads the source once.** The sizing pass that
+  places the moov first read the whole source before the write pass; it
+  walks the block headers now, reading each track's first frame alone (a
+  4.4 GB source: 9.2 to 4.7 GB read), a hashed track (`--hash`) still
+  reading its bytes.
 
 ## [0.52.0] - 2026-10-15
 
