@@ -74,6 +74,10 @@ All notable changes to mkvgo are documented here. The format is based on
   container leaves out, like the AAC configuration did. A `SamplingFrequency`
   no file can mean (a corrupt float: 1.4e-37 Hz) is rejected, reported as
   unknown rather than as a value.
+- **An unknown-size element that is no Cluster** (a live muxer's Cues, with
+  its CuePoints of unknown size too) is walked to the element that ends it
+  (RFC 8794: the first segment-level ID, the Segment's end or EOF) instead
+  of refusing the file; its content is not read.
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it

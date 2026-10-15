@@ -298,6 +298,13 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			c.ResyncedBytes += off - elemStart
 			continue
 		}
+		if eh.Size < 0 && eh.ID != mkv.IDCluster {
+			// A live muxer's Cues or Tags declare no size: walked to the element that ends them, where the walk resumes.
+			if err := p.skipUnknownSizeElement(endPos); err != nil {
+				return err
+			}
+			continue
+		}
 		switch eh.ID {
 		case mkv.IDInfo:
 			if gotInfo {
@@ -459,9 +466,6 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return err
 			}
 		default:
-			if eh.Size < 0 {
-				return fmt.Errorf("unknown-size element 0x%X cannot be skipped", eh.ID)
-			}
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}

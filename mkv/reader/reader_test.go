@@ -1154,13 +1154,15 @@ func TestUnknownSizeElementInSegment(t *testing.T) {
 	writeSegmentStart(&buf, int64(seg.Len()))
 	buf.Write(seg.Bytes())
 
+	// An unknown-size element that is no Cluster (a live muxer's) ends the walk when
+	// nothing recognizable follows it, keeping what came before; it is not an error.
 	r := bytes.NewReader(buf.Bytes())
-	_, err := Read(context.Background(), r, "unksize.mkv")
-	if err == nil {
-		t.Fatal("expected error for unknown-size element")
+	c, err := Read(context.Background(), r, "unksize.mkv")
+	if err != nil {
+		t.Fatalf("unknown-size element: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown-size") {
-		t.Fatalf("unexpected error: %v", err)
+	if c.Info.TimecodeScale == 0 {
+		t.Error("the Info before the unknown-size element was lost")
 	}
 }
 

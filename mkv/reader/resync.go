@@ -160,6 +160,41 @@ func (p *parser) resyncToSegmentElement(from, scanLimit, segEnd int64) (int64, e
 	return resyncToSegmentElement(p.r, scanLimit, segEnd)
 }
 
+// skipUnknownSizeElement walks the children of an unknown-size element that is
+// no Cluster (a live muxer's Cues, with its CuePoints of unknown size too),
+// header by header: the element ends at the first segment-level ID - no child
+// of any such element - or at the Segment's end or EOF (RFC 8794 section 6.2);
+// a child that declares no size is walked the same way, its own children ending
+// it where the parent ends. The parser is left AT the element that ended it; a
+// header that will not decode stops the walk there, for the Segment walk to
+// resync as it would anywhere else.
+func (p *parser) skipUnknownSizeElement(endPos int64) error {
+	br, err := newBufReadSeeker(p.r, fullReadBufSize)
+	if err != nil {
+		return err
+	}
+	stop := br.off
+	for endPos < 0 || stop < endPos {
+		if err := p.checkCtx(); err != nil {
+			return err
+		}
+		h, n, err := ebml.ReadElementHeader(br)
+		if err != nil || isSegmentLevelID(h.ID) {
+			break
+		}
+		stop += int64(n)
+		if h.Size < 0 {
+			continue // an unknown-size child: its children are walked in turn
+		}
+		if _, err := br.Seek(h.Size, io.SeekCurrent); err != nil {
+			return err
+		}
+		stop += h.Size
+	}
+	_, err = p.r.Seek(stop, io.SeekStart)
+	return err
+}
+
 // skipUnknownSizeCluster walks the children of an unknown-size Cluster whose
 // header was just read, and stops on the element that ends it: per the EBML
 // rule for unknown-sized elements (RFC 8794 section 6.2), the first element

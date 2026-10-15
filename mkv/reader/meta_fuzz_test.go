@@ -13,6 +13,7 @@ import (
 // real muxer-written file so the mutator starts from valid EBML.
 func FuzzReadMeta(f *testing.F) {
 	f.Add(buildPlainMKV())
+	f.Add(liveCuesMKV()) // unknown-size Tags, Cues and CuePoints: the resync path past them
 	f.Add(segmentMKV(infoElem(), tracksElem(), cuesElem(8), clusterElem()))
 	if b, err := os.ReadFile("testdata/probe/hdr_multi.mkv"); err == nil {
 		f.Add(b)

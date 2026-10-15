@@ -13,6 +13,7 @@ import (
 // the corruption shapes the resync handles.
 func FuzzRead(f *testing.F) {
 	f.Add(buildMinimalMKV().Bytes())
+	f.Add(liveCuesMKV()) // unknown-size Tags, Cues and CuePoints: the resync path past them
 	f.Add(buildGappedMKV(4096, true))
 	f.Add(buildGappedMKV(200<<10, false))
 	f.Add(append(realCluster(), 0x00, 0x00, 0x00, 0x00)) // cluster then padding

@@ -153,3 +153,51 @@ func TestAudioHeadersFillAbsentFields(t *testing.T) {
 		}
 	}
 }
+
+// TestUnknownSizeCuesTolerated: a live muxer's Cues and CuePoints declare no
+// size; the walk resumes on the next segment-level element or ends, and the
+// file probes on both readers.
+func TestUnknownSizeCuesTolerated(t *testing.T) {
+	data := liveCuesMKV()
+	c, err := Read(context.Background(), bytes.NewReader(data), "live.webm")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(c.Tracks) != 1 || c.Tracks[0].Codec != "opus" {
+		t.Errorf("tracks = %+v, want the Opus track", c.Tracks)
+	}
+	m, err := ReadMeta(context.Background(), bytes.NewReader(data), "live.webm")
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if len(m.Tracks) != 1 {
+		t.Errorf("ReadMeta tracks = %d, want 1", len(m.Tracks))
+	}
+}
+
+// liveCuesMKV is a file as a live muxer leaves it: Tags, Cues and CuePoints of unknown size.
+func liveCuesMKV() []byte {
+	unknown := func(id uint32, body []byte) []byte {
+		var b bytes.Buffer
+		ebml.WriteElementHeader(&b, id, -1)
+		b.Write(body)
+		return b.Bytes()
+	}
+	cuePoint := unknown(mkv.IDCuePoint, append(uintElem(mkv.IDCueTime, 0, 1),
+		unknown(mkv.IDCueTrackPositions, append(uintElem(mkv.IDCueTrack, 1, 1), uintElem(mkv.IDCueClusterPos, 100, 1)...))...))
+	te := masterElem(mkv.IDTrackEntry,
+		uintElem(mkv.IDTrackNumber, 1, 1),
+		uintElem(mkv.IDTrackType, mkv.TrackTypeAudio, 1),
+		strElem(mkv.IDCodecID, "A_OPUS"))
+	var seg bytes.Buffer
+	seg.Write(infoElem())
+	seg.Write(unknown(mkv.IDTags, masterElem(mkv.IDTag, masterElem(mkv.IDSimpleTag, strElem(mkv.IDTagName, "TITLE")))))
+	seg.Write(masterElem(mkv.IDTracks, te))
+	seg.Write(realCluster())
+	seg.Write(unknown(mkv.IDCues, cuePoint))
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+	return buf.Bytes()
+}
