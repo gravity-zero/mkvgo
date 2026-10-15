@@ -4,6 +4,9 @@ import "math"
 
 // OrientationFromMatrix returns the clockwise rotation (0/90/180/270) and the horizontal mirror a display matrix (a, b, c, d) states, as ffmpeg builds it: a rotation, then -display_hflip negating the first column.
 func OrientationFromMatrix(a, b, c, d float64) (rotation int, hflip bool) {
+	if math.Hypot(a, b) < 1e-3 {
+		return 0, false // a first row of no length (a metadata track's 0 1e-5 0 0): not a rotation, ignored as ffmpeg ignores it
+	}
 	if a*d-b*c < 0 { // a mirror: take it off the first column to read the rotation left
 		a, hflip = -a, true
 	}

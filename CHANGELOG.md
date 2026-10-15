@@ -82,6 +82,9 @@ All notable changes to mkvgo are documented here. The format is based on
   avcC, HEVC hvcC) and is refused by name when the codec configuration states
   none: Matroska PixelWidth/PixelHeight are mandatory and never 0 (a crashtest
   fixture went out as a 0x64530 track).
+- **A display matrix with a column of no length is not a rotation**: a
+  metadata track's `0 1e-5 0 0` matrix read as a 90° rotation; it is ignored,
+  as ffmpeg ignores it.
 - **A sample entry whose configuration is not what its codec needs** (an
   `mp4a` without decoder config, an `avc1` without `avcC`, a `stbl` without
   `stsd`) no longer fails the whole file: the track is described as it

@@ -28,6 +28,17 @@ var ffmpegOrientations = []struct {
 	{270, true, true, 0, -1, 1, 0, 0, 90},
 }
 
+// TestDegenerateMatrixIsNoRotation: a matrix whose first row has no length (a
+// metadata track's 0 1e-5 0 0) is not a rotation; ffmpeg ignores it too.
+func TestDegenerateMatrixIsNoRotation(t *testing.T) {
+	if rot, hflip := OrientationFromMatrix(0, 1.52587890625e-05, 0, 0); rot != 0 || hflip {
+		t.Errorf("degenerate matrix read as %d° hflip=%v, want 0 and no mirror", rot, hflip)
+	}
+	if rot, _ := OrientationFromMatrix(0, 1, -1, 0); rot != 90 {
+		t.Errorf("a 90° matrix reads %d°", rot)
+	}
+}
+
 // TestOrientationAsFFmpegWritesIt: every rotation with or without a mirror
 // reads from ffmpeg's display matrix and from its Matroska pose to the same
 // orientation, and writes back the matrix and the pose ffmpeg wrote.
