@@ -31,6 +31,8 @@ All notable changes to mkvgo are documented here. The format is based on
   30 MB file, the bytes read unchanged, the output byte-identical.
 - **`demux` writes in 1 MiB calls** (64 KiB before, which a video frame
   alone overflowed): 63,900 to 4,400 write calls on a 4.4 GB file.
+- **`mp4.OpenMeta` parses a QuickTime chapter track only when the file has
+  no `chpl`**, instead of reading its sample table on every open.
 
 ## [0.52.0] - 2026-10-15
 
