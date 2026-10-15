@@ -78,6 +78,7 @@ type inTrack struct {
 	encryption     string  // the protected sample entry's scheme (schm); "" when the samples are clear
 	bitDepth       uint8   // PCM bits per sample; 0 otherwise
 	pcmFrame       uint32  // PCM bytes per frame (one sample of every channel); 0 when not PCM
+	fragDecodeEnd  int64   // where the track's last fragment ended (ticks): the next one's base when it has no tfdt
 
 	// language and selection flags read from the track header / media header.
 	language      string // ISO 639-2 from mdhd (e.g. "fre"); "" when absent/"und"

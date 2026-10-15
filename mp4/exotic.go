@@ -275,7 +275,7 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 			continue
 		}
 		var h tfhd
-		var haveTfhd bool
+		var haveTfhd, haveTfdt bool
 		var start int64
 		for _, tb := range trafBoxes {
 			switch tb.typ {
@@ -284,11 +284,14 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 					haveTfhd = true
 				}
 			case "tfdt":
-				start = parseTfdt(tb.payload)
+				start, haveTfdt = parseTfdt(tb.payload), true
 			}
 		}
 		if !haveTfhd {
 			continue
+		}
+		if !haveTfdt {
+			start = ends[h.trackID] // the fragment continues where the track's previous one ended
 		}
 		td := trex[h.trackID]
 		if !h.haveDur {

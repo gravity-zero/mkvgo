@@ -235,6 +235,7 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 		return nil // fragment for a track we do not carry
 	}
 
+	baseDecodeTime = t.fragDecodeEnd // without a tfdt, a fragment continues where the track's previous one ended
 	for _, b := range boxes {
 		if b.typ == "tfdt" {
 			baseDecodeTime = parseTfdt(b.payload)
@@ -271,6 +272,7 @@ func parseTrafSamples(traf []byte, moofStart int64, trex map[uint32]trexDefault,
 		dataCursor = sampleOff
 		dts = newDTS
 	}
+	t.fragDecodeEnd = dts
 	return nil
 }
 

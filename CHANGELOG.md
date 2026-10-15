@@ -56,6 +56,9 @@ All notable changes to mkvgo are documented here. The format is based on
   away and the remux failed ("outside SimpleBlock's int16 range").
 - **`from-mp4` opens a new cluster when a decode window's presentation times
   spread wider than a SimpleBlock's offset can say**, instead of failing.
+- **A fragment without `tfdt` continues where the track's previous fragment
+  ended** (every such fragment restarted at 0, collapsing a 7.9 s file onto
+  1.8 s), for the remux as for the probe's duration.
 - **Matroska audio defaults**: an audio track without `Channels` reads 1,
   without `SamplingFrequency` 8000 Hz (48000 for Opus) - the spec defaults
   every demuxer applies - once the codec's own header had its say: Vorbis,

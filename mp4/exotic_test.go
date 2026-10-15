@@ -580,3 +580,39 @@ func TestRemuxToMP4RefusesEncryptedTracks(t *testing.T) {
 		}
 	}
 }
+
+// fragmentWithoutTfdt is oneFragment without a tfdt: the fragment's decode time is where the track's previous one ended.
+func fragmentWithoutTfdt(trackID uint32, sizes, durs []uint32) ([]byte, []byte) {
+	moof, mdat := oneFragment(trackID, 0, sizes, durs, nil, 1)
+	tfdt := fullBox("tfdt", 1, 0, func(w *bw) { w.u64(0) })
+	i := bytes.Index(moof, tfdt)
+	out := append(append([]byte{}, moof[:i]...), moof[i+len(tfdt):]...)
+	// the moof, traf and trun data_offset shrink by the tfdt's length
+	binary.BigEndian.PutUint32(out[0:], uint32(len(out)))
+	traf := bytes.Index(out, []byte("traf")) - 4
+	binary.BigEndian.PutUint32(out[traf:], binary.BigEndian.Uint32(out[traf:])-uint32(len(tfdt)))
+	trun := bytes.Index(out, []byte("trun")) - 4
+	off := trun + 8 + 8
+	binary.BigEndian.PutUint32(out[off:], uint32(int32(binary.BigEndian.Uint32(out[off:]))-int32(len(tfdt))))
+	return out, mdat
+}
+
+// TestFragmentsWithoutTfdtContinue: a fragment without a tfdt starts where
+// the track's previous fragment ended, on the sample table as on the probe's
+// duration - not at zero, which collapsed every fragment onto the first.
+func TestFragmentsWithoutTfdtContinue(t *testing.T) {
+	moof1, mdat1 := fragmentWithoutTfdt(1, []uint32{10, 10, 10}, []uint32{1024, 1024, 1024})
+	moof2, mdat2 := fragmentWithoutTfdt(1, []uint32{10, 10}, []uint32{1024, 1024})
+	data := fragmentedAAC(0, moof1, mdat1, moof2, mdat2)
+	mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), sampleFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := mv.tracks[0].samples
+	if len(s) != 5 || s[3].dtsMs != 3072*1000/48000 || s[4].dtsMs != 4096*1000/48000 {
+		t.Errorf("samples = %d, fragment 2 at %d and %d ms; want 5 samples at 64 and 85 ms", len(s), s[3].dtsMs, s[4].dtsMs)
+	}
+	if c, _ := probeMovie(t, data); c.DurationMs != 5120*1000/48000 {
+		t.Errorf("probe DurationMs = %d, want %d", c.DurationMs, 5120*1000/48000)
+	}
+}
