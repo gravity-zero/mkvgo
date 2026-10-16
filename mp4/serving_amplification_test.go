@@ -77,7 +77,37 @@ func countingFS(t *readTally) *mkv.FS {
 // viewer pulls video and audio for the same instant through two separate walks,
 // each of which reads the whole window to serve its slice of it.
 func buildInterleavedSource(tb testing.TB, seconds int) string {
+	return buildInterleavedSourceUntil(tb, seconds, -1)
+}
+
+// buildInterleavedSourceUntil is buildInterleavedSource with the second audio track ending at secondAudioEndMs (-1: with the video).
+func buildInterleavedSourceUntil(tb testing.TB, seconds int, secondAudioEndMs int64) string {
+	return buildInterleavedSourceHole(tb, seconds, secondAudioEndMs, -1)
+}
+
+// sourceLayout shapes buildSourceWithLayout's file: the second audio silent over [holeFromMs, holeToMs); from tailFromMs
+// on (-1: never), the video's clusters written first and the audio's after them, a block-ordered tail; the audio
+// tracks cued per cluster only when audioCues is set.
+type sourceLayout struct {
+	holeFromMs, holeToMs int64
+	tailFromMs           int64
+	tailToMs             int64 // the block-ordered stretch ends here (0: at the end of the file), interleaved clusters follow
+	endNoKey             bool  // the first interleaved cluster after the stretch holds no keyframe: uncued
+	audioCues            bool
+	videoDiv, audioMul   int // scale the video down and the audio up (0: as they are), for an audio zone far wider than a window
+}
+
+// buildInterleavedSourceHole is buildInterleavedSource with the second audio track silent (no block, no cue) from holeFromMs to holeToMs (-1: to the end).
+func buildInterleavedSourceHole(tb testing.TB, seconds int, holeFromMs, holeToMs int64) string {
+	return buildSourceWithLayout(tb, seconds, sourceLayout{holeFromMs: holeFromMs, holeToMs: holeToMs, tailFromMs: -1, audioCues: true})
+}
+
+// buildSourceWithLayout writes buildInterleavedSource's tracks in the given layout.
+func buildSourceWithLayout(tb testing.TB, seconds int, lay sourceLayout) string {
 	tb.Helper()
+	inHole := func(ms int64) bool {
+		return lay.holeFromMs >= 0 && ms >= lay.holeFromMs && (lay.holeToMs < 0 || ms < lay.holeToMs)
+	}
 	const (
 		fps        = 25
 		gopSec     = 2 // keyframe (and cue) every 2s
@@ -95,6 +125,16 @@ func buildInterleavedSource(tb testing.TB, seconds int) string {
 			b[i] = seed + byte(i)
 		}
 		return b
+	}
+	videoBytes := func(n int) int {
+		if lay.videoDiv > 1 {
+			return n / lay.videoDiv
+		}
+		return n
+	}
+	audioSize := audioBytes
+	if lay.audioMul > 1 {
+		audioSize *= lay.audioMul
 	}
 	w, h := uint32(1920), uint32(1080)
 	sr := 48000.0
@@ -122,38 +162,69 @@ func buildInterleavedSource(tb testing.TB, seconds int) string {
 	}
 
 	totalMs := int64(seconds) * 1000
-	for cs := int64(0); cs < totalMs; cs += clusterMs {
+	writeCluster := func(cs int64, video, audio bool) {
 		clusterEnd := cs + clusterMs
 		clusterPos := m.RelPos()
 		var blks []mkv.Block
-
-		// Video: one frame per 1/fps, a keyframe (and a cue) every gopSec.
-		for f := cs * fps / 1000; f*1000/fps < clusterEnd; f++ {
-			ms := f * 1000 / fps
-			if ms < cs {
-				continue
+		if video {
+			// Video: one frame per 1/fps, a keyframe (and a cue) every gopSec.
+			for f := cs * fps / 1000; f*1000/fps < clusterEnd; f++ {
+				ms := f * 1000 / fps
+				if ms < cs {
+					continue
+				}
+				noKey := lay.endNoKey && audio && cs == lay.tailToMs // the first interleaved cluster after the stretch: uncued
+				key := f%(gopSec*fps) == 0 && !noKey
+				data := sample(videoBytes(deltaBytes), byte(f))
+				if key {
+					data = sample(videoBytes(keyBytes), byte(f))
+					m.Cues = append(m.Cues, mkv.CuePoint{TimeMs: ms, Track: 1, ClusterPos: clusterPos})
+				}
+				blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: ms, Keyframe: key, Data: data})
 			}
-			key := f%(gopSec*fps) == 0
-			data := sample(deltaBytes, byte(f))
-			if key {
-				data = sample(keyBytes, byte(f))
-				m.Cues = append(m.Cues, mkv.CuePoint{TimeMs: ms, Track: 1, ClusterPos: clusterPos})
+		}
+		if audio {
+			// Two audio tracks (the VF+VO of a real release) and a subtitle track,
+			// interleaved through the same cluster.
+			if lay.audioCues {
+				m.Cues = append(m.Cues, mkv.CuePoint{TimeMs: cs, Track: 2, ClusterPos: clusterPos})
+				if !inHole(cs) {
+					m.Cues = append(m.Cues, mkv.CuePoint{TimeMs: cs, Track: 3, ClusterPos: clusterPos})
+				}
 			}
-			blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: ms, Keyframe: key, Data: data})
-		}
-		// Two audio tracks (the VF+VO of a real release) and a subtitle track,
-		// interleaved through the same cluster.
-		for ms := cs; ms < clusterEnd; ms += audioMs {
-			blks = append(blks, mkv.Block{TrackNumber: 2, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(ms))})
-			blks = append(blks, mkv.Block{TrackNumber: 3, Timecode: ms, Keyframe: true, Data: sample(audioBytes, byte(ms+1))})
-		}
-		for ms := cs; ms < clusterEnd; ms += 1000 {
-			blks = append(blks, mkv.Block{TrackNumber: 4, Timecode: ms, Keyframe: true, Data: []byte("subtitle line")})
+			for ms := cs; ms < clusterEnd; ms += audioMs {
+				blks = append(blks, mkv.Block{TrackNumber: 2, Timecode: ms, Keyframe: true, Data: sample(audioSize, byte(ms))})
+				if !inHole(ms) {
+					blks = append(blks, mkv.Block{TrackNumber: 3, Timecode: ms, Keyframe: true, Data: sample(audioSize, byte(ms+1))})
+				}
+			}
+			for ms := cs; ms < clusterEnd; ms += 1000 {
+				blks = append(blks, mkv.Block{TrackNumber: 4, Timecode: ms, Keyframe: true, Data: []byte("subtitle line")})
+			}
 		}
 		sortBlocksByTimecode(blks)
 		if err := writer.WriteCluster(m.W, clusterTS(cs), scale, blks); err != nil {
 			tb.Fatal(err)
 		}
+	}
+	split, tailEnd := totalMs, totalMs
+	if lay.tailFromMs >= 0 && lay.tailFromMs < totalMs {
+		split = lay.tailFromMs
+		if lay.tailToMs > split && lay.tailToMs < totalMs {
+			tailEnd = lay.tailToMs
+		}
+	}
+	for cs := int64(0); cs < split; cs += clusterMs {
+		writeCluster(cs, true, true)
+	}
+	for cs := split; cs < tailEnd; cs += clusterMs {
+		writeCluster(cs, true, false)
+	}
+	for cs := split; cs < tailEnd; cs += clusterMs {
+		writeCluster(cs, false, true)
+	}
+	for cs := tailEnd; cs < totalMs; cs += clusterMs {
+		writeCluster(cs, true, true)
 	}
 	if err := m.Finalize(); err != nil {
 		tb.Fatal(err)

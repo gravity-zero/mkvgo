@@ -27,6 +27,27 @@ All notable changes to mkvgo are documented here. The format is based on
   both; a kept handle's `Bytes()` is nil (write and close it) and its ETag is
   the weak one of a streamed segment.
 
+### Fixed
+
+- **A window no longer walks the rest of the file for a track that is not
+  there.** The walk that builds a window stopped only once every track of the
+  plan had a block past the window's end. A track that ends before the video
+  never has one, so every window after its end read the source to its last
+  byte (22.7 MiB for a 2.8 MiB window on a 60 s source). A file written track
+  by track from some point on - interleaved for its first minutes, then every
+  video cluster, then every audio cluster, the audio uncued - made the window
+  crossing that point walk the whole video tail to reach its audio, once per
+  audio track: 4.1 GB read to serve 6.6 MB of a 2.9 GB UHD episode, measured
+  on a real file, and under load the segment timed out. Now a track whose
+  Cues stop two cue gaps before a window is not waited for; the one walk that
+  meets the end of the source teaches the plan where each track ended; and a
+  track still missing two windows past the window's bytes is looked for in
+  the uncued regions of the source (the clusters the Cues never name, between
+  or after the cued ones), where a track stored apart from the video lives:
+  the window straddling the change reads about three windows' worth, the
+  windows after it one, as on an interleaved file. `HLSPlanStats.FarLookups`
+  and `FarHits` count those searches. The segments are the same bytes.
+
 ## [0.53.0] - 2026-10-16
 
 ### Added

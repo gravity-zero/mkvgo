@@ -331,6 +331,10 @@ type HLSPlanStats struct {
 	// unknown - whose segments are copied from the source.
 	KeptSegments  int64
 	KeptFallbacks int64
+	// FarLookups counts the walks that looked for a track still missing two windows past the window's bytes in the
+	// uncued regions of the source (a track stored apart from the video); FarHits, those that found it there.
+	FarLookups int64
+	FarHits    int64
 	// UndeclaredZlibBlocks is the number of subtitle blocks the plan inflated
 	// although their track declares no compression: a muxer compressed the
 	// track and lost the ContentEncodings (mkvgo diagnose reports such tracks).
