@@ -1285,7 +1285,7 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 type segSample struct {
 	fragSample
 	data []byte
-	off  int64 // where the payload sits in the source (structure-only walks, which hold no data)
+	off  int64 // where the payload sits in the source
 }
 
 // sampleOf frames one walked block as a window sample: its decoded bytes, or when the walk skipped its payload its place in the source.
@@ -1300,7 +1300,7 @@ func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
 		return segSample{}, err
 	}
 	meta.size = uint32(len(data))
-	return segSample{fragSample: meta, data: data}, nil
+	return segSample{fragSample: meta, data: data, off: b.DataOffset}, nil
 }
 
 // timeSegmentWindow derives one segment window's per-sample dtsTS/ctsTS/durTS

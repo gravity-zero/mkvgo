@@ -52,6 +52,7 @@ func TestSourcePathStatOncePerInterval(t *testing.T) {
 // write fails before a byte of the source is copied, and the plan refuses
 // every request after it, before any read.
 func TestChangedSourceCaughtByFstatWithinInterval(t *testing.T) {
+	copyFromSource(t)
 	src := openGOPSource(t, 6, false, true)
 	ctx := context.Background()
 	plan, err := PlanHLS(ctx, src, Options{SegmentMs: openGOPMs})

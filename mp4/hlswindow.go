@@ -324,6 +324,13 @@ type HLSPlanStats struct {
 	TableEvictions   int64
 	StreamedSegments int64
 	StreamFallbacks  int64
+	// KeptSegments is the number of segments Open served from the bytes the
+	// walk that built their window had read (one read of the source for the
+	// window); KeptFallbacks, the tables built headers only - the process-wide
+	// window budget was full (SetWindowBytes), or the window's span was
+	// unknown - whose segments are copied from the source.
+	KeptSegments  int64
+	KeptFallbacks int64
 	// UndeclaredZlibBlocks is the number of subtitle blocks the plan inflated
 	// although their track declares no compression: a muxer compressed the
 	// track and lost the ContentEncodings (mkvgo diagnose reports such tracks).

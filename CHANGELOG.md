@@ -4,6 +4,29 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **A streamed window is read once.** The walk that builds a window's table
+  for `HLSPlan.Open` reads the whole window (every payload of a 1080p film
+  sits under the reader's seek threshold), yet its segments were then copied
+  from the source again: a viewer taking video and one audio track read 2.56x
+  the bytes served, measured per range on a 1080p film, and under a saturated
+  disk the second read no longer came from the page cache. The walk now keeps
+  what it read - the video segment and each audio segment of 2 MiB or less,
+  each for the first `Open` that asks for it; the other languages go once a
+  viewer took the video and one audio - and serving the window reads the
+  source once: 1.21x the bytes served on that film (the window once, the
+  other language and the subtitles with it), 3.17x down to 1.70x on a 2160p
+  remux. The kept segments are budgeted process-wide, apart from the table
+  cache (`mp4.SetWindowBytes`, `serve --window-bytes <MiB>|off`, default 256
+  MiB, held by tables and by handles until written whole or closed): a window
+  built while the budget is full is kept headers only and copied from the
+  source as before. `HLSPlanStats.KeptSegments` and `KeptFallbacks` count
+  both; a kept handle's `Bytes()` is nil (write and close it) and its ETag is
+  the weak one of a streamed segment.
+
 ## [0.53.0] - 2026-10-16
 
 ### Added

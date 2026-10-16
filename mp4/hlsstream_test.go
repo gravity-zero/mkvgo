@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"os"
@@ -94,21 +95,26 @@ func TestOpenStreamsIdenticalBytes(t *testing.T) {
 			}, blocks)
 		}(),
 	} {
-		t.Run(name, func(t *testing.T) {
-			segMs := int64(2000)
-			if name == "open-gop" {
-				segMs = openGOPMs
-			}
-			plan, err := PlanHLS(ctx, src, Options{SegmentMs: segMs})
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertOpenMatchesResource(t, plan)
-			st := plan.Stats()
-			if st.TableBuilds == 0 || st.StreamedSegments == 0 || st.StreamFallbacks != 0 {
-				t.Errorf("stats: %+v", st)
-			}
-		})
+		for _, kept := range []bool{true, false} { // served from the walk's bytes, then copied from the source
+			t.Run(fmt.Sprintf("%s/kept=%v", name, kept), func(t *testing.T) {
+				if !kept {
+					copyFromSource(t)
+				}
+				segMs := int64(2000)
+				if name == "open-gop" {
+					segMs = openGOPMs
+				}
+				plan, err := PlanHLS(ctx, src, Options{SegmentMs: segMs})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertOpenMatchesResource(t, plan)
+				st := plan.Stats()
+				if st.TableBuilds == 0 || st.StreamFallbacks != 0 || (kept && st.KeptSegments == 0) || (!kept && st.StreamedSegments == 0) {
+					t.Errorf("stats: %+v", st)
+				}
+			})
+		}
 	}
 }
 
@@ -346,7 +352,7 @@ func TestOpenFallsBackWhenNotStreamable(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertOpenMatchesResource(t, streaming)
-	if st := streaming.Stats(); st.StreamedSegments == 0 {
+	if st := streaming.Stats(); st.StreamedSegments+st.KeptSegments == 0 || st.StreamFallbacks != 0 {
 		t.Errorf("StreamFromFS must stream: %+v", st)
 	}
 }
@@ -574,6 +580,7 @@ func TestPrefetchRanges(t *testing.T) {
 // buffer, and a Matroska window's light audio comes with its walk: every
 // resource keeps Resource's bytes, in the clear and encrypted.
 func TestOpenParallelReadsOnNetworkSource(t *testing.T) {
+	copyFromSource(t) // the table semantics of a headers-only walk on a network source
 	defer func(f func(*os.File) bool) { networkSource = f }(networkSource)
 	networkSource = func(*os.File) bool { return true }
 	mkvSrc := filepath.Join(t.TempDir(), "interleaved.mkv")
@@ -610,6 +617,7 @@ func TestSourceAccessOption(t *testing.T) {
 		t.Fatal(err)
 	}
 	var want []byte
+	copyFromSource(t) // under the window budget a kept window's light audio rides in the table whatever the access
 	for _, c := range []struct {
 		access  SourceAccess
 		inTable bool

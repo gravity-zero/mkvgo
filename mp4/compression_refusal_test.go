@@ -93,7 +93,7 @@ func TestCompressedTracksInflated(t *testing.T) {
 		}
 	}
 	assertOpenMatchesResource(t, plan)
-	if st := plan.Stats(); st.StreamedSegments == 0 {
+	if st := plan.Stats(); st.StreamedSegments+st.KeptSegments == 0 {
 		t.Errorf("the video must stream: %+v", st)
 	}
 }

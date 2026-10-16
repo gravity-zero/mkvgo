@@ -103,6 +103,7 @@ func lacedStripMKV(t *testing.T, lacing byte, strip bool) string {
 // laced audio (Xiph, EBML, fixed) and header-stripped video included - byte
 // for byte like Resource, in the clear and encrypted (AES-128, cenc, cbcs).
 func TestOpenStreamsLacedAndStrippedMKV(t *testing.T) {
+	copyFromSource(t)
 	modes := encryptionModes()
 	modes["clear"] = Options{}
 	for _, lacing := range []byte{1, 3, 2} {

@@ -511,13 +511,29 @@ read them - sixteen clients at 2 MB/s on a 57 Mbit/s UHD remux hold 900 MiB.
 `Open` returns a handle instead: its `ContentType` and exact `Size` up front
 (for Content-Length), and `WriteTo` / `WriteRange` that write the bytes from
 the source as they go, through one pooled 256 KiB buffer. The first request
-for a window walks it structure-only (block headers, no payloads) and keeps a
-small table - where each sample sits, the timed `moof` - shared by every
-rendition and every client of that window; each write then copies the sample
-ranges straight from the file. An MP4 source needs no walk: its sample table,
-kept by the plan, already holds every sample's timing and offset. The bytes
-equal `Resource`'s exactly, playlists and init segments come back whole as
-before. An AES-128 segment (`Options.Encrypt`) streams too: its size is known
+for a window walks it and keeps a small table - where each sample sits, the
+timed `moof` - shared by every rendition and every client of that window. The
+walk reads the whole window whatever it keeps (a frame of a 1080p film sits
+under the reader's seek threshold, so block by block the walk reads through
+every payload), so it keeps what it read: the video segment and each audio
+segment of 2 MiB or less, each handed to the first `Open` that asks for it;
+once a viewer has taken the video and one audio, the other languages are let
+go (a second viewer, or a language switch, is copied from the file). Serving
+the window then reads the source once: measured on a 1080p film, a viewer
+taking video and one audio track read 2.56x the bytes served (the walk, then
+the copies) and reads 1.21x (the window once, the other language and the
+subtitles with it); on a 2160p remux with a TrueHD track and PGS subtitles,
+3.17x down to 1.70x. The kept segments are budgeted process-wide, apart from
+the table cache so that tables stay the few KiB of structure they were:
+`SetWindowBytes(n)` caps the bytes held by tables and by handles not yet
+written whole or closed (default 256 MiB), and a window built while the
+budget is full is kept headers only, its segments copied from the file at
+each write as before, counted in `Stats().KeptFallbacks` (served from the
+walk's bytes: `KeptSegments`). A kept handle's `Bytes()` is nil: write it
+and `Close` it, the budget comes back then. An MP4 source
+needs no walk: its sample table, kept by the plan, already holds every
+sample's timing and offset. The bytes equal `Resource`'s exactly, playlists
+and init segments come back whole as before. An AES-128 segment (`Options.Encrypt`) streams too: its size is known
 up front (PKCS#7 pads to the next 16-byte block), it is encrypted with CBC as
 it is written, and a range is encrypted from the segment's start, what comes
 before the range thrown away. A CENC segment (`Options.CENC`, cenc or cbcs)

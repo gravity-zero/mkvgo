@@ -39,13 +39,60 @@ func SetTableCacheBytes(total int64) {
 	tableTotalBudget.Store(total)
 }
 
-// tableAccount is a plan's share of tableBytesTotal, given back when the plan is collected.
-type tableAccount struct{ bytes int64 }
+// tableAccount is a plan's share of tableBytesTotal and of windowBytesTotal, given back when the plan is collected.
+type tableAccount struct{ bytes, held int64 }
 
 func newTableAccount(p *HLSPlan) *tableAccount {
 	a := &tableAccount{}
-	runtime.AddCleanup(p, func(a *tableAccount) { tableBytesTotal.Add(-a.bytes) }, a)
+	runtime.AddCleanup(p, func(a *tableAccount) {
+		tableBytesTotal.Add(-a.bytes)
+		windowBytesTotal.Add(-a.held)
+	}, a)
 	return a
+}
+
+// windowBytesBudget bounds, process-wide, the kept video segments (SetWindowBytes); windowBytesTotal is what tables and handles hold now.
+var (
+	windowBytesBudget atomic.Int64
+	windowBytesTotal  atomic.Int64
+)
+
+func init() { windowBytesBudget.Store(256 << 20) }
+
+// SetWindowBytes caps, process-wide, the video segments Open keeps from the walks that built them (held until written
+// whole or closed) rather than copying them from the source again; zero restores the default of 256 MiB, negative keeps nothing.
+func SetWindowBytes(total int64) {
+	switch {
+	case total == 0:
+		total = 256 << 20
+	case total < 0:
+		total = 0
+	}
+	windowBytesBudget.Store(total)
+}
+
+// reserveWindowBytes takes n bytes of the window budget, or nothing when they do not fit.
+func reserveWindowBytes(n int64) bool {
+	for {
+		cur := windowBytesTotal.Load()
+		if n <= 0 || cur+n > windowBytesBudget.Load() {
+			return false
+		}
+		if windowBytesTotal.CompareAndSwap(cur, cur+n) {
+			return true
+		}
+	}
+}
+
+// heldBytes is a video segment's share of the window budget, given back once: by its handle, or when the handle is collected.
+type heldBytes struct{ n atomic.Int64 }
+
+func (h *heldBytes) release() {
+	if h != nil {
+		if n := h.n.Swap(0); n > 0 {
+			windowBytesTotal.Add(-n)
+		}
+	}
 }
 
 // spanMergeGap is the largest hole between two payloads the copier reads
@@ -72,11 +119,14 @@ type windowTable struct {
 	segs  []trackSegment
 	heads [][]byte
 	offs  [][]int64
-	data  [][]byte // a network source's light audio segment, built whole by the walk that read it
+	data  [][]byte // a segment built whole by the walk that read it: kept until Open takes it, or a network source's light audio
 	// packed holds a cached table's renditions' samples (see tablecodec.go),
 	// unpacked into segs and offs per request, for the one served (view).
 	packed [][]byte
 	bytes  int64
+	kept   []int64 // per track, what data holds under the window budget until taken; their sum is held
+	taken  []bool  // per track, whether a kept segment was handed out
+	held   int64
 }
 
 type tableFlight struct {
@@ -146,6 +196,60 @@ func (p *HLSPlan) table(ctx context.Context, n int) (*windowTable, error) {
 	return f.table, f.err
 }
 
+// takeKept hands out a segment window n's table kept from its walk, once: the table lets it go, the handle holds its budget share.
+func (p *HLSPlan) takeKept(t *windowTable, ti, n int) ([]byte, *heldBytes) {
+	p.tabMu.Lock()
+	defer p.tabMu.Unlock()
+	if t.kept == nil || t.kept[ti] == 0 {
+		return nil, nil
+	}
+	d := t.data[ti]
+	t.data[ti] = nil
+	t.held -= t.kept[ti]
+	if p.tables[n] == t {
+		p.tabAcct.held -= t.kept[ti]
+	}
+	h := &heldBytes{}
+	h.n.Store(t.kept[ti])
+	t.kept[ti] = 0
+	t.taken[ti] = true
+	if p.keptConsumed(t) { // a viewer took its video and one audio: the other languages are nobody's
+		p.dropKept(t)
+	}
+	return d, h
+}
+
+// keptConsumed reports whether a table's viewer has taken what a viewer takes: every kept video and one kept audio.
+func (p *HLSPlan) keptConsumed(t *windowTable) bool {
+	audioKept, audioTaken := false, false
+	for ti := range t.kept {
+		video := p.tracks[ti].ft.outTrack.spec.video
+		if video && t.kept[ti] > 0 {
+			return false
+		}
+		if !video && (t.kept[ti] > 0 || t.taken[ti]) {
+			audioKept = true
+			audioTaken = audioTaken || t.taken[ti]
+		}
+	}
+	return !audioKept || audioTaken
+}
+
+// dropKept gives back the segments an evicted table still held. Caller holds tabMu.
+func (p *HLSPlan) dropKept(t *windowTable) {
+	if t.held == 0 {
+		return
+	}
+	for ti := range t.kept {
+		if t.kept[ti] > 0 {
+			t.data[ti], t.kept[ti] = nil, 0
+		}
+	}
+	p.tabAcct.held -= t.held
+	windowBytesTotal.Add(-t.held)
+	t.held = 0
+}
+
 // storeTable keeps a table within the byte budget, oldest out first. Caller holds tabMu.
 func (p *HLSPlan) storeTable(n int, t *windowTable) {
 	if p.tables == nil {
@@ -159,6 +263,7 @@ func (p *HLSPlan) storeTable(n int, t *windowTable) {
 	p.tabBytes += t.bytes
 	p.tabAcct.bytes += t.bytes
 	tableBytesTotal.Add(t.bytes)
+	p.tabAcct.held += t.held
 	for (p.tabBytes > tableCacheBytes || tableBytesTotal.Load() > tableTotalBudget.Load()) && len(p.tabOrder) > 0 {
 		old := p.tabOrder[0]
 		p.tabOrder = p.tabOrder[1:]
@@ -166,6 +271,7 @@ func (p *HLSPlan) storeTable(n int, t *windowTable) {
 			p.tabBytes -= ot.bytes
 			p.tabAcct.bytes -= ot.bytes
 			tableBytesTotal.Add(-ot.bytes)
+			p.dropKept(ot)
 			delete(p.tables, old)
 			p.winMu.Lock()
 			p.stats.TableEvictions++
@@ -189,13 +295,21 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	if n+1 < p.segCount {
 		segEnd = p.bounds[n+1]
 	}
-	// Headers only, every track: each sample's bytes are copied from the file
-	// at its offset when served. On a network source a light window's audio
-	// rides in the table instead: read with the walk, it costs no round trip
-	// of its own (a heavy one, lossless or many tracks, is streamed).
-	keepAudio := p.networkSrc(ctx) && p.otherEstimate(n) <= audioInTableBytes
-	windows, nextPts, _, err := p.walkWindow(ctx, n, segStart, segEnd, true, keepAudio)
+	// The walk reads the whole window whatever it keeps (every payload sits
+	// under the reader's seek threshold): under the window budget it keeps
+	// the segments it read - the video, each light audio - for the Opens
+	// that take them, so serving the window reads the source once. Over the
+	// budget, headers only: each sample's bytes are copied from the file at
+	// its offset when served, and only a network source's light audio rides
+	// in the table (read with the walk, it costs no round trip of its own).
+	est := p.windowSpan(n)
+	keep := est > 0 && est <= maxWindowInPlace && reserveWindowBytes(est)
+	keepAudio := !keep && p.otherEstimate(n) <= audioInTableBytes && p.networkSrc(ctx)
+	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, !keep, keepAudio)
 	if err != nil {
+		if keep {
+			windowBytesTotal.Add(-est)
+		}
 		return nil, err
 	}
 	var otherBytes int64 // what the non-video renditions weigh in this window, for the next estimate
@@ -208,19 +322,42 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	}
 	p.learnOtherRate(n, otherBytes)
 	t := &windowTable{packed: make([][]byte, len(p.tracks)), heads: make([][]byte, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	if keep {
+		t.kept, t.taken = make([]int64, len(p.tracks)), make([]bool, len(p.tracks))
+	}
 	for ti := range p.tracks {
 		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
 		if err != nil {
+			if keep {
+				windowBytesTotal.Add(-est)
+			}
 			return nil, err
 		}
-		if keepAudio && !p.tracks[ti].ft.outTrack.spec.video {
-			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, nil)
+		video := p.tracks[ti].ft.outTrack.spec.video
+		var payload int64
+		for _, s := range windows[ti] {
+			payload += int64(s.size)
+		}
+		if (keep && (video || payload <= audioInTableBytes)) || (keepAudio && !video) {
+			var arena []byte
+			if ti == inPlace.track && inPlace.media() != nil {
+				arena = inPlace.buf
+			}
+			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, arena)
 			if err != nil {
+				if keep {
+					windowBytesTotal.Add(-est)
+				}
 				return nil, err
 			}
 			t.data[ti] = data
-			t.bytes += int64(len(data))
-			continue
+			if keep {
+				t.kept[ti] = int64(len(data))
+				t.held += t.kept[ti]
+			} else {
+				t.bytes += int64(len(data))
+				continue
+			}
 		}
 		seg := p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
 		offs := make([]int64, len(windows[ti]))
@@ -231,16 +368,25 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		t.heads[ti] = buildSegmentFile(uint32(n+1), seg)
 		t.bytes += int64(cap(t.packed[ti])+cap(t.heads[ti])) + tableTrackOverhead
 	}
+	if keep {
+		windowBytesTotal.Add(t.held - est) // the estimate was the window's span; what is held is the segments
+	}
 	p.winMu.Lock()
 	p.stats.TableBuilds++
 	if waited {
 		p.stats.SlotWaits++
 	}
+	if !keep {
+		p.stats.KeptFallbacks++
+	}
+	if inPlace.buf != nil && inPlace.media() == nil {
+		p.stats.ArenaFallbacks++
+	}
 	p.winMu.Unlock()
 	return t, nil
 }
 
-// audioInTableBytes is the most a network source's window may hold of
+// audioInTableBytes is the most a window may keep of one audio rendition, or (headers-only walk) a network source may hold of
 // non-video payloads for its walk to keep them in the table.
 var audioInTableBytes int64 = 2 << 20
 
@@ -312,6 +458,7 @@ type ResourceHandle struct {
 	n           int         // the segment's 0-based window
 	head        []byte      // the segment's head when it is not the table's (CENC: framed with its senc)
 	cenc        *cencStream // a CENC segment's cipher and auxiliary data
+	held        *heldBytes  // the window budget a kept video segment holds until written whole or closed
 }
 
 // Open opens the named resource (the same names Resource serves); the handle's
@@ -344,12 +491,23 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	if p.mp4src {
 		t, err = p.mp4Table(ti, n)
 	} else if t, err = p.table(ctx, n); err == nil {
+		if d, held := p.takeKept(t, ti, n); d != nil { // a segment the walk kept: this viewer's, once
+			p.winMu.Lock()
+			p.stats.KeptSegments++
+			p.winMu.Unlock()
+			h := &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p, held: held}
+			runtime.AddCleanup(h, (*heldBytes).release, held)
+			return h, nil
+		}
 		t = t.view(ti)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if d := t.data[ti]; d != nil { // a network source's audio: built whole by the walk
+	if d := t.data[ti]; d != nil { // a network source's light audio: built whole by the walk, kept in the table
+		p.winMu.Lock()
+		p.stats.KeptSegments++
+		p.winMu.Unlock()
 		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
 	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
@@ -368,9 +526,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	return h, nil
 }
 
-// ETag identifies the resource's bytes: strong for bytes in hand, else weak from the size, the source's SourceID and the name.
+// ETag identifies the resource's bytes: strong for a resource built whole, else weak from the size, the source's SourceID and the name.
 func (h *ResourceHandle) ETag() string {
-	if h.data != nil {
+	if h.data != nil && h.plan == nil {
 		sum := sha256.Sum256(h.data)
 		return `"` + hex.EncodeToString(sum[:]) + `"`
 	}
@@ -438,11 +596,20 @@ func (h *ResourceHandle) ContentType() string { return h.contentType }
 // Size is the resource's exact length in bytes.
 func (h *ResourceHandle) Size() int64 { return h.size }
 
-// Close releases the handle; nothing is held open between writes.
-func (h *ResourceHandle) Close() error { return nil }
+// Close releases the handle: a kept segment gives its window budget back; nothing is held open between writes.
+func (h *ResourceHandle) Close() error {
+	h.held.release()
+	return nil
+}
 
-// Bytes returns the resource when the handle holds it whole, nil when it streams from the source.
-func (h *ResourceHandle) Bytes() []byte { return h.data }
+// Bytes returns the resource when the handle holds it whole and unbudgeted; nil when it streams from the source or
+// holds a kept video segment, which is written through the handle and given back by Close.
+func (h *ResourceHandle) Bytes() []byte {
+	if h.held != nil {
+		return nil
+	}
+	return h.data
+}
 
 // WriteTo writes the whole resource.
 func (h *ResourceHandle) WriteTo(ctx context.Context, w io.Writer) (int64, error) {
@@ -461,6 +628,9 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 		m, err := w.Write(h.data[off : off+n])
 		if err == nil && int64(m) < n {
 			err = io.ErrShortWrite
+		}
+		if off+n == h.size {
+			h.held.release()
 		}
 		return int64(m), err
 	}

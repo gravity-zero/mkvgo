@@ -37,6 +37,8 @@ func CmdServe(args []string) {
 	// windowCache: what the plan may hold for a window's un-collected renditions.
 	// 0 lets it size itself from the source (see mp4.Options.WindowCacheBytes).
 	var windowCache int64
+	// windowBytes: the kept video the process holds for Open (0 = default, -1 = off).
+	var windowBytes int64
 	// maxWalks: how many windows the process builds at once (0 = no cap).
 	maxWalks := 0
 	// buffered: hold each segment whole while it is sent, instead of streaming it.
@@ -82,6 +84,19 @@ func CmdServe(args []string) {
 				}
 				windowCache = mib << 20
 			}
+		case "-window-bytes", "--window-bytes":
+			i++
+			if i < len(args) {
+				if args[i] == "off" {
+					windowBytes = -1
+					break
+				}
+				mib, err := strconv.ParseInt(args[i], 10, 64)
+				if err != nil || mib < 0 {
+					Fatal("serve: --window-bytes takes a size in MiB, or \"off\"")
+				}
+				windowBytes = mib << 20
+			}
 		default:
 			rest = append(rest, args[i])
 		}
@@ -117,6 +132,7 @@ func CmdServe(args []string) {
 	opts := f.options(src)
 	opts.WindowCacheBytes = windowCache
 	mp4.SetMaxConcurrentWalks(maxWalks)
+	mp4.SetWindowBytes(windowBytes)
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}

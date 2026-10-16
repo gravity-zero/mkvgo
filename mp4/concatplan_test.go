@@ -168,7 +168,7 @@ func TestPlanConcatOpenMatchesResource(t *testing.T) {
 			var streamed int64
 			for k := 0; k < plan.NumParts(); k++ {
 				st := plan.Part(k).Stats()
-				streamed += st.StreamedSegments
+				streamed += st.StreamedSegments + st.KeptSegments
 				if st.StreamFallbacks != 0 {
 					t.Errorf("part %d: %d segments built in memory", k, st.StreamFallbacks)
 				}

@@ -56,6 +56,7 @@ func encryptedSources(t *testing.T) []string {
 // every sample's IV, counter and subsamples included: whole, a middle range
 // and random ranges, every rendition, with no segment built in memory.
 func TestOpenStreamsEncryptedSegments(t *testing.T) {
+	copyFromSource(t)
 	ctx := context.Background()
 	for _, src := range encryptedSources(t) {
 		for mode, o := range encryptionModes() {
