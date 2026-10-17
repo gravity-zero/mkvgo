@@ -75,6 +75,13 @@ func (p *HLSPlan) pastDamage(off int64) (int64, error) {
 	return d.end, nil
 }
 
+// seatedPastDamage reports whether window n's own cluster lies in a damaged region passed over: the walk opens past
+// it, mid-GOP, on frames whose references were lost.
+func (p *HLSPlan) seatedPastDamage(n int) bool {
+	off, err := p.pastDamage(p.offsets[n])
+	return err == nil && off != p.offsets[n]
+}
+
 // errDamageKnown is the cause of a refusal repeated from a region already given up, which is not counted again.
 var errDamageKnown = errors.New("region already found unreadable")
 

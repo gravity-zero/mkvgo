@@ -1305,6 +1305,7 @@ type segSample struct {
 	fragSample
 	data []byte
 	off  int64 // where the payload sits in the source
+	end  int64 // where the block's payload ends in the source
 }
 
 // sampleOf frames one walked block as a window sample: its decoded bytes, or when the walk skipped its payload its place in the source.
@@ -1312,14 +1313,39 @@ func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
 	meta := fragSample{ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe}
 	if structure {
 		meta.size = uint32(len(pt.ft.outTrack.mkv.HeaderStripping) + int(b.Size))
-		return segSample{fragSample: meta, off: b.DataOffset}, nil
+		return segSample{fragSample: meta, off: b.DataOffset, end: b.DataOffset + b.Size}, nil
 	}
 	data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
 	if err != nil {
 		return segSample{}, err
 	}
 	meta.size = uint32(len(data))
-	return segSample{fragSample: meta, data: data, off: b.DataOffset}, nil
+	return segSample{fragSample: meta, data: data, off: b.DataOffset, end: b.DataOffset + b.Size}, nil
+}
+
+// cutSlack is how far before a damaged region a block's payload may end and still be taken as cut by it: the
+// children a BlockGroup closes on (a ReferenceBlock, a BlockDuration) sit between its payload and the next element.
+const cutSlack = 64
+
+// dropCut removes from a window walked so far the samples a damaged region starting at from cut or swallowed,
+// marks the track's last remaining sample as closing on the region, and reports whether the track lost any.
+func dropCut(window []segSample, from int64) []segSample {
+	k := len(window)
+	for k > 0 && window[k-1].end > from-cutSlack {
+		k--
+	}
+	window = window[:k]
+	if k > 0 {
+		window[k-1].cut = true
+	}
+	return window
+}
+
+// emptyWindowTS is the decode time of a window holding no sample of a track: where the window starts on the track's
+// timeline, not past the track's end (a window after the track has ended stays parked at its end).
+func emptyWindowTS(timescale uint32, originMs, segStartMs, endTS int64) int64 {
+	scale := tsScale(timescale)
+	return min(max(scale(segStartMs)-scale(originMs), 0), endTS)
 }
 
 // timeSegmentWindow derives one segment window's per-sample dtsTS/ctsTS/durTS
@@ -1373,12 +1399,16 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 			window[x].ctsTS = 0
 			if x > 0 {
 				window[x-1].durTS = window[x].dtsTS - window[x-1].dtsTS
+				if window[x-1].cut {
+					window[x-1].durTS = gridTS
+				}
 			}
 		}
 		if nextPts >= 0 {
 			nextK = clock.peek(nextPts)
 			window[len(window)-1].durTS = nextK*gridTS - clock.k*gridTS
-		} else { // the track's final sample (fillFragTiming's grid rule)
+		}
+		if nextPts < 0 || window[len(window)-1].cut { // the track's final sample (fillFragTiming's grid rule), or one a damaged region cut short
 			window[len(window)-1].durTS = gridTS
 		}
 		return window[0].dtsTS, false, nextK
@@ -1400,11 +1430,14 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 	}
 	for x := 0; x < len(window)-1; x++ {
 		window[x].durTS = dts[x+1] - dts[x]
+		if window[x].cut {
+			window[x].durTS = pt.lastDurTS
+		}
 	}
-	if nextPts >= 0 {
-		window[len(window)-1].durTS = scale(nextPts) - dts[len(window)-1]
-	} else { // the track's final sample (fillFragTiming's rule)
-		window[len(window)-1].durTS = pt.lastDurTS
+	if last := len(window) - 1; nextPts >= 0 && !window[last].cut {
+		window[last].durTS = scale(nextPts) - dts[last]
+	} else { // the track's final sample (fillFragTiming's rule), or one a damaged region cut short
+		window[last].durTS = pt.lastDurTS
 	}
 	return dts[0] - base, windowHasCTS(window), nextK
 }
@@ -1611,11 +1644,29 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	}
 	peeking := 0
 	farOff, triedFar, crossedAny := p.farWindowOff(n), false, false
+	skips := len(br.SkippedRanges())
+	needKey := make([]bool, len(p.tracks)) // a video track past a damaged region: its frames reference what was lost
+	if p.seatedPastDamage(n) {
+		for ti, pt := range p.tracks {
+			needKey[ti] = pt.ft.outTrack.spec.video
+		}
+	}
 	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, none, err
 		}
 		b, err := br.Next()
+		if k := len(br.SkippedRanges()); k > skips { // passed over a damaged region: what it cut goes, the video waits for a keyframe
+			for _, r := range br.SkippedRanges()[skips:] {
+				for ti := range windows {
+					windows[ti] = dropCut(windows[ti], r.From)
+				}
+			}
+			for ti, pt := range p.tracks {
+				needKey[ti] = needKey[ti] || pt.ft.outTrack.spec.video
+			}
+			skips, inPlace = k, none
+		}
 		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			for ti := range p.tracks {
 				if !crossed[ti] {
@@ -1702,6 +1753,12 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			p.learnSegPos(n+1, br.Pos()) // first past segEnd: where the next one opens
 			p.learnTrackPos(n+1, ti, br.Pos())
 			continue
+		}
+		if needKey[ti] {
+			if !b.Keyframe {
+				continue
+			}
+			needKey[ti] = false
 		}
 		s, err := sampleOf(pt, b, structure && (!keepAudio || pt.ft.outTrack.spec.video))
 		if err != nil {
@@ -3201,6 +3258,9 @@ func (p *HLSPlan) timeWindow(ti, n int, window []segSample, nextPts, startK int6
 	}
 	var nextK int64
 	seg.baseDecodeTS, seg.hasCTS, nextK = timeSegmentWindow(metas, pt, nextPts, startK)
+	if len(window) == 0 {
+		seg.baseDecodeTS = emptyWindowTS(pt.ft.timescale, pt.firstPtsMs, p.bounds[n], pt.ft.durMediaTS)
+	}
 	if nextK >= 0 {
 		p.learnGridStart(n+1, ti, nextK) // where the next window's clock opens, as the full pass has it
 	}
@@ -4033,7 +4093,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		var segBytes int64
 		for i, ft := range fts {
 			starts[i] = append(starts[i], int32(cursors[i]))
-			seg := segmentWindow(ft, &cursors[i], segEnd)
+			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
 			head := segmentFileLen(seg)
 			if ft == video && !o.NoIFrames && len(seg.samples) > 0 && seg.samples[0].sync {
 				iframes = append(iframes, iframeRef{seg: k, length: head + int64(seg.samples[0].size)})

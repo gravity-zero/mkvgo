@@ -47,6 +47,10 @@ type fragSample struct {
 	dtsTS int64
 	durTS int64
 	ctsTS int32
+	// cut marks the last sample before a damaged region a window walk passed
+	// over: its duration is the track's frame duration, not the gap to the
+	// first sample past the region.
+	cut bool
 }
 
 // buildInitSegment assembles the fMP4 initialisation segment: ftyp (with the

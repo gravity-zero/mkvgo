@@ -19,9 +19,17 @@ All notable changes to mkvgo are documented here. The format is based on
   cancelled context, a replaced file). The on-demand window walks pass over a
   damaged region shorter than `Options.DamageBytes` (64 MiB by default; CLI
   `--damage-bytes` on `hls-segment` and `abr-segment`): the window holding
-  its start serves what it read before it, a window whose cue points into the
-  zeros serves no sample, the windows behind it are whole, and the plan
-  remembers the region so no later window scans it again. A longer region is
+  its start serves what it read before it, less the block the region cuts
+  (its payload runs into the zeros), and closes on that track's frame
+  duration rather than on a frame stretched to the far side of the region; a
+  window whose cue points into the zeros serves no sample and is timed where
+  it starts (an empty window was timed at the track's end, 6717 s for a frame
+  at 2834 s, which players re-timed the next windows on); the video resumes
+  on the first keyframe past the region, never on frames whose references it
+  lost; the windows behind it are whole, and the plan remembers the region so
+  no later window scans it again. A served real file (a 1080p film zeroed
+  over 11 MB) now decodes without error and plays through the hole in
+  hls.js, where it stalled on the stretched frame. A longer region is
   refused as before, the error matching `reader.ErrDamagedRegion` with
   `Resume` -1 so a server can tell a damaged file from a failing server.
   `HLSPlanStats.DamageSkips` and `DamageRefusals` count both. The full

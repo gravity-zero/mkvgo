@@ -789,7 +789,7 @@ func audioIndex(fts []*fragTrack, i int) int {
 
 // segmentWindow returns track i's cursor window for boundary k, advancing the
 // cursor: the samples from the cursor to the first one at/past segEnd.
-func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
+func segmentWindow(ft *fragTrack, cursor *int, segStart, segEnd int64) trackSegment {
 	start := *cursor
 	j := start
 	for j < len(ft.samples) && ft.samples[j].blockPtsMs < segEnd {
@@ -807,9 +807,12 @@ func segmentWindow(ft *fragTrack, cursor *int, segEnd int64) trackSegment {
 			seg.dataLen += int64(ft.samples[x].size)
 		}
 	} else {
-		// An empty window (the track ended before the presentation): an empty
-		// trun keeps the rendition's segments aligned; decode time = stream end.
+		// An empty window: an empty trun keeps the rendition's segments aligned,
+		// timed where the window starts, at the stream end once the track has ended.
 		seg.baseDecodeTS = ft.durMediaTS
+		if len(ft.samples) > 0 {
+			seg.baseDecodeTS = emptyWindowTS(ft.timescale, ft.samples[0].ptsMs, segStart, ft.durMediaTS)
+		}
 	}
 	return seg
 }
@@ -852,7 +855,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 		var segBytes int64
 		for i, ft := range fts {
 			from := cursors[i]
-			seg := segmentWindow(ft, &cursors[i], segEnd)
+			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
 			var cipherData []byte
 			if o.CENC != nil {
 				// CENC needs the plaintext bytes before the head is built: the

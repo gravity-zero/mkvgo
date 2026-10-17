@@ -91,7 +91,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		var segBytes int64
 		for i, ft := range fts {
 			plans[i].froms = append(plans[i].froms, cursors[i])
-			seg := segmentWindow(ft, &cursors[i], segEnd)
+			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
 			head := buildSegmentFile(uint32(k+1), seg)
 			plans[i].heads = append(plans[i].heads, head)
 			plans[i].segs = append(plans[i].segs, seg)
