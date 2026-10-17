@@ -44,6 +44,9 @@ func TestParseHLSFlagsDamageBytes(t *testing.T) {
 	if got := parseHLSFlags([]string{"in.mkv", "--damage-bytes", "1048576"}).options("in.mkv").DamageBytes; got != 1<<20 {
 		t.Errorf("options().DamageBytes = %d, want 1048576", got)
 	}
+	if got := parseHLSFlags([]string{"in.mkv", "--damage-bytes", "-1"}).options("in.mkv").DamageBytes; got != -1 {
+		t.Errorf("options().DamageBytes = %d, want -1 (refuse any damage, as the library)", got)
+	}
 }
 
 // --source-access sets options().SourceAccess; absent, it is automatic.

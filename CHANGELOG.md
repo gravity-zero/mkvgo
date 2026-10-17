@@ -74,6 +74,10 @@ All notable changes to mkvgo are documented here. The format is based on
   told library callers to run a CLI command; it now says to rewrite the file
   with a resyncing reindex (or raise the damage bound), and the CLI adds
   `mkvgo reindex --resync` when it exits on such an error.
+- **A negative `DamageBytes` refuses any damage in `mp4.Options` too, and on
+  the CLI.** `mkv.Options` refused any damage under a negative value while
+  `mp4.Options` fell back to the 64 MiB default, and `--damage-bytes` refused
+  any value but a positive one; both now take `-1` to refuse any damage.
 
 ## [0.55.1] - 2026-10-17
 

@@ -282,7 +282,8 @@ type Options struct {
 	// walk (PlanHLS, PlanABR) looks for the next Cluster before refusing the
 	// window: a damaged region shorter than this is passed over, a longer one
 	// is refused with reader.ErrDamagedRegion. 0 is DefaultDamageBytes (64
-	// MiB). The full passes never pass over damage.
+	// MiB); a negative value refuses any damage, as in mkv.Options. The full
+	// passes never pass over damage.
 	DamageBytes int64
 
 	// MaxMoovBytes caps the moov box an MP4 source may declare: a larger one

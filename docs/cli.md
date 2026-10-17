@@ -401,7 +401,7 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-o` | Output file path (required) |
 | `-format` | Output format: `srt` (default), `ass`, or `vtt` |
 | `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, MKV/WebM only) |
-| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. Default 64 MiB |
+| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. `-1` refuses any damage. Default 64 MiB |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
@@ -1194,7 +1194,7 @@ value for the two modes to stay byte-identical. `--audio-shift` (see `to-hls`)
 cancels a constant A/V desync in the served segments via the init's edit list,
 nothing rewritten. A damaged region in the middle of the source (a zeroed
 stretch, an element that does not decode) shorter than `--damage-bytes`
-(64 MiB by default) is passed over: the segment holding its start stops
+(64 MiB by default; `-1` refuses any damage) is passed over: the segment holding its start stops
 there (the block the region cuts is not served, nor stretched over the
 hole), the video resumes on the first keyframe past it, the lost stretch
 shows a still image (a keyframe repeated every second, so a player meets no

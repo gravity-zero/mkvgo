@@ -122,12 +122,12 @@ func (d doValue) Set(string) error { d(); return nil }
 func (d doValue) String() string   { return "" }
 func (d doValue) IsBoolFlag() bool { return true }
 
-// damageBytesFlag parses --damage-bytes into n: a positive byte count.
+// damageBytesFlag parses --damage-bytes into n: a positive byte count, or a negative one to refuse any damage.
 func damageBytesFlag(n *int64) func(string) {
 	return func(v string) {
 		b, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || b <= 0 {
-			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", v))
+		if err != nil || b == 0 {
+			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count, or -1 to refuse any damage)", v))
 		}
 		*n = b
 	}

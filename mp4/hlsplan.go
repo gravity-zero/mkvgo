@@ -979,7 +979,7 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 			return err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
+		if p.walkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			return nil
 		}
 		if err != nil {
@@ -1027,7 +1027,7 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 			return err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
+		if p.walkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			return nil
 		}
 		if err != nil {
@@ -1720,7 +1720,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			}
 			skips, inPlace = k, none
 		}
-		if isBlockWalkEnd(err) { // clean end, incl. a truncated/over-declared tail
+		if p.walkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			for ti := range p.tracks {
 				if !crossed[ti] {
 					p.learnTrackEnd(ti, maxInt64(seen[ti], segStart))
@@ -2072,7 +2072,7 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 				return nil, nil, err
 			}
 			b, err := br.Next()
-			if isBlockWalkEnd(err) {
+			if p.walkEnd(err) {
 				break
 			}
 			if err != nil {
@@ -2615,7 +2615,7 @@ func (p *HLSPlan) farTrackIn(ctx context.Context, src io.ReadSeeker, i int, rg t
 			return nil, -1, farElsewhere, err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) {
+		if p.walkEnd(err) {
 			return ended()
 		}
 		if err != nil {
@@ -3218,7 +3218,7 @@ func (p *HLSPlan) coldAhead(ctx context.Context, src io.ReadSeeker, br *reader.B
 			return nil, err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) {
+		if p.walkEnd(err) {
 			break
 		}
 		if err != nil {
@@ -3794,7 +3794,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 			}
 			// Clean end (incl. a truncated/over-declared tail); all cues to this
 			// point are collected, so finish cleanly.
-			if isBlockWalkEnd(err) {
+			if p.walkEnd(err) {
 				cur.cues = append(cur.cues, local...)
 				cur.done = true
 				return nil

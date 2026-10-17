@@ -26,10 +26,22 @@ func (p *HLSPlan) damageCap() int64 {
 	return DefaultDamageBytes
 }
 
-// tolerateDamage makes a window walk pass over a damaged region under damageCap instead of failing on it.
+// tolerateDamage makes a window walk pass over a damaged region under damageCap instead of failing on it, unless a
+// negative Options.DamageBytes refuses any damage.
 func (p *HLSPlan) tolerateDamage(br *reader.BlockReader) {
+	if p.opts.DamageBytes < 0 {
+		return
+	}
 	br.SetSkipDamage(true)
 	br.SetDamageScan(p.damageCap())
+}
+
+// walkEnd is isBlockWalkEnd, save that under a negative Options.DamageBytes a damaged region is refused, not an end.
+func (p *HLSPlan) walkEnd(err error) bool {
+	if p.opts.DamageBytes < 0 && errors.Is(err, reader.ErrDamagedRegion) {
+		return false
+	}
+	return isBlockWalkEnd(err)
 }
 
 // noteSkipped records the damaged regions a walk passed over, so the windows seated inside them start past them.

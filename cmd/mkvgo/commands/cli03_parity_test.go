@@ -98,8 +98,8 @@ func oldParseHLSFlags(args []string) hlsFlags {
 		case "--damage-bytes":
 			needValue(args, &i)
 			n, err := strconv.ParseInt(args[i], 10, 64)
-			if err != nil || n <= 0 {
-				Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
+			if err != nil || n == 0 {
+				Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count, or -1 to refuse any damage)", args[i]))
 			}
 			f.damageBytes = n
 		case "--source-access":
@@ -229,7 +229,7 @@ func TestCLI03_HLSFlagsParity(t *testing.T) {
 		"--cenc-scheme": {"cenc", "cbcs"}, "--cenc-key": {"00112233445566778899aabbccddeeff"}, "--cenc-kid": {"ffeeddccbbaa99887766554433221100"},
 		"--cenc-iv": {"0102030405060708", "zz"}, "--cenc-key-uri": {"skd://k"}, "--url-prefix": {"https://cdn/"},
 		"--keep-tracks": {"1,2", "1, x"}, "--keep-lang": {"fre,ENG", " , "}, "--audio-lang": {"spa"}, "--sub-offset": {"-500", "x"},
-		"--damage-bytes": {"100", "0"}, "--source-access": {"auto", "local", "network", "nfs"}, "--audio-shift": {"2=500", "bad"},
+		"--damage-bytes": {"100", "0", "-1"}, "--source-access": {"auto", "local", "network", "nfs"}, "--audio-shift": {"2=500", "bad"},
 	}
 	bools := []string{"--single-file", "--chapter-markers", "--skip-unsupported", "-skip-unsupported", "--no-iframes", "--synthesize-index", "--cenc-inline-key"}
 	operands := []string{"in.mkv", "master.m3u8", "-", "--bogus", "-x"}

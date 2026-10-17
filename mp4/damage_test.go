@@ -200,3 +200,19 @@ func TestOnDemandRefusesADamagedRegionBeyondTheCap(t *testing.T) {
 		}
 	}
 }
+
+// TestOnDemandNegativeDamageBytesRefusesAnyDamage: a negative Options.DamageBytes passes over no damage, as in
+// mkv.Options: even a short region is refused with reader.ErrDamagedRegion.
+func TestOnDemandNegativeDamageBytesRefusesAnyDamage(t *testing.T) {
+	clean := buildInterleavedSource(t, 40)
+	offs := clusterOffsets(t, clean)
+	bad := zeroedSource(t, clean, offs[10]+100<<10, offs[10]+100<<10+64<<10)
+	ctx := context.Background()
+	plan, err := PlanHLS(ctx, bad, Options{SegmentMs: 2000, StreamFromFS: true, SourceAccess: SourceLocal, DamageBytes: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := plan.Resource(ctx, plan.SegmentName(10)); !errors.Is(err, reader.ErrDamagedRegion) {
+		t.Errorf("window 10 under DamageBytes -1: %v, want ErrDamagedRegion", err)
+	}
+}
