@@ -729,6 +729,9 @@ func (br *BlockReader) reportProgress() {
 	br.progressFn(br.r.tell(), br.progressTotal)
 }
 
+// maxEBMLHeaderSize bounds the EBML header body init skips: a real one holds a few dozen bytes.
+const maxEBMLHeaderSize = 1 << 20
+
 func (br *BlockReader) init() error {
 	// Phase 1: read EBML header ID+size from the raw (unbuffered) source.
 	// We must consume these bytes before wrapping in the buffered reader so it
@@ -739,6 +742,9 @@ func (br *BlockReader) init() error {
 	}
 	if h1.ID != ebml.IDEBMLHeader {
 		return fmt.Errorf("expected EBML header, got 0x%X", h1.ID)
+	}
+	if h1.Size < 0 || h1.Size > maxEBMLHeaderSize {
+		return fmt.Errorf("EBML header declares %d bytes (a real one holds a few dozen, at most %d)", h1.Size, maxEBMLHeaderSize)
 	}
 	// Skip EBML header body via the raw reader (before we create the buffer).
 	if _, err := io.CopyN(io.Discard, br.raw, h1.Size); err != nil {

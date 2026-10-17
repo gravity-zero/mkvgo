@@ -76,6 +76,11 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **ROB-05: the block reader refuses an EBML header of absurd size up
+  front.** `NewBlockReader` skipped the header body by its declared size: an
+  unknown size (-1) was skipped as nothing, misplacing every offset after it,
+  and a size of 2^40 read the whole source before failing. A size outside 0 to
+  1 MiB is now an immediate error.
 - **ROB-04: an MP4 header duration no longer overflows into a negative one.**
   The mvhd, mehd and mdhd durations were converted as `ticks*1000/timescale`
   in int64, which wrapped for any duration past about 9.2e15 ticks although
