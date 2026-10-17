@@ -215,6 +215,32 @@ func TestSubtitleReadsPassOverDamage(t *testing.T) {
 		checkPGSPastDamage(t, cues, "cues index", walked, defaultEnd)
 	})
 
+	t.Run("garbage at a cue", func(t *testing.T) {
+		data, err := os.ReadFile(clean)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := clusters[4]; i < clusters[4]+64; i++ {
+			data[i] = 0xFF // not a download gap: the cue points at bytes that are no Cluster
+		}
+		odd := filepath.Join(t.TempDir(), "odd.mkv")
+		if err := os.WriteFile(odd, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c, err := reader.OpenMetaWithFS(ctx, odd, nil, reader.WithCues())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ix, _, err := SubtitleIndexFromCues(c, int64(len(data)), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var skips []mkv.DamagedRange
+		if err := ix.Resolve(ctx, odd, onSkipInto(&skips)); err == nil {
+			t.Errorf("a cue on bytes that are no Cluster resolved as damage (OnSkip %+v)", skips)
+		}
+	})
+
 	t.Run("refused", func(t *testing.T) {
 		for _, n := range []int64{-1, 1000} {
 			err := ForEachSubtitlePGS(ctx, bad, 2, func(PGSCue) error { return nil }, mkv.Options{DamageBytes: n})

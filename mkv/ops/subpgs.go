@@ -193,7 +193,7 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 		}
 		for k := int64(0); k < e.frames; k++ {
 			blk, err := br.Next()
-			if dmg.pending() { // the entry lies in a damaged region: its cues are lost
+			if dmg.pending() && (k > 0 || seatZeroed(f, e.pos.Off)) { // the entry lies in a damaged region: its cues are lost
 				if err := asm.afterDamage(dmg); err != nil {
 					return err
 				}

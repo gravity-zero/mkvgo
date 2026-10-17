@@ -2,6 +2,7 @@ package ops
 
 import (
 	"io"
+	"slices"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -44,10 +45,20 @@ func (d *subtitleDamage) skipped() (fromMs int64, ok bool) {
 	return fromMs, ok
 }
 
+// seatZeroed reports whether the bytes an index entry seats on are null: damage, where other bytes mean a stale index.
+func seatZeroed(f io.ReadSeeker, off int64) bool {
+	var b [16]byte
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return false
+	}
+	n, _ := io.ReadFull(f, b[:])
+	return n > 0 && !slices.ContainsFunc(b[:n], func(c byte) bool { return c != 0 })
+}
+
 // damageAtCluster reports the damaged region a cued cluster that does not resolve starts, when opts let a read pass over it.
 func damageAtCluster(f io.ReadSeeker, tcScale, at int64, opts []mkv.Options) (reader.DamageRange, bool) {
 	n := mkv.DamageBytesFrom(opts)
-	if n <= 0 {
+	if n <= 0 || !seatZeroed(f, at) {
 		return reader.DamageRange{}, false
 	}
 	br, err := reader.NewBlockReaderAt(f, tcScale, at)

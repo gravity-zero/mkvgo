@@ -326,9 +326,9 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 		}
 		// One entry, e.frames frames: an unlaced block takes exactly one turn
 		// here, a laced one takes its whole lace without re-seeking.
-		for f := int64(0); f < e.frames; f++ {
+		for k := int64(0); k < e.frames; k++ {
 			blk, err := br.Next()
-			if dmg.pending() { // the entry lies in a damaged region: its cues are lost
+			if dmg.pending() && (k > 0 || seatZeroed(f, e.pos.Off)) { // the entry lies in a damaged region: its cues are lost
 				dmg.skipped()
 				break
 			}
@@ -342,7 +342,7 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 			// Only the block's first frame carries the recorded timecode; the
 			// rest are strided by the track's DefaultDuration, which a mid-file
 			// reader cannot know - so they are not checked against the index.
-			if f == 0 && blk.Timecode != e.timeMs {
+			if k == 0 && blk.Timecode != e.timeMs {
 				return fmt.Errorf("%w: offset %d holds track %d at %d ms, the index recorded %d ms",
 					ErrIndexStale, e.pos.Off, trackID, blk.Timecode, e.timeMs)
 			}

@@ -54,6 +54,14 @@ All notable changes to mkvgo are documented here. The format is based on
   probe allocate 732 MiB; an empty point is now skipped, and Cues past 8M
   points are refused as damaged.
 
+### Fixed
+
+- **A subtitle index that points at bytes no Cluster holds is stale, not
+  damaged.** `SubtitleIndex.Resolve` and the `From` reads took any position
+  that failed to parse for a damaged region when a Cluster followed within
+  `DamageBytes`, dropping its cues silently; only null bytes, a download's
+  gap, count as damage now, and anything else fails as before.
+
 ## [0.55.1] - 2026-10-17
 
 ### Fixed
