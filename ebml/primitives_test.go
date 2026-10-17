@@ -34,7 +34,7 @@ func TestReadUint_ReadError(t *testing.T) {
 
 func TestReadFloat_InvalidSize(t *testing.T) {
 	r := bytes.NewReader(make([]byte, 16))
-	for _, size := range []int64{0, 1, 3, 5, 7, 16} {
+	for _, size := range []int64{1, 3, 5, 7, 16} { // 0 is a valid empty float (ROB-03)
 		_, err := ReadFloat(r, size)
 		if err == nil {
 			t.Errorf("ReadFloat(size=%d) expected error, got nil", size)

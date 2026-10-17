@@ -37,8 +37,11 @@ func ReadUint(r io.Reader, size int64) (uint64, error) {
 	return val, nil
 }
 
-// ReadFloat reads a 4- or 8-byte IEEE 754 float.
+// ReadFloat reads a 4- or 8-byte IEEE 754 float; a 0-byte float is 0 (RFC 8794 section 7.3).
 func ReadFloat(r io.Reader, size int64) (float64, error) {
+	if size == 0 {
+		return 0, nil
+	}
 	if size == 4 {
 		buf := make([]byte, 4)
 		if _, err := io.ReadFull(r, buf); err != nil {

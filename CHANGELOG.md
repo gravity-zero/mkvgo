@@ -76,6 +76,9 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **ROB-03: a zero-length float reads as 0.** RFC 8794 lets a float element
+  hold no bytes, meaning 0; `ebml.ReadFloat` refused it, so a file whose
+  Duration (or any float) was written empty failed to open. It now returns 0.
 - **ROB-02, NEW-01: a resync reads its region once.** `ResyncToCluster`, and
   the segment-level resync that recovers Info and Tracks behind junk, sought
   back and read a 64 KiB window again past every false candidate: a region of
