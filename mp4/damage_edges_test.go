@@ -89,8 +89,10 @@ func readFragment(t *testing.T, seg []byte) (tfdt uint64, samples []fragSampleVi
 // frame stretched over the region, no frame after it before the next keyframe,
 // and a window left empty is timed where it stands, never at the track's end.
 func TestOnDemandDamageEdges(t *testing.T) {
+	sr, ch := 48000.0, uint8(2)
 	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC,
-		Width: u32p(640), Height: u32p(480), FrameRate: f64p(25)}}
+		Width: u32p(640), Height: u32p(480), FrameRate: f64p(25)},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch}}
 	frame := func(i int) []byte {
 		b := bytes.Repeat([]byte{0x55}, 3000)
 		copy(b, []byte{0xAB, 0xCD, byte(i >> 8), byte(i)})
@@ -99,6 +101,7 @@ func TestOnDemandDamageEdges(t *testing.T) {
 	var blocks []genBlock
 	for i := 0; i < 25*24; i++ { // 24 s at 25 fps, a keyframe every 4 s
 		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i%100 == 0, data: frame(i)})
+		blocks = append(blocks, genBlock{track: 2, pts: int64(i)*40 + 20, key: true, data: bytes.Repeat([]byte{0x21}, 200)})
 	}
 	clean := buildMKV(t, tracks, blocks)
 	data, err := os.ReadFile(clean)
@@ -137,7 +140,7 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 					t.Fatal(err)
 				}
 			} else {
-				seg, _ = serveVideoOnly(t, plan, n)
+				seg, _ = serveWindow(t, plan, n)
 			}
 			tfdt, samples := readFragment(t, seg)
 			for k, s := range samples {
@@ -147,9 +150,15 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 				if s.dur > 1000 {
 					t.Errorf("window %d sample %d: %d ms, a frame stretched over the damage", n, k, s.dur)
 				}
+				if s.sync && (len(s.data) < 4 || s.data[0] != 0xAB || s.data[1] != 0xCD) {
+					t.Errorf("window %d sample %d: flagged a keyframe but holds no frame of the source", n, k)
+				}
 				if len(s.data) >= 4 && s.data[0] == 0xAB && s.data[1] == 0xCD {
 					if i := int(s.data[2])<<8 | int(s.data[3]); i >= 237 && i < lostTo {
 						t.Errorf("window %d sample %d: frame %d served, cut by the damage or referencing frames it lost", n, k, i)
+					}
+					if i := int(s.data[2])<<8 | int(s.data[3]); s.sync && i%100 != 0 {
+						t.Errorf("window %d sample %d: flagged a keyframe but holds frame %d", n, k, i)
 					}
 				}
 			}
@@ -178,18 +187,42 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 	}
 }
 
-// serveVideoOnly streams segment n of a video-only plan through Open.
-func serveVideoOnly(t *testing.T, p *HLSPlan, n int) ([]byte, error) {
-	t.Helper()
+// TestOnDemandDamageFillKeepsTheKeyframeBytes: on a real x264 + AAC file (a cluster and a GOP every 2 s, the
+// audio before the video in each cluster) zeroed over two clusters, the window the region emptied serves copies of
+// the keyframe the walk met past it. The reader hands that keyframe out in its in-place arena, where the next video
+// block lands when the keyframe is not kept: copied unkept, the window served a P frame flagged a keyframe.
+func TestOnDemandDamageFillKeepsTheKeyframeBytes(t *testing.T) {
+	bad := zeroedSource(t, "../internal/testdata/gop2s_aac.mkv", 80000, 150000) // 4.8 s to 9 s: resumes on the 10 s cluster
 	ctx := context.Background()
-	h, err := p.Open(ctx, p.SegmentName(n))
+	plan, err := PlanHLS(ctx, bad, Options{SegmentMs: 2000})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer h.Close()
-	var out bytes.Buffer
-	if _, err := h.WriteTo(ctx, &out); err != nil {
-		t.Fatal(err)
+	for n := 0; n < plan.NumSegments(); n++ {
+		seg, _, err := plan.Resource(ctx, plan.SegmentName(n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, samples := readFragment(t, seg)
+		for k, s := range samples {
+			if s.sync && !holdsIDRSlice(s.data) {
+				t.Errorf("window %d sample %d: flagged a keyframe, but holds no IDR slice", n, k)
+			}
+		}
 	}
-	return out.Bytes(), nil
+}
+
+// holdsIDRSlice reports whether an AVCC sample (4-byte lengths) holds an IDR slice NAL unit.
+func holdsIDRSlice(b []byte) bool {
+	for len(b) >= 5 {
+		n := int(binary.BigEndian.Uint32(b))
+		if n == 0 || 4+n > len(b) {
+			return false
+		}
+		if b[4]&0x1F == 5 {
+			return true
+		}
+		b = b[4+n:]
+	}
+	return false
 }

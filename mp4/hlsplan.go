@@ -1773,6 +1773,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 					if err != nil {
 						return nil, nil, none, err
 					}
+					k.data = append([]byte(nil), k.data...) // the reader reuses a payload's buffer once the block is not kept
 					resume[ti] = &k
 				}
 				seekKey[ti] = false
@@ -1806,6 +1807,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 					if err != nil {
 						return nil, nil, none, err
 					}
+					k.data = append([]byte(nil), k.data...) // the reader reuses a payload's buffer once the block is not kept
 					resume[ti] = &k
 				} else {
 					seekKey[ti] = true // the walk goes on, header by header, to the keyframe the copies are made of

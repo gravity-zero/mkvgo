@@ -29,7 +29,15 @@ All notable changes to mkvgo are documented here. The format is based on
   region emptied serves a copy of that keyframe every second, a window it cut
   short a copy of its own opening keyframe from where its frames stop, a
   still image where the video was lost (hls.js seeking back over empty
-  fragments looped on them and never loaded the next one); the windows behind it are whole, and the plan remembers the region so
+  fragments looped on them and never loaded the next one); known limits:
+  the copies are the keyframe byte for byte, so an H.264 IDR repeats its
+  idr_pic_id in consecutive IDR access units and an HEVC CRA repeats its
+  picture order count, which the standards forbid; Chromium (hls.js, MSE)
+  and FFmpeg decode them, hardware decoders (VideoToolbox in Safari,
+  MediaCodec under ExoPlayer) are untested and need a run on a damaged file
+  before relying on it; the audio is not filled: with hls.js handling the
+  audio, playback stalls at the audio hole and seeks over it, skipping the
+  frozen stretch; the windows behind it are whole, and the plan remembers the region so
   no later window scans it again. A served real file (a 1080p film zeroed
   over 11 MB) now decodes without error and plays through the hole in
   hls.js, where it stalled on the stretched frame. A longer region is
