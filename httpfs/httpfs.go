@@ -12,6 +12,15 @@
 // (mkv.RangeHinter). The server must honour Range requests (respond 206); one that
 // replies 200 to a ranged request gets an explicit error rather than a silent
 // full download. The FS is read-only: write operations return an error.
+//
+// Server-side request forgery: httpfs requests whatever URL it is handed and
+// follows redirects, so a service that opens URLs its users supply can be made
+// to reach internal hosts (metadata endpoints, admin ports) and read back what
+// the parser makes of them. Such a service sets Options.AllowHost to the hosts
+// it means to read from; httpfs then refuses any other host, first request and
+// redirect alike. Without it, the default client still refuses a redirect to
+// another host while Options.Header is set, so credentials put there do not
+// follow a redirect out of the host they were meant for.
 package httpfs
 
 import (
@@ -34,10 +43,13 @@ import (
 
 const defaultWindow = 512 << 10
 
-// Options configures New. The zero value uses http.DefaultClient and a
-// 512 KiB read window.
+// Options configures New. The zero value uses a client that follows
+// redirects as http.DefaultClient does (see AllowHost for the exception) and
+// a 512 KiB read window.
 type Options struct {
-	// Client is the HTTP client to use; nil means http.DefaultClient.
+	// Client is the HTTP client to use; nil means a default client whose
+	// redirect policy is AllowHost's. A Client given here keeps its own
+	// CheckRedirect: AllowHost then only vets each request's first host.
 	Client *http.Client
 	// WindowSize is the first request's length in bytes; <= 0 means 512 KiB.
 	// A request that continues where the last one ended asks for twice as
@@ -48,6 +60,11 @@ type Options struct {
 	Header http.Header
 	// RequestTimeout bounds each request, body included; 0 means 60 s, negative none.
 	RequestTimeout time.Duration
+	// AllowHost, when set, is asked about the host (host[:port]) of every
+	// request and of every redirect the default client meets; a host it
+	// refuses is not contacted. Nil allows any host, except that the default
+	// client does not follow a redirect to another host while Header is set.
+	AllowHost func(host string) bool
 }
 
 // FS is the HTTP-backed filesystem. It also counts the bytes fetched, which
@@ -133,12 +150,31 @@ func New(opts ...Options) *FS {
 		o = opts[0]
 	}
 	if o.Client == nil {
-		o.Client = http.DefaultClient
+		o.Client = &http.Client{CheckRedirect: redirectPolicy(o)}
 	}
 	if o.WindowSize <= 0 {
 		o.WindowSize = defaultWindow
 	}
 	return &FS{opts: o}
+}
+
+// redirectPolicy is the default client's: at most 10 hops, each to a host
+// AllowHost accepts, or with no AllowHost to the first request's host
+// whenever Header is set, so the caller's headers never reach another host.
+func redirectPolicy(o Options) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		host := req.URL.Host
+		switch {
+		case o.AllowHost != nil && !o.AllowHost(host):
+			return fmt.Errorf("redirect to host %s refused by AllowHost", host)
+		case o.AllowHost == nil && len(o.Header) > 0 && host != via[0].URL.Host:
+			return fmt.Errorf("redirect from %s to another host %s refused: the request carries Options.Header (set AllowHost to allow it)", via[0].URL.Host, host)
+		}
+		return nil
+	}
 }
 
 // BytesFetched returns the total bytes transferred so far across all readers.
@@ -231,6 +267,10 @@ func (f *FS) do(ctx context.Context, method, url, rng, identity string) (resp *h
 	if err != nil {
 		done()
 		return nil, nil, err
+	}
+	if f.opts.AllowHost != nil && !f.opts.AllowHost(req.URL.Host) {
+		done()
+		return nil, nil, fmt.Errorf("httpfs: %s: host %s refused by AllowHost", url, req.URL.Host)
 	}
 	for k, vs := range f.opts.Header {
 		for _, v := range vs {
@@ -609,9 +649,9 @@ func (r *reader) Stat() (os.FileInfo, error) {
 	tailDone := make(chan struct{})
 	go func() {
 		defer close(tailDone)
-		tail, tailErr = r.fetchKept(fmt.Sprintf("bytes=-%d", w))
+		tail, tailErr = r.fetchKept(w, true)
 	}()
-	head, err := r.fetchKept(fmt.Sprintf("bytes=0-%d", w-1))
+	head, err := r.fetchKept(w, false)
 	<-tailDone
 	if err != nil {
 		if errors.Is(err, errNotRanged) {
@@ -641,8 +681,14 @@ type keptRange struct {
 	mod time.Time
 }
 
-// fetchKept reads the whole response to a ranged GET of rng.
-func (r *reader) fetchKept(rng string) (*keptRange, error) {
+// fetchKept reads the whole response to a ranged GET of the first w bytes, or
+// the last w when suffix is set; a response serving anything else is refused
+// before its body is read, so nothing past w is ever allocated.
+func (r *reader) fetchKept(w int64, suffix bool) (*keptRange, error) {
+	rng := fmt.Sprintf("bytes=0-%d", w-1)
+	if suffix {
+		rng = fmt.Sprintf("bytes=-%d", w)
+	}
 	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, rng, "")
 	if err != nil {
 		return nil, err
@@ -662,7 +708,14 @@ func (r *reader) fetchKept(rng string) (*keptRange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("httpfs: %s: %w", r.url, err)
 	}
-	data := make([]byte, last-start+1)
+	want := last - start + 1
+	if (!suffix && (start != 0 || last > w-1)) || (suffix && (last != total-1 || want > w)) {
+		return nil, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %s", r.url, start, last, rng)
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != want {
+		return nil, fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
+	}
+	data := make([]byte, want)
 	n, err := io.ReadFull(resp.Body, data)
 	r.fs.fetched.Add(int64(n))
 	if err != nil {

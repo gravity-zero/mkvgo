@@ -11,12 +11,18 @@
 // environment variables when left empty in Options: AWS_ACCESS_KEY_ID,
 // AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION (or
 // AWS_DEFAULT_REGION), AWS_ENDPOINT_URL.
+//
+// A bucket name must follow the S3 naming rules, and a redirect is returned
+// as an error rather than followed: the signed request, with its credentials,
+// only ever goes to the endpoint's host.
 package s3fs
 
 import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -108,7 +114,9 @@ func New(opts Options) *S3FS {
 		sessionToken: opts.SessionToken,
 		region:       opts.Region,
 	}
-	client := &http.Client{Transport: transport}
+	// A redirect is returned, not followed: following it would sign the next
+	// hop and send the credentials to whatever host it names.
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return &S3FS{
 		opts:   opts,
 		scheme: scheme,
@@ -193,11 +201,20 @@ func (s *S3FS) resolveURL(path string) (string, error) {
 		b.WriteByte('/')
 		b.WriteString(uriEncodeS3Path(key))
 	}
+	u, err := url.Parse(b.String())
+	want := s.host
+	if !s.opts.PathStyle {
+		want = bucket + "." + s.host
+	}
+	if err != nil || u.Host != want {
+		return "", fmt.Errorf("s3fs: %s does not resolve to host %s", path, want)
+	}
 	return b.String(), nil
 }
 
 // splitS3Path parses "s3://bucket/key" into (bucket, key). key may be empty
-// (a bucket-root reference); bucket must not be.
+// (a bucket-root reference); bucket must be a valid S3 bucket name, which
+// also keeps it from rewriting the host it is written in front of.
 func splitS3Path(path string) (bucket, key string, err error) {
 	if !IsURL(path) {
 		return "", "", fmt.Errorf("s3fs: not an s3:// URL: %s", path)
@@ -212,7 +229,32 @@ func splitS3Path(path string) (bucket, key string, err error) {
 	if bucket == "" {
 		return "", "", fmt.Errorf("s3fs: missing bucket in %s", path)
 	}
+	if err := checkBucket(bucket); err != nil {
+		return "", "", fmt.Errorf("s3fs: %s: %w", path, err)
+	}
 	return bucket, key, nil
+}
+
+// checkBucket enforces the S3 bucket naming rules: 3 to 63 characters of
+// [a-z0-9.-], alphanumeric at both ends, no "..", not an IPv4 address.
+func checkBucket(b string) error {
+	if len(b) < 3 || len(b) > 63 {
+		return fmt.Errorf("bucket name %q is not 3 to 63 characters long", b)
+	}
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		alnum := c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+		if !alnum && c != '.' && c != '-' || !alnum && (i == 0 || i == len(b)-1) {
+			return fmt.Errorf("bucket name %q is not lowercase letters, digits, dots and hyphens between a letter or digit at each end", b)
+		}
+	}
+	if strings.Contains(b, "..") {
+		return fmt.Errorf("bucket name %q holds two adjacent dots", b)
+	}
+	if a, err := netip.ParseAddr(b); err == nil && a.Is4() {
+		return fmt.Errorf("bucket name %q is an IP address", b)
+	}
+	return nil
 }
 
 // uriEncodeS3Path percent-encodes a path per the S3 URI-encoding rule used in

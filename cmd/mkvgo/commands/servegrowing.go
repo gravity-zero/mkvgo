@@ -28,30 +28,8 @@ const refreshInterval = 1 * time.Second
 // (detected automatically, e.g. a Cues index appearing at the end). Ctrl-C
 // shuts the server down gracefully.
 func CmdServeGrowing(args []string) {
-	addr := ":8478"
-	segMs := int64(0)
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-addr", "--addr":
-			i++
-			if i < len(args) {
-				addr = args[i]
-			}
-		case "-segment", "--segment":
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				segMs = int64(secs * 1000)
-			}
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	cfg := parseServeGrowingFlags(args)
+	addr, segMs, rest := cfg.addr, cfg.segMs, cfg.rest
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["serve-growing"])
 	}
@@ -65,7 +43,7 @@ func CmdServeGrowing(args []string) {
 		Fatal(err.Error())
 	}
 
-	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: true})}
+	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: cfg.cors})}
 
 	fmt.Printf("serving %s (play while downloading)\n  %s\n", src, playableURL(addr))
 	fmt.Println("press Ctrl-C to stop")
@@ -112,4 +90,29 @@ func refreshLoop(ctx context.Context, plan *mp4.GrowingHLSPlan) {
 			}
 		}
 	}
+}
+
+// serveGrowingFlags are serve-growing's flags.
+type serveGrowingFlags struct {
+	addr  string
+	segMs int64
+	cors  bool
+	rest  []string
+}
+
+// parseServeGrowingFlags reads serve-growing's flags.
+func parseServeGrowingFlags(args []string) serveGrowingFlags {
+	cfg := serveGrowingFlags{addr: ":8478"}
+	fl := newFlags("serve-growing")
+	fl.String(&cfg.addr, "-addr", "--addr")
+	fl.Bool(&cfg.cors, "-cors", "--cors")
+	fl.Func(func(v string) {
+		secs, err := strconv.ParseFloat(v, 64)
+		if err != nil || secs <= 0 {
+			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
+		}
+		cfg.segMs = int64(secs * 1000)
+	}, "-segment", "--segment")
+	cfg.rest = fl.Parse(args)
+	return cfg
 }

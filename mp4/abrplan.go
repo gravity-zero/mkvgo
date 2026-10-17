@@ -43,6 +43,7 @@ func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, 
 	for i, src := range sources {
 		vo := o
 		vo.VideoOnly = i > 0
+		vo.CENC = cencForVariant(o.CENC, i)
 		pl, err := PlanHLS(ctx, src, vo)
 		if err != nil {
 			return nil, errf("variant %d (%s): %w", i+1, src, err)

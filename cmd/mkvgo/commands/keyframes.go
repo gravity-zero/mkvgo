@@ -59,17 +59,9 @@ func CmdKeyframes(path string) {
 func CmdToVTT(args []string) {
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("to-vtt")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 1 || outPath == "" {
 		Fatal("usage: " + CmdUsage["to-vtt"])
 	}
@@ -90,17 +82,9 @@ func CmdToVTT(args []string) {
 func CmdExtractFrame(args []string) {
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("extract-frame")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
 		Fatal("usage: " + CmdUsage["extract-frame"])
 	}
@@ -130,49 +114,33 @@ func CmdExtractFrames(args []string) {
 	var sel matroska.KeyframeSelect
 	asJSON := false
 	var rest []string
-	timeArg := func(i *int, flag string) int64 {
-		*i++
-		if *i >= len(args) {
-			Fatal("usage: " + CmdUsage["extract-frames"])
-		}
-		ms, err := ParseTimePoint(args[*i])
-		if err != nil {
-			Fatal(fmt.Sprintf("%s: %v", flag, err))
-		}
-		return ms
+	fl := newFlags("extract-frames")
+	fl.String(&outPath, "-o")
+	timeArg := func(dst *int64, flag string) {
+		fl.Func(func(v string) {
+			ms, err := ParseTimePoint(v)
+			if err != nil {
+				Fatal(fmt.Sprintf("%s: %v", flag, err))
+			}
+			*dst = ms
+		}, flag)
+		fl.Missing(flag, "usage: "+CmdUsage["extract-frames"])
 	}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i < len(args) {
-				outPath = args[i]
+	timeArg(&sel.EveryMs, "-every")
+	timeArg(&sel.StartMs, "-start")
+	timeArg(&sel.EndMs, "-end")
+	fl.Func(func(v string) {
+		for _, s := range strings.Split(v, ",") {
+			ms, err := ParseTimePoint(s)
+			if err != nil {
+				Fatal(fmt.Sprintf("-at: %v", err))
 			}
-		case "-every":
-			sel.EveryMs = timeArg(&i, "-every")
-		case "-start":
-			sel.StartMs = timeArg(&i, "-start")
-		case "-end":
-			sel.EndMs = timeArg(&i, "-end")
-		case "-at":
-			i++
-			if i >= len(args) {
-				Fatal("usage: " + CmdUsage["extract-frames"])
-			}
-			for _, s := range strings.Split(args[i], ",") {
-				ms, err := ParseTimePoint(s)
-				if err != nil {
-					Fatal(fmt.Sprintf("-at: %v", err))
-				}
-				sel.TargetsMs = append(sel.TargetsMs, ms)
-			}
-		case "-json", "--json":
-			asJSON = true
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
+			sel.TargetsMs = append(sel.TargetsMs, ms)
 		}
-	}
+	}, "-at")
+	fl.Missing("-at", "usage: "+CmdUsage["extract-frames"])
+	fl.Bool(&asJSON, "-json", "--json")
+	rest = fl.Parse(args)
 	if len(rest) != 1 || outPath == "" || (sel.EveryMs <= 0) == (len(sel.TargetsMs) == 0) {
 		Fatal("usage: " + CmdUsage["extract-frames"])
 	}

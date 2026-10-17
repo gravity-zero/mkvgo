@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"os"
 	"slices"
 	"time"
@@ -622,35 +623,86 @@ func (p *parser) scanTailForCues(c *mkv.Container) (bool, error) {
 // tailRun returns where in buf (covering [bufStart, end)) the earliest run of
 // segment-level elements other than clusters tiling exactly to end starts,
 // whether it holds a Cues element, and whether there is one; without one, at
-// is len(buf).
+// is len(buf). One backward pass decides every start, so the cost is linear.
 func tailRun(buf []byte, bufStart, end int64) (at int, cues, ok bool) {
+	marks := tileMarks(buf, end-bufStart, isTailMeta)
+	if marks == nil {
+		return len(buf), false, false
+	}
 	for i, b := range buf {
 		if b != 0x1C && b != 0x12 && b != 0x10 && b != 0x19 && b != 0xEC && b != 0x11 && b != 0x15 && b != 0x16 { // first byte of a tail element ID
 			continue
 		}
-		if c, ok := metaRunTiles(buf[i:], bufStart+int64(i), end); ok {
-			return i, c, true
+		if i < len(marks) && marks[i]&markTiles != 0 {
+			return i, marks[i]&markCues != 0, true
 		}
 	}
 	return len(buf), false, false
 }
 
-// metaRunTiles reports whether buf starts a run of tail metadata elements tiling exactly to end, and whether it holds a Cues.
-func metaRunTiles(buf []byte, abs, end int64) (cues, ok bool) {
-	for off := 0; abs < end; {
-		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(buf[off:]))
-		if err != nil || eh.Size < 0 || !isTailMeta(eh.ID) {
-			return false, false
-		}
-		step := int64(hlen) + eh.Size
-		if abs+step > end {
-			return false, false
-		}
-		cues = cues || eh.ID == mkv.IDCues
-		abs += step
-		off += int(step)
+const (
+	markTiles = 1 << iota // the elements from here tile exactly to the end
+	markCues              // and one of them is a Cues
+)
+
+// tileMarks marks each offset i in [0, n] of buf from which elements accept
+// takes, of definite size, tile exactly to n, computed from the end so each
+// offset is decoded once; nil when n is outside buf.
+func tileMarks(buf []byte, n int64, accept func(uint32) bool) []uint8 {
+	if n < 0 || n > int64(len(buf)) {
+		return nil
 	}
-	return cues, abs == end
+	marks := make([]uint8, n+1)
+	marks[n] = markTiles
+	for i := n - 1; i >= 0; i-- {
+		id, size, hlen, ok := elemAt(buf[i:n])
+		if !ok || size < 0 || !accept(id) || size > n-i-int64(hlen) {
+			continue
+		}
+		next := marks[i+int64(hlen)+size]
+		if next&markTiles == 0 {
+			continue
+		}
+		marks[i] = markTiles | next&markCues
+		if id == mkv.IDCues {
+			marks[i] |= markCues
+		}
+	}
+	return marks
+}
+
+// elemAt decodes the element header at b[0] straight from the slice, with
+// ebml.ReadElementHeader's rules: a 1-4 octet ID, a size whose all-ones value is unknown (-1).
+func elemAt(b []byte) (id uint32, size int64, hlen int, ok bool) {
+	idv, n1, ok := vintAt(b)
+	if !ok || n1 > 4 {
+		return 0, 0, 0, false
+	}
+	sv, n2, ok := vintAt(b[n1:])
+	if !ok {
+		return 0, 0, 0, false
+	}
+	mask := uint64(1) << uint(n2*7)
+	size = int64(sv &^ mask)
+	if sv == mask|(mask-1) {
+		size = -1
+	}
+	return uint32(idv), size, n1 + n2, true
+}
+
+// vintAt decodes the EBML VINT at b[0], marker bit kept, and its width.
+func vintAt(b []byte) (v uint64, n int, ok bool) {
+	if len(b) == 0 || b[0] == 0 {
+		return 0, 0, false
+	}
+	n = bits.LeadingZeros8(b[0]) + 1
+	if len(b) < n {
+		return 0, 0, false
+	}
+	for _, c := range b[:n] {
+		v = v<<8 | uint64(c)
+	}
+	return v, n, true
 }
 
 // isTailMeta accepts the elements a muxer writes after the clusters: any segment-level element but a Cluster, or Void.
@@ -660,17 +712,29 @@ func isTailMeta(id uint32) bool { return id != mkv.IDCluster && isTailElement(id
 // metadata element that started before buf: a run of CuePoints, Tags,
 // EditionEntries, ChapterAtoms or AttachedFiles, or of their children, tiling
 // exactly to x. Media payload ends no such run, so a window ending on a
-// cluster stops the tail scan.
+// cluster stops the tail scan. One backward pass decides every start; the
+// children checked inside CuePoints and ChapterAtoms draw on a budget in
+// proportion to x, past which the window is taken as not ending on metadata.
 func metaEndsAt(buf []byte, x int) bool {
-	for i := 0; i < x; i++ {
-		if !innerFirstByte[buf[i]] {
+	if x <= 0 || x > len(buf) {
+		return false
+	}
+	budget := 8*x + 4096
+	tiles := make([]bool, x+1)
+	tiles[x] = true
+	found := false
+	for i := x - 1; i >= 0; i-- {
+		id, size, hlen, ok := elemAt(buf[i:x])
+		if !ok || size < 0 || size > int64(x-i-hlen) || !tiles[i+hlen+int(size)] {
 			continue
 		}
-		if innerRunTiles(buf[i:x]) {
-			return true
+		tiles[i] = innerElement(id, buf[i+hlen:i+hlen+int(size)], &budget)
+		if budget < 0 {
+			return false
 		}
+		found = found || tiles[i] && innerFirstByte[buf[i]]
 	}
-	return false
+	return found
 }
 
 // innerFirstByte marks the first bytes of the IDs innerElement accepts.
@@ -681,26 +745,10 @@ var innerFirstByte = func() (t [256]bool) {
 	return t
 }()
 
-// innerRunTiles reports whether b is exactly a run of tail-metadata children.
-func innerRunTiles(b []byte) bool {
-	for off := 0; off < len(b); {
-		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(b[off:]))
-		if err != nil || eh.Size < 0 || int64(off)+int64(hlen)+eh.Size > int64(len(b)) {
-			return false
-		}
-		body := b[off+hlen : off+hlen+int(eh.Size)]
-		if !innerElement(eh.ID, body) {
-			return false
-		}
-		off += hlen + int(eh.Size)
-	}
-	return len(b) > 0
-}
-
 // innerElement accepts a child of a tail metadata element: a multi-byte ID of
 // one, or a CuePoint/ChapterAtom whose own children check out (their one-byte
-// IDs alone are too common in media payload).
-func innerElement(id uint32, body []byte) bool {
+// IDs alone are too common in media payload). Each child decoded costs budget one.
+func innerElement(id uint32, body []byte, budget *int) bool {
 	switch id {
 	case mkv.IDTag, mkv.IDSimpleTag, mkv.IDTargets, mkv.IDTagName, mkv.IDTagString, mkv.IDTagLanguage,
 		mkv.IDTagBinary, mkv.IDTargetTypeValue, mkv.IDTagTrackUID, mkv.IDEditionEntry, mkv.IDEditionUID,
@@ -709,24 +757,25 @@ func innerElement(id uint32, body []byte) bool {
 		mkv.IDFileUID, mkv.IDFileDescription:
 		return true
 	case mkv.IDCuePoint:
-		return childrenAre(body, mkv.IDCueTime, mkv.IDCueTime, mkv.IDCueTrackPositions)
+		return childrenAre(body, budget, mkv.IDCueTime, mkv.IDCueTime, mkv.IDCueTrackPositions)
 	case mkv.IDChapterAtom:
-		return childrenAre(body, mkv.IDChapterUID, mkv.IDChapterUID, mkv.IDChapterTimeStart, mkv.IDChapterTimeEnd,
+		return childrenAre(body, budget, mkv.IDChapterUID, mkv.IDChapterUID, mkv.IDChapterTimeStart, mkv.IDChapterTimeEnd,
 			mkv.IDChapterDisplay, mkv.IDChapterFlagHidden, mkv.IDChapterSegmentUID, mkv.IDChapterAtom)
 	}
 	return false
 }
 
 // childrenAre reports whether body tiles exactly into elements whose IDs are all in ids, one of them must.
-func childrenAre(body []byte, must uint32, ids ...uint32) bool {
+func childrenAre(body []byte, budget *int, must uint32, ids ...uint32) bool {
 	seen := false
 	for off := 0; off < len(body); {
-		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(body[off:]))
-		if err != nil || eh.Size < 0 || int64(off)+int64(hlen)+eh.Size > int64(len(body)) || !slices.Contains(ids, eh.ID) {
+		*budget--
+		id, size, hlen, ok := elemAt(body[off:])
+		if !ok || size < 0 || size > int64(len(body)-off-hlen) || !slices.Contains(ids, id) {
 			return false
 		}
-		seen = seen || eh.ID == must
-		off += hlen + int(eh.Size)
+		seen = seen || id == must
+		off += hlen + int(size)
 	}
 	return seen
 }
@@ -736,17 +785,19 @@ func childrenAre(body []byte, must uint32, ids ...uint32) bool {
 // cuesMagic byte sequence occurring inside cluster data fails the tiling check,
 // so it is not mistaken for the real index.
 func tailAnchor(buf []byte, bufStart, end int64) (int, bool) {
-	for i := 0; ; {
+	marks := tileMarks(buf, end-bufStart, isTailElement)
+	for i := 0; marks != nil; {
 		j := bytes.Index(buf[i:], cuesMagic)
 		if j < 0 {
-			return 0, false
+			break
 		}
 		at := i + j
-		if tilesToEnd(buf[at:], bufStart+int64(at), end) {
+		if at < len(marks) && marks[at]&markTiles != 0 {
 			return at, true
 		}
 		i = at + 1
 	}
+	return 0, false
 }
 
 // tilesToEnd reports whether the elements starting at buf[0] (file offset abs)
@@ -754,11 +805,11 @@ func tailAnchor(buf []byte, bufStart, end int64) (int, bool) {
 // to end, leaving no gap and never overshooting.
 func tilesToEnd(buf []byte, abs, end int64) bool {
 	for off := 0; abs < end; {
-		eh, hlen, err := ebml.ReadElementHeader(bytes.NewReader(buf[off:]))
-		if err != nil || eh.Size < 0 || !isTailElement(eh.ID) {
+		id, size, hlen, ok := elemAt(buf[off:])
+		if !ok || size < 0 || !isTailElement(id) {
 			return false
 		}
-		step := int64(hlen) + eh.Size
+		step := int64(hlen) + size
 		if abs+step > end {
 			return false
 		}
@@ -875,108 +926,84 @@ func resyncToCluster(r io.ReadSeeker, scanLimit, fitLimit int64) (int64, error) 
 	if err != nil {
 		return -1, err
 	}
-	for {
-		off, err := scanForClusterMagic(r, from, scanLimit)
-		if err != nil || off < 0 {
-			return -1, err
-		}
-		valid, err := isClusterAt(r, off, fitLimit)
-		if err != nil {
-			return -1, err
-		}
-		if valid {
-			if _, err := r.Seek(off, io.SeekStart); err != nil {
-				return -1, err
-			}
-			return off, nil
-		}
-		from = off + 1 // false positive: resume scanning just past it
+	off, err := scanValid(r, from, scanLimit, func(b []byte) int { return bytes.Index(b, clusterMagic) },
+		func(b []byte, off int64) bool { return clusterPrefix(b, off, fitLimit) })
+	if err != nil || off < 0 {
+		return -1, err
 	}
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return -1, err
+	}
+	return off, nil
 }
 
-// scanForClusterMagic returns the absolute offset of the next clusterMagic at
-// or after `from` and before `limit` (-1 = until EOF), or -1 if none.
-func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
-	return scanForMagic(r, from, limit, func(b []byte) int { return bytes.Index(b, clusterMagic) })
-}
-
-// scanForMagic returns the absolute offset of the first 4-byte element ID that
-// index locates at or after `from` and before `limit` (-1 = until EOF), or -1
-// if none. It reads forward in windows, carrying the last few bytes so an ID
-// split across a read boundary is still found.
-func scanForMagic(r io.ReadSeeker, from, limit int64, index func([]byte) int) (int64, error) {
+// scanValid returns the offset of the first candidate index finds at or after
+// from, starting before limit (-1 = until EOF), that judge accepts on the
+// segmentElementProbe bytes there (fewer at EOF), or -1. Candidates are judged
+// in the window already read, and the bytes a candidate near its end needs
+// are carried into the next one, so the source is read once whatever the
+// number of false candidates. A read error is returned once the bytes before
+// it hold no accepted candidate.
+func scanValid(r io.ReadSeeker, from, limit int64, index func([]byte) int, judge func(b []byte, off int64) bool) (int64, error) {
 	if _, err := r.Seek(from, io.SeekStart); err != nil {
 		return -1, err
 	}
 	const window = 64 << 10
-	buf := make([]byte, len(clusterMagic)-1+window)
+	const probe = segmentElementProbe
+	buf := make([]byte, probe+window)
 	tail := 0
-	next := from
+	next := from // absolute offset of the next byte to read
 	for {
 		base := next - int64(tail) // absolute offset of buf[0]
 		n, rerr := r.Read(buf[tail : tail+window])
 		end := tail + n
-
-		search := buf[:end]
-		if limit >= 0 {
-			if max := limit - base; max < int64(end) {
-				if max < 0 {
-					max = 0
-				}
-				search = buf[:max]
-			}
-		}
-		if i := index(search); i >= 0 {
-			return base + int64(i), nil
-		}
-
 		next += int64(n)
-		if limit >= 0 && next >= limit {
-			return -1, nil
+		final := rerr != nil || n == 0
+		searchEnd := end
+		if limit >= 0 && limit-base < int64(end) {
+			searchEnd = int(max(limit-base, 0))
 		}
-		if rerr != nil {
-			// A clean end of input is "no cluster here"; a real read failure is
-			// not, and reporting it as one lets the caller finish with a
-			// silently truncated Container and a nil error.
-			if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
-				return -1, nil
+		judgeEnd := searchEnd // candidates before it are judged in this window
+		if !final {
+			judgeEnd = min(judgeEnd, max(end-probe+1, 0))
+		}
+		for i := 0; i < judgeEnd; {
+			j := index(buf[i:searchEnd])
+			if j < 0 || i+j >= judgeEnd {
+				break
 			}
-			return -1, rerr
+			at := i + j
+			if judge(buf[at:min(at+probe, end)], base+int64(at)) {
+				return base + int64(at), nil
+			}
+			i = at + 1
 		}
-		if n == 0 {
-			// A reader may legally return (0, nil); without this the scan makes
-			// no progress and never terminates when limit < 0.
+		if final {
+			if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+				return -1, rerr
+			}
 			return -1, nil
 		}
-		keep := len(clusterMagic) - 1
-		if end < keep {
-			keep = end
+		if limit >= 0 && next >= limit && judgeEnd >= searchEnd {
+			return -1, nil
 		}
-		copy(buf[:keep], buf[end-keep:end])
-		tail = keep
+		tail = copy(buf, buf[judgeEnd:end])
 	}
 }
 
-// isClusterAt reports whether a real Cluster begins at off: the element ID must
-// be Cluster, its declared size must decode and (when known) fit within limit,
-// and its first child must be a recognizable cluster-level element.
-func isClusterAt(r io.ReadSeeker, off, limit int64) (bool, error) {
-	if _, err := r.Seek(off, io.SeekStart); err != nil {
-		return false, err
+// clusterPrefix reports whether b, the bytes at off, open a real Cluster: its
+// declared size, when known, fits within limit and its first child is a
+// recognizable cluster-level element.
+func clusterPrefix(b []byte, off, limit int64) bool {
+	id, size, hlen, ok := elemAt(b)
+	if !ok || id != mkv.IDCluster {
+		return false
 	}
-	h, _, err := ebml.ReadElementHeader(r)
-	if err != nil || h.ID != mkv.IDCluster {
-		return false, nil
+	if size >= 0 && limit >= 0 && off+int64(hlen)+size > limit {
+		return false
 	}
-	bodyStart, _ := r.Seek(0, io.SeekCurrent)
-	if h.Size >= 0 && limit >= 0 && bodyStart+h.Size > limit {
-		return false, nil // declared size overruns the segment - not a real cluster
-	}
-	child, _, err := ebml.ReadElementHeader(r)
-	if err != nil {
-		return false, nil
-	}
-	return clusterChildIDs[child.ID], nil
+	child, _, _, ok := elemAt(b[hlen:])
+	return ok && clusterChildIDs[child]
 }
 
 func (p *parser) parseInfo(size int64, c *mkv.Container) error {

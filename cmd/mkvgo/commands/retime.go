@@ -23,39 +23,23 @@ func CmdRetime(args []string) {
 	var deltaPath string
 	shift := map[uint64]int64{}
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--deep-verify":
-			deepVerify = true
-		case "--strict":
-			strict = true
-		case "--in-place":
-			inPlace = true
-		case "--replace":
-			replace = true
-		case "--keep-backup":
-			keepBackup = true
-		case "--shift":
-			if i+1 >= len(args) {
-				Fatal("--shift needs a <track>=<ms> value")
-			}
-			i++
-			track, ms, err := parseShift(args[i])
-			if err != nil {
-				Fatal(err.Error())
-			}
-			shift[track] = ms * 1_000_000 // ms -> ns
-		case "--rollback-delta":
-			if i+1 >= len(args) {
-				Fatal("--rollback-delta needs a file path")
-			}
-			i++
-			deltaPath = args[i]
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
+	fl := newFlags("retime")
+	fl.Bool(&deepVerify, "--deep-verify")
+	fl.Bool(&strict, "--strict")
+	fl.Bool(&inPlace, "--in-place")
+	fl.Bool(&replace, "--replace")
+	fl.Bool(&keepBackup, "--keep-backup")
+	fl.Func(func(v string) {
+		track, ms, err := parseShift(v)
+		if err != nil {
+			Fatal(err.Error())
 		}
-	}
+		shift[track] = ms * 1_000_000 // ms -> ns
+	}, "--shift")
+	fl.Missing("--shift", "--shift needs a <track>=<ms> value")
+	fl.String(&deltaPath, "--rollback-delta")
+	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
+	rest = fl.Parse(args)
 	if len(rest) != 1 {
 		Fatal(retimeUsage)
 	}

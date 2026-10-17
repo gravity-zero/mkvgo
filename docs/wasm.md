@@ -59,7 +59,7 @@ dependencies). Every method returns a Promise and every error is a rejection.
 | `trackEnds(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (statistics tags head-only, else a bounded header-only tail walk - ranged reads) | `TrackEndsReport` - where each track's content really ends, the picture's end, and how far an audio track stops before it (`diagnose` raises `audio-short` from it) |
 | `cueHealth(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (head-only, no cluster walk; `diagnose` adds the bounded hole probe) | `CueHealthReport` - can the index seek video? Spots a seek-broken index (non-empty but with no video cue) and one too coarse to land near its target, in milliseconds, with the remedy - the reason says where the hole is, the tail is measured to the picture's own end (statistics `DURATION` tag) rather than the declared duration, and `video_shortfall_ms` flags picture missing from the stream, which no index can cue. Cues on other tracks are counted, never held against a file: seeking never uses them |
 | `diagnose(input, opts?)` | `Uint8Array` **or `Blob`/`File`** (routed by the first bytes; MKV head-mostly - the tolerant walk runs only when the declared and real sizes disagree; MP4 head-only) | `Diagnosis` - one-call triage with a remedy per finding, same shape for both containers. MKV: index health + per-track audio start delays + size coherence + the source's declared `timecode_scale` (nanoseconds per timecode unit; 1000000 is one millisecond and is what nearly every file uses). MP4: box-layout truncation, missing moov, trailing junk, edit-list audio delays |
-| `openForensic(input, opts?)` | `Uint8Array` **or `Blob`/`File`** | single-source A/B watermark handle: `{ numSegments, masterPlaylist, mediaPlaylist, init, segment(n, fromB), segmentForPattern(n, pattern), distinct(n), close() }` - variant B derives from the one source by dropping a disposable H.264 frame per segment, timing-compensated (shared manifest); `distinct(n)` says whether segment n carries a bit |
+| `openForensic(input, opts?)` | `Uint8Array` **or `Blob`/`File`** | single-source A/B watermark handle: `{ numSegments, masterPlaylist, mediaPlaylist, init, segment(n, fromB), segmentForPattern(n, pattern), distinct(n), close() }` - variant B derives from the one source by dropping a disposable H.264 frame per segment, timing-compensated (shared manifest); `distinct(n)` says whether segment n carries a bit. Experimental session marking, robust neither to collusion nor to re-encoding (see library.md) |
 | `version()` | - | version `string` |
 
 Probe options: `{ keyframes?, bitrate?, inbandColour? }`. Remux options:
@@ -266,8 +266,8 @@ are different encryption schemes). A bad key length surfaces the same error the
 CLI's `--aes-key` flag does. AES-128 is HLS-only - unlike CENC it produces no
 DASH manifest.
 
-**Key rotation** (forward secrecy): rotate the key across the presentation so a
-captured key decrypts only its own period. Set `rotateEverySegments` and a
+**Key rotation** (compartmentalization): rotate the key across the
+presentation so a leaked key decrypts only the periods it serves. Set `rotateEverySegments` and a
 `keys` array instead of a single `key`; the media playlist then carries a fresh
 `EXT-X-KEY` at each boundary and each segment is encrypted with its period's
 key. The schedule is a pure function of the segment index, so an on-demand plan

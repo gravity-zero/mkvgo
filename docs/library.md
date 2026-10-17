@@ -353,6 +353,11 @@ Two serving-side repairs, nothing written to the source:
   refusing the window, 64 MiB by default (`DefaultDamageBytes`): a damaged
   region shorter than that is passed over, a longer one is refused. See the
   salvage section below for what the windows around a region serve.
+- **`Options.MaxMoovBytes`** - the largest moov box an MP4 source may
+  declare, 256 MiB by default (`DefaultMaxMoovBytes`); a long movie's moov
+  runs to tens of MB. A larger one is refused before any of it is read, so a
+  remote server streaming a huge moov, or a sparse local file, cannot exhaust
+  memory. Raise it for a source that genuinely needs more.
 
 ### Convert an audio codec at packaging time (`Options.FrameConverter`)
 
@@ -1085,6 +1090,13 @@ the edge).
 
 ### Single-source forensic watermarking (`mp4.PlanForensic`)
 
+**Experimental session marking, robust neither to collusion nor to
+re-encoding.** Which frame variant B drops is decided without a key: a lone
+viewer holding variant A segments derives their B with the same rule and
+erases the pattern, and viewers comparing their segments see which carry a
+bit. It tells honest sessions apart; it does not trace a leak by a viewer who
+means to hide it.
+
 ```go
 fp, err := mp4.PlanForensic(ctx, "title.mkv", mp4.Options{SegmentMs: 6000})
 seg, err := fp.Segment(ctx, n, sessionBit(n)) // A, or the derived B
@@ -1110,9 +1122,9 @@ The serve surface mirrors `WatermarkPlan` (`Segment`, `SegmentForPattern`), so
 swapping between the two is a construction-site change. The WASM
 `openForensic(input)` and the CLI `forensic-segment` expose the same.
 
-The building block is exported for callers with their own segments:
-`mp4.DropNonRefSample(segment)` returns the derived bytes and whether a frame
-was dropped, for any video segment this package produced.
+`mp4.DropNonRefSample(segment)`, the building block, is deprecated: exported,
+it hands anyone holding a variant A segment the variant B, which erases the
+mark. Serve through `ForensicPlan`.
 
 ### Gapless multi-file sessions (`mp4.RemuxConcatToHLS` / `mp4.PlanConcat`)
 
@@ -1209,10 +1221,10 @@ the DASH manifest is withheld (AES-128 is an HLS mechanism). The key is only
 ever advertised (`KeyURI`), never stored - authenticating that endpoint is the
 server's access control.
 
-**Key rotation** (forward secrecy). Set `RotateEverySegments` and a `Keys`
+**Key rotation** (compartmentalization: a leaked key decrypts only the periods it serves). Set `RotateEverySegments` and a `Keys`
 `[]HLSKey` list instead of the single `Key`: the key changes every N segments,
-cycling through `Keys`, so a captured key decrypts only its own period rather
-than the whole video. The media playlist then carries a fresh `EXT-X-KEY` at
+cycling through `Keys`, so a leaked key decrypts only the periods it serves
+rather than the whole video. The media playlist then carries a fresh `EXT-X-KEY` at
 each boundary and each segment is encrypted with its period's key. The schedule
 is a pure function of the segment index, so `RemuxToHLS` and `PlanHLS` still
 agree byte for byte.
@@ -1254,7 +1266,10 @@ DRM handshake. Two schemes:
 - **`"cenc"`** -- AES-CTR, a per-sample Initialization Vector (the caller's base
   IV plus the sample's absolute decode timestamp -- computed identically by
   `RemuxToHLS` and `PlanHLS`, so the ciphertext is byte-identical between the
-  two). No pattern: every protected byte is encrypted.
+  two). Every track shares the key, so each track but the video adds its own
+  value to the IV's top byte, and each ABR variant past the first its index
+  times 2^48: no two samples of a presentation share an IV. No pattern: every
+  protected byte is encrypted.
 - **`"cbcs"`** -- AES-CBC with a constant IV and, on video, a
   1-encrypted:9-clear 16-byte-block pattern per NAL unit's protected region
   (CBC state resets at each NAL); audio has no pattern (whole sample
@@ -2010,7 +2025,7 @@ If a leftover `path+".mkvgo.tmp"` already exists (a previous run crashed mid-cop
 
 `ops.ReindexInPlace` rebuilds the seek index by patching the file itself: the new Cues element is appended inside the Segment, the Segment size extended, the head SeekHead repointed and any stale Cues element voided. Cluster bytes are never moved and no copy of the file is created, so the operation needs write access to the file only (not the directory) and uses no transient disk space beyond the new index itself.
 
-It is crash-safe: every byte about to be overwritten is captured into a small journal appended inside the file (fsynced before any patch), the result is verified while the journal still allows a rollback -- the light head-only check always, plus the full-read `Validate` pass with `Options.DeepVerify` -- and the journal is truncated away only once the checks pass. Any failure (including a failed verification) restores the original bytes; a crash mid-operation is repaired by the automatic recovery the next run performs, or explicitly:
+It is crash-safe: every byte about to be overwritten is captured into a small journal appended inside the file (fsynced before any patch, and preceded by a 64-byte intent record in the free tail of the head Void that names the original size, so an append cut before the journal's trailer - a power loss mid-write - is still cut back), the result is verified while the journal still allows a rollback -- the light head-only check always, plus the full-read `Validate` pass with `Options.DeepVerify` -- and the journal is truncated away only once the checks pass. Any failure (including a failed verification) restores the original bytes; a crash mid-operation is repaired by the automatic recovery the next run performs, or explicitly:
 
 ```go
 err := ops.ReindexInPlace(ctx, "video.mkv", mkv.Options{DeepVerify: true})
@@ -2554,7 +2569,7 @@ library on S3/HTTP transfers a few ranged kilobytes per file:
 ```go
 import "github.com/gravity-zero/mkvgo/httpfs"
 
-f := httpfs.New()                       // Options: Client, WindowSize, Header (auth)
+f := httpfs.New()                       // Options: Client, WindowSize, Header (auth), AllowHost
 c, err := matroska.OpenMetaWithFS(ctx, "https://nas/movie.mkv", f.Port())
 fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file size
 ```
@@ -2594,6 +2609,15 @@ the plan, and rebuilding it reports the not-found plainly. A fresh reader's
 `404` stays a plain not-found error. Only a strong ETag derived from the bytes rules out a mix of
 versions (see `mp4.ErrSourceChanged` above for what nginx and Caddy send).
 
+A service that opens URLs its users supply should set `Options.AllowHost`
+to the hosts it means to read from: httpfs requests whatever URL it is handed
+and follows redirects, so without it a user can point the service at an
+internal host (server-side request forgery). A host `AllowHost` refuses is not
+contacted, first request and redirect alike. Without `AllowHost`, the default
+client still refuses a redirect to another host while `Options.Header` is
+set, so credentials put there stay with their host. A `Client` you pass keeps
+its own `CheckRedirect`.
+
 Each request is bounded by `Options.RequestTimeout` (60 s by default,
 negative for none), and a reader opened through `DoOpenContext` - which an
 on-demand plan does for every read of its source - abandons its request in
@@ -2631,7 +2655,7 @@ fmt.Println(c.Tracks, fs.BytesFetched()) // a window or two, whatever the file s
 | `PathStyle` | `https://<host>/<bucket>/<key>` instead of the default virtual-hosted `https://<bucket>.<host>/<key>`. Needed by some S3-compatible services and by bucket names containing dots. |
 | `WindowSize` | Ranged-fetch granularity in bytes, passed through to `httpfs.Options.WindowSize`. |
 
-Signing covers GET/HEAD with an unsigned payload (`x-amz-content-sha256: UNSIGNED-PAYLOAD` -- this package never needs to sign a request body, only Range reads), the host, date, session token (when present) and `Range` header, with the S3 URI-encoding rule for the key (each `/`-separated segment percent-encoded, slashes kept literal). The FS is read-only, like `httpfs`.
+Signing covers GET/HEAD with an unsigned payload (`x-amz-content-sha256: UNSIGNED-PAYLOAD` -- this package never needs to sign a request body, only Range reads), the host, date, session token (when present) and `Range` header, with the S3 URI-encoding rule for the key (each `/`-separated segment percent-encoded, slashes kept literal). The FS is read-only, like `httpfs`. A bucket name must follow the S3 naming rules (3 to 63 characters of lowercase letters, digits, dots and hyphens, a letter or digit at each end, no `..`, not an IPv4 address), and the URL built from it must name the endpoint's host: a name like `evil.example?` cannot move the signed request to another host. A redirect is returned as an error, never followed, since following it would sign the next hop.
 
 ---
 

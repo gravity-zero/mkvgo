@@ -16,7 +16,9 @@ Global flags:
 - `-h`, `--help` -- show help for a command
 
 Exit codes: `0` success, `1` any error (bad usage, unreadable input, failed
-operation). `validate` also exits `1` when error-severity issues are found
+operation). A flag that takes a value but is the last argument
+(`mkvgo to-hls in.mkv -o out -segment`) is bad usage: it exits `1` naming
+the flag, rather than being ignored. `validate` also exits `1` when error-severity issues are found
 (`-strict` makes warnings fail too) and `compare` when the files differ, so
 they can gate scripts (`mkvgo validate f.mkv && ...`).
 
@@ -1121,15 +1123,23 @@ Security flags (shared with `hls-segment`; both must use the same values):
   SAMPLE-AES (see `--cenc-*` below). some demuxers do not decrypt
   whole-segment fMP4 - verified spec-conformant by openssl round-trip.
   Incompatible with `--cenc-*` (pick one scheme).
+- `--aes-key-file <path>` / `--cenc-key-file <path>` - read the key (hex,
+  whitespace ignored; the comma-separated list for `--aes-rotate-segments`
+  too) from a file instead of argv. A key passed as `--aes-key` or
+  `--cenc-key` is visible to other users of the machine (`ps`,
+  `/proc/<pid>/cmdline`) and lands in the shell history: prefer the file, or
+  the `MKVGO_AES_KEY` / `MKVGO_CENC_KEY` environment variables, read when the
+  encryption is asked for (`--aes-key-uri`, or another `--cenc-*` flag) and
+  no key flag is given. Giving both a key and its `-file` is refused.
 - `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
-  forward secrecy (a captured key decrypts only its own period). Pass
+  compartmentalization (a leaked key decrypts only the periods it serves). Pass
   comma-separated lists to `--aes-key` and `--aes-key-uri` (at least two,
   matching in count); the keys cycle every N segments, key *i* served at URI
   *i*, and the media playlist carries a fresh `EXT-X-KEY` at each boundary. The
   schedule is a pure function of the segment index, so `hls-segment` serves the
   same bytes on demand. Example: `--aes-rotate-segments 10 --aes-key
   <hexA>,<hexB> --aes-key-uri https://k/a,https://k/b`.
-- `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> [--cenc-key-uri <uri>]` --
+- `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> --cenc-key-uri <uri>` --
   sample-level Common Encryption (ISO/IEC 23001-7): `cenc` is AES-CTR (a
   per-sample IV, `--cenc-iv` 8 or 16 bytes hex); `cbcs` is AES-CBC with a
   1-encrypted:9-clear 16-byte-block pattern on video (`--cenc-iv` must be 16
@@ -1139,8 +1149,10 @@ Security flags (shared with `hls-segment`; both must use the same values):
   `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is
   emitted (a ciphertext byte range is not independently decryptable). Packaging
   only -- no license server: `--cenc-key-uri` is what an EME-capable player's
-  DRM path resolves through its own CDM; left unset it falls back to a `data:`
-  URI embedding the key (fine for local testing, never for production). Video
+  DRM path resolves through its own CDM. It is required: without it the
+  playlist would carry the key itself in a `data:` URI, which the CLI refuses
+  unless `--cenc-inline-key` asks for exactly that (local testing only, never
+  production). Video
   may be H.264, HEVC, AV1 or VP9 - each codec's decoder-visible header bytes
   stay clear and the coded data is protected (verified decrypting and decoding
   in a real Clear Key player); AV1/VP9 refuse rather than mis-protect the frame
@@ -1225,7 +1237,7 @@ mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 
 Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wrapped in a long-running `net/http` server (`mkvhttp.Handler`), so a player can be pointed straight at it: nothing is written to disk, every resource is built the first time it is requested.
 
 ```
-mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N]
+mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--cors]
 mkvgo serve <file.mkv|url> [-addr :8478] --direct
 mkvgo serve <file.mkv|url> [-addr :8478] --auto [-target mse-generic]
 ```
@@ -1235,8 +1247,8 @@ mkvgo serve <file.mkv|url> [-addr :8478] --auto [-target mse-generic]
 - `--window-cache <MiB>`: what the plan may hold for a window's un-collected renditions. A viewer asks for the video and the audio of the same instant, and one walk of the source builds both (their bytes are interleaved - reading one rendition's window reads them all), so the second request costs no read at all: a viewer reads the source once instead of twice, measured 2.1-3.7x down to 1.07-1.84x on real releases. Omit the flag and the plan sizes the budget from the source; `off` disables the sharing, and every rendition re-walks its own window.
 - Media segments are streamed: the server walks a segment's window first, then writes its bytes. The walk reads the whole window, so it keeps what it read: the video segment and each light audio segment, for the first request that asks for each, and serving the window reads the source once (measured on a 1080p film: 2.56x the bytes served down to 1.21x). `--window-bytes <MiB>|off` caps, process-wide, the kept segments held by tables and by responses in flight (`mp4.SetWindowBytes`, default 256 MiB): over the cap a window is kept headers only and its segments are copied from the source through one 256 KiB buffer at each write, so a slow client holds a buffer, not a segment; `off` always copies. `--buffered` keeps the previous behaviour (the whole segment in memory while it is sent, strong ETag).
 - `--source-access auto|local|network` says how the file is reached (`mp4.Options.SourceAccess`). `auto` decides from the file: a network mount (NFS, SMB, 9p, Ceph, AFS, or a FUSE mount of a network kind such as rclone, sshfs, s3fs, gcsfuse, davfs; a mergerfs pool counts as local) or a URL is network. Local: the bytes are asked from the disk ahead of their reads; network: no read-ahead, an audio segment's reads sent together.
-- `--max-walks N`: how many segment windows the process builds at once (`mp4.SetMaxConcurrentWalks`). A window in flight holds its media until it is sent, so when the CPU saturates and requests queue, memory follows the queue; the cap bounds it to N windows and queues the rest. Default 0, no cap, which is right for a single viewer only: **set it on any shared server**, the number of CPUs is a good value.
-- Responses carry an ETag (strong, the SHA-256 of the bytes, for a resource held in memory; weak for a media segment streamed from the source), support `Range` (206 partial content) and conditional `If-None-Match` (304), and are served `Cache-Control: no-cache`: a player revalidates on the ETag. A segment name stays the same if the source is replaced under the same path, so no resource is announced immutable. CORS headers are enabled, for a browser-based player on another origin.
+- `--max-walks N`: how many segment windows the process builds at once (`mp4.SetMaxConcurrentWalks`). A window in flight holds its media until it is sent, so when the CPU saturates and requests queue, memory follows the queue; the cap bounds it to N windows and queues the rest. Default: the number of CPUs (`runtime.NumCPU()`); `--max-walks 0` removes the cap, which is right for a single viewer only. The library default (`mp4.SetMaxConcurrentWalks` never called) stays uncapped.
+- Responses carry an ETag (strong, the SHA-256 of the bytes, for a resource held in memory; weak for a media segment streamed from the source), support `Range` (206 partial content) and conditional `If-None-Match` (304), and are served `Cache-Control: no-cache`: a player revalidates on the ETag. A segment name stays the same if the source is replaced under the same path, so no resource is announced immutable. CORS headers (`Access-Control-Allow-Origin: *`) are off by default: `--cors` turns them on, for a browser-based player on another origin. Without it, a page on another origin cannot read what the server serves.
 - `--direct`: skip packaging entirely and serve the raw file byte-range (`mkvhttp.FileHandler`) -- direct-play: serve the file as-is when the client supports it, no packaging.
 - `--auto`: run `mkvgo playability` (target `-target`, default `mse-generic`) and pick `--direct` when the overall verdict is direct-play, or the on-demand HLS plan otherwise; prints which mode it chose. `--direct` and `--auto` are mutually exclusive.
 - Ctrl-C shuts the server down gracefully.
@@ -1263,10 +1275,11 @@ See `docs/library.md` (`mkvhttp.Handler`, `mkvhttp.FileHandler`) for the full ca
 Play while downloading: serve a file that may still be growing (a download landing on disk) as HLS -- `mp4.PlanGrowingHLS` wrapped in the same long-running server `serve` uses. The media playlist is `EVENT`-typed and lengthens as new whole clusters land; once the source finishes (a Cues index appears, or the file simply stops growing and `Complete()` is signalled), it switches to `VOD` + `ENDLIST`.
 
 ```
-mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6]
+mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] [--cors]
 ```
 
 - `-addr` sets the listen address (default `:8478`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
+- `--cors` adds the CORS headers a browser-based player on another origin needs; off by default, as for `serve`.
 - Polls the source once a second for new whole clusters (a stat plus, at most, a bounded read of what's new) and extends the playlist as they land; a partial trailing cluster (still being written) is never served from.
 - A published segment's bytes are byte-identical to what `to-hls`/`hls-segment` would produce for the finished file, and never change once served (stable numbering).
 - Encrypted/CENC presentations, subtitle renditions, the DASH manifest and the I-frame trick-play playlist are not available in this version (see `docs/library.md` for the full list of v1 limits).
@@ -1330,6 +1343,9 @@ mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segmen
 mkvgo abr-segment master.m3u8 movie-1080p.mp4 movie-720p.mp4     # top manifest
 mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
 ```
+
+Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
+The library equivalent is `mp4.PlanABR` (see library.md).
 
 ### cmaf-mpd
 
@@ -1407,6 +1423,8 @@ mkvgo watermark-segment a.mkv b.mkv 7 --pattern 4b -o s.m4s       # segment 7, r
 
 ### forensic-segment
 
+**Experimental session marking, robust neither to collusion nor to re-encoding.** The frame dropped is chosen without a key, so a lone viewer holding variant A segments can derive their B (and erase the pattern), and viewers comparing segments see which carry a bit. Use it to tell honest sessions apart, not to trace a leak by a viewer who means to hide.
+
 The single-source flavor of `watermark-segment`: variant B is DERIVED from the one source, with no second encode - each variant-B segment has one disposable H.264 frame removed at the sample level (a frame no other frame references, `nal_ref_idc == 0`), timing-compensated so the manifest, `#EXTINF` durations and the decode timeline of every following segment are identical to variant A's. The difference lives in the coded samples, so it survives a remux; it does not survive a re-encode. A viewer of variant B sees at most a one-frame hold (~40 ms).
 
 Not every segment carries a bit: a segment with no disposable frame (all-intra, or every frame referenced) has identical variants - `--distinct` reports whether segment `N` is a carrier. A reliable session signature wants a healthy number of carrier segments (~12+); if most segments report `false`, prefer the two-encode `watermark-segment`.
@@ -1423,10 +1441,7 @@ mkvgo forensic-segment movie.mkv 7 --distinct                     # does segment
 mkvgo forensic-segment movie.mkv 7 --variant B -o segB00007.m4s   # the derived variant
 ```
 
-The library equivalent is `mp4.PlanForensic` + `mp4.DropNonRefSample` (see library.md).
-
-Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
-The library equivalent is `mp4.PlanABR` (see library.md).
+The library equivalent is `mp4.PlanForensic` (see library.md); `mp4.DropNonRefSample` is deprecated.
 
 ### concat-hls
 

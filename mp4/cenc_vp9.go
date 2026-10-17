@@ -217,13 +217,19 @@ func vp9FrameSubsample(frame []byte, knownWidth int) (cencSubsample, int, error)
 // vp9ClampSubsample splits a region of length total into a clear prefix of
 // clearLen bytes and a protected remainder, clamping clearLen to fit both
 // total and a subsample's 16-bit clear field (ISO/IEC 23001-7); any excess
-// spills into the protected count instead of overflowing the field.
+// spills into the protected count instead of overflowing the field. The
+// protected bytes are a whole number of AES blocks, as the VP codec binding
+// requires: the clear prefix takes the remainder (a header never nears the
+// 16-bit limit that would stop it).
 func vp9ClampSubsample(clearLen, total int) cencSubsample {
 	if clearLen > total {
 		clearLen = total
 	}
 	if clearLen > 0xFFFF {
 		clearLen = 0xFFFF
+	}
+	if rem := (total - clearLen) % 16; clearLen+rem <= 0xFFFF {
+		clearLen += rem
 	}
 	return cencSubsample{clear: uint16(clearLen), protected: uint32(total - clearLen)}
 }

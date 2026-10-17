@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"math/bits"
 	"strconv"
 	"strings"
 
@@ -293,8 +294,8 @@ func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64,
 	return 0, 0, errf("no moov box found")
 }
 
-// maxMoovScanWindow caps the backward moov scan; a moov is at most tens of MB
-// even for a long movie, so growing past this means there is genuinely no moov.
+// maxMoovScanWindow caps the backward moov scan. A long movie's moov runs to
+// tens of MB and only an extreme one to hundreds, so past this there is no moov.
 const maxMoovScanWindow = 256 << 20
 
 // moovScanChunk is how much of the file the backward scan holds at a time.
@@ -363,11 +364,27 @@ func validMoovAt(r io.ReadSeeker, boxStart, boxSize, size int64) bool {
 // readMoov returns the full moov box payload - every sample-table byte included.
 // Used by the remux/extract path, which needs the complete tables.
 func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
+	return readMoovLimit(r, size, DefaultMaxMoovBytes)
+}
+
+// readMoovLimit is readMoov refusing a moov past limit bytes before reading it.
+func readMoovLimit(r io.ReadSeeker, size, limit int64) ([]byte, error) {
 	dataOff, payloadLen, err := findMoov(r, size)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkMoovSize(payloadLen, limit); err != nil {
+		return nil, err
+	}
 	return readMoovAt(r, dataOff, payloadLen)
+}
+
+// checkMoovSize refuses a moov payload past limit, saying how to raise it.
+func checkMoovSize(payloadLen, limit int64) error {
+	if payloadLen > limit {
+		return errf("moov box declares %d bytes, past the %d-byte limit: raise Options.MaxMoovBytes to read a source this large", payloadLen, limit)
+	}
+	return nil
 }
 
 // readMoovAt reads the whole moov payload findMoov located.
@@ -420,16 +437,19 @@ func readMoovLazy(r io.ReadSeeker, size int64) ([]byte, error) {
 	return readMoovLazyAt(r, dataOff, payloadLen)
 }
 
+// maxLazyMoovBytes is the largest moov readMoovLazyAt allocates up front; a
+// larger declared moov goes to readMoovAt, whose buffer grows with the bytes
+// that arrive, so a size a remote server or a sparse file declares is never
+// allocated before it is read.
+const maxLazyMoovBytes = 256 << 20
+
 // readMoovLazyAt is readMoovLazy on the moov payload findMoov located.
 func readMoovLazyAt(r io.ReadSeeker, dataOff, payloadLen int64) ([]byte, error) {
-	// This buffer is the real moov size and is filled sparsely (large sample
-	// tables are seeked over, not read), so unlike readMoov it cannot grow
-	// incrementally - the boxes must sit at their true offsets. payloadLen is a
-	// legitimate value here (a very large movie's moov genuinely runs to
-	// hundreds of MB), so it is bounded by the source's declared size rather
-	// than a fixed cap. On a remote FS that declared size is the server's
-	// reported length; this single allocation is the one spot where the parser
-	// trusts it (bounded, and you already trust the server to stream the file).
+	// The buffer is filled sparsely (large sample tables are seeked over), so
+	// it is allocated at the declared size and capped for that reason.
+	if payloadLen > maxLazyMoovBytes {
+		return nil, errf("moov of %d bytes is past the %d-byte lazy read", payloadLen, int64(maxLazyMoovBytes))
+	}
 	m := &lazyMoov{r: r, base: dataOff, buf: make([]byte, payloadLen)}
 	if err := m.parse(0, len(m.buf)); err != nil {
 		return nil, err
@@ -543,7 +563,12 @@ const (
 
 // parseMP4 reads and parses the movie header of a seekable MP4 of the given size.
 func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
-	moovPayload, err := readMoovForMode(r, size, mode)
+	return parseMP4Limit(r, size, mode, DefaultMaxMoovBytes)
+}
+
+// parseMP4Limit is parseMP4 refusing a moov past moovLimit bytes before reading it.
+func parseMP4Limit(r io.ReadSeeker, size int64, mode sampleMode, moovLimit int64) (*movie, error) {
+	moovPayload, err := readMoovForMode(r, size, mode, moovLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -736,6 +761,10 @@ func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 	}
 }
 
+// maxSidxBytes is the largest sidx payload ISO/IEC 14496-12 allows: a
+// version-1 header and 65535 references (reference_count is 16 bits) of 12 bytes.
+const maxSidxBytes = 32 + 65535*12
+
 // scanSidxBoxes returns the payloads of the sidx boxes that precede the first
 // fragment (moof) - a bounded head scan of the top-level boxes.
 func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
@@ -766,6 +795,9 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 		}
 		switch typ {
 		case "sidx":
+			if boxSize-headerLen > maxSidxBytes {
+				break // past what a sidx can hold: not one, and never read whole
+			}
 			payload, err := readExact(r, boxSize-headerLen)
 			if err != nil {
 				return out
@@ -831,14 +863,17 @@ func sidxKeyframeMs(payload []byte, wantRefID uint32) ([]int64, bool) {
 // readMoovForMode returns the moov payload: the full box for the remux/extract
 // path (which needs the complete sample tables), or the I/O-light lazy read
 // (with a full-read fallback on any unexpected layout) for the metadata path.
-func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode) ([]byte, error) {
+func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode, limit int64) ([]byte, error) {
 	if mode == sampleFull {
-		return readMoov(r, size)
+		return readMoovLimit(r, size, limit)
 	}
 	// The moov is looked for once: a file that has none is not scanned again
 	// for the fallback.
 	dataOff, payloadLen, err := findMoov(r, size)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkMoovSize(payloadLen, limit); err != nil {
 		return nil, err
 	}
 	if payload, err := readMoovLazyAt(r, dataOff, payloadLen); err == nil {
@@ -869,7 +904,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		var durTicks uint64
 		movieTS, durTicks = parseMovieHeader(mvhd.payload)
 		if movieTS > 0 && durTicks > 0 && durTicks < 1<<62 && durTicks != 0xFFFFFFFF {
-			mv.durationMs = int64(durTicks) * 1000 / int64(movieTS)
+			mv.durationMs = headerTicksToMs(durTicks, movieTS)
 		}
 	}
 	if movieTS == 0 {
@@ -954,7 +989,24 @@ func mehdDurationMs(moovBoxes []memBox, movieTS uint32) int64 {
 	if ticks == 0 || ticks >= 1<<62 || ticks == 0xFFFFFFFF {
 		return 0
 	}
-	return int64(ticks) * 1000 / int64(movieTS)
+	return headerTicksToMs(ticks, movieTS)
+}
+
+// headerTicksToMs converts a header's duration to milliseconds without
+// overflowing: a result past int64 is taken as unset (0).
+func headerTicksToMs(ticks uint64, timescale uint32) int64 {
+	if timescale == 0 {
+		return 0
+	}
+	hi, lo := bits.Mul64(ticks, 1000)
+	if hi >= uint64(timescale) {
+		return 0
+	}
+	q, _ := bits.Div64(hi, lo, uint64(timescale))
+	if q > math.MaxInt64 {
+		return 0
+	}
+	return int64(q)
 }
 
 // trexDefaultDurations reads mvex>trex and returns each track's
@@ -1675,7 +1727,7 @@ func mdhdDurationMs(payload []byte) int64 {
 	if ticks == 0 || ticks == 0xFFFFFFFF || ticks >= 1<<62 {
 		return 0 // unset/sentinel
 	}
-	return int64(ticks) * 1000 / int64(ts)
+	return headerTicksToMs(ticks, ts)
 }
 
 // parseElst reads an edit list box and returns the first non-empty edit's

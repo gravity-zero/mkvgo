@@ -434,7 +434,7 @@ func TestRetime_CrashRecovery(t *testing.T) {
 	if _, err := f.Seek(size, io.SeekStart); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInPlaceJournal(f, size, zones); err != nil {
+	if err := writeInPlaceJournal(f, nil, size, zones); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range patches[:len(patches)/2] {

@@ -36,7 +36,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 		return nil, err
 	}
 
-	mv, err := parseMP4(src, fi.Size(), sampleFull)
+	mv, err := parseMP4Limit(src, fi.Size(), sampleFull, o.moovLimit())
 	if err != nil {
 		return nil, err
 	}

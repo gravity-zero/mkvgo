@@ -681,7 +681,7 @@ func TestCENCSampleIVCounterRangesDisjoint(t *testing.T) {
 	// dtsTS stride of 1: the worst case for the low-byte-corruption bug.
 	var ranges []rng
 	for dts := int64(0); dts < 200; dts++ {
-		start := as128(cencCounterBlock(cencSampleIV(base, dts)))
+		start := as128(cencCounterBlock(cencSampleIV(base, dts, 0)))
 		end := add(start, blocksPerSample) // exclusive upper counter bound
 		ranges = append(ranges, rng{start, end})
 	}
@@ -698,7 +698,7 @@ func TestCENCSampleIVCounterRangesDisjoint(t *testing.T) {
 	// The low 8 bytes (block-counter space) must be untouched by the per-sample
 	// derivation; only the high 8 bytes carry dtsTS.
 	for dts := int64(0); dts < 8; dts++ {
-		iv := cencSampleIV(base, dts)
+		iv := cencSampleIV(base, dts, 0)
 		if !bytes.Equal(iv[8:], base[8:]) {
 			t.Fatalf("dts=%d: low 8 IV bytes changed (%x), must stay the block-counter space (%x)", dts, iv[8:], base[8:])
 		}

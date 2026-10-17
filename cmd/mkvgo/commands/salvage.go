@@ -29,25 +29,13 @@ func CmdSalvage(args []string) {
 	var jsonOut, dryRun, cleanCut bool
 	var deltaPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--json":
-			jsonOut = true
-		case "--dry-run":
-			dryRun = true
-		case "--clean-cut":
-			cleanCut = true
-		case "--rollback-delta":
-			if i+1 >= len(args) {
-				Fatal("--rollback-delta needs a file path")
-			}
-			i++
-			deltaPath = args[i]
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	fl := newFlags("salvage")
+	fl.Bool(&jsonOut, "--json")
+	fl.Bool(&dryRun, "--dry-run")
+	fl.Bool(&cleanCut, "--clean-cut")
+	fl.String(&deltaPath, "--rollback-delta")
+	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
+	rest = fl.Parse(args)
 	if dryRun && deltaPath != "" {
 		Fatal("--rollback-delta does not apply to --dry-run (nothing is written, nothing to roll back)")
 	}

@@ -27,17 +27,9 @@ func CmdExtractAttachment(args []string) {
 		Fatal(fmt.Sprintf("invalid attachment ID %q", args[1]))
 	}
 	var outPath string
-	for i := 2; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		} else {
-			rejectFlagArg(args[i])
-		}
-	}
+	fl := newFlags("extract-attachment")
+	fl.String(&outPath, "-o")
+	fl.Parse(args[2:])
 	if outPath == "" {
 		Fatal("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
@@ -60,40 +52,18 @@ func CmdExtractSubtitle(args []string) {
 	var trackID uint64
 	format = "srt"
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		case "-index":
-			i++
-			if i >= len(args) {
-				Fatal("-index needs a value")
-			}
-			indexPath = args[i]
-		case "-t":
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			id, err := strconv.ParseUint(args[i], 10, 64)
-			if err != nil {
-				Fatal(fmt.Sprintf("invalid track ID %q", args[i]))
-			}
-			trackID = id
-		case "-format":
-			i++
-			if i >= len(args) {
-				Fatal("-format needs a value")
-			}
-			format = args[i]
-		default:
-			rejectFlagArg(args[i])
+	fl := newFlags("extract-subtitle")
+	fl.String(&outPath, "-o")
+	fl.String(&indexPath, "-index")
+	fl.Func(func(v string) {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			Fatal(fmt.Sprintf("invalid track ID %q", v))
 		}
-	}
+		trackID = id
+	}, "-t")
+	fl.String(&format, "-format")
+	fl.Parse(args[1:])
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: " + usage)
 	}
@@ -261,32 +231,19 @@ func CmdSubtitleIndex(args []string) {
 	var outPath string
 	var trackIDs []uint64
 	fromCues := false
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-from-cues":
-			fromCues = true
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
+	fl := newFlags("subtitle-index")
+	fl.Bool(&fromCues, "-from-cues")
+	fl.String(&outPath, "-o")
+	fl.Func(func(v string) {
+		for _, part := range strings.Split(v, ",") {
+			id, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64)
+			if err != nil {
+				Fatal(fmt.Sprintf("invalid track ID %q", part))
 			}
-			outPath = args[i]
-		case "-t":
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			for _, part := range strings.Split(args[i], ",") {
-				id, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64)
-				if err != nil {
-					Fatal(fmt.Sprintf("invalid track ID %q", part))
-				}
-				trackIDs = append(trackIDs, id)
-			}
-		default:
-			rejectFlagArg(args[i])
+			trackIDs = append(trackIDs, id)
 		}
-	}
+	}, "-t")
+	fl.Parse(args[1:])
 	if outPath == "" {
 		Fatal("usage: " + usage)
 	}

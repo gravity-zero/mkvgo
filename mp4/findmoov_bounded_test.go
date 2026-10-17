@@ -166,7 +166,7 @@ func TestNonISOBMFFSourceIsRefusedOnItsHead(t *testing.T) {
 func TestMetaReadLooksForTheMoovOnce(t *testing.T) {
 	const size = 300 << 20
 	f := brokenMP4(size)
-	if _, err := readMoovForMode(f, size, sampleNone); err == nil {
+	if _, err := readMoovForMode(f, size, sampleNone, DefaultMaxMoovBytes); err == nil {
 		t.Fatal("a file without a moov was read")
 	}
 	if f.read > maxMoovScanWindow+(4<<20) {

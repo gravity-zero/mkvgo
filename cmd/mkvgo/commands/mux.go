@@ -16,30 +16,10 @@ func CmdDemux(args []string) {
 	var outDir string
 	var trackIDs []uint64
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			if i >= len(args) {
-				Fatal("-o requires a directory")
-			}
-			outDir = args[i]
-		case "-t":
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			if i >= len(args) {
-				Fatal("-t requires track IDs (comma-separated)")
-			}
-			trackIDs = ParseTrackIDs(args[i])
-		default:
-			rejectFlagArg(args[i])
-		}
-	}
+	fl := newFlags("demux")
+	fl.String(&outDir, "-o")
+	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
+	fl.Parse(args[1:])
 	if outDir == "" {
 		Fatal("missing -o <dir>")
 	}
@@ -61,22 +41,12 @@ func CmdMux(args []string) {
 	var outPath string
 	var inputs []matroska.TrackInput
 
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			if i >= len(args) {
-				Fatal("-o requires an output path")
-			}
-			outPath = args[i]
-			continue
-		}
-		rejectFlagArg(args[i])
-		srcPath, trackID, ok := splitTrackSpec(args[i])
+	fl := newFlags("mux")
+	fl.String(&outPath, "-o")
+	for _, spec := range fl.Parse(args) {
+		srcPath, trackID, ok := splitTrackSpec(spec)
 		if !ok {
-			Fatal(fmt.Sprintf("invalid track spec %q, expected file:trackID", args[i]))
+			Fatal(fmt.Sprintf("invalid track spec %q, expected file:trackID", spec))
 		}
 		id, err := strconv.ParseUint(trackID, 10, 64)
 		if err != nil {
@@ -112,24 +82,10 @@ func CmdRemoveTrack(args []string) {
 	var outPath string
 	var trackIDs []uint64
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		case "-t":
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			trackIDs = ParseTrackIDs(args[i])
-		default:
-			rejectFlagArg(args[i])
-		}
-	}
+	fl := newFlags("remove-track")
+	fl.String(&outPath, "-o")
+	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
+	fl.Parse(args[1:])
 	if outPath == "" || len(trackIDs) == 0 {
 		Fatal("usage: mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>")
 	}
@@ -151,36 +107,18 @@ func CmdAddTrack(args []string) {
 	var outPath string
 	var input matroska.TrackInput
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
+	fl := newFlags("add-track")
+	fl.String(&outPath, "-o")
+	fl.Func(func(v string) { input.Language = v }, "-lang")
+	fl.Func(func(v string) { input.Name = v }, "-name")
+	for _, op := range fl.Parse(args[1:]) {
+		if srcPath, trackID, ok := splitTrackSpec(op); ok {
+			id, err := strconv.ParseUint(trackID, 10, 64)
+			if err != nil {
+				Fatal(fmt.Sprintf("invalid track ID %q", trackID))
 			}
-			outPath = args[i]
-		case "-lang":
-			i++
-			if i >= len(args) {
-				Fatal("-lang needs a value")
-			}
-			input.Language = args[i]
-		case "-name":
-			i++
-			if i >= len(args) {
-				Fatal("-name needs a value")
-			}
-			input.Name = args[i]
-		default:
-			rejectFlagArg(args[i])
-			if srcPath, trackID, ok := splitTrackSpec(args[i]); ok {
-				id, err := strconv.ParseUint(trackID, 10, 64)
-				if err != nil {
-					Fatal(fmt.Sprintf("invalid track ID %q", trackID))
-				}
-				input.SourcePath = srcPath
-				input.TrackID = id
-			}
+			input.SourcePath = srcPath
+			input.TrackID = id
 		}
 	}
 	if outPath == "" || input.SourcePath == "" {

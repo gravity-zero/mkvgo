@@ -15,25 +15,14 @@ import (
 func CmdToMP4(args []string) {
 	var faststart, skip, flatten, wvtt, mp3delay, hashes bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "--faststart", "-faststart":
-			faststart = true
-		case "--hash", "-hash":
-			hashes = true
-		case "--skip-unsupported", "-skip-unsupported":
-			skip = true
-		case "--flatten-subs", "-flatten-subs":
-			flatten = true
-		case "--webvtt-native", "-webvtt-native":
-			wvtt = true
-		case "--mp3-container-delay", "-mp3-container-delay":
-			mp3delay = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdToMP4")
+	fl.Bool(&faststart, "--faststart", "-faststart")
+	fl.Bool(&hashes, "--hash", "-hash")
+	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
+	fl.Bool(&flatten, "--flatten-subs", "-flatten-subs")
+	fl.Bool(&wvtt, "--webvtt-native", "-webvtt-native")
+	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
+	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["to-mp4"])
 	}
@@ -73,17 +62,10 @@ func CmdToMP4(args []string) {
 func CmdFromMP4(args []string) {
 	var mp3delay, skip bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "--mp3-container-delay", "-mp3-container-delay":
-			mp3delay = true
-		case "--skip-unsupported", "-skip-unsupported":
-			skip = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdFromMP4")
+	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
+	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
+	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["from-mp4"])
 	}

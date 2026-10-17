@@ -14,20 +14,10 @@ import (
 func CmdPlayability(args []string) {
 	targetName := "mse-generic"
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch a {
-		case "-target", "--target":
-			i++
-			if i >= len(args) {
-				Fatal("usage: " + CmdUsage["playability"])
-			}
-			targetName = args[i]
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("playability")
+	fl.String(&targetName, "-target", "--target")
+	fl.Missing("-target", "usage: "+CmdUsage["playability"])
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["playability"])
 	}
@@ -69,9 +59,7 @@ func CmdPlayability(args []string) {
 // the file's video track metadata. Guidance, not a guarantee - mkvgo never
 // transcodes.
 func CmdLadder(args []string) {
-	for _, a := range args {
-		rejectFlagArg(a)
-	}
+	newFlags("CmdLadder").Parse(args)
 	if len(args) < 1 {
 		Fatal("usage: " + CmdUsage["ladder"])
 	}

@@ -73,17 +73,10 @@ JSON schema:
 	source := args[0]
 	var outPath, jsonStr string
 
-	for i := 1; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		} else {
-			rejectFlagArg(args[i])
-			jsonStr = args[i]
-		}
+	fl := newFlags("edit")
+	fl.String(&outPath, "-o")
+	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+		jsonStr = ops[len(ops)-1]
 	}
 	if outPath == "" {
 		Fatal("missing -o <out.mkv>")
@@ -123,17 +116,10 @@ func CmdEditTitle(args []string) {
 	source := args[0]
 	var outPath, title string
 
-	for i := 1; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		} else {
-			rejectFlagArg(args[i])
-			title = args[i]
-		}
+	fl := newFlags("edit-title")
+	fl.String(&outPath, "-o")
+	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+		title = ops[len(ops)-1]
 	}
 	if outPath == "" || title == "" {
 		Fatal("usage: mkvgo edit-title <file.mkv> -o <out.mkv> <title>")
@@ -160,52 +146,23 @@ func CmdEditTrack(args []string) {
 	var lang, name *string
 	var setDefault, setForced *bool
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		case "-t":
-			i++
-			if i >= len(args) {
-				Fatal("-t needs a value")
-			}
-			id, err := strconv.ParseUint(args[i], 10, 64)
-			if err != nil {
-				Fatal(fmt.Sprintf("invalid track ID %q", args[i]))
-			}
-			trackID = id
-		case "-lang":
-			i++
-			if i >= len(args) {
-				Fatal("-lang needs a value")
-			}
-			lang = &args[i]
-		case "-name":
-			i++
-			if i >= len(args) {
-				Fatal("-name needs a value")
-			}
-			name = &args[i]
-		case "-default":
-			v := true
-			setDefault = &v
-		case "-no-default":
-			v := false
-			setDefault = &v
-		case "-forced":
-			v := true
-			setForced = &v
-		case "-no-forced":
-			v := false
-			setForced = &v
-		default:
-			rejectFlagArg(args[i])
+	fl := newFlags("edit-track")
+	fl.String(&outPath, "-o")
+	fl.Func(func(v string) {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			Fatal(fmt.Sprintf("invalid track ID %q", v))
 		}
-	}
+		trackID = id
+	}, "-t")
+	fl.Func(func(v string) { lang = &v }, "-lang")
+	fl.Func(func(v string) { name = &v }, "-name")
+	var isDefault, noDefault, isForced, noForced bool
+	fl.Do(func() { isDefault = true; setDefault = &isDefault }, "-default")
+	fl.Do(func() { noDefault = false; setDefault = &noDefault }, "-no-default")
+	fl.Do(func() { isForced = true; setForced = &isForced }, "-forced")
+	fl.Do(func() { noForced = false; setForced = &noForced }, "-no-forced")
+	fl.Parse(args[1:])
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: mkvgo edit-track <file.mkv> -o <out.mkv> -t <trackID> [-lang x] [-name x]")
 	}

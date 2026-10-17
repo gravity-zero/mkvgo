@@ -48,8 +48,9 @@ import (
 //
 // Key/IV reuse is the caller's responsibility. mkvgo validates the key, key ID
 // and IV lengths, not their global uniqueness. Within a single packaging pass
-// mkvgo derives a distinct per-sample IV for "cenc" so a track never reuses a
-// keystream; "cbcs" uses the scheme-mandated constant IV. But across separate
+// mkvgo derives a distinct per-sample IV for "cenc" so no two samples share a
+// keystream, across the tracks of a presentation and the variants of an ABR
+// one; "cbcs" uses the scheme-mandated constant IV. But across separate
 // encodings the pair (Key, base IV) must be unique: encrypting two different
 // files with the same Key and the same base IV under "cenc" makes their
 // per-sample IVs - and therefore their AES-CTR keystreams - collide wherever
@@ -422,10 +423,36 @@ func addUint64BE(b []byte, v uint64) {
 // high 8 bytes keeps every sample's counter range disjoint. For an 8-byte IV
 // the whole IV IS the high 8 bytes (the counter block's low 8 are zero), so
 // the same code is correct and unchanged there.
-func cencSampleIV(base []byte, dtsTS int64) []byte {
+//
+// domain sets the track apart: every track shares the key, so two tracks'
+// samples at the same dtsTS would otherwise share an IV and a keystream.
+func cencSampleIV(base []byte, dtsTS int64, domain uint64) []byte {
 	iv := append([]byte(nil), base...)
-	addUint64BE(iv[:8], uint64(dtsTS))
+	addUint64BE(iv[:8], uint64(dtsTS)+domain)
 	return iv
+}
+
+// cencForVariant is c for ABR variant i (0-based): 'cenc' variants share the
+// key, so each past the first takes the base IV plus i·2^48, below the track
+// domains (cencIVDomain) and past any dtsTS a variant reaches; the first is c.
+func cencForVariant(c *CENCOptions, i int) *CENCOptions {
+	if c == nil || c.Scheme != "cenc" || i == 0 {
+		return c
+	}
+	v := *c
+	v.IV = append([]byte(nil), c.IV...)
+	addUint64BE(v.IV[:8], uint64(i)<<48)
+	return &v
+}
+
+// cencIVDomain is what a track adds to its samples' IVs: 0 for the video, so
+// its IVs are what they always were, and for any other track its ID's own
+// value in the top byte, never 0, past any dtsTS a presentation reaches (2^56).
+func cencIVDomain(isVideo bool, trackID uint64) uint64 {
+	if isVideo {
+		return 0
+	}
+	return (trackID%255 + 1) << 56
 }
 
 // cencCounterBlock expands a 'cenc' per-sample IV to the 16-byte AES-CTR
@@ -533,8 +560,8 @@ func cbcsEncryptWholeSample(block cipher.Block, iv []byte, sample []byte) {
 // data holds every sample in samples back-to-back, in decode order, exactly
 // as segmentWindow/segmentTrack lay them out; samples' dtsTS values are what
 // the per-sample 'cenc' IV derives from (see this file's doc comment).
-func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
-	k, err := newCENCCipher(c, isVideo, codec)
+func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, trackID uint64, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
+	k, err := newCENCCipher(c, isVideo, codec, trackID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -562,10 +589,11 @@ type cencCipher struct {
 	c        *CENCOptions
 	block    cipher.Block
 	isVideo  bool
+	domain   uint64 // added to every 'cenc' IV of the track (cencIVDomain)
 	splitter videoSubsampleSplitter
 }
 
-func newCENCCipher(c *CENCOptions, isVideo bool, codec string) (*cencCipher, error) {
+func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (*cencCipher, error) {
 	block, err := aes.NewCipher(c.Key)
 	if err != nil {
 		return nil, err
@@ -573,7 +601,7 @@ func newCENCCipher(c *CENCOptions, isVideo bool, codec string) (*cencCipher, err
 	if isVideo && !cencSupportsCodec(codec) {
 		return nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
 	}
-	k := &cencCipher{c: c, block: block, isVideo: isVideo}
+	k := &cencCipher{c: c, block: block, isVideo: isVideo, domain: cencIVDomain(isVideo, trackID)}
 	if isVideo {
 		if k.splitter, err = newVideoSubsampleSplitter(codec); err != nil {
 			return nil, err
@@ -593,7 +621,7 @@ func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
 		e.subs = subs
 	}
 	if k.c.Scheme == "cenc" {
-		e.iv = cencSampleIV(k.c.IV, dtsTS)
+		e.iv = cencSampleIV(k.c.IV, dtsTS, k.domain)
 	}
 	return e, nil
 }

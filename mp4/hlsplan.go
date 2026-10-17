@@ -394,7 +394,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// Source sniff: an MP4's moov IS the index (sample offsets/sizes/sync,
 	// head-only), so its plan is exact by construction; a Matroska source
 	// plans through its Cues.
-	if mp4ps, sniffErr := sniffMP4ForPlan(ctx, srcPath, fs); sniffErr != nil {
+	if mp4ps, sniffErr := sniffMP4ForPlan(ctx, srcPath, fs, o.moovLimit()); sniffErr != nil {
 		return nil, sniffErr
 	} else if mp4ps != nil {
 		defer mp4ps.Close()
@@ -3303,7 +3303,7 @@ func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts, star
 		for x := range window {
 			plain = append(plain, window[x].data...)
 		}
-		td, cipher, err := prepareCENCSegment(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, seg.samples, plain)
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, pt.ft.outTrack.mkv.ID, seg.samples, plain)
 		if err != nil {
 			return nil, err
 		}
@@ -4037,7 +4037,7 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 
 // sniffMP4ForPlan opens srcPath as an MP4 packaging source when it is one,
 // nil when it is Matroska (the caller then takes the Cues path).
-func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagingSource, error) {
+func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS, moovLimit int64) (*packagingSource, error) {
 	f, err := fs.DoOpenContext(ctx, srcPath)
 	if err != nil {
 		return nil, err
@@ -4062,7 +4062,7 @@ func sniffMP4ForPlan(ctx context.Context, srcPath string, fs *mkv.FS) (*packagin
 	}
 	// sampleFull builds the sample table from the moof fragments for a
 	// fragmented/CMAF source, so the packager reads it like a progressive file.
-	mv, err := parseMP4(ctxReadSeeker{f, ctx}, st.Size(), sampleFull)
+	mv, err := parseMP4Limit(ctxReadSeeker{f, ctx}, st.Size(), sampleFull, moovLimit)
 	if cerr := ctx.Err(); cerr != nil {
 		f.Close()
 		return nil, cerr
@@ -4275,7 +4275,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		}
 		// Same requirement as the full pass and the Matroska on-demand path:
 		// CENC needs the plaintext bytes before the head is built.
-		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.ID, seg.samples, plain)
 		if err != nil {
 			return nil, err
 		}

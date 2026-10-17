@@ -39,153 +39,97 @@ func parseHLSFlags(args []string) hlsFlags {
 	var keyHex, keyURI string
 	var rotateSegs int
 	var cencScheme, cencKeyHex, cencKIDHex, cencIVHex, cencKeyURI string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i < len(args) {
-				f.outDir = args[i]
-			}
-		case "-segment", "--segment":
-			// Segment length in seconds (HLS convention, the HLS convention).
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				f.segMs = int64(secs * 1000)
-			}
-		case "--aes-key":
-			i++
-			if i < len(args) {
-				keyHex = args[i]
-			}
-		case "--aes-key-uri":
-			i++
-			if i < len(args) {
-				keyURI = args[i]
-			}
-		case "--aes-rotate-segments":
-			i++
-			if i < len(args) {
-				n, err := strconv.Atoi(args[i])
-				if err != nil || n < 1 {
-					Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", args[i]))
-				}
-				rotateSegs = n
-			}
-		case "--cenc-scheme":
-			i++
-			if i < len(args) {
-				cencScheme = args[i]
-			}
-		case "--cenc-key":
-			i++
-			if i < len(args) {
-				cencKeyHex = args[i]
-			}
-		case "--cenc-kid":
-			i++
-			if i < len(args) {
-				cencKIDHex = args[i]
-			}
-		case "--cenc-iv":
-			i++
-			if i < len(args) {
-				cencIVHex = args[i]
-			}
-		case "--cenc-key-uri":
-			i++
-			if i < len(args) {
-				cencKeyURI = args[i]
-			}
-		case "--url-prefix":
-			i++
-			if i < len(args) {
-				f.prefix = args[i]
-			}
-		case "--single-file":
-			f.singleFile = true
-		case "--keep-tracks":
-			i++
-			if i < len(args) {
-				for _, p := range strings.Split(args[i], ",") {
-					id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
-					if err != nil {
-						Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
-					}
-					f.keepTracks = append(f.keepTracks, id)
-				}
-			}
-		case "--keep-lang", "--audio-lang":
-			i++
-			if i < len(args) {
-				for _, l := range strings.Split(args[i], ",") {
-					if l = strings.TrimSpace(l); l != "" {
-						f.keepLangs = append(f.keepLangs, strings.ToLower(l))
-					}
-				}
-			}
-		case "--sub-offset":
-			i++
-			if i < len(args) {
-				ms, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil {
-					Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", args[i]))
-				}
-				f.subOffset = ms
-			}
-		case "--chapter-markers":
-			f.chapterMarkers = true
-		case "--skip-unsupported", "-skip-unsupported":
-			f.skipUnsupported = true
-		case "--no-iframes":
-			f.noIFrames = true
-		case "--damage-bytes":
-			i++
-			if i < len(args) {
-				n, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil || n <= 0 {
-					Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
-				}
-				f.damageBytes = n
-			}
-		case "--source-access":
-			if i+1 >= len(args) {
-				Fatal("--source-access needs auto, local or network")
-			}
-			i++
-			switch args[i] {
-			case "auto":
-				f.sourceAccess = mp4.SourceAuto
-			case "local":
-				f.sourceAccess = mp4.SourceLocal
-			case "network":
-				f.sourceAccess = mp4.SourceNetwork
-			default:
-				Fatal("--source-access takes auto, local or network, not " + args[i])
-			}
-		case "--synthesize-index":
-			f.synthIndex = true
-		case "--audio-shift":
-			if i+1 >= len(args) {
-				Fatal("--audio-shift needs a <track>=<ms> value")
-			}
-			i++
-			track, ms, err := parseShift(args[i])
-			if err != nil {
-				Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
-			}
-			if f.audioShift == nil {
-				f.audioShift = map[uint64]int64{}
-			}
-			f.audioShift[track] = ms * 1_000_000 // ms -> ns
-		default:
-			rejectFlagArg(args[i])
-			f.rest = append(f.rest, args[i])
+	var keyFile, cencKeyFile string
+	var cencInline bool
+	fl := newFlags("hls")
+	fl.String(&f.outDir, "-o")
+	fl.Func(func(v string) { // segment length in seconds, the HLS convention
+		secs, err := strconv.ParseFloat(v, 64)
+		if err != nil || secs <= 0 {
+			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
 		}
-	}
+		f.segMs = int64(secs * 1000)
+	}, "-segment", "--segment")
+	fl.String(&keyHex, "--aes-key")
+	fl.String(&keyFile, "--aes-key-file")
+	fl.String(&cencKeyFile, "--cenc-key-file")
+	fl.Bool(&cencInline, "--cenc-inline-key")
+	fl.String(&keyURI, "--aes-key-uri")
+	fl.Func(func(v string) {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", v))
+		}
+		rotateSegs = n
+	}, "--aes-rotate-segments")
+	fl.String(&cencScheme, "--cenc-scheme")
+	fl.String(&cencKeyHex, "--cenc-key")
+	fl.String(&cencKIDHex, "--cenc-kid")
+	fl.String(&cencIVHex, "--cenc-iv")
+	fl.String(&cencKeyURI, "--cenc-key-uri")
+	fl.String(&f.prefix, "--url-prefix")
+	fl.Bool(&f.singleFile, "--single-file")
+	fl.Func(func(v string) {
+		for _, p := range strings.Split(v, ",") {
+			id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
+			if err != nil {
+				Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
+			}
+			f.keepTracks = append(f.keepTracks, id)
+		}
+	}, "--keep-tracks")
+	fl.Func(func(v string) {
+		for _, l := range strings.Split(v, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				f.keepLangs = append(f.keepLangs, strings.ToLower(l))
+			}
+		}
+	}, "--keep-lang", "--audio-lang")
+	fl.Func(func(v string) {
+		ms, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", v))
+		}
+		f.subOffset = ms
+	}, "--sub-offset")
+	fl.Bool(&f.chapterMarkers, "--chapter-markers")
+	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
+	fl.Bool(&f.noIFrames, "--no-iframes")
+	fl.Func(func(v string) {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", v))
+		}
+		f.damageBytes = n
+	}, "--damage-bytes")
+	fl.Func(func(v string) {
+		switch v {
+		case "auto":
+			f.sourceAccess = mp4.SourceAuto
+		case "local":
+			f.sourceAccess = mp4.SourceLocal
+		case "network":
+			f.sourceAccess = mp4.SourceNetwork
+		default:
+			Fatal("--source-access takes auto, local or network, not " + v)
+		}
+	}, "--source-access")
+	fl.Missing("--source-access", "--source-access needs auto, local or network")
+	fl.Bool(&f.synthIndex, "--synthesize-index")
+	fl.Func(func(v string) {
+		track, ms, err := parseShift(v)
+		if err != nil {
+			Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
+		}
+		if f.audioShift == nil {
+			f.audioShift = map[uint64]int64{}
+		}
+		f.audioShift[track] = ms * 1_000_000 // ms -> ns
+	}, "--audio-shift")
+	fl.Missing("--audio-shift", "--audio-shift needs a <track>=<ms> value")
+	f.rest = fl.Parse(args)
+	keyHex = keyValue(keyHex, keyFile, "MKVGO_AES_KEY", "--aes-key", keyURI != "")
+	cencKeyHex = keyValue(cencKeyHex, cencKeyFile, "MKVGO_CENC_KEY", "--cenc-key", cencScheme != "" || cencKIDHex != "" || cencIVHex != "" || cencKeyURI != "")
 	if keyHex != "" || keyURI != "" {
 		// --aes-key and --aes-key-uri take a single value, or a comma-separated
 		// list when rotating (--aes-rotate-segments N): the keys cycle every N
@@ -217,9 +161,33 @@ func parseHLSFlags(args []string) hlsFlags {
 		key := mustHex(cencKeyHex, "--cenc-key (expected 32 hex chars)")
 		kid := mustHex(cencKIDHex, "--cenc-kid (expected 32 hex chars)")
 		iv := mustHex(cencIVHex, "--cenc-iv (expected 16 or 32 hex chars)")
+		if cencKeyURI == "" && !cencInline {
+			Fatal("--cenc-key-uri is required: without it the playlist would carry the content key in clear (a data: URI). Pass --cenc-key-uri with the URI of your key or license server, or --cenc-inline-key to embed the key on purpose (testing only)")
+		}
 		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI}
 	}
 	return f
+}
+
+// keyValue is a key's hex from its argv flag, else its file (whitespace
+// ignored), else env when the encryption it belongs to is asked for.
+func keyValue(argv, file, env, flag string, asked bool) string {
+	if argv != "" && file != "" {
+		Fatal(flag + " and " + flag + "-file both given: pass the key once")
+	}
+	switch {
+	case argv != "":
+		return argv
+	case file != "":
+		b, err := os.ReadFile(file)
+		if err != nil {
+			Fatal("cannot read " + flag + "-file: " + err.Error())
+		}
+		return strings.Join(strings.Fields(string(b)), "")
+	case asked:
+		return os.Getenv(env)
+	}
+	return ""
 }
 
 // splitCSV splits a comma-separated flag value into trimmed, non-empty parts.

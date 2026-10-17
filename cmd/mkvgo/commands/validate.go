@@ -13,15 +13,9 @@ import (
 func CmdValidate(args []string) {
 	var strict bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "-strict", "--strict":
-			strict = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdValidate")
+	fl.Bool(&strict, "-strict", "--strict")
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["validate"])
 	}
@@ -60,15 +54,9 @@ func CmdValidate(args []string) {
 func CmdCompare(args []string) {
 	var blocks bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "-blocks", "--blocks":
-			blocks = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdCompare")
+	fl.Bool(&blocks, "-blocks", "--blocks")
+	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["compare"])
 	}

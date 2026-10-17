@@ -93,8 +93,9 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 
 **Serving over HTTP.** The hand-rolled handler above is the idea in a few
 lines; `mkvhttp.Handler(plan)` (package `github.com/gravity-zero/mkvgo/mkvhttp`)
-is the batteries-included version -- strong ETag, conditional GET, Range,
-per-resource `Cache-Control`, CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already
+is the batteries-included version -- ETag, conditional GET, Range,
+per-resource `Cache-Control` (`no-cache` by default, immutable segments with
+`Options.Immutable` under a versioned URL), opt-in CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already
 satisfy its `Resolver` interface as-is. See `docs/library.md` for the full
 semantics table. `mkvgo serve <file.mkv>` is this wired up as a CLI command
 (see `docs/cli.md`).
@@ -485,7 +486,7 @@ delivery -- in [library.md](library.md#common-encryption-cenc).
 
 **Key/IV uniqueness is yours to guarantee.** mkvgo validates the key/IV lengths,
 not their global uniqueness. It derives a distinct per-sample IV within one
-`cenc` pass, but across separate encodings you must use a fresh key or a fresh
+`cenc` pass, across its tracks and ABR variants, but across separate encodings you must use a fresh key or a fresh
 base IV: two files encrypted with the same key and the same base IV reuse the
 AES-CTR keystream wherever their decode timestamps overlap, which leaks
 plaintext. (`cbcs` uses the scheme's constant IV by design; the same

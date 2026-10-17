@@ -6,8 +6,157 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+
+- **SEC-01: an MP4's moov is capped at 256 MiB before it is read.** The
+  metadata path allocated the moov's declared size in one piece, bounded only
+  by the source's size: over `httpfs` that size is the server's Content-Range
+  total, so 16 bytes of header claiming a terabyte asked for a terabyte, and a
+  server streaming zeros under a 300 MiB moov made the probe allocate 1.3 GiB.
+  A moov declared past `Options.MaxMoovBytes` (new, 0 = `DefaultMaxMoovBytes`,
+  256 MiB) is now refused before any of it is read, on every MP4 path, with an
+  error naming the option; under the cap the lazy read is used as before.
+- **SEC-02: `httpfs` keeps only the range it asked for.** Under a
+  `mkv.ShareReads` scope, `Stat` fetches the first and last window and sized
+  each buffer from the Content-Range the server sent. A response is now taken
+  only when it answers the request (the head starts at 0 and ends within the
+  window, the suffix ends at the object's last byte and spans at most a
+  window) and its Content-Length matches, so nothing past a window is
+  allocated.
+- **SEC-03: an `s3://` bucket can no longer move the signed request to
+  another host.** In the default virtual-hosted style the bucket was written
+  raw in front of the endpoint: `s3://evil.example?/k` sent the signed
+  request, access key id and session token included, to `evil.example`. A
+  bucket must now follow the S3 naming rules (3 to 63 characters of
+  `[a-z0-9.-]`, a letter or digit at each end, no `..`, not an IPv4 address),
+  and the URL built must name the endpoint's host.
+- **SEC-04: credentials do not follow a redirect.** `s3fs` followed a
+  redirect to any host and signed every hop; it now returns a 3xx as an error.
+  `httpfs`'s default client (it used `http.DefaultClient`) refuses a redirect
+  to another host while `Options.Header` is set. New `httpfs.Options.AllowHost`
+  vets the host of every request and redirect, for a service that opens URLs
+  its users supply (server-side request forgery, see the package doc).
+- **SEC-06: encryption keys no longer have to go through argv.** `to-hls`,
+  `hls-segment` and the other commands taking the HLS security flags accept
+  `--aes-key-file` and `--cenc-key-file` (hex, whitespace ignored), and fall
+  back to `MKVGO_AES_KEY` / `MKVGO_CENC_KEY` when the encryption is asked for
+  without a key flag. A key on the command line is readable through `ps` and
+  `/proc` and kept in the shell history; `--aes-key` and `--cenc-key` remain,
+  documented with that risk.
+- **SEC-07 (CLI): CENC packaging refuses to put the key in the playlist by
+  default.** Without `--cenc-key-uri`, the `EXT-X-KEY` line carried the content
+  key in clear as a `data:` URI. The CLI now exits with an error naming
+  `--cenc-key-uri`, and `--cenc-inline-key` keeps the inline key for local
+  testing. The library default is unchanged.
+- **SEC-08: `mkvgo serve` caps its concurrent walks and turns CORS on only
+  when asked.** The command ran with no cap on the windows built at once, so
+  a burst of requests held as many windows in memory, and it sent
+  `Access-Control-Allow-Origin: *` on every response, letting any web page
+  read what a local server serves. `--max-walks` now defaults to the number
+  of CPUs (`--max-walks 0` removes the cap), and `--cors` (on `serve` and
+  `serve-growing`) adds the CORS headers. The library defaults are unchanged.
+- **NEW-05, NEW-06: 'cenc' packaging reused the AES-CTR keystream across
+  tracks and ABR variants; content packaged this way must be re-packaged
+  under new keys.** The per-sample IV was the base IV plus the sample's decode
+  timestamp in its own track, and every track and ABR variant shares the key:
+  the first video sample and the first audio sample both took the base IV, as
+  did every pair of samples at equal timestamps, and every ABR variant
+  repeated the first one's IVs. The same key and IV under AES-CTR is a
+  two-time pad: XORing the two ciphertexts gives the XOR of the two plaintexts,
+  and a predictable one (silent audio, a known header) reveals the other.
+  Affected: everything mkvgo 0.54.0 or earlier packaged with
+  `CENCOptions{Scheme: "cenc"}` (CLI `--cenc-scheme cenc`) holding more than
+  one track (video plus audio) or more than one ABR variant under one key.
+  Re-package it with a new key, and rotate the old key out of the license or
+  key server: re-packaging under the old key does not help, the ciphertexts
+  already published stay exposed. `cbcs` is not affected (its constant IV is
+  the scheme's design and its pattern encryption runs CBC, not CTR). Each
+  track but the video now adds its own value in the IV's top byte, and each
+  variant past the first its index times 2^48, so no IV serves two samples
+  under one key.
+- **NEW-07: VP9 CENC protects whole AES blocks per frame.** The VP codec
+  ISO media binding requires each frame's encrypted bytes to be block-aligned,
+  the clear bytes before them taking the remainder; the splitter protected
+  everything after the uncompressed header, so a frame's protected run (and,
+  in a superframe, the counter state of the next frame) was off by up to 15
+  bytes. The clear prefix now takes the remainder.
+- **SEC-05: single-source forensic marking is requalified as experimental.**
+  `ForensicPlan` (CLI `forensic-segment`, WASM `openForensic`) picks the frame
+  variant B drops without a key, and `DropNonRefSample` is exported: a lone
+  viewer can turn every A segment into its B and erase the session pattern,
+  and viewers comparing segments see which carry a bit. The Go doc, the CLI
+  help, the docs and the README now call it experimental session marking,
+  robust neither to collusion nor to re-encoding. `DropNonRefSample` is
+  deprecated. The algorithm and its output are unchanged.
+- **SEC-09: the explicit AES-128 IV is documented as reused.** `HLSKey.IV`
+  and `HLSEncryption.IV` apply one IV to every segment of a key's period,
+  which under CBC shows where two segments' plaintexts start alike. The doc
+  now says so and recommends the default per-sequence-number IV. No output
+  changes.
+
 ### Fixed
 
+- **NEW-04: an in-place repair that dies while landing its journal is
+  recoverable.** `ReindexInPlace` appended the new Cues, the journal and its
+  trailer in three write calls, `RetimeTracksInPlace` the journal in two: a
+  process dying between them left bytes past the original end with no trailer,
+  so `RecoverInPlace` found nothing to undo while the next `ReindexInPlace`
+  refused the file over that tail, and the error said to run `RecoverInPlace`.
+  The tail now goes out in one write call: a death before or after any write,
+  of the repair or of a recovery, comes back to the original file or the
+  finished one, which a test checks at every write. A write torn partway (a
+  power loss) is covered too for `ReindexInPlace`: before appending, it writes
+  and syncs a 64-byte intent record (the original size, CRC32C) in the free
+  tail of the head Void it already needs, and clears it before dropping the
+  journal; recovery cuts the file back to that size, or clears a record the
+  crash cut short. A test tears the writes at every byte (451 cuts) and gets
+  the original or the finished file each time. `RetimeTracksInPlace` needs no
+  head Void and keeps the one-write rule only.
+- **NEW-03: a box named `sidx` is read only if a sidx can be that large.**
+  The fragmented-MP4 keyframe scan read every `sidx` before the first
+  fragment whole, whatever its declared size: a source delivering a 64 MiB box
+  of that name cost 248 MiB of allocations (a remote server can stream it at no
+  cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
+  larger one is skipped.
+- **NEW-02: `mux` and `join` name the right flag when `-o` lacks its value.**
+  They exited with `-t needs a value` and `-pattern needs a value`; both now
+  say `-o needs a value`.
+- **CLI-02: a value flag given last is an error, not ignored.** In most
+  commands a flag taking a value (`-segment`, `-o`, `--aes-key`, ...) placed
+  as the last argument was dropped in silence: `to-hls in.mkv -o out -segment`
+  ran with the default segment length and exited 0. Every such flag now exits
+  1 with `<flag> needs a value`.
+- **ROB-05: the block reader refuses an EBML header of absurd size up
+  front.** `NewBlockReader` skipped the header body by its declared size: an
+  unknown size (-1) was skipped as nothing, misplacing every offset after it,
+  and a size of 2^40 read the whole source before failing. A size outside 0 to
+  1 MiB is now an immediate error.
+- **ROB-04: an MP4 header duration no longer overflows into a negative one.**
+  The mvhd, mehd and mdhd durations were converted as `ticks*1000/timescale`
+  in int64, which wrapped for any duration past about 9.2e15 ticks although
+  the guard let through up to 2^62: a version-1 header could report a
+  negative movie or track duration. The conversion now runs in 128 bits, and
+  a result past int64 is taken as unset.
+- **ROB-03: a zero-length float reads as 0.** RFC 8794 lets a float element
+  hold no bytes, meaning 0; `ebml.ReadFloat` refused it, so a file whose
+  Duration (or any float) was written empty failed to open. It now returns 0.
+- **ROB-02, NEW-01: a resync reads its region once.** `ResyncToCluster`, and
+  the segment-level resync that recovers Info and Tracks behind junk, sought
+  back and read a 64 KiB window again past every false candidate: a region of
+  Cluster IDs that do not open a cluster cost a window per five bytes (8 MiB
+  of them read some 100 GiB, one HTTP request each over `httpfs`). Candidates
+  are now judged in the window already read, the few bytes one near its end
+  needs carried into the next, so the region is read once. The offsets found
+  are the same as before on generated data.
+- **ROB-01: the trailing-Cues scan is linear.** On a Matroska file without a
+  SeekHead, the reader looks for the index in the last 64 to 512 KiB by
+  parsing forward from every candidate byte. A tail of empty Voids that does
+  not reach the end made that quadratic: 12 s of CPU for 64 KiB, minutes for
+  512 KiB, on every open of such a file. One backward pass now decides every
+  start (0.6 ms for 64 KiB, 5 ms for 512 KiB), headers are decoded straight
+  from the buffer, and the child checks inside CuePoints and ChapterAtoms draw
+  on a budget in proportion to the window. The scan decides as before on every
+  fixture and on generated tails.
 - **A window is served past a short damaged region instead of refused.** A
   file holding a zeroed stretch (the pieces a download never received: 11 MB
   of zeros then debris, seen in the middle of a 3 GB film) failed every window
@@ -59,7 +208,44 @@ All notable changes to mkvgo are documented here. The format is based on
   keeps its meaning (what `Resource` handed out), so the window accounting it
   belongs to is unchanged.
 
+### Documentation
+
+- **DOC-01: key rotation is called compartmentalization, not forward
+  secrecy.** A rotated AES-128 key is one of a fixed list, cycled: a leaked
+  key decrypts every period it serves and nothing protects past periods once
+  the list is known. `HLSEncryption`, `--aes-rotate-segments` and the
+  library, WASM, recipe and TypeScript docs now say a leaked key decrypts
+  only the periods it serves.
+- **DOC-05: the Go Report Card badge is gone from the README.** The service
+  has been sunset.
+- **DOC-02: the README command table lists every command.** Thirteen were
+  missing (`analyze`, `fingerprint`, `track-ends`, `playability`, `ladder`,
+  `ingest`, `extract-frames`, `subtitle-index`, `abr-segment`, `concat-hls`,
+  `concat-segment`, `serve`, `serve-growing`); a test now fails when the table
+  and the CLI's command list differ.
+- **DOC-03: the `v{k}/<name>` and `mp4.PlanABR` paragraph sits under
+  `abr-segment`** in docs/cli.md, where it belongs, instead of closing the
+  `forensic-segment` section.
+- **DOC-04: the `mkvhttp` package doc says what it caches.** It promised
+  "long-lived caching for the deterministic outputs" and a strong ETag; the
+  handler serves everything `no-cache` by default (immutable segments only
+  with `Options.Immutable`) and streams media segments under a weak ETag. The
+  package doc and streaming.md now say so.
+
 ### Changed
+
+- **NEW-05, NEW-06: 'cenc' output bytes change for every track but the
+  video and every ABR variant but the first.** Their IVs move to their own
+  domain (see Security); a cache or CDN holding segments packaged before this
+  release must drop them together with the init and playlists of the same
+  presentation, as the re-packaging under a new key requires anyway. The video
+  of a single presentation and of an ABR one's first variant keeps its bytes.
+- **CLI-03: every command reads its flags through a `flag.FlagSet`.** The
+  33 hand-written argument loops are replaced by one `FlagSet` per command,
+  read with mkvgo's syntax (a value as the next argument, flags and operands
+  in any order, each flag under its registered spellings only): the accepted
+  arguments, results and messages are unchanged, checked against the previous
+  parser on 20,000 generated argument lists and on the CLI suite.
 
 - **Recycled buffers are poisoned under test.** Built with the `mkvgo_poison`
   tag, every buffer handed back for reuse (a block's payload buffer, a

@@ -75,23 +75,10 @@ func CmdCMAFHLS(args []string) {
 // parseCMAFArgs reads the shared cmaf-* command line: -o, repeated --audio,
 // and the rung directories.
 func parseCMAFArgs(args []string, cmd string) (out string, videos, audios []string) {
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i < len(args) {
-				out = args[i]
-			}
-		case "--audio":
-			i++
-			if i < len(args) {
-				audios = append(audios, args[i])
-			}
-		default:
-			rejectFlagArg(args[i])
-			videos = append(videos, args[i])
-		}
-	}
+	fl := newFlags("cmaf-mpd")
+	fl.String(&out, "-o")
+	fl.Func(func(v string) { audios = append(audios, v) }, "--audio")
+	videos = fl.Parse(args)
 	if len(videos) == 0 && len(audios) == 0 {
 		Fatal("usage: " + CmdUsage[cmd])
 	}

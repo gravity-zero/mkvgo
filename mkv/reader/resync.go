@@ -3,7 +3,6 @@ package reader
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -70,23 +69,17 @@ func resyncToSegmentElement(r io.ReadSeeker, scanLimit, fitLimit int64) (int64, 
 	if scanLimit < 0 || scanLimit > fitLimit {
 		scanLimit = fitLimit
 	}
-	for {
-		off, err := scanForMagic(r, from, scanLimit, indexSegmentLevelID)
-		if err != nil || off < 0 {
-			return -1, err
-		}
-		valid, err := isSegmentElementAt(r, off, fitLimit)
-		if err != nil {
-			return -1, err
-		}
-		if valid {
-			if _, err := r.Seek(off, io.SeekStart); err != nil {
-				return -1, err
-			}
-			return off, nil
-		}
-		from = off + 1 // false positive: resume scanning just past it
+	off, err := scanValid(r, from, scanLimit, indexSegmentLevelID, func(b []byte, off int64) bool {
+		h, hn, ok := segmentElementPrefix(b)
+		return ok && (h.Size < 0 || off+int64(hn)+h.Size <= fitLimit)
+	})
+	if err != nil || off < 0 {
+		return -1, err
 	}
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return -1, err
+	}
+	return off, nil
 }
 
 // indexSegmentLevelID returns the index of the first segment-level element ID
@@ -105,25 +98,6 @@ func indexSegmentLevelID(b []byte) int {
 // judge it: the element header and its first child's header, 12 bytes each at
 // most.
 const segmentElementProbe = 32
-
-// isSegmentElementAt reports whether a real segment-level element begins at
-// off (see segmentElementPrefix) and, when its size is declared, fits within
-// limit.
-func isSegmentElementAt(r io.ReadSeeker, off, limit int64) (bool, error) {
-	if _, err := r.Seek(off, io.SeekStart); err != nil {
-		return false, err
-	}
-	var buf [segmentElementProbe]byte
-	n, err := io.ReadFull(r, buf[:])
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return false, err
-	}
-	h, hn, ok := segmentElementPrefix(buf[:n])
-	if !ok {
-		return false, nil
-	}
-	return h.Size < 0 || off+int64(hn)+h.Size <= limit, nil
-}
 
 // segmentElementPrefix reports whether b - the first bytes at a candidate
 // offset - opens a plausible segment-level element, returning its header and

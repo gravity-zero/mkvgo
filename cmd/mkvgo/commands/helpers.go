@@ -94,8 +94,8 @@ var CmdUsage = map[string]string{
 	"track-ends":         "mkvgo track-ends <file.mkv> [-json] (where each track's content really ends: statistics tags when they describe the file, else a bounded header-only tail walk; picture end and audio shortfall)",
 	"cue-health":         "mkvgo cue-health <file.mkv> [-json] [-probe] (head-only seek-index triage: which tracks the cues reference; -probe looks inside each hole; exit 1 when unhealthy)",
 	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [--deep-verify] [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
-	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--buffered] [--source-access auto|local|network] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
-	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
+	"serve":              "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--buffered] [--cors] [--source-access auto|local|network] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
+	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] [--cors] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv> <output.mp4>",
 	"from-mp4":           "mkvgo from-mp4 [--skip-unsupported] [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
@@ -106,7 +106,7 @@ var CmdUsage = map[string]string{
 	"cmaf-mpd":           "mkvgo cmaf-mpd -o <manifest.mpd> [<rung-dir> ...] [--audio <dir>]... (DASH manifest over CMAF rungs an external encoder produced: each dir holds one rendition's init.mp4 + .m4s segments; rungs are checked segment-aligned first)",
 	"cmaf-hls":           "mkvgo cmaf-hls -o <dir> [<rung-dir> ...] [--audio <dir>]... (HLS master + one media playlist per rendition over CMAF rungs an external encoder produced; same rung directories as cmaf-mpd)",
 	"watermark-segment":  "mkvgo watermark-segment <a.mkv> <b.mkv> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [-o out] [-segment 6] (serve one resource of an A/B session-watermarked stream; segment N drawn from A/B per --variant or bit N of --pattern)",
-	"forensic-segment":   "mkvgo forensic-segment <src.mkv|mp4> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [--distinct] [-o out] [-segment 6] (single-source A/B watermark: variant B drops one disposable H.264 frame per segment, timing-compensated; --distinct tells whether segment N carries a bit)",
+	"forensic-segment":   "mkvgo forensic-segment <src.mkv|mp4> <master|playlist|init|N> [--variant A|B] [--pattern <hex>] [--distinct] [-o out] [-segment 6] (single-source A/B watermark: variant B drops one disposable H.264 frame per segment, timing-compensated; --distinct tells whether segment N carries a bit. Experimental session marking, robust neither to collusion nor to re-encoding)",
 	"concat-hls":         "mkvgo concat-hls <in1> <in2> [...] -o <dir> [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (concatenate sources into one continuous HLS session)",
 	"concat-segment":     "mkvgo concat-segment <master.m3u8|p{k}/name> <in1> <in2> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] (build one concat resource on demand)",
 	"extract-frame":      "mkvgo extract-frame <file.mkv> <time> -o <out.h264|.hevc|.ivf> (keyframe nearest <time>, decoder-ready)",
@@ -550,4 +550,14 @@ func FormatBytes(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+// needValue advances *i to the value of the flag at args[*i] and returns it, exiting when the flag is the last argument.
+func needValue(args []string, i *int) string {
+	flag := args[*i]
+	*i++
+	if *i >= len(args) {
+		Fatal(flag + " needs a value")
+	}
+	return args[*i]
 }

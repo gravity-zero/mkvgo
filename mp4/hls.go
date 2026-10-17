@@ -224,7 +224,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}
 
-	ps, err := openPackagingSource(ctx, srcPath, fs)
+	ps, err := openPackagingSource(ctx, srcPath, fs, o.moovLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -867,7 +867,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				if err != nil {
 					return nil, nil, err
 				}
-				td, cipher, err := prepareCENCSegment(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, seg.samples, plain)
+				td, cipher, err := prepareCENCSegment(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.ID, seg.samples, plain)
 				if err != nil {
 					return nil, nil, err
 				}

@@ -131,6 +131,14 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		}
 		zones = append(zones, inplaceZone{off: oc.off, orig: orig})
 	}
+	intentOff := int64(-1) // where the intent record goes: the tail of the head Void, when it is free (zeros) before and after the patch
+	if slack := patch.slotLen - int64(len(slotPatch)); slack >= intentLen {
+		at := slotOff + patch.slotLen - intentLen
+		if cur, err := readOrig(at, intentLen); err == nil && bytes.Count(cur, []byte{0}) == intentLen {
+			intentOff = at
+			zones = append(zones, inplaceZone{off: at, orig: cur})
+		}
+	}
 
 	journalNow := &inplaceJournal{origSize: size, zones: zones}
 	rollback := func(cause error) error {
@@ -147,17 +155,25 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 		beforeIssues = preValidate(ctx, path, fs)
 	}
 
+	// 0. The intent record in the head Void: a tail appended next and cut
+	// before its trailer still tells where the original file ended.
+	if intentOff >= 0 {
+		if err := writeIntent(f, intentOff, size); err != nil {
+			return rollback(fmt.Errorf("write intent record: %w", err))
+		}
+		if err := sync(); err != nil {
+			return rollback(fmt.Errorf("sync after intent record: %w", err))
+		}
+	}
+
 	// 1. Land the crash-safety journal past the current end of file
 	// The Segment size is not extended yet, so no reader can see cuesBytes or
 	// the journal that follows it.
 	if _, err := f.Seek(size, io.SeekStart); err != nil {
 		return rollback(fmt.Errorf("seek to end of file: %w", err))
 	}
-	if _, err := f.Write(cuesBytes); err != nil {
-		return rollback(fmt.Errorf("append cues: %w", err))
-	}
-	if err := writeInPlaceJournal(f, size, zones); err != nil {
-		return rollback(fmt.Errorf("write journal: %w", err))
+	if err := writeInPlaceJournal(f, cuesBytes, size, zones); err != nil {
+		return rollback(fmt.Errorf("append cues and journal: %w", err))
 	}
 	if err := sync(); err != nil {
 		return rollback(fmt.Errorf("sync after journal: %w", err))
@@ -195,6 +211,17 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 	if deep {
 		if err := deepVerifyValidate(ctx, path, fs, beforeIssues, mkv.StrictVerifyFrom(opts), mkv.OnPreexistingFrom(opts)); err != nil {
 			return rollback(err)
+		}
+	}
+
+	// The intent record goes before the journal: a crash between the two leaves
+	// a journal, which undoes everything, never a record facing a finished file.
+	if intentOff >= 0 {
+		if err := clearIntent(f, intentOff); err != nil {
+			return rollback(fmt.Errorf("clear intent record: %w", err))
+		}
+		if err := sync(); err != nil {
+			return rollback(fmt.Errorf("sync after clearing the intent record: %w", err))
 		}
 	}
 
@@ -245,7 +272,18 @@ func RecoverInPlace(ctx context.Context, path string, opts ...mkv.Options) (reco
 		return false, fmt.Errorf("recover inplace: %w", err)
 	}
 	if journal == nil {
-		return false, nil
+		cut, err := recoverIntent(f, f.(interface{ Truncate(size int64) error }), stat.Size())
+		if err != nil {
+			return false, fmt.Errorf("recover inplace: %w", err)
+		}
+		if cut {
+			if s, ok := f.(interface{ Sync() error }); ok {
+				if err := s.Sync(); err != nil {
+					return false, fmt.Errorf("recover inplace: sync: %w", err)
+				}
+			}
+		}
+		return cut, nil
 	}
 	if err := rollbackInPlaceJournal(f, journal); err != nil {
 		return false, fmt.Errorf("recover inplace: %w", err)
@@ -264,6 +302,7 @@ type inplacePatch struct {
 	segSizePatch []byte   // written at scan.segSizeOff (same VINT width)
 	slotOff      int64    // where slotPatch goes (head SeekHead or a head Void)
 	slotPatch    []byte   // rebuilt SeekHead + any trailing Void header
+	slotLen      int64    // the slot's length: past slotPatch, Void payload
 	oldCuesHdrs  [][]byte // parallel to scan.oldCues; a Void header per stale Cues
 }
 
@@ -367,6 +406,7 @@ func buildInPlacePatch(scan *inplaceScan, size, timecodeScale int64) (*inplacePa
 		segSizePatch: segSizePatch,
 		slotOff:      slotOff,
 		slotPatch:    slotPatch,
+		slotLen:      slotLen,
 		oldCuesHdrs:  oldCuesHdrs,
 	}, nil
 }
@@ -633,6 +673,21 @@ func beginInPlacePatch(path string, fs *mkv.FS, op string) (f mkv.ReadWriteSeekC
 	if err != nil {
 		return closeOnErr(fmt.Errorf("%s: %w", op, err))
 	}
+	if journal == nil {
+		cut, err := recoverIntent(f, trunc, size)
+		if err != nil {
+			return closeOnErr(fmt.Errorf("%s: auto-recovery: %w", op, err))
+		}
+		if cut {
+			if err := sync(); err != nil {
+				return closeOnErr(fmt.Errorf("%s: auto-recovery sync: %w", op, err))
+			}
+			if stat, err = fs.DoStat(path); err != nil {
+				return closeOnErr(fmt.Errorf("%s: re-stat after auto-recovery: %w", op, err))
+			}
+			size = stat.Size()
+		}
+	}
 	if journal != nil {
 		if err := rollbackInPlaceJournal(f, journal); err != nil {
 			return closeOnErr(fmt.Errorf("%s: auto-recovery: %w", op, err))
@@ -647,6 +702,121 @@ func beginInPlacePatch(path string, fs *mkv.FS, op string) (f mkv.ReadWriteSeekC
 }
 
 // Crash-safety journal
+// intentLen is the intent record's size: magic, the original file size, a CRC32C over both.
+const intentLen = 64
+
+// intentMagic opens an intent record.
+var intentMagic = [8]byte{0x8A, 'M', 'K', 'V', 'G', 'O', 'I', '1'}
+
+// intentHeadScan is how much of the file's head recovery looks through for an intent record.
+const intentHeadScan = 1 << 20
+
+var intentCRC = crc32.MakeTable(crc32.Castagnoli)
+
+// intentBytes is the intent record for an operation on a file of origSize bytes.
+func intentBytes(origSize int64) []byte {
+	b := make([]byte, intentLen)
+	copy(b, intentMagic[:])
+	binary.BigEndian.PutUint64(b[8:], uint64(origSize))
+	binary.BigEndian.PutUint32(b[intentLen-4:], crc32.Checksum(b[:intentLen-4], intentCRC))
+	return b
+}
+
+// writeIntent writes the intent record at off.
+func writeIntent(f mkv.ReadWriteSeekCloser, off, origSize int64) error {
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := f.Write(intentBytes(origSize))
+	return err
+}
+
+// clearIntent restores the zeros the intent record at off covered.
+func clearIntent(f mkv.ReadWriteSeekCloser, off int64) error {
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := f.Write(make([]byte, intentLen))
+	return err
+}
+
+// recoverIntent looks at the tail of every Void before the first Cluster,
+// where an operation puts its intent record. A whole record, left by an
+// operation that died before its journal's trailer landed, cuts the file back
+// to the size it names; a record the crash cut short (only appended bytes
+// follow it, never patches) is cleared back to the zeros it covered. It
+// reports whether there was either.
+func recoverIntent(f mkv.ReadWriteSeekCloser, trunc interface{ Truncate(size int64) error }, size int64) (bool, error) {
+	head := make([]byte, min(size, intentHeadScan))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false, err
+	}
+	for _, end := range headVoidEnds(head) {
+		at := end - intentLen
+		if at < 0 {
+			continue
+		}
+		rec := head[at:end]
+		switch {
+		case binary.BigEndian.Uint32(rec[intentLen-4:]) == crc32.Checksum(rec[:intentLen-4], intentCRC) && bytes.Equal(rec[:8], intentMagic[:]):
+			orig := int64(binary.BigEndian.Uint64(rec[8:]))
+			if orig < int64(end) || orig > size {
+				continue
+			}
+			if orig < size {
+				if err := trunc.Truncate(orig); err != nil {
+					return false, err
+				}
+			}
+			return true, clearIntent(f, int64(at))
+		case tornIntent(rec):
+			return true, clearIntent(f, int64(at))
+		}
+	}
+	return false, nil
+}
+
+// tornIntent reports whether rec is the start of an intent record a crash cut short: the magic, or its first bytes,
+// then whatever of the record landed, then the zeros it was writing over.
+func tornIntent(rec []byte) bool {
+	k := len(bytes.TrimRight(rec, "\x00"))
+	if k == 0 || k == len(rec) {
+		return false
+	}
+	return bytes.Equal(rec[:min(k, len(intentMagic))], intentMagic[:min(k, len(intentMagic))])
+}
+
+// headVoidEnds lists where the Voids before the first Cluster end, from the head of the file: the EBML header, the
+// Segment header, then its children.
+func headVoidEnds(head []byte) []int {
+	r := bytes.NewReader(head)
+	h, _, err := ebml.ReadElementHeader(r)
+	if err != nil || h.ID != ebml.IDEBMLHeader || h.Size < 0 || h.Size > int64(r.Len()) {
+		return nil
+	}
+	if _, err := r.Seek(h.Size, io.SeekCurrent); err != nil {
+		return nil
+	}
+	if seg, _, err := ebml.ReadElementHeader(r); err != nil || seg.ID != mkv.IDSegment {
+		return nil
+	}
+	var ends []int
+	for r.Len() > 0 {
+		e, _, err := ebml.ReadElementHeader(r)
+		if err != nil || e.ID == mkv.IDCluster || e.Size < 0 || e.Size > int64(r.Len()) {
+			return ends
+		}
+		pos, _ := r.Seek(e.Size, io.SeekCurrent)
+		if e.ID == mkv.IDVoid {
+			ends = append(ends, int(pos))
+		}
+	}
+	return ends
+}
+
 // inplaceZone is one region of the file whose original bytes were captured
 // before being overwritten, so a rollback can restore them verbatim.
 type inplaceZone struct {
@@ -660,11 +830,13 @@ type inplaceJournal struct {
 	zones    []inplaceZone
 }
 
-// writeInPlaceJournal appends the journal payload and trailer to w, which
-// must already be positioned right after the new Cues bytes (i.e. at the
-// current end of the file, before the Segment size has been extended to
-// cover any of this).
-func writeInPlaceJournal(w io.Writer, origSize int64, zones []inplaceZone) error {
+// writeInPlaceJournal appends lead (the bytes the operation appends for good,
+// if any), then the journal payload and its trailer, to w, which must already
+// be positioned at the current end of the file, before the Segment size has
+// been extended to cover any of this. Everything goes in one write call, so a
+// process dying around it leaves either nothing or a journal recovery finds:
+// a tail cut between two calls carried no trailer and stayed in the file.
+func writeInPlaceJournal(w io.Writer, lead []byte, origSize int64, zones []inplaceZone) error {
 	payload := make([]byte, 0, 12+len(zones)*12)
 	payload = appendUint64(payload, uint64(origSize))
 	payload = appendUint32(payload, uint32(len(zones)))
@@ -676,14 +848,12 @@ func writeInPlaceJournal(w io.Writer, origSize int64, zones []inplaceZone) error
 	if len(payload) > maxInplaceJournal {
 		return fmt.Errorf("journal payload %d bytes exceeds cap (%d)", len(payload), maxInplaceJournal)
 	}
-	if _, err := w.Write(payload); err != nil {
-		return err
-	}
-	trailer := make([]byte, 0, inplaceTrailerLen)
-	trailer = appendUint32(trailer, uint32(len(payload)))
-	trailer = appendUint32(trailer, crc32.ChecksumIEEE(payload))
-	trailer = append(trailer, inplaceJournalMagic[:]...)
-	_, err := w.Write(trailer)
+	tail := make([]byte, 0, len(lead)+len(payload)+inplaceTrailerLen)
+	tail = append(append(tail, lead...), payload...)
+	tail = appendUint32(tail, uint32(len(payload)))
+	tail = appendUint32(tail, crc32.ChecksumIEEE(payload))
+	tail = append(tail, inplaceJournalMagic[:]...)
+	_, err := w.Write(tail)
 	return err
 }
 

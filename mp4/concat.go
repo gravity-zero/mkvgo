@@ -76,7 +76,7 @@ type concatProbe struct {
 // eligibility) and reports its video codec and its audio layout, without
 // reading any sample.
 func probeConcatSource(ctx context.Context, src string, o *Options) (concatProbe, error) {
-	ps, err := openPackagingSource(ctx, src, o.FS)
+	ps, err := openPackagingSource(ctx, src, o.FS, o.moovLimit())
 	if err != nil {
 		return concatProbe{}, err
 	}

@@ -15,11 +15,7 @@ const rollbackUsage = "usage: mkvgo rollback <repaired.mkv> <delta.rbd> <restore
 // is refused when the repaired file changed since the repair, and never
 // delivered unless it hashes back to the original exactly.
 func CmdRollback(args []string) {
-	var rest []string
-	for _, a := range args {
-		rejectFlagArg(a)
-		rest = append(rest, a)
-	}
+	rest := newFlags("CmdRollback").Parse(args)
 	if len(rest) != 3 {
 		Fatal(rollbackUsage)
 	}

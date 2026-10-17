@@ -17,15 +17,9 @@ const trackEndsUsage = "usage: mkvgo track-ends <file.mkv> [-json]"
 func CmdTrackEnds(args []string) {
 	var jsonOut bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "-json", "--json":
-			jsonOut = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdTrackEnds")
+	fl.Bool(&jsonOut, "-json", "--json")
+	rest = fl.Parse(args)
 	if len(rest) != 1 {
 		Fatal(trackEndsUsage)
 	}

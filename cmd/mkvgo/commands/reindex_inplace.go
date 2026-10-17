@@ -18,25 +18,13 @@ func CmdReindexInPlace(args []string) {
 	var deepVerify, rollback, strict bool
 	var deltaPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--deep-verify":
-			deepVerify = true
-		case "--strict":
-			strict = true
-		case "--rollback":
-			rollback = true
-		case "--rollback-delta":
-			if i+1 >= len(args) {
-				Fatal("--rollback-delta needs a file path")
-			}
-			i++
-			deltaPath = args[i]
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	fl := newFlags("reindex-inplace")
+	fl.Bool(&deepVerify, "--deep-verify")
+	fl.Bool(&strict, "--strict")
+	fl.Bool(&rollback, "--rollback")
+	fl.String(&deltaPath, "--rollback-delta")
+	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
+	rest = fl.Parse(args)
 	if len(rest) != 1 {
 		Fatal(reindexInPlaceUsage)
 	}
