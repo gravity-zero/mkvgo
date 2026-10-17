@@ -73,7 +73,9 @@ type countingReader struct {
 	// sparse seeks over every skipped byte past the window and keeps reads at sparseChunk (SetSparse).
 	sparse bool
 	nread  int64 // bytes read from src so far
-	failed error // the first error src itself returned, other than its end: an I/O failure is never damage in the file
+	// seekable is false for a stream source (readOnlySeeker), whose skips are all read through.
+	seekable bool
+	failed   error // the first error src itself returned, other than its end: an I/O failure is never damage in the file
 }
 
 // fail remembers src's own failure (not its end).
@@ -84,12 +86,14 @@ func (c *countingReader) fail(err error) {
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
+	_, stream := src.(*readOnlySeeker)
 	return &countingReader{
-		src:   src,
-		buf:   make([]byte, bufSize),
-		pos:   startPos,
-		end:   -1,
-		chunk: minChunk,
+		src:      src,
+		buf:      make([]byte, bufSize),
+		pos:      startPos,
+		end:      -1,
+		chunk:    minChunk,
+		seekable: !stream,
 	}
 }
 
@@ -194,8 +198,11 @@ func (c *countingReader) discard(n int64) error {
 		c.pos += n
 		return nil
 	}
-	if n-avail <= seekSkipMin && !c.sparse {
+	if (n-avail <= seekSkipMin && !c.sparse) || !c.seekable {
 		_, err := io.CopyN(io.Discard, c, n)
+		if err == io.EOF {
+			return io.ErrUnexpectedEOF // the source ends inside the bytes skipped, as on the seeking path
+		}
 		return err
 	}
 	n -= avail
@@ -299,7 +306,7 @@ type IndexedBlock struct {
 // peeking ahead and checking if the next element is a segment-level element.
 type BlockReader struct {
 	r             *countingReader
-	raw           io.ReadSeeker // kept for interface compatibility; nil for stream readers
+	raw           io.ReadSeeker // the source: nil for ReadStream's reader, a readOnlySeeker for NewStreamBlockReader's
 	segEnd        int64
 	clusterEnd    int64
 	inCluster     bool // true when inside a cluster (including unknown-size)

@@ -29,10 +29,9 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// readOnlySeeker wraps an io.Reader to satisfy io.ReadSeeker.
-// The only Seek call the BlockReader makes after construction is
-// Seek(0, SeekCurrent) inside readOnlySeeker.Seek for position queries;
-// all skips go through countingReader.discard (io.CopyN).
+// readOnlySeeker wraps an io.Reader to satisfy io.ReadSeeker: Seek answers only a position query (0, SeekCurrent).
+// A countingReader over one is built non-seekable and reads every skip through; the BlockReader's resync and damage
+// probes seek its raw source, fail on it, and give up as on any source that cannot seek.
 type readOnlySeeker struct {
 	r   io.Reader
 	pos int64

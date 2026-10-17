@@ -84,6 +84,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`ReadStream` keeps its place past an edition's UID and flags.** It read
   them without advancing its position, so the edition's loop swallowed what
   followed: the next edition and the Tags after the Chapters were lost.
+- **A stream reader reads a large skip through instead of seeking.** Past
+  64 KiB, `NewStreamBlockReader` and `ReadStream` tried to seek over a block
+  of a filtered track or a header-only payload and failed with "stream is not
+  seekable"; a source that cannot seek now reads every skip through.
 
 ## [0.55.1] - 2026-10-17
 
