@@ -106,35 +106,23 @@ type serveFlags struct {
 // parseServeFlags reads serve's flags; the shared HLS flags are left in rest.
 func parseServeFlags(args []string) serveFlags {
 	cfg := serveFlags{addr: ":8478", target: "mse-generic", maxWalks: runtime.NumCPU()}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-addr", "--addr":
-			cfg.addr = needValue(args, &i)
-		case "-direct", "--direct":
-			cfg.direct = true
-		case "-auto", "--auto":
-			cfg.auto = true
-		case "-target", "--target":
-			cfg.target = needValue(args, &i)
-		case "-buffered", "--buffered":
-			cfg.buffered = true
-		case "-cors", "--cors":
-			cfg.cors = true
-		case "-max-walks", "--max-walks":
-			v := needValue(args, &i)
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 {
-				Fatal("-max-walks: expected a non-negative count, got " + v)
-			}
-			cfg.maxWalks = n
-		case "-window-cache", "--window-cache":
-			cfg.windowCache = mibOrOff(needValue(args, &i), "--window-cache")
-		case "-window-bytes", "--window-bytes":
-			cfg.windowBytes = mibOrOff(needValue(args, &i), "--window-bytes")
-		default:
-			cfg.rest = append(cfg.rest, args[i])
+	fl := newFlags("serve")
+	fl.String(&cfg.addr, "-addr", "--addr")
+	fl.Bool(&cfg.direct, "-direct", "--direct")
+	fl.Bool(&cfg.auto, "-auto", "--auto")
+	fl.String(&cfg.target, "-target", "--target")
+	fl.Bool(&cfg.buffered, "-buffered", "--buffered")
+	fl.Bool(&cfg.cors, "-cors", "--cors")
+	fl.Func(func(v string) {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			Fatal("-max-walks: expected a non-negative count, got " + v)
 		}
-	}
+		cfg.maxWalks = n
+	}, "-max-walks", "--max-walks")
+	fl.Func(func(v string) { cfg.windowCache = mibOrOff(v, "--window-cache") }, "-window-cache", "--window-cache")
+	fl.Func(func(v string) { cfg.windowBytes = mibOrOff(v, "--window-bytes") }, "-window-bytes", "--window-bytes")
+	cfg.rest = fl.ParseKnown(args) // the shared HLS flags and the source, for parseHLSFlags
 	return cfg
 }
 

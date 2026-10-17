@@ -17,42 +17,19 @@ func CmdSplit(args []string) {
 	var everyMs int64
 	var ranges []matroska.TimeRange
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outDir = args[i]
-		case "-chapters":
-			byChapters = true
-		case "-range":
-			i++
-			if i >= len(args) {
-				Fatal("-range needs a value")
-			}
-			ranges = ParseTimeRanges(args[i])
-		case "-every":
-			i++
-			if i >= len(args) {
-				Fatal("-every needs a value")
-			}
-			ms, err := ParseTimePoint(args[i])
-			if err != nil || ms <= 0 {
-				Fatal(fmt.Sprintf("invalid -every duration %q", args[i]))
-			}
-			everyMs = ms
-		case "-pattern":
-			i++
-			if i >= len(args) {
-				Fatal("-pattern needs a value")
-			}
-			pattern = args[i]
-		default:
-			rejectFlagArg(args[i])
+	fl := newFlags("split")
+	fl.String(&outDir, "-o")
+	fl.Bool(&byChapters, "-chapters")
+	fl.Func(func(v string) { ranges = ParseTimeRanges(v) }, "-range")
+	fl.Func(func(v string) {
+		ms, err := ParseTimePoint(v)
+		if err != nil || ms <= 0 {
+			Fatal(fmt.Sprintf("invalid -every duration %q", v))
 		}
-	}
+		everyMs = ms
+	}, "-every")
+	fl.String(&pattern, "-pattern")
+	fl.Parse(args[1:])
 	if outDir == "" {
 		Fatal("missing -o <dir>")
 	}
@@ -90,18 +67,9 @@ func CmdJoin(args []string) {
 	var outPath string
 	var sources []string
 
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		} else {
-			rejectFlagArg(args[i])
-			sources = append(sources, args[i])
-		}
-	}
+	fl := newFlags("join")
+	fl.String(&outPath, "-o")
+	sources = fl.Parse(args)
 	if outPath == "" || len(sources) == 0 {
 		Fatal("usage: mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...")
 	}

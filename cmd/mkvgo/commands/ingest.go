@@ -17,24 +17,12 @@ func CmdIngest(args []string) {
 	reindex := false
 	analyze := false
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch a {
-		case "-target", "--target":
-			i++
-			if i >= len(args) {
-				Fatal("usage: " + CmdUsage["ingest"])
-			}
-			targetName = args[i]
-		case "-reindex", "--reindex":
-			reindex = true
-		case "-analyze", "--analyze":
-			analyze = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("ingest")
+	fl.String(&targetName, "-target", "--target")
+	fl.Missing("-target", "usage: "+CmdUsage["ingest"])
+	fl.Bool(&reindex, "-reindex", "--reindex")
+	fl.Bool(&analyze, "-analyze", "--analyze")
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["ingest"])
 	}

@@ -52,6 +52,11 @@ func (c *cliFlags) Func(fn func(string), spellings ...string) {
 	c.define(funcValue(fn), spellings...)
 }
 
+// Do binds a flag taking no value to fn, called each time it is present.
+func (c *cliFlags) Do(fn func(), spellings ...string) {
+	c.define(doValue(fn), spellings...)
+}
+
 // Parse reads args and returns the operands; an unknown argument starting
 // with '-' exits as an unknown flag.
 func (c *cliFlags) Parse(args []string) []string {
@@ -109,3 +114,9 @@ type funcValue func(string)
 
 func (f funcValue) Set(v string) error { f(v); return nil }
 func (f funcValue) String() string     { return "" }
+
+type doValue func()
+
+func (d doValue) Set(string) error { d(); return nil }
+func (d doValue) String() string   { return "" }
+func (d doValue) IsBoolFlag() bool { return true }

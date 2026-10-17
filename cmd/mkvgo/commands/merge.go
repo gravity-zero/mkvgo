@@ -15,17 +15,10 @@ func CmdMerge(args []string) {
 	var outPath string
 	var inputs []matroska.MergeInput
 
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-			continue
-		}
-		rejectFlagArg(args[i])
-		inputs = append(inputs, matroska.MergeInput{SourcePath: args[i]})
+	fl := newFlags("merge")
+	fl.String(&outPath, "-o")
+	for _, src := range fl.Parse(args) {
+		inputs = append(inputs, matroska.MergeInput{SourcePath: src})
 	}
 	if outPath == "" || len(inputs) == 0 {
 		Fatal("usage: mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]")
@@ -50,36 +43,13 @@ func CmdMergeSubtitle(args []string) {
 	var outPath, subPath, format, lang, name string
 	lang = "und"
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			i++
-			if i >= len(args) {
-				Fatal("-o needs a value")
-			}
-			outPath = args[i]
-		case "-format":
-			i++
-			if i >= len(args) {
-				Fatal("-format needs a value")
-			}
-			format = args[i]
-		case "-lang":
-			i++
-			if i >= len(args) {
-				Fatal("-lang needs a value")
-			}
-			lang = args[i]
-		case "-name":
-			i++
-			if i >= len(args) {
-				Fatal("-name needs a value")
-			}
-			name = args[i]
-		default:
-			rejectFlagArg(args[i])
-			subPath = args[i]
-		}
+	fl := newFlags("merge-subtitle")
+	fl.String(&outPath, "-o")
+	fl.String(&format, "-format")
+	fl.String(&lang, "-lang")
+	fl.String(&name, "-name")
+	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+		subPath = ops[len(ops)-1]
 	}
 	if outPath == "" || subPath == "" {
 		Fatal("usage: mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass]")

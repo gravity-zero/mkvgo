@@ -30,17 +30,10 @@ func mp4Diagnose(ctx context.Context, path string, _ ...matroska.Options) (*matr
 func CmdDiagnose(args []string) {
 	var jsonOut, deep bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "-json", "--json":
-			jsonOut = true
-		case "--deep-verify":
-			deep = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdDiagnose")
+	fl.Bool(&jsonOut, "-json", "--json")
+	fl.Bool(&deep, "--deep-verify")
+	rest = fl.Parse(args)
 	if len(rest) != 1 {
 		Fatal(diagnoseUsage)
 	}

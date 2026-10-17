@@ -16,9 +16,7 @@ import (
 // (VP8/VP9/AV1, Vorbis/Opus, WebVTT), and drops non-WebM elements
 // (chapters/attachments/tags) - warning about the ones actually present.
 func CmdToWebM(args []string) {
-	for _, a := range args {
-		rejectFlagArg(a)
-	}
+	newFlags("CmdToWebM").Parse(args)
 	if len(args) < 2 {
 		Fatal("usage: mkvgo to-webm <input.mkv> <output.webm>")
 	}

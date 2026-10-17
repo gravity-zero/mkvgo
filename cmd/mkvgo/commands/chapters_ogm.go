@@ -14,14 +14,9 @@ func CmdSetChapters(args []string) {
 	usage := CmdUsage["set-chapters"]
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			outPath = needValue(args, &i)
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("set-chapters")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
 		Fatal("usage: " + usage)
 	}
@@ -53,14 +48,9 @@ func CmdExtractChapters(args []string) {
 	usage := CmdUsage["extract-chapters"]
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			outPath = needValue(args, &i)
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("extract-chapters")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + usage)
 	}

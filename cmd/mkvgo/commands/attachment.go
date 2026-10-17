@@ -18,19 +18,11 @@ func CmdAddAttachment(args []string) {
 	source := ""
 	var outPath, attPath, name, mime string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			outPath = needValue(args, &i)
-		case "-name":
-			name = needValue(args, &i)
-		case "-mime":
-			mime = needValue(args, &i)
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	fl := newFlags("add-attachment")
+	fl.String(&outPath, "-o")
+	fl.String(&name, "-name")
+	fl.String(&mime, "-mime")
+	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
 		Fatal("usage: " + usage)
 	}
@@ -66,14 +58,9 @@ func CmdRemoveAttachment(args []string) {
 	usage := CmdUsage["remove-attachment"]
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			outPath = needValue(args, &i)
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("remove-attachment")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
 		Fatal("usage: " + usage)
 	}

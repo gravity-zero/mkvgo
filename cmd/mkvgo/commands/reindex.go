@@ -13,31 +13,16 @@ func CmdReindex(args []string) {
 	var deepVerify, replace, keepBackup, resync, cleanCut, strict bool
 	var deltaPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--deep-verify":
-			deepVerify = true
-		case "--strict":
-			strict = true
-		case "--replace":
-			replace = true
-		case "--keep-backup":
-			keepBackup = true
-		case "--resync":
-			resync = true
-		case "--clean-cut":
-			cleanCut = true
-		case "--rollback-delta":
-			if i+1 >= len(args) {
-				Fatal("--rollback-delta needs a file path")
-			}
-			i++
-			deltaPath = args[i]
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
-		}
-	}
+	fl := newFlags("reindex")
+	fl.Bool(&deepVerify, "--deep-verify")
+	fl.Bool(&strict, "--strict")
+	fl.Bool(&replace, "--replace")
+	fl.Bool(&keepBackup, "--keep-backup")
+	fl.Bool(&resync, "--resync")
+	fl.Bool(&cleanCut, "--clean-cut")
+	fl.String(&deltaPath, "--rollback-delta")
+	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal(reindexUsage)
 	}

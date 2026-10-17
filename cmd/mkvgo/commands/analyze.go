@@ -15,11 +15,7 @@ import (
 // whole file (the payloads between the headers are read through). MP4 is not
 // supported yet (Matroska/WebM only) - see docs/library.md.
 func CmdAnalyze(args []string) {
-	var rest []string
-	for _, a := range args {
-		rejectFlagArg(a)
-		rest = append(rest, a)
-	}
+	rest := newFlags("CmdAnalyze").Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["analyze"])
 	}

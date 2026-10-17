@@ -22,17 +22,10 @@ const cueHealthUsage = "usage: mkvgo cue-health <file.mkv> [-json] [-probe]"
 func CmdCueHealth(args []string) {
 	var jsonOut, probe bool
 	var rest []string
-	for _, a := range args {
-		switch a {
-		case "-json", "--json":
-			jsonOut = true
-		case "-probe", "--probe":
-			probe = true
-		default:
-			rejectFlagArg(a)
-			rest = append(rest, a)
-		}
-	}
+	fl := newFlags("CmdCueHealth")
+	fl.Bool(&jsonOut, "-json", "--json")
+	fl.Bool(&probe, "-probe", "--probe")
+	rest = fl.Parse(args)
 	if len(rest) != 1 {
 		Fatal(cueHealthUsage)
 	}

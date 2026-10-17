@@ -14,14 +14,9 @@ import (
 func CmdHash(args []string) {
 	var outPath string
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-o" {
-			outPath = needValue(args, &i)
-			continue
-		}
-		rejectFlagArg(args[i])
-		rest = append(rest, args[i])
-	}
+	fl := newFlags("hash")
+	fl.String(&outPath, "-o")
+	rest = fl.Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["hash"])
 	}
@@ -48,9 +43,7 @@ func CmdHash(args []string) {
 // `to-mp4 --hash`). Exits 1 on any mismatch (bit rot, truncation, transfer
 // corruption) - scriptable like validate.
 func CmdVerify(args []string) {
-	for _, a := range args {
-		rejectFlagArg(a)
-	}
+	newFlags("CmdVerify").Parse(args)
 	if len(args) < 1 {
 		Fatal("usage: " + CmdUsage["verify"])
 	}

@@ -103,23 +103,16 @@ type serveGrowingFlags struct {
 // parseServeGrowingFlags reads serve-growing's flags.
 func parseServeGrowingFlags(args []string) serveGrowingFlags {
 	cfg := serveGrowingFlags{addr: ":8478"}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-addr", "--addr":
-			cfg.addr = needValue(args, &i)
-		case "-cors", "--cors":
-			cfg.cors = true
-		case "-segment", "--segment":
-			v := needValue(args, &i)
-			secs, err := strconv.ParseFloat(v, 64)
-			if err != nil || secs <= 0 {
-				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
-			}
-			cfg.segMs = int64(secs * 1000)
-		default:
-			rejectFlagArg(args[i])
-			cfg.rest = append(cfg.rest, args[i])
+	fl := newFlags("serve-growing")
+	fl.String(&cfg.addr, "-addr", "--addr")
+	fl.Bool(&cfg.cors, "-cors", "--cors")
+	fl.Func(func(v string) {
+		secs, err := strconv.ParseFloat(v, 64)
+		if err != nil || secs <= 0 {
+			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
 		}
-	}
+		cfg.segMs = int64(secs * 1000)
+	}, "-segment", "--segment")
+	cfg.rest = fl.Parse(args)
 	return cfg
 }

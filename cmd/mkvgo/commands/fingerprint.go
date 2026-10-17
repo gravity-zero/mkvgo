@@ -15,11 +15,7 @@ import (
 // read: every track's frame payload is hashed. MP4/MOV sources are hashed by
 // remuxing to a temporary Matroska file first - see matroska.Fingerprint.
 func CmdFingerprint(args []string) {
-	var rest []string
-	for _, a := range args {
-		rejectFlagArg(a)
-		rest = append(rest, a)
-	}
+	rest := newFlags("CmdFingerprint").Parse(args)
 	if len(rest) < 1 {
 		Fatal("usage: " + CmdUsage["fingerprint"])
 	}

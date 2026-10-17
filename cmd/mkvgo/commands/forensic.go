@@ -24,28 +24,19 @@ func CmdForensicSegment(args []string) {
 	var segMs int64
 	var distinct bool
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			outPath = needValue(args, &i)
-		case "-segment", "--segment":
-			needValue(args, &i)
-			secs, err := strconv.ParseFloat(args[i], 64)
-			if err != nil || secs <= 0 {
-				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-			}
-			segMs = int64(secs * 1000)
-		case "--variant":
-			variant = needValue(args, &i)
-		case "--pattern":
-			patternHex = needValue(args, &i)
-		case "--distinct":
-			distinct = true
-		default:
-			rejectFlagArg(args[i])
-			rest = append(rest, args[i])
+	fl := newFlags("forensic-segment")
+	fl.String(&outPath, "-o")
+	fl.Func(func(v string) {
+		secs, err := strconv.ParseFloat(v, 64)
+		if err != nil || secs <= 0 {
+			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
 		}
-	}
+		segMs = int64(secs * 1000)
+	}, "-segment", "--segment")
+	fl.String(&variant, "--variant")
+	fl.String(&patternHex, "--pattern")
+	fl.Bool(&distinct, "--distinct")
+	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["forensic-segment"])
 	}
