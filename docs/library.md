@@ -2559,7 +2559,7 @@ library on S3/HTTP transfers a few ranged kilobytes per file:
 ```go
 import "github.com/gravity-zero/mkvgo/httpfs"
 
-f := httpfs.New()                       // Options: Client, WindowSize, Header (auth)
+f := httpfs.New()                       // Options: Client, WindowSize, Header (auth), AllowHost
 c, err := matroska.OpenMetaWithFS(ctx, "https://nas/movie.mkv", f.Port())
 fmt.Println(c.Tracks, f.BytesFetched()) // ~a window or two, whatever the file size
 ```
@@ -2599,6 +2599,15 @@ the plan, and rebuilding it reports the not-found plainly. A fresh reader's
 `404` stays a plain not-found error. Only a strong ETag derived from the bytes rules out a mix of
 versions (see `mp4.ErrSourceChanged` above for what nginx and Caddy send).
 
+A service that opens URLs its users supply should set `Options.AllowHost`
+to the hosts it means to read from: httpfs requests whatever URL it is handed
+and follows redirects, so without it a user can point the service at an
+internal host (server-side request forgery). A host `AllowHost` refuses is not
+contacted, first request and redirect alike. Without `AllowHost`, the default
+client still refuses a redirect to another host while `Options.Header` is
+set, so credentials put there stay with their host. A `Client` you pass keeps
+its own `CheckRedirect`.
+
 Each request is bounded by `Options.RequestTimeout` (60 s by default,
 negative for none), and a reader opened through `DoOpenContext` - which an
 on-demand plan does for every read of its source - abandons its request in
@@ -2636,7 +2645,7 @@ fmt.Println(c.Tracks, fs.BytesFetched()) // a window or two, whatever the file s
 | `PathStyle` | `https://<host>/<bucket>/<key>` instead of the default virtual-hosted `https://<bucket>.<host>/<key>`. Needed by some S3-compatible services and by bucket names containing dots. |
 | `WindowSize` | Ranged-fetch granularity in bytes, passed through to `httpfs.Options.WindowSize`. |
 
-Signing covers GET/HEAD with an unsigned payload (`x-amz-content-sha256: UNSIGNED-PAYLOAD` -- this package never needs to sign a request body, only Range reads), the host, date, session token (when present) and `Range` header, with the S3 URI-encoding rule for the key (each `/`-separated segment percent-encoded, slashes kept literal). The FS is read-only, like `httpfs`.
+Signing covers GET/HEAD with an unsigned payload (`x-amz-content-sha256: UNSIGNED-PAYLOAD` -- this package never needs to sign a request body, only Range reads), the host, date, session token (when present) and `Range` header, with the S3 URI-encoding rule for the key (each `/`-separated segment percent-encoded, slashes kept literal). The FS is read-only, like `httpfs`. A bucket name must follow the S3 naming rules (3 to 63 characters of lowercase letters, digits, dots and hyphens, a letter or digit at each end, no `..`, not an IPv4 address), and the URL built from it must name the endpoint's host: a name like `evil.example?` cannot move the signed request to another host. A redirect is returned as an error, never followed, since following it would sign the next hop.
 
 ---
 

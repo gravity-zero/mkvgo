@@ -23,6 +23,19 @@ All notable changes to mkvgo are documented here. The format is based on
   window, the suffix ends at the object's last byte and spans at most a
   window) and its Content-Length matches, so nothing past a window is
   allocated.
+- **SEC-03: an `s3://` bucket can no longer move the signed request to
+  another host.** In the default virtual-hosted style the bucket was written
+  raw in front of the endpoint: `s3://evil.example?/k` sent the signed
+  request, access key id and session token included, to `evil.example`. A
+  bucket must now follow the S3 naming rules (3 to 63 characters of
+  `[a-z0-9.-]`, a letter or digit at each end, no `..`, not an IPv4 address),
+  and the URL built must name the endpoint's host.
+- **SEC-04: credentials do not follow a redirect.** `s3fs` followed a
+  redirect to any host and signed every hop; it now returns a 3xx as an error.
+  `httpfs`'s default client (it used `http.DefaultClient`) refuses a redirect
+  to another host while `Options.Header` is set. New `httpfs.Options.AllowHost`
+  vets the host of every request and redirect, for a service that opens URLs
+  its users supply (server-side request forgery, see the package doc).
 
 ### Fixed
 
