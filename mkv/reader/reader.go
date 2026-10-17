@@ -1032,7 +1032,7 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 		}
 		switch eh.ID {
 		case mkv.IDTimecodeScale:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1043,7 +1043,7 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 				c.Info.TimecodeScale = int64(v)
 			}
 		case mkv.IDDuration:
-			v, err := ebml.ReadFloat(p.r, eh.Size)
+			v, err := readFloatOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1052,7 +1052,7 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1061,7 +1061,7 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1070,13 +1070,13 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			c.Info.Title = v
 		case mkv.IDDateUTC:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1169,19 +1169,19 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 		}
 		switch eh.ID {
 		case mkv.IDTrackNumber:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
 			t.ID = v
 		case mkv.IDTrackUID:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
 			t.UID = v
 		case mkv.IDTrackType:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1197,7 +1197,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return t, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1219,7 +1219,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return t, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1229,7 +1229,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return t, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1239,20 +1239,20 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return t, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
 			t.Name = v
 		case mkv.IDFlagDefault:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
 			t.IsDefault = v == 1
 			t.DefaultPresent = true
 		case mkv.IDFlagForced:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1277,7 +1277,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				t.Commentary = b
 			}
 		case mkv.IDDefaultDuration:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1287,13 +1287,13 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 				t.DefaultDurationNs = int64(v)
 			}
 		case mkv.IDCodecDelay:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
 			t.CodecDelay = int64(v)
 		case mkv.IDSeekPreRoll:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
@@ -1381,14 +1381,14 @@ func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDProjectionType:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			typ = &v
 			t.Projection = mkv.ProjectionTypeName(v)
 		case mkv.IDProjectionPoseYaw, mkv.IDProjectionPosePitch, mkv.IDProjectionPoseRoll:
-			v, err := ebml.ReadFloat(p.r, eh.Size)
+			v, err := readFloatOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1422,40 +1422,40 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDPixelWidth:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			w := uint32(v)
 			t.Width = &w
 		case mkv.IDPixelHeight:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			h := uint32(v)
 			t.Height = &h
 		case mkv.IDFlagInterlaced:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			flagInterlaced = v
 		case mkv.IDFieldOrder:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			fieldOrder = &v
 		case mkv.IDDisplayWidth:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			dw := uint32(v)
 			t.DisplayWidth = &dw
 		case mkv.IDDisplayHeight:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1466,7 +1466,7 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 				return err
 			}
 		case mkv.IDStereoMode:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1505,48 +1505,48 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDColourMatrix:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			cs := uint16(v)
 			t.ColorSpace = &cs
 		case mkv.IDColourTransfer:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			tr := uint16(v)
 			t.ColorTransfer = &tr
 		case mkv.IDColourPrimaries:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			pr := uint16(v)
 			t.ColorPrimaries = &pr
 		case mkv.IDColourRange:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			rg := uint16(v)
 			t.ColorRange = &rg
 		case mkv.IDColourBitsPerChannel:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			bd := uint16(v)
 			t.VideoBitDepth = &bd
 		case mkv.IDColourMaxCLL:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			ensureHDR(t).MaxCLL = uint32(v)
 		case mkv.IDColourMaxFALL:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1589,7 +1589,7 @@ func (p *parser) parseMasteringMetadata(size int64, t *mkv.Track) error {
 			return err
 		}
 		set := func(dst *float64) error {
-			v, e := ebml.ReadFloat(p.r, eh.Size)
+			v, e := readFloatOf(p.r, eh)
 			if e == nil {
 				*dst = v
 			}
@@ -1646,7 +1646,7 @@ func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDBlockAddIDType:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1688,7 +1688,7 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDSamplingFreq:
-			v, err := ebml.ReadFloat(p.r, eh.Size)
+			v, err := readFloatOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1698,7 +1698,7 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 				p.rateRejected = true
 			}
 		case mkv.IDOutputSamplingFreq:
-			v, err := ebml.ReadFloat(p.r, eh.Size)
+			v, err := readFloatOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1706,14 +1706,14 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 				t.OutputSampleRate = &v
 			}
 		case mkv.IDChannels:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			ch := uint8(v)
 			t.Channels = &ch
 		case mkv.IDBitDepth:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1772,11 +1772,11 @@ func (p *parser) parseEditionEntry(size int64) (mkv.Edition, error) {
 		}
 		switch eh.ID {
 		case mkv.IDEditionUID:
-			if ed.UID, err = ebml.ReadUint(p.r, eh.Size); err != nil {
+			if ed.UID, err = readUintOf(p.r, eh); err != nil {
 				return ed, err
 			}
 		case mkv.IDEditionFlagDefault, mkv.IDEditionFlagHidden, mkv.IDEditionFlagOrdered:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return ed, err
 			}
@@ -1841,19 +1841,19 @@ func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
 		}
 		switch eh.ID {
 		case mkv.IDChapterUID:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return ch, err
 			}
 			ch.ID = v
 		case mkv.IDChapterTimeStart:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return ch, err
 			}
 			ch.StartMs = int64(v / 1000000)
 		case mkv.IDChapterTimeEnd:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return ch, err
 			}
@@ -1902,7 +1902,7 @@ func (p *parser) parseChapterDisplay(size int64, ch *mkv.Chapter) error {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -1963,7 +1963,7 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 		}
 		switch eh.ID {
 		case mkv.IDFileUID:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return att, err
 			}
@@ -1972,7 +1972,7 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return att, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return att, err
 			}
@@ -1981,7 +1981,7 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return att, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return att, err
 			}
@@ -2100,13 +2100,13 @@ func (p *parser) parseTargets(size int64, tag *mkv.Tag) error {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			tag.TargetType = v
 		case mkv.IDTagTrackUID:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -2145,7 +2145,7 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return st, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return st, err
 			}
@@ -2154,7 +2154,7 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return st, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return st, err
 			}
@@ -2163,7 +2163,7 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return st, err
 			}
-			v, err := ebml.ReadString(p.r, eh.Size)
+			v, err := readStringOf(p.r, eh)
 			if err != nil {
 				return st, err
 			}
@@ -2236,7 +2236,7 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 		case mkv.IDContentEncryption:
 			err = p.parseContentEncryption(eh.Size, t)
 		case mkv.IDContentEncodingType:
-			encType, err = ebml.ReadUint(p.r, eh.Size)
+			encType, err = readUintOf(p.r, eh)
 		default:
 			err = p.skip(eh.Size)
 		}
@@ -2266,7 +2266,7 @@ func (p *parser) parseContentEncryption(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDContentEncAlgo:
-			algo, err = ebml.ReadUint(p.r, eh.Size)
+			algo, err = readUintOf(p.r, eh)
 		case mkv.IDContentEncAESSettings:
 			mode, err = p.parseAESCipherMode(eh.Size)
 		default:
@@ -2295,7 +2295,7 @@ func (p *parser) parseAESCipherMode(size int64) (uint64, error) {
 			return 0, err
 		}
 		if eh.ID == mkv.IDAESSettingsCipherMode {
-			mode, err = ebml.ReadUint(p.r, eh.Size)
+			mode, err = readUintOf(p.r, eh)
 		} else {
 			err = p.skip(eh.Size)
 		}
@@ -2325,7 +2325,7 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 		}
 		switch eh.ID {
 		case mkv.IDContentCompAlgo:
-			algo, err := ebml.ReadUint(p.r, eh.Size)
+			algo, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
@@ -2432,7 +2432,7 @@ func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, error) {
 		}
 		switch eh.ID {
 		case mkv.IDCueTime:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return cp, err
 			}
@@ -2464,19 +2464,19 @@ func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
 		}
 		switch eh.ID {
 		case mkv.IDCueTrack:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			cp.Track = v
 		case mkv.IDCueClusterPos:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
 			cp.ClusterPos = int64(v)
 		case mkv.IDCueRelativePos:
-			v, err := ebml.ReadUint(p.r, eh.Size)
+			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}

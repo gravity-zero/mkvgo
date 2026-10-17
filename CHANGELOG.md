@@ -88,6 +88,12 @@ All notable changes to mkvgo are documented here. The format is based on
   64 KiB, `NewStreamBlockReader` and `ReadStream` tried to seek over a block
   of a filtered track or a header-only payload and failed with "stream is not
   seekable"; a source that cannot seek now reads every skip through.
+- **An empty element reads as its schema default.** RFC 8794 section 6.1 has
+  an element of size 0 take the default RFC 9559 gives it; both readers read
+  it as 0 or "" instead, so an empty FlagDefault made a track non-default.
+  FlagDefault, Channels, SamplingFrequency, TimestampScale, FieldOrder, the
+  colour code points, TargetTypeValue and the three Language elements now
+  take their defaults.
 
 ## [0.55.1] - 2026-10-17
 

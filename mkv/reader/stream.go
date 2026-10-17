@@ -93,29 +93,29 @@ func (p *streamParser) skip(size int64) error {
 	return err
 }
 
-func (p *streamParser) readUint(size int64) (uint64, error) {
-	v, err := ebml.ReadUint(p.r, size)
+func (p *streamParser) readUint(h ebml.ElementHeader) (uint64, error) {
+	v, err := readUintOf(p.r, h)
 	if err == nil {
-		p.pos += size
+		p.pos += h.Size
 	}
 	return v, err
 }
 
-func (p *streamParser) readFloat(size int64) (float64, error) {
-	v, err := ebml.ReadFloat(p.r, size)
+func (p *streamParser) readFloat(h ebml.ElementHeader) (float64, error) {
+	v, err := readFloatOf(p.r, h)
 	if err == nil {
-		p.pos += size
+		p.pos += h.Size
 	}
 	return v, err
 }
 
-func (p *streamParser) readString(size int64) (string, error) {
-	if err := p.chargeMeta(size); err != nil {
+func (p *streamParser) readString(h ebml.ElementHeader) (string, error) {
+	if err := p.chargeMeta(h.Size); err != nil {
 		return "", err
 	}
-	v, err := ebml.ReadString(p.r, size)
+	v, err := readStringOf(p.r, h)
 	if err == nil {
-		p.pos += size
+		p.pos += h.Size
 	}
 	return v, err
 }
@@ -348,7 +348,7 @@ func (p *streamParser) parseStreamInfo(size int64, c *mkv.Container) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTimecodeScale:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -356,25 +356,25 @@ func (p *streamParser) parseStreamInfo(size int64, c *mkv.Container) error {
 				c.Info.TimecodeScale = int64(v)
 			}
 		case mkv.IDDuration:
-			v, err := p.readFloat(h.Size)
+			v, err := p.readFloat(h)
 			if err != nil {
 				return err
 			}
 			c.Info.Duration = v
 		case mkv.IDMuxingApp:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			c.Info.MuxingApp = v
 		case mkv.IDWritingApp:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			c.Info.WritingApp = v
 		case mkv.IDTitle:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
@@ -406,19 +406,19 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTrackNumber:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			t.ID = v
 		case mkv.IDTrackUID:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			t.UID = v
 		case mkv.IDTrackType:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -431,7 +431,7 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 				t.Type = mkv.SubtitleTrack
 			}
 		case mkv.IDCodecID:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
@@ -447,41 +447,41 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 			}
 			t.CodecPrivate = v
 		case mkv.IDLanguage:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			t.Language = v
 			t.LanguagePresent = true
 		case mkv.IDLanguageBCP47:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			t.LanguageBCP47 = v
 			t.LanguagePresent = true
 		case mkv.IDName:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			t.Name = v
 		case mkv.IDFlagDefault:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			t.IsDefault = v == 1
 			t.DefaultPresent = true
 		case mkv.IDFlagForced:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			t.IsForced = v == 1
 			t.ForcedPresent = true
 		case mkv.IDDefaultDuration:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -539,7 +539,7 @@ func (p *streamParser) parseStreamContentEncoding(size int64, t *mkv.Track) erro
 		case mkv.IDContentEncryption:
 			return p.parseStreamContentEncryption(h.Size, t)
 		case mkv.IDContentEncodingType:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			encType = v
 			return err
 		}
@@ -557,13 +557,13 @@ func (p *streamParser) parseStreamContentEncryption(size int64, t *mkv.Track) er
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDContentEncAlgo:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			algo = v
 			return err
 		case mkv.IDContentEncAESSettings:
 			return p.boundedLoop(h.Size, func(h ebml.ElementHeader) error {
 				if h.ID == mkv.IDAESSettingsCipherMode {
-					v, err := p.readUint(h.Size)
+					v, err := p.readUint(h)
 					mode = v
 					return err
 				}
@@ -585,7 +585,7 @@ func (p *streamParser) parseStreamContentCompression(size int64, t *mkv.Track) e
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDContentCompAlgo:
-			algo, err := p.readUint(h.Size)
+			algo, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -610,40 +610,40 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDPixelWidth:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			w := uint32(v)
 			t.Width = &w
 		case mkv.IDPixelHeight:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			hv := uint32(v)
 			t.Height = &hv
 		case mkv.IDFlagInterlaced:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			flagInterlaced = v
 		case mkv.IDFieldOrder:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			fieldOrder = &v
 		case mkv.IDDisplayWidth:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			dw := uint32(v)
 			t.DisplayWidth = &dw
 		case mkv.IDDisplayHeight:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -667,14 +667,14 @@ func (p *streamParser) parseStreamProjection(size int64, t *mkv.Track) error {
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDProjectionType:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			typ = &v
 			t.Projection = mkv.ProjectionTypeName(v)
 		case mkv.IDProjectionPoseYaw, mkv.IDProjectionPosePitch, mkv.IDProjectionPoseRoll:
-			v, err := p.readFloat(h.Size)
+			v, err := p.readFloat(h)
 			if err != nil {
 				return err
 			}
@@ -694,35 +694,35 @@ func (p *streamParser) parseStreamColour(size int64, t *mkv.Track) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDColourMatrix:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			cs := uint16(v)
 			t.ColorSpace = &cs
 		case mkv.IDColourTransfer:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			tr := uint16(v)
 			t.ColorTransfer = &tr
 		case mkv.IDColourPrimaries:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			pr := uint16(v)
 			t.ColorPrimaries = &pr
 		case mkv.IDColourRange:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			rg := uint16(v)
 			t.ColorRange = &rg
 		case mkv.IDColourBitsPerChannel:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -739,7 +739,7 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDSamplingFreq:
-			v, err := p.readFloat(h.Size)
+			v, err := p.readFloat(h)
 			if err != nil {
 				return err
 			}
@@ -749,7 +749,7 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 				p.rateRejected = true
 			}
 		case mkv.IDOutputSamplingFreq:
-			v, err := p.readFloat(h.Size)
+			v, err := p.readFloat(h)
 			if err != nil {
 				return err
 			}
@@ -757,14 +757,14 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 				t.OutputSampleRate = &v
 			}
 		case mkv.IDChannels:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			ch := uint8(v)
 			t.Channels = &ch
 		case mkv.IDBitDepth:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -802,7 +802,7 @@ func (p *streamParser) parseStreamEdition(size int64) (mkv.Edition, error) {
 			ed.Chapters = append(ed.Chapters, ch)
 			return nil
 		case mkv.IDEditionUID, mkv.IDEditionFlagDefault, mkv.IDEditionFlagHidden, mkv.IDEditionFlagOrdered:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			switch h.ID {
 			case mkv.IDEditionUID:
 				ed.UID = v
@@ -828,19 +828,19 @@ func (p *streamParser) parseStreamChapterAtom(size int64, depth int) (mkv.Chapte
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDChapterUID:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			ch.ID = v
 		case mkv.IDChapterTimeStart:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			ch.StartMs = int64(v / 1_000_000)
 		case mkv.IDChapterTimeEnd:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -864,7 +864,7 @@ func (p *streamParser) parseStreamChapterAtom(size int64, depth int) (mkv.Chapte
 func (p *streamParser) parseStreamChapterDisplay(size int64, ch *mkv.Chapter) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		if h.ID == mkv.IDChapString {
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
@@ -894,19 +894,19 @@ func (p *streamParser) parseStreamAttachedFile(size int64) (mkv.Attachment, erro
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDFileUID:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
 			att.ID = v
 		case mkv.IDFileName:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			att.Name = v
 		case mkv.IDFileMimeType:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
@@ -964,13 +964,13 @@ func (p *streamParser) parseStreamTargets(size int64, tag *mkv.Tag) error {
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTargetType:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			tag.TargetType = v
 		case mkv.IDTagTrackUID:
-			v, err := p.readUint(h.Size)
+			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
@@ -990,19 +990,19 @@ func (p *streamParser) parseStreamSimpleTag(size int64, depth int) (mkv.SimpleTa
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTagName:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			st.Name = v
 		case mkv.IDTagString:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}
 			st.Value = v
 		case mkv.IDTagLanguage:
-			v, err := p.readString(h.Size)
+			v, err := p.readString(h)
 			if err != nil {
 				return err
 			}

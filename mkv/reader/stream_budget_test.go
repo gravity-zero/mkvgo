@@ -3,6 +3,9 @@ package reader
 import (
 	"bytes"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // TestStreamParserChargesBudget covers the streaming reader's cumulative metadata
@@ -13,7 +16,7 @@ func TestStreamParserChargesBudget(t *testing.T) {
 	if _, err := over.readBytes(50); err == nil {
 		t.Error("readBytes past the budget must error")
 	}
-	if _, err := over.readString(50); err == nil {
+	if _, err := over.readString(ebml.ElementHeader{ID: mkv.IDName, Size: 50}); err == nil {
 		t.Error("readString past the budget must error")
 	}
 
