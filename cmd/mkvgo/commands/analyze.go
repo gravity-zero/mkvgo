@@ -31,7 +31,7 @@ func CmdAnalyze(args []string) {
 
 	report, err := matroska.Analyze(context.Background(), path, opts...)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if JsonOutput {

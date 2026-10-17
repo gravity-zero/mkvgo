@@ -23,7 +23,7 @@ func CmdValidate(args []string) {
 
 	issues, err := matroska.Validate(context.Background(), path)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	switch {
 	case JsonOutput:
@@ -82,7 +82,7 @@ func CmdCompare(args []string) {
 		}
 		bd, err := matroska.CompareBlocksConcat(context.Background(), pathA, parts)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		diffs = append(diffs, bd...)
 	}

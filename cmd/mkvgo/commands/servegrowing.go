@@ -40,7 +40,7 @@ func CmdServeGrowing(args []string) {
 
 	plan, err := mp4.PlanGrowingHLS(ctx, src, mp4.Options{SegmentMs: segMs})
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: cfg.cors})}
@@ -60,7 +60,7 @@ func CmdServeGrowing(args []string) {
 	select {
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	case <-sigCh:
 		fmt.Println("\nshutting down...")
@@ -68,7 +68,7 @@ func CmdServeGrowing(args []string) {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	}
 }

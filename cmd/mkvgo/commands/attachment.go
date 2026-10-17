@@ -31,7 +31,7 @@ func CmdAddAttachment(args []string) {
 
 	data, err := os.ReadFile(attPath)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if len(data) == 0 {
 		Fatal(fmt.Sprintf("%s is empty", attPath))
@@ -48,7 +48,7 @@ func CmdAddAttachment(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("attached %s (%s, %s) → %s\n", name, mime, FormatBytes(int64(len(data))), outPath)
 }

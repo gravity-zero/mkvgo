@@ -51,7 +51,7 @@ func CmdServe(args []string) {
 		}
 		report, err := matroska.Playability(context.Background(), src, target)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		direct = report.OverallVerdict == directPlayVerdict
 		fmt.Printf("auto: %s verdict for target %q -> %s\n", report.OverallVerdict, targetName, serveModeLabel(direct))
@@ -71,7 +71,7 @@ func CmdServe(args []string) {
 	}
 	plan, err := mp4.PlanHLS(context.Background(), src, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, cfg.httpOptions(cfg.cors))}
@@ -166,14 +166,14 @@ func runServer(srv *http.Server) {
 	select {
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	case <-sigCh:
 		fmt.Println("\nshutting down...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	}
 }

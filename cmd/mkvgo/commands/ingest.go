@@ -39,7 +39,7 @@ func CmdIngest(args []string) {
 
 	plan, err := matroska.Ingest(context.Background(), path, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if JsonOutput {

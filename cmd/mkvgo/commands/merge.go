@@ -30,7 +30,7 @@ func CmdMerge(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("merged %d sources → %s\n", len(inputs), outPath)
 }
@@ -78,7 +78,7 @@ func CmdMergeSubtitle(args []string) {
 	}
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("merged %s subtitle → %s\n", format, outPath)
 }

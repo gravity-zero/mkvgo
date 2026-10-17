@@ -25,7 +25,7 @@ func CmdSetChapters(args []string) {
 
 	f, err := os.Open(chapPath)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	chapters, err := matroska.ParseOGMChapters(f)
 	f.Close()
@@ -37,7 +37,7 @@ func CmdSetChapters(args []string) {
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("set %d chapters → %s\n", len(chapters), outPath)
 }
@@ -61,14 +61,14 @@ func CmdExtractChapters(args []string) {
 
 	if outPath == "" || outPath == "-" {
 		if err := matroska.FormatOGMChapters(os.Stdout, c.Chapters); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	f, err := os.Create(outPath)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	werr := matroska.FormatOGMChapters(f, c.Chapters)
 	if cerr := f.Close(); werr == nil {

@@ -25,7 +25,7 @@ func CmdTrackEnds(args []string) {
 	}
 	report, err := matroska.TrackEnds(context.Background(), rest[0])
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if jsonOut || JsonOutput {
 		PrintJSON(report)

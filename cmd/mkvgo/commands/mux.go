@@ -29,7 +29,7 @@ func CmdDemux(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("demuxed %s → %s\n", source, outDir)
 }
@@ -69,7 +69,7 @@ func CmdMux(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("muxed %d tracks → %s\n", len(inputs), outPath)
 }
@@ -94,7 +94,7 @@ func CmdRemoveTrack(args []string) {
 	err := matroska.RemoveTrack(context.Background(), source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("removed tracks %v → %s\n", trackIDs, outPath)
 }
@@ -129,7 +129,7 @@ func CmdAddTrack(args []string) {
 	err := matroska.AddTrack(context.Background(), base, outPath, input, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("added track %s:%d → %s\n", input.SourcePath, input.TrackID, outPath)
 }

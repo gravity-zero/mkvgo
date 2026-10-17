@@ -24,7 +24,7 @@ func CmdConcatHLS(args []string) {
 	err := mp4.RemuxConcatToHLS(context.Background(), f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("concatenated HLS session written → %s (play master.m3u8; %d parts, one continuous timeline)\n", f.outDir, len(f.rest))
 }
@@ -47,7 +47,7 @@ func CmdConcatSegment(args []string) {
 	}
 	plan, err := mp4.PlanConcat(context.Background(), sources, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	data, _, rerr := plan.Resource(context.Background(), what)
 	if rerr != nil {
@@ -56,13 +56,13 @@ func CmdConcatSegment(args []string) {
 
 	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "%s → %s (%d bytes, %d parts)\n", what, outPath, len(data), plan.NumParts())
 }

@@ -34,7 +34,7 @@ func CmdPlayability(args []string) {
 	}
 	report, err := matroska.Playability(context.Background(), path, target, opts...)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if JsonOutput {
@@ -71,7 +71,7 @@ func CmdLadder(args []string) {
 	}
 	rungs, err := matroska.RecommendLadderFor(context.Background(), path, opts...)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if JsonOutput {

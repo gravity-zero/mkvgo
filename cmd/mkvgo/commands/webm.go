@@ -35,7 +35,7 @@ func CmdToWebM(args []string) {
 	err := ops.RemuxToWebM(context.Background(), src, dst, mkv.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }

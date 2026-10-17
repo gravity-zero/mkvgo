@@ -28,7 +28,7 @@ func CmdFingerprint(args []string) {
 
 	fp, err := matroska.Fingerprint(context.Background(), path, opts...)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if JsonOutput {

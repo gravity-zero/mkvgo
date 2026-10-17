@@ -44,7 +44,7 @@ func CmdWatermarkSegment(args []string) {
 	opts := mp4.Options{FS: sourceFS(srcA), SegmentMs: segMs}
 	plan, err := mp4.PlanWatermark(context.Background(), srcA, srcB, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	var data []byte
@@ -66,19 +66,19 @@ func CmdWatermarkSegment(args []string) {
 		}
 		data, err = plan.Segment(context.Background(), n-1, fromB)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	}
 
 	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "%s -> %s (%d bytes, %d segments)\n", what, outPath, len(data), plan.NumSegments())
 }

@@ -25,7 +25,7 @@ func CmdKeyframes(path string) {
 	if isMP4Path(path) {
 		c, _, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: true, FS: fs})
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		ks = c.Keyframes
 	} else {
@@ -34,7 +34,7 @@ func CmdKeyframes(path string) {
 		// Cues-less ones (the "no external fallback" path). A nil fs is the OS.
 		c, err := matroska.OpenMetaWithFS(context.Background(), path, fs, matroska.WithKeyframeIndex())
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		ks = c.Keyframes
 	}
@@ -71,7 +71,7 @@ func CmdToVTT(args []string) {
 	if err := writeFileFrom(outPath, func(out io.Writer) error {
 		return matroska.SubtitleFileToWebVTT(src, out)
 	}); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("converted %s → %s\n", src, outPath)
 }
@@ -90,15 +90,15 @@ func CmdExtractFrame(args []string) {
 	}
 	atMs, err := ParseTimePoint(rest[1])
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	ks, err := matroska.ExtractKeyframeSample(context.Background(), rest[0], atMs)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, ks.Data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "keyframe @ %s (%s) → %s (%d bytes, decoder-ready)\n",
 		FmtMs(ks.PtsMs), ks.Codec, outPath, len(ks.Data))
@@ -163,7 +163,7 @@ func CmdExtractFrames(args []string) {
 		err = writeFileFrom(outPath, write)
 	}
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if asJSON || JsonOutput {
 		_ = json.NewEncoder(os.Stderr).Encode(st)

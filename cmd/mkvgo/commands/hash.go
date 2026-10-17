@@ -30,7 +30,7 @@ func CmdHash(args []string) {
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if outPath == "" {
 		outPath = source
@@ -65,7 +65,7 @@ func CmdVerify(args []string) {
 			mp4.Options{Progress: NewProgressBar()})
 		ClearProgress()
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		report(len(mismatches), func() {
 			if JsonOutput {
@@ -83,7 +83,7 @@ func CmdVerify(args []string) {
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	report(len(mismatches), func() {
 		if JsonOutput {

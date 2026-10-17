@@ -36,7 +36,7 @@ func CmdReindexInPlace(args []string) {
 		}
 		recovered, err := matroska.RecoverInPlace(context.Background(), path)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		if recovered {
 			fmt.Printf("rolled back interrupted in-place reindex of %s (original bytes restored)\n", path)
@@ -57,7 +57,7 @@ func CmdReindexInPlace(args []string) {
 	err := matroska.ReindexInPlace(context.Background(), path, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("reindexed %s in place (index patched, clusters untouched)\n", path)
 	printPreexisting()

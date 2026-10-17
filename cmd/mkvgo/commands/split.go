@@ -53,7 +53,7 @@ func CmdSplit(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	for i, p := range outputs {
 		fmt.Printf("part %d → %s\n", i+1, p)
@@ -78,7 +78,7 @@ func CmdJoin(args []string) {
 	err := matroska.Join(context.Background(), sources, outPath, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("joined %d files → %s\n", len(sources), outPath)
 }

@@ -24,12 +24,12 @@ func CmdRollback(args []string) {
 
 	delta, err := os.Open(deltaPath)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	defer delta.Close()
 
 	if err := matroska.ApplyRollback(context.Background(), repaired, delta, out); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("restored %s from %s + %s (verified against the original's sha256)\n", out, repaired, deltaPath)
 }
@@ -58,7 +58,7 @@ func armRollbackDelta(opts *matroska.Options, path string) (printSummary, closeF
 	GuardOverwrite(path)
 	f, err := os.Create(path)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	opts.RollbackSink = f
 	opts.RollbackRequired = true

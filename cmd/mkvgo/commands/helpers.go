@@ -136,6 +136,15 @@ func Fatal(msg string) {
 	osExit(1)
 }
 
+// FatalErr is Fatal with err's message, naming the command that repairs a damaged file when err is one.
+func FatalErr(err error) {
+	msg := err.Error()
+	if errors.Is(err, reader.ErrDamagedRegion) {
+		msg += "\nrepair it with `mkvgo reindex --resync`"
+	}
+	Fatal(msg)
+}
+
 // rejectFlagArg fails with a clear "unknown flag" error when a positional argument
 // looks like an option (starts with '-'), so a mistyped flag fails loudly instead of
 // being treated as a filename. A lone "-" (conventionally stdin) is allowed.
@@ -195,7 +204,7 @@ func OpenMKV(path string) *matroska.Container {
 	}
 	c, err := matroska.Open(context.Background(), path)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	return c
 }
@@ -207,7 +216,7 @@ func openInput(path string) *matroska.Container {
 	if path == "-" {
 		c, _, err := reader.ReadStream(context.Background(), os.Stdin)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		c.Path = "<stdin>"
 		return c
@@ -272,7 +281,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 		if errors.Is(err, matroska.ErrNotMatroska) {
 			return loadMP4Meta(path, keyframes)
 		}
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	return c, nil
 }
@@ -295,7 +304,7 @@ func globalReadOptions() []matroska.ReadOption {
 func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
 	c, dropped, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: keyframes, InBandColour: InBand})
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	return c, dropped
 }
@@ -329,7 +338,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 		c, dropped, err := mp4.OpenMeta(context.Background(), url,
 			mp4.Options{Keyframes: keyframes, InBandColour: InBand, FS: fs})
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return c, dropped
 	}
@@ -337,7 +346,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 		matroska.WithAttachments(), matroska.WithoutAttachmentData())
 	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, ro...)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintln(os.Stderr, "note: remote Matroska reads are metadata-only (keyframes from the Cues, attachment payloads stay remote)")
 	return c, nil
@@ -347,7 +356,7 @@ func PrintJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 }
 

@@ -276,7 +276,7 @@ func CmdToHLS(args []string) {
 	err := mp4.RemuxToHLS(context.Background(), src, outDir, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("HLS written → %s (play master.m3u8; init.mp4 + segments + subtitle renditions)\n", outDir)
 }
@@ -301,7 +301,7 @@ func CmdHLSSegment(args []string) {
 	}
 	plan, err := mp4.PlanHLS(context.Background(), src, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	var data []byte
@@ -335,13 +335,13 @@ func CmdHLSSegment(args []string) {
 
 	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "%s → %s (%d bytes, %d segments total)\n", what, outPath, len(data), plan.NumSegments())
 }
@@ -362,7 +362,7 @@ func CmdToABR(args []string) {
 	err := mp4.RemuxToABR(context.Background(), f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("ABR presentation written → %s (play master.m3u8; %d variants)\n", f.outDir, len(f.rest))
 }
@@ -386,7 +386,7 @@ func CmdABRSegment(args []string) {
 	}
 	plan, err := mp4.PlanABR(context.Background(), sources, opts)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	data, _, rerr := plan.Resource(context.Background(), what)
 	if rerr != nil {
@@ -395,13 +395,13 @@ func CmdABRSegment(args []string) {
 
 	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "%s → %s (%d bytes, %d variants)\n", what, outPath, len(data), plan.NumVariants())
 }

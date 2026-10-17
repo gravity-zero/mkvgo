@@ -1075,7 +1075,7 @@ func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv
 			return cues, nil
 		}
 		if err != nil {
-			return nil, errf("synthesize index: %w (repair the source first: `mkvgo reindex --resync`)", err)
+			return nil, errf("synthesize index: %w (repair the source first with a resyncing reindex)", err)
 		}
 		if !b.Keyframe {
 			continue

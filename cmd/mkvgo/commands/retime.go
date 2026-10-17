@@ -32,7 +32,7 @@ func CmdRetime(args []string) {
 	fl.Func(func(v string) {
 		track, ms, err := parseShift(v)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		shift[track] = ms * 1_000_000 // ms -> ns
 	}, "--shift")
@@ -63,7 +63,7 @@ func CmdRetime(args []string) {
 			Fatal("retime on an MP4 edits the moov only; --in-place/--replace/--keep-backup/--deep-verify/--strict/--rollback-delta do not apply")
 		}
 		if err := mp4.RetimeTracks(context.Background(), path, shift); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		fmt.Printf("retimed %s (edit list):\n", path)
 		fmt.Print(shiftLines(shift))
@@ -93,7 +93,7 @@ func CmdRetime(args []string) {
 	err := retimeFn(context.Background(), path, shift, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	printPreexisting()
 	fmt.Printf("retimed %s:\n", path)

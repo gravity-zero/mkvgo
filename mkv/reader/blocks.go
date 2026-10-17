@@ -828,9 +828,9 @@ type DamageError struct {
 
 func (e *DamageError) Error() string {
 	if e.Resume < 0 {
-		return fmt.Sprintf("damaged region at offset %d longer than the walk looks past it - damage inside the file; repair it with `mkvgo reindex --resync` (%v)", e.Offset, e.Cause)
+		return fmt.Sprintf("damaged region at offset %d longer than the walk looks past it - damage inside the file; raise the damage bound or rewrite the file with a resyncing reindex (%v)", e.Offset, e.Cause)
 	}
-	return fmt.Sprintf("damaged region at offset %d: an element there cannot be read while media continues at offset %d - damage inside the file, not a truncated tail; repair it with `mkvgo reindex --resync` (%v)",
+	return fmt.Sprintf("damaged region at offset %d: an element there cannot be read while media continues at offset %d - damage inside the file, not a truncated tail; rewrite the file with a resyncing reindex (%v)",
 		e.Offset, e.Resume, e.Cause)
 }
 

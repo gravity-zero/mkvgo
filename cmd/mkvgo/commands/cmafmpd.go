@@ -26,17 +26,17 @@ func CmdCMAFMPD(args []string) {
 	p := cmafPresentationFromDirs(videos, audios, base)
 	data, err := mp4.DASHFromCMAF(context.Background(), p)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if outPath == "" || outPath == "-" {
 		if _, err := os.Stdout.Write(data); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		return
 	}
 	GuardOverwrite(outPath)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Fprintf(os.Stderr, "manifest.mpd → %s (%d bytes, %d video + %d audio representations)\n", outPath, len(data), len(p.Video), len(p.Audio))
 }
@@ -52,10 +52,10 @@ func CmdCMAFHLS(args []string) {
 	p := cmafPresentationFromDirs(videos, audios, outDir)
 	playlists, err := mp4.HLSFromCMAF(context.Background(), p)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	names := make([]string, 0, len(playlists))
 	for name := range playlists {
@@ -66,7 +66,7 @@ func CmdCMAFHLS(args []string) {
 		path := filepath.Join(outDir, name)
 		GuardOverwrite(path)
 		if err := os.WriteFile(path, playlists[name], 0o644); err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "HLS playlists written → %s (%d files; play master.m3u8)\n", outDir, len(names))
@@ -91,14 +91,14 @@ func cmafPresentationFromDirs(videos, audios []string, base string) mp4.CMAFPres
 	for _, d := range videos {
 		rep, err := cmafRepFromDir(d, base)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		p.Video = append(p.Video, rep)
 	}
 	for _, d := range audios {
 		rep, err := cmafRepFromDir(d, base)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		p.Audio = append(p.Audio, rep)
 	}

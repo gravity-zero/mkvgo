@@ -55,7 +55,7 @@ func CmdReindex(args []string) {
 		err := matroska.ReindexReplace(context.Background(), src, opts)
 		ClearProgress()
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		fmt.Printf("reindexed %s (original replaced after verification)\n", src)
 		printPreexisting()
@@ -76,7 +76,7 @@ func CmdReindex(args []string) {
 	err := matroska.Reindex(context.Background(), src, dst, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("reindexed %s → %s\n", src, dst)
 	printPreexisting()

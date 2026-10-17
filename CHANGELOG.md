@@ -70,6 +70,10 @@ All notable changes to mkvgo are documented here. The format is based on
   Its end fell back to the next cue's start, past the region, so it stayed on
   screen over the whole lost span; it now ends at the region's start time, or
   after the default 3 s when that is not later than the cue, as a PGS cue does.
+- **`reader.DamageError` names the repair in library terms.** Its message
+  told library callers to run a CLI command; it now says to rewrite the file
+  with a resyncing reindex (or raise the damage bound), and the CLI adds
+  `mkvgo reindex --resync` when it exits on such an error.
 
 ## [0.55.1] - 2026-10-17
 

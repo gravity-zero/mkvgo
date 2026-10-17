@@ -37,7 +37,7 @@ func CmdExtractAttachment(args []string) {
 
 	err = matroska.ExtractAttachment(context.Background(), source, attID, outPath)
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("extracted attachment #%d → %s\n", attID, outPath)
 }
@@ -81,7 +81,7 @@ func CmdExtractSubtitle(args []string) {
 		}
 		n, err := extractFromIndex(source, trackID, format, indexPath, outPath, opts)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		if format == "pgs" {
 			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d (from %s) → %s\n", n, trackID, indexPath, outPath)
@@ -121,7 +121,7 @@ func CmdExtractSubtitle(args []string) {
 		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
 	}
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("extracted subtitle track %d (%s) → %s\n", trackID, format, outPath)
 }
@@ -256,14 +256,14 @@ func CmdSubtitleIndex(args []string) {
 
 	ix, err := buildSubtitleIndex(source, trackIDs, fromCues, subtitleReadOptions(damageBytes))
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	blob, err := ix.MarshalBinary()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	if err := os.WriteFile(outPath, blob, 0o644); err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	total := 0
 	for _, id := range ix.Tracks() {

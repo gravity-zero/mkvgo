@@ -87,7 +87,7 @@ JSON schema:
 		var err error
 		raw, err = io.ReadAll(os.Stdin)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	} else {
 		raw = []byte(jsonStr)
@@ -104,7 +104,7 @@ JSON schema:
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("edited → %s\n", outPath)
 }
@@ -131,7 +131,7 @@ func CmdEditTitle(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("title set to %q → %s\n", title, outPath)
 }
@@ -191,7 +191,7 @@ func CmdEditTrack(args []string) {
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("edited track %d → %s\n", trackID, outPath)
 }
@@ -212,7 +212,7 @@ Fails if new metadata is larger than the original.`)
 		var err error
 		raw, err = io.ReadAll(os.Stdin)
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 	} else {
 		raw = []byte(jsonStr)
@@ -227,7 +227,7 @@ Fails if new metadata is larger than the original.`)
 		applyPatch(c, patch)
 	})
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 	fmt.Printf("edited in-place → %s\n", source)
 }

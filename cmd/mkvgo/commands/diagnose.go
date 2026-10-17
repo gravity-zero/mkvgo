@@ -44,7 +44,7 @@ func CmdDiagnose(args []string) {
 	}
 	d, err := diagnose(context.Background(), rest[0], matroska.Options{DeepVerify: deep})
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if jsonOut || JsonOutput {

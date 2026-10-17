@@ -56,7 +56,7 @@ func CmdSalvage(args []string) {
 		report, err := matroska.MapDamage(context.Background(), src, opts)
 		ClearProgress()
 		if err != nil {
-			Fatal(err.Error())
+			FatalErr(err)
 		}
 		if jsonOut || JsonOutput {
 			PrintJSON(report)
@@ -76,7 +76,7 @@ func CmdSalvage(args []string) {
 	report, err := matroska.Salvage(context.Background(), src, dst, opts)
 	ClearProgress()
 	if err != nil {
-		Fatal(err.Error())
+		FatalErr(err)
 	}
 
 	if jsonOut || JsonOutput {

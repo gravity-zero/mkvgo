@@ -205,8 +205,8 @@ func TestDamageInsideTheFileIsNotATruncatedTail(t *testing.T) {
 		if de.Offset != overrunAt || de.Resume != thirdCluster {
 			t.Errorf("damage at %d, media resuming at %d; want %d and %d", de.Offset, de.Resume, overrunAt, thirdCluster)
 		}
-		if !strings.Contains(err.Error(), "mkvgo reindex --resync") {
-			t.Errorf("the refusal does not name the repair: %v", err)
+		if msg := err.Error(); !strings.Contains(msg, "resyncing reindex") || strings.Contains(msg, "mkvgo ") {
+			t.Errorf("the refusal must name the repair in library terms, not a CLI command: %v", err)
 		}
 	})
 
