@@ -241,6 +241,31 @@ func TestSubtitleReadsPassOverDamage(t *testing.T) {
 		}
 	})
 
+	t.Run("zeroed tail", func(t *testing.T) {
+		data, err := os.ReadFile(clean)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(data[clusters[8]+50:]) // a download whose last pieces never came
+		tail := filepath.Join(t.TempDir(), "tail.mkv")
+		if err := os.WriteFile(tail, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cues, skips, err := pgsVia(func(fn func(PGSCue) error, o mkv.Options) error {
+			return ForEachSubtitlePGS(ctx, tail, 2, fn, o)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cues) != 8 || len(skips) != 1 || skips[0].StartOffset <= clusters[8] || skips[0].EndOffset != int64(len(data)) {
+			t.Errorf("zeroed tail: %d cues, OnSkip %+v; want 8 cues and once from inside cluster 8 (%d) to %d", len(cues), skips, clusters[8], len(data))
+		}
+		var vtt bytes.Buffer
+		if err := ExtractSubtitleWebVTT(ctx, tail, 3, &vtt); err != nil || !strings.Contains(vtt.String(), "cue 7") {
+			t.Errorf("text over a zeroed tail: %v\n%s", err, vtt.String())
+		}
+	})
+
 	t.Run("refused", func(t *testing.T) {
 		for _, n := range []int64{-1, 1000} {
 			err := ForEachSubtitlePGS(ctx, bad, 2, func(PGSCue) error { return nil }, mkv.Options{DamageBytes: n})

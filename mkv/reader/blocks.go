@@ -896,7 +896,11 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if br.suspected && br.suspectAt < from {
 			from = br.suspectAt
 		}
-		resume, found := br.clusterAfter(from)
+		resume, found, end := br.clusterAfter(from)
+		if !found && end >= 0 && br.skipDamage {
+			br.skipDamageTo(from, end) // the damage runs to the end: the walk is over
+			return b, io.EOF
+		}
 		if !found {
 			if br.damageScan > 0 {
 				return b, &DamageError{Offset: from, Resume: -1, Cause: err} // longer than the walk looks
@@ -909,13 +913,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if br.r.reset(resume) != nil {
 			return b, err
 		}
-		br.skippedBytes += resume - from
-		fromMs := int64(-1)
-		if ms, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); err == nil && br.clusterCount > 0 {
-			fromMs = ms
-		}
-		br.skipped = append(br.skipped, DamageRange{From: from, To: resume, FromMs: fromMs, ToMs: -1})
-		br.timeSkip = true
+		br.skipDamageTo(from, resume)
 		br.inCluster, br.clusterEnd = false, -1
 		br.pending, br.peeked, br.awaitLimit = nil, nil, false
 	}
@@ -967,27 +965,51 @@ func (br *BlockReader) zeroTail(off int64) bool {
 	return true
 }
 
-// clusterAfter looks for a valid Cluster past off (the start of an element the
-// walk could not read) and leaves the source where it found it, so a failed
-// search changes nothing for a reader that is retried later.
-func (br *BlockReader) clusterAfter(off int64) (int64, bool) {
+// skipDamageTo records the damaged region [from, to) the walk passes over, timed from the Cluster it was in.
+func (br *BlockReader) skipDamageTo(from, to int64) {
+	br.skippedBytes += to - from
+	fromMs := int64(-1)
+	if ms, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); err == nil && br.clusterCount > 0 {
+		fromMs = ms
+	}
+	br.skipped = append(br.skipped, DamageRange{From: from, To: to, FromMs: fromMs, ToMs: -1})
+	br.timeSkip = true
+}
+
+// clusterAfter looks for a valid Cluster past off (the start of an element the walk could not read) and leaves the
+// source where it found it, so a failed search changes nothing for a reader retried later; with none found, end is
+// where the source or the Segment ends when the search reached it, else -1.
+func (br *BlockReader) clusterAfter(off int64) (resume int64, found bool, end int64) {
 	if br.raw == nil {
-		return 0, false
+		return 0, false, -1
 	}
 	cur, err := br.raw.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return 0, false
+		return 0, false, -1
 	}
 	defer br.raw.Seek(cur, io.SeekStart) //nolint:errcheck // best effort: the caller holds an error already
+	size, err := br.raw.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, false, -1
+	}
 	if _, err := br.raw.Seek(off+1, io.SeekStart); err != nil {
-		return 0, false
+		return 0, false, -1
 	}
 	scan := br.segEnd
 	if br.damageScan > 0 && (scan < 0 || off+1+br.damageScan < scan) {
 		scan = off + 1 + br.damageScan // how far the walk looks; the Cluster found must still fit the segment
 	}
-	resume, err := resyncToCluster(br.raw, scan, br.segEnd)
-	return resume, err == nil && resume > off
+	resume, err = resyncToCluster(br.raw, scan, br.segEnd)
+	if err == nil && resume > off {
+		return resume, true, -1
+	}
+	if end = size; br.segEnd >= 0 && br.segEnd < end {
+		end = br.segEnd
+	}
+	if err != nil || (scan >= 0 && scan < end) {
+		return 0, false, -1
+	}
+	return 0, false, end
 }
 
 func (br *BlockReader) next() (mkv.Block, error) {

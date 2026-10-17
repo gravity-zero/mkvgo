@@ -61,6 +61,11 @@ All notable changes to mkvgo are documented here. The format is based on
   that failed to parse for a damaged region when a Cluster followed within
   `DamageBytes`, dropping its cues silently; only null bytes, a download's
   gap, count as damage now, and anything else fails as before.
+- **Damage that runs to the end of the file ends a tolerant walk.** A
+  download whose last pieces never arrived left a zeroed tail with no Cluster
+  behind it, and every subtitle read failed with "damage inside the file";
+  when the tail lies within `DamageBytes` the walk now ends there, the region
+  reported once through `OnSkip`.
 
 ## [0.55.1] - 2026-10-17
 
