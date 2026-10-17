@@ -197,6 +197,9 @@ All notable changes to mkvgo are documented here. The format is based on
   `ingest`, `extract-frames`, `subtitle-index`, `abr-segment`, `concat-hls`,
   `concat-segment`, `serve`, `serve-growing`); a test now fails when the table
   and the CLI's command list differ.
+- **DOC-03: the `v{k}/<name>` and `mp4.PlanABR` paragraph sits under
+  `abr-segment`** in docs/cli.md, where it belongs, instead of closing the
+  `forensic-segment` section.
 
 ### Changed
 

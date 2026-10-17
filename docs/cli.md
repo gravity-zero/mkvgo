@@ -1341,6 +1341,9 @@ mkvgo abr-segment master.m3u8 movie-1080p.mp4 movie-720p.mp4     # top manifest
 mkvgo abr-segment v2/seg00042.m4s 1080p.mp4 720p.mp4 -o s.m4s    # one segment
 ```
 
+Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
+The library equivalent is `mp4.PlanABR` (see library.md).
+
 ### cmaf-mpd
 
 Write the multi-rung **DASH** `manifest.mpd` for CMAF fragments an **external
@@ -1436,9 +1439,6 @@ mkvgo forensic-segment movie.mkv 7 --variant B -o segB00007.m4s   # the derived 
 ```
 
 The library equivalent is `mp4.PlanForensic` (see library.md); `mp4.DropNonRefSample` is deprecated.
-
-Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
-The library equivalent is `mp4.PlanABR` (see library.md).
 
 ### concat-hls
 
