@@ -76,6 +76,15 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **ROB-01: the trailing-Cues scan is linear.** On a Matroska file without a
+  SeekHead, the reader looks for the index in the last 64 to 512 KiB by
+  parsing forward from every candidate byte. A tail of empty Voids that does
+  not reach the end made that quadratic: 12 s of CPU for 64 KiB, minutes for
+  512 KiB, on every open of such a file. One backward pass now decides every
+  start (0.6 ms for 64 KiB, 5 ms for 512 KiB), headers are decoded straight
+  from the buffer, and the child checks inside CuePoints and ChapterAtoms draw
+  on a budget in proportion to the window. The scan decides as before on every
+  fixture and on generated tails.
 - **A window is served past a short damaged region instead of refused.** A
   file holding a zeroed stretch (the pieces a download never received: 11 MB
   of zeros then debris, seen in the middle of a 3 GB film) failed every window
