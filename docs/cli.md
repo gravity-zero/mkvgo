@@ -392,7 +392,7 @@ mkvgo remove-attachment video.mkv -o out.mkv 2
 Extract an embedded text subtitle track as SRT, ASS or WebVTT. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt).
 
 ```
-mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt]
+mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt] [--damage-bytes <n>]
 ```
 
 | Flag | Description |
@@ -401,6 +401,7 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-o` | Output file path (required) |
 | `-format` | Output format: `srt` (default), `ass`, or `vtt` |
 | `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, MKV/WebM only) |
+| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. Default 64 MiB |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
@@ -422,13 +423,14 @@ itself from the second extraction of that file onwards, and one build covers
 every track it names.
 
 ```
-mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5] [-from-cues]
+mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5] [-from-cues] [--damage-bytes <n>]
 ```
 
 | Flag | Description |
 |---|---|
 | `-o` | Output index file (required) |
 | `-t` | Comma-separated track IDs to index (default: every subtitle track) |
+| `--damage-bytes` | As for `extract-subtitle`: a damaged region within it is left out of the index and named on stderr. Default 64 MiB |
 | `-from-cues` | Derive the index from the file's own `Cues` instead of walking: metadata and one cluster header per cued cluster are read, nothing else. Muxers cue every subtitle block, and the command checks it - each track's cue count must match its trusted `NUMBER_OF_FRAMES` statistic - and refuses otherwise, naming the tracks to index with a walk |
 
 ```bash

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -120,3 +121,14 @@ type doValue func()
 func (d doValue) Set(string) error { d(); return nil }
 func (d doValue) String() string   { return "" }
 func (d doValue) IsBoolFlag() bool { return true }
+
+// damageBytesFlag parses --damage-bytes into n: a positive byte count.
+func damageBytesFlag(n *int64) func(string) {
+	return func(v string) {
+		b, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || b <= 0 {
+			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", v))
+		}
+		*n = b
+	}
+}

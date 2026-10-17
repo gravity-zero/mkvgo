@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -184,6 +185,7 @@ func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, 
 	}
 	br.KeepTracks(keep...)
 	br.SetHeaderOnly(true) // positions only: not one subtitle payload is read either
+	dmg := tolerateSubtitleDamage(br, opts)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -191,11 +193,13 @@ func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, 
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			dmg.skipped()
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
+		dmg.skipped()
 		// Every frame of a laced block reports the same position, so a naive
 		// append would record N entries pointing at one block - and serving
 		// them would replay frame 0 N times. Coalesce them into one entry and
@@ -296,6 +300,7 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 	defer f.Close()
 
 	var br *reader.BlockReader
+	var dmg *subtitleDamage
 	cues := make([]subtitle.Cue, 0, len(entries))
 	for i := range entries {
 		if err := ctx.Err(); err != nil {
@@ -315,6 +320,7 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 			// laced block's frames would all carry the block timecode, and the
 			// output would differ from the walking extractor's.
 			br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
+			dmg = tolerateSubtitleDamage(br, opts)
 		} else if err := br.SeekTo(e.pos); err != nil {
 			return err
 		}
@@ -322,6 +328,10 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 		// here, a laced one takes its whole lace without re-seeking.
 		for f := int64(0); f < e.frames; f++ {
 			blk, err := br.Next()
+			if dmg.pending() { // the entry lies in a damaged region: its cues are lost
+				dmg.skipped()
+				break
+			}
 			if err != nil {
 				return fmt.Errorf("%w: reading the block at offset %d: %w", ErrIndexStale, e.pos.Off, err)
 			}
@@ -600,6 +610,7 @@ func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mk
 	}
 	defer f.Close()
 	clusters := map[int64]reader.BlockPos{} // data start, end and timestamp per cluster, read once
+	var lost []reader.DamageRange           // damaged regions cued clusters lie in: their entries are dropped
 	for _, id := range ix.order {
 		entries := ix.entries[id]
 		for i := range entries {
@@ -607,18 +618,27 @@ func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mk
 				return err
 			}
 			e := &entries[i]
-			if e.pos.ClusterTS >= 0 {
-				continue // settled by a call that was interrupted later
+			if e.pos.ClusterTS >= 0 || inDamage(lost, e.pos.ClusterStart) {
+				continue // settled by a call that was interrupted later, or lost
 			}
 			base, ok := clusters[e.pos.ClusterStart]
 			if !ok {
 				if base, err = reader.ResolveClusterBlock(f, e.pos.ClusterStart, 0); err != nil {
-					return fmt.Errorf("subtitle index from cues: %w", err)
+					g, damaged := damageAtCluster(f, ix.tcScale, e.pos.ClusterStart, opts)
+					if !damaged {
+						return fmt.Errorf("subtitle index from cues: %w", err)
+					}
+					lost = append(lost, g)
+					reportDamage(opts, g, e.timeMs)
+					continue
 				}
 				clusters[e.pos.ClusterStart] = base
 			}
 			e.pos = reader.BlockPos{Off: base.Off + e.pos.Off, ClusterStart: base.ClusterStart, ClusterEnd: base.ClusterEnd, ClusterTS: base.ClusterTS}
 		}
+	}
+	for _, id := range ix.order {
+		ix.entries[id] = slices.DeleteFunc(ix.entries[id], func(e subEntry) bool { return inDamage(lost, e.pos.ClusterStart) })
 	}
 	ix.unresolved = false
 	return nil

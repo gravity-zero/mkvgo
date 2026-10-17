@@ -86,6 +86,7 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 		return err
 	}
 	br.KeepTracks(trackID) // reader-side filter, as in ExtractSubtitleWebVTT
+	dmg := tolerateSubtitleDamage(br, opts)
 
 	asm := newPGSAssembler(fn, subtitleTrackByID(c, trackID))
 	for {
@@ -94,9 +95,15 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			if err := asm.afterDamage(dmg); err != nil {
+				return err
+			}
 			break
 		}
 		if err != nil {
+			return err
+		}
+		if err := asm.afterDamage(dmg); err != nil {
 			return err
 		}
 		if err := asm.block(blk.Timecode, blk.Duration, blk.Data); err != nil {
@@ -163,6 +170,7 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 
 	asm := newPGSAssembler(fn, subtitleTrackByID(c, trackID))
 	var br *reader.BlockReader
+	var dmg *subtitleDamage
 	for i := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -179,11 +187,18 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 			// A mid-file reader never walks over the Tracks element, so it
 			// cannot pick the per-frame strides up on its own.
 			br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
+			dmg = tolerateSubtitleDamage(br, opts)
 		} else if err := br.SeekTo(e.pos); err != nil {
 			return err
 		}
 		for k := int64(0); k < e.frames; k++ {
 			blk, err := br.Next()
+			if dmg.pending() { // the entry lies in a damaged region: its cues are lost
+				if err := asm.afterDamage(dmg); err != nil {
+					return err
+				}
+				break
+			}
 			if err != nil {
 				return fmt.Errorf("%w: reading the block at offset %d: %w", ErrIndexStale, e.pos.Off, err)
 			}
@@ -289,6 +304,16 @@ func (a *pgsAssembler) closeAt(t int64) error {
 		cue.EndMs = cue.StartMs + defaultSubDurationMs
 	}
 	return a.emit(cue)
+}
+
+// afterDamage ends the cue on screen where a region the walk just passed over begins, and forgets the epoch it cut.
+func (a *pgsAssembler) afterDamage(d *subtitleDamage) error {
+	fromMs, ok := d.skipped()
+	if !ok {
+		return nil
+	}
+	a.dec.Reset()
+	return a.closeAt(fromMs)
 }
 
 // finish flushes a cue the track never closed - a last subtitle with no trailing

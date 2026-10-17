@@ -115,6 +115,7 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	// Filter in the reader, not after the fact - see ExtractSubtitle: the other
 	// tracks' payloads are neither delivered nor, past the read window, read.
 	br.KeepTracks(trackID)
+	dmg := tolerateSubtitleDamage(br, opts)
 
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
@@ -135,11 +136,13 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			dmg.skipped()
 			break
 		}
 		if err != nil {
 			return err
 		}
+		dmg.skipped()
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err

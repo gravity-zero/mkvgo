@@ -46,6 +46,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	// window. A subtitle track is a handful of blocks among a video track's
 	// millions, so the walk stops copying and allocating for all of them.
 	br.KeepTracks(trackID)
+	dmg := tolerateSubtitleDamage(br, opts)
 
 	out, err := fs.DoCreate(outPath)
 	if err != nil {
@@ -61,11 +62,13 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			dmg.skipped()
 			break
 		}
 		if err != nil {
 			return err
 		}
+		dmg.skipped()
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err
@@ -128,6 +131,7 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		return err
 	}
 	br.KeepTracks(trackID) // reader-side filter, as in ExtractSubtitle
+	dmg := tolerateSubtitleDamage(br, opts)
 
 	var cues []subtitle.Cue
 	for {
@@ -136,11 +140,13 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
+			dmg.skipped()
 			break
 		}
 		if err != nil {
 			return err
 		}
+		dmg.skipped()
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err

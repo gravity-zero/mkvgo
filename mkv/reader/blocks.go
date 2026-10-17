@@ -343,6 +343,7 @@ type BlockReader struct {
 	skipDamage   bool
 	skippedBytes int64
 	skipped      []DamageRange
+	timeSkip     bool  // the last skipped region still waits for the timestamp of the Cluster it resumed on
 	damageScan   int64 // SetDamageScan: how far past an unreadable element the walk looks for a Cluster (0: to the segment's end)
 	// known is the set of track numbers the file declares, learned when the
 	// walk passes over the Tracks element or given by SetKnownTracks; nil when
@@ -433,6 +434,7 @@ func (br *BlockReader) RestartAt(offset int64) error {
 	br.inCluster = false
 	br.clusterEnd = -1
 	br.clusterTS = 0
+	br.timeSkip = false
 	br.clusterStart = 0
 	br.pending = nil
 	br.peeked = nil
@@ -464,6 +466,7 @@ func (br *BlockReader) SeekTo(p BlockPos) error {
 	br.inCluster = true
 	br.clusterEnd = p.ClusterEnd
 	br.clusterTS = p.ClusterTS
+	br.timeSkip = false
 	br.clusterStart = p.ClusterStart
 	br.pending = nil
 	br.peeked = nil
@@ -831,8 +834,9 @@ func (e *DamageError) Error() string {
 		e.Offset, e.Resume, e.Cause)
 }
 
-// DamageRange is a damaged region a SetSkipDamage walk passed over: [From, To).
-type DamageRange struct{ From, To int64 }
+// DamageRange is a damaged region a SetSkipDamage walk passed over: [From, To), between the timestamps (ms) of the
+// last Cluster entered before it and of the Cluster resumed on; -1 when the walk has not entered that Cluster.
+type DamageRange struct{ From, To, FromMs, ToMs int64 }
 
 func (e *DamageError) Is(target error) bool { return target == ErrDamagedRegion }
 
@@ -906,7 +910,12 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			return b, err
 		}
 		br.skippedBytes += resume - from
-		br.skipped = append(br.skipped, DamageRange{From: from, To: resume})
+		fromMs := int64(-1)
+		if ms, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); err == nil && br.clusterCount > 0 {
+			fromMs = ms
+		}
+		br.skipped = append(br.skipped, DamageRange{From: from, To: resume, FromMs: fromMs, ToMs: -1})
+		br.timeSkip = true
 		br.inCluster, br.clusterEnd = false, -1
 		br.pending, br.peeked, br.awaitLimit = nil, nil, false
 	}
@@ -1047,7 +1056,11 @@ func (br *BlockReader) next() (mkv.Block, error) {
 					return mkv.Block{}, err
 				}
 				br.clusterTS = int64(v)
-				if tsMs, err := safeTimecodeMs(br.clusterTS, br.timecodeScale); br.hasStop && err == nil && tsMs > br.stopMs {
+				tsMs, err := safeTimecodeMs(br.clusterTS, br.timecodeScale)
+				if br.timeSkip && err == nil {
+					br.skipped[len(br.skipped)-1].ToMs, br.timeSkip = tsMs, false
+				}
+				if br.hasStop && err == nil && tsMs > br.stopMs {
 					br.awaitLimit = true
 					return mkv.Block{}, ErrClusterLimit
 				}

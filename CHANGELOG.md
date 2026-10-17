@@ -4,6 +4,26 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A subtitle read passes over a short damaged region instead of losing the
+  whole track.** A Matroska file zeroed over a stretch (the pieces a download
+  never received) failed every subtitle extraction with "damaged region at
+  offset ...", so a player got no subtitle at all for the track. Every
+  subtitle read (`ExtractSubtitle`, `ExtractASS`, `ExtractSubtitleWebVTT`,
+  `ForEachSubtitlePGS` and their `From` forms, `BuildSubtitleIndex`,
+  `SubtitleIndex.Resolve`) now resumes on the next Cluster when it lies within
+  the new `Options.DamageBytes`, 64 MiB by default as for the on-demand HLS
+  windows: the cues inside the region are lost, a PGS cue it left on screen
+  is not stretched over it, and the rest of the track is delivered. Each
+  region is reported once through `Options.OnSkip`. A longer region still
+  fails with `reader.ErrDamagedRegion`; a negative `DamageBytes` refuses any
+  damage. `reader.DamageRange` gains `FromMs` and `ToMs`, the timestamps of
+  the clusters around the region. CLI: `extract-subtitle` and
+  `subtitle-index` take `--damage-bytes` and name each region on stderr.
+
 ## [0.55.0] - 2026-10-17
 
 ### Security

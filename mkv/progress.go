@@ -78,6 +78,13 @@ type Options struct {
 	// junk past the declared Segment end, and nothing else. Never called
 	// when the source was clean.
 	OnSkip func(DamagedRange)
+	// DamageBytes bounds the damaged region a subtitle read (ExtractSubtitle*,
+	// ForEachSubtitlePGS*, BuildSubtitleIndex, SubtitleIndex.Resolve) passes
+	// over: the cues inside it are lost, each region is reported through
+	// OnSkip, and the rest of the track is delivered. A region running further
+	// than this past its first unreadable byte fails the read with
+	// reader.ErrDamagedRegion. 0 is DefaultDamageBytes; negative refuses any damage.
+	DamageBytes int64
 	// OnRepair, when non-nil, is called once per region a Resync reindex
 	// reconstructed with zero or partial loss (see RepairedRange), after all
 	// verifications have passed. Never called when Resync is unset.
@@ -150,6 +157,20 @@ func OnSkipFrom(opts []Options) func(DamagedRange) {
 		return opts[0].OnSkip
 	}
 	return nil
+}
+
+// DefaultDamageBytes is Options.DamageBytes when it is 0: the bound of mp4.DefaultDamageBytes.
+const DefaultDamageBytes = 64 << 20
+
+// DamageBytesFrom is Options.DamageBytes resolved: DefaultDamageBytes for 0, -1 for a read that refuses any damage.
+func DamageBytesFrom(opts []Options) int64 {
+	switch {
+	case len(opts) == 0 || opts[0].DamageBytes == 0:
+		return DefaultDamageBytes
+	case opts[0].DamageBytes < 0:
+		return -1
+	}
+	return opts[0].DamageBytes
 }
 
 func OnRepairFrom(opts []Options) func(RepairedRange) {

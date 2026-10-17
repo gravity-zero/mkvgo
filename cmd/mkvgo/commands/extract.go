@@ -50,11 +50,13 @@ func CmdExtractSubtitle(args []string) {
 	source := args[0]
 	var outPath, format, indexPath string
 	var trackID uint64
+	var damageBytes int64
 	format = "srt"
 
 	fl := newFlags("extract-subtitle")
 	fl.String(&outPath, "-o")
 	fl.String(&indexPath, "-index")
+	fl.Func(damageBytesFlag(&damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
 		id, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
@@ -68,6 +70,7 @@ func CmdExtractSubtitle(args []string) {
 		Fatal("usage: " + usage)
 	}
 	GuardOverwrite(outPath)
+	opts := subtitleReadOptions(damageBytes)
 
 	if indexPath != "" {
 		if format != "vtt" && format != "pgs" {
@@ -76,7 +79,7 @@ func CmdExtractSubtitle(args []string) {
 		if isMP4Path(source) {
 			Fatal("-index applies to MKV/WebM only: an MP4 already carries its own sample table")
 		}
-		n, err := extractFromIndex(source, trackID, format, indexPath, outPath)
+		n, err := extractFromIndex(source, trackID, format, indexPath, outPath, opts)
 		if err != nil {
 			Fatal(err.Error())
 		}
@@ -91,14 +94,14 @@ func CmdExtractSubtitle(args []string) {
 	var err error
 	switch format {
 	case "vtt":
-		err = extractWebVTT(source, trackID, outPath)
+		err = extractWebVTT(source, trackID, outPath, opts)
 	case "pgs":
 		if isMP4Path(source) {
 			Fatal("PGS bitmap subtitles are a Matroska codec: -format pgs applies to MKV/WebM only")
 		}
 		var n int
 		n, err = writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
-			return matroska.ForEachSubtitlePGS(context.Background(), source, trackID, fn)
+			return matroska.ForEachSubtitlePGS(context.Background(), source, trackID, fn, opts)
 		})
 		if err == nil {
 			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d → %s\n", n, trackID, outPath)
@@ -108,12 +111,12 @@ func CmdExtractSubtitle(args []string) {
 		if isMP4Path(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
-		err = matroska.ExtractSubtitle(context.Background(), source, trackID, outPath)
+		err = matroska.ExtractSubtitle(context.Background(), source, trackID, outPath, opts)
 	case "ass", "ssa":
 		if isMP4Path(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
-		err = matroska.ExtractASS(context.Background(), source, trackID, outPath)
+		err = matroska.ExtractASS(context.Background(), source, trackID, outPath, opts)
 	default:
 		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
 	}
@@ -125,19 +128,19 @@ func CmdExtractSubtitle(args []string) {
 
 // extractWebVTT writes subtitle track trackID of source (MKV/WebM or MP4) to
 // outPath as WebVTT.
-func extractWebVTT(source string, trackID uint64, outPath string) error {
+func extractWebVTT(source string, trackID uint64, outPath string, opts matroska.Options) error {
 	return writeFileFrom(outPath, func(out io.Writer) error {
 		if isMP4Path(source) {
 			return mp4.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
 		}
-		return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
+		return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out, opts)
 	})
 }
 
 // extractFromIndex serves one track from an index file written by
 // CmdSubtitleIndex, instead of walking the source. It returns the number of PGS
 // cues written, which is 0 (and meaningless) for the text formats.
-func extractFromIndex(source string, trackID uint64, format, indexPath, outPath string) (int, error) {
+func extractFromIndex(source string, trackID uint64, format, indexPath, outPath string, opts matroska.Options) (int, error) {
 	blob, err := os.ReadFile(indexPath)
 	if err != nil {
 		return 0, err
@@ -148,11 +151,11 @@ func extractFromIndex(source string, trackID uint64, format, indexPath, outPath 
 	}
 	if format == "pgs" {
 		return writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
-			return matroska.ForEachSubtitlePGSFrom(context.Background(), source, trackID, &ix, fn)
+			return matroska.ForEachSubtitlePGSFrom(context.Background(), source, trackID, &ix, fn, opts)
 		})
 	}
 	return 0, writeFileFrom(outPath, func(out io.Writer) error {
-		return matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out)
+		return matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out, opts)
 	})
 }
 
@@ -230,9 +233,11 @@ func CmdSubtitleIndex(args []string) {
 	source := args[0]
 	var outPath string
 	var trackIDs []uint64
+	var damageBytes int64
 	fromCues := false
 	fl := newFlags("subtitle-index")
 	fl.Bool(&fromCues, "-from-cues")
+	fl.Func(damageBytesFlag(&damageBytes), "--damage-bytes")
 	fl.String(&outPath, "-o")
 	fl.Func(func(v string) {
 		for _, part := range strings.Split(v, ",") {
@@ -249,7 +254,7 @@ func CmdSubtitleIndex(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	ix, err := buildSubtitleIndex(source, trackIDs, fromCues)
+	ix, err := buildSubtitleIndex(source, trackIDs, fromCues, subtitleReadOptions(damageBytes))
 	if err != nil {
 		Fatal(err.Error())
 	}
@@ -300,4 +305,12 @@ func subtitleIndexFromCues(source string, trackIDs []uint64, opts ...matroska.Op
 		return nil, err
 	}
 	return ix, nil
+}
+
+// subtitleReadOptions bounds the damaged region a subtitle read passes over and names each one on stderr.
+func subtitleReadOptions(damageBytes int64) matroska.Options {
+	return matroska.Options{DamageBytes: damageBytes, OnSkip: func(r matroska.DamagedRange) {
+		fmt.Fprintf(os.Stderr, "skipped a damaged region at bytes %d to %d (about %d to %d ms): the subtitles in it are lost\n",
+			r.StartOffset, r.EndOffset, r.ApproxStartMs, r.ApproxEndMs)
+	}}
 }

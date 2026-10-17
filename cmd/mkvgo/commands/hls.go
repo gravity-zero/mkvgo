@@ -95,13 +95,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Bool(&f.chapterMarkers, "--chapter-markers")
 	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
 	fl.Bool(&f.noIFrames, "--no-iframes")
-	fl.Func(func(v string) {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n <= 0 {
-			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", v))
-		}
-		f.damageBytes = n
-	}, "--damage-bytes")
+	fl.Func(damageBytesFlag(&f.damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
 		switch v {
 		case "auto":

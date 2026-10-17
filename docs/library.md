@@ -1466,6 +1466,27 @@ err = subtitle.FileToWebVTT("subs.fr.srt", w)
 
 S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` - are exported for custom pipelines.
 
+#### A damaged region
+
+Every Matroska subtitle read - `ExtractSubtitle`, `ExtractASS`,
+`ExtractSubtitleWebVTT`, `ForEachSubtitlePGS`, their `From` forms,
+`BuildSubtitleIndex` and `SubtitleIndex.Resolve` - passes over a damaged region
+(a zeroed stretch, bytes a download never received) when the next Cluster lies
+within `Options.DamageBytes` of it, 64 MiB by default (`mkv.DefaultDamageBytes`),
+as the on-demand HLS windows do. The cues inside the region are lost and the
+rest of the track is delivered; a PGS cue the region left on screen ends with
+the default duration (or at the start of the cluster the region begins in)
+instead of lasting until the next cue past it. Each region is reported once
+through `Options.OnSkip`, with its byte range and the timestamps of the
+clusters around it. A longer region fails the read with
+`reader.ErrDamagedRegion`, and a negative `DamageBytes` refuses any damage.
+
+```go
+err := matroska.ForEachSubtitlePGS(ctx, "movie.mkv", trackID, fn, matroska.Options{
+    OnSkip: func(r matroska.DamagedRange) { log.Printf("subtitles lost over %d-%d ms", r.ApproxStartMs, r.ApproxEndMs) },
+})
+```
+
 #### Serving a Matroska subtitle track without walking the file
 
 An MP4 extraction is near-instant because the sample table already records where

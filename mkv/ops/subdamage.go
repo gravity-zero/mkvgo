@@ -1,0 +1,97 @@
+package ops
+
+import (
+	"io"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+)
+
+// subtitleDamage passes a subtitle read over the damaged regions Options.DamageBytes allows and hands each to OnSkip.
+type subtitleDamage struct {
+	br     *reader.BlockReader
+	opts   []mkv.Options
+	told   int
+	lastTo int64 // where the last region reported ends: entries of one region read from an index report it once
+}
+
+// tolerateSubtitleDamage makes br skip a damaged region under the bound opts give; a read refusing damage keeps br strict.
+func tolerateSubtitleDamage(br *reader.BlockReader, opts []mkv.Options) *subtitleDamage {
+	if n := mkv.DamageBytesFrom(opts); n > 0 {
+		br.SetSkipDamage(true)
+		br.SetDamageScan(n)
+	}
+	return &subtitleDamage{br: br, opts: opts}
+}
+
+// pending reports whether the reader passed over a region the last skipped call did not report.
+func (d *subtitleDamage) pending() bool { return len(d.br.SkippedRanges()) > d.told }
+
+// skipped reports the regions passed over since the last call and returns the earliest one's start time (ms), -1 for none.
+func (d *subtitleDamage) skipped() (fromMs int64, ok bool) {
+	r := d.br.SkippedRanges()
+	fromMs = -1
+	for ; d.told < len(r); d.told++ {
+		g := r[d.told]
+		if !ok {
+			fromMs, ok = g.FromMs, true
+		}
+		if g.To != d.lastTo {
+			reportDamage(d.opts, g, g.FromMs)
+		}
+		d.lastTo = g.To
+	}
+	return fromMs, ok
+}
+
+// damageAtCluster reports the damaged region a cued cluster that does not resolve starts, when opts let a read pass over it.
+func damageAtCluster(f io.ReadSeeker, tcScale, at int64, opts []mkv.Options) (reader.DamageRange, bool) {
+	n := mkv.DamageBytesFrom(opts)
+	if n <= 0 {
+		return reader.DamageRange{}, false
+	}
+	br, err := reader.NewBlockReaderAt(f, tcScale, at)
+	if err != nil {
+		return reader.DamageRange{}, false
+	}
+	br.SetSkipDamage(true)
+	br.SetDamageScan(n)
+	br.SetHeaderOnly(true)
+	_, _ = br.Next()
+	r := br.SkippedRanges()
+	if len(r) == 0 || r[0].From < at || r[0].From >= at+clusterHeadBytes {
+		return reader.DamageRange{}, false
+	}
+	g := r[0]
+	g.From = at // the cluster is lost from its own start
+	return g, true
+}
+
+// clusterHeadBytes is how far into a cluster ResolveClusterBlock reads: its header and its Timestamp.
+const clusterHeadBytes = 24
+
+// inDamage reports whether off lies in one of the regions.
+func inDamage(regions []reader.DamageRange, off int64) bool {
+	for _, g := range regions {
+		if off >= g.From && off < g.To {
+			return true
+		}
+	}
+	return false
+}
+
+// reportDamage hands OnSkip a region a read passed over, timed at atMs when the region's own start time is unknown.
+func reportDamage(opts []mkv.Options, g reader.DamageRange, atMs int64) {
+	onSkip := mkv.OnSkipFrom(opts)
+	if onSkip == nil {
+		return
+	}
+	from, end := g.FromMs, g.ToMs
+	if from < 0 {
+		from = atMs
+	}
+	if end < 0 {
+		end = from
+	}
+	onSkip(mkv.DamagedRange{StartOffset: g.From, EndOffset: g.To, ApproxStartMs: from, ApproxEndMs: end})
+}
