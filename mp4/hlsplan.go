@@ -461,7 +461,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, err
 		}
 	}
-	if err := cencPreflight(&o, videoCodecOf(media)); err != nil {
+	if err := cencPreflight(&o, media); err != nil {
 		return nil, err
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
@@ -4148,7 +4148,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	if len(media) == 0 {
 		return nil, errf("no audio or video track to segment")
 	}
-	if err := cencPreflight(o, videoCodecOf(media)); err != nil {
+	if err := cencPreflight(o, media); err != nil {
 		return nil, err
 	}
 

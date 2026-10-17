@@ -40,6 +40,10 @@ All notable changes to mkvgo are documented here. The format is based on
   set.** The same-host check let it through, and Go strips only its own
   credential headers on that hop: custom ones such as `X-Api-Key` crossed in
   clear.
+- **CENC 'cenc' refuses two tracks whose IVs would coincide.** A track's IVs
+  are set apart by its ID modulo 255, so two audio tracks numbered 2 and 257
+  shared their keystream; such a presentation is now refused and names both
+  tracks.
 
 ## [0.55.1] - 2026-10-17
 

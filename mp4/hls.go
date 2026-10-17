@@ -265,7 +265,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if len(media) == 0 {
 		return nil, errf("no audio or video track to segment")
 	}
-	if err := cencPreflight(&o, videoCodecOf(media)); err != nil {
+	if err := cencPreflight(&o, media); err != nil {
 		return nil, err
 	}
 	var subs []hlsSubTrack

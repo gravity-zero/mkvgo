@@ -137,10 +137,11 @@ func (c *CENCOptions) keyLine() string {
 // selected video codec, nil when CENC is unset. videoCodec is the mkvgo short
 // codec name ("h264", "hevc", …) of the presentation's video track, or "" for
 // an audio-only presentation.
-func cencPreflight(o *Options, videoCodec string) error {
+func cencPreflight(o *Options, media []*outTrack) error {
 	if o.CENC == nil {
 		return nil
 	}
+	videoCodec := videoCodecOf(media)
 	if o.Encrypt != nil {
 		return errf("Options.CENC and Options.Encrypt cannot be combined (pick one encryption scheme)")
 	}
@@ -152,6 +153,16 @@ func cencPreflight(o *Options, videoCodec string) error {
 	}
 	if videoCodec != "" && !cencSupportsCodec(videoCodec) {
 		return errf("Options.CENC: video codec %q has no subsample encryption rule in this version (h264, hevc, av1, vp9)", videoCodec)
+	}
+	if o.CENC.Scheme == "cenc" {
+		owner := map[uint64]uint64{}
+		for _, t := range media {
+			d := cencIVDomain(t.spec.video, t.mkv.ID)
+			if id, ok := owner[d]; ok {
+				return errf("Options.CENC: tracks %d and %d would share their sample IVs under the key; keep one of them (Options.KeepTracks)", id, t.mkv.ID)
+			}
+			owner[d] = t.mkv.ID
+		}
 	}
 	return nil
 }
