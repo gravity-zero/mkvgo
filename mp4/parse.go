@@ -293,8 +293,8 @@ func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64,
 	return 0, 0, errf("no moov box found")
 }
 
-// maxMoovScanWindow caps the backward moov scan; a moov is at most tens of MB
-// even for a long movie, so growing past this means there is genuinely no moov.
+// maxMoovScanWindow caps the backward moov scan. A long movie's moov runs to
+// tens of MB and only an extreme one to hundreds, so past this there is no moov.
 const maxMoovScanWindow = 256 << 20
 
 // moovScanChunk is how much of the file the backward scan holds at a time.
@@ -420,16 +420,19 @@ func readMoovLazy(r io.ReadSeeker, size int64) ([]byte, error) {
 	return readMoovLazyAt(r, dataOff, payloadLen)
 }
 
+// maxLazyMoovBytes is the largest moov readMoovLazyAt allocates up front; a
+// larger declared moov goes to readMoovAt, whose buffer grows with the bytes
+// that arrive, so a size a remote server or a sparse file declares is never
+// allocated before it is read.
+const maxLazyMoovBytes = 256 << 20
+
 // readMoovLazyAt is readMoovLazy on the moov payload findMoov located.
 func readMoovLazyAt(r io.ReadSeeker, dataOff, payloadLen int64) ([]byte, error) {
-	// This buffer is the real moov size and is filled sparsely (large sample
-	// tables are seeked over, not read), so unlike readMoov it cannot grow
-	// incrementally - the boxes must sit at their true offsets. payloadLen is a
-	// legitimate value here (a very large movie's moov genuinely runs to
-	// hundreds of MB), so it is bounded by the source's declared size rather
-	// than a fixed cap. On a remote FS that declared size is the server's
-	// reported length; this single allocation is the one spot where the parser
-	// trusts it (bounded, and you already trust the server to stream the file).
+	// The buffer is filled sparsely (large sample tables are seeked over), so
+	// it is allocated at the declared size and capped for that reason.
+	if payloadLen > maxLazyMoovBytes {
+		return nil, errf("moov of %d bytes is past the %d-byte lazy read", payloadLen, int64(maxLazyMoovBytes))
+	}
 	m := &lazyMoov{r: r, base: dataOff, buf: make([]byte, payloadLen)}
 	if err := m.parse(0, len(m.buf)); err != nil {
 		return nil, err

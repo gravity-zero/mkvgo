@@ -6,6 +6,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+
+- **SEC-01: a declared moov size is no longer allocated before it is read.**
+  The metadata path allocated the moov's declared size in one piece, bounded
+  only by the source's size: over `httpfs` that size is the server's
+  Content-Range total, so 16 bytes of header claiming a terabyte (or a sparse
+  local file) asked for a terabyte. A moov declared past 256 MiB
+  (`maxLazyMoovBytes`) now goes to the full read, whose buffer grows with the
+  bytes that arrive, and a source that does not hold them fails having
+  allocated what it delivered.
+
 ### Fixed
 
 - **A window is served past a short damaged region instead of refused.** A
