@@ -739,6 +739,10 @@ func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 	}
 }
 
+// maxSidxBytes is the largest sidx payload ISO/IEC 14496-12 allows: a
+// version-1 header and 65535 references (reference_count is 16 bits) of 12 bytes.
+const maxSidxBytes = 32 + 65535*12
+
 // scanSidxBoxes returns the payloads of the sidx boxes that precede the first
 // fragment (moof) - a bounded head scan of the top-level boxes.
 func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
@@ -769,6 +773,9 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 		}
 		switch typ {
 		case "sidx":
+			if boxSize-headerLen > maxSidxBytes {
+				break // past what a sidx can hold: not one, and never read whole
+			}
 			payload, err := readExact(r, boxSize-headerLen)
 			if err != nil {
 				return out

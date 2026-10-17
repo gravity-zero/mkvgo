@@ -26,6 +26,12 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **NEW-03: a box named `sidx` is read only if a sidx can be that large.**
+  The fragmented-MP4 keyframe scan read every `sidx` before the first
+  fragment whole, whatever its declared size: a source delivering a 64 MiB box
+  of that name cost 248 MiB of allocations (a remote server can stream it at no
+  cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
+  larger one is skipped.
 - **A window is served past a short damaged region instead of refused.** A
   file holding a zeroed stretch (the pieces a download never received: 11 MB
   of zeros then debris, seen in the middle of a 3 GB film) failed every window
