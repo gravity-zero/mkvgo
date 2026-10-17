@@ -44,112 +44,69 @@ func parseHLSFlags(args []string) hlsFlags {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			i++
-			if i < len(args) {
-				f.outDir = args[i]
-			}
+			f.outDir = needValue(args, &i)
 		case "-segment", "--segment":
 			// Segment length in seconds, the HLS convention.
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				f.segMs = int64(secs * 1000)
+			needValue(args, &i)
+			secs, err := strconv.ParseFloat(args[i], 64)
+			if err != nil || secs <= 0 {
+				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
 			}
+			f.segMs = int64(secs * 1000)
 		case "--aes-key":
-			i++
-			if i < len(args) {
-				keyHex = args[i]
-			}
+			keyHex = needValue(args, &i)
 		case "--aes-key-file":
-			i++
-			if i < len(args) {
-				keyFile = args[i]
-			}
+			keyFile = needValue(args, &i)
 		case "--cenc-key-file":
-			i++
-			if i < len(args) {
-				cencKeyFile = args[i]
-			}
+			cencKeyFile = needValue(args, &i)
 		case "--cenc-inline-key":
 			cencInline = true
 		case "--aes-key-uri":
-			i++
-			if i < len(args) {
-				keyURI = args[i]
-			}
+			keyURI = needValue(args, &i)
 		case "--aes-rotate-segments":
-			i++
-			if i < len(args) {
-				n, err := strconv.Atoi(args[i])
-				if err != nil || n < 1 {
-					Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", args[i]))
-				}
-				rotateSegs = n
+			needValue(args, &i)
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 1 {
+				Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", args[i]))
 			}
+			rotateSegs = n
 		case "--cenc-scheme":
-			i++
-			if i < len(args) {
-				cencScheme = args[i]
-			}
+			cencScheme = needValue(args, &i)
 		case "--cenc-key":
-			i++
-			if i < len(args) {
-				cencKeyHex = args[i]
-			}
+			cencKeyHex = needValue(args, &i)
 		case "--cenc-kid":
-			i++
-			if i < len(args) {
-				cencKIDHex = args[i]
-			}
+			cencKIDHex = needValue(args, &i)
 		case "--cenc-iv":
-			i++
-			if i < len(args) {
-				cencIVHex = args[i]
-			}
+			cencIVHex = needValue(args, &i)
 		case "--cenc-key-uri":
-			i++
-			if i < len(args) {
-				cencKeyURI = args[i]
-			}
+			cencKeyURI = needValue(args, &i)
 		case "--url-prefix":
-			i++
-			if i < len(args) {
-				f.prefix = args[i]
-			}
+			f.prefix = needValue(args, &i)
 		case "--single-file":
 			f.singleFile = true
 		case "--keep-tracks":
-			i++
-			if i < len(args) {
-				for _, p := range strings.Split(args[i], ",") {
-					id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
-					if err != nil {
-						Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
-					}
-					f.keepTracks = append(f.keepTracks, id)
+			needValue(args, &i)
+			for _, p := range strings.Split(args[i], ",") {
+				id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
+				if err != nil {
+					Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
 				}
+				f.keepTracks = append(f.keepTracks, id)
 			}
 		case "--keep-lang", "--audio-lang":
-			i++
-			if i < len(args) {
-				for _, l := range strings.Split(args[i], ",") {
-					if l = strings.TrimSpace(l); l != "" {
-						f.keepLangs = append(f.keepLangs, strings.ToLower(l))
-					}
+			needValue(args, &i)
+			for _, l := range strings.Split(args[i], ",") {
+				if l = strings.TrimSpace(l); l != "" {
+					f.keepLangs = append(f.keepLangs, strings.ToLower(l))
 				}
 			}
 		case "--sub-offset":
-			i++
-			if i < len(args) {
-				ms, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil {
-					Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", args[i]))
-				}
-				f.subOffset = ms
+			needValue(args, &i)
+			ms, err := strconv.ParseInt(args[i], 10, 64)
+			if err != nil {
+				Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", args[i]))
 			}
+			f.subOffset = ms
 		case "--chapter-markers":
 			f.chapterMarkers = true
 		case "--skip-unsupported", "-skip-unsupported":
@@ -157,14 +114,12 @@ func parseHLSFlags(args []string) hlsFlags {
 		case "--no-iframes":
 			f.noIFrames = true
 		case "--damage-bytes":
-			i++
-			if i < len(args) {
-				n, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil || n <= 0 {
-					Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
-				}
-				f.damageBytes = n
+			needValue(args, &i)
+			n, err := strconv.ParseInt(args[i], 10, 64)
+			if err != nil || n <= 0 {
+				Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
 			}
+			f.damageBytes = n
 		case "--source-access":
 			if i+1 >= len(args) {
 				Fatal("--source-access needs auto, local or network")

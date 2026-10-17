@@ -61,10 +61,7 @@ func CmdToVTT(args []string) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 			continue
 		}
 		rejectFlagArg(args[i])
@@ -92,10 +89,7 @@ func CmdExtractFrame(args []string) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 			continue
 		}
 		rejectFlagArg(args[i])
@@ -144,10 +138,7 @@ func CmdExtractFrames(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 		case "-every":
 			sel.EveryMs = timeArg(&i, "-every")
 		case "-start":

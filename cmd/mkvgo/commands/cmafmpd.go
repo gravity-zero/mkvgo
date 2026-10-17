@@ -78,15 +78,9 @@ func parseCMAFArgs(args []string, cmd string) (out string, videos, audios []stri
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			i++
-			if i < len(args) {
-				out = args[i]
-			}
+			out = needValue(args, &i)
 		case "--audio":
-			i++
-			if i < len(args) {
-				audios = append(audios, args[i])
-			}
+			audios = append(audios, needValue(args, &i))
 		default:
 			rejectFlagArg(args[i])
 			videos = append(videos, args[i])

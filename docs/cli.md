@@ -16,7 +16,9 @@ Global flags:
 - `-h`, `--help` -- show help for a command
 
 Exit codes: `0` success, `1` any error (bad usage, unreadable input, failed
-operation). `validate` also exits `1` when error-severity issues are found
+operation). A flag that takes a value but is the last argument
+(`mkvgo to-hls in.mkv -o out -segment`) is bad usage: it exits `1` naming
+the flag, rather than being ignored. `validate` also exits `1` when error-severity issues are found
 (`-strict` makes warnings fail too) and `compare` when the files differ, so
 they can gate scripts (`mkvgo validate f.mkv && ...`).
 

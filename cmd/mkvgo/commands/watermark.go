@@ -27,29 +27,18 @@ func CmdWatermarkSegment(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 		case "-segment", "--segment":
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				segMs = int64(secs * 1000)
+			needValue(args, &i)
+			secs, err := strconv.ParseFloat(args[i], 64)
+			if err != nil || secs <= 0 {
+				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
 			}
+			segMs = int64(secs * 1000)
 		case "--variant":
-			i++
-			if i < len(args) {
-				variant = args[i]
-			}
+			variant = needValue(args, &i)
 		case "--pattern":
-			i++
-			if i < len(args) {
-				patternHex = args[i]
-			}
+			patternHex = needValue(args, &i)
 		default:
 			rejectFlagArg(args[i])
 			rest = append(rest, args[i])

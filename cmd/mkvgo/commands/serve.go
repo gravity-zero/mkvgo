@@ -47,56 +47,44 @@ func CmdServe(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-addr", "--addr":
-			i++
-			if i < len(args) {
-				addr = args[i]
-			}
+			addr = needValue(args, &i)
 		case "-direct", "--direct":
 			direct = true
 		case "-auto", "--auto":
 			auto = true
 		case "-target", "--target":
-			i++
-			if i < len(args) {
-				targetName = args[i]
-			}
+			targetName = needValue(args, &i)
 		case "-buffered", "--buffered":
 			buffered = true
 		case "-max-walks", "--max-walks":
-			i++
-			if i < len(args) {
-				n, err := strconv.Atoi(args[i])
-				if err != nil || n < 0 {
-					Fatal("-max-walks: expected a non-negative count, got " + args[i])
-				}
-				maxWalks = n
+			needValue(args, &i)
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				Fatal("-max-walks: expected a non-negative count, got " + args[i])
 			}
+			maxWalks = n
 		case "-window-cache", "--window-cache":
-			i++
-			if i < len(args) {
-				if args[i] == "off" {
-					windowCache = -1
-					break
-				}
-				mib, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil || mib < 0 {
-					Fatal("serve: --window-cache takes a size in MiB, or \"off\"")
-				}
-				windowCache = mib << 20
+			needValue(args, &i)
+			if args[i] == "off" {
+				windowCache = -1
+				break
 			}
+			mib, err := strconv.ParseInt(args[i], 10, 64)
+			if err != nil || mib < 0 {
+				Fatal("serve: --window-cache takes a size in MiB, or \"off\"")
+			}
+			windowCache = mib << 20
 		case "-window-bytes", "--window-bytes":
-			i++
-			if i < len(args) {
-				if args[i] == "off" {
-					windowBytes = -1
-					break
-				}
-				mib, err := strconv.ParseInt(args[i], 10, 64)
-				if err != nil || mib < 0 {
-					Fatal("serve: --window-bytes takes a size in MiB, or \"off\"")
-				}
-				windowBytes = mib << 20
+			needValue(args, &i)
+			if args[i] == "off" {
+				windowBytes = -1
+				break
 			}
+			mib, err := strconv.ParseInt(args[i], 10, 64)
+			if err != nil || mib < 0 {
+				Fatal("serve: --window-bytes takes a size in MiB, or \"off\"")
+			}
+			windowBytes = mib << 20
 		default:
 			rest = append(rest, args[i])
 		}

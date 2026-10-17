@@ -76,6 +76,11 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **CLI-02: a value flag given last is an error, not ignored.** In most
+  commands a flag taking a value (`-segment`, `-o`, `--aes-key`, ...) placed
+  as the last argument was dropped in silence: `to-hls in.mkv -o out -segment`
+  ran with the default segment length and exited 0. Every such flag now exits
+  1 with `<flag> needs a value`.
 - **ROB-05: the block reader refuses an EBML header of absurd size up
   front.** `NewBlockReader` skipped the header body by its declared size: an
   unknown size (-1) was skipped as nothing, misplacing every offset after it,

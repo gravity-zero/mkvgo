@@ -21,20 +21,11 @@ func CmdAddAttachment(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 		case "-name":
-			i++
-			if i < len(args) {
-				name = args[i]
-			}
+			name = needValue(args, &i)
 		case "-mime":
-			i++
-			if i < len(args) {
-				mime = args[i]
-			}
+			mime = needValue(args, &i)
 		default:
 			rejectFlagArg(args[i])
 			rest = append(rest, args[i])
@@ -77,10 +68,7 @@ func CmdRemoveAttachment(args []string) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 			continue
 		}
 		rejectFlagArg(args[i])

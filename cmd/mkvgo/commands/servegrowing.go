@@ -34,19 +34,14 @@ func CmdServeGrowing(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-addr", "--addr":
-			i++
-			if i < len(args) {
-				addr = args[i]
-			}
+			addr = needValue(args, &i)
 		case "-segment", "--segment":
-			i++
-			if i < len(args) {
-				secs, err := strconv.ParseFloat(args[i], 64)
-				if err != nil || secs <= 0 {
-					Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-				}
-				segMs = int64(secs * 1000)
+			needValue(args, &i)
+			secs, err := strconv.ParseFloat(args[i], 64)
+			if err != nil || secs <= 0 {
+				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
 			}
+			segMs = int64(secs * 1000)
 		default:
 			rejectFlagArg(args[i])
 			rest = append(rest, args[i])

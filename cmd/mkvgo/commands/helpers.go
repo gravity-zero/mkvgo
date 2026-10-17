@@ -551,3 +551,13 @@ func FormatBytes(b int64) string {
 		return fmt.Sprintf("%d B", b)
 	}
 }
+
+// needValue advances *i to the value of the flag at args[*i] and returns it, exiting when the flag is the last argument.
+func needValue(args []string, i *int) string {
+	flag := args[*i]
+	*i++
+	if *i >= len(args) {
+		Fatal(flag + " needs a value")
+	}
+	return args[*i]
+}

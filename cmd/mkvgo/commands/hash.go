@@ -16,10 +16,7 @@ func CmdHash(args []string) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-o" {
-			i++
-			if i < len(args) {
-				outPath = args[i]
-			}
+			outPath = needValue(args, &i)
 			continue
 		}
 		rejectFlagArg(args[i])
