@@ -93,8 +93,9 @@ http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {
 
 **Serving over HTTP.** The hand-rolled handler above is the idea in a few
 lines; `mkvhttp.Handler(plan)` (package `github.com/gravity-zero/mkvgo/mkvhttp`)
-is the batteries-included version -- strong ETag, conditional GET, Range,
-per-resource `Cache-Control`, CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already
+is the batteries-included version -- ETag, conditional GET, Range,
+per-resource `Cache-Control` (`no-cache` by default, immutable segments with
+`Options.Immutable` under a versioned URL), opt-in CORS -- since `mp4.HLSPlan`/`mp4.ABRPlan` already
 satisfy its `Resolver` interface as-is. See `docs/library.md` for the full
 semantics table. `mkvgo serve <file.mkv>` is this wired up as a CLI command
 (see `docs/cli.md`).

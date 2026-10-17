@@ -200,6 +200,11 @@ All notable changes to mkvgo are documented here. The format is based on
 - **DOC-03: the `v{k}/<name>` and `mp4.PlanABR` paragraph sits under
   `abr-segment`** in docs/cli.md, where it belongs, instead of closing the
   `forensic-segment` section.
+- **DOC-04: the `mkvhttp` package doc says what it caches.** It promised
+  "long-lived caching for the deterministic outputs" and a strong ETag; the
+  handler serves everything `no-cache` by default (immutable segments only
+  with `Options.Immutable`) and streams media segments under a weak ETag. The
+  package doc and streaming.md now say so.
 
 ### Changed
 

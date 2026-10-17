@@ -2,8 +2,11 @@
 // repository already builds head-only (mp4.HLSPlan, mp4.ABRPlan): nothing is
 // pre-generated on disk, every resource a player requests is built from the
 // source the first time it is asked for, and static-VOD HTTP semantics
-// (strong ETag, conditional GET, Range, long-lived caching for the
-// deterministic outputs) come for free.
+// (ETag, conditional GET, Range, Cache-Control) come for free. Every resource
+// is served "no-cache" by default, revalidated on its ETag: a segment name
+// does not say which version of the source it was built from. Options.Immutable
+// opts the init and media segments into a year of immutable caching, for a
+// handler mounted where the URL names the source's version (plan.SourceID()).
 //
 //	plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{})
 //	http.Handle("/hls/", http.StripPrefix("/hls/", mkvhttp.Handler(plan)))
