@@ -80,6 +80,14 @@ All notable changes to mkvgo are documented here. The format is based on
   everything after the uncompressed header, so a frame's protected run (and,
   in a superframe, the counter state of the next frame) was off by up to 15
   bytes. The clear prefix now takes the remainder.
+- **SEC-05: single-source forensic marking is requalified as experimental.**
+  `ForensicPlan` (CLI `forensic-segment`, WASM `openForensic`) picks the frame
+  variant B drops without a key, and `DropNonRefSample` is exported: a lone
+  viewer can turn every A segment into its B and erase the session pattern,
+  and viewers comparing segments see which carry a bit. The Go doc, the CLI
+  help, the docs and the README now call it experimental session marking,
+  robust neither to collusion nor to re-encoding. `DropNonRefSample` is
+  deprecated. The algorithm and its output are unchanged.
 - **SEC-09: the explicit AES-128 IV is documented as reused.** `HLSKey.IV`
   and `HLSEncryption.IV` apply one IV to every segment of a key's period,
   which under CBC shows where two segments' plaintexts start alike. The doc

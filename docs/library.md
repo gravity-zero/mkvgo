@@ -1090,6 +1090,13 @@ the edge).
 
 ### Single-source forensic watermarking (`mp4.PlanForensic`)
 
+**Experimental session marking, robust neither to collusion nor to
+re-encoding.** Which frame variant B drops is decided without a key: a lone
+viewer holding variant A segments derives their B with the same rule and
+erases the pattern, and viewers comparing their segments see which carry a
+bit. It tells honest sessions apart; it does not trace a leak by a viewer who
+means to hide it.
+
 ```go
 fp, err := mp4.PlanForensic(ctx, "title.mkv", mp4.Options{SegmentMs: 6000})
 seg, err := fp.Segment(ctx, n, sessionBit(n)) // A, or the derived B
@@ -1115,9 +1122,9 @@ The serve surface mirrors `WatermarkPlan` (`Segment`, `SegmentForPattern`), so
 swapping between the two is a construction-site change. The WASM
 `openForensic(input)` and the CLI `forensic-segment` expose the same.
 
-The building block is exported for callers with their own segments:
-`mp4.DropNonRefSample(segment)` returns the derived bytes and whether a frame
-was dropped, for any video segment this package produced.
+`mp4.DropNonRefSample(segment)`, the building block, is deprecated: exported,
+it hands anyone holding a variant A segment the variant B, which erases the
+mark. Serve through `ForensicPlan`.
 
 ### Gapless multi-file sessions (`mp4.RemuxConcatToHLS` / `mp4.PlanConcat`)
 

@@ -1417,6 +1417,8 @@ mkvgo watermark-segment a.mkv b.mkv 7 --pattern 4b -o s.m4s       # segment 7, r
 
 ### forensic-segment
 
+**Experimental session marking, robust neither to collusion nor to re-encoding.** The frame dropped is chosen without a key, so a lone viewer holding variant A segments can derive their B (and erase the pattern), and viewers comparing segments see which carry a bit. Use it to tell honest sessions apart, not to trace a leak by a viewer who means to hide.
+
 The single-source flavor of `watermark-segment`: variant B is DERIVED from the one source, with no second encode - each variant-B segment has one disposable H.264 frame removed at the sample level (a frame no other frame references, `nal_ref_idc == 0`), timing-compensated so the manifest, `#EXTINF` durations and the decode timeline of every following segment are identical to variant A's. The difference lives in the coded samples, so it survives a remux; it does not survive a re-encode. A viewer of variant B sees at most a one-frame hold (~40 ms).
 
 Not every segment carries a bit: a segment with no disposable frame (all-intra, or every frame referenced) has identical variants - `--distinct` reports whether segment `N` is a carrier. A reliable session signature wants a healthy number of carrier segments (~12+); if most segments report `false`, prefer the two-encode `watermark-segment`.
@@ -1433,7 +1435,7 @@ mkvgo forensic-segment movie.mkv 7 --distinct                     # does segment
 mkvgo forensic-segment movie.mkv 7 --variant B -o segB00007.m4s   # the derived variant
 ```
 
-The library equivalent is `mp4.PlanForensic` + `mp4.DropNonRefSample` (see library.md).
+The library equivalent is `mp4.PlanForensic` (see library.md); `mp4.DropNonRefSample` is deprecated.
 
 Every `v{k}/<name>` is byte-identical to the file `to-abr` would have written.
 The library equivalent is `mp4.PlanABR` (see library.md).

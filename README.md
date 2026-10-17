@@ -69,7 +69,7 @@ streaming, no transcoder involved. **One segment set, two manifests.**
   byte-identical output.
 - **ABR** from pre-encoded qualities, **AES-128** encryption (with **key
   rotation**) + signed URLs, **CENC** for the DRM/EME path (AV1/VP9 included),
-  **A/B forensic watermarking**, **single-file** byte-range serving, **I-frame**
+  **A/B forensic watermarking** (the single-source flavor is experimental session marking, robust neither to collusion nor to re-encoding), **single-file** byte-range serving, **I-frame**
   trick-play playlists, **thumbnails** for scrubbing, and **audio-only**
   (podcasts/music).
 - **Serving-side repairs** - an unindexed source streams anyway (the seek
@@ -198,7 +198,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
 | | `cmaf-mpd` · `cmaf-hls` | DASH manifest / HLS playlists over CMAF rungs an external encoder already produced - nothing re-packaged, rungs checked segment-aligned |
 | | `watermark-segment` | Serve one segment of an A/B forensic-watermarked stream (per-viewer bit routing, no re-encode) |
-| | `forensic-segment` | Single-source A/B watermark - variant B derived by dropping one disposable H.264 frame per segment, timing-compensated |
+| | `forensic-segment` | Single-source A/B watermark - variant B derived by dropping one disposable H.264 frame per segment, timing-compensated. Experimental session marking, robust neither to collusion nor to re-encoding |
 
 Full CLI reference: **[docs/cli.md](docs/cli.md)**
 

@@ -16,6 +16,10 @@ package mp4
 // A's. A segment with no disposable frame (all-intra, or every frame
 // referenced) yields no variant: Distinct reports false and the caller
 // treats that segment as carrying no watermark bit.
+//
+// This is experimental session marking, robust neither to collusion nor to re-encoding: the frame dropped is chosen
+// without a key, so a lone viewer can turn each A segment into its B and
+// erase the pattern, and viewers comparing their segments see which carry a bit.
 
 import (
 	"context"
@@ -24,7 +28,9 @@ import (
 
 // ForensicPlan serves a single-source A/B session-watermarked HLS
 // presentation on demand: variant A segments are the plan's ordinary
-// segments, variant B segments have one disposable frame dropped. The
+// segments, variant B segments have one disposable frame dropped. It is
+// experimental session marking, robust neither to collusion nor to re-encoding (see the file comment): a
+// viewer can derive B from A, so the mark does not identify a viewer who means to erase it. The
 // manifest, init segment and segment durations are identical across
 // variants, so one plan serves every session; only the per-segment A/B bit
 // differs (see WatermarkPlan for the two-encode flavor and for the code
@@ -85,7 +91,7 @@ func (f *ForensicPlan) Segment(ctx context.Context, n int, fromB bool) ([]byte, 
 	if err != nil || !fromB {
 		return seg, err
 	}
-	out, _ := DropNonRefSample(seg)
+	out, _ := dropNonRefSample(seg)
 	return out, nil
 }
 
@@ -96,7 +102,7 @@ func (f *ForensicPlan) Distinct(ctx context.Context, n int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, dropped := DropNonRefSample(seg)
+	_, dropped := dropNonRefSample(seg)
 	return dropped, nil
 }
 
@@ -119,7 +125,14 @@ func (f *ForensicPlan) SegmentForPattern(ctx context.Context, n int, pattern []b
 // Returns (segment, false) untouched when no sample is droppable or the
 // segment does not have the expected single-video-track shape (an audio
 // rendition segment, an encrypted segment, a foreign file).
-func DropNonRefSample(segment []byte) ([]byte, bool) {
+//
+// Deprecated: anyone holding a variant A segment can call it to derive the
+// variant B a ForensicPlan would serve, which erases the session mark. Serve
+// through ForensicPlan; this function will leave the exported API.
+func DropNonRefSample(segment []byte) ([]byte, bool) { return dropNonRefSample(segment) }
+
+// dropNonRefSample is DropNonRefSample, for ForensicPlan.
+func dropNonRefSample(segment []byte) ([]byte, bool) {
 	fs := parseForensicSegment(segment)
 	if fs == nil {
 		return segment, false
