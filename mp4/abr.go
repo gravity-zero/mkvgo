@@ -43,6 +43,7 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 	for i, src := range sources {
 		vo := o
 		vo.VideoOnly = i > 0
+		vo.CENC = cencForVariant(o.CENC, i)
 		sub := filepath.Join(outputDir, fmt.Sprintf("v%d", i+1))
 		res, err := remuxToHLSInto(ctx, src, sub, &vo)
 		if err != nil {

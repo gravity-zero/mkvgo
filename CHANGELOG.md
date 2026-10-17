@@ -48,6 +48,25 @@ All notable changes to mkvgo are documented here. The format is based on
   key in clear as a `data:` URI. The CLI now exits with an error naming
   `--cenc-key-uri`, and `--cenc-inline-key` keeps the inline key for local
   testing. The library default is unchanged.
+- **NEW-05, NEW-06: 'cenc' packaging reused the AES-CTR keystream across
+  tracks and ABR variants; content packaged this way must be re-packaged
+  under new keys.** The per-sample IV was the base IV plus the sample's decode
+  timestamp in its own track, and every track and ABR variant shares the key:
+  the first video sample and the first audio sample both took the base IV, as
+  did every pair of samples at equal timestamps, and every ABR variant
+  repeated the first one's IVs. The same key and IV under AES-CTR is a
+  two-time pad: XORing the two ciphertexts gives the XOR of the two plaintexts,
+  and a predictable one (silent audio, a known header) reveals the other.
+  Affected: everything mkvgo 0.54.0 or earlier packaged with
+  `CENCOptions{Scheme: "cenc"}` (CLI `--cenc-scheme cenc`) holding more than
+  one track (video plus audio) or more than one ABR variant under one key.
+  Re-package it with a new key, and rotate the old key out of the license or
+  key server: re-packaging under the old key does not help, the ciphertexts
+  already published stay exposed. `cbcs` is not affected (its constant IV is
+  the scheme's design and its pattern encryption runs CBC, not CTR). Each
+  track but the video now adds its own value in the IV's top byte, and each
+  variant past the first its index times 2^48, so no IV serves two samples
+  under one key.
 
 ### Fixed
 
@@ -88,6 +107,15 @@ All notable changes to mkvgo are documented here. The format is based on
   segments handed out, whole by `Resource` or opened by `Open`. `ServedBytes`
   keeps its meaning (what `Resource` handed out), so the window accounting it
   belongs to is unchanged.
+
+### Changed
+
+- **NEW-05, NEW-06: 'cenc' output bytes change for every track but the
+  video and every ABR variant but the first.** Their IVs move to their own
+  domain (see Security); a cache or CDN holding segments packaged before this
+  release must drop them together with the init and playlists of the same
+  presentation, as the re-packaging under a new key requires anyway. The video
+  of a single presentation and of an ABR one's first variant keeps its bytes.
 
 ## [0.54.0] - 2026-10-16
 

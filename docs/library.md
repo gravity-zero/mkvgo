@@ -1259,7 +1259,10 @@ DRM handshake. Two schemes:
 - **`"cenc"`** -- AES-CTR, a per-sample Initialization Vector (the caller's base
   IV plus the sample's absolute decode timestamp -- computed identically by
   `RemuxToHLS` and `PlanHLS`, so the ciphertext is byte-identical between the
-  two). No pattern: every protected byte is encrypted.
+  two). Every track shares the key, so each track but the video adds its own
+  value to the IV's top byte, and each ABR variant past the first its index
+  times 2^48: no two samples of a presentation share an IV. No pattern: every
+  protected byte is encrypted.
 - **`"cbcs"`** -- AES-CBC with a constant IV and, on video, a
   1-encrypted:9-clear 16-byte-block pattern per NAL unit's protected region
   (CBC state resets at each NAL); audio has no pattern (whole sample
