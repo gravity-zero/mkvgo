@@ -17,7 +17,8 @@ All notable changes to mkvgo are documented here. The format is based on
   damage it is (`reader.DamageError`, `Offset` and `Resume`), the same as an
   element overrunning the file, and never the source's own failure (I/O, a
   cancelled context, a replaced file). The on-demand window walks pass over a
-  damaged region under 2 % of the source (1 MiB at least): the window holding
+  damaged region shorter than `Options.DamageBytes` (64 MiB by default; CLI
+  `--damage-bytes` on `hls-segment` and `abr-segment`): the window holding
   its start serves what it read before it, a window whose cue points into the
   zeros serves no sample, the windows behind it are whole, and the plan
   remembers the region so no later window scans it again. A longer region is

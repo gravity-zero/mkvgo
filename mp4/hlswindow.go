@@ -337,7 +337,7 @@ type HLSPlanStats struct {
 	FarLookups int64
 	FarHits    int64
 	// DamageSkips counts the damaged regions (an element the walk cannot read, a zeroed stretch) the window walks
-	// passed over, each shorter than 2 % of the source; DamageRefusals, the regions longer than that, on which the
+	// passed over, each shorter than Options.DamageBytes; DamageRefusals, the regions longer than that, on which the
 	// window was refused (reader.ErrDamagedRegion).
 	DamageSkips    int64
 	DamageRefusals int64

@@ -26,6 +26,7 @@ type hlsFlags struct {
 	subOffset       int64
 	chapterMarkers  bool
 	noIFrames       bool
+	damageBytes     int64
 	skipUnsupported bool
 	sourceAccess    mp4.SourceAccess
 	synthIndex      bool
@@ -141,6 +142,15 @@ func parseHLSFlags(args []string) hlsFlags {
 			f.skipUnsupported = true
 		case "--no-iframes":
 			f.noIFrames = true
+		case "--damage-bytes":
+			i++
+			if i < len(args) {
+				n, err := strconv.ParseInt(args[i], 10, 64)
+				if err != nil || n <= 0 {
+					Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
+				}
+				f.damageBytes = n
+			}
 		case "--source-access":
 			if i+1 >= len(args) {
 				Fatal("--source-access needs auto, local or network")
@@ -252,6 +262,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		SubtitleOffsetMs:       f.subOffset,
 		ChapterMarkers:         f.chapterMarkers,
 		NoIFrames:              f.noIFrames,
+		DamageBytes:            f.damageBytes,
 		SkipUnsupported:        f.skipUnsupported,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,

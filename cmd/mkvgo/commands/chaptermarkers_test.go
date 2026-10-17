@@ -36,6 +36,16 @@ func TestParseHLSFlagsNoIFrames(t *testing.T) {
 	}
 }
 
+// --damage-bytes sets options().DamageBytes; absent, it is 0 (the library default).
+func TestParseHLSFlagsDamageBytes(t *testing.T) {
+	if got := parseHLSFlags([]string{"in.mkv"}).options("in.mkv").DamageBytes; got != 0 {
+		t.Errorf("options().DamageBytes = %d, want 0 by default", got)
+	}
+	if got := parseHLSFlags([]string{"in.mkv", "--damage-bytes", "1048576"}).options("in.mkv").DamageBytes; got != 1<<20 {
+		t.Errorf("options().DamageBytes = %d, want 1048576", got)
+	}
+}
+
 // --source-access sets options().SourceAccess; absent, it is automatic.
 func TestParseHLSFlagsSourceAccess(t *testing.T) {
 	for flag, want := range map[string]mp4.SourceAccess{"": mp4.SourceAuto, "auto": mp4.SourceAuto, "local": mp4.SourceLocal, "network": mp4.SourceNetwork} {

@@ -14,16 +14,16 @@ type damagedRange struct {
 	refused    bool
 }
 
-// damageCapMin is the shortest damaged region a window walk always passes over, whatever the file's size.
-const damageCapMin = 1 << 20
+// DefaultDamageBytes is how far past an unreadable element a window walk looks for the next Cluster when
+// Options.DamageBytes is 0.
+const DefaultDamageBytes = 64 << 20
 
-// damageCap is how far past an unreadable element a window walk looks for the next Cluster: 2 % of the source
-// (a hole longer than that is refused), never under damageCapMin; 64 MiB when the source's size is unknown.
+// damageCap is Options.DamageBytes, or DefaultDamageBytes when it is unset.
 func (p *HLSPlan) damageCap() int64 {
-	if p.srcSize <= 0 {
-		return 64 << 20
+	if p.opts.DamageBytes > 0 {
+		return p.opts.DamageBytes
 	}
-	return maxInt64(p.srcSize/50, damageCapMin)
+	return DefaultDamageBytes
 }
 
 // tolerateDamage makes a window walk pass over a damaged region under damageCap instead of failing on it.

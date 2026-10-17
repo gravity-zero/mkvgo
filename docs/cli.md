@@ -1168,7 +1168,7 @@ and reading only that window - first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
-mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--synthesize-index] [--chapter-markers] [--no-iframes]
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--synthesize-index] [--chapter-markers] [--no-iframes] [--damage-bytes <n>]
 ```
 
 Without `-o` the resource goes to stdout (pipe it from a server handler).
@@ -1176,7 +1176,11 @@ Without `-o` the resource goes to stdout (pipe it from a server handler).
 (see `to-hls`) resyncs the WebVTT renditions virtually; it must match `to-hls`'s
 value for the two modes to stay byte-identical. `--audio-shift` (see `to-hls`)
 cancels a constant A/V desync in the served segments via the init's edit list,
-nothing rewritten.
+nothing rewritten. A damaged region in the middle of the source (a zeroed
+stretch, an element that does not decode) shorter than `--damage-bytes`
+(64 MiB by default) is passed over: the segment holding its start stops
+there, the next ones serve as usual. A longer one refuses the segment
+(`to-hls` always refuses a file damaged in its middle).
 
 For a Matroska source whose Cues index every video keyframe, the output is
 **byte-identical** to the corresponding file `to-hls` writes (same boundaries,
@@ -1316,7 +1320,7 @@ resource name (`master.m3u8`, or `v{k}/<name>` such as `v2/seg00042.m4s`), the
 rest are the quality variants best first.
 
 ```
-mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--sub-offset <ms>] [--chapter-markers] [--no-iframes]
+mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--sub-offset <ms>] [--chapter-markers] [--no-iframes] [--damage-bytes <n>]
 ```
 
 ```bash

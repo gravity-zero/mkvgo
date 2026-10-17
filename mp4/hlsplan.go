@@ -194,7 +194,6 @@ type HLSPlan struct {
 	winBuilt []uint64
 	srcRead  atomic.Int64 // HLSPlanStats.SourceReadBytes
 	streamed atomic.Int64 // HLSPlanStats.StreamedBytes
-	srcSize  int64        // the source's size when the plan was built (0: unknown), for damageCap
 	// damaged (segMu, sorted by start) are the unreadable regions the walks met: passed over, or refused.
 	damaged []damagedRange
 	// subIndex is Options.SubtitleIndex when it matches the source's
@@ -654,7 +653,6 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if st, serr := fs.DoStat(srcPath); serr == nil {
 		srcSize = st.Size()
 	}
-	p.srcSize = srcSize
 	for k := 0; k < p.segCount; k++ {
 		end := srcSize
 		if k+1 < p.segCount {

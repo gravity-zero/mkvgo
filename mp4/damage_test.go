@@ -104,13 +104,13 @@ func clusterOffsets(t *testing.T, src string) []int {
 }
 
 // TestOnDemandServesPastASmallDamagedRegion: a zeroed stretch shorter than the
-// plan's cap (2 % of the source, 1 MiB at least) that swallows the end of one
+// plan's cap (Options.DamageBytes) that swallows the end of one
 // cluster and the start of the next, cue included. The window holding its start
 // serves what it read up to the damage, the window whose cue points into the
 // zeros serves no sample instead of failing, every other window is the full
 // pass's, and the full pass itself refuses the file with the repair named.
 func TestOnDemandServesPastASmallDamagedRegion(t *testing.T) {
-	clean := buildInterleavedSource(t, 120) // 60 clusters of 2 s (1 MiB each), each cued: a 63 MB source, its cap 1.26 MB
+	clean := buildInterleavedSource(t, 40) // 20 clusters of 2 s (1 MiB each), each cued
 	offs := clusterOffsets(t, clean)
 	if len(offs) < 16 {
 		t.Fatalf("%d clusters, want 60 (one per 2 s)", len(offs))
@@ -170,14 +170,14 @@ func TestOnDemandServesPastASmallDamagedRegion(t *testing.T) {
 func TestOnDemandRefusesADamagedRegionBeyondTheCap(t *testing.T) {
 	clean := buildInterleavedSource(t, 40) // 20 clusters of 2 s, each cued
 	offs := clusterOffsets(t, clean)
-	from, to := offs[10]+100<<10, offs[10]+100<<10+2560<<10 // 2.5 MiB from inside the 20 s cluster, over the 1 MiB cap
+	from, to := offs[10]+100<<10, offs[10]+100<<10+2560<<10 // 2.5 MiB from inside the 20 s cluster, over the cap set below
 	bad := zeroedSource(t, clean, from, to)
 	ctx := context.Background()
 	full := t.TempDir()
 	if err := RemuxToHLS(ctx, clean, full, Options{SegmentMs: 2000}); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := PlanHLS(ctx, bad, Options{SegmentMs: 2000, StreamFromFS: true, SourceAccess: SourceLocal})
+	plan, err := PlanHLS(ctx, bad, Options{SegmentMs: 2000, StreamFromFS: true, SourceAccess: SourceLocal, DamageBytes: 1 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}

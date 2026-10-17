@@ -277,6 +277,13 @@ type Options struct {
 	// encrypted); the media segments and the other playlists are the same
 	// either way.
 	NoIFrames bool
+
+	// DamageBytes is how far past an unreadable element an on-demand window
+	// walk (PlanHLS, PlanABR) looks for the next Cluster before refusing the
+	// window: a damaged region shorter than this is passed over, a longer one
+	// is refused with reader.ErrDamagedRegion. 0 is DefaultDamageBytes (64
+	// MiB). The full passes never pass over damage.
+	DamageBytes int64
 }
 
 // wantsEditList reports whether a codec's container delay should be carried as an
