@@ -94,6 +94,9 @@ All notable changes to mkvgo are documented here. The format is based on
   FlagDefault, Channels, SamplingFrequency, TimestampScale, FieldOrder, the
   colour code points, TargetTypeValue and the three Language elements now
   take their defaults.
+- **A string ends at its first null byte.** RFC 8794 section 13 leaves the
+  bytes after it out of the string; only trailing nulls were trimmed, so
+  `eng\0xx` read as five characters.
 
 ## [0.55.1] - 2026-10-17
 

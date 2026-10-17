@@ -1,6 +1,7 @@
 package ebml
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -85,14 +86,14 @@ func readExact(r io.Reader, size int64) ([]byte, error) {
 	return buf, nil
 }
 
-// ReadString reads a UTF-8/ASCII string, trimming trailing nulls.
+// ReadString reads a UTF-8/ASCII string up to its first null, past which nothing belongs to it (RFC 8794 section 13).
 func ReadString(r io.Reader, size int64) (string, error) {
 	buf, err := readExact(r, size)
 	if err != nil {
 		return "", err
 	}
-	for len(buf) > 0 && buf[len(buf)-1] == 0 {
-		buf = buf[:len(buf)-1]
+	if i := bytes.IndexByte(buf, 0); i >= 0 {
+		buf = buf[:i]
 	}
 	return string(buf), nil
 }
