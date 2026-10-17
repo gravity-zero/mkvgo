@@ -2354,6 +2354,9 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 // refusing to allocate for a pathological or malicious declared size.
 const maxCuesBuffer = 64 << 20 // 64 MiB
 
+// maxCuePoints caps the CuePoints a Cues element yields (a cue on every audio frame of 24 h is 4M); a var for tests.
+var maxCuePoints = 1 << 23
+
 // parseCues reads the whole Cues index in ONE io.ReadFull and parses it from
 // memory, instead of letting the nested CuePoint walk issue ~4 tiny reads per
 // entry directly against p.r. A long file's index is tens of thousands of
@@ -2394,9 +2397,15 @@ func (p *parser) parseCuesFrom(size int64, c *mkv.Container) error {
 			return err
 		}
 		if eh.ID == mkv.IDCuePoint {
+			if eh.Size == 0 {
+				continue // an empty point: nothing to seek to
+			}
 			cp, err := p.parseCuePoint(eh.Size)
 			if err != nil {
 				return err
+			}
+			if len(c.Cues) >= maxCuePoints {
+				return fmt.Errorf("the Cues hold more than %d points: the file is damaged or forged", maxCuePoints)
 			}
 			c.Cues = append(c.Cues, cp)
 		} else {

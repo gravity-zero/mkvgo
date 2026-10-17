@@ -49,6 +49,10 @@ All notable changes to mkvgo are documented here. The format is based on
   VP9 title with v0.55 under the same key and IV applies the same keystream to
   shifted bytes, so the old and new outputs together leak plaintext. The docs
   now say a title needs its own key or base IV under `cenc`.
+- **A Cues element costs memory in proportion to the points it positions.**
+  Each 2-byte empty CuePoint became a 32-byte entry, so 8 MiB of them made a
+  probe allocate 732 MiB; an empty point is now skipped, and Cues past 8M
+  points are refused as damaged.
 
 ## [0.55.1] - 2026-10-17
 

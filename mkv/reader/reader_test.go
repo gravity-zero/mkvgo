@@ -107,8 +107,10 @@ func wrapSegment(inner []byte) []byte {
 }
 
 func oneCuePoint() []byte {
+	point := []byte{0xB3, 0x81, 0x00, 0xB7, 0x86, 0xF7, 0x81, 0x01, 0xF1, 0x81, 0x00} // CueTime 0, track 1 at 0
 	var cue bytes.Buffer
-	ebml.WriteElementHeader(&cue, mkv.IDCuePoint, 0)
+	ebml.WriteElementHeader(&cue, mkv.IDCuePoint, int64(len(point)))
+	cue.Write(point)
 	var out bytes.Buffer
 	ebml.WriteElementHeader(&out, mkv.IDCues, int64(cue.Len()))
 	out.Write(cue.Bytes())
