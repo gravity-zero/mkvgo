@@ -803,7 +803,7 @@ func (p *streamParser) parseStreamEdition(size int64) (mkv.Edition, error) {
 			ed.Chapters = append(ed.Chapters, ch)
 			return nil
 		case mkv.IDEditionUID, mkv.IDEditionFlagDefault, mkv.IDEditionFlagHidden, mkv.IDEditionFlagOrdered:
-			v, err := ebml.ReadUint(p.r, h.Size)
+			v, err := p.readUint(h.Size)
 			switch h.ID {
 			case mkv.IDEditionUID:
 				ed.UID = v

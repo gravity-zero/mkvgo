@@ -81,6 +81,9 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Damage ahead of the first Cluster is reported.** A tolerant walk resynced
   past it silently, so a subtitle read lost the first Cluster's cues without
   an `OnSkip` call; the region is now reported, timed from 0.
+- **`ReadStream` keeps its place past an edition's UID and flags.** It read
+  them without advancing its position, so the edition's loop swallowed what
+  followed: the next edition and the Tags after the Chapters were lost.
 
 ## [0.55.1] - 2026-10-17
 
