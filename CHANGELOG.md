@@ -76,6 +76,12 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **ROB-04: an MP4 header duration no longer overflows into a negative one.**
+  The mvhd, mehd and mdhd durations were converted as `ticks*1000/timescale`
+  in int64, which wrapped for any duration past about 9.2e15 ticks although
+  the guard let through up to 2^62: a version-1 header could report a
+  negative movie or track duration. The conversion now runs in 128 bits, and
+  a result past int64 is taken as unset.
 - **ROB-03: a zero-length float reads as 0.** RFC 8794 lets a float element
   hold no bytes, meaning 0; `ebml.ReadFloat` refused it, so a file whose
   Duration (or any float) was written empty failed to open. It now returns 0.

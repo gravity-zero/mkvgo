@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"math/bits"
 	"strconv"
 	"strings"
 
@@ -903,7 +904,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		var durTicks uint64
 		movieTS, durTicks = parseMovieHeader(mvhd.payload)
 		if movieTS > 0 && durTicks > 0 && durTicks < 1<<62 && durTicks != 0xFFFFFFFF {
-			mv.durationMs = int64(durTicks) * 1000 / int64(movieTS)
+			mv.durationMs = headerTicksToMs(durTicks, movieTS)
 		}
 	}
 	if movieTS == 0 {
@@ -988,7 +989,24 @@ func mehdDurationMs(moovBoxes []memBox, movieTS uint32) int64 {
 	if ticks == 0 || ticks >= 1<<62 || ticks == 0xFFFFFFFF {
 		return 0
 	}
-	return int64(ticks) * 1000 / int64(movieTS)
+	return headerTicksToMs(ticks, movieTS)
+}
+
+// headerTicksToMs converts a header's duration to milliseconds without
+// overflowing: a result past int64 is taken as unset (0).
+func headerTicksToMs(ticks uint64, timescale uint32) int64 {
+	if timescale == 0 {
+		return 0
+	}
+	hi, lo := bits.Mul64(ticks, 1000)
+	if hi >= uint64(timescale) {
+		return 0
+	}
+	q, _ := bits.Div64(hi, lo, uint64(timescale))
+	if q > math.MaxInt64 {
+		return 0
+	}
+	return int64(q)
 }
 
 // trexDefaultDurations reads mvex>trex and returns each track's
@@ -1709,7 +1727,7 @@ func mdhdDurationMs(payload []byte) int64 {
 	if ticks == 0 || ticks == 0xFFFFFFFF || ticks >= 1<<62 {
 		return 0 // unset/sentinel
 	}
-	return int64(ticks) * 1000 / int64(ts)
+	return headerTicksToMs(ticks, ts)
 }
 
 // parseElst reads an edit list box and returns the first non-empty edit's
