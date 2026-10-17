@@ -380,7 +380,7 @@ func retimeInPlace(ctx context.Context, path string, shift map[uint64]int64, opt
 	if _, err := f.Seek(size, io.SeekStart); err != nil {
 		return fmt.Errorf("retime: seek to end of file: %w", err)
 	}
-	if err := writeInPlaceJournal(f, size, zones); err != nil {
+	if err := writeInPlaceJournal(f, nil, size, zones); err != nil {
 		return rollback(fmt.Errorf("write journal: %w", err))
 	}
 	if err := sync(); err != nil {

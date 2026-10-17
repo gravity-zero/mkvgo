@@ -152,11 +152,8 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 	if _, err := f.Seek(size, io.SeekStart); err != nil {
 		return rollback(fmt.Errorf("seek to end of file: %w", err))
 	}
-	if _, err := f.Write(cuesBytes); err != nil {
-		return rollback(fmt.Errorf("append cues: %w", err))
-	}
-	if err := writeInPlaceJournal(f, size, zones); err != nil {
-		return rollback(fmt.Errorf("write journal: %w", err))
+	if err := writeInPlaceJournal(f, cuesBytes, size, zones); err != nil {
+		return rollback(fmt.Errorf("append cues and journal: %w", err))
 	}
 	if err := sync(); err != nil {
 		return rollback(fmt.Errorf("sync after journal: %w", err))
@@ -661,11 +658,13 @@ type inplaceJournal struct {
 	zones    []inplaceZone
 }
 
-// writeInPlaceJournal appends the journal payload and trailer to w, which
-// must already be positioned right after the new Cues bytes (i.e. at the
-// current end of the file, before the Segment size has been extended to
-// cover any of this).
-func writeInPlaceJournal(w io.Writer, origSize int64, zones []inplaceZone) error {
+// writeInPlaceJournal appends lead (the bytes the operation appends for good,
+// if any), then the journal payload and its trailer, to w, which must already
+// be positioned at the current end of the file, before the Segment size has
+// been extended to cover any of this. Everything goes in one write call, so a
+// process dying around it leaves either nothing or a journal recovery finds:
+// a tail cut between two calls carried no trailer and stayed in the file.
+func writeInPlaceJournal(w io.Writer, lead []byte, origSize int64, zones []inplaceZone) error {
 	payload := make([]byte, 0, 12+len(zones)*12)
 	payload = appendUint64(payload, uint64(origSize))
 	payload = appendUint32(payload, uint32(len(zones)))
@@ -677,14 +676,12 @@ func writeInPlaceJournal(w io.Writer, origSize int64, zones []inplaceZone) error
 	if len(payload) > maxInplaceJournal {
 		return fmt.Errorf("journal payload %d bytes exceeds cap (%d)", len(payload), maxInplaceJournal)
 	}
-	if _, err := w.Write(payload); err != nil {
-		return err
-	}
-	trailer := make([]byte, 0, inplaceTrailerLen)
-	trailer = appendUint32(trailer, uint32(len(payload)))
-	trailer = appendUint32(trailer, crc32.ChecksumIEEE(payload))
-	trailer = append(trailer, inplaceJournalMagic[:]...)
-	_, err := w.Write(trailer)
+	tail := make([]byte, 0, len(lead)+len(payload)+inplaceTrailerLen)
+	tail = append(append(tail, lead...), payload...)
+	tail = appendUint32(tail, uint32(len(payload)))
+	tail = appendUint32(tail, crc32.ChecksumIEEE(payload))
+	tail = append(tail, inplaceJournalMagic[:]...)
+	_, err := w.Write(tail)
 	return err
 }
 

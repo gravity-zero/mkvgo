@@ -82,6 +82,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **NEW-04: an in-place repair that dies while landing its journal is
+  recoverable.** `ReindexInPlace` appended the new Cues, the journal and its
+  trailer in three write calls, `RetimeTracksInPlace` the journal in two: a
+  process dying between them left bytes past the original end with no trailer,
+  so `RecoverInPlace` found nothing to undo while the next `ReindexInPlace`
+  refused the file over that tail, and the error said to run `RecoverInPlace`.
+  The tail now goes out in one write call: a death before or after any write,
+  of the repair or of a recovery, comes back to the original file or the
+  finished one, which a test checks at every write.
 - **NEW-03: a box named `sidx` is read only if a sidx can be that large.**
   The fragmented-MP4 keyframe scan read every `sidx` before the first
   fragment whole, whatever its declared size: a source delivering a 64 MiB box
