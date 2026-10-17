@@ -353,6 +353,11 @@ Two serving-side repairs, nothing written to the source:
   refusing the window, 64 MiB by default (`DefaultDamageBytes`): a damaged
   region shorter than that is passed over, a longer one is refused. See the
   salvage section below for what the windows around a region serve.
+- **`Options.MaxMoovBytes`** - the largest moov box an MP4 source may
+  declare, 256 MiB by default (`DefaultMaxMoovBytes`); a long movie's moov
+  runs to tens of MB. A larger one is refused before any of it is read, so a
+  remote server streaming a huge moov, or a sparse local file, cannot exhaust
+  memory. Raise it for a source that genuinely needs more.
 
 ### Convert an audio codec at packaging time (`Options.FrameConverter`)
 

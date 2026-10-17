@@ -34,7 +34,7 @@ func (ps *packagingSource) Close() {
 }
 
 // openPackagingSource sniffs and opens srcPath for packaging.
-func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS) (*packagingSource, error) {
+func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS, moovLimit int64) (*packagingSource, error) {
 	f, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS) (*pack
 		f.Close()
 		return nil, err
 	}
-	mv, err := parseMP4(f, st.Size(), sampleFull)
+	mv, err := parseMP4Limit(f, st.Size(), sampleFull, moovLimit)
 	if err != nil {
 		f.Close()
 		return nil, err

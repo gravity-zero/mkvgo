@@ -8,14 +8,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
-- **SEC-01: a declared moov size is no longer allocated before it is read.**
-  The metadata path allocated the moov's declared size in one piece, bounded
-  only by the source's size: over `httpfs` that size is the server's
-  Content-Range total, so 16 bytes of header claiming a terabyte (or a sparse
-  local file) asked for a terabyte. A moov declared past 256 MiB
-  (`maxLazyMoovBytes`) now goes to the full read, whose buffer grows with the
-  bytes that arrive, and a source that does not hold them fails having
-  allocated what it delivered.
+- **SEC-01: an MP4's moov is capped at 256 MiB before it is read.** The
+  metadata path allocated the moov's declared size in one piece, bounded only
+  by the source's size: over `httpfs` that size is the server's Content-Range
+  total, so 16 bytes of header claiming a terabyte asked for a terabyte, and a
+  server streaming zeros under a 300 MiB moov made the probe allocate 1.3 GiB.
+  A moov declared past `Options.MaxMoovBytes` (new, 0 = `DefaultMaxMoovBytes`,
+  256 MiB) is now refused before any of it is read, on every MP4 path, with an
+  error naming the option; under the cap the lazy read is used as before.
 - **SEC-02: `httpfs` keeps only the range it asked for.** Under a
   `mkv.ShareReads` scope, `Stat` fetches the first and last window and sized
   each buffer from the Content-Range the server sent. A response is now taken

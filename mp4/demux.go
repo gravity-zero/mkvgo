@@ -47,7 +47,7 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	}
 	size := fi.Size()
 
-	mv, err := parseMP4(src, size, sampleFull)
+	mv, err := parseMP4Limit(src, size, sampleFull, o.moovLimit())
 	if err != nil {
 		return err
 	}

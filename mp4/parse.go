@@ -363,11 +363,27 @@ func validMoovAt(r io.ReadSeeker, boxStart, boxSize, size int64) bool {
 // readMoov returns the full moov box payload - every sample-table byte included.
 // Used by the remux/extract path, which needs the complete tables.
 func readMoov(r io.ReadSeeker, size int64) ([]byte, error) {
+	return readMoovLimit(r, size, DefaultMaxMoovBytes)
+}
+
+// readMoovLimit is readMoov refusing a moov past limit bytes before reading it.
+func readMoovLimit(r io.ReadSeeker, size, limit int64) ([]byte, error) {
 	dataOff, payloadLen, err := findMoov(r, size)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkMoovSize(payloadLen, limit); err != nil {
+		return nil, err
+	}
 	return readMoovAt(r, dataOff, payloadLen)
+}
+
+// checkMoovSize refuses a moov payload past limit, saying how to raise it.
+func checkMoovSize(payloadLen, limit int64) error {
+	if payloadLen > limit {
+		return errf("moov box declares %d bytes, past the %d-byte limit: raise Options.MaxMoovBytes to read a source this large", payloadLen, limit)
+	}
+	return nil
 }
 
 // readMoovAt reads the whole moov payload findMoov located.
@@ -546,7 +562,12 @@ const (
 
 // parseMP4 reads and parses the movie header of a seekable MP4 of the given size.
 func parseMP4(r io.ReadSeeker, size int64, mode sampleMode) (*movie, error) {
-	moovPayload, err := readMoovForMode(r, size, mode)
+	return parseMP4Limit(r, size, mode, DefaultMaxMoovBytes)
+}
+
+// parseMP4Limit is parseMP4 refusing a moov past moovLimit bytes before reading it.
+func parseMP4Limit(r io.ReadSeeker, size int64, mode sampleMode, moovLimit int64) (*movie, error) {
+	moovPayload, err := readMoovForMode(r, size, mode, moovLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -841,14 +862,17 @@ func sidxKeyframeMs(payload []byte, wantRefID uint32) ([]int64, bool) {
 // readMoovForMode returns the moov payload: the full box for the remux/extract
 // path (which needs the complete sample tables), or the I/O-light lazy read
 // (with a full-read fallback on any unexpected layout) for the metadata path.
-func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode) ([]byte, error) {
+func readMoovForMode(r io.ReadSeeker, size int64, mode sampleMode, limit int64) ([]byte, error) {
 	if mode == sampleFull {
-		return readMoov(r, size)
+		return readMoovLimit(r, size, limit)
 	}
 	// The moov is looked for once: a file that has none is not scanned again
 	// for the fallback.
 	dataOff, payloadLen, err := findMoov(r, size)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkMoovSize(payloadLen, limit); err != nil {
 		return nil, err
 	}
 	if payload, err := readMoovLazyAt(r, dataOff, payloadLen); err == nil {

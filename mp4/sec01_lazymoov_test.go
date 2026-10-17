@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/httpfs"
@@ -111,4 +112,55 @@ func FuzzReadMetaDeclaredSize(f *testing.F) {
 			t.Fatalf("ReadMeta allocated %d MiB for %d real bytes declaring %d", grew>>20, len(head), declared)
 		}
 	})
+}
+
+// moovOfZeros is a source whose moov declares n bytes and delivers them, all zero, as a server streaming them or a sparse file would.
+func moovOfZeros(n int64) *zeroTail {
+	return &zeroTail{head: hugeMoovHeader(16 + n), size: 16 + n}
+}
+
+func TestSEC01_MoovHardCap(t *testing.T) {
+	const declared = 300 << 20
+	before := totalAlloc()
+	_, _, err := ReadMeta(context.Background(), moovOfZeros(declared), "zeros.mp4")
+	grew := totalAlloc() - before
+	if err == nil || !strings.Contains(err.Error(), "MaxMoovBytes") {
+		t.Fatalf("a %d MiB moov past the cap: err %v, want a refusal naming Options.MaxMoovBytes", declared>>20, err)
+	}
+	if grew > 16<<20 {
+		t.Fatalf("refusing a %d MiB moov allocated %d MiB: it was read", declared>>20, grew>>20)
+	}
+	small := moovOfZeros(1 << 20)
+	if _, _, err := ReadMeta(context.Background(), small, "zeros.mp4", Options{MaxMoovBytes: 512 << 10}); err == nil || !strings.Contains(err.Error(), "MaxMoovBytes") {
+		t.Fatalf("a 1 MiB moov under a 512 KiB MaxMoovBytes: %v", err)
+	}
+	if _, _, err := ReadMeta(context.Background(), moovOfZeros(1<<20), "zeros.mp4", Options{MaxMoovBytes: 2 << 20}); err != nil && strings.Contains(err.Error(), "MaxMoovBytes") {
+		t.Fatalf("a 1 MiB moov under a 2 MiB MaxMoovBytes is refused by the cap: %v", err)
+	}
+}
+
+func TestSEC01_MoovHardCapHTTP(t *testing.T) {
+	const declared = int64(300) << 20
+	head := hugeMoovHeader(16 + declared)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var a, b int64
+		if _, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &a, &b); err != nil {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		b = min(b, 16+declared-1)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", a, b, 16+declared))
+		w.WriteHeader(http.StatusPartialContent)
+		body := make([]byte, b-a+1)
+		if a < int64(len(head)) {
+			copy(body, head[a:])
+		}
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+	before := totalAlloc()
+	_, _, err := OpenMetaWithFS(context.Background(), srv.URL+"/zeros.mp4", httpfs.New().Port())
+	if grew := totalAlloc() - before; err == nil || grew > 16<<20 {
+		t.Fatalf("a server streaming a %d MiB moov: err %v, %d MiB allocated", declared>>20, err, grew>>20)
+	}
 }

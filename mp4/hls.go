@@ -224,7 +224,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		}
 	}
 
-	ps, err := openPackagingSource(ctx, srcPath, fs)
+	ps, err := openPackagingSource(ctx, srcPath, fs, o.moovLimit())
 	if err != nil {
 		return nil, err
 	}

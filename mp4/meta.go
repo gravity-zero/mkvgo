@@ -72,7 +72,7 @@ func readMeta(ctx context.Context, r io.ReadSeeker, path string, o Options) (*mk
 	if o.Keyframes {
 		mode = sampleKeyframes
 	}
-	mv, err := parseMP4(r, size, mode)
+	mv, err := parseMP4Limit(r, size, mode, o.moovLimit())
 	if err != nil {
 		return nil, nil, err
 	}

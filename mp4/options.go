@@ -284,6 +284,23 @@ type Options struct {
 	// is refused with reader.ErrDamagedRegion. 0 is DefaultDamageBytes (64
 	// MiB). The full passes never pass over damage.
 	DamageBytes int64
+
+	// MaxMoovBytes caps the moov box an MP4 source may declare: a larger one
+	// is refused before any of it is read, so neither a size a server or a
+	// sparse file announces nor bytes a server streams can exhaust memory. 0 is
+	// DefaultMaxMoovBytes (256 MiB); a long movie's moov runs to tens of MB.
+	MaxMoovBytes int64
+}
+
+// DefaultMaxMoovBytes is the moov cap when Options.MaxMoovBytes is 0.
+const DefaultMaxMoovBytes = 256 << 20
+
+// moovLimit is the moov cap the options set.
+func (o *Options) moovLimit() int64 {
+	if o == nil || o.MaxMoovBytes <= 0 {
+		return DefaultMaxMoovBytes
+	}
+	return o.MaxMoovBytes
 }
 
 // wantsEditList reports whether a codec's container delay should be carried as an
