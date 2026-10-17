@@ -28,6 +28,13 @@ type HLSKey struct {
 	// IV, when set (16 bytes), is used for every segment in this key's periods
 	// and advertised as the IV attribute. Leave nil for the spec default: the
 	// IV is each segment's media sequence number, and no IV attribute is written.
+	//
+	// Under CBC one IV reused across segments of the same key makes segments
+	// that open on the same bytes (an fMP4 moof header differs little from one
+	// segment to the next) encrypt to the same first blocks, which tells an
+	// observer where their plaintexts match. Leave IV nil unless a player
+	// requires an explicit one: the per-sequence-number default never repeats
+	// within a key's period.
 	IV []byte
 }
 
@@ -36,7 +43,8 @@ type HLSKey struct {
 // with Keys to rotate the key across the presentation (forward secrecy: a
 // leaked key decrypts only its own period, not the whole video).
 type HLSEncryption struct {
-	// Single-key case (used when RotateEverySegments == 0).
+	// Single-key case (used when RotateEverySegments == 0). IV, when set, is
+	// reused for every segment: see HLSKey.IV for why nil is recommended.
 	Key    []byte
 	KeyURI string
 	IV     []byte

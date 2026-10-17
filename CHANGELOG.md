@@ -74,6 +74,11 @@ All notable changes to mkvgo are documented here. The format is based on
   track but the video now adds its own value in the IV's top byte, and each
   variant past the first its index times 2^48, so no IV serves two samples
   under one key.
+- **SEC-09: the explicit AES-128 IV is documented as reused.** `HLSKey.IV`
+  and `HLSEncryption.IV` apply one IV to every segment of a key's period,
+  which under CBC shows where two segments' plaintexts start alike. The doc
+  now says so and recommends the default per-sequence-number IV. No output
+  changes.
 
 ### Fixed
 
