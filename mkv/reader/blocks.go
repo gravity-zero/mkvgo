@@ -788,10 +788,13 @@ func (br *BlockReader) resyncHead(from int64) bool {
 		return false
 	}
 	off, err := resyncToSegmentElement(br.raw, -1, br.segEnd)
-	if err != nil || off < 0 {
+	if err != nil || off < 0 || br.r.reset(off) != nil {
 		return false
 	}
-	return br.r.reset(off) == nil
+	if br.skipDamage {
+		br.skipDamageTo(from-1, off) // a tolerant walk reports what it passed over, a Cluster it lost included
+	}
+	return true
 }
 
 // isSegmentLevelID returns true for element IDs that can appear directly

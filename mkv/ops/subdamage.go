@@ -100,7 +100,7 @@ func reportDamage(opts []mkv.Options, g reader.DamageRange, atMs int64) {
 	}
 	from, end := g.FromMs, g.ToMs
 	if from < 0 {
-		from = atMs
+		from = max(atMs, 0) // before any Cluster: from the start
 	}
 	if end < 0 {
 		end = from

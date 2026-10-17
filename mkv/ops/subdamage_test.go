@@ -266,6 +266,27 @@ func TestSubtitleReadsPassOverDamage(t *testing.T) {
 		}
 	})
 
+	t.Run("before any cluster", func(t *testing.T) {
+		data, err := os.ReadFile(clean)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(data[clusters[0] : clusters[0]+100]) // the walk meets the damage before it entered any Cluster
+		head := filepath.Join(t.TempDir(), "head.mkv")
+		if err := os.WriteFile(head, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cues, skips, err := pgsVia(func(fn func(PGSCue) error, o mkv.Options) error {
+			return ForEachSubtitlePGS(ctx, head, 2, fn, o)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(skips) != 1 || skips[0].ApproxStartMs < 0 || skips[0].ApproxEndMs < skips[0].ApproxStartMs {
+			t.Errorf("%d cues, OnSkip %+v: want one region timed from 0 at the earliest", len(cues), skips)
+		}
+	})
+
 	t.Run("refused", func(t *testing.T) {
 		for _, n := range []int64{-1, 1000} {
 			err := ForEachSubtitlePGS(ctx, bad, 2, func(PGSCue) error { return nil }, mkv.Options{DamageBytes: n})

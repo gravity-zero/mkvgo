@@ -78,6 +78,9 @@ All notable changes to mkvgo are documented here. The format is based on
   the CLI.** `mkv.Options` refused any damage under a negative value while
   `mp4.Options` fell back to the 64 MiB default, and `--damage-bytes` refused
   any value but a positive one; both now take `-1` to refuse any damage.
+- **Damage ahead of the first Cluster is reported.** A tolerant walk resynced
+  past it silently, so a subtitle read lost the first Cluster's cues without
+  an `OnSkip` call; the region is now reported, timed from 0.
 
 ## [0.55.1] - 2026-10-17
 
