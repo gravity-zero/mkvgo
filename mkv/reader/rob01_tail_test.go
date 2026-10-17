@@ -2,7 +2,6 @@ package reader
 
 import (
 	"testing"
-	"time"
 )
 
 // voidTail is n bytes of empty Voids (EC 80) closed by a stray byte, so no run tiles to the end.
@@ -26,15 +25,18 @@ func benchTailRun(b *testing.B, n int) {
 	}
 }
 
-// TestROB01_TailScanLinear: the quadratic scan took 12 s on 64 KiB of Voids, the linear one about 1 ms; 1 s holds on a loaded CI runner.
+// TestROB01_TailScanLinear: the header decodes the tail scan costs grow with its window, at most 16 per byte; the quadratic scan's grew with its square.
 func TestROB01_TailScanLinear(t *testing.T) {
+	var decodes int
+	elemAtCount = &decodes
+	defer func() { elemAtCount = nil }()
 	for _, n := range []int{64 << 10, 512 << 10} {
 		buf := voidTail(n)
-		start := time.Now()
+		decodes = 0
 		rel, _, ok := tailRun(buf, 0, int64(n))
 		_ = metaEndsAt(buf, rel)
-		if d := time.Since(start); d > time.Second {
-			t.Errorf("tail scan of %d KiB of Voids took %v", n>>10, d)
+		if decodes > 16*n {
+			t.Errorf("tail scan of %d KiB of Voids decoded %d element headers, past 16 per byte", n>>10, decodes)
 		}
 		if ok {
 			t.Errorf("a tail ending on a stray byte tiles")
