@@ -161,7 +161,8 @@ func New(opts ...Options) *FS {
 
 // redirectPolicy is the default client's: at most 10 hops, each to a host
 // AllowHost accepts, or with no AllowHost to the first request's host
-// whenever Header is set, so the caller's headers never reach another host.
+// whenever Header is set, and never from https to http with Header set, so the
+// caller's headers never reach another host or cross in clear.
 func redirectPolicy(o Options) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -173,6 +174,8 @@ func redirectPolicy(o Options) func(*http.Request, []*http.Request) error {
 			return fmt.Errorf("redirect to host %s refused by AllowHost", host)
 		case o.AllowHost == nil && len(o.Header) > 0 && host != via[0].URL.Host:
 			return fmt.Errorf("redirect from %s to another host %s refused: the request carries Options.Header (set AllowHost to allow it)", via[0].URL.Host, host)
+		case len(o.Header) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https":
+			return fmt.Errorf("redirect from https to %s on %s refused: the request carries Options.Header, which would cross in clear", req.URL.Scheme, host)
 		}
 		return nil
 	}

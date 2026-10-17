@@ -36,6 +36,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`httpfs` errors no longer show a URL's query.** A presigned URL keeps its
   signature and session token in the query, and every error, including the
   client's own, printed the URL whole; an error now names it up to the `?`.
+- **`httpfs` refuses an https to http redirect while `Options.Header` is
+  set.** The same-host check let it through, and Go strips only its own
+  credential headers on that hop: custom ones such as `X-Api-Key` crossed in
+  clear.
 
 ## [0.55.1] - 2026-10-17
 
