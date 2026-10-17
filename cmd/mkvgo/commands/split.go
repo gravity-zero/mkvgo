@@ -94,7 +94,7 @@ func CmdJoin(args []string) {
 		if args[i] == "-o" {
 			i++
 			if i >= len(args) {
-				Fatal("-pattern needs a value")
+				Fatal("-o needs a value")
 			}
 			outPath = args[i]
 		} else {

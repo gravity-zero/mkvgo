@@ -103,6 +103,9 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **NEW-02: `mux` and `join` name the right flag when `-o` lacks its value.**
+  They exited with `-t needs a value` and `-pattern needs a value`; both now
+  say `-o needs a value`.
 - **CLI-02: a value flag given last is an error, not ignored.** In most
   commands a flag taking a value (`-segment`, `-o`, `--aes-key`, ...) placed
   as the last argument was dropped in silence: `to-hls in.mkv -o out -segment`

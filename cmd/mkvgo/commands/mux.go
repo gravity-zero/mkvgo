@@ -65,7 +65,7 @@ func CmdMux(args []string) {
 		if args[i] == "-o" {
 			i++
 			if i >= len(args) {
-				Fatal("-t needs a value")
+				Fatal("-o needs a value")
 			}
 			if i >= len(args) {
 				Fatal("-o requires an output path")
