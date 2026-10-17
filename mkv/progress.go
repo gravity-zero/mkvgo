@@ -75,7 +75,9 @@ type Options struct {
 	// Resync that is every corrupted region the tolerant walk skipped;
 	// without Resync the strict rewrites (Reindex, ReindexReplace,
 	// RetimeTracksReplace) still drop - and report here - proven trailing
-	// junk past the declared Segment end, and nothing else. Never called
+	// junk past the declared Segment end, and nothing else. A subtitle read
+	// (see DamageBytes) calls it as it passes over each damaged region, before
+	// the read ends, which may still fail on a later region. Never called
 	// when the source was clean.
 	OnSkip func(DamagedRange)
 	// DamageBytes bounds the damaged region a subtitle read (ExtractSubtitle*,

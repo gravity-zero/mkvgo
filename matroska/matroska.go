@@ -555,8 +555,8 @@ func RecoverInPlace(ctx context.Context, path string, opts ...Options) (bool, er
 	return ops.RecoverInPlace(ctx, path, opts...)
 }
 
-// DamagedRange is one span of srcPath a Salvage run could not carry over
-// verbatim. See ops.DamagedRange.
+// DamagedRange is one span of a source a rewrite dropped or a subtitle read
+// passed over (Options.OnSkip). See ops.DamagedRange.
 type DamagedRange = ops.DamagedRange
 
 // RepairedRange is one region a tolerant walk reconstructed instead of
