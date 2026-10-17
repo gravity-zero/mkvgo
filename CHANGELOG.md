@@ -214,6 +214,12 @@ All notable changes to mkvgo are documented here. The format is based on
   release must drop them together with the init and playlists of the same
   presentation, as the re-packaging under a new key requires anyway. The video
   of a single presentation and of an ABR one's first variant keeps its bytes.
+- **CLI-03: every command reads its flags through a `flag.FlagSet`.** The
+  33 hand-written argument loops are replaced by one `FlagSet` per command,
+  read with mkvgo's syntax (a value as the next argument, flags and operands
+  in any order, each flag under its registered spellings only): the accepted
+  arguments, results and messages are unchanged, checked against the previous
+  parser on 20,000 generated argument lists and on the CLI suite.
 
 ## [0.54.0] - 2026-10-16
 

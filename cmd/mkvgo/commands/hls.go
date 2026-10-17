@@ -41,120 +41,93 @@ func parseHLSFlags(args []string) hlsFlags {
 	var cencScheme, cencKeyHex, cencKIDHex, cencIVHex, cencKeyURI string
 	var keyFile, cencKeyFile string
 	var cencInline bool
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-o":
-			f.outDir = needValue(args, &i)
-		case "-segment", "--segment":
-			// Segment length in seconds, the HLS convention.
-			needValue(args, &i)
-			secs, err := strconv.ParseFloat(args[i], 64)
-			if err != nil || secs <= 0 {
-				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", args[i]))
-			}
-			f.segMs = int64(secs * 1000)
-		case "--aes-key":
-			keyHex = needValue(args, &i)
-		case "--aes-key-file":
-			keyFile = needValue(args, &i)
-		case "--cenc-key-file":
-			cencKeyFile = needValue(args, &i)
-		case "--cenc-inline-key":
-			cencInline = true
-		case "--aes-key-uri":
-			keyURI = needValue(args, &i)
-		case "--aes-rotate-segments":
-			needValue(args, &i)
-			n, err := strconv.Atoi(args[i])
-			if err != nil || n < 1 {
-				Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", args[i]))
-			}
-			rotateSegs = n
-		case "--cenc-scheme":
-			cencScheme = needValue(args, &i)
-		case "--cenc-key":
-			cencKeyHex = needValue(args, &i)
-		case "--cenc-kid":
-			cencKIDHex = needValue(args, &i)
-		case "--cenc-iv":
-			cencIVHex = needValue(args, &i)
-		case "--cenc-key-uri":
-			cencKeyURI = needValue(args, &i)
-		case "--url-prefix":
-			f.prefix = needValue(args, &i)
-		case "--single-file":
-			f.singleFile = true
-		case "--keep-tracks":
-			needValue(args, &i)
-			for _, p := range strings.Split(args[i], ",") {
-				id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
-				if err != nil {
-					Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
-				}
-				f.keepTracks = append(f.keepTracks, id)
-			}
-		case "--keep-lang", "--audio-lang":
-			needValue(args, &i)
-			for _, l := range strings.Split(args[i], ",") {
-				if l = strings.TrimSpace(l); l != "" {
-					f.keepLangs = append(f.keepLangs, strings.ToLower(l))
-				}
-			}
-		case "--sub-offset":
-			needValue(args, &i)
-			ms, err := strconv.ParseInt(args[i], 10, 64)
-			if err != nil {
-				Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", args[i]))
-			}
-			f.subOffset = ms
-		case "--chapter-markers":
-			f.chapterMarkers = true
-		case "--skip-unsupported", "-skip-unsupported":
-			f.skipUnsupported = true
-		case "--no-iframes":
-			f.noIFrames = true
-		case "--damage-bytes":
-			needValue(args, &i)
-			n, err := strconv.ParseInt(args[i], 10, 64)
-			if err != nil || n <= 0 {
-				Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", args[i]))
-			}
-			f.damageBytes = n
-		case "--source-access":
-			if i+1 >= len(args) {
-				Fatal("--source-access needs auto, local or network")
-			}
-			i++
-			switch args[i] {
-			case "auto":
-				f.sourceAccess = mp4.SourceAuto
-			case "local":
-				f.sourceAccess = mp4.SourceLocal
-			case "network":
-				f.sourceAccess = mp4.SourceNetwork
-			default:
-				Fatal("--source-access takes auto, local or network, not " + args[i])
-			}
-		case "--synthesize-index":
-			f.synthIndex = true
-		case "--audio-shift":
-			if i+1 >= len(args) {
-				Fatal("--audio-shift needs a <track>=<ms> value")
-			}
-			i++
-			track, ms, err := parseShift(args[i])
-			if err != nil {
-				Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
-			}
-			if f.audioShift == nil {
-				f.audioShift = map[uint64]int64{}
-			}
-			f.audioShift[track] = ms * 1_000_000 // ms -> ns
-		default:
-			rejectFlagArg(args[i])
-			f.rest = append(f.rest, args[i])
+	fl := newFlags("hls")
+	fl.String(&f.outDir, "-o")
+	fl.Func(func(v string) { // segment length in seconds, the HLS convention
+		secs, err := strconv.ParseFloat(v, 64)
+		if err != nil || secs <= 0 {
+			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
 		}
-	}
+		f.segMs = int64(secs * 1000)
+	}, "-segment", "--segment")
+	fl.String(&keyHex, "--aes-key")
+	fl.String(&keyFile, "--aes-key-file")
+	fl.String(&cencKeyFile, "--cenc-key-file")
+	fl.Bool(&cencInline, "--cenc-inline-key")
+	fl.String(&keyURI, "--aes-key-uri")
+	fl.Func(func(v string) {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", v))
+		}
+		rotateSegs = n
+	}, "--aes-rotate-segments")
+	fl.String(&cencScheme, "--cenc-scheme")
+	fl.String(&cencKeyHex, "--cenc-key")
+	fl.String(&cencKIDHex, "--cenc-kid")
+	fl.String(&cencIVHex, "--cenc-iv")
+	fl.String(&cencKeyURI, "--cenc-key-uri")
+	fl.String(&f.prefix, "--url-prefix")
+	fl.Bool(&f.singleFile, "--single-file")
+	fl.Func(func(v string) {
+		for _, p := range strings.Split(v, ",") {
+			id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
+			if err != nil {
+				Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
+			}
+			f.keepTracks = append(f.keepTracks, id)
+		}
+	}, "--keep-tracks")
+	fl.Func(func(v string) {
+		for _, l := range strings.Split(v, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				f.keepLangs = append(f.keepLangs, strings.ToLower(l))
+			}
+		}
+	}, "--keep-lang", "--audio-lang")
+	fl.Func(func(v string) {
+		ms, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", v))
+		}
+		f.subOffset = ms
+	}, "--sub-offset")
+	fl.Bool(&f.chapterMarkers, "--chapter-markers")
+	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
+	fl.Bool(&f.noIFrames, "--no-iframes")
+	fl.Func(func(v string) {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count)", v))
+		}
+		f.damageBytes = n
+	}, "--damage-bytes")
+	fl.Func(func(v string) {
+		switch v {
+		case "auto":
+			f.sourceAccess = mp4.SourceAuto
+		case "local":
+			f.sourceAccess = mp4.SourceLocal
+		case "network":
+			f.sourceAccess = mp4.SourceNetwork
+		default:
+			Fatal("--source-access takes auto, local or network, not " + v)
+		}
+	}, "--source-access")
+	fl.Missing("--source-access", "--source-access needs auto, local or network")
+	fl.Bool(&f.synthIndex, "--synthesize-index")
+	fl.Func(func(v string) {
+		track, ms, err := parseShift(v)
+		if err != nil {
+			Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
+		}
+		if f.audioShift == nil {
+			f.audioShift = map[uint64]int64{}
+		}
+		f.audioShift[track] = ms * 1_000_000 // ms -> ns
+	}, "--audio-shift")
+	fl.Missing("--audio-shift", "--audio-shift needs a <track>=<ms> value")
+	f.rest = fl.Parse(args)
 	keyHex = keyValue(keyHex, keyFile, "MKVGO_AES_KEY", "--aes-key", keyURI != "")
 	cencKeyHex = keyValue(cencKeyHex, cencKeyFile, "MKVGO_CENC_KEY", "--cenc-key", cencScheme != "" || cencKIDHex != "" || cencIVHex != "" || cencKeyURI != "")
 	if keyHex != "" || keyURI != "" {
