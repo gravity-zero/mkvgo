@@ -8,6 +8,26 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A window is served past a short damaged region instead of refused.** A
+  file holding a zeroed stretch (the pieces a download never received: 11 MB
+  of zeros then debris, seen in the middle of a 3 GB film) failed every window
+  touching it with `invalid VINT: leading zero byte`, and a server marked
+  itself failing on three such refusals in a row. The block reader now
+  classifies a header that does not decode in the middle of the file as the
+  damage it is (`reader.DamageError`, `Offset` and `Resume`), the same as an
+  element overrunning the file, and never the source's own failure (I/O, a
+  cancelled context, a replaced file). The on-demand window walks pass over a
+  damaged region under 2 % of the source (1 MiB at least): the window holding
+  its start serves what it read before it, a window whose cue points into the
+  zeros serves no sample, the windows behind it are whole, and the plan
+  remembers the region so no later window scans it again. A longer region is
+  refused as before, the error matching `reader.ErrDamagedRegion` with
+  `Resume` -1 so a server can tell a damaged file from a failing server.
+  `HLSPlanStats.DamageSkips` and `DamageRefusals` count both. The full
+  passes (`RemuxToMP4`, `RemuxToHLS`) keep refusing a file damaged in its
+  middle, now with the repair named. `BlockReader.SetDamageScan` bounds how
+  far a walk looks past an unreadable element; `SkippedRanges` names the
+  regions a `SetSkipDamage` walk passed over.
 - **What a plan served is counted on the streaming path too.** `ServedBytes`
   only counted the segments `Resource` built whole: a server streaming every
   segment through `HLSPlan.Open` read it at 0 while it served megabytes, with

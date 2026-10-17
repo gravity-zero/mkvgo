@@ -113,6 +113,7 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 	}
 	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, false, false)
 	if err != nil {
+		p.noteDamageRefused(err)
 		return nil, err
 	}
 	if inPlace.buf != nil && inPlace.media() == nil {
@@ -335,6 +336,11 @@ type HLSPlanStats struct {
 	// uncued regions of the source (a track stored apart from the video); FarHits, those that found it there.
 	FarLookups int64
 	FarHits    int64
+	// DamageSkips counts the damaged regions (an element the walk cannot read, a zeroed stretch) the window walks
+	// passed over, each shorter than 2 % of the source; DamageRefusals, the regions longer than that, on which the
+	// window was refused (reader.ErrDamagedRegion).
+	DamageSkips    int64
+	DamageRefusals int64
 	// UndeclaredZlibBlocks is the number of subtitle blocks the plan inflated
 	// although their track declares no compression: a muxer compressed the
 	// track and lost the ContentEncodings (mkvgo diagnose reports such tracks).
@@ -397,6 +403,7 @@ func (p *HLSPlan) countWalk(br **reader.BlockReader) func() {
 	return func() {
 		if *br != nil {
 			p.srcRead.Add((*br).BytesRead())
+			p.noteSkipped(*br)
 		}
 	}
 }

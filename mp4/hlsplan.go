@@ -194,6 +194,9 @@ type HLSPlan struct {
 	winBuilt []uint64
 	srcRead  atomic.Int64 // HLSPlanStats.SourceReadBytes
 	streamed atomic.Int64 // HLSPlanStats.StreamedBytes
+	srcSize  int64        // the source's size when the plan was built (0: unknown), for damageCap
+	// damaged (segMu, sorted by start) are the unreadable regions the walks met: passed over, or refused.
+	damaged []damagedRange
 	// subIndex is Options.SubtitleIndex when it matches the source's
 	// fingerprint, else the index derived from the source's Cues when they
 	// cue its subtitle blocks; nil otherwise, and the subtitle scans walk.
@@ -651,6 +654,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if st, serr := fs.DoStat(srcPath); serr == nil {
 		srcSize = st.Size()
 	}
+	p.srcSize = srcSize
 	for k := 0; k < p.segCount; k++ {
 		end := srcSize
 		if k+1 < p.segCount {
@@ -1519,23 +1523,33 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	defer p.countWalk(&br)()
 	var ahead [][]aheadBlock
 	from := p.segPosAt(n)
+	cold, err := p.pastDamage(p.coldStart(n)) // a seat inside a damaged region already met starts past it
+	if err != nil {
+		return nil, nil, none, err
+	}
 	if from.Valid() {
 		p.hintWindow(src, n, from.Off)
 		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
 	} else {
-		p.hintWindow(src, n, p.coldStart(n))
-		br, err = reader.NewBlockReaderAt(src, p.tcScale, p.coldStart(n))
+		p.hintWindow(src, n, cold)
+		br, err = reader.NewBlockReaderAt(src, p.tcScale, cold)
 	}
 	if err != nil {
 		return nil, nil, none, err
 	}
+	p.tolerateDamage(br)
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(keep...)
-	if !from.Valid() && p.coldStart(n) < p.offsets[n] { // the clusters before the window's own, header-only, then the window's
+	if !from.Valid() && cold < p.offsets[n] { // the clusters before the window's own, header-only, then the window's
 		if ahead, err = p.coldAhead(ctx, src, br, n, index, segStart, structure, keepAudio); err != nil {
 			return nil, nil, none, err
 		}
-		if err = br.RestartAt(p.offsets[n]); err != nil {
+		p.noteSkipped(br)
+		own, perr := p.pastDamage(p.offsets[n])
+		if perr != nil {
+			return nil, nil, none, perr
+		}
+		if err = br.RestartAt(own); err != nil {
 			return nil, nil, none, err
 		}
 	}
@@ -1877,6 +1891,7 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 			return nil, nil, err
 		}
 		defer p.countWalk(&br)()
+		p.tolerateDamage(br)
 		br.SetTrackDefaultDurations(p.trackDurs)
 		// Every track's blocks come back, the others' headers only: they show how far the walk is while this
 		// track's next block is nowhere near (stored apart from the video), and cost nothing more to pass over.
@@ -2413,6 +2428,7 @@ func (p *HLSPlan) farTrackIn(ctx context.Context, src io.ReadSeeker, i int, rg t
 	if err != nil {
 		return nil, -1, farElsewhere, err
 	}
+	p.tolerateDamage(br)
 	pt := p.tracks[ti]
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(pt.ft.outTrack.mkv.ID)
@@ -3585,12 +3601,18 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	p.winMu.Lock()
 	p.stats.SubtitleWalks++
 	p.winMu.Unlock()
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, start)
+	past, perr := p.pastDamage(start)
+	if perr != nil {
+		st.err = perr
+		return perr
+	}
+	br, err := reader.NewBlockReaderAt(src, p.tcScale, past)
 	if err != nil {
 		st.err = err
 		return err
 	}
 	defer p.countWalk(&br)()
+	p.tolerateDamage(br)
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(track.track.ID)
 	var local []subtitle.Cue

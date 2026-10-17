@@ -45,12 +45,18 @@ import (
 // the truncation.
 //
 // A damaged region INSIDE the file (reader.ErrDamagedRegion: an element that
-// overruns the file while media continues behind it) ends the walk the same
-// way here: these are the on-demand paths, where a segment that stops at the
-// damage beats a segment that fails. A path that writes the WHOLE file out
-// uses isSourceEnd instead, and refuses.
+// cannot be read while media continues behind it) ends the walk the same way
+// here: these are the on-demand paths, where a segment that stops at the
+// damage beats a segment that fails. A region the reader could not see past
+// (DamageError.Resume < 0: longer than the plan's damageCap) is not an end
+// but the refusal it is. A path that writes the WHOLE file out uses
+// isSourceEnd instead, and refuses.
 func isBlockWalkEnd(err error) bool {
-	return isSourceEnd(err) || errors.Is(err, reader.ErrDamagedRegion)
+	if isSourceEnd(err) {
+		return true
+	}
+	var de *reader.DamageError
+	return errors.As(err, &de) && de.Resume >= 0
 }
 
 // isSourceEnd reports whether a BlockReader.Next error is the end of the

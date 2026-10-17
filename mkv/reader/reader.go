@@ -865,16 +865,22 @@ func (p *parser) resyncToCluster(limit int64) (int64, error) {
 // parser/Container machinery. A caller wanting a hard cap on the scan
 // distance (rather than "until segment end") passes limit = currentOffset+cap.
 func ResyncToCluster(r io.ReadSeeker, limit int64) (int64, error) {
+	return resyncToCluster(r, limit, limit)
+}
+
+// resyncToCluster is ResyncToCluster looking for the Cluster's start before scanLimit and requiring the Cluster to fit
+// before fitLimit: a walk bounding how far it looks past damage (not where the media may end) scans less than it allows.
+func resyncToCluster(r io.ReadSeeker, scanLimit, fitLimit int64) (int64, error) {
 	from, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return -1, err
 	}
 	for {
-		off, err := scanForClusterMagic(r, from, limit)
+		off, err := scanForClusterMagic(r, from, scanLimit)
 		if err != nil || off < 0 {
 			return -1, err
 		}
-		valid, err := isClusterAt(r, off, limit)
+		valid, err := isClusterAt(r, off, fitLimit)
 		if err != nil {
 			return -1, err
 		}

@@ -310,6 +310,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		if keep {
 			windowBytesTotal.Add(-est)
 		}
+		p.noteDamageRefused(err)
 		return nil, err
 	}
 	var otherBytes int64 // what the non-video renditions weigh in this window, for the next estimate

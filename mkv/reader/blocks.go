@@ -73,6 +73,14 @@ type countingReader struct {
 	// sparse seeks over every skipped byte past the window and keeps reads at sparseChunk (SetSparse).
 	sparse bool
 	nread  int64 // bytes read from src so far
+	failed error // the first error src itself returned, other than its end: an I/O failure is never damage in the file
+}
+
+// fail remembers src's own failure (not its end).
+func (c *countingReader) fail(err error) {
+	if err != nil && c.failed == nil && !errors.Is(err, io.EOF) {
+		c.failed = err
+	}
 }
 
 func newCountingReader(src io.ReadSeeker, startPos int64) *countingReader {
@@ -103,6 +111,7 @@ func (c *countingReader) growChunk() {
 func (c *countingReader) fill() error {
 	n, err := c.src.Read(c.buf[:c.chunk])
 	c.nread += int64(n)
+	c.fail(err)
 	if n == 0 {
 		if err == nil {
 			err = io.ErrNoProgress
@@ -121,6 +130,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 			n, err := c.src.Read(p)
 			c.pos += int64(n)
 			c.nread += int64(n)
+			c.fail(err)
 			c.growChunk()
 			return n, err
 		}
@@ -195,6 +205,7 @@ func (c *countingReader) discard(n int64) error {
 	if c.end < 0 {
 		end, err := c.src.Seek(0, io.SeekEnd)
 		if err != nil {
+			c.fail(err)
 			return err
 		}
 		c.end = end
@@ -205,11 +216,13 @@ func (c *countingReader) discard(n int64) error {
 		// is, or the invariant (src offset == pos + (w-r)) stays broken for
 		// every later read on this reader.
 		if _, serr := c.src.Seek(c.pos, io.SeekStart); serr != nil {
+			c.fail(serr)
 			return serr
 		}
 		return io.ErrUnexpectedEOF
 	}
 	if _, err := c.src.Seek(target, io.SeekStart); err != nil {
+		c.fail(err)
 		return err
 	}
 	c.pos = target
@@ -230,6 +243,7 @@ func (c *countingReader) restartChunk() int {
 // window per hop.
 func (c *countingReader) reset(pos int64) error {
 	if _, err := c.src.Seek(pos, io.SeekStart); err != nil {
+		c.fail(err)
 		return err
 	}
 	c.r, c.w = 0, 0
@@ -328,6 +342,8 @@ type BlockReader struct {
 	// what was passed over.
 	skipDamage   bool
 	skippedBytes int64
+	skipped      []DamageRange
+	damageScan   int64 // SetDamageScan: how far past an unreadable element the walk looks for a Cluster (0: to the segment's end)
 	// known is the set of track numbers the file declares, learned when the
 	// walk passes over the Tracks element or given by SetKnownTracks; nil when
 	// unknown (a reader seated in mid-file). A block naming any other track is
@@ -786,23 +802,31 @@ func isSegmentLevelID(id uint32) bool {
 // element it cannot read while media continues behind it.
 var ErrDamagedRegion = errors.New("damaged region in the cluster stream")
 
-// DamageError is returned by Next when an element declares more bytes than
-// the file holds while a valid Cluster follows further on: damage INSIDE the
-// file, not a truncated tail. The two used to be indistinguishable - both
-// surfaced as io.ErrUnexpectedEOF - and a caller tolerating a truncated tail
-// then stopped at the damage and delivered the head of the file as if it were
-// the whole of it. A DamageError deliberately does not match
-// io.ErrUnexpectedEOF.
+// DamageError is returned by Next when an element cannot be read - it declares
+// more bytes than the file holds, or its header does not decode (a zeroed
+// region, bytes a download never received) - while a valid Cluster follows
+// further on: damage INSIDE the file, not a truncated tail. The two used to be
+// indistinguishable - both surfaced as io.ErrUnexpectedEOF - and a caller
+// tolerating a truncated tail then stopped at the damage and delivered the
+// head of the file as if it were the whole of it. A DamageError deliberately
+// does not match io.ErrUnexpectedEOF. Resume is -1 when the walk bounded how
+// far it looks (SetDamageScan) and found no Cluster within that distance.
 type DamageError struct {
 	Offset int64 // where the unreadable element starts
-	Resume int64 // the next valid Cluster
+	Resume int64 // the next valid Cluster, -1 when none lies within the bounded look
 	Cause  error
 }
 
 func (e *DamageError) Error() string {
-	return fmt.Sprintf("damaged region at offset %d: an element there runs past the end of the file while media continues at offset %d - damage inside the file, not a truncated tail; repair it with `mkvgo reindex --resync` (%v)",
+	if e.Resume < 0 {
+		return fmt.Sprintf("damaged region at offset %d longer than the walk looks past it - damage inside the file; repair it with `mkvgo reindex --resync` (%v)", e.Offset, e.Cause)
+	}
+	return fmt.Sprintf("damaged region at offset %d: an element there cannot be read while media continues at offset %d - damage inside the file, not a truncated tail; repair it with `mkvgo reindex --resync` (%v)",
 		e.Offset, e.Resume, e.Cause)
 }
+
+// DamageRange is a damaged region a SetSkipDamage walk passed over: [From, To).
+type DamageRange struct{ From, To int64 }
 
 func (e *DamageError) Is(target error) bool { return target == ErrDamagedRegion }
 
@@ -813,9 +837,17 @@ func (e *DamageError) Is(target error) bool { return target == ErrDamagedRegion 
 // copy that silently loses a region is what the default refuses.
 func (br *BlockReader) SetSkipDamage(on bool) { br.skipDamage = on }
 
+// SetDamageScan bounds how far past an unreadable element Next looks for the
+// next valid Cluster (0: to the end of the segment). A bounded look also
+// classifies a failure on the reader's seat (a cue pointing into a zeroed
+// region), which an unbounded reader reports as the decode error it is; past
+// the bound, the DamageError carries no Resume.
+func (br *BlockReader) SetDamageScan(n int64) { br.damageScan = n }
+
 // SkippedBytes is how many bytes of damaged regions a SetSkipDamage walk has
-// passed over so far.
-func (br *BlockReader) SkippedBytes() int64 { return br.skippedBytes }
+// passed over so far; SkippedRanges, which regions.
+func (br *BlockReader) SkippedBytes() int64          { return br.skippedBytes }
+func (br *BlockReader) SkippedRanges() []DamageRange { return br.skipped }
 
 // BytesRead is how many bytes the reader has read from its source so far.
 func (br *BlockReader) BytesRead() int64 {
@@ -836,13 +868,14 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		if br.zeroTail(br.elemStart) {
 			return mkv.Block{}, io.EOF
 		}
-		if !br.skipDamage && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return b, err // a decode error is already its own refusal
+		if br.r.failed != nil {
+			return b, err // the source itself failed (I/O, cancellation, replaced file): not damage in the file
 		}
-		if br.clusterCount == 0 {
+		if br.clusterCount == 0 && br.damageScan <= 0 {
 			// Not one Cluster entered yet: a reader seated on a position that
 			// turns out not to be a Cluster (a stale cue) is not looking at
-			// damage in the file. That error stays as it is.
+			// damage in the file. That error stays as it is - unless the walk
+			// bounded its look, which asks for the classification.
 			return b, err
 		}
 		// The damage starts at the element that failed - or earlier, at the
@@ -855,6 +888,9 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 		}
 		resume, found := br.clusterAfter(from)
 		if !found {
+			if br.damageScan > 0 {
+				return b, &DamageError{Offset: from, Resume: -1, Cause: err} // longer than the walk looks
+			}
 			return b, err // nothing behind it: a truncated tail, as reported
 		}
 		if !br.skipDamage {
@@ -864,6 +900,7 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 			return b, err
 		}
 		br.skippedBytes += resume - from
+		br.skipped = append(br.skipped, DamageRange{From: from, To: resume})
 		br.inCluster, br.clusterEnd = false, -1
 		br.pending, br.peeked, br.awaitLimit = nil, nil, false
 	}
@@ -930,7 +967,11 @@ func (br *BlockReader) clusterAfter(off int64) (int64, bool) {
 	if _, err := br.raw.Seek(off+1, io.SeekStart); err != nil {
 		return 0, false
 	}
-	resume, err := ResyncToCluster(br.raw, br.segEnd)
+	scan := br.segEnd
+	if br.damageScan > 0 && (scan < 0 || off+1+br.damageScan < scan) {
+		scan = off + 1 + br.damageScan // how far the walk looks; the Cluster found must still fit the segment
+	}
+	resume, err := resyncToCluster(br.raw, scan, br.segEnd)
 	return resume, err == nil && resume > off
 }
 
