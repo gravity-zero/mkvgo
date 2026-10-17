@@ -158,9 +158,9 @@ func TestOnDemandServesPastASmallDamagedRegion(t *testing.T) {
 		t.Errorf("stats: %d skips, %d refusals; want skips and no refusal", st.DamageSkips, st.DamageRefusals)
 	}
 	before := plan.Stats().SourceReadBytes
-	serveWindow(t, plan, 11) // again: seated past the region it knows, no scan of the zeros
-	if read := plan.Stats().SourceReadBytes - before; read > 64<<10 {
-		t.Errorf("window 11 served again read %d bytes; want next to nothing", read)
+	video, _ := serveWindow(t, plan, 11) // again: seated past the region it knows, no scan of the zeros
+	if read := plan.Stats().SourceReadBytes - before; read > int64(len(video))+64<<10 {
+		t.Errorf("window 11 served again read %d bytes for %d served; want nothing past what it serves", read, len(video))
 	}
 }
 

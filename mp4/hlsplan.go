@@ -1323,6 +1323,56 @@ func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
 	return segSample{fragSample: meta, data: data, off: b.DataOffset, end: b.DataOffset + b.Size}, nil
 }
 
+// maxResumeLookMs bounds how far past a window a walk looks for the keyframe its fill copies.
+const maxResumeLookMs = 30_000
+
+// fillStepMs spaces the keyframe copies that stand for video a damaged region destroyed.
+const fillStepMs = 1000
+
+// fillDamage keeps a video track's timeline whole across a damaged region:
+// a window the region emptied serves copies of the first keyframe past it,
+// and a window the region cut short serves copies of its own opening
+// keyframe from where its frames stop, one a second up to segEnd. A
+// keyframe decodes alone, so the copies show a still image where the video
+// was lost; without them a player meets an empty fragment, or a hole, and
+// hls.js seeking back over the region loops on the empty fragments. It
+// reports whether it filled any window.
+func (p *HLSPlan) fillDamage(windows [][]segSample, nextPts []int64, resume []*segSample, segStart, segEnd int64) bool {
+	filled := false
+	for ti, pt := range p.tracks {
+		w := windows[ti]
+		if !pt.ft.outTrack.spec.video {
+			continue
+		}
+		switch {
+		case len(w) == 0 && resume[ti] != nil:
+			windows[ti] = keyframeCopies(*resume[ti], segStart, segEnd)
+		case len(w) > 0 && w[len(w)-1].cut && w[0].sync:
+			from := lastWalkedMs(w) + max(pt.lastDurTS*1000/int64(pt.ft.timescale), 1)
+			if from >= segEnd {
+				continue
+			}
+			w[len(w)-1].cut = false
+			windows[ti] = append(w, keyframeCopies(w[0], from, segEnd)...)
+		default:
+			continue
+		}
+		nextPts[ti], filled = segEnd, true
+	}
+	return filled
+}
+
+// keyframeCopies is src, a keyframe, repeated every fillStepMs from fromMs up to toMs.
+func keyframeCopies(src segSample, fromMs, toMs int64) []segSample {
+	var out []segSample
+	for t := fromMs; t < toMs; t += fillStepMs {
+		c := src
+		c.ptsMs, c.blockPtsMs, c.sync, c.cut = t, t, true, false
+		out = append(out, c)
+	}
+	return out
+}
+
 // cutSlack is how far before a damaged region a block's payload may end and still be taken as cut by it: the
 // children a BlockGroup closes on (a ReferenceBlock, a BlockDuration) sit between its payload and the next element.
 const cutSlack = 64
@@ -1645,7 +1695,9 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	peeking := 0
 	farOff, triedFar, crossedAny := p.farWindowOff(n), false, false
 	skips := len(br.SkippedRanges())
-	needKey := make([]bool, len(p.tracks)) // a video track past a damaged region: its frames reference what was lost
+	needKey := make([]bool, len(p.tracks))      // a video track past a damaged region: its frames reference what was lost
+	resume := make([]*segSample, len(p.tracks)) // a video track's first keyframe past a region, met past segEnd
+	seekKey := make([]bool, len(p.tracks))      // past segEnd, still looking for that keyframe
 	if p.seatedPastDamage(n) {
 		for ti, pt := range p.tracks {
 			needKey[ti] = pt.ft.outTrack.spec.video
@@ -1715,6 +1767,17 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			seen[ti] = b.BlockTimecode
 		}
 		if crossed[ti] {
+			if seekKey[ti] && (b.Keyframe || b.BlockTimecode > segEnd+maxResumeLookMs) {
+				if b.Keyframe {
+					k, err := sampleOf(p.tracks[ti], b, structure && (!keepAudio || p.tracks[ti].ft.outTrack.spec.video))
+					if err != nil {
+						return nil, nil, none, err
+					}
+					resume[ti] = &k
+				}
+				seekKey[ti] = false
+				remaining--
+			}
 			if peeks[ti].observe(b.Timecode, b.Keyframe) {
 				remaining--
 				peeking--
@@ -1737,6 +1800,18 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			p.learnAhead(br.Pos(), b)
 		}
 		if b.BlockTimecode >= segEnd {
+			if needKey[ti] && len(windows[ti]) == 0 {
+				if b.Keyframe {
+					k, err := sampleOf(pt, b, structure && (!keepAudio || pt.ft.outTrack.spec.video))
+					if err != nil {
+						return nil, nil, none, err
+					}
+					resume[ti] = &k
+				} else {
+					seekKey[ti] = true // the walk goes on, header by header, to the keyframe the copies are made of
+					remaining++
+				}
+			}
 			crossed[ti], crossedAny = true, true
 			peeks[ti] = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
 			switch {
@@ -1773,6 +1848,9 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 		if crossed[ti] {
 			nextPts[ti] = peeks[ti].min
 		}
+	}
+	if segEnd < 1<<62 && p.fillDamage(windows, nextPts, resume, segStart, segEnd) {
+		inPlace = none
 	}
 	return windows, nextPts, inPlace, nil
 }

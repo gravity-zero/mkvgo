@@ -22,11 +22,14 @@ All notable changes to mkvgo are documented here. The format is based on
   its start serves what it read before it, less the block the region cuts
   (its payload runs into the zeros), and closes on that track's frame
   duration rather than on a frame stretched to the far side of the region; a
-  window whose cue points into the zeros serves no sample and is timed where
-  it starts (an empty window was timed at the track's end, 6717 s for a frame
-  at 2834 s, which players re-timed the next windows on); the video resumes
-  on the first keyframe past the region, never on frames whose references it
-  lost; the windows behind it are whole, and the plan remembers the region so
+  window whose cue points into the zeros is timed where it starts (an empty
+  window was timed at the track's end, 6717 s for a frame at 2834 s); the
+  video resumes on the first keyframe past the region, never on frames whose
+  references it lost, and keeps a timeline without holes: a window the
+  region emptied serves a copy of that keyframe every second, a window it cut
+  short a copy of its own opening keyframe from where its frames stop, a
+  still image where the video was lost (hls.js seeking back over empty
+  fragments looped on them and never loaded the next one); the windows behind it are whole, and the plan remembers the region so
   no later window scans it again. A served real file (a 1080p film zeroed
   over 11 MB) now decodes without error and plays through the hole in
   hls.js, where it stalled on the stretched frame. A longer region is

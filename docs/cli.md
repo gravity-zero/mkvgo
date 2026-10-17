@@ -1180,8 +1180,9 @@ nothing rewritten. A damaged region in the middle of the source (a zeroed
 stretch, an element that does not decode) shorter than `--damage-bytes`
 (64 MiB by default) is passed over: the segment holding its start stops
 there (the block the region cuts is not served, nor stretched over the
-hole), a segment inside it is empty and timed where it starts, the video
-resumes on the first keyframe past it, and the next ones serve as usual. A longer one refuses the segment
+hole), the video resumes on the first keyframe past it, the lost stretch
+shows a still image (a keyframe repeated every second, so a player meets no
+empty segment and no hole), and the next ones serve as usual. A longer one refuses the segment
 (`to-hls` always refuses a file damaged in its middle).
 
 For a Matroska source whose Cues index every video keyframe, the output is

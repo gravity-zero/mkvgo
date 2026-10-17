@@ -127,7 +127,7 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var prev uint64
+	var prev, prevEnd uint64
 	for n := 0; n < plan.NumSegments(); n++ {
 		for _, buffered := range []bool{false, true} {
 			var seg []byte
@@ -144,7 +144,7 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 				if z := len(s.data) - len(bytes.TrimRight(s.data, "\x00")); z >= 64 {
 					t.Errorf("window %d sample %d: ends with %d zero bytes, a block the damage cut", n, k, z)
 				}
-				if s.dur > 200 {
+				if s.dur > 1000 {
 					t.Errorf("window %d sample %d: %d ms, a frame stretched over the damage", n, k, s.dur)
 				}
 				if len(s.data) >= 4 && s.data[0] == 0xAB && s.data[1] == 0xCD {
@@ -159,8 +159,17 @@ func checkDamageEdges(t *testing.T, clean string, from, to, lostTo int) {
 			if tfdt < prev {
 				t.Errorf("window %d: tfdt %d ms behind the previous window's %d", n, tfdt, prev)
 			}
+			if len(samples) == 0 {
+				t.Errorf("window %d serves no video: a player loops on an empty fragment when seeking back over the region", n)
+			}
+			if n > 0 && tfdt != prevEnd {
+				t.Errorf("window %d opens at %d ms, the previous one ends at %d: a hole in the video timeline", n, tfdt, prevEnd)
+			}
 			if buffered {
-				prev = tfdt
+				prev, prevEnd = tfdt, tfdt
+				for _, s := range samples {
+					prevEnd += uint64(s.dur)
+				}
 			}
 		}
 	}
