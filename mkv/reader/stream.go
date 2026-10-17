@@ -385,6 +385,19 @@ func (p *streamParser) parseStreamInfo(size int64, c *mkv.Container) error {
 				return err
 			}
 			c.Info.Title = v
+		case mkv.IDSegmentUID, mkv.IDPrevUID, mkv.IDNextUID:
+			v, err := p.readBytes(h.Size)
+			if err != nil {
+				return err
+			}
+			switch h.ID {
+			case mkv.IDSegmentUID:
+				c.Info.SegmentUID = v
+			case mkv.IDPrevUID:
+				c.Info.PrevUID = v
+			default:
+				c.Info.NextUID = v
+			}
 		default:
 			return p.skip(h.Size)
 		}
@@ -693,6 +706,7 @@ func (p *streamParser) parseStreamProjection(size int64, t *mkv.Track) error {
 // parseStreamColour mirrors the seekable parser's parseColour: it reads the
 // Video>Colour CICP code points and video bit depth into the track.
 func (p *streamParser) parseStreamColour(size int64, t *mkv.Track) error {
+	t.ColourDetermined = true // the container carries an explicit Colour element
 	return p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDColourMatrix:

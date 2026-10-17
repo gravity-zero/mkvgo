@@ -110,6 +110,10 @@ All notable changes to mkvgo are documented here. The format is based on
   It said the metadata scan stops there; the scan reads on into the element's
   body up to the next segment-level element, so Tracks behind an unknown-size
   SeekHead are still read. A test now holds both cases.
+- **`ReadStream` reads the SegmentUID, PrevUID and NextUID, and marks a
+  track's colour as read from its Colour element.** A differential fuzz target
+  (`FuzzReadVsReadStream`) holding both readers to the same description of a
+  file found them missing from the streaming reader.
 
 ## [0.55.1] - 2026-10-17
 

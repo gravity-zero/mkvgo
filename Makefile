@@ -29,6 +29,7 @@ FUZZTIME ?= 30s
 fuzz:
 	go test -fuzz=FuzzRead -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzReadMeta -fuzztime=$(FUZZTIME) ./mkv/reader/
+	go test -fuzz=FuzzReadVsReadStream -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzBlockReader -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzCodecColour -fuzztime=$(FUZZTIME) ./mkv/reader/
 	go test -fuzz=FuzzResyncToCluster -fuzztime=$(FUZZTIME) ./mkv/reader/
