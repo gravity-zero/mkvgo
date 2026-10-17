@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -30,65 +31,9 @@ const directPlayVerdict = "direct-play"
 // the same shared HLS flags as to-hls/hls-segment (--segment, --keep-tracks,
 // --keep-lang, ...) when packaging. Ctrl-C shuts the server down gracefully.
 func CmdServe(args []string) {
-	addr := ":8478"
-	direct := false
-	auto := false
-	targetName := "mse-generic"
-	// windowCache: what the plan may hold for a window's un-collected renditions.
-	// 0 lets it size itself from the source (see mp4.Options.WindowCacheBytes).
-	var windowCache int64
-	// windowBytes: the kept video the process holds for Open (0 = default, -1 = off).
-	var windowBytes int64
-	// maxWalks: how many windows the process builds at once (0 = no cap).
-	maxWalks := 0
-	// buffered: hold each segment whole while it is sent, instead of streaming it.
-	buffered := false
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-addr", "--addr":
-			addr = needValue(args, &i)
-		case "-direct", "--direct":
-			direct = true
-		case "-auto", "--auto":
-			auto = true
-		case "-target", "--target":
-			targetName = needValue(args, &i)
-		case "-buffered", "--buffered":
-			buffered = true
-		case "-max-walks", "--max-walks":
-			needValue(args, &i)
-			n, err := strconv.Atoi(args[i])
-			if err != nil || n < 0 {
-				Fatal("-max-walks: expected a non-negative count, got " + args[i])
-			}
-			maxWalks = n
-		case "-window-cache", "--window-cache":
-			needValue(args, &i)
-			if args[i] == "off" {
-				windowCache = -1
-				break
-			}
-			mib, err := strconv.ParseInt(args[i], 10, 64)
-			if err != nil || mib < 0 {
-				Fatal("serve: --window-cache takes a size in MiB, or \"off\"")
-			}
-			windowCache = mib << 20
-		case "-window-bytes", "--window-bytes":
-			needValue(args, &i)
-			if args[i] == "off" {
-				windowBytes = -1
-				break
-			}
-			mib, err := strconv.ParseInt(args[i], 10, 64)
-			if err != nil || mib < 0 {
-				Fatal("serve: --window-bytes takes a size in MiB, or \"off\"")
-			}
-			windowBytes = mib << 20
-		default:
-			rest = append(rest, args[i])
-		}
-	}
+	cfg := parseServeFlags(args)
+	addr, direct, auto, targetName := cfg.addr, cfg.direct, cfg.auto, cfg.target
+	rest := cfg.rest
 	if direct && auto {
 		Fatal("serve: --direct and --auto are mutually exclusive")
 	}
@@ -113,14 +58,14 @@ func CmdServe(args []string) {
 	}
 
 	if direct {
-		serveDirect(addr, src)
+		serveDirect(addr, src, cfg.httpOptions(cfg.cors))
 		return
 	}
 
 	opts := f.options(src)
-	opts.WindowCacheBytes = windowCache
-	mp4.SetMaxConcurrentWalks(maxWalks)
-	mp4.SetWindowBytes(windowBytes)
+	opts.WindowCacheBytes = cfg.windowCache
+	mp4.SetMaxConcurrentWalks(cfg.maxWalks)
+	mp4.SetWindowBytes(cfg.windowBytes)
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
@@ -129,7 +74,7 @@ func CmdServe(args []string) {
 		Fatal(err.Error())
 	}
 
-	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: true, Buffered: buffered})}
+	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, cfg.httpOptions(cfg.cors))}
 
 	fmt.Printf("serving %s\n  %s\n", src, playableURL(addr))
 	runServer(srv)
@@ -137,14 +82,77 @@ func CmdServe(args []string) {
 
 // serveDirect serves src as-is over HTTP for a direct-play client: no
 // packaging, just byte-range access to the raw file (mkvhttp.FileHandler).
-func serveDirect(addr, src string) {
+func serveDirect(addr, src string, opts mkvhttp.Options) {
 	name := filepath.Base(src)
 	mux := http.NewServeMux()
-	mux.Handle("/"+name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: true}))
+	mux.Handle("/"+name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: opts.AllowCORS}))
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	fmt.Printf("serving %s (direct-play, no packaging)\n  %s\n", src, directPlayableURL(addr, name))
 	runServer(srv)
+}
+
+// serveFlags are the serve command's own flags; rest keeps the shared HLS flags and the source.
+type serveFlags struct {
+	addr, target   string
+	direct, auto   bool
+	windowCache    int64 // what the plan may hold for a window's un-collected renditions; 0 sizes it from the source
+	windowBytes    int64 // the kept video the process holds for Open (0 = default, -1 = off)
+	maxWalks       int   // windows built at once, NumCPU unless --max-walks says otherwise (0 = no cap)
+	buffered, cors bool
+	rest           []string
+}
+
+// parseServeFlags reads serve's flags; the shared HLS flags are left in rest.
+func parseServeFlags(args []string) serveFlags {
+	cfg := serveFlags{addr: ":8478", target: "mse-generic", maxWalks: runtime.NumCPU()}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-addr", "--addr":
+			cfg.addr = needValue(args, &i)
+		case "-direct", "--direct":
+			cfg.direct = true
+		case "-auto", "--auto":
+			cfg.auto = true
+		case "-target", "--target":
+			cfg.target = needValue(args, &i)
+		case "-buffered", "--buffered":
+			cfg.buffered = true
+		case "-cors", "--cors":
+			cfg.cors = true
+		case "-max-walks", "--max-walks":
+			v := needValue(args, &i)
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				Fatal("-max-walks: expected a non-negative count, got " + v)
+			}
+			cfg.maxWalks = n
+		case "-window-cache", "--window-cache":
+			cfg.windowCache = mibOrOff(needValue(args, &i), "--window-cache")
+		case "-window-bytes", "--window-bytes":
+			cfg.windowBytes = mibOrOff(needValue(args, &i), "--window-bytes")
+		default:
+			cfg.rest = append(cfg.rest, args[i])
+		}
+	}
+	return cfg
+}
+
+// mibOrOff reads a size in MiB as bytes, or "off" as -1.
+func mibOrOff(v, flag string) int64 {
+	if v == "off" {
+		return -1
+	}
+	mib, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || mib < 0 {
+		Fatal("serve: " + flag + " takes a size in MiB, or \"off\"")
+	}
+	return mib << 20
+}
+
+// httpOptions are the handler options serve runs with: CORS only on --cors.
+func (cfg serveFlags) httpOptions(cors bool) mkvhttp.Options {
+	return mkvhttp.Options{AllowCORS: cors, Buffered: cfg.buffered}
 }
 
 // serveModeLabel names the server mode --auto picked, for the log line.

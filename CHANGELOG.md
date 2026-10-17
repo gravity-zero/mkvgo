@@ -48,6 +48,13 @@ All notable changes to mkvgo are documented here. The format is based on
   key in clear as a `data:` URI. The CLI now exits with an error naming
   `--cenc-key-uri`, and `--cenc-inline-key` keeps the inline key for local
   testing. The library default is unchanged.
+- **SEC-08: `mkvgo serve` caps its concurrent walks and turns CORS on only
+  when asked.** The command ran with no cap on the windows built at once, so
+  a burst of requests held as many windows in memory, and it sent
+  `Access-Control-Allow-Origin: *` on every response, letting any web page
+  read what a local server serves. `--max-walks` now defaults to the number
+  of CPUs (`--max-walks 0` removes the cap), and `--cors` (on `serve` and
+  `serve-growing`) adds the CORS headers. The library defaults are unchanged.
 - **NEW-05, NEW-06: 'cenc' packaging reused the AES-CTR keystream across
   tracks and ABR variants; content packaged this way must be re-packaged
   under new keys.** The per-sample IV was the base IV plus the sample's decode
