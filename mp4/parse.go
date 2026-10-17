@@ -25,10 +25,9 @@ const dashRoleScheme = "urn:mpeg:dash:role:2011"
 // against the data actually available and no allocation is sized by an attacker.
 
 const (
-	// maxSamples caps the per-track sample count parsed from a sample table. A
-	// forged stsz/stco could otherwise declare billions of entries; this bounds
-	// the index memory to a few hundred MB worst case. Real files stay far below.
-	maxSamples = 1 << 27 // ~134M samples
+	// maxSamples caps the samples a movie's tables and fragments declare, all tracks together (24 h of 60 fps
+	// video and two 48 kHz AAC tracks is 13M): it bounds the index to about 1 GB whatever size a source claims.
+	maxSamples = 1 << 24
 )
 
 // inSample is one parsed MP4 sample: where its bytes live in the file, its size,
@@ -48,6 +47,7 @@ type inSample struct {
 
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.
 type inTrack struct {
+	tableSamples     int64  // the samples its sample table declares, when parsed past the header
 	trackID          uint32 // tkhd track_ID, for correlating mvex/trex and mfra/tfra
 	trackType        mkv.TrackType
 	codec            string // mkvgo short codec name (e.g. "h264", "aac")
@@ -915,14 +915,16 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	// "lost" media and must not be surfaced as dropped tracks.
 	chapterTrackIDs := chapterTrackRefs(moovBoxes)
 
+	room := int64(maxSamples)
 	for _, b := range moovBoxes {
 		if b.typ != "trak" {
 			continue
 		}
-		tr, dropped, err := parseTrak(b.payload, size, movieTS, mode)
+		tr, dropped, err := parseTrakRoom(b.payload, size, movieTS, mode, room)
 		if err != nil {
 			return nil, err
 		}
+		room -= tr.tableSamples
 		if chapterTrackIDs[tr.trackID] && (dropped != nil || tr.unsupported != "") {
 			if mv.chapterTrak == nil {
 				mv.chapterTrak = b.payload // the titles are read from it when there is no chpl
@@ -1222,6 +1224,11 @@ func chapterTrackRefs(moovBoxes []memBox) map[uint32]bool {
 // *DroppedTrack describing it, so the caller can surface it instead of dropping it
 // silently. An error is returned only for malformed structure.
 func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) (inTrack, *DroppedTrack, error) {
+	return parseTrakRoom(payload, fileSize, movieTS, mode, maxSamples)
+}
+
+// parseTrakRoom is parseTrak expanding the sample table only when it declares at most room samples.
+func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMode, room int64) (inTrack, *DroppedTrack, error) {
 	var tr inTrack
 	trakBoxes, err := iterBoxes(payload)
 	if err != nil {
@@ -1411,6 +1418,12 @@ func parseTrak(payload []byte, fileSize int64, movieTS uint32, mode sampleMode) 
 	}
 
 	tr.sttsClipped = sttsHasNegativeDelta(stblBoxes)
+	if n := headerFrameCount(stblBoxes); mode != sampleNone && n > room {
+		tr.describedOnly(errf("%d samples, past the %d a movie may hold with the tracks before it", n, max(room, 0)))
+		mode = sampleNone
+	} else if mode != sampleNone {
+		tr.tableSamples = n
+	}
 	switch mode {
 	case sampleKeyframes:
 		// Only the keyframe index is needed: derive sync-sample times from

@@ -299,6 +299,13 @@ func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uin
 	case !h.defaultBaseIsMoof && prevEnd > 0:
 		base, chained = prevEnd, true
 	}
+	room := int64(maxSamples)
+	for i := range mv.tracks {
+		room -= int64(len(mv.tracks[i].samples))
+	}
+	if n := trafSampleCount(boxes); n > room {
+		return 0, errf("a fragment declares %d samples, past the %d a movie may hold: the file is damaged or forged", n, max(room, 0))
+	}
 	first := len(t.samples)
 	dataEnd, dts, err := placeTrafSamples(boxes, t, base, baseDecodeTime, h)
 	if err != nil {
@@ -312,6 +319,17 @@ func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uin
 	}
 	t.fragDecodeEnd = dts
 	return dataEnd, nil
+}
+
+// trafSampleCount is the samples a traf's truns declare.
+func trafSampleCount(boxes []memBox) int64 {
+	var n int64
+	for _, b := range boxes {
+		if b.typ == "trun" && len(b.payload) >= 8 {
+			n += int64(binary.BigEndian.Uint32(b.payload[4:8]))
+		}
+	}
+	return n
 }
 
 // placeTrafSamples appends the samples of a traf's truns anchored on base; it returns the data end and decode end.

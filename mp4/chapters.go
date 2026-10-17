@@ -198,7 +198,7 @@ func chapterTrackSamples(trak []byte, fileSize int64) []inSample {
 		return nil
 	}
 	sb, err := iterBoxes(stbl.payload)
-	if err != nil || buildSampleTable(&tr, sb, fileSize) != nil || len(tr.samples) > maxChapters {
+	if err != nil || headerFrameCount(sb) > maxChapters || buildSampleTable(&tr, sb, fileSize) != nil {
 		return nil
 	}
 	return tr.samples

@@ -20,6 +20,11 @@ All notable changes to mkvgo are documented here. The format is based on
   `RemuxConcatToHLS`, `concat-hls` and `concat-segment` packaged every part
   with the same key and IVs restarting at 0, so two episodes shared their
   AES-CTR keystream; they now refuse `Options.CENC` as they refuse `Encrypt`.
+- **An MP4 declares at most 16M samples, all tracks together.** A 20-byte
+  fragment `trun` could ask for 4 billion samples (about 200 GB), and
+  constant-size sample tables sized against a remote source's claimed length
+  for about 8 GB per track. A fragment past the bound is refused; a track whose
+  table passes it is described and refused by name for a remux.
 
 ## [0.55.1] - 2026-10-17
 
