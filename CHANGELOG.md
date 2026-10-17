@@ -33,6 +33,9 @@ All notable changes to mkvgo are documented here. The format is based on
   declares.** It sized its buffer from the FileData length the file states,
   so a few bytes of Matroska could ask for a terabyte; the buffer now grows as
   bytes arrive and a payload past the end of the file fails.
+- **`httpfs` errors no longer show a URL's query.** A presigned URL keeps its
+  signature and session token in the query, and every error, including the
+  client's own, printed the URL whole; an error now names it up to the `?`.
 
 ## [0.55.1] - 2026-10-17
 

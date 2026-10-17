@@ -31,6 +31,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -177,6 +178,23 @@ func redirectPolicy(o Options) func(*http.Request, []*http.Request) error {
 	}
 }
 
+// shown is u as an error names it: without its query and fragment, where a presigned URL keeps its signature.
+func shown(u string) string {
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		return u[:i] + "?..."
+	}
+	return u
+}
+
+// hideQuery strips the query from the URL a *url.Error names.
+func hideQuery(err error) error {
+	var ue *neturl.Error
+	if errors.As(err, &ue) {
+		ue.URL = shown(ue.URL)
+	}
+	return err
+}
+
 // BytesFetched returns the total bytes transferred so far across all readers.
 func (f *FS) BytesFetched() int64 { return f.fetched.Load() }
 
@@ -190,7 +208,7 @@ func (f *FS) Port() *mkv.FS {
 		OpenContext: f.open,
 		Stat: func(url string) (os.FileInfo, error) {
 			if !IsURL(url) {
-				return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", url)
+				return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", shown(url))
 			}
 			return f.stat(url)
 		},
@@ -220,7 +238,7 @@ func (f *FS) stat(url string) (os.FileInfo, error) {
 		return fileInfo{name: url, size: resp.ContentLength, modTime: lastModified(resp.Header), id: identityOf(resp.Header)}, nil
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusNotImplemented {
-		return nil, fmt.Errorf("httpfs: %s: HTTP %s", url, resp.Status)
+		return nil, fmt.Errorf("httpfs: %s: HTTP %s", shown(url), resp.Status)
 	}
 	resp, done, err = f.do(context.Background(), http.MethodGet, url, "bytes=0-0", "")
 	if err != nil {
@@ -232,18 +250,18 @@ func (f *FS) stat(url string) (os.FileInfo, error) {
 	case http.StatusPartialContent:
 		_, _, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 		if err != nil {
-			return nil, fmt.Errorf("httpfs: %s: %w", url, err)
+			return nil, fmt.Errorf("httpfs: %s: %w", shown(url), err)
 		}
 		return fileInfo{name: url, size: total, modTime: lastModified(resp.Header), id: identityOf(resp.Header)}, nil
 	case http.StatusOK:
 		return nil, errIgnoresRange(url)
 	}
-	return nil, fmt.Errorf("httpfs: %s: HTTP %s", url, resp.Status)
+	return nil, fmt.Errorf("httpfs: %s: HTTP %s", shown(url), resp.Status)
 }
 
 func (f *FS) open(ctx context.Context, url string) (mkv.ReadSeekCloser, error) {
 	if !IsURL(url) {
-		return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", url)
+		return nil, fmt.Errorf("httpfs: not an http(s) URL: %s", shown(url))
 	}
 	r := &reader{fs: f, ctx: ctx, url: url, size: -1}
 	if share := mkv.ReadShareFrom(ctx); share != nil {
@@ -266,11 +284,11 @@ func (f *FS) do(ctx context.Context, method, url, rng, identity string) (resp *h
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		done()
-		return nil, nil, err
+		return nil, nil, hideQuery(err)
 	}
 	if f.opts.AllowHost != nil && !f.opts.AllowHost(req.URL.Host) {
 		done()
-		return nil, nil, fmt.Errorf("httpfs: %s: host %s refused by AllowHost", url, req.URL.Host)
+		return nil, nil, fmt.Errorf("httpfs: %s: host %s refused by AllowHost", shown(url), req.URL.Host)
 	}
 	for k, vs := range f.opts.Header {
 		for _, v := range vs {
@@ -289,7 +307,7 @@ func (f *FS) do(ctx context.Context, method, url, rng, identity string) (resp *h
 	resp, err = f.opts.Client.Do(req)
 	if err != nil {
 		done()
-		return nil, nil, fmt.Errorf("httpfs: %s: %w", url, err)
+		return nil, nil, fmt.Errorf("httpfs: %s: %w", shown(url), hideQuery(err))
 	}
 	return resp, done, nil
 }
@@ -297,7 +315,7 @@ func (f *FS) do(ctx context.Context, method, url, rng, identity string) (resp *h
 const defaultRequestTimeout = 60 * time.Second
 
 func errIgnoresRange(url string) error {
-	return fmt.Errorf("httpfs: %s: server ignores Range requests (refusing a full download; the server must support ranged GETs)", url)
+	return fmt.Errorf("httpfs: %s: server ignores Range requests (refusing a full download; the server must support ranged GETs)", shown(url))
 }
 
 // parseContentRange reads "bytes <start>-<end>/<total>" and checks start <= end < total.
@@ -351,9 +369,9 @@ func checkVersion(url, identity string, h http.Header) error {
 	case identity:
 		return nil
 	case "":
-		return fmt.Errorf("httpfs: %s: the response carries no %s: nothing shows it is the version read so far", url, field)
+		return fmt.Errorf("httpfs: %s: the response carries no %s: nothing shows it is the version read so far", shown(url), field)
 	}
-	return fmt.Errorf("httpfs: %s: %w", url, mkv.ErrSourceChanged)
+	return fmt.Errorf("httpfs: %s: %w", shown(url), mkv.ErrSourceChanged)
 }
 
 func lastModified(h http.Header) time.Time {
@@ -452,16 +470,16 @@ func (r *reader) Read(p []byte) (int, error) {
 				r.abandon()
 				r.pos -= int64(n)
 				if m > 0 {
-					return 0, fmt.Errorf("httpfs: %s: 206 of %d bytes carried more", r.url, r.span)
+					return 0, fmt.Errorf("httpfs: %s: 206 of %d bytes carried more", shown(r.url), r.span)
 				}
-				return 0, fmt.Errorf("httpfs: %s: read body: %w", r.url, e)
+				return 0, fmt.Errorf("httpfs: %s: read body: %w", shown(r.url), e)
 			}
 		}
 		r.release()
 		return n, nil
 	case err == io.EOF:
 		r.abandon()
-		return n, fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", r.url, r.bodyEnd-r.bodyPos)
+		return n, fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", shown(r.url), r.bodyEnd-r.bodyPos)
 	case err != nil:
 		// A response that broke midway (a timeout over a slow reader, a
 		// dropped connection) is resumed from where it stopped, a few times
@@ -470,7 +488,7 @@ func (r *reader) Read(p []byte) (int, error) {
 		// no version known, nothing would tell two versions apart, so none.
 		r.abandon()
 		if r.ctx.Err() != nil || r.breaks >= maxBreaks || r.id == "" {
-			return n, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+			return n, fmt.Errorf("httpfs: %s: read body: %w", shown(r.url), err)
 		}
 		r.breaks++
 		if n > 0 {
@@ -506,10 +524,10 @@ func (r *reader) skip(n int64) error {
 	if err != nil {
 		r.abandon()
 		if err == io.EOF {
-			return fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", r.url, r.bodyEnd-r.bodyPos)
+			return fmt.Errorf("httpfs: %s: 206 ended %d bytes short of its range", shown(r.url), r.bodyEnd-r.bodyPos)
 		}
 		if r.ctx.Err() != nil {
-			return fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+			return fmt.Errorf("httpfs: %s: read body: %w", shown(r.url), err)
 		}
 	}
 	return nil
@@ -605,20 +623,20 @@ func (r *reader) ReadAt(p []byte, off int64) (int, error) {
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 	case http.StatusPreconditionFailed:
-		return 0, fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
+		return 0, fmt.Errorf("httpfs: %s: %w", shown(r.url), mkv.ErrSourceChanged)
 	case http.StatusRequestedRangeNotSatisfiable:
 		return 0, io.EOF
 	case http.StatusOK:
 		return 0, errIgnoresRange(r.url)
 	default:
-		return 0, fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+		return 0, fmt.Errorf("httpfs: %s: HTTP %s", shown(r.url), resp.Status)
 	}
 	start, last, _, err := parseContentRange(resp.Header.Get("Content-Range"))
 	if err != nil {
-		return 0, fmt.Errorf("httpfs: %s: %w", r.url, err)
+		return 0, fmt.Errorf("httpfs: %s: %w", shown(r.url), err)
 	}
 	if start != off || last >= off+int64(len(p)) {
-		return 0, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", r.url, start, last, off, off+int64(len(p))-1)
+		return 0, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", shown(r.url), start, last, off, off+int64(len(p))-1)
 	}
 	if err := checkVersion(r.url, r.id, resp.Header); err != nil {
 		return 0, err
@@ -626,7 +644,7 @@ func (r *reader) ReadAt(p []byte, off int64) (int, error) {
 	n, err := io.ReadFull(resp.Body, p[:last-start+1])
 	r.fs.fetched.Add(int64(n))
 	if err != nil {
-		return n, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+		return n, fmt.Errorf("httpfs: %s: read body: %w", shown(r.url), err)
 	}
 	if n < len(p) {
 		return n, io.EOF
@@ -660,7 +678,7 @@ func (r *reader) Stat() (os.FileInfo, error) {
 		return nil, err
 	}
 	if tailErr == nil && (tail.id != head.id || tail.size != head.size) { // the two ends are of two versions
-		return nil, fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
+		return nil, fmt.Errorf("httpfs: %s: %w", shown(r.url), mkv.ErrSourceChanged)
 	}
 	if !strongIdentity(head.id) {
 		return fileInfo{name: r.url, size: head.size, modTime: head.mod, id: head.id}, nil
@@ -702,24 +720,24 @@ func (r *reader) fetchKept(w int64, suffix bool) (*keptRange, error) {
 	case http.StatusOK:
 		return nil, errIgnoresRange(r.url)
 	default:
-		return nil, fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+		return nil, fmt.Errorf("httpfs: %s: HTTP %s", shown(r.url), resp.Status)
 	}
 	start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 	if err != nil {
-		return nil, fmt.Errorf("httpfs: %s: %w", r.url, err)
+		return nil, fmt.Errorf("httpfs: %s: %w", shown(r.url), err)
 	}
 	want := last - start + 1
 	if (!suffix && (start != 0 || last > w-1)) || (suffix && (last != total-1 || want > w)) {
-		return nil, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %s", r.url, start, last, rng)
+		return nil, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %s", shown(r.url), start, last, rng)
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != want {
-		return nil, fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
+		return nil, fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", shown(r.url), want, resp.ContentLength)
 	}
 	data := make([]byte, want)
 	n, err := io.ReadFull(resp.Body, data)
 	r.fs.fetched.Add(int64(n))
 	if err != nil {
-		return nil, fmt.Errorf("httpfs: %s: read body: %w", r.url, err)
+		return nil, fmt.Errorf("httpfs: %s: read body: %w", shown(r.url), err)
 	}
 	return &keptRange{recentRange: recentRange{url: r.url, id: identityOf(resp.Header), off: start, size: total, data: data}, mod: lastModified(resp.Header)}, nil
 }
@@ -773,20 +791,20 @@ func (r *reader) fetch(off int64) error {
 	case http.StatusPartialContent:
 		start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 		if err != nil {
-			return fmt.Errorf("httpfs: %s: %w", r.url, err)
+			return fmt.Errorf("httpfs: %s: %w", shown(r.url), err)
 		}
 		if start != off || last > end {
-			return fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", r.url, start, last, off, end)
+			return fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", shown(r.url), start, last, off, end)
 		}
 		if err := checkVersion(r.url, r.id, resp.Header); err != nil {
 			return err
 		}
 		if r.size >= 0 && total != r.size {
-			return fmt.Errorf("httpfs: %s: the size went from %d to %d: %w", r.url, r.size, total, mkv.ErrSourceChanged)
+			return fmt.Errorf("httpfs: %s: the size went from %d to %d: %w", shown(r.url), r.size, total, mkv.ErrSourceChanged)
 		}
 		want := last - start + 1
 		if resp.ContentLength >= 0 && resp.ContentLength != want {
-			return fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
+			return fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", shown(r.url), want, resp.ContentLength)
 		}
 		if r.id == "" {
 			r.id = identityOf(resp.Header)
@@ -804,23 +822,23 @@ func (r *reader) fetch(off int64) error {
 		ok = true
 		return nil
 	case http.StatusPreconditionFailed:
-		return fmt.Errorf("httpfs: %s: %w", r.url, mkv.ErrSourceChanged)
+		return fmt.Errorf("httpfs: %s: %w", shown(r.url), mkv.ErrSourceChanged)
 	case http.StatusRequestedRangeNotSatisfiable:
 		// fetch never asks past a known size: a 416 then means the object shrank.
 		if r.size >= 0 {
-			return fmt.Errorf("httpfs: %s: offset %d is past the object's end now: %w", r.url, off, mkv.ErrSourceChanged)
+			return fmt.Errorf("httpfs: %s: offset %d is past the object's end now: %w", shown(r.url), off, mkv.ErrSourceChanged)
 		}
-		return fmt.Errorf("httpfs: %s: range not satisfiable", r.url)
+		return fmt.Errorf("httpfs: %s: range not satisfiable", shown(r.url))
 	case http.StatusNotFound, http.StatusGone:
 		// Gone under a reader bound to a version is a changed source; a fresh reader's is a plain not-found.
 		if r.id != "" || r.size >= 0 {
-			return fmt.Errorf("httpfs: %s: HTTP %s: %w", r.url, resp.Status, mkv.ErrSourceChanged)
+			return fmt.Errorf("httpfs: %s: HTTP %s: %w", shown(r.url), resp.Status, mkv.ErrSourceChanged)
 		}
-		return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+		return fmt.Errorf("httpfs: %s: HTTP %s", shown(r.url), resp.Status)
 	case http.StatusOK:
 		return errIgnoresRange(r.url)
 	}
-	return fmt.Errorf("httpfs: %s: HTTP %s", r.url, resp.Status)
+	return fmt.Errorf("httpfs: %s: HTTP %s", shown(r.url), resp.Status)
 }
 
 // fileInfo is the os.FileInfo Stat returns: size, Last-Modified, and the version as mkv.FileIdentity.
