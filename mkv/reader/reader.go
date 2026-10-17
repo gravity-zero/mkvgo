@@ -672,7 +672,7 @@ func tileMarks(buf []byte, n int64, accept func(uint32) bool) []uint8 {
 	return marks
 }
 
-// elemAtCount, set by a test, counts elemAt's decodes; nil otherwise.
+// elemAtCount, set by a test, counts every elemAt decode in the process: no test of this package may run t.Parallel.
 var elemAtCount atomic.Pointer[atomic.Int64]
 
 // elemAt decodes the element header at b[0] straight from the slice, with
