@@ -96,7 +96,14 @@ All notable changes to mkvgo are documented here. The format is based on
   refused the file over that tail, and the error said to run `RecoverInPlace`.
   The tail now goes out in one write call: a death before or after any write,
   of the repair or of a recovery, comes back to the original file or the
-  finished one, which a test checks at every write.
+  finished one, which a test checks at every write. A write torn partway (a
+  power loss) is covered too for `ReindexInPlace`: before appending, it writes
+  and syncs a 64-byte intent record (the original size, CRC32C) in the free
+  tail of the head Void it already needs, and clears it before dropping the
+  journal; recovery cuts the file back to that size, or clears a record the
+  crash cut short. A test tears the writes at every byte (451 cuts) and gets
+  the original or the finished file each time. `RetimeTracksInPlace` needs no
+  head Void and keeps the one-write rule only.
 - **NEW-03: a box named `sidx` is read only if a sidx can be that large.**
   The fragmented-MP4 keyframe scan read every `sidx` before the first
   fragment whole, whatever its declared size: a source delivering a 64 MiB box
