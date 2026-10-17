@@ -609,9 +609,9 @@ func (r *reader) Stat() (os.FileInfo, error) {
 	tailDone := make(chan struct{})
 	go func() {
 		defer close(tailDone)
-		tail, tailErr = r.fetchKept(fmt.Sprintf("bytes=-%d", w))
+		tail, tailErr = r.fetchKept(w, true)
 	}()
-	head, err := r.fetchKept(fmt.Sprintf("bytes=0-%d", w-1))
+	head, err := r.fetchKept(w, false)
 	<-tailDone
 	if err != nil {
 		if errors.Is(err, errNotRanged) {
@@ -641,8 +641,14 @@ type keptRange struct {
 	mod time.Time
 }
 
-// fetchKept reads the whole response to a ranged GET of rng.
-func (r *reader) fetchKept(rng string) (*keptRange, error) {
+// fetchKept reads the whole response to a ranged GET of the first w bytes, or
+// the last w when suffix is set; a response serving anything else is refused
+// before its body is read, so nothing past w is ever allocated.
+func (r *reader) fetchKept(w int64, suffix bool) (*keptRange, error) {
+	rng := fmt.Sprintf("bytes=0-%d", w-1)
+	if suffix {
+		rng = fmt.Sprintf("bytes=-%d", w)
+	}
 	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, rng, "")
 	if err != nil {
 		return nil, err
@@ -662,7 +668,14 @@ func (r *reader) fetchKept(rng string) (*keptRange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("httpfs: %s: %w", r.url, err)
 	}
-	data := make([]byte, last-start+1)
+	want := last - start + 1
+	if (!suffix && (start != 0 || last > w-1)) || (suffix && (last != total-1 || want > w)) {
+		return nil, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %s", r.url, start, last, rng)
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != want {
+		return nil, fmt.Errorf("httpfs: %s: 206 of %d bytes declares a body of %d", r.url, want, resp.ContentLength)
+	}
+	data := make([]byte, want)
 	n, err := io.ReadFull(resp.Body, data)
 	r.fs.fetched.Add(int64(n))
 	if err != nil {

@@ -16,6 +16,13 @@ All notable changes to mkvgo are documented here. The format is based on
   (`maxLazyMoovBytes`) now goes to the full read, whose buffer grows with the
   bytes that arrive, and a source that does not hold them fails having
   allocated what it delivered.
+- **SEC-02: `httpfs` keeps only the range it asked for.** Under a
+  `mkv.ShareReads` scope, `Stat` fetches the first and last window and sized
+  each buffer from the Content-Range the server sent. A response is now taken
+  only when it answers the request (the head starts at 0 and ends within the
+  window, the suffix ends at the object's last byte and spans at most a
+  window) and its Content-Length matches, so nothing past a window is
+  allocated.
 
 ### Fixed
 
