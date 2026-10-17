@@ -77,11 +77,11 @@ func TestSplitVP9SubsamplesRoundTrip(t *testing.T) {
 	if len(subs) != 1 {
 		t.Fatalf("subs = %+v, want exactly 1 (single frame, no superframe)", subs)
 	}
-	if subs[0].clear != 14 {
-		t.Errorf("clear = %d, want 14 (the uncompressed header length)", subs[0].clear)
+	if subs[0].clear != 22 {
+		t.Errorf("clear = %d, want 22 (the 14-byte uncompressed header, then the 8 bytes past the last whole AES block)", subs[0].clear)
 	}
-	if subs[0].protected != 40 {
-		t.Errorf("protected = %d, want 40 (the tile data)", subs[0].protected)
+	if subs[0].protected != 32 {
+		t.Errorf("protected = %d, want 32 (the tile data, block-aligned)", subs[0].protected)
 	}
 	var total int
 	for _, s := range subs {
@@ -138,11 +138,11 @@ func TestSplitVP9SubsamplesSuperframe(t *testing.T) {
 	if len(subs) != 3 {
 		t.Fatalf("subs = %+v, want 3 (2 frames + superframe index)", subs)
 	}
-	if subs[0].clear != 14 || subs[0].protected != 20 {
-		t.Errorf("frame 1 subsample = %+v, want clear=14 protected=20", subs[0])
+	if subs[0].clear != 18 || subs[0].protected != 16 {
+		t.Errorf("frame 1 subsample = %+v, want clear=18 protected=16", subs[0])
 	}
-	if subs[1].clear != 14 || subs[1].protected != 30 {
-		t.Errorf("frame 2 subsample = %+v, want clear=14 protected=30", subs[1])
+	if subs[1].clear != 28 || subs[1].protected != 16 {
+		t.Errorf("frame 2 subsample = %+v, want clear=28 protected=16", subs[1])
 	}
 	if subs[2].clear != uint16(len(index)) || subs[2].protected != 0 {
 		t.Errorf("superframe index subsample = %+v, want clear=%d protected=0", subs[2], len(index))

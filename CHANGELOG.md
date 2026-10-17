@@ -74,6 +74,12 @@ All notable changes to mkvgo are documented here. The format is based on
   track but the video now adds its own value in the IV's top byte, and each
   variant past the first its index times 2^48, so no IV serves two samples
   under one key.
+- **NEW-07: VP9 CENC protects whole AES blocks per frame.** The VP codec
+  ISO media binding requires each frame's encrypted bytes to be block-aligned,
+  the clear bytes before them taking the remainder; the splitter protected
+  everything after the uncompressed header, so a frame's protected run (and,
+  in a superframe, the counter state of the next frame) was off by up to 15
+  bytes. The clear prefix now takes the remainder.
 - **SEC-09: the explicit AES-128 IV is documented as reused.** `HLSKey.IV`
   and `HLSEncryption.IV` apply one IV to every segment of a key's period,
   which under CBC shows where two segments' plaintexts start alike. The doc
