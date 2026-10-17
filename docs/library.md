@@ -1173,8 +1173,9 @@ shifted subtitles come back whole; `mkvhttp.Handler` uses it on its own.
 `ConcatPlan.NumParts()`/`ConcatPlan.Part(k)` expose the underlying
 per-source `HLSPlan`s directly.
 
-**v1 limits.** `Options.Encrypt` and `Options.SingleFile` are refused
-explicitly. No combined DASH manifest is emitted: DASH shares one
+**v1 limits.** `Options.Encrypt`, `Options.CENC` and `Options.SingleFile` are
+refused explicitly (under CENC every part would restart its sample IVs under
+the same key). No combined DASH manifest is emitted: DASH shares one
 `SegmentTimeline` per AdaptationSet, and independent per-part timelines have
 nothing to share it over (the same non-aligned rationale as `RemuxToABR`'s
 combined manifest). No combined I-frame playlist either; each part's own

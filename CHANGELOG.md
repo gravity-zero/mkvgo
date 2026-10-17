@@ -16,6 +16,10 @@ All notable changes to mkvgo are documented here. The format is based on
   credentials a bucket could move to another host or carry over a redirect,
   and the allocations a remote source or a crafted file sized. `go get` warns
   on a retracted version, `go list -m -u` flags it, and `@latest` skips it.
+- **Concatenated presentations refuse CENC.** `PlanConcat`,
+  `RemuxConcatToHLS`, `concat-hls` and `concat-segment` packaged every part
+  with the same key and IVs restarting at 0, so two episodes shared their
+  AES-CTR keystream; they now refuse `Options.CENC` as they refuse `Encrypt`.
 
 ## [0.55.1] - 2026-10-17
 

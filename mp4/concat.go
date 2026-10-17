@@ -53,6 +53,9 @@ func validateConcatOptions(o *Options) error {
 	if o.Encrypt != nil {
 		return errf("concat presentations do not support Encrypt (v1): AES-128 key rotation across parts is not yet defined")
 	}
+	if o.CENC != nil {
+		return errf("concat presentations do not support CENC: every part would restart its sample IVs under the same key; package each part on its own")
+	}
 	if o.SingleFile {
 		return errf("concat presentations do not support SingleFile (v1): byte-range playlists reference one file per rendition, which a per-part concatenation does not have")
 	}

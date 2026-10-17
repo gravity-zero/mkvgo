@@ -285,6 +285,13 @@ func TestRemuxConcatToHLS_Refusals(t *testing.T) {
 	if err := RemuxConcatToHLS(context.Background(), []string{src0, src1}, dir, Options{SingleFile: true}); err == nil {
 		t.Error("SingleFile should be refused")
 	}
+	cenc := &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIV8, KeyURI: "k"}
+	if err := RemuxConcatToHLS(context.Background(), []string{src0, src1}, dir, Options{CENC: cenc}); err == nil || !strings.Contains(err.Error(), "CENC") {
+		t.Errorf("CENC should be refused (every part would restart its IVs under the same key): %v", err)
+	}
+	if _, err := PlanConcat(context.Background(), []string{src0, src1}, Options{CENC: cenc}); err == nil || !strings.Contains(err.Error(), "CENC") {
+		t.Errorf("PlanConcat: CENC should be refused: %v", err)
+	}
 	if err := RemuxConcatToHLS(context.Background(), []string{src0}, dir, Options{}); err == nil {
 		t.Error("a single source should be rejected")
 	}
