@@ -259,14 +259,15 @@ metaLoop:
 					return nil, nil, err
 				}
 			}
-			// unknown-size SeekHead/Cues: can't skip → stop metadata scan.
+			// unknown size: the scan reads on into its body, whose children are passed over below like any
+			// element that is not segment-level, up to the next one that is.
 		default:
 			if eh.Size >= 0 {
 				if err := p.skip(eh.Size); err != nil {
 					return nil, nil, err
 				}
 			}
-			// unknown-size unknown element: stop metadata scan.
+			// unknown size: read on into its body, as for SeekHead and Cues above.
 		}
 	}
 

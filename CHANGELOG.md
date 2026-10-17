@@ -106,6 +106,10 @@ All notable changes to mkvgo are documented here. The format is based on
   DisplayHeight, MaxCLL and MaxFALL (32 bits), StereoMode and the Colour code
   points (16 bits) wrapped silently, so 300 channels read as 44; such a value
   is now dropped, and a rejected channel count does not fall back to 1.
+- **`ReadStream`'s comment on an unknown-size element matches what it does.**
+  It said the metadata scan stops there; the scan reads on into the element's
+  body up to the next segment-level element, so Tracks behind an unknown-size
+  SeekHead are still read. A test now holds both cases.
 
 ## [0.55.1] - 2026-10-17
 
