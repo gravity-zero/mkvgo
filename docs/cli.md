@@ -1132,7 +1132,7 @@ Security flags (shared with `hls-segment`; both must use the same values):
   encryption is asked for (`--aes-key-uri`, or another `--cenc-*` flag) and
   no key flag is given. Giving both a key and its `-file` is refused.
 - `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
-  forward secrecy (a captured key decrypts only its own period). Pass
+  compartmentalization (a leaked key decrypts only the periods it serves). Pass
   comma-separated lists to `--aes-key` and `--aes-key-uri` (at least two,
   matching in count); the keys cycle every N segments, key *i* served at URI
   *i*, and the media playlist carries a fresh `EXT-X-KEY` at each boundary. The

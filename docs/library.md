@@ -1221,10 +1221,10 @@ the DASH manifest is withheld (AES-128 is an HLS mechanism). The key is only
 ever advertised (`KeyURI`), never stored - authenticating that endpoint is the
 server's access control.
 
-**Key rotation** (forward secrecy). Set `RotateEverySegments` and a `Keys`
+**Key rotation** (compartmentalization: a leaked key decrypts only the periods it serves). Set `RotateEverySegments` and a `Keys`
 `[]HLSKey` list instead of the single `Key`: the key changes every N segments,
-cycling through `Keys`, so a captured key decrypts only its own period rather
-than the whole video. The media playlist then carries a fresh `EXT-X-KEY` at
+cycling through `Keys`, so a leaked key decrypts only the periods it serves
+rather than the whole video. The media playlist then carries a fresh `EXT-X-KEY` at
 each boundary and each segment is encrypted with its period's key. The schedule
 is a pure function of the segment index, so `RemuxToHLS` and `PlanHLS` still
 agree byte for byte.

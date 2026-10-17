@@ -644,8 +644,8 @@ export interface HLSKey {
 export interface HLSEncryption extends HLSKey {
   /**
    * Rotate the key every N media segments through `keys`, cycling back to the
-   * first once the last is used (forward secrecy: a captured key decrypts only
-   * its own period, not the whole video). The media playlist then carries a
+   * first once the last is used (compartmentalization: a leaked key decrypts
+   * only the periods it serves, not the whole video). The media playlist then carries a
    * fresh EXT-X-KEY at each period boundary. Leave unset for a single key (the
    * `key`/`keyURI`/`iv` fields above). Needs at least two `keys`.
    */

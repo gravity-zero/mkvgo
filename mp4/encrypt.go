@@ -40,8 +40,8 @@ type HLSKey struct {
 
 // HLSEncryption configures AES-128 segment encryption. Set the single Key/
 // KeyURI/IV for one key over the whole presentation, or RotateEverySegments
-// with Keys to rotate the key across the presentation (forward secrecy: a
-// leaked key decrypts only its own period, not the whole video).
+// with Keys to rotate the key across the presentation (compartmentalization:
+// a leaked key decrypts only the periods it serves, not the whole video).
 type HLSEncryption struct {
 	// Single-key case (used when RotateEverySegments == 0). IV, when set, is
 	// reused for every segment: see HLSKey.IV for why nil is recommended.

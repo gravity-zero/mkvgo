@@ -266,8 +266,8 @@ are different encryption schemes). A bad key length surfaces the same error the
 CLI's `--aes-key` flag does. AES-128 is HLS-only - unlike CENC it produces no
 DASH manifest.
 
-**Key rotation** (forward secrecy): rotate the key across the presentation so a
-captured key decrypts only its own period. Set `rotateEverySegments` and a
+**Key rotation** (compartmentalization): rotate the key across the
+presentation so a leaked key decrypts only the periods it serves. Set `rotateEverySegments` and a
 `keys` array instead of a single `key`; the media playlist then carries a fresh
 `EXT-X-KEY` at each boundary and each segment is encrypted with its period's
 key. The schedule is a pure function of the segment index, so an on-demand plan

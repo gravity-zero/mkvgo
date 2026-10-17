@@ -195,8 +195,8 @@ Encrypt (AES-128) and sign URLs:
 mkvgo to-hls video.mkv -o stream/ --aes-key <32-hex> --aes-key-uri https://…/key
 ```
 
-**Rotate the key** for forward secrecy (a captured key decrypts only its
-period, not the whole video):
+**Rotate the key** for compartmentalization (a leaked key decrypts only the
+periods it serves, not the whole video):
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ --aes-rotate-segments 10 \

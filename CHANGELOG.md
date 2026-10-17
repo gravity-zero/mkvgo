@@ -182,6 +182,15 @@ All notable changes to mkvgo are documented here. The format is based on
   keeps its meaning (what `Resource` handed out), so the window accounting it
   belongs to is unchanged.
 
+### Documentation
+
+- **DOC-01: key rotation is called compartmentalization, not forward
+  secrecy.** A rotated AES-128 key is one of a fixed list, cycled: a leaked
+  key decrypts every period it serves and nothing protects past periods once
+  the list is known. `HLSEncryption`, `--aes-rotate-segments` and the
+  library, WASM, recipe and TypeScript docs now say a leaked key decrypts
+  only the periods it serves.
+
 ### Changed
 
 - **NEW-05, NEW-06: 'cenc' output bytes change for every track but the
