@@ -1145,7 +1145,9 @@ Security flags (shared with `hls-segment`; both must use the same values):
   sample-level Common Encryption (ISO/IEC 23001-7): `cenc` is AES-CTR (a
   per-sample IV, `--cenc-iv` 8 or 16 bytes hex); `cbcs` is AES-CBC with a
   1-encrypted:9-clear 16-byte-block pattern on video (`--cenc-iv` must be 16
-  bytes, used as a constant IV). Unlike `--aes-key`, a CENC presentation still
+  bytes, used as a constant IV). Under `cenc`, give each title its own key or
+  its own `--cenc-iv`: two titles packaged with the same pair share their
+  keystream wherever their timestamps overlap. Unlike `--aes-key`, a CENC presentation still
   gets a `manifest.mpd` (`ContentProtection` with the key ID). Media playlists
   (video and audio) carry `EXT-X-KEY` (`METHOD=SAMPLE-AES-CTR` for cenc,
   `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is

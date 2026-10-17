@@ -463,6 +463,9 @@ the key. Two schemes: `cenc` (AES-CTR, a per-sample IV) and `cbcs` (AES-CBC, a
 constant IV, 1-encrypted:9-clear pattern on video). Unlike AES-128 above, a
 CENC presentation still gets a DASH manifest (with a `ContentProtection`
 element), and both HLS renditions (video and audio) carry `EXT-X-KEY`.
+Under `cenc`, give each title its own key or its own base IV: two titles
+packaged with the same pair share their keystream wherever their timestamps
+overlap.
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ \

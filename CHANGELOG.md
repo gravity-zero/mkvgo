@@ -44,6 +44,11 @@ All notable changes to mkvgo are documented here. The format is based on
   are set apart by its ID modulo 255, so two audio tracks numbered 2 and 257
   shared their keystream; such a presentation is now refused and names both
   tracks.
+- **VP9 'cenc' content packaged before v0.55.0 needs a new key.** NEW-07
+  moved each frame's protected run by up to 15 bytes: re-packaging the same
+  VP9 title with v0.55 under the same key and IV applies the same keystream to
+  shifted bytes, so the old and new outputs together leak plaintext. The docs
+  now say a title needs its own key or base IV under `cenc`.
 
 ## [0.55.1] - 2026-10-17
 
