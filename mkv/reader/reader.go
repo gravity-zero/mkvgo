@@ -159,6 +159,8 @@ type parser struct {
 	rateReads bool
 	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
 	rateRejected bool
+	// channelsRejected says it stated a channel count past 255.
+	channelsRejected bool
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -1170,7 +1172,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	t := mkv.Track{}
-	p.rateRejected = false
+	p.rateRejected, p.channelsRejected = false, false
 
 	for {
 		if err := p.checkCtx(); err != nil {
@@ -1358,7 +1360,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	// Colour element didn't (container values, parsed above, still win per field).
 	fillColourFromCodecPrivate(&t)
 	fillCodecDerived(&t)
-	audioDefaults(&t, p.rateRejected)
+	audioDefaults(&t, p.rateRejected, p.channelsRejected)
 	return t, nil
 }
 
@@ -1452,15 +1454,13 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			w := uint32(v)
-			t.Width = &w
+			t.Width = fit32(v)
 		case mkv.IDPixelHeight:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			h := uint32(v)
-			t.Height = &h
+			t.Height = fit32(v)
 		case mkv.IDFlagInterlaced:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
@@ -1478,15 +1478,13 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			dw := uint32(v)
-			t.DisplayWidth = &dw
+			t.DisplayWidth = fit32(v)
 		case mkv.IDDisplayHeight:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			dh := uint32(v)
-			t.DisplayHeight = &dh
+			t.DisplayHeight = fit32(v)
 		case mkv.IDColour:
 			if err := p.parseColour(eh.Size, t); err != nil {
 				return err
@@ -1497,8 +1495,7 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 				return err
 			}
 			if v != 0 { // 0 = mono: leave nil (no stereo)
-				sm := uint16(v)
-				t.StereoMode = &sm
+				t.StereoMode = fit16(v)
 			}
 		case mkv.IDProjection:
 			if err := p.parseProjection(eh.Size, t); err != nil {
@@ -1538,48 +1535,47 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			cs := uint16(v)
-			t.ColorSpace = &cs
+			t.ColorSpace = fit16(v)
 		case mkv.IDColourTransfer:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			tr := uint16(v)
-			t.ColorTransfer = &tr
+			t.ColorTransfer = fit16(v)
 		case mkv.IDColourPrimaries:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			pr := uint16(v)
-			t.ColorPrimaries = &pr
+			t.ColorPrimaries = fit16(v)
 		case mkv.IDColourRange:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			rg := uint16(v)
-			t.ColorRange = &rg
+			t.ColorRange = fit16(v)
 		case mkv.IDColourBitsPerChannel:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			bd := uint16(v)
-			t.VideoBitDepth = &bd
+			t.VideoBitDepth = fit16(v)
 		case mkv.IDColourMaxCLL:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			ensureHDR(t).MaxCLL = uint32(v)
+			if x := fit32(v); x != nil {
+				ensureHDR(t).MaxCLL = *x
+			}
 		case mkv.IDColourMaxFALL:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			ensureHDR(t).MaxFALL = uint32(v)
+			if x := fit32(v); x != nil {
+				ensureHDR(t).MaxFALL = *x
+			}
 		case mkv.IDMasteringMetadata:
 			if err := p.parseMasteringMetadata(eh.Size, t); err != nil {
 				return err
@@ -1748,15 +1744,14 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			ch := uint8(v)
-			t.Channels = &ch
+			t.Channels = fit8(v)
+			p.channelsRejected = t.Channels == nil
 		case mkv.IDBitDepth:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			bd := uint8(v)
-			t.BitDepth = &bd
+			t.BitDepth = fit8(v)
 		default:
 			if err := p.skip(eh.Size); err != nil {
 				return err

@@ -64,6 +64,8 @@ type streamParser struct {
 	metaBudget int64 // remaining bytes allowed for in-memory metadata (parity with the seekable parser)
 	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
 	rateRejected bool
+	// channelsRejected says it stated a channel count past 255.
+	channelsRejected bool
 }
 
 // chargeMeta debits the cumulative metadata budget, bounding the TOTAL bytes a
@@ -405,7 +407,7 @@ func (p *streamParser) parseStreamTracks(size int64, c *mkv.Container) error {
 
 func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	t := mkv.Track{}
-	p.rateRejected = false
+	p.rateRejected, p.channelsRejected = false, false
 	err := p.boundedLoop(size, func(h ebml.ElementHeader) error {
 		switch h.ID {
 		case mkv.IDTrackNumber:
@@ -517,7 +519,7 @@ func (p *streamParser) parseStreamTrackEntry(size int64) (mkv.Track, error) {
 	// bitstream when the container Colour element is absent (container wins).
 	fillColourFromCodecPrivate(&t)
 	fillCodecDerived(&t)
-	audioDefaults(&t, p.rateRejected)
+	audioDefaults(&t, p.rateRejected, p.channelsRejected)
 	return t, err
 }
 
@@ -617,15 +619,13 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			w := uint32(v)
-			t.Width = &w
+			t.Width = fit32(v)
 		case mkv.IDPixelHeight:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			hv := uint32(v)
-			t.Height = &hv
+			t.Height = fit32(v)
 		case mkv.IDFlagInterlaced:
 			v, err := p.readUint(h)
 			if err != nil {
@@ -643,15 +643,13 @@ func (p *streamParser) parseStreamVideo(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			dw := uint32(v)
-			t.DisplayWidth = &dw
+			t.DisplayWidth = fit32(v)
 		case mkv.IDDisplayHeight:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			dh := uint32(v)
-			t.DisplayHeight = &dh
+			t.DisplayHeight = fit32(v)
 		case mkv.IDColour:
 			return p.parseStreamColour(h.Size, t)
 		case mkv.IDProjection:
@@ -701,36 +699,31 @@ func (p *streamParser) parseStreamColour(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			cs := uint16(v)
-			t.ColorSpace = &cs
+			t.ColorSpace = fit16(v)
 		case mkv.IDColourTransfer:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			tr := uint16(v)
-			t.ColorTransfer = &tr
+			t.ColorTransfer = fit16(v)
 		case mkv.IDColourPrimaries:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			pr := uint16(v)
-			t.ColorPrimaries = &pr
+			t.ColorPrimaries = fit16(v)
 		case mkv.IDColourRange:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			rg := uint16(v)
-			t.ColorRange = &rg
+			t.ColorRange = fit16(v)
 		case mkv.IDColourBitsPerChannel:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			bd := uint16(v)
-			t.VideoBitDepth = &bd
+			t.VideoBitDepth = fit16(v)
 		default:
 			return p.skip(h.Size)
 		}
@@ -764,15 +757,14 @@ func (p *streamParser) parseStreamAudio(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			ch := uint8(v)
-			t.Channels = &ch
+			t.Channels = fit8(v)
+			p.channelsRejected = t.Channels == nil
 		case mkv.IDBitDepth:
 			v, err := p.readUint(h)
 			if err != nil {
 				return err
 			}
-			bd := uint8(v)
-			t.BitDepth = &bd
+			t.BitDepth = fit8(v)
 		default:
 			return p.skip(h.Size)
 		}

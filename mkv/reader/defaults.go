@@ -47,3 +47,29 @@ func readStringOf(r io.Reader, h ebml.ElementHeader) (string, error) {
 	}
 	return ebml.ReadString(r, h.Size)
 }
+
+// fit8, fit16 and fit32 return v as a field of that width, or nil when it does not fit: a value is never truncated
+// into a plausible one.
+func fit8(v uint64) *uint8 {
+	if v > 0xFF {
+		return nil
+	}
+	x := uint8(v)
+	return &x
+}
+
+func fit16(v uint64) *uint16 {
+	if v > 0xFFFF {
+		return nil
+	}
+	x := uint16(v)
+	return &x
+}
+
+func fit32(v uint64) *uint32 {
+	if v > 0xFFFFFFFF {
+		return nil
+	}
+	x := uint32(v)
+	return &x
+}

@@ -101,6 +101,11 @@ All notable changes to mkvgo are documented here. The format is based on
   what follows the parent.** Both readers now skip the rest of the parent, as
   the track-duration scan already did; a Void overrunning Tracks used to take
   the Tags behind it, and `ReadStream` the Cluster too.
+- **A value past its field's width is left unknown instead of truncated.**
+  Channels and BitDepth (8 bits), PixelWidth, PixelHeight, DisplayWidth,
+  DisplayHeight, MaxCLL and MaxFALL (32 bits), StereoMode and the Colour code
+  points (16 bits) wrapped silently, so 300 channels read as 44; such a value
+  is now dropped, and a rejected channel count does not fall back to 1.
 
 ## [0.55.1] - 2026-10-17
 

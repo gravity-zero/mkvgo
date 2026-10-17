@@ -9,12 +9,12 @@ const maxSampleRate = 1 << 24
 func validSampleRate(v float64) bool { return v >= 1 && v <= maxSampleRate }
 
 // audioDefaults applies the spec defaults an audio TrackEntry leaves implicit - one channel, 8000 Hz (48000 for Opus,
-// whose output rate the codec fixes) - after the codec configuration had its say; a rate rejected as absurd stays unknown.
-func audioDefaults(t *mkv.Track, rateRejected bool) {
+// whose output rate the codec fixes) - after the codec configuration had its say; a value rejected as absurd stays unknown.
+func audioDefaults(t *mkv.Track, rateRejected, channelsRejected bool) {
 	if t.Type != mkv.AudioTrack {
 		return
 	}
-	if t.Channels == nil {
+	if t.Channels == nil && !channelsRejected {
 		one := uint8(1)
 		t.Channels = &one
 	}
