@@ -926,108 +926,84 @@ func resyncToCluster(r io.ReadSeeker, scanLimit, fitLimit int64) (int64, error) 
 	if err != nil {
 		return -1, err
 	}
-	for {
-		off, err := scanForClusterMagic(r, from, scanLimit)
-		if err != nil || off < 0 {
-			return -1, err
-		}
-		valid, err := isClusterAt(r, off, fitLimit)
-		if err != nil {
-			return -1, err
-		}
-		if valid {
-			if _, err := r.Seek(off, io.SeekStart); err != nil {
-				return -1, err
-			}
-			return off, nil
-		}
-		from = off + 1 // false positive: resume scanning just past it
+	off, err := scanValid(r, from, scanLimit, func(b []byte) int { return bytes.Index(b, clusterMagic) },
+		func(b []byte, off int64) bool { return clusterPrefix(b, off, fitLimit) })
+	if err != nil || off < 0 {
+		return -1, err
 	}
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return -1, err
+	}
+	return off, nil
 }
 
-// scanForClusterMagic returns the absolute offset of the next clusterMagic at
-// or after `from` and before `limit` (-1 = until EOF), or -1 if none.
-func scanForClusterMagic(r io.ReadSeeker, from, limit int64) (int64, error) {
-	return scanForMagic(r, from, limit, func(b []byte) int { return bytes.Index(b, clusterMagic) })
-}
-
-// scanForMagic returns the absolute offset of the first 4-byte element ID that
-// index locates at or after `from` and before `limit` (-1 = until EOF), or -1
-// if none. It reads forward in windows, carrying the last few bytes so an ID
-// split across a read boundary is still found.
-func scanForMagic(r io.ReadSeeker, from, limit int64, index func([]byte) int) (int64, error) {
+// scanValid returns the offset of the first candidate index finds at or after
+// from, starting before limit (-1 = until EOF), that judge accepts on the
+// segmentElementProbe bytes there (fewer at EOF), or -1. Candidates are judged
+// in the window already read, and the bytes a candidate near its end needs
+// are carried into the next one, so the source is read once whatever the
+// number of false candidates. A read error is returned once the bytes before
+// it hold no accepted candidate.
+func scanValid(r io.ReadSeeker, from, limit int64, index func([]byte) int, judge func(b []byte, off int64) bool) (int64, error) {
 	if _, err := r.Seek(from, io.SeekStart); err != nil {
 		return -1, err
 	}
 	const window = 64 << 10
-	buf := make([]byte, len(clusterMagic)-1+window)
+	const probe = segmentElementProbe
+	buf := make([]byte, probe+window)
 	tail := 0
-	next := from
+	next := from // absolute offset of the next byte to read
 	for {
 		base := next - int64(tail) // absolute offset of buf[0]
 		n, rerr := r.Read(buf[tail : tail+window])
 		end := tail + n
-
-		search := buf[:end]
-		if limit >= 0 {
-			if max := limit - base; max < int64(end) {
-				if max < 0 {
-					max = 0
-				}
-				search = buf[:max]
-			}
-		}
-		if i := index(search); i >= 0 {
-			return base + int64(i), nil
-		}
-
 		next += int64(n)
-		if limit >= 0 && next >= limit {
-			return -1, nil
+		final := rerr != nil || n == 0
+		searchEnd := end
+		if limit >= 0 && limit-base < int64(end) {
+			searchEnd = int(max(limit-base, 0))
 		}
-		if rerr != nil {
-			// A clean end of input is "no cluster here"; a real read failure is
-			// not, and reporting it as one lets the caller finish with a
-			// silently truncated Container and a nil error.
-			if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
-				return -1, nil
+		judgeEnd := searchEnd // candidates before it are judged in this window
+		if !final {
+			judgeEnd = min(judgeEnd, max(end-probe+1, 0))
+		}
+		for i := 0; i < judgeEnd; {
+			j := index(buf[i:searchEnd])
+			if j < 0 || i+j >= judgeEnd {
+				break
 			}
-			return -1, rerr
+			at := i + j
+			if judge(buf[at:min(at+probe, end)], base+int64(at)) {
+				return base + int64(at), nil
+			}
+			i = at + 1
 		}
-		if n == 0 {
-			// A reader may legally return (0, nil); without this the scan makes
-			// no progress and never terminates when limit < 0.
+		if final {
+			if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+				return -1, rerr
+			}
 			return -1, nil
 		}
-		keep := len(clusterMagic) - 1
-		if end < keep {
-			keep = end
+		if limit >= 0 && next >= limit && judgeEnd >= searchEnd {
+			return -1, nil
 		}
-		copy(buf[:keep], buf[end-keep:end])
-		tail = keep
+		tail = copy(buf, buf[judgeEnd:end])
 	}
 }
 
-// isClusterAt reports whether a real Cluster begins at off: the element ID must
-// be Cluster, its declared size must decode and (when known) fit within limit,
-// and its first child must be a recognizable cluster-level element.
-func isClusterAt(r io.ReadSeeker, off, limit int64) (bool, error) {
-	if _, err := r.Seek(off, io.SeekStart); err != nil {
-		return false, err
+// clusterPrefix reports whether b, the bytes at off, open a real Cluster: its
+// declared size, when known, fits within limit and its first child is a
+// recognizable cluster-level element.
+func clusterPrefix(b []byte, off, limit int64) bool {
+	id, size, hlen, ok := elemAt(b)
+	if !ok || id != mkv.IDCluster {
+		return false
 	}
-	h, _, err := ebml.ReadElementHeader(r)
-	if err != nil || h.ID != mkv.IDCluster {
-		return false, nil
+	if size >= 0 && limit >= 0 && off+int64(hlen)+size > limit {
+		return false
 	}
-	bodyStart, _ := r.Seek(0, io.SeekCurrent)
-	if h.Size >= 0 && limit >= 0 && bodyStart+h.Size > limit {
-		return false, nil // declared size overruns the segment - not a real cluster
-	}
-	child, _, err := ebml.ReadElementHeader(r)
-	if err != nil {
-		return false, nil
-	}
-	return clusterChildIDs[child.ID], nil
+	child, _, _, ok := elemAt(b[hlen:])
+	return ok && clusterChildIDs[child]
 }
 
 func (p *parser) parseInfo(size int64, c *mkv.Container) error {

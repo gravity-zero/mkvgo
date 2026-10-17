@@ -76,6 +76,14 @@ All notable changes to mkvgo are documented here. The format is based on
   of that name cost 248 MiB of allocations (a remote server can stream it at no
   cost to itself). A sidx holds at most 65535 references (786,452 bytes); a
   larger one is skipped.
+- **ROB-02, NEW-01: a resync reads its region once.** `ResyncToCluster`, and
+  the segment-level resync that recovers Info and Tracks behind junk, sought
+  back and read a 64 KiB window again past every false candidate: a region of
+  Cluster IDs that do not open a cluster cost a window per five bytes (8 MiB
+  of them read some 100 GiB, one HTTP request each over `httpfs`). Candidates
+  are now judged in the window already read, the few bytes one near its end
+  needs carried into the next, so the region is read once. The offsets found
+  are the same as before on generated data.
 - **ROB-01: the trailing-Cues scan is linear.** On a Matroska file without a
   SeekHead, the reader looks for the index in the last 64 to 512 KiB by
   parsing forward from every candidate byte. A tail of empty Voids that does
