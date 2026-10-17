@@ -342,11 +342,18 @@ type HLSPlanStats struct {
 	// Evictions is the number of windows the byte budget pushed out before
 	// their renditions were collected.
 	Evictions int64
-	// BuiltBytes is the media the walks framed, ServedBytes what was handed
-	// out, DroppedBytes what was built and released without being served.
-	BuiltBytes   int64
-	ServedBytes  int64
-	DroppedBytes int64
+	// BuiltBytes is the media the walks framed, ServedBytes what Resource
+	// handed out whole, DroppedBytes what was built and released without
+	// being served. StreamedBytes is what Open handed out beside those: a
+	// segment streamed from the source as it is written, a kept segment, a
+	// playlist, an init or a subtitle whole when opened. ServedBytes plus
+	// StreamedBytes is what the plan served through Open. ServedSegments
+	// counts the media segments handed out, whole by Resource or opened by Open.
+	BuiltBytes     int64
+	ServedBytes    int64
+	DroppedBytes   int64
+	StreamedBytes  int64
+	ServedSegments int64
 	// SubtitleWalks is the number of times a subtitle rendition had to walk
 	// the clusters for its cues (each walk reads a minute or more of the
 	// file); SubtitleIndexedBlocks, the subtitle blocks read straight from
@@ -381,6 +388,7 @@ func (p *HLSPlan) Stats() HLSPlanStats {
 	defer p.winMu.Unlock()
 	s := p.stats
 	s.SourceReadBytes = p.srcRead.Load()
+	s.StreamedBytes = p.streamed.Load()
 	return s
 }
 

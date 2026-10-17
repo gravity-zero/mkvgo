@@ -478,6 +478,8 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 			p.winMu.Lock()
 			p.stats.StreamFallbacks++
 			p.winMu.Unlock()
+		} else {
+			p.streamed.Add(int64(len(data))) // a playlist, an init or a subtitle handed out whole; a segment Resource counted in ServedBytes
 		}
 		return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
 	}
@@ -494,7 +496,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		if d, held := p.takeKept(t, ti, n); d != nil { // a segment the walk kept: this viewer's, once
 			p.winMu.Lock()
 			p.stats.KeptSegments++
+			p.stats.ServedSegments++
 			p.winMu.Unlock()
+			p.streamed.Add(int64(len(d)))
 			h := &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p, held: held}
 			runtime.AddCleanup(h, (*heldBytes).release, held)
 			return h, nil
@@ -507,7 +511,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	if d := t.data[ti]; d != nil { // a network source's light audio: built whole by the walk, kept in the table
 		p.winMu.Lock()
 		p.stats.KeptSegments++
+		p.stats.ServedSegments++
 		p.winMu.Unlock()
+		p.streamed.Add(int64(len(d)))
 		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
 	}
 	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
@@ -522,6 +528,7 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	}
 	p.winMu.Lock()
 	p.stats.StreamedSegments++
+	p.stats.ServedSegments++
 	p.winMu.Unlock()
 	return h, nil
 }
@@ -624,6 +631,15 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 	if off < 0 || n < 0 || off > h.size || n > h.size-off {
 		return 0, errors.New("mp4: range outside the resource")
 	}
+	m, err := h.writeRange(ctx, w, off, n)
+	if h.plan != nil && h.data == nil { // streamed from the source; a handle holding its bytes was counted whole when opened
+		h.plan.streamed.Add(m)
+	}
+	return m, err
+}
+
+// writeRange writes [off, off+n) from the handle's bytes or through the plan.
+func (h *ResourceHandle) writeRange(ctx context.Context, w io.Writer, off, n int64) (int64, error) {
 	if h.data != nil {
 		m, err := w.Write(h.data[off : off+n])
 		if err == nil && int64(m) < n {

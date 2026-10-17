@@ -493,6 +493,12 @@ uncollected) and `BuiltBytes` / `ServedBytes` / `DroppedBytes`. A rebuild is a
 full read of the window: a plan whose `WindowRebuilds` grows with its audience
 is reading its source more than once per viewer. An MP4-source plan reads each
 rendition's samples on their own and counts nothing of the windows here.
+`ServedBytes` is what `Resource` handed out whole (`Open`'s fallbacks
+included); `StreamedBytes` is the rest `Open` handed out: a segment streamed
+from the source as it is written, a kept segment, a playlist, an init or a
+subtitle whole when opened. A server that serves through `Open` sums the two
+for what the plan served, against `SourceReadBytes` below. `ServedSegments`
+counts the media segments handed out either way.
 `SourceReadBytes` is what the plan's requests have read from the source since
 it was built (the build's own walks are not counted), cumulative and whatever
 the source (Matroska or MP4, a local file or a custom FS): every window walk,

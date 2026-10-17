@@ -193,6 +193,7 @@ type HLSPlan struct {
 	stats    HLSPlanStats
 	winBuilt []uint64
 	srcRead  atomic.Int64 // HLSPlanStats.SourceReadBytes
+	streamed atomic.Int64 // HLSPlanStats.StreamedBytes
 	// subIndex is Options.SubtitleIndex when it matches the source's
 	// fingerprint, else the index derived from the source's Cues when they
 	// cue its subtitle blocks; nil otherwise, and the subtitle scans walk.
@@ -3215,12 +3216,23 @@ func (p *HLSPlan) gridStartFor(ctx context.Context, n, ti int, window []segSampl
 	return k, nil
 }
 
-// segmentTrack builds the n-th segment of the ti-th track, reading only that
+// segmentTrack builds the n-th segment of the ti-th track and counts it served.
+func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
+	data, err := p.buildSegmentTrack(ctx, ti, n)
+	if err == nil {
+		p.winMu.Lock()
+		p.stats.ServedSegments++
+		p.winMu.Unlock()
+	}
+	return data, err
+}
+
+// buildSegmentTrack builds the n-th segment of the ti-th track, reading only that
 // segment's window from the source. The walk that reads the window builds every
 // rendition of it (it had to read all their bytes to reach its own), so the
 // sibling segments of the same instant - the audio a viewer pulls beside its
 // video - are already built when they are asked for, and cost no I/O at all.
-func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
+func (p *HLSPlan) buildSegmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if n < 0 || n >= p.segCount {
 		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
 	}

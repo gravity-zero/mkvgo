@@ -4,6 +4,21 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **What a plan served is counted on the streaming path too.** `ServedBytes`
+  only counted the segments `Resource` built whole: a server streaming every
+  segment through `HLSPlan.Open` read it at 0 while it served megabytes, with
+  no figure to set against `SourceReadBytes`. What `Open` hands out beside
+  `Resource`'s is now `HLSPlanStats.StreamedBytes`: a segment streamed from
+  the source counted as it is written, a kept segment, a playlist, an init or
+  a subtitle counted whole when opened. `ServedSegments` counts the media
+  segments handed out, whole by `Resource` or opened by `Open`. `ServedBytes`
+  keeps its meaning (what `Resource` handed out), so the window accounting it
+  belongs to is unchanged.
+
 ## [0.54.0] - 2026-10-16
 
 ### Changed
