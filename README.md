@@ -1,7 +1,6 @@
 # mkvgo
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/gravity-zero/mkvgo.svg)](https://pkg.go.dev/github.com/gravity-zero/mkvgo)
-[![Go Report Card](https://goreportcard.com/badge/github.com/gravity-zero/mkvgo)](https://goreportcard.com/report/github.com/gravity-zero/mkvgo)
 [![CI](https://github.com/gravity-zero/mkvgo/actions/workflows/ci.yml/badge.svg)](https://github.com/gravity-zero/mkvgo/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/gravity-zero/mkvgo/branch/master/graph/badge.svg)](https://codecov.io/gh/gravity-zero/mkvgo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

@@ -190,6 +190,8 @@ All notable changes to mkvgo are documented here. The format is based on
   the list is known. `HLSEncryption`, `--aes-rotate-segments` and the
   library, WASM, recipe and TypeScript docs now say a leaked key decrypts
   only the periods it serves.
+- **DOC-05: the Go Report Card badge is gone from the README.** The service
+  has been sunset.
 
 ### Changed
 
