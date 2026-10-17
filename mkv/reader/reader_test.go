@@ -302,7 +302,7 @@ func TestHugeElementSize(t *testing.T) {
 	inner.Write([]byte{0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00})
 
 	writeSegmentStart(&buf, int64(inner.Len())+100)
-	ebml.WriteElementHeader(&buf, mkv.IDInfo, int64(inner.Len()))
+	ebml.WriteElementHeader(&buf, mkv.IDInfo, int64(inner.Len())+0x0100000000) // room for the Title it declares
 	buf.Write(inner.Bytes())
 
 	r := bytes.NewReader(buf.Bytes())
@@ -1514,11 +1514,26 @@ func TestChargeMeta(t *testing.T) {
 	}
 }
 
+// claimingChild is a leaf id declaring size bytes with no body, inside parents (innermost first) whose own sizes
+// claim room for it, so the declared size reaches the parser's limits rather than its parent's end.
+func claimingChild(size int64, id uint32, parents ...uint32) []byte {
+	var b bytes.Buffer
+	ebml.WriteElementHeader(&b, id, size)
+	claim := int64(b.Len()) + size
+	out := b.Bytes()
+	for _, pid := range parents {
+		var w bytes.Buffer
+		ebml.WriteElementHeader(&w, pid, claim)
+		w.Write(out)
+		claim += int64(w.Len() - len(out))
+		out = w.Bytes()
+	}
+	return out
+}
+
 func TestMetadataBudgetRejectsHugeAttachment(t *testing.T) {
 	// AttachedFile whose FileData declares 2 GiB (> 1 GiB budget), no body.
-	var fd bytes.Buffer
-	ebml.WriteElementHeader(&fd, mkv.IDFileData, 2<<30)
-	atts := wrapEl(mkv.IDAttachments, wrapEl(mkv.IDAttachedFile, fd.Bytes()))
+	atts := claimingChild(2<<30, mkv.IDFileData, mkv.IDAttachedFile, mkv.IDAttachments)
 
 	var buf bytes.Buffer
 	writeEBMLHeader(&buf)
@@ -1543,21 +1558,9 @@ func TestMetadataBudgetRejectsHugeStrings(t *testing.T) {
 		name string
 		file []byte
 	}{
-		{"TagString", func() []byte {
-			var el bytes.Buffer
-			ebml.WriteElementHeader(&el, mkv.IDTagString, 2<<30)
-			return wrapEl(mkv.IDTags, wrapEl(mkv.IDTag, wrapEl(mkv.IDSimpleTag, el.Bytes())))
-		}()},
-		{"FileName", func() []byte {
-			var el bytes.Buffer
-			ebml.WriteElementHeader(&el, mkv.IDFileName, 2<<30)
-			return wrapEl(mkv.IDAttachments, wrapEl(mkv.IDAttachedFile, el.Bytes()))
-		}()},
-		{"CodecID", func() []byte {
-			var el bytes.Buffer
-			ebml.WriteElementHeader(&el, mkv.IDCodecID, 2<<30)
-			return wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, el.Bytes()))
-		}()},
+		{"TagString", claimingChild(2<<30, mkv.IDTagString, mkv.IDSimpleTag, mkv.IDTag, mkv.IDTags)},
+		{"FileName", claimingChild(2<<30, mkv.IDFileName, mkv.IDAttachedFile, mkv.IDAttachments)},
+		{"CodecID", claimingChild(2<<30, mkv.IDCodecID, mkv.IDTrackEntry, mkv.IDTracks)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer

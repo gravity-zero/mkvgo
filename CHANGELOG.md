@@ -97,6 +97,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **A string ends at its first null byte.** RFC 8794 section 13 leaves the
   bytes after it out of the string; only trailing nulls were trimmed, so
   `eng\0xx` read as five characters.
+- **A child declaring more bytes than its parent holds no longer swallows
+  what follows the parent.** Both readers now skip the rest of the parent, as
+  the track-duration scan already did; a Void overrunning Tracks used to take
+  the Tags behind it, and `ReadStream` the Cluster too.
 
 ## [0.55.1] - 2026-10-17
 

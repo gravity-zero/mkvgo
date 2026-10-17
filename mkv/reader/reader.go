@@ -202,6 +202,17 @@ func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
 	return ebml.ReadElementHeader(p.r)
 }
 
+// pastParent reports a child declaring more bytes than its parent holds (or an unknown size), and seats the parser on
+// the parent's end: the rest of the parent is skipped, so the child does not swallow what follows it.
+func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
+	pos, err := p.r.Seek(0, io.SeekCurrent)
+	if err != nil || (eh.Size >= 0 && pos+eh.Size <= end) {
+		return false
+	}
+	_, _ = p.r.Seek(end, io.SeekStart)
+	return true
+}
+
 func (p *parser) skip(size int64) error {
 	// Reject an unknown size (-1): only Segment and Cluster may be unknown-size, so
 	// inside a leaf element it is malformed. Skipping it as Seek(-1) would seek a
@@ -1030,6 +1041,9 @@ func (p *parser) parseInfo(size int64, c *mkv.Container) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDTimecodeScale:
 			v, err := readUintOf(p.r, eh)
@@ -1134,6 +1148,9 @@ func (p *parser) parseTracks(size int64, c *mkv.Container) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDTrackEntry {
 			track, err := p.parseTrackEntry(eh.Size)
 			if err != nil {
@@ -1166,6 +1183,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return t, err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDTrackNumber:
@@ -1379,6 +1399,9 @@ func (p *parser) parseProjection(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDProjectionType:
 			v, err := readUintOf(p.r, eh)
@@ -1419,6 +1442,9 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDPixelWidth:
@@ -1502,6 +1528,9 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDColourMatrix:
@@ -1588,6 +1617,9 @@ func (p *parser) parseMasteringMetadata(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		set := func(dst *float64) error {
 			v, e := readFloatOf(p.r, eh)
 			if e == nil {
@@ -1644,6 +1676,9 @@ func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDBlockAddIDType:
 			v, err := readUintOf(p.r, eh)
@@ -1685,6 +1720,9 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDSamplingFreq:
@@ -1742,6 +1780,9 @@ func (p *parser) parseChapters(size int64, c *mkv.Container) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDEditionEntry {
 			ed, err := p.parseEditionEntry(eh.Size)
 			if err != nil {
@@ -1769,6 +1810,9 @@ func (p *parser) parseEditionEntry(size int64) (mkv.Edition, error) {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return ed, err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDEditionUID:
@@ -1839,6 +1883,9 @@ func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
 		if err != nil {
 			return ch, err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDChapterUID:
 			v, err := readUintOf(p.r, eh)
@@ -1898,6 +1945,9 @@ func (p *parser) parseChapterDisplay(size int64, ch *mkv.Chapter) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDChapString {
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
@@ -1927,6 +1977,9 @@ func (p *parser) parseAttachments(size int64, c *mkv.Container) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		if eh.ID == mkv.IDAttachedFile {
 			att, err := p.parseAttachedFile(eh.Size)
@@ -1960,6 +2013,9 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return att, err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDFileUID:
@@ -2035,6 +2091,9 @@ func (p *parser) parseTags(size int64, c *mkv.Container) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDTag {
 			tag, err := p.parseTag(eh.Size)
 			if err != nil {
@@ -2062,6 +2121,9 @@ func (p *parser) parseTag(size int64) (mkv.Tag, error) {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return tag, err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDTargets:
@@ -2094,6 +2156,9 @@ func (p *parser) parseTargets(size int64, tag *mkv.Tag) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDTargetType:
@@ -2139,6 +2204,9 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return st, err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDTagName:
@@ -2204,6 +2272,9 @@ func (p *parser) parseContentEncodings(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDContentEncoding {
 			if err := p.parseContentEncoding(eh.Size, t); err != nil {
 				return err
@@ -2229,6 +2300,9 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDContentCompression:
@@ -2264,6 +2338,9 @@ func (p *parser) parseContentEncryption(size int64, t *mkv.Track) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDContentEncAlgo:
 			algo, err = readUintOf(p.r, eh)
@@ -2294,6 +2371,9 @@ func (p *parser) parseAESCipherMode(size int64) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		if p.pastParent(eh, end) {
+			return mode, nil
+		}
 		if eh.ID == mkv.IDAESSettingsCipherMode {
 			mode, err = readUintOf(p.r, eh)
 		} else {
@@ -2322,6 +2402,9 @@ func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDContentCompAlgo:
@@ -2396,6 +2479,9 @@ func (p *parser) parseCuesFrom(size int64, c *mkv.Container) error {
 		if err != nil {
 			return err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		if eh.ID == mkv.IDCuePoint {
 			if eh.Size == 0 {
 				continue // an empty point: nothing to seek to
@@ -2430,6 +2516,9 @@ func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, error) {
 		if err != nil {
 			return cp, err
 		}
+		if p.pastParent(eh, end) {
+			break
+		}
 		switch eh.ID {
 		case mkv.IDCueTime:
 			v, err := readUintOf(p.r, eh)
@@ -2461,6 +2550,9 @@ func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
 		eh, _, err := p.readHeader()
 		if err != nil {
 			return err
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDCueTrack:

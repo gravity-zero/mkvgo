@@ -142,6 +142,9 @@ func (p *streamParser) boundedLoop(size int64, fn func(ebml.ElementHeader) error
 		if err != nil {
 			return err
 		}
+		if h.Size < 0 || p.pos+h.Size > end {
+			return p.skip(end - p.pos) // a child past its parent: the rest of the parent is skipped, as scanTracksDurations does
+		}
 		if err := fn(h); err != nil {
 			return err
 		}
