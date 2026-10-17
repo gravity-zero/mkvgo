@@ -39,6 +39,8 @@ func parseHLSFlags(args []string) hlsFlags {
 	var keyHex, keyURI string
 	var rotateSegs int
 	var cencScheme, cencKeyHex, cencKIDHex, cencIVHex, cencKeyURI string
+	var keyFile, cencKeyFile string
+	var cencInline bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
@@ -47,7 +49,7 @@ func parseHLSFlags(args []string) hlsFlags {
 				f.outDir = args[i]
 			}
 		case "-segment", "--segment":
-			// Segment length in seconds (HLS convention, the HLS convention).
+			// Segment length in seconds, the HLS convention.
 			i++
 			if i < len(args) {
 				secs, err := strconv.ParseFloat(args[i], 64)
@@ -61,6 +63,18 @@ func parseHLSFlags(args []string) hlsFlags {
 			if i < len(args) {
 				keyHex = args[i]
 			}
+		case "--aes-key-file":
+			i++
+			if i < len(args) {
+				keyFile = args[i]
+			}
+		case "--cenc-key-file":
+			i++
+			if i < len(args) {
+				cencKeyFile = args[i]
+			}
+		case "--cenc-inline-key":
+			cencInline = true
 		case "--aes-key-uri":
 			i++
 			if i < len(args) {
@@ -186,6 +200,8 @@ func parseHLSFlags(args []string) hlsFlags {
 			f.rest = append(f.rest, args[i])
 		}
 	}
+	keyHex = keyValue(keyHex, keyFile, "MKVGO_AES_KEY", "--aes-key", keyURI != "")
+	cencKeyHex = keyValue(cencKeyHex, cencKeyFile, "MKVGO_CENC_KEY", "--cenc-key", cencScheme != "" || cencKIDHex != "" || cencIVHex != "" || cencKeyURI != "")
 	if keyHex != "" || keyURI != "" {
 		// --aes-key and --aes-key-uri take a single value, or a comma-separated
 		// list when rotating (--aes-rotate-segments N): the keys cycle every N
@@ -217,9 +233,33 @@ func parseHLSFlags(args []string) hlsFlags {
 		key := mustHex(cencKeyHex, "--cenc-key (expected 32 hex chars)")
 		kid := mustHex(cencKIDHex, "--cenc-kid (expected 32 hex chars)")
 		iv := mustHex(cencIVHex, "--cenc-iv (expected 16 or 32 hex chars)")
+		if cencKeyURI == "" && !cencInline {
+			Fatal("--cenc-key-uri is required: without it the playlist would carry the content key in clear (a data: URI). Pass --cenc-key-uri with the URI of your key or license server, or --cenc-inline-key to embed the key on purpose (testing only)")
+		}
 		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI}
 	}
 	return f
+}
+
+// keyValue is a key's hex from its argv flag, else its file (whitespace
+// ignored), else env when the encryption it belongs to is asked for.
+func keyValue(argv, file, env, flag string, asked bool) string {
+	if argv != "" && file != "" {
+		Fatal(flag + " and " + flag + "-file both given: pass the key once")
+	}
+	switch {
+	case argv != "":
+		return argv
+	case file != "":
+		b, err := os.ReadFile(file)
+		if err != nil {
+			Fatal("cannot read " + flag + "-file: " + err.Error())
+		}
+		return strings.Join(strings.Fields(string(b)), "")
+	case asked:
+		return os.Getenv(env)
+	}
+	return ""
 }
 
 // splitCSV splits a comma-separated flag value into trimmed, non-empty parts.

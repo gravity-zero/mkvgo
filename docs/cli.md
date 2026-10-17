@@ -1121,6 +1121,14 @@ Security flags (shared with `hls-segment`; both must use the same values):
   SAMPLE-AES (see `--cenc-*` below). some demuxers do not decrypt
   whole-segment fMP4 - verified spec-conformant by openssl round-trip.
   Incompatible with `--cenc-*` (pick one scheme).
+- `--aes-key-file <path>` / `--cenc-key-file <path>` - read the key (hex,
+  whitespace ignored; the comma-separated list for `--aes-rotate-segments`
+  too) from a file instead of argv. A key passed as `--aes-key` or
+  `--cenc-key` is visible to other users of the machine (`ps`,
+  `/proc/<pid>/cmdline`) and lands in the shell history: prefer the file, or
+  the `MKVGO_AES_KEY` / `MKVGO_CENC_KEY` environment variables, read when the
+  encryption is asked for (`--aes-key-uri`, or another `--cenc-*` flag) and
+  no key flag is given. Giving both a key and its `-file` is refused.
 - `--aes-rotate-segments <N>` - rotate the AES-128 key every N segments for
   forward secrecy (a captured key decrypts only its own period). Pass
   comma-separated lists to `--aes-key` and `--aes-key-uri` (at least two,
@@ -1129,7 +1137,7 @@ Security flags (shared with `hls-segment`; both must use the same values):
   schedule is a pure function of the segment index, so `hls-segment` serves the
   same bytes on demand. Example: `--aes-rotate-segments 10 --aes-key
   <hexA>,<hexB> --aes-key-uri https://k/a,https://k/b`.
-- `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> [--cenc-key-uri <uri>]` --
+- `--cenc-scheme cenc|cbcs --cenc-key <32 hex> --cenc-kid <32 hex> --cenc-iv <16|32 hex> --cenc-key-uri <uri>` --
   sample-level Common Encryption (ISO/IEC 23001-7): `cenc` is AES-CTR (a
   per-sample IV, `--cenc-iv` 8 or 16 bytes hex); `cbcs` is AES-CBC with a
   1-encrypted:9-clear 16-byte-block pattern on video (`--cenc-iv` must be 16
@@ -1139,8 +1147,10 @@ Security flags (shared with `hls-segment`; both must use the same values):
   `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is
   emitted (a ciphertext byte range is not independently decryptable). Packaging
   only -- no license server: `--cenc-key-uri` is what an EME-capable player's
-  DRM path resolves through its own CDM; left unset it falls back to a `data:`
-  URI embedding the key (fine for local testing, never for production). Video
+  DRM path resolves through its own CDM. It is required: without it the
+  playlist would carry the key itself in a `data:` URI, which the CLI refuses
+  unless `--cenc-inline-key` asks for exactly that (local testing only, never
+  production). Video
   may be H.264, HEVC, AV1 or VP9 - each codec's decoder-visible header bytes
   stay clear and the coded data is protected (verified decrypting and decoding
   in a real Clear Key player); AV1/VP9 refuse rather than mis-protect the frame

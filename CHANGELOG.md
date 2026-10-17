@@ -36,6 +36,18 @@ All notable changes to mkvgo are documented here. The format is based on
   to another host while `Options.Header` is set. New `httpfs.Options.AllowHost`
   vets the host of every request and redirect, for a service that opens URLs
   its users supply (server-side request forgery, see the package doc).
+- **SEC-06: encryption keys no longer have to go through argv.** `to-hls`,
+  `hls-segment` and the other commands taking the HLS security flags accept
+  `--aes-key-file` and `--cenc-key-file` (hex, whitespace ignored), and fall
+  back to `MKVGO_AES_KEY` / `MKVGO_CENC_KEY` when the encryption is asked for
+  without a key flag. A key on the command line is readable through `ps` and
+  `/proc` and kept in the shell history; `--aes-key` and `--cenc-key` remain,
+  documented with that risk.
+- **SEC-07 (CLI): CENC packaging refuses to put the key in the playlist by
+  default.** Without `--cenc-key-uri`, the `EXT-X-KEY` line carried the content
+  key in clear as a `data:` URI. The CLI now exits with an error naming
+  `--cenc-key-uri`, and `--cenc-inline-key` keeps the inline key for local
+  testing. The library default is unchanged.
 
 ### Fixed
 
