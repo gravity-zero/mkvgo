@@ -1915,6 +1915,17 @@ const windowHeadroom = 32 << 10
 // describe oddly, and is built the ordinary way.
 const maxWindowInPlace = 256 << 20
 
+// maxSegmentBytes caps one segment's media, whose buffer is sized from the sample sizes the source declares.
+const maxSegmentBytes = 256 << 20
+
+// segmentFits refuses a segment whose declared media passes maxSegmentBytes, before its buffer is allocated.
+func segmentFits(dataLen int64) error {
+	if dataLen > maxSegmentBytes {
+		return errf("a segment declares %d bytes of media, past the %d one may hold: the source's sample sizes are damaged or forged, or SegmentMs is too long for its bitrate", dataLen, maxSegmentBytes)
+	}
+	return nil
+}
+
 // windowInPlace is the buffer one window's video is read into and served
 // from. The walk hands its tail to the BlockReader for each video block
 // (next); a block the window keeps is then committed (keep) - one it does not
@@ -4267,6 +4278,9 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		return readSampleRuns(ctx, countedSource{src, &p.srcRead}, samples, offs, dst)
 	}
 
+	if err := segmentFits(seg.dataLen); err != nil {
+		return nil, err
+	}
 	var out []byte
 	if p.opts.CENC != nil {
 		plain := make([]byte, seg.dataLen)

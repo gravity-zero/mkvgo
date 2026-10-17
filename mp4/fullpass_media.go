@@ -257,6 +257,9 @@ func (c *directCopier) flush() error {
 
 // read returns the dataLen bytes of the track's samples from index from on.
 func (m *trackMedia) read(samples []fragSample, from int, dataLen int64) ([]byte, error) {
+	if err := segmentFits(dataLen); err != nil {
+		return nil, err
+	}
 	if m.tmp != nil {
 		b := make([]byte, dataLen)
 		if _, err := io.ReadFull(m.tmp, b); err != nil {

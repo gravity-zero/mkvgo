@@ -342,6 +342,9 @@ func (t *mp4SubTable) load(ctx context.Context, open func(context.Context) (mkv.
 		return err
 	}
 	defer src.Close()
+	if err := segmentFits(total); err != nil {
+		return err
+	}
 	buf := make([]byte, total)
 	if err := readSampleRuns(ctx, src, samples, offs, buf); err != nil {
 		return errf("read subtitle sample: %w", err)

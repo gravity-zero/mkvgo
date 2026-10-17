@@ -25,6 +25,10 @@ All notable changes to mkvgo are documented here. The format is based on
   constant-size sample tables sized against a remote source's claimed length
   for about 8 GB per track. A fragment past the bound is refused; a track whose
   table passes it is described and refused by name for a remux.
+- **A segment holds at most 256 MiB of media.** An MP4 segment's buffer was
+  allocated whole from the sample sizes the source declares, before any byte
+  was read: overlapping samples made a 100 MiB file ask for gigabytes per
+  segment. Such a segment is now refused with an error that names the bound.
 
 ## [0.55.1] - 2026-10-17
 
