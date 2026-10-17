@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -468,10 +469,8 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 				return nil, fmt.Errorf("reindex inplace: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
 			}
 			firstClusterSeen = true
-			if int(h.Size) > len(clusterBuf) {
-				clusterBuf = make([]byte, h.Size)
-			}
-			body := clusterBuf[:h.Size]
+			clusterBuf = poison.Reuse(clusterBuf, int(h.Size))
+			body := clusterBuf
 			if _, err := io.ReadFull(r, body); err != nil {
 				return nil, inplaceReadErr("read cluster body", err)
 			}

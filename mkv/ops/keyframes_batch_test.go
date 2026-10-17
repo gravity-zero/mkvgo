@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -536,6 +537,9 @@ func TestWriteKeyframeStreamDecompresses(t *testing.T) {
 // Buffers are reused: the walk's allocations do not grow with the number of
 // keyframes.
 func TestExtractKeyframesAllocationsFlat(t *testing.T) {
+	if poison.On {
+		t.Skip("poisoning allocates a fresh buffer at each reuse")
+	}
 	allocs := func(clusters int) float64 {
 		fx := h264Fixture(avcFrames)
 		fx.clusters = clusters

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/internal/fileid"
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -1078,6 +1079,7 @@ func (c *spanCopier) release() {
 		if c.wipe {
 			clear((*c.stage)[:cap(*c.stage)])
 		}
+		poison.Fill((*c.stage)[:cap(*c.stage)])
 		stageBufs.Put(c.stage)
 		c.stage = nil
 	}
@@ -1088,6 +1090,7 @@ func putStreamBuf(bufp *[]byte, wipe bool) {
 	if wipe {
 		clear(*bufp)
 	}
+	poison.Fill(*bufp)
 	streamBufs.Put(bufp)
 }
 

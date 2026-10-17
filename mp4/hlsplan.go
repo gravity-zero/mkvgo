@@ -39,6 +39,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/fileid"
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -1842,7 +1843,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			return nil, nil, none, err
 		}
 		if ti == inPlace.track {
-			inPlace.keep(s.data)
+			s.data = inPlace.keep(s.data)
 		}
 		windows[ti] = append(windows[ti], s)
 	}
@@ -1928,6 +1929,7 @@ type windowInPlace struct {
 	track  int    // plan-track index it serves; -1 for none
 	buf    []byte // headroom + the committed media
 	broken bool
+	out    []byte // poisoning on: the last block handed out apart from buf, unkept so far
 }
 
 // newWindowInPlace reserves the buffer for window n's video: the source bytes
@@ -1979,21 +1981,31 @@ func (w *windowInPlace) next(size int) []byte {
 	if w.broken || size <= 0 || size > cap(w.buf)-len(w.buf) {
 		return nil
 	}
+	if poison.On { // the block lands apart, the one handed out before and not kept is poisoned
+		poison.Fill(w.out)
+		w.out = make([]byte, size)
+		return w.out
+	}
 	return w.buf[len(w.buf) : len(w.buf)+size]
 }
 
 // keep commits a block the window keeps. data must be the slice next handed
 // out for it; if it is anything else the media is no longer back to back in
 // the buffer.
-func (w *windowInPlace) keep(data []byte) {
+func (w *windowInPlace) keep(data []byte) []byte {
 	if w.broken || w.buf == nil || len(data) == 0 {
-		return
+		return data
 	}
-	if tail := w.next(len(data)); tail == nil || &tail[0] != &data[0] {
+	if poison.On && len(w.out) > 0 && &w.out[0] == &data[0] && len(data) <= cap(w.buf)-len(w.buf) {
+		w.out = nil
+		data = append(w.buf, data...)[len(w.buf):]
+	}
+	if tail := w.buf[len(w.buf):cap(w.buf)]; len(data) > len(tail) || &tail[0] != &data[0] {
 		w.broken = true
-		return
+		return data
 	}
 	w.buf = w.buf[:len(w.buf)+len(data)]
+	return data
 }
 
 // media returns the committed media, or nil when the buffer cannot serve the

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -14,6 +15,9 @@ import (
 // walk reuses, since each is copied into its track's chunk at once; a buffer per
 // block allocated the whole source once per pass (3.8 GB for a 1.8 GB fast start).
 func TestRemuxToMP4ReusesTheBlockBuffer(t *testing.T) {
+	if poison.On {
+		t.Skip("poisoning allocates a fresh buffer at each reuse")
+	}
 	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4},
 		Width: u32p(64), Height: u32p(64), FrameRate: f64p(25)}}
 	var blocks []genBlock

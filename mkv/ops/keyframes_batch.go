@@ -24,6 +24,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -467,10 +468,8 @@ func (kw *keyframeWalker) readExact(p kfPoint) (*KeyframeBatchSample, error) {
 	if p.size > maxKeyframeSize {
 		return nil, nil
 	}
-	if cap(kw.block) < int(p.size) {
-		kw.block = make([]byte, p.size)
-	}
-	buf := kw.block[:p.size]
+	kw.block = poison.Reuse(kw.block, int(p.size))
+	buf := kw.block
 	if _, err := kw.src.Seek(p.off, io.SeekStart); err != nil {
 		return nil, err
 	}
@@ -500,10 +499,8 @@ func (kw *keyframeWalker) seat(cue mkv.CuePoint, clusterStart int64) error {
 		}
 		br.KeepTracks(kw.video.ID)
 		br.SetBlockBuffer(func(_ uint64, size int) []byte {
-			if cap(kw.block) < size {
-				kw.block = make([]byte, size)
-			}
-			return kw.block[:size]
+			kw.block = poison.Reuse(kw.block, size)
+			return kw.block
 		})
 		kw.br = br
 	} else if cue.RelativePos < relSeekMin {
@@ -547,19 +544,19 @@ func (kw *keyframeWalker) build(b mkv.Block) (*KeyframeBatchSample, error) {
 			if kw.av1Seq == nil {
 				return nil, nil // no sequence header anywhere: undecodable alone
 			}
-			kw.payload = append(append(kw.payload[:0], kw.av1Seq...), frame...)
+			kw.payload = append(append(poison.Reuse(kw.payload, 0), kw.av1Seq...), frame...)
 			payload = kw.payload
 		}
 	case "h264":
 		// See keyframe_avc_poc.go: open-GOP I keyframes get renumbered.
-		kw.payload, err = kw.avcPOC.renumber(kw.payload[:0], frame, kw.nalLen)
+		kw.payload, err = kw.avcPOC.renumber(poison.Reuse(kw.payload, 0), frame, kw.nalLen)
 		if err != nil {
 			return nil, nil
 		}
 		payload = kw.payload
 	case "hevc":
 		// See keyframe_hevc_poc.go: CRA keyframes get renumbered POCs.
-		kw.payload, err = kw.hevcPOC.renumber(kw.payload[:0], frame, kw.nalLen)
+		kw.payload, err = kw.hevcPOC.renumber(poison.Reuse(kw.payload, 0), frame, kw.nalLen)
 		if err != nil {
 			return nil, nil
 		}
@@ -575,14 +572,14 @@ func (kw *keyframeWalker) build(b mkv.Block) (*KeyframeBatchSample, error) {
 	}
 	switch kw.video.Codec {
 	case "h264", "hevc":
-		kw.data = append(kw.data[:0], kw.paramSets...)
+		kw.data = append(poison.Reuse(kw.data, 0), kw.paramSets...)
 		kw.data, err = appendAnnexB(kw.data, payload, kw.nalLen)
 		if err != nil {
 			return nil, nil
 		}
 		s.Ext = "." + kw.video.Codec
 	default:
-		kw.data = appendIVF(kw.data[:0], kw.video, b.Timecode, payload)
+		kw.data = appendIVF(poison.Reuse(kw.data, 0), kw.video, b.Timecode, payload)
 		s.Ext = ".ivf"
 	}
 	s.Data = kw.data

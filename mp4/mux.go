@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -598,10 +599,8 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 		if t := routing[track]; t == nil || t.spec.text || t.sampleEntry == nil {
 			return nil
 		}
-		if cap(blockBuf) < size {
-			blockBuf = make([]byte, size)
-		}
-		return blockBuf[:size]
+		blockBuf = poison.Reuse(blockBuf, size)
+		return blockBuf
 	})
 	for {
 		if err := ctx.Err(); err != nil {

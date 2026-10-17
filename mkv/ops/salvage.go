@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -564,10 +565,8 @@ func (w *salvageWalker) copyCluster(h ebml.ElementHeader, elemStart int64, hdrBy
 		return w.skipToNextCluster()
 	}
 
-	if int(h.Size) > len(w.clusterBuf) {
-		w.clusterBuf = make([]byte, h.Size)
-	}
-	body := w.clusterBuf[:h.Size]
+	w.clusterBuf = poison.Reuse(w.clusterBuf, int(h.Size))
+	body := w.clusterBuf
 	if _, err := io.ReadFull(w.r, body); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			// Truncated tail: recover the complete blocks before the cut

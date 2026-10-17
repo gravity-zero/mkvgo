@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -37,6 +38,9 @@ func bigVideoMKV(t *testing.T) string {
 // costs about its own size in memory, not twice it (one buffer per block,
 // then every block copied into the segment).
 func TestMatroskaVideoSegmentIsBuiltInPlace(t *testing.T) {
+	if poison.On {
+		t.Skip("poisoning allocates a fresh buffer at each reuse")
+	}
 	src := bigVideoMKV(t)
 	ctx := context.Background()
 	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000})

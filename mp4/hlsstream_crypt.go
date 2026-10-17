@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"github.com/gravity-zero/mkvgo/internal/poison"
 )
 
 // hlsstream_crypt.go - encrypted segments written from the source as Open's
@@ -23,6 +25,7 @@ var (
 // putSampleBuf returns a sample buffer to its pool, zeroed: it held a sample's plaintext.
 func putSampleBuf(bufp *[]byte) {
 	clear((*bufp)[:cap(*bufp)])
+	poison.Fill((*bufp)[:cap(*bufp)])
 	*bufp = (*bufp)[:0]
 	sampleBufs.Put(bufp)
 }

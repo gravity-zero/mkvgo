@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -329,8 +331,12 @@ func TestEncryptedStreamLeavesNothingInPooledBuffers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wiped := byte(0)
+	if poison.On {
+		wiped = poison.Byte
+	}
 	for _, buf := range [][]byte{(*streamBufs.Get().(*[]byte)), (*stageBufs.Get().(*[]byte))[:stageBytes]} {
-		if i := bytes.IndexFunc(buf, func(r rune) bool { return r != 0 }); i >= 0 {
+		if i := slices.IndexFunc(buf, func(c byte) bool { return c != 0 && c != wiped }); i >= 0 {
 			t.Fatalf("a pooled buffer comes back holding byte %d of an encrypted request", i)
 		}
 	}

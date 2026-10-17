@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -114,10 +115,8 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 			firstCluster = false
 
 			// Grow reusable buffer once.
-			if int(h.Size) > len(clusterBuf) {
-				clusterBuf = make([]byte, h.Size)
-			}
-			body := clusterBuf[:h.Size]
+			clusterBuf = poison.Reuse(clusterBuf, int(h.Size))
+			body := clusterBuf
 			if _, err := io.ReadFull(r, body); err != nil {
 				return fmt.Errorf("reindex: read cluster body: %w", err)
 			}
@@ -902,10 +901,8 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 				return nil, 0, nil, fmt.Errorf("reindex: cluster size %d exceeds limit (%d)", h.Size, maxReindexClusterSize)
 			}
 
-			if int(h.Size) > len(clusterBuf) {
-				clusterBuf = make([]byte, h.Size)
-			}
-			body := clusterBuf[:h.Size]
+			clusterBuf = poison.Reuse(clusterBuf, int(h.Size))
+			body := clusterBuf
 			if _, err := io.ReadFull(r, body); err != nil {
 				return nil, 0, nil, fmt.Errorf("reindex: read cluster body: %w", err)
 			}

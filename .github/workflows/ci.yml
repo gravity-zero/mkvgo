@@ -50,6 +50,12 @@ jobs:
         if: runner.os == 'Linux'
         run: GOARCH=386 CGO_ENABLED=0 go test ./...
 
+      # Recycled block and pool buffers are filled with 0xDB at each reuse: code
+      # still holding one reads garbage and fails instead of passing by chance.
+      - name: Test (poisoned buffers)
+        if: runner.os == 'Linux'
+        run: CGO_ENABLED=0 go test -tags mkvgo_poison ./...
+
       - name: Vet
         run: go vet ./...
 

@@ -59,6 +59,16 @@ All notable changes to mkvgo are documented here. The format is based on
   keeps its meaning (what `Resource` handed out), so the window accounting it
   belongs to is unchanged.
 
+### Changed
+
+- **Recycled buffers are poisoned under test.** Built with the `mkvgo_poison`
+  tag, every buffer handed back for reuse (a block's payload buffer, a
+  window's in-place arena, the serving pools, a cluster body) is filled with
+  0xDB and replaced by a fresh one, so code holding a block's bytes past the
+  reader's next block reads garbage and fails instead of passing on a lucky
+  memory layout. CI and `make preflight` run the whole suite in this mode;
+  the default build is unchanged.
+
 ## [0.54.0] - 2026-10-16
 
 ### Changed
