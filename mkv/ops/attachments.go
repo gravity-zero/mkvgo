@@ -56,8 +56,11 @@ func LoadAttachmentData(ctx context.Context, a *mkv.Attachment, opts ...mkv.Opti
 			c.Close()
 		}
 	}()
-	data := make([]byte, a.Size)
-	if _, err := io.ReadFull(src, data); err != nil {
+	data, err := io.ReadAll(io.LimitReader(src, a.Size)) // grows as bytes arrive: Size is what the file declares
+	if err == nil && int64(len(data)) != a.Size {
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
 		return fmt.Errorf("attachment %q: %w", a.Name, err)
 	}
 	a.Data = data

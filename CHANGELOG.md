@@ -29,6 +29,10 @@ All notable changes to mkvgo are documented here. The format is based on
   allocated whole from the sample sizes the source declares, before any byte
   was read: overlapping samples made a 100 MiB file ask for gigabytes per
   segment. Such a segment is now refused with an error that names the bound.
+- **`LoadAttachmentData` no longer allocates the size an attachment
+  declares.** It sized its buffer from the FileData length the file states,
+  so a few bytes of Matroska could ask for a terabyte; the buffer now grows as
+  bytes arrive and a payload past the end of the file fails.
 
 ## [0.55.1] - 2026-10-17
 
