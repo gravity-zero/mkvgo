@@ -192,6 +192,11 @@ All notable changes to mkvgo are documented here. The format is based on
   only the periods it serves.
 - **DOC-05: the Go Report Card badge is gone from the README.** The service
   has been sunset.
+- **DOC-02: the README command table lists every command.** Thirteen were
+  missing (`analyze`, `fingerprint`, `track-ends`, `playability`, `ladder`,
+  `ingest`, `extract-frames`, `subtitle-index`, `abr-segment`, `concat-hls`,
+  `concat-segment`, `serve`, `serve-growing`); a test now fails when the table
+  and the CLI's command list differ.
 
 ### Changed
 

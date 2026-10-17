@@ -176,10 +176,17 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `diagnose` | One-call triage with remedies (MKV/WebM **or** MP4): index health, per-track audio delay, truncation verdict - routes each file to the right repair |
 | | `hash` / `verify` | Store per-track content hashes / detect bit rot (self-verifying files) |
 | | `compare` | Diff metadata, or block content with `-blocks` - several files on the right compare against their concatenation |
+| | `analyze` | Per-track frame/keyframe counts, bitrate, GOP, duration, CFR/VFR - walks every block header, no decode |
+| | `fingerprint` | Container-independent content identity: presentation hash + per-track payload SHA-256 |
+| | `track-ends` | Where each track's content really ends: picture end and audio shortfall |
+| | `playability` · `ladder` | Direct-play verdict per client target / recommended ABR rungs capped at the source |
+| | `ingest` | One-call serving plan for a file: direct-play, remux to HLS, or transcode |
 | **Extract** | `demux` | Extract tracks to raw streams |
 | | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT, or PGS bitmaps → PNGs + manifest; external sidecar → WebVTT |
 | | `extract-attachment` · `add-attachment` · `remove-attachment` | Manage attachments (MIME sniffed) |
 | | `extract-frame` | Keyframe nearest a time, decoder-ready - thumbnail/storyboard pipelines |
+| | `extract-frames` | Keyframe-only Matroska stream (every N seconds or at given times) |
+| | `subtitle-index` | Record where every subtitle block sits, so later extractions seek instead of walking the file |
 | **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) |
 | | `edit-inplace` | Edit metadata without rewriting clusters - instant |
 | | `set-chapters` · `extract-chapters` | Import/export chapters as OGM text (the standard chapter interchange format) |
@@ -195,6 +202,9 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | **Stream** | `to-hls` | Package as CMAF - HLS + DASH over one demuxed segment set (AES-128 + key rotation, CENC AV1/VP9, single-file, I-frames, audio-only) |
 | | `hls-segment` | Serve one HLS/DASH resource on demand - zero pre-generation (local file **or** URL) |
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |
+| | `abr-segment` | Serve one ABR resource on demand, byte-identical to `to-abr` |
+| | `concat-hls` · `concat-segment` | Several sources as one continuous HLS session - pre-generated, or one resource on demand |
+| | `serve` · `serve-growing` | Long-running HTTP server for one file's on-demand HLS (or the raw file for direct play) / play while downloading |
 | | `cmaf-mpd` · `cmaf-hls` | DASH manifest / HLS playlists over CMAF rungs an external encoder already produced - nothing re-packaged, rungs checked segment-aligned |
 | | `watermark-segment` | Serve one segment of an A/B forensic-watermarked stream (per-viewer bit routing, no re-encode) |
 | | `forensic-segment` | Single-source A/B watermark - variant B derived by dropping one disposable H.264 frame per segment, timing-compensated. Experimental session marking, robust neither to collusion nor to re-encoding |
