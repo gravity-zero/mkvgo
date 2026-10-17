@@ -26,13 +26,14 @@ func benchTailRun(b *testing.B, n int) {
 	}
 }
 
+// TestROB01_TailScanLinear: the quadratic scan took 12 s on 64 KiB of Voids, the linear one about 1 ms; 1 s holds on a loaded CI runner.
 func TestROB01_TailScanLinear(t *testing.T) {
 	for _, n := range []int{64 << 10, 512 << 10} {
 		buf := voidTail(n)
 		start := time.Now()
 		rel, _, ok := tailRun(buf, 0, int64(n))
 		_ = metaEndsAt(buf, rel)
-		if d := time.Since(start); d > 50*time.Millisecond {
+		if d := time.Since(start); d > time.Second {
 			t.Errorf("tail scan of %d KiB of Voids took %v", n>>10, d)
 		}
 		if ok {
