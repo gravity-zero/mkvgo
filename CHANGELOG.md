@@ -4,6 +4,19 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.55.2] - 2026-10-18
+
+### Security
+
+- **Every version from v0.13.0 to v0.54.0 is retracted.** They ship
+  `httpfs` (from v0.13.0), `s3fs` and the CENC 'cenc' packaging (from
+  v0.17.0), and with them the flaws fixed in v0.55.0: the AES-CTR keystream
+  reused across tracks and variants under one key (NEW-05, NEW-06: re-package
+  what they encrypted and rotate its keys), the S3 credentials a bucket could
+  move to another host or carry over a redirect (SEC-03, SEC-04), and the
+  remote allocation a server sized (SEC-01, SEC-02). `go get` and
+  `go list -m -u` now steer a module pinned on one of them to v0.55.2.
+
 ## [0.55.1] - 2026-10-17
 
 ### Fixed
