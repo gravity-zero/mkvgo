@@ -10,6 +10,7 @@ import (
 	"math/bits"
 	"os"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -671,14 +672,14 @@ func tileMarks(buf []byte, n int64, accept func(uint32) bool) []uint8 {
 	return marks
 }
 
-// elemAtCount, set by a test, counts elemAt's decodes.
-var elemAtCount *int
+// elemAtCount, set by a test, counts elemAt's decodes; nil otherwise.
+var elemAtCount atomic.Pointer[atomic.Int64]
 
 // elemAt decodes the element header at b[0] straight from the slice, with
 // ebml.ReadElementHeader's rules: a 1-4 octet ID, a size whose all-ones value is unknown (-1).
 func elemAt(b []byte) (id uint32, size int64, hlen int, ok bool) {
-	if elemAtCount != nil {
-		*elemAtCount++
+	if c := elemAtCount.Load(); c != nil {
+		c.Add(1)
 	}
 	idv, n1, ok := vintAt(b)
 	if !ok || n1 > 4 {

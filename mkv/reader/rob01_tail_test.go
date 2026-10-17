@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"sync/atomic"
 	"testing"
 )
 
@@ -27,16 +28,16 @@ func benchTailRun(b *testing.B, n int) {
 
 // TestROB01_TailScanLinear: the header decodes the tail scan costs grow with its window, at most 16 per byte; the quadratic scan's grew with its square.
 func TestROB01_TailScanLinear(t *testing.T) {
-	var decodes int
-	elemAtCount = &decodes
-	defer func() { elemAtCount = nil }()
+	var decodes atomic.Int64
+	elemAtCount.Store(&decodes)
+	defer elemAtCount.Store(nil)
 	for _, n := range []int{64 << 10, 512 << 10} {
 		buf := voidTail(n)
-		decodes = 0
+		decodes.Store(0)
 		rel, _, ok := tailRun(buf, 0, int64(n))
 		_ = metaEndsAt(buf, rel)
-		if decodes > 16*n {
-			t.Errorf("tail scan of %d KiB of Voids decoded %d element headers, past 16 per byte", n>>10, decodes)
+		if d := decodes.Load(); d > 16*int64(n) {
+			t.Errorf("tail scan of %d KiB of Voids decoded %d element headers, past 16 per byte", n>>10, d)
 		}
 		if ok {
 			t.Errorf("a tail ending on a stray byte tiles")
