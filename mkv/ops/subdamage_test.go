@@ -275,3 +275,57 @@ func TestSubtitleReadsPassOverDamage(t *testing.T) {
 		}
 	})
 }
+
+// TestTextCueClosedAtDamage: a text cue without BlockDuration just before a damaged region ends where the region
+// starts, not at the first cue past it, on the walk and on an index read.
+func TestTextCueClosedAtDamage(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var sets [][]mkv.Block
+	for c := int64(0); c < 10; c++ {
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: c * 1000, Keyframe: true, Data: append([]byte{0, 0, 1, 0x2D, 0x65}, make([]byte, 32<<10)...)},
+			{TrackNumber: 3, Timecode: c*1000 + 200, Keyframe: true, Data: []byte(fmt.Sprintf("cue %d", c))},
+		})
+	}
+	dir := t.TempDir()
+	clean := buildMKVCuedBlocks(t, dir, "c.mkv", []mkv.Track{
+		{ID: 1, UID: 11, Type: mkv.VideoTrack, Codec: "h264", Width: &w, Height: &h},
+		{ID: 3, UID: 33, Type: mkv.SubtitleTrack, Codec: "srt"},
+	}, sets, 10000, nil)
+	data, err := os.ReadFile(clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cl []int64
+	for off := 0; ; {
+		i := bytes.Index(data[off:], []byte{0x1F, 0x43, 0xB6, 0x75})
+		if i < 0 {
+			break
+		}
+		cl = append(cl, int64(off+i))
+		off += i + 4
+	}
+	clear(data[cl[4] : cl[8]+100]) // the walk resumes on the 9 s cluster
+	bad := filepath.Join(dir, "b.mkv")
+	if err := os.WriteFile(bad, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ix, err := BuildSubtitleIndex(context.Background(), clean, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The walk knows the region starts past cluster 3 (3 s), the index read at cluster 4 (4 s).
+	want := map[string]string{"walk": "00:00:03.200 --> 00:00:06.200\ncue 3", "index": "00:00:03.200 --> 00:00:04.000\ncue 3"}
+	for name, read := range map[string]func(*bytes.Buffer) error{
+		"walk":  func(b *bytes.Buffer) error { return ExtractSubtitleWebVTT(context.Background(), bad, 3, b) },
+		"index": func(b *bytes.Buffer) error { return ExtractSubtitleWebVTTFrom(context.Background(), bad, 3, ix, b) },
+	} {
+		var vtt bytes.Buffer
+		if err := read(&vtt); err != nil {
+			t.Fatal(name, err)
+		}
+		if !strings.Contains(vtt.String(), want[name]) {
+			t.Errorf("%s: cue 3 is not closed where the region starts:\n%s", name, vtt.String())
+		}
+	}
+}

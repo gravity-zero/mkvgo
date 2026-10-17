@@ -140,13 +140,15 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
-			dmg.skipped()
+			fromMs, ok := dmg.skipped()
+			closeOpenCue(cues, fromMs, ok)
 			break
 		}
 		if err != nil {
 			return err
 		}
-		dmg.skipped()
+		fromMs, ok := dmg.skipped()
+		closeOpenCue(cues, fromMs, ok)
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err

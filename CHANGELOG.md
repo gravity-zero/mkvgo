@@ -66,6 +66,10 @@ All notable changes to mkvgo are documented here. The format is based on
   behind it, and every subtitle read failed with "damage inside the file";
   when the tail lies within `DamageBytes` the walk now ends there, the region
   reported once through `OnSkip`.
+- **A WebVTT cue without BlockDuration ends where a damaged region begins.**
+  Its end fell back to the next cue's start, past the region, so it stayed on
+  screen over the whole lost span; it now ends at the region's start time, or
+  after the default 3 s when that is not later than the cue, as a PGS cue does.
 
 ## [0.55.1] - 2026-10-17
 

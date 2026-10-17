@@ -329,7 +329,8 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 		for k := int64(0); k < e.frames; k++ {
 			blk, err := br.Next()
 			if dmg.pending() && (k > 0 || seatZeroed(f, e.pos.Off)) { // the entry lies in a damaged region: its cues are lost
-				dmg.skipped()
+				fromMs, ok := dmg.skipped()
+				closeOpenCue(cues, fromMs, ok)
 				break
 			}
 			if err != nil {
