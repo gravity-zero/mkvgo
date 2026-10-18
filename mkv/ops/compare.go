@@ -86,12 +86,12 @@ func digestConcat(ctx context.Context, paths []string, fs *mkv.FS) ([]trackDiges
 	for i, p := range paths {
 		c, err := reader.OpenWithFS(ctx, p, fs, reader.WithoutAttachmentData())
 		if err != nil {
-			return nil, fmt.Errorf("open %s: %w", p, err)
+			return nil, fmt.Errorf("open %s: %w", shown.Path(p), err)
 		}
 		if accs == nil {
 			accs = newTrackAccs(len(c.Tracks))
 		} else if len(c.Tracks) != len(accs) {
-			return nil, fmt.Errorf("%s has %d tracks, expected %d like %s", p, len(c.Tracks), len(accs), paths[0])
+			return nil, fmt.Errorf("%s has %d tracks, expected %d like %s", shown.Path(p), len(c.Tracks), len(accs), shown.Path(paths[0]))
 		}
 		order := make(map[uint64]int, len(c.Tracks))
 		for j, t := range c.Tracks {

@@ -8,6 +8,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **Credentials in a URL stay out of errors.** A `user:password@` before
+  the host was kept where the query was cut; it is dropped too, and the
+  errors of a concat comparison name their parts that way as well.
 - **No two samples of a track share a 'cenc' IV.** A sample's IV is the base
   plus its decode time, and decode times were the presentation times sorted
   as they were: two blocks stamped alike, a broken remux's duplicate
