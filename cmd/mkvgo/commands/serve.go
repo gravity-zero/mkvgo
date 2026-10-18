@@ -74,7 +74,7 @@ func CmdServe(args []string) {
 		FatalErr(err)
 	}
 
-	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, cfg.httpOptions(cfg.cors))}
+	srv := newServer(addr, mkvhttp.Handler(plan, cfg.httpOptions(cfg.cors)), segmentWriteTimeout)
 
 	fmt.Printf("serving %s\n  %s\n", src, playableURL(addr))
 	runServer(srv)
@@ -86,10 +86,20 @@ func serveDirect(addr, src string, opts mkvhttp.Options) {
 	name := filepath.Base(src)
 	mux := http.NewServeMux()
 	mux.Handle("/"+name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: opts.AllowCORS}))
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := newServer(addr, mux, 0) // a direct-play response is the whole film: no deadline on writing it
 
 	fmt.Printf("serving %s (direct-play, no packaging)\n  %s\n", src, directPlayableURL(addr, name))
 	runServer(srv)
+}
+
+// segmentWriteTimeout bounds writing one HLS response: a segment is at most 256 MiB, so a client stalled past this
+// releases the source handle and the window budget its segment holds.
+const segmentWriteTimeout = 5 * time.Minute
+
+// newServer is an http.Server whose clients cannot hold a connection open without sending or reading: a header must
+// arrive within 10 s and an idle connection closes after 2 min; writeTimeout > 0 bounds writing a response.
+func newServer(addr string, h http.Handler, writeTimeout time.Duration) *http.Server {
+	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: writeTimeout}
 }
 
 // serveFlags are the serve command's own flags; rest keeps the shared HLS flags and the source.

@@ -43,7 +43,7 @@ func CmdServeGrowing(args []string) {
 		FatalErr(err)
 	}
 
-	srv := &http.Server{Addr: addr, Handler: mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: cfg.cors})}
+	srv := newServer(addr, mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: cfg.cors}), segmentWriteTimeout)
 
 	fmt.Printf("serving %s (play while downloading)\n  %s\n", src, playableURL(addr))
 	fmt.Println("press Ctrl-C to stop")

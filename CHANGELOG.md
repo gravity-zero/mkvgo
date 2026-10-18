@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`serve` and `serve-growing` bound slow clients.** Their HTTP server
+  had no timeout: a client sending or reading nothing held a connection, a
+  source handle and a segment's budget. A request header must arrive within
+  10 s, an idle connection closes after 2 min, and an HLS response must be
+  written within 5 min; a direct-play response keeps no write deadline.
 - **An EBML lace of one frame is that frame.** RFC 9559 codes the size of
   every frame but the last, so such a lace codes none; the full decoder read
   the frame's first bytes as a size and cut it short, the header-only one
