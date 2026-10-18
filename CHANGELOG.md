@@ -64,6 +64,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The EBML lace decoder refuses a size with no length marker.** A first
+  byte of `0x00`, or a size cut short by the block's end, decoded as a value
+  where the stream decoder refuses it; both decoders refuse it now.
 - **An empty DisplayWidth or DisplayHeight means square pixels.** It was
   read as a display size of 0; it takes its default, the pixel size, which
   the track reports as no display size.

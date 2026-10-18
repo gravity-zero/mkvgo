@@ -1576,20 +1576,18 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 	return nil, 0, fmt.Errorf("unknown lacing type %d", lacing)
 }
 
+// readVINTFromBuf decodes the VINT at buf[0], length marker kept: (0, 0) without a marker or with fewer bytes than it announces.
 func readVINTFromBuf(buf []byte) (uint64, int) {
 	if len(buf) == 0 {
 		return 0, 0
 	}
 	b := buf[0]
-	width := 1
-	for i := 7; i >= 0; i-- {
-		if b&(1<<uint(i)) != 0 {
-			width = 8 - i
-			break
-		}
+	width := bits.LeadingZeros8(b) + 1
+	if b == 0 || width > len(buf) {
+		return 0, 0 // no length marker, or fewer bytes than it announces
 	}
 	val := uint64(b)
-	for i := 1; i < width && i < len(buf); i++ {
+	for i := 1; i < width; i++ {
 		val = (val << 8) | uint64(buf[i])
 	}
 	return val, width

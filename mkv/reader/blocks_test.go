@@ -90,7 +90,8 @@ func TestReadVINTFromBuf(t *testing.T) {
 		{"1-byte 0xFF", []byte{0xFF}, 0xFF, 1},
 		{"2-byte", []byte{0x40, 0x01}, 0x4001, 2},
 		{"4-byte", []byte{0x10, 0x00, 0x00, 0x01}, 0x10000001, 4},
-		{"truncated 2-byte", []byte{0x40}, 0x40, 2}, // only 1 byte available for 2-byte VINT
+		{"truncated 2-byte", []byte{0x40}, 0, 0},        // only 1 byte available for 2-byte VINT: no value
+		{"leading zero byte", []byte{0x00, 0xBF}, 0, 0}, // no length marker in the first byte: no VINT, as the stream decoder holds
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
