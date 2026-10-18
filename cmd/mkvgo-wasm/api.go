@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"syscall/js"
@@ -70,7 +71,12 @@ func promise(fn func() (any, error)) any {
 			}()
 			v, err := fn()
 			if err != nil {
-				reject.Invoke(jsError(err.Error()))
+				e := jsError(err.Error())
+				var pe partialResult
+				if errors.As(err, &pe) {
+					e.Set("partial", pe.value)
+				}
+				reject.Invoke(e)
 				return
 			}
 			resolve.Invoke(v)
@@ -80,6 +86,12 @@ func promise(fn func() (any, error)) any {
 	p := js.Global().Get("Promise").New(handler)
 	handler.Release()
 	return p
+}
+
+// partialResult is a failure that still hands the caller what was produced, as the rejection's partial.
+type partialResult struct {
+	error
+	value any
 }
 
 func jsError(msg string) js.Value {

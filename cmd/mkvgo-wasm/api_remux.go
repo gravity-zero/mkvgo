@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -370,6 +371,9 @@ func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 		case "mp4":
 			err = mp4.ExtractSubtitleWebVTT(context.Background(), "in", trackID, &out,
 				mp4.Options{FS: fs})
+		}
+		if errors.Is(err, matroska.ErrSourceTruncated) {
+			return nil, partialResult{err, out.String()}
 		}
 		if err != nil {
 			return nil, err

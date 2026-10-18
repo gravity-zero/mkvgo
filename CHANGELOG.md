@@ -64,7 +64,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   stops before its declared end writes the cues it holds and returns
   `ErrSourceTruncated`.
 - The WebAssembly `extractSubtitleVTT` takes a `Blob`/`File` too, read by
-  ranges like the other Blob-backed exports, instead of a whole `Uint8Array`.
+  ranges like the other Blob-backed exports, instead of a whole `Uint8Array`;
+  on a Matroska source cut before its declared end it rejects with the WebVTT
+  of the cues it holds in the error's `partial`.
 - Native MP4/MOV editing: `mp4.EditInPlace`, `EditMetadata`, `SetChapters`,
   `RemoveTrack`, `Rewrite`, `Split`, `Join`, `Mux`, `Merge`, `AddTrack` and
   `MergeSubtitle` copy samples byte for byte and rewrite only the tables; the

@@ -129,7 +129,7 @@ func TestWebVTTWithPartialCuesLosesNoCue(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 	for name, cueSub := range map[string]func(int) bool{"half cued": func(i int) bool { return i%2 == 0 }, "none cued": func(int) bool { return false }} {
-		// The statistic says 20, so a count of 10 or 0 cues is not verified; a lying statistic of 10 is below.
+		// The statistic says 20, so a count of 10 or 0 cues is not verified: the walk serves.
 		path := webvttFixture(t, dir, name+".mkv", cueSub, "20")
 		var got bytes.Buffer
 		if err := ExtractSubtitleWebVTT(ctx, path, 2, &got); err != nil {
