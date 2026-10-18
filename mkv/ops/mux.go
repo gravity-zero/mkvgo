@@ -172,9 +172,7 @@ func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([
 
 		t := *srcTrack
 		t.ID = nextID
-		if inp.Language != "" {
-			t.Language, t.LanguageBCP47 = inp.Language, "" // the source's BCP-47 tag would take precedence over it
-		}
+		setLanguage(&t, inp.Language)
 		if inp.Name != "" {
 			t.Name = inp.Name
 		}
@@ -228,4 +226,13 @@ func buildMuxSources(ctx context.Context, inputs []mkv.TrackInput, trackMap map[
 		timecodeScale = 1000000
 	}
 	return sources, timecodeScale, durationMs, nil
+}
+
+// setLanguage gives t the language lang, when set; a language that changes drops the BCP-47 tag that would take
+// precedence over it, one passed through unchanged (merge passes every track's own) keeps it.
+func setLanguage(t *mkv.Track, lang string) {
+	if lang == "" || lang == t.Language {
+		return
+	}
+	t.Language, t.LanguageBCP47 = lang, ""
 }

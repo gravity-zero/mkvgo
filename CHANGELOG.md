@@ -89,9 +89,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 Matroska reading:
 
-- A language set on a Matroska track (`edit-track -lang`, the `edit` patch's
-  `language`, `add-track`, `mux`) is the one in effect: the source's
-  LanguageBCP47, which takes precedence, kept the old language.
+- A language changed on a Matroska track (`edit-track -lang`, the `edit`
+  patch's `language`, `add-track`, `mux`) is the one in effect: the source's
+  LanguageBCP47, which takes precedence, kept the old language. A language
+  passed through unchanged, as `merge` does, keeps its BCP-47 tag.
 - `ReadStream` describes a file as `Read` does: it runs the same decoders,
   and a differential fuzz target (`FuzzReadVsReadStream`) holds them together.
   It streams each element through them instead of holding its body, so an

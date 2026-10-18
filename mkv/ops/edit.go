@@ -115,9 +115,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 
 	t := *addedTrack
 	t.ID = newID
-	if input.Language != "" {
-		t.Language, t.LanguageBCP47 = input.Language, "" // the source's BCP-47 tag would take precedence over it
-	}
+	setLanguage(&t, input.Language)
 	if input.Name != "" {
 		t.Name = input.Name
 	}

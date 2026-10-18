@@ -44,10 +44,10 @@ func applyPatch(c *matroska.Container, patch EditPatch) {
 			}
 			found = true
 			if tp.Language != nil {
-				c.Tracks[i].Language = *tp.Language
-				if tp.LanguageBCP47 == nil {
-					c.Tracks[i].LanguageBCP47 = "" // a stale BCP-47 tag would take precedence over the language set
+				if tp.LanguageBCP47 == nil && *tp.Language != c.Tracks[i].Language {
+					c.Tracks[i].LanguageBCP47 = "" // a changed language drops the tag that would take precedence over it
 				}
+				c.Tracks[i].Language = *tp.Language
 			}
 			if tp.LanguageBCP47 != nil {
 				c.Tracks[i].LanguageBCP47 = *tp.LanguageBCP47
@@ -242,7 +242,9 @@ func CmdEditTrack(args []string) {
 			if lang != nil && isMP4Content(source) {
 				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = mp4.LanguageFields(*lang)
 			} else if lang != nil {
-				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = *lang, "" // a stale BCP-47 tag would take precedence
+				if *lang != c.Tracks[i].Language {
+					c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = *lang, "" // a changed language drops the tag over it
+				}
 			}
 			if name != nil {
 				c.Tracks[i].Name = *name

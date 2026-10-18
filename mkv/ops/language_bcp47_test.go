@@ -50,3 +50,39 @@ func TestSetLanguageClearsAStaleBCP47Tag(t *testing.T) {
 		}
 	}
 }
+
+// TestUnchangedLanguageKeepsItsBCP47Tag pins that a language passed through unchanged, as merge does with every
+// track's own, keeps the track's BCP-47 tag: only a language that changes clears it.
+func TestUnchangedLanguageKeepsItsBCP47Tag(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := audioTrack(2)
+	audio.Language, audio.LanguageBCP47 = "por", "pt-BR"
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}}, []mkv.Track{videoTrack(1), audio}, 2000))
+	for tc := int64(0); tc < 2000; tc += 500 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("v")},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")},
+		}))
+	}
+	mustNil(t, mw.Finalize())
+	mustNil(t, f.Close())
+	ctx := context.Background()
+	merged := filepath.Join(dir, "merged.mkv")
+	mustNil(t, Merge(ctx, mkv.MergeOptions{OutputPath: merged, Inputs: []mkv.MergeInput{{SourcePath: src}}}))
+	c, err := reader.Open(ctx, merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range c.Tracks {
+		if tr.Type == mkv.AudioTrack && tr.LanguageBCP47 != "pt-BR" {
+			t.Errorf("merge left track %d with BCP-47 %q, want pt-BR", tr.ID, tr.LanguageBCP47)
+		}
+	}
+}
