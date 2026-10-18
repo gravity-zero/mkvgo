@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -234,11 +235,8 @@ func buildMuxSources(ctx context.Context, inputs []mkv.TrackInput, trackMap map[
 
 // setLanguage gives t the language lang, when set; a language that changes drops the BCP-47 tag that would take
 // precedence over it, one passed through unchanged (merge passes every track's own) keeps it.
-func setLanguage(t *mkv.Track, lang string) {
-	if lang == "" || lang == t.Language {
-		return
-	}
-	t.Language, t.LanguageBCP47 = lang, ""
+func setLanguage(t *mkv.Track, language string) {
+	t.Language, t.LanguageBCP47 = lang.Set(t.Language, t.LanguageBCP47, language)
 }
 
 // applyEdit runs an edit callback over c, then drops the BCP-47 tag of every track whose language the callback
@@ -251,8 +249,8 @@ func applyEdit(c *mkv.Container, edit func(*mkv.Container)) {
 	edit(c)
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
-		if b, ok := before[t.ID]; ok && t.Language != b[0] && t.LanguageBCP47 == b[1] {
-			t.LanguageBCP47 = ""
+		if b, ok := before[t.ID]; ok {
+			t.LanguageBCP47 = lang.Edited(b[0], b[1], t.Language, t.LanguageBCP47)
 		}
 	}
 }

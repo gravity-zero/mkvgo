@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -45,10 +46,7 @@ func applyPatch(c *matroska.Container, patch EditPatch) {
 			}
 			found = true
 			if tp.Language != nil {
-				if tp.LanguageBCP47 == nil && *tp.Language != c.Tracks[i].Language {
-					c.Tracks[i].LanguageBCP47 = "" // a changed language drops the tag that would take precedence over it
-				}
-				c.Tracks[i].Language = *tp.Language
+				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = lang.Set(c.Tracks[i].Language, c.Tracks[i].LanguageBCP47, *tp.Language)
 			}
 			if tp.LanguageBCP47 != nil {
 				c.Tracks[i].LanguageBCP47 = *tp.LanguageBCP47
@@ -210,7 +208,7 @@ func CmdEditTrack(args []string) {
 	source := args[0]
 	var outPath string
 	var trackID uint64
-	var lang, name *string
+	var language, name *string
 	var setDefault, setForced *bool
 
 	fl := newFlags("edit-track")
@@ -222,7 +220,7 @@ func CmdEditTrack(args []string) {
 		}
 		trackID = id
 	}, "-t")
-	fl.Func(func(v string) { lang = &v }, "-lang")
+	fl.Func(func(v string) { language = &v }, "-lang")
 	fl.Func(func(v string) { name = &v }, "-name")
 	var isDefault, noDefault, isForced, noForced bool
 	fl.Do(func() { isDefault = true; setDefault = &isDefault }, "-default")
@@ -240,12 +238,10 @@ func CmdEditTrack(args []string) {
 			if c.Tracks[i].ID != trackID {
 				continue
 			}
-			if lang != nil && isMP4Content(source) {
-				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = mp4.LanguageFields(*lang)
-			} else if lang != nil {
-				if *lang != c.Tracks[i].Language {
-					c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = *lang, "" // a changed language drops the tag over it
-				}
+			if language != nil && isMP4Content(source) {
+				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = mp4.LanguageFields(*language)
+			} else if language != nil {
+				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = lang.Set(c.Tracks[i].Language, c.Tracks[i].LanguageBCP47, *language)
 			}
 			if name != nil {
 				c.Tracks[i].Name = *name
