@@ -402,7 +402,11 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 		return nil, err
 	}
 	var outputs []string
-	links := splitLinks(m.seed, m.link, len(plans))
+	bounds := make([][2]int64, len(plans))
+	for i, p := range plans {
+		bounds[i] = [2]int64{p.tsNs, p.teNs}
+	}
+	links := splitLinks(m.seed, m.link, bounds)
 	for i := range plans {
 		if err := ctx.Err(); err != nil {
 			return outputs, err

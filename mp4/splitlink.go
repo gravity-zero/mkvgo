@@ -20,16 +20,18 @@ func (l splitLink) continues(prev splitLink) bool {
 	return l.prev != "" && l.prev == prev.uid
 }
 
-// splitLinks chains n parts, derived from the source's moov so splitting a file twice writes the same bytes; the chain's ends keep the source's own links.
-func splitLinks(seed [32]byte, src splitLink, n int) []splitLink {
+// splitLinks chains the parts cut at bounds (start, end ns) by the source's moov and each cut: deterministic, never linking splits at other cuts.
+func splitLinks(seed [32]byte, src splitLink, bounds [][2]int64) []splitLink {
+	n := len(bounds)
 	links := make([]splitLink, n)
 	for i := range links {
 		h := sha256.New()
-		h.Write([]byte("mkvgo.mp4.split-uid.v1"))
+		h.Write([]byte("mkvgo.mp4.split-uid.v2"))
 		h.Write(seed[:])
-		var idx [8]byte
-		binary.BigEndian.PutUint64(idx[:], uint64(i))
-		h.Write(idx[:])
+		var cut [16]byte
+		binary.BigEndian.PutUint64(cut[:8], uint64(bounds[i][0]))
+		binary.BigEndian.PutUint64(cut[8:], uint64(bounds[i][1]))
+		h.Write(cut[:])
 		links[i].uid = hex.EncodeToString(h.Sum(nil)[:16])
 		if i > 0 {
 			links[i].prev = links[i-1].uid
