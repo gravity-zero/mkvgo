@@ -228,6 +228,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	}
 	endStates := map[uint64]*trackEndState{}
 	var carried, queue, shown []mkv.Block // cues to open on, cues to write next, cues written (source timeline)
+	var opening []mkv.Block               // the carried cues as the source shows them, before they open at the cut
 	if carry != nil {
 		carried, opts.walk.onScreen = opts.walk.onScreen, nil
 	}
@@ -283,6 +284,15 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 				}
 			}
 			baseSettled = true
+			for i := range cluster { // a carried cue was on screen at the zero too, not only at the cut
+				for _, o := range opening {
+					if b := &cluster[i]; b.Timecode == cutStart && base < cutStart && bytes.Equal(b.Data, o.Data) {
+						from := max(o.Timecode, base)
+						b.Duration += b.Timecode - from
+						b.Timecode = from
+					}
+				}
+			}
 		}
 		s := shift()
 		for i := range cluster {
@@ -419,6 +429,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			cutStart, cutStartSet = blk.Timecode, true
 			for _, c := range carried { // the cues still on screen at the cut open this part, for the time they have left
 				if end := c.Timecode + c.Duration; end > cutStart {
+					opening = append(opening, c)
 					c.Timecode, c.Duration = cutStart, end-cutStart
 					queue = append(queue, c)
 				}
@@ -436,7 +447,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			firstTC, firstSet = blk.Timecode, true
 		}
 		if isSub {
-			if want, ok := opts.dropLeadingSub[newID]; ok && blk.Timecode == firstTC && bytes.Equal(blk.Data, want) {
+			if want, ok := opts.dropLeadingSub[newID]; ok && blk.Timecode <= firstTC && bytes.Equal(blk.Data, want) {
 				delete(opts.dropLeadingSub, newID) // the previous linked part already shows this cue past the seam
 				if opts.lastSubs != nil {
 					opts.lastSubs[newID] = blk // still this part's cue at its end, for the part after

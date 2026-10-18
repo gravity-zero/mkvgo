@@ -34,6 +34,23 @@ func TestSplitKeepsOpenGOPLeadingPictures(t *testing.T) {
 	}
 }
 
+// TestSplitOpensOnTheCueAtItsZero pins that a cue on screen across a cut opens the next part at its zero, even when
+// sound muxed ahead of the keyframe puts that zero a few ms before the first picture.
+func TestSplitOpensOnTheCueAtItsZero(t *testing.T) {
+	c := matrix.Case{OpenGOP: true, Audio: true, NTSC: true, Subtitle: matrix.CueOverCut, Cuts: 1}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	mustNil(t, c.BuildMKV(src))
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
+	mustNil(t, err)
+	cue := c.Blocks()[matrix.SubtitleTrack][0]
+	b := trackBlocks(collectAllBlocks(t, parts[1]))
+	video, subs := b[matrix.VideoTrack], b[matrix.SubtitleTrack]
+	if len(subs) != 1 || subs[0].Timecode != 0 || subs[0].Timecode+subs[0].Duration != video[0].Timecode+cue.Timecode+cue.Duration-c.ExpectedCuts()[0] {
+		t.Errorf("part 2 subtitles %s with its picture at %d ms, want the cue from 0 to where it ends", blockSeq(subs), video[0].Timecode)
+	}
+}
+
 func trackBlocks(blocks []mkv.Block) map[uint64][]mkv.Block {
 	out := map[uint64][]mkv.Block{}
 	for _, b := range blocks {

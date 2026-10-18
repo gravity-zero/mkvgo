@@ -104,6 +104,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   and shown before it, and the sound stored among them, at negative timestamps
   in the part it opens: they were in neither part, and `Join` placed the rest of
   the part that much early.
+- A cue on screen across a Matroska cut opens the next part at its zero, not a
+  few ms in when sound muxed ahead of the keyframe sets that zero.
 - `Join` gives a chapter a split carried over a cut the end of its
   continuation, not the cut.
 - Every Matroska writer of the library refuses an output that is one of its

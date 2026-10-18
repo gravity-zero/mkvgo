@@ -2457,7 +2457,7 @@ frame). An open-GOP keyframe stores pictures shown just before it after it in
 the file: the part before stops at the keyframe, and the part it opens keeps
 them (with the sound stored among them) at negative timestamps, ahead of its
 zero, as an MP4 edit list does, so `Join` gives the source back frame for frame.
-A range that
+A cue on screen across a cut opens the next part at its zero. A range that
 contains media but no video keyframe is an explicit error. Audio-only sources
 cut exactly at the requested times.
 
