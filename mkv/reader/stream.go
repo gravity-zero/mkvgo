@@ -198,13 +198,21 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 		return nil, nil, fmt.Errorf("segment: expected 0x%X got 0x%X", mkv.IDSegment, h.ID)
 	}
 	// h.Size may be -1 (unknown-size segment) - fine for streaming.
+	segEnd := int64(-1)
+	if h.Size >= 0 {
+		segEnd = p.pos + h.Size
+	}
 
-	// Scan segment-level elements until we hit the first Cluster.
+	// Scan segment-level elements until we hit the first Cluster, or the Segment's end: what lies past it is no
+	// part of the Segment, as the seekable readers hold.
 	var peekedCluster *ebml.ElementHeader
 metaLoop:
 	for {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
+		}
+		if segEnd >= 0 && p.pos >= segEnd {
+			break metaLoop
 		}
 		if derr := peekHeaderErr(br0); derr != nil {
 			// Junk ahead of (or between) the head elements: scan forward to
@@ -228,6 +236,9 @@ metaLoop:
 				break metaLoop
 			}
 			return nil, nil, err
+		}
+		if segEnd >= 0 && eh.ID != mkv.IDCluster && eh.Size >= 0 && p.pos+eh.Size > segEnd {
+			break metaLoop // an element past the Segment's end
 		}
 		switch eh.ID {
 		case mkv.IDInfo:

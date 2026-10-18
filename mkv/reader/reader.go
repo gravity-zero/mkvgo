@@ -501,6 +501,9 @@ func (p *parser) parseSeekHeadRefs(size, segStart, endPos int64) (offs, meta []i
 		if e != nil {
 			return offs, meta, e
 		}
+		if p.pastParent(eh, end) {
+			return offs, meta, nil
+		}
 		if eh.ID != mkv.IDSeek {
 			if eh.Size < 0 {
 				return offs, meta, nil
@@ -863,6 +866,9 @@ func (p *parser) parseTailBuffer(c *mkv.Container, tail []byte, base int64) erro
 				return nil
 			}
 			return err
+		}
+		if p.pastParent(eh, end) {
+			return nil
 		}
 		switch eh.ID {
 		case mkv.IDCues:

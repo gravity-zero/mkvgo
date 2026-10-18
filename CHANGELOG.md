@@ -114,6 +114,11 @@ All notable changes to mkvgo are documented here. The format is based on
   track's colour as read from its Colour element.** A differential fuzz target
   (`FuzzReadVsReadStream`) holding both readers to the same description of a
   file found them missing from the streaming reader.
+- **`ReadStream` stops at the Segment's declared end, and both readers skip
+  the rest of a SeekHead or Seek entry a child overruns.** The differential
+  fuzz target found the streaming reader reading Tracks past a Segment that
+  ended before them, and the seekable reader skipping its Tags behind a
+  SeekHead child that declared more than the SeekHead held.
 - **A split part named after a chapter never takes a Windows device name.**
   A chapter titled `CON` or `nul.txt` made `CON.mkv` or `nul.txt.mkv`, which
   Windows opens as a device; such a name now takes a leading `_`. Titles with

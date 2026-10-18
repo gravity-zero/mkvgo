@@ -206,6 +206,9 @@ func (p *parser) blockGroupKeyframe(size int64) (relTC int16, track uint64, key,
 		if err != nil {
 			return 0, 0, false, false
 		}
+		if p.pastParent(ch, end) {
+			return 0, 0, false, false
+		}
 		switch ch.ID {
 		case mkv.IDBlock:
 			r, tk, _, bok := p.peekBlockHeader(ch.Size, false)

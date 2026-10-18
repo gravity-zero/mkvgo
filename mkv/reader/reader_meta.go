@@ -507,6 +507,9 @@ func (p *parser) parseSeekHeadMeta(size, segStart, endPos int64) (headOffsets, e
 		if e != nil {
 			return offs, e
 		}
+		if p.pastParent(eh, end) {
+			return offs, nil
+		}
 		if eh.ID != mkv.IDSeek {
 			if eh.Size < 0 {
 				return offs, nil
@@ -556,6 +559,9 @@ func (p *parser) parseSeekEntry(size int64) (id uint32, pos int64, ok bool, err 
 		eh, _, e := p.readHeader()
 		if e != nil {
 			return id, pos, false, e
+		}
+		if p.pastParent(eh, end) {
+			break
 		}
 		switch eh.ID {
 		case mkv.IDSeekID:
