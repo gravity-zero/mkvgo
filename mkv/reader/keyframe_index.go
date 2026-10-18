@@ -103,7 +103,14 @@ walk:
 			continue
 		}
 
-		// Inside a Cluster.
+		// Inside a Cluster. A child past its end is damage, as in BlockReader: resync on the next Cluster rather
+		// than read its blocks as this one's.
+		if pastEnd(h, p.pos(), clusterEnd) != nil {
+			if !p.resyncCluster(segEnd, &inCluster, &haveTS, &clusterTS, &clusterEnd) {
+				return finalizeIndex(times)
+			}
+			continue
+		}
 		switch h.ID {
 		case mkv.IDTimestamp:
 			v, err := ebml.ReadUint(p.r, h.Size)

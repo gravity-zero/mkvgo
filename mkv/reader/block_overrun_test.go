@@ -15,7 +15,7 @@ import (
 func overrunClusters(blockGroup bool) (data []byte, second int64) {
 	block := func(payload byte) []byte { return []byte{0x81, 0x00, 0x00, 0x80, payload, payload} }
 	var c2 bytes.Buffer
-	c2.Write(uintEl(mkv.IDTimestamp, 1000))
+	c2.Write(uintElN(mkv.IDTimestamp, 1000, 2))
 	c2.Write(wrapEl(mkv.IDSimpleBlock, block(0xBB)))
 	cluster2 := wrapEl(mkv.IDCluster, c2.Bytes())
 
@@ -81,6 +81,48 @@ func TestBlockPastItsClusterIsDamage(t *testing.T) {
 		}
 		if !bytes.Equal(got, []byte{0xAA, 0xBB}) || len(br.SkippedRanges()) != 1 {
 			t.Errorf("group %v: tolerant walk read %x with %d ranges skipped, want aa bb and 1", group, got, len(br.SkippedRanges()))
+		}
+	}
+}
+
+// TestKeyframeIndexResyncsPastAnOverrunningBlock: the keyframe index walk read a block past its Cluster's end as
+// BlockReader did, and lost the next Cluster's keyframes from the index; it resyncs on that Cluster now.
+func TestKeyframeIndexResyncsPastAnOverrunningBlock(t *testing.T) {
+	data, _ := overrunClusters(false)
+	segStart := int64(bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75}))
+	p := &parser{r: bytes.NewReader(data), segStart: segStart, segEnd: -1}
+	times := p.buildKeyframeIndex(0, 1000000)
+	found := false
+	for _, ms := range times {
+		found = found || ms == 1000
+	}
+	if !found {
+		t.Errorf("keyframe index %v, want the second Cluster's keyframe at 1000 ms", times)
+	}
+}
+
+// TestFilteredBlockWithALongTrackNumber: a block of one byte whose track number takes eight was refused when its
+// track was read, but discarded as "size minus what was read" - a negative count, a no-op - when the track was
+// filtered out, leaving the walk seven bytes past the block. Both refuse it now.
+func TestFilteredBlockWithALongTrackNumber(t *testing.T) {
+	var c bytes.Buffer
+	c.Write(uintEl(mkv.IDTimestamp, 0))
+	ebml.WriteElementHeader(&c, mkv.IDSimpleBlock, 1)
+	c.Write([]byte{0x01, 0, 0, 0, 0, 0, 0, 0x02}) // an 8-byte track number 2, in a 1-byte block
+	data := buildBlockReaderInput(c.Bytes())
+	for _, keep := range []bool{false, true} {
+		if _, err := data.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		br, err := NewBlockReader(data, 1000000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if keep {
+			br.KeepTracks(1)
+		}
+		if _, err := br.Next(); err == nil || errors.Is(err, io.EOF) {
+			t.Errorf("keep tracks %v: %v, want the block refused", keep, err)
 		}
 	}
 }

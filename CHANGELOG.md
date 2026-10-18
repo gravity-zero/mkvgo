@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The keyframe walks resync past a block that overruns its Cluster,
+  and a block whose track number runs past it is refused whether its track is
+  kept or filtered.** The keyframe index lost the next Cluster's keyframes;
+  a filtered block discarded a negative count and left the walk inside the
+  data that followed.
 - **Read, ReadMeta and ReadStream agree on duplicate and odd head
   elements.** The tail a SeekHead-less file is read back from added a second
   Tracks to the head's and reset the Info; a Tracks of unknown size made

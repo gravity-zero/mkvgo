@@ -123,6 +123,9 @@ func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale in
 		if err != nil {
 			break
 		}
+		if pastEnd(ch, p.pos(), end) != nil {
+			return 0, false // a child past its Cluster's end: read on, it would take the next Cluster's blocks for this one's
+		}
 		switch ch.ID {
 		case mkv.IDTimestamp:
 			v, err := ebml.ReadUint(p.r, ch.Size)

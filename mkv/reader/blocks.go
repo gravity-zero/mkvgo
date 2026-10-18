@@ -847,6 +847,10 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	if err != nil {
 		return mkv.Block{}, err
 	}
+	if br.r.tell()-start > size {
+		// Refused before the filters: discarding a negative rest would leave the walk inside what follows.
+		return mkv.Block{}, fmt.Errorf("block's track number runs %d bytes past the block", br.r.tell()-start-size)
+	}
 	if br.known != nil && !br.known[uint64(trackNum)] {
 		// A track the file does not declare: bytes that happen to parse as a
 		// block, not content. Dropped, and remembered as where damage may
