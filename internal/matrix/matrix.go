@@ -92,6 +92,9 @@ func (c Case) frames() int { return int(6e9 / c.frameNs()) }
 
 func (c Case) frameMs(j int) int64 { return int64(math.Round(float64(j) * c.frameNs() / 1e6)) }
 
+// EndMs is where the media ends: the last frame plus its whole milliseconds, as a remux measures it.
+func (c Case) EndMs() int64 { return c.frameMs(c.frames()-1) + int64(c.frameNs()/1e6) }
+
 // RequestedCuts are the times the split ranges name, in ms.
 func (c Case) RequestedCuts() []int64 {
 	if c.Cuts == 2 {
@@ -184,7 +187,7 @@ func (c Case) ChapterList() []mkv.Chapter {
 	for i, s := range starts {
 		chs[i] = mkv.Chapter{ID: uint64(i + 1), Title: fmt.Sprintf("Chapter %d", i+1), StartMs: s}
 		if c.Chapters == EndedChapters {
-			chs[i].EndMs = c.frameMs(c.frames())
+			chs[i].EndMs = c.EndMs()
 			if i+1 < len(starts) {
 				chs[i].EndMs = starts[i+1]
 			}
@@ -226,7 +229,7 @@ func (c Case) BuildMKV(path string) error {
 	}
 	const scale = 1_000_000
 	m := writer.NewMKVWriter(f)
-	dur := c.frameMs(c.frames())
+	dur := c.EndMs()
 	cont := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-matrix", WritingApp: "mkvgo-matrix"}, Chapters: c.ChapterList()}
 	err = m.WriteStart()
 	if err == nil {
