@@ -95,6 +95,12 @@ func mp4Options() mp4.Options {
 	}}
 }
 
+// guardOutput refuses an output that exists (unless -f) or that is one of the inputs, which -f never allows.
+func guardOutput(outPath string, inputs ...string) {
+	guardDistinct(outPath, inputs...)
+	GuardOverwrite(outPath)
+}
+
 // guardDistinct refuses an output that is one of the inputs: writing it would destroy what is being read.
 func guardDistinct(outPath string, inputs ...string) {
 	out, err := os.Stat(outPath)

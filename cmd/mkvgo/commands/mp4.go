@@ -83,7 +83,7 @@ func CmdFromMP4(args []string) {
 		Fatal("usage: " + CmdUsage["from-mp4"])
 	}
 	src, dst := rest[0], rest[1]
-	GuardOverwrite(dst)
+	guardOutput(dst, src)
 
 	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
 		FS:                sourceFS(src),

@@ -71,7 +71,7 @@ func CmdReindex(args []string) {
 		Fatal(reindexUsage)
 	}
 	src, dst := rest[0], rest[1]
-	GuardOverwrite(dst)
+	guardOutput(dst, src)
 
 	err := matroska.Reindex(context.Background(), src, dst, opts)
 	ClearProgress()

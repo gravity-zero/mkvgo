@@ -71,7 +71,7 @@ func CmdSalvage(args []string) {
 		Fatal(salvageUsage)
 	}
 	src, dst := rest[0], rest[1]
-	GuardOverwrite(dst)
+	guardOutput(dst, src)
 
 	report, err := matroska.Salvage(context.Background(), src, dst, opts)
 	ClearProgress()

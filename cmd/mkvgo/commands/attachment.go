@@ -27,7 +27,7 @@ func CmdAddAttachment(args []string) {
 		Fatal("usage: " + usage)
 	}
 	source, attPath = rest[0], rest[1]
-	GuardOverwrite(outPath)
+	guardOutput(outPath, source, attPath)
 
 	data, err := os.ReadFile(attPath)
 	if err != nil {
@@ -65,7 +65,7 @@ func CmdRemoveAttachment(args []string) {
 		Fatal("usage: " + usage)
 	}
 	source, target := rest[0], rest[1]
-	GuardOverwrite(outPath)
+	guardOutput(outPath, source)
 
 	// RemoveAttachment resolves the target BEFORE writing anything, so a bad
 	// ID/name fails without leaving an output file behind.

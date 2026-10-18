@@ -76,7 +76,7 @@ func CmdWatermarkSegment(args []string) {
 		}
 		return
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, srcA, srcB)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
 		FatalErr(err)
 	}
