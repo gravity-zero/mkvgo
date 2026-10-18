@@ -246,6 +246,9 @@ func withChapters(r io.ReadSeeker, payload []byte, vs vsource, chs []mkv.Chapter
 		return nil, nil, err
 	}
 	after.Chapters = chs
+	if len(chs) > 0 {
+		before.Chapters = nil // the source's chapter track is not carried: rebuild one even when the chapters come out unchanged
+	}
 	moov, chap, err := patchMoovMeta(payload, mv, before, after, limit)
 	if err != nil {
 		return nil, nil, err

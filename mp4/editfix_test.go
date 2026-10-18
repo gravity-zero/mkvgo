@@ -266,6 +266,26 @@ func TestSplitThenJoinGivesChaptersBackWhole(t *testing.T) {
 	}
 }
 
+// TestSplitAndJoinKeepTheChapterTrack: QuickTime players read the chapter track, not the chpl, so an output whose chapters come out unchanged keeps one too.
+func TestSplitAndJoinKeepTheChapterTrack(t *testing.T) {
+	src := editFixture(t)
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "B", StartMs: 1000}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 4000}, {StartMs: 4000}}})
+	dst := filepath.Join(t.TempDir(), "j.mp4")
+	if err := Join(context.Background(), parts, dst); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range append(parts, dst) {
+		if len(chapterTrackRefs(moovBoxesOf(t, p))) == 0 {
+			t.Errorf("%s has no chapter track", filepath.Base(p))
+		}
+	}
+}
+
 func TestEditedTitleSurvivesDroppingTheTags(t *testing.T) {
 	path := editFixture(t)
 	if err := EditInPlace(context.Background(), path, func(c *mkv.Container) {
