@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -383,6 +384,9 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 		}
 		prevStart = r.StartMs
 		if plans[i], err = m.planPart(r, cur); err != nil {
+			if nk := (*noKeyframeInRange)(nil); opts.ByChapters && errors.As(err, &nk) {
+				return nil, errf("split: chapter %q (%d-%d ms) holds no keyframe (the next one is at %d ms): split by time instead (-range or -every, SplitOptions.Ranges or EveryMs), or move the chapter (set-chapters)", titleAt(titles, i), nk.startMs, nk.endMs, nk.nextMs)
+			}
 			return nil, errf("split: part %d: %w", i+1, err)
 		}
 		name := splitplan.PartName(pattern, i, titleAt(titles, i), i < len(titles), used)
@@ -410,6 +414,13 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 	return outputs, nil
 }
 
+// noKeyframeInRange is a range with no keyframe of its own; Split words the remedy for the way the ranges were given.
+type noKeyframeInRange struct{ startMs, endMs, nextMs int64 }
+
+func (e *noKeyframeInRange) Error() string {
+	return fmt.Sprintf("the range %d-%d ms holds no keyframe (the next one is at %d ms): widen it", e.startMs, e.endMs, e.nextMs)
+}
+
 // partPlan is where a part cuts each track: decode ranges [a[i], b[i]) and its window on the source timeline (teNs 0: the end).
 type partPlan struct {
 	a, b       []int
@@ -435,7 +446,7 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 			return p, fmt.Errorf("no keyframe at or after %d ms (the last one is at %d ms): start the range earlier", r.StartMs, lastKeyMs(ref, m.movieTS))
 		}
 		if r.EndMs > 0 && roundMs(ref.ptNs(a, m.movieTS)) >= r.EndMs {
-			return p, fmt.Errorf("the range %d-%d ms holds no keyframe (the next one is at %d ms): widen it", r.StartMs, r.EndMs, roundMs(ref.ptNs(a, m.movieTS)))
+			return p, &noKeyframeInRange{startMs: r.StartMs, endMs: r.EndMs, nextMs: roundMs(ref.ptNs(a, m.movieTS))}
 		}
 		p.tsNs = ref.ptNs(a, m.movieTS)
 	}

@@ -218,6 +218,16 @@ func TestSplitRefusals(t *testing.T) {
 	if err == nil {
 		t.Error("a pattern escaping the output directory went through")
 	}
+	// By chapters the ranges come from the file: the refusal names the chapter and what to do, not "widen it".
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "Short", StartMs: 2500}, {ID: 3, Title: "C", StartMs: 2700}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: t.TempDir(), ByChapters: true})
+	if err == nil || strings.Contains(err.Error(), "widen it") || !strings.Contains(err.Error(), `"Short"`) || !strings.Contains(err.Error(), "-range") {
+		t.Errorf("split by chapters on a chapter with no keyframe: %v", err)
+	}
 }
 
 func TestJoinRefusesDifferentStreams(t *testing.T) {
