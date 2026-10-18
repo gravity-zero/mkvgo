@@ -186,7 +186,7 @@ func (s *S3FS) resolveURL(path string) (string, error) {
 		return "", err
 	}
 	if s.opts.SessionToken != "" && strings.EqualFold(s.scheme, "http") && !s.opts.AllowHTTPSessionToken {
-		return "", fmt.Errorf("s3fs: %s: the endpoint is plain http and the session token would cross the network in clear; use an https:// endpoint, or set s3fs.Options.AllowHTTPSessionToken to send it anyway", path)
+		return "", fmt.Errorf("s3fs: %s: the endpoint is plain http and the session token would cross the network in clear; use an https:// endpoint, or credentials without a session token (unset AWS_SESSION_TOKEN), or set s3fs.Options.AllowHTTPSessionToken to send it anyway", path)
 	}
 	var b strings.Builder
 	b.WriteString(s.scheme)

@@ -16,7 +16,8 @@ this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 - `mp4.CENCOptions` without a `KeyURI` is refused instead of writing the key
   into the playlists as a `data:` URI; `InlineKey` (wasm `inlineKey`) asks for it.
 - `s3fs` refuses to send a session token to an `http://` endpoint unless
-  `Options.AllowHTTPSessionToken` is set.
+  `Options.AllowHTTPSessionToken` is set; the refusal names the way out a CLI
+  user has, an `https://` endpoint or unsetting `AWS_SESSION_TOKEN`.
 
 ### Security
 
