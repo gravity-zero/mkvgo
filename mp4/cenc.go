@@ -61,8 +61,9 @@ type CENCOptions struct {
 	// Scheme selects the encryption scheme: "cenc" (AES-CTR) or "cbcs"
 	// (AES-CBC, 1:9 pattern on video). Required.
 	Scheme string
-	// Key is the 16-byte AES key. Never written to the output - only KeyID
-	// and (optionally) PSSH boxes are.
+	// Key is the 16-byte AES key. The media carry only KeyID and the PSSH
+	// boxes; the key itself reaches the output only through the default
+	// KeyURI, a data: URI in the playlists, when KeyURI is left empty.
 	Key []byte
 	// KeyID is the 16-byte key identifier (tenc's default_KID / the DASH
 	// ContentProtection cenc:default_KID).

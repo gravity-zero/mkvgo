@@ -34,7 +34,9 @@ type HLSKey struct {
 	// segment to the next) encrypt to the same first blocks, which tells an
 	// observer where their plaintexts match. Leave IV nil unless a player
 	// requires an explicit one: the per-sequence-number default never repeats
-	// within a key's period.
+	// within one rendition under a key. Renditions number their segments alike,
+	// so a video and an audio segment of the same number share an IV; under CBC
+	// that tells only whether their first blocks match.
 	IV []byte
 }
 
