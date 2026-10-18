@@ -209,12 +209,12 @@ Commands:
   chapters      List chapters (MKV/WebM or MP4)
   attachments   List attachments
   demux         Extract tracks to raw streams
-  mux           Combine tracks into a single MKV
-  remove-track  Remove tracks from an MKV
-  add-track     Add a track from another MKV
+  mux           Combine tracks into one file (MKV/WebM or MP4)
+  remove-track  Remove tracks (MKV/WebM or MP4)
+  add-track     Add a track from another file of the same container
   edit          Edit metadata from JSON (arg or stdin)
-  edit-title    Change the container title
-  edit-track    Edit track properties (lang, name, default, forced)
+  edit-title    Change the container title (MKV/WebM or MP4)
+  edit-track    Edit track properties (lang, name, default, forced; MKV/WebM or MP4)
   extract-attachment  Extract an attachment to file
   add-attachment      Attach a file (font, cover art; MIME sniffed)
   remove-attachment   Remove an attachment by ID or name
@@ -222,12 +222,12 @@ Commands:
   subtitle-index      Build the subtitle block index of an MKV/WebM (Cues index only the video), so extraction seeks instead of walking
   to-vtt        Convert an external .srt/.ass/.vtt sidecar to WebVTT
   keyframes     List video keyframe timestamps (from Cues / sample table)
-  split         Split MKV by time ranges or chapters
-  join          Concatenate multiple MKVs
-  merge         Combine all tracks from multiple MKVs
-  merge-subtitle  Inject an external SRT into an MKV
-  edit-inplace  Edit metadata without rewriting clusters (instant)
-  set-chapters  Replace chapters from an OGM-format text file
+  split         Split by time ranges or chapters (MKV/WebM or MP4)
+  join          Concatenate files with the same streams (all MKV/WebM or all MP4)
+  merge         Combine all tracks from several files (all MKV/WebM or all MP4)
+  merge-subtitle  Inject an external SRT (MKV/WebM or MP4; ASS into MKV)
+  edit-inplace  Edit metadata without rewriting the media (instant; MKV/WebM or MP4)
+  set-chapters  Replace chapters from an OGM-format text file (MKV/WebM or MP4)
   extract-chapters  Export chapters as OGM text (the standard chapter interchange format)
   tags          Show tags
   probe         Full dump of all metadata (MKV/WebM or MP4: colour, Dolby Vision, keyframes, dropped tracks)

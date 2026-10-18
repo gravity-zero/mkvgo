@@ -601,10 +601,10 @@ all: the WebM subset supports none.
 
 ### add-track
 
-Add a track from another MKV file.
+Add a track from another file of the same container (MKV/WebM, or MP4/MOV).
 
 ```
-mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID> [-lang code] [-name text]
+mkvgo add-track <file.mkv|.mp4> -o <out> <source:trackID> [-lang code] [-name text]
 ```
 
 | Flag | Description |
