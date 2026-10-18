@@ -3,7 +3,6 @@ package mp4
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,7 +118,7 @@ func TestChapterMarkersHLS(t *testing.T) {
 	}
 	wantLines := []string{
 		`#EXT-X-DATERANGE:ID="chapter-1",START-DATE="1970-01-01T00:00:00.000Z",DURATION=4.000,X-CHAPTER-TITLE="Intro"`,
-		`#EXT-X-DATERANGE:ID="chapter-2",START-DATE="1970-01-01T00:00:04.000Z",DURATION=5.000,X-CHAPTER-TITLE="Part \"Two\""`,
+		`#EXT-X-DATERANGE:ID="chapter-2",START-DATE="1970-01-01T00:00:04.000Z",DURATION=5.000,X-CHAPTER-TITLE="Part Two"`, // the title's quotes go: HLS quoted strings have no escape
 	}
 	for _, want := range wantLines {
 		if !strings.Contains(s, want) {
@@ -323,7 +322,7 @@ func TestChapterMarkersNoChapters(t *testing.T) {
 func TestChapterMarkersEscaping(t *testing.T) {
 	chapters := []mkv.Chapter{{StartMs: 0, EndMs: 1000, Title: `A "quote" & <tag>`}}
 	hls := string(buildChapterDateRanges(chapters))
-	if !strings.Contains(hls, fmt.Sprintf("X-CHAPTER-TITLE=%q", chapters[0].Title)) {
+	if !strings.Contains(hls, `X-CHAPTER-TITLE="A quote & <tag>"`) { // HLS quoted strings have no escape: the quotes go
 		t.Errorf("HLS title not escaped as expected:\n%s", hls)
 	}
 	dash := buildChapterEventStream(chapters)

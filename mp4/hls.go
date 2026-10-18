@@ -1177,9 +1177,9 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", nAudio)
 		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		attrs += hlsChannelsAttr(t)
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
@@ -1197,9 +1197,9 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		if name == "" {
 			name = fmt.Sprintf("Subtitles %d", i+1)
 		}
-		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		if t.IsDefault {
 			attrs += ",DEFAULT=YES"
@@ -1237,7 +1237,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		}
 	}
 	if codecs := hlsCodecsAttr(fts); codecs != "" {
-		inf += fmt.Sprintf(",CODECS=%q", codecs)
+		inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
 	}
 	if nAudio > 0 {
 		inf += ",AUDIO=\"aud\""
@@ -1311,7 +1311,7 @@ func iframeStreamInfURI(o *Options, fts []*fragTrack, durs []float64, iframes []
 			inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
 		}
 		if cs := rfc6381Codec(v.outTrack); cs != "" {
-			inf += fmt.Sprintf(",CODECS=%q", cs)
+			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(cs))
 		}
 	}
 	return inf + fmt.Sprintf(",URI=%q\n", rw(uri))

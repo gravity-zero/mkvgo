@@ -66,8 +66,8 @@ func buildChapterDateRanges(chapters []mkv.Chapter) []byte {
 	for i, ch := range chapters {
 		start := chapterDateEpoch.Add(time.Duration(ch.StartMs) * time.Millisecond)
 		dur := float64(ch.EndMs-ch.StartMs) / 1000
-		b = append(b, fmt.Sprintf("#EXT-X-DATERANGE:ID=%q,START-DATE=%q,DURATION=%.3f,X-CHAPTER-TITLE=%q\n",
-			fmt.Sprintf("chapter-%d", i+1), start.Format("2006-01-02T15:04:05.000Z"), dur, ch.Title)...)
+		b = append(b, fmt.Sprintf("#EXT-X-DATERANGE:ID=%q,START-DATE=%q,DURATION=%.3f,X-CHAPTER-TITLE=%s\n",
+			fmt.Sprintf("chapter-%d", i+1), start.Format("2006-01-02T15:04:05.000Z"), dur, hlsQuoted(ch.Title))...)
 	}
 	return b
 }
@@ -93,6 +93,20 @@ func buildChapterEventStream(chapters []mkv.Chapter) string {
 	b.WriteString("    </EventStream>\n")
 	return b.String()
 }
+
+// hlsQuoted is s as an HLS quoted-string: RFC 8216 has no escape, so a double quote, carriage return or line feed,
+// which would end the string or the tag, is dropped.
+func hlsQuoted(s string) string {
+	return `"` + strings.Map(func(r rune) rune {
+		if r == '"' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, s) + `"`
+}
+
+// xmlAttr XML-escapes s for a double-quoted attribute value: a file's string never closes the attribute.
+func xmlAttr(s string) string { return xmlEscapeText(s) }
 
 // xmlEscapeText XML-escapes s for use as element text content (titles may
 // carry '&', '<', '>', quotes - none of which are valid raw inside an

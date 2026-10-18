@@ -355,9 +355,9 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", j+1)
 		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		attrs += hlsChannelsAttr(t)
 		if t.IsDefault || (!hasDefaultAudio && j == 0) {
@@ -377,9 +377,9 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 			if name == "" {
 				name = fmt.Sprintf("Subtitles %d", i+1)
 			}
-			attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
+			attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 			if l := t.ResolvedLanguage(); l != "" {
-				attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+				attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 			}
 			if t.IsDefault {
 				attrs += ",DEFAULT=YES"
@@ -421,7 +421,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		}
 	}
 	if codecs := hlsCodecsAttr(ref.fts); codecs != "" {
-		inf += fmt.Sprintf(",CODECS=%q", codecs)
+		inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
 	}
 	if len(audioIdx) > 0 {
 		inf += ",AUDIO=\"aud\""

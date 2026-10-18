@@ -56,7 +56,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		for _, r := range audio {
 			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth)
 			if cs := cmafCodecs(r.tracks); cs != "" {
-				inf += fmt.Sprintf(",CODECS=%q", cs)
+				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(cs))
 			}
 			fmt.Fprintf(&b, "%s\n%s\n", inf, rw(r.id+".m3u8"))
 		}
@@ -76,9 +76,9 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", i+1)
 		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		attrs += hlsChannelsAttr(t)
 		if i == 0 {
@@ -103,7 +103,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 			inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
 		}
 		if vcs := cmafCodecs(r.tracks); vcs != "" && !audioUnknown {
-			inf += fmt.Sprintf(",CODECS=%q", strings.Join(append([]string{vcs}, audioCodecs...), ","))
+			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(strings.Join(append([]string{vcs}, audioCodecs...), ",")))
 		}
 		if len(audio) > 0 {
 			inf += ",AUDIO=\"aud\""

@@ -214,7 +214,7 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 			}
 		}
 		if codecs := rfc6381Codec(ft.outTrack); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		r := &rends[i]
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)

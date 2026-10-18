@@ -8,6 +8,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **A file's strings no longer reshape the manifests.** A track's name and
+  language, a chapter title and a codec string were written with Go's `%q`:
+  a `"` closed the HLS quoted string, which has no escape, and the DASH
+  attribute, which `%q` does not XML-escape. A crafted file could add
+  attributes to the master playlist and elements, such as a `BaseURL` to
+  another host, to the manifest. HLS strings now drop `"`, CR and LF; DASH
+  attributes are XML-escaped.
 - **A 16-byte 'cenc' IV must leave its block counter room.** AES-CTR counts
   a sample's blocks in the IV's last 8 bytes; an IV ending near `ff..ff`
   carried that count into the next sample's IV, which then shared keystream.

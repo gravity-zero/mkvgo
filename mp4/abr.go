@@ -100,9 +100,9 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		if name == "" {
 			name = fmt.Sprintf("Audio %d", nAudio)
 		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		attrs += hlsChannelsAttr(t)
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
@@ -119,9 +119,9 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		if name == "" {
 			name = fmt.Sprintf("Subtitles %d", i+1)
 		}
-		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,AUTOSELECT=YES", name)
+		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%q", l)
+			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 		}
 		if t.IsDefault {
 			attrs += ",DEFAULT=YES"
@@ -157,7 +157,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 				inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
 			}
 			if vcs := rfc6381Codec(v.outTrack); vcs != "" && (audioCodecs != "" || nAudio == 0) {
-				inf += fmt.Sprintf(",CODECS=%q", vcs+audioCodecs)
+				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(vcs+audioCodecs))
 			}
 		}
 		if nAudio > 0 {
@@ -265,7 +265,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 			rep += fmt.Sprintf(` frameRate="%s"`, dashFrameRate(*t.FrameRate))
 		}
 		if codecs := rfc6381Codec(v.outTrack); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		prefix := fmt.Sprintf("v%d/", vi+1)
 		media := prefix + strings.Replace(renditionSegment(res.fts, vidx, 0), "00001", "$Number%05d$", 1)
@@ -291,7 +291,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 			rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
 		}
 		if codecs := rfc6381Codec(ft.outTrack); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		media := "v1/" + strings.Replace(renditionSegment(ref.fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)

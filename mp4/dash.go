@@ -70,7 +70,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 			}
 		}
 		if codecs := rfc6381Codec(ft.outTrack); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		if o.CENC != nil {
@@ -153,7 +153,7 @@ func dashTimelineSpans(starts, durs []int64) string {
 // attribute is defined as (RFC 5646).
 func dashLangAttr(t *mkv.Track) string {
 	if l := t.ResolvedLanguage(); l != "" {
-		return fmt.Sprintf(" lang=%q", l)
+		return fmt.Sprintf(` lang="%s"`, xmlAttr(l))
 	}
 	return ""
 }

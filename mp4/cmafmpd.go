@@ -680,7 +680,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 			rep += fmt.Sprintf(` frameRate="%s"`, dashFrameRate(*t.FrameRate))
 		}
 		if codecs := cmafCodecs(r.tracks); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		writeCMAFAddressing(&b, rw, r)
@@ -699,7 +699,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 			rep += fmt.Sprintf(` audioSamplingRate="%d"`, int64(*t.SampleRate))
 		}
 		if codecs := cmafCodecs(r.tracks); codecs != "" {
-			rep += fmt.Sprintf(" codecs=%q", codecs)
+			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		b.WriteString(dashLabel(t, "      "))
