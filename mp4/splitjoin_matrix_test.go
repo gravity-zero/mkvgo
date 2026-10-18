@@ -1,7 +1,11 @@
 package mp4
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,7 +14,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// TestSplitJoinMatrix holds every matrix case, remuxed to MP4, to what split then join must keep: every sample, the chapters, the cue on screen at each cut, and no split link.
+// TestSplitJoinMatrix: every matrix case, as a hashed MP4, keeps through split then join its samples, chapters, cues at the cuts, groups and verifying hashes.
 func TestSplitJoinMatrix(t *testing.T) {
 	for _, c := range matrix.Cases() {
 		t.Run(c.Name(), func(t *testing.T) {
@@ -20,7 +24,7 @@ func TestSplitJoinMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			src := filepath.Join(dir, "src.mp4")
-			if err := RemuxToMP4(context.Background(), mkvPath, src, Options{}); err != nil {
+			if err := RemuxToMP4(context.Background(), mkvPath, src, Options{ContentHashes: true}); err != nil {
 				t.Fatal(err)
 			}
 			parts := splitInto(t, src, mkv.SplitOptions{Ranges: c.Ranges()})
@@ -36,6 +40,12 @@ func TestSplitJoinMatrix(t *testing.T) {
 						t.Errorf("%s does not open on the cue on screen at its cut", filepath.Base(p))
 					}
 				}
+			}
+			for _, p := range parts {
+				mustVerify(t, p)
+			}
+			if c.Audio {
+				withUnknownMovieDuration(t, parts[0]) // a recorder's mvhd: the join takes the length from the tracks
 			}
 			joined := filepath.Join(dir, "j.mp4")
 			if err := Join(context.Background(), parts, joined); err != nil {
@@ -63,6 +73,29 @@ func TestSplitJoinMatrix(t *testing.T) {
 			if tags := splitLinkTags(t, joined); len(tags) != 0 {
 				t.Errorf("the join carries %v", tags)
 			}
+			mustVerify(t, joined)
+			sd, _ := os.ReadFile(src)
+			jd, _ := os.ReadFile(joined)
+			if ws, gs := trakGroups(t, sd), trakGroups(t, jd); fmt.Sprint(ws) != fmt.Sprint(gs) {
+				t.Errorf("alternate groups %v, the source's %v", gs, ws)
+			}
 		})
+	}
+}
+
+// withUnknownMovieDuration rewrites a file's mvhd duration (moov at the head or tail) to all ones, as a recorder still writing leaves it.
+func withUnknownMovieDuration(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(data, []byte("mvhd"))
+	if i < 0 || data[i+4] != 0 {
+		t.Fatal("no version 0 mvhd")
+	}
+	binary.BigEndian.PutUint32(data[i+4+16:], 0xFFFFFFFF)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
