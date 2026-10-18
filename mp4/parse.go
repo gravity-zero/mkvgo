@@ -664,7 +664,16 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 	}
 
 	tr.sttsClipped = sttsHasNegativeDelta(stblBoxes)
-	if n := headerFrameCount(stblBoxes); mode != sampleNone && n > room {
+	pcm, pcmPackets, err := readPCMTable(&tr, stblBoxes)
+	if err != nil && mode != sampleNone {
+		tr.describedOnly(err)
+		mode = sampleNone
+	}
+	n := headerFrameCount(stblBoxes)
+	if pcmPackets {
+		n = pcm.blocks() // one-frame PCM samples are held as the packets they gather into
+	}
+	if mode != sampleNone && n > room {
 		tr.describedOnly(errf("%d samples, past the %d a movie may hold with the tracks before it", n, max(room, 0)))
 		mode = sampleNone
 	} else if mode != sampleNone {
@@ -690,7 +699,11 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 			tr.keyframesMs = kf
 		}
 	case sampleFull:
-		if err := buildSampleTable(&tr, stblBoxes, fileSize); err != nil {
+		build := func() error { return buildSampleTable(&tr, stblBoxes, fileSize) }
+		if pcmPackets {
+			build = func() error { return buildPCMBlocks(&tr, pcm, fileSize) }
+		}
+		if err := build(); err != nil {
 			tr.describedOnly(err)
 			tr.samples = nil
 		}

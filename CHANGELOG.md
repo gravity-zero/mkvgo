@@ -118,6 +118,9 @@ Damage and resync:
 
 MP4:
 
+- A PCM track's one-frame samples are budgeted and built as the packets they
+  gather into: six minutes of 48 kHz LPCM (17M samples) passed the movie's
+  sample budget and was refused, and longer tracks were expanded frame by frame.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
 - Tick conversions saturate instead of wrapping; a MOV opening on `pnot` or
