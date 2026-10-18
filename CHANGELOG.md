@@ -106,6 +106,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   when the edit does not change them, and rewrites them there when the head
   cannot hold them: a title edit was refused once those tags outgrew the
   head's free space, and the whole file had to be rewritten.
+- `EditInPlace` on a file with no SeekHead finds the Tags after the clusters
+  instead of writing a second copy of them in the head.
 - A Matroska `Split` on an open-GOP keyframe keeps the pictures stored after it
   and shown before it, and the sound stored among them, at negative timestamps
   in the part it opens: they were in neither part, and `Join` placed the rest of

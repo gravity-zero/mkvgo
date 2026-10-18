@@ -50,6 +50,9 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err := writer.WriteTags(&newTags, c.Tags); err != nil {
 		return err
 	}
+	if region.tailUnknown && !region.headTags && oldTags.Len() > 0 {
+		return fmt.Errorf("the tags sit after the clusters, which no SeekHead indexes and which cannot be stepped through: %w", ErrNoRoomInPlace)
+	}
 	tailOnly := region.tailTags.size > 0 && !region.headTags // every tag lives after the clusters
 	keepTail := tailOnly && bytes.Equal(oldTags.Bytes(), newTags.Bytes())
 
@@ -344,6 +347,8 @@ type metadataRegion struct {
 	tailTagsEntry writer.SeekEntry
 	// headTags is set when a Tags element sits in the head region too.
 	headTags bool
+	// tailUnknown is set when a file with no SeekHead could not be stepped through to its end.
+	tailUnknown bool
 }
 
 func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
@@ -426,8 +431,9 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 				if err := classifyTailEntries(f, path, fs, &region); err != nil {
 					return metadataRegion{}, err
 				}
+				return region, nil
 			}
-			return region, nil
+			return region, scanTailTags(f, pos, segEnd, &region)
 		default:
 			if eh.Size < 0 {
 				return metadataRegion{}, fmt.Errorf("unknown-size element 0x%X", eh.ID)
@@ -442,6 +448,33 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		return metadataRegion{}, fmt.Errorf("no metadata found")
 	}
 	return region, nil
+}
+
+// scanTailTags finds, in a file with no SeekHead to point at it, a Tags element after the clusters by stepping over
+// the top-level elements; a cluster of unknown size stops the step, and leaves the tail unknown.
+func scanTailTags(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegion) error {
+	for segEnd < 0 || pos < segEnd {
+		if _, err := f.Seek(pos, io.SeekStart); err != nil {
+			return err
+		}
+		eh, hdrLen, err := ebml.ReadElementHeader(f)
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil
+		}
+		if err != nil || eh.Size < 0 {
+			region.tailUnknown = true
+			return nil
+		}
+		if eh.ID == mkv.IDTags {
+			if region.tailTags.size > 0 {
+				region.tailUnknown = true // more than one: not one element to keep or rewrite
+				return nil
+			}
+			region.tailTags.pos, region.tailTags.size = pos, int64(hdrLen)+eh.Size
+		}
+		pos += int64(hdrLen) + eh.Size
+	}
+	return nil
 }
 
 // classifyTailEntries re-reads the old SeekHead and sorts its entries: those

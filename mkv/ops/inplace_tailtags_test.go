@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -112,5 +113,35 @@ func TestEditInPlaceOnAnUnknownSizeSegment(t *testing.T) {
 	mustNil(t, err)
 	if c.Info.Title != "Live" || len(c.Tags) != 1 || len(collectAllBlocks(t, path)) != blocks {
 		t.Errorf("title %q, %d tags, %d blocks of %d", c.Info.Title, len(c.Tags), len(collectAllBlocks(t, path)), blocks)
+	}
+}
+
+// TestEditInPlaceWithoutSeekHead pins that a file with no SeekHead, its Tags after the clusters, is edited in place
+// without a second copy of the tags.
+func TestEditInPlaceWithoutSeekHead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "noseek.mkv")
+	tailTagsMKV(t, path, 2)
+	data, err := os.ReadFile(path)
+	mustNil(t, err)
+	sh := bytes.Index(data, []byte{0x11, 0x4D, 0x9B, 0x74})
+	if sh < 0 {
+		t.Fatal("no SeekHead to remove")
+	}
+	r := bytes.NewReader(data[sh:])
+	h, hdrLen, err := ebml.ReadElementHeader(r)
+	mustNil(t, err)
+	var void bytes.Buffer
+	mustNil(t, writer.WriteVoid(&void, hdrLen+int(h.Size)))
+	copy(data[sh:], void.Bytes())
+	mustNil(t, os.WriteFile(path, data, 0o644))
+	mustNil(t, EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "No index" }))
+	c, err := reader.Open(context.Background(), path)
+	mustNil(t, err)
+	n := 0
+	for _, tag := range c.Tags {
+		n += len(tag.SimpleTags)
+	}
+	if c.Info.Title != "No index" || n != 2 {
+		t.Errorf("title %q, %d simple tags; want the title and the 2 notes once", c.Info.Title, n)
 	}
 }
