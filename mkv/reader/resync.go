@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -202,4 +203,140 @@ func (p *parser) skipUnknownSizeCluster(endPos int64) error {
 	}
 	_, err = p.r.Seek(stop, io.SeekStart)
 	return err
+}
+
+// clusterMagic is the 4-byte Cluster element ID (0x1F43B675), the anchor used
+// to resync after a corrupted/padded region in the body.
+var clusterMagic = []byte{0x1F, 0x43, 0xB6, 0x75}
+
+// clusterChildIDs are element IDs that can legitimately be the first child of a
+// Cluster. A real cluster opens with one of these; requiring it rejects a
+// clusterMagic byte-sequence that occurs by chance inside corrupted data.
+var clusterChildIDs = map[uint32]bool{
+	mkv.IDTimestamp:   true, // 0xE7
+	mkv.IDSimpleBlock: true, // 0xA3
+	mkv.IDBlockGroup:  true, // 0xA0
+	mkv.IDVoid:        true, // 0xEC
+	0xA7:              true, // Position
+	0xAB:              true, // PrevSize
+	0xBF:              true, // CRC-32
+	0x5854:            true, // SilentTracks
+}
+
+// resyncToCluster scans forward from the current position for the next *valid*
+// Cluster, bounded by limit (the segment end, or -1 to scan until EOF). A
+// candidate is accepted only if isClusterAt confirms it (real Cluster ID + a
+// recognizable first child), so a magic sequence occurring by chance inside
+// corruption is skipped rather than trusted. On success it positions the reader
+// at the Cluster ID and returns its offset; it returns -1 (with a nil error)
+// when no valid Cluster remains before limit. Only genuine I/O errors are returned.
+func (p *parser) resyncToCluster(limit int64) (int64, error) {
+	return ResyncToCluster(p.r, limit)
+}
+
+// ResyncToCluster scans r forward from its current position for the next
+// structurally valid Cluster (element ID 0x1F43B675 followed by a recognizable
+// first child), bounded by limit (an absolute offset, or -1 to scan until
+// EOF). A candidate is accepted only when its declared size (when known) fits
+// within limit and its first child decodes as a real cluster-level element, so
+// a clusterMagic byte sequence occurring by chance inside corrupted data is
+// skipped rather than trusted. On success it leaves r positioned at the
+// Cluster's element ID and returns that offset; it returns -1 with a nil error
+// when no valid Cluster is found before limit (including a genuine EOF). Only
+// a real I/O failure is returned as an error.
+//
+// This is the same bounded, validated resync parseSegment falls back to on a
+// corrupted or zero-padded region; it is exported so an out-of-parser
+// recovery tool (ops.Salvage) can reuse it without pulling in the full
+// parser/Container machinery. A caller wanting a hard cap on the scan
+// distance (rather than "until segment end") passes limit = currentOffset+cap.
+func ResyncToCluster(r io.ReadSeeker, limit int64) (int64, error) {
+	return resyncToCluster(r, limit, limit)
+}
+
+// resyncToCluster is ResyncToCluster looking for the Cluster's start before scanLimit and requiring the Cluster to fit
+// before fitLimit: a walk bounding how far it looks past damage (not where the media may end) scans less than it allows.
+func resyncToCluster(r io.ReadSeeker, scanLimit, fitLimit int64) (int64, error) {
+	from, err := r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return -1, err
+	}
+	off, err := scanValid(r, from, scanLimit, func(b []byte) int { return bytes.Index(b, clusterMagic) },
+		func(b []byte, off int64) bool { return clusterPrefix(b, off, fitLimit) })
+	if err != nil || off < 0 {
+		return -1, err
+	}
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return -1, err
+	}
+	return off, nil
+}
+
+// scanValid returns the offset of the first candidate index finds at or after
+// from, starting before limit (-1 = until EOF), that judge accepts on the
+// segmentElementProbe bytes there (fewer at EOF), or -1. Candidates are judged
+// in the window already read, and the bytes a candidate near its end needs
+// are carried into the next one, so the source is read once whatever the
+// number of false candidates. A read error is returned once the bytes before
+// it hold no accepted candidate.
+func scanValid(r io.ReadSeeker, from, limit int64, index func([]byte) int, judge func(b []byte, off int64) bool) (int64, error) {
+	if _, err := r.Seek(from, io.SeekStart); err != nil {
+		return -1, err
+	}
+	const window = 64 << 10
+	const probe = segmentElementProbe
+	buf := make([]byte, probe+window)
+	tail := 0
+	next := from // absolute offset of the next byte to read
+	for {
+		base := next - int64(tail) // absolute offset of buf[0]
+		n, rerr := r.Read(buf[tail : tail+window])
+		end := tail + n
+		next += int64(n)
+		final := rerr != nil || n == 0
+		searchEnd := end
+		if limit >= 0 && limit-base < int64(end) {
+			searchEnd = int(max(limit-base, 0))
+		}
+		judgeEnd := searchEnd // candidates before it are judged in this window
+		if !final {
+			judgeEnd = min(judgeEnd, max(end-probe+1, 0))
+		}
+		for i := 0; i < judgeEnd; {
+			j := index(buf[i:searchEnd])
+			if j < 0 || i+j >= judgeEnd {
+				break
+			}
+			at := i + j
+			if judge(buf[at:min(at+probe, end)], base+int64(at)) {
+				return base + int64(at), nil
+			}
+			i = at + 1
+		}
+		if final {
+			if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+				return -1, rerr
+			}
+			return -1, nil
+		}
+		if limit >= 0 && next >= limit && judgeEnd >= searchEnd {
+			return -1, nil
+		}
+		tail = copy(buf, buf[judgeEnd:end])
+	}
+}
+
+// clusterPrefix reports whether b, the bytes at off, open a real Cluster: its
+// declared size, when known, fits within limit and its first child is a
+// recognizable cluster-level element.
+func clusterPrefix(b []byte, off, limit int64) bool {
+	id, size, hlen, ok := elemAt(b)
+	if !ok || id != mkv.IDCluster {
+		return false
+	}
+	if size >= 0 && limit >= 0 && off+int64(hlen)+size > limit {
+		return false
+	}
+	child, _, _, ok := elemAt(b[hlen:])
+	return ok && clusterChildIDs[child]
 }
