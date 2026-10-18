@@ -2453,8 +2453,13 @@ Cut policy (keyframe alignment): a segment starts at the first **video
 keyframe** at/after `StartMs` (leading audio and mid-GOP video are dropped so
 the segment starts decodable) and ends right before the next video keyframe
 at/after `EndMs` (the straddling GOP is kept, so chaining segments loses no
-frame). A range that contains media but no video keyframe is an explicit
-error. Audio-only sources cut exactly at the requested times.
+frame). An open-GOP keyframe stores pictures shown just before it after it in
+the file: the part before stops at the keyframe, and the part it opens keeps
+them (with the sound stored among them) at negative timestamps, ahead of its
+zero, as an MP4 edit list does, so `Join` gives the source back frame for frame.
+A range that
+contains media but no video keyframe is an explicit error. Audio-only sources
+cut exactly at the requested times.
 
 A segment's timeline starts at the first frame it actually keeps, not at the
 time it was asked for: those differ by however far the source's next keyframe

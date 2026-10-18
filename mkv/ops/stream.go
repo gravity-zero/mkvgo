@@ -263,6 +263,10 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	base := opts.timeStart
 	baseSettled := !opts.keyframeAlign || opts.timeStart <= 0
 
+	// cutStart is the keyframe the segment opened on. Without the gate the
+	// segment opens on the bound it was asked for, which is then the cut.
+	cutStart, cutStartSet := opts.timeStart, !opts.keyframeAlign || opts.timeStart <= 0
+
 	// shift converts a source timecode to an output one. Only meaningful once
 	// the base is settled.
 	shift := func() int64 { return base - opts.timeOffset }
@@ -272,17 +276,17 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			return nil
 		}
 		if !baseSettled {
-			base = cluster[0].Timecode
+			base = math.MaxInt64
 			for i := range cluster {
-				if cluster[i].Timecode < base {
-					base = cluster[i].Timecode
+				if t := cluster[i].Timecode; t < base && t >= opts.timeStart { // a leading block stays ahead of the zero
+					base = t
 				}
 			}
 			baseSettled = true
 		}
 		s := shift()
 		for i := range cluster {
-			if cluster[i].Timecode < base {
+			if cluster[i].Timecode < base && cluster[i].Timecode >= opts.timeStart {
 				return fmt.Errorf("block at %dms precedes the segment's first frame (%dms) by more than one cluster: refusing to write a negative timestamp", cluster[i].Timecode, base)
 			}
 			cluster[i].Timecode -= s
@@ -318,9 +322,6 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	// end) so a concatenating caller can rebase the following file per track.
 	// Called after the last flush: the ends are in the OUTPUT timeline, and the
 	// base that defines it is only settled once a cluster has been written.
-	// cutStart is the keyframe the segment opened on. Without the gate the
-	// segment opens on the bound it was asked for, which is then the cut.
-	cutStart, cutStartSet := opts.timeStart, !opts.keyframeAlign || opts.timeStart <= 0
 	cutEnd := int64(0)
 
 	recordEnds := func() {
@@ -385,7 +386,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		// track only a video keyframe qualifies (see videoTracks above).
 		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
 
-		if opts.timeStart > 0 && blk.Timecode < opts.timeStart {
+		// Stored after the cut keyframe yet timed before it (an open GOP's leading pictures, the sound muxed with
+		// them): the part before stopped at the keyframe, so this one keeps them ahead of its zero.
+		if opts.timeStart > 0 && blk.Timecode < opts.timeStart && (!opts.keyframeAlign || clusterTS < 0 || opts.timeStart-blk.Timecode > clusterMs) {
 			continue
 		}
 		// keyframeAlign: drop everything (audio included) until the first cut

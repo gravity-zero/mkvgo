@@ -100,6 +100,12 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska `Split` on an open-GOP keyframe keeps the pictures stored after it
+  and shown before it, and the sound stored among them, at negative timestamps
+  in the part it opens: they were in neither part, and `Join` placed the rest of
+  the part that much early.
+- `Join` gives a chapter a split carried over a cut the end of its
+  continuation, not the cut.
 - Every Matroska writer of the library refuses an output that is one of its
   inputs, as the MP4 engine does: `EditMetadata(p, p)`, `AddTrack`,
   `RemoveTrack`, `Join`, `Mux`, `MergeSubtitle`, `MergeASS`, `ExtractSubtitle`,
