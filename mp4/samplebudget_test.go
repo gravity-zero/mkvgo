@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +56,14 @@ func TestMovieSampleTablesBounded(t *testing.T) {
 	}
 	if total > 1<<24 || refused == 0 {
 		t.Errorf("%d samples expanded over %d traks, %d refused; want at most %d and the rest refused", total, len(mv.tracks), refused, 1<<24)
+	}
+}
+
+// TestSampleBudgetRefusalStatesWhatIsLeft: the refusal compares a table with the budget earlier tracks left, and says so.
+func TestSampleBudgetRefusalStatesWhatIsLeft(t *testing.T) {
+	budget := int64(10)
+	_, err := readTrakTable(firstTrak(t, editFixture(t)), 0, 1<<40, &budget, nil)
+	if err == nil || !strings.Contains(err.Error(), "150 samples pass the 10 left") {
+		t.Errorf("err = %v", err)
 	}
 }

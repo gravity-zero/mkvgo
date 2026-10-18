@@ -51,7 +51,7 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64, mdats [][2]int
 		return nil, err
 	}
 	if int64(n) > *budget {
-		return nil, fmt.Errorf("its %d samples pass the %d mkvgo holds at once (a join or a mux counts those of every input): remux to MKV (from-mp4) and work there, or join fewer files at once when joining", n, maxSamples)
+		return nil, fmt.Errorf("its %d samples pass the %d left of the %d mkvgo holds at once (earlier tracks and their sample groups count, every input's in a join or a mux): remux to MKV (from-mp4) and work there, or join fewer files at once when joining", n, *budget, maxSamples)
 	}
 	*budget -= int64(n)
 	offsets, err := parseChunkOffsets(sb)
