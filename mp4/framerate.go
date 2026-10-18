@@ -40,17 +40,22 @@ func headerFrameRate(stblBoxes []memBox, timescale uint32) float64 {
 		}
 	}
 	// A variable rate plays at the delta most of its frames have (the shorter on a tie), not its first: that one
-	// may be a frame held half a second, which read as 2 fps.
-	if d := dominantDelta(stts.payload); d > 0 {
+	// may be a frame held half a second, which read as 2 fps. Unless that delta covers under a tenth of the time:
+	// reordered frames packed one tick apart are most of the deltas and none of the duration, and the average holds.
+	if d, covered := dominantDelta(stts.payload); d > 0 {
+		if samples, ticks := sttsTotals(stts.payload); samples > 1 && 10*covered < ticks {
+			return float64(timescale) * float64(samples) / float64(ticks)
+		}
 		delta = d
 	}
 	return float64(timescale) / float64(delta)
 }
 
-// dominantDelta returns the stts delta covering the most samples, the shorter on a tie; 0 when the table is short.
-func dominantDelta(payload []byte) uint32 {
+// dominantDelta returns the stts delta covering the most samples, the shorter on a tie, and the ticks those samples
+// cover; 0 when the table is short.
+func dominantDelta(payload []byte) (uint32, uint64) {
 	if len(payload) < 8 {
-		return 0
+		return 0, 0
 	}
 	counts := map[uint32]uint64{}
 	n := binary.BigEndian.Uint32(payload[4:8])
@@ -65,7 +70,7 @@ func dominantDelta(payload []byte) uint32 {
 			best = d
 		}
 	}
-	return best
+	return best, counts[best] * uint64(best)
 }
 
 // sttsTotals returns the samples an stts describes and the ticks they cover, 0 and 0 when it is short.

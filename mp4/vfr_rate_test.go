@@ -22,3 +22,19 @@ func TestVariableFrameRateIsTheDominantRate(t *testing.T) {
 		t.Errorf("fps = %v, want 30, the rate of 89 of its 100 frames", fps)
 	}
 }
+
+// TestFrameRateOfDeltasPackedOneTickApart pins a table whose most frequent delta covers almost no time - reordered
+// frames stored one tick apart in pairs (1, 5999 at 90 kHz) - reads at its average rate, not 90000 fps.
+func TestFrameRateOfDeltasPackedOneTickApart(t *testing.T) {
+	var p bw
+	p.u32(0)
+	p.u32(5)
+	for _, e := range [][2]uint32{{13, 3000}, {136, 1}, {117, 5999}, {12, 6000}, {12, 2999}} {
+		p.u32(e[0])
+		p.u32(e[1])
+	}
+	fps := headerFrameRate([]memBox{{typ: "stts", payload: p.b}}, 90000)
+	if want := 90000 * 290.0 / (13*3000 + 136 + 117*5999 + 12*6000 + 12*2999); math.Abs(fps-want) > 1e-9 {
+		t.Errorf("fps = %v, want the average %v", fps, want)
+	}
+}

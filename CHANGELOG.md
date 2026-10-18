@@ -227,7 +227,9 @@ MP4:
   pictures with no warning. The edits keep both descriptions as before.
 - A variable-frame-rate MP4 video reports the rate most of its frames play at,
   not its first frame's: a screen recording holding its first frame half a
-  second read as 2 fps, in the probe and in the HLS `FRAME-RATE`.
+  second read as 2 fps, in the probe and in the HLS `FRAME-RATE`, and a table
+  whose most frequent delta covers under a tenth of the time (reordered frames
+  stored a tick apart) reports its average rate, not 90000 fps.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
 - `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a
