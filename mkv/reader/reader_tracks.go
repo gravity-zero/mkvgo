@@ -445,6 +445,14 @@ func (p *parser) parseColour(size int64, t *mkv.Track) error {
 				return err
 			}
 			t.VideoBitDepth = fit16(v)
+			colourLayout(t).BitsPerChannel = fit16(v)
+		case mkv.IDChromaSubsamplingHorz, mkv.IDChromaSubsamplingVert, mkv.IDCbSubsamplingHorz, mkv.IDCbSubsamplingVert,
+			mkv.IDChromaSitingHorz, mkv.IDChromaSitingVert:
+			v, err := readUintOf(p.r, eh)
+			if err != nil {
+				return err
+			}
+			*colourLayoutField(colourLayout(t), eh.ID) = fit16(v)
 		case mkv.IDColourMaxCLL:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
@@ -644,4 +652,29 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 		}
 	}
 	return nil
+}
+
+// colourLayout returns the track's Colour layout, allocating it on first use.
+func colourLayout(t *mkv.Track) *mkv.ColourLayout {
+	if t.ColourLayout == nil {
+		t.ColourLayout = &mkv.ColourLayout{}
+	}
+	return t.ColourLayout
+}
+
+// colourLayoutField is the layout field a subsampling or siting element fills.
+func colourLayoutField(l *mkv.ColourLayout, id uint32) **uint16 {
+	switch id {
+	case mkv.IDChromaSubsamplingHorz:
+		return &l.ChromaSubsamplingHorz
+	case mkv.IDChromaSubsamplingVert:
+		return &l.ChromaSubsamplingVert
+	case mkv.IDCbSubsamplingHorz:
+		return &l.CbSubsamplingHorz
+	case mkv.IDCbSubsamplingVert:
+		return &l.CbSubsamplingVert
+	case mkv.IDChromaSitingHorz:
+		return &l.ChromaSitingHorz
+	}
+	return &l.ChromaSitingVert
 }

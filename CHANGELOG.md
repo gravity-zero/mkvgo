@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska rewrite of the Tracks (`EditInPlace`, `EditMetadata`, `Split`,
+  `Join`, `Mux`...) keeps the Colour element's sample layout: bits per channel,
+  chroma and Cb subsampling and chroma siting were dropped. Read into
+  `Track.ColourLayout` (`colour_layout` in the probe JSON).
 - Matroska blocks keep their `DiscardPadding` (`Block.DiscardPaddingNs`) through
   every rewrite (`Split`, `Join`, `EditMetadata`, `Mux`...): the padding an
   encoder appends to a stream's last audio frame was dropped, so a decoder

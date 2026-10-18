@@ -340,6 +340,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 					if t.ColorPrimaries != nil {
 						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
 					}
+					writeColourLayout(c, t.ColourLayout)
 					writeHDRStatic(c, t.HDR)
 				})
 			}
@@ -867,7 +868,25 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 // hasColour reports whether a track carries any colour code points.
 func hasColour(t *mkv.Track) bool {
 	return t.ColorPrimaries != nil || t.ColorTransfer != nil || t.ColorSpace != nil || t.ColorRange != nil ||
-		t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
+		t.ColourLayout != nil || t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
+}
+
+// writeColourLayout writes the layout elements the track states, each only when known.
+func writeColourLayout(c *ew, l *mkv.ColourLayout) {
+	if l == nil {
+		return
+	}
+	for _, e := range []struct {
+		id uint32
+		v  *uint16
+	}{{mkv.IDColourBitsPerChannel, l.BitsPerChannel}, {mkv.IDChromaSubsamplingHorz, l.ChromaSubsamplingHorz},
+		{mkv.IDChromaSubsamplingVert, l.ChromaSubsamplingVert}, {mkv.IDCbSubsamplingHorz, l.CbSubsamplingHorz},
+		{mkv.IDCbSubsamplingVert, l.CbSubsamplingVert}, {mkv.IDChromaSitingHorz, l.ChromaSitingHorz},
+		{mkv.IDChromaSitingVert, l.ChromaSitingVert}} {
+		if e.v != nil {
+			c.uint(e.id, uint64(*e.v))
+		}
+	}
 }
 
 // writeHDRStatic writes MaxCLL/MaxFALL and MasteringMetadata, each only when known.

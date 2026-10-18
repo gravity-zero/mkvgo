@@ -102,14 +102,20 @@ const (
 // color_transfer, color_primaries and color_range. See mkv/colour.go for the
 // code-point → conventional-name mapping.
 const (
-	IDColour               = 0x55B0
-	IDColourMatrix         = 0x55B1 // MatrixCoefficients  → conventional color_space
-	IDColourBitsPerChannel = 0x55B2 // BitsPerChannel      → video bit depth
-	IDColourRange          = 0x55B9 // Range               → conventional color_range
-	IDColourTransfer       = 0x55BA // TransferCharacter.  → conventional color_transfer
-	IDColourPrimaries      = 0x55BB // Primaries           → conventional color_primaries
-	IDColourMaxCLL         = 0x55BC // MaxCLL (cd/m²)      → HDR10 content light level
-	IDColourMaxFALL        = 0x55BD // MaxFALL (cd/m²)     → HDR10 frame-average light
+	IDColour                = 0x55B0
+	IDColourMatrix          = 0x55B1 // MatrixCoefficients  → conventional color_space
+	IDColourBitsPerChannel  = 0x55B2 // BitsPerChannel      → video bit depth
+	IDChromaSubsamplingHorz = 0x55B3
+	IDChromaSubsamplingVert = 0x55B4
+	IDCbSubsamplingHorz     = 0x55B5
+	IDCbSubsamplingVert     = 0x55B6
+	IDChromaSitingHorz      = 0x55B7
+	IDChromaSitingVert      = 0x55B8
+	IDColourRange           = 0x55B9 // Range               → conventional color_range
+	IDColourTransfer        = 0x55BA // TransferCharacter.  → conventional color_transfer
+	IDColourPrimaries       = 0x55BB // Primaries           → conventional color_primaries
+	IDColourMaxCLL          = 0x55BC // MaxCLL (cd/m²)      → HDR10 content light level
+	IDColourMaxFALL         = 0x55BD // MaxFALL (cd/m²)     → HDR10 frame-average light
 )
 
 // MasteringMetadata (0x55D0) and its sub-elements (SMPTE ST 2086 mastering display

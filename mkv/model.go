@@ -267,6 +267,9 @@ type Track struct {
 	ColorTransfer  *uint16 `json:"color_transfer,omitempty"`  // TransferCharacteristics (0x55BA)
 	ColorPrimaries *uint16 `json:"color_primaries,omitempty"` // Primaries (0x55BB)
 	ColorRange     *uint16 `json:"color_range,omitempty"`     // Range (0x55B9): 1=tv/limited, 2=pc/full
+	// ColourLayout is the sample layout the container's Colour element states (nil when it states none), carried
+	// over as read by every rewrite.
+	ColourLayout *ColourLayout `json:"colour_layout,omitempty"`
 	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour
 	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) - even when it resolves
@@ -829,4 +832,16 @@ type Diff struct {
 
 func (d Diff) String() string {
 	return fmt.Sprintf("[%s] %s: %s", d.Type, d.Section, d.Detail)
+}
+
+// ColourLayout is the Colour element's sample layout: bits per channel, chroma and Cb subsampling, chroma siting, each
+// nil when absent.
+type ColourLayout struct {
+	BitsPerChannel        *uint16 `json:"bits_per_channel,omitempty"`        // 0x55B2
+	ChromaSubsamplingHorz *uint16 `json:"chroma_subsampling_horz,omitempty"` // 0x55B3
+	ChromaSubsamplingVert *uint16 `json:"chroma_subsampling_vert,omitempty"` // 0x55B4
+	CbSubsamplingHorz     *uint16 `json:"cb_subsampling_horz,omitempty"`     // 0x55B5
+	CbSubsamplingVert     *uint16 `json:"cb_subsampling_vert,omitempty"`     // 0x55B6
+	ChromaSitingHorz      *uint16 `json:"chroma_siting_horz,omitempty"`      // 0x55B7
+	ChromaSitingVert      *uint16 `json:"chroma_siting_vert,omitempty"`      // 0x55B8
 }
