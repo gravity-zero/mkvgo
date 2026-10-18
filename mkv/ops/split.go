@@ -142,7 +142,20 @@ func sanitizeName(title string, n int) string {
 	if s == "" {
 		return fmt.Sprintf("chapter_%02d", n)
 	}
+	stem, _, _ := strings.Cut(s, ".")
+	if deviceName(strings.ToUpper(strings.TrimRight(stem, " "))) {
+		s = "_" + s // a name Windows keeps for a device, extension or not
+	}
 	return s
+}
+
+// deviceName reports a name Windows reserves for a device: CON, PRN, AUX, NUL, COM1-9, LPT1-9.
+func deviceName(s string) bool {
+	switch s {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	return len(s) == 4 && (strings.HasPrefix(s, "COM") || strings.HasPrefix(s, "LPT")) && s[3] >= '1' && s[3] <= '9'
 }
 
 func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {

@@ -114,6 +114,11 @@ All notable changes to mkvgo are documented here. The format is based on
   track's colour as read from its Colour element.** A differential fuzz target
   (`FuzzReadVsReadStream`) holding both readers to the same description of a
   file found them missing from the streaming reader.
+- **A split part named after a chapter never takes a Windows device name.**
+  A chapter titled `CON` or `nul.txt` made `CON.mkv` or `nul.txt.mkv`, which
+  Windows opens as a device; such a name now takes a leading `_`. Titles with
+  path separators were already kept under `OutputDir`, now held by a test; the
+  docs say that `Split` overwrites an existing part.
 
 ## [0.55.1] - 2026-10-17
 

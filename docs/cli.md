@@ -738,7 +738,7 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00]
 | `-chapters` | Split at chapter boundaries |
 | `-range` | Comma-separated `start-end` ranges. Each bound is milliseconds (`300000`), fractional seconds (`90.5`) or a clock time (`5:00`, `01:30:00`, `1:30.5`); `0` = end of file |
 | `-every` | Split into keyframe-aligned segments of roughly this duration (same time syntax). Boundaries come from the Cues index -- reindex a file without one first |
-| `-pattern` | Output name pattern (default `part_%03d.mkv`; `%d` = part number). With `-chapters`, `{title}` is replaced by the sanitized chapter title (duplicates get a numeric suffix) |
+| `-pattern` | Output name pattern (default `part_%03d.mkv`; `%d` = part number). With `-chapters`, `{title}` is replaced by the sanitized chapter title (duplicates get a numeric suffix). Parts already in `<dir>` are overwritten: `-f` is not asked for |
 
 Exactly one of `-chapters`, `-range` or `-every` must be given.
 
