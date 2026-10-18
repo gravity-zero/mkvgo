@@ -536,3 +536,17 @@ func TestConcatChapters_ClippedToWhatTheSourceWrote(t *testing.T) {
 		t.Errorf("chapters = %v, want Main + Next", titles)
 	}
 }
+
+// TestConcatChapters_ContinuedChapterKeepsItsEnd pins that a chapter a split carried over a cut, clipped to the
+// cut in the part before it, ends where its continuation ends once the parts are joined.
+func TestConcatChapters_ContinuedChapterKeepsItsEnd(t *testing.T) {
+	uid1, uid2 := []byte{1}, []byte{2}
+	a := cont(mkv.Chapter{ID: 1, Title: "One", StartMs: 0, EndMs: 2500}, mkv.Chapter{ID: 2, Title: "Two", StartMs: 2500, EndMs: 3000})
+	a.Info.SegmentUID, a.Info.NextUID = uid1, uid2
+	b := cont(mkv.Chapter{ID: 2, Title: "Two", StartMs: 0, EndMs: 3000})
+	b.Info.SegmentUID, b.Info.PrevUID = uid2, uid1
+	got := concatChapters([]*mkv.Container{a, b}, []int64{0, 3000})
+	if len(got) != 2 || got[1].Title != "Two" || got[1].StartMs != 2500 || got[1].EndMs != 6000 {
+		t.Errorf("joined chapters %+v, want Two at 2500-6000", got)
+	}
+}
