@@ -151,7 +151,7 @@ func sameStreams(a, b *cutModel) error {
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(sx, sy) {
+		if !bytes.Equal(decodingDescription(sx, x.handler), decodingDescription(sy, y.handler)) {
 			return fmt.Errorf("track %d is encoded differently from the first file's (its sample description differs): a join copies samples, so every file needs the same encoding settings", i+1)
 		}
 	}
@@ -289,6 +289,50 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 		}
 	}
 	return out, lead, nil
+}
+
+// decodingDescription is an stsd as a decoder reads it: the bitrates muxers declare per file (btrt, the esds rates) left out.
+func decodingDescription(stsd []byte, handler string) []byte {
+	if len(stsd) < 8 {
+		return stsd
+	}
+	entries, err := iterBoxes(stsd[8:])
+	if err != nil {
+		return stsd
+	}
+	var w bw
+	w.bytes(stsd[:8])
+	for _, e := range entries {
+		hdr := len(e.payload)
+		switch handler {
+		case "vide":
+			hdr = 78
+		case "soun":
+			hdr = audioExtOffset(e.payload)
+		}
+		kids, err := iterBoxes(e.payload[min(hdr, len(e.payload)):])
+		if hdr >= len(e.payload) || err != nil {
+			w.bytes(box(e.typ, e.payload))
+			continue
+		}
+		w.bytes([]byte(e.typ))
+		w.bytes(e.payload[:hdr])
+		for _, k := range kids {
+			switch k.typ {
+			case "btrt":
+			case "esds":
+				if obj, asc, _, err := parseESDS(k.payload); err == nil {
+					w.bytes([]byte{obj})
+					w.bytes(asc)
+					continue
+				}
+				w.bytes(box(k.typ, k.payload))
+			default:
+				w.bytes(box(k.typ, k.payload))
+			}
+		}
+	}
+	return w.b
 }
 
 // firstSyncCts is the composition time of a table's first sync sample in decode order.
