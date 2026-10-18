@@ -158,6 +158,9 @@ type parser struct {
 	rateRejected bool
 	// channelsRejected says it stated a channel count past 255.
 	channelsRejected bool
+	// gotInfo and gotTracks say the first Info and Tracks are read: the spec allows one of each, and the first wins,
+	// met at the head or in the tail.
+	gotInfo, gotTracks bool
 }
 
 // checkCtx reports a cancellation error so the inner element loops (parseInfo /
@@ -271,7 +274,6 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	// The spec allows exactly one Info and one Tracks. Some non-conformant muxers
 	// write more; take the FIRST of each and skip the rest, so a duplicate Tracks
 	// does not append a second set of tracks (and so Read matches ReadMeta).
-	var gotInfo, gotTracks bool
 
 	for {
 		if ctx.Err() != nil {
@@ -319,7 +321,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
-			if gotInfo {
+			if p.gotInfo {
 				if err := p.skip(eh.Size); err != nil {
 					return err
 				}
@@ -328,9 +330,9 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if err := p.parseInfo(eh.Size, c); err != nil {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
-			gotInfo = true
+			p.gotInfo = true
 		case mkv.IDTracks:
-			if gotTracks {
+			if p.gotTracks {
 				if err := p.skip(eh.Size); err != nil {
 					return err
 				}
@@ -339,7 +341,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			if err := p.parseTracks(eh.Size, c); err != nil {
 				return p.elemErr(eh.ID, elemStart, err)
 			}
-			gotTracks = true
+			p.gotTracks = true
 		case mkv.IDChapters:
 			if err := p.parseChapters(eh.Size, c); err != nil {
 				return p.elemErr(eh.ID, elemStart, err)

@@ -181,9 +181,6 @@ metaLoop:
 			}
 			return nil, nil, err
 		}
-		if segEnd >= 0 && eh.ID != mkv.IDCluster && eh.Size >= 0 && p.pos+eh.Size > segEnd {
-			break metaLoop // an element past the Segment's end
-		}
 		switch eh.ID {
 		case mkv.IDInfo, mkv.IDTracks:
 			if seen[eh.ID] { // a duplicate: the first wins, as in Read
@@ -192,7 +189,7 @@ metaLoop:
 				}
 				break
 			}
-			seen[eh.ID] = true
+			seen[eh.ID] = eh.Size >= 0 // one of unknown size holds nothing decoded: the next counts, as in Read
 			decode := (*parser).parseInfo
 			if eh.ID == mkv.IDTracks {
 				decode = (*parser).parseTracks

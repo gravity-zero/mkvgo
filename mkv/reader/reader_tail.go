@@ -310,9 +310,17 @@ func (p *parser) parseTailBuffer(c *mkv.Container, tail []byte, base int64) erro
 		case mkv.IDAttachments:
 			err = p.parseAttachments(eh.Size, c)
 		case mkv.IDInfo:
-			err = p.parseInfo(eh.Size, c)
+			if p.gotInfo {
+				err = p.skip(eh.Size) // the first wins, as in the Segment walk
+				break
+			}
+			err, p.gotInfo = p.parseInfo(eh.Size, c), true
 		case mkv.IDTracks:
-			err = p.parseTracks(eh.Size, c)
+			if p.gotTracks {
+				err = p.skip(eh.Size)
+				break
+			}
+			err, p.gotTracks = p.parseTracks(eh.Size, c), true
 		default:
 			if eh.Size < 0 {
 				return fmt.Errorf("tail element 0x%X has unknown size", eh.ID)

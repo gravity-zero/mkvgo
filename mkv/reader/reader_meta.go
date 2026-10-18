@@ -51,11 +51,9 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOp
 // typically-muxed file that is the first ~1-2 KB, so ReadMeta is orders of
 // magnitude faster and cheaper than a full Read.
 //
-// For a spec-conformant file (a single Info and a single Tracks element) it
-// returns Tracks, Info and DurationMs byte-identical to a full Read. A malformed
-// file with DUPLICATE Info/Tracks elements may differ: a full Read merges every
-// occurrence (parseInfo overwrites, parseTracks concatenates) whereas ReadMeta
-// stops at the first - fall back to Read if you must mirror that behaviour.
+// It returns Tracks, Info and DurationMs byte-identical to a full Read. A file
+// with duplicate Info or Tracks elements reads the same too: every reader keeps
+// the first of each.
 //
 // The returned Container has Tracks and Info populated; Chapters, Attachments,
 // Tags and Cues are left nil - call Read/Open for those.

@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Read, ReadMeta and ReadStream agree on duplicate and odd head
+  elements.** The tail a SeekHead-less file is read back from added a second
+  Tracks to the head's and reset the Info; a Tracks of unknown size made
+  `ReadStream` skip the real one after it; and `ReadStream` stopped at a head
+  element running past the Segment's end that `Read` reads whole.
 - **Statistics tags find their tracks by UID.** Matching them walked
   every tag for every track: 50,000 of each, a few megabytes of file, cost
   billions of comparisons on every read.
