@@ -101,8 +101,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 			if ch.EndMs > 0 {
 				ch.EndMs += roundMs(offsets[i])
 			}
-			// A chapter a split cut in two comes back whole: same title, running into the seam.
-			if n := len(chs); n > 0 && j == 0 && ch.StartMs == roundMs(offsets[i]) && chs[n-1].Title == ch.Title && (chs[n-1].EndMs == 0 || chs[n-1].EndMs == ch.StartMs) {
+			// A chapter a split cut in two comes back whole: same title, running into the seam (or to the previous file's end as read, which truncates where the seam rounds).
+			if n := len(chs); n > 0 && j == 0 && ch.StartMs == roundMs(offsets[i]) && chs[n-1].Title == ch.Title &&
+				(chs[n-1].EndMs == 0 || chs[n-1].EndMs == ch.StartMs || chs[n-1].EndMs == roundMs(offsets[i-1])+models[i-1].meta.DurationMs) {
 				chs[n-1].EndMs = ch.EndMs
 				continue
 			}

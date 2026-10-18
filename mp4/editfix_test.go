@@ -266,6 +266,32 @@ func TestSplitThenJoinGivesChaptersBackWhole(t *testing.T) {
 	}
 }
 
+// TestJoinMergesAChapterCutBetweenTwoMs: a 30 fps cut falls between two milliseconds, and the chapter it splits still comes back whole.
+func TestJoinMergesAChapterCutBetweenTwoMs(t *testing.T) {
+	data, err := os.ReadFile(realFixture("fps30.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "in.mp4")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "B", StartMs: 500}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kf := mustCutModel(t, src).keyframesMs() // 0, 833, 1667: the last rounds up
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: kf[2]}, {StartMs: kf[2]}}})
+	dst := filepath.Join(t.TempDir(), "j.mp4")
+	if err := Join(context.Background(), parts, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustMeta(t, dst).Chapters; len(got) != 2 || got[1].Title != "B" || got[1].StartMs != 500 {
+		t.Errorf("chapters after a split at %d ms and a join: %+v", kf[2], got)
+	}
+}
+
 // TestSplitAndJoinKeepTheChapterTrack: QuickTime players read the chapter track, not the chpl, so an output whose chapters come out unchanged keeps one too.
 func TestSplitAndJoinKeepTheChapterTrack(t *testing.T) {
 	src := editFixture(t)
