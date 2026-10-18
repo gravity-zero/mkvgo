@@ -149,6 +149,9 @@ Serving:
   ahead, then a seek) no longer holds the process-wide window budget until
   its plan is collected: a later walk reclaims it, oldest first, from any
   plan, so the source keeps being read once per window.
+- A grid-timed audio segment built cold keeps its bytes when the window before
+  it is built afterwards and it is built again: its decode times could move by
+  a frame under the same weak ETag, so a Range resume spliced two versions.
 - A window built twice (a cancelled walk finishing beside its retry) gives
   back what the copy not kept had reserved, instead of leaking it for good.
 - A subtitle track no longer keeps a read that failed once, a request

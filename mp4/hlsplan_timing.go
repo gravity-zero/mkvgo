@@ -353,16 +353,24 @@ func (p *HLSPlan) timeWindow(ti, n int, window []segSample, nextPts, startK int6
 
 // gridStartFor is the grid clock track ti's window n opens on: the value the
 // window before learned, else - when the window's timecodes leave the grid, so
-// a transient may straddle its start - wound up over the window before; kept,
-// so a repeat serves the same bytes. -1 when the track is not grid-timed.
+// a transient may straddle its start - wound up over the window before, else
+// its first block's slot; kept either way, so a rebuild serves the same bytes.
+// -1 when the track is not grid-timed.
 func (p *HLSPlan) gridStartFor(ctx context.Context, n, ti int, window []segSample) (int64, error) {
 	k := p.gridStartAt(n, ti)
-	if pt := p.tracks[ti]; k < 0 && pt.gridTS > 0 && len(window) > 0 && gridJitter(window, pt) {
+	pt := p.tracks[ti]
+	if k >= 0 || pt.gridTS <= 0 || len(window) == 0 {
+		return k, nil
+	}
+	if gridJitter(window, pt) {
 		var err error
 		if k, err = p.warmGridStart(ctx, n, ti, window[0].blockPtsMs); err != nil {
 			return -1, err
 		}
-		p.learnGridStart(n, ti, k)
+	} else {
+		clock := newGridClock(pt, pt.gridTS)
+		k = clock.peek(window[0].blockPtsMs) // the first block's own slot, where a cold clock opens
 	}
-	return k, nil
+	p.learnGridStart(n, ti, k)
+	return p.gridStartAt(n, ti), nil // the value kept, should another build have learned one first
 }
