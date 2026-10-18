@@ -1023,7 +1023,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	end := start + size
 	var block mkv.Block
 	var found, referenced bool
-	var durationMs int64
+	var durationMs, paddingNs int64
 
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
@@ -1061,6 +1061,17 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
 			}
+		case mkv.IDDiscardPadding:
+			if h.Size > 8 {
+				return mkv.Block{}, fmt.Errorf("DiscardPadding of %d bytes: a signed integer holds 8 at most", h.Size)
+			}
+			raw, err := ebml.ReadUint(br.r, h.Size)
+			if err != nil {
+				return mkv.Block{}, err
+			}
+			if shift := 64 - 8*h.Size; h.Size > 0 {
+				paddingNs = int64(raw<<shift) >> shift // sign-extended
+			}
 		default:
 			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
@@ -1071,6 +1082,11 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 		return mkv.Block{}, fmt.Errorf("BlockGroup without Block element")
 	}
 	block.Duration = durationMs
+	if n := len(br.pending); n > 0 { // the padding trims the end of the lace's last frame
+		br.pending[n-1].DiscardPaddingNs = paddingNs
+	} else {
+		block.DiscardPaddingNs = paddingNs
+	}
 	// A Block has no keyframe flag of its own (that bit is SimpleBlock's): in a
 	// BlockGroup the frame is a keyframe exactly when the group names no
 	// ReferenceBlock - it depends on no other frame. The frames a lace queued

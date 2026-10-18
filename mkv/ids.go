@@ -178,6 +178,7 @@ const (
 	IDBlock          = 0xA1
 	IDBlockDuration  = 0x9B
 	IDReferenceBlock = 0xFB
+	IDDiscardPadding = 0x75A2
 )
 
 const (

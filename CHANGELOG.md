@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- Matroska blocks keep their `DiscardPadding` (`Block.DiscardPaddingNs`) through
+  every rewrite (`Split`, `Join`, `EditMetadata`, `Mux`...): the padding an
+  encoder appends to a stream's last audio frame was dropped, so a decoder
+  played it.
 - `EditInPlace` on a file whose Tags sit after the clusters leaves them there
   when the edit does not change them, and rewrites them there when the head
   cannot hold them: a title edit was refused once those tags outgrew the

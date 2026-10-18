@@ -590,6 +590,9 @@ type Block struct {
 	// BlockDuration element. It is 0 when absent (e.g. SimpleBlocks, which never
 	// carry one). Subtitle cues store their on-screen time here.
 	Duration int64
+	// DiscardPaddingNs is the BlockGroup's DiscardPadding: the nanoseconds of audio a decoder drops from the end of
+	// the block (the encoder's padding of a stream's last frame). 0 when absent.
+	DiscardPaddingNs int64
 	// DataOffset is the absolute file offset of Data's first byte (a laced
 	// frame's own), set by the BlockReader in header-only mode too: what lets a
 	// consumer come back for the payload without holding it.
