@@ -2,6 +2,7 @@ package reader
 
 import (
 	"io"
+	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -50,6 +51,14 @@ func readStringOf(r io.Reader, h ebml.ElementHeader) (string, error) {
 
 // fit8, fit16 and fit32 return v as a field of that width, or nil when it does not fit: a value is never truncated
 // into a plausible one.
+// fitInt64 converts v when an int64 holds it.
+func fitInt64(v uint64) (int64, bool) {
+	if v > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(v), true
+}
+
 func fit8(v uint64) *uint8 {
 	if v > 0xFF {
 		return nil

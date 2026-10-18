@@ -1310,7 +1310,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err != nil {
 				return t, err
 			}
-			if v > 0 {
+			if v > 0 && v <= math.MaxInt64 {
 				fps := 1e9 / float64(v)
 				t.FrameRate = &fps
 				t.DefaultDurationNs = int64(v)
@@ -1320,13 +1320,17 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err != nil {
 				return t, err
 			}
-			t.CodecDelay = int64(v)
+			if n, ok := fitInt64(v); ok {
+				t.CodecDelay = n
+			}
 		case mkv.IDSeekPreRoll:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return t, err
 			}
-			t.SeekPreRoll = int64(v)
+			if n, ok := fitInt64(v); ok {
+				t.SeekPreRoll = n
+			}
 		case mkv.IDVideo:
 			if err := p.parseVideoSettings(eh.Size, &t); err != nil {
 				return t, err
@@ -2488,9 +2492,12 @@ func (p *parser) parseCuesFrom(size int64, c *mkv.Container) error {
 			if eh.Size == 0 {
 				continue // an empty point: nothing to seek to
 			}
-			cp, err := p.parseCuePoint(eh.Size)
+			cp, usable, err := p.parseCuePoint(eh.Size)
 			if err != nil {
 				return err
+			}
+			if !usable {
+				continue // no time or Cluster position a seek can use
 			}
 			if len(c.Cues) >= maxCuePoints {
 				return fmt.Errorf("the Cues hold more than %d points: the file is damaged or forged", maxCuePoints)
@@ -2505,10 +2512,11 @@ func (p *parser) parseCuesFrom(size int64, c *mkv.Container) error {
 	return nil
 }
 
-func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, error) {
+func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, bool, error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	cp := mkv.CuePoint{}
+	timed, placed := true, false
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -2516,7 +2524,7 @@ func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, error) {
 		}
 		eh, _, err := p.readHeader()
 		if err != nil {
-			return cp, err
+			return cp, false, err
 		}
 		if p.pastParent(eh, end) {
 			break
@@ -2525,23 +2533,25 @@ func (p *parser) parseCuePoint(size int64) (mkv.CuePoint, error) {
 		case mkv.IDCueTime:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
-				return cp, err
+				return cp, false, err
 			}
-			cp.TimeMs = int64(v)
+			cp.TimeMs, timed = fitInt64(v)
 		case mkv.IDCueTrackPositions:
-			if err := p.parseCueTrackPositions(eh.Size, &cp); err != nil {
-				return cp, err
+			ok, err := p.parseCueTrackPositions(eh.Size, &cp)
+			if err != nil {
+				return cp, false, err
 			}
+			placed = placed || ok
 		default:
 			if err := p.skip(eh.Size); err != nil {
-				return cp, err
+				return cp, false, err
 			}
 		}
 	}
-	return cp, nil
+	return cp, timed && placed, nil
 }
 
-func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
+func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) (placed bool, err error) {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
@@ -2551,7 +2561,7 @@ func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
 		}
 		eh, _, err := p.readHeader()
 		if err != nil {
-			return err
+			return placed, err
 		}
 		if p.pastParent(eh, end) {
 			break
@@ -2560,26 +2570,30 @@ func (p *parser) parseCueTrackPositions(size int64, cp *mkv.CuePoint) error {
 		case mkv.IDCueTrack:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
-				return err
+				return placed, err
 			}
 			cp.Track = v
 		case mkv.IDCueClusterPos:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
-				return err
+				return placed, err
 			}
-			cp.ClusterPos = int64(v)
+			if n, ok := fitInt64(v); ok {
+				cp.ClusterPos, placed = n, true
+			}
 		case mkv.IDCueRelativePos:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
-				return err
+				return placed, err
 			}
-			cp.RelativePos = int64(v)
+			if n, ok := fitInt64(v); ok {
+				cp.RelativePos = n
+			}
 		default:
 			if err := p.skip(eh.Size); err != nil {
-				return err
+				return placed, err
 			}
 		}
 	}
-	return nil
+	return placed, nil
 }

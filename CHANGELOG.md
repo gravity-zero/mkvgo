@@ -56,6 +56,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A value past what an int64 holds is unknown, not negative.** A
+  DefaultDuration, CodecDelay or SeekPreRoll, a cue time or Cluster position
+  above 2^63 was read as a negative number; it is left unknown now, and a cue
+  point with no usable time or Cluster position is dropped instead of kept as
+  a seek to offset 0.
 - **`ReadStream` describes a file as `Read` does.** It decoded each element
   with its own copy of the decoders, which had fallen behind: an Opus track
   lost its `CodecDelay` and `SeekPreRoll`, a video its HDR metadata and stereo
