@@ -8,6 +8,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **A 'cenc' ABR ladder holds at most 256 variants.** Variants share the key
+  and part its IV space by variant number; a 257th variant's video took the
+  IVs of the first variant's audio track 255. `PlanABR` and `RemuxToABR`
+  refuse a longer ladder under one 'cenc' key.
 - **Every version from v0.13.0 to v0.55.1 is retracted.** They ship
   `httpfs` (from v0.13.0), `s3fs` and the CENC 'cenc' packaging (from
   v0.17.0), and with them the flaws fixed up to v0.55.2 that apply to each: the

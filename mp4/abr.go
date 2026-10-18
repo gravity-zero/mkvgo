@@ -36,6 +36,9 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 		return errf("ABR packaging needs at least two sources (got %d) - use RemuxToHLS for one", len(sources))
 	}
 	o := optionsFrom(opts)
+	if err := cencVariantsFit(o.CENC, len(sources)); err != nil {
+		return err
+	}
 	fs := o.FS
 	if err := fs.DoMkdirAll(outputDir, 0o755); err != nil {
 		return err

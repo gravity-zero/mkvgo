@@ -443,6 +443,18 @@ func cencSampleIV(base []byte, dtsTS int64, domain uint64) []byte {
 	return iv
 }
 
+// maxCENCVariants is how many ABR variants share a 'cenc' key: variant i's IVs start at i<<48 (cencForVariant), and
+// the 257th would reach 2^56, the first variant's track domains (cencIVDomain).
+const maxCENCVariants = 256
+
+// cencVariantsFit refuses an ABR ladder of n variants that would reuse a 'cenc' IV under the shared key.
+func cencVariantsFit(c *CENCOptions, n int) error {
+	if c == nil || c.Scheme != "cenc" || n <= maxCENCVariants {
+		return nil
+	}
+	return errf("Options.CENC: %d variants, but at most %d variants share a 'cenc' key without reusing its IVs; package the ladder in parts under different keys", n, maxCENCVariants)
+}
+
 // cencForVariant is c for ABR variant i (0-based): 'cenc' variants share the
 // key, so each past the first takes the base IV plus i·2^48, below the track
 // domains (cencIVDomain) and past any dtsTS a variant reaches; the first is c.

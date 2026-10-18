@@ -40,6 +40,9 @@ func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, 
 		return nil, errf("ABR planning needs at least two sources (got %d) - use PlanHLS for one", len(sources))
 	}
 	o := optionsFrom(opts)
+	if err := cencVariantsFit(o.CENC, len(sources)); err != nil {
+		return nil, err
+	}
 	variants := make([]*HLSPlan, len(sources))
 	results := make([]*hlsResult, len(sources))
 	for i, src := range sources {
