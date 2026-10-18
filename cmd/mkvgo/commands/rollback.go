@@ -20,7 +20,7 @@ func CmdRollback(args []string) {
 		Fatal(rollbackUsage)
 	}
 	repaired, deltaPath, out := rest[0], rest[1], rest[2]
-	GuardOverwrite(out)
+	guardOutput(out, repaired, deltaPath)
 
 	delta, err := os.Open(deltaPath)
 	if err != nil {

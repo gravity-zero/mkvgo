@@ -90,8 +90,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   truncated the file they read, then removed it as an unfinished output.
 - `-f` replaces an existing output, never an input: `reindex`, `salvage`,
   `to-webm`, `from-mp4`, `add-attachment`, `remove-attachment`,
-  `concat-segment` and `watermark-segment` wrote over the file they read when
-  it was also the output.
+  `concat-segment`, `watermark-segment`, `forensic-segment`, `hls-segment`,
+  `abr-segment`, `rollback`, `extract-attachment`, `extract-subtitle`,
+  `subtitle-index`, `extract-chapters`, `to-vtt` and the frame extractions
+  wrote over the file they read when it was also the output.
 - A Matroska `split` whose part would be named like its source (re-splitting
   `part_001.mkv` into its own directory) truncated the source, then removed
   it; every part is now checked before any is written, as for MP4.

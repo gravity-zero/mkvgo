@@ -339,7 +339,7 @@ func CmdHLSSegment(args []string) {
 		}
 		return
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, src)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
 		FatalErr(err)
 	}
@@ -399,7 +399,7 @@ func CmdABRSegment(args []string) {
 		}
 		return
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, sources...)
 	if err := os.WriteFile(outPath, data, 0o644); err != nil {
 		FatalErr(err)
 	}

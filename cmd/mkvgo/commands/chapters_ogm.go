@@ -72,7 +72,7 @@ func CmdExtractChapters(args []string) {
 		}
 		return
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, rest[0])
 	f, err := os.Create(outPath)
 	if err != nil {
 		FatalErr(err)

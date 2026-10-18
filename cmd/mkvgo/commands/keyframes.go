@@ -66,7 +66,7 @@ func CmdToVTT(args []string) {
 		Fatal("usage: " + CmdUsage["to-vtt"])
 	}
 	src := rest[0]
-	GuardOverwrite(outPath)
+	guardOutput(outPath, src)
 
 	if err := writeFileFrom(outPath, func(out io.Writer) error {
 		return matroska.SubtitleFileToWebVTT(src, out)
@@ -96,7 +96,7 @@ func CmdExtractFrame(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, rest[0])
 	if err := os.WriteFile(outPath, ks.Data, 0o644); err != nil {
 		FatalErr(err)
 	}
@@ -159,7 +159,7 @@ func CmdExtractFrames(args []string) {
 	if outPath == "-" {
 		err = write(os.Stdout)
 	} else {
-		GuardOverwrite(outPath)
+		guardOutput(outPath, src)
 		err = writeFileFrom(outPath, write)
 	}
 	if err != nil {

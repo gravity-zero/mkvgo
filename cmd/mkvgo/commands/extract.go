@@ -33,7 +33,7 @@ func CmdExtractAttachment(args []string) {
 	if outPath == "" {
 		Fatal("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, source)
 
 	err = matroska.ExtractAttachment(context.Background(), source, attID, outPath)
 	if err != nil {
@@ -69,7 +69,7 @@ func CmdExtractSubtitle(args []string) {
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: " + usage)
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, source)
 	opts := subtitleReadOptions(damageBytes)
 
 	if indexPath != "" {
@@ -252,7 +252,7 @@ func CmdSubtitleIndex(args []string) {
 	if outPath == "" {
 		Fatal("usage: " + usage)
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, source)
 
 	ix, err := buildSubtitleIndex(source, trackIDs, fromCues, subtitleReadOptions(damageBytes))
 	if err != nil {
