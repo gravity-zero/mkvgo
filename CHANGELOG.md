@@ -111,6 +111,9 @@ Matroska reading:
 - Every kept entry is charged to the metadata budget, and statistics tags
   find their tracks by UID (50,000 tracks cost billions of comparisons).
 - A PGS object referenced many times is decoded once per display set.
+- A PGS display set whose objects lie more than 4096 pixels apart is refused
+  as damage: two forged dots at opposite corners asked for a 17 GB picture,
+  an out-of-memory crash no recover catches.
 
 Damage and resync:
 

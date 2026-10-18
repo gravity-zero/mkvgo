@@ -275,7 +275,10 @@ func (a *pgsAssembler) block(timeMs, durMs int64, data []byte) error {
 		if ds.Clear() {
 			continue
 		}
-		cue := flattenPGSDisplaySet(ds, timeMs)
+		cue, err := flattenPGSDisplaySet(ds, timeMs)
+		if err != nil {
+			return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+		}
 		if durMs > 0 {
 			// A muxer that wrote a BlockDuration knows the end better than the
 			// next block's timecode does: emit immediately and hold nothing.
@@ -333,12 +336,12 @@ func (a *pgsAssembler) finish() error {
 // several (a disc that puts a top and a bottom line in two windows) is composited
 // onto the smallest rectangle covering them, so X, Y stays a real screen position
 // rather than becoming meaningless.
-func flattenPGSDisplaySet(ds *subtitle.PGSDisplaySet, startMs int64) PGSCue {
+func flattenPGSDisplaySet(ds *subtitle.PGSDisplaySet, startMs int64) (PGSCue, error) {
 	cue := PGSCue{StartMs: startMs, ScreenW: ds.ScreenW, ScreenH: ds.ScreenH}
 	if len(ds.Objects) == 1 {
 		o := ds.Objects[0]
 		cue.X, cue.Y, cue.Forced, cue.Image = o.X, o.Y, o.Forced, o.Image
-		return cue
+		return cue, nil
 	}
 	var union image.Rectangle
 	for _, o := range ds.Objects {
@@ -346,11 +349,18 @@ func flattenPGSDisplaySet(ds *subtitle.PGSDisplaySet, startMs int64) PGSCue {
 		union = union.Union(r)
 		cue.Forced = cue.Forced || o.Forced
 	}
+	if union.Dx() > pgsMaxPlane || union.Dy() > pgsMaxPlane {
+		return cue, fmt.Errorf("PGS: a display set spreads its objects over %dx%d pixels, past the %d a subtitle plane holds: the track is damaged or forged", union.Dx(), union.Dy(), pgsMaxPlane)
+	}
 	out := image.NewNRGBA(image.Rect(0, 0, union.Dx(), union.Dy()))
 	for _, o := range ds.Objects {
 		at := image.Pt(o.X-union.Min.X, o.Y-union.Min.Y)
 		draw.Draw(out, image.Rectangle{Min: at, Max: at.Add(o.Image.Bounds().Size())}, o.Image, image.Point{}, draw.Over)
 	}
 	cue.X, cue.Y, cue.Image = union.Min.X, union.Min.Y, out
-	return cue
+	return cue, nil
 }
+
+// pgsMaxPlane bounds the picture several objects are composited onto, as the format bounds each object: placed
+// far apart by a forged composition, two dots would otherwise ask for a picture of gigabytes.
+const pgsMaxPlane = 4096
