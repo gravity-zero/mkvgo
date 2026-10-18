@@ -463,6 +463,10 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 		traks = append(traks, t)
 		movieDur = max(movieDur, dur)
 	}
+	// The part runs up to the cut even where no track presents up to it (open-GOP leading pictures the next part hides), or a join would pull the next part early.
+	if p.teNs > 0 {
+		movieDur = max(movieDur, rescale(p.teNs-p.tsNs, nsPerSec, m.outTS))
+	}
 	payload, err := m.assemble(traks, movieDur, m.outTS)
 	if err != nil {
 		return err

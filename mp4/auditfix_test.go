@@ -372,20 +372,25 @@ func TestChunksOutsideEveryMdatAreRefused(t *testing.T) {
 	}
 }
 
-// TestOpenGOPSplitJoinsBack: the parts of an open-GOP split hide their leading pictures, and a join takes them back.
+// TestOpenGOPSplitJoinsBack: the parts of an open-GOP split hide their leading pictures, and a join takes them back, with or without audio.
 func TestOpenGOPSplitJoinsBack(t *testing.T) {
-	src := realFixture("hevc_opengop.mp4")
-	kf := mustCutModel(t, src).keyframesMs()
-	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: kf[1]}, {StartMs: kf[1]}}})
-	joined := filepath.Join(t.TempDir(), "j.mp4")
-	if err := Join(context.Background(), parts, joined); err != nil {
+	videoOnly := filepath.Join(t.TempDir(), "v.mp4")
+	if err := RemoveTrack(context.Background(), realFixture("hevc_opengop.mp4"), videoOnly, []uint64{2}); err != nil {
 		t.Fatal(err)
 	}
-	want, got := sampleSeqs(t, src), sampleSeqs(t, joined)
-	for ti := range want {
-		if strings.Join(want[ti], ",") != strings.Join(got[ti], ",") {
-			t.Errorf("track %d: the join does not give the source back", ti+1)
-			diffFirst(t, want[ti], got[ti])
+	for _, src := range []string{realFixture("hevc_opengop.mp4"), videoOnly} {
+		kf := mustCutModel(t, src).keyframesMs()
+		parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: kf[1]}, {StartMs: kf[1]}}})
+		joined := filepath.Join(t.TempDir(), "j.mp4")
+		if err := Join(context.Background(), parts, joined); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(src), err)
+		}
+		want, got := sampleSeqs(t, src), sampleSeqs(t, joined)
+		for ti := range want {
+			if strings.Join(want[ti], ",") != strings.Join(got[ti], ",") {
+				t.Errorf("%s track %d: the join does not give the source back", filepath.Base(src), ti+1)
+				diffFirst(t, want[ti], got[ti])
+			}
 		}
 	}
 }
