@@ -179,6 +179,9 @@ func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[in
 	if err != nil {
 		return err
 	}
+	if others, err = restateContentHashes(ctx, vs, traks, others); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
