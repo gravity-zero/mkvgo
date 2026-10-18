@@ -12,14 +12,15 @@ material where they should not be. A report is acknowledged within a week.
 
 ## Supported versions
 
-Only the latest release receives fixes. Every version from v0.13.0 to
-v0.55.1 is retracted for the flaws fixed up to v0.55.2: upgrade with
-`go get github.com/gravity-zero/mkvgo@latest`.
+Only the latest release receives fixes: upgrade with
+`go get github.com/gravity-zero/mkvgo@latest`. Every version from v0.13.0 to
+v0.55.1, and the pseudo-versions after v0.12.0, are retracted for the flaws
+fixed in v0.55.2.
 
-| Version   | Supported |
-|-----------|-----------|
-| >= 0.55.2 | yes       |
-| < 0.55.2  | no        |
+| Version                   | Supported |
+|---------------------------|-----------|
+| the latest release        | yes       |
+| any earlier one           | no        |
 
 ## Scope
 

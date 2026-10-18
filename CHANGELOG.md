@@ -33,7 +33,8 @@ All notable changes to mkvgo are documented here. The format is based on
   and part its IV space by variant number; a 257th variant's video took the
   IVs of the first variant's audio track 255. `PlanABR` and `RemuxToABR`
   refuse a longer ladder under one 'cenc' key.
-- **Every version from v0.13.0 to v0.55.1 is retracted.** They ship
+- **Every version from v0.13.0 to v0.55.1 is retracted**, and the
+  pseudo-versions of commits after v0.12.0 with them. They ship
   `httpfs` (from v0.13.0), `s3fs` and the CENC 'cenc' packaging (from
   v0.17.0), and with them the flaws fixed up to v0.55.2 that apply to each: the
   AES-CTR keystream reused across tracks, variants or concatenated parts under
@@ -58,9 +59,11 @@ All notable changes to mkvgo are documented here. The format is based on
   declares.** It sized its buffer from the FileData length the file states,
   so a few bytes of Matroska could ask for a terabyte; the buffer now grows as
   bytes arrive and a payload past the end of the file fails.
-- **`httpfs` errors no longer show a URL's query.** A presigned URL keeps its
-  signature and session token in the query, and every error, including the
-  client's own, printed the URL whole; an error now names it up to the `?`.
+- **Errors no longer show a URL's query.** A presigned URL keeps its
+  signature and session token in the query, and every error naming a remote
+  source printed the URL whole: `httpfs` and the client's own errors, the
+  planner, the readers, `ops`, a concat or ABR part, an `httpfs` file's
+  `Stat().Name()`. They name it up to the `?` now.
 - **`httpfs` refuses an https to http redirect while `Options.Header` is
   set.** The same-host check let it through, and Go strips only its own
   credential headers on that hop: custom ones such as `X-Api-Key` crossed in
@@ -69,8 +72,8 @@ All notable changes to mkvgo are documented here. The format is based on
   are set apart by its ID modulo 255, so two audio tracks numbered 2 and 257
   shared their keystream; such a presentation is now refused and names both
   tracks.
-- **VP9 'cenc' content packaged before v0.55.0 needs a new key.** NEW-07
-  moved each frame's protected run by up to 15 bytes: re-packaging the same
+- **VP9 'cenc' content packaged before v0.55.0 needs a new key.** v0.55.0
+  moved each VP9 frame's protected run by up to 15 bytes: re-packaging the same
   VP9 title with v0.55 under the same key and IV applies the same keystream to
   shifted bytes, so the old and new outputs together leak plaintext. The docs
   now say a title needs its own key or base IV under `cenc`.
@@ -161,9 +164,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **The JSON patch of `edit` and `edit-inplace` ignored what it did not
   know:** an unknown field or a track ID the file does not have is now an
   error, for both containers, and `language_bcp47` is accepted.
-- **The EBML lace decoder refuses a size with no length marker.** A first
-  byte of `0x00`, or a size cut short by the block's end, decoded as a value
-  where the stream decoder refuses it; both decoders refuse it now.
+- **The EBML lace decoder refuses sizes that are not sizes.** A first byte
+  of `0x00`, or a size cut short by the block's end, decoded as a value where
+  the stream decoder refuses it, and the running total could wrap past 2^63
+  back onto the payload's length, so 25 frames of 3.6e16 bytes passed it.
 - **An empty DisplayWidth or DisplayHeight means square pixels.** It was
   read as a display size of 0; it takes its default, the pixel size, which
   the track reports as no display size.
@@ -179,11 +183,12 @@ All notable changes to mkvgo are documented here. The format is based on
   a track its bitrate from the tags. It now runs the seekable reader's
   decoders over each element's body, makes the same head-only derivations,
   refuses a Duration that overflows and keeps the first of duplicate Info and
-  Tracks elements, as `Read` does.
-- **A presigned URL's signature stays out of every error.** The planner, the
-  readers, `ops` and a concat or ABR part named a remote source by its whole
-  URL, query included; they name it without its query now, as `httpfs` does,
-  and an `httpfs` file's `Stat().Name()` drops it too.
+  Tracks elements, as `Read` does. A differential fuzz target
+  (`FuzzReadVsReadStream`) now holds both readers to one description of a
+  file; it also found `ReadStream` losing what followed an edition's UID, the
+  SegmentUID, PrevUID and NextUID, and reading elements that start past the
+  Segment's declared end, and `Read` skipping its Tags behind a SeekHead child
+  that declared more than the SeekHead held.
 - **A block that runs past its Cluster is damage.** A SimpleBlock or a
   BlockGroup's Block declaring more bytes than its parent holds swallowed the
   next Cluster and lost its blocks without an error; the walk now reports a
@@ -213,9 +218,6 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Damage ahead of the first Cluster is reported.** A tolerant walk resynced
   past it silently, so a subtitle read lost the first Cluster's cues without
   an `OnSkip` call; the region is now reported, timed from 0.
-- **`ReadStream` keeps its place past an edition's UID and flags.** It read
-  them without advancing its position, so the edition's loop swallowed what
-  followed: the next edition and the Tags after the Chapters were lost.
 - **A stream reader reads a large skip through instead of seeking.** Past
   64 KiB, `NewStreamBlockReader` and `ReadStream` tried to seek over a block
   of a filtered track or a header-only payload and failed with "stream is not
@@ -224,8 +226,7 @@ All notable changes to mkvgo are documented here. The format is based on
   an element of size 0 take the default RFC 9559 gives it; both readers read
   it as 0 or "" instead, so an empty FlagDefault made a track non-default.
   FlagDefault, Channels, SamplingFrequency, TimestampScale, FieldOrder, the
-  colour code points, TargetTypeValue and the three Language elements now
-  take their defaults.
+  colour code points, Language and TagLanguage now take their defaults.
 - **A string ends at its first null byte.** RFC 8794 section 13 leaves the
   bytes after it out of the string; only trailing nulls were trimmed, so
   `eng\0xx` read as five characters.
@@ -238,32 +239,18 @@ All notable changes to mkvgo are documented here. The format is based on
   DisplayHeight, MaxCLL and MaxFALL (32 bits), StereoMode and the Colour code
   points (16 bits) wrapped silently, so 300 channels read as 44; such a value
   is now dropped, and a rejected channel count does not fall back to 1.
-- **`ReadStream`'s comment on an unknown-size element matches what it does.**
-  It said the metadata scan stops there; the scan reads on into the element's
-  body up to the next segment-level element, so Tracks behind an unknown-size
-  SeekHead are still read. A test now holds both cases.
-- **`ReadStream` reads the SegmentUID, PrevUID and NextUID, and marks a
-  track's colour as read from its Colour element.** A differential fuzz target
-  (`FuzzReadVsReadStream`) holding both readers to the same description of a
-  file found them missing from the streaming reader.
-- **`ReadStream` stops at the Segment's declared end, and both readers skip
-  the rest of a SeekHead or Seek entry a child overruns.** The differential
-  fuzz target found the streaming reader reading Tracks past a Segment that
-  ended before them, and the seekable reader skipping its Tags behind a
-  SeekHead child that declared more than the SeekHead held.
 - **A split part named after a chapter never takes a Windows device name.**
   A chapter titled `CON` or `nul.txt` made `CON.mkv` or `nul.txt.mkv`, which
   Windows opens as a device; such a name now takes a leading `_`, `COM0`,
   `LPT0` and the superscript forms `COM¹` to `LPT³` included. Titles with
   path separators were already kept under `OutputDir`, now held by a test; the
   docs say that `Split` overwrites an existing part.
-- **The EBML lace size decoder refuses sizes that run over the block.** Its
-  running total could wrap past 2^63 back onto the payload's length, so 25
-  frames of 3.6e16 bytes passed it; the block reader refused them afterwards,
-  and the decoder now does itself.
-
 ### Documentation
 
+- **`ReadStream`'s comment on an unknown-size element matches what it does.**
+  It said the metadata scan stops there; the scan reads on into the element's
+  body up to the next segment-level element, so Tracks behind an unknown-size
+  SeekHead are still read. A test now holds both cases.
 - **`SECURITY.md`** says how to report a vulnerability, which versions get
   fixes, and what is in scope: parsing untrusted files, remote sources,
   serving and encryption.
