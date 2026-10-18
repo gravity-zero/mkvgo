@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
@@ -82,10 +83,11 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 	if err != nil {
 		mdats = nil // the box walk already reported the layout; check the tables alone
 	}
-	for _, tr := range mv.tracks {
+	for i, tr := range mv.tracks {
+		num := uint64(i + 1) // the probe's track number, the one every command takes
 		if strings.HasPrefix(tr.unsupported, "sample table: ") {
-			d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: uint64(tr.trackID),
-				Detail: fmt.Sprintf("track %d: %s", tr.trackID, strings.TrimPrefix(tr.unsupported, "sample table: ")), Remedy: remedy})
+			d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: num,
+				Detail: fmt.Sprintf("track %d: %s", num, strings.TrimPrefix(tr.unsupported, "sample table: ")), Remedy: remedy})
 			continue
 		}
 		if mdats == nil {
@@ -93,8 +95,8 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 		}
 		for k, smp := range tr.samples {
 			if !inMdat(mdats, smp.offset, int64(smp.size)) {
-				d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: uint64(tr.trackID),
-					Detail: fmt.Sprintf("track %d: sample %d (%d bytes at offset %d) lies outside every mdat box", tr.trackID, k+1, smp.size, smp.offset), Remedy: remedy})
+				d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: num,
+					Detail: fmt.Sprintf("track %d: sample %d (%d bytes at offset %d) lies outside every mdat box", num, k+1, smp.size, smp.offset), Remedy: remedy})
 				break
 			}
 		}
@@ -204,13 +206,24 @@ func diagnoseTracks(moovPayload []byte, d *mkv.Diagnosis) error {
 		handler string
 		ns      int64
 	}
+	// Tracks are named as the probe and retime number them: a chapter or timecode trak is no track of theirs.
+	probeNum := map[int]uint64{}
+	if mv, err := parseMoov(moovPayload, math.MaxInt64, sampleNone); err == nil {
+		for i, tr := range mv.tracks {
+			probeNum[tr.trakIndex] = uint64(i + 1)
+		}
+	}
 	var tracks []trackDelay
-	var num uint64
+	trakIndex := -1
 	for _, b := range boxes {
 		if b.typ != "trak" {
 			continue
 		}
-		num++
+		trakIndex++
+		num, ok := probeNum[trakIndex]
+		if !ok {
+			continue
+		}
 		tb, err := iterBoxes(b.payload)
 		if err != nil {
 			continue // an unparseable foreign trak is not this triage's business
@@ -228,7 +241,7 @@ func diagnoseTracks(moovPayload []byte, d *mkv.Diagnosis) error {
 		tracks = append(tracks, trackDelay{
 			num:     num,
 			handler: trakHandler(tb),
-			ns:      empty * 1_000_000_000 / int64(movieTS),
+			ns:      ticksToNs(empty, movieTS),
 		})
 	}
 

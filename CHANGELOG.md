@@ -123,6 +123,10 @@ MP4:
   sample budget and was refused, and longer tracks were expanded frame by frame.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
+- `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a
+  timecode or chapter track ahead of the audio, its `retime --shift` remedy
+  named the wrong track, and its `sample-table` findings used the file's
+  track_ID.
 - Tick conversions saturate instead of wrapping; a MOV opening on `pnot` or
   `uuid` is recognised everywhere.
 - Sync tables hold only usable entries, a fragment's `trun` must fit its
