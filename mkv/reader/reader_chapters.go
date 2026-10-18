@@ -3,6 +3,7 @@ package reader
 import (
 	"fmt"
 	"io"
+	"unsafe"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -28,6 +29,9 @@ func (p *parser) parseChapters(size int64, c *mkv.Container) error {
 		if eh.ID == mkv.IDEditionEntry {
 			ed, err := p.parseEditionEntry(eh.Size)
 			if err != nil {
+				return err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(ed))); err != nil {
 				return err
 			}
 			eds = append(eds, ed)
@@ -77,6 +81,9 @@ func (p *parser) parseEditionEntry(size int64) (mkv.Edition, error) {
 		case mkv.IDChapterAtom:
 			ch, err := p.parseChapterAtom(eh.Size, 0)
 			if err != nil {
+				return ed, err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(ch))); err != nil {
 				return ed, err
 			}
 			ed.Chapters = append(ed.Chapters, ch)
@@ -154,6 +161,9 @@ func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
 		case mkv.IDChapterAtom:
 			sub, err := p.parseChapterAtom(eh.Size, depth+1)
 			if err != nil {
+				return ch, err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(sub))); err != nil {
 				return ch, err
 			}
 			ch.SubChapters = append(ch.SubChapters, sub)

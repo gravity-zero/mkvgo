@@ -3,6 +3,7 @@ package reader
 import (
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -29,6 +30,9 @@ func (p *parser) parseTracks(size int64, c *mkv.Container) error {
 		if eh.ID == mkv.IDTrackEntry {
 			track, err := p.parseTrackEntry(eh.Size)
 			if err != nil {
+				return err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(track))); err != nil {
 				return err
 			}
 			c.Tracks = append(c.Tracks, track)

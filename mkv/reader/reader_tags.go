@@ -3,6 +3,7 @@ package reader
 import (
 	"fmt"
 	"io"
+	"unsafe"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -26,6 +27,9 @@ func (p *parser) parseAttachments(size int64, c *mkv.Container) error {
 		if eh.ID == mkv.IDAttachedFile {
 			att, err := p.parseAttachedFile(eh.Size)
 			if err != nil {
+				return err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(att))); err != nil {
 				return err
 			}
 			c.Attachments = append(c.Attachments, att)
@@ -141,6 +145,9 @@ func (p *parser) parseTags(size int64, c *mkv.Container) error {
 			if err != nil {
 				return err
 			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(tag))); err != nil {
+				return err
+			}
 			c.Tags = append(c.Tags, tag)
 		} else {
 			if err := p.skip(eh.Size); err != nil {
@@ -175,6 +182,9 @@ func (p *parser) parseTag(size int64) (mkv.Tag, error) {
 		case mkv.IDSimpleTag:
 			st, err := p.parseSimpleTagDepth(eh.Size, 0)
 			if err != nil {
+				return tag, err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(st))); err != nil {
 				return tag, err
 			}
 			tag.SimpleTags = append(tag.SimpleTags, st)
@@ -288,6 +298,9 @@ func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, erro
 		case mkv.IDSimpleTag:
 			sub, err := p.parseSimpleTagDepth(eh.Size, depth+1)
 			if err != nil {
+				return st, err
+			}
+			if err := p.chargeMeta(int64(unsafe.Sizeof(sub))); err != nil {
 				return st, err
 			}
 			st.SubTags = append(st.SubTags, sub)

@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Every entry a Matroska reader keeps is charged to the metadata
+  budget.** Only strings and binaries were: a Tracks of empty TrackEntry
+  elements, two bytes each, became a 560-byte track apiece, 4 MB of input
+  holding 1.5 GB. Tracks, editions, chapters, tags, simple tags and
+  attachments are charged what they hold in memory.
 - **A fragment's trun must fit the data the fragment holds.** A trun
   listing no per-sample field is a count alone: twenty bytes declared 16M
   samples, 800 MB of records, in a file of a few hundred bytes. Its samples,
