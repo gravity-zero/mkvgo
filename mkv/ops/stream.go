@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -80,7 +81,15 @@ type streamOpts struct {
 	// "any keyframe" would start a segment mid-GOP (corrupt video until the
 	// next real video keyframe). Empty means no video track: any keyframe cuts.
 	videoTracks map[uint64]bool
-	extraSubs   []mkv.Block
+	// subtitleTracks holds the SOURCE track numbers of subtitle tracks: a cue on screen across a cut opens the
+	// next part too (walk.onScreen), and lastSubs / dropLeadingSub let Join keep it once.
+	subtitleTracks map[uint64]bool
+	// lastSubs, when non-nil, receives each output subtitle track's last cue (source timeline).
+	lastSubs map[uint64]mkv.Block
+	// dropLeadingSub holds, per output track, a cue the previous linked part already shows past its end: the
+	// copy a split opened this part on is dropped.
+	dropLeadingSub map[uint64][]byte
+	extraSubs      []mkv.Block
 	// bounds, when non-nil, receives where the segment really began. A
 	// keyframe-aligned cut starts where the source's GOPs fall, not where it was
 	// asked to, so a caller that has to agree with the blocks - chapters to
@@ -101,6 +110,9 @@ type sourceWalk struct {
 	carry  *mkv.Block // the block the previous call stopped on, if it stopped before EOF
 	stopMs int64      // the end that call was cut on
 	maxMs  int64      // the latest timecode read before carry: every such block is no cut keyframe
+	// onScreen holds the subtitle cues the previous call wrote that are still on screen at its cut: the next
+	// call, opening on carry, shows them from its own start for the time they have left.
+	onScreen []mkv.Block
 }
 
 // walkReader is a BlockReader that may outlive the call that opened it.
@@ -153,7 +165,7 @@ func (w *sourceWalk) Close() error {
 		return nil
 	}
 	err := w.f.Close()
-	w.f, w.br, w.carry = nil, nil, nil
+	w.f, w.br, w.carry, w.onScreen = nil, nil, nil, nil
 	return err
 }
 
@@ -215,6 +227,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		gateSkipped = opts.timeStart > 0 && maxMs >= opts.timeStart
 	}
 	endStates := map[uint64]*trackEndState{}
+	var carried, queue, shown []mkv.Block // cues to open on, cues to write next, cues written (source timeline)
+	if carry != nil {
+		carried, opts.walk.onScreen = opts.walk.onScreen, nil
+	}
+	firstTC, firstSet := int64(0), false
 
 	// The output's timebase decides how long a cluster may run: block offsets
 	// are 16-bit counts of ITS units, not of milliseconds.
@@ -340,7 +357,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		var blk mkv.Block
 		prevMax := maxMs
-		if carry != nil {
+		if len(queue) > 0 {
+			blk, queue, err = queue[0], queue[1:], nil
+		} else if carry != nil {
 			blk, carry = *carry, nil
 		} else if blk, err = br.Next(); err == nil && blk.Timecode > maxMs {
 			maxMs = blk.Timecode
@@ -382,6 +401,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			if !opts.keyframeAlign || cutKeyframe {
 				cutEnd = blk.Timecode
 				opts.walk.stopped(blk, opts.timeEnd, prevMax)
+				if opts.walk != nil {
+					opts.walk.onScreen = cuesOnScreenAt(shown, blk.Timecode)
+				}
 				break
 			}
 			// keyframeAlign: the cut lands on the next cut keyframe at/after
@@ -392,13 +414,39 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		// Past the gate, so this is the cut keyframe the segment opens on.
 		if !cutStartSet {
 			cutStart, cutStartSet = blk.Timecode, true
+			for _, c := range carried { // the cues still on screen at the cut open this part, for the time they have left
+				if end := c.Timecode + c.Duration; end > cutStart {
+					c.Timecode, c.Duration = cutStart, end-cutStart
+					queue = append(queue, c)
+				}
+			}
+			carried = nil
 		}
 
+		srcBlk, isSub := blk, opts.subtitleTracks[blk.TrackNumber]
 		newID, ok := opts.remap[blk.TrackNumber]
 		if !ok {
 			continue
 		}
 		blk.TrackNumber = newID
+		if !firstSet {
+			firstTC, firstSet = blk.Timecode, true
+		}
+		if isSub {
+			if want, ok := opts.dropLeadingSub[newID]; ok && blk.Timecode == firstTC && bytes.Equal(blk.Data, want) {
+				delete(opts.dropLeadingSub, newID) // the previous linked part already shows this cue past the seam
+				if opts.lastSubs != nil {
+					opts.lastSubs[newID] = blk // still this part's cue at its end, for the part after
+				}
+				continue
+			}
+			if opts.walk != nil {
+				shown = append(shown, srcBlk)
+			}
+			if opts.lastSubs != nil {
+				opts.lastSubs[newID] = blk
+			}
+		}
 
 		// The timecode stays the SOURCE's until flush: the output's zero is not
 		// known yet when the cut is keyframe-aligned (see base above). Nothing
@@ -664,4 +712,26 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		cluster = append(cluster, blk)
 	}
 	return stats, flush()
+}
+
+// cuesOnScreenAt returns the cues still on screen at t, the ones a cut at t runs through.
+func cuesOnScreenAt(cues []mkv.Block, t int64) []mkv.Block {
+	var out []mkv.Block
+	for _, c := range cues {
+		if c.Timecode < t && c.Timecode+c.Duration > t {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// subtitleTrackSet returns the source track numbers of c's subtitle tracks.
+func subtitleTrackSet(tracks []mkv.Track) map[uint64]bool {
+	set := map[uint64]bool{}
+	for _, t := range tracks {
+		if t.Type == mkv.SubtitleTrack {
+			set[t.ID] = true
+		}
+	}
+	return set
 }

@@ -137,7 +137,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	// Slices of one timeline get a tighter seam - see videoSeamOffset - because
 	// for them the latest end overshoots by the interleaving the cut ran through.
 	outVideo := videoTrackSet(first.Tracks) // output track numbers
-	var offset, prevEnd, prevVideoEnd int64
+	outSubs := subtitleTrackSet(first.Tracks)
+	var offset, prevEnd, prevVideoEnd, prevMediaEnd int64 // prevMediaEnd: the end without the subtitle cues
+	var lastSubs map[uint64]mkv.Block                     // the previous source's last cue per output subtitle track
 	var prevHasVideoEnd bool
 	offsets := make([]int64, len(sources)) // where each source's timeline starts
 	for i, src := range sources {
@@ -152,7 +154,8 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 				// than the reordering a muxer is allowed - past that it is not
 				// interleaving that separates the two ends, it is content, and
 				// pulling the seam over it would bury the previous part's tail.
-				if ok && seam >= offsets[i-1] && prevEnd-seam <= defaultClusterDurationMs {
+				// A cue on screen past the cut (one a split carried over it) holds no picture: it does not count.
+				if ok && seam >= offsets[i-1] && prevMediaEnd-seam <= defaultClusterDurationMs {
 					offset = seam
 				}
 			}
@@ -175,18 +178,34 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 			}
 		}
 		trackEnds := make(map[uint64]int64, len(c.Tracks))
+		var dropLeading map[uint64][]byte // a split's cue across the cut, which the previous part already shows
+		if i > 0 && linkedTo(&conts[i-1].Info, &c.Info) {
+			for id, last := range lastSubs {
+				if last.Timecode+last.Duration > offset-offsets[i-1] { // still on screen at the seam
+					if dropLeading == nil {
+						dropLeading = map[uint64][]byte{}
+					}
+					dropLeading[id] = last.Data
+				}
+			}
+		}
+		lastSubs = map[uint64]mkv.Block{}
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
+			subtitleTracks: subtitleTrackSet(c.Tracks), lastSubs: lastSubs, dropLeadingSub: dropLeading,
 			outScale:       first.Info.TimecodeScale,
 			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", shown.Path(src), err)
 		}
-		prevEnd, prevVideoEnd, prevHasVideoEnd = offset, 0, false
+		prevEnd, prevVideoEnd, prevMediaEnd, prevHasVideoEnd = offset, 0, offset, false
 		for id, end := range trackEnds {
 			if end > prevEnd {
 				prevEnd = end
+			}
+			if !outSubs[id] && end > prevMediaEnd {
+				prevMediaEnd = end
 			}
 			if outVideo[id] && (!prevHasVideoEnd || end > prevVideoEnd) {
 				prevVideoEnd, prevHasVideoEnd = end, true

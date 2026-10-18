@@ -148,6 +148,13 @@ Matroska reading:
   as damage: two forged dots at opposite corners asked for a 17 GB picture,
   an out-of-memory crash no recover catches.
 
+- A subtitle cue on screen across a Matroska split's cut opens the next part
+  too, for the time it has left, and a join of the linked parts gives it back
+  once, as for MP4.
+- A join of linked Matroska parts no longer lets a cue running past a cut hold
+  the timeline: the seam is checked against the picture and the sound, and a
+  1.5 s cue left a 1.5 s hole in the video.
+
 Damage and resync:
 
 - The keyframe walks resync past a block that overruns its Cluster, and

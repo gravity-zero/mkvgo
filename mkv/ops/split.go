@@ -243,6 +243,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
 		videoTracks:    videoTrackSet(c.Tracks),
+		subtitleTracks: subtitleTrackSet(c.Tracks),
 		contentDigests: digests, contentStats: stats,
 		trackEnds: trackEnds,
 		bounds:    &bounds,
