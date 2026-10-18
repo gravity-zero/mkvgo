@@ -149,6 +149,7 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 	// Scan segment-level elements until we hit the first Cluster, or the Segment's end: what lies past it is no
 	// part of the Segment, as the seekable readers hold.
 	var peekedCluster *ebml.ElementHeader
+	seen := map[uint32]bool{} // the spec allows one Info and one Tracks
 metaLoop:
 	for {
 		if ctx.Err() != nil {
@@ -184,12 +185,19 @@ metaLoop:
 			break metaLoop // an element past the Segment's end
 		}
 		switch eh.ID {
-		case mkv.IDInfo:
-			if err := p.decode(eh.Size, func(d *parser) error { return d.parseInfo(eh.Size, c) }); err != nil {
-				return nil, nil, elemErrAt(eh.ID, elemStart, err)
+		case mkv.IDInfo, mkv.IDTracks:
+			if seen[eh.ID] { // a duplicate: the first wins, as in Read
+				if err := p.skip(eh.Size); err != nil {
+					return nil, nil, err
+				}
+				break
 			}
-		case mkv.IDTracks:
-			if err := p.decode(eh.Size, func(d *parser) error { return d.parseTracks(eh.Size, c) }); err != nil {
+			seen[eh.ID] = true
+			decode := (*parser).parseInfo
+			if eh.ID == mkv.IDTracks {
+				decode = (*parser).parseTracks
+			}
+			if err := p.decode(eh.Size, func(d *parser) error { return decode(d, eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDChapters:
