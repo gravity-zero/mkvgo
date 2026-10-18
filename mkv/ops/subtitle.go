@@ -1,7 +1,9 @@
 package ops
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -99,7 +101,54 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 // kind: S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through, S_TEXT/ASS is flattened
 // to plain text. Each cue's end is its BlockDuration, falling back to the next
 // cue's start (then a default) when absent. Bitmap subtitles are not supported.
+//
+// When the source's Cues name every block of the track - their count matches a
+// trusted NUMBER_OF_FRAMES statistic - the blocks are read where the Cues put
+// them and nothing else of the file is; otherwise, or when an indexed block
+// does not hold what the Cues say or lies in a damaged region, the file is
+// walked. Both give the same WebVTT, and damage is handled the walk's way: a
+// region within Options.DamageBytes is passed over (OnSkip), a larger one, or
+// one the bound refuses, fails the extraction with nothing written.
 func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
+	if ix := verifiedCueIndex(ctx, srcPath, trackID, opts); ix != nil {
+		var out bytes.Buffer // written only once every indexed block read as the Cues say
+		err := ExtractSubtitleWebVTTFrom(ctx, srcPath, trackID, ix, &out, opts...)
+		if err == nil {
+			_, err = w.Write(out.Bytes())
+			return err
+		}
+		if !errors.Is(err, ErrIndexStale) {
+			return err
+		}
+	}
+	return extractSubtitleWebVTTWalk(ctx, srcPath, trackID, w, opts...)
+}
+
+// verifiedCueIndex returns the resolved index the source's Cues give trackID when they are verified complete and
+// every entry resolved outside damage, nil when the walk must serve.
+func verifiedCueIndex(ctx context.Context, srcPath string, trackID uint64, opts []mkv.Options) *SubtitleIndex {
+	fs := mkv.FSFrom(opts)
+	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithCues(), reader.WithTags())
+	if err != nil {
+		return nil
+	}
+	st, err := fs.DoStat(srcPath)
+	if err != nil {
+		return nil
+	}
+	ix, verified, err := SubtitleIndexFromCues(c, st.Size(), []uint64{trackID})
+	if err != nil || !verified[trackID] {
+		return nil
+	}
+	cued := len(ix.entries[trackID])
+	if err := ix.Resolve(ctx, srcPath, opts...); err != nil || len(ix.entries[trackID]) != cued {
+		return nil // an entry lost to damage: the walk decides what the region costs
+	}
+	return ix
+}
+
+// extractSubtitleWebVTTWalk is ExtractSubtitleWebVTT walking the whole file.
+func extractSubtitleWebVTTWalk(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -164,7 +213,32 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		cues = append(cues, subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text})
 	}
 	subtitle.ResolveCueEnds(cues, defaultSubDurationMs)
-	return subtitle.WriteWebVTT(w, cues)
+	if err := subtitle.WriteWebVTT(w, cues); err != nil {
+		return err
+	}
+	return truncatedSource(srcPath, fs, cues)
+}
+
+// ErrSourceTruncated reports a source that stops before the end its Segment declares (a download not finished):
+// what it holds was extracted and written, what follows is missing.
+var ErrSourceTruncated = errors.New("the source stops before its declared end")
+
+// truncatedSource returns ErrSourceTruncated, saying how far the written cues reach, when the file is shorter
+// than its Segment declares.
+func truncatedSource(path string, fs *mkv.FS, cues []subtitle.Cue) error {
+	declared, known, err := segmentDeclaredEndOf(path, fs)
+	if err != nil || !known {
+		return nil
+	}
+	st, err := fs.DoStat(path)
+	if err != nil || declared <= st.Size() {
+		return nil
+	}
+	var reach int64
+	if n := len(cues); n > 0 {
+		reach = cues[n-1].EndMs
+	}
+	return fmt.Errorf("%w: it ends at byte %d of the %d its Segment declares, so the WebVTT holds the cues up to %d ms: extract again once the file is complete", ErrSourceTruncated, st.Size(), declared, reach)
 }
 
 // isTextSubtitle reports whether a Matroska subtitle codec short name is a text

@@ -1467,6 +1467,8 @@ err = subtitle.FileToWebVTT("subs.fr.srt", w)
 
 S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration, falling back to the next cue's start. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `ResolveCueEnds` - are exported for custom pipelines.
 
+A Matroska track whose blocks the source's own Cues all name - their count matches a trusted `NUMBER_OF_FRAMES` statistic, the guard `SubtitleIndexFromCues` reports as verified - is read where the Cues put it: the metadata, one header per cued cluster and the subtitle blocks, not the file. Cues naming only some of the blocks, none of them, a file without the statistic, an indexed block that does not hold what the Cues say, or one in a damaged region, all leave the extraction to the walk, so no cue is ever dropped for the index's sake; the WebVTT is the same either way. A source that stops before the end its Segment declares (a download not finished) writes the cues it holds, then returns an error matching `ops.ErrSourceTruncated` (`matroska.ErrSourceTruncated`) that says how far they reach: keep the output, or extract again once the file is complete.
+
 #### A damaged region
 
 Every Matroska subtitle read - `ExtractSubtitle`, `ExtractASS`,

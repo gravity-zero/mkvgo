@@ -778,6 +778,10 @@ var (
 	ErrTrackNotIndexed = ops.ErrTrackNotIndexed
 )
 
+// ErrSourceTruncated is returned, after the cues it holds are written, by a WebVTT extraction from a source that
+// stops before its declared end. See ops.ErrSourceTruncated.
+var ErrSourceTruncated = ops.ErrSourceTruncated
+
 // BuildSubtitleIndex walks a source once and records the block positions of the
 // given subtitle tracks (all of them when none are named). mkvgo does not store
 // the result: marshal it and keep it wherever suits. See ops.BuildSubtitleIndex.
