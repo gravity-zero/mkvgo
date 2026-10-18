@@ -165,6 +165,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 		if nextPts >= 0 {
 			nextK = clock.peek(nextPts)
 			window[len(window)-1].durTS = nextK*gridTS - clock.k*gridTS
+			markReachingNext(window, nextK*gridTS)
 		}
 		if nextPts < 0 || window[len(window)-1].cut { // the track's final sample (fillFragTiming's grid rule), or one a damaged region cut short
 			window[len(window)-1].durTS = gridTS
@@ -195,10 +196,22 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 	}
 	if last := len(window) - 1; nextPts >= 0 && !window[last].cut {
 		window[last].durTS = scale(nextPts) - dts[last]
+		markReachingNext(window, scale(nextPts)-base)
 	} else { // the track's final sample (fillFragTiming's rule), or one a damaged region cut short
 		window[last].durTS = pt.lastDurTS
 	}
 	return dts[0] - base, windowHasCTS(window), nextK
+}
+
+// markReachingNext flags the samples timed at or past nextDTS, where the next window opens, and keeps the last one
+// lasting forward: the whole-track pass would have pushed the next window instead.
+func markReachingNext(window []fragSample, nextDTS int64) {
+	for x := range window {
+		window[x].reachesNext = window[x].dtsTS >= nextDTS
+	}
+	if last := &window[len(window)-1]; last.durTS <= 0 {
+		last.durTS = 1
+	}
 }
 
 // gridClock is fillFragTiming's running frame index for grid-timed audio: re-derived from each block's timecode, never stepping back, one slot per lace frame.

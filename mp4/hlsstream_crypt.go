@@ -68,7 +68,7 @@ func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 			}
 			*bufp = buf
 		}
-		if td.entries[x], err = k.entry(buf, s.dtsTS); err != nil {
+		if td.entries[x], err = k.sampleEntry(buf, s); err != nil {
 			return err
 		}
 	}

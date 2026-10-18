@@ -47,6 +47,9 @@ type fragSample struct {
 	dtsTS int64
 	durTS int64
 	ctsTS int32
+	// reachesNext marks a sample an on-demand window times at or past the next window's first decode time, which
+	// the next segment's 'cenc' IV would repeat.
+	reachesNext bool
 	// cut marks the last sample before a damaged region a window walk passed
 	// over: its duration is the track's frame duration, not the gap to the
 	// first sample past the region.

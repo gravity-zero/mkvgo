@@ -603,7 +603,7 @@ func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, trackID uint
 	for i := range samples {
 		size := int(samples[i].size)
 		sample := out[pos : pos+size]
-		e, err := k.entry(sample, samples[i].dtsTS)
+		e, err := k.sampleEntry(sample, samples[i])
 		if err != nil {
 			return nil, nil, err
 		}
@@ -643,6 +643,14 @@ func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (
 		}
 	}
 	return k, nil
+}
+
+// sampleEntry is entry for a sample of a segment, refusing one whose 'cenc' IV the next segment repeats.
+func (k *cencCipher) sampleEntry(sample []byte, s fragSample) (sencEntry, error) {
+	if s.reachesNext && k.c.Scheme == "cenc" {
+		return sencEntry{}, errf("Options.CENC: track %d has samples decoded at the same time on both sides of a segment boundary, which the 'cenc' scheme would encrypt with one IV; package it with the cbcs scheme", k.trackID)
+	}
+	return k.entry(sample, s.dtsTS)
 }
 
 // entry is a plaintext sample's senc entry: its IV ('cenc') and, for video, its clear/protected subsamples.

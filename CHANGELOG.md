@@ -23,7 +23,9 @@ this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 Encryption:
 
 - No two samples of a track share a 'cenc' IV: decode times are strictly
-  increasing, and a repeated IV or a decode time past 2^48 ticks is refused.
+  increasing, and a repeated IV or a decode time past 2^48 ticks is refused,
+  across an on-demand plan's segment boundaries too, where a sample timed
+  into the next segment no longer lasts zero or negative ticks.
 - 'cenc' refuses two tracks whose IVs coincide (IDs equal modulo 255), an ABR
   ladder past 256 variants, and a 16-byte IV leaving its block counter no room.
 - Concatenated presentations refuse CENC: every part restarted the same IVs
