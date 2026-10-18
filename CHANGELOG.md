@@ -99,6 +99,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A fragment's trun must fit the data the fragment holds.** A trun
+  listing no per-sample field is a count alone: twenty bytes declared 16M
+  samples, 800 MB of records, in a file of a few hundred bytes. Its samples,
+  each taken as at least one byte, must fit the fragment's data.
 - **An MP4 sync table holds only what the track can use.** `stss` was
   sized from the count it declares, whatever the track's sample count, and a
   table cut short read as "every sample is a keyframe", which cut on frames

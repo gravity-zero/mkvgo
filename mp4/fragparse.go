@@ -306,6 +306,9 @@ func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uin
 	if n := trafSampleCount(boxes); n > room {
 		return 0, errf("a fragment declares %d samples, past the %d a movie may hold: the file is damaged or forged", n, max(room, 0))
 	}
+	if err := trunsFitData(boxes, h.defSize, limit-moofStart); err != nil {
+		return 0, err
+	}
 	first := len(t.samples)
 	dataEnd, dts, err := placeTrafSamples(boxes, t, base, baseDecodeTime, h)
 	if err != nil {
@@ -330,6 +333,21 @@ func trafSampleCount(boxes []memBox) int64 {
 		}
 	}
 	return n
+}
+
+// trunsFitData refuses a trun that lists no per-sample field yet more samples than the fragment's span of data
+// holds: its count alone, a few bytes, would otherwise add millions of samples, each taken as at least one byte.
+func trunsFitData(boxes []memBox, defSize uint32, span int64) error {
+	const perSample = trunSampleDuration | trunSampleSize | trunSampleFlags | trunSampleCTS
+	for _, b := range boxes {
+		if b.typ != "trun" || len(b.payload) < 8 || binary.BigEndian.Uint32(b.payload[0:4])&perSample != 0 {
+			continue
+		}
+		if n := int64(binary.BigEndian.Uint32(b.payload[4:8])); n*int64(max(defSize, 1)) > max(span, 0) {
+			return errf("a trun declares %d samples of %d bytes where the fragment holds %d bytes of data: the file is damaged or forged", n, defSize, max(span, 0))
+		}
+	}
+	return nil
 }
 
 // placeTrafSamples appends the samples of a traf's truns anchored on base; it returns the data end and decode end.
