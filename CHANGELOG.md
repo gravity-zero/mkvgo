@@ -6,302 +6,129 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
+this release, re-package what CENC 'cenc' encrypted and rotate its keys.
+
+### Changed
+
+- `serve` and `serve-growing` listen on `127.0.0.1:8478` by default;
+  `-addr :8478` opens them to the network.
+- `mp4.CENCOptions` without a `KeyURI` is refused instead of writing the key
+  into the playlists as a `data:` URI; `InlineKey` (wasm `inlineKey`) asks for it.
+- `s3fs` refuses to send a session token to an `http://` endpoint unless
+  `Options.AllowHTTPSessionToken` is set.
+
 ### Security
 
-- **`serve` and `serve-growing` listen on this machine only by default.**
-  The default address was `:8478`, every interface, so a file served to a
-  local player was readable from the network. It is now `127.0.0.1:8478`;
-  `-addr :8478` opens it to the network.
-- **`s3fs` keeps a session token off plain http.** A `SessionToken` (or
-  `AWS_SESSION_TOKEN`) sent to an `http://` endpoint crossed the network in
-  clear, and anyone on the path could reuse it until it expired. Such a read
-  is refused with what to do: an `https://` endpoint, or the new
-  `Options.AllowHTTPSessionToken`. Reads without a session token are unchanged.
-- **CENC needs a key URI.** `CENCOptions` with an empty `KeyURI` wrote the
-  content key in clear into every playlist, as a `data:` URI. Such a plan is
-  now refused with what to do: set `KeyURI`, or the new `InlineKey` to embed
-  the key on purpose (testing only); the CLI already asked for
-  `--cenc-inline-key`, and the wasm build takes `inlineKey`.
-- **Credentials in a URL stay out of errors.** A `user:password@` before
-  the host was kept where the query was cut; it is dropped too, and the
-  errors of a concat comparison name their parts that way as well.
-- **No two samples of a track share a 'cenc' IV.** A sample's IV is the base
-  plus its decode time, and decode times were the presentation times sorted
-  as they were: two blocks stamped alike, a broken remux's duplicate
-  timestamp, took one IV and one AES-CTR keystream. Decode times are now
-  strictly increasing, the full pass and the plan alike, and a fragment that
-  would still repeat an IV, an MP4 source whose `stts` holds a zero delta, is
-  refused with the `cbcs` scheme named, as is a decode time past 2^48 ticks,
-  where a track's IVs would reach another track's or variant's.
-- **A file's strings no longer reshape the manifests.** A track's name and
-  language, a chapter title and a codec string were written with Go's `%q`:
-  a `"` closed the HLS quoted string, which has no escape, and the DASH
-  attribute, which `%q` does not XML-escape. A crafted file could add
-  attributes to the master playlist and elements, such as a `BaseURL` to
-  another host, to the manifest. HLS strings now drop `"`, CR and LF; DASH
-  attributes are XML-escaped.
-- **A 16-byte 'cenc' IV must leave its block counter room.** AES-CTR counts
-  a sample's blocks in the IV's last 8 bytes; an IV ending near `ff..ff`
-  carried that count into the next sample's IV, which then shared keystream.
-  Such an IV is refused, naming the bound (`ffffffff00000000`).
-- **A 'cenc' ABR ladder holds at most 256 variants.** Variants share the key
-  and part its IV space by variant number; a 257th variant's video took the
-  IVs of the first variant's audio track 255. `PlanABR` and `RemuxToABR`
-  refuse a longer ladder under one 'cenc' key.
-- **Every version from v0.13.0 to v0.55.1 is retracted**, and the
-  pseudo-versions of commits after v0.12.0 with them. They ship
-  `httpfs` (from v0.13.0), `s3fs` and the CENC 'cenc' packaging (from
-  v0.17.0), and with them the flaws fixed up to v0.56.0 that apply to each: the
-  AES-CTR keystream reused across tracks, variants or concatenated parts under
-  one key (re-package what they encrypted and rotate its keys), the S3
-  credentials a bucket could move to another host or carry over a redirect,
-  and the allocations a remote source or a crafted file sized. `go get` warns
-  on a retracted version, `go list -m -u` flags it, and `@latest` skips it.
-- **Concatenated presentations refuse CENC.** `PlanConcat`,
-  `RemuxConcatToHLS`, `concat-hls` and `concat-segment` packaged every part
-  with the same key and IVs restarting at 0, so two episodes shared their
-  AES-CTR keystream; they now refuse `Options.CENC` as they refuse `Encrypt`.
-- **An MP4 declares at most 16M samples, all tracks together.** A 20-byte
-  fragment `trun` could ask for 4 billion samples (about 200 GB), and
-  constant-size sample tables sized against a remote source's claimed length
-  for about 8 GB per track. A fragment past the bound is refused; a track whose
-  table passes it is described and refused by name for a remux.
-- **A segment holds at most 256 MiB of media.** An MP4 segment's buffer was
-  allocated whole from the sample sizes the source declares, before any byte
-  was read: overlapping samples made a 100 MiB file ask for gigabytes per
-  segment. Such a segment is now refused with an error that names the bound.
-- **`LoadAttachmentData` no longer allocates the size an attachment
-  declares.** It sized its buffer from the FileData length the file states,
-  so a few bytes of Matroska could ask for a terabyte; the buffer now grows as
-  bytes arrive and a payload past the end of the file fails.
-- **Errors no longer show a URL's query.** A presigned URL keeps its
-  signature and session token in the query, and every error naming a remote
-  source printed the URL whole: `httpfs` and the client's own errors, the
-  planner, the readers, `ops`, a concat or ABR part, an `httpfs` file's
-  `Stat().Name()`. They name it up to the `?` now.
-- **`httpfs` refuses an https to http redirect while `Options.Header` is
-  set.** The same-host check let it through, and Go strips only its own
-  credential headers on that hop: custom ones such as `X-Api-Key` crossed in
-  clear.
-- **CENC 'cenc' refuses two tracks whose IVs would coincide.** A track's IVs
-  are set apart by its ID modulo 255, so two audio tracks numbered 2 and 257
-  shared their keystream; such a presentation is now refused and names both
-  tracks.
-- **VP9 'cenc' content packaged before v0.55.0 needs a new key.** v0.55.0
-  moved each VP9 frame's protected run by up to 15 bytes: re-packaging the same
-  VP9 title with v0.55 under the same key and IV applies the same keystream to
-  shifted bytes, so the old and new outputs together leak plaintext. The docs
-  now say a title needs its own key or base IV under `cenc`.
-- **A Cues element costs memory in proportion to the points it positions.**
-  Each 2-byte empty CuePoint became a 32-byte entry, so 8 MiB of them made a
-  probe allocate 732 MiB; an empty point is now skipped, and Cues past 8M
-  points are refused as damaged.
+Encryption:
+
+- No two samples of a track share a 'cenc' IV: decode times are strictly
+  increasing, and a repeated IV or a decode time past 2^48 ticks is refused.
+- 'cenc' refuses two tracks whose IVs coincide (IDs equal modulo 255), an ABR
+  ladder past 256 variants, and a 16-byte IV leaving its block counter no room.
+- Concatenated presentations refuse CENC: every part restarted the same IVs
+  under one key.
+- VP9 'cenc' content packaged before v0.55.0 needs a new key or base IV
+  before it is packaged again (the protected runs moved).
+- Versions v0.13.0 to v0.55.1, and the pseudo-versions after v0.12.0, are
+  retracted for the flaws above and below; `@latest` skips them.
+
+Remote sources:
+
+- Errors never show a URL's query or `user:password@`, `Stat().Name()` included.
+- `httpfs` refuses an https to http redirect while `Options.Header` is set.
+
+Crafted files (each was an allocation or a crash a few bytes could trigger):
+
+- Manifests escape a file's strings: HLS drops `"`, CR and LF, DASH
+  attributes are XML-escaped (a title could add a `BaseURL` to another host).
+- An MP4 declares at most 16M samples in all, and a segment holds at most
+  256 MiB of media.
+- `LoadAttachmentData` grows its buffer as bytes arrive instead of trusting
+  the declared size.
+- Empty CuePoints are skipped and Cues past 8M points are refused as damage.
 
 ### Added
 
-- **`subtitle.ParseSRTReader`** (and `matroska.ParseSRTReader`) parses SRT from a
-  reader, for a source opened through a caller's filesystem.
-- **MP4/MOV is edited natively, not just remuxed.** `mp4.EditInPlace`,
-  `EditMetadata`, `SetChapters`, `RemoveTrack`, `Rewrite`, `Split`, `Join`,
-  `Mux`, `Merge`, `AddTrack` and `MergeSubtitle` copy the samples and sample
-  descriptions byte for byte and write only new tables; the CLI's `edit`,
-  `edit-title`, `edit-track`, `edit-inplace`, `set-chapters`, `remove-track`,
-  `add-track`, `mux`, `merge`, `merge-subtitle`, `split` and `join` route an
-  MP4/MOV source to them, and `to-mp4` on an MP4/MOV rewrites it fast start.
-  An in-place edit rewrites the moov alone, crash-ordered like `retime`. A
-  split opens each part on a video keyframe with a recomputed edit list, so the
-  audio stays in sync; a join resumes each file where the previous one's
-  presentation ends, without replaying the priming or the padding its edit
-  list hides, holds the last audio sample over a gap up to 500 ms and refuses
-  a longer one, and gives a split's parts back sample for sample. Fragmented and
-  encrypted MP4 are refused; what MP4 cannot hold (attachments, styled ASS)
-  still goes through `from-mp4` / `to-mp4`. `mkvgo.EditInPlace` routes either
-  container, and `mp4.LanguageFields` splits a language as a user gives it
-  into the 3-letter code and the BCP-47 tag. Every command refuses an output
-  that is one of its inputs, and a mux, merge or join of MP4 and Matroska
-  files together.
-- **`split` part names never collide and the pattern is checked first**, for
-  both containers: a name already taken (case aside) gets the next free
-  number, a chapter title is cut to 200 bytes, and a pattern that is a path
-  or has a verb other than the part number is refused before anything is
-  written.
+- Native MP4/MOV editing: `mp4.EditInPlace`, `EditMetadata`, `SetChapters`,
+  `RemoveTrack`, `Rewrite`, `Split`, `Join`, `Mux`, `Merge`, `AddTrack` and
+  `MergeSubtitle` copy samples byte for byte and rewrite only the tables; the
+  CLI routes an MP4/MOV to them (`edit`, `edit-title`, `edit-track`,
+  `edit-inplace`, `set-chapters`, `remove-track`, `add-track`, `mux`, `merge`,
+  `merge-subtitle`, `split`, `join`), and `to-mp4` on an MP4/MOV rewrites it
+  fast start. An in-place edit rewrites the moov alone, crash-ordered like
+  `retime`. A split opens each part on a keyframe with its audio in sync; a
+  join resumes each file where the previous one ends, without replaying
+  priming or padding, holds the last audio sample over a gap up to 500 ms and
+  refuses a longer one, and gives a split's parts back sample for sample.
+  Fragmented and encrypted MP4 are refused, as are an output that is one of
+  the inputs and a mux, merge or join mixing MP4 and Matroska; what MP4
+  cannot hold (attachments, styled ASS) still goes through `from-mp4` / `to-mp4`.
+- `mp4.LanguageFields` turns a user's language into the 3-letter code and the
+  BCP-47 tag; `mkvgo.EditInPlace` routes either container.
+- `subtitle.ParseSRTReader` (and `matroska.ParseSRTReader`) parses SRT from a reader.
+- `split` part names never collide (case aside), chapter titles are cut to
+  200 bytes and avoid Windows device names, and a bad pattern is refused first.
+- `mp4.Diagnose` reports a `sample-table` finding: a table the file cannot
+  hold, or a sample outside every `mdat`.
 
 ### Fixed
 
-- **A Cluster Timestamp past what a block's time can be added to is
-  damage.** Read into an int64 and added to a block's relative timecode, a
-  value near 2^63 wrapped into a negative block time; the block reader refuses
-  such a Cluster and the keyframe walks ignore its time.
-- **MP4 tick conversions saturate instead of wrapping.** A decode time past
-  what `ticks*1000` holds in an int64, reachable with 16M samples of 2^31
-  ticks, wrapped and read as a negative time; large values now scale in two
-  parts and saturate.
-- **A MOV opening on a preview (`pnot`) or a `uuid` box was not recognised**
-  by the container-agnostic entry points (`mkvgo.EditInPlace`,
-  `RetimeTracks`, `Diagnose`) nor by the CLI's routing: they now sniff with
-  the same box list as the mp4 package (`mp4.OpensLikeISOBMFF`).
-- **The sidx boxes ahead of an MP4's fragments are read one at a time.**
-  Every one, up to 786 KiB each, was read and kept before the first was
-  looked at, so a file stacking thousands of them held gigabytes on a
-  head-only probe; the walk now stops at the one that serves.
-- **`mp4.Diagnose` reads the sample tables.** It read the boxes and the track
-  headers and called healthy a file whose sample table points outside the
-  media, a chunk at offset 0 inside the `ftyp`, which every edit refuses or
-  copies wrong. A table the file cannot hold, or a sample outside every
-  `mdat`, is now a `sample-table` finding.
-- **`serve` and `serve-growing` bound slow clients.** Their HTTP server
-  had no timeout: a client sending or reading nothing held a connection, a
-  source handle and a segment's budget. A request header must arrive within
-  10 s, an idle connection closes after 2 min, and an HLS response must be
-  written within 5 min; a direct-play response keeps no write deadline.
-- **An EBML lace of one frame is that frame.** RFC 9559 codes the size of
-  every frame but the last, so such a lace codes none; the full decoder read
-  the frame's first bytes as a size and cut it short, the header-only one
-  refused the block.
-- **The keyframe walks resync past a block that overruns its Cluster,
-  and a block whose track number runs past it is refused whether its track is
-  kept or filtered.** The keyframe index lost the next Cluster's keyframes;
-  a filtered block discarded a negative count and left the walk inside the
-  data that followed.
-- **Read, ReadMeta and ReadStream agree on duplicate and odd head
-  elements.** The tail a SeekHead-less file is read back from added a second
-  Tracks to the head's and reset the Info; a Tracks of unknown size made
-  `ReadStream` skip the real one after it; and `ReadStream` stopped at a head
-  element running past the Segment's end that `Read` reads whole.
-- **Statistics tags find their tracks by UID.** Matching them walked
-  every tag for every track: 50,000 of each, a few megabytes of file, cost
-  billions of comparisons on every read.
-- **Every entry a Matroska reader keeps is charged to the metadata
-  budget.** Only strings and binaries were: a Tracks of empty TrackEntry
-  elements, two bytes each, became a 560-byte track apiece, 4 MB of input
-  holding 1.5 GB. Tracks, editions, chapters, tags, simple tags and
-  attachments are charged what they hold in memory.
-- **A fragment's trun must fit the data the fragment holds.** A trun
-  listing no per-sample field is a count alone: twenty bytes declared 16M
-  samples, 800 MB of records, in a file of a few hundred bytes. Its samples,
-  each taken as at least one byte, must fit the fragment's data.
-- **An MP4 sync table holds only what the track can use.** `stss` was
-  sized from the count it declares, whatever the track's sample count, and a
-  table cut short read as "every sample is a keyframe", which cut on frames
-  that are not. Only sample numbers within the track count, and a short
-  table holds the entries it holds.
-- **A chapter-track sample larger than a title is not read.** Its buffer
-  was sized from the declared sample size before any byte arrived: one
-  sample claiming 4 GiB of a sparse or remote file allocated 4 GiB on a
-  metadata probe. A chapter track with a sample past 64 KiB is ignored.
-- **A PGS object named many times is decoded once.** A composition could
-  name one object 255 times and each reference decoded it again: a few bytes
-  held 16 GiB. An object, or a crop of it, is decoded once per display set,
-  its placements sharing the image, and a block whose display sets would
-  decode past four 4096x4096 objects is refused.
-- **An MP4 nesting containers past the sample tables is refused.** The
-  metadata path descended into every container box with no depth bound: a
-  few tens of megabytes of nested `trak` boxes overflowed the goroutine
-  stack, a fatal error that stops the whole process. Past eight levels the
-  moov is refused.
-- **`retime` on an MP4 shifted the wrong track when a trak the probe does not
-  list (a timecode or chapter track) came first:** track numbers were counted
-  over every trak, so `--shift 2=...` could move the video. They are the
-  probe's again, and its refusals name them the same way.
-- **A forged `elst` sized an allocation:** its entry count is checked against
-  the bytes the box holds before anything is allocated (a few-KB file could ask
-  for about 96 GiB).
-- **A MOV's title was not read:** the QuickTime user-data text atoms
-  (`udta/©nam`, `©ART`…) are read when no `ilst` value says otherwise.
-- **The JSON patch of `edit` and `edit-inplace` ignored what it did not
-  know:** an unknown field or a track ID the file does not have is now an
-  error, for both containers, and `language_bcp47` is accepted.
-- **The EBML lace decoder refuses sizes that are not sizes.** A first byte
-  of `0x00`, or a size cut short by the block's end, decoded as a value where
-  the stream decoder refuses it, and the running total could wrap past 2^63
-  back onto the payload's length, so 25 frames of 3.6e16 bytes passed it.
-- **An empty DisplayWidth or DisplayHeight means square pixels.** It was
-  read as a display size of 0; it takes its default, the pixel size, which
-  the track reports as no display size.
-- **A value past what an int64 holds is unknown, not negative.** A
-  DefaultDuration, CodecDelay or SeekPreRoll, a cue time or Cluster position
-  above 2^63 was read as a negative number; it is left unknown now, and a cue
-  point with no usable time or Cluster position is dropped instead of kept as
-  a seek to offset 0.
-- **`ReadStream` describes a file as `Read` does.** It decoded each element
-  with its own copy of the decoders, which had fallen behind: an Opus track
-  lost its `CodecDelay` and `SeekPreRoll`, a video its HDR metadata and stereo
-  mode, a track its role flags, the Info its date, a video its frame rate and
-  a track its bitrate from the tags. It now runs the seekable reader's
-  decoders over each element's body, makes the same head-only derivations,
-  refuses a Duration that overflows and keeps the first of duplicate Info and
-  Tracks elements, as `Read` does. A differential fuzz target
-  (`FuzzReadVsReadStream`) now holds both readers to one description of a
-  file; it also found `ReadStream` losing what followed an edition's UID, the
-  SegmentUID, PrevUID and NextUID, and reading elements that start past the
-  Segment's declared end, and `Read` skipping its Tags behind a SeekHead child
-  that declared more than the SeekHead held; past a damaged byte, both readers
-  now resync only on an element that fits the Segment.
-- **A block that runs past its Cluster is damage.** A SimpleBlock or a
-  BlockGroup's Block declaring more bytes than its parent holds swallowed the
-  next Cluster and lost its blocks without an error; the walk now reports a
-  `DamageError` resuming on that Cluster, or skips to it under `SetSkipDamage`.
-- **A subtitle index that points at bytes no Cluster holds is stale, not
-  damaged.** `SubtitleIndex.Resolve` and the `From` reads took any position
-  that failed to parse for a damaged region when a Cluster followed within
-  `DamageBytes`, dropping its cues silently; only null bytes, a download's
-  gap, count as damage now, and anything else fails as before.
-- **Damage that runs to the end of the file ends a tolerant walk.** A
-  download whose last pieces never arrived left a zeroed tail with no Cluster
-  behind it, and every subtitle read failed with "damage inside the file";
-  when the tail lies within `DamageBytes` the walk now ends there, the region
-  reported once through `OnSkip`.
-- **A WebVTT cue without BlockDuration ends where a damaged region begins.**
-  Its end fell back to the next cue's start, past the region, so it stayed on
-  screen over the whole lost span; it now ends at the region's start time, or
-  after the default 3 s when that is not later than the cue, as a PGS cue does.
-- **`reader.DamageError` names the repair in library terms.** Its message
-  told library callers to run a CLI command; it now says to rewrite the file
-  with a resyncing reindex (or raise the damage bound), and the CLI adds
-  `mkvgo reindex --resync` when it exits on such an error.
-- **A negative `DamageBytes` refuses any damage in `mp4.Options` too, and on
-  the CLI.** `mkv.Options` refused any damage under a negative value while
-  `mp4.Options` fell back to the 64 MiB default, and `--damage-bytes` refused
-  any value but a positive one; both now take `-1` to refuse any damage.
-- **Damage ahead of the first Cluster is reported.** A tolerant walk resynced
-  past it silently, so a subtitle read lost the first Cluster's cues without
-  an `OnSkip` call; the region is now reported, timed from 0.
-- **A stream reader reads a large skip through instead of seeking.** Past
-  64 KiB, `NewStreamBlockReader` and `ReadStream` tried to seek over a block
-  of a filtered track or a header-only payload and failed with "stream is not
-  seekable"; a source that cannot seek now reads every skip through.
-- **An empty element reads as its schema default.** RFC 8794 section 6.1 has
-  an element of size 0 take the default RFC 9559 gives it; both readers read
-  it as 0 or "" instead, so an empty FlagDefault made a track non-default.
-  FlagDefault, Channels, SamplingFrequency, TimestampScale, FieldOrder, the
-  colour code points, Language and TagLanguage now take their defaults.
-- **A string ends at its first null byte.** RFC 8794 section 13 leaves the
-  bytes after it out of the string; only trailing nulls were trimmed, so
-  `eng\0xx` read as five characters.
-- **A child declaring more bytes than its parent holds no longer swallows
-  what follows the parent.** Both readers now skip the rest of the parent, as
-  the track-duration scan already did; a Void overrunning Tracks used to take
-  the Tags behind it, and `ReadStream` the Cluster too.
-- **A value past its field's width is left unknown instead of truncated.**
-  Channels and BitDepth (8 bits), PixelWidth, PixelHeight, DisplayWidth,
-  DisplayHeight, MaxCLL and MaxFALL (32 bits), StereoMode and the Colour code
-  points (16 bits) wrapped silently, so 300 channels read as 44; such a value
-  is now dropped, and a rejected channel count does not fall back to 1.
-- **A split part named after a chapter never takes a Windows device name.**
-  A chapter titled `CON` or `nul.txt` made `CON.mkv` or `nul.txt.mkv`, which
-  Windows opens as a device; such a name now takes a leading `_`, `COM0`,
-  `LPT0` and the superscript forms `COM¹` to `LPT³` included. Titles with
-  path separators were already kept under `OutputDir`, now held by a test; the
-  docs say that `Split` overwrites an existing part.
+Matroska reading:
+
+- `ReadStream` describes a file as `Read` does: it runs the same decoders,
+  and a differential fuzz target (`FuzzReadVsReadStream`) holds them together.
+- Duplicate Info or Tracks keep the first; an unknown-size Tracks no longer
+  hides the next one.
+- A child overrunning its parent, or a block overrunning its Cluster, is
+  bounded or reported as damage instead of swallowing what follows.
+- Empty elements take their schema default, strings end at their first null,
+  and values past an int64 or their field's width are left unknown.
+- An empty DisplayWidth or DisplayHeight means square pixels; a cue point
+  without a time or position is dropped.
+- The EBML lace decoder refuses sizes that are not sizes and reads a one-frame
+  lace as that frame.
+- A Cluster Timestamp that would wrap a block's time is damage.
+- Every kept entry is charged to the metadata budget, and statistics tags
+  find their tracks by UID (50,000 tracks cost billions of comparisons).
+- A PGS object referenced many times is decoded once per display set.
+
+Damage and resync:
+
+- The keyframe walks resync past a block that overruns its Cluster, and
+  past a damaged byte both readers resync only on an element that fits the Segment.
+- Damage ahead of the first Cluster, or running to the end of the file, is
+  reported once through `OnSkip` and ends the walk where it should.
+- A subtitle index pointing at bytes no Cluster holds is stale, not damage; a
+  WebVTT cue without a duration ends where a damaged region begins.
+- A negative `DamageBytes` refuses any damage in `mp4.Options` and the CLI too;
+  `reader.DamageError` names the repair in library terms.
+- A stream reader reads a large skip through instead of seeking.
+
+MP4:
+
+- `retime` addresses tracks as the probe lists them (a timecode track first
+  could shift the video).
+- Tick conversions saturate instead of wrapping; a MOV opening on `pnot` or
+  `uuid` is recognised everywhere.
+- Sync tables hold only usable entries, a fragment's `trun` must fit its
+  data, a forged `elst` count is checked, the sidx boxes are read one at a
+  time, a chapter sample past 64 KiB is ignored, and containers nest at most
+  eight levels deep.
+- A MOV's QuickTime user-data title is read, and the `edit` JSON patch
+  refuses unknown fields and tracks and accepts `language_bcp47`.
+
+Serving:
+
+- `serve` and `serve-growing` time out slow clients (10 s header, 2 min
+  idle, 5 min HLS response).
+
 ### Documentation
 
-- **`ReadStream`'s comment on an unknown-size element matches what it does.**
-  It said the metadata scan stops there; the scan reads on into the element's
-  body up to the next segment-level element, so Tracks behind an unknown-size
-  SeekHead are still read. A test now holds both cases.
-- **`SECURITY.md`** says how to report a vulnerability, which versions get
-  fixes, and what is in scope: parsing untrusted files, remote sources,
-  serving and encryption.
+- `SECURITY.md` says how to report a vulnerability and what is in scope.
+- `docs/library.md` says what a HEAD, a 304 or a short Range costs a source,
+  what a server's declared sizes can make one open allocate, and that only
+  `Diagnose` looks for a sample outside every `mdat`.
 
 ## [0.55.1] - 2026-10-17
 
