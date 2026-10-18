@@ -887,6 +887,22 @@ func patchMetaBox(p []byte, title string, tags []mkv.SimpleTag) ([]byte, error) 
 			}
 		}
 	}
+	return mapIlst(p, func(atoms []memBox) [][]byte {
+		var kids [][]byte
+		for _, a := range freshAtoms {
+			kids = append(kids, box(a.typ, a.payload))
+		}
+		for _, a := range atoms {
+			if _, managed := metaAtomNames[a.typ]; !managed {
+				kids = append(kids, box(a.typ, a.payload))
+			}
+		}
+		return kids
+	})
+}
+
+// mapIlst rebuilds a meta box (full box, or QuickTime's bare form) with its ilst atoms passed through fn, adding an ilst when it has none.
+func mapIlst(p []byte, fn func(atoms []memBox) [][]byte) ([]byte, error) {
 	head, body := p[:0], p
 	if len(p) >= 4 {
 		if mb, err := iterBoxes(p[4:]); err == nil && (hasMemBox(mb, "ilst") || hasMemBox(mb, "hdlr")) {
@@ -902,16 +918,7 @@ func patchMetaBox(p []byte, title string, tags []mkv.SimpleTag) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		var kids [][]byte
-		for _, a := range freshAtoms {
-			kids = append(kids, box(a.typ, a.payload))
-		}
-		for _, a := range atoms {
-			if _, managed := metaAtomNames[a.typ]; !managed {
-				kids = append(kids, box(a.typ, a.payload))
-			}
-		}
-		return container("ilst", kids...), nil
+		return container("ilst", fn(atoms)...), nil
 	}
 	var w bw
 	w.bytes(head)

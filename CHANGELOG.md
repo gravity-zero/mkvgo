@@ -69,6 +69,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   join resumes each file where the previous one ends, without replaying
   priming or padding, holds the last audio sample over a gap up to 500 ms and
   refuses a longer one, and gives a split's parts back sample for sample.
+  A split's parts are chained by `org.mkvgo` freeform tags (`SPLIT_UID`,
+  `SPLIT_PREV`): a join makes a chapter the split cut whole again only
+  between linked parts, keeps at most 255 chapters, and writes no link.
   Fragmented and encrypted MP4 are refused, as are an output that is one of
   the inputs and a mux, merge or join mixing MP4 and Matroska; what MP4
   cannot hold (attachments, styled ASS) still goes through `from-mp4` / `to-mp4`. A track

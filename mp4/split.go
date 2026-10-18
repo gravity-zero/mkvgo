@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -35,6 +36,8 @@ type cutModel struct {
 	meta    *mkv.Container
 	ref     int   // the track cuts land on: the first video track, else the first
 	held    int64 // bytes of moov the model keeps
+	link    splitLink
+	seed    [32]byte // the moov's hash, the parts' links derive from it
 }
 
 // loadCutModel opens a source's moov into a cutModel, chunk offsets shifted by base, samples taken from budget.
@@ -59,7 +62,7 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 	if err != nil {
 		return nil, err
 	}
-	m := &cutModel{path: path, meta: meta, ref: -1, held: int64(len(payload))}
+	m := &cutModel{path: path, meta: meta, ref: -1, held: int64(len(payload)), link: readSplitLink(boxes), seed: sha256.Sum256(payload)}
 	var traks [][]byte
 	for _, b := range boxes {
 		switch b.typ {
@@ -385,11 +388,12 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 		return nil, err
 	}
 	var outputs []string
+	links := splitLinks(m.seed, m.link, len(plans))
 	for i := range plans {
 		if err := ctx.Err(); err != nil {
 			return outputs, err
 		}
-		if err := m.writePart(ctx, src, size, lay, plans[i], paths[i], o); err != nil {
+		if err := m.writePart(ctx, src, size, lay, plans[i], links[i], paths[i], o); err != nil {
 			return outputs, errf("split: part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, paths[i])
@@ -451,8 +455,8 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 	return p, nil
 }
 
-// writePart writes the part a plan describes.
-func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64, lay outLayout, p partPlan, outPath string, o Options) error {
+// writePart writes the part a plan describes, link chaining it to its neighbours.
+func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64, lay outLayout, p partPlan, link splitLink, outPath string, o Options) error {
 	traks := make([][]byte, 0, len(m.tracks))
 	var movieDur int64
 	for i := range m.tracks {
@@ -481,6 +485,9 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 	vs := vsource{{size: size, r: src}}
 	payload, vs, err = withChapters(src, payload, vs, splitplan.ClipChapters(m.meta.Chapters, roundMs(p.tsNs), teMs))
 	if err != nil {
+		return err
+	}
+	if payload, err = withSplitLink(payload, link); err != nil {
 		return err
 	}
 	return writeRelocated(ctx, vs, payload, nil, lay, outPath, o)

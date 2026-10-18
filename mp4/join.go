@@ -101,8 +101,8 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 			if ch.EndMs > 0 {
 				ch.EndMs += roundMs(offsets[i])
 			}
-			// A chapter a split cut in two comes back whole: same title, running into the seam (or to the previous file's end as read, which truncates where the seam rounds).
-			if n := len(chs); n > 0 && j == 0 && ch.StartMs == roundMs(offsets[i]) && chs[n-1].Title == ch.Title &&
+			// A chapter a split cut in two comes back whole: the next part of that split, same title, running into the seam (or to the previous file's end as read, which truncates where the seam rounds).
+			if n := len(chs); n > 0 && j == 0 && m.link.continues(models[i-1].link) && ch.StartMs == roundMs(offsets[i]) && chs[n-1].Title == ch.Title &&
 				(chs[n-1].EndMs == 0 || chs[n-1].EndMs == ch.StartMs || chs[n-1].EndMs == roundMs(offsets[i-1])+models[i-1].meta.DurationMs) {
 				chs[n-1].EndMs = ch.EndMs
 				continue
@@ -112,7 +112,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 		}
 	}
 	r0 := vs[0].r
-	if payload, vs, err = withChapters(r0, payload, vs, chs); err != nil {
+	if payload, vs, err = withChapters(r0, payload, vs, tidyChapters(chs, 0)); err != nil {
+		return errf("join: %w", err)
+	}
+	// The output is no part of a split: the first part's link would chain it to files it does not follow.
+	if payload, err = withSplitLink(payload, splitLink{}); err != nil {
 		return errf("join: %w", err)
 	}
 	ftyp, err := sourceFtyp(r0, vs[0].size)

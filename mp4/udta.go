@@ -123,15 +123,10 @@ func parseIlstTags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cove
 // freeformContentHash decodes a freeform ilst atom when it carries one of
 // mkvgo's CONTENT_SHA256_<track_ID> values.
 func freeformContentHash(atomPayload []byte) (uint32, string, bool) {
-	boxes, err := iterBoxes(atomPayload)
-	if err != nil {
+	name, val, ok := freeformText(atomPayload)
+	if !ok {
 		return 0, "", false
 	}
-	nameBox, ok := findMemBox(boxes, "name")
-	if !ok || len(nameBox.payload) < 4 {
-		return 0, "", false
-	}
-	name := string(nameBox.payload[4:]) // skip the fullbox version/flags
 	const prefix = "CONTENT_SHA256_"
 	if !strings.HasPrefix(name, prefix) {
 		return 0, "", false
@@ -140,11 +135,21 @@ func freeformContentHash(atomPayload []byte) (uint32, string, bool) {
 	if err != nil {
 		return 0, "", false
 	}
-	val := ilstDataValue(atomPayload)
-	if val == "" {
-		return 0, "", false
-	}
 	return uint32(id), val, true
+}
+
+// freeformText decodes a freeform ilst atom's name and UTF-8 value (false when either is missing).
+func freeformText(atomPayload []byte) (name, value string, ok bool) {
+	boxes, err := iterBoxes(atomPayload)
+	if err != nil {
+		return "", "", false
+	}
+	nameBox, found := findMemBox(boxes, "name")
+	if !found || len(nameBox.payload) < 4 {
+		return "", "", false
+	}
+	value = ilstDataValue(atomPayload)
+	return string(nameBox.payload[4:]), value, value != "" // skip the name box's version/flags
 }
 
 // ilstCoverValue extracts a covr atom's image as a Matroska-style attachment.

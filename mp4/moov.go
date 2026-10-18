@@ -234,7 +234,12 @@ func buildMovieMeta(title string, tags []mkv.SimpleTag, cover *coverArt, hashes 
 				fmt.Sprintf("CONTENT_SHA256_%d", id), hashes[id]))
 		}
 	}
-	ilst := container("ilst", ilstChildren...)
+	return ilstMeta(ilstChildren...)
+}
+
+// ilstMeta is a movie-level meta box (iTunes mdir handler) holding an ilst of atoms.
+func ilstMeta(atoms ...[]byte) []byte {
+	ilst := container("ilst", atoms...)
 	hdlr := fullBox("hdlr", 0, 0, func(w *bw) {
 		w.u32(0)         // pre_defined
 		w.fourcc("mdir") // handler_type: metadata
