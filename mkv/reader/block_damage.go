@@ -55,8 +55,7 @@ func (br *BlockReader) SetDamageScan(n int64) { br.damageScan = n }
 
 // SkippedBytes is how many bytes of damaged regions a SetSkipDamage walk has
 // passed over so far; SkippedRanges, which regions.
-func (br *BlockReader) SkippedBytes() int64 { return br.skippedBytes }
-
+func (br *BlockReader) SkippedBytes() int64          { return br.skippedBytes }
 func (br *BlockReader) SkippedRanges() []DamageRange { return br.skipped }
 
 // maxZeroTail is the longest run of null bytes closing a file that is taken
