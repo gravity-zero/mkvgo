@@ -31,7 +31,7 @@ func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64,
 		return nil, 0, nil
 	}
 	// Bound the count before any n-sized allocation/loop: a tiny stsz must not be
-	// trusted to declare 134M samples (complexity DoS). Each sample occupies bytes
+	// trusted to declare millions of samples (complexity DoS). Each sample occupies bytes
 	// in the file, so the count cannot exceed the file size.
 	if fc > maxSamples {
 		return nil, 0, errf("stsz sample_count %d exceeds limit", fc)
@@ -225,7 +225,7 @@ func mustFind(boxes []memBox, typ string) []byte {
 // parseStsz returns the per-sample sizes. fileSize bounds the constant-size path
 // (sampleSize != 0), where the table carries no per-sample bytes: a tiny stsz must
 // not be trusted to declare more samples than the file can physically hold - the
-// classic complexity DoS that maxSamples alone (134M) does not stop. Pass
+// classic complexity DoS that maxSamples alone (16M) does not stop. Pass
 // fileSize == 0 to disable that bound (callers with no file size). The allocation
 // happens only after the count is validated, in both paths.
 func parseStsz(payload []byte, fileSize int64) ([]uint32, error) {
