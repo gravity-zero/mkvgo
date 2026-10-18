@@ -179,6 +179,8 @@ MP4:
 - `to-mp4` groups alternative tracks as the mainstream muxer does (audio in
   group 1, subtitles in group 3, the chapter track in none): with every
   track in group 0, Apple players showed one audio language and hid the rest.
+  `mux`, `merge`, `add-track` and `merge-subtitle` on MP4 regroup the tracks
+  they gather the same way, whatever group each source gave them.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
 - `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a

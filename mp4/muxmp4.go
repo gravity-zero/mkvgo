@@ -292,7 +292,7 @@ func muxMP4(ctx context.Context, inputs []muxInput, dstPath string, meta func(c 
 		if err != nil {
 			return errf("track %d of the output: %w", i+1, err)
 		}
-		if trak, err = setTrakID(trak, nextID); err != nil {
+		if trak, err = setTrakSlot(trak, nextID); err != nil {
 			return err
 		}
 		nextID++
@@ -534,9 +534,10 @@ func shiftChunkOffsets(trak []byte, base int64) ([]byte, error) {
 	})
 }
 
-// setTrakID sets a trak's tkhd track_ID.
-func setTrakID(trak []byte, id uint32) ([]byte, error) {
+// setTrakSlot sets a trak's tkhd track_ID, and its alternate_group to its type's: tracks muxed from files that grouped them apart group alike.
+func setTrakSlot(trak []byte, id uint32) ([]byte, error) {
 	return rewriteAt(trak, nil, func(tb []memBox) ([][]byte, error) {
+		group := alternateGroup(trakHandler(tb), false) // a mux carries no chapter track: it rebuilds one
 		out := make([][]byte, 0, len(tb))
 		for _, b := range tb {
 			if b.typ != "tkhd" {
@@ -544,14 +545,15 @@ func setTrakID(trak []byte, id uint32) ([]byte, error) {
 				continue
 			}
 			p := append([]byte(nil), b.payload...)
-			off := 12
+			off, gOff := 12, 34
 			if len(p) > 0 && p[0] == 1 {
-				off = 20
+				off, gOff = 20, 46
 			}
-			if len(p) < off+4 {
+			if len(p) < gOff+2 {
 				return nil, fmt.Errorf("tkhd too short")
 			}
-			p[off], p[off+1], p[off+2], p[off+3] = byte(id>>24), byte(id>>16), byte(id>>8), byte(id)
+			binary.BigEndian.PutUint32(p[off:], id)
+			binary.BigEndian.PutUint16(p[gOff:], group)
 			out = append(out, box("tkhd", p))
 		}
 		return out, nil
