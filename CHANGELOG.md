@@ -206,7 +206,8 @@ All notable changes to mkvgo are documented here. The format is based on
   file; it also found `ReadStream` losing what followed an edition's UID, the
   SegmentUID, PrevUID and NextUID, and reading elements that start past the
   Segment's declared end, and `Read` skipping its Tags behind a SeekHead child
-  that declared more than the SeekHead held.
+  that declared more than the SeekHead held; past a damaged byte, both readers
+  now resync only on an element that fits the Segment.
 - **A block that runs past its Cluster is damage.** A SimpleBlock or a
   BlockGroup's Block declaring more bytes than its parent holds swallowed the
   next Cluster and lost its blocks without an error; the walk now reports a

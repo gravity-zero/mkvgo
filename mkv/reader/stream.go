@@ -163,7 +163,7 @@ metaLoop:
 			// the next segment-level element, as the seekable readers do. A
 			// stream with nothing valid behind the junk keeps the decode error.
 			junkStart := p.pos
-			found, rerr := p.resyncStream(ctx, br0)
+			found, rerr := p.resyncStream(ctx, br0, segEnd)
 			if rerr != nil {
 				return nil, nil, rerr
 			}
@@ -280,9 +280,10 @@ func peekHeaderErr(br *bufio.Reader) error {
 
 // resyncStream is the forward-only counterpart of ResyncToSegmentElement: it
 // discards bytes until br sits on a plausible segment-level element (see
-// segmentElementPrefix) and reports whether one was found before the end of
-// the stream. The undecodable byte the caller stopped on is skipped first.
-func (p *streamParser) resyncStream(ctx context.Context, br *bufio.Reader) (bool, error) {
+// segmentElementPrefix) that fits the Segment ending at segEnd (-1: unknown)
+// and reports whether one was found. The undecodable byte the caller stopped
+// on is skipped first.
+func (p *streamParser) resyncStream(ctx context.Context, br *bufio.Reader, segEnd int64) (bool, error) {
 	skip := 1
 	for {
 		if err := ctx.Err(); err != nil {
@@ -290,6 +291,9 @@ func (p *streamParser) resyncStream(ctx context.Context, br *bufio.Reader) (bool
 		}
 		n, _ := br.Discard(skip)
 		p.pos += int64(n)
+		if segEnd >= 0 && p.pos >= segEnd {
+			return false, nil
+		}
 		b, _ := br.Peek(streamResyncWindow)
 		if len(b) < 4 {
 			return false, nil
@@ -300,7 +304,8 @@ func (p *streamParser) resyncStream(ctx context.Context, br *bufio.Reader) (bool
 		case i > 0:
 			skip = i // bring the candidate to the head of the window
 		default:
-			if _, _, ok := segmentElementPrefix(b); ok {
+			// The element must fit the Segment, as the seekable resync holds (resyncToSegmentElement).
+			if h, hn, ok := segmentElementPrefix(b); ok && (h.Size < 0 || segEnd < 0 || p.pos+int64(hn)+h.Size <= segEnd) {
 				return true, nil
 			}
 			skip = 1
