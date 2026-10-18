@@ -56,6 +56,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A block that runs past its Cluster is damage.** A SimpleBlock or a
+  BlockGroup's Block declaring more bytes than its parent holds swallowed the
+  next Cluster and lost its blocks without an error; the walk now reports a
+  `DamageError` resuming on that Cluster, or skips to it under `SetSkipDamage`.
 - **A subtitle index that points at bytes no Cluster holds is stale, not
   damaged.** `SubtitleIndex.Resolve` and the `From` reads took any position
   that failed to parse for a damaged region when a Cluster followed within

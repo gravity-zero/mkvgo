@@ -1081,6 +1081,10 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				continue
 			}
 
+			if err := pastEnd(h, br.r.tell(), br.clusterEnd); err != nil {
+				return mkv.Block{}, err
+			}
+
 			switch h.ID {
 			case mkv.IDTimestamp:
 				v, err := ebml.ReadUint(br.r, h.Size)
@@ -1344,6 +1348,15 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	return blocks[0], nil
 }
 
+// pastEnd refuses a child whose body, starting at body, runs past its parent's end (none when end < 0): read on, it
+// would swallow what follows the parent.
+func pastEnd(h ebml.ElementHeader, body, end int64) error {
+	if end < 0 || h.Size < 0 || body+h.Size <= end {
+		return nil
+	}
+	return fmt.Errorf("element 0x%X at %d runs %d bytes past its parent's end", h.ID, body, body+h.Size-end)
+}
+
 func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	start := br.r.tell()
 	end := start + size
@@ -1354,6 +1367,9 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
+			return mkv.Block{}, err
+		}
+		if err := pastEnd(h, br.r.tell(), end); err != nil {
 			return mkv.Block{}, err
 		}
 		switch h.ID {
