@@ -2388,7 +2388,7 @@ multiple); a file without Cues must be reindexed first. `Pattern` names the
 parts (default `part_%03d.mkv`); when splitting by chapters the `{title}`
 token is replaced by the sanitized chapter title: a path separator or control
 character becomes `_`, a name Windows reserves for a device (`CON`, `NUL`,
-`COM1`...) takes a leading `_`, and every part is checked to stay under
+`COM0`-`COM9`, `COM¹`-`COM³`, the same for `LPT`) takes a leading `_`, and every part is checked to stay under
 `OutputDir`. Unlike the CLI's single-output commands, `Split` does not refuse
 an existing file: a part whose name is taken is overwritten.
 

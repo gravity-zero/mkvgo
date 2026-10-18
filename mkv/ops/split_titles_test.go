@@ -61,3 +61,18 @@ func TestSplitTitlesStayInTheOutputDir(t *testing.T) {
 var reservedOnWindows = map[string]bool{"CON": true, "PRN": true, "AUX": true, "NUL": true,
 	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true, "COM6": true, "COM7": true, "COM8": true, "COM9": true,
 	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true, "LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true}
+
+// TestDeviceNamesWindowsReserves: Windows reserves COM0 and LPT0 and the superscript-digit forms COM¹ to LPT³ beside
+// CON, PRN, AUX, NUL, COM1-9 and LPT1-9.
+func TestDeviceNamesWindowsReserves(t *testing.T) {
+	for _, s := range []string{"CON", "NUL", "COM0", "COM9", "LPT0", "COM¹", "COM²", "LPT³"} {
+		if !deviceName(s) {
+			t.Errorf("deviceName(%q) = false, want reserved", s)
+		}
+	}
+	for _, s := range []string{"COM", "COM10", "LPT⁴", "CONSOLE", "COMA"} {
+		if deviceName(s) {
+			t.Errorf("deviceName(%q) = true, want free", s)
+		}
+	}
+}

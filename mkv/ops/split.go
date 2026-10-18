@@ -149,13 +149,21 @@ func sanitizeName(title string, n int) string {
 	return s
 }
 
-// deviceName reports a name Windows reserves for a device: CON, PRN, AUX, NUL, COM1-9, LPT1-9.
+// deviceName reports a name Windows reserves for a device: CON, PRN, AUX, NUL, COM and LPT followed by 0-9, ¹, ² or ³.
 func deviceName(s string) bool {
 	switch s {
 	case "CON", "PRN", "AUX", "NUL":
 		return true
 	}
-	return len(s) == 4 && (strings.HasPrefix(s, "COM") || strings.HasPrefix(s, "LPT")) && s[3] >= '1' && s[3] <= '9'
+	if !strings.HasPrefix(s, "COM") && !strings.HasPrefix(s, "LPT") {
+		return false
+	}
+	switch d := s[3:]; d {
+	case "¹", "²", "³":
+		return true
+	default:
+		return len(d) == 1 && d[0] >= '0' && d[0] <= '9'
+	}
 }
 
 func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {

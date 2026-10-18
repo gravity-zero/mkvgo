@@ -155,7 +155,8 @@ All notable changes to mkvgo are documented here. The format is based on
   SeekHead child that declared more than the SeekHead held.
 - **A split part named after a chapter never takes a Windows device name.**
   A chapter titled `CON` or `nul.txt` made `CON.mkv` or `nul.txt.mkv`, which
-  Windows opens as a device; such a name now takes a leading `_`. Titles with
+  Windows opens as a device; such a name now takes a leading `_`, `COM0`,
+  `LPT0` and the superscript forms `COM¹` to `LPT³` included. Titles with
   path separators were already kept under `OutputDir`, now held by a test; the
   docs say that `Split` overwrites an existing part.
 - **The EBML lace size decoder refuses sizes that run over the block.** Its
