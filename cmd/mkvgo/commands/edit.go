@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -103,14 +104,8 @@ func guardOutput(outPath string, inputs ...string) {
 
 // guardDistinct refuses an output that is one of the inputs: writing it would destroy what is being read.
 func guardDistinct(outPath string, inputs ...string) {
-	out, err := os.Stat(outPath)
-	if err != nil {
-		return
-	}
-	for _, in := range inputs {
-		if fi, err := os.Stat(in); err == nil && os.SameFile(out, fi) {
-			Fatal(fmt.Sprintf("%s is also an input: write the output to another file", outPath))
-		}
+	if err := outguard.Distinct(os.Stat, outPath, inputs...); err != nil {
+		Fatal(err.Error())
 	}
 }
 

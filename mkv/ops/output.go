@@ -1,11 +1,7 @@
 package ops
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/gravity-zero/mkvgo/internal/shown"
+	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -18,25 +14,13 @@ func createOutput(fs *mkv.FS, dst string, inputs ...string) (mkv.WriteSeekCloser
 	return fs.DoCreate(dst)
 }
 
-// refuseInput refuses a dst that is one of the inputs, before anything is written to it.
+// refuseInput refuses a dst that is one of the inputs, before anything is written to it (internal/outguard).
 func refuseInput(fs *mkv.FS, dst string, inputs ...string) error {
-	for _, in := range inputs {
-		if in != "" && sameFile(fs, dst, in) {
-			return fmt.Errorf("%s is also an input: write the output to another file", shown.Path(dst))
-		}
-	}
-	return nil
+	return outguard.Distinct(fs.DoStat, dst, inputs...)
 }
 
-// sameFile reports whether a and b name one file: the same path, or two paths the filesystem resolves to one file.
-func sameFile(fs *mkv.FS, a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
-	}
-	fa, errA := fs.DoStat(a)
-	fb, errB := fs.DoStat(b)
-	return errA == nil && errB == nil && os.SameFile(fa, fb)
-}
+// sameFile reports whether a and b name one file (internal/outguard).
+func sameFile(fs *mkv.FS, a, b string) bool { return outguard.SameFile(fs.DoStat, a, b) }
 
 // attachmentPaths are the files lazy attachments are copied from at write time: inputs like any source.
 func attachmentPaths(attachments []mkv.Attachment) []string {
