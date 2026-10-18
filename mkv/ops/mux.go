@@ -173,7 +173,7 @@ func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([
 		t := *srcTrack
 		t.ID = nextID
 		if inp.Language != "" {
-			t.Language = inp.Language
+			t.Language, t.LanguageBCP47 = inp.Language, "" // the source's BCP-47 tag would take precedence over it
 		}
 		if inp.Name != "" {
 			t.Name = inp.Name
