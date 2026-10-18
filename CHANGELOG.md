@@ -124,6 +124,12 @@ All notable changes to mkvgo are documented here. The format is based on
   frames of 3.6e16 bytes passed it; the block reader refused them afterwards,
   and the decoder now does itself.
 
+### Documentation
+
+- **`SECURITY.md`** says how to report a vulnerability, which versions get
+  fixes, and what is in scope: parsing untrusted files, remote sources,
+  serving and encryption.
+
 ## [0.55.1] - 2026-10-17
 
 ### Fixed
