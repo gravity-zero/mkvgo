@@ -59,8 +59,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - **`ReadStream` describes a file as `Read` does.** It decoded each element
   with its own copy of the decoders, which had fallen behind: an Opus track
   lost its `CodecDelay` and `SeekPreRoll`, a video its HDR metadata and stereo
-  mode, a track its role flags, the Info its date. It now runs the seekable
-  reader's decoders over the stream, forward only.
+  mode, a track its role flags, the Info its date, a video its frame rate and
+  a track its bitrate from the tags. It now runs the seekable reader's
+  decoders over each element's body, makes the same head-only derivations,
+  and refuses a Duration that overflows as `Read` does.
 - **A presigned URL's signature stays out of every error.** The planner, the
   readers, `ops` and a concat or ABR part named a remote source by its whole
   URL, query included; they name it without its query now, as `httpfs` does,

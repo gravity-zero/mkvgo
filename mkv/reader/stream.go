@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -57,35 +56,20 @@ func NewStreamBlockReader(r io.Reader, timecodeScale int64) (*BlockReader, error
 	return NewBlockReader(&readOnlySeeker{r: r}, timecodeScale)
 }
 
-// forwardSeeker lets the seekable reader's element decoders read a stream: it tells the position and seeks forward
-// by discarding, never back.
-type forwardSeeker struct{ p *streamParser }
-
-func (s forwardSeeker) Read(b []byte) (int, error) {
-	n, err := s.p.r.Read(b)
-	s.p.pos += int64(n)
-	return n, err
-}
-
-func (s forwardSeeker) Seek(offset int64, whence int) (int64, error) {
-	to := offset
-	switch whence {
-	case io.SeekStart:
-	case io.SeekCurrent:
-		to += s.p.pos
-	default:
-		return 0, fmt.Errorf("mkvgo/reader: stream is not seekable (whence=%d)", whence)
+// decode runs a seekable element decoder over the body of a size-byte element read into memory, so both readers
+// read an element the same way, a child header running past its parent's end included. An element of unknown size
+// has no body to decode: the scan reads on into it.
+func (p *streamParser) decode(size int64, fn func(*parser) error) error {
+	if size < 0 {
+		return nil
 	}
-	if to < s.p.pos {
-		return 0, fmt.Errorf("mkvgo/reader: stream is not seekable (back to %d from %d)", to, s.p.pos)
+	body, err := ebml.ReadBytes(p.r, size)
+	if err != nil {
+		return err
 	}
-	return to, s.p.skip(to - s.p.pos)
-}
-
-// decode runs a seekable element decoder over the stream, so both readers read an element the same way.
-func (p *streamParser) decode(fn func(*parser) error) error {
-	d := &parser{r: forwardSeeker{p}, metaBudget: p.metaBudget, ctx: p.ctx, segEnd: -1}
-	err := fn(d)
+	d := &parser{r: bytes.NewReader(body), posBase: p.pos, metaBudget: p.metaBudget, ctx: p.ctx, segEnd: -1}
+	p.pos += size
+	err = fn(d)
 	p.metaBudget = d.metaBudget
 	return err
 }
@@ -201,23 +185,23 @@ metaLoop:
 		}
 		switch eh.ID {
 		case mkv.IDInfo:
-			if err := p.decode(func(d *parser) error { return d.parseInfo(eh.Size, c) }); err != nil {
+			if err := p.decode(eh.Size, func(d *parser) error { return d.parseInfo(eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDTracks:
-			if err := p.decode(func(d *parser) error { return d.parseTracks(eh.Size, c) }); err != nil {
+			if err := p.decode(eh.Size, func(d *parser) error { return d.parseTracks(eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDChapters:
-			if err := p.decode(func(d *parser) error { return d.parseChapters(eh.Size, c) }); err != nil {
+			if err := p.decode(eh.Size, func(d *parser) error { return d.parseChapters(eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDAttachments:
-			if err := p.decode(func(d *parser) error { return d.parseAttachments(eh.Size, c) }); err != nil {
+			if err := p.decode(eh.Size, func(d *parser) error { return d.parseAttachments(eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDTags:
-			if err := p.decode(func(d *parser) error { return d.parseTags(eh.Size, c) }); err != nil {
+			if err := p.decode(eh.Size, func(d *parser) error { return d.parseTags(eh.Size, c) }); err != nil {
 				return nil, nil, elemErrAt(eh.ID, elemStart, err)
 			}
 		case mkv.IDCluster:
@@ -241,12 +225,13 @@ metaLoop:
 		}
 	}
 
-	if c.Info.Duration > 0 && c.Info.TimecodeScale > 0 {
-		d := c.Info.Duration * float64(c.Info.TimecodeScale) / 1e6
-		if d <= float64(math.MaxInt64) && d >= float64(math.MinInt64) {
-			c.DurationMs = int64(d)
-		}
+	if err := setDurationMs(c); err != nil {
+		return nil, nil, err
 	}
+	// What Read derives from the head alone: a bitrate and a frame rate from the tags, a frame rate from the codec.
+	promoteTrackBitrate(c)
+	statsFrameRates(c)
+	codecFrameRates(c)
 
 	// Build BlockReader directly (bypass init which would re-read the EBML
 	// header). The reader is already positioned right after the metadata.

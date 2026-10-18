@@ -23,7 +23,7 @@ func TestStreamParserChargesBudget(t *testing.T) {
 		fail   bool
 	}{{10, true}, {maxMetadataBytes, false}} {
 		p := &streamParser{r: bytes.NewReader(tracks), metaBudget: tc.budget}
-		err := p.decode(func(d *parser) error { return d.parseTracks(int64(len(tracks)), &mkv.Container{}) })
+		err := p.decode(int64(len(tracks)), func(d *parser) error { return d.parseTracks(int64(len(tracks)), &mkv.Container{}) })
 		if (err != nil) != tc.fail {
 			t.Errorf("budget %d: %v, want failure %v", tc.budget, err, tc.fail)
 		}
