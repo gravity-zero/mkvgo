@@ -127,6 +127,8 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 	// blow-up a forged stco+stsc pair could weaponise into a multi-second stall.
 	si := 0
 	ei := 0
+	cut := false // the file ends inside the table: a download that stopped
+chunks:
 	for ci, off := range chunkOffsets {
 		chunk := uint32(ci + 1)
 		for ei+1 < len(stscEntries) && stscEntries[ei+1].firstChunk <= chunk {
@@ -140,7 +142,14 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 		for k := uint32(0); k < perChunk && si < n; k++ {
 			size := sizes[si]
 			end := pos + int64(size)
-			if pos < 0 || end > fileSize {
+			if pos < 0 {
+				return errf("sample %d at [%d:%d] is outside the file (size %d)", si, pos, end, fileSize)
+			}
+			if end > fileSize && si > 0 { // the file was cut there: the samples before play, as a player plays them
+				cut = true
+				break chunks
+			}
+			if end > fileSize {
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", si, pos, end, fileSize)
 			}
 			samples[si].offset = pos
@@ -150,7 +159,9 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 			si++
 		}
 	}
-	if si != n {
+	if cut {
+		n, samples = si, samples[:si]
+	} else if si != n {
 		return errf("chunk table covers %d samples but stsz lists %d", si, n)
 	}
 

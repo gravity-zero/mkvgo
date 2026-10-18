@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 )
 
@@ -151,6 +152,9 @@ func (t *pcmTable) endMs(timescale uint32, editShiftMs int64) int64 {
 	return max(ticksToMs(last, timescale)+editShiftMs, 0)
 }
 
+// errFileCut stops a PCM table walk at the end of a file that was cut short.
+var errFileCut = errors.New("the file ends inside the sample table")
+
 // buildPCMBlocks builds the packets coalescePCM would gather the one-frame table into, chunk by chunk.
 func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 	if fileSize > 0 && int64(t.count)*int64(t.size) > fileSize {
@@ -168,7 +172,13 @@ func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 			k := min(t.perBlock, n-j)
 			pos := off + int64(j)*int64(t.size)
 			end := pos + int64(k)*int64(t.size)
-			if pos < 0 || end > fileSize {
+			if pos < 0 {
+				return errf("sample %d at [%d:%d] is outside the file (size %d)", first+j, pos, end, fileSize)
+			}
+			if end > fileSize && len(out) > 0 {
+				return errFileCut // the file was cut there: the packets before play
+			}
+			if end > fileSize {
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", first+j, pos, end, fileSize)
 			}
 			sum, last := runs.take(k)
@@ -184,6 +194,10 @@ func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 		}
 		return nil
 	})
+	if errors.Is(err, errFileCut) {
+		tr.samples = out
+		return nil
+	}
 	if err != nil {
 		return err
 	}
