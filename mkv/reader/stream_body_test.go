@@ -66,3 +66,35 @@ func TestBodyReaderSeeks(t *testing.T) {
 		t.Error("a seek back past the lookback succeeded")
 	}
 }
+
+// TestReadStreamBlocksEndAtTheSegment pins that ReadStream's block walk ends at a known Segment's end, as the
+// seekable one does, instead of failing on the zero padding a preallocated download leaves behind it.
+func TestReadStreamBlocksEndAtTheSegment(t *testing.T) {
+	var seg bytes.Buffer
+	seg.Write(masterElem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3)))
+	seg.Write(masterElem(mkv.IDTracks, masterElem(mkv.IDTrackEntry,
+		uintElem(mkv.IDTrackNumber, 1, 1), uintElem(mkv.IDTrackType, mkv.TrackTypeVideo, 1))))
+	file := append(streamFixture(seg.Bytes()), make([]byte, 4096)...)
+	count := func(br *BlockReader) (int, error) {
+		n := 0
+		for {
+			if _, err := br.Next(); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+	seekable, err := NewBlockReader(bytes.NewReader(file), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, werr := count(seekable)
+	_, br, err := ReadStream(context.Background(), bytes.NewReader(file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, gerr := count(br)
+	if werr != io.EOF || gerr != io.EOF || got != want || want == 0 {
+		t.Errorf("stream walk: %d blocks, %v; seekable walk: %d blocks, %v", got, gerr, want, werr)
+	}
+}

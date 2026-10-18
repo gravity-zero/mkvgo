@@ -312,7 +312,7 @@ metaLoop:
 	// header). The reader is already positioned right after the metadata.
 	br := &BlockReader{
 		timecodeScale: c.Info.TimecodeScale,
-		segEnd:        -1, // unknown-size segment terminates on EOF
+		segEnd:        segEnd, // -1 for an unknown-size segment, which ends on EOF
 		clusterEnd:    -1,
 	}
 	// Seed countingReader at the current position. The underlying reader is

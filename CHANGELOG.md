@@ -113,6 +113,8 @@ Damage and resync:
 - A negative `DamageBytes` refuses any damage in `mp4.Options` and the CLI too;
   `reader.DamageError` names the repair in library terms.
 - A stream reader reads a large skip through instead of seeking.
+- `ReadStream`'s block walk ends at a known Segment's end, as the seekable one
+  does, instead of failing on the zero padding behind it.
 
 MP4:
 
