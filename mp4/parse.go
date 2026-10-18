@@ -672,6 +672,12 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 	if pcmPackets {
 		n = pcm.blocks() // one-frame PCM samples are held as the packets they gather into
 	}
+	if mode != sampleNone {
+		if err := oneSampleDescription(stblBoxes); err != nil {
+			tr.describedOnly(err)
+			mode = sampleNone
+		}
+	}
 	if mode != sampleNone && n > room {
 		tr.describedOnly(errf("%d samples, past the %d a movie may hold with the tracks before it", n, max(room, 0)))
 		mode = sampleNone

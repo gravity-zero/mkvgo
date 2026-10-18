@@ -184,6 +184,10 @@ MP4:
   track in group 0, Apple players showed one audio language and hid the rest.
   `mux`, `merge`, `add-track` and `merge-subtitle` on MP4 regroup the tracks
   they gather the same way, whatever group each source gave them.
+- An MP4/MOV track whose samples switch between different sample descriptions
+  (the codec setup changing partway) is refused by name for a remux or HLS,
+  which carry one: every sample was decoded with the first, grey or corrupt
+  pictures with no warning. The edits keep both descriptions as before.
 - A variable-frame-rate MP4 video reports the rate most of its frames play at,
   not its first frame's: a screen recording holding its first frame half a
   second read as 2 fps, in the probe and in the HLS `FRAME-RATE`.

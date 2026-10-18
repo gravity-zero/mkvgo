@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"strconv"
@@ -647,4 +648,32 @@ func (d *descReader) next() (tag uint8, body []byte, err error) {
 	body = d.buf[d.pos : d.pos+size]
 	d.pos += size
 	return tag, body, nil
+}
+
+// oneSampleDescription refuses a table whose samples use sample descriptions that differ: a Matroska track carries
+// one codec setup, and the samples past a switch would be decoded with the first. Identical copies are one.
+func oneSampleDescription(stblBoxes []memBox) error {
+	stsd, ok := findMemBox(stblBoxes, "stsd")
+	if !ok || len(stsd.payload) < 8 {
+		return nil
+	}
+	entries, err := iterBoxes(stsd.payload[8:])
+	if err != nil || len(entries) < 2 {
+		return nil
+	}
+	stsc, ok := findMemBox(stblBoxes, "stsc")
+	if !ok || len(stsc.payload) < 8 {
+		return nil
+	}
+	n := binary.BigEndian.Uint32(stsc.payload[4:8])
+	for i := uint32(0); i < n && 20+int(i)*12 <= len(stsc.payload); i++ {
+		sdi := binary.BigEndian.Uint32(stsc.payload[16+i*12:])
+		if sdi < 1 || int(sdi) > len(entries) {
+			return errf("chunk run %d names sample description %d of %d", i+1, sdi, len(entries))
+		}
+		if e := entries[sdi-1]; e.typ != entries[0].typ || !bytes.Equal(e.payload, entries[0].payload) {
+			return errf("its samples switch between %d different sample descriptions (the codec setup changes partway), and a remux carries one: re-encode it, or set Options.SkipUnsupported to drop the track", len(entries))
+		}
+	}
+	return nil
 }
