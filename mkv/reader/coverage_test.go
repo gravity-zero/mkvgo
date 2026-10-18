@@ -938,18 +938,6 @@ func TestCoverBufReadSeekerInvalidWhence(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Stream: boundedLoop with unknown-size element → error
-// ---------------------------------------------------------------------------
-
-func TestCoverStreamBoundedLoopUnknownSize(t *testing.T) {
-	p := &streamParser{r: bytes.NewReader(nil)}
-	err := p.boundedLoop(-1, func(_ ebml.ElementHeader) error { return nil })
-	if err == nil {
-		t.Error("boundedLoop with size=-1 should return error")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // AV1 reduced sequence header path (triggers bc.level = u16p(bits(5)))
 // ---------------------------------------------------------------------------
 

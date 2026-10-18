@@ -8,20 +8,27 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// TestStreamParserChargesBudget covers the streaming reader's cumulative metadata
-// budget (parity with the seekable parser): a read past the remaining budget is
-// rejected before allocating, so a forged stream cannot exhaust memory.
+// TestStreamParserChargesBudget covers the streaming reader's cumulative metadata budget: the decoders it borrows
+// from the seekable parser charge it, so a Tracks element past what remains is refused before its bytes are held,
+// and what one element spends is gone for the next.
 func TestStreamParserChargesBudget(t *testing.T) {
-	over := &streamParser{r: bytes.NewReader(make([]byte, 100)), metaBudget: 10}
-	if _, err := over.readBytes(50); err == nil {
-		t.Error("readBytes past the budget must error")
-	}
-	if _, err := over.readString(ebml.ElementHeader{ID: mkv.IDName, Size: 50}); err == nil {
-		t.Error("readString past the budget must error")
-	}
+	var te bytes.Buffer
+	te.Write(uintEl(mkv.IDTrackNumber, 1))
+	ebml.WriteElementHeader(&te, mkv.IDCodecPrivate, 50)
+	te.Write(make([]byte, 50))
+	tracks := wrapEl(mkv.IDTrackEntry, te.Bytes())
 
-	ok := &streamParser{r: bytes.NewReader(make([]byte, 100)), metaBudget: maxMetadataBytes}
-	if _, err := ok.readBytes(50); err != nil {
-		t.Errorf("within budget: %v", err)
+	for _, tc := range []struct {
+		budget int64
+		fail   bool
+	}{{10, true}, {maxMetadataBytes, false}} {
+		p := &streamParser{r: bytes.NewReader(tracks), metaBudget: tc.budget}
+		err := p.decode(func(d *parser) error { return d.parseTracks(int64(len(tracks)), &mkv.Container{}) })
+		if (err != nil) != tc.fail {
+			t.Errorf("budget %d: %v, want failure %v", tc.budget, err, tc.fail)
+		}
+		if !tc.fail && p.metaBudget > tc.budget-50 {
+			t.Errorf("budget %d: %d left after a 50-byte CodecPrivate, want it charged", tc.budget, p.metaBudget)
+		}
 	}
 }
