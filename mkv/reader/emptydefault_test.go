@@ -60,3 +60,32 @@ func TestEmptyElementsTakeTheirDefault(t *testing.T) {
 		}
 	}
 }
+
+// TestEmptyDisplaySizeIsThePixelSize: an empty DisplayWidth or DisplayHeight defaults to the pixel size, square
+// pixels, which the model says with nil; it was read as a display size of 0.
+func TestEmptyDisplaySizeIsThePixelSize(t *testing.T) {
+	video := wrapEl(mkv.IDVideo, append(append(append(uintEl(mkv.IDPixelWidth, 200), uintEl(mkv.IDPixelHeight, 100)...),
+		emptyEl(mkv.IDDisplayWidth)...), emptyEl(mkv.IDDisplayHeight)...))
+	var te bytes.Buffer
+	te.Write(uintEl(mkv.IDTrackNumber, 1))
+	te.Write(uintEl(mkv.IDTrackType, mkv.TrackTypeVideo))
+	ebml.WriteElementHeader(&te, mkv.IDCodecID, 5)
+	ebml.WriteString(&te, "V_VP9")
+	te.Write(video)
+	var seg bytes.Buffer
+	ebml.WriteElementHeader(&seg, mkv.IDInfo, 0)
+	seg.Write(wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, te.Bytes())))
+	seg.Write(realCluster())
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+
+	c, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := c.Tracks[0]; tr.DisplayWidth != nil || tr.DisplayHeight != nil {
+		t.Errorf("display %v x %v, want nil (the 200x100 pixel size)", tr.DisplayWidth, tr.DisplayHeight)
+	}
+}

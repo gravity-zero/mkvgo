@@ -19,10 +19,9 @@ var (
 		mkv.IDColourTransfer:  2,
 		mkv.IDColourPrimaries: 2,
 		mkv.IDChannels:        1,
-		mkv.IDTargetTypeValue: 50,
 	}
 	schemaFloat  = map[uint32]float64{mkv.IDSamplingFreq: 8000}
-	schemaString = map[uint32]string{mkv.IDLanguage: "eng", mkv.IDChapLanguage: "eng", mkv.IDTagLanguage: "und"}
+	schemaString = map[uint32]string{mkv.IDLanguage: "eng", mkv.IDTagLanguage: "und"}
 )
 
 // readUintOf reads h's unsigned integer, its schema default when it is empty.

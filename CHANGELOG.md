@@ -56,6 +56,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An empty DisplayWidth or DisplayHeight means square pixels.** It was
+  read as a display size of 0; it takes its default, the pixel size, which
+  the track reports as no display size.
 - **A value past what an int64 holds is unknown, not negative.** A
   DefaultDuration, CodecDelay or SeekPreRoll, a cue time or Cluster position
   above 2^63 was read as a negative number; it is left unknown now, and a cue

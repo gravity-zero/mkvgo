@@ -1489,13 +1489,17 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 			if err != nil {
 				return err
 			}
-			t.DisplayWidth = fit32(v)
+			if v > 0 { // 0 or empty: the default, the pixel size
+				t.DisplayWidth = fit32(v)
+			}
 		case mkv.IDDisplayHeight:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
 				return err
 			}
-			t.DisplayHeight = fit32(v)
+			if v > 0 { // 0 or empty: the default, the pixel size
+				t.DisplayHeight = fit32(v)
+			}
 		case mkv.IDColour:
 			if err := p.parseColour(eh.Size, t); err != nil {
 				return err
