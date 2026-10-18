@@ -61,7 +61,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -80,7 +80,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 				return obj, nil
 			})
 		})
-		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -99,7 +99,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 			})
 		})
 		var closeFn js.Func
-		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+		closeFn = jsFunc(func(js.Value, []js.Value) any {
 			resourceFn.Release()
 			segmentFn.Release()
 			closeFn.Release()
@@ -170,7 +170,7 @@ func openABRJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -190,7 +190,7 @@ func openABRJS(_ js.Value, args []js.Value) any {
 			})
 		})
 		var closeFn js.Func
-		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+		closeFn = jsFunc(func(js.Value, []js.Value) any {
 			resourceFn.Release()
 			closeFn.Release()
 			return nil
@@ -260,7 +260,7 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -280,7 +280,7 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 			})
 		})
 		var closeFn js.Func
-		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+		closeFn = jsFunc(func(js.Value, []js.Value) any {
 			resourceFn.Release()
 			closeFn.Release()
 			return nil

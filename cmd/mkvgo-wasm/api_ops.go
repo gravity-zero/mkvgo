@@ -301,7 +301,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 		h.Set("mediaPlaylist", toUint8Array(fp.MediaPlaylist()))
 		h.Set("init", toUint8Array(fp.InitSegment()))
 
-		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -320,7 +320,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		patternFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		patternFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 2 || !isUint8(rargs[1]) {
 				return promise(func() (any, error) {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
@@ -341,7 +341,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		distinctFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		distinctFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("distinct: missing index") })
 			}
@@ -360,7 +360,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 			})
 		})
 		var closeFn js.Func
-		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+		closeFn = jsFunc(func(js.Value, []js.Value) any {
 			segmentFn.Release()
 			patternFn.Release()
 			distinctFn.Release()
@@ -440,7 +440,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 		h.Set("mediaPlaylist", toUint8Array(wm.MediaPlaylist()))
 		h.Set("init", toUint8Array(wm.InitSegment()))
 
-		segmentFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -459,7 +459,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		patternFn := js.FuncOf(func(_ js.Value, rargs []js.Value) any {
+		patternFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 2 || !isUint8(rargs[1]) {
 				return promise(func() (any, error) {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
@@ -481,7 +481,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 			})
 		})
 		var closeFn js.Func
-		closeFn = js.FuncOf(func(js.Value, []js.Value) any {
+		closeFn = jsFunc(func(js.Value, []js.Value) any {
 			segmentFn.Release()
 			patternFn.Release()
 			closeFn.Release()

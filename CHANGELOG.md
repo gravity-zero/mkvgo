@@ -186,6 +186,9 @@ WebAssembly:
 - A string where a number belongs (a segment index, a track id, a
   `keepTracks` entry) is a rejected promise naming the argument: it panicked
   outside the promise and ended the Go program, so every later call failed.
+  Every function handed to JavaScript now turns such a panic into a rejected
+  promise, whatever option caused it (a key passed as an ArrayBuffer, a null
+  entry in `keys`, a `signal` that is not an AbortSignal).
 
 ### Documentation
 

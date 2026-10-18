@@ -30,3 +30,31 @@ func TestWrongArgumentTypesRejectInsteadOfExiting(t *testing.T) {
 		t.Errorf("intArg(3) = %d, %v", n, err)
 	}
 }
+
+// TestBadOptionsRejectInsteadOfExiting pins that an option a caller gets wrong (a key passed as an ArrayBuffer, a
+// keys entry that is null, a signal that is not an AbortSignal) is a rejected promise from every exported function.
+func TestBadOptionsRejectInsteadOfExiting(t *testing.T) {
+	input := js.Global().Get("Uint8Array").New(4)
+	cenc := js.Global().Get("Object").New()
+	cenc.Set("key", js.Global().Get("ArrayBuffer").New(16))
+	cenc.Set("keyId", js.Global().Get("Uint8Array").New(16))
+	cenc.Set("iv", js.Global().Get("Uint8Array").New(8))
+	withCENC := js.Global().Get("Object").New()
+	withCENC.Set("cenc", cenc)
+	enc := js.Global().Get("Object").New()
+	enc.Set("rotateEverySegments", 2)
+	enc.Set("keys", js.ValueOf([]any{nil}))
+	withKeys := js.Global().Get("Object").New()
+	withKeys.Set("encrypt", enc)
+	withSignal := js.Global().Get("Object").New()
+	withSignal.Set("signal", js.Global().Get("Object").New())
+	ignore := js.FuncOf(func(js.Value, []js.Value) any { return nil })
+	defer ignore.Release()
+	for name, opts := range map[string]js.Value{"cenc key": withCENC, "null key": withKeys, "signal": withSignal} {
+		p := js.ValueOf(guarded(openHLSJS)(js.Undefined(), []js.Value{input, opts}))
+		if p.Type() != js.TypeObject {
+			t.Fatalf("%s: openHLS returned %v, want a promise", name, p)
+		}
+		p.Call("catch", ignore)
+	}
+}

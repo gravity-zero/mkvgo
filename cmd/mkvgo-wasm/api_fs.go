@@ -74,9 +74,9 @@ func (i blobInfo) ModTime() time.Time { return time.Time{} }
 func (i blobInfo) IsDir() bool        { return false }
 func (i blobInfo) Sys() any           { return nil }
 
-// isUint8 reports whether v is a typed array / ArrayBuffer-like (has byteLength).
+// isUint8 reports whether v is a Uint8Array: an ArrayBuffer or another typed array has no bytes toGoBytes can copy.
 func isUint8(v js.Value) bool {
-	return v.Type() == js.TypeObject && v.Get("byteLength").Type() == js.TypeNumber
+	return v.Type() == js.TypeObject && v.InstanceOf(js.Global().Get("Uint8Array"))
 }
 
 // singleSourceFS adapts one JS input (Uint8Array or Blob/File) to an mkv.FS

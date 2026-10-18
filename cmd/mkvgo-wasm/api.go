@@ -26,8 +26,6 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// promise runs fn on its own goroutine and returns a JS Promise for its
-// result - the only sane calling convention for wasm exports, since fn may
 // intArg reads v as an integer, refusing anything that is not a number: Value.Int panics on a string, outside any
 // promise, and the panic ends the Go program.
 func intArg(v js.Value, what string) (int, error) {
@@ -40,6 +38,24 @@ func intArg(v js.Value, what string) (int, error) {
 // rejected is a promise that rejects with err.
 func rejected(err error) any { return promise(func() (any, error) { return nil, err }) }
 
+// guarded is fn turning any panic into a rejected promise: what a caller passes is read before fn's promise exists,
+// and a panic there, outside any recover, ends the Go program.
+func guarded(fn func(js.Value, []js.Value) any) func(js.Value, []js.Value) any {
+	return func(this js.Value, args []js.Value) (out any) {
+		defer func() {
+			if r := recover(); r != nil {
+				out = rejected(fmt.Errorf("mkvgo: invalid arguments: %v", r))
+			}
+		}()
+		return fn(this, args)
+	}
+}
+
+// jsFunc is js.FuncOf over guarded(fn): the form every function handed to JavaScript takes.
+func jsFunc(fn func(js.Value, []js.Value) any) js.Func { return js.FuncOf(guarded(fn)) }
+
+// promise runs fn on its own goroutine and returns a JS Promise for its
+// result - the only sane calling convention for wasm exports, since fn may
 // block (Blob reads await JS promises).
 func promise(fn func() (any, error)) any {
 	handler := js.FuncOf(func(this js.Value, args []js.Value) any {
