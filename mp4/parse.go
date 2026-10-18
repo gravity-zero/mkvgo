@@ -329,7 +329,7 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	if mvhd, ok := findMemBox(moovBoxes, "mvhd"); ok {
 		var durTicks uint64
 		movieTS, durTicks = parseMovieHeader(mvhd.payload)
-		if movieTS > 0 && durTicks > 0 && durTicks < 1<<62 && durTicks != 0xFFFFFFFF {
+		if movieTS > 0 && headerDurationSet(durTicks) {
 			mv.durationMs = headerTicksToMs(durTicks, movieTS)
 		}
 	}

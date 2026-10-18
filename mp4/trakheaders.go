@@ -9,6 +9,11 @@ import (
 )
 
 // parseMovieHeader reads the movie timescale and duration from an mvhd box.
+// headerDurationSet reports whether a header's duration states one: 0 and all ones (0xFFFFFFFF, recorders still writing) mean unset.
+func headerDurationSet(ticks uint64) bool {
+	return ticks > 0 && ticks != 0xFFFFFFFF && ticks < 1<<62
+}
+
 func parseMovieHeader(payload []byte) (timescale uint32, durationTicks uint64) {
 	if len(payload) < 4 {
 		return 0, 0
@@ -75,8 +80,8 @@ func mdhdDurationMs(payload []byte) int64 {
 	} else {
 		ticks = uint64(binary.BigEndian.Uint32(payload[durOff : durOff+4]))
 	}
-	if ticks == 0 || ticks == 0xFFFFFFFF || ticks >= 1<<62 {
-		return 0 // unset/sentinel
+	if !headerDurationSet(ticks) {
+		return 0
 	}
 	return headerTicksToMs(ticks, ts)
 }

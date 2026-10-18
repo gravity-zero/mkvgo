@@ -399,8 +399,11 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 		}
 	}
 	var chapTrak []byte
-	_, movieTicks := parseMovieHeader(mvhd.payload)
-	chs := closeChapters(flattenChapters(after.Chapters), headerTicksToMs(movieTicks, movieTS))
+	var movieMs int64
+	if _, movieTicks := parseMovieHeader(mvhd.payload); headerDurationSet(movieTicks) {
+		movieMs = headerTicksToMs(movieTicks, movieTS)
+	}
+	chs := closeChapters(flattenChapters(after.Chapters), movieMs)
 	if chaptersChanged && len(chs) > 0 {
 		if chapID == 0 {
 			chapID = max(maxID+1, mvhdNextTrackID(mvhd.payload))

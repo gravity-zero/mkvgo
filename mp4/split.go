@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
@@ -75,7 +74,9 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 				return nil, fmt.Errorf("mvhd declares no timescale")
 			}
 			m.movieTS = ts
-			m.movieNs = rescale(int64(min(dur, math.MaxInt64/2)), ts, nsPerSec)
+			if headerDurationSet(dur) {
+				m.movieNs = rescale(int64(dur), ts, nsPerSec) // unset: taken from the tracks below
+			}
 			m.others = append(m.others, b)
 		default:
 			m.others = append(m.others, b)
