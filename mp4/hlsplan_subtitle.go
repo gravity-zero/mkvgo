@@ -331,10 +331,11 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 	entries []reader.IndexedBlock, start, target, uptoMs int64) (served bool, err error) {
 	st := &p.subScan[i]
 	track := &p.subs[i]
-	stale := func() (bool, error) {
+	stale := func() (bool, error) { // the index does not describe this file: the walk serves from now on
 		st.indexOff, st.indexed = true, nil
 		return false, nil
 	}
+	walkOnce := func() (bool, error) { return false, nil } // a read failed: the walk serves this request, the index the next
 	var br *reader.BlockReader
 	defer p.countWalk(&br)()
 	var read int64
@@ -361,7 +362,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 			}
 			e := &entries[j]
 			if err := cues.resolve(countedSource{src, &p.srcRead}, e); err != nil {
-				return stale()
+				return walkOnce()
 			}
 			clusterMs, ok := p.clusterMs(e.Pos.ClusterTS)
 			if !ok || !e.Pos.Valid() || e.Frames < 1 {
@@ -372,16 +373,19 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 			}
 			if br == nil {
 				if br, err = reader.NewBlockReaderFrom(src, p.tcScale, e.Pos); err != nil {
-					return stale()
+					return walkOnce()
 				}
 				br.SetTrackDefaultDurations(p.trackDurs)
 				br.KeepTracks(track.track.ID)
 			} else if err := br.SeekTo(e.Pos); err != nil {
-				return stale()
+				return walkOnce()
 			}
 			for f := int64(0); f < e.Frames; f++ {
 				b, err := br.Next()
-				if err != nil || b.TrackNumber != track.track.ID || (f == 0 && b.Timecode != e.TimeMs) {
+				if err != nil {
+					return walkOnce()
+				}
+				if b.TrackNumber != track.track.ID || (f == 0 && b.Timecode != e.TimeMs) {
 					return stale()
 				}
 				cue, ok, recovered, err := subCueFromBlockRecovered(&track.track, b)

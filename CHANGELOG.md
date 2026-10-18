@@ -160,7 +160,9 @@ Serving:
   back what the copy not kept had reserved, instead of leaking it for good.
 - A subtitle track no longer keeps a read that failed once, a request
   cancelled or a server erroring, as its answer for the life of the plan;
-  only damage and a replaced source are remembered.
+  only damage and a replaced source are remembered. With a subtitle index, a
+  failed read sends that one request to the walk instead of dropping the
+  index for the plan's life.
 - `serve` and `serve-growing` time out slow clients (10 s header, 2 min
   idle, 5 min HLS response).
 
