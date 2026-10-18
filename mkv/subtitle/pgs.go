@@ -57,6 +57,9 @@ const (
 	// declared data length asks for. Real subtitle objects are tens of KiB; a
 	// 3-byte length field can otherwise claim 16 MiB per object.
 	pgsMaxObjectBytes = 4 << 20
+	// pgsMaxBlockPixels bounds the pixels one block's display sets decode: four 4096x4096 objects, 256 MiB. A real
+	// block places one or two subtitle-sized objects; only a forged one names objects over and over.
+	pgsMaxBlockPixels = 4 * pgsMaxObjectDim * pgsMaxObjectDim
 )
 
 // PGSObject is one picture of a display set, already composed: the palette is
@@ -114,6 +117,7 @@ type PGSDecoder struct {
 	objects  map[uint16]*pgsObjectDef
 	pending  *pgsObjectDef // object being accumulated across several ODS
 	pendID   uint16
+	pixels   int // what the block being decoded may still decode (pgsMaxBlockPixels)
 }
 
 // NewPGSDecoder returns a decoder with no epoch state.
@@ -130,10 +134,12 @@ func (d *PGSDecoder) Reset() {
 // always that is exactly one; the slice exists because the format allows a
 // block to carry several, and dropping the extras would silently lose cues.
 //
-// The returned images are freshly allocated and owned by the caller.
+// The returned images are freshly allocated and owned by the caller; an object a display set places more than once
+// shares one image between its placements.
 func (d *PGSDecoder) Decode(block []byte) ([]PGSDisplaySet, error) {
 	var out []PGSDisplaySet
 	var comp *pgsComposition
+	d.pixels = pgsMaxBlockPixels
 
 	b := block
 	for len(b) > 0 {
@@ -391,8 +397,31 @@ func (d *PGSDecoder) compose(c *pgsComposition) (PGSDisplaySet, error) {
 		// is no colour to invent - and it keeps the timeline consistent.
 		pal = &pgsPalette{}
 	}
+	// A composition may name one object, or one crop of it, many times: each is decoded once, its references
+	// sharing the bitmap, so a few bytes naming an object again never cost another picture.
+	type pick struct {
+		id   uint16
+		crop image.Rectangle
+	}
+	decoded := map[pick]*image.NRGBA{}
 	for _, co := range c.objects {
+		key := pick{id: co.objectID}
+		if co.cropped {
+			key.crop = image.Rect(co.cropX, co.cropY, co.cropX+co.cropW, co.cropY+co.cropH)
+		}
+		if img, ok := decoded[key]; ok {
+			if img != nil {
+				ds.Objects = append(ds.Objects, PGSObject{X: co.x, Y: co.y, Forced: co.forced, Image: img})
+			}
+			continue
+		}
+		decoded[key] = nil
 		def := d.objects[co.objectID]
+		if def != nil {
+			if d.pixels -= def.w * def.h; d.pixels < 0 {
+				return ds, fmt.Errorf("PGS: the block's display sets decode to more than %d pixels: the track is damaged or forged", pgsMaxBlockPixels)
+			}
+		}
 		if def == nil {
 			// The object was defined in a part of the epoch the caller did not
 			// read (a mid-file start). Skipping keeps the rest of the display
@@ -420,6 +449,7 @@ func (d *PGSDecoder) compose(c *pgsComposition) (PGSDisplaySet, error) {
 			}
 			img = cropped
 		}
+		decoded[key] = img
 		ds.Objects = append(ds.Objects, PGSObject{X: x, Y: y, Forced: co.forced, Image: img})
 	}
 	return ds, nil

@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A PGS object named many times is decoded once.** A composition could
+  name one object 255 times and each reference decoded it again: a few bytes
+  held 16 GiB. An object, or a crop of it, is decoded once per display set,
+  its placements sharing the image, and a block whose display sets would
+  decode past four 4096x4096 objects is refused.
 - **An MP4 nesting containers past the sample tables is refused.** The
   metadata path descended into every container box with no depth bound: a
   few tens of megabytes of nested `trak` boxes overflowed the goroutine
