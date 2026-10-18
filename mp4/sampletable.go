@@ -186,6 +186,9 @@ func ticksToNs(ticks int64, timescale uint32) int64 {
 	}
 	// Round to nearest: a priming of N samples must survive the ns round trip back
 	// to exactly N samples in the edit list (truncation would lose a sample).
+	if ticks > math.MaxInt64/1_000_000_000 || ticks < math.MinInt64/1_000_000_000 {
+		return scaleTicks(ticks, timescale, 1_000_000_000)
+	}
 	return (ticks*1_000_000_000 + int64(timescale)/2) / int64(timescale)
 }
 
@@ -193,7 +196,24 @@ func ticksToMs(ticks int64, timescale uint32) int64 {
 	if timescale == 0 {
 		return ticks
 	}
+	if ticks > math.MaxInt64/1000 || ticks < math.MinInt64/1000 {
+		return scaleTicks(ticks, timescale, 1000)
+	}
 	return ticks * 1000 / int64(timescale)
+}
+
+// scaleTicks is ticks*unit/timescale for ticks whose product overflows: whole timescales and the remainder scale
+// apart, and a result past the int64 range saturates instead of wrapping to the other sign.
+func scaleTicks(ticks int64, timescale uint32, unit int64) int64 {
+	ts := int64(timescale)
+	q, r := ticks/ts, ticks%ts
+	if q > math.MaxInt64/unit {
+		return math.MaxInt64
+	}
+	if q < math.MinInt64/unit {
+		return math.MinInt64
+	}
+	return q*unit + r*unit/ts
 }
 
 // mustFind returns the box payload or nil; the caller validates emptiness.

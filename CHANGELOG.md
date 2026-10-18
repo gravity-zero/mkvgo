@@ -113,6 +113,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **MP4 tick conversions saturate instead of wrapping.** A decode time past
+  what `ticks*1000` holds in an int64, reachable with 16M samples of 2^31
+  ticks, wrapped and read as a negative time; large values now scale in two
+  parts and saturate.
 - **The sidx boxes ahead of an MP4's fragments are read one at a time.**
   Every one, up to 786 KiB each, was read and kept before the first was
   looked at, so a file stacking thousands of them held gigabytes on a
