@@ -58,7 +58,7 @@ func TestSEC04_S3RedirectNotFollowed(t *testing.T) {
 		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
 	}))
 	defer origin.Close()
-	fs := New(Options{Endpoint: origin.URL, PathStyle: true, AccessKey: "AKID", SecretKey: "SECRET", SessionToken: "TOKEN"})
+	fs := New(Options{Endpoint: origin.URL, PathStyle: true, AccessKey: "AKID", SecretKey: "SECRET", SessionToken: "TOKEN", AllowHTTPSessionToken: true})
 	f, err := fs.Port().DoOpen("s3://mybucket/k.mkv")
 	if err == nil {
 		buf := make([]byte, 4)

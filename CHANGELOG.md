@@ -12,6 +12,11 @@ All notable changes to mkvgo are documented here. The format is based on
   The default address was `:8478`, every interface, so a file served to a
   local player was readable from the network. It is now `127.0.0.1:8478`;
   `-addr :8478` opens it to the network.
+- **`s3fs` keeps a session token off plain http.** A `SessionToken` (or
+  `AWS_SESSION_TOKEN`) sent to an `http://` endpoint crossed the network in
+  clear, and anyone on the path could reuse it until it expired. Such a read
+  is refused with what to do: an `https://` endpoint, or the new
+  `Options.AllowHTTPSessionToken`. Reads without a session token are unchanged.
 - **Credentials in a URL stay out of errors.** A `user:password@` before
   the host was kept where the query was cut; it is dropped too, and the
   errors of a concat comparison name their parts that way as well.

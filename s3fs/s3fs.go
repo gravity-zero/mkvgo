@@ -55,6 +55,8 @@ type Options struct {
 	WindowSize int
 	// RequestTimeout bounds each request, passed through to httpfs.Options.RequestTimeout: 0 means 60 s, negative none.
 	RequestTimeout time.Duration
+	// AllowHTTPSessionToken sends a SessionToken to a plain http:// endpoint, where it crosses the network in clear; without it such a read is refused.
+	AllowHTTPSessionToken bool
 }
 
 // S3FS is the S3-backed read-only filesystem. Construct with New; use Port to
@@ -182,6 +184,9 @@ func (s *S3FS) resolveURL(path string) (string, error) {
 	bucket, key, err := splitS3Path(path)
 	if err != nil {
 		return "", err
+	}
+	if s.opts.SessionToken != "" && strings.EqualFold(s.scheme, "http") && !s.opts.AllowHTTPSessionToken {
+		return "", fmt.Errorf("s3fs: %s: the endpoint is plain http and the session token would cross the network in clear; use an https:// endpoint, or set s3fs.Options.AllowHTTPSessionToken to send it anyway", path)
 	}
 	var b strings.Builder
 	b.WriteString(s.scheme)
