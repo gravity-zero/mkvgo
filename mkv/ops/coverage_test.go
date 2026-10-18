@@ -512,7 +512,7 @@ func TestCovOpenOutputFiles_CreateError(t *testing.T) {
 	}
 	// Non-existent sub-dir → os.Create fails → DoCreate error cleanup path.
 	nonExistDir := filepath.Join(t.TempDir(), "nosuchsubdir")
-	_, _, err := openOutputFiles(tracks, nonExistDir, nil) // nil FS → os
+	_, _, err := openOutputFiles(tracks, nonExistDir, "", nil) // nil FS → os
 	if err == nil {
 		t.Fatal("expected error for non-existent directory")
 	}
@@ -1233,7 +1233,7 @@ func TestCovOpenOutputFiles_CleanupClosers(t *testing.T) {
 		1: {ID: 1, Codec: "h264"},
 		2: {ID: 2, Codec: "aac"},
 	}
-	_, _, err = openOutputFiles(tracks, t.TempDir(), fs)
+	_, _, err = openOutputFiles(tracks, t.TempDir(), "", fs)
 	if err == nil {
 		t.Fatal("expected error from second Create")
 	}

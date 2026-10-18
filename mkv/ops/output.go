@@ -12,12 +12,20 @@ import (
 // createOutput creates dst for writing, refusing a dst that is one of the inputs: creating it truncates what the
 // operation is about to read, and the cleanup of the failed write then removes it.
 func createOutput(fs *mkv.FS, dst string, inputs ...string) (mkv.WriteSeekCloser, error) {
-	for _, in := range inputs {
-		if sameFile(fs, dst, in) {
-			return nil, fmt.Errorf("%s is also an input: write the output to another file", shown.Path(dst))
-		}
+	if err := refuseInput(fs, dst, inputs...); err != nil {
+		return nil, err
 	}
 	return fs.DoCreate(dst)
+}
+
+// refuseInput refuses a dst that is one of the inputs, before anything is written to it.
+func refuseInput(fs *mkv.FS, dst string, inputs ...string) error {
+	for _, in := range inputs {
+		if in != "" && sameFile(fs, dst, in) {
+			return fmt.Errorf("%s is also an input: write the output to another file", shown.Path(dst))
+		}
+	}
+	return nil
 }
 
 // sameFile reports whether a and b name one file: the same path, or two paths the filesystem resolves to one file.

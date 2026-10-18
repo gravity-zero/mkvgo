@@ -16,6 +16,9 @@ import (
 // tracks, not metadata.
 func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) error {
 	fs := mkv.FSFrom(extra)
+	if err := refuseInput(fs, opts.OutputPath, mergePaths(opts.Inputs)...); err != nil {
+		return err // every input counts, the one that only carries the attachments too
+	}
 	if len(opts.Inputs) == 0 {
 		return fmt.Errorf("no inputs")
 	}
@@ -80,6 +83,9 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 
 func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, srtLang, srtName string, extraSources []mkv.MergeInput, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
+	if err := refuseInput(fs, dstPath, append([]string{basePath, srtPath}, mergePaths(extraSources)...)...); err != nil {
+		return err
+	}
 	if len(extraSources) == 0 {
 		return MergeSubtitle(ctx, basePath, srtPath, dstPath, srtLang, srtName, opts...)
 	}
@@ -93,4 +99,13 @@ func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, 
 	}
 
 	return MergeSubtitle(ctx, tmpPath, srtPath, dstPath, srtLang, srtName, opts...)
+}
+
+// mergePaths are the source paths of merge inputs.
+func mergePaths(inputs []mkv.MergeInput) []string {
+	paths := make([]string, len(inputs))
+	for i, in := range inputs {
+		paths[i] = in.SourcePath
+	}
+	return paths
 }

@@ -86,7 +86,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - Every Matroska writer of the library refuses an output that is one of its
   inputs, as the MP4 engine does: `EditMetadata(p, p)`, `AddTrack`,
   `RemoveTrack`, `Join`, `Mux`, `MergeSubtitle`, `MergeASS`, `ExtractSubtitle`,
-  `ExtractASS`, `RemuxToWebM`, `Reindex`, `Salvage` and `ApplyRollback`
+  `ExtractASS`, `ExtractAttachment`, `Demux`, `RemuxToWebM`, `Reindex`,
+  `Salvage`, `ApplyRollback`, `Merge` and `MergeWithSubtitles` (every input,
+  the added track's file and the one that only carries attachments included)
   truncated the file they read, then removed it as an unfinished output.
 - `-f` replaces an existing output, never an input: `reindex`, `salvage`,
   `to-webm`, `from-mp4`, `add-attachment`, `remove-attachment`,

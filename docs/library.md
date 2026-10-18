@@ -2429,7 +2429,8 @@ Boundaries come from the Cues index (the first keyframe at/after each
 multiple); a file without Cues must be reindexed first. `Pattern` names the
 parts (default `part_%03d.mkv`); when splitting by chapters the `{title}`
 token is replaced by the sanitized chapter title: every ASCII character but
-letters, digits, space and `-_.()` becomes `_` (non-ASCII letters stay), a name Windows reserves for a device (`CON`, `NUL`,
+letters, digits, space and `-_.()` becomes `_`, every character past U+007F
+stays as it is, leading and trailing spaces and dots are trimmed, a name Windows reserves for a device (`CON`, `NUL`,
 `COM0`-`COM9`, `COM¹`-`COM³`, the same for `LPT`) takes a leading `_`, and every part is checked to stay under
 `OutputDir`. Unlike the CLI's single-output commands, `Split` does not refuse
 an existing file: a part whose name is taken is overwritten, but a part that

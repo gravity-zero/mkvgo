@@ -37,6 +37,8 @@ func TestOpsRefuseAnOutputThatIsAnInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	other := filepath.Join(dir, "other.mkv")
+	mustNil(t, os.WriteFile(other, original, 0o644))
 	ctx := context.Background()
 	ops := map[string]func() error{
 		"EditMetadata": func() error { return EditMetadata(ctx, src, src, func(c *mkv.Container) { c.Info.Title = "x" }) },
@@ -46,10 +48,18 @@ func TestOpsRefuseAnOutputThatIsAnInput(t *testing.T) {
 		"Mux": func() error {
 			return Mux(ctx, mkv.MuxOptions{OutputPath: src, Tracks: []mkv.TrackInput{{SourcePath: src, TrackID: 1}}})
 		},
-		"MergeSubtitle": func() error { return MergeSubtitle(ctx, src, srt, src, "eng", "") },
-		"RemuxToWebM":   func() error { return RemuxToWebM(ctx, src, src) },
-		"Reindex":       func() error { return Reindex(ctx, src, src) },
-		"Salvage":       func() error { _, err := Salvage(ctx, src, src); return err },
+		"MergeSubtitle":            func() error { return MergeSubtitle(ctx, src, srt, src, "eng", "") },
+		"RemuxToWebM":              func() error { return RemuxToWebM(ctx, src, src) },
+		"Reindex":                  func() error { return Reindex(ctx, src, src) },
+		"Salvage":                  func() error { _, err := Salvage(ctx, src, src); return err },
+		"AddTrack from the output": func() error { return AddTrack(ctx, other, src, mkv.TrackInput{SourcePath: src, TrackID: 2}) },
+		"ExtractAttachment":        func() error { return ExtractAttachment(ctx, src, 1, src) },
+		"Merge, attachments only": func() error {
+			return Merge(ctx, mkv.MergeOptions{OutputPath: src, Inputs: []mkv.MergeInput{{SourcePath: src, TrackIDs: []uint64{99}}, {SourcePath: other}}})
+		},
+		"MergeWithSubtitles, extras": func() error {
+			return MergeWithSubtitles(ctx, src, srt, src, "eng", "", []mkv.MergeInput{{SourcePath: other}})
+		},
 	}
 	for name, op := range ops {
 		if err := op(); err == nil {

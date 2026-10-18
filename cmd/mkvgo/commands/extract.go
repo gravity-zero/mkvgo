@@ -69,7 +69,7 @@ func CmdExtractSubtitle(args []string) {
 	if outPath == "" || trackID == 0 {
 		Fatal("usage: " + usage)
 	}
-	guardOutput(outPath, source)
+	guardOutput(outPath, source, indexPath)
 	opts := subtitleReadOptions(damageBytes)
 
 	if indexPath != "" {

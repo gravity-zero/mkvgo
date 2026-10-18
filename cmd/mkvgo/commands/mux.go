@@ -140,7 +140,7 @@ func CmdAddTrack(args []string) {
 	if outPath == "" || input.SourcePath == "" {
 		Fatal("usage: " + CmdUsage["add-track"])
 	}
-	GuardOverwrite(outPath)
+	guardOutput(outPath, base, input.SourcePath)
 
 	var err error
 	if allMP4(outPath, base, input.SourcePath) {

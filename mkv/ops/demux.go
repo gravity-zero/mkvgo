@@ -27,7 +27,7 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		return err
 	}
 
-	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, fs)
+	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, fs)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ type demuxOutput struct {
 // alone is tens of KiB, and a write call costs the same whatever it carries.
 const demuxWriteBuf = 1 << 20
 
-func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
+func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	outputs := make([]demuxOutput, 0, len(tracks))
 	abandon := func(err error) (map[uint64]*bufio.Writer, []demuxOutput, error) {
@@ -144,7 +144,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir string, fs *mkv.FS) (map[u
 		if err != nil {
 			return abandon(err)
 		}
-		f, err := fs.DoCreate(path)
+		f, err := createOutput(fs, path, source)
 		if err != nil {
 			return abandon(err)
 		}
