@@ -38,7 +38,7 @@ Encryption:
 Remote sources:
 
 - Errors never show a URL's query or `user:password@`, `Stat().Name()` and
-  the mux, merge and concat comparison errors included.
+  the mux, merge and compare errors included.
 - `httpfs` refuses an https to http redirect while `Options.Header` is set.
 
 Crafted files (each was an allocation or a crash a few bytes could trigger):
@@ -46,8 +46,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - Manifests escape a file's strings: HLS drops `"`, CR and LF, DASH
   attributes are XML-escaped (a title could add a `BaseURL` to another host).
 - Manifests escape every URI, `RewriteURL`'s, `KeyURI` and CMAF file names:
-  HLS percent-encodes `"`, CR and LF and writes accents as they are instead
-  of Go escapes, DASH XML-escapes them.
+  HLS percent-encodes `"`, CR and LF and writes a backslash or a control
+  character as it is instead of a Go escape; DASH XML-escapes them, so a
+  signed URL's `&` is now written `&amp;`.
 - An MP4 declares at most 16M samples in all, and a segment holds at most
   256 MiB of media.
 - `LoadAttachmentData` grows its buffer as bytes arrive instead of trusting

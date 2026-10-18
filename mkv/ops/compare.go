@@ -16,11 +16,11 @@ func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]m
 	fs := mkv.FSFrom(opts)
 	a, err := reader.OpenWithFS(ctx, pathA, fs, reader.WithoutAttachmentData())
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", pathA, err)
+		return nil, fmt.Errorf("open %s: %w", shown.Path(pathA), err)
 	}
 	b, err := reader.OpenWithFS(ctx, pathB, fs, reader.WithoutAttachmentData())
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", pathB, err)
+		return nil, fmt.Errorf("open %s: %w", shown.Path(pathB), err)
 	}
 	return CompareContainers(a, b), nil
 }
@@ -42,11 +42,11 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options
 	fs := mkv.FSFrom(opts)
 	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
-		return nil, fmt.Errorf("digest %s: %w", pathA, err)
+		return nil, fmt.Errorf("digest %s: %w", shown.Path(pathA), err)
 	}
 	_, b, err := digestTracks(ctx, pathB, fs, nil, false)
 	if err != nil {
-		return nil, fmt.Errorf("digest %s: %w", pathB, err)
+		return nil, fmt.Errorf("digest %s: %w", shown.Path(pathB), err)
 	}
 
 	return diffDigests(a, b), nil
