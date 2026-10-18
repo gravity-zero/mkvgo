@@ -99,6 +99,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A chapter-track sample larger than a title is not read.** Its buffer
+  was sized from the declared sample size before any byte arrived: one
+  sample claiming 4 GiB of a sparse or remote file allocated 4 GiB on a
+  metadata probe. A chapter track with a sample past 64 KiB is ignored.
 - **A PGS object named many times is decoded once.** A composition could
   name one object 255 times and each reference decoded it again: a few bytes
   held 16 GiB. An object, or a crop of it, is decoded once per display set,

@@ -204,8 +204,17 @@ func chapterTrackSamples(trak []byte, fileSize int64) []inSample {
 	return tr.samples
 }
 
+// maxChapterSampleBytes is the largest chapter-track sample read: a title and its tx3g modifiers take bytes, not
+// megabytes, so a larger declared size is not a title and is never allocated.
+const maxChapterSampleBytes = 64 << 10
+
 // readChapterTrack reads the chapter titles of a QuickTime chapter track, one ranged read per run of contiguous samples.
 func readChapterTrack(r io.ReadSeeker, samples []inSample) []mkv.Chapter {
+	for _, s := range samples {
+		if s.size > maxChapterSampleBytes {
+			return nil
+		}
+	}
 	var chapters []mkv.Chapter
 	for i := 0; i < len(samples); {
 		j, end := i+1, samples[i].offset+int64(samples[i].size)
