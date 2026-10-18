@@ -5,6 +5,9 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // The budget must follow the SOURCE, not a constant: a 1080p window runs ~2 MiB
@@ -280,6 +283,7 @@ func TestParallelRenditionsOfOneWindowShareASingleWalk(t *testing.T) {
 	}
 
 	tally = readTally{}
+	plan.fs = slowFirstOpen(countingFS(&tally), 50*time.Millisecond) // the walk waits, so every request joins it even on one CPU
 	var wg sync.WaitGroup
 	got := make([][]byte, tracks)
 	for ti := 0; ti < tracks; ti++ {
@@ -311,4 +315,16 @@ func TestParallelRenditionsOfOneWindowShareASingleWalk(t *testing.T) {
 			t.Errorf("track %d: the segment served through the shared walk differs from an uncached one", ti)
 		}
 	}
+}
+
+// slowFirstOpen delays fs's first Open by d, so requests started together overlap with the walk it begins.
+func slowFirstOpen(fs *mkv.FS, d time.Duration) *mkv.FS {
+	var once sync.Once
+	open := fs.Open
+	slow := *fs
+	slow.Open = func(path string) (mkv.ReadSeekCloser, error) {
+		once.Do(func() { time.Sleep(d) })
+		return open(path)
+	}
+	return &slow
 }

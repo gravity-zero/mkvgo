@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -525,6 +526,14 @@ func TestOpenETagFollowsSource(t *testing.T) {
 // The tables every plan keeps stay under the process budget: two plans
 // building many windows never hold more than the budget plus one table.
 func TestTableCacheProcessBudget(t *testing.T) {
+	// Earlier tests' plans give their tables back when collected: wait for that, so only this test's count.
+	for i := 0; tableBytesTotal.Load() != 0; i++ {
+		if i == 100 {
+			t.Fatalf("%d bytes of tables still held by plans nothing references", tableBytesTotal.Load())
+		}
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
 	SetTableCacheBytes(64 << 10)
 	defer SetTableCacheBytes(0)
 	ctx := context.Background()
