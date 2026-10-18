@@ -37,17 +37,19 @@ func subtitled(t *testing.T, cue string) string {
 	return src
 }
 
-// sameSubtitlesAfterJoin joins parts and compares the subtitle samples with src's.
+// sameSubtitlesAfterJoin joins parts and compares every track's samples with src's: a cue running past a cut must not move the picture's seam.
 func sameSubtitlesAfterJoin(t *testing.T, src string, parts []string) {
 	t.Helper()
 	joined := filepath.Join(t.TempDir(), "j.mp4")
 	if err := Join(context.Background(), parts, joined); err != nil {
 		t.Fatal(err)
 	}
-	ti := textTrackIndex(t, mustCutModel(t, src))
-	if want, got := sampleSeqs(t, src)[ti], sampleSeqs(t, joined)[ti]; strings.Join(want, ",") != strings.Join(got, ",") {
-		t.Errorf("the join does not give the subtitles back")
-		diffFirst(t, want, got)
+	want, got := sampleSeqs(t, src), sampleSeqs(t, joined)
+	for ti := range want {
+		if strings.Join(want[ti], ",") != strings.Join(got[ti], ",") {
+			t.Errorf("track %d: the join does not give the source back", ti+1)
+			diffFirst(t, want[ti], got[ti])
+		}
 	}
 }
 
