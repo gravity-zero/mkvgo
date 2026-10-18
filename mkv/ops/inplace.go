@@ -24,8 +24,10 @@ import (
 //
 // The head SeekHead is rebuilt to point at the edited elements (keeping its
 // entries to elements outside the head, e.g. the Cues). A Tags element sitting
-// after the clusters (as Mux writes statistics tags) is folded into the head
-// metadata and its old bytes voided, so tags are not duplicated.
+// after the clusters (as Mux writes statistics tags) stays there when the edit
+// leaves the tags as they are; edited, they are folded into the head metadata
+// and the old bytes voided, or rewritten in the old element's place when the
+// head cannot hold them.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, path, fs)
@@ -33,6 +35,10 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		return err
 	}
 
+	var oldTags bytes.Buffer
+	if err := writer.WriteTags(&oldTags, c.Tags); err != nil {
+		return err
+	}
 	applyEdit(c, edit)
 	syncDurationMs(c)
 
@@ -40,62 +46,31 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err != nil {
 		return fmt.Errorf("scan metadata: %w", err)
 	}
-
-	// Serialise the metadata elements, recording each element's offset within
-	// the buffer so the rebuilt SeekHead can point at them.
-	var newMeta bytes.Buffer
-	var entries []writer.SeekEntry
-	mark := func(id uint32) { entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())}) }
-
-	mark(mkv.IDInfo)
-	if err := writer.WriteSegmentInfo(&newMeta, &c.Info, c.DurationMs); err != nil {
+	var newTags bytes.Buffer
+	if err := writer.WriteTags(&newTags, c.Tags); err != nil {
 		return err
 	}
-	if len(c.Tracks) > 0 {
-		mark(mkv.IDTracks)
-		if err := writer.WriteTracks(&newMeta, c.Tracks); err != nil {
-			return err
-		}
-	}
-	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
-		mark(mkv.IDChapters)
-		if err := writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions); err != nil {
-			return err
-		}
-	}
-	if len(c.Attachments) > 0 {
-		mark(mkv.IDAttachments)
-		if err := writer.WriteAttachments(&newMeta, c.Attachments); err != nil {
-			return err
-		}
-	}
-	if len(c.Tags) > 0 {
-		mark(mkv.IDTags)
-		if err := writer.WriteTags(&newMeta, c.Tags); err != nil {
-			return err
-		}
-	}
+	tailOnly := region.tailTags.size > 0 && !region.headTags // every tag lives after the clusters
+	keepTail := tailOnly && bytes.Equal(oldTags.Bytes(), newTags.Bytes())
 
-	// Lay the region out: a SeekHead slot (when the file had one) then the
-	// metadata, with the leftover voided. The old SeekHead sits at the region
-	// start, so ANY write here destroys it - rebuilding it is mandatory, never
-	// optional, or the Cues past the clusters would only be findable by a full
-	// walk.
-	//
-	// A layout that leaves exactly ONE byte over is unwritable: the smallest
-	// EBML element spans 2 bytes (a 1-byte ID and a 1-byte size). Rather than
-	// refuse an otherwise valid edit over a single byte, absorb it into the
-	// metadata - the first element's data size is re-encoded one byte wider,
-	// which EBML explicitly allows - and lay the region out again.
-	metaBytes := newMeta.Bytes()
+	kept := region.keptSeekEntries
+	if keepTail {
+		region.keptSeekEntries = append(kept, region.tailTagsEntry)
+	}
+	metaBytes, entries, err := serializeHead(c, !keepTail)
+	if err != nil {
+		return err
+	}
 	available := region.end - region.start
-	reserve, seekData, err := fitRegion(region, entries, metaBytes, available)
-	if errors.Is(err, errOddByte) {
-		var perr error
-		if metaBytes, entries, perr = widenFirstDataSize(metaBytes, entries); perr != nil {
-			return fmt.Errorf("new metadata (%d bytes) leaves exactly 1 byte of the %d available, which no EBML element can fill: %w", len(metaBytes), available, perr)
+	reserve, seekData, err := layoutRegion(region, &metaBytes, &entries, available)
+	tailSlack := region.tailTags.size - int64(newTags.Len())
+	rewriteTail := err != nil && tailOnly && !keepTail && len(c.Tags) > 0 && (tailSlack == 0 || tailSlack >= 2)
+	if rewriteTail { // the head cannot hold the edited tags, their old element can
+		region.keptSeekEntries = append(kept, region.tailTagsEntry)
+		if metaBytes, entries, err = serializeHead(c, false); err != nil {
+			return err
 		}
-		reserve, seekData, err = fitRegion(region, entries, metaBytes, available)
+		reserve, seekData, err = layoutRegion(region, &metaBytes, &entries, available)
 	}
 	if err != nil {
 		return err
@@ -137,14 +112,23 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 
-	// The tags now live in the head region: void the old post-cluster Tags
-	// element so they are not read twice.
-	if region.tailTags.size > 0 {
+	// Tags folded into the head are voided where they were, so they are not read twice; tags the head could not
+	// hold are rewritten there.
+	if region.tailTags.size > 0 && !keepTail {
 		if _, err := f.Seek(region.tailTags.pos, io.SeekStart); err != nil {
 			return err
 		}
-		if err := writer.WriteVoid(f, int(region.tailTags.size)); err != nil {
-			return err
+		voided := region.tailTags.size
+		if rewriteTail {
+			if _, err := f.Write(newTags.Bytes()); err != nil {
+				return err
+			}
+			voided = tailSlack
+		}
+		if voided > 0 {
+			if err := writer.WriteVoid(f, int(voided)); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -157,6 +141,61 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 	return nil
+}
+
+// serializeHead serialises the head metadata elements, recording each one's offset for the rebuilt SeekHead;
+// withTags false leaves the Tags out, to stay after the clusters.
+func serializeHead(c *mkv.Container, withTags bool) ([]byte, []writer.SeekEntry, error) {
+	var newMeta bytes.Buffer
+	var entries []writer.SeekEntry
+	mark := func(id uint32) { entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())}) }
+
+	mark(mkv.IDInfo)
+	if err := writer.WriteSegmentInfo(&newMeta, &c.Info, c.DurationMs); err != nil {
+		return nil, nil, err
+	}
+	if len(c.Tracks) > 0 {
+		mark(mkv.IDTracks)
+		if err := writer.WriteTracks(&newMeta, c.Tracks); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
+		mark(mkv.IDChapters)
+		if err := writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(c.Attachments) > 0 {
+		mark(mkv.IDAttachments)
+		if err := writer.WriteAttachments(&newMeta, c.Attachments); err != nil {
+			return nil, nil, err
+		}
+	}
+	if withTags && len(c.Tags) > 0 {
+		mark(mkv.IDTags)
+		if err := writer.WriteTags(&newMeta, c.Tags); err != nil {
+			return nil, nil, err
+		}
+	}
+	return newMeta.Bytes(), entries, nil
+}
+
+// layoutRegion lays the metadata out in the region (see fitRegion), widening it a byte when one would be left over.
+func layoutRegion(region metadataRegion, meta *[]byte, entries *[]writer.SeekEntry, available int64) (int64, []byte, error) {
+	// A SeekHead slot (when the file had one) then the metadata, the leftover voided. The old SeekHead sits at the
+	// region start, so ANY write here destroys it: rebuilding it is mandatory, or the Cues past the clusters would
+	// only be findable by a full walk. A single byte left over, which no EBML element can fill, is absorbed into the
+	// metadata by re-encoding the first element's data size a byte wider, as EBML allows.
+	reserve, seekData, err := fitRegion(region, *entries, *meta, available)
+	if errors.Is(err, errOddByte) {
+		var perr error
+		if *meta, *entries, perr = widenFirstDataSize(*meta, *entries); perr != nil {
+			return 0, nil, fmt.Errorf("new metadata (%d bytes) leaves exactly 1 byte of the %d available, which no EBML element can fill: %w", len(*meta), available, perr)
+		}
+		reserve, seekData, err = fitRegion(region, *entries, *meta, available)
+	}
+	return reserve, seekData, err
 }
 
 // errOddByte reports a layout that would leave exactly one byte of the region
@@ -297,6 +336,10 @@ type metadataRegion struct {
 	// tailTags is a Tags element sitting after the head region (Mux writes the
 	// statistics tags there); its bytes are voided after an in-place edit.
 	tailTags struct{ pos, size int64 }
+	// tailTagsEntry is the old SeekHead's entry for tailTags, kept when they stay where they are.
+	tailTagsEntry writer.SeekEntry
+	// headTags is set when a Tags element sits in the head region too.
+	headTags bool
 }
 
 func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
@@ -355,6 +398,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 				region.start = pos
 			}
 			region.end = pos + int64(ebml.ElementIDLen(eh.ID)) + int64(ebml.DataSizeLen(eh.Size)) + eh.Size
+			region.headTags = region.headTags || eh.ID == mkv.IDTags
 			if eh.ID == mkv.IDSeekHead {
 				if !region.hadSeekHead {
 					region.hadSeekHead, region.seekHeadPos = true, pos
@@ -421,6 +465,7 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 			}
 			region.tailTags.pos = abs
 			region.tailTags.size = int64(hdrLen) + th.Size
+			region.tailTagsEntry = e
 			continue
 		}
 		region.keptSeekEntries = append(region.keptSeekEntries, e)
