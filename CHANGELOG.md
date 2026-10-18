@@ -155,6 +155,9 @@ Matroska reading:
   the timeline: the seam is checked against the picture and the sound, and a
   1.5 s cue left a 1.5 s hole in the video.
 
+- A Matroska split by chapters names the chapter that holds no keyframe and
+  offers a split by time, instead of asking to adjust a range nobody gave.
+
 Damage and resync:
 
 - The keyframe walks resync past a block that overruns its Cluster, and

@@ -521,8 +521,13 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 // to start on: writing it would either drop the content silently (empty part)
 // or produce corrupt video until the next real keyframe, so it is an explicit
 // error instead.
-func noCutKeyframeErr(startMs int64) error {
-	return fmt.Errorf("no video keyframe at/after %dms: cannot start a decodable segment there (video keyframes are sparse in the source); adjust the range to a keyframe", startMs)
+func noCutKeyframeErr(startMs int64) error { return noCutKeyframeError{startMs} }
+
+// noCutKeyframeError is noCutKeyframeErr's refusal, typed so a chapter split can name the chapter instead.
+type noCutKeyframeError struct{ startMs int64 }
+
+func (e noCutKeyframeError) Error() string {
+	return fmt.Sprintf("no video keyframe at/after %dms: cannot start a decodable segment there (video keyframes are sparse in the source); adjust the range to a keyframe", e.startMs)
 }
 
 func identityRemap(tracks []mkv.Track) map[uint64]uint64 {

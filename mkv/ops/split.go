@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
@@ -93,6 +94,9 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		}
 
 		if err := splitRange(ctx, c, outPath, r, remap, durationMs, chapterWindowEnd(ranges, i), linkAt(uids, i, &c.Info), fs, walk, mkv.ProgressFrom(extra)); err != nil {
+			if nk := (noCutKeyframeError{}); opts.ByChapters && errors.As(err, &nk) && i < len(titles) {
+				return outputs, fmt.Errorf("part %d: chapter %q (%d-%d ms) holds no video keyframe: split by time instead (-range or -every, SplitOptions.Ranges or EveryMs), or move the chapter (set-chapters)", i+1, titles[i], r.StartMs, r.EndMs)
+			}
 			return outputs, fmt.Errorf("part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, outPath)

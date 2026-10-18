@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -117,5 +118,30 @@ func TestSplitCarriesASubtitleOverTwoCuts(t *testing.T) {
 		if v[0] != int64(i)*500 {
 			t.Fatalf("joined frame %d at %d ms, want %d: a seam opened a hole", i, v[0], i*500)
 		}
+	}
+}
+
+// TestSplitByChaptersNamesTheChapterWithoutAKeyframe pins the advice a chapter split gives when a chapter holds
+// no keyframe: the chapter by name, and the ways out the caller has, never a range they did not give.
+func TestSplitByChaptersNamesTheChapterWithoutAKeyframe(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"},
+		Chapters: []mkv.Chapter{{StartMs: 0, Title: "Intro"}, {StartMs: 2500, Title: "Short"}, {StartMs: 2700, Title: "Rest"}}}
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(c, []mkv.Track{videoTrack(1)}, 4000))
+	for tc := int64(0); tc < 4000; tc += 500 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: tc, Duration: 500, Keyframe: tc%1000 == 0, Data: []byte("v")}}))
+	}
+	mustNil(t, mw.Finalize())
+	mustNil(t, f.Close())
+	_, err = Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), ByChapters: true})
+	if err == nil || !strings.Contains(err.Error(), `"Short"`) || !strings.Contains(err.Error(), "split by time instead") {
+		t.Errorf("err = %v, want the chapter named and a split by time offered", err)
 	}
 }
