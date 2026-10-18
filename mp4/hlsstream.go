@@ -325,6 +325,13 @@ func (p *HLSPlan) storeTable(n int, t *windowTable) {
 		p.tables = make(map[int]*windowTable)
 	}
 	if _, dup := p.tables[n]; dup {
+		for ti := range t.kept { // the copy not stored: its waiters copy from the source, its budget is given back
+			if t.kept[ti] > 0 {
+				t.data[ti], t.kept[ti] = nil, 0
+			}
+		}
+		windowBytesTotal.Add(-t.held)
+		t.held = 0
 		return
 	}
 	p.tables[n] = t

@@ -142,6 +142,8 @@ Serving:
   ahead, then a seek) no longer holds the process-wide window budget until
   its plan is collected: a later walk reclaims it, oldest first, from any
   plan, so the source keeps being read once per window.
+- A window built twice (a cancelled walk finishing beside its retry) gives
+  back what the copy not kept had reserved, instead of leaking it for good.
 - A subtitle track no longer keeps a read that failed once, a request
   cancelled or a server erroring, as its answer for the life of the plan;
   only damage and a replaced source are remembered.
