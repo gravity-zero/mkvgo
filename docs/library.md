@@ -2850,6 +2850,9 @@ entries, err := subtitle.ParseSRT("subs.srt")
 // []subtitle.SRTEntry{StartMs, EndMs, Text}
 ```
 
+`subtitle.ParseSRTReader(r)` parses a reader the caller opened, a remote source through its own filesystem for
+instance, entry for entry as `ParseSRT` parses a file.
+
 ### ASS/SSA
 
 ```go

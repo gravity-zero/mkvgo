@@ -85,6 +85,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- **`subtitle.ParseSRTReader`** (and `matroska.ParseSRTReader`) parses SRT from a
+  reader, for a source opened through a caller's filesystem.
 - **MP4/MOV is edited natively, not just remuxed.** `mp4.EditInPlace`,
   `EditMetadata`, `SetChapters`, `RemoveTrack`, `Rewrite`, `Split`, `Join`,
   `Mux`, `Merge`, `AddTrack` and `MergeSubtitle` copy the samples and sample

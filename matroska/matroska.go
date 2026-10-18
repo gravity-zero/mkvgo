@@ -864,6 +864,7 @@ func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, 
 
 var (
 	ParseSRT           = subtitle.ParseSRT
+	ParseSRTReader     = subtitle.ParseSRTReader
 	ParseASS           = subtitle.ParseASS
 	FormatASSTimestamp = subtitle.FormatASSTimestamp
 )

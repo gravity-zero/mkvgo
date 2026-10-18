@@ -3,6 +3,7 @@ package subtitle
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,9 +22,14 @@ func ParseSRT(path string) ([]SRTEntry, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return ParseSRTReader(f)
+}
 
+// ParseSRTReader parses SRT entries from r, as ParseSRT does from a file - for a source the caller opened, through
+// its own filesystem.
+func ParseSRTReader(r io.Reader) ([]SRTEntry, error) {
 	var entries []SRTEntry
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024)
 
 	for scanner.Scan() {
