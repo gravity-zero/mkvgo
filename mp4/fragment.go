@@ -134,7 +134,7 @@ func buildInitTrak(ft *fragTrack, cenc *CENCOptions) []byte {
 	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, hName), minf)
 	mdia := container("mdia", mdiaChildren...)
 
-	trakChildren := [][]byte{buildTkhd(t, uint32(ft.presentMs))}
+	trakChildren := [][]byte{buildTkhd(t, uint32(ft.presentMs), 0)} // one track per init segment: no alternative to group
 	if t.mkv.IsForced {
 		trakChildren = append(trakChildren, container("udta", buildKind(dashRoleScheme, "forced-subtitle")))
 	}

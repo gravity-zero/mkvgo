@@ -176,6 +176,9 @@ MP4:
   gather into: six minutes of 48 kHz LPCM (17M samples) passed the movie's
   sample budget and was refused, and longer tracks were expanded frame by frame;
   the keyframes walk takes such a track's end from its stts runs.
+- `to-mp4` groups alternative tracks as the mainstream muxer does (audio in
+  group 1, subtitles in group 3, the chapter track in none): with every
+  track in group 0, Apple players showed one audio language and hid the rest.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
 - `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a

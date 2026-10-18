@@ -435,7 +435,7 @@ func buildTrak(t *outTrack, mdatBase int64, co64 bool) ([]byte, uint32) {
 	mdiaChildren = append(mdiaChildren, buildHdlr(t.spec.handler, hName), minf)
 	mdia := container("mdia", mdiaChildren...)
 
-	trakChildren := [][]byte{buildTkhd(t, presentDur)}
+	trakChildren := [][]byte{buildTkhd(t, presentDur, alternateGroup(t.spec.handler, t.isChapter))}
 	if t.chapterRefID > 0 {
 		trakChildren = append(trakChildren, buildTrefChap(t.chapterRefID))
 	}
@@ -486,7 +486,7 @@ func buildKind(scheme, value string) []byte {
 	})
 }
 
-func buildTkhd(t *outTrack, durationMs uint32) []byte {
+func buildTkhd(t *outTrack, durationMs uint32, group uint16) []byte {
 	// in_movie | in_preview, plus track_enabled when the track is the default  -
 	// probers map track_enabled back to the "default" disposition.
 	flags := uint32(0x000006)
@@ -503,9 +503,9 @@ func buildTkhd(t *outTrack, durationMs uint32) []byte {
 		w.u32(t.mp4ID)
 		w.u32(0) // reserved
 		w.u32(durationMs)
-		w.zeros(8) // reserved
-		w.u16(0)   // layer
-		w.u16(0)   // alternate_group
+		w.zeros(8)   // reserved
+		w.u16(0)     // layer
+		w.u16(group) // alternate_group
 		w.u16(volume)
 		w.u16(0) // reserved
 		w.matrix(orientationMatrix(t.mkv.Rotation, t.mkv.HFlip))
@@ -517,6 +517,22 @@ func buildTkhd(t *outTrack, durationMs uint32) []byte {
 			w.u32(0)
 		}
 	})
+}
+
+// alternateGroup is a track's tkhd alternate_group, by type as the mainstream muxer sets it (measured): audio 1,
+// subtitles 3, video and everything else 0. Players offer the tracks of one group as alternatives, so a second
+// language left in group 0 was hidden by Apple players. A chapter track is in no group, or players offer it as a
+// subtitle.
+func alternateGroup(handler string, chapter bool) uint16 {
+	switch {
+	case chapter:
+		return 0
+	case handler == "soun":
+		return 1
+	case handler == "text", handler == "sbtl", handler == "subt":
+		return 3
+	}
+	return 0
 }
 
 func buildMdhd(duration, timescale uint32, lang string) []byte {
