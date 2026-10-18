@@ -58,6 +58,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Added
 
+- `matroska.ErrNoRoomInPlace`: `EditInPlace` refusals for want of room match
+  it with `errors.Is`, message unchanged, the file left as it was.
 - `ExtractSubtitleWebVTT` on Matroska reads a track the source's Cues fully
   index (verified against `NUMBER_OF_FRAMES`) where the Cues put it, instead of
   walking the file, and walks otherwise with the same output. A source that

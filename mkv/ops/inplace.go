@@ -198,6 +198,10 @@ func layoutRegion(region metadataRegion, meta *[]byte, entries *[]writer.SeekEnt
 	return reserve, seekData, err
 }
 
+// ErrNoRoomInPlace is what EditInPlace returns (errors.Is) when the edited metadata does not fit where the file
+// keeps it, before anything is written: EditMetadata rewrites the file instead.
+var ErrNoRoomInPlace = errors.New("use full rewrite instead")
+
 // errOddByte reports a layout that would leave exactly one byte of the region
 // unfilled - unwritable, since the smallest EBML element spans two bytes. The
 // caller resolves it by growing the metadata a byte (widenFirstDataSize).
@@ -210,7 +214,7 @@ var errOddByte = errors.New("one byte would be left over")
 func fitRegion(region metadataRegion, entries []writer.SeekEntry, meta []byte, available int64) (int64, []byte, error) {
 	newSize := int64(len(meta))
 	if newSize > available {
-		return 0, nil, fmt.Errorf("new metadata (%d bytes) exceeds available space (%d bytes) - use full rewrite instead", newSize, available)
+		return 0, nil, fmt.Errorf("new metadata (%d bytes) exceeds available space (%d bytes) - %w", newSize, available, ErrNoRoomInPlace)
 	}
 	if !region.hadSeekHead {
 		if available-newSize == 1 {
@@ -300,7 +304,7 @@ func fitSeekHead(region metadataRegion, head []writer.SeekEntry, newSize, availa
 			return slot, sh, nil
 		}
 	}
-	return 0, nil, fmt.Errorf("new metadata (%d bytes) plus the rebuilt SeekHead exceeds available space (%d bytes) - use full rewrite instead", newSize, available)
+	return 0, nil, fmt.Errorf("new metadata (%d bytes) plus the rebuilt SeekHead exceeds available space (%d bytes) - %w", newSize, available, ErrNoRoomInPlace)
 }
 
 // buildSeekHead serialises the head SeekHead for a region rewritten with slot

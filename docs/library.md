@@ -1890,6 +1890,10 @@ statistics, or what mkvpropedit leaves) stay there when the callback does not
 change them, so a title edit never needs room for them in the head; changed,
 they are folded into the head without duplication, or rewritten in their old
 element when the head cannot hold them and they are no larger.
+When the edit fits nowhere, `EditInPlace` returns an
+error matching `matroska.ErrNoRoomInPlace` (`errors.Is`) before writing a
+byte, and `EditMetadata` is the way through. A Segment of unknown size (a live
+recording) is edited like any other.
 
 Modifies the file directly without rewriting cluster data. Only safe for metadata changes that fit in the existing header space.
 

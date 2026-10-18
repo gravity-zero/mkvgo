@@ -1,7 +1,9 @@
 package ops
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,5 +69,48 @@ func TestEditInPlaceRewritesTailTagsWhereTheyAre(t *testing.T) {
 	mustNil(t, err)
 	if len(c.Tags) != 1 || len(c.Tags[0].SimpleTags) != 29 || c.Tags[0].SimpleTags[0].Value != "edited" {
 		t.Errorf("tags after the edit: %+v", c.Tags)
+	}
+}
+
+// TestEditInPlaceRefusalLeavesTheFileAsItWas pins that an edit with no room is refused as ErrNoRoomInPlace, its
+// message unchanged, before a single byte of the file is written.
+func TestEditInPlaceRefusalLeavesTheFileAsItWas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tail.mkv")
+	tailTagsMKV(t, path, 30)
+	before, err := os.ReadFile(path)
+	mustNil(t, err)
+	err = EditInPlace(context.Background(), path, func(c *mkv.Container) {
+		c.Info.Title = "New title"
+		c.Tags[0].SimpleTags = append(c.Tags[0].SimpleTags, mkv.SimpleTag{Name: "MORE", Value: strings.Repeat("y", 400)})
+	})
+	if !errors.Is(err, ErrNoRoomInPlace) || !strings.HasPrefix(err.Error(), "new metadata (") || !strings.HasSuffix(err.Error(), " - use full rewrite instead") {
+		t.Fatalf("err = %v, want ErrNoRoomInPlace with the usual message", err)
+	}
+	after, err := os.ReadFile(path)
+	mustNil(t, err)
+	if !bytes.Equal(before, after) {
+		t.Errorf("a refused edit changed the file")
+	}
+}
+
+// TestEditInPlaceOnAnUnknownSizeSegment pins that a Segment of unknown size (a live recording) is edited in place,
+// its clusters untouched.
+func TestEditInPlaceOnAnUnknownSizeSegment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "live.mkv")
+	tailTagsMKV(t, path, 2)
+	data, err := os.ReadFile(path)
+	mustNil(t, err)
+	seg := bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})
+	if seg < 0 || data[seg+4] != 0x01 {
+		t.Fatalf("no 8-byte Segment size to mark unknown")
+	}
+	copy(data[seg+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	mustNil(t, os.WriteFile(path, data, 0o644))
+	blocks := len(collectAllBlocks(t, path))
+	mustNil(t, EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "Live" }))
+	c, err := reader.Open(context.Background(), path)
+	mustNil(t, err)
+	if c.Info.Title != "Live" || len(c.Tags) != 1 || len(collectAllBlocks(t, path)) != blocks {
+		t.Errorf("title %q, %d tags, %d blocks of %d", c.Info.Title, len(c.Tags), len(collectAllBlocks(t, path)), blocks)
 	}
 }
