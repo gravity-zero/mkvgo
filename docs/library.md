@@ -2413,7 +2413,7 @@ files, err := matroska.Split(ctx, matroska.SplitOptions{
         {StartMs: 300000, EndMs: 0},  // 0 = end of file
     },
 })
-// files = ["./parts/video_001.mkv", "./parts/video_002.mkv"]
+// files = ["parts/part_001.mkv", "parts/part_002.mkv"]
 ```
 
 **Split into fixed-duration, keyframe-aligned segments:**
@@ -2428,11 +2428,14 @@ files, err := matroska.Split(ctx, matroska.SplitOptions{
 Boundaries come from the Cues index (the first keyframe at/after each
 multiple); a file without Cues must be reindexed first. `Pattern` names the
 parts (default `part_%03d.mkv`); when splitting by chapters the `{title}`
-token is replaced by the sanitized chapter title: a path separator or control
-character becomes `_`, a name Windows reserves for a device (`CON`, `NUL`,
+token is replaced by the sanitized chapter title: every ASCII character but
+letters, digits, space and `-_.()` becomes `_` (non-ASCII letters stay), a name Windows reserves for a device (`CON`, `NUL`,
 `COM0`-`COM9`, `COM¹`-`COM³`, the same for `LPT`) takes a leading `_`, and every part is checked to stay under
 `OutputDir`. Unlike the CLI's single-output commands, `Split` does not refuse
-an existing file: a part whose name is taken is overwritten.
+an existing file: a part whose name is taken is overwritten, but a part that
+would be the source itself is refused before any part is written. The modes
+are read in this order when several are set: `ByChapters`, then `EveryMs`,
+then `Ranges` (the CLI refuses more than one).
 
 **Split by chapters:**
 ```go

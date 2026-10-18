@@ -11,7 +11,7 @@ Global flags:
 - `-json` -- structured JSON output (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare, analyze; accepted but ignored by writing commands)
 - `-in-band` -- the inspection commands (`info`, `tracks`, `probe`) complete a video track's description from its first sample where the header leaves it short: colour behind a bare `hvcC`, a VP9 profile with no `vpcC`, HDR10 static metadata (MaxCLL/MaxFALL, mastering display) kept only in the HEVC SEI / AV1 metadata OBUs. It also reads the channel count each AC-3, E-AC-3 and AAC stream states (`stream_channels` in JSON, `channels_mismatch` when the container's `channels` says otherwise; Matroska). One bounded read, only for such a track; the container wins per field. The library's `WithInBandColourFallback` / `mp4.Options.InBandColour`. Ignored on stdin (`-`) and by the writing commands, which always apply it
 - `-fps-reads` -- the inspection commands (`info`, `tracks`, `probe`) let the frame-rate estimate of a Matroska track without DefaultDuration read the block headers it needs in the first 512 KiB, one exact 32-byte read each; off by default, when the estimate uses only the bytes the head read already holds and the statistics tags. The library's `WithFrameRateReads`. On 63 real files without DefaultDuration (local ext4 disk, page cache dropped per file): 12 estimated by default, 63 with the flag, about 126 more reads per file and a median probe of 7.8 ms instead of 5.0 ms (no difference once cached)
-- `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`). `edit-inplace` is the exception: it modifies its input file by design.
+- `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`); with it, an output that is one of the command's inputs is still refused. `edit-inplace` modifies its input file by design, and `split` overwrites existing parts (but never its source).
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
 
@@ -1259,6 +1259,7 @@ mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] --auto [-target mse-generic]
 - Responses carry an ETag (strong, the SHA-256 of the bytes, for a resource held in memory; weak for a media segment streamed from the source), support `Range` (206 partial content) and conditional `If-None-Match` (304), and are served `Cache-Control: no-cache`: a player revalidates on the ETag. A segment name stays the same if the source is replaced under the same path, so no resource is announced immutable. CORS headers (`Access-Control-Allow-Origin: *`) are off by default: `--cors` turns them on, for a browser-based player on another origin. Without it, a page on another origin cannot read what the server serves.
 - `--direct`: skip packaging entirely and serve the raw file byte-range (`mkvhttp.FileHandler`) -- direct-play: serve the file as-is when the client supports it, no packaging.
 - `--auto`: run `mkvgo playability` (target `-target`, default `mse-generic`) and pick `--direct` when the overall verdict is direct-play, or the on-demand HLS plan otherwise; prints which mode it chose. `--direct` and `--auto` are mutually exclusive.
+- A client must send its request header within 10 s, an idle connection closes after 2 min, and an HLS response must be written within 5 min (a slow client is cut off past it; `--direct` has no write deadline).
 - Ctrl-C shuts the server down gracefully.
 
 ```bash
@@ -1291,6 +1292,7 @@ mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors]
 - Polls the source once a second for new whole clusters (a stat plus, at most, a bounded read of what's new) and extends the playlist as they land; a partial trailing cluster (still being written) is never served from.
 - A published segment's bytes are byte-identical to what `to-hls`/`hls-segment` would produce for the finished file, and never change once served (stable numbering).
 - Encrypted/CENC presentations, subtitle renditions, the DASH manifest and the I-frame trick-play playlist are not available in this version (see `docs/library.md` for the full list of v1 limits).
+- The same timeouts as `serve` apply.
 - Ctrl-C shuts the server down gracefully.
 
 ```bash
