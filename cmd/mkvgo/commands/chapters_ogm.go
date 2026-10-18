@@ -34,7 +34,7 @@ func CmdSetChapters(args []string) {
 		Fatal(fmt.Sprintf("%s: %v", chapPath, err))
 	}
 
-	guardDistinct(outPath, source)
+	guardDistinct(outPath, source, chapPath)
 	if isMP4Content(source) {
 		guardMP4Output(outPath)
 		err = mp4.SetChapters(context.Background(), source, outPath, chapters, mp4Options())

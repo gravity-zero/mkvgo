@@ -51,11 +51,12 @@ func armPreexisting(opts *matroska.Options) (printPreexisting func()) {
 // armRollbackDelta wires a --rollback-delta flag into opts: the delta file is
 // created up front and the repair is made to FAIL if the delta cannot be
 // written (a user asking for the file must not get a silent empty one).
+// files are the command's own files, which the delta must not be.
 // printSummary reports the written entry (call it after ClearProgress, on the
 // success path); closeFn closes the delta file and must be called when the
 // command is done writing.
-func armRollbackDelta(opts *matroska.Options, path string) (printSummary, closeFn func()) {
-	GuardOverwrite(path)
+func armRollbackDelta(opts *matroska.Options, path string, files ...string) (printSummary, closeFn func()) {
+	guardOutput(path, files...) // the delta is created before the repair reads anything: never over one of its files
 	f, err := os.Create(path)
 	if err != nil {
 		FatalErr(err)

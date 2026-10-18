@@ -79,7 +79,7 @@ func CmdRetime(args []string) {
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
-		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath)
+		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
 		defer closeDelta()
 	}
 

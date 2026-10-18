@@ -102,7 +102,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   `concat-segment`, `watermark-segment`, `forensic-segment`, `hls-segment`,
   `abr-segment`, `rollback`, `extract-attachment`, `extract-subtitle`,
   `subtitle-index`, `extract-chapters`, `to-vtt` and the frame extractions
-  wrote over the file they read when it was also the output.
+  wrote over the file they read when it was also the output; so did a
+  `--rollback-delta` naming the command's own file, and `set-chapters` over its
+  chapters file.
 - A Matroska `split` whose part would be named like its source (re-splitting
   `part_001.mkv` into its own directory) truncated the source, then removed
   it; every part is now checked before any is written, as for MP4.
