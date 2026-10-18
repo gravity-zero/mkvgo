@@ -102,6 +102,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **The sidx boxes ahead of an MP4's fragments are read one at a time.**
+  Every one, up to 786 KiB each, was read and kept before the first was
+  looked at, so a file stacking thousands of them held gigabytes on a
+  head-only probe; the walk now stops at the one that serves.
 - **`mp4.Diagnose` reads the sample tables.** It read the boxes and the track
   headers and called healthy a file whose sample table points outside the
   media, a chunk at offset 0 inside the `ftyp`, which every edit refuses or

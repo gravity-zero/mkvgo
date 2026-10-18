@@ -127,10 +127,10 @@ func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 	if vt == nil {
 		return
 	}
-	for _, sidx := range scanSidxBoxes(r, size) {
+	walkSidxBoxes(r, size, func(sidx []byte) bool {
 		times, ok := sidxKeyframeMs(sidx, vt.trackID)
 		if !ok {
-			continue
+			return false
 		}
 		ms := make([]int64, len(times))
 		for i, t := range times {
@@ -139,8 +139,8 @@ func readSidxKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 			}
 		}
 		vt.keyframesMs = sortDedupTimes(ms)
-		return
-	}
+		return true
+	})
 }
 
 // maxSidxBytes is the largest sidx payload ISO/IEC 14496-12 allows: a
@@ -151,13 +151,20 @@ const maxSidxBytes = 32 + 65535*12
 // fragment (moof) - a bounded head scan of the top-level boxes.
 func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 	var out [][]byte
+	walkSidxBoxes(r, size, func(p []byte) bool { out = append(out, p); return false })
+	return out
+}
+
+// walkSidxBoxes hands visit the payload of each sidx box before the first fragment, one at a time, until visit
+// returns true: only the sidx in hand is held, however many a file stacks ahead of its fragments.
+func walkSidxBoxes(r io.ReadSeeker, size int64, visit func([]byte) bool) {
 	var hdr [16]byte
-	for off := int64(0); off+8 <= size; {
+	for off, n := int64(0), 0; off+8 <= size && n < maxTopLevelBoxes; n++ {
 		if _, err := r.Seek(off, io.SeekStart); err != nil {
-			return out
+			return
 		}
 		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
-			return out
+			return
 		}
 		boxSize := int64(binary.BigEndian.Uint32(hdr[:4]))
 		typ := string(hdr[4:8])
@@ -165,7 +172,7 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 		switch boxSize {
 		case 1:
 			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
-				return out
+				return
 			}
 			boxSize = int64(binary.BigEndian.Uint64(hdr[8:16]))
 			headerLen = 16
@@ -173,7 +180,7 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 			boxSize = size - off
 		}
 		if boxSize < headerLen || off+boxSize > size {
-			return out
+			return
 		}
 		switch typ {
 		case "sidx":
@@ -181,16 +188,14 @@ func scanSidxBoxes(r io.ReadSeeker, size int64) [][]byte {
 				break // past what a sidx can hold: not one, and never read whole
 			}
 			payload, err := readExact(r, boxSize-headerLen)
-			if err != nil {
-				return out
+			if err != nil || visit(payload) {
+				return
 			}
-			out = append(out, payload)
 		case "moof", "mdat":
-			return out // fragments started; no head sidx beyond here
+			return // fragments started; no head sidx beyond here
 		}
 		off += boxSize
 	}
-	return out
 }
 
 // sidxKeyframeMs reads a sidx box payload and returns the start times (ms) of the
