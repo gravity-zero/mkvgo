@@ -2659,6 +2659,11 @@ than a silent full download. A `206` is taken only when it is coherent: its
 before its total, the total has not moved since the reader's first response
 (a moved total is `mkv.ErrSourceChanged`), and the body is exactly that many
 bytes - an over-long body is refused, a chunked body ending short too.
+A size the server declares bounds what a read allocates before the bytes
+arrive: a source that lies about it can make one open allocate up to
+`mp4.Options.MaxMoovBytes` (256 MiB by default) for an MP4 metadata read, or
+64 MiB for a Matroska block, before it fails. Lower `MaxMoovBytes` when the
+servers are not trusted.
 `Stat` is one `HEAD` (one single-byte ranged `GET` where `HEAD` is not
 served): no body is transferred, and the `FileInfo` carries the size,
 `Last-Modified` as its mtime and the object's version (`mkv.FileIdentity`:
