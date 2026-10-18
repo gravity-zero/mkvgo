@@ -4,7 +4,7 @@ LDFLAGS = -s -w -X main.version=$(VERSION)
 GOLANGCI_LINT_VERSION := v2.14.0
 BIN = mkvgo
 
-.PHONY: build test vet fuzz bench clean release wasm wasm-smoke preflight ci-status
+.PHONY: build test vet fuzz gate heavy bench clean release wasm wasm-smoke preflight ci-status
 
 # CGO_ENABLED=0: mkvgo is pure Go; keep the binaries static (and buildable
 # without a C toolchain - net/http would otherwise link the cgo resolver).
@@ -24,20 +24,24 @@ vet:
 bench:
 	CGO_ENABLED=0 go test ./mp4/ -run '^$$' -bench 'Benchmark(Serve|PlanHLS)' -benchmem
 
-# Runs each parser fuzzer briefly; CI fuzzes continuously (.github/workflows/fuzz.yml).
+# Runs every fuzz target briefly, discovered rather than listed (scripts/fuzz-all.sh); CI fuzzes nightly with the
+# same script (.github/workflows/fuzz.yml).
 FUZZTIME ?= 30s
 fuzz:
-	go test -fuzz=FuzzRead -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzReadMeta -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzReadVsReadStream -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzBlockReader -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzCodecColour -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzResyncToCluster -fuzztime=$(FUZZTIME) ./mkv/reader/
-	go test -fuzz=FuzzSurgicalScanCluster -fuzztime=$(FUZZTIME) ./mkv/ops/
-	go test -fuzz=FuzzApplyRollback -fuzztime=$(FUZZTIME) ./mkv/ops/
-	go test -fuzz=FuzzParseOGMChapters -fuzztime=$(FUZZTIME) ./mkv/
-	go test -fuzz=FuzzParseMP4 -fuzztime=$(FUZZTIME) ./mp4/
-	go test -fuzz=FuzzVP9FrameHeader -fuzztime=$(FUZZTIME) ./mp4/
+	FUZZTIME=$(FUZZTIME) scripts/fuzz-all.sh
+
+# gate: the per-commit check - gofmt, tests, vet, lint - ending in a receipt naming the commit.
+gate:
+	scripts/gate.sh
+
+# heavy: the race suite and every fuzz target, in a container bounded to 4 CPUs and 6 GB so a long run never starves
+# the machine it shares; HEAVY_FUZZTIME per target. Output files come back owned by the caller.
+HEAVY_FUZZTIME ?= 180s
+heavy:
+	docker run --rm --cpus 4 --memory 6g -v "$(CURDIR)":/src -w /src \
+	  -v mkvgo-gocache:/root/.cache/go-build -v mkvgo-gomod:/go/pkg/mod -e GOFLAGS=-buildvcs=false \
+	  golang:1.27.2-trixie sh -c 'go test -race -count=1 ./... && FUZZTIME=$(HEAVY_FUZZTIME) scripts/fuzz-all.sh; rc=$$?; \
+	  chown -R $(shell id -u):$(shell id -g) /src/mkv /src/mp4 /src/ebml /src/httpfs /src/internal; exit $$rc'
 
 # End-to-end verification against real ffmpeg/ffprobe (opt-in):
 #   make e2e                            # local ffmpeg on PATH
