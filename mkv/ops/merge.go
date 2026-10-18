@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -33,7 +34,7 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 	for _, inp := range opts.Inputs {
 		c, err := reader.OpenWithFS(ctx, inp.SourcePath, fs, reader.WithoutAttachmentData())
 		if err != nil {
-			return fmt.Errorf("open %s: %w", inp.SourcePath, err)
+			return fmt.Errorf("open %s: %w", shown.Path(inp.SourcePath), err)
 		}
 
 		want := make(map[uint64]bool)

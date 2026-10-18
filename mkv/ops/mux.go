@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -156,7 +157,7 @@ func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([
 	for _, inp := range inputs {
 		c, err := reader.OpenWithFS(ctx, inp.SourcePath, fs, reader.WithoutAttachmentData())
 		if err != nil {
-			return nil, nil, fmt.Errorf("open %s: %w", inp.SourcePath, err)
+			return nil, nil, fmt.Errorf("open %s: %w", shown.Path(inp.SourcePath), err)
 		}
 		var srcTrack *mkv.Track
 		for i := range c.Tracks {
@@ -166,7 +167,7 @@ func buildMuxTracks(ctx context.Context, inputs []mkv.TrackInput, fs *mkv.FS) ([
 			}
 		}
 		if srcTrack == nil {
-			return nil, nil, fmt.Errorf("track %d not found in %s", inp.TrackID, inp.SourcePath)
+			return nil, nil, fmt.Errorf("track %d not found in %s", inp.TrackID, shown.Path(inp.SourcePath))
 		}
 
 		t := *srcTrack

@@ -98,7 +98,7 @@ func digestConcat(ctx context.Context, paths []string, fs *mkv.FS) ([]trackDiges
 			order[t.ID] = j
 		}
 		if err := digestBlocksInto(ctx, p, fs, c.Info.TimecodeScale, order, accs, nil, nil); err != nil {
-			return nil, fmt.Errorf("digest part %d (%s): %w", i+1, p, err)
+			return nil, fmt.Errorf("digest part %d (%s): %w", i+1, shown.Path(p), err)
 		}
 	}
 	return sealTrackAccs(accs), nil
