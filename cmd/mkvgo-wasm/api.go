@@ -14,6 +14,8 @@ import (
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // sha256Hex is the lowercase hex SHA-256 of b - a stable content ETag for a
@@ -139,6 +141,18 @@ func isBlob(v js.Value) bool {
 
 // sniffFormat classifies the input from its first bytes: "mkv" for an EBML
 // header (Matroska/WebM), "mp4" for an ISO-BMFF box structure.
+// sniffSource reads the head of the source "in" of fs and names its container.
+func sniffSource(fs *mkv.FS) (string, error) {
+	f, err := fs.DoOpen("in")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	head := make([]byte, 8)
+	n, _ := io.ReadFull(f, head)
+	return sniffFormat(head[:n])
+}
+
 func sniffFormat(head []byte) (string, error) {
 	if len(head) >= 4 && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
 		return "mkv", nil

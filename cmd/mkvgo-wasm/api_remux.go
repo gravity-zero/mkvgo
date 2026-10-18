@@ -342,7 +342,7 @@ func remuxToHLSJS(_ js.Value, args []js.Value) any {
 	})
 }
 
-// extractSubtitleVTTJS(input: Uint8Array, trackId: number) → Promise<string>
+// extractSubtitleVTTJS(input: Uint8Array | Blob | File, trackId: number) → Promise<string>
 func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 	if len(args) < 2 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("extractSubtitleVTT: need (input, trackId)") })
@@ -354,24 +354,22 @@ func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 	}
 	trackID := uint64(id)
 	return promise(func() (any, error) {
-		if isBlob(input) {
-			return nil, fmt.Errorf("extractSubtitleVTT needs a Uint8Array")
+		fs, err := singleSourceFS(input) // a Blob/File is read by ranges, as every Blob-backed export
+		if err != nil {
+			return nil, fmt.Errorf("extractSubtitleVTT: %w", err)
 		}
-		data := toGoBytes(input)
-		format, err := sniffFormat(data[:min(8, len(data))])
+		format, err := sniffSource(fs)
 		if err != nil {
 			return nil, err
 		}
-		m := mkv.NewMemFS()
-		m.Put("in", data)
 		var out strings.Builder
 		switch format {
 		case "mkv":
 			err = matroska.ExtractSubtitleWebVTT(context.Background(), "in", trackID, &out,
-				matroska.Options{FS: m.FS()})
+				matroska.Options{FS: fs})
 		case "mp4":
 			err = mp4.ExtractSubtitleWebVTT(context.Background(), "in", trackID, &out,
-				mp4.Options{FS: m.FS()})
+				mp4.Options{FS: fs})
 		}
 		if err != nil {
 			return nil, err
