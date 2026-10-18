@@ -85,7 +85,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		}
 		media := strings.Replace(renditionSegment(fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
-			rw(renditionInit(fts, i)), rw(media))
+			xmlAttr(rw(renditionInit(fts, i))), xmlAttr(rw(media)))
 		b.WriteString(timeline)
 		b.WriteString("        </SegmentTemplate>\n")
 		b.WriteString("      </Representation>\n")
@@ -99,7 +99,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
-		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(fmt.Sprintf("sub%d.vtt", i+1))))
 		b.WriteString("      </Representation>\n")
 		b.WriteString("    </AdaptationSet>\n")
 	}

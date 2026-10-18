@@ -58,7 +58,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 			if cs := cmafCodecs(r.tracks); cs != "" {
 				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(cs))
 			}
-			fmt.Fprintf(&b, "%s\n%s\n", inf, rw(r.id+".m3u8"))
+			fmt.Fprintf(&b, "%s\n%s\n", inf, uriLine(rw(r.id+".m3u8")))
 		}
 		return []byte(b.String())
 	}
@@ -84,7 +84,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		if i == 0 {
 			attrs += ",DEFAULT=YES"
 		}
-		fmt.Fprintf(&b, "#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(r.id+".m3u8"))
+		fmt.Fprintf(&b, "#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(r.id+".m3u8")))
 		switch cs := cmafCodecs(r.tracks); {
 		case cs == "":
 			audioUnknown = true
@@ -108,7 +108,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		if len(audio) > 0 {
 			inf += ",AUDIO=\"aud\""
 		}
-		fmt.Fprintf(&b, "%s\n%s\n", inf, rw(r.id+".m3u8"))
+		fmt.Fprintf(&b, "%s\n%s\n", inf, uriLine(rw(r.id+".m3u8")))
 	}
 	return []byte(b.String())
 }

@@ -1051,7 +1051,7 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 		// in a retry loop. With the map first, the init carries no key and the
 		// key below applies only to the media segments that follow it. Subtitle
 		// playlists (mapURI == "") carry neither a map nor a key.
-		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s\n", hlsURI(rw(mapURI)))...)
 	}
 	// keyLineFor returns the EXT-X-KEY governing segment i, or "" for a clear /
 	// subtitle playlist. AES-128 may rotate the key across the presentation, so
@@ -1075,7 +1075,7 @@ func buildMediaPlaylist(o *Options, durs []float64, mapURI string, segName func(
 			b = append(b, kl...)
 			lastKey = kl
 		}
-		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(i)))...)
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, uriLine(rw(segName(i))))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
 	return b
@@ -1185,7 +1185,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(renditionPlaylist(fts, i)))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(renditionPlaylist(fts, i))))...)
 	}
 
 	for i := range subs {
@@ -1207,7 +1207,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		if t.IsForced {
 			attrs += ",FORCED=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("sub%d.m3u8", i+1))))...)
 	}
 
 	// Peak and average bandwidth over the media segments (bits per second).
@@ -1245,7 +1245,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	if len(subs) > 0 {
 		inf += ",SUBTITLES=\"subs\""
 	}
-	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
+	b = append(b, (inf + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
 	if len(iframes) > 0 && o != nil && o.Encrypt == nil && o.CENC == nil && !o.NoIFrames {
 		b = append(b, iframeStreamInf(o, fts, dursOf(segs), iframes)...)
 	}
@@ -1277,10 +1277,10 @@ func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes [
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-I-FRAMES-ONLY\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
-	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw("init.mp4"))...)
+	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s\n", hlsURI(rw("init.mp4")))...)
 	for _, ifr := range iframes {
 		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n#EXT-X-BYTERANGE:%d@0\n%s\n",
-			durs[ifr.seg], ifr.length, rw(fmt.Sprintf("seg%05d.m4s", ifr.seg+1)))...)
+			durs[ifr.seg], ifr.length, uriLine(rw(fmt.Sprintf("seg%05d.m4s", ifr.seg+1))))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
 	return b
@@ -1314,5 +1314,5 @@ func iframeStreamInfURI(o *Options, fts []*fragTrack, durs []float64, iframes []
 			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(cs))
 		}
 	}
-	return inf + fmt.Sprintf(",URI=%q\n", rw(uri))
+	return inf + fmt.Sprintf(",URI=%s\n", hlsURI(rw(uri)))
 }

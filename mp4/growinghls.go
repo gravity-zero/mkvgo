@@ -851,10 +851,10 @@ func buildGrowingMediaPlaylist(o *Options, durs []float64, mapURI string, segNam
 		b = append(b, "#EXT-X-PLAYLIST-TYPE:EVENT\n"...)
 	}
 	if mapURI != "" {
-		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURI))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s\n", hlsURI(rw(mapURI)))...)
 	}
 	for i, d := range durs {
-		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(i)))...)
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, uriLine(rw(segName(i))))...)
 	}
 	if done {
 		b = append(b, "#EXT-X-ENDLIST\n"...)

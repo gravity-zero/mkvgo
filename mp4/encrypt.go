@@ -115,7 +115,7 @@ func (e *HLSEncryption) validate() error {
 // so a single key prints once and a rotating schedule prints at each boundary.
 func (e *HLSEncryption) keyLineForSegment(seg int) string {
 	k := e.periodKey(seg)
-	line := fmt.Sprintf("#EXT-X-KEY:METHOD=AES-128,URI=%q", k.KeyURI)
+	line := fmt.Sprintf("#EXT-X-KEY:METHOD=AES-128,URI=%s", hlsURI(k.KeyURI))
 	if k.IV != nil {
 		line += ",IV=0x" + hex.EncodeToString(k.IV)
 	}

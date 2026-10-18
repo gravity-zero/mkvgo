@@ -738,16 +738,16 @@ func writeCMAFAddressing(b *strings.Builder, rw func(string) string, r *cmafRep)
 	timeline := dashTimelineSpans(starts, durs)
 	if media, start, ok := numberTemplate(r.segURLs); ok {
 		fmt.Fprintf(b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="%d" timescale="%d">`+"\n",
-			rw(r.initURL), rw(media), start, r.timescale)
+			xmlAttr(rw(r.initURL)), xmlAttr(rw(media)), start, r.timescale)
 		b.WriteString(timeline)
 		b.WriteString("        </SegmentTemplate>\n")
 		return
 	}
 	fmt.Fprintf(b, `        <SegmentList timescale="%d">`+"\n", r.timescale)
-	fmt.Fprintf(b, `          <Initialization sourceURL="%s"/>`+"\n", rw(r.initURL))
+	fmt.Fprintf(b, `          <Initialization sourceURL="%s"/>`+"\n", xmlAttr(rw(r.initURL)))
 	b.WriteString(timeline)
 	for _, u := range r.segURLs {
-		fmt.Fprintf(b, `          <SegmentURL media="%s"/>`+"\n", rw(u))
+		fmt.Fprintf(b, `          <SegmentURL media="%s"/>`+"\n", xmlAttr(rw(u)))
 	}
 	b.WriteString("        </SegmentList>\n")
 }

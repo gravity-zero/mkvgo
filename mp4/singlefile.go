@@ -168,10 +168,10 @@ func buildByteRangePlaylist(o *Options, durs []float64, r *sfRendition) []byte {
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int64(max+0.999))...)
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
-	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q,BYTERANGE=\"%d@0\"\n", rw(r.name), r.sidxEnd)...)
+	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s,BYTERANGE=\"%d@0\"\n", hlsURI(rw(r.name)), r.sidxEnd)...)
 	for k, d := range durs {
 		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n#EXT-X-BYTERANGE:%d@%d\n%s\n",
-			d, r.ranges[k][1], r.ranges[k][0], rw(r.name))...)
+			d, r.ranges[k][1], r.ranges[k][0], uriLine(rw(r.name)))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
 	return b
@@ -225,7 +225,7 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 		if !ft.outTrack.spec.video {
 			b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		}
-		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(r.name))
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(r.name)))
 		fmt.Fprintf(&b, `        <SegmentBase indexRange="%d-%d"><Initialization range="0-%d"/></SegmentBase>`+"\n",
 			r.initLen, r.sidxEnd-1, r.initLen-1)
 		b.WriteString("      </Representation>\n")
@@ -237,7 +237,7 @@ func buildDASHManifestSingle(o *Options, fts []*fragTrack, subs []hlsSubTrack, d
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
-		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("sub%d.vtt", i+1)))
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(fmt.Sprintf("sub%d.vtt", i+1))))
 		b.WriteString("      </Representation>\n")
 		b.WriteString("    </AdaptationSet>\n")
 	}

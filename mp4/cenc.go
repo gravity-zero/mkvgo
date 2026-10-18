@@ -139,7 +139,7 @@ func (c *CENCOptions) keyLine() string {
 	if c.Scheme == "cbcs" {
 		method = "SAMPLE-AES"
 	}
-	return fmt.Sprintf("#EXT-X-KEY:METHOD=%s,URI=%q,KEYFORMAT=\"identity\",KEYFORMATVERSIONS=\"1\"\n", method, c.resolvedKeyURI())
+	return fmt.Sprintf("#EXT-X-KEY:METHOD=%s,URI=%s,KEYFORMAT=\"identity\",KEYFORMATVERSIONS=\"1\"\n", method, hlsURI(c.resolvedKeyURI()))
 }
 
 // cencPreflight validates Options.CENC against the sibling options and the

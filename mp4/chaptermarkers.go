@@ -105,6 +105,15 @@ func hlsQuoted(s string) string {
 	}, s) + `"`
 }
 
+// uriEscaper percent-encodes what an HLS quoted string or line cannot hold, so a URI keeps its meaning and its line.
+var uriEscaper = strings.NewReplacer(`"`, "%22", "\r", "%0D", "\n", "%0A")
+
+// hlsURI quotes a URI for an HLS attribute: a quote or a line break in it is percent-encoded, never written raw.
+func hlsURI(s string) string { return `"` + uriEscaper.Replace(s) + `"` }
+
+// uriLine is a URI for an HLS playlist line of its own: a line break in it never starts another line.
+func uriLine(s string) string { return uriEscaper.Replace(s) }
+
 // xmlAttr XML-escapes s for a double-quoted attribute value: a file's string never closes the attribute.
 func xmlAttr(s string) string { return xmlEscapeText(s) }
 

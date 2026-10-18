@@ -108,7 +108,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
 			attrs += ",DEFAULT=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw("v1/"+renditionPlaylist(ref.fts, i)))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw("v1/"+renditionPlaylist(ref.fts, i))))...)
 	}
 	for i := range ref.subs {
 		t := &ref.subs[i].track
@@ -129,7 +129,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		if t.IsForced {
 			attrs += ",FORCED=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("v1/sub%d.m3u8", i+1))))...)
 	}
 
 	// The audio codec strings ride on every variant (the group is shared).
@@ -166,7 +166,7 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		if len(ref.subs) > 0 {
 			inf += ",SUBTITLES=\"subs\""
 		}
-		b = append(b, (inf + "\n" + rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1)) + "\n")...)
+		b = append(b, (inf + "\n" + uriLine(rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1))) + "\n")...)
 	}
 
 	// Trick-play: one I-frame stream per variant that exposes an I-frame
@@ -271,7 +271,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		media := prefix + strings.Replace(renditionSegment(res.fts, vidx, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
-			rw(prefix+renditionInit(res.fts, vidx)), rw(media))
+			xmlAttr(rw(prefix+renditionInit(res.fts, vidx))), xmlAttr(rw(media)))
 		b.WriteString(timeline)
 		b.WriteString("        </SegmentTemplate>\n")
 		b.WriteString("      </Representation>\n")
@@ -299,7 +299,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
-			rw("v1/"+renditionInit(ref.fts, i)), rw(media))
+			xmlAttr(rw("v1/"+renditionInit(ref.fts, i))), xmlAttr(rw(media)))
 		b.WriteString(timeline)
 		b.WriteString("        </SegmentTemplate>\n")
 		b.WriteString("      </Representation>\n")
@@ -311,7 +311,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
 		b.WriteString(dashLabel(t, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
-		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", rw(fmt.Sprintf("v1/sub%d.vtt", i+1)))
+		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(fmt.Sprintf("v1/sub%d.vtt", i+1))))
 		b.WriteString("      </Representation>\n")
 		b.WriteString("    </AdaptationSet>\n")
 	}

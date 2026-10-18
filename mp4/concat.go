@@ -271,10 +271,10 @@ func buildConcatPlaylist(o *Options, durs [][]float64, mapURIs []string, segName
 			b = append(b, "#EXT-X-DISCONTINUITY\n"...)
 		}
 		if mapURIs[k] != "" {
-			b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%q\n", rw(mapURIs[k]))...)
+			b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s\n", hlsURI(rw(mapURIs[k])))...)
 		}
 		for i, d := range pd {
-			b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, rw(segName(k, i)))...)
+			b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", d, uriLine(rw(segName(k, i))))...)
 		}
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
@@ -363,7 +363,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		if t.IsDefault || (!hasDefaultAudio && j == 0) {
 			attrs += ",DEFAULT=YES"
 		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(fmt.Sprintf("audio%d.m3u8", j+1)))...)
+		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("audio%d.m3u8", j+1))))...)
 	}
 
 	subsOK := subsAligned(results)
@@ -387,7 +387,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 			if t.IsForced {
 				attrs += ",FORCED=YES"
 			}
-			b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%q\n", attrs, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+			b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("sub%d.m3u8", i+1))))...)
 		}
 	}
 
@@ -429,7 +429,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 	if subsOK && len(ref.subs) > 0 {
 		inf += ",SUBTITLES=\"subs\""
 	}
-	b = append(b, (inf + "\n" + rw("playlist.m3u8") + "\n")...)
+	b = append(b, (inf + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
 	return b
 }
 
