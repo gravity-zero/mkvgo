@@ -51,7 +51,7 @@ func buildKeyframeTimes(stblBoxes []memBox, timescale uint32, editShiftMs int64,
 	ctts := parseCtts(stblBoxes, n) // zero-filled when absent
 	var sync map[int]bool
 	if collectSync {
-		sync = parseStss(stblBoxes) // nil → every sample is a sync sample
+		sync = parseStssN(stblBoxes, n) // nil → every sample is a sync sample
 		times = make([]int64, 0, n/8+1)
 	}
 
@@ -116,7 +116,7 @@ func buildSampleTable(tr *inTrack, stblBoxes []memBox, fileSize int64) error {
 		return err
 	}
 	cttsOffsets := parseCtts(stblBoxes, n)
-	syncSet := parseStss(stblBoxes)
+	syncSet := parseStssN(stblBoxes, n)
 
 	samples := make([]inSample, n)
 
@@ -376,20 +376,23 @@ func parseCtts(stblBoxes []memBox, n int) []int32 {
 	return offsets
 }
 
-// parseStss returns the set of 1-based sync sample numbers, or nil when the box
-// is absent (meaning every sample is a sync sample).
-func parseStss(stblBoxes []memBox) map[int]bool {
+// parseStss is parseStssN for a track of up to maxSamples samples.
+func parseStss(stblBoxes []memBox) map[int]bool { return parseStssN(stblBoxes, maxSamples) }
+
+// parseStssN returns the set of 1-based sync sample numbers of a track of n samples, or nil when the box is absent
+// (meaning every sample is a sync sample). Only numbers 1 to n count, and a table cut short holds the entries it
+// holds - never "every sample", which would cut on frames that are not keyframes.
+func parseStssN(stblBoxes []memBox, n int) map[int]bool {
 	stss, ok := findMemBox(stblBoxes, "stss")
 	if !ok || len(stss.payload) < 8 {
 		return nil
 	}
-	count := binary.BigEndian.Uint32(stss.payload[4:8])
-	if len(stss.payload) < 8+int(count)*4 {
-		return nil
-	}
-	set := make(map[int]bool, count)
-	for i := uint32(0); i < count; i++ {
-		set[int(binary.BigEndian.Uint32(stss.payload[8+i*4:12+i*4]))] = true
+	count := min(int64(binary.BigEndian.Uint32(stss.payload[4:8])), int64(len(stss.payload)-8)/4)
+	set := make(map[int]bool, min(count, int64(n)))
+	for i := int64(0); i < count; i++ {
+		if v := int(binary.BigEndian.Uint32(stss.payload[8+i*4:])); v >= 1 && v <= n {
+			set[v] = true
+		}
 	}
 	return set
 }

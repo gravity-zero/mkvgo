@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An MP4 sync table holds only what the track can use.** `stss` was
+  sized from the count it declares, whatever the track's sample count, and a
+  table cut short read as "every sample is a keyframe", which cut on frames
+  that are not. Only sample numbers within the track count, and a short
+  table holds the entries it holds.
 - **A chapter-track sample larger than a title is not read.** Its buffer
   was sized from the declared sample size before any byte arrived: one
   sample claiming 4 GiB of a sparse or remote file allocated 4 GiB on a

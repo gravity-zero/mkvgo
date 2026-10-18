@@ -893,9 +893,9 @@ func TestParseStssMinBoundary(t *testing.T) {
 	if !set[2] || !set[5] || !set[9] || len(set) != 3 {
 		t.Errorf("stss 3 entries: %v, want {2:true 5:true 9:true}", set)
 	}
-	// Truncate last entry: returns nil (defensive).
-	if parseStss([]memBox{{typ: "stss", payload: p.b[:len(p.b)-4]}}) != nil {
-		t.Error("truncated stss: want nil")
+	// Truncate last entry: the two entries it holds, never nil ("every sample is a keyframe").
+	if set := parseStss([]memBox{{typ: "stss", payload: p.b[:len(p.b)-4]}}); len(set) != 2 || set[9] {
+		t.Errorf("truncated stss: %v, want {2, 5}", set)
 	}
 }
 

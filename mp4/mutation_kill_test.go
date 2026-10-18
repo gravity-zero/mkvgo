@@ -377,15 +377,15 @@ func TestParseStssCountAndTruncation(t *testing.T) {
 		t.Errorf("stss set = %v, want {1,5,9}", set)
 	}
 
-	// Payload claims 4 entries but only has 3 worth → nil (defensive).
+	// Payload claims 4 entries but only has 3 worth: the 3 it holds, never nil, which would make every sample a keyframe.
 	var p2 bw
 	p2.u32(0)
 	p2.u32(4)
 	p2.u32(1)
 	p2.u32(5)
 	p2.u32(9)
-	if parseStss([]memBox{{typ: "stss", payload: p2.b}}) != nil {
-		t.Error("truncated stss must return nil")
+	if set := parseStss([]memBox{{typ: "stss", payload: p2.b}}); len(set) != 3 || !set[9] {
+		t.Errorf("truncated stss = %v, want the 3 entries it holds", set)
 	}
 }
 
