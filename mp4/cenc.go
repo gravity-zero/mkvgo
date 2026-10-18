@@ -42,6 +42,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 )
 
 // CENCOptions configures Common Encryption packaging (Options.CENC).
@@ -104,6 +105,11 @@ func (c *CENCOptions) validate() error {
 	case "cenc":
 		if len(c.IV) != 8 && len(c.IV) != 16 {
 			return errf("cenc IV must be 8 or 16 bytes, got %d", len(c.IV))
+		}
+		// AES-CTR counts a sample's blocks in a 16-byte IV's last 8 bytes: a count carrying out of them would reach
+		// the next sample's IV. 2^32 blocks of room covers any sample a segment holds (maxSegmentBytes).
+		if len(c.IV) == 16 && binary.BigEndian.Uint64(c.IV[8:]) > math.MaxUint64-1<<32+1 {
+			return errf("cenc 16-byte IV: its last 8 bytes leave the AES-CTR block counter too little room before it carries into the sample number; use an IV whose last 8 bytes are at most ffffffff00000000")
 		}
 	case "cbcs":
 		if len(c.IV) != aes.BlockSize {

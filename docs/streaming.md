@@ -465,7 +465,9 @@ CENC presentation still gets a DASH manifest (with a `ContentProtection`
 element), and both HLS renditions (video and audio) carry `EXT-X-KEY`.
 Under `cenc`, give each title its own key or its own base IV: two titles
 packaged with the same pair share their keystream wherever their timestamps
-overlap.
+overlap. A 16-byte IV's last 8 bytes hold the block counter and must be at
+most `ffffffff00000000`; an ABR ladder under one `cenc` key holds at most 256
+variants.
 
 ```bash
 mkvgo to-hls video.mkv -o stream/ \

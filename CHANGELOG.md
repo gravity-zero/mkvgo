@@ -8,6 +8,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **A 16-byte 'cenc' IV must leave its block counter room.** AES-CTR counts
+  a sample's blocks in the IV's last 8 bytes; an IV ending near `ff..ff`
+  carried that count into the next sample's IV, which then shared keystream.
+  Such an IV is refused, naming the bound (`ffffffff00000000`).
 - **A 'cenc' ABR ladder holds at most 256 variants.** Variants share the key
   and part its IV space by variant number; a 257th variant's video took the
   IVs of the first variant's audio track 255. `PlanABR` and `RemuxToABR`
