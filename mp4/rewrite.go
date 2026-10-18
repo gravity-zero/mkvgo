@@ -8,11 +8,10 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -120,17 +119,8 @@ func rewriteMP4(ctx context.Context, srcPath, dstPath string, ro rewriteOptions,
 
 // distinctOutput refuses an output that is one of the inputs: creating it would truncate what is about to be read.
 func distinctOutput(fs *mkv.FS, dstPath string, inputs ...string) error {
-	out, outErr := fs.DoStat(dstPath)
-	for _, in := range inputs {
-		if filepath.Clean(in) == filepath.Clean(dstPath) {
-			return errf("%s is also an input: write the output to another file", shown.Path(dstPath))
-		}
-		if outErr != nil {
-			continue
-		}
-		if fi, err := fs.DoStat(in); err == nil && os.SameFile(out, fi) {
-			return errf("%s is also an input: write the output to another file", shown.Path(dstPath))
-		}
+	if err := outguard.Distinct(fs.DoStat, dstPath, inputs...); err != nil {
+		return errf("%w", err)
 	}
 	return nil
 }

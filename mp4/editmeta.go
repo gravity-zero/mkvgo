@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -771,8 +772,8 @@ func patchMdiaMeta(p []byte, b, a *mkv.Track) ([]byte, error) {
 				binary.BigEndian.PutUint16(md[off:], packLanguage(mdhdLanguage(*a)))
 			}
 			children = append(children, box("mdhd", md))
-			if bcpChanged && a.LanguageBCP47 != "" {
-				children = append(children, buildElng(a.LanguageBCP47))
+			if tag := lang.Edited(b.Language, b.LanguageBCP47, a.Language, a.LanguageBCP47); (langChanged || bcpChanged) && tag != "" {
+				children = append(children, buildElng(tag))
 			}
 		case "elng":
 			// A new legacy code makes the old BCP-47 tag a lie; a new BCP-47 tag was written after the mdhd.

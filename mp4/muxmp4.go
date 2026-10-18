@@ -9,8 +9,8 @@ import (
 	"maps"
 	"slices"
 	"sort"
-	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -90,18 +90,7 @@ const maxSRTBytes = 64 << 20
 
 // LanguageFields splits a language as a user gives it into the mdhd's 3-letter code (ISO 639-2/T for a tag's 2-letter language) and, for a BCP-47 tag, the elng tag.
 func LanguageFields(tag string) (language, bcp47 string) {
-	if len(tag) == 3 && isLowerAlpha(tag) {
-		return tag, ""
-	}
-	primary, _, _ := strings.Cut(tag, "-")
-	primary = strings.ToLower(primary)
-	if code, ok := iso6391To6392T[primary]; ok {
-		primary = code
-	}
-	if len(primary) != 3 || !isLowerAlpha(primary) {
-		primary = "und"
-	}
-	return primary, tag
+	return lang.Fields(tag, lang.Terminology)
 }
 
 // Merge combines the selected tracks of MP4/MOV inputs (all of an input's when it names none); title, tags and chapters come from the first input.
