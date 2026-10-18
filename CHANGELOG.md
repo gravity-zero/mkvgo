@@ -102,6 +102,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **`mp4.Diagnose` reads the sample tables.** It read the boxes and the track
+  headers and called healthy a file whose sample table points outside the
+  media, a chunk at offset 0 inside the `ftyp`, which every edit refuses or
+  copies wrong. A table the file cannot hold, or a sample outside every
+  `mdat`, is now a `sample-table` finding.
 - **`serve` and `serve-growing` bound slow clients.** Their HTTP server
   had no timeout: a client sending or reading nothing held a connection, a
   source handle and a segment's budget. A request header must arrive within

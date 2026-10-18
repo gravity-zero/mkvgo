@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -63,8 +64,41 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 	if err := diagnoseTracks(moovRaw, d); err != nil {
 		return nil, errf("diagnose: %s: %w", shown.Path(path), err)
 	}
+	diagnoseSampleTables(f, lay.fileSize, moovRaw, d)
 	d.Healthy = len(d.Findings) == 0
 	return d, nil
+}
+
+// diagnoseSampleTables reads every track's sample table as a remux does and reports one it cannot hold, or whose
+// samples lie outside every mdat box - a chunk at offset 0 reads the ftyp as media.
+func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *mkv.Diagnosis) {
+	const remedy = "re-download the source: no mkvgo command rebuilds a sample table"
+	mv, err := parseMoov(moovRaw, size, sampleFull)
+	if err != nil {
+		d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Detail: err.Error(), Remedy: remedy})
+		return
+	}
+	mdats, err := mdatRanges(f, size)
+	if err != nil {
+		mdats = nil // the box walk already reported the layout; check the tables alone
+	}
+	for _, tr := range mv.tracks {
+		if strings.HasPrefix(tr.unsupported, "sample table: ") {
+			d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: uint64(tr.trackID),
+				Detail: fmt.Sprintf("track %d: %s", tr.trackID, strings.TrimPrefix(tr.unsupported, "sample table: ")), Remedy: remedy})
+			continue
+		}
+		if mdats == nil {
+			continue
+		}
+		for k, smp := range tr.samples {
+			if !inMdat(mdats, smp.offset, int64(smp.size)) {
+				d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: uint64(tr.trackID),
+					Detail: fmt.Sprintf("track %d: sample %d (%d bytes at offset %d) lies outside every mdat box", tr.trackID, k+1, smp.size, smp.offset), Remedy: remedy})
+				break
+			}
+		}
+	}
 }
 
 // diagnoseScanBoxes walks the top-level boxes tolerantly: instead of failing

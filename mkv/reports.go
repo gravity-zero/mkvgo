@@ -187,7 +187,7 @@ type CueHole struct {
 type Finding struct {
 	// Kind: "no-index" | "index-misskeyed" | "index-sparse" |
 	// "index-stale-tracks" | "audio-delay" | "truncated" | "damaged" |
-	// "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container".
+	// "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container" | "sample-table".
 	Kind    string `json:"kind"`
 	Detail  string `json:"detail"`
 	Remedy  string `json:"remedy"`

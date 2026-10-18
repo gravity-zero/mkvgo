@@ -3,6 +3,7 @@ package mp4
 import (
 	"encoding/binary"
 	"io"
+	"sort"
 )
 
 // maxTopLevelBoxes bounds the top-level boxes mdatRanges walks: real files hold a handful, and each costs a read.
@@ -47,12 +48,9 @@ func mdatRanges(r io.ReadSeeker, size int64) ([][2]int64, error) {
 	return ranges, nil
 }
 
-// inMdat reports whether [off, off+n) lies inside one of ranges, as mdatRanges returns them.
+// inMdat reports whether [off, off+n) lies inside one of ranges, as mdatRanges returns them: in file order, so the
+// one range that can hold off is found by binary search, never a walk over thousands of forged boxes per sample.
 func inMdat(ranges [][2]int64, off, n int64) bool {
-	for _, r := range ranges {
-		if off >= r[0] && n >= 0 && off+n <= r[1] {
-			return true
-		}
-	}
-	return false
+	i := sort.Search(len(ranges), func(i int) bool { return ranges[i][1] > off })
+	return i < len(ranges) && off >= ranges[i][0] && n >= 0 && off+n <= ranges[i][1]
 }
