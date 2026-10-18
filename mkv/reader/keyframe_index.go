@@ -120,7 +120,7 @@ walk:
 				}
 				continue
 			}
-			clusterTS, haveTS = int64(v), true
+			clusterTS, haveTS = int64(v), v <= maxClusterTimestamp // past it, the blocks' times would wrap
 		case mkv.IDSimpleBlock:
 			rel, track, key, ok := p.peekBlockHeader(h.Size, true)
 			if !ok {

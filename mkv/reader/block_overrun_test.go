@@ -126,3 +126,18 @@ func TestFilteredBlockWithALongTrackNumber(t *testing.T) {
 		}
 	}
 }
+
+// TestClusterTimestampPastInt64: a Cluster Timestamp read into an int64 and added to a block's relative timecode
+// wrapped past 2^63 - 32768 into a negative block time. Such a Cluster is damage, not a time.
+func TestClusterTimestampPastInt64(t *testing.T) {
+	var c bytes.Buffer
+	c.Write(uintElN(mkv.IDTimestamp, 1<<63-1, 8))
+	c.Write(wrapEl(mkv.IDSimpleBlock, []byte{0x81, 0x7F, 0xFF, 0x80, 0xAA}))
+	br, err := NewBlockReader(buildBlockReaderInput(c.Bytes()), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := br.Next(); err == nil {
+		t.Errorf("a block at Cluster time 2^63-1 read at %d ms, want the Cluster refused", b.Timecode)
+	}
+}

@@ -132,7 +132,7 @@ func (p *parser) clusterFirstKeyframeMs(limit int64, videoTrack uint64, scale in
 			if err != nil {
 				return 0, false
 			}
-			clusterTS, haveTS = int64(v), true
+			clusterTS, haveTS = int64(v), v <= maxClusterTimestamp // past it, the blocks' times would wrap
 		case mkv.IDSimpleBlock:
 			blocks++
 			rel, track, key, ok := p.peekBlockHeader(ch.Size, true)

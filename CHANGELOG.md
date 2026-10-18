@@ -113,6 +113,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A Cluster Timestamp past what a block's time can be added to is
+  damage.** Read into an int64 and added to a block's relative timecode, a
+  value near 2^63 wrapped into a negative block time; the block reader refuses
+  such a Cluster and the keyframe walks ignore its time.
 - **MP4 tick conversions saturate instead of wrapping.** A decode time past
   what `ticks*1000` holds in an int64, reachable with 16M samples of 2^31
   ticks, wrapped and read as a negative time; large values now scale in two

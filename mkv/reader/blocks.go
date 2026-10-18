@@ -736,6 +736,9 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				if err != nil {
 					return mkv.Block{}, err
 				}
+				if v > maxClusterTimestamp {
+					return mkv.Block{}, fmt.Errorf("cluster timestamp %d past what a block's relative timecode can be added to", v)
+				}
 				br.clusterTS = int64(v)
 				tsMs, err := safeTimecodeMs(br.clusterTS, br.timecodeScale)
 				if br.timeSkip && err == nil {
@@ -996,6 +999,10 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	br.pending = blocks[1:]
 	return blocks[0], nil
 }
+
+// maxClusterTimestamp is the largest Cluster Timestamp a block's signed 16-bit relative timecode adds to without
+// leaving the int64 range.
+const maxClusterTimestamp = math.MaxInt64 - math.MaxInt16
 
 // pastEnd refuses a child whose body, starting at body, runs past its parent's end (none when end < 0): read on, it
 // would swallow what follows the parent.
