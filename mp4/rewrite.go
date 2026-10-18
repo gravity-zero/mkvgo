@@ -832,19 +832,25 @@ func traksInMdat(payload []byte, drop map[int]bool, mdats [][2]int64, real, limi
 	return nil
 }
 
-// withMovieDuration recomputes the mvhd duration over the traks a removal keeps.
+// withMovieDuration recomputes the mvhd duration over the media traks a removal keeps: a chapter or timecode track runs to the old end.
 func withMovieDuration(payload []byte, drop map[int]bool) ([]byte, error) {
 	boxes, err := iterBoxes(payload)
 	if err != nil {
 		return nil, err
 	}
+	chapters := chapterTrackRefs(boxes)
 	var dur int64
 	idx := -1
 	for _, b := range boxes {
 		if b.typ != "trak" {
 			continue
 		}
-		if idx++; !drop[idx] {
+		idx++
+		tb, _ := iterBoxes(b.payload)
+		if id, _ := trakID(b.payload); chapters[id] || trakHandler(tb) == "tmcd" {
+			continue
+		}
+		if !drop[idx] {
 			if d, err := trakDuration(b.payload); err == nil {
 				dur = max(dur, d)
 			}
