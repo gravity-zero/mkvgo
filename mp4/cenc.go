@@ -620,6 +620,9 @@ type cencCipher struct {
 	isVideo  bool
 	domain   uint64 // added to every 'cenc' IV of the track (cencIVDomain)
 	splitter videoSubsampleSplitter
+	trackID  uint64
+	lastDTS  int64 // the previous sample's decode time, past the first ('cenc' IVs must not repeat)
+	started  bool
 }
 
 func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (*cencCipher, error) {
@@ -630,7 +633,7 @@ func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (
 	if isVideo && !cencSupportsCodec(codec) {
 		return nil, errf("cenc: video codec %q does not support subsample encryption (h264, hevc, av1, vp9)", codec)
 	}
-	k := &cencCipher{c: c, block: block, isVideo: isVideo, domain: cencIVDomain(isVideo, trackID)}
+	k := &cencCipher{c: c, block: block, isVideo: isVideo, domain: cencIVDomain(isVideo, trackID), trackID: trackID}
 	if isVideo {
 		if k.splitter, err = newVideoSubsampleSplitter(codec); err != nil {
 			return nil, err
@@ -650,6 +653,10 @@ func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
 		e.subs = subs
 	}
 	if k.c.Scheme == "cenc" {
+		if k.started && dtsTS <= k.lastDTS {
+			return e, errf("Options.CENC: track %d has two samples decoded at the same time, which the 'cenc' scheme would encrypt with one IV; package it with the cbcs scheme", k.trackID)
+		}
+		k.lastDTS, k.started = dtsTS, true
 		e.iv = cencSampleIV(k.c.IV, dtsTS, k.domain)
 	}
 	return e, nil

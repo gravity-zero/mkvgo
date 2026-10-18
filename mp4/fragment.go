@@ -429,6 +429,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		dts[i] = pts(i)
 	}
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
+	strictlyIncreasing(dts)
 	base := dts[0]
 	for i := range samples {
 		samples[i].dtsTS = dts[i] - base
@@ -475,4 +476,14 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		totalTS += samples[i].durTS
 	}
 	return offsetMs, hasCTS, totalTS, ctsShiftTS
+}
+
+// strictlyIncreasing makes sorted decode times strictly increasing: a time equal to the one before - two blocks
+// stamped alike - moves one tick past it, so no two samples share a decode time, nor a 'cenc' IV.
+func strictlyIncreasing(dts []int64) {
+	for i := 1; i < len(dts); i++ {
+		if dts[i] <= dts[i-1] {
+			dts[i] = dts[i-1] + 1
+		}
+	}
 }

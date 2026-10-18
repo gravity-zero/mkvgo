@@ -178,6 +178,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 		dts[x] = scale(window[x].ptsMs)
 	}
 	sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
+	strictlyIncreasing(dts)
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
 		off := scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS

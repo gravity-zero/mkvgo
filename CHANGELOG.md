@@ -8,6 +8,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **No two samples of a track share a 'cenc' IV.** A sample's IV is the base
+  plus its decode time, and decode times were the presentation times sorted
+  as they were: two blocks stamped alike, a broken remux's duplicate
+  timestamp, took one IV and one AES-CTR keystream. Decode times are now
+  strictly increasing, the full pass and the plan alike, and a fragment that
+  would still repeat an IV, an MP4 source whose `stts` holds a zero delta, is
+  refused with the `cbcs` scheme named.
 - **A file's strings no longer reshape the manifests.** A track's name and
   language, a chapter title and a codec string were written with Go's `%q`:
   a `"` closed the HLS quoted string, which has no escape, and the DASH
