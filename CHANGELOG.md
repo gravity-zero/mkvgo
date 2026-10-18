@@ -138,6 +138,10 @@ MP4:
 
 Serving:
 
+- Video a window walk kept for a viewer who never came for it (audio fetched
+  ahead, then a seek) no longer holds the process-wide window budget until
+  its plan is collected: a later walk reclaims it, oldest first, from any
+  plan, so the source keeps being read once per window.
 - A subtitle track no longer keeps a read that failed once, a request
   cancelled or a server erroring, as its answer for the life of the plan;
   only damage and a replaced source are remembered.

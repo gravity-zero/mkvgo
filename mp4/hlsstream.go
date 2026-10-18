@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"weak"
 
 	"github.com/gravity-zero/mkvgo/internal/fileid"
 	"github.com/gravity-zero/mkvgo/internal/poison"
@@ -251,6 +252,73 @@ func (p *HLSPlan) dropKept(t *windowTable) {
 	t.held = 0
 }
 
+// keepers are the plans whose tables may hold kept segments, weakly: a plan nobody uses is still collected.
+var keepers struct {
+	sync.Mutex
+	plans []weak.Pointer[HLSPlan]
+	known map[weak.Pointer[HLSPlan]]bool
+}
+
+// registerKeeper lists p among the plans a reclaim may take kept segments from.
+func registerKeeper(p *HLSPlan) {
+	w := weak.Make(p)
+	keepers.Lock()
+	defer keepers.Unlock()
+	if keepers.known == nil {
+		keepers.known = map[weak.Pointer[HLSPlan]]bool{}
+	}
+	if !keepers.known[w] {
+		keepers.known[w] = true
+		keepers.plans = append(keepers.plans, w)
+	}
+}
+
+// reclaimKept gives back kept segments nobody collected, this plan's oldest tables first, then the other plans',
+// until need fits the process budget; it reports whether it gave anything back. A segment reclaimed is copied
+// from the source when asked for, as one the budget never let a walk keep.
+func (p *HLSPlan) reclaimKept(need int64) bool {
+	freed := p.dropOldestKept(need)
+	keepers.Lock()
+	others := make([]*HLSPlan, 0, len(keepers.plans))
+	live := keepers.plans[:0]
+	for _, w := range keepers.plans {
+		if q := w.Value(); q != nil {
+			live = append(live, w)
+			if q != p {
+				others = append(others, q)
+			}
+		} else {
+			delete(keepers.known, w)
+		}
+	}
+	keepers.plans = live
+	keepers.Unlock()
+	for _, q := range others {
+		if windowBytesTotal.Load()+need <= windowBytesBudget.Load() {
+			break
+		}
+		freed = q.dropOldestKept(need) || freed
+	}
+	return freed
+}
+
+// dropOldestKept gives back the kept segments of p's oldest tables until need fits the process budget.
+func (p *HLSPlan) dropOldestKept(need int64) bool {
+	p.tabMu.Lock()
+	defer p.tabMu.Unlock()
+	freed := false
+	for _, n := range p.tabOrder {
+		if windowBytesTotal.Load()+need <= windowBytesBudget.Load() {
+			break
+		}
+		if t := p.tables[n]; t != nil && t.held > 0 {
+			p.dropKept(t)
+			freed = true
+		}
+	}
+	return freed
+}
+
 // storeTable keeps a table within the byte budget, oldest out first. Caller holds tabMu.
 func (p *HLSPlan) storeTable(n int, t *windowTable) {
 	if p.tables == nil {
@@ -265,6 +333,9 @@ func (p *HLSPlan) storeTable(n int, t *windowTable) {
 	p.tabAcct.bytes += t.bytes
 	tableBytesTotal.Add(t.bytes)
 	p.tabAcct.held += t.held
+	if t.held > 0 {
+		registerKeeper(p)
+	}
 	for (p.tabBytes > tableCacheBytes || tableBytesTotal.Load() > tableTotalBudget.Load()) && len(p.tabOrder) > 0 {
 		old := p.tabOrder[0]
 		p.tabOrder = p.tabOrder[1:]
@@ -304,7 +375,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	// its offset when served, and only a network source's light audio rides
 	// in the table (read with the walk, it costs no round trip of its own).
 	est := p.windowSpan(n)
-	keep := est > 0 && est <= maxWindowInPlace && reserveWindowBytes(est)
+	keep := est > 0 && est <= maxWindowInPlace && (reserveWindowBytes(est) || p.reclaimKept(est) && reserveWindowBytes(est))
 	keepAudio := !keep && p.otherEstimate(n) <= audioInTableBytes && p.networkSrc(ctx)
 	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, !keep, keepAudio)
 	if err != nil {
