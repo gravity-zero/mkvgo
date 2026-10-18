@@ -344,15 +344,19 @@ func (p *parser) holds(off, n int64) bool {
 
 // statsFrameRates sets EstimatedFrameRate on the video tracks without DefaultDuration from their NUMBER_OF_FRAMES and DURATION statistics tags, snapped to a standard rate within 2e-4.
 func statsFrameRates(c *mkv.Container) {
+	tagsByUID := make(map[uint64][]int)
+	for k, tag := range c.Tags {
+		if tag.TargetID != 0 {
+			tagsByUID[tag.TargetID] = append(tagsByUID[tag.TargetID], k)
+		}
+	}
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
 		if t.Type != mkv.VideoTrack || t.FrameRate != nil || t.UID == 0 {
 			continue
 		}
-		for _, tag := range c.Tags {
-			if tag.TargetID != t.UID {
-				continue
-			}
+		for _, k := range tagsByUID[t.UID] {
+			tag := c.Tags[k]
 			var frames, seconds float64
 			for _, st := range tag.SimpleTags {
 				switch strings.ToUpper(st.Name) {

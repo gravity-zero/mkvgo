@@ -99,6 +99,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **Statistics tags find their tracks by UID.** Matching them walked
+  every tag for every track: 50,000 of each, a few megabytes of file, cost
+  billions of comparisons on every read.
 - **Every entry a Matroska reader keeps is charged to the metadata
   budget.** Only strings and binaries were: a Tracks of empty TrackEntry
   elements, two bytes each, became a 560-byte track apiece, 4 MB of input

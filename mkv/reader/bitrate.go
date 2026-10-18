@@ -17,6 +17,7 @@ import (
 // source is kept. The full Read always reaches this; the metadata path does so only
 // under WithBitrate, which follows the head SeekHead to the Tags element.
 func promoteTrackBitrate(c *mkv.Container) {
+	byUID := tracksByUID(c)
 	for _, tag := range c.Tags {
 		if tag.TargetID == 0 {
 			continue // a global tag, not a per-track bitrate
@@ -25,13 +26,22 @@ func promoteTrackBitrate(c *mkv.Container) {
 		if bps <= 0 {
 			continue
 		}
-		for i := range c.Tracks {
-			if t := &c.Tracks[i]; t.UID == tag.TargetID && t.Bitrate == nil {
+		for _, i := range byUID[tag.TargetID] {
+			if t := &c.Tracks[i]; t.Bitrate == nil {
 				b := uint32(bps)
 				t.Bitrate = &b
 			}
 		}
 	}
+}
+
+// tracksByUID indexes c's tracks by UID, so a tag finds its tracks without a walk over every track.
+func tracksByUID(c *mkv.Container) map[uint64][]int {
+	m := make(map[uint64][]int, len(c.Tracks))
+	for i, t := range c.Tracks {
+		m[t.UID] = append(m[t.UID], i)
+	}
+	return m
 }
 
 // bpsTagValue returns the value of a "BPS" SimpleTag (bits per second), or 0 when
