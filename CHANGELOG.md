@@ -37,7 +37,7 @@ All notable changes to mkvgo are documented here. The format is based on
 - **Every version from v0.13.0 to v0.55.1 is retracted**, and the
   pseudo-versions of commits after v0.12.0 with them. They ship
   `httpfs` (from v0.13.0), `s3fs` and the CENC 'cenc' packaging (from
-  v0.17.0), and with them the flaws fixed up to v0.55.2 that apply to each: the
+  v0.17.0), and with them the flaws fixed up to v0.56.0 that apply to each: the
   AES-CTR keystream reused across tracks, variants or concatenated parts under
   one key (re-package what they encrypted and rotate its keys), the S3
   credentials a bucket could move to another host or carry over a redirect,

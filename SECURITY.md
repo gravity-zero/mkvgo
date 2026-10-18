@@ -15,7 +15,7 @@ material where they should not be. A report is acknowledged within a week.
 Only the latest release receives fixes: upgrade with
 `go get github.com/gravity-zero/mkvgo@latest`. Every version from v0.13.0 to
 v0.55.1, and the pseudo-versions after v0.12.0, are retracted for the flaws
-fixed in v0.55.2.
+fixed in v0.56.0.
 
 | Version                   | Supported |
 |---------------------------|-----------|
