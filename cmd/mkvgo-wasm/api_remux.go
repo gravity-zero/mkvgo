@@ -167,6 +167,9 @@ func readCENCOpts(v js.Value) (*mp4.CENCOptions, error) {
 	if u := c.Get("keyURI"); u.Type() == js.TypeString {
 		out.KeyURI = u.String()
 	}
+	if b := c.Get("inlineKey"); b.Type() == js.TypeBoolean {
+		out.InlineKey = b.Bool()
+	}
 	return out, nil
 }
 

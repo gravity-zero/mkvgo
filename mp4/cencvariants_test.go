@@ -15,7 +15,7 @@ func TestCENCVariantsBounded(t *testing.T) {
 	for i := range srcs {
 		srcs[i] = fmt.Sprintf("/nonexistent/v%d.mkv", i)
 	}
-	cenc := &CENCOptions{Scheme: "cenc", KeyID: make([]byte, 16), Key: make([]byte, 16), IV: make([]byte, 8)}
+	cenc := &CENCOptions{Scheme: "cenc", KeyID: make([]byte, 16), Key: make([]byte, 16), IV: make([]byte, 8), InlineKey: true}
 	_, planErr := PlanABR(context.Background(), srcs, Options{CENC: cenc})
 	remuxErr := RemuxToABR(context.Background(), srcs, t.TempDir(), Options{CENC: cenc})
 	for name, err := range map[string]error{"PlanABR": planErr, "RemuxToABR": remuxErr} {

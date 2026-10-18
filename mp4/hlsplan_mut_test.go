@@ -434,7 +434,7 @@ func TestPlanHLSFromMP4IframeAndDASHGating(t *testing.T) {
 	})
 
 	t.Run("cenc", func(t *testing.T) {
-		cenc := &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc")}
+		cenc := &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}
 		plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000, CENC: cenc})
 		if err != nil {
 			t.Fatal(err)

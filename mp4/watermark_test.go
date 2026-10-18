@@ -145,7 +145,7 @@ func TestWatermarkRejectsEncryption(t *testing.T) {
 		t.Error("watermark planning must refuse Options.Encrypt in this version")
 	}
 	if _, err := PlanWatermark(ctx, src, src, Options{SegmentMs: 1000,
-		CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: make([]byte, 16), IV: make([]byte, 8)}}); err == nil {
+		CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: make([]byte, 16), IV: make([]byte, 8), InlineKey: true}}); err == nil {
 		t.Error("watermark planning must refuse Options.CENC in this version")
 	}
 }

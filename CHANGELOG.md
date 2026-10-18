@@ -17,6 +17,11 @@ All notable changes to mkvgo are documented here. The format is based on
   clear, and anyone on the path could reuse it until it expired. Such a read
   is refused with what to do: an `https://` endpoint, or the new
   `Options.AllowHTTPSessionToken`. Reads without a session token are unchanged.
+- **CENC needs a key URI.** `CENCOptions` with an empty `KeyURI` wrote the
+  content key in clear into every playlist, as a `data:` URI. Such a plan is
+  now refused with what to do: set `KeyURI`, or the new `InlineKey` to embed
+  the key on purpose (testing only); the CLI already asked for
+  `--cenc-inline-key`, and the wasm build takes `inlineKey`.
 - **Credentials in a URL stay out of errors.** A `user:password@` before
   the host was kept where the query was cut; it is dropped too, and the
   errors of a concat comparison name their parts that way as well.

@@ -173,7 +173,7 @@ func oldParseHLSFlags(args []string) hlsFlags {
 		if cencKeyURI == "" && !cencInline {
 			Fatal("--cenc-key-uri is required: without it the playlist would carry the content key in clear (a data: URI). Pass --cenc-key-uri with the URI of your key or license server, or --cenc-inline-key to embed the key on purpose (testing only)")
 		}
-		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI}
+		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI, InlineKey: cencInline}
 	}
 	return f
 }

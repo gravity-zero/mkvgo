@@ -12,7 +12,7 @@ import (
 func TestCENCSixteenByteIVLeavesCounterRoom(t *testing.T) {
 	opts := func(low byte) *CENCOptions {
 		iv := append(make([]byte, 8), bytes.Repeat([]byte{low}, 8)...)
-		return &CENCOptions{Scheme: "cenc", Key: make([]byte, 16), KeyID: make([]byte, 16), IV: iv}
+		return &CENCOptions{Scheme: "cenc", Key: make([]byte, 16), KeyID: make([]byte, 16), IV: iv, InlineKey: true}
 	}
 	if err := opts(0xFF).validate(); err == nil || !strings.Contains(err.Error(), "ffffffff00000000") {
 		t.Errorf("an IV ending in ff..ff: %v, want it refused, naming the bound", err)

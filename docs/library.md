@@ -1312,9 +1312,9 @@ still gets a `manifest.mpd`, with a `ContentProtection` element
 and audio AdaptationSets.
 
 Mutually exclusive with `Encrypt` and (in this version) `SingleFile`.
-`KeyURI` left empty falls back to a `data:` URI embedding `Key` directly --
-convenient for local testing, but it puts the raw key in the playlist text;
-production deployments should always set a real `KeyURI`.
+`KeyURI` is required: left empty, the plan is refused, since the only
+fallback is a `data:` URI embedding `Key`, the raw key in the playlist text.
+`InlineKey: true` asks for that fallback on purpose, for local testing.
 
 ### MP4 → MKV
 

@@ -62,7 +62,7 @@ func TestCENCIVsDistinctWithinATrack(t *testing.T) {
 // TestCENCRefusesARepeatedIV: whatever derived the decode times - an MP4 source's stts may hold a zero delta - two
 // samples of a fragment at one decode time are refused under 'cenc' rather than encrypted with one IV.
 func TestCENCRefusesARepeatedIV(t *testing.T) {
-	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc")}, false, "aac", 2)
+	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}, false, "aac", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCENCRefusesARepeatedIV(t *testing.T) {
 // TestCENCRefusesADecodeTimePastTheDomains: the IV is the base plus the decode time plus the track's domain (2^56
 // up) or the variant's offset (2^48 up); a forged stts reaching 2^48 ticks would walk one track's IVs into another's.
 func TestCENCRefusesADecodeTimePastTheDomains(t *testing.T) {
-	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc")}, false, "aac", 2)
+	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}, false, "aac", 2)
 	if err != nil {
 		t.Fatal(err)
 	}

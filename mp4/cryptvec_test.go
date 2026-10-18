@@ -48,9 +48,9 @@ func cryptVecOptions(mode string) Options {
 	case "aes-128":
 		o.Encrypt = &HLSEncryption{Key: cryptVecKey, IV: cryptVecIV, KeyURI: "key.bin"}
 	case "cenc":
-		o.CENC = &CENCOptions{Scheme: "cenc", Key: cryptVecKey, KeyID: cryptVecKID, IV: cryptVecIV[:8]}
+		o.CENC = &CENCOptions{Scheme: "cenc", Key: cryptVecKey, KeyID: cryptVecKID, IV: cryptVecIV[:8], InlineKey: true}
 	case "cbcs":
-		o.CENC = &CENCOptions{Scheme: "cbcs", Key: cryptVecKey, KeyID: cryptVecKID, IV: cryptVecIV}
+		o.CENC = &CENCOptions{Scheme: "cbcs", Key: cryptVecKey, KeyID: cryptVecKID, IV: cryptVecIV, InlineKey: true}
 	}
 	return o
 }

@@ -26,8 +26,8 @@ func encryptionModes() map[string]Options {
 		"aes-128": {Encrypt: &HLSEncryption{Key: key, KeyURI: "key.bin"}},
 		"aes-128-rotating": {Encrypt: &HLSEncryption{RotateEverySegments: 1, Keys: []HLSKey{
 			{Key: key, KeyURI: "k1.bin"}, {Key: kid, KeyURI: "k2.bin", IV: iv}}}},
-		"cenc": {CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: kid, IV: iv[:8]}},
-		"cbcs": {CENC: &CENCOptions{Scheme: "cbcs", Key: key, KeyID: kid, IV: iv}},
+		"cenc": {CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: kid, IV: iv[:8], InlineKey: true}},
+		"cbcs": {CENC: &CENCOptions{Scheme: "cbcs", Key: key, KeyID: kid, IV: iv, InlineKey: true}},
 	}
 }
 

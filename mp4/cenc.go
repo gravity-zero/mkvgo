@@ -62,8 +62,7 @@ type CENCOptions struct {
 	// (AES-CBC, 1:9 pattern on video). Required.
 	Scheme string
 	// Key is the 16-byte AES key. The media carry only KeyID and the PSSH
-	// boxes; the key itself reaches the output only through the default
-	// KeyURI, a data: URI in the playlists, when KeyURI is left empty.
+	// boxes; the key itself reaches the output only through InlineKey.
 	Key []byte
 	// KeyID is the 16-byte key identifier (tenc's default_KID / the DASH
 	// ContentProtection cenc:default_KID).
@@ -74,12 +73,13 @@ type CENCOptions struct {
 	// block-sized).
 	IV []byte
 	// KeyURI is what the HLS EXT-X-KEY line advertises as URI="…" and what an
-	// EME-capable player's license request ultimately needs to resolve. Left
-	// empty, it defaults to a data: URI embedding Key directly - convenient
-	// for local testing, but it puts the raw key in the playlist text, so
-	// production deployments should always set a real KeyURI (an
-	// authenticated endpoint, or the player's license-server URL).
+	// EME-capable player's license request ultimately needs to resolve (an
+	// authenticated endpoint, or the player's license-server URL). Required
+	// unless InlineKey is set.
 	KeyURI string
+	// InlineKey, with KeyURI empty, advertises a data: URI embedding Key: the
+	// raw key in the playlist text, for local testing only.
+	InlineKey bool
 	// PSSH holds zero or more complete, caller-built 'pssh' boxes (Protection
 	// System Specific Header, one per DRM system) copied verbatim into the
 	// init segment's moov. mkvgo does not build these itself - it has no DRM
@@ -102,6 +102,9 @@ func (c *CENCOptions) validate() error {
 	if len(c.KeyID) != 16 {
 		return errf("CENC key ID must be 16 bytes, got %d", len(c.KeyID))
 	}
+	if c.KeyURI == "" && !c.InlineKey {
+		return errf("CENC needs a KeyURI for the EXT-X-KEY line: without it the playlists would carry the content key in clear. Set CENCOptions.KeyURI to your key or license server, or CENCOptions.InlineKey to embed the key on purpose (testing only)")
+	}
 	switch c.Scheme {
 	case "cenc":
 		if len(c.IV) != 8 && len(c.IV) != 16 {
@@ -120,8 +123,7 @@ func (c *CENCOptions) validate() error {
 	return nil
 }
 
-// resolvedKeyURI returns KeyURI, or (unset) a data: URI embedding Key - see
-// the KeyURI doc comment for the production caveat.
+// resolvedKeyURI returns KeyURI, or (unset, InlineKey) a data: URI embedding Key.
 func (c *CENCOptions) resolvedKeyURI() string {
 	if c.KeyURI != "" {
 		return c.KeyURI

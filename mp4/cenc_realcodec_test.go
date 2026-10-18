@@ -48,7 +48,7 @@ func TestCENCRealCodecBitstreams(t *testing.T) {
 				}
 				encDir := t.TempDir()
 				err := RemuxToHLS(ctx, f.path, encDir, Options{SegmentMs: 1000,
-					CENC: &CENCOptions{Scheme: scheme, Key: key, KeyID: kid, IV: iv}})
+					CENC: &CENCOptions{Scheme: scheme, Key: key, KeyID: kid, IV: iv, InlineKey: true}})
 				if err != nil {
 					t.Fatalf("%s: the real %s parser rejected the bitstream: %v", scheme, f.codec, err)
 				}
@@ -65,7 +65,7 @@ func TestCENCRealCodecBitstreams(t *testing.T) {
 				}
 				// Plan and full pass agree byte for byte.
 				plan, err := PlanHLS(ctx, f.path, Options{SegmentMs: 1000,
-					CENC: &CENCOptions{Scheme: scheme, Key: key, KeyID: kid, IV: iv}})
+					CENC: &CENCOptions{Scheme: scheme, Key: key, KeyID: kid, IV: iv, InlineKey: true}})
 				if err != nil {
 					t.Fatalf("%s plan: %v", scheme, err)
 				}

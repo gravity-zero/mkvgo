@@ -174,7 +174,7 @@ func TestForensicRejects(t *testing.T) {
 		t.Error("forensic planning must refuse Options.Encrypt")
 	}
 	if _, err := PlanForensic(ctx, src, Options{SegmentMs: 1000,
-		CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: make([]byte, 16), IV: make([]byte, 8)}}); err == nil {
+		CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: make([]byte, 16), IV: make([]byte, 8), InlineKey: true}}); err == nil {
 		t.Error("forensic planning must refuse Options.CENC")
 	}
 }

@@ -305,7 +305,7 @@ const plan = await MkvGo.openHLS(file, {
     key: key16,                     // 16-byte Uint8Array, never written to the output
     keyId: kid16,                   // 16-byte Uint8Array (tenc default_KID)
     iv: iv8,                        // 8 or 16 bytes for "cenc", 16 for "cbcs"
-    keyURI: 'https://api.example.com/key',
+    keyURI: 'https://api.example.com/key', // required, unless inlineKey: true puts the key in the playlist (testing only)
   },
 })
 ```
