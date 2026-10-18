@@ -117,8 +117,8 @@ func TestMP4RetimeTracksRefusals(t *testing.T) {
 	path := editShiftFixture(t, false)
 
 	err := RetimeTracks(ctx, path, map[uint64]int64{2: -100_000_000})
-	if err == nil || !strings.Contains(err.Error(), "cannot start") {
-		t.Errorf("presenting before 0 must refuse with the reason, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "cannot start") || !strings.Contains(err.Error(), "delay the other tracks by 100ms") {
+		t.Errorf("presenting before 0 must refuse with the reason and the shift that does it, got %v", err)
 	}
 	if err := RetimeTracks(ctx, path, map[uint64]int64{9: 100_000_000}); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("unknown track must refuse, got %v", err)

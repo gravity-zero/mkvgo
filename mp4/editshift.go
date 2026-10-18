@@ -337,8 +337,8 @@ func rewriteTrakEditShift(payload []byte, track uint64, ns int64, movieTS uint32
 	shiftTicks := roundTicks(ns, movieTS)
 	newEmpty := empty + shiftTicks
 	if newEmpty < 0 {
-		return nil, 0, fmt.Errorf("track %d: cannot start %dms before the presentation start (only %dms of delay to remove; MP4 cannot present media earlier than 0 without trimming it)",
-			track, ticksToMs(-newEmpty, movieTS), ticksToMs(empty, movieTS))
+		return nil, 0, fmt.Errorf("track %d: cannot start %dms before the presentation start (only %dms of delay to remove; MP4 cannot present media earlier than 0 without trimming it): delay the other tracks by %dms instead",
+			track, ticksToMs(-newEmpty, movieTS), ticksToMs(empty, movieTS), ticksToMs(-newEmpty, movieTS))
 	}
 	if len(kept) == 0 {
 		// No media edit yet (typical for a file without an elst): the whole
