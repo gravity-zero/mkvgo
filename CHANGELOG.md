@@ -82,6 +82,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska `split` whose part would be named like its source (re-splitting
+  `part_001.mkv` into its own directory) truncated the source, then removed
+  it; every part is now checked before any is written, as for MP4.
+
 Matroska reading:
 
 - `ReadStream` describes a file as `Read` does: it runs the same decoders,

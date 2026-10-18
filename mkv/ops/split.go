@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -60,23 +63,31 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 
 	uids := splitSegmentUIDs(c, len(ranges))
 
-	var outputs []string
+	// Every part is named, and checked against the source, before any is written: a part over the source would
+	// truncate it before its clusters are read.
+	paths := make([]string, len(ranges))
 	used := map[string]bool{}
+	for i := range ranges {
+		title := ""
+		if i < len(titles) {
+			title = titles[i]
+		}
+		if paths[i], err = safePath(opts.OutputDir, splitplan.PartName(pattern, i, title, i < len(titles), used)); err != nil {
+			return nil, err
+		}
+		if sameFile(fs, paths[i], opts.SourcePath) {
+			return nil, fmt.Errorf("part %d would be written over the source %s: split into another directory, or name the parts with -pattern", i+1, shown.Path(opts.SourcePath))
+		}
+	}
+
+	var outputs []string
 	walk := &sourceWalk{}
 	defer walk.Close()
 	for i, r := range ranges {
 		if ctx.Err() != nil {
 			return outputs, ctx.Err()
 		}
-		title := ""
-		if i < len(titles) {
-			title = titles[i]
-		}
-		name := splitplan.PartName(pattern, i, title, i < len(titles), used)
-		outPath, err := safePath(opts.OutputDir, name)
-		if err != nil {
-			return outputs, err
-		}
+		outPath := paths[i]
 
 		durationMs := r.EndMs - r.StartMs
 		if r.EndMs == 0 {
@@ -339,4 +350,14 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	return splitplan.ClipChapters(chapters, startMs, endMs)
+}
+
+// sameFile reports whether a and b name one file: the same path, or two paths the filesystem resolves to one file.
+func sameFile(fs *mkv.FS, a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	fa, errA := fs.DoStat(a)
+	fb, errB := fs.DoStat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
