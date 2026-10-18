@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -48,6 +49,8 @@ type rewriteOptions struct {
 // rwChunk is one chunk carried to the output: where its bytes are read, how many, and where they land.
 type rwChunk struct {
 	src, size, out int64
+	at             int64  // decode time of its first sample (ns), for interleaving sources
+	samples        uint32 // samples in the chunk
 }
 
 // rwTrak is one output trak and its chunks.
@@ -81,6 +84,7 @@ func rewriteMP4(ctx context.Context, srcPath, dstPath string, ro rewriteOptions,
 		return errf("%s: a fragmented MP4 is not rewritten sample by sample; remux it to a progressive MP4 first (from-mp4, then to-mp4)", shown.Path(srcPath))
 	}
 	vs := vsource{{size: size, r: src}}
+	mdats := sourceMdats(src, size)
 	if ro.edit != nil {
 		var extra []byte
 		if payload, extra, err = editedMoov(src, payload, size, mv, ro.edit); err != nil {
@@ -92,11 +96,23 @@ func rewriteMP4(ctx context.Context, srcPath, dstPath string, ro rewriteOptions,
 	if err != nil {
 		return err
 	}
+	if err := traksInMdat(payload, drop, mdats, size, vs.limit()); err != nil {
+		return errf("%s: %w", shown.Path(srcPath), err)
+	}
 	ftyp, err := sourceFtyp(src, size)
 	if err != nil {
 		return err
 	}
-	if err := writeRelocated(ctx, vs, payload, drop, ftyp, dstPath, o); err != nil {
+	top, err := sourceTopBoxes(src, size)
+	if err != nil {
+		return err
+	}
+	if len(drop) > 0 {
+		if payload, err = withMovieDuration(payload, drop); err != nil {
+			return err
+		}
+	}
+	if err := writeRelocated(ctx, vs, payload, drop, outLayout{ftyp: ftyp, top: top}, dstPath, o); err != nil {
 		return errf("%s: %w", shown.Path(srcPath), err)
 	}
 	return nil
@@ -160,14 +176,26 @@ func (v vsource) seg(off int64) int {
 	return i
 }
 
+// outLayout is how writeRelocated arranges its output around the moov.
+type outLayout struct {
+	ftyp, top  []byte // written ahead of the moov / between the moov and the mdat
+	interleave bool   // chunks ordered by decode time across sources (a mux), not by source offset
+}
+
 // writeRelocated writes the fast-start MP4 a moov payload describes: the traks not dropped, their chunks read from vs.
-func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[int]bool, ftyp []byte, dstPath string, o Options) (err error) {
+func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[int]bool, lay outLayout, dstPath string, o Options) (err error) {
+	ftyp := lay.ftyp
 	traks, others, err := collectTraks(payload, drop, vs.limit())
 	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if lay.interleave {
+		for _, t := range traks {
+			setChunkTimes(t)
+		}
 	}
 	var mediaLen int64
 	order := make([]*rwChunk, 0)
@@ -177,7 +205,12 @@ func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[in
 			mediaLen += t.chunks[i].size
 		}
 	}
-	sort.SliceStable(order, func(a, b int) bool { return order[a].src < order[b].src })
+	sort.SliceStable(order, func(a, b int) bool {
+		if lay.interleave && order[a].at != order[b].at {
+			return order[a].at < order[b].at
+		}
+		return order[a].src < order[b].src
+	})
 	co64 := needCo64(mediaLen)
 	build := func(base int64) ([]byte, error) {
 		pos := base
@@ -191,13 +224,13 @@ func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[in
 	if err != nil {
 		return err
 	}
-	if !co64 && int64(len(ftyp))+int64(len(probe))+mdatHeaderLen+mediaLen > math.MaxUint32 {
+	if !co64 && int64(len(ftyp))+int64(len(probe))+int64(len(lay.top))+mdatHeaderLen+mediaLen > math.MaxUint32 {
 		co64 = true // a large moov pushes the media past what 32-bit offsets reach
 		if probe, err = build(0); err != nil {
 			return err
 		}
 	}
-	moov, err := build(int64(len(ftyp)) + int64(len(probe)) + mdatHeaderLen)
+	moov, err := build(int64(len(ftyp)) + int64(len(probe)) + int64(len(lay.top)) + mdatHeaderLen)
 	if err != nil {
 		return err
 	}
@@ -219,7 +252,7 @@ func writeRelocated(ctx context.Context, vs vsource, payload []byte, drop map[in
 		}
 	}()
 	out := bufio.NewWriterSize(dst, 256<<10)
-	for _, b := range [][]byte{ftyp, moov, mdatHeader(mediaLen)} {
+	for _, b := range [][]byte{ftyp, moov, lay.top, mdatHeader(mediaLen)} {
 		if _, err := out.Write(b); err != nil {
 			return errf("write: %w", err)
 		}
@@ -438,6 +471,34 @@ func rewriteAt(payload []byte, path []string, leaf func([]memBox) ([][]byte, err
 	return joinBoxes(out), nil
 }
 
+// sourceMdats locates a source's mdat payloads; a file whose top-level walk fails (junk past the moov) gets nil: bounds alone apply.
+func sourceMdats(r io.ReadSeeker, size int64) [][2]int64 {
+	ranges, err := mdatRanges(r, size)
+	if err != nil {
+		return nil
+	}
+	return ranges
+}
+
+// inMdats reports whether [off, off+n) lies inside one of the ascending ranges (nil: no ranges to hold to).
+func inMdats(ranges [][2]int64, off, n int64) bool {
+	if ranges == nil {
+		return true
+	}
+	i := sort.Search(len(ranges), func(i int) bool { return ranges[i][1] > off })
+	return i < len(ranges) && inMdat(ranges[i:i+1], off, n)
+}
+
+// checkInMdat refuses a trak whose chunks below real (the source's own bytes) lie outside every mdat, such as in the ftyp.
+func checkInMdat(chunks []rwChunk, mdats [][2]int64, real int64) error {
+	for i, c := range chunks {
+		if c.size > 0 && c.src < real && !inMdats(mdats, c.src, c.size) {
+			return fmt.Errorf("chunk %d at %d lies outside every mdat: the file is damaged, remux it with a tool that rebuilds its tables", i+1, c.src)
+		}
+	}
+	return nil
+}
+
 // trakChunks lists a trak's chunks with their byte sizes, each within limit bytes.
 func trakChunks(trak []byte, limit int64) ([]rwChunk, error) {
 	stbl, err := boxAt(trak, "mdia", "minf", "stbl")
@@ -484,10 +545,10 @@ func trakChunks(trak []byte, limit int64) ([]rwChunk, error) {
 			n += int64(sizes[si])
 			si++
 		}
-		if off < 0 || off+n > limit {
+		if n > 0 && (off < 0 || off+n > limit) {
 			return nil, fmt.Errorf("chunk %d at [%d:%d] is outside the file (size %d)", chunk, off, off+n, limit)
 		}
-		chunks[ci] = rwChunk{src: off, size: n}
+		chunks[ci] = rwChunk{src: off, size: n, samples: perChunk}
 	}
 	if si != len(sizes) {
 		return nil, fmt.Errorf("chunk table covers %d samples but stsz lists %d", si, len(sizes))
@@ -625,6 +686,10 @@ func copyChunks(ctx context.Context, w io.Writer, vs vsource, order []*rwChunk, 
 			return err
 		}
 		start, n := order[i].src, order[i].size
+		if n == 0 {
+			i++
+			continue
+		}
 		si := vs.seg(start)
 		if si < 0 {
 			return errf("chunk at %d lies past the sources", start)
@@ -658,4 +723,140 @@ func copyChunks(ctx context.Context, w io.Writer, vs vsource, order []*rwChunk, 
 		i = j
 	}
 	return nil
+}
+
+// sourceTopBoxes returns, verbatim, the top-level boxes a rewrite carries besides ftyp, moov and mdat: XMP uuid, user data,
+// QuickTime preview, and a meta that addresses nothing by file offset (no iloc).
+func sourceTopBoxes(r io.ReadSeeker, size int64) ([]byte, error) {
+	const keepMax = 16 << 20
+	var out []byte
+	var hdr [16]byte
+	for off := int64(0); off+8 <= size; {
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
+			return nil, err
+		}
+		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
+			return nil, err
+		}
+		n, typ, hl := int64(binary.BigEndian.Uint32(hdr[:4])), string(hdr[4:8]), int64(8)
+		if n == 1 {
+			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
+				return nil, err
+			}
+			n, hl = int64(binary.BigEndian.Uint64(hdr[8:16])), 16
+		}
+		if n == 0 {
+			n = size - off
+		}
+		if n < hl || off+n > size {
+			break // past a damaged box nothing more is carried; the media was located without it
+		}
+		switch typ {
+		case "uuid", "udta", "pnot", "meta":
+			if int64(len(out))+n > keepMax {
+				return nil, errf("its top-level %q boxes pass %d MiB: rewrite it with a tool that drops them", typ, keepMax>>20)
+			}
+			if _, err := r.Seek(off, io.SeekStart); err != nil {
+				return nil, err
+			}
+			b, err := readExact(r, n)
+			if err != nil {
+				return nil, err
+			}
+			if typ == "meta" && bytes.Contains(b, []byte("iloc")) {
+				break
+			}
+			out = append(out, b...)
+		}
+		off += n
+	}
+	return out, nil
+}
+
+// traksInMdat checks every kept trak's chunks against the source's mdats (chunks past real are the edit's own bytes).
+func traksInMdat(payload []byte, drop map[int]bool, mdats [][2]int64, real, limit int64) error {
+	boxes, err := iterBoxes(payload)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for _, b := range boxes {
+		if b.typ != "trak" {
+			continue
+		}
+		if idx++; drop[idx] {
+			continue
+		}
+		chunks, err := trakChunks(b.payload, limit)
+		if err != nil {
+			return err
+		}
+		if err := checkInMdat(chunks, mdats, real); err != nil {
+			id, _ := trakID(b.payload)
+			return fmt.Errorf("track_ID %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// withMovieDuration recomputes the mvhd duration over the traks a removal keeps.
+func withMovieDuration(payload []byte, drop map[int]bool) ([]byte, error) {
+	boxes, err := iterBoxes(payload)
+	if err != nil {
+		return nil, err
+	}
+	var dur int64
+	idx := -1
+	for _, b := range boxes {
+		if b.typ != "trak" {
+			continue
+		}
+		if idx++; !drop[idx] {
+			if d, err := trakDuration(b.payload); err == nil {
+				dur = max(dur, d)
+			}
+		}
+	}
+	var w bw
+	for _, b := range boxes {
+		p := b.payload
+		if b.typ == "mvhd" {
+			if p, err = patchMvhdDuration(p, dur); err != nil {
+				return nil, err
+			}
+		}
+		w.bytes(box(b.typ, p))
+	}
+	return w.b, nil
+}
+
+// setChunkTimes stamps each chunk with its first sample's decode time; a table it cannot read leaves the times at 0.
+func setChunkTimes(t *rwTrak) {
+	stbl, err := boxAt(t.payload, "mdia", "minf", "stbl")
+	if err != nil {
+		return
+	}
+	sb, err := iterBoxes(stbl)
+	if err != nil {
+		return
+	}
+	var n int
+	for _, c := range t.chunks {
+		n += int(c.samples)
+	}
+	durs, err := parseStts(mustFind(sb, "stts"), n)
+	mdhd, merr := boxAt(t.payload, "mdia", "mdhd")
+	if err != nil || merr != nil {
+		return
+	}
+	ts, _ := parseMdhd(mdhd)
+	var dts int64
+	si := 0
+	for i := range t.chunks {
+		t.chunks[i].at = rescale(dts, ts, nsPerSec)
+		for k := uint32(0); k < t.chunks[i].samples && si < len(durs); k++ {
+			dts += int64(durs[si])
+			si++
+		}
+	}
 }

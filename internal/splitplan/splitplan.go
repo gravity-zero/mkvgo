@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -45,23 +46,43 @@ func EveryRanges(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 	return append(ranges, mkv.TimeRange{StartMs: start, EndMs: 0}), nil
 }
 
-// PartName names part i (0-based) from pattern, title filling {title}; used tracks the names already taken.
+// CheckPattern refuses a part-name pattern that is a path or whose verbs are not one integer: it names a file in the output directory.
+func CheckPattern(pattern string) error {
+	if strings.ContainsAny(pattern, `/\`) {
+		return fmt.Errorf("pattern %q names a path: it names a file inside the output directory, e.g. part_%%03d.mp4", pattern)
+	}
+	if hasVerb(pattern) && strings.Contains(fmt.Sprintf(pattern, 1), "%!") {
+		return fmt.Errorf("pattern %q: its only verb is the part number, e.g. %%d or %%03d (write %%%% for a literal %%)", pattern)
+	}
+	return nil
+}
+
+// hasVerb reports whether a pattern holds a verb besides literal %% signs.
+func hasVerb(pattern string) bool {
+	return strings.Contains(strings.ReplaceAll(pattern, "%%", ""), "%")
+}
+
+// PartName names part i (0-based) from pattern, title filling {title}; used holds the names taken, compared without case.
 func PartName(pattern string, i int, title string, hasTitle bool, used map[string]bool) string {
 	pat := pattern
 	if hasTitle {
 		pat = strings.ReplaceAll(pat, "{title}", SanitizeName(title, i+1))
 	}
-	name := pat
-	if strings.Contains(pat, "%") {
+	name := strings.ReplaceAll(pat, "%%", "%")
+	if hasVerb(pat) {
 		name = fmt.Sprintf(pat, i+1)
 	}
-	if used[name] {
-		ext := filepath.Ext(name)
-		name = strings.TrimSuffix(name, ext) + fmt.Sprintf("_%d", i+1) + ext
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for k := i + 1; used[strings.ToLower(name)]; k++ {
+		name = stem + fmt.Sprintf("_%d", k) + ext
 	}
-	used[name] = true
+	used[strings.ToLower(name)] = true
 	return name
 }
+
+// maxTitleBytes bounds the title a part name takes.
+const maxTitleBytes = 200
 
 // SanitizeName makes a chapter title safe as a file-name fragment ("chapter_<n>" when nothing is left).
 func SanitizeName(title string, n int) string {
@@ -76,6 +97,10 @@ func SanitizeName(title string, n int) string {
 		}
 	}
 	s := strings.Trim(b.String(), " .")
+	for len(s) > maxTitleBytes { // file systems cap a name near 255 bytes: keep room for the pattern
+		_, size := utf8.DecodeLastRuneInString(s)
+		s = strings.TrimRight(s[:len(s)-size], " .")
+	}
 	if s == "" {
 		return fmt.Sprintf("chapter_%02d", n)
 	}

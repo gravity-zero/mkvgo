@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -25,6 +26,9 @@ func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), op
 	}
 	f, err := o.FS.DoOpenFile(path, os.O_RDWR, 0)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return errf("edit: %w: an in-place edit needs write access to the file; without it, write the edit to a new file (edit -o, mp4.EditMetadata)", err)
+		}
 		return errf("edit: %w", err)
 	}
 	defer f.Close()
@@ -49,7 +53,7 @@ func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), op
 		return errf("edit: %s: a fragmented MP4 keeps its moov ahead of the fragments, so it cannot be edited in place; remux it to a progressive MP4 first (from-mp4, then to-mp4)", shown.Path(path))
 	}
 	if moovEncrypted(payload) {
-		return errf("edit: %s: its encryption data (saio) is addressed by file offset and would be left behind by the moved moov: mkvgo does not edit encrypted MP4", shown.Path(path))
+		return errf("edit: %s: its encryption data (saio) is addressed by file offset inside the moov an in-place edit retires: mkvgo does not edit encrypted MP4", shown.Path(path))
 	}
 	after, _, err := moovContainer(f, payload, lay.fileSize)
 	if err != nil {
@@ -69,6 +73,9 @@ func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), op
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if mb, err := iterBoxes(moov); err == nil && len(mb) == 1 && chap == nil && bytes.Equal(mb[0].payload, payload) {
+		return nil // the edit changes nothing the file stores
 	}
 	var blobs [][]byte
 	if chap != nil {
@@ -92,12 +99,12 @@ func moovContainer(r io.ReadSeeker, payload []byte, size int64) (*mkv.Container,
 }
 
 // editableHint closes every refusal of a field EditInPlace cannot change.
-const editableHint = "an MP4 edit changes the title, the tags, the chapters and each track's language, name, default and forced flags; for anything else remux to MKV (from-mp4), edit, and remux back (to-mp4)"
+const editableHint = "an MP4 edit changes the title, the tags, the chapters and each track's language, name, default and forced flags; tracks are removed or added with remove-track, add-track or mux (mp4.RemoveTrack, AddTrack, Mux); anything else goes through MKV (from-mp4, edit, to-mp4)"
 
 // checkEditable refuses an edit that changes a field outside the editable set, or a value MP4 cannot store.
 func checkEditable(before, after *mkv.Container) error {
 	if len(after.Tracks) != len(before.Tracks) {
-		return fmt.Errorf("the track list cannot change (%d tracks before, %d after): %s", len(before.Tracks), len(after.Tracks), editableHint)
+		return fmt.Errorf("an edit keeps the track list (%d tracks before, %d after): remove or add tracks with remove-track, add-track or mux (mp4.RemoveTrack, AddTrack, Mux)", len(before.Tracks), len(after.Tracks))
 	}
 	want := *before
 	want.Info.Title = after.Info.Title
@@ -112,7 +119,7 @@ func checkEditable(before, after *mkv.Container) error {
 		w.IsForced, w.ForcedPresent = a.IsForced, a.ForcedPresent
 	}
 	if field := firstDiff(reflect.ValueOf(want), reflect.ValueOf(*after), ""); field != "" {
-		return fmt.Errorf("%s cannot be changed: %s", field, editableHint)
+		return fmt.Errorf("%s cannot be changed: %s", trackFieldName(field, after), editableHint)
 	}
 	if !reflect.DeepEqual(want, *after) {
 		return fmt.Errorf("an internal field cannot be changed: %s", editableHint)
@@ -125,23 +132,106 @@ func checkEditable(before, after *mkv.Container) error {
 		if a.LanguageBCP47 != b.LanguageBCP47 && a.LanguageBCP47 != "" && !validBCP47(a.LanguageBCP47) {
 			return fmt.Errorf("track %d: %q is not a BCP-47 language tag (letters and digits in subtags of 1 to 8, joined by \"-\", e.g. \"pt-BR\")", a.ID, a.LanguageBCP47)
 		}
-		if strings.ContainsRune(a.Name, 0) || strings.ContainsRune(a.LanguageBCP47, 0) {
+		if (a.Name != b.Name && strings.ContainsRune(a.Name, 0)) || (a.LanguageBCP47 != b.LanguageBCP47 && strings.ContainsRune(a.LanguageBCP47, 0)) {
 			return fmt.Errorf("track %d: a name or language holding a NUL byte cannot be stored", a.ID)
 		}
 	}
 	if !reflect.DeepEqual(before.Tags, after.Tags) {
+		seen := map[string]bool{}
 		for _, tg := range after.Tags {
 			if tg.TargetID != 0 {
 				return fmt.Errorf("a tag targeting track %d cannot be stored in an MP4: only file-level tags can", tg.TargetID)
 			}
 			for _, st := range tg.SimpleTags {
-				if _, ok := mp4MetaAtoms[st.Name]; !ok && st.Name != "TITLE" {
+				switch _, ok := mp4MetaAtoms[st.Name]; {
+				case !ok && st.Name != "TITLE":
 					return fmt.Errorf("tag %q has no MP4 counterpart: the tags an MP4 stores are TITLE, %s", st.Name, strings.Join(slices.Sorted(maps.Keys(mp4MetaAtoms)), ", "))
+				case seen[st.Name]:
+					return fmt.Errorf("tag %q is given twice: an MP4 stores one value per tag", st.Name)
+				case len(st.Binary) > 0 || st.Language != "" || len(st.SubTags) > 0:
+					return fmt.Errorf("tag %q carries a binary value, a language or nested tags, which an MP4 tag cannot hold: give it as plain text", st.Name)
+				}
+				seen[st.Name] = true
+				if st.Name == "TITLE" && after.Info.Title != before.Info.Title && st.Value != after.Info.Title && st.Value != tagValue(before, "TITLE") {
+					return fmt.Errorf("the title is set to %q and the TITLE tag to %q, but an MP4 stores one title: set either", after.Info.Title, st.Value)
 				}
 			}
 		}
 	}
+	if !reflect.DeepEqual(before.Chapters, after.Chapters) {
+		if err := checkChapters(after.Chapters, after.DurationMs); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// sameChapterMarks reports whether two chapter lists store the same titled starts, all an MP4 chapter list holds.
+func sameChapterMarks(a, b []mkv.Chapter) bool {
+	fa, fb := flattenChapters(a), flattenChapters(b)
+	return slices.EqualFunc(fa, fb, func(x, y mkv.Chapter) bool { return x.Title == y.Title && x.StartMs == y.StartMs })
+}
+
+// tagValue is the value of a file-level tag ("" when absent).
+func tagValue(c *mkv.Container, name string) string {
+	for _, st := range globalTags(c) {
+		if st.Name == name {
+			return st.Value
+		}
+	}
+	return ""
+}
+
+// tidyChapters makes chapters read from a source storable: titled, in ascending order, within the movie, at most 255.
+func tidyChapters(chs []mkv.Chapter, durMs int64) []mkv.Chapter {
+	out := slices.DeleteFunc(slices.Clone(flattenChapters(chs)), func(ch mkv.Chapter) bool { return durMs > 0 && ch.StartMs >= durMs })
+	slices.SortStableFunc(out, func(a, b mkv.Chapter) int { return int(min(max(a.StartMs-b.StartMs, -1), 1)) })
+	out = slices.CompactFunc(out, func(a, b mkv.Chapter) bool { return a.StartMs == b.StartMs })
+	for i := range out {
+		out[i].SubChapters, out[i].SegmentUID = nil, nil
+		if out[i].EndMs != 0 && out[i].EndMs <= out[i].StartMs {
+			out[i].EndMs = 0
+		}
+	}
+	return out[:min(len(out), maxChapters)]
+}
+
+// checkChapters refuses chapters an MP4 cannot hold as given: it stores at most 255 titled starts, in order, within the movie.
+func checkChapters(chs []mkv.Chapter, durMs int64) error {
+	if len(chs) > maxChapters {
+		return fmt.Errorf("%d chapters given, an MP4 chapter list holds at most %d", len(chs), maxChapters)
+	}
+	prev := int64(-1)
+	for i, ch := range chs {
+		switch {
+		case ch.Title == "":
+			return fmt.Errorf("chapter %d has no title: an MP4 chapter is a titled start time", i+1)
+		case len(ch.Title) > 255:
+			return fmt.Errorf("chapter %d's title is %d bytes, an MP4 chapter title holds at most 255", i+1, len(ch.Title))
+		case len(ch.SubChapters) > 0 || len(ch.SegmentUID) > 0:
+			return fmt.Errorf("chapter %d has sub-chapters or links to another segment, which an MP4 cannot hold: flatten it first", i+1)
+		case ch.StartMs < 0 || ch.StartMs <= prev:
+			return fmt.Errorf("chapter %d starts at %d ms, not after the previous one: give the chapters in ascending order from 0", i+1, ch.StartMs)
+		case durMs > 0 && ch.StartMs >= durMs:
+			return fmt.Errorf("chapter %d starts at %d ms, at or past the end of the movie (%d ms): start it before the end", i+1, ch.StartMs, durMs)
+		case ch.EndMs != 0 && ch.EndMs <= ch.StartMs:
+			return fmt.Errorf("chapter %d ends at %d ms, before it starts (%d ms)", i+1, ch.EndMs, ch.StartMs)
+		}
+		prev = ch.StartMs
+	}
+	return nil
+}
+
+// trackFieldName turns a field path such as "Tracks[1].Codec" into "track 2's Codec", naming the track by its ID.
+func trackFieldName(field string, c *mkv.Container) string {
+	var i int
+	var rest string
+	if n, _ := fmt.Sscanf(field, "Tracks[%d]", &i); n == 1 && i >= 0 && i < len(c.Tracks) {
+		if _, rest, _ = strings.Cut(field, "]."); rest != "" {
+			return fmt.Sprintf("track %d's %s", c.Tracks[i].ID, rest)
+		}
+	}
+	return field
 }
 
 // validBCP47 checks a tag's shape: a 2 to 8 letter language, then subtags of 1 to 8 letters or digits, 35 characters at most.
@@ -215,14 +305,22 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 	for i := range mv.tracks {
 		byTrak[mv.tracks[i].trakIndex] = i
 	}
-	chaptersChanged := !reflect.DeepEqual(before.Chapters, after.Chapters)
+	chaptersChanged := !sameChapterMarks(before.Chapters, after.Chapters)
 	metaChanged := before.Info.Title != after.Info.Title || !reflect.DeepEqual(before.Tags, after.Tags)
 
 	// The chapter traks the media traks point at are replaced as a whole.
 	oldChap := map[uint32]bool{}
 	var chapID uint32
 	if chaptersChanged {
-		oldChap = chapterTrackRefs(boxes)
+		if mv.chapterTrak != nil && len(before.Chapters) == 0 {
+			return nil, nil, fmt.Errorf("the file's QuickTime chapter track could not be read, so changing its chapters here would lose them: remux it to MKV (from-mp4), set the chapters there and remux back (to-mp4)")
+		}
+		// Only the titles' text tracks are replaced: a chapter-image track keeps its references.
+		for id := range chapterTrackRefs(boxes) {
+			if textTrak(boxes, id) {
+				oldChap[id] = true
+			}
+		}
 	}
 	maxID := uint32(0)
 	trakIdx := -1
@@ -324,12 +422,33 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 	return box("moov", w.b), chapData, nil
 }
 
+// textTrak reports whether the trak with track_ID id is a text track (a chapter track's titles).
+func textTrak(boxes []memBox, id uint32) bool {
+	for _, b := range boxes {
+		if b.typ != "trak" {
+			continue
+		}
+		if tid, _ := trakID(b.payload); tid == id {
+			tb, err := iterBoxes(b.payload)
+			if err != nil {
+				return false
+			}
+			switch trakHandler(tb) {
+			case "text", "sbtl":
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
 // closeChapters ends an open last chapter at the movie's end and keeps every chapter within it.
 func closeChapters(chs []mkv.Chapter, durMs int64) []mkv.Chapter {
 	if durMs <= 0 || len(chs) == 0 {
 		return chs
 	}
-	out := slices.Clone(chs)
+	out := slices.DeleteFunc(slices.Clone(chs), func(ch mkv.Chapter) bool { return ch.StartMs >= durMs })
 	for i := range out {
 		if out[i].EndMs == 0 && i == len(out)-1 || out[i].EndMs > durMs {
 			out[i].EndMs = max(durMs, out[i].StartMs+1)
@@ -407,47 +526,20 @@ func buildEditChapterTrak(chs []mkv.Chapter, id uint32, base int64, movieTS uint
 	co64 := base+int64(buf.Len()) > math.MaxUint32
 	trak, _ = buildTrak(t, base, co64)
 	if movieTS != movieTimescale {
-		if trak, err = rescaleTrakMovieTime(trak, movieTS); err != nil {
+		if trak, err = rescaledTrak(trak, movieTS); err != nil {
 			return nil, nil, err
 		}
 	}
 	return trak, buf.Bytes(), nil
 }
 
-// rescaleTrakMovieTime converts a built trak's movie-timescale fields (tkhd duration, edit segment durations) from milliseconds to movieTS.
-func rescaleTrakMovieTime(trak []byte, movieTS uint32) ([]byte, error) {
-	tb, err := iterBoxes(trak[8:])
+// rescaledTrak converts a built trak box's movie-timescale fields from milliseconds to movieTS.
+func rescaledTrak(trak []byte, movieTS uint32) ([]byte, error) {
+	p, err := rescaleMovieTime(trak[8:], movieTimescale, movieTS)
 	if err != nil {
 		return nil, err
 	}
-	scale := func(v int64) int64 { return v * int64(movieTS) / movieTimescale }
-	children := make([][]byte, 0, len(tb))
-	for _, b := range tb {
-		switch b.typ {
-		case "tkhd":
-			dur, err := trakDuration(trak[8:])
-			if err != nil {
-				return nil, err
-			}
-			p, err := patchTkhdDuration(b.payload, scale(dur))
-			if err != nil {
-				return nil, err
-			}
-			children = append(children, box("tkhd", p))
-		case "edts":
-			entries, err := trakElstEntries(tb)
-			if err != nil {
-				return nil, err
-			}
-			for i := range entries {
-				entries[i].segDur = scale(entries[i].segDur)
-			}
-			children = append(children, buildElstBox(entries))
-		default:
-			children = append(children, box(b.typ, b.payload))
-		}
-	}
-	return container("trak", children...), nil
+	return box("trak", p), nil
 }
 
 // patchTrakChapRef drops a trak's tref/chap entries naming a replaced chapter trak and, when add, points an audio or video trak at chapID.

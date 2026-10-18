@@ -99,7 +99,15 @@ All notable changes to mkvgo are documented here. The format is based on
   list hides, and gives a split's parts back sample for sample. Fragmented and
   encrypted MP4 are refused; what MP4 cannot hold (attachments, styled ASS)
   still goes through `from-mp4` / `to-mp4`. `mkvgo.EditInPlace` routes either
-  container.
+  container, and `mp4.LanguageFields` splits a language as a user gives it
+  into the 3-letter code and the BCP-47 tag. Every command refuses an output
+  that is one of its inputs, and a mux, merge or join of MP4 and Matroska
+  files together.
+- **`split` part names never collide and the pattern is checked first**, for
+  both containers: a name already taken (case aside) gets the next free
+  number, a chapter title is cut to 200 bytes, and a pattern that is a path
+  or has a verb other than the part number is refused before anything is
+  written.
 
 ### Fixed
 

@@ -281,3 +281,30 @@ func TestEditedTitleSurvivesDroppingTheTags(t *testing.T) {
 		t.Errorf("title %q after dropping the tags", c.Info.Title)
 	}
 }
+
+// TestProbeReadsChapterTrackOnlyTitles: with no chpl, the probe reads the chapter track's titles as an edit does, titles of any length.
+func TestProbeReadsChapterTrackOnlyTitles(t *testing.T) {
+	src := editFixture(t)
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "A much longer title", StartMs: 2000}, {ID: 3, Title: "Mid", StartMs: 4000}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteTailMoov(t, src, func(p []byte) []byte {
+		boxes, _ := iterBoxes(p)
+		var w bw
+		for _, b := range boxes {
+			if b.typ != "udta" {
+				w.bytes(box(b.typ, b.payload))
+			}
+		}
+		return w.b
+	})
+	var got []string
+	for _, ch := range mustMeta(t, src).Chapters {
+		got = append(got, ch.Title)
+	}
+	if strings.Join(got, "|") != "A|A much longer title|Mid" {
+		t.Errorf("probe chapters %q", got)
+	}
+}

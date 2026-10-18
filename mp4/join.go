@@ -55,7 +55,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 	}
 	totalNs := offsets[len(models)-1] + models[len(models)-1].movieNs
 
-	keep := first.keptIDs()
+	outTS := first.outTS
 	traks := make([][]byte, 0, len(first.tracks))
 	var movieDur int64
 	for ti := range first.tracks {
@@ -65,21 +65,18 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 		}
 		c := &first.tracks[ti]
 		e := c.edit
-		e.empty += rescale(lead, c.ts, first.movieTS)
-		segDur := rescale(max(tt.maxEnd()-e.mediaTime, 0), c.ts, first.movieTS)
+		e.empty = rescale(e.empty, first.movieTS, outTS) + rescale(lead, c.ts, outTS)
+		segDur := rescale(max(tt.maxEnd()-e.mediaTime, 0), c.ts, outTS)
 		last := &models[len(models)-1].tracks[ti]
 		endNs := offsets[len(models)-1] + last.presentEndNs(models[len(models)-1].movieTS)
-		if lim := rescale(min(endNs, totalNs), nsPerSec, first.movieTS) - e.empty; segDur > lim {
+		if lim := rescale(min(endNs, totalNs), nsPerSec, outTS) - e.empty; segDur > lim {
 			segDur = max(lim, 0)
 		}
 		var edts []byte
 		if len(tt.samples) > 0 {
 			edts = buildEdit(e.empty, e.mediaTime, segDur)
 		}
-		t, err := stripTref(c.trak, keep)
-		if err != nil {
-			return err
-		}
+		t := c.trak
 		if !sameSgpds(models, ti) {
 			tt.groups, tt.gparam = nil, nil
 			t, err = dropSgpds(t)
@@ -93,7 +90,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 		traks = append(traks, t)
 		movieDur = max(movieDur, e.empty+segDur)
 	}
-	payload, err := first.assemble(traks, movieDur)
+	payload, err := first.assemble(traks, movieDur, outTS)
 	if err != nil {
 		return err
 	}
@@ -121,7 +118,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs, payload, nil, ftyp, dstPath, o)
+	return writeRelocated(ctx, vs, payload, nil, outLayout{ftyp: ftyp}, dstPath, o)
 }
 
 // sameStreams refuses a file whose tracks a join could not continue from the first file's.
@@ -132,10 +129,10 @@ func sameStreams(a, b *cutModel) error {
 	for i := range a.tracks {
 		x, y := &a.tracks[i], &b.tracks[i]
 		if x.handler != y.handler {
-			return fmt.Errorf("track %d is %q here and %q in the first file", i+1, y.handler, x.handler)
+			return fmt.Errorf("track %d is %q here and %q in the first file: put the tracks in the same order first (mux)", i+1, y.handler, x.handler)
 		}
 		if x.ts != y.ts {
-			return fmt.Errorf("track %d runs on a %d Hz timescale here and %d Hz in the first file", i+1, y.ts, x.ts)
+			return fmt.Errorf("track %d runs on a %d Hz timescale here and %d Hz in the first file, which a sample copy cannot reconcile: join them as MKV (from-mp4, join, to-mp4)", i+1, y.ts, x.ts)
 		}
 		sx, err := boxAt(x.trak, "mdia", "minf", "stbl", "stsd")
 		if err != nil {
@@ -188,10 +185,21 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 		for _, x := range tt.samples {
 			allSync = allSync && x.sync
 		}
-		if k > 0 {
+		// Pictures presented ahead of the first keyframe (open-GOP leading pictures) may be hidden; frames after it may not.
+		if key := firstSyncCts(tt); k > 0 && !allSync && c.edit.mediaTime > key {
+			return nil, 0, fmt.Errorf("file %d hides the first %d ms of this track with its edit list, frames a join would have to show or orphan: remux the files to MKV (from-mp4) and join there", k+1, rescale(c.edit.mediaTime-key, c.ts, 1000))
+		}
+		if k > 0 && allSync {
 			// Samples wholly ahead of the file's media start (encoder priming) would play twice over the seam.
 			for from < to && tt.samples[from].sync && tt.samples[from].dts+int64(tt.samples[from].cto)+int64(tt.samples[from].dur) <= c.edit.mediaTime {
 				from++
+			}
+		}
+		if k < len(models)-1 && !allSync && c.edit.segDur >= 0 && len(tt.samples) > 0 {
+			last := tt.samples[len(tt.samples)-1]
+			mediaEnd := rescale(c.edit.empty, m.movieTS, nsPerSec) + rescale(tt.maxEnd()-c.edit.mediaTime, c.ts, nsPerSec)
+			if hidden := mediaEnd - c.presentEndNs(m.movieTS); hidden > rescale(int64(last.dur), c.ts, nsPerSec) {
+				return nil, 0, fmt.Errorf("file %d's edit list hides the last %d ms of this track, frames a join would have to show: remux the files to MKV (from-mp4) and join there", k+1, hidden/1_000_000)
 			}
 		}
 		if k < len(models)-1 && allSync && c.edit.segDur >= 0 {
@@ -216,7 +224,7 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 					*vs = vs.withMem(filler)
 				}
 				if gap > math.MaxUint32 {
-					return nil, 0, fmt.Errorf("a %d-tick gap before file %d does not fit one sample: join files whose presentations are shorter apart", gap, k+1)
+					return nil, 0, fmt.Errorf("file %d starts %d ticks after the previous one ends, a gap one sample cannot span: join files that follow each other", k+1, gap)
 				}
 				out.samples = append(out.samples, rwSample{src: fillerAt, dts: end, size: uint32(len(filler)), dur: uint32(gap), sdi: last.sdi, sync: true})
 				if withSdtp {
@@ -227,12 +235,14 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 				}
 			case gap > 0:
 				if int64(last.dur)+gap > math.MaxUint32 {
-					return nil, 0, fmt.Errorf("a %d-tick gap before file %d does not fit one sample: join files whose presentations are shorter apart", gap, k+1)
+					return nil, 0, fmt.Errorf("file %d starts %d ticks after the previous one ends, a gap one sample cannot span: join files that follow each other", k+1, gap)
 				}
 				last.dur += uint32(gap)
 			case gap < 0 && int64(last.dur)+gap > 0:
 				// The previous file's last sample runs past this file's start: it ends there, the timeline does not drift.
 				last.dur = uint32(int64(last.dur) + gap)
+			case gap < 0 && !allSync:
+				return nil, 0, fmt.Errorf("file %d's edit list hides the last %d ms of this track, frames a join would have to show: remux the files to MKV (from-mp4) and join there", k, rescale(-gap, c.ts, 1000))
 			case gap < 0:
 				shift = end - firstDts
 			}
@@ -259,6 +269,16 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 		}
 	}
 	return out, lead, nil
+}
+
+// firstSyncCts is the composition time of a table's first sync sample in decode order.
+func firstSyncCts(tt *trakTable) int64 {
+	for _, s := range tt.samples {
+		if s.sync {
+			return s.dts + int64(s.cto)
+		}
+	}
+	return 0
 }
 
 // textFiller is the empty sample that keeps a subtitle track blank across a gap (nil: the track is not timed text).

@@ -79,6 +79,9 @@ func decodePatch(raw []byte) EditPatch {
 	if err := dec.Decode(&patch); err != nil {
 		Fatal(fmt.Sprintf("invalid JSON: %v", err))
 	}
+	if _, err := dec.Token(); err != io.EOF {
+		Fatal("invalid JSON: text follows the patch object")
+	}
 	return patch
 }
 
@@ -122,13 +125,13 @@ func guardMP4Output(outPath string) {
 
 func CmdEdit(args []string) {
 	if len(args) < 4 {
-		Fatal(`usage: mkvgo edit <file.mkv> -o <out.mkv> '<json>'
-       mkvgo edit <file.mkv> -o <out.mkv> -    (read from stdin)
+		Fatal(`usage: mkvgo edit <file.mkv|.mp4> -o <out> '<json>'
+       mkvgo edit <file.mkv|.mp4> -o <out> -    (read from stdin)
 
 JSON schema:
 {
   "title": "New Title",
-  "tracks": [{"id": 2, "language": "fre", "name": "French", "is_default": true, "is_forced": false}],
+  "tracks": [{"id": 2, "language": "fre", "language_bcp47": "fr-CA", "name": "French", "is_default": true, "is_forced": false}],
   "chapters": [{"id": 1, "title": "Intro", "start_ms": 0, "end_ms": 5000}],
   "tags": [{"target_type": "MOVIE", "simple_tags": [{"name": "TITLE", "value": "X"}]}]
 }`)
@@ -171,7 +174,7 @@ JSON schema:
 
 func CmdEditTitle(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: mkvgo edit-title <file.mkv> -o <out.mkv> <title>")
+		Fatal("usage: " + CmdUsage["edit-title"])
 	}
 	source := args[0]
 	var outPath, title string
@@ -182,7 +185,7 @@ func CmdEditTitle(args []string) {
 		title = ops[len(ops)-1]
 	}
 	if outPath == "" || title == "" {
-		Fatal("usage: mkvgo edit-title <file.mkv> -o <out.mkv> <title>")
+		Fatal("usage: " + CmdUsage["edit-title"])
 	}
 	GuardOverwrite(outPath)
 
@@ -198,7 +201,7 @@ func CmdEditTitle(args []string) {
 
 func CmdEditTrack(args []string) {
 	if len(args) < 5 {
-		Fatal("usage: mkvgo edit-track <file.mkv> -o <out.mkv> -t <trackID> [-lang x] [-name x] [-default|-no-default] [-forced|-no-forced]")
+		Fatal("usage: " + CmdUsage["edit-track"])
 	}
 	source := args[0]
 	var outPath string
@@ -224,7 +227,7 @@ func CmdEditTrack(args []string) {
 	fl.Do(func() { noForced = false; setForced = &noForced }, "-no-forced")
 	fl.Parse(args[1:])
 	if outPath == "" || trackID == 0 {
-		Fatal("usage: mkvgo edit-track <file.mkv> -o <out.mkv> -t <trackID> [-lang x] [-name x]")
+		Fatal("usage: " + CmdUsage["edit-track"])
 	}
 	GuardOverwrite(outPath)
 
@@ -260,11 +263,12 @@ func CmdEditTrack(args []string) {
 
 func CmdEditInPlace(args []string) {
 	if len(args) < 2 {
-		Fatal(`usage: mkvgo edit-inplace <file.mkv> '<json>'
-       mkvgo edit-inplace <file.mkv> -    (read from stdin)
+		Fatal(`usage: mkvgo edit-inplace <file.mkv|.mp4> '<json>'
+       mkvgo edit-inplace <file.mkv|.mp4> -    (read from stdin)
 
 Edits metadata in-place without rewriting the file. Instant on large files.
-Fails if new metadata is larger than the original.`)
+MKV: fails if the new metadata outgrows the room reserved for it.
+MP4: appends a new moov and retires the old one (crash-ordered).`)
 	}
 	source := args[0]
 	jsonStr := args[1]

@@ -21,13 +21,15 @@ type cutTrack struct {
 	edit    simpleEdit
 	ts      uint32
 	handler string
+	endNs   int64 // where its presentation ends on the movie timeline
 }
 
 // cutModel is a source's moov as split and join see it: its probe tracks expanded, the rest of the moov verbatim.
 type cutModel struct {
 	path    string
 	movieTS uint32
-	movieNs int64 // presentation length
+	outTS   uint32 // the output's movie timescale: a common multiple of the movie's and the tracks', so cuts stay exact
+	movieNs int64  // presentation length
 	tracks  []cutTrack
 	others  []memBox // moov children other than traks
 	meta    *mkv.Container
@@ -41,6 +43,7 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 	if err != nil {
 		return nil, err
 	}
+	mdats := sourceMdats(r, size)
 	meta, mv, err := moovContainer(r, payload, size)
 	if err != nil {
 		return nil, err
@@ -90,7 +93,7 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 		if err != nil {
 			return nil, fmt.Errorf("track %d: %w", i+1, err)
 		}
-		tt, err := readTrakTable(trak, base, base+size, budget)
+		tt, err := readTrakTable(trak, base, base+size, budget, mdats)
 		if err != nil {
 			return nil, fmt.Errorf("track %d: %w", i+1, err)
 		}
@@ -114,9 +117,19 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 	if m.ref < 0 {
 		m.ref = 0
 	}
+	keep := m.keptIDs()
+	m.outTS = m.movieTS
+	for i := range m.tracks {
+		c := &m.tracks[i]
+		c.endNs = c.presentEndNs(m.movieTS)
+		m.outTS = commonTimescale(m.outTS, c.ts)
+		if c.trak, err = stripTref(c.trak, keep); err != nil {
+			return nil, err
+		}
+	}
 	if m.movieNs == 0 {
 		for i := range m.tracks {
-			m.movieNs = max(m.movieNs, m.tracks[i].presentEndNs(m.movieTS))
+			m.movieNs = max(m.movieNs, m.tracks[i].endNs)
 		}
 	}
 	return m, nil
@@ -130,6 +143,9 @@ func (c *cutTrack) ptNs(i int, movieTS uint32) int64 {
 
 // presentEndNs is where the track's presentation ends on the movie timeline.
 func (c *cutTrack) presentEndNs(movieTS uint32) int64 {
+	if c.endNs != 0 {
+		return c.endNs
+	}
 	if c.edit.segDur >= 0 {
 		return rescale(c.edit.empty+c.edit.segDur, movieTS, nsPerSec)
 	}
@@ -166,39 +182,43 @@ func roundMs(ns int64) int64 {
 }
 
 // partEdit builds a cut track's edts (samples tt from source decode index a, window tsNs..teNs) and its tkhd duration.
-func partEdit(c *cutTrack, tt *trakTable, a int, movieTS uint32, tsNs, teNs int64) ([]byte, int64) {
+func partEdit(c *cutTrack, tt *trakTable, a int, srcTS, outTS uint32, tsNs, teNs int64) ([]byte, int64) {
 	if len(tt.samples) == 0 {
 		return nil, 0
 	}
 	dtsA := c.tt.samples[a].dts
-	minCts := tt.minCts()
-	e0 := rescale(c.edit.empty, movieTS, nsPerSec) - tsNs + rescale(dtsA-c.edit.mediaTime+minCts, c.ts, nsPerSec)
-	empty, mediaTime := int64(0), minCts
+	// The part's media starts at its earliest sample, or later where the source's edit list hides some (priming).
+	start := max(tt.minCts(), c.edit.mediaTime-dtsA)
+	e0 := rescale(c.edit.empty, srcTS, nsPerSec) - tsNs + rescale(dtsA-c.edit.mediaTime+start, c.ts, nsPerSec)
+	empty, mediaTime := int64(0), start
 	if e0 >= 0 {
-		empty = rescale(e0, nsPerSec, movieTS)
+		empty = rescale(e0, nsPerSec, outTS)
 	} else {
-		mediaTime = minCts + rescale(-e0, nsPerSec, c.ts)
+		mediaTime = start + rescale(-e0, nsPerSec, c.ts)
 	}
-	segDur := rescale(max(tt.maxEnd()-mediaTime, 0), c.ts, movieTS)
-	limitNs := c.presentEndNs(movieTS)
+	segDur := rescale(max(tt.maxEnd()-mediaTime, 0), c.ts, outTS)
+	limitNs := c.presentEndNs(srcTS)
 	if teNs > 0 {
 		limitNs = min(limitNs, teNs)
 	}
-	if lim := rescale(limitNs-tsNs, nsPerSec, movieTS) - empty; segDur > lim {
+	if lim := rescale(limitNs-tsNs, nsPerSec, outTS) - empty; segDur > lim {
 		segDur = max(lim, 0)
 	}
 	return buildEdit(empty, mediaTime, segDur), empty + segDur
 }
 
 // assemble builds a virtual moov payload: mvhd with the movie duration, then the given traks, then the other children.
-func (m *cutModel) assemble(traks [][]byte, movieDur int64) ([]byte, error) {
+func (m *cutModel) assemble(traks [][]byte, movieDur int64, movieTS uint32) ([]byte, error) {
 	var w bw
 	for _, b := range m.others {
 		if b.typ != "mvhd" {
 			continue
 		}
-		p, err := patchMvhdDuration(b.payload, movieDur)
+		p, err := patchMvhdTimescale(b.payload, movieTS)
 		if err != nil {
+			return nil, err
+		}
+		if p, err = patchMvhdDuration(p, movieDur); err != nil {
 			return nil, err
 		}
 		w.bytes(box("mvhd", p))
@@ -296,14 +316,23 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 	}
 	var ranges []mkv.TimeRange
 	var titles []string
+	var chs []mkv.Chapter
 	switch {
 	case opts.ByChapters:
 		if len(m.meta.Chapters) == 0 {
 			return nil, errf("split: no chapters to split by")
 		}
-		ranges = splitplan.ChapterRanges(m.meta.Chapters)
+		lastKey := lastKeyMs(&m.tracks[m.ref], m.movieTS)
 		for _, ch := range m.meta.Chapters {
+			if ch.StartMs > lastKey && len(chs) > 0 {
+				continue // no keyframe left to open a part on: the previous part runs on through it
+			}
+			chs = append(chs, ch)
 			titles = append(titles, ch.Title)
+		}
+		ranges = splitplan.ChapterRanges(chs)
+		if n := len(ranges); n > 0 && len(chs) < len(m.meta.Chapters) {
+			ranges[n-1].EndMs = 0
 		}
 	case opts.EveryMs > 0:
 		if ranges, err = splitplan.EveryRanges(m.keyframesMs(), opts.EveryMs); err != nil {
@@ -318,6 +347,9 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 	pattern := opts.Pattern
 	if pattern == "" {
 		pattern = "part_%03d.mp4"
+	}
+	if err := splitplan.CheckPattern(pattern); err != nil {
+		return nil, errf("split: %w", err)
 	}
 	// Every part is planned before the first is written: a range that cannot be cut leaves no part behind.
 	used := map[string]bool{}
@@ -379,7 +411,7 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 	if r.StartMs > 0 {
 		a = ref.firstSyncFrom(cur[m.ref], m.movieTS, func(pt int64) bool { return roundMs(pt) >= r.StartMs })
 		if a == n {
-			return p, fmt.Errorf("no keyframe at or after %d ms", r.StartMs)
+			return p, fmt.Errorf("no keyframe at or after %d ms (the last one is at %d ms): start the range earlier", r.StartMs, lastKeyMs(ref, m.movieTS))
 		}
 		if r.EndMs > 0 && roundMs(ref.ptNs(a, m.movieTS)) >= r.EndMs {
 			return p, fmt.Errorf("the range %d-%d ms holds no keyframe (the next one is at %d ms): widen it", r.StartMs, r.EndMs, roundMs(ref.ptNs(a, m.movieTS)))
@@ -413,24 +445,20 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 
 // writePart writes the part a plan describes.
 func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64, ftyp []byte, p partPlan, outPath string, o Options) error {
-	keep := m.keptIDs()
 	traks := make([][]byte, 0, len(m.tracks))
 	var movieDur int64
 	for i := range m.tracks {
 		c := &m.tracks[i]
 		tt := c.tt.slice(p.a[i], p.b[i])
-		edts, dur := partEdit(c, tt, min(p.a[i], len(c.tt.samples)-1), m.movieTS, p.tsNs, p.teNs)
-		t, err := stripTref(c.trak, keep)
+		edts, dur := partEdit(c, tt, min(p.a[i], len(c.tt.samples)-1), m.movieTS, m.outTS, p.tsNs, p.teNs)
+		t, err := rebuildTrak(c.trak, tt, edts, dur)
 		if err != nil {
-			return err
-		}
-		if t, err = rebuildTrak(t, tt, edts, dur); err != nil {
 			return fmt.Errorf("track %d: %w", i+1, err)
 		}
 		traks = append(traks, t)
 		movieDur = max(movieDur, dur)
 	}
-	payload, err := m.assemble(traks, movieDur)
+	payload, err := m.assemble(traks, movieDur, m.outTS)
 	if err != nil {
 		return err
 	}
@@ -443,5 +471,15 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs, payload, nil, ftyp, outPath, o)
+	return writeRelocated(ctx, vs, payload, nil, outLayout{ftyp: ftyp}, outPath, o)
+}
+
+// lastKeyMs is where a track's last sync sample presents.
+func lastKeyMs(c *cutTrack, movieTS uint32) int64 {
+	for i := len(c.tt.samples) - 1; i >= 0; i-- {
+		if c.tt.samples[i].sync {
+			return roundMs(c.ptNs(i, movieTS))
+		}
+	}
+	return 0
 }

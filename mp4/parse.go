@@ -355,8 +355,8 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 		tr.trakIndex = trakIndex
 		room -= tr.tableSamples
 		if chapterTrackIDs[tr.trackID] && (dropped != nil || tr.unsupported != "") {
-			if mv.chapterTrak == nil {
-				mv.chapterTrak = b.payload // the titles are read from it when there is no chpl
+			if tb, err := iterBoxes(b.payload); err == nil && mv.chapterTrak == nil && (trakHandler(tb) == "text" || trakHandler(tb) == "sbtl") {
+				mv.chapterTrak = b.payload // the titles are read from it when there is no chpl (never from a chapter-image track)
 			}
 			continue
 		}

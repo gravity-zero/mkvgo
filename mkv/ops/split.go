@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -21,13 +19,15 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		return nil, err
 	}
 
-	if err := fs.DoMkdirAll(opts.OutputDir, 0755); err != nil {
-		return nil, err
-	}
-
 	pattern := opts.Pattern
 	if pattern == "" {
 		pattern = "part_%03d.mkv"
+	}
+	if err := splitplan.CheckPattern(pattern); err != nil {
+		return nil, err
+	}
+	if err := fs.DoMkdirAll(opts.OutputDir, 0755); err != nil {
+		return nil, err
 	}
 
 	var ranges []mkv.TimeRange
@@ -68,21 +68,11 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		if ctx.Err() != nil {
 			return outputs, ctx.Err()
 		}
-		pat := pattern
+		title := ""
 		if i < len(titles) {
-			pat = strings.ReplaceAll(pat, "{title}", sanitizeName(titles[i], i+1))
+			title = titles[i]
 		}
-		name := pat
-		if strings.Contains(pat, "%") {
-			name = fmt.Sprintf(pat, i+1)
-		}
-		// A {title}-only pattern with duplicate chapter titles must not make
-		// parts overwrite each other: suffix the part number.
-		if used[name] {
-			ext := filepath.Ext(name)
-			name = strings.TrimSuffix(name, ext) + fmt.Sprintf("_%d", i+1) + ext
-		}
-		used[name] = true
+		name := splitplan.PartName(pattern, i, title, i < len(titles), used)
 		outPath, err := safePath(opts.OutputDir, name)
 		if err != nil {
 			return outputs, err
@@ -340,8 +330,6 @@ func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 	}
 	return splitplan.EveryRanges(keyframes, everyMs)
 }
-
-func sanitizeName(title string, n int) string { return splitplan.SanitizeName(title, n) }
 
 func deviceName(s string) bool { return splitplan.DeviceName(s) }
 

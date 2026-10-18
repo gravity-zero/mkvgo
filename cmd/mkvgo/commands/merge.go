@@ -11,7 +11,7 @@ import (
 
 func CmdMerge(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]")
+		Fatal("usage: " + CmdUsage["merge"])
 	}
 	var outPath string
 	var inputs []matroska.MergeInput
@@ -22,7 +22,7 @@ func CmdMerge(args []string) {
 		inputs = append(inputs, matroska.MergeInput{SourcePath: src})
 	}
 	if outPath == "" || len(inputs) == 0 {
-		Fatal("usage: mkvgo merge -o <out.mkv> <file1.mkv> [<file2.mkv> ...]")
+		Fatal("usage: " + CmdUsage["merge"])
 	}
 	GuardOverwrite(outPath)
 
@@ -46,7 +46,7 @@ func CmdMerge(args []string) {
 
 func CmdMergeSubtitle(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass] [-lang code] [-name text]")
+		Fatal("usage: " + CmdUsage["merge-subtitle"])
 	}
 	source := args[0]
 	var outPath, subPath, format, lang, name string
@@ -61,7 +61,7 @@ func CmdMergeSubtitle(args []string) {
 		subPath = ops[len(ops)-1]
 	}
 	if outPath == "" || subPath == "" {
-		Fatal("usage: mkvgo merge-subtitle <file.mkv> -o <out.mkv> <subtitle> [-format srt|ass]")
+		Fatal("usage: " + CmdUsage["merge-subtitle"])
 	}
 	GuardOverwrite(outPath)
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -35,6 +36,7 @@ type muxSource struct {
 	movieTS uint32
 	traks   [][]byte
 	qt      bool // a QuickTime movie (major brand "qt  ", or no ftyp)
+	mdats   [][2]int64
 }
 
 // Mux builds an MP4 from tracks of MP4/MOV sources, samples copied untouched; opts set the metadata, as matroska.Mux.
@@ -66,6 +68,9 @@ func trackInputOverride(ti mkv.TrackInput) func(*mkv.Track) {
 	}
 }
 
+// maxSRTBytes bounds the SRT file merge-subtitle reads whole.
+const maxSRTBytes = 64 << 20
+
 // LanguageFields splits a language as a user gives it into the mdhd's 3-letter code and, for a BCP-47 tag, the elng tag.
 func LanguageFields(tag string) (language, bcp47 string) {
 	if len(tag) == 3 && isLowerAlpha(tag) {
@@ -91,10 +96,11 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...Options) error {
 	for _, in := range opts.Inputs {
 		ids := in.TrackIDs
 		if len(ids) == 0 {
-			c, _, err := OpenMeta(ctx, in.SourcePath, o)
+			c, dropped, err := OpenMeta(ctx, in.SourcePath, o)
 			if err != nil {
 				return errf("merge: %s: %w", shown.Path(in.SourcePath), err)
 			}
+			reportDropped(o, dropped)
 			for _, t := range c.Tracks {
 				ids = append(ids, t.ID)
 			}
@@ -120,6 +126,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 // MergeSubtitle writes srcPath to dstPath with an SRT file added as a timed-text (tx3g) subtitle track.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	o := optionsFrom(opts)
+	if fi, err := os.Stat(srtPath); err == nil && fi.Size() > maxSRTBytes {
+		return errf("merge-subtitle: the SRT file is %d bytes, past the %d MiB a subtitle track takes: split it into several files", fi.Size(), maxSRTBytes>>20)
+	}
 	entries, err := subtitle.ParseSRT(srtPath)
 	if err != nil {
 		return errf("merge-subtitle: parse SRT: %w", err)
@@ -142,12 +151,21 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	return muxMP4(ctx, inputs, dstPath, nil, o)
 }
 
+// reportDropped tells OnDrop about the traks a mux leaves out (timecode, chapter images...).
+func reportDropped(o Options, dropped []DroppedTrack) {
+	for _, d := range dropped {
+		d.Reason += " (not carried)"
+		o.report(d)
+	}
+}
+
 // allTracks lists every probe track of an MP4 source as mux inputs.
 func allTracks(ctx context.Context, path string, o Options) ([]muxInput, error) {
-	c, _, err := OpenMeta(ctx, path, o)
+	c, dropped, err := OpenMeta(ctx, path, o)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", shown.Path(path), err)
 	}
+	reportDropped(o, dropped)
 	var out []muxInput
 	for _, t := range c.Tracks {
 		out = append(out, muxInput{path: path, id: t.ID})
@@ -225,9 +243,11 @@ func muxMP4(ctx context.Context, inputs []muxInput, dstPath string, meta func(c 
 	if err := distinctOutput(o.FS, dstPath, slices.Collect(maps.Keys(sources))...); err != nil {
 		return err
 	}
-	outTS := first.movieTS // every source's movie times stay exact on a common multiple
-	for _, s := range sources {
-		outTS = commonTimescale(outTS, s.movieTS)
+	outTS := first.movieTS // every source's movie times stay exact on a common multiple, taken in input order
+	for _, in := range inputs {
+		if s := sources[in.path]; s != nil {
+			outTS = commonTimescale(outTS, s.movieTS)
+		}
 	}
 	var traks [][]byte
 	var movieDur int64
@@ -291,13 +311,15 @@ func muxMP4(ctx context.Context, inputs []muxInput, dstPath string, meta func(c 
 	if meta != nil {
 		meta(after)
 	} else if src, _, err := moovContainer(first.r, first.payload, first.size); err == nil {
-		after.Chapters = src.Chapters // read from the first source's own moov: its chapter track is not carried
-	}
-	if len(after.Chapters) > 0 {
-		before.Chapters = nil // the sources' chapter tracks are not carried: rebuild one for the output
+		// Read from the first source's own moov (its chapter track is not carried), made storable rather than refused.
+		after.Chapters = tidyChapters(src.Chapters, after.DurationMs)
+		before.Chapters = after.Chapters
 	}
 	if err := checkEditable(before, after); err != nil {
 		return errf("%w", err)
+	}
+	if len(after.Chapters) > 0 {
+		before.Chapters = nil // the sources' chapter tracks are not carried: rebuild one for the output
 	}
 	moov, chap, err := patchMoovMeta(payload, mv, before, after, limit)
 	if err != nil {
@@ -311,7 +333,7 @@ func muxMP4(ctx context.Context, inputs []muxInput, dstPath string, meta func(c 
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs.withMem(chap), mb[0].payload, nil, ftyp, dstPath, o)
+	return writeRelocated(ctx, vs.withMem(chap), mb[0].payload, nil, outLayout{ftyp: ftyp, interleave: true}, dstPath, o)
 }
 
 func openMuxSource(r io.ReadSeeker, o Options) (*muxSource, error) {
@@ -351,6 +373,7 @@ func openMuxSource(r io.ReadSeeker, o Options) (*muxSource, error) {
 		return nil, err
 	}
 	s.qt = len(ftyp) < 12 || string(ftyp[8:12]) == "qt  "
+	s.mdats = sourceMdats(r, size)
 	return s, nil
 }
 
@@ -366,6 +389,14 @@ func (s *muxSource) trak(id uint64, movieTS uint32) ([]byte, error) {
 	trak, err := dropTref(trak)
 	if err != nil {
 		return nil, err
+	}
+	// Checked against this source alone: in the shared space a chunk past its end would read the next source's bytes.
+	chunks, err := trakChunks(trak, s.size)
+	if err == nil {
+		err = checkInMdat(chunks, s.mdats, s.size)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("track %d: %w", id, err)
 	}
 	if trak, err = shiftChunkOffsets(trak, s.base); err != nil {
 		return nil, err

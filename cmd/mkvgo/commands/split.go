@@ -11,7 +11,7 @@ import (
 
 func CmdSplit(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5000,5000-0]")
+		Fatal("usage: " + CmdUsage["split"])
 	}
 	source := args[0]
 	var outDir, pattern string
@@ -72,7 +72,7 @@ func CmdSplit(args []string) {
 
 func CmdJoin(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...")
+		Fatal("usage: " + CmdUsage["join"])
 	}
 	var outPath string
 	var sources []string
@@ -81,7 +81,7 @@ func CmdJoin(args []string) {
 	fl.String(&outPath, "-o")
 	sources = fl.Parse(args)
 	if outPath == "" || len(sources) == 0 {
-		Fatal("usage: mkvgo join -o <out.mkv> <file1.mkv> <file2.mkv> ...")
+		Fatal("usage: " + CmdUsage["join"])
 	}
 	GuardOverwrite(outPath)
 

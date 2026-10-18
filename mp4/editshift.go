@@ -153,7 +153,7 @@ func scanTopLevelLayout(f mkv.ReadWriteSeekCloser) (*topLayout, error) {
 				"appending a moov would extend it - remux the file first", typ, off)
 		}
 		if boxSize < hdrLen || off+boxSize > size {
-			return nil, fmt.Errorf("box %q at %d has invalid size %d", typ, off, boxSize)
+			return nil, fmt.Errorf("box %q at %d has invalid size %d: rewrite the file first (to-mp4 in.mp4 out.mp4) and edit the copy", typ, off, boxSize)
 		}
 		if typ == "moov" {
 			if lay.moovOff < 0 {
@@ -165,7 +165,7 @@ func scanTopLevelLayout(f mkv.ReadWriteSeekCloser) (*topLayout, error) {
 		off += boxSize
 	}
 	if off != size {
-		return nil, fmt.Errorf("%d byte(s) of junk beyond the last box: remux the file first", size-off)
+		return nil, fmt.Errorf("%d byte(s) of junk beyond the last box: rewrite the file first (to-mp4 in.mp4 out.mp4) and edit the copy", size-off)
 	}
 	if lay.moovOff < 0 {
 		return nil, fmt.Errorf("no moov box found")
@@ -588,16 +588,26 @@ func appendAndRetire(f mkv.ReadWriteSeekCloser, lay *topLayout, op string, blobs
 	if !ok {
 		return errf("%s: the file handle does not support Sync (required for the crash-safe moov swap)", op)
 	}
-	if _, err := f.Seek(lay.fileSize, io.SeekStart); err != nil {
+	// Another writer may have grown the file since its layout was read: appending at the old end would overwrite it.
+	if end, err := f.Seek(0, io.SeekEnd); err != nil {
+		return err
+	} else if end != lay.fileSize {
+		return errf("%s: the file changed while it was being edited (%d bytes, %d before): edit it again once nothing else writes to it", op, end, lay.fileSize)
+	}
+	// Until the flip the original moov is authoritative: a failed append is cut off again, so the file stays editable.
+	undo := func(err error) error {
+		if t, ok := f.(interface{ Truncate(int64) error }); ok {
+			_ = t.Truncate(lay.fileSize)
+		}
 		return err
 	}
 	for _, b := range blobs {
 		if _, err := f.Write(b); err != nil {
-			return errf("%s: append moov: %w", op, err)
+			return undo(errf("%s: append moov: %w", op, err))
 		}
 	}
 	if err := syncer.Sync(); err != nil {
-		return errf("%s: sync appended moov: %w", op, err)
+		return undo(errf("%s: sync appended moov: %w", op, err))
 	}
 	// Retire any stray moov (left behind by an interrupted run) BEFORE the live
 	// one. A forward walk keeps reading the live head moov - the original

@@ -29,7 +29,7 @@ type trakTable struct {
 }
 
 // readTrakTable expands a trak's sample table, base added to every chunk offset, its samples taken from budget.
-func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, error) {
+func readTrakTable(trak []byte, base, limit int64, budget *int64, mdats [][2]int64) (*trakTable, error) {
 	stbl, err := boxAt(trak, "mdia", "minf", "stbl")
 	if err != nil {
 		return nil, err
@@ -42,13 +42,16 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, e
 	if !ok {
 		return nil, noStsz(sb)
 	}
-	sizes, err := parseStsz(stsz.payload, limit)
+	sizes, err := parseStsz(stsz.payload, limit-base)
 	if err != nil {
 		return nil, err
 	}
 	n := len(sizes)
+	if err := checkTableCounts(sb, n); err != nil {
+		return nil, err
+	}
 	if int64(n) > *budget {
-		return nil, fmt.Errorf("its %d samples pass the %d the files may hold together", n, maxSamples)
+		return nil, fmt.Errorf("its %d samples pass the %d mkvgo holds at once across the files: join fewer files at once, or remux to MKV (from-mp4) and work there", n, maxSamples)
 	}
 	*budget -= int64(n)
 	offsets, err := parseChunkOffsets(sb)
@@ -68,7 +71,7 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, e
 		return nil, err
 	}
 	ctos := parseCtts(sb, n)
-	syncSet := parseStss(sb)
+	_, hasStss := findMemBox(sb, "stss")
 
 	tt := &trakTable{samples: make([]rwSample, n)}
 	si, ei := 0, 0
@@ -86,6 +89,9 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, e
 			if pos < 0 || pos+int64(sizes[si]) > limit-base {
 				return nil, fmt.Errorf("sample %d at [%d:%d] is outside the file", si, pos, pos+int64(sizes[si]))
 			}
+			if sizes[si] > 0 && !inMdats(mdats, pos, int64(sizes[si])) {
+				return nil, fmt.Errorf("sample %d at %d lies outside every mdat: the file is damaged, remux it with a tool that rebuilds its tables", si, pos)
+			}
 			tt.samples[si] = rwSample{src: base + pos, size: sizes[si], sdi: sdi}
 			pos += int64(sizes[si])
 			si++
@@ -98,16 +104,30 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, e
 	for i := range tt.samples {
 		s := &tt.samples[i]
 		s.dts, s.dur, s.cto = dts, durs[i], ctos[i]
-		s.sync = syncSet == nil || syncSet[i+1]
+		s.sync = !hasStss
 		dts += int64(durs[i])
+	}
+	if stss, ok := findMemBox(sb, "stss"); ok {
+		count := binary.BigEndian.Uint32(stss.payload[4:])
+		for i := uint32(0); i < count; i++ {
+			if v := binary.BigEndian.Uint32(stss.payload[8+i*4:]); v >= 1 && int(v) <= n {
+				tt.samples[v-1].sync = true
+			}
+		}
 	}
 	if b, ok := findMemBox(sb, "sdtp"); ok && len(b.payload) >= 4+n {
 		tt.sdtp = append([]byte(nil), b.payload[4:4+n]...)
 	}
+	groups := 0
 	for _, b := range sb {
 		if b.typ != "sbgp" {
 			continue
 		}
+		// Each table expands to one entry per sample: they draw on the same budget as the samples.
+		if groups++; groups > maxSampleGroups || int64(n) > *budget {
+			return nil, fmt.Errorf("its sample-to-group tables pass what mkvgo holds (%d at most, within the sample budget): remux it to MKV (from-mp4) and work there", maxSampleGroups)
+		}
+		*budget -= int64(n)
 		typ, param, idx, err := parseSbgp(b.payload, n)
 		if err != nil {
 			return nil, err
@@ -115,18 +135,49 @@ func readTrakTable(trak []byte, base, limit int64, budget *int64) (*trakTable, e
 		if tt.groups == nil {
 			tt.groups, tt.gparam = map[string][]uint32{}, map[string]*uint32{}
 		}
+		if _, dup := tt.groups[typ]; dup {
+			return nil, fmt.Errorf("it maps its samples to %q groups twice, which mkvgo cannot carry: remux it to MKV (from-mp4) and work there", typ)
+		}
 		tt.groups[typ], tt.gparam[typ] = idx, param
 	}
 	return tt, nil
 }
 
+// checkTableCounts refuses a sync, composition or chunk table cut short or larger than n samples call for: read as
+// "every sample is a keyframe" or "no reordering", a truncated table would cut on predicted frames without a word.
+func checkTableCounts(sb []memBox, n int) error {
+	for _, c := range []struct {
+		typ   string
+		width uint64
+	}{{"stss", 4}, {"ctts", 8}, {"stco", 4}, {"co64", 8}} {
+		b, ok := findMemBox(sb, c.typ)
+		if !ok {
+			continue
+		}
+		if len(b.payload) < 8 {
+			return fmt.Errorf("its %s table is cut short: the file is damaged, remux it with a tool that rebuilds its tables", c.typ)
+		}
+		count := uint64(binary.BigEndian.Uint32(b.payload[4:]))
+		if count*c.width > uint64(len(b.payload)-8) {
+			return fmt.Errorf("its %s table declares %d entries but holds fewer: the file is damaged, remux it with a tool that rebuilds its tables", c.typ, count)
+		}
+		if (c.typ == "stco" || c.typ == "co64") && count > uint64(n)+1 {
+			return fmt.Errorf("its chunk table lists %d chunks for %d samples: the file is damaged, remux it with a tool that rebuilds its tables", count, n)
+		}
+	}
+	return nil
+}
+
 // noStsz explains a sample table without stsz.
 func noStsz(sb []memBox) error {
 	if hasMemBox(sb, "stz2") {
-		return fmt.Errorf("its sample sizes are in a compact stz2 table, which mkvgo does not read: remux it to MKV (from-mp4) to work on it")
+		return fmt.Errorf("its sample sizes are in a compact stz2 table, which mkvgo does not read: remux it with a tool that writes a plain stsz table")
 	}
 	return fmt.Errorf("stbl without stsz")
 }
+
+// maxSampleGroups bounds the sample-to-group tables one track may carry through a cut.
+const maxSampleGroups = 16
 
 type stscSDI struct {
 	firstChunk, perChunk, sdi uint32
@@ -305,7 +356,7 @@ func (tt *trakTable) stblChildren(stsd []byte, sgpds [][]byte) [][]byte {
 		for _, x := range s {
 			uniform = uniform && x.size == s[0].size
 		}
-		if uniform {
+		if uniform && s[0].size > 0 {
 			w.u32(s[0].size)
 			w.u32(uint32(len(s)))
 			return
@@ -423,6 +474,9 @@ func trakSimpleEdit(trakBoxes []memBox) (simpleEdit, error) {
 			return e, fmt.Errorf("its edit list plays the media at rate %.3f, which a cut cannot carry: remux it to MKV (from-mp4) and cut there", float64(x.rate)/65536)
 		}
 		e.mediaTime, e.segDur = x.mediaTime, x.segDur
+		if x.segDur == 0 {
+			e.segDur = -1 // a zero-length media edit runs to the end of the media, as players read it
+		}
 	}
 	return e, nil
 }
@@ -440,6 +494,9 @@ func rescale(v int64, from, to uint32) int64 {
 	lo, carry := bits.Add64(lo, uint64(from)/2, 0)
 	hi += carry
 	if hi >= uint64(from) {
+		if neg {
+			return math.MinInt64 + 1
+		}
 		return math.MaxInt64
 	}
 	q, _ := bits.Div64(hi, lo, uint64(from))
@@ -456,7 +513,7 @@ func buildEdit(empty, mediaTime, segDur int64) []byte {
 	if empty > 0 {
 		entries = append(entries, elstEntry{segDur: empty, mediaTime: -1, rate: 1 << 16})
 	}
-	entries = append(entries, elstEntry{segDur: max(segDur, 0), mediaTime: mediaTime, rate: 1 << 16})
+	entries = append(entries, elstEntry{segDur: max(segDur, 0), mediaTime: max(mediaTime, 0), rate: 1 << 16})
 	return buildElstBox(entries)
 }
 

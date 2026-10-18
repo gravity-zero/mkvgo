@@ -37,7 +37,7 @@ func CmdDemux(args []string) {
 
 func CmdMux(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: mkvgo mux -o <out.mkv> <file:trackID> [<file:trackID> ...]")
+		Fatal("usage: " + CmdUsage["mux"])
 	}
 	var outPath string
 	var inputs []matroska.TrackInput
@@ -85,7 +85,7 @@ func CmdMux(args []string) {
 
 func CmdRemoveTrack(args []string) {
 	if len(args) < 5 {
-		Fatal("usage: mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>")
+		Fatal("usage: " + CmdUsage["remove-track"])
 	}
 	source := args[0]
 	var outPath string
@@ -96,7 +96,7 @@ func CmdRemoveTrack(args []string) {
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
 	fl.Parse(args[1:])
 	if outPath == "" || len(trackIDs) == 0 {
-		Fatal("usage: mkvgo remove-track <file.mkv> -o <out.mkv> -t <trackID,...>")
+		Fatal("usage: " + CmdUsage["remove-track"])
 	}
 	GuardOverwrite(outPath)
 
@@ -117,7 +117,7 @@ func CmdRemoveTrack(args []string) {
 
 func CmdAddTrack(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID> [-lang code] [-name text]")
+		Fatal("usage: " + CmdUsage["add-track"])
 	}
 	base := args[0]
 	var outPath string
@@ -138,7 +138,7 @@ func CmdAddTrack(args []string) {
 		}
 	}
 	if outPath == "" || input.SourcePath == "" {
-		Fatal("usage: mkvgo add-track <file.mkv> -o <out.mkv> <source:trackID>")
+		Fatal("usage: " + CmdUsage["add-track"])
 	}
 	GuardOverwrite(outPath)
 

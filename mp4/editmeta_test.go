@@ -188,8 +188,8 @@ func TestEditInPlaceRefusals(t *testing.T) {
 		fn   func(c *mkv.Container)
 		want string
 	}{
-		{"codec", func(c *mkv.Container) { c.Tracks[0].Codec = "hevc" }, "Tracks[0].Codec cannot be changed"},
-		{"track list", func(c *mkv.Container) { c.Tracks = c.Tracks[:1] }, "track list cannot change"},
+		{"codec", func(c *mkv.Container) { c.Tracks[0].Codec = "hevc" }, "track 1's Codec cannot be changed"},
+		{"track list", func(c *mkv.Container) { c.Tracks = c.Tracks[:1] }, "keeps the track list"},
 		{"bcp47 in the legacy field", func(c *mkv.Container) { c.Tracks[1].Language = "fr-CA" }, "3-letter ISO 639-2"},
 		{"track tag", func(c *mkv.Container) {
 			c.Tags = []mkv.Tag{{TargetID: 2, SimpleTags: []mkv.SimpleTag{{Name: "ARTIST", Value: "x"}}}}

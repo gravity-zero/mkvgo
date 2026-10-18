@@ -478,7 +478,7 @@ mkvgo edit <file.mkv> -o <out.mkv> -
 |---|---|
 | `-o` | Output file path (required) |
 
-The JSON is a partial `Container` struct. Only fields you include are changed.
+The JSON is a patch with four optional keys - `title`, `tracks` (each `id` with any of `language`, `language_bcp47`, `name`, `is_default`, `is_forced`), `chapters` and `tags` - and only the fields you include change. An unknown key, text after the object or a track ID the file does not have is an error.
 
 ```bash
 mkvgo edit video.mkv -o out.mkv '{"title":"New Title"}'
@@ -527,10 +527,10 @@ mkvgo edit-track video.mkv -o out.mkv -t 2 -lang jpn -name "Japanese" -default
 Edit metadata without rewriting the entire file. Only modifies headers -- instant even on large files.
 
 ```
-mkvgo edit-inplace <file.mkv> '<json>'
+mkvgo edit-inplace <file.mkv|.mp4> '<json>'
 ```
 
-mkvgo-written files reserve padding after the metadata, so edits that GROW
+On an MP4/MOV the new moov is appended and the old one retired to a `free` box (crash-ordered; see the MP4/MOV note above). On Matroska: mkvgo-written files reserve padding after the metadata, so edits that GROW
 the metadata (longer title, added tags/chapters) usually still fit; beyond
 the reserve the command fails and a full rewrite (`edit`) is needed. The
 head SeekHead is rebuilt in place (its Cues entry preserved), and tags kept
@@ -742,7 +742,7 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00]
 | `-chapters` | Split at chapter boundaries |
 | `-range` | Comma-separated `start-end` ranges. Each bound is milliseconds (`300000`), fractional seconds (`90.5`) or a clock time (`5:00`, `01:30:00`, `1:30.5`); `0` = end of file |
 | `-every` | Split into keyframe-aligned segments of roughly this duration (same time syntax). Boundaries come from the Cues index -- reindex a file without one first |
-| `-pattern` | Output name pattern (default `part_%03d.mkv`; `%d` = part number). With `-chapters`, `{title}` is replaced by the sanitized chapter title (duplicates get a numeric suffix). Parts already in `<dir>` are overwritten: `-f` is not asked for |
+| `-pattern` | Output name pattern (default `part_%03d.mkv`, `part_%03d.mp4` for an MP4 source; `%d` = part number, the only verb; a file name, not a path). With `-chapters`, `{title}` is replaced by the sanitized chapter title (duplicates get a numeric suffix). Parts already in `<dir>` are overwritten: `-f` is not asked for |
 
 Exactly one of `-chapters`, `-range` or `-every` must be given.
 
