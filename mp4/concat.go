@@ -501,6 +501,9 @@ func RemuxConcatToHLS(ctx context.Context, sources []string, outputDir string, o
 	if len(sources) < 2 {
 		return errf("concat packaging needs at least two sources (got %d); use RemuxToHLS for one", len(sources))
 	}
+	if err := refusePackagedSource(outputDir, sources...); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if err := validateConcatOptions(&o); err != nil {
 		return err

@@ -25,8 +25,10 @@ import (
 	"io"
 	"math"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -190,6 +192,9 @@ type segInfo struct {
 // as WebVTT renditions; bitmap subtitles (PGS/VOBSUB) are dropped and reported
 // via Options.OnDrop.
 func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options) error {
+	if err := refusePackagedSource(outputDir, srcPath); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	_, err := remuxToHLSInto(ctx, srcPath, outputDir, &o)
 	return err
@@ -1315,4 +1320,27 @@ func iframeStreamInfURI(o *Options, fts []*fragTrack, durs []float64, iframes []
 		}
 	}
 	return inf + fmt.Sprintf(",URI=%s\n", hlsURI(rw(uri)))
+}
+
+// packagedName matches, relative to the output directory, every file a packaging pass writes: playlists, init and
+// media segments, subtitles, the manifest, single-file streams, their temporary files, under an ABR or concat prefix.
+var packagedName = regexp.MustCompile(`^((v|p)\d+/)?(master\.m3u8|playlist\.m3u8|iframe\.m3u8|audio\d+\.m3u8|sub\d+(_\d+)?\.(m3u8|vtt)|manifest\.mpd|init(_a\d+)?\.mp4|seg(_a\d+_)?\d+\.m4s|stream(_a\d+)?\.mp4|\.mkvgo-hls-t\d+\.tmp)$`)
+
+// refusePackagedSource refuses a source lying in outputDir under a name the packaging writes: it would be written
+// over before, or while, its samples are read.
+func refusePackagedSource(outputDir string, sources ...string) error {
+	dir, err := filepath.Abs(outputDir)
+	if err != nil {
+		return nil
+	}
+	for _, src := range sources {
+		abs, err := filepath.Abs(src)
+		if err != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(dir, abs); err == nil && packagedName.MatchString(filepath.ToSlash(rel)) {
+			return errf("%s would be written over by the packaging into %s: move it, or package into another directory", shown.Path(src), outputDir)
+		}
+	}
+	return nil
 }

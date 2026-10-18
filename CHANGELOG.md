@@ -90,6 +90,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   `Salvage`, `ApplyRollback`, `Merge` and `MergeWithSubtitles` (every input,
   the added track's file and the one that only carries attachments included)
   truncated the file they read, then removed it as an unfinished output.
+- `mp4.RemuxToMP4` and `mp4.RemuxFromMP4` refuse their source as output, and
+  `RemuxToHLS`, `RemuxToABR` and `RemuxConcatToHLS` a source lying in the
+  output directory under a name they write (`init.mp4`, `seg00001.m4s`,
+  `v1/...`): the source was truncated, then removed.
 - `-f` replaces an existing output, never an input: `reindex`, `salvage`,
   `to-webm`, `from-mp4`, `add-attachment`, `remove-attachment`,
   `concat-segment`, `watermark-segment`, `forensic-segment`, `hls-segment`,

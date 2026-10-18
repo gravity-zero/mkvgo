@@ -202,6 +202,9 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		return br, func() { src.Close() }, nil
 	}
 
+	if err := distinctOutput(fs, dstPath, srcPath); err != nil {
+		return err
+	}
 	dst, err := fs.DoCreate(dstPath)
 	if err != nil {
 		return err
