@@ -92,8 +92,16 @@ func (c Case) frames() int { return int(6e9 / c.frameNs()) }
 
 func (c Case) frameMs(j int) int64 { return int64(math.Round(float64(j) * c.frameNs() / 1e6)) }
 
-// EndMs is where the media ends: the last frame plus its whole milliseconds, as a remux measures it.
+// EndMs is where the video ends: the last frame plus its whole milliseconds, as a remux measures it; chapters end there.
 func (c Case) EndMs() int64 { return c.frameMs(c.frames()-1) + int64(c.frameNs()/1e6) }
+
+// DurationMs is where the longest track ends: the audio's 300 frames of 20 ms run past an NTSC video's end.
+func (c Case) DurationMs() int64 {
+	if c.Audio {
+		return max(c.EndMs(), 300*20)
+	}
+	return c.EndMs()
+}
 
 // RequestedCuts are the times the split ranges name, in ms.
 func (c Case) RequestedCuts() []int64 {
@@ -229,7 +237,7 @@ func (c Case) BuildMKV(path string) error {
 	}
 	const scale = 1_000_000
 	m := writer.NewMKVWriter(f)
-	dur := c.EndMs()
+	dur := c.DurationMs()
 	cont := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-matrix", WritingApp: "mkvgo-matrix"}, Chapters: c.ChapterList()}
 	err = m.WriteStart()
 	if err == nil {
