@@ -14,6 +14,26 @@ import (
 // had fallen behind them - an Opus track lost its CodecDelay and SeekPreRoll, a video its HDR and stereo mode, a
 // track its role flags, the Info its date. Both readers describe a richly described file the same now.
 func TestReadStreamDescribesWhatReadDoes(t *testing.T) {
+	data := describedMKV(t)
+	cs, err := Read(context.Background(), bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cst, _, err := ReadStream(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.Tracks[1].CodecDelay != 6500000 {
+		t.Fatalf("Read: CodecDelay %d, the fixture does not carry it", cs.Tracks[1].CodecDelay)
+	}
+	if got, want := comparable(cst), comparable(cs); got != want {
+		t.Errorf("ReadStream and Read differ:\nstream: %s\nread:   %s", got, want)
+	}
+}
+
+// describedMKV is a head carrying what a description holds beyond the basics: a date, HDR and stereo video, an
+// Opus track with its delays and role flags, a chapter.
+func describedMKV(t testing.TB) []byte {
 	w, h := uint32(1920), uint32(1080)
 	ch, rate := uint8(2), 48000.0
 	stereo := uint16(1)
@@ -33,18 +53,5 @@ func TestReadStreamDescribesWhatReadDoes(t *testing.T) {
 	if err := writer.Write(&buf, c); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := Read(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cst, _, err := ReadStream(context.Background(), bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cs.Tracks[1].CodecDelay != 6500000 {
-		t.Fatalf("Read: CodecDelay %d, the fixture does not carry it", cs.Tracks[1].CodecDelay)
-	}
-	if got, want := comparable(cst), comparable(cs); got != want {
-		t.Errorf("ReadStream and Read differ:\nstream: %s\nread:   %s", got, want)
-	}
+	return buf.Bytes()
 }

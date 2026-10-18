@@ -4,21 +4,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // FuzzReadVsReadStream: on an input both readers accept, ReadStream and Read describe the same file - Info, Tracks,
 // Chapters and editions, Attachments, Tags and the EBML DocType. What legitimately differs is normalized:
 //   - ReadStream stops at the first Cluster, where Read goes on to Cues and metadata the SeekHead points past it,
-//     so Read is given the input cut where ReadStream stopped;
+//     or found by reading the file's end back, so Read is given the input cut before that Cluster's header;
 //   - Cues, Keyframes, SegmentStart, ResyncedBytes and Path are the seekable reader's alone and are not compared.
 func FuzzReadVsReadStream(f *testing.F) {
 	f.Add(buildMinimalMKV().Bytes())
 	f.Add(liveCuesMKV())
+	f.Add(describedMKV(f))
 	for _, name := range []string{"sample.mkv", "meta.mkv", "av1.mkv", "vp9.webm"} {
 		if b, err := os.ReadFile(filepath.Join("..", "..", "internal", "testdata", name)); err == nil {
 			f.Add(b)
@@ -29,9 +33,12 @@ func FuzzReadVsReadStream(f *testing.F) {
 		if err != nil {
 			return
 		}
-		cut := min(int(br.r.tell()), len(data))
+		cut := beforeCluster(data, min(int(br.r.tell()), len(data)), br.inCluster)
 		cs, err := Read(context.Background(), bytes.NewReader(data[:cut]), "fuzz.mkv")
 		if err != nil {
+			if len(cst.Tracks) > 0 && !readOnlyElement(err) {
+				t.Errorf("Read refuses the %d bytes ReadStream described %d tracks from: %v", cut, len(cst.Tracks), err)
+			}
 			return
 		}
 		if got, want := comparable(cst), comparable(cs); got != want {
@@ -49,4 +56,25 @@ func comparable(c *mkv.Container) string {
 		return err.Error()
 	}
 	return string(b)
+}
+
+// beforeCluster backs cut over the Cluster header ReadStream stopped after, when it entered one.
+func beforeCluster(data []byte, cut int, inCluster bool) int {
+	if !inCluster {
+		return cut
+	}
+	for n := 5; n <= 12 && n <= cut; n++ {
+		h, hl, err := ebml.ReadElementHeader(bytes.NewReader(data[cut-n : cut]))
+		if err == nil && h.ID == mkv.IDCluster && hl == n {
+			return cut - n
+		}
+	}
+	return cut
+}
+
+// readOnlyElement tells an error Read met in an element ReadStream passes over unread - the Cues, a SeekHead - from
+// one in an element both decode.
+func readOnlyElement(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, fmt.Sprintf("element 0x%X ", mkv.IDCues)) || strings.Contains(msg, fmt.Sprintf("element 0x%X ", mkv.IDSeekHead))
 }
