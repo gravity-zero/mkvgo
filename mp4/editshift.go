@@ -328,8 +328,8 @@ func rewriteTrakEditShift(payload []byte, track uint64, ns int64, movieTS uint32
 	var empty int64
 	kept := make([]elstEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.mediaTime < 0 {
-			empty += e.segDur // collapse every empty edit into one
+		if e.mediaTime < 0 && len(kept) == 0 {
+			empty += e.segDur // the empty edits ahead of the media are the delay a shift moves; a pause after it stays
 			continue
 		}
 		kept = append(kept, e)
