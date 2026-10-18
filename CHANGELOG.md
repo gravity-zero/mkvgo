@@ -72,6 +72,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   A split's parts are chained by `org.mkvgo` freeform tags (`SPLIT_UID`,
   `SPLIT_PREV`): a join makes a chapter the split cut whole again only
   between linked parts, keeps at most 255 chapters, and writes no link.
+  A subtitle cue on screen at a cut opens the next part too, and a join of
+  linked parts keeps it once.
   An output written from a hashed MP4 (`to-mp4 --hash`) hashes its own
   tracks, as a Matroska edit does, so `verify` passes on split parts and
   reordered muxes; the hashes cost one more read of the media.

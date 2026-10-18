@@ -155,6 +155,15 @@ func (c *cutTrack) presentEndNs(movieTS uint32) int64 {
 	return rescale(c.edit.empty, movieTS, nsPerSec) + rescale(c.tt.maxEnd()-c.edit.mediaTime, c.ts, nsPerSec)
 }
 
+// isText reports whether the track is timed text, whose samples hold the screen until the next one.
+func (c *cutTrack) isText() bool {
+	switch c.handler {
+	case "text", "sbtl", "subt":
+		return true
+	}
+	return false
+}
+
 // firstSyncFrom is the first sync sample at or after decode index from whose presentation is at or past bound (len when none).
 func (c *cutTrack) firstSyncFrom(from int, movieTS uint32, atOrPast func(ptNs int64) bool) int {
 	for i := from; i < len(c.tt.samples); i++ {
@@ -444,6 +453,10 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 			ca, cb = 0, len(c.tt.samples)
 			if r.StartMs > 0 {
 				ca = c.firstSyncFrom(cur[i], m.movieTS, func(pt int64) bool { return pt >= p.tsNs })
+				// A cue on screen at the cut opens the part too, its head hidden by the edit list; the previous part keeps it up to the cut.
+				if j := ca - 1; c.isText() && j >= cur[i] && c.ptNs(j, m.movieTS) < p.tsNs && c.ptNs(j, m.movieTS)+rescale(int64(c.tt.samples[j].dur), c.ts, nsPerSec) > p.tsNs {
+					ca = j
+				}
 			}
 			if p.teNs > 0 {
 				cb = c.firstSyncFrom(ca, m.movieTS, func(pt int64) bool { return pt >= p.teNs })

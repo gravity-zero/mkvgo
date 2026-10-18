@@ -226,6 +226,12 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 			shift = rescale(offsets[k]+rescale(c.edit.empty, m.movieTS, nsPerSec), nsPerSec, first.ts) -
 				rescale(first.edit.empty, models[0].movieTS, first.ts) + first.edit.mediaTime - c.edit.mediaTime
 		}
+		if n := len(out.samples); n > 0 && from < to && c.isText() && m.link.continues(models[k-1].link) {
+			// The cue a split carried over the cut opens this part again: it is the previous part's last sample, kept once.
+			if last, s := out.samples[n-1], tt.samples[from]; shift+s.dts == last.dts && s.size == last.size {
+				from++
+			}
+		}
 		if n := len(out.samples); n > 0 && from < to {
 			last := &out.samples[n-1]
 			firstDts := tt.samples[from].dts
