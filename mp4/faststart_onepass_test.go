@@ -120,17 +120,20 @@ func TestFastStartCo64(t *testing.T) {
 	defer func() { co64Above = old }()
 	src := fastStartSource(t, 3)
 	st, _ := os.Stat(src)
-	var sent atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		f, err := os.Open(src)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		defer f.Close()
-		w.Header().Set("ETag", `"v1"`)
-		http.ServeContent(countingResponse{w, &sent}, r, "s.mkv", st.ModTime(), f)
-	}))
+	serve := func(sent *atomic.Int64) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			f, err := os.Open(src)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			defer f.Close()
+			w.Header().Set("ETag", `"v1"`)
+			http.ServeContent(countingResponse{w, sent}, r, "s.mkv", st.ModTime(), f)
+		}))
+	}
+	var sent, plainSent atomic.Int64
+	srv := serve(&sent)
 	defer srv.Close()
 
 	dir := t.TempDir()
@@ -172,12 +175,15 @@ func TestFastStartCo64(t *testing.T) {
 		}
 	}
 	// The remote fast start downloads what a remote remux without it does: the source once.
+	// Each count is read once its server's handlers have all returned (Close waits for them).
+	srv.Close()
 	fast := sent.Load()
-	sent.Store(0)
-	if err := RemuxToMP4(context.Background(), srv.URL+"/s.mkv", filepath.Join(dir, "plain-remote.mp4"), Options{SkipUnsupported: true, FS: httpfs.Hybrid()}); err != nil {
+	plainSrv := serve(&plainSent)
+	if err := RemuxToMP4(context.Background(), plainSrv.URL+"/s.mkv", filepath.Join(dir, "plain-remote.mp4"), Options{SkipUnsupported: true, FS: httpfs.Hybrid()}); err != nil {
 		t.Fatal(err)
 	}
-	if plain := sent.Load(); fast != plain {
+	plainSrv.Close()
+	if plain := plainSent.Load(); fast != plain {
 		t.Errorf("the remote fast start downloaded %d bytes, a remote remux without it %d", fast, plain)
 	}
 }
