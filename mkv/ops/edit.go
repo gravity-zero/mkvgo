@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -106,7 +107,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 		}
 	}
 	if addedTrack == nil {
-		return fmt.Errorf("track %d not found in %s", input.TrackID, input.SourcePath)
+		return fmt.Errorf("track %d not found in %s", input.TrackID, shown.Path(input.SourcePath))
 	}
 
 	newID := uint64(len(c.Tracks) + 1)

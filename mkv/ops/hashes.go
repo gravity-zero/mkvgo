@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -73,7 +74,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...mkv.Options) 
 		}
 	}
 	if len(stored) == 0 {
-		return nil, fmt.Errorf("no %s tags in %s - hash it first", ContentHashTag, path)
+		return nil, fmt.Errorf("no %s tags in %s - hash it first", ContentHashTag, shown.Path(path))
 	}
 
 	var mismatches []HashMismatch

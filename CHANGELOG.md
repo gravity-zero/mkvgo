@@ -56,6 +56,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **A presigned URL's signature stays out of every error.** The planner, the
+  readers, `ops` and a concat or ABR part named a remote source by its whole
+  URL, query included; they name it without its query now, as `httpfs` does,
+  and an `httpfs` file's `Stat().Name()` drops it too.
 - **A block that runs past its Cluster is damage.** A SimpleBlock or a
   BlockGroup's Block declaring more bytes than its parent holds swallowed the
   next Cluster and lost its blocks without an error; the walk now reports a

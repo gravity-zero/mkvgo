@@ -7,6 +7,7 @@ import (
 	"hash"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -70,7 +71,7 @@ func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts 
 	fs := mkv.FSFrom(opts)
 	_, whole, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
-		return nil, fmt.Errorf("digest %s: %w", path, err)
+		return nil, fmt.Errorf("digest %s: %w", shown.Path(path), err)
 	}
 	concat, err := digestConcat(ctx, parts, fs)
 	if err != nil {

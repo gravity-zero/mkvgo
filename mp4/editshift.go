@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -76,7 +77,7 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 
 	lay, err := scanTopLevelLayout(f)
 	if err != nil {
-		return errf("retime: %s: %w", path, err)
+		return errf("retime: %s: %w", shown.Path(path), err)
 	}
 	moovRaw, err := readRange(f, lay.moovOff, lay.moovSize)
 	if err != nil {
@@ -84,7 +85,7 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	}
 	newMoov, err := rewriteMoovEditShifts(moovRaw[lay.moovHdr:], shift)
 	if err != nil {
-		return errf("retime: %s: %w", path, err)
+		return errf("retime: %s: %w", shown.Path(path), err)
 	}
 	if err := ctx.Err(); err != nil {
 		return err

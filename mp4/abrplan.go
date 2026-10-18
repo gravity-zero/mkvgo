@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
 // ABRPlan serves a multi-variant HLS presentation on demand. It is immutable
@@ -46,7 +48,7 @@ func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, 
 		vo.CENC = cencForVariant(o.CENC, i)
 		pl, err := PlanHLS(ctx, src, vo)
 		if err != nil {
-			return nil, errf("variant %d (%s): %w", i+1, src, err)
+			return nil, errf("variant %d (%s): %w", i+1, shown.Path(src), err)
 		}
 		variants[i] = pl
 		results[i] = pl.hlsResult()

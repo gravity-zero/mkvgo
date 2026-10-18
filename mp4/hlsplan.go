@@ -40,6 +40,7 @@ import (
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/fileid"
 	"github.com/gravity-zero/mkvgo/internal/poison"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -417,7 +418,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, err
 	}
 	if len(c.Cues) == 0 && !o.SynthesizeIndex {
-		return nil, errf("%s: no Cues index - on-demand HLS seeks through the Cues (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", srcPath)
+		return nil, errf("%s: no Cues index - on-demand HLS seeks through the Cues (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", shown.Path(srcPath))
 	}
 	planned, _, err := planTracks(c, o)
 	if err != nil {
@@ -515,14 +516,14 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		// the video cue points in memory. The synthesized index replaces
 		// nothing on disk; the plan just seeks through it.
 		if !o.SynthesizeIndex {
-			return nil, errf("%s: the Cues index no video keyframes - on-demand HLS seeks through them (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", srcPath)
+			return nil, errf("%s: the Cues index no video keyframes - on-demand HLS seeks through them (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", shown.Path(srcPath))
 		}
 		cues, err = synthesizeVideoCues(ctx, srcPath, fs, c, vidID, p.trackDurs)
 		if err != nil {
 			return nil, err
 		}
 		if len(cues) == 0 {
-			return nil, errf("%s: no video keyframes found to synthesize an index from", srcPath)
+			return nil, errf("%s: no video keyframes found to synthesize an index from", shown.Path(srcPath))
 		}
 	}
 	p.cueDensity = cueDensityOf(cues, synthesized)

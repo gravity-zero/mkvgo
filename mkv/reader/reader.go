@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 func Open(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("open %s: %w", shown.Path(path), err)
 	}
 	defer f.Close()
 	return Read(ctx, f, path, opts...)
@@ -29,7 +30,7 @@ func Open(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container,
 func OpenWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("open %s: %w", shown.Path(path), err)
 	}
 	defer f.Close()
 	return Read(ctx, f, path, opts...)
@@ -57,7 +58,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 
 	if err := p.parseEBMLHeader(c); err != nil {
 		if looksLikeISOBMFF(r) {
-			return nil, fmt.Errorf("%s: %w", path, ErrNotMatroska)
+			return nil, fmt.Errorf("%s: %w", shown.Path(path), ErrNotMatroska)
 		}
 		return nil, fmt.Errorf("ebml header: %w", err)
 	}

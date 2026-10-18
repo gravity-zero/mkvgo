@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -369,7 +370,7 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 
 	f, err := fs.DoOpen(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("open %s: %w", shown.Path(path), err)
 	}
 	defer f.Close()
 

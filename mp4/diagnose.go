@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -60,7 +61,7 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 		return nil, errf("diagnose: read moov: %w", err)
 	}
 	if err := diagnoseTracks(moovRaw, d); err != nil {
-		return nil, errf("diagnose: %s: %w", path, err)
+		return nil, errf("diagnose: %s: %w", shown.Path(path), err)
 	}
 	d.Healthy = len(d.Findings) == 0
 	return d, nil

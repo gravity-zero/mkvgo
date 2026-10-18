@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -78,7 +79,7 @@ func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*Finger
 	fs := mkv.FSFrom(opts)
 	c, digests, err := digestTracksAny(ctx, path, fs, mkv.ProgressFrom(opts))
 	if err != nil {
-		return nil, fmt.Errorf("digest %s: %w", path, err)
+		return nil, fmt.Errorf("digest %s: %w", shown.Path(path), err)
 	}
 
 	fp := &FingerprintReport{Tracks: make([]TrackFingerprint, len(c.Tracks))}

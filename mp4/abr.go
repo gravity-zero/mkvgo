@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
 // RemuxToABR packages the sources - quality variants of the same content,
@@ -47,7 +49,7 @@ func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ..
 		sub := filepath.Join(outputDir, fmt.Sprintf("v%d", i+1))
 		res, err := remuxToHLSInto(ctx, src, sub, &vo)
 		if err != nil {
-			return errf("variant %d (%s): %w", i+1, src, err)
+			return errf("variant %d (%s): %w", i+1, shown.Path(src), err)
 		}
 		results[i] = res
 	}

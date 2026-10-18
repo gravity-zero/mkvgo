@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -89,7 +90,7 @@ func sniffContainer(path string, o *matroska.Options) (string, error) {
 	defer f.Close()
 	head := make([]byte, 8)
 	if _, err := io.ReadFull(f, head); err != nil {
-		return "", fmt.Errorf("mkvgo: %s: read head: %w", path, err)
+		return "", fmt.Errorf("mkvgo: %s: read head: %w", shown.Path(path), err)
 	}
 	if head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
 		return "mkv", nil
@@ -105,8 +106,8 @@ func sniffContainer(path string, o *matroska.Options) (string, error) {
 	if head[0] == 0x47 {
 		var rest [181]byte // reach the sync byte at offset 188 (8 + 180)
 		if _, err := io.ReadFull(f, rest[:]); err == nil && rest[180] == 0x47 {
-			return "", fmt.Errorf("mkvgo: %s: this is an MPEG-TS transport stream, not a container mkvgo reads - remux it to MP4 or Matroska first", path)
+			return "", fmt.Errorf("mkvgo: %s: this is an MPEG-TS transport stream, not a container mkvgo reads - remux it to MP4 or Matroska first", shown.Path(path))
 		}
 	}
-	return "", fmt.Errorf("mkvgo: %s: unrecognised container (neither an EBML/Matroska header nor an ISO-BMFF box)", path)
+	return "", fmt.Errorf("mkvgo: %s: unrecognised container (neither an EBML/Matroska header nor an ISO-BMFF box)", shown.Path(path))
 }

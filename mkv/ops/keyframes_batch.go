@@ -25,6 +25,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/internal/poison"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -201,17 +202,17 @@ func walkKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, pack
 		}
 	}
 	if video == nil {
-		return st, fmt.Errorf("%s: %w", srcPath, ErrNoVideo)
+		return st, fmt.Errorf("%s: %w", shown.Path(srcPath), ErrNoVideo)
 	}
 	switch video.Codec {
 	case "h264", "hevc", "vp8", "vp9", "av1":
 	default:
-		return st, fmt.Errorf("%s: %w (track codec %q)", srcPath, ErrUnsupportedCodec, video.Codec)
+		return st, fmt.Errorf("%s: %w (track codec %q)", shown.Path(srcPath), ErrUnsupportedCodec, video.Codec)
 	}
 	st.Cues = len(points)
 	st.MedianCueGapMs = medianGapMs(points)
 	if len(points) == 0 {
-		return st, fmt.Errorf("%s: %w", srcPath, ErrNoKeyframeIndex)
+		return st, fmt.Errorf("%s: %w", shown.Path(srcPath), ErrNoKeyframeIndex)
 	}
 
 	kw := &keyframeWalker{c: c, video: video, src: src, pack: pack}

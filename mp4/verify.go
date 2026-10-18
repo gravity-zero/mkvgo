@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+
+	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
 // HashMismatch describes one MP4 track whose recomputed content digest does
@@ -41,7 +43,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 		return nil, err
 	}
 	if len(mv.hashes) == 0 {
-		return nil, errf("no CONTENT_SHA256 atoms in %s - produce a hashed MP4 with `to-mp4 --hash`", path)
+		return nil, errf("no CONTENT_SHA256 atoms in %s - produce a hashed MP4 with `to-mp4 --hash`", shown.Path(path))
 	}
 
 	var mismatches []HashMismatch

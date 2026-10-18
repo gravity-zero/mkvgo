@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -180,7 +181,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,
 		}); err != nil {
-			return fmt.Errorf("join %s: %w", src, err)
+			return fmt.Errorf("join %s: %w", shown.Path(src), err)
 		}
 		prevEnd, prevVideoEnd, prevHasVideoEnd = offset, 0, false
 		for id, end := range trackEnds {

@@ -77,6 +77,7 @@ import (
 	"sync"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -179,7 +180,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		segMs = defaultSegmentMs
 	}
 	if o.Encrypt != nil || o.CENC != nil {
-		return nil, errf("%s: a growing (still-downloading) HLS plan does not support Options.Encrypt/CENC in this version", srcPath)
+		return nil, errf("%s: a growing (still-downloading) HLS plan does not support Options.Encrypt/CENC in this version", shown.Path(srcPath))
 	}
 
 	f, err := fs.DoOpen(srcPath)
@@ -190,10 +191,10 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	_, rerr := io.ReadFull(f, head[:])
 	_ = f.Close()
 	if rerr != nil {
-		return nil, errf("%s: read head: %w", srcPath, rerr)
+		return nil, errf("%s: read head: %w", shown.Path(srcPath), rerr)
 	}
 	if head[0] != 0x1A || head[1] != 0x45 || head[2] != 0xDF || head[3] != 0xA3 {
-		return nil, errf("%s: play-while-downloading is Matroska/WebM-only in this version", srcPath)
+		return nil, errf("%s: play-while-downloading is Matroska/WebM-only in this version", shown.Path(srcPath))
 	}
 
 	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
@@ -205,7 +206,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, err
 	}
 	if len(c.Tracks) == 0 {
-		return nil, errf("%s: no Tracks element yet (the downloader must write the head before play-while-downloading can start)", srcPath)
+		return nil, errf("%s: no Tracks element yet (the downloader must write the head before play-while-downloading can start)", shown.Path(srcPath))
 	}
 	if err := refuseFrameConverterOnPlan(o.FrameConverter); err != nil {
 		return nil, err
@@ -241,7 +242,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, errf("no audio or video track to segment")
 	}
 	if !videoSeen {
-		return nil, errf("%s: play-while-downloading requires a video track (an audio-only growing plan is not supported in this version, matching PlanHLS)", srcPath)
+		return nil, errf("%s: play-while-downloading requires a video track (an audio-only growing plan is not supported in this version, matching PlanHLS)", shown.Path(srcPath))
 	}
 
 	p := &GrowingHLSPlan{
@@ -360,7 +361,7 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 			break
 		}
 		if h.Size < 0 {
-			return p.published - before, errf("%s: growing plan requires known-size Matroska clusters (unsupported unknown-size cluster at byte %d)", p.srcPath, p.cursor)
+			return p.published - before, errf("%s: growing plan requires known-size Matroska clusters (unsupported unknown-size cluster at byte %d)", shown.Path(p.srcPath), p.cursor)
 		}
 		bodyEnd := p.cursor + int64(n) + h.Size
 		if bodyEnd > size {
@@ -784,7 +785,7 @@ func (p *GrowingHLSPlan) Resource(ctx context.Context, name string) ([]byte, str
 
 	if name == "master.m3u8" {
 		if p.master == nil {
-			return nil, "", errf("%s: no data yet (call Refresh)", p.srcPath)
+			return nil, "", errf("%s: no data yet (call Refresh)", shown.Path(p.srcPath))
 		}
 		return p.master, mimeM3U8, nil
 	}
@@ -793,12 +794,12 @@ func (p *GrowingHLSPlan) Resource(ctx context.Context, name string) ([]byte, str
 		switch name {
 		case renditionPlaylist(fts, i):
 			if i >= len(p.medias) {
-				return nil, "", errf("%s: no data yet (call Refresh)", p.srcPath)
+				return nil, "", errf("%s: no data yet (call Refresh)", shown.Path(p.srcPath))
 			}
 			return p.medias[i], mimeM3U8, nil
 		case renditionInit(fts, i):
 			if i >= len(p.inits) {
-				return nil, "", errf("%s: no data yet (call Refresh)", p.srcPath)
+				return nil, "", errf("%s: no data yet (call Refresh)", shown.Path(p.srcPath))
 			}
 			return p.inits[i], mimeMP4, nil
 		}
@@ -883,7 +884,7 @@ func (p *GrowingHLSPlan) firstClusterOffset(src io.ReadSeeker) (int64, bool, err
 			return pos, true, nil
 		}
 		if h.Size < 0 {
-			return 0, false, errf("%s: unknown-size element before the first cluster (unsupported for a growing plan)", p.srcPath)
+			return 0, false, errf("%s: unknown-size element before the first cluster (unsupported for a growing plan)", shown.Path(p.srcPath))
 		}
 		pos += int64(n) + h.Size
 	}
@@ -905,7 +906,7 @@ func segmentDeclaredEnd(fs *mkv.FS, path string) (int64, error) {
 		return -1, err
 	}
 	if h1.Size < 0 {
-		return -1, errf("%s: unknown-size EBML header", path)
+		return -1, errf("%s: unknown-size EBML header", shown.Path(path))
 	}
 	if _, err := f.Seek(h1.Size, io.SeekCurrent); err != nil {
 		return -1, err
@@ -915,7 +916,7 @@ func segmentDeclaredEnd(fs *mkv.FS, path string) (int64, error) {
 		return -1, err
 	}
 	if h2.ID != mkv.IDSegment {
-		return -1, errf("%s: expected a Segment element", path)
+		return -1, errf("%s: expected a Segment element", shown.Path(path))
 	}
 	if h2.Size < 0 {
 		return -1, nil

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -213,18 +214,18 @@ func readCMAFInit(fs *mkv.FS, path string) (*movie, map[uint32]trexDefault, erro
 	}
 	moov, err := readMoov(f, st.Size())
 	if err != nil {
-		return nil, nil, errf("%s: %w", path, err)
+		return nil, nil, errf("%s: %w", shown.Path(path), err)
 	}
 	mv, err := parseMoov(moov, st.Size(), sampleNone)
 	if err != nil {
-		return nil, nil, errf("%s: %w", path, err)
+		return nil, nil, errf("%s: %w", shown.Path(path), err)
 	}
 	if !mv.fragmented {
-		return nil, nil, errf("%s is not a CMAF initialisation segment (no mvex box) - pass the init segment the encoder wrote alongside the media segments", path)
+		return nil, nil, errf("%s is not a CMAF initialisation segment (no mvex box) - pass the init segment the encoder wrote alongside the media segments", shown.Path(path))
 	}
 	boxes, err := iterBoxes(moov)
 	if err != nil {
-		return nil, nil, errf("%s: %w", path, err)
+		return nil, nil, errf("%s: %w", shown.Path(path), err)
 	}
 	return mv, parseTrexDefaults(boxes), nil
 }

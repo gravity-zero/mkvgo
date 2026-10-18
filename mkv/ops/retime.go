@@ -15,6 +15,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -285,7 +286,7 @@ func retimeShiftTC(path string, meta *mkv.Container, shift map[uint64]int64) (ma
 	for _, track := range sortedTracks(shift) {
 		deltaNs := shift[track]
 		if !known[track] {
-			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, path, ErrUnknownTrack)
+			return nil, 0, fmt.Errorf("retime: track %d does not exist in %s: %w", track, shown.Path(path), ErrUnknownTrack)
 		}
 		// The shift lands on the nearest whole timecode unit. A file cannot
 		// express finer than one unit, so a request that is not an exact

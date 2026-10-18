@@ -43,6 +43,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
@@ -109,7 +110,7 @@ func probeConcatSource(ctx context.Context, src string, o *Options) (concatProbe
 		p.audio = append(p.audio, audioSig{codec: t.mkv.Codec, lang: t.mkv.Language})
 	}
 	if !videoSeen {
-		return concatProbe{}, errf("%s: no video track (concat requires one in every part)", src)
+		return concatProbe{}, errf("%s: no video track (concat requires one in every part)", shown.Path(src))
 	}
 	return p, nil
 }
@@ -508,7 +509,7 @@ func RemuxConcatToHLS(ctx context.Context, sources []string, outputDir string, o
 	for k, src := range sources {
 		p, err := probeConcatSource(ctx, src, &o)
 		if err != nil {
-			return errf("part %d (%s): %w", k+1, src, err)
+			return errf("part %d (%s): %w", k+1, shown.Path(src), err)
 		}
 		probes[k] = p
 	}
@@ -525,7 +526,7 @@ func RemuxConcatToHLS(ctx context.Context, sources []string, outputDir string, o
 		sub := filepath.Join(outputDir, fmt.Sprintf("p%d", k))
 		res, err := remuxToHLSInto(ctx, src, sub, &o)
 		if err != nil {
-			return errf("part %d (%s): %w", k+1, src, err)
+			return errf("part %d (%s): %w", k+1, shown.Path(src), err)
 		}
 		results[k] = res
 	}

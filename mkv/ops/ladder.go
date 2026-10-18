@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -147,7 +148,7 @@ func RecommendLadderFor(ctx context.Context, path string, opts ...mkv.Options) (
 		}
 	}
 	if video == nil {
-		return nil, fmt.Errorf("%s: no video track", path)
+		return nil, fmt.Errorf("%s: no video track", shown.Path(path))
 	}
 
 	in := LadderInput{Codec: canonicalCodec(video.Codec)}

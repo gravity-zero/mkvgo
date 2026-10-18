@@ -19,6 +19,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
@@ -61,7 +62,7 @@ func PlanConcat(ctx context.Context, sources []string, opts ...Options) (*Concat
 	for k, src := range sources {
 		p, err := probeConcatSource(ctx, src, &o)
 		if err != nil {
-			return nil, errf("part %d (%s): %w", k+1, src, err)
+			return nil, errf("part %d (%s): %w", k+1, shown.Path(src), err)
 		}
 		probes[k] = p
 	}
@@ -74,7 +75,7 @@ func PlanConcat(ctx context.Context, sources []string, opts ...Options) (*Concat
 	for k, src := range sources {
 		pl, err := PlanHLS(ctx, src, o)
 		if err != nil {
-			return nil, errf("part %d (%s): %w", k+1, src, err)
+			return nil, errf("part %d (%s): %w", k+1, shown.Path(src), err)
 		}
 		parts[k] = pl
 		results[k] = pl.hlsResult()

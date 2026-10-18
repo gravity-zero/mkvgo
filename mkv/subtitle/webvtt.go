@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -239,5 +240,5 @@ func noCueCheck(srcPath string, cues int, format string) error {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s: %w (%d bytes of content, none of it %s text - is the file UTF-8 %s?)", srcPath, ErrNoCues, len(data), format, format)
+	return fmt.Errorf("%s: %w (%d bytes of content, none of it %s text - is the file UTF-8 %s?)", shown.Path(srcPath), ErrNoCues, len(data), format, format)
 }
