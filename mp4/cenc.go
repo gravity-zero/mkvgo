@@ -654,6 +654,10 @@ func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
 		e.subs = subs
 	}
 	if k.c.Scheme == "cenc" {
+		if dtsTS < 0 || dtsTS >= 1<<48 {
+			// The track domains (2^56 up) and the variant offsets (2^48 up) stay apart only below 2^48 ticks.
+			return e, errf("Options.CENC: track %d has a decode time of %d ticks, past the 2^48 the 'cenc' IV domains keep apart; package it with the cbcs scheme", k.trackID, dtsTS)
+		}
 		if k.started && dtsTS <= k.lastDTS {
 			return e, errf("Options.CENC: track %d has two samples decoded at the same time, which the 'cenc' scheme would encrypt with one IV; package it with the cbcs scheme", k.trackID)
 		}

@@ -73,3 +73,15 @@ func TestCENCRefusesARepeatedIV(t *testing.T) {
 		t.Error("a second sample at decode time 100 took an IV, want it refused")
 	}
 }
+
+// TestCENCRefusesADecodeTimePastTheDomains: the IV is the base plus the decode time plus the track's domain (2^56
+// up) or the variant's offset (2^48 up); a forged stts reaching 2^48 ticks would walk one track's IVs into another's.
+func TestCENCRefusesADecodeTimePastTheDomains(t *testing.T) {
+	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc")}, false, "aac", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.entry([]byte{1}, 1<<48); err == nil {
+		t.Error("a decode time of 2^48 ticks took an IV, want it refused")
+	}
+}
