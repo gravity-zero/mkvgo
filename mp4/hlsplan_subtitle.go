@@ -185,6 +185,16 @@ func (p *HLSPlan) subWindowLocked(ctx context.Context, i int, neededFrom, target
 	return append([]subtitle.Cue(nil), st.window.cues...), nil
 }
 
+// keep returns err, caching it for the track when a scan again would meet it again: a damaged region or a
+// replaced source. A read that failed (a request cancelled, a server or a disk erring once) is never cached.
+func (st *subScanState) keep(err error) error {
+	var damage *reader.DamageError
+	if errors.As(err, &damage) || errors.Is(err, reader.ErrDamagedRegion) || errors.Is(err, ErrSourceChanged) {
+		st.err = err
+	}
+	return err
+}
+
 // extendCursorLocked advances cur until it holds every cue starting before
 // uptoMs (within its floor) with resolvable ends. Two bounds drive the walk:
 // blocks with timecode T live in clusters stamped within the relative-
@@ -229,13 +239,11 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	p.winMu.Unlock()
 	past, perr := p.pastDamage(start)
 	if perr != nil {
-		st.err = perr
-		return perr
+		return st.keep(perr)
 	}
 	br, err := reader.NewBlockReaderAt(src, p.tcScale, past)
 	if err != nil {
-		st.err = err
-		return err
+		return st.keep(err)
 	}
 	defer p.countWalk(&br)()
 	p.tolerateDamage(br)
@@ -265,15 +273,14 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 				return nil
 			}
 			if err != nil {
-				st.err = errf("read block: %w", err)
-				return st.err
+				return st.keep(errf("read block: %w", err))
 			}
 			if b.TrackNumber != track.track.ID {
 				continue
 			}
 			cue, ok, recovered, err := subCueFromBlockRecovered(&track.track, b)
 			if err != nil {
-				st.err = err
+				st.err = err // the cue's own bytes: every scan would refuse them again
 				return st.err
 			}
 			p.noteRecovered(recovered)
