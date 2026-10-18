@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- Junk read as an unknown Matroska element between the segment's elements (what
+  is left after a damaged parent) is resynced past, as an undecodable header
+  is, instead of skipped by the size it happens to declare, which could carry
+  the read past the Tracks and report a file without them.
 - A Matroska parent declaring less than its last child needs (a damaged Info
   whose last string runs into the Tracks) no longer hides what follows: the
   child is read when its end, not the parent's, opens a segment-level element.

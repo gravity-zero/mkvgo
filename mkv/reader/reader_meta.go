@@ -279,6 +279,17 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			}
 			continue
 		default:
+			if p.junkAt(eh) { // looked past as Read does, no further than headResyncCap
+				off, err := p.resyncToSegmentElement(elemStart+1, elemStart+1+headResyncCap, endPos)
+				if err != nil {
+					return err
+				}
+				if off < 0 {
+					return p.finalizeHeadMeta(c, offs, o) // nothing recognizable in the window: what we have
+				}
+				c.ResyncedBytes += off - elemStart
+				continue
+			}
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}

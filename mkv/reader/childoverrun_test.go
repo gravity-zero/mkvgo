@@ -88,3 +88,38 @@ func TestParentTooShortForItsLastChild(t *testing.T) {
 		}
 	}
 }
+
+// TestJunkAfterAShortParent: bytes left after a parent that declares too little, read as an unknown element of a
+// large size, are junk to resync past, not a size to skip: the Tracks behind them are read by both seekable reads.
+func TestJunkAfterAShortParent(t *testing.T) {
+	var te bytes.Buffer
+	te.Write(uintEl(mkv.IDTrackNumber, 1))
+	te.Write(uintEl(mkv.IDTrackType, mkv.TrackTypeAudio))
+	ebml.WriteElementHeader(&te, mkv.IDCodecID, 6)
+	ebml.WriteString(&te, "A_OPUS")
+	var seg bytes.Buffer
+	seg.Write(wrapEl(mkv.IDInfo, uintEl(mkv.IDTimecodeScale, 1000000)))
+	seg.Write([]byte{0x42, 0x99, 0x08, 0x00, 0x10, 0x00, 0x00}) // ID 0x4299, size 1 MiB: the rest of a longer Info
+	seg.Write(wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, te.Bytes())))
+	seg.Write(realCluster())
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+	for name, read := range map[string]func() (*mkv.Container, error){
+		"Read": func() (*mkv.Container, error) {
+			return Read(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
+		},
+		"OpenMeta": func() (*mkv.Container, error) {
+			return ReadMeta(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
+		},
+	} {
+		c, err := read()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(c.Tracks) != 1 {
+			t.Errorf("%s: %d tracks, want the Opus track behind the junk", name, len(c.Tracks))
+		}
+	}
+}

@@ -221,6 +221,22 @@ func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 	return true
 }
 
+// junkAt reports a segment child that is no segment-level element, Void or CRC-32 and whose declared end opens no
+// segment-level element short of the Segment's: bytes read as a header where the framing was lost, to resync past
+// rather than skip by the size they happen to declare. The read position is kept.
+func (p *parser) junkAt(eh ebml.ElementHeader) bool {
+	if eh.Size < 0 || isSegmentLevelID(eh.ID) || eh.ID == mkv.IDVoid || eh.ID == 0xBF {
+		return false
+	}
+	pos := p.pos()
+	if end := pos + eh.Size; end == p.segEnd || p.segmentElementAt(end) {
+		_, _ = p.r.Seek(pos, io.SeekStart)
+		return false
+	}
+	_, _ = p.r.Seek(pos, io.SeekStart)
+	return true
+}
+
 // segmentElementAt reports whether a segment-level element ID starts at off; the read position is left anywhere.
 func (p *parser) segmentElementAt(off int64) bool {
 	if _, err := p.r.Seek(off, io.SeekStart); err != nil {
@@ -495,6 +511,17 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return err
 			}
 		default:
+			if p.junkAt(eh) { // resynced past as an undecodable header is
+				off, err := p.resyncToSegmentElement(elemStart+1, -1, endPos)
+				if err != nil {
+					return err
+				}
+				if off < 0 {
+					return nil
+				}
+				c.ResyncedBytes += off - elemStart
+				continue
+			}
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}
