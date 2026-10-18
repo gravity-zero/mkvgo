@@ -8,6 +8,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Security
 
+- **`serve` and `serve-growing` listen on this machine only by default.**
+  The default address was `:8478`, every interface, so a file served to a
+  local player was readable from the network. It is now `127.0.0.1:8478`;
+  `-addr :8478` opens it to the network.
 - **Credentials in a URL stay out of errors.** A `user:password@` before
   the host was kept where the query was cut; it is dropped too, and the
   errors of a concat comparison name their parts that way as well.

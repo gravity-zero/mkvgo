@@ -102,6 +102,9 @@ func newServer(addr string, h http.Handler, writeTimeout time.Duration) *http.Se
 	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: writeTimeout}
 }
 
+// defaultServeAddr keeps serve and serve-growing on this machine; -addr :8478 opens them to the network.
+const defaultServeAddr = "127.0.0.1:8478"
+
 // serveFlags are the serve command's own flags; rest keeps the shared HLS flags and the source.
 type serveFlags struct {
 	addr, target   string
@@ -115,7 +118,7 @@ type serveFlags struct {
 
 // parseServeFlags reads serve's flags; the shared HLS flags are left in rest.
 func parseServeFlags(args []string) serveFlags {
-	cfg := serveFlags{addr: ":8478", target: "mse-generic", maxWalks: runtime.NumCPU()}
+	cfg := serveFlags{addr: defaultServeAddr, target: "mse-generic", maxWalks: runtime.NumCPU()}
 	fl := newFlags("serve")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.direct, "-direct", "--direct")

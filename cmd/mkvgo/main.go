@@ -137,10 +137,10 @@ func main() {
 		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]")
 		commands.CmdRetime(args)
 	case "serve":
-		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr :8478] [--direct | --auto [-target mse-generic]]")
+		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr 127.0.0.1:8478] [--direct | --auto [-target mse-generic]]")
 		commands.CmdServe(args)
 	case "serve-growing":
-		commands.RequireArgs(args, 1, "mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6]")
+		commands.RequireArgs(args, 1, "mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6]")
 		commands.CmdServeGrowing(args)
 	case "merge":
 		commands.CmdMerge(args)

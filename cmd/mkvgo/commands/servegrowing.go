@@ -102,7 +102,7 @@ type serveGrowingFlags struct {
 
 // parseServeGrowingFlags reads serve-growing's flags.
 func parseServeGrowingFlags(args []string) serveGrowingFlags {
-	cfg := serveGrowingFlags{addr: ":8478"}
+	cfg := serveGrowingFlags{addr: defaultServeAddr}
 	fl := newFlags("serve-growing")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.cors, "-cors", "--cors")

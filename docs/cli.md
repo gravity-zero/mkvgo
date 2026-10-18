@@ -1245,12 +1245,12 @@ mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 
 Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wrapped in a long-running `net/http` server (`mkvhttp.Handler`), so a player can be pointed straight at it: nothing is written to disk, every resource is built the first time it is requested.
 
 ```
-mkvgo serve <file.mkv|url> [-addr :8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--cors]
-mkvgo serve <file.mkv|url> [-addr :8478] --direct
-mkvgo serve <file.mkv|url> [-addr :8478] --auto [-target mse-generic]
+mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--cors]
+mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] --direct
+mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] --auto [-target mse-generic]
 ```
 
-- `-addr` sets the listen address (default `:8478`); the command prints the playable URL on startup.
+- `-addr` sets the listen address (default `127.0.0.1:8478`, this machine only; `-addr :8478` listens on every interface); the command prints the playable URL on startup.
 - Accepts the same shared HLS flags as `to-hls`/`hls-segment` (`-segment`, `--keep-tracks`, `--keep-lang`, ...) when packaging (the default mode, and the mode `--auto` falls back to).
 - `--window-cache <MiB>`: what the plan may hold for a window's un-collected renditions. A viewer asks for the video and the audio of the same instant, and one walk of the source builds both (their bytes are interleaved - reading one rendition's window reads them all), so the second request costs no read at all: a viewer reads the source once instead of twice, measured 2.1-3.7x down to 1.07-1.84x on real releases. Omit the flag and the plan sizes the budget from the source; `off` disables the sharing, and every rendition re-walks its own window.
 - Media segments are streamed: the server walks a segment's window first, then writes its bytes. The walk reads the whole window, so it keeps what it read: the video segment and each light audio segment, for the first request that asks for each, and serving the window reads the source once (measured on a 1080p film: 2.56x the bytes served down to 1.21x). `--window-bytes <MiB>|off` caps, process-wide, the kept segments held by tables and by responses in flight (`mp4.SetWindowBytes`, default 256 MiB): over the cap a window is kept headers only and its segments are copied from the source through one 256 KiB buffer at each write, so a slow client holds a buffer, not a segment; `off` always copies. `--buffered` keeps the previous behaviour (the whole segment in memory while it is sent, strong ETag).
@@ -1283,10 +1283,10 @@ See `docs/library.md` (`mkvhttp.Handler`, `mkvhttp.FileHandler`) for the full ca
 Play while downloading: serve a file that may still be growing (a download landing on disk) as HLS -- `mp4.PlanGrowingHLS` wrapped in the same long-running server `serve` uses. The media playlist is `EVENT`-typed and lengthens as new whole clusters land; once the source finishes (a Cues index appears, or the file simply stops growing and `Complete()` is signalled), it switches to `VOD` + `ENDLIST`.
 
 ```
-mkvgo serve-growing <file.mkv> [-addr :8478] [-segment 6] [--cors]
+mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors]
 ```
 
-- `-addr` sets the listen address (default `:8478`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
+- `-addr` sets the listen address (default `127.0.0.1:8478`, this machine only, as for `serve`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
 - `--cors` adds the CORS headers a browser-based player on another origin needs; off by default, as for `serve`.
 - Polls the source once a second for new whole clusters (a stat plus, at most, a bounded read of what's new) and extends the playlist as they land; a partial trailing cluster (still being written) is never served from.
 - A published segment's bytes are byte-identical to what `to-hls`/`hls-segment` would produce for the finished file, and never change once served (stable numbering).
