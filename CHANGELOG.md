@@ -79,6 +79,8 @@ Matroska reading:
 
 - `ReadStream` describes a file as `Read` does: it runs the same decoders,
   and a differential fuzz target (`FuzzReadVsReadStream`) holds them together.
+  It streams each element through them instead of holding its body, so an
+  attachment costs its data once and Attachments past 512 MiB still read.
 - Duplicate Info or Tracks keep the first; an unknown-size Tracks no longer
   hides the next one.
 - A child overrunning its parent, or a block overrunning its Cluster, is

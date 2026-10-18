@@ -56,22 +56,92 @@ func NewStreamBlockReader(r io.Reader, timecodeScale int64) (*BlockReader, error
 	return NewBlockReader(&readOnlySeeker{r: r}, timecodeScale)
 }
 
-// decode runs a seekable element decoder over the body of a size-byte element read into memory, so both readers
-// read an element the same way, a child header running past its parent's end included. An element of unknown size
-// has no body to decode: the scan reads on into it.
+// decode runs a seekable element decoder over a size-byte element streamed through a bodyReader, so both readers
+// read an element the same way, a child header running past its parent's end included, without holding its body.
+// An element of unknown size has no body to decode: the scan reads on into it.
 func (p *streamParser) decode(size int64, fn func(*parser) error) error {
 	if size < 0 {
 		return nil
 	}
-	body, err := ebml.ReadBytes(p.r, size)
-	if err != nil {
-		return err
-	}
-	d := &parser{r: bytes.NewReader(body), posBase: p.pos, metaBudget: p.metaBudget, ctx: p.ctx, segEnd: -1}
-	p.pos += size
-	err = fn(d)
+	lr := &io.LimitedReader{R: p.r, N: size}
+	d := &parser{r: &bodyReader{r: lr}, posBase: p.pos, metaBudget: p.metaBudget, ctx: p.ctx, segEnd: -1}
+	err := fn(d)
 	p.metaBudget = d.metaBudget
+	if _, cerr := io.Copy(io.Discard, lr); cerr != nil {
+		return cerr
+	}
+	if lr.N > 0 {
+		return io.ErrUnexpectedEOF // the stream ended inside the element, as a whole read of it would report
+	}
+	p.pos += size
 	return err
+}
+
+// bodyLookback is how far a bodyReader can seek back: past the longest element header (4-byte ID, 8-byte size),
+// the most a decoder reads beyond a parent's end before returning to it.
+const bodyLookback = 64
+
+// bodyReader is an element body read forward from a stream, seeking ahead by reading and back over the last
+// bodyLookback bytes; like a bytes.Reader, it seeks past the end and reads EOF there.
+type bodyReader struct {
+	r      io.Reader
+	pos    int64  // where the decoder stands
+	end    int64  // how much was pulled from r
+	tail   []byte // the last bytes pulled, ending at end
+	replay []byte // tail bytes to hand out again after a seek back, ending at end
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	if b.pos > b.end {
+		return 0, io.EOF
+	}
+	if len(b.replay) > 0 {
+		n := copy(p, b.replay)
+		b.replay = b.replay[n:]
+		b.pos += int64(n)
+		return n, nil
+	}
+	n, err := b.r.Read(p)
+	b.pos += int64(n)
+	b.end += int64(n)
+	if n >= bodyLookback {
+		b.tail = append(b.tail[:0], p[n-bodyLookback:n]...)
+	} else {
+		b.tail = append(b.tail, p[:n]...)
+		if len(b.tail) > bodyLookback {
+			b.tail = b.tail[len(b.tail)-bodyLookback:]
+		}
+	}
+	return n, err
+}
+
+func (b *bodyReader) Seek(offset int64, whence int) (int64, error) {
+	target := offset
+	if whence == io.SeekCurrent {
+		target += b.pos
+	} else if whence != io.SeekStart {
+		return 0, fmt.Errorf("mkvgo/reader: element body cannot seek from its end")
+	}
+	switch {
+	case target < 0:
+		return 0, fmt.Errorf("mkvgo/reader: seek to %d before the element body", target)
+	case target >= b.end:
+		if target > b.pos {
+			b.pos += int64(len(b.replay))
+			b.replay = nil
+			if _, err := io.CopyN(io.Discard, b, target-b.pos); err != nil && err != io.EOF {
+				return 0, err
+			}
+		}
+		b.replay, b.pos = nil, target
+	default:
+		back := b.end - target
+		if back > int64(len(b.tail)) {
+			return 0, fmt.Errorf("mkvgo/reader: stream cannot seek back %d bytes inside an element", b.pos-target)
+		}
+		b.replay, b.pos = b.tail[int64(len(b.tail))-back:], target
+	}
+	return target, nil
 }
 
 // streamParser is a forward-only parser: skips via io.CopyN, no Seek.
