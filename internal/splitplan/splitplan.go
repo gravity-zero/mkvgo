@@ -49,7 +49,7 @@ func EveryRanges(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 // CheckPattern refuses a part-name pattern that is a path or whose verbs are not one integer: it names a file in the output directory.
 func CheckPattern(pattern string) error {
 	if strings.ContainsAny(pattern, `/\`) {
-		return fmt.Errorf("pattern %q names a path: it names a file inside the output directory, e.g. part_%%03d.mp4", pattern)
+		return fmt.Errorf("pattern %q names a path: it names a file inside the output directory, e.g. part_%%03d%s", pattern, filepath.Ext(pattern))
 	}
 	if hasVerb(pattern) && strings.Contains(fmt.Sprintf(pattern, 1), "%!") {
 		return fmt.Errorf("pattern %q: its only verb is the part number, e.g. %%d or %%03d (write %%%% for a literal %%)", pattern)
