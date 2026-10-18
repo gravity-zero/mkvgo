@@ -39,7 +39,7 @@ func TestLazyMoovParse64BitAndSizeZeroBoxes(t *testing.T) {
 	raw64 := w.b
 
 	m := &lazyMoov{r: bytes.NewReader(raw64), buf: make([]byte, len(raw64))}
-	if err := m.parse(0, len(raw64)); err != nil {
+	if err := m.parse(0, len(raw64), 0); err != nil {
 		t.Fatalf("well-formed 64-bit box: %v", err)
 	}
 	if m.filled != len(raw64) {
@@ -53,7 +53,7 @@ func TestLazyMoovParse64BitAndSizeZeroBoxes(t *testing.T) {
 	// not read past the parse window.
 	truncated := raw64[:15]
 	m2 := &lazyMoov{r: bytes.NewReader(truncated), buf: make([]byte, len(truncated))}
-	if err := m2.parse(0, len(truncated)); err == nil || !strings.Contains(err.Error(), "truncated 64-bit box") {
+	if err := m2.parse(0, len(truncated), 0); err == nil || !strings.Contains(err.Error(), "truncated 64-bit box") {
 		t.Errorf("truncated 64-bit header: err = %v, want a truncated-64-bit-box error", err)
 	}
 
@@ -67,7 +67,7 @@ func TestLazyMoovParse64BitAndSizeZeroBoxes(t *testing.T) {
 	raw0 := w2.b
 
 	m3 := &lazyMoov{r: bytes.NewReader(raw0), buf: make([]byte, len(raw0))}
-	if err := m3.parse(0, len(raw0)); err != nil {
+	if err := m3.parse(0, len(raw0), 0); err != nil {
 		t.Fatalf("size-0 box: %v", err)
 	}
 	if m3.filled != len(raw0) {

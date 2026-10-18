@@ -250,7 +250,7 @@ func readMoovLazyAt(r io.ReadSeeker, dataOff, payloadLen int64) ([]byte, error) 
 		return nil, errf("moov of %d bytes is past the %d-byte lazy read", payloadLen, int64(maxLazyMoovBytes))
 	}
 	m := &lazyMoov{r: r, base: dataOff, buf: make([]byte, payloadLen)}
-	if err := m.parse(0, len(m.buf)); err != nil {
+	if err := m.parse(0, len(m.buf), 0); err != nil {
 		return nil, err
 	}
 	return m.buf, nil
@@ -296,7 +296,14 @@ func (m *lazyMoov) skip(boxEnd int) {
 	}
 }
 
-func (m *lazyMoov) parse(start, end int) error {
+// maxLazyDepth bounds how deep parse descends: moov, trak, mdia, minf, stbl hold the sample tables five levels
+// down; a file nesting containers deeper is forged, and each level costs a stack frame.
+const maxLazyDepth = 8
+
+func (m *lazyMoov) parse(start, end, depth int) error {
+	if depth > maxLazyDepth {
+		return errf("the moov nests containers deeper than %d levels: the file is damaged or forged", maxLazyDepth)
+	}
 	for off := start; off+8 <= end; {
 		if err := m.ensure(off + 8); err != nil {
 			return err
@@ -323,7 +330,7 @@ func (m *lazyMoov) parse(start, end int) error {
 		boxEnd := off + int(boxSize)
 		switch {
 		case lazyContainers[typ]:
-			if err := m.parse(off+hdr, boxEnd); err != nil {
+			if err := m.parse(off+hdr, boxEnd, depth+1); err != nil {
 				return err
 			}
 		case lazySkipBody[typ]:

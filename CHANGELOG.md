@@ -99,6 +99,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An MP4 nesting containers past the sample tables is refused.** The
+  metadata path descended into every container box with no depth bound: a
+  few tens of megabytes of nested `trak` boxes overflowed the goroutine
+  stack, a fatal error that stops the whole process. Past eight levels the
+  moov is refused.
 - **`retime` on an MP4 shifted the wrong track when a trak the probe does not
   list (a timecode or chapter track) came first:** track numbers were counted
   over every trak, so `--shift 2=...` could move the video. They are the

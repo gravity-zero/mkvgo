@@ -156,7 +156,7 @@ func TestLazyMoovEnsurePropagatesReadError(t *testing.T) {
 func TestLazyMoovParseLoopBoundary(t *testing.T) {
 	raw := box("free", nil) // 8 bytes, no payload
 	m := &lazyMoov{r: bytes.NewReader(raw), buf: make([]byte, len(raw))}
-	if err := m.parse(0, len(raw)); err != nil {
+	if err := m.parse(0, len(raw), 0); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if m.filled != len(raw) {
@@ -173,11 +173,11 @@ func TestLazyMoovParseLoopBoundary(t *testing.T) {
 func TestLazyMoovParseSizeCheckBoundary(t *testing.T) {
 	raw := box("free", make([]byte, 8)) // 16-byte box (8 header + 8 payload)
 	m := &lazyMoov{r: bytes.NewReader(raw), buf: make([]byte, len(raw))}
-	if err := m.parse(0, len(raw)); err != nil {
+	if err := m.parse(0, len(raw), 0); err != nil {
 		t.Fatalf("off+boxSize == end must be accepted: %v", err)
 	}
 	m2 := &lazyMoov{r: bytes.NewReader(raw), buf: make([]byte, len(raw))}
-	if err := m2.parse(0, len(raw)-1); err == nil {
+	if err := m2.parse(0, len(raw)-1, 0); err == nil {
 		t.Error("off+boxSize == end+1 must be rejected as an invalid size")
 	}
 }
@@ -702,7 +702,7 @@ func TestHugeLargesizeRejected(t *testing.T) {
 			t.Errorf("iterBoxes: largesize %d accepted", size)
 		}
 		m := &lazyMoov{r: bytes.NewReader(raw), buf: make([]byte, len(raw))}
-		if err := m.parse(0, len(raw)); err == nil {
+		if err := m.parse(0, len(raw), 0); err == nil {
 			t.Errorf("lazyMoov.parse: largesize %d accepted", size)
 		}
 	}
