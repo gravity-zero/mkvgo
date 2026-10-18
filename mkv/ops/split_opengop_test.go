@@ -10,9 +10,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// TestSplitKeepsOpenGOPLeadingPictures pins that a part opening on an open-GOP keyframe keeps the pictures stored
-// after it and shown before it, ahead of its zero, as an MP4 edit list would: the part before stops at the keyframe.
-func TestSplitKeepsOpenGOPLeadingPictures(t *testing.T) {
+// TestSplitOpenGOPPartsOpenOnTheirKeyframe pins a cut on an open-GOP keyframe: the next part opens on it at 0 without
+// the leading pictures stored after it (they decode only with the GOP before), the part before takes the sound stored
+// among them and holds its last picture to the cut, so no sound is lost and a join keeps the timeline.
+func TestSplitOpenGOPPartsOpenOnTheirKeyframe(t *testing.T) {
 	c := matrix.Case{OpenGOP: true, Audio: true, Cuts: 1}
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
@@ -20,17 +21,21 @@ func TestSplitKeepsOpenGOPLeadingPictures(t *testing.T) {
 	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
 	mustNil(t, err)
 	cut := c.ExpectedCuts()[0]
-	video := trackBlocks(collectAllBlocks(t, parts[1]))[matrix.VideoTrack]
-	if len(video) < 3 || video[0].Timecode != 0 || !video[0].Keyframe || video[1].Timecode != -80 || video[2].Timecode != -40 {
-		t.Fatalf("part 2 opens on %s, want the keyframe at 0 then its leading pictures at -80 and -40", blockSeq(video[:min(3, len(video))]))
+	p1, p2 := trackBlocks(collectAllBlocks(t, parts[0])), trackBlocks(collectAllBlocks(t, parts[1]))
+	if v := p2[matrix.VideoTrack]; v[0].Timecode != 0 || !v[0].Keyframe || v[1].Timecode <= 0 {
+		t.Errorf("part 2 opens on %s, want its keyframe at 0 and no picture before it", blockSeq(v[:2]))
 	}
-	audio := trackBlocks(collectAllBlocks(t, parts[0]))[matrix.AudioTrack]
-	audio2 := trackBlocks(collectAllBlocks(t, parts[1]))[matrix.AudioTrack]
-	if n := len(audio) + len(audio2); n != len(c.Blocks()[matrix.AudioTrack]) {
+	if n := len(p1[matrix.AudioTrack]) + len(p2[matrix.AudioTrack]); n != len(c.Blocks()[matrix.AudioTrack]) {
 		t.Errorf("the parts hold %d audio frames, the source %d", n, len(c.Blocks()[matrix.AudioTrack]))
 	}
-	if last := audio[len(audio)-1].Timecode; last >= cut {
-		t.Errorf("part 1 holds audio at %d ms, past its cut at %d", last, cut)
+	last := p1[matrix.VideoTrack][0]
+	for _, b := range p1[matrix.VideoTrack] {
+		if b.Timecode > last.Timecode {
+			last = b
+		}
+	}
+	if last.Timecode+last.Duration != cut {
+		t.Errorf("part 1's last picture %d+%d ms ends short of the cut at %d", last.Timecode, last.Duration, cut)
 	}
 }
 

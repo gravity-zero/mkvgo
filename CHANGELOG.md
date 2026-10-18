@@ -108,12 +108,13 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   head's free space, and the whole file had to be rewritten.
 - `EditInPlace` on a file with no SeekHead finds the Tags after the clusters
   instead of writing a second copy of them in the head.
-- A Matroska `Split` on an open-GOP keyframe keeps the pictures stored after it
-  and shown before it, and the sound stored among them, at negative timestamps
-  in the part it opens: they were in neither part, and `Join` placed the rest of
-  the part that much early.
-- A cue on screen across a Matroska cut opens the next part at its zero, not a
-  few ms in when sound muxed ahead of the keyframe sets that zero.
+- A Matroska `Split` opens every part on its keyframe at 0: the sound stored
+  after the cut keyframe but timed before it goes to the part before, which was
+  missing it, instead of moving the next part's zero ahead of its first picture.
+  On an open GOP the part before holds its last picture to the cut, so `Join`
+  no longer places the rest of the next part that much early; the leading
+  pictures stored after the keyframe, which decode only with the GOP before,
+  stay out of both parts.
 - `Join` gives a chapter a split carried over a cut the end of its
   continuation, not the cut.
 - Every Matroska writer of the library refuses an output that is one of its

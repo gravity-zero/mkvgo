@@ -107,9 +107,9 @@ type streamOpts struct {
 type sourceWalk struct {
 	f      mkv.ReadSeekCloser
 	br     *reader.BlockReader
-	carry  *mkv.Block // the block the previous call stopped on, if it stopped before EOF
-	stopMs int64      // the end that call was cut on
-	maxMs  int64      // the latest timecode read before carry: every such block is no cut keyframe
+	carry  []mkv.Block // the block the previous call stopped on, if it stopped before EOF, and those it read past it
+	stopMs int64       // the end that call was cut on
+	maxMs  int64       // the latest timecode read before carry: every such block is no cut keyframe
 	// onScreen holds the subtitle cues the previous call wrote that are still on screen at its cut: the next
 	// call, opening on carry, shows them from its own start for the time they have left.
 	onScreen []mkv.Block
@@ -125,8 +125,8 @@ func (r walkReader) Close() error { return r.f.Close() }
 
 // reader returns the walk for a range starting at startMs, and the block to
 // deliver before the reader's next one.
-func (w *sourceWalk) reader(fs *mkv.FS, srcPath string, scale, startMs int64, progress mkv.ProgressFunc) (walkReader, *mkv.Block, error) {
-	if w != nil && w.carry != nil && startMs >= w.stopMs {
+func (w *sourceWalk) reader(fs *mkv.FS, srcPath string, scale, startMs int64, progress mkv.ProgressFunc) (walkReader, []mkv.Block, error) {
+	if w != nil && len(w.carry) > 0 && startMs >= w.stopMs {
 		first := w.carry
 		w.carry = nil
 		return walkReader{w.br, w.f}, first, nil
@@ -152,10 +152,10 @@ func (w *sourceWalk) reader(fs *mkv.FS, srcPath string, scale, startMs int64, pr
 	return walkReader{br, f}, nil, nil
 }
 
-// stopped records the block a call cut its range on, for the next call to open on.
-func (w *sourceWalk) stopped(blk mkv.Block, endMs, maxMs int64) {
+// stopped records the block a call cut its range on, and those it read past it, for the next call to open on.
+func (w *sourceWalk) stopped(blks []mkv.Block, endMs, maxMs int64) {
 	if w != nil {
-		w.carry, w.stopMs, w.maxMs = &blk, endMs, maxMs
+		w.carry, w.stopMs, w.maxMs = blks, endMs, maxMs
 	}
 }
 
@@ -221,15 +221,14 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	subIdx := 0
 	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
 	maxMs := int64(math.MinInt64)
-	if carry != nil {
+	if len(carry) > 0 {
 		// A walk from the top would have dropped the blocks read before carry at the gate.
 		maxMs = opts.walk.maxMs
 		gateSkipped = opts.timeStart > 0 && maxMs >= opts.timeStart
 	}
 	endStates := map[uint64]*trackEndState{}
 	var carried, queue, shown []mkv.Block // cues to open on, cues to write next, cues written (source timeline)
-	var opening []mkv.Block               // the carried cues as the source shows them, before they open at the cut
-	if carry != nil {
+	if len(carry) > 0 {
 		carried, opts.walk.onScreen = opts.walk.onScreen, nil
 	}
 	firstTC, firstSet := int64(0), false
@@ -277,26 +276,17 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			return nil
 		}
 		if !baseSettled {
-			base = math.MaxInt64
+			base = cluster[0].Timecode
 			for i := range cluster {
-				if t := cluster[i].Timecode; t < base && t >= opts.timeStart { // a leading block stays ahead of the zero
-					base = t
+				if cluster[i].Timecode < base {
+					base = cluster[i].Timecode
 				}
 			}
 			baseSettled = true
-			for i := range cluster { // a carried cue was on screen at the zero too, not only at the cut
-				for _, o := range opening {
-					if b := &cluster[i]; b.Timecode == cutStart && base < cutStart && bytes.Equal(b.Data, o.Data) {
-						from := max(o.Timecode, base)
-						b.Duration += b.Timecode - from
-						b.Timecode = from
-					}
-				}
-			}
 		}
 		s := shift()
 		for i := range cluster {
-			if cluster[i].Timecode < base && cluster[i].Timecode >= opts.timeStart {
+			if cluster[i].Timecode < base {
 				return fmt.Errorf("block at %dms precedes the segment's first frame (%dms) by more than one cluster: refusing to write a negative timestamp", cluster[i].Timecode, base)
 			}
 			cluster[i].Timecode -= s
@@ -333,6 +323,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	// Called after the last flush: the ends are in the OUTPUT timeline, and the
 	// base that defines it is only settled once a cluster has been written.
 	cutEnd := int64(0)
+	ending, behind := false, []mkv.Block(nil) // past the cut: the sound stored behind it, still this segment's
 
 	recordEnds := func() {
 		if opts.bounds != nil {
@@ -368,10 +359,18 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		var blk mkv.Block
 		prevMax := maxMs
-		if len(queue) > 0 {
+		if ending {
+			if len(behind) == 0 {
+				if opts.walk != nil {
+					opts.walk.onScreen = cuesOnScreenAt(shown, cutEnd)
+				}
+				break
+			}
+			blk, behind = behind[0], behind[1:]
+		} else if len(queue) > 0 {
 			blk, queue, err = queue[0], queue[1:], nil
-		} else if carry != nil {
-			blk, carry = *carry, nil
+		} else if len(carry) > 0 {
+			blk, carry = carry[0], carry[1:]
 		} else if blk, err = br.Next(); err == nil && blk.Timecode > maxMs {
 			maxMs = blk.Timecode
 		}
@@ -396,9 +395,12 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		// track only a video keyframe qualifies (see videoTracks above).
 		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
 
-		// Stored after the cut keyframe yet timed before it (an open GOP's leading pictures, the sound muxed with
-		// them): the part before stopped at the keyframe, so this one keeps them ahead of its zero.
-		if opts.timeStart > 0 && blk.Timecode < opts.timeStart && (!opts.keyframeAlign || clusterTS < 0 || opts.timeStart-blk.Timecode > clusterMs) {
+		if opts.timeStart > 0 && blk.Timecode < opts.timeStart {
+			continue
+		}
+		// Stored after the cut keyframe yet timed before it: the part before took the sound (behindCut), an open
+		// GOP's leading pictures cannot decode without the GOP before, and the part opens on its keyframe at 0.
+		if opts.keyframeAlign && opts.timeStart > 0 && cutStartSet && blk.Timecode < cutStart {
 			continue
 		}
 		// keyframeAlign: drop everything (audio included) until the first cut
@@ -407,17 +409,22 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			gateSkipped = true
 			continue
 		}
-		if opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd {
+		if opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd && !ending {
 			if clusterTS < 0 && gateSkipped {
 				return noCutKeyframeErr(opts.timeStart)
 			}
 			if !opts.keyframeAlign || cutKeyframe {
 				cutEnd = blk.Timecode
-				opts.walk.stopped(blk, opts.timeEnd, prevMax)
-				if opts.walk != nil {
-					opts.walk.onScreen = cuesOnScreenAt(shown, blk.Timecode)
+				rest := []mkv.Block{blk}
+				if opts.keyframeAlign {
+					var err error
+					if behind, rest, err = behindCut(br, blk, opts.videoTracks); err != nil {
+						return err
+					}
 				}
-				break
+				opts.walk.stopped(rest, opts.timeEnd, prevMax)
+				ending = true
+				continue
 			}
 			// keyframeAlign: the cut lands on the next cut keyframe at/after
 			// timeEnd. Blocks before it belong to the GOP that started inside
@@ -429,7 +436,6 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			cutStart, cutStartSet = blk.Timecode, true
 			for _, c := range carried { // the cues still on screen at the cut open this part, for the time they have left
 				if end := c.Timecode + c.Duration; end > cutStart {
-					opening = append(opening, c)
 					c.Timecode, c.Duration = cutStart, end-cutStart
 					queue = append(queue, c)
 				}
@@ -524,11 +530,57 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	if err := injectSubs(1 << 62); err != nil {
 		return err
 	}
+	holdToCut(cluster, endStates, opts, cutEnd)
 	if err := flush(); err != nil {
 		return err
 	}
 	recordEnds()
 	return nil
+}
+
+// behindCut reads the blocks stored right after a cut keyframe: the sound timed before it goes to the segment
+// ending there (behind), the rest, the keyframe first, to the next one; an open GOP's leading pictures to neither.
+func behindCut(br walkReader, key mkv.Block, video map[uint64]bool) (behind, rest []mkv.Block, err error) {
+	rest = []mkv.Block{key}
+	for range 256 {
+		blk, err := br.Next()
+		if err == io.EOF {
+			return behind, rest, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		switch {
+		case blk.Timecode >= key.Timecode:
+			rest = append(rest, blk)
+			if blk.Timecode-key.Timecode >= defaultClusterDurationMs {
+				return behind, rest, nil
+			}
+		case !video[blk.TrackNumber]:
+			behind = append(behind, blk)
+		}
+	}
+	return behind, rest, nil
+}
+
+// holdToCut gives a segment's last picture, when the cut keyframe's leading pictures leave a gap before the cut,
+// the duration that reaches it: the segment and a join of it end their picture at the cut.
+func holdToCut(cluster []mkv.Block, ends map[uint64]*trackEndState, opts streamOpts, cutEnd int64) {
+	if !opts.keyframeAlign || cutEnd <= 0 {
+		return
+	}
+	for src := range opts.videoTracks {
+		id, ok := opts.remap[src]
+		s := ends[id]
+		if !ok || s == nil || s.lastDur > 0 || s.maxTC+max(s.minGap, 1) >= cutEnd {
+			continue
+		}
+		for i := range cluster {
+			if cluster[i].TrackNumber == id && cluster[i].Timecode == s.maxTC {
+				cluster[i].Duration, s.lastDur = cutEnd-s.maxTC, cutEnd-s.maxTC
+			}
+		}
+	}
 }
 
 // noCutKeyframeErr reports a range that contains blocks but no video keyframe

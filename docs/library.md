@@ -2461,12 +2461,15 @@ Cut policy (keyframe alignment): a segment starts at the first **video
 keyframe** at/after `StartMs` (leading audio and mid-GOP video are dropped so
 the segment starts decodable) and ends right before the next video keyframe
 at/after `EndMs` (the straddling GOP is kept, so chaining segments loses no
-frame). An open-GOP keyframe stores pictures shown just before it after it in
-the file: the part before stops at the keyframe, and the part it opens keeps
-them (with the sound stored among them) at negative timestamps, ahead of its
-zero, as an MP4 edit list does, so `Join` gives the source back frame for frame.
-A cue on screen across a cut opens the next part at its zero. A range that
-contains media but no video keyframe is an explicit error. Audio-only sources
+frame). Every part after the first opens on its keyframe at 0; sound stored
+after that keyframe but timed before it goes to the part before. An open-GOP
+keyframe also stores, after it, pictures shown just before it, which decode
+only with the GOP before: they stay out of both parts, the part before holds its
+last picture to the cut, and a Matroska `Join` of the parts therefore lacks
+them, two or so pictures per seam, its timeline and sound intact. For an exact
+round trip of an open-GOP source, split and join it as MP4, whose edit list
+keeps them hidden. A range that contains media but no video keyframe is an
+explicit error. Audio-only sources
 cut exactly at the requested times.
 
 A segment's timeline starts at the first frame it actually keeps, not at the

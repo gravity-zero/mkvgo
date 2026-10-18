@@ -26,6 +26,11 @@ func TestSplitJoinMatrix(t *testing.T) {
 			}
 			// The cue is on screen at the first cut, and at the second too when it runs over both.
 			covered := map[matrix.Subtitle]int{matrix.CueOverCut: 1, matrix.CueOverTwoCuts: 2}[c.Subtitle]
+			for _, p := range parts[1:] {
+				if v := trackBlocks(collectAllBlocks(t, p))[matrix.VideoTrack]; v[0].Timecode != 0 || !v[0].Keyframe {
+					t.Errorf("%s opens on %s, want its keyframe at 0", filepath.Base(p), blockSeq(v[:1]))
+				}
+			}
 			for _, p := range parts[1 : 1+covered] {
 				if subs := trackBlocks(collectAllBlocks(t, p))[matrix.SubtitleTrack]; len(subs) == 0 || subs[0].Timecode > 0 {
 					t.Errorf("%s does not open on the cue on screen at its cut", filepath.Base(p))
@@ -34,7 +39,7 @@ func TestSplitJoinMatrix(t *testing.T) {
 			joined := filepath.Join(dir, "j.mkv")
 			mustNil(t, Join(ctx, parts, joined))
 			got := trackBlocks(collectAllBlocks(t, joined))
-			for track, want := range c.Blocks() {
+			for track, want := range joinedBlocks(c) {
 				if g, w := blockSeq(got[track]), blockSeq(want); g != w {
 					t.Errorf("track %d: the join does not give the source back:\n got %s\nwant %s", track, g, w)
 				}
@@ -59,4 +64,36 @@ func TestSplitJoinMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// joinedBlocks is what a join of the case's parts gives back: the source, less, on an open GOP, the leading pictures
+// stored after each cut keyframe, the picture before them held to the cut.
+func joinedBlocks(c matrix.Case) map[uint64][]mkv.Block {
+	out := c.Blocks()
+	if !c.OpenGOP {
+		return out
+	}
+	for _, cut := range c.ExpectedCuts() {
+		var video []mkv.Block
+		afterKey := false
+		for _, b := range out[matrix.VideoTrack] {
+			if b.Timecode == cut {
+				afterKey = true
+			} else if afterKey && b.Timecode < cut {
+				continue
+			} else if b.Timecode >= cut {
+				afterKey = false
+			}
+			video = append(video, b)
+		}
+		last := -1
+		for i, b := range video {
+			if b.Timecode < cut && (last < 0 || b.Timecode > video[last].Timecode) {
+				last = i
+			}
+		}
+		video[last].Duration = cut - video[last].Timecode
+		out[matrix.VideoTrack] = video
+	}
+	return out
 }

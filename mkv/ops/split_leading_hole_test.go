@@ -160,9 +160,9 @@ func TestSplit_ChaptersFollowThePartsFirstFrame(t *testing.T) {
 }
 
 // A source that reorders across the gate - the audio of the keyframe's instant
-// arriving after it in file order, slightly behind it in time - must still come
-// out with non-negative timestamps: the part's zero is the smallest timecode of
-// its first cluster, not the first block that happened to open the gate.
+// arriving after it in file order, slightly behind it in time - opens the part on
+// its keyframe at zero: the sound timed before it belongs to the part before (it
+// takes it), never ahead of this part's first picture.
 func TestSplit_LateBlocksBehindTheCutKeyframe(t *testing.T) {
 	dir := t.TempDir()
 
@@ -190,8 +190,8 @@ func TestSplit_LateBlocksBehindTheCutKeyframe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The audio at 5900 sits behind the keyframe at 6000 that opened the part,
-	// so the part's zero is 5900 and nothing lands before it.
+	// The audio at 5900 sits behind the keyframe at 6000 that opened the part:
+	// the part's zero is the keyframe, its sound starts with the next block.
 	for _, track := range []uint64{1, 2} {
 		for _, tc := range collectTimecodes(t, parts[0], 1_000_000, track) {
 			if tc < 0 {
@@ -204,11 +204,11 @@ func TestSplit_LateBlocksBehindTheCutKeyframe(t *testing.T) {
 	if len(video) == 0 || len(audio) == 0 {
 		t.Fatalf("empty part: video %v audio %v", video, audio)
 	}
-	if audio[0] != 0 {
-		t.Errorf("audio starts at %d, want 0 - it is the earliest block kept", audio[0])
+	if video[0] != 0 {
+		t.Errorf("video starts at %d, want 0 - the part opens on its keyframe", video[0])
 	}
-	if video[0] != 100 {
-		t.Errorf("video starts at %d, want 100 - 100 ms after the audio, as in the source", video[0])
+	if audio[0] != 400 {
+		t.Errorf("audio starts at %d, want 400 - the first block timed at or after the keyframe", audio[0])
 	}
 }
 
