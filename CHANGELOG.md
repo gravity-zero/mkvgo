@@ -94,6 +94,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   `RemuxToHLS`, `RemuxToABR` and `RemuxConcatToHLS` a source lying in the
   output directory under a name they write (`init.mp4`, `seg00001.m4s`,
   `v1/...`): the source was truncated, then removed.
+- The files lazy attachments are copied from count as inputs of `Mux` and
+  `EditMetadata`, and `MergeWithSubtitles` refuses to take an existing file
+  for its temporary merge, whose cleanup removed it.
 - `-f` replaces an existing output, never an input: `reindex`, `salvage`,
   `to-webm`, `from-mp4`, `add-attachment`, `remove-attachment`,
   `concat-segment`, `watermark-segment`, `forensic-segment`, `hls-segment`,

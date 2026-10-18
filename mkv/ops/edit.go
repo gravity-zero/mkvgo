@@ -169,7 +169,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	applyEdit(c, edit)
 	syncDurationMs(c)
 
-	out, err := createOutput(fs, dstPath, srcPath)
+	out, err := createOutput(fs, dstPath, append([]string{srcPath}, attachmentPaths(c.Attachments)...)...)
 	if err != nil {
 		return err
 	}

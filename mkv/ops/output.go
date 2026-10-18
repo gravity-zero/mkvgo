@@ -37,3 +37,14 @@ func sameFile(fs *mkv.FS, a, b string) bool {
 	fb, errB := fs.DoStat(b)
 	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
+
+// attachmentPaths are the files lazy attachments are copied from at write time: inputs like any source.
+func attachmentPaths(attachments []mkv.Attachment) []string {
+	var paths []string
+	for _, a := range attachments {
+		if a.DataPath != "" {
+			paths = append(paths, a.DataPath)
+		}
+	}
+	return paths
+}

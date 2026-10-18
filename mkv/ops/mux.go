@@ -28,11 +28,11 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 		return err
 	}
 
-	inputs := make([]string, len(opts.Tracks))
-	for i, in := range opts.Tracks {
-		inputs[i] = in.SourcePath
+	inputs := make([]string, 0, len(opts.Tracks))
+	for _, in := range opts.Tracks {
+		inputs = append(inputs, in.SourcePath)
 	}
-	out, err := createOutput(fs, opts.OutputPath, inputs...)
+	out, err := createOutput(fs, opts.OutputPath, append(inputs, attachmentPaths(opts.Attachments)...)...)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}

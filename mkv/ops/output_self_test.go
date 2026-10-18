@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
@@ -68,5 +69,77 @@ func TestOpsRefuseAnOutputThatIsAnInput(t *testing.T) {
 		if got, err := os.ReadFile(src); err != nil || !bytes.Equal(got, original) {
 			t.Fatalf("%s changed or removed its source (%v)", name, err)
 		}
+	}
+}
+
+// TestMuxRefusesAnOutputItsAttachmentsAreReadFrom pins that the files lazy attachments are copied from count as
+// inputs: muxing another file's tracks with a.mkv's attachments into a.mkv truncated it, then removed it.
+func TestMuxRefusesAnOutputItsAttachmentsAreReadFrom(t *testing.T) {
+	dir := t.TempDir()
+	write := func(path string) {
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"},
+			Attachments: []mkv.Attachment{{ID: 1, Name: "font.ttf", MIMEType: "font/ttf", Data: bytes.Repeat([]byte{7}, 4096)}}}
+		mw := writer.NewMKVWriter(f)
+		mustNil(t, mw.WriteStart())
+		mustNil(t, mw.WriteMetadata(c, []mkv.Track{videoTrack(1)}, 1000))
+		mustNil(t, mw.WriteClusterWithCues(0, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}))
+		mustNil(t, mw.Finalize())
+		mustNil(t, f.Close())
+	}
+	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
+	write(a)
+	write(b)
+	ctx := context.Background()
+	src, err := reader.OpenWithFS(ctx, a, nil, reader.WithoutAttachmentData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(a)
+	err = Mux(ctx, mkv.MuxOptions{OutputPath: a, Tracks: []mkv.TrackInput{{SourcePath: b, TrackID: 1}}, Attachments: src.Attachments})
+	if err == nil {
+		t.Error("a mux writing over the file its attachments are read from succeeded")
+	}
+	if after, err := os.ReadFile(a); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the attachments' file was changed or removed (%v)", err)
+	}
+	err = EditMetadata(ctx, b, a, func(c *mkv.Container) { c.Attachments = append(c.Attachments, src.Attachments...) })
+	if err == nil {
+		t.Error("an edit writing over the file an added attachment is read from succeeded")
+	}
+	if after, err := os.ReadFile(a); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the added attachment's file was changed or removed (%v)", err)
+	}
+}
+
+// TestMergeWithSubtitlesKeepsAFileNamedLikeItsTemp pins that the temporary merge next to the output never takes a
+// file that exists: a base named out.mkv.tmp was removed by the temporary file's cleanup.
+func TestMergeWithSubtitlesKeepsAFileNamedLikeItsTemp(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "out.mkv.tmp")
+	f, err := os.Create(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}}, []mkv.Track{videoTrack(1)}, 1000))
+	mustNil(t, mw.WriteClusterWithCues(0, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("v")}}))
+	mustNil(t, mw.Finalize())
+	mustNil(t, f.Close())
+	other := filepath.Join(dir, "other.mkv")
+	data, _ := os.ReadFile(base)
+	mustNil(t, os.WriteFile(other, data, 0o644))
+	srt := filepath.Join(dir, "s.srt")
+	mustNil(t, os.WriteFile(srt, []byte("1\n00:00:00,000 --> 00:00:01,000\nhi\n"), 0o644))
+	err = MergeWithSubtitles(context.Background(), base, srt, filepath.Join(dir, "out.mkv"), "eng", "", []mkv.MergeInput{{SourcePath: other}})
+	if err == nil {
+		t.Error("a merge whose temporary file is its base succeeded")
+	}
+	if after, err := os.ReadFile(base); err != nil || !bytes.Equal(after, data) {
+		t.Fatalf("the base named like the temporary file was changed or removed (%v)", err)
 	}
 }

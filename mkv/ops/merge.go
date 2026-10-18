@@ -91,6 +91,9 @@ func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, 
 	}
 
 	tmpPath := dstPath + ".tmp"
+	if _, err := fs.DoStat(tmpPath); err == nil {
+		return fmt.Errorf("%s already exists and the merge needs it for its temporary file: move it, or write the output elsewhere", shown.Path(tmpPath))
+	}
 	defer func() { _ = fs.DoRemove(tmpPath) }()
 
 	inputs := append([]mkv.MergeInput{{SourcePath: basePath}}, extraSources...)
