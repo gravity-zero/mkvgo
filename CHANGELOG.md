@@ -119,6 +119,10 @@ All notable changes to mkvgo are documented here. The format is based on
   Windows opens as a device; such a name now takes a leading `_`. Titles with
   path separators were already kept under `OutputDir`, now held by a test; the
   docs say that `Split` overwrites an existing part.
+- **The EBML lace size decoder refuses sizes that run over the block.** Its
+  running total could wrap past 2^63 back onto the payload's length, so 25
+  frames of 3.6e16 bytes passed it; the block reader refused them afterwards,
+  and the decoder now does itself.
 
 ## [0.55.1] - 2026-10-17
 

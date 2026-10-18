@@ -1519,6 +1519,9 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 			return nil, 0, fmt.Errorf("ebml lacing: invalid first-size vint")
 		}
 		firstSize := int(first & ^(uint64(1) << uint(width*7)))
+		if firstSize > n {
+			return nil, 0, fmt.Errorf("ebml lacing: first frame of %d bytes runs over the data %d", firstSize, n)
+		}
 		sizes[0] = firstSize
 		pos += width
 		total := firstSize
@@ -1543,7 +1546,9 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 			if sizes[i] < 0 {
 				return nil, 0, fmt.Errorf("ebml lacing: negative frame size at index %d", i)
 			}
-			total += sizes[i]
+			if total += sizes[i]; sizes[i] > n || total > n {
+				return nil, 0, fmt.Errorf("ebml lacing: frames past %d run over the data %d", i, n)
+			}
 		}
 		last := n - pos - total
 		if last < 0 {
