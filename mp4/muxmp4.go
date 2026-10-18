@@ -147,6 +147,10 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 // MergeSubtitle writes srcPath to dstPath with an SRT file added as a timed-text (tx3g) subtitle track.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	o := optionsFrom(opts)
+	// The SRT reaches the mux as memory, out of sight of its own output check.
+	if err := distinctOutput(o.FS, dstPath, srtPath); err != nil {
+		return err
+	}
 	entries, err := readSRT(o.FS, srtPath)
 	if err != nil {
 		return errf("merge-subtitle: %w", err)

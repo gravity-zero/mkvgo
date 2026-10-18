@@ -87,6 +87,22 @@ func TestMergeAndAddTrack(t *testing.T) {
 	mustVerify(t, dst2)
 }
 
+// TestMergeSubtitleNeverWritesOverItsSRT: the SRT is an input too, held in memory, and an output naming it is refused untouched.
+func TestMergeSubtitleNeverWritesOverItsSRT(t *testing.T) {
+	src := editFixture(t)
+	srt := filepath.Join(t.TempDir(), "s.srt")
+	cue := []byte("1\n00:00:01,000 --> 00:00:02,500\nHello\n")
+	if err := os.WriteFile(srt, cue, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeSubtitle(context.Background(), src, srt, srt, "fre", ""); err == nil || !strings.Contains(err.Error(), "also an input") {
+		t.Errorf("an output naming the SRT: %v", err)
+	}
+	if got, err := os.ReadFile(srt); err != nil || !bytes.Equal(got, cue) {
+		t.Errorf("the SRT changed: %d bytes (%d before) %v", len(got), len(cue), err)
+	}
+}
+
 func TestMergeSubtitleSRT(t *testing.T) {
 	src := editFixture(t)
 	srt := filepath.Join(t.TempDir(), "s.srt")
