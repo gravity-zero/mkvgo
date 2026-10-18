@@ -696,6 +696,11 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				br.clusterEnd = -1
 				continue
 			}
+			// An unknown-size cluster ends at a known Segment's end at the latest: what follows is not its child.
+			if br.clusterEnd < 0 && br.segEnd >= 0 && br.r.tell() >= br.segEnd {
+				br.inCluster = false
+				continue
+			}
 
 			// Read next element header (or use peeked one).
 			var h ebml.ElementHeader

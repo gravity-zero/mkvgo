@@ -114,7 +114,8 @@ Damage and resync:
   `reader.DamageError` names the repair in library terms.
 - A stream reader reads a large skip through instead of seeking.
 - `ReadStream`'s block walk ends at a known Segment's end, as the seekable one
-  does, instead of failing on the zero padding behind it.
+  does, instead of failing on the zero padding behind it, and a last Cluster
+  of unknown size ends there too.
 
 MP4:
 

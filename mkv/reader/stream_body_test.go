@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -96,5 +97,49 @@ func TestReadStreamBlocksEndAtTheSegment(t *testing.T) {
 	got, gerr := count(br)
 	if werr != io.EOF || gerr != io.EOF || got != want || want == 0 {
 		t.Errorf("stream walk: %d blocks, %v; seekable walk: %d blocks, %v", got, gerr, want, werr)
+	}
+}
+
+// TestUnknownSizeLastClusterEndsAtTheSegment pins that a last Cluster of unknown size ends at a known Segment's
+// end, for both block walks, instead of reading the padding behind it as its children.
+func TestUnknownSizeLastClusterEndsAtTheSegment(t *testing.T) {
+	known := realCluster()
+	_, hn, err := ebml.ReadElementHeader(bytes.NewReader(known))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := append([]byte{0x1F, 0x43, 0xB6, 0x75, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, known[hn:]...)
+	var body bytes.Buffer
+	body.Write(masterElem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3)))
+	body.Write(masterElem(mkv.IDTracks, masterElem(mkv.IDTrackEntry,
+		uintElem(mkv.IDTrackNumber, 1, 1), uintElem(mkv.IDTrackType, mkv.TrackTypeVideo, 1))))
+	body.Write(cluster)
+	var file bytes.Buffer
+	ebml.WriteElementHeader(&file, ebml.IDEBMLHeader, 0)
+	ebml.WriteElementHeader(&file, mkv.IDSegment, int64(body.Len()))
+	file.Write(body.Bytes())
+	file.Write(make([]byte, 4096))
+	count := func(br *BlockReader) (int, error) {
+		n := 0
+		for {
+			if _, err := br.Next(); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+	seekable, err := NewBlockReader(bytes.NewReader(file.Bytes()), 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := count(seekable); n != 1 || err != io.EOF {
+		t.Errorf("seekable walk: %d blocks, %v; want 1 and EOF", n, err)
+	}
+	_, br, err := ReadStream(context.Background(), bytes.NewReader(file.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := count(br); n != 1 || err != io.EOF {
+		t.Errorf("stream walk: %d blocks, %v; want 1 and EOF", n, err)
 	}
 }
