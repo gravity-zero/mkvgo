@@ -86,3 +86,49 @@ func TestUnchangedLanguageKeepsItsBCP47Tag(t *testing.T) {
 		}
 	}
 }
+
+// TestEditCallbackLanguageTakesEffect pins that a language an edit callback changes is the one players see, through
+// EditMetadata and EditInPlace alike, as the MP4 engine does: the stale BCP-47 tag no longer overrides it.
+func TestEditCallbackLanguageTakesEffect(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := audioTrack(2)
+	audio.Language, audio.LanguageBCP47 = "eng", "en"
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}}, []mkv.Track{videoTrack(1), audio}, 2000))
+	for tc := int64(0); tc < 2000; tc += 500 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("v")},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")},
+		}))
+	}
+	mustNil(t, mw.Finalize())
+	mustNil(t, f.Close())
+	ctx := context.Background()
+	toJapanese := func(c *mkv.Container) {
+		for i := range c.Tracks {
+			if c.Tracks[i].ID == 2 {
+				c.Tracks[i].Language = "jpn"
+			}
+		}
+	}
+	edited := filepath.Join(dir, "edited.mkv")
+	mustNil(t, EditMetadata(ctx, src, edited, toJapanese))
+	mustNil(t, EditInPlace(ctx, src, toJapanese))
+	for _, path := range []string{edited, src} {
+		c, err := reader.Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tr := range c.Tracks {
+			if tr.ID == 2 && tr.ResolvedLanguage() != "jpn" {
+				t.Errorf("%s: language %q (BCP-47 %q) after the callback set jpn", filepath.Base(path), tr.ResolvedLanguage(), tr.LanguageBCP47)
+			}
+		}
+	}
+}

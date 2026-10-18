@@ -33,7 +33,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		return err
 	}
 
-	edit(c)
+	applyEdit(c, edit)
 	syncDurationMs(c)
 
 	region, err := findMetadataRegion(path, fs)

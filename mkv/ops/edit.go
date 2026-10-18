@@ -166,7 +166,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 		return err
 	}
 
-	edit(c)
+	applyEdit(c, edit)
 	syncDurationMs(c)
 
 	out, err := createOutput(fs, dstPath, srcPath)

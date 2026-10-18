@@ -1875,6 +1875,8 @@ err := matroska.EditMetadata(ctx, "input.mkv", "output.mkv",
 )
 ```
 
+A track whose `Language` the callback changes while leaving its `LanguageBCP47` loses that tag, in `EditMetadata` and `EditInPlace` alike (and as the MP4 engine does): the tag takes precedence, and would keep the old language in effect. Set `LanguageBCP47` in the callback to keep or give one.
+
 The attachments the callback inherits are not loaded: `Attachment.Data` is nil, `DataPath`/`DataOffset`/`Size` say where each payload lives, and the writer copies it through from there - so a font set never becomes resident on the way to the output. The same holds for every op that merely carries attachments (`RemoveTrack`, `AddTrack`, `Split`, `Join`, `Merge`, `MergeSubtitle`, `MergeASS`); an attachment the callback ADDS is written from its `Data`, and `ExtractAttachment` reads a payload whole because that is its job. A callback that needs the bytes of an inherited attachment asks for them: `matroska.LoadAttachmentData(ctx, &c.Attachments[i])` fills `Data` from disk (a no-op on an attachment that already holds it).
 
 ### In-place (instant, headers only)

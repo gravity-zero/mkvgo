@@ -104,6 +104,9 @@ Matroska reading:
   patch's `language`, `add-track`, `mux`) is the one in effect: the source's
   LanguageBCP47, which takes precedence, kept the old language. A language
   passed through unchanged, as `merge` does, keeps its BCP-47 tag.
+- A language an `EditMetadata` or `EditInPlace` callback changes on a Matroska
+  track takes effect: the tag the callback left untouched is dropped, as the
+  MP4 engine does.
 - `ReadStream` describes a file as `Read` does: it runs the same decoders,
   and a differential fuzz target (`FuzzReadVsReadStream`) holds them together.
   It streams each element through them instead of holding its body, so an

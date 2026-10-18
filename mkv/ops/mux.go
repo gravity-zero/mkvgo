@@ -240,3 +240,19 @@ func setLanguage(t *mkv.Track, lang string) {
 	}
 	t.Language, t.LanguageBCP47 = lang, ""
 }
+
+// applyEdit runs an edit callback over c, then drops the BCP-47 tag of every track whose language the callback
+// changed but whose tag it left: the tag takes precedence, and would keep the old language in effect.
+func applyEdit(c *mkv.Container, edit func(*mkv.Container)) {
+	before := make(map[uint64][2]string, len(c.Tracks))
+	for _, t := range c.Tracks {
+		before[t.ID] = [2]string{t.Language, t.LanguageBCP47}
+	}
+	edit(c)
+	for i := range c.Tracks {
+		t := &c.Tracks[i]
+		if b, ok := before[t.ID]; ok && t.Language != b[0] && t.LanguageBCP47 == b[1] {
+			t.LanguageBCP47 = ""
+		}
+	}
+}
