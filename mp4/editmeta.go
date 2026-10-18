@@ -374,6 +374,10 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 				oldChap[id] = true
 			}
 		}
+		// A reference to no trak at all (track_ID 0 on some muxers' files) would make players look for the new chapters there.
+		for id := range danglingRefs(boxes) {
+			oldChap[id] = true
+		}
 	}
 	maxID := uint32(0)
 	trakIdx := -1

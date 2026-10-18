@@ -324,6 +324,9 @@ func collectTraks(payload []byte, drop map[int]bool, limit int64) (traks []*rwTr
 			removedIDs[id] = true
 		}
 	}
+	for id := range danglingRefs(boxes) {
+		removedIDs[id] = true
+	}
 	chapIDs := chapterTrackRefs(boxes)
 	idx = -1
 	var kept []memBox
@@ -554,6 +557,43 @@ func trakChunks(trak []byte, limit int64) ([]rwChunk, error) {
 		return nil, fmt.Errorf("chunk table covers %d samples but stsz lists %d", si, len(sizes))
 	}
 	return chunks, nil
+}
+
+// danglingRefs is the set of track_IDs some trak's tref names but no trak in the moov carries.
+func danglingRefs(boxes []memBox) map[uint32]bool {
+	present := map[uint32]bool{}
+	for _, b := range boxes {
+		if b.typ == "trak" {
+			id, _ := trakID(b.payload)
+			present[id] = true
+		}
+	}
+	gone := map[uint32]bool{}
+	for _, b := range boxes {
+		if b.typ != "trak" {
+			continue
+		}
+		tb, err := iterBoxes(b.payload)
+		if err != nil {
+			continue
+		}
+		tref, ok := findMemBox(tb, "tref")
+		if !ok {
+			continue
+		}
+		refs, err := iterBoxes(tref.payload)
+		if err != nil {
+			continue
+		}
+		for _, r := range refs {
+			for off := 0; off+4 <= len(r.payload); off += 4 {
+				if id := binary.BigEndian.Uint32(r.payload[off:]); !present[id] {
+					gone[id] = true
+				}
+			}
+		}
+	}
+	return gone
 }
 
 // dropTrefIDs removes the references to the given track_IDs from a trak's tref.

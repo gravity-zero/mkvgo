@@ -330,3 +330,48 @@ func TestJoinRefusesALongAudioGap(t *testing.T) {
 		}
 	}
 }
+
+// TestDanglingChapterRefIsDropped: a tref/chap naming track_ID 0 (no trak) is left out by a rewrite and replaced by new chapters.
+func TestDanglingChapterRefIsDropped(t *testing.T) {
+	src := editFixture(t)
+	rewriteTailMoov(t, src, func(p []byte) []byte {
+		return mapTraks(t, p, func(i int, trak []byte) []byte {
+			tb, err := iterBoxes(trak)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var w bw
+			for _, b := range tb {
+				if b.typ == "tref" {
+					continue
+				}
+				w.bytes(box(b.typ, b.payload))
+				if b.typ == "tkhd" {
+					w.bytes(buildTrefChap(0))
+				}
+			}
+			return w.b
+		})
+	})
+	if len(danglingRefs(moovBoxesOf(t, src))) == 0 {
+		t.Fatal("fixture has no dangling reference")
+	}
+	dst := filepath.Join(t.TempDir(), "rw.mp4")
+	if err := Rewrite(context.Background(), src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if d := danglingRefs(moovBoxesOf(t, dst)); len(d) != 0 {
+		t.Errorf("rewrite kept references to %v", d)
+	}
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "B", StartMs: 3000}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if d := danglingRefs(moovBoxesOf(t, src)); len(d) != 0 {
+		t.Errorf("the edit kept references to %v next to its chapter track", d)
+	}
+	if n := len(mustMeta(t, src).Chapters); n != 2 {
+		t.Errorf("%d chapters", n)
+	}
+}

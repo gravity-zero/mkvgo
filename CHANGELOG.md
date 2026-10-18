@@ -63,7 +63,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   refuses a longer one, and gives a split's parts back sample for sample.
   Fragmented and encrypted MP4 are refused, as are an output that is one of
   the inputs and a mux, merge or join mixing MP4 and Matroska; what MP4
-  cannot hold (attachments, styled ASS) still goes through `from-mp4` / `to-mp4`.
+  cannot hold (attachments, styled ASS) still goes through `from-mp4` / `to-mp4`. A track
+  reference naming no trak is dropped.
 - `mp4.LanguageFields` turns a user's language into the 3-letter code and the
   BCP-47 tag; `mkvgo.EditInPlace` routes either container.
 - `subtitle.ParseSRTReader` (and `matroska.ParseSRTReader`) parses SRT from a reader.
