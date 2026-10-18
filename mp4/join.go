@@ -153,6 +153,9 @@ func sameStreams(a, b *cutModel) error {
 	return nil
 }
 
+// maxAudioGapMs is the longest audio gap a join hides by stretching the last sample; players drift past it.
+const maxAudioGapMs = 500
+
 // joinTables lays track ti of every file on the output timeline; lead is how late it starts when the first files lack it.
 func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *trakTable, lead int64, err error) {
 	first := &models[0].tracks[ti]
@@ -237,6 +240,8 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 				for typ := range groupTypes {
 					out.groups[typ] = append(out.groups[typ], 0)
 				}
+			case gap > 0 && first.handler == "soun" && rescale(gap, first.ts, 1000) > maxAudioGapMs:
+				return nil, 0, fmt.Errorf("file %d's audio starts %d ms after the previous file's ends, more than the %d ms a join fills by holding the last sample: remux the files to MKV (from-mp4) and join there", k+1, rescale(gap, first.ts, 1000), maxAudioGapMs)
 			case gap > 0:
 				if int64(last.dur)+gap > math.MaxUint32 {
 					return nil, 0, fmt.Errorf("file %d starts %d ticks after the previous one ends, a gap one sample cannot span: join files that follow each other", k+1, gap)

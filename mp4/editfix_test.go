@@ -308,3 +308,25 @@ func TestProbeReadsChapterTrackOnlyTitles(t *testing.T) {
 		t.Errorf("probe chapters %q", got)
 	}
 }
+
+// TestJoinRefusesALongAudioGap: an audio gap a held last sample would fill is stretched up to maxAudioGapMs, refused past it.
+func TestJoinRefusesALongAudioGap(t *testing.T) {
+	mk := func() *cutModel {
+		samples := []rwSample{{dts: 0, dur: 500, size: 1, sync: true}, {dts: 500, dur: 500, size: 1, sync: true}}
+		return &cutModel{movieTS: 1000, movieNs: 2 * nsPerSec, tracks: []cutTrack{{tt: &trakTable{samples: samples}, ts: 1000, handler: "soun", edit: simpleEdit{segDur: -1}}}}
+	}
+	for _, c := range []struct {
+		next int64
+		ok   bool
+	}{{1400, true}, {1500, true}, {1501, false}, {2000, false}} {
+		var vs vsource
+		tt, _, err := joinTables([]*cutModel{mk(), mk()}, []int64{0, c.next * 1_000_000}, 0, &vs)
+		if (err == nil) != c.ok {
+			t.Errorf("next file at %d ms: err %v", c.next, err)
+			continue
+		}
+		if c.ok && tt.samples[1].dur != uint32(c.next-500) {
+			t.Errorf("next file at %d ms: last sample lasts %d ticks", c.next, tt.samples[1].dur)
+		}
+	}
+}

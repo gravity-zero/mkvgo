@@ -98,7 +98,8 @@ All notable changes to mkvgo are documented here. The format is based on
   split opens each part on a video keyframe with a recomputed edit list, so the
   audio stays in sync; a join resumes each file where the previous one's
   presentation ends, without replaying the priming or the padding its edit
-  list hides, and gives a split's parts back sample for sample. Fragmented and
+  list hides, holds the last audio sample over a gap up to 500 ms and refuses
+  a longer one, and gives a split's parts back sample for sample. Fragmented and
   encrypted MP4 are refused; what MP4 cannot hold (attachments, styled ASS)
   still goes through `from-mp4` / `to-mp4`. `mkvgo.EditInPlace` routes either
   container, and `mp4.LanguageFields` splits a language as a user gives it
