@@ -99,6 +99,10 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- **An EBML lace of one frame is that frame.** RFC 9559 codes the size of
+  every frame but the last, so such a lace codes none; the full decoder read
+  the frame's first bytes as a size and cut it short, the header-only one
+  refused the block.
 - **The keyframe walks resync past a block that overruns its Cluster,
   and a block whose track number runs past it is refused whether its track is
   kept or filtered.** The keyframe index lost the next Cluster's keyframes;

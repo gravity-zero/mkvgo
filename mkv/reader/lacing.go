@@ -112,6 +112,10 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 		}
 		return sizes, 0, nil
 	case lacingEBML:
+		if frameCount == 1 {
+			sizes[0] = n // only the last frame's size goes uncoded: a lace of one codes none
+			return sizes, 0, nil
+		}
 		pos := 0
 		first, width := readVINTFromBuf(raw[pos:])
 		if width == 0 {
