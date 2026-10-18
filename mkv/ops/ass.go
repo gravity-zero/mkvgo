@@ -53,7 +53,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 		}
 	}
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath, assPath)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	br.KeepTracks(trackID)
 	dmg := tolerateSubtitleDamage(br, opts)
 
-	out, err := fs.DoCreate(outPath)
+	out, err := createOutput(fs, outPath, srcPath)
 	if err != nil {
 		return err
 	}

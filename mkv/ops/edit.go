@@ -61,7 +61,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 		c.Tags = keptTags
 	}
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	// A file with one more track is not the file it came from (derivedSegmentUID).
 	meta.Info.SegmentUID = derivedSegmentUID(&c.Info, srcPath, "add-track")
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	edit(c)
 	syncDurationMs(c)
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath)
 	if err != nil {
 		return err
 	}

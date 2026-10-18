@@ -184,7 +184,7 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	}
 	defer raw.Close()
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: create dst: %w", err)
 	}

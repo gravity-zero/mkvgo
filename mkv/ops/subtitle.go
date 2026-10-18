@@ -48,7 +48,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	br.KeepTracks(trackID)
 	dmg := tolerateSubtitleDamage(br, opts)
 
-	out, err := fs.DoCreate(outPath)
+	out, err := createOutput(fs, outPath, srcPath)
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 		}
 	}
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath, srtPath)
 	if err != nil {
 		return err
 	}

@@ -691,7 +691,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	}
 	defer raw.Close()
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, srcPath)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("reindex create dst: %w", err)
 	}

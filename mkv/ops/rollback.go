@@ -580,7 +580,7 @@ func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, ds
 		repairedSize = st.Size()
 	}
 
-	out, err := fs.DoCreate(dstPath)
+	out, err := createOutput(fs, dstPath, repairedPath)
 	if err != nil {
 		return fmt.Errorf("rollback: create output: %w", err)
 	}

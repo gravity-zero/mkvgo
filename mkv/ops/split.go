@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
@@ -350,14 +348,4 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	return splitplan.ClipChapters(chapters, startMs, endMs)
-}
-
-// sameFile reports whether a and b name one file: the same path, or two paths the filesystem resolves to one file.
-func sameFile(fs *mkv.FS, a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
-	}
-	fa, errA := fs.DoStat(a)
-	fb, errB := fs.DoStat(b)
-	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
