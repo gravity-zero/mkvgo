@@ -205,14 +205,29 @@ func (p *parser) readHeader() (ebml.ElementHeader, int, error) {
 }
 
 // pastParent reports a child declaring more bytes than its parent holds (or an unknown size), and seats the parser on
-// the parent's end: the rest of the parent is skipped, so the child does not swallow what follows it.
+// the parent's end: the rest of the parent is skipped, so the child does not swallow what follows it. Unless the
+// parent is the one whose size is wrong: its end opens no segment-level element and the child's end does (a seekable
+// read only: a streamed element cannot be looked past).
 func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 	pos, err := p.r.Seek(0, io.SeekCurrent)
 	if err != nil || (eh.Size >= 0 && pos+eh.Size <= end) {
 		return false
 	}
+	if _, streamed := p.r.(*bodyReader); !streamed && eh.Size >= 0 && !p.segmentElementAt(end) && p.segmentElementAt(pos+eh.Size) {
+		_, _ = p.r.Seek(pos, io.SeekStart)
+		return false
+	}
 	_, _ = p.r.Seek(end, io.SeekStart)
 	return true
+}
+
+// segmentElementAt reports whether a segment-level element ID starts at off; the read position is left anywhere.
+func (p *parser) segmentElementAt(off int64) bool {
+	if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+		return false
+	}
+	id, _, err := ebml.ReadElementID(p.r)
+	return err == nil && isSegmentLevelID(id)
 }
 
 func (p *parser) skip(size int64) error {

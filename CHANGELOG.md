@@ -102,6 +102,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska parent declaring less than its last child needs (a damaged Info
+  whose last string runs into the Tracks) no longer hides what follows: the
+  child is read when its end, not the parent's, opens a segment-level element.
 - A Matroska rewrite of the Tracks (`EditInPlace`, `EditMetadata`, `Split`,
   `Join`, `Mux`...) keeps the Colour element's sample layout: bits per channel,
   chroma and Cb subsampling and chroma siting were dropped. Read into

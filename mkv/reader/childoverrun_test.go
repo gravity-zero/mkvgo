@@ -48,3 +48,43 @@ func TestChildPastItsParent(t *testing.T) {
 		}
 	}
 }
+
+// TestParentTooShortForItsLastChild: a parent declaring a byte less than its last child needs (a corrupted Info
+// whose WritingApp runs into the Tracks) is the one whose size is wrong when the child's end, not the parent's,
+// opens a segment-level element: the seekable reader reads the child and finds the Tracks right after it.
+func TestParentTooShortForItsLastChild(t *testing.T) {
+	var info bytes.Buffer
+	info.Write(uintEl(mkv.IDTimecodeScale, 1000000))
+	ebml.WriteElementHeader(&info, mkv.IDWritingApp, 6)
+	ebml.WriteString(&info, "vpxenc")
+	var te bytes.Buffer
+	te.Write(uintEl(mkv.IDTrackNumber, 1))
+	te.Write(uintEl(mkv.IDTrackType, mkv.TrackTypeVideo))
+	ebml.WriteElementHeader(&te, mkv.IDCodecID, 5)
+	ebml.WriteString(&te, "V_VP9")
+	var seg bytes.Buffer
+	ebml.WriteElementHeader(&seg, mkv.IDInfo, int64(info.Len()-1)) // a byte short of its WritingApp
+	seg.Write(info.Bytes())
+	seg.Write(wrapEl(mkv.IDTracks, wrapEl(mkv.IDTrackEntry, te.Bytes())))
+	seg.Write(realCluster())
+	var buf bytes.Buffer
+	writeEBMLHeader(&buf)
+	writeSegmentStart(&buf, int64(seg.Len()))
+	buf.Write(seg.Bytes())
+	for name, read := range map[string]func() (*mkv.Container, error){
+		"Read": func() (*mkv.Container, error) {
+			return Read(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
+		},
+		"OpenMeta": func() (*mkv.Container, error) {
+			return ReadMeta(context.Background(), bytes.NewReader(buf.Bytes()), "x.mkv")
+		},
+	} {
+		c, err := read()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(c.Tracks) != 1 || c.Info.WritingApp != "vpxenc" {
+			t.Errorf("%s: %d tracks, writing app %q; want the VP9 track and vpxenc", name, len(c.Tracks), c.Info.WritingApp)
+		}
+	}
+}
