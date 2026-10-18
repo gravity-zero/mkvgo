@@ -170,6 +170,12 @@ Serving:
 - `serve` and `serve-growing` time out slow clients (10 s header, 2 min
   idle, 5 min HLS response).
 
+WebAssembly:
+
+- A string where a number belongs (a segment index, a track id, a
+  `keepTracks` entry) is a rejected promise naming the argument: it panicked
+  outside the promise and ended the Go program, so every later call failed.
+
 ### Documentation
 
 - `SECURITY.md` says how to report a vulnerability and what is in scope.

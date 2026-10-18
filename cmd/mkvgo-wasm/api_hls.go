@@ -21,7 +21,10 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 		return promise(func() (any, error) { return nil, fmt.Errorf("openHLS: missing input") })
 	}
 	input := args[0]
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	cenc, cencErr := readCENCOpts(optArg(args, 1))
 	enc, encErr := readEncryptOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
@@ -81,7 +84,10 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "segment: the index")
+			if err != nil {
+				return rejected(err)
+			}
 			ctx, release := signalContext(optArg(rargs, 1))
 			return promise(func() (any, error) {
 				defer release()
@@ -128,7 +134,10 @@ func openABRJS(_ js.Value, args []js.Value) any {
 	for i := 0; i < n; i++ {
 		inputs[i] = inputsVal.Index(i)
 	}
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	cenc, cencErr := readCENCOpts(optArg(args, 1))
 	enc, encErr := readEncryptOpts(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
@@ -217,7 +226,10 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 	for i := 0; i < n; i++ {
 		inputs[i] = inputsVal.Index(i)
 	}
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	keepLangs := readKeepLangs(optArg(args, 1))
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {

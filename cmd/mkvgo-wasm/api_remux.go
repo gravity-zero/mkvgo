@@ -16,10 +16,10 @@ import (
 )
 
 // remuxOpts reads the optional remux options object.
-func readRemuxOpts(args []js.Value, idx int) mp4.Options {
+func readRemuxOpts(args []js.Value, idx int) (mp4.Options, error) {
 	var o mp4.Options
 	if len(args) <= idx || args[idx].Type() != js.TypeObject {
-		return o
+		return o, nil
 	}
 	v := args[idx]
 	o.FastStart = v.Get("fastStart").Truthy()
@@ -35,7 +35,11 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 		n := k.Get("length").Int()
 		o.KeepTracks = make([]uint64, 0, n)
 		for i := 0; i < n; i++ {
-			o.KeepTracks = append(o.KeepTracks, uint64(k.Index(i).Int()))
+			id, err := intArg(k.Index(i), "keepTracks: each track id")
+			if err != nil {
+				return o, err
+			}
+			o.KeepTracks = append(o.KeepTracks, uint64(id))
 		}
 	}
 	if s := v.Get("subOffsetMs"); s.Type() == js.TypeNumber {
@@ -68,7 +72,7 @@ func readRemuxOpts(args []js.Value, idx int) mp4.Options {
 			}
 		}
 	}
-	return o
+	return o, nil
 }
 
 // readKeepLangs reads the optional `keepLangs` array of language codes from
@@ -274,7 +278,10 @@ func remuxCall(args []js.Value, out string, run func(context.Context, mp4.Option
 		return promise(func() (any, error) { return nil, fmt.Errorf("missing input") })
 	}
 	input := args[0]
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	ctx, release := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer release()
@@ -300,7 +307,10 @@ func remuxToHLSJS(_ js.Value, args []js.Value) any {
 		return promise(func() (any, error) { return nil, fmt.Errorf("missing input") })
 	}
 	input := args[0]
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	ctx, release := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer release()
@@ -338,7 +348,11 @@ func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 		return promise(func() (any, error) { return nil, fmt.Errorf("extractSubtitleVTT: need (input, trackId)") })
 	}
 	input := args[0]
-	trackID := uint64(args[1].Int())
+	id, err := intArg(args[1], "extractSubtitleVTT: the track id")
+	if err != nil {
+		return rejected(err)
+	}
+	trackID := uint64(id)
 	return promise(func() (any, error) {
 		if isBlob(input) {
 			return nil, fmt.Errorf("extractSubtitleVTT needs a Uint8Array")

@@ -278,7 +278,10 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 		return promise(func() (any, error) { return nil, fmt.Errorf("openForensic: missing input") })
 	}
 	input := args[0]
-	opts := readRemuxOpts(args, 1)
+	opts, err := readRemuxOpts(args, 1)
+	if err != nil {
+		return rejected(err)
+	}
 	openCtx, openRelease := signalContext(optArg(args, 1))
 	return promise(func() (any, error) {
 		defer openRelease()
@@ -302,7 +305,10 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "the segment index")
+			if err != nil {
+				return rejected(err)
+			}
 			fromB := len(rargs) > 1 && rargs[1].Truthy()
 			ctx, release := signalContext(optArg(rargs, 2))
 			return promise(func() (any, error) {
@@ -320,7 +326,10 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
 				})
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "the segment index")
+			if err != nil {
+				return rejected(err)
+			}
 			pattern := toGoBytes(rargs[1])
 			ctx, release := signalContext(optArg(rargs, 2))
 			return promise(func() (any, error) {
@@ -336,7 +345,10 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("distinct: missing index") })
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "the segment index")
+			if err != nil {
+				return rejected(err)
+			}
 			ctx, release := signalContext(optArg(rargs, 1))
 			return promise(func() (any, error) {
 				defer release()
@@ -405,7 +417,10 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 		})
 	}
 	inputs := []js.Value{args[0], args[1]}
-	opts := readRemuxOpts(args, 2)
+	opts, err := readRemuxOpts(args, 2)
+	if err != nil {
+		return rejected(err)
+	}
 	openCtx, openRelease := signalContext(optArg(args, 2))
 	return promise(func() (any, error) {
 		defer openRelease()
@@ -429,7 +444,10 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "the segment index")
+			if err != nil {
+				return rejected(err)
+			}
 			fromB := len(rargs) > 1 && rargs[1].Truthy()
 			ctx, release := signalContext(optArg(rargs, 2))
 			return promise(func() (any, error) {
@@ -447,7 +465,10 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
 				})
 			}
-			n := rargs[0].Int()
+			n, err := intArg(rargs[0], "the segment index")
+			if err != nil {
+				return rejected(err)
+			}
 			pattern := toGoBytes(rargs[1])
 			ctx, release := signalContext(optArg(rargs, 2))
 			return promise(func() (any, error) {
