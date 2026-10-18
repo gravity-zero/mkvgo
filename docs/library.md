@@ -1761,6 +1761,46 @@ streaming form.
 
 ---
 
+## Editing MP4/MOV natively
+
+The `mp4` package edits MP4/MOV files without going through Matroska. Every operation copies the samples and sample descriptions (`stsd`, with every codec, colour, HDR and Dolby Vision box) byte for byte and writes only new tables. Track numbers are the probe's (`mp4.OpenMeta`): a trak the probe does not list (timecode, chapter text) is never counted. Fragmented MP4 is refused (remux it to a progressive MP4 first: `from-mp4`, then `to-mp4`), and so is an encrypted track (`saio` points into the file and would be orphaned).
+
+```go
+// In place: the moov alone is rewritten, whatever the file size.
+err := mp4.EditInPlace(ctx, "movie.mp4", func(c *mkv.Container) {
+    c.Info.Title = "Movie"
+    c.Tracks[1].Language = "fre"
+    c.Tracks[1].IsForced = true
+    c.Chapters = []mkv.Chapter{{ID: 1, Title: "Intro", StartMs: 0}, {ID: 2, Title: "Act 1", StartMs: 90_000}}
+})
+
+// Into a new, fast-start file.
+err = mp4.EditMetadata(ctx, "in.mp4", "out.mp4", func(c *mkv.Container) { c.Info.Title = "Movie" })
+err = mp4.SetChapters(ctx, "in.mp4", "out.mp4", chapters)
+err = mp4.RemoveTrack(ctx, "in.mp4", "out.mp4", []uint64{3})
+err = mp4.Rewrite(ctx, "in.mov", "out.mov") // fast start, free space and retired moovs dropped
+
+parts, err := mp4.Split(ctx, mkv.SplitOptions{SourcePath: "in.mp4", OutputDir: "parts", ByChapters: true})
+err = mp4.Join(ctx, parts, "joined.mp4")
+
+err = mp4.Mux(ctx, mkv.MuxOptions{OutputPath: "out.mp4", Title: "Movie", Tracks: []mkv.TrackInput{
+    {SourcePath: "video.mp4", TrackID: 1, IsDefault: true},
+    {SourcePath: "audio.mov", TrackID: 1, Language: "fre", IsDefault: true},
+}})
+err = mp4.Merge(ctx, mkv.MergeOptions{OutputPath: "out.mp4", Inputs: []mkv.MergeInput{{SourcePath: "a.mp4"}, {SourcePath: "b.mp4", TrackIDs: []uint64{2}}}})
+err = mp4.AddTrack(ctx, "in.mp4", "out.mp4", mkv.TrackInput{SourcePath: "commentary.m4a", TrackID: 1, Language: "eng", Name: "Commentary"})
+err = mp4.MergeSubtitle(ctx, "in.mp4", "subs.srt", "out.mp4", "fre", "Français")
+```
+
+- **What an edit may change**: the title, the file-level tags (`TITLE`, `ARTIST`, `ALBUM`, `DATE_RELEASED`, `GENRE`, `COMMENT`, `ENCODER`, `COMPOSER`, `DESCRIPTION` → iTunes `ilst`), the chapters (flat, titled: a Nero `chpl` plus the QuickTime chapter track Apple players read; an open last chapter ends with the movie) and each track's `Language` (the 3-letter ISO 639-2 code `mdhd` holds), `LanguageBCP47` (an `elng` box, checked for a BCP-47 shape; `mp4.LanguageFields("pt-BR")` gives both fields, the 3-letter code `und` when the tag's language is a 2-letter one: give the code yourself for the players that ignore `elng`), `Name` (`udta/name` and the `hdlr` name), `IsDefault` (`tkhd` enabled flag) and `IsForced` (a DASH-role `kind` box). Any other change is refused by field name before anything is written; a track-targeted tag or one outside the list is refused too. An MP4 tag applies to the whole file, so a Matroska target level (`TRACK`, `ALBUM`...) is not stored. A `chpl` stores chapter starts only: the last chapter ends with the movie, which a merged track running longer lengthens. A MOV's QuickTime text atoms (`udta/©nam`…) are read, and replaced rather than duplicated.
+- **`EditInPlace`** is crash-ordered like `RetimeTracks`: the new moov (behind a small `mdat` holding the chapter titles when the chapters change) is appended and synced, then the old one becomes a `free` box with a 4-byte flip. A faststart file is no longer faststart afterwards; `Rewrite` (or `to-mp4`) compacts it. Editing nothing writes nothing.
+- **`Split`** follows `matroska.Split` (ranges, `ByChapters`, `EveryMs`, `Pattern` defaulting to `part_%03d.mp4`, `{title}`): a part opens on the first video keyframe at or after its start and stops at the first one at or after its end; every range is checked before the first part is written. Each part gets a recomputed edit list, so the audio stays in sync with the picture (a source's audio delay survives in the first part, the encoder priming too). The first AAC frames of a part after the first decode slightly differently, as with any cut without re-encoding. With an open-GOP stream (HEVC CRA), the leading pictures of a cut's keyframe stay with the next part, where they cannot be decoded: the earlier part ends a few frames short. `Join` gives them back.
+- **`Join`** concatenates files with the same streams: the same tracks, timescales and byte-identical sample descriptions, refused by name otherwise. Each file starts where the previous one's presentation ends: the priming and the end padding an edit list hides are not replayed at the seams, so the timeline does not drift; a subtitle gap is filled with an empty cue. Joining the parts of a split gives back the source's samples and timing exactly, its chapters whole.
+- **`Mux` / `Merge` / `AddTrack` / `MergeSubtitle`** take every input from MP4/MOV sources (`MergeSubtitle`: an SRT file, carried as `tx3g`). `Language`/`Name` override when set, `IsDefault` always (as `matroska.Mux`); `Mux` takes its title, tags and chapters from `MuxOptions`, the others from the first input. Track references between sources are dropped and the chapter track rebuilt; a MOV track entering an MP4 gets its language and handler name in their ISO form, an MP4 track entering a MOV its handler name as a Pascal string. The output's movie timescale is a common multiple of the sources' (the larger one past 2^30), so every edit list stays exact. MP4 carries no attachments: `Mux` refuses them.
+- Outputs are fast start (`ftyp`, `moov`, `mdat`), 64-bit chunk offsets past 4 GiB; a failed write leaves no output, and an output that is one of the inputs is refused. `Options.Progress` and `Options.OnDrop` (a timecode or other non-media trak that a split, join or mux does not carry) apply.
+
+The root package routes `mkvgo.EditInPlace` to `matroska.EditInPlace` or `mp4.EditInPlace` from the file's first bytes, like `mkvgo.RetimeTracks`.
+
 ## Mux / Demux
 
 **Mux** -- combine tracks from multiple sources:

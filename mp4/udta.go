@@ -27,6 +27,45 @@ var metaAtomNames = map[string]string{
 // (©nam), for Info.Title, and the cover art (covr) as a Matroska-style
 // attachment. Other non-text values are skipped.
 func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment, hashes map[uint32]string) {
+	tags, title, cover, hashes = parseIlstTags(udtaBoxes)
+	for _, b := range udtaBoxes {
+		name, ok := metaAtomNames[b.typ]
+		if !ok || hasTag(tags, name) {
+			continue
+		}
+		if val := quickTimeText(b.payload); val != "" {
+			tags = append(tags, mkv.SimpleTag{Name: name, Value: val})
+			if name == "TITLE" {
+				title = val
+			}
+		}
+	}
+	return tags, title, cover, hashes
+}
+
+func hasTag(tags []mkv.SimpleTag, name string) bool {
+	for _, t := range tags {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// quickTimeText reads the first string of a QuickTime user-data text atom (16-bit size, 16-bit language, text).
+func quickTimeText(p []byte) string {
+	if len(p) < 4 {
+		return ""
+	}
+	n := int(binary.BigEndian.Uint16(p))
+	if n > len(p)-4 {
+		return ""
+	}
+	return strings.TrimRight(string(p[4:4+n]), "\x00")
+}
+
+// parseIlstTags reads the iTunes-style meta/ilst atoms of a udta.
+func parseIlstTags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment, hashes map[uint32]string) {
 	meta, ok := findMemBox(udtaBoxes, "meta")
 	if !ok || len(meta.payload) < 4 {
 		return nil, "", nil, nil

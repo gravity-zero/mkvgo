@@ -62,8 +62,38 @@ All notable changes to mkvgo are documented here. The format is based on
   probe allocate 732 MiB; an empty point is now skipped, and Cues past 8M
   points are refused as damaged.
 
+### Added
+
+- **MP4/MOV is edited natively, not just remuxed.** `mp4.EditInPlace`,
+  `EditMetadata`, `SetChapters`, `RemoveTrack`, `Rewrite`, `Split`, `Join`,
+  `Mux`, `Merge`, `AddTrack` and `MergeSubtitle` copy the samples and sample
+  descriptions byte for byte and write only new tables; the CLI's `edit`,
+  `edit-title`, `edit-track`, `edit-inplace`, `set-chapters`, `remove-track`,
+  `add-track`, `mux`, `merge`, `merge-subtitle`, `split` and `join` route an
+  MP4/MOV source to them, and `to-mp4` on an MP4/MOV rewrites it fast start.
+  An in-place edit rewrites the moov alone, crash-ordered like `retime`. A
+  split opens each part on a video keyframe with a recomputed edit list, so the
+  audio stays in sync; a join resumes each file where the previous one's
+  presentation ends, without replaying the priming or the padding its edit
+  list hides, and gives a split's parts back sample for sample. Fragmented and
+  encrypted MP4 are refused; what MP4 cannot hold (attachments, styled ASS)
+  still goes through `from-mp4` / `to-mp4`. `mkvgo.EditInPlace` routes either
+  container.
+
 ### Fixed
 
+- **`retime` on an MP4 shifted the wrong track when a trak the probe does not
+  list (a timecode or chapter track) came first:** track numbers were counted
+  over every trak, so `--shift 2=...` could move the video. They are the
+  probe's again, and its refusals name them the same way.
+- **A forged `elst` sized an allocation:** its entry count is checked against
+  the bytes the box holds before anything is allocated (a few-KB file could ask
+  for about 96 GiB).
+- **A MOV's title was not read:** the QuickTime user-data text atoms
+  (`udta/©nam`, `©ART`…) are read when no `ilst` value says otherwise.
+- **The JSON patch of `edit` and `edit-inplace` ignored what it did not
+  know:** an unknown field or a track ID the file does not have is now an
+  error, for both containers, and `language_bcp47` is accepted.
 - **The EBML lace decoder refuses a size with no length marker.** A first
   byte of `0x00`, or a size cut short by the block's end, decoded as a value
   where the stream decoder refuses it; both decoders refuse it now.

@@ -110,12 +110,15 @@ memory on hostile input, and continuous fuzzing.
 |---|:---:|:---:|---|:---:|
 | **Matroska** `.mkv` | ✅ | ✅ | MP4, WebM | ✅ |
 | **WebM** `.webm` | ✅ | ✅ (WebM-subset codecs) | MP4, WebM | ✅ |
-| **MP4 / MOV** `.mp4` `.mov` | ✅ | - (remux only) | MKV | ✅ |
+| **MP4 / MOV** `.mp4` `.mov` | ✅ | ✅ (no attachments) | MKV, MP4 (fast start) | ✅ |
 
-WebM is read and written as Matroska. Editing, muxing, splitting and joining are
-**Matroska operations** - to do them on MP4 content, `from-mp4` → operate →
-`to-mp4` (every step lossless). Inspection and packaging work on MP4/MOV
-directly.
+WebM is read and written as Matroska. MP4/MOV is edited natively: metadata in
+place or into a new file, `remove-track`, `split`, `join`, `mux`, `merge`,
+`add-track`, `merge-subtitle` (SRT as timed text) and `retime` copy the samples
+and sample descriptions byte for byte and write only new tables. What MP4 has
+no room for - attachments, styled ASS subtitles - goes through `from-mp4` →
+operate → `to-mp4` (every step lossless). Fragmented MP4 is inspected and
+packaged directly; to edit one, remux it to a progressive MP4 first.
 
 **Codecs carried** (never converted): H.264 · HEVC · AV1 · VP9 video; AAC ·
 Opus · AC-3 · E-AC-3 · FLAC · MP3 · DTS audio; SRT · WebVTT · ASS/SSA subtitles.
@@ -187,8 +190,8 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `extract-frame` | Keyframe nearest a time, decoder-ready - thumbnail/storyboard pipelines |
 | | `extract-frames` | Keyframe-only Matroska stream (every N seconds or at given times) |
 | | `subtitle-index` | Record where every subtitle block sits, so later extractions seek instead of walking the file |
-| **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) |
-| | `edit-inplace` | Edit metadata without rewriting clusters - instant |
+| **Edit** | `edit` · `edit-title` · `edit-track` | Edit metadata (from JSON, or targeted flags) - MKV/WebM and MP4/MOV |
+| | `edit-inplace` | Edit metadata without rewriting the media - instant (MKV: header patch; MP4: crash-ordered moov swap) |
 | | `set-chapters` · `extract-chapters` | Import/export chapters as OGM text (the standard chapter interchange format) |
 | | `remove-track` · `add-track` | Remove / add a track |
 | **Assemble** | `mux` · `merge` · `join` | Combine tracks / files |
@@ -198,7 +201,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `salvage` | Surgical recovery of a damaged file - lying sizes fixed lossless, valid blocks around a gap kept; `--dry-run` maps the damage first |
 | | `rollback` | Undo any repair from its inverse delta (`--rollback-delta`, typically <0.1% of the file) - no full backup copy needed |
 | | `retime` | Cancel a constant A/V desync in place - MKV: 2 bytes per block under a crash-safe journal; MP4: the moov edit list, a few bytes whatever the size |
-| **Convert** | `to-mp4` · `from-mp4` · `to-webm` | Remux between containers (no transcode) |
+| **Convert** | `to-mp4` · `from-mp4` · `to-webm` | Remux between containers (no transcode); `to-mp4` on an MP4/MOV rewrites it fast start, sample for sample |
 | **Stream** | `to-hls` | Package as CMAF - HLS + DASH over one demuxed segment set (AES-128 + key rotation, CENC AV1/VP9, single-file, I-frames, audio-only) |
 | | `hls-segment` | Serve one HLS/DASH resource on demand - zero pre-generation (local file **or** URL) |
 | | `to-abr` | Multi-variant HLS master from pre-encoded qualities (ABR packaging) |

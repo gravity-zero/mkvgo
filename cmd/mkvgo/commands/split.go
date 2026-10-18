@@ -3,8 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 func CmdSplit(args []string) {
@@ -43,14 +45,22 @@ func CmdSplit(args []string) {
 		Fatal("specify exactly one of -chapters, -range or -every")
 	}
 
-	outputs, err := matroska.Split(context.Background(), matroska.SplitOptions{
+	so := matroska.SplitOptions{
 		SourcePath: source,
 		OutputDir:  outDir,
 		ByChapters: byChapters,
 		Ranges:     ranges,
 		EveryMs:    everyMs,
 		Pattern:    pattern,
-	}, matroska.Options{Progress: NewProgressBar()})
+	}
+	var outputs []string
+	var err error
+	if isMP4Content(source) {
+		guardMP4Output(pattern)
+		outputs, err = mp4.Split(context.Background(), so, mp4Options())
+	} else {
+		outputs, err = matroska.Split(context.Background(), so, matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -75,10 +85,38 @@ func CmdJoin(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.Join(context.Background(), sources, outPath, matroska.Options{Progress: NewProgressBar()})
+	var err error
+	if allMP4(outPath, sources...) {
+		err = mp4.Join(context.Background(), sources, outPath, mp4Options())
+	} else {
+		err = matroska.Join(context.Background(), sources, outPath, matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
 	}
 	fmt.Printf("joined %d files → %s\n", len(sources), outPath)
+}
+
+// allMP4 reports whether every input is an MP4 (then outPath must not carry a Matroska name), refusing a mix of containers.
+func allMP4(outPath string, inputs ...string) bool {
+	guardDistinct(outPath, inputs...)
+	mp4s := 0
+	for _, in := range inputs {
+		if _, err := os.Stat(in); err != nil {
+			FatalErr(err)
+		}
+		if isMP4Content(in) {
+			mp4s++
+		}
+	}
+	switch mp4s {
+	case 0:
+		return false
+	case len(inputs):
+		guardMP4Output(outPath)
+		return true
+	}
+	Fatal("the inputs mix MP4 and Matroska files: convert them to one container first (from-mp4 or to-mp4)")
+	return false
 }

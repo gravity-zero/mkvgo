@@ -46,6 +46,7 @@ type inSample struct {
 type inTrack struct {
 	tableSamples     int64  // the samples its sample table declares, when parsed past the header
 	trackID          uint32 // tkhd track_ID, for correlating mvex/trex and mfra/tfra
+	trakIndex        int    // 0-based position of the trak among the moov's traks
 	trackType        mkv.TrackType
 	codec            string // mkvgo short codec name (e.g. "h264", "aac")
 	codecPrivate     []byte
@@ -341,14 +342,17 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	chapterTrackIDs := chapterTrackRefs(moovBoxes)
 
 	room := int64(maxSamples)
+	trakIndex := -1
 	for _, b := range moovBoxes {
 		if b.typ != "trak" {
 			continue
 		}
+		trakIndex++
 		tr, dropped, err := parseTrakRoom(b.payload, size, movieTS, mode, room)
 		if err != nil {
 			return nil, err
 		}
+		tr.trakIndex = trakIndex
 		room -= tr.tableSamples
 		if chapterTrackIDs[tr.trackID] && (dropped != nil || tr.unsupported != "") {
 			if mv.chapterTrak == nil {

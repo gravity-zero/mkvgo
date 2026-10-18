@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // CmdSetChapters replaces a file's chapters from an OGM simple-format text
@@ -33,8 +34,14 @@ func CmdSetChapters(args []string) {
 		Fatal(fmt.Sprintf("%s: %v", chapPath, err))
 	}
 
-	err = matroska.SetChapters(context.Background(), source, outPath, chapters,
-		matroska.Options{Progress: NewProgressBar()})
+	guardDistinct(outPath, source)
+	if isMP4Content(source) {
+		guardMP4Output(outPath)
+		err = mp4.SetChapters(context.Background(), source, outPath, chapters, mp4Options())
+	} else {
+		err = matroska.SetChapters(context.Background(), source, outPath, chapters,
+			matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

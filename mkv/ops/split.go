@@ -6,9 +6,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -99,120 +99,6 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		outputs = append(outputs, outPath)
 	}
 	return outputs, nil
-}
-
-// rangesEvery builds keyframe-aligned split ranges of roughly everyMs each:
-// every boundary is the first keyframe at/after the previous boundary plus
-// everyMs, so each part starts decodable without re-encoding.
-func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
-	if len(keyframes) == 0 {
-		return nil, fmt.Errorf("no keyframe index (Cues) to segment on; rebuild it with reindex first")
-	}
-	var bounds []int64
-	prev := int64(0)
-	for _, k := range keyframes {
-		if k >= prev+everyMs {
-			bounds = append(bounds, k)
-			prev = k
-		}
-	}
-	ranges := make([]mkv.TimeRange, 0, len(bounds)+1)
-	start := int64(0)
-	for _, b := range bounds {
-		ranges = append(ranges, mkv.TimeRange{StartMs: start, EndMs: b})
-		start = b
-	}
-	return append(ranges, mkv.TimeRange{StartMs: start, EndMs: 0}), nil
-}
-
-// sanitizeName makes a chapter title safe as a file-name fragment; an empty
-// or fully-stripped title falls back to "chapter_<n>".
-func sanitizeName(title string, n int) string {
-	var b strings.Builder
-	for _, r := range title {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
-			r == ' ', r == '-', r == '_', r == '.', r == '(', r == ')', r > 127:
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	s := strings.Trim(b.String(), " .")
-	if s == "" {
-		return fmt.Sprintf("chapter_%02d", n)
-	}
-	stem, _, _ := strings.Cut(s, ".")
-	if deviceName(strings.ToUpper(strings.TrimRight(stem, " "))) {
-		s = "_" + s // a name Windows keeps for a device, extension or not
-	}
-	return s
-}
-
-// deviceName reports a name Windows reserves for a device: CON, PRN, AUX, NUL, COM and LPT followed by 0-9, ¹, ² or ³.
-func deviceName(s string) bool {
-	switch s {
-	case "CON", "PRN", "AUX", "NUL":
-		return true
-	}
-	if !strings.HasPrefix(s, "COM") && !strings.HasPrefix(s, "LPT") {
-		return false
-	}
-	switch d := s[3:]; d {
-	case "¹", "²", "³":
-		return true
-	default:
-		return len(d) == 1 && d[0] >= '0' && d[0] <= '9'
-	}
-}
-
-func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
-	ranges := make([]mkv.TimeRange, len(chapters))
-	next := nextChapterStarts(chapters)
-	for i, ch := range chapters {
-		ranges[i] = mkv.TimeRange{StartMs: ch.StartMs, EndMs: ch.EndMs}
-		if ranges[i].EndMs == 0 && next[i] > 0 {
-			ranges[i].EndMs = next[i]
-		}
-	}
-	return ranges
-}
-
-// nextChapterStarts returns, for each chapter, the start of the sibling that
-// follows it in TIME, or -1 when nothing does.
-//
-// Not chapters[i+1]: the reader concatenates every EditionEntry of a file into
-// one flat list, each edition restarting at its own first timestamp, so the
-// next entry in the list can point back to an earlier moment. Reading the
-// following INDEX as the following instant made a chapter end before it began -
-// a negative range that Split turned into an empty part, no error - and made
-// the last chapter of the first edition vanish from the slice it names.
-//
-// Strictly greater, so several atoms sharing one timestamp (an edition
-// restarting at 0, an atom with no ChapterTimeStart) do not deduce an end of 0
-// and fall back to "runs forever", which is the reading this replaced.
-//
-// Computed for the whole list at once rather than scanned per chapter: Split
-// clips the list once per part, so a per-chapter scan made the cut cubic in the
-// number of chapters - 4.3 s at 2000 of them, eight times that at every
-// doubling.
-func nextChapterStarts(chapters []mkv.Chapter) []int64 {
-	sorted := make([]int64, len(chapters))
-	for i, ch := range chapters {
-		sorted[i] = ch.StartMs
-	}
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-
-	out := make([]int64, len(chapters))
-	for i, ch := range chapters {
-		j := sort.Search(len(sorted), func(k int) bool { return sorted[k] > ch.StartMs })
-		if j == len(sorted) {
-			out[i] = -1
-			continue
-		}
-		out[i] = sorted[j]
-	}
-	return out
 }
 
 // segmentLink is one part's place in the chain of parts: its own identity, and
@@ -447,44 +333,22 @@ func max0(v int64) int64 {
 	return v
 }
 
-// clipChapters keeps the chapters (recursively) that overlap [startMs, endMs)
-// and rebases them onto the segment's own timeline. endMs == 0 means
-// "until the end of the source".
-func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
-	var out []mkv.Chapter
-	next := nextChapterStarts(chapters)
-	for i, ch := range chapters {
-		if endMs > 0 && ch.StartMs >= endMs {
-			continue
-		}
-		// ChapterTimeEnd is optional and most muxers leave it out: such a chapter
-		// runs until the next one starts (the same reading chaptersToRanges uses
-		// to cut on them). Taking a missing end for "no end" instead made every
-		// chapter look like it spanned the rest of the file, so each part
-		// inherited all the chapters before it, collapsed onto its own start.
-		// nextChapterStart says why the following INDEX is not the following
-		// instant; -1 is the honest "nothing follows", which does run to the end.
-		end := ch.EndMs
-		if end == 0 {
-			end = next[i]
-		}
-		if end > 0 && end <= startMs {
-			continue
-		}
-		clipped := ch
-		clipped.StartMs = ch.StartMs - startMs
-		if clipped.StartMs < 0 {
-			clipped.StartMs = 0
-		}
-		if ch.EndMs > 0 {
-			end := ch.EndMs
-			if endMs > 0 && end > endMs {
-				end = endMs
-			}
-			clipped.EndMs = end - startMs
-		}
-		clipped.SubChapters = clipChapters(ch.SubChapters, startMs, endMs)
-		out = append(out, clipped)
+// rangesEvery builds keyframe-aligned split ranges of roughly everyMs each.
+func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
+	if len(keyframes) == 0 {
+		return nil, fmt.Errorf("no keyframe index (Cues) to segment on; rebuild it with reindex first")
 	}
-	return out
+	return splitplan.EveryRanges(keyframes, everyMs)
+}
+
+func sanitizeName(title string, n int) string { return splitplan.SanitizeName(title, n) }
+
+func deviceName(s string) bool { return splitplan.DeviceName(s) }
+
+func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
+	return splitplan.ChapterRanges(chapters)
+}
+
+func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
+	return splitplan.ClipChapters(chapters, startMs, endMs)
 }

@@ -1,14 +1,18 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 type EditPatch struct {
@@ -19,11 +23,13 @@ type EditPatch struct {
 }
 
 type TrackPatch struct {
-	ID        uint64  `json:"id"`
-	Language  *string `json:"language"`
-	Name      *string `json:"name"`
-	IsDefault *bool   `json:"is_default"`
-	IsForced  *bool   `json:"is_forced"`
+	ID       uint64  `json:"id"`
+	Language *string `json:"language"`
+	// LanguageBCP47 is the full BCP-47 tag (e.g. "pt-BR") next to the 3-letter Language.
+	LanguageBCP47 *string `json:"language_bcp47"`
+	Name          *string `json:"name"`
+	IsDefault     *bool   `json:"is_default"`
+	IsForced      *bool   `json:"is_forced"`
 }
 
 func applyPatch(c *matroska.Container, patch EditPatch) {
@@ -31,12 +37,17 @@ func applyPatch(c *matroska.Container, patch EditPatch) {
 		c.Info.Title = *patch.Title
 	}
 	for _, tp := range patch.Tracks {
+		found := false
 		for i := range c.Tracks {
 			if c.Tracks[i].ID != tp.ID {
 				continue
 			}
+			found = true
 			if tp.Language != nil {
 				c.Tracks[i].Language = *tp.Language
+			}
+			if tp.LanguageBCP47 != nil {
+				c.Tracks[i].LanguageBCP47 = *tp.LanguageBCP47
 			}
 			if tp.Name != nil {
 				c.Tracks[i].Name = *tp.Name
@@ -48,12 +59,64 @@ func applyPatch(c *matroska.Container, patch EditPatch) {
 				c.Tracks[i].IsForced = *tp.IsForced
 			}
 		}
+		if !found {
+			Fatal(fmt.Sprintf("track %d not found (the file has %d tracks)", tp.ID, len(c.Tracks)))
+		}
 	}
 	if patch.Chapters != nil {
 		c.Chapters = patch.Chapters
 	}
 	if patch.Tags != nil {
 		c.Tags = patch.Tags
+	}
+}
+
+// decodePatch parses an edit patch, refusing a field it does not know rather than ignoring it.
+func decodePatch(raw []byte) EditPatch {
+	var patch EditPatch
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&patch); err != nil {
+		Fatal(fmt.Sprintf("invalid JSON: %v", err))
+	}
+	return patch
+}
+
+// mp4Options is the CLI's mp4.Options: a progress bar, and every track left out reported.
+func mp4Options() mp4.Options {
+	return mp4.Options{Progress: NewProgressBar(), OnDrop: func(d mp4.DroppedTrack) {
+		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+	}}
+}
+
+// guardDistinct refuses an output that is one of the inputs: writing it would destroy what is being read.
+func guardDistinct(outPath string, inputs ...string) {
+	out, err := os.Stat(outPath)
+	if err != nil {
+		return
+	}
+	for _, in := range inputs {
+		if fi, err := os.Stat(in); err == nil && os.SameFile(out, fi) {
+			Fatal(fmt.Sprintf("%s is also an input: write the output to another file", outPath))
+		}
+	}
+}
+
+// editMetadata rewrites source to outPath with edit applied, through the engine of the source's container.
+func editMetadata(source, outPath string, edit func(*matroska.Container)) error {
+	guardDistinct(outPath, source)
+	if isMP4Content(source) {
+		guardMP4Output(outPath)
+		return mp4.EditMetadata(context.Background(), source, outPath, edit, mp4Options())
+	}
+	return matroska.EditMetadata(context.Background(), source, outPath, edit, matroska.Options{Progress: NewProgressBar()})
+}
+
+// guardMP4Output refuses a Matroska name for the MP4 an MP4 source's edit writes.
+func guardMP4Output(outPath string) {
+	switch strings.ToLower(filepath.Ext(outPath)) {
+	case ".mkv", ".mka", ".mks", ".webm":
+		Fatal(fmt.Sprintf("%s: the source is an MP4, so the output is an MP4 too - name it .mp4 (or convert with from-mp4 first)", outPath))
 	}
 }
 
@@ -93,15 +156,12 @@ JSON schema:
 		raw = []byte(jsonStr)
 	}
 
-	var patch EditPatch
-	if err := json.Unmarshal(raw, &patch); err != nil {
-		Fatal(fmt.Sprintf("invalid JSON: %v", err))
-	}
+	patch := decodePatch(raw)
 	GuardOverwrite(outPath)
 
-	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
+	err := editMetadata(source, outPath, func(c *matroska.Container) {
 		applyPatch(c, patch)
-	}, matroska.Options{Progress: NewProgressBar()})
+	})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -126,9 +186,9 @@ func CmdEditTitle(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
+	err := editMetadata(source, outPath, func(c *matroska.Container) {
 		c.Info.Title = title
-	}, matroska.Options{Progress: NewProgressBar()})
+	})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -168,12 +228,14 @@ func CmdEditTrack(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.EditMetadata(context.Background(), source, outPath, func(c *matroska.Container) {
+	err := editMetadata(source, outPath, func(c *matroska.Container) {
 		for i := range c.Tracks {
 			if c.Tracks[i].ID != trackID {
 				continue
 			}
-			if lang != nil {
+			if lang != nil && isMP4Content(source) {
+				c.Tracks[i].Language, c.Tracks[i].LanguageBCP47 = mp4.LanguageFields(*lang)
+			} else if lang != nil {
 				c.Tracks[i].Language = *lang
 			}
 			if name != nil {
@@ -188,7 +250,7 @@ func CmdEditTrack(args []string) {
 			return
 		}
 		Fatal(fmt.Sprintf("track %d not found", trackID))
-	}, matroska.Options{Progress: NewProgressBar()})
+	})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -218,14 +280,15 @@ Fails if new metadata is larger than the original.`)
 		raw = []byte(jsonStr)
 	}
 
-	var patch EditPatch
-	if err := json.Unmarshal(raw, &patch); err != nil {
-		Fatal(fmt.Sprintf("invalid JSON: %v", err))
-	}
+	patch := decodePatch(raw)
 
-	err := matroska.EditInPlace(context.Background(), source, func(c *matroska.Container) {
-		applyPatch(c, patch)
-	})
+	edit := func(c *matroska.Container) { applyPatch(c, patch) }
+	var err error
+	if isMP4Content(source) {
+		err = mp4.EditInPlace(context.Background(), source, edit)
+	} else {
+		err = matroska.EditInPlace(context.Background(), source, edit)
+	}
 	if err != nil {
 		FatalErr(err)
 	}

@@ -36,6 +36,19 @@ func CmdToMP4(args []string) {
 		fmt.Fprintln(os.Stderr, "warning: --webvtt-native writes WebVTT as wvtt (read by Apple/CMAF players, not by every demuxer)")
 	}
 
+	guardDistinct(dst, src)
+	if isMP4Content(src) {
+		if skip || flatten || wvtt || mp3delay || hashes {
+			Fatal("the source is already an MP4: to-mp4 rewrites it sample for sample (fast start, free space dropped), so --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay and --hash do not apply")
+		}
+		err := mp4.Rewrite(context.Background(), src, dst, mp4Options())
+		ClearProgress()
+		if err != nil {
+			FatalErr(err)
+		}
+		fmt.Printf("rewritten %s → %s\n", src, dst)
+		return
+	}
 	err := mp4.RemuxToMP4(context.Background(), src, dst, mp4.Options{
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),

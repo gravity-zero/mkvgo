@@ -52,6 +52,22 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	return mp4.RetimeTracks(ctx, path, shift, mp4.Options{FS: o.FS, Progress: o.Progress})
 }
 
+// EditInPlace edits a file's metadata in place whatever the container: matroska.EditInPlace for Matroska/WebM, mp4.EditInPlace for MP4/MOV.
+func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...matroska.Options) error {
+	o := matroska.Options{}
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	format, err := sniffContainer(path, &o)
+	if err != nil {
+		return err
+	}
+	if format == "mkv" {
+		return matroska.EditInPlace(ctx, path, edit, opts...)
+	}
+	return mp4.EditInPlace(ctx, path, edit, mp4.Options{FS: o.FS})
+}
+
 // Diagnose classifies a file in one call and names the remedy for every
 // finding, whatever the container - the library counterpart of
 // `mkvgo diagnose`, which routes the same way:

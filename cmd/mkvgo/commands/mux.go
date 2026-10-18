@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gravity-zero/mkvgo/matroska"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 func CmdDemux(args []string) {
@@ -64,9 +65,17 @@ func CmdMux(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.Mux(context.Background(), matroska.MuxOptions{
-		OutputPath: outPath, Tracks: inputs,
-	}, matroska.Options{Progress: NewProgressBar()})
+	var paths []string
+	for _, in := range inputs {
+		paths = append(paths, in.SourcePath)
+	}
+	mo := matroska.MuxOptions{OutputPath: outPath, Tracks: inputs}
+	var err error
+	if allMP4(outPath, paths...) {
+		err = mp4.Mux(context.Background(), mo, mp4Options())
+	} else {
+		err = matroska.Mux(context.Background(), mo, matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -91,7 +100,14 @@ func CmdRemoveTrack(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.RemoveTrack(context.Background(), source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
+	guardDistinct(outPath, source)
+	var err error
+	if isMP4Content(source) {
+		guardMP4Output(outPath)
+		err = mp4.RemoveTrack(context.Background(), source, outPath, trackIDs, mp4Options())
+	} else {
+		err = matroska.RemoveTrack(context.Background(), source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -126,7 +142,12 @@ func CmdAddTrack(args []string) {
 	}
 	GuardOverwrite(outPath)
 
-	err := matroska.AddTrack(context.Background(), base, outPath, input, matroska.Options{Progress: NewProgressBar()})
+	var err error
+	if allMP4(outPath, base, input.SourcePath) {
+		err = mp4.AddTrack(context.Background(), base, outPath, input, mp4Options())
+	} else {
+		err = matroska.AddTrack(context.Background(), base, outPath, input, matroska.Options{Progress: NewProgressBar()})
+	}
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

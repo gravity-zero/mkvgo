@@ -83,7 +83,11 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	if err != nil {
 		return errf("retime: read moov: %w", err)
 	}
-	newMoov, err := rewriteMoovEditShifts(moovRaw[lay.moovHdr:], shift)
+	traks, names, err := shiftsByTrak(moovRaw[lay.moovHdr:], lay.fileSize, shift)
+	if err != nil {
+		return errf("retime: %s: %w", shown.Path(path), err)
+	}
+	newMoov, err := rewriteMoovEditShiftsNamed(moovRaw[lay.moovHdr:], traks, names)
 	if err != nil {
 		return errf("retime: %s: %w", shown.Path(path), err)
 	}
@@ -187,10 +191,33 @@ type elstEntry struct {
 	rate      uint32
 }
 
+// shiftsByTrak rekeys shift from probe track IDs to 1-based trak positions (a trak the probe drops does not count), with the way back.
+func shiftsByTrak(payload []byte, size int64, shift map[uint64]int64) (map[uint64]int64, map[uint64]uint64, error) {
+	mv, err := parseMoov(payload, size, sampleNone)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make(map[uint64]int64, len(shift))
+	names := make(map[uint64]uint64, len(shift))
+	for _, track := range slices.Sorted(maps.Keys(shift)) {
+		if track == 0 || track > uint64(len(mv.tracks)) {
+			return nil, nil, fmt.Errorf("track %d not found (the file has %d)", track, len(mv.tracks))
+		}
+		pos := uint64(mv.tracks[track-1].trakIndex) + 1
+		out[pos], names[pos] = shift[track], track
+	}
+	return out, names, nil
+}
+
 // rewriteMoovEditShifts rebuilds the moov payload with each shifted track's
 // empty edit adjusted (and the tkhd/mvhd durations following), returning the
 // complete new moov box bytes.
 func rewriteMoovEditShifts(payload []byte, shift map[uint64]int64) ([]byte, error) {
+	return rewriteMoovEditShiftsNamed(payload, shift, nil)
+}
+
+// rewriteMoovEditShiftsNamed is rewriteMoovEditShifts naming each trak by names[position] in its refusals.
+func rewriteMoovEditShiftsNamed(payload []byte, shift map[uint64]int64, names map[uint64]uint64) ([]byte, error) {
 	boxes, err := iterBoxes(payload)
 	if err != nil {
 		return nil, err
@@ -233,7 +260,11 @@ func rewriteMoovEditShifts(payload []byte, shift map[uint64]int64) ([]byte, erro
 			continue
 		}
 		delete(pending, trakNum)
-		newTrak, newDur, err := rewriteTrakEditShift(b.payload, trakNum, ns, movieTS)
+		name := trakNum
+		if n, ok := names[trakNum]; ok {
+			name = n
+		}
+		newTrak, newDur, err := rewriteTrakEditShift(b.payload, name, ns, movieTS)
 		if err != nil {
 			return nil, err
 		}
@@ -370,6 +401,13 @@ func trakElstEntries(trakBoxes []memBox) ([]elstEntry, error) {
 	}
 	version := p[0]
 	count := binary.BigEndian.Uint32(p[4:8])
+	width := uint64(12)
+	if version == 1 {
+		width = 20
+	}
+	if uint64(count)*width > uint64(len(p)-8) {
+		return nil, fmt.Errorf("elst declares %d entries but holds %d bytes", count, len(p)-8)
+	}
 	entries := make([]elstEntry, 0, count)
 	off := 8
 	for i := uint32(0); i < count; i++ {
@@ -458,6 +496,9 @@ func tkhdDurationField(p []byte) (off int, dur int64, err error) {
 }
 
 func patchTkhdDuration(p []byte, dur int64) ([]byte, error) {
+	if len(p) >= 24 && p[0] == 0 && dur > 0xFFFFFFFF {
+		p = widenTimes(p, 8)
+	}
 	off, _, err := tkhdDurationField(p)
 	if err != nil {
 		return nil, err
@@ -479,6 +520,9 @@ func patchMvhdDuration(p []byte, dur int64) ([]byte, error) {
 	if len(p) < 4 {
 		return nil, fmt.Errorf("mvhd too short")
 	}
+	if len(p) >= 20 && p[0] == 0 && dur > 0xFFFFFFFF {
+		p = widenTimes(p, 4)
+	}
 	out := append([]byte(nil), p...)
 	if p[0] == 1 {
 		off := 4 + 8 + 8 + 4
@@ -497,6 +541,22 @@ func patchMvhdDuration(p []byte, dur int64) ([]byte, error) {
 	}
 	binary.BigEndian.PutUint32(out[off:off+4], uint32(dur))
 	return out, nil
+}
+
+// patchMdhdDuration writes a media duration: mdhd shares mvhd's leading layout.
+func patchMdhdDuration(p []byte, dur int64) ([]byte, error) { return patchMvhdDuration(p, dur) }
+
+// widenTimes turns a v0 mvhd/mdhd/tkhd payload into v1 (64-bit times and duration); mid is the width kept between them.
+func widenTimes(p []byte, mid int) []byte {
+	var w bw
+	w.u8(1)
+	w.bytes(p[1:4])
+	w.u64(uint64(binary.BigEndian.Uint32(p[4:])))
+	w.u64(uint64(binary.BigEndian.Uint32(p[8:])))
+	w.bytes(p[12 : 12+mid])
+	w.u64(uint64(binary.BigEndian.Uint32(p[12+mid:])))
+	w.bytes(p[16+mid:])
+	return w.b
 }
 
 // roundTicks converts nanoseconds to timescale ticks, rounding half away
@@ -519,40 +579,47 @@ func roundTicks(ns int64, ts uint32) int64 {
 // destroy the file), which is why the same-size and moov-at-tail layouts
 // take this path too, at the cost of one retired free block.
 func writeMoovInPlace(f mkv.ReadWriteSeekCloser, lay *topLayout, newMoov []byte) error {
+	return appendAndRetire(f, lay, "retime", newMoov)
+}
+
+// appendAndRetire appends blobs (the new moov last) at the end of the file, syncs, then retires the old moov(s).
+func appendAndRetire(f mkv.ReadWriteSeekCloser, lay *topLayout, op string, blobs ...[]byte) error {
 	syncer, ok := f.(interface{ Sync() error })
 	if !ok {
-		return errf("retime: the file handle does not support Sync (required for the crash-safe moov swap)")
+		return errf("%s: the file handle does not support Sync (required for the crash-safe moov swap)", op)
 	}
 	if _, err := f.Seek(lay.fileSize, io.SeekStart); err != nil {
 		return err
 	}
-	if _, err := f.Write(newMoov); err != nil {
-		return errf("retime: append moov: %w", err)
+	for _, b := range blobs {
+		if _, err := f.Write(b); err != nil {
+			return errf("%s: append moov: %w", op, err)
+		}
 	}
 	if err := syncer.Sync(); err != nil {
-		return errf("retime: sync appended moov: %w", err)
+		return errf("%s: sync appended moov: %w", op, err)
 	}
 	// Retire any stray moov (left behind by an interrupted run) BEFORE the live
 	// one. A forward walk keeps reading the live head moov - the original
 	// semantics - throughout; flipping the head first would instead expose a
 	// stale stray moov for the length of the window.
 	for _, off := range lay.strayMoovs {
-		if err := retireMoov(f, off); err != nil {
+		if err := retireMoov(f, off, op); err != nil {
 			return err
 		}
 	}
 	if len(lay.strayMoovs) > 0 {
 		if err := syncer.Sync(); err != nil {
-			return errf("retime: sync retired stray moov: %w", err)
+			return errf("%s: sync retired stray moov: %w", op, err)
 		}
 	}
 	// The live moov goes last: this single flip is the instant the appended
 	// moov becomes the file's authoritative one.
-	if err := retireMoov(f, lay.moovOff); err != nil {
+	if err := retireMoov(f, lay.moovOff, op); err != nil {
 		return err
 	}
 	if err := syncer.Sync(); err != nil {
-		return errf("retime: sync: %w", err)
+		return errf("%s: sync: %w", op, err)
 	}
 	return nil
 }
@@ -560,12 +627,12 @@ func writeMoovInPlace(f mkv.ReadWriteSeekCloser, lay *topLayout, newMoov []byte)
 // retireMoov turns a moov box into a free box with a single 4-byte type flip.
 // The type sits at offset+4 in both header forms (the 64-bit form keeps size=1
 // at 0-3, the type at 4-7, the largesize after).
-func retireMoov(f mkv.ReadWriteSeekCloser, off int64) error {
+func retireMoov(f mkv.ReadWriteSeekCloser, off int64, op string) error {
 	if _, err := f.Seek(off+4, io.SeekStart); err != nil {
 		return err
 	}
 	if _, err := f.Write([]byte("free")); err != nil {
-		return errf("retime: retire moov at %d: %w", off, err)
+		return errf("%s: retire moov at %d: %w", op, off, err)
 	}
 	return nil
 }
