@@ -665,9 +665,8 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 
 	tr.sttsClipped = sttsHasNegativeDelta(stblBoxes)
 	pcm, pcmPackets, err := readPCMTable(&tr, stblBoxes)
-	if err != nil && mode != sampleNone {
-		tr.describedOnly(err)
-		mode = sampleNone
+	if err != nil {
+		pcmPackets = false // the sample-by-sample path reads the table, and reports what it cannot
 	}
 	n := headerFrameCount(stblBoxes)
 	if pcmPackets {
@@ -687,6 +686,10 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 		// endMs is computed for every track (the movie duration is the max across
 		// tracks); only video collects the sync-sample keyframe times.
 		isVideo := tr.trackType == mkv.VideoTrack
+		if pcmPackets {
+			tr.sampleEndMs = pcm.endMs(tr.timescale, tr.editShiftMs) // a PCM track's end, without expanding its table
+			break
+		}
 		kf, endMs, err := buildKeyframeTimes(stblBoxes, tr.timescale, tr.editShiftMs, isVideo, fileSize)
 		if err != nil {
 			// A sample table the file cannot hold (a forged one, a moov cut from its media): the track is

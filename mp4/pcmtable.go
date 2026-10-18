@@ -138,6 +138,19 @@ func (r *sttsRuns) take(k uint32) (sum, last int64) {
 	return sum, last
 }
 
+// endMs is the last sample's presentation time, as buildKeyframeTimes computes it, from the stts runs alone.
+func (t *pcmTable) endMs(timescale uint32, editShiftMs int64) int64 {
+	if t.count == 0 {
+		return 0
+	}
+	runs, err := newSttsRuns(t.stts, t.count)
+	if err != nil {
+		return 0
+	}
+	last, _ := runs.take(t.count - 1)
+	return max(ticksToMs(last, timescale)+editShiftMs, 0)
+}
+
 // buildPCMBlocks builds the packets coalescePCM would gather the one-frame table into, chunk by chunk.
 func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 	if fileSize > 0 && int64(t.count)*int64(t.size) > fileSize {

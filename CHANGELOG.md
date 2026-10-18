@@ -126,7 +126,8 @@ MP4:
 
 - A PCM track's one-frame samples are budgeted and built as the packets they
   gather into: six minutes of 48 kHz LPCM (17M samples) passed the movie's
-  sample budget and was refused, and longer tracks were expanded frame by frame.
+  sample budget and was refused, and longer tracks were expanded frame by frame;
+  the keyframes walk takes such a track's end from its stts runs.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
 - `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a

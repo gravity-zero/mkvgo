@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"bytes"
+	"runtime"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -93,4 +94,41 @@ func mustTrakStbl(t *testing.T, data []byte) []memBox {
 		boxes = next
 	}
 	return boxes
+}
+
+// TestPCMKeyframesModeKeepsTheSampleBudget pins that the keyframes walk takes a PCM track's end from its stts runs,
+// the same end the sample-by-sample walk finds, so no PCM table is expanded whatever its packets are charged.
+func TestPCMKeyframesModeKeepsTheSampleBudget(t *testing.T) {
+	const perTrak = 1 << 22 // five of them pass 1<<24
+	table := []([]byte){
+		fullBox("stts", 0, 0, func(w *bw) { w.u32(1); w.u32(perTrak); w.u32(1) }),
+		fullBox("stsc", 0, 0, func(w *bw) { w.u32(1); w.u32(1); w.u32(perTrak); w.u32(1) }),
+		fullBox("stsz", 0, 0, func(w *bw) { w.u32(4); w.u32(perTrak) }),
+		fullBox("stco", 0, 0, func(w *bw) { w.u32(1); w.u32(0) }),
+	}
+	traks := [][]byte{mvhdBox(0)}
+	for id := uint32(1); id <= 5; id++ {
+		traks = append(traks, soundTrak(id, 48000, perTrak, audioSampleEntry("sowt", &stereo48k, nil), table...))
+	}
+	data := append(box("ftyp", []byte("qt  \x00\x00\x02\x00qt  ")), container("moov", traks...)...)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	mv, err := parseMP4(bytes.NewReader(data), 1<<40, sampleKeyframes)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > 8<<20 {
+		t.Errorf("the keyframes walk allocated %d bytes for five PCM tables: it expanded them", got)
+	}
+	for _, tr := range mv.tracks {
+		if tr.unsupported != "" || tr.sampleEndMs != (perTrak-1)*1000/48000 {
+			t.Errorf("track %d: end %d ms, refused %q; want %d ms, carried", tr.trackID, tr.sampleEndMs, tr.unsupported, (perTrak-1)*1000/48000)
+		}
+	}
+	_, endMs, err := buildKeyframeTimes(mustTrakStbl(t, data), 48000, 0, false, 1<<40)
+	if err != nil || endMs != mv.tracks[0].sampleEndMs {
+		t.Errorf("the sample-by-sample end is %d ms (%v), the runs' %d", endMs, err, mv.tracks[0].sampleEndMs)
+	}
 }
