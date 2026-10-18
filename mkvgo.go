@@ -111,8 +111,7 @@ func sniffContainer(path string, o *matroska.Options) (string, error) {
 	if head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
 		return "mkv", nil
 	}
-	switch string(head[4:8]) {
-	case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
+	if mp4.OpensLikeISOBMFF(head) {
 		return "mp4", nil
 	}
 	// MPEG-TS carries no header, only a 0x47 sync byte every 188 bytes. One

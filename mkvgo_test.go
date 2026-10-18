@@ -182,3 +182,23 @@ func TestSniffNamesMPEGTS(t *testing.T) {
 		t.Errorf("a lone 0x47 must stay unrecognised, got %v", err)
 	}
 }
+
+// TestSniffRoutesAMOVOpeningOnPnot: a QuickTime movie whose first box is a preview (pnot) routes to the MP4 engine.
+func TestSniffRoutesAMOVOpeningOnPnot(t *testing.T) {
+	mov, err := os.ReadFile(filepath.Join("internal", "testdata", "bframes_aac.mov"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pnot := append([]byte{0, 0, 0, 20}, append([]byte("pnot"), make([]byte, 12)...)...)
+	path := filepath.Join(t.TempDir(), "preview.mov")
+	if err := os.WriteFile(path, append(pnot, mov...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "x" }); err != nil {
+		t.Fatalf("a MOV opening on pnot: %v", err)
+	}
+	c, _, err := mp4.OpenMeta(context.Background(), path)
+	if err != nil || c.Info.Title != "x" {
+		t.Errorf("title %v, err %v", c, err)
+	}
+}

@@ -115,7 +115,7 @@ func TestMergeSubtitleSRT(t *testing.T) {
 	if err := MergeSubtitle(context.Background(), src, srt, bcp, "fr-CA", ""); err != nil {
 		t.Fatal(err)
 	}
-	if tr := mustMeta(t, bcp).Tracks[2]; tr.LanguageBCP47 != "fr-CA" || tr.Language != "" {
+	if tr := mustMeta(t, bcp).Tracks[2]; tr.LanguageBCP47 != "fr-CA" || tr.Language != "fra" {
 		t.Errorf("BCP-47 subtitle: language %q, bcp47 %q", tr.Language, tr.LanguageBCP47)
 	}
 	for _, bad := range []string{"zz!", "pt_BR!"} {
@@ -216,7 +216,7 @@ func TestMuxRefusesWritingOverAnInput(t *testing.T) {
 }
 
 func TestLanguageFieldsAndBCP47Check(t *testing.T) {
-	for _, tc := range []struct{ in, lang, bcp string }{{"fre", "fre", ""}, {"pt-BR", "und", "pt-BR"}, {"yue-HK", "yue", "yue-HK"}, {"fr", "und", "fr"}} {
+	for _, tc := range []struct{ in, lang, bcp string }{{"fre", "fre", ""}, {"pt-BR", "por", "pt-BR"}, {"yue-HK", "yue", "yue-HK"}, {"fr", "fra", "fr"}, {"x-klingon", "und", "x-klingon"}} {
 		if l, b := LanguageFields(tc.in); l != tc.lang || b != tc.bcp {
 			t.Errorf("LanguageFields(%q) = %q, %q", tc.in, l, b)
 		}
@@ -251,5 +251,24 @@ func TestMergeKeepsChapterTrackOnlyChapters(t *testing.T) {
 	}
 	if c := mustMeta(t, dst); len(c.Chapters) != 2 || c.Chapters[1].Title != "B" {
 		t.Errorf("chapters %+v", c.Chapters)
+	}
+}
+
+// TestMergeSubtitleReadsThroughTheFS: the SRT comes through Options.FS, and one past the cap is refused before it is held.
+func TestMergeSubtitleReadsThroughTheFS(t *testing.T) {
+	src := editFixture(t)
+	mem := mkv.NewMemFS()
+	srt := []byte("1\n00:00:01,000 --> 00:00:02,000\nHi\n")
+	mem.Put("/subs.srt", srt)
+	data, _ := os.ReadFile(src)
+	mem.Put("/in.mp4", data)
+	if err := MergeSubtitle(context.Background(), "/in.mp4", "/subs.srt", "/out.mp4", "eng", "", Options{FS: mem.FS()}); err != nil {
+		t.Fatalf("an SRT on the given FS: %v", err)
+	}
+	big := bytes.Repeat([]byte("x\n"), maxSRTBytes/2+10)
+	mem.Put("/big.srt", big)
+	err := MergeSubtitle(context.Background(), "/in.mp4", "/big.srt", "/out2.mp4", "eng", "", Options{FS: mem.FS()})
+	if err == nil || !strings.Contains(err.Error(), "passes the 64 MiB") {
+		t.Errorf("err = %v", err)
 	}
 }

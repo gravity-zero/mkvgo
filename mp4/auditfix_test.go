@@ -467,3 +467,90 @@ func TestReplayingTheSameChaptersWritesNothing(t *testing.T) {
 		t.Errorf("replaying the chapters grew the file by %d bytes", now-size)
 	}
 }
+
+// TestCutsAndMuxKeepTopLevelUserData: split parts, a join and a mux carry the first source's XMP uuid box.
+func TestCutsAndMuxKeepTopLevelUserData(t *testing.T) {
+	src := editFixture(t)
+	xmp := box("uuid", append(bytes.Repeat([]byte{0xbe}, 16), []byte("<x:xmpmeta/>")...))
+	f, _ := os.OpenFile(src, os.O_APPEND|os.O_WRONLY, 0)
+	f.Write(xmp)
+	f.Close()
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 3000}, {StartMs: 3000}}})
+	joined := filepath.Join(t.TempDir(), "j.mp4")
+	if err := Join(context.Background(), parts, joined); err != nil {
+		t.Fatal(err)
+	}
+	muxed := filepath.Join(t.TempDir(), "m.mp4")
+	if err := Mux(context.Background(), mkv.MuxOptions{OutputPath: muxed, Tracks: []mkv.TrackInput{{SourcePath: src, TrackID: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range append(parts, joined, muxed) {
+		if data, _ := os.ReadFile(p); !bytes.Contains(data, xmp) {
+			t.Errorf("%s: the top-level uuid box was dropped", filepath.Base(p))
+		}
+	}
+}
+
+// TestReplacedChapterTitlesLeaveNoMdat: once chapters are replaced in place, the mdat that held only the old titles is a free box.
+func TestReplacedChapterTitlesLeaveNoMdat(t *testing.T) {
+	path := editFixture(t)
+	if err := EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Chapters = []mkv.Chapter{{Title: "A", StartMs: 0}} }); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		n := 0
+		for _, typ := range topLevelTypes(t, path) {
+			if typ == "mdat" {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count(); n != 2 {
+		t.Fatalf("%d mdat boxes after adding chapters, want 2", n)
+	}
+	if err := EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Chapters = nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Errorf("%d mdat boxes after removing the chapters, want 1 (the titles' mdat retired)", n)
+	}
+	mustVerify(t, path)
+	if err := EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Chapters = []mkv.Chapter{{Title: "B", StartMs: 0}} }); err != nil {
+		t.Fatal(err)
+	}
+	if c := mustMeta(t, path); len(c.Chapters) != 1 || c.Chapters[0].Title != "B" {
+		t.Errorf("chapters %+v", c.Chapters)
+	}
+}
+
+// TestNegativeCompositionOffsetsCutExactly: a track with negative composition offsets (ctts v1) splits and joins back exactly.
+func TestNegativeCompositionOffsetsCutExactly(t *testing.T) {
+	src := realFixture("negative_cts.mp4")
+	m := mustCutModel(t, src)
+	kf := m.keyframesMs()
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: kf[1]}, {StartMs: kf[1]}}})
+	for i, p := range parts {
+		pm := mustCutModel(t, p)
+		for ti := range pm.tracks {
+			if mt := pm.tracks[ti].edit.mediaTime; mt < 0 {
+				t.Errorf("part %d track %d: negative media_time %d", i+1, ti+1, mt)
+			}
+		}
+	}
+	joined := filepath.Join(t.TempDir(), "j.mp4")
+	if err := Join(context.Background(), parts, joined); err != nil {
+		t.Fatal(err)
+	}
+	j := mustCutModel(t, joined)
+	for ti := range m.tracks {
+		want, got := sampleSeqs(t, src)[ti], sampleSeqs(t, joined)[ti]
+		if strings.Join(want, ",") != strings.Join(got, ",") {
+			t.Errorf("track %d: the join does not give the source back", ti+1)
+			diffFirst(t, want, got)
+		}
+		if a, b := m.tracks[ti].ptNs(0, m.movieTS), j.tracks[ti].ptNs(0, j.movieTS); a != b {
+			t.Errorf("track %d: first presentation %d ns, source %d", ti+1, b, a)
+		}
+	}
+}

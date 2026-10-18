@@ -314,6 +314,11 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 	if err != nil {
 		return nil, err
 	}
+	top, err := sourceTopBoxes(src, size)
+	if err != nil {
+		return nil, err
+	}
+	lay := outLayout{ftyp: ftyp, top: top}
 	var ranges []mkv.TimeRange
 	var titles []string
 	var chs []mkv.Chapter
@@ -381,7 +386,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 		if err := ctx.Err(); err != nil {
 			return outputs, err
 		}
-		if err := m.writePart(ctx, src, size, ftyp, plans[i], paths[i], o); err != nil {
+		if err := m.writePart(ctx, src, size, lay, plans[i], paths[i], o); err != nil {
 			return outputs, errf("split: part %d: %w", i+1, err)
 		}
 		outputs = append(outputs, paths[i])
@@ -444,7 +449,7 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 }
 
 // writePart writes the part a plan describes.
-func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64, ftyp []byte, p partPlan, outPath string, o Options) error {
+func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64, lay outLayout, p partPlan, outPath string, o Options) error {
 	traks := make([][]byte, 0, len(m.tracks))
 	var movieDur int64
 	for i := range m.tracks {
@@ -471,7 +476,7 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs, payload, nil, outLayout{ftyp: ftyp}, outPath, o)
+	return writeRelocated(ctx, vs, payload, nil, lay, outPath, o)
 }
 
 // lastKeyMs is where a track's last sync sample presents.

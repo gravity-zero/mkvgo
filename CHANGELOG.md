@@ -117,6 +117,10 @@ All notable changes to mkvgo are documented here. The format is based on
   what `ticks*1000` holds in an int64, reachable with 16M samples of 2^31
   ticks, wrapped and read as a negative time; large values now scale in two
   parts and saturate.
+- **A MOV opening on a preview (`pnot`) or a `uuid` box was not recognised**
+  by the container-agnostic entry points (`mkvgo.EditInPlace`,
+  `RetimeTracks`, `Diagnose`) nor by the CLI's routing: they now sniff with
+  the same box list as the mp4 package (`mp4.OpensLikeISOBMFF`).
 - **The sidx boxes ahead of an MP4's fragments are read one at a time.**
   Every one, up to 786 KiB each, was read and kept before the first was
   looked at, so a file stacking thousands of them held gigabytes on a

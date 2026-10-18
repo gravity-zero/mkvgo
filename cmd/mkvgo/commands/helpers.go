@@ -251,11 +251,7 @@ func isMP4Content(path string) bool {
 	if _, err := io.ReadFull(f, head); err != nil {
 		return false
 	}
-	switch string(head[4:8]) {
-	case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
-		return true
-	}
-	return false
+	return mp4.OpensLikeISOBMFF(head)
 }
 
 // loadContainer reads metadata from path, handling MP4 (mp4.OpenMeta) as well as

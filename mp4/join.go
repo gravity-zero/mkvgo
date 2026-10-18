@@ -118,7 +118,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs, payload, nil, outLayout{ftyp: ftyp}, dstPath, o)
+	top, err := sourceTopBoxes(r0, vs[0].size)
+	if err != nil {
+		return err
+	}
+	return writeRelocated(ctx, vs, payload, nil, outLayout{ftyp: ftyp, top: top}, dstPath, o)
 }
 
 // sameStreams refuses a file whose tracks a join could not continue from the first file's.

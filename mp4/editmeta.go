@@ -81,7 +81,60 @@ func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), op
 	if chap != nil {
 		blobs = append(blobs, mdatHeader(int64(len(chap))), chap)
 	}
-	return appendAndRetire(f, lay, "edit", append(blobs, moov)...)
+	orphans := chapterOnlyMdats(payload, lay, before, after)
+	if err := appendAndRetire(f, lay, "edit", append(blobs, moov)...); err != nil {
+		return err
+	}
+	// The new moov is live: an mdat that held only the replaced chapter titles is dead weight, retired like the old moov.
+	for _, off := range orphans {
+		if err := retireMoov(f, off, "edit"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// chapterOnlyMdats lists the mdat boxes holding nothing but the titles of chapter tracks this edit replaces.
+func chapterOnlyMdats(payload []byte, lay *topLayout, before, after *mkv.Container) []int64 {
+	if sameChapterMarks(before.Chapters, after.Chapters) {
+		return nil
+	}
+	boxes, err := iterBoxes(payload)
+	if err != nil {
+		return nil
+	}
+	used := map[int][2]int64{} // mdat index -> bytes of replaced chapter titles, bytes of anything else
+	for _, b := range boxes {
+		if b.typ != "trak" {
+			continue
+		}
+		id, _ := trakID(b.payload)
+		replaced := chapterTrackRefs(boxes)[id] && textTrak(boxes, id)
+		chunks, err := trakChunks(b.payload, lay.fileSize)
+		if err != nil {
+			return nil
+		}
+		for _, c := range chunks {
+			for i, m := range lay.mdats {
+				if c.src >= m[1] && c.src < m[2] {
+					u := used[i]
+					if replaced {
+						u[0] += c.size
+					} else {
+						u[1] += c.size
+					}
+					used[i] = u
+				}
+			}
+		}
+	}
+	var out []int64
+	for i, u := range used {
+		if m := lay.mdats[i]; u[1] == 0 && u[0] == m[2]-m[1] {
+			out = append(out, m[0])
+		}
+	}
+	return out
 }
 
 // moovContainer reads a moov payload into the metadata OpenMeta reports, plus the parsed movie.

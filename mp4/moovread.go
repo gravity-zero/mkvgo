@@ -39,6 +39,9 @@ var isoBMFFOpeners = map[string]bool{
 	"sidx": true, "emsg": true, "prft": true, "meta": true,
 }
 
+// OpensLikeISOBMFF reports whether a file's first 8 bytes are the header of a box an MP4/MOV opens with.
+func OpensLikeISOBMFF(head []byte) bool { return len(head) >= 8 && isoBMFFOpeners[string(head[4:8])] }
+
 // checkISOBMFFHead refuses with ErrNotMP4 a source whose first box header
 // does not name a box such a file opens with. A source too short to hold a
 // box header is left to the walk, which says what it lacks.

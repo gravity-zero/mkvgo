@@ -109,6 +109,7 @@ type topLayout struct {
 	// the live one, or the next forward walk lands on a stale movie header.
 	strayMoovs []int64
 	fileSize   int64
+	mdats      [][3]int64 // each top-level mdat: box offset, payload start, end
 }
 
 // scanTopLevelLayout walks the top-level boxes and returns the moov's
@@ -154,6 +155,9 @@ func scanTopLevelLayout(f mkv.ReadWriteSeekCloser) (*topLayout, error) {
 		}
 		if boxSize < hdrLen || off+boxSize > size {
 			return nil, fmt.Errorf("box %q at %d has invalid size %d: rewrite the file first (to-mp4 in.mp4 out.mp4) and edit the copy", typ, off, boxSize)
+		}
+		if typ == "mdat" {
+			lay.mdats = append(lay.mdats, [3]int64{off, off + hdrLen, off + boxSize})
 		}
 		if typ == "moov" {
 			if lay.moovOff < 0 {

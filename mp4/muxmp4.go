@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -68,16 +67,38 @@ func trackInputOverride(ti mkv.TrackInput) func(*mkv.Track) {
 	}
 }
 
+// readSRT parses an SRT file through fs, refusing one past maxSRTBytes rather than holding it.
+func readSRT(fs *mkv.FS, path string) ([]subtitle.SRTEntry, error) {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	lr := &io.LimitedReader{R: f, N: maxSRTBytes + 1}
+	entries, err := subtitle.ParseSRTReader(lr)
+	if lr.N == 0 {
+		return nil, fmt.Errorf("the SRT file passes the %d MiB a subtitle track takes: split it into several files", maxSRTBytes>>20)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parse SRT: %w", err)
+	}
+	return entries, nil
+}
+
 // maxSRTBytes bounds the SRT file merge-subtitle reads whole.
 const maxSRTBytes = 64 << 20
 
-// LanguageFields splits a language as a user gives it into the mdhd's 3-letter code and, for a BCP-47 tag, the elng tag.
+// LanguageFields splits a language as a user gives it into the mdhd's 3-letter code (ISO 639-2/T for a tag's 2-letter language) and, for a BCP-47 tag, the elng tag.
 func LanguageFields(tag string) (language, bcp47 string) {
 	if len(tag) == 3 && isLowerAlpha(tag) {
 		return tag, ""
 	}
 	primary, _, _ := strings.Cut(tag, "-")
-	if primary = strings.ToLower(primary); len(primary) != 3 || !isLowerAlpha(primary) {
+	primary = strings.ToLower(primary)
+	if code, ok := iso6391To6392T[primary]; ok {
+		primary = code
+	}
+	if len(primary) != 3 || !isLowerAlpha(primary) {
 		primary = "und"
 	}
 	return primary, tag
@@ -126,12 +147,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 // MergeSubtitle writes srcPath to dstPath with an SRT file added as a timed-text (tx3g) subtitle track.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	o := optionsFrom(opts)
-	if fi, err := os.Stat(srtPath); err == nil && fi.Size() > maxSRTBytes {
-		return errf("merge-subtitle: the SRT file is %d bytes, past the %d MiB a subtitle track takes: split it into several files", fi.Size(), maxSRTBytes>>20)
-	}
-	entries, err := subtitle.ParseSRT(srtPath)
+	entries, err := readSRT(o.FS, srtPath)
 	if err != nil {
-		return errf("merge-subtitle: parse SRT: %w", err)
+		return errf("merge-subtitle: %w", err)
 	}
 	if len(entries) == 0 {
 		return errf("merge-subtitle: the SRT file holds no cue")
@@ -333,7 +351,11 @@ func muxMP4(ctx context.Context, inputs []muxInput, dstPath string, meta func(c 
 	if err != nil {
 		return err
 	}
-	return writeRelocated(ctx, vs.withMem(chap), mb[0].payload, nil, outLayout{ftyp: ftyp, interleave: true}, dstPath, o)
+	top, err := sourceTopBoxes(first.r, first.size)
+	if err != nil {
+		return err
+	}
+	return writeRelocated(ctx, vs.withMem(chap), mb[0].payload, nil, outLayout{ftyp: ftyp, top: top, interleave: true}, dstPath, o)
 }
 
 func openMuxSource(r io.ReadSeeker, o Options) (*muxSource, error) {
