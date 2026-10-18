@@ -68,7 +68,7 @@ type countingReader struct {
 	buf   []byte // window storage, bufSize capacity
 	r, w  int    // valid window is buf[r:w]; buf[r] is the byte at pos
 	pos   int64  // logical position of the next byte the caller consumes
-	end   int64  // source size, resolved on the first seek-skip; -1 until then
+	end   int64  // source size, resolved on the first seek-skip (-1 until then) and kept: a reader never outlives a growth of its source, the growing paths building one per Cluster confirmed whole
 	chunk int    // current read-ahead size; grows sequentially, shrinks on jumps
 	// sparse seeks over every skipped byte past the window and keeps reads at sparseChunk (SetSparse).
 	sparse bool
