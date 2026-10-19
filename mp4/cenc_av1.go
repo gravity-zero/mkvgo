@@ -56,11 +56,10 @@ package mp4
 //     bytes are unchanged, the tile bytes are the ones encrypted) - not that
 //     a real AV1 decoder/CDM accepts the resulting bitstream. That requires
 //     actually decoding real encoder output split this way.
-//   - The single-tile assumption for OBU_TILE_GROUP and OBU_FRAME's trailing
-//     tile_group_obu(): multi-tile streams have a non-empty tile_group_header
-//     (tile_start_and_end_present_flag, tg_start/tg_end when present), which
-//     this file does not parse and would currently miscount as protected
-//     tile data.
+//   - The single-tile assumption for OBU_TILE_GROUP: multi-tile streams have a
+//     non-empty tile_group_header (tile_start_and_end_present_flag, tg_start/tg_end
+//     when present), which this file does not parse and would miscount as
+//     protected tile data. An OBU_FRAME of several tiles is refused.
 //   - OBU_FRAME_HEADER (a frame header with no combined tile data) is left
 //     entirely clear and does not update av1Splitter's reference-slot state;
 //     a segment that mixes OBU_FRAME_HEADER+OBU_TILE_GROUP frames with
@@ -191,6 +190,9 @@ func (s *av1Splitter) split(sample []byte) ([]cencSubsample, error) {
 			fh, err := parseAV1FrameHeader(r, s.seq, &s.refs, temporalID, spatialID)
 			if err != nil {
 				return nil, err
+			}
+			if fh.tileColsLog2 > 0 || fh.tileRowsLog2 > 0 {
+				return nil, errf("cenc: av1: a frame of %d tiles, whose sizes one subsample would encrypt: encode it with a single tile (one tile column and row) to package it encrypted", (1<<fh.tileColsLog2)*(1<<fh.tileRowsLog2))
 			}
 			clearInFrame := (int(r.pos) + 7) / 8
 			if clearInFrame > payloadLen {
