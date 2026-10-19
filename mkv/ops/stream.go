@@ -232,6 +232,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		carried, opts.walk.onScreen = opts.walk.onScreen, nil
 	}
 	firstTC, firstSet := int64(0), false
+	lastKey := int64(math.MinInt64) // the latest video keyframe read: a cut lands on it or later
 
 	// The output's timebase decides how long a cluster may run: block offsets
 	// are 16-bit counts of ITS units, not of milliseconds.
@@ -395,6 +396,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		// cutKeyframe: a keyframe a segment may start or end on. With a video
 		// track only a video keyframe qualifies (see videoTracks above).
 		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
+		if blk.Keyframe && opts.videoTracks[blk.TrackNumber] {
+			lastKey = max(lastKey, blk.Timecode)
+		}
 
 		if opts.timeStart > 0 && blk.Timecode < opts.timeStart {
 			continue
@@ -463,7 +467,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 				continue
 			}
 			if opts.walk != nil {
-				shown = append(shown, srcBlk)
+				shown = append(dropEndedCues(shown, lastKey), srcBlk)
 			}
 			if opts.lastSubs != nil {
 				opts.lastSubs[newID] = blk
@@ -793,6 +797,18 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		cluster = append(cluster, blk)
 	}
 	return stats, flush()
+}
+
+// dropEndedCues keeps the cues still on screen past t, in place: one ended by then cannot run through a later cut.
+func dropEndedCues(cues []mkv.Block, t int64) []mkv.Block {
+	kept := cues[:0]
+	for _, c := range cues {
+		if c.Timecode+c.Duration > t {
+			kept = append(kept, c)
+		}
+	}
+	clear(cues[len(kept):])
+	return kept
 }
 
 // cuesOnScreenAt returns the cues still on screen at t, the ones a cut at t runs through.

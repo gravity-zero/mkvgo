@@ -145,3 +145,12 @@ func TestSplitByChaptersNamesTheChapterWithoutAKeyframe(t *testing.T) {
 		t.Errorf("err = %v, want the chapter named and a split by time offered", err)
 	}
 }
+
+// TestDropEndedCuesKeepsOnlyWhatCanRunThroughACut: a walk holds the cues still on screen, not every cue of the part.
+func TestDropEndedCuesKeepsOnlyWhatCanRunThroughACut(t *testing.T) {
+	cues := []mkv.Block{{Timecode: 0, Duration: 500}, {Timecode: 400, Duration: 700}, {Timecode: 900, Duration: 100}, {Timecode: 1000, Duration: 50}}
+	kept := dropEndedCues(cues, 1000)
+	if len(kept) != 2 || kept[0].Timecode != 400 || kept[1].Timecode != 1000 {
+		t.Errorf("kept %+v, want the cues at 400 and 1000", kept)
+	}
+}
