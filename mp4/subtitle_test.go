@@ -79,7 +79,8 @@ func TestStripMarkup(t *testing.T) {
 		"plain text":                 "plain text",
 		"<i>italic</i>":              "italic",
 		"<font color=red>hi</font>!": "hi!",
-		"a < b":                      "a ", // an unmatched '<' opens a tag to end-of-line
+		"a < b":                      "a < b", // no '>' closes it: a literal
+		"I <3 you":                   "I <3 you",
 	}
 	for in, want := range cases {
 		if got := stripMarkup(in); got != want {

@@ -77,9 +77,15 @@ func stripMarkup(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	depth := 0
-	for _, r := range s {
+	for i, r := range s {
 		switch r {
 		case '<':
+			if !strings.ContainsRune(s[i:], '>') {
+				if depth == 0 {
+					b.WriteRune(r) // no tag closes: a literal, as in "I <3 you"
+				}
+				continue
+			}
 			depth++
 		case '>':
 			if depth > 0 {
