@@ -239,10 +239,41 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	}
 	// Fill colour/bit-depth/profile from the codec bitstream when the container
 	// Colour element didn't (container values, parsed above, still win per field).
+	stated := t
 	fillColourFromCodecPrivate(&t)
+	recordDerived(&t, &stated)
 	fillCodecDerived(&t)
 	audioDefaults(&t, p.rateRejected, p.channelsRejected)
 	return t, nil
+}
+
+// recordDerived notes in t.Derived the written fields the bitstream filled where the container (stated) said nothing.
+func recordDerived(t, stated *mkv.Track) {
+	d := mkv.DerivedFields{}
+	if t.Derived != nil {
+		d = *t.Derived
+	}
+	pick16 := func(had, was, now *uint16) *uint16 {
+		if was == nil && now != nil {
+			return now
+		}
+		return had
+	}
+	pick32 := func(had, was, now *uint32) *uint32 {
+		if was == nil && now != nil {
+			return now
+		}
+		return had
+	}
+	d.ColorPrimaries = pick16(d.ColorPrimaries, stated.ColorPrimaries, t.ColorPrimaries)
+	d.ColorTransfer = pick16(d.ColorTransfer, stated.ColorTransfer, t.ColorTransfer)
+	d.ColorSpace = pick16(d.ColorSpace, stated.ColorSpace, t.ColorSpace)
+	d.ColorRange = pick16(d.ColorRange, stated.ColorRange, t.ColorRange)
+	d.DisplayWidth = pick32(d.DisplayWidth, stated.DisplayWidth, t.DisplayWidth)
+	d.DisplayHeight = pick32(d.DisplayHeight, stated.DisplayHeight, t.DisplayHeight)
+	if d != (mkv.DerivedFields{}) {
+		t.Derived = &d
+	}
 }
 
 // scanFromVideo records what the Video element says about scanning. FlagInterlaced

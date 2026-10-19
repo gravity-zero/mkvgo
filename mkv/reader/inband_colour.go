@@ -223,7 +223,9 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			continue
 		}
 		delete(need, blk.TrackNumber) // first sample carries the parameter sets
+		stated := *t
 		applyInBandHeader(t, blk.Data)
+		recordDerived(t, &stated)
 	}
 }
 

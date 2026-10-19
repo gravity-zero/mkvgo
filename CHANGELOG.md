@@ -102,6 +102,11 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska rewrite (`EditInPlace`, `EditMetadata`, `Split`, `Join`, `Mux`...)
+  no longer writes into the container the colour and display size the reader
+  took from the codec's SPS where the container stated none: a title edit added
+  a Colour element and grew the head, refused for want of room on some files.
+  A value the edit sets is written as before.
 - Junk read as an unknown Matroska element between the segment's elements (what
   is left after a damaged parent) is resynced past, as an undecodable header
   is, instead of skipped by the size it happens to declare, which could carry

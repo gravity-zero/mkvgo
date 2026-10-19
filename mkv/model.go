@@ -270,6 +270,9 @@ type Track struct {
 	// ColourLayout is the sample layout the container's Colour element states (nil when it states none), carried
 	// over as read by every rewrite.
 	ColourLayout *ColourLayout `json:"colour_layout,omitempty"`
+	// Derived holds what the Matroska reader took from the codec bitstream where the container stated nothing: a
+	// rewrite leaves out a field that still holds that value, so it adds nothing the container did not say.
+	Derived *DerivedFields `json:"-"`
 	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour
 	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) - even when it resolves
@@ -845,3 +848,16 @@ type ColourLayout struct {
 	ChromaSitingHorz      *uint16 `json:"chroma_siting_horz,omitempty"`      // 0x55B7
 	ChromaSitingVert      *uint16 `json:"chroma_siting_vert,omitempty"`      // 0x55B8
 }
+
+// DerivedFields are the written Track fields the reader filled from the codec bitstream, each nil when the container
+// stated it (or nothing filled it).
+type DerivedFields struct {
+	ColorPrimaries, ColorTransfer, ColorSpace, ColorRange *uint16
+	DisplayWidth, DisplayHeight                           *uint32
+}
+
+// Stated16 reports whether v is a value to write: set, and not the one the reader derived.
+func Stated16(v, derived *uint16) bool { return v != nil && (derived == nil || *derived != *v) }
+
+// Stated32 is Stated16 for the display dimensions.
+func Stated32(v, derived *uint32) bool { return v != nil && (derived == nil || *derived != *v) }

@@ -320,24 +320,25 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			if t.Height != nil {
 				v.uint(mkv.IDPixelHeight, uint64(*t.Height))
 			}
-			if t.DisplayWidth != nil {
+			if mkv.Stated32(t.DisplayWidth, derived(t).DisplayWidth) {
 				v.uint(mkv.IDDisplayWidth, uint64(*t.DisplayWidth))
 			}
-			if t.DisplayHeight != nil {
+			if mkv.Stated32(t.DisplayHeight, derived(t).DisplayHeight) {
 				v.uint(mkv.IDDisplayHeight, uint64(*t.DisplayHeight))
 			}
 			if hasColour(t) {
 				v.master(mkv.IDColour, func(c *ew) {
-					if t.ColorRange != nil {
+					d := derived(t)
+					if mkv.Stated16(t.ColorRange, d.ColorRange) {
 						c.uint(mkv.IDColourRange, uint64(*t.ColorRange))
 					}
-					if t.ColorSpace != nil {
+					if mkv.Stated16(t.ColorSpace, d.ColorSpace) {
 						c.uint(mkv.IDColourMatrix, uint64(*t.ColorSpace))
 					}
-					if t.ColorTransfer != nil {
+					if mkv.Stated16(t.ColorTransfer, d.ColorTransfer) {
 						c.uint(mkv.IDColourTransfer, uint64(*t.ColorTransfer))
 					}
-					if t.ColorPrimaries != nil {
+					if mkv.Stated16(t.ColorPrimaries, d.ColorPrimaries) {
 						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
 					}
 					writeColourLayout(c, t.ColourLayout)
@@ -867,8 +868,18 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 
 // hasColour reports whether a track carries any colour code points.
 func hasColour(t *mkv.Track) bool {
-	return t.ColorPrimaries != nil || t.ColorTransfer != nil || t.ColorSpace != nil || t.ColorRange != nil ||
+	d := derived(t)
+	return mkv.Stated16(t.ColorPrimaries, d.ColorPrimaries) || mkv.Stated16(t.ColorTransfer, d.ColorTransfer) ||
+		mkv.Stated16(t.ColorSpace, d.ColorSpace) || mkv.Stated16(t.ColorRange, d.ColorRange) ||
 		t.ColourLayout != nil || t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
+}
+
+// derived returns what the reader derived for t, empty when nothing.
+func derived(t *mkv.Track) *mkv.DerivedFields {
+	if t.Derived == nil {
+		return &mkv.DerivedFields{}
+	}
+	return t.Derived
 }
 
 // writeColourLayout writes the layout elements the track states, each only when known.
