@@ -17,6 +17,42 @@ import (
 
 const defaultSubDurationMs = 3000
 
+// openCues holds the cues an extraction has met but not written: those at the latest start, which the next later cue
+// may end (subtitle.CueEndMs), each written by its own write once its end is known.
+type openCues struct {
+	starts     []int64
+	texts      []string
+	ends       []int64
+	writes     []func(endMs int64) error
+	mediaEndMs int64
+}
+
+// add queues a cue (endMs 0 when it states none), first writing the queued ones when it starts after them.
+func (q *openCues) add(startMs, endMs int64, text string, write func(endMs int64) error) error {
+	if len(q.starts) > 0 && startMs > q.starts[0] {
+		if err := q.flush(startMs, true); err != nil {
+			return err
+		}
+	}
+	q.starts, q.texts, q.ends, q.writes = append(q.starts, startMs), append(q.texts, text), append(q.ends, endMs), append(q.writes, write)
+	return nil
+}
+
+// flush writes the queued cues, each that states no end ended by nextMs (when hasNext), its reading or the media's end.
+func (q *openCues) flush(nextMs int64, hasNext bool) error {
+	for i, start := range q.starts {
+		end := q.ends[i]
+		if end <= start {
+			end = subtitle.CueEndMs(start, q.texts[i], nextMs, hasNext, q.mediaEndMs)
+		}
+		if err := q.writes[i](end); err != nil {
+			return err
+		}
+	}
+	q.starts, q.texts, q.ends, q.writes = q.starts[:0], q.texts[:0], q.ends[:0], q.writes[:0]
+	return nil
+}
+
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
@@ -63,19 +99,26 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	defer closeWithErr(out, &err)
 
 	seq := 1
+	q := openCues{mediaEndMs: c.DurationMs}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
-			dmg.skipped()
-			break
+			if fromMs, ok := dmg.skipped(); ok {
+				return q.flush(fromMs, true)
+			}
+			return q.flush(0, false)
 		}
 		if err != nil {
 			return err
 		}
-		dmg.skipped()
+		if fromMs, ok := dmg.skipped(); ok {
+			if err := q.flush(fromMs, true); err != nil {
+				return err
+			}
+		}
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err
@@ -84,31 +127,29 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 		if len(text) == 0 {
 			continue
 		}
-
-		endMs := blk.Timecode + defaultSubDurationMs
+		endMs := int64(0)
 		if blk.Duration > 0 {
 			endMs = blk.Timecode + blk.Duration
 		}
-
-		if _, err := fmt.Fprintf(out, "%d\n%s --> %s\n%s\n\n",
-			seq,
-			subtitle.FormatSRTTime(blk.Timecode),
-			subtitle.FormatSRTTime(endMs),
-			text,
-		); err != nil {
-			return fmt.Errorf("write subtitle entry: %w", err)
+		start := blk.Timecode
+		if err := q.add(start, endMs, text, func(endMs int64) error {
+			if _, err := fmt.Fprintf(out, "%d\n%s --> %s\n%s\n\n", seq, subtitle.FormatSRTTime(start), subtitle.FormatSRTTime(endMs), text); err != nil {
+				return fmt.Errorf("write subtitle entry: %w", err)
+			}
+			seq++
+			return nil
+		}); err != nil {
+			return err
 		}
-		seq++
 	}
-	return nil
 }
 
 // ExtractSubtitleWebVTT extracts the subtitle track trackID from the Matroska
 // file at srcPath and writes it as WebVTT to w - the head of the work an
 // external subtitle-extraction fork does, in-process. Text codecs are decoded by
 // kind: S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through, S_TEXT/ASS is flattened
-// to plain text. Each cue's end is its BlockDuration, falling back to the next
-// cue's start (then a default) when absent. Bitmap subtitles are not supported.
+// to plain text. Each cue's end is its BlockDuration; absent, subtitle.SettleCueEnds
+// ends it once read, at the next cue or at the film's end. Bitmap subtitles are not supported.
 //
 // When the source's Cues name every block of the track - their count matches a
 // trusted NUMBER_OF_FRAMES statistic - the blocks are read where the Cues put
@@ -220,7 +261,7 @@ func extractSubtitleWebVTTWalk(ctx context.Context, srcPath string, trackID uint
 		}
 		cues = append(cues, subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text})
 	}
-	subtitle.ResolveCueEnds(cues, defaultSubDurationMs)
+	subtitle.SettleCueEnds(cues, c.DurationMs)
 	if err := subtitle.WriteWebVTT(w, cues); err != nil {
 		return err
 	}

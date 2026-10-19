@@ -13,9 +13,6 @@ import (
 // native wvtt samples are decoded to cue text; each sample's composition time and
 // duration give the cue timing.
 
-// defaultSubDurationMs bounds the last cue when its sample duration is unknown.
-const defaultSubDurationMs = 3000
-
 // ExtractSubtitleWebVTT extracts the subtitle track trackID (a Container.Tracks ID
 // from OpenMeta) from the MP4 at srcPath and writes it as WebVTT to w. Only the
 // movie header and the track's subtitle samples are read. tx3g and wvtt are
@@ -69,6 +66,6 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 		}
 		cues = append(cues, subtitle.Cue{StartMs: s.ctsMs, EndMs: end, Text: string(text)})
 	}
-	subtitle.ResolveCueEnds(cues, defaultSubDurationMs)
+	subtitle.SettleCueEnds(cues, mv.durationMs)
 	return subtitle.WriteWebVTT(w, cues)
 }

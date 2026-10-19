@@ -362,7 +362,7 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 			cues = append(cues, subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text})
 		}
 	}
-	subtitle.ResolveCueEnds(cues, defaultSubDurationMs)
+	subtitle.SettleCueEnds(cues, c.DurationMs)
 	return subtitle.WriteWebVTT(w, cues)
 }
 

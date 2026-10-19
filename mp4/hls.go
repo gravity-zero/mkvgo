@@ -1105,7 +1105,7 @@ func urlRewriter(o *Options) func(string) string {
 // cue (see subtitle.ShiftCues) before windowing, so a re-synced track lands
 // in the right segment and, for a zero offset, is byte-identical to before.
 func writeSubtitleRendition(o *Options, fs *mkv.FS, dir string, idx int, st *hlsSubTrack, bounds []int64, durs []float64, fts []*fragTrack) error {
-	subtitle.ResolveCueEnds(st.cues, 2000)
+	subtitle.SettleCueEnds(st.cues, 0)
 	cues := subtitle.ShiftCues(st.cues, o.SubtitleOffsetMs)
 	for k := range durs {
 		segStart := bounds[k]

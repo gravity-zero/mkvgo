@@ -82,7 +82,7 @@ func (p *HLSPlan) subCuesThrough(ctx context.Context, i int, uptoMs int64) ([]su
 	// Resolving on the prefix equals resolving on the full track for every
 	// cue starting before uptoMs: the scan guarantees their successors
 	// (which duration-less ends resolve on) are in the prefix.
-	subtitle.ResolveCueEnds(cues, 2000)
+	subtitle.SettleCueEnds(cues, 0)
 	return cues, nil
 }
 
@@ -161,7 +161,7 @@ func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd 
 	if err != nil {
 		return nil, err
 	}
-	subtitle.ResolveCueEnds(cues, 2000)
+	subtitle.SettleCueEnds(cues, 0)
 	return cues, nil
 }
 

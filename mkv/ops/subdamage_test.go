@@ -298,7 +298,7 @@ func TestSubtitleReadsPassOverDamage(t *testing.T) {
 }
 
 // TestTextCueClosedAtDamage: a text cue without BlockDuration just before a damaged region ends where the region
-// starts, not at the first cue past it, on the walk and on an index read.
+// starts (the index read knows where), else once read, not at the first cue past it, on the walk and on an index read.
 func TestTextCueClosedAtDamage(t *testing.T) {
 	w, h := uint32(320), uint32(240)
 	var sets [][]mkv.Block
@@ -336,7 +336,7 @@ func TestTextCueClosedAtDamage(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The walk knows the region starts past cluster 3 (3 s), the index read at cluster 4 (4 s).
-	want := map[string]string{"walk": "00:00:03.200 --> 00:00:06.200\ncue 3", "index": "00:00:03.200 --> 00:00:04.000\ncue 3"}
+	want := map[string]string{"walk": "00:00:03.200 --> 00:00:04.200\ncue 3", "index": "00:00:03.200 --> 00:00:04.000\ncue 3"}
 	for name, read := range map[string]func(*bytes.Buffer) error{
 		"walk":  func(b *bytes.Buffer) error { return ExtractSubtitleWebVTT(context.Background(), bad, 3, b) },
 		"index": func(b *bytes.Buffer) error { return ExtractSubtitleWebVTTFrom(context.Background(), bad, 3, ix, b) },

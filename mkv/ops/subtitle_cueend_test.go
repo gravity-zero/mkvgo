@@ -1,0 +1,70 @@
+package ops
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
+
+// cueEndFixture is a film of 20 s whose cues state no duration: two a second apart, one before a 10 s silence, and a
+// last one 500 ms before the end.
+func cueEndFixture(t *testing.T, codec string, cue func(text string) []byte) string {
+	t.Helper()
+	w, h := uint32(320), uint32(240)
+	at := map[int64]string{1000: "Oui.", 2000: "Non.", 4000: strings.Repeat("a", 85), 19_500: "Fin."}
+	var sets [][]mkv.Block
+	for s := int64(0); s < 20; s++ {
+		set := []mkv.Block{{TrackNumber: 1, Timecode: s * 1000, Keyframe: true, Data: []byte{0, 0, 0, 1, 0x65, byte(s)}}}
+		for _, tc := range []int64{s * 1000, s*1000 + 500} {
+			if text, ok := at[tc]; ok {
+				set = append(set, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: cue(text)})
+			}
+		}
+		sets = append(sets, set)
+	}
+	var priv []byte
+	if codec == "ass" {
+		priv = []byte("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
+	}
+	return buildMKVCuedBlocks(t, t.TempDir(), "s.mkv", []mkv.Track{
+		{ID: 1, UID: 11, Type: mkv.VideoTrack, Codec: "h264", Width: &w, Height: &h},
+		{ID: 2, UID: 22, Type: mkv.SubtitleTrack, Codec: codec, CodecPrivate: priv},
+	}, sets, 20_000, nil)
+}
+
+// A cue that states no end stops at the next cue, once read, or at the film's end, whichever comes first: never over
+// the next cue, never through a silence, never past the film, in SRT, ASS and WebVTT alike.
+func TestExtractedCuesEndOnceRead(t *testing.T) {
+	ctx := context.Background()
+	srt := cueEndFixture(t, "srt", func(text string) []byte { return []byte(text) })
+	ass := cueEndFixture(t, "ass", func(text string) []byte { return []byte("0,0,Default,,0,0,0,," + text) })
+	read := func(path string) string {
+		data, err := os.ReadFile(path)
+		mustNil(t, err)
+		return string(data)
+	}
+	dir := t.TempDir()
+	mustNil(t, ExtractSubtitle(ctx, srt, 2, filepath.Join(dir, "s.srt")))
+	mustNil(t, ExtractASS(ctx, ass, 2, filepath.Join(dir, "s.ass")))
+	var vtt bytes.Buffer
+	mustNil(t, ExtractSubtitleWebVTT(ctx, srt, 2, &vtt))
+	for name, c := range map[string]struct {
+		got  string
+		want []string
+	}{
+		"srt": {read(filepath.Join(dir, "s.srt")), []string{"00:00:01,000 --> 00:00:02,000", "00:00:02,000 --> 00:00:03,000", "00:00:04,000 --> 00:00:09,000", "00:00:19,500 --> 00:00:20,000"}},
+		"ass": {read(filepath.Join(dir, "s.ass")), []string{",0:00:01.00,0:00:02.00,", ",0:00:02.00,0:00:03.00,", ",0:00:04.00,0:00:09.00,", ",0:00:19.50,0:00:20.00,"}},
+		"vtt": {vtt.String(), []string{"00:00:01.000 --> 00:00:02.000", "00:00:02.000 --> 00:00:03.000", "00:00:04.000 --> 00:00:09.000", "00:00:19.500 --> 00:00:20.000"}},
+	} {
+		for _, w := range c.want {
+			if !strings.Contains(c.got, w) {
+				t.Errorf("%s lacks %q:\n%s", name, w, c.got)
+			}
+		}
+	}
+}

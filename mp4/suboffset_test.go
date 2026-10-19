@@ -12,8 +12,8 @@ import (
 )
 
 // subOffsetFixture builds the shared source: 6s of video (keyframe every 1s)
-// and 3 subtitle cues at t=0/2000/4000ms, ResolveCueEnds giving them
-// (0,2000), (2000,4000) and (4000,6000) before any shift.
+// and 3 subtitle cues at t=0/2000/4000ms, SettleCueEnds giving them a second
+// each to read: (0,1000), (2000,3000) and (4000,5000) before any shift.
 func subOffsetFixture(t *testing.T) string {
 	t.Helper()
 	w, h := uint32(320), uint32(240)
@@ -104,18 +104,18 @@ func TestRemuxToHLS_SubtitleOffsetPositive(t *testing.T) {
 func TestRemuxToHLS_SubtitleOffsetNegativeDropAndClamp(t *testing.T) {
 	src := subOffsetFixture(t)
 	dir := t.TempDir()
-	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000, SubtitleOffsetMs: -5500}); err != nil {
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000, SubtitleOffsetMs: -4500}); err != nil {
 		t.Fatal(err)
 	}
 	whole, err := os.ReadFile(filepath.Join(dir, "sub1.vtt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// cue 1 (0,2000)-5500=(-5500,-3500): end <= 0 -> dropped.
-	// cue 2 (2000,4000)-5500=(-3500,-1500): end <= 0 -> dropped.
-	// cue 3 (4000,6000)-5500=(-1500,500): straddles 0 -> clamped to (0,500).
+	// cue 1 (0,1000)-4500=(-4500,-3500): end <= 0 -> dropped.
+	// cue 2 (2000,3000)-4500=(-2500,-1500): end <= 0 -> dropped.
+	// cue 3 (4000,5000)-4500=(-500,500): straddles 0 -> clamped to (0,500).
 	if bytes.Contains(whole, []byte("cue numero 1")) || bytes.Contains(whole, []byte("cue numero 2")) {
-		t.Errorf("cues 1 and 2 must be fully dropped by a -5500ms shift:\n%s", whole)
+		t.Errorf("cues 1 and 2 must be fully dropped by a -4500ms shift:\n%s", whole)
 	}
 	if !bytes.Contains(whole, []byte("cue numero 3")) {
 		t.Errorf("cue 3 must survive, clamped:\n%s", whole)

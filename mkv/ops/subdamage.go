@@ -108,14 +108,12 @@ func reportDamage(opts []mkv.Options, g reader.DamageRange, atMs int64) {
 	onSkip(mkv.DamagedRange{StartOffset: g.From, EndOffset: g.To, ApproxStartMs: from, ApproxEndMs: end})
 }
 
-// closeOpenCue ends the last cue, when it has no end of its own, where a region passed over begins (else after the
-// default duration): the next cue lies past the region and would stretch it over the lost span.
+// closeOpenCue ends the last cue, when it has no end of its own, as subtitle.CueEndMs does with the region passed
+// over standing for the next cue: the next real cue lies past the region and would stretch it over the lost span.
 func closeOpenCue(cues []subtitle.Cue, fromMs int64, ok bool) {
 	if !ok || len(cues) == 0 || cues[len(cues)-1].EndMs > cues[len(cues)-1].StartMs {
 		return
 	}
 	c := &cues[len(cues)-1]
-	if c.EndMs = fromMs; c.EndMs <= c.StartMs {
-		c.EndMs = c.StartMs + defaultSubDurationMs
-	}
+	c.EndMs = subtitle.CueEndMs(c.StartMs, c.Text, fromMs, true, 0)
 }

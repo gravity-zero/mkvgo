@@ -366,7 +366,7 @@ func (t *mp4SubTable) load(ctx context.Context, open func(context.Context) (mkv.
 	return nil
 }
 
-// window returns the cues meeting [from, to), each ended as subtitle.ResolveCueEnds ends it over the whole track, reading only the text that decides them.
+// window returns the cues meeting [from, to), each ended as subtitle.SettleCueEnds ends it over the whole track, reading only the text that decides them.
 func (t *mp4SubTable) window(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), from, to int64) ([]subtitle.Cue, error) {
 	var idx []int
 	for j := range t.samples {
@@ -385,13 +385,17 @@ func (t *mp4SubTable) window(ctx context.Context, open func(context.Context) (mk
 		end := t.startMs[j] + t.durMs[j]
 		if t.durMs[j] <= 0 {
 			next, err := t.nextText(ctx, open, j)
+			for err == nil && next >= 0 && t.startMs[next] <= t.startMs[j] {
+				next, err = t.nextText(ctx, open, next)
+			}
 			if err != nil {
 				return nil, err
 			}
-			end = t.startMs[j] + 2000
-			if next >= 0 && t.startMs[next] > t.startMs[j] {
-				end = t.startMs[next]
+			nextMs := int64(0)
+			if next >= 0 {
+				nextMs = t.startMs[next]
 			}
+			end = subtitle.CueEndMs(t.startMs[j], t.text[j], nextMs, next >= 0, 0)
 		}
 		if end > from {
 			cues = append(cues, subtitle.Cue{StartMs: t.startMs[j], EndMs: end, Text: t.text[j]})

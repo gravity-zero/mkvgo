@@ -39,7 +39,7 @@ func TestMP4PlanReadsNoSubtitleText(t *testing.T) {
 	}
 }
 
-// TestMP4SubWindowMatchesWholeTrackDecode: every window equals decoding the whole track, ResolveCueEnds and the overlap filter, the old plan-time path.
+// TestMP4SubWindowMatchesWholeTrackDecode: every window equals decoding the whole track, SettleCueEnds and the overlap filter, the old plan-time path.
 func TestMP4SubWindowMatchesWholeTrackDecode(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	var file []byte
@@ -81,7 +81,7 @@ func TestMP4SubWindowMatchesWholeTrackDecode(t *testing.T) {
 			want = append(want, c)
 		}
 	}
-	subtitle.ResolveCueEnds(want, 2000)
+	subtitle.SettleCueEnds(want, 0)
 
 	table := func() *mp4SubTable {
 		tb := &mp4SubTable{codec: "tx3g"}

@@ -180,7 +180,8 @@ func ShiftCues(cues []Cue, offsetMs int64) []Cue {
 
 // ResolveCueEnds fills any cue whose end is unset (<= its start, e.g. no source
 // duration) from the next cue's start, falling back to defaultDurMs for the last
-// cue. Cues must already be in start order.
+// cue. Cues must already be in start order. SettleCueEnds is the rule mkvgo
+// applies: it also ends a cue once read, and at the media's end.
 func ResolveCueEnds(cues []Cue, defaultDurMs int64) {
 	for i := range cues {
 		if cues[i].EndMs > cues[i].StartMs {

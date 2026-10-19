@@ -134,19 +134,26 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 		}
 	}
 
+	q := openCues{mediaEndMs: c.DurationMs}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
-			dmg.skipped()
-			break
+			if fromMs, ok := dmg.skipped(); ok {
+				return q.flush(fromMs, true)
+			}
+			return q.flush(0, false)
 		}
 		if err != nil {
 			return err
 		}
-		dmg.skipped()
+		if fromMs, ok := dmg.skipped(); ok {
+			if err := q.flush(fromMs, true); err != nil {
+				return err
+			}
+		}
 		payload, err := decompressSubtitleBlock(track, blk.Data)
 		if err != nil {
 			return err
@@ -159,15 +166,18 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 		if len(parts) < 3 {
 			continue
 		}
-		start := subtitle.FormatASSTimestamp(blk.Timecode)
-		endMs := blk.Timecode + defaultSubDurationMs
+		endMs := int64(0)
 		if blk.Duration > 0 {
 			endMs = blk.Timecode + blk.Duration
 		}
-		end := subtitle.FormatASSTimestamp(endMs)
-		if _, err := fmt.Fprintf(out, "Dialogue: %s,%s,%s,%s\n", parts[1], start, end, parts[2]); err != nil {
-			return fmt.Errorf("write ASS dialogue: %w", err)
+		start := subtitle.FormatASSTimestamp(blk.Timecode)
+		if err := q.add(blk.Timecode, endMs, subtitle.FlattenASSBlock([]byte(text)), func(endMs int64) error {
+			if _, err := fmt.Fprintf(out, "Dialogue: %s,%s,%s,%s\n", parts[1], start, subtitle.FormatASSTimestamp(endMs), parts[2]); err != nil {
+				return fmt.Errorf("write ASS dialogue: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
-	return nil
 }
