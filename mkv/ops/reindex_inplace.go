@@ -524,6 +524,9 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 			if h.Size < 0 {
 				return nil, fmt.Errorf("reindex inplace: unknown-size SeekHead")
 			}
+			if h.Size > maxSeekHeadBytes {
+				return nil, fmt.Errorf("reindex inplace: a SeekHead of %d bytes, past the %d an index holds: repair the file with mkvgo reindex (a copy) instead", h.Size, maxSeekHeadBytes)
+			}
 			body := make([]byte, h.Size)
 			if _, err := io.ReadFull(r, body); err != nil {
 				return nil, inplaceReadErr("read SeekHead body", err)

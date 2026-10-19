@@ -47,6 +47,9 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err != nil {
 		return fmt.Errorf("scan metadata: %w", err)
 	}
+	if err := regionWithinMedia(path, fs, c, region); err != nil {
+		return err
+	}
 	after, err := metaForms(c)
 	if err != nil {
 		return err
@@ -544,6 +547,25 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 	return region, nil
 }
 
+// regionWithinMedia refuses a head whose declared sizes run past the file or over the first cluster the Cues name:
+// the edit would fill that span with its Void, zeroing the media.
+func regionWithinMedia(path string, fs *mkv.FS, c *mkv.Container, region metadataRegion) error {
+	st, err := fs.DoStat(path)
+	if err != nil {
+		return err
+	}
+	end := st.Size()
+	for _, cp := range c.Cues {
+		if cp.ClusterPos > 0 {
+			end = min(end, region.segDataStart+cp.ClusterPos)
+		}
+	}
+	if region.end > end {
+		return fmt.Errorf("the metadata before the clusters declares sizes reaching byte %d, past the media at byte %d: repair the file with mkvgo reindex, then edit it", region.end, end)
+	}
+	return nil
+}
+
 // tailElement is a metadata element after the clusters: where it starts, its full size, its SeekHead entry.
 type tailElement struct {
 	pos, size int64
@@ -629,7 +651,7 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 		return nil, err
 	}
 	sh, _, err := ebml.ReadElementHeader(f)
-	if err != nil || sh.ID != mkv.IDSeekHead || sh.Size < 0 {
+	if err != nil || sh.ID != mkv.IDSeekHead || sh.Size < 0 || sh.Size > maxSeekHeadBytes {
 		return nil, nil
 	}
 	body := make([]byte, sh.Size)
@@ -638,6 +660,10 @@ func readSeekHeadEntries(path string, fs *mkv.FS, region *metadataRegion) ([]wri
 	}
 	return parseSeekHeadBody(body), nil
 }
+
+// maxSeekHeadBytes bounds the SeekHead an in-place edit reads whole: a real one is a few dozen entries; the size a
+// file declares is not believed past it.
+const maxSeekHeadBytes = 1 << 20
 
 // parseSeekHeadBody parses a SeekHead element's raw body into SeekEntry pairs
 // (SeekID + SeekPosition). A malformed or truncated entry simply stops the
@@ -659,6 +685,9 @@ func parseSeekHeadBody(body []byte) []writer.SeekEntry {
 				return out
 			}
 			continue
+		}
+		if eh.Size > int64(br.Len()) {
+			return out
 		}
 		inner := make([]byte, eh.Size)
 		if _, err := io.ReadFull(br, inner); err != nil {
