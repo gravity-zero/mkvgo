@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -309,4 +310,29 @@ func absMs(d int64) int64 {
 		return -d
 	}
 	return d
+}
+
+// TestJoinReadsOneWaveLevel: QuickTime puts one wave in a sample entry; one inside it is compared byte for byte, never walked, so a crafted nest cannot exhaust the stack.
+func TestJoinReadsOneWaveLevel(t *testing.T) {
+	describe := func(rate byte) []byte {
+		var w bw
+		decodingKids(&w, []memBox{{typ: "wave", payload: box("wave", box("btrt", []byte{0, 0, 0, rate}))}}, true)
+		return w.b
+	}
+	if bytes.Equal(describe(1), describe(2)) {
+		t.Error("a wave inside a wave was walked, its btrt dropped")
+	}
+	const depth = 100_000
+	core := box("frma", []byte("mp4a"))
+	nest := make([]byte, 8*depth+len(core))
+	for i := range depth {
+		binary.BigEndian.PutUint32(nest[8*i:], uint32(len(nest)-8*i))
+		copy(nest[8*i+4:], "wave")
+	}
+	copy(nest[8*depth:], core)
+	var w bw
+	decodingKids(&w, []memBox{{typ: "wave", payload: nest}}, true)
+	if !bytes.Contains(w.b, nest) {
+		t.Error("the nested waves were not kept verbatim")
+	}
 }

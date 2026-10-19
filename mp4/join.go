@@ -318,13 +318,13 @@ func decodingDescription(stsd []byte, handler string) []byte {
 		}
 		w.bytes([]byte(e.typ))
 		w.bytes(e.payload[:hdr])
-		decodingKids(&w, kids)
+		decodingKids(&w, kids, true)
 	}
 	return w.b
 }
 
-// decodingKids writes a sample entry's child boxes without their declared bitrates, inside a QuickTime wave too.
-func decodingKids(w *bw, kids []memBox) {
+// decodingKids writes a sample entry's child boxes without their declared bitrates, inside its QuickTime wave too (one level, as QuickTime writes it).
+func decodingKids(w *bw, kids []memBox, walkWave bool) {
 	for _, k := range kids {
 		switch k.typ {
 		case "btrt":
@@ -336,9 +336,9 @@ func decodingKids(w *bw, kids []memBox) {
 			}
 			w.bytes(box(k.typ, k.payload))
 		case "wave":
-			if inner, err := iterBoxes(k.payload); err == nil {
+			if inner, err := iterBoxes(k.payload); err == nil && walkWave {
 				w.bytes([]byte(k.typ))
-				decodingKids(w, inner)
+				decodingKids(w, inner, false)
 				continue
 			}
 			w.bytes(box(k.typ, k.payload))
