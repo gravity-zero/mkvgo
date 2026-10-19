@@ -49,3 +49,30 @@ func TestPGSBlockPixelsBounded(t *testing.T) {
 		t.Error("five 4096x4096 objects in one block decoded, want the block refused")
 	}
 }
+
+// TestPGSEpochObjectsBounded: objects live until an epoch start, so a stream that never starts one (or a block
+// inflated from a few KiB) piled up every object it defined; an epoch holding past pgsMaxEpochBytes is refused.
+func TestPGSEpochObjectsBounded(t *testing.T) {
+	d := NewPGSDecoder()
+	rle := make([]byte, 60_000)
+	for i := range 1000 {
+		if _, err := d.Decode(pgsODS(uint16(i), 64, 64, rle)); err != nil {
+			if i*len(rle) < pgsMaxEpochBytes-len(rle) {
+				t.Fatalf("refused after %d bytes, under the %d-byte budget: %v", i*len(rle), pgsMaxEpochBytes, err)
+			}
+			return
+		}
+	}
+	t.Errorf("an epoch kept 1000 objects of %d bytes, want a refusal past %d bytes", len(rle), pgsMaxEpochBytes)
+}
+
+// TestPGSEpochObjectRedefinedCountsOnce: redefining an object replaces it, its old bytes leave the budget.
+func TestPGSEpochObjectRedefinedCountsOnce(t *testing.T) {
+	d := NewPGSDecoder()
+	rle := make([]byte, 60_000)
+	for range 1000 {
+		if _, err := d.Decode(pgsODS(1, 64, 64, rle)); err != nil {
+			t.Fatalf("one object redefined over and over was refused: %v", err)
+		}
+	}
+}

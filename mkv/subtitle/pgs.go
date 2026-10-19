@@ -57,6 +57,8 @@ const (
 	// declared data length asks for. Real subtitle objects are tens of KiB; a
 	// 3-byte length field can otherwise claim 16 MiB per object.
 	pgsMaxObjectBytes = 4 << 20
+	// pgsMaxEpochBytes bounds what an epoch's objects hold together: they live until the next epoch start.
+	pgsMaxEpochBytes = 4 * pgsMaxObjectBytes
 	// pgsMaxBlockPixels bounds the pixels one block's display sets decode: four 4096x4096 objects, 256 MiB. A real
 	// block places one or two subtitle-sized objects; only a forged one names objects over and over.
 	pgsMaxBlockPixels = 4 * pgsMaxObjectDim * pgsMaxObjectDim
@@ -117,6 +119,7 @@ type PGSDecoder struct {
 	objects  map[uint16]*pgsObjectDef
 	pending  *pgsObjectDef // object being accumulated across several ODS
 	pendID   uint16
+	objBytes int // what the epoch's objects hold (pgsMaxEpochBytes)
 	pixels   int // what the block being decoded may still decode (pgsMaxBlockPixels)
 }
 
@@ -127,7 +130,7 @@ func NewPGSDecoder() *PGSDecoder { return &PGSDecoder{} }
 // than reading it front to back should call it, so a display set cannot compose
 // against pictures that belong to a different part of the file.
 func (d *PGSDecoder) Reset() {
-	d.palettes, d.objects, d.pending = nil, nil, nil
+	d.palettes, d.objects, d.pending, d.objBytes = nil, nil, nil, 0
 }
 
 // Decode decodes one Matroska block into the display sets it holds. Almost
@@ -173,7 +176,7 @@ func (d *PGSDecoder) Decode(block []byte) ([]PGSDisplaySet, error) {
 				// An epoch start invalidates everything carried over. It comes
 				// BEFORE the PDS/ODS of its own display set, so clearing here
 				// discards the old epoch without touching the new one.
-				d.palettes, d.objects, d.pending = nil, nil, nil
+				d.palettes, d.objects, d.pending, d.objBytes = nil, nil, nil, 0
 			}
 			comp = c
 		case pgsSegPDS:
@@ -376,6 +379,12 @@ func (d *PGSDecoder) parseObject(p []byte) error {
 		}
 		if d.objects == nil {
 			d.objects = make(map[uint16]*pgsObjectDef, 2)
+		}
+		if old := d.objects[id]; old != nil {
+			d.objBytes -= len(old.rle)
+		}
+		if d.objBytes += len(d.pending.rle); d.objBytes > pgsMaxEpochBytes {
+			return fmt.Errorf("PGS: object %d brings the objects held since the last epoch start to %d bytes (limit %d)", id, d.objBytes, pgsMaxEpochBytes)
 		}
 		d.objects[id] = d.pending
 		d.pending = nil
