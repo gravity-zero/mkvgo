@@ -250,7 +250,9 @@ func TestFingerprint_MP4RemuxesToATempFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
+	for _, v := range []string{"TMPDIR", "TMP", "TEMP"} { // os.TempDir reads TMPDIR on Unix, TMP then TEMP on Windows
+		t.Setenv(v, tmp)
+	}
 	sawTemp := false
 	progress := func(_, _ int64) {
 		if entries, err := os.ReadDir(tmp); err == nil && len(entries) > 0 {
