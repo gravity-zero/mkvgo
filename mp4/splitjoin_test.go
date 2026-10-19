@@ -3,6 +3,7 @@ package mp4
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -323,5 +324,40 @@ func TestSplitNeverOpensOnPicturesTheEditListHides(t *testing.T) {
 				t.Errorf("the parts show %d ms of video, the source 2500", shown/1_000_000)
 			}
 		})
+	}
+}
+
+// TestJoinRefusesAnotherDisplayMatrix: a portrait clip and a landscape one of the same encoding would come out under the first's matrix, the second turned.
+func TestJoinRefusesAnotherDisplayMatrix(t *testing.T) {
+	a, b := editFixture(t), editFixture(t)
+	rewriteTailMoov(t, b, func(p []byte) []byte {
+		return mapTraks(t, p, func(k int, trak []byte) []byte {
+			if k != 0 {
+				return trak
+			}
+			tb, _ := iterBoxes(trak)
+			var w bw
+			for _, x := range tb {
+				if x.typ == "tkhd" {
+					q := append([]byte(nil), x.payload...)
+					off := 40
+					if q[0] == 1 {
+						off = 52
+					}
+					binary.BigEndian.PutUint32(q[off:], 0)
+					binary.BigEndian.PutUint32(q[off+4:], 0x10000)
+					binary.BigEndian.PutUint32(q[off+12:], 0xFFFF0000)
+					binary.BigEndian.PutUint32(q[off+16:], 0)
+					w.bytes(box("tkhd", q))
+					continue
+				}
+				w.bytes(box(x.typ, x.payload))
+			}
+			return w.b
+		})
+	})
+	err := Join(context.Background(), []string{a, b}, filepath.Join(t.TempDir(), "j.mp4"))
+	if err == nil || !strings.Contains(err.Error(), "turned") {
+		t.Errorf("err = %v, want a refusal of the other display matrix", err)
 	}
 }

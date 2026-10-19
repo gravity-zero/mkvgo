@@ -154,8 +154,27 @@ func sameStreams(a, b *cutModel) error {
 		if !bytes.Equal(decodingDescription(sx, x.handler), decodingDescription(sy, y.handler)) {
 			return fmt.Errorf("track %d is encoded differently from the first file's (its sample description differs): a join copies samples, so every file needs the same encoding settings", i+1)
 		}
+		if !bytes.Equal(tkhdDisplay(x.trak), tkhdDisplay(y.trak)) {
+			return fmt.Errorf("track %d is turned or sized for display differently from the first file's (its tkhd matrix or size differs), which the join could state only one way: set the same orientation first (edit), or remux the files to MKV (from-mp4) and join there", i+1)
+		}
 	}
 	return nil
+}
+
+// tkhdDisplay is a trak's display matrix and size as its tkhd states them (nil when it has none).
+func tkhdDisplay(trak []byte) []byte {
+	p, err := boxAt(trak, "tkhd")
+	if err != nil || len(p) < 1 {
+		return nil
+	}
+	off := 40
+	if p[0] == 1 {
+		off = 52
+	}
+	if len(p) < off+44 {
+		return nil
+	}
+	return p[off : off+44]
 }
 
 // maxAudioGapMs is the longest audio gap a join hides by stretching the last sample; players drift past it.
