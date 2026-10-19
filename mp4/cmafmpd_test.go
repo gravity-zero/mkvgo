@@ -260,6 +260,9 @@ func TestDASHFromCMAF_RejectsBadFiles(t *testing.T) {
 			[]string{"carries a video track", "under Video"}},
 		{"duplicate-id", func(p *CMAFPresentation) { p.Video[0].ID, p.Video[1].ID = "x", "x" },
 			[]string{`id "x" is used twice`}},
+		{"quoted-id", func(p *CMAFPresentation) { p.Video[0].ID = `a" b` }, []string{"letters, digits"}},
+		{"path-id", func(p *CMAFPresentation) { p.Video[0].ID = "../x" }, []string{"letters, digits"}},
+		{"master-id", func(p *CMAFPresentation) { p.Video[0].ID = "master" }, []string{`"master" names`}},
 		{"no-init", func(p *CMAFPresentation) { p.Video[0].Init = "" }, []string{"no initialisation segment"}},
 		{"no-segments", func(p *CMAFPresentation) { p.Video[0].Segments = nil }, []string{"no media segments"}},
 	}

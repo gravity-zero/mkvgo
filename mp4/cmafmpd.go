@@ -104,6 +104,9 @@ func readCMAFPresentation(ctx context.Context, o *Options, p CMAFPresentation) (
 			if id == "" {
 				id = fmt.Sprintf("%s%d", prefix, i+1)
 			}
+			if err := cmafID(id); err != nil {
+				return err
+			}
 			if seen[id] {
 				return errf("representation id %q is used twice - give each representation its own ID", id)
 			}
@@ -750,4 +753,26 @@ func writeCMAFAddressing(b *strings.Builder, rw func(string) string, r *cmafRep)
 		fmt.Fprintf(b, `          <SegmentURL media="%s"/>`+"\n", xmlAttr(rw(u)))
 	}
 	b.WriteString("        </SegmentList>\n")
+}
+
+// cmafID refuses a representation ID that is not a plain name: it is written in the MPD and names the playlist file.
+func cmafID(id string) error {
+	if id == "master" {
+		return errf(`representation id "master" names the master playlist - give the representation another ID`)
+	}
+	for i, r := range id {
+		if !cmafIDRune(r, i) {
+			return errf("representation id %q: use letters, digits, '-', '_' and '.' (not first) only, it names a file and an MPD attribute", id)
+		}
+	}
+	return nil
+}
+
+// cmafIDRune reports whether r may stand at position i of a representation ID.
+func cmafIDRune(r rune, i int) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		return true
+	}
+	return r == '.' && i > 0
 }
