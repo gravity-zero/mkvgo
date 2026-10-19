@@ -32,6 +32,9 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	if track == nil {
 		return fmt.Errorf("subtitle track %d not found", trackID)
 	}
+	if !isTextSubtitle(track.Codec) {
+		return fmt.Errorf("subtitle track %d codec %q is not text (cannot write it as SRT): extract a bitmap track with -format pgs", trackID, track.Codec)
+	}
 
 	f, err := fs.DoOpen(srcPath)
 	if err != nil {
@@ -81,6 +84,9 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 		}
 
 		endMs := blk.Timecode + defaultSubDurationMs
+		if blk.Duration > 0 {
+			endMs = blk.Timecode + blk.Duration
+		}
 
 		if _, err := fmt.Fprintf(out, "%d\n%s --> %s\n%s\n\n",
 			seq,

@@ -156,7 +156,11 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 			continue
 		}
 		start := subtitle.FormatASSTimestamp(blk.Timecode)
-		end := subtitle.FormatASSTimestamp(blk.Timecode + defaultSubDurationMs)
+		endMs := blk.Timecode + defaultSubDurationMs
+		if blk.Duration > 0 {
+			endMs = blk.Timecode + blk.Duration
+		}
+		end := subtitle.FormatASSTimestamp(endMs)
 		if _, err := fmt.Fprintf(out, "Dialogue: %s,%s,%s,%s\n", parts[1], start, end, parts[2]); err != nil {
 			return fmt.Errorf("write ASS dialogue: %w", err)
 		}
