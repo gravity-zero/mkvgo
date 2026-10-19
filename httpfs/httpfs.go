@@ -628,7 +628,7 @@ func (r *reader) ReadAt(p []byte, off int64) (int, error) {
 	default:
 		return 0, fmt.Errorf("httpfs: %s: HTTP %s", shown.Path(r.url), resp.Status)
 	}
-	start, last, _, err := parseContentRange(resp.Header.Get("Content-Range"))
+	start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 	if err != nil {
 		return 0, fmt.Errorf("httpfs: %s: %w", shown.Path(r.url), err)
 	}
@@ -644,7 +644,12 @@ func (r *reader) ReadAt(p []byte, off int64) (int, error) {
 		return n, fmt.Errorf("httpfs: %s: read body: %w", shown.Path(r.url), err)
 	}
 	if n < len(p) {
-		return n, io.EOF
+		if total >= 0 && last+1 >= total {
+			return n, io.EOF
+		}
+		// The server served less than asked short of the object's end (a range cap): the rest is asked for again.
+		m, err := r.ReadAt(p[n:], off+int64(n))
+		return n + m, err
 	}
 	return n, nil
 }
