@@ -19,3 +19,21 @@ func TestSplitLinksNameTheirCut(t *testing.T) {
 		t.Error("the part after a 3 s cut continues the part before a 2 s cut")
 	}
 }
+
+// TestSplitLinksCarryTheirCut: each part but the last names how far into it the split cut, so a join places the next
+// part there without reading it off the tracks; the last runs to the source's end and names none.
+func TestSplitLinksCarryTheirCut(t *testing.T) {
+	src := editFixture(t)
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 2000}, {StartMs: 2000, EndMs: 4000}, {StartMs: 4000}}})
+	var cuts []int64
+	for _, p := range parts {
+		cuts = append(cuts, readSplitLink(moovBoxesOf(t, p)).cutNs)
+	}
+	if cuts[0] <= 0 || cuts[1] <= 0 || cuts[2] != 0 {
+		t.Fatalf("cuts %v, want two positive then none", cuts)
+	}
+	m := mustCutModel(t, parts[0])
+	if got := m.tracks[m.ref].ptNs(0, m.movieTS) + cuts[0]; roundMs(got) < 1900 || roundMs(got) > 2100 {
+		t.Errorf("part 1 is cut %d ms in, want about 2000", roundMs(cuts[0]))
+	}
+}

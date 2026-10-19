@@ -4,16 +4,22 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"strconv"
 )
 
 // The freeform atoms that chain a split's parts, MP4's stand-in for Matroska's SegmentUID and PrevUID.
 const (
 	splitUIDAtom  = "SPLIT_UID"
 	splitPrevAtom = "SPLIT_PREV"
+	splitCutAtom  = "SPLIT_CUT"
 )
 
-// splitLink names a part and the part a split cut just before it.
-type splitLink struct{ uid, prev string }
+// splitLink names a part and the part a split cut just before it; cutNs is how far into the part (ns) the split cut it,
+// 0 when it runs to the source's end: a join places the next part there, whatever track runs past it.
+type splitLink struct {
+	uid, prev string
+	cutNs     int64
+}
 
 // continues reports whether l is the part a split cut right after prev.
 func (l splitLink) continues(prev splitLink) bool {
@@ -36,11 +42,17 @@ func splitLinks(seed [32]byte, src splitLink, bounds [][2]int64) []splitLink {
 		if i > 0 {
 			links[i].prev = links[i-1].uid
 		}
+		if bounds[i][1] > 0 {
+			links[i].cutNs = bounds[i][1] - bounds[i][0]
+		}
 	}
 	if n > 0 {
 		links[0].prev = src.prev
 		if src.uid != "" {
 			links[n-1].uid = src.uid
+		}
+		if last := &links[n-1]; last.cutNs == 0 && src.cutNs > bounds[n-1][0] {
+			last.cutNs = src.cutNs - bounds[n-1][0] // a part of a part: its last piece ends at the cut the source names
 		}
 	}
 	return links
@@ -69,6 +81,10 @@ func readSplitLink(moovBoxes []memBox) splitLink {
 				l.uid = v
 			case name == splitPrevAtom:
 				l.prev = v
+			case name == splitCutAtom:
+				if ns, err := strconv.ParseInt(v, 10, 64); err == nil && ns > 0 {
+					l.cutNs = ns
+				}
 			}
 		}
 		return nil
@@ -112,7 +128,7 @@ func udtaWithSplitLink(p []byte, l splitLink) ([]byte, error) {
 	relink := func(atoms []memBox) [][]byte {
 		var kids [][]byte
 		for _, a := range atoms {
-			if name, _, ok := freeformText(a.payload); a.typ == "----" && ok && (name == splitUIDAtom || name == splitPrevAtom) {
+			if name, _, ok := freeformText(a.payload); a.typ == "----" && ok && (name == splitUIDAtom || name == splitPrevAtom || name == splitCutAtom) {
 				continue
 			}
 			kids = append(kids, box(a.typ, a.payload))
@@ -122,6 +138,9 @@ func udtaWithSplitLink(p []byte, l splitLink) ([]byte, error) {
 		}
 		if l.prev != "" {
 			kids = append(kids, freeformAtom(splitPrevAtom, l.prev))
+		}
+		if l.cutNs > 0 {
+			kids = append(kids, freeformAtom(splitCutAtom, strconv.FormatInt(l.cutNs, 10)))
 		}
 		return kids
 	}
