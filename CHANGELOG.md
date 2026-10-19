@@ -77,7 +77,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   `merge-subtitle`, `split`, `join`), and `to-mp4` on an MP4/MOV rewrites it
   fast start. An in-place edit rewrites the moov alone, crash-ordered like
   `retime`. A split opens each part on a keyframe with its audio in sync; a
-  join compares how the files decode (the bitrates each declares aside),
+  join compares how the files decode (the bitrates each declares aside, in a
+  QuickTime `wave` too),
   takes a file's length from its tracks when its movie header leaves it unset,
   resumes each file where the previous one ends, without replaying
   priming or padding, holds the last audio sample over a gap up to 500 ms and

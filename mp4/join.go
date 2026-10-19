@@ -317,22 +317,34 @@ func decodingDescription(stsd []byte, handler string) []byte {
 		}
 		w.bytes([]byte(e.typ))
 		w.bytes(e.payload[:hdr])
-		for _, k := range kids {
-			switch k.typ {
-			case "btrt":
-			case "esds":
-				if obj, asc, _, err := parseESDS(k.payload); err == nil {
-					w.bytes([]byte{obj})
-					w.bytes(asc)
-					continue
-				}
-				w.bytes(box(k.typ, k.payload))
-			default:
-				w.bytes(box(k.typ, k.payload))
-			}
-		}
+		decodingKids(&w, kids)
 	}
 	return w.b
+}
+
+// decodingKids writes a sample entry's child boxes without their declared bitrates, inside a QuickTime wave too.
+func decodingKids(w *bw, kids []memBox) {
+	for _, k := range kids {
+		switch k.typ {
+		case "btrt":
+		case "esds":
+			if obj, asc, _, err := parseESDS(k.payload); err == nil {
+				w.bytes([]byte{obj})
+				w.bytes(asc)
+				continue
+			}
+			w.bytes(box(k.typ, k.payload))
+		case "wave":
+			if inner, err := iterBoxes(k.payload); err == nil {
+				w.bytes([]byte(k.typ))
+				decodingKids(w, inner)
+				continue
+			}
+			w.bytes(box(k.typ, k.payload))
+		default:
+			w.bytes(box(k.typ, k.payload))
+		}
+	}
 }
 
 // firstSyncCts is the composition time of a table's first sync sample in decode order.
