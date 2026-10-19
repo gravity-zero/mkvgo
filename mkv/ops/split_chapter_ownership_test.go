@@ -407,3 +407,28 @@ func TestSplitByChaptersRunsTheLastPartThroughAChapterWithNoKeyframe(t *testing.
 		t.Errorf("the parts hold %d frames of the source's %d", total, want)
 	}
 }
+
+// TestSplitKeepsEverySoundBlockStoredPastTheCut: however many sound blocks are stored after the cut keyframe yet timed before it, the part before gets them all.
+func TestSplitKeepsEverySoundBlockStoredPastTheCut(t *testing.T) {
+	dir := t.TempDir()
+	blocks := []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("k0")}}
+	for tc := int64(0); tc < 600; tc++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+	}
+	blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: 1000, Keyframe: true, Data: []byte("k1")})
+	for tc := int64(600); tc < 2000; tc++ { // 400 of them timed before the keyframe stored ahead of them
+		blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 2000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 1000}, {StartMs: 1000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, p := range parts {
+		total += countBlocksFromFile(t, p, 1_000_000)[2]
+	}
+	if total != 2000 {
+		t.Errorf("the parts hold %d sound blocks of the source's 2000", total)
+	}
+}
