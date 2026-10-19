@@ -110,3 +110,41 @@ func TestSplitHoldsTheLastPictureWhenTheSoundBehindTheCutRollsTheCluster(t *test
 		}
 	}
 }
+
+// TestJoinOfPartsWithSoundMuxedFarAhead pins the linked seam on a source whose sound is stored 1.2 s ahead of its
+// picture: the part before the cut ends its sound that much past its picture, the next one starts its sound there,
+// and the join places the next part at its picture's cut, not at the end of the sound before it.
+func TestJoinOfPartsWithSoundMuxedFarAhead(t *testing.T) {
+	type stored struct {
+		dts int64
+		b   mkv.Block
+	}
+	var all []stored
+	for j := int64(0); j < 100; j++ {
+		all = append(all, stored{j * 40, mkv.Block{TrackNumber: 1, Timecode: j * 40, Keyframe: j%25 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(j)}}})
+	}
+	for k := int64(0); k < 200; k++ {
+		all = append(all, stored{k*20 - 1200, mkv.Block{TrackNumber: 2, Timecode: k * 20, Keyframe: true, Data: []byte{0xAA, byte(k)}}})
+	}
+	sort.SliceStable(all, func(a, b int) bool { return all[a].dts < all[b].dts })
+	blocks := make([]mkv.Block, len(all))
+	for i, s := range all {
+		blocks[i] = s.b
+	}
+	dir := t.TempDir()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 4000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: []mkv.TimeRange{{EndMs: 2000}, {StartMs: 2000}}})
+	mustNil(t, err)
+	joined := filepath.Join(dir, "j.mkv")
+	mustNil(t, Join(context.Background(), parts, joined))
+	got := trackBlocks(collectAllBlocks(t, joined))
+	for _, b := range got[1] {
+		if b.Keyframe && b.Timecode%1000 != 0 {
+			t.Errorf("a joined keyframe sits at %d ms, the source's are on whole seconds", b.Timecode)
+			break
+		}
+	}
+	if n := len(got[2]); n != 200 {
+		t.Errorf("the join holds %d audio frames, the source 200", n)
+	}
+}

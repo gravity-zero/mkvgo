@@ -146,7 +146,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		if i > 0 {
 			offset = prevEnd
 			if prevHasVideoEnd && linkedTo(&conts[i-1].Info, &conts[i].Info) {
-				seam, ok, err := videoSeamOffset(ctx, conts[i], prevVideoEnd, fs)
+				seam, sound, ok, err := videoSeamOffset(ctx, conts[i], prevVideoEnd, fs)
 				if err != nil {
 					return err
 				}
@@ -154,8 +154,11 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 				// than the reordering a muxer is allowed - past that it is not
 				// interleaving that separates the two ends, it is content, and
 				// pulling the seam over it would bury the previous part's tail.
+				// Unless the next part's sound takes up exactly where the previous part's stops: that is
+				// interleaving, however far ahead of its picture the sound was muxed.
 				// A cue on screen past the cut (one a split carried over it) holds no picture: it does not count.
-				if ok && seam >= offsets[i-1] && prevMediaEnd-seam <= defaultClusterDurationMs {
+				continuous := sound >= 0 && abs64(prevMediaEnd-(seam+sound)) <= seamSoundSlackMs
+				if ok && seam >= offsets[i-1] && (prevMediaEnd-seam <= defaultClusterDurationMs || continuous) {
 					offset = seam
 				}
 			}
@@ -248,8 +251,23 @@ func linkedTo(prev, next *mkv.SegmentInfo) bool {
 	return len(prev.SegmentUID) > 0 && bytes.Equal(next.PrevUID, prev.SegmentUID)
 }
 
+// seamSoundSlackMs is how far apart the end of a part's sound and the start of the next one's may be, around the
+// picture's seam, for the two to be read as one stream cut there: an audio frame or two.
+const seamSoundSlackMs = 50
+
+// seamSoundWindowMs is how far into a part its first sound is looked for: past any lead a muxer gives its sound.
+const seamSoundWindowMs = 5000
+
+func abs64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // videoSeamOffset returns where a slice's timeline must start for its picture to
-// carry on from the previous slice's, and whether that could be established.
+// carry on from the previous slice's, where in the slice its first sound sits (-1 when none is in reach), and
+// whether that could be established.
 //
 // A keyframe-aligned cut runs down the file at a video keyframe, so it is exact
 // on the video track and on no other: interleaving leaves the part BEFORE the
@@ -263,19 +281,19 @@ func linkedTo(prev, next *mkv.SegmentInfo) bool {
 // So the seam is the picture's: the previous part's last frame ends, less how
 // far into this one its own first frame sits. Both parts keep the overlap they
 // were cut with, which is the interleaving the source was muxed with.
-func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int64, fs *mkv.FS) (int64, bool, error) {
-	video := videoTrackSet(next.Tracks)
+func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int64, fs *mkv.FS) (int64, int64, bool, error) {
+	video, subs := videoTrackSet(next.Tracks), subtitleTrackSet(next.Tracks)
 	if len(video) == 0 {
-		return 0, false, nil
+		return 0, -1, false, nil
 	}
 	f, err := fs.DoOpen(next.Path)
 	if err != nil {
-		return 0, false, err
+		return 0, -1, false, err
 	}
 	defer f.Close()
 	br, err := reader.NewBlockReader(f, next.Info.TimecodeScale)
 	if err != nil {
-		return 0, false, err
+		return 0, -1, false, err
 	}
 	br.SetHeaderOnly(true) // where the blocks are, not what they hold
 
@@ -283,34 +301,43 @@ func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int6
 	// may store the picture slightly behind the sound - so the smallest video
 	// timecode of the opening cluster is what counts, and one cluster is as far
 	// as that reordering goes (the window Split settles a part's own zero on).
+	// The sound may start further on, in a later cluster, when it was muxed far ahead of the picture: it is looked
+	// for up to seamSoundWindowMs in.
 	var firstTC, best int64
+	sound := int64(-1)
 	var seen, found bool
-	for br.ClusterCount() <= 1 {
+	for {
 		if ctx.Err() != nil {
-			return 0, false, ctx.Err()
+			return 0, -1, false, ctx.Err()
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return 0, false, err
+			return 0, -1, false, err
 		}
 		if !seen {
 			firstTC, seen = blk.Timecode, true
 		}
-		if video[blk.TrackNumber] && (!found || blk.Timecode < best) {
-			best, found = blk.Timecode, true
-		}
 		// A scan window, not a cluster being written: how far into the file to
 		// look for the seam. It is deliberately NOT clusterSpanMs - nothing here
 		// encodes a block offset, so the timebase does not bound it.
-		if blk.Timecode-firstTC >= defaultClusterDurationMs {
+		inWindow := br.ClusterCount() <= 1 && blk.Timecode-firstTC < defaultClusterDurationMs
+		switch {
+		case video[blk.TrackNumber]:
+			if inWindow && (!found || blk.Timecode < best) {
+				best, found = blk.Timecode, true
+			}
+		case !subs[blk.TrackNumber] && (sound < 0 || blk.Timecode < sound):
+			sound = blk.Timecode
+		}
+		if blk.Timecode-firstTC >= seamSoundWindowMs || (!inWindow && sound >= 0) {
 			break
 		}
 	}
 	if !found {
-		return 0, false, nil
+		return 0, -1, false, nil
 	}
-	return prevVideoEnd - best, true, nil
+	return prevVideoEnd - best, sound, true, nil
 }

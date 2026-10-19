@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- `Join` places linked parts whose sound was muxed more than a second ahead of
+  the picture at the picture's cut when the next part's sound takes up where
+  the previous one's stops: it fell back on the sound's end, and every later
+  part came that much late, its chapters and subtitle cues with it.
 - A Matroska rewrite keeps the TrackEntry, Video and Audio children mkvgo has no
   field for, as they were read (`Track.Unmodeled`): FlagLacing, FlagOriginal and
   the accessibility flags, StereoMode, DisplayUnit (whose loss changed what the
