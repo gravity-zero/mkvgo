@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -84,9 +85,7 @@ func CmdServe(args []string) {
 // packaging, just byte-range access to the raw file (mkvhttp.FileHandler).
 func serveDirect(addr, src string, opts mkvhttp.Options) {
 	name := filepath.Base(src)
-	mux := http.NewServeMux()
-	mux.Handle("/"+name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: opts.AllowCORS}))
-	srv := newServer(addr, mux, 0) // a direct-play response is the whole film: no deadline on writing it
+	srv := newServer(addr, directMux(name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: opts.AllowCORS})), 0) // a direct-play response is the whole film: no deadline on writing it
 
 	fmt.Printf("serving %s (direct-play, no packaging)\n  %s\n", src, directPlayableURL(addr, name))
 	runServer(srv)
@@ -197,10 +196,22 @@ func playableURL(addr string) string {
 	return "http://" + hostOf(addr) + "/master.m3u8"
 }
 
+// directMux serves h at /name only, matched on the decoded path: a ServeMux pattern would read a space or a brace in
+// a file's name as pattern syntax and panic.
+func directMux(name string, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/"+name {
+			http.NotFound(w, r)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // directPlayableURL is playableURL's counterpart for --direct/--auto: the
 // file is mounted at its own base name instead of a fixed playlist name.
 func directPlayableURL(addr, name string) string {
-	return "http://" + hostOf(addr) + "/" + name
+	return "http://" + hostOf(addr) + "/" + url.PathEscape(name)
 }
 
 // hostOf turns a bare-port listen address into one a player can connect to.
