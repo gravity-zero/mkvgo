@@ -189,6 +189,9 @@ func checkJoinedEndToEnd(t *testing.T, files []string, dst string) {
 		idx += len(v.tt.samples)
 		offset += m.movieNs
 	}
+	if idx != len(jv.tt.samples) {
+		t.Fatalf("the join holds %d pictures, its files %d", len(jv.tt.samples), idx)
+	}
 }
 
 // shownAtSeam is the run of an all-sync track a seam keeps: after the priming wholly ahead of its media start (head), up to the padding past its presentation end (tail).
