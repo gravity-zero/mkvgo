@@ -46,6 +46,17 @@ func TestJoinAcrossTwoSplits(t *testing.T) {
 					t.Fatal(err)
 				}
 				checkJoinedEndToEndCues(t, c.files, dst)
+				// Independently: no picture of the second file presents ahead of its first keyframe, the references it would decode from are not there.
+				jc, first := mustCutModel(t, dst), mustCutModel(t, c.files[0])
+				jv, n := &jc.tracks[jc.ref], len(first.tracks[first.ref].tt.samples)
+				for i := n + 1; i < len(jv.tt.samples); i++ {
+					if s, key := jv.tt.samples[i], jv.tt.samples[n]; !s.sync && s.dts+int64(s.cto) < key.dts+int64(key.cto) {
+						t.Fatalf("picture %d presents ahead of the keyframe the second file opens on", i+1)
+					}
+					if jv.tt.samples[i].sync {
+						break
+					}
+				}
 				var want []mkv.Chapter
 				var total int64
 				for _, f := range c.files {
@@ -102,6 +113,7 @@ func checkJoinedEndToEndCues(t *testing.T, files []string, dst string) {
 	}
 	got := sampleSeqs(t, dst)
 	want := make([][]string, len(got))
+	var prev *cutModel
 	for k, f := range files {
 		seqs := sampleSeqs(t, f)
 		if len(seqs) != len(got) {
@@ -110,8 +122,9 @@ func checkJoinedEndToEndCues(t *testing.T, files []string, dst string) {
 		m := mustCutModel(t, f)
 		for ti, seq := range seqs {
 			from, to := shownAtSeam(&m.tracks[ti], m.movieTS, k > 0, k < len(files)-1)
-			want[ti] = append(want[ti], cues(ti, bodies(seq)[from:to])...)
+			want[ti] = append(want[ti], cues(ti, keptAtSeam(&m.tracks[ti], bodies(seq), from, to, unlinkedAfter(m, prev)))...)
 		}
+		prev = m
 	}
 	for ti := range got {
 		if g := cues(ti, bodies(got[ti])); strings.Join(g, ",") != strings.Join(want[ti], ",") {

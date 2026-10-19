@@ -153,6 +153,7 @@ func checkJoinedEndToEnd(t *testing.T, files []string, dst string) {
 	t.Helper()
 	got := sampleSeqs(t, dst)
 	want := make([][]string, len(got))
+	var prev *cutModel
 	for k, f := range files {
 		seqs := sampleSeqs(t, f)
 		if len(seqs) != len(got) {
@@ -161,8 +162,9 @@ func checkJoinedEndToEnd(t *testing.T, files []string, dst string) {
 		m := mustCutModel(t, f)
 		for ti, seq := range seqs {
 			from, to := shownAtSeam(&m.tracks[ti], m.movieTS, k > 0, k < len(files)-1)
-			want[ti] = append(want[ti], bodies(seq)[from:to]...)
+			want[ti] = append(want[ti], keptAtSeam(&m.tracks[ti], bodies(seq), from, to, unlinkedAfter(m, prev))...)
 		}
+		prev = m
 	}
 	for ti := range got {
 		if g := bodies(got[ti]); strings.Join(g, ",") != strings.Join(want[ti], ",") {
@@ -175,23 +177,62 @@ func checkJoinedEndToEnd(t *testing.T, files []string, dst string) {
 	jv := &jm.tracks[jm.ref]
 	var offset int64
 	idx := 0
+	prev = nil
 	for _, f := range files {
 		m := mustCutModel(t, f)
 		v := &m.tracks[m.ref]
+		unlinked := unlinkedAfter(m, prev)
 		for i := range v.tt.samples {
-			if idx+i >= len(jv.tt.samples) {
+			if unlinked && leadingHidden(v, i) {
+				continue
+			}
+			if idx >= len(jv.tt.samples) {
 				t.Fatalf("the join holds %d pictures, fewer than its files", len(jv.tt.samples))
 			}
-			if want, got := offset+v.ptNs(i, m.movieTS), jv.ptNs(idx+i, jm.movieTS); absMs((got-want)/1_000_000) > 1 {
+			if want, got := offset+v.ptNs(i, m.movieTS), jv.ptNs(idx, jm.movieTS); absMs((got-want)/1_000_000) > 1 {
 				t.Fatalf("%s picture %d presents at %d ms in the join, want %d", filepath.Base(f), i+1, got/1_000_000, want/1_000_000)
 			}
+			idx++
 		}
-		idx += len(v.tt.samples)
 		offset += m.movieNs
+		prev = m
 	}
 	if idx != len(jv.tt.samples) {
 		t.Fatalf("the join holds %d pictures, its files %d", len(jv.tt.samples), idx)
 	}
+}
+
+// unlinkedAfter says whether file m follows prev without continuing it (the first file follows nothing).
+func unlinkedAfter(m, prev *cutModel) bool {
+	return prev != nil && !m.link.continues(prev.link)
+}
+
+// leadingHidden says whether sample i is a picture after the track's first keyframe that its edit list hides: a leading picture of an open GOP.
+func leadingHidden(c *cutTrack, i int) bool {
+	ss := c.tt.samples
+	if ss[i].sync || ss[i].dts+int64(ss[i].cto) >= c.edit.mediaTime {
+		return false
+	}
+	for _, x := range ss[:i] {
+		if x.sync {
+			return true
+		}
+	}
+	return false
+}
+
+// keptAtSeam is seq[from:to] less, after a file it does not continue, the leading pictures its edit list hides.
+func keptAtSeam(c *cutTrack, seq []string, from, to int, unlinked bool) []string {
+	if !unlinked {
+		return seq[from:to]
+	}
+	var out []string
+	for i := from; i < to; i++ {
+		if !leadingHidden(c, i) {
+			out = append(out, seq[i])
+		}
+	}
+	return out
 }
 
 // shownAtSeam is the run of an all-sync track a seam keeps: after the priming wholly ahead of its media start (head), up to the padding past its presentation end (tail).

@@ -318,16 +318,23 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 				}
 			}
 		}
+		// The leading pictures a file's edit list hides reference pictures the file before it never held: they go, their time to the picture before.
+		dropLeading, keyed := k > 0 && !allSync && !m.link.continues(models[k-1].link), false
 		for i := from; i < to; i++ {
 			s := tt.samples[i]
+			if dropLeading && keyed && !s.sync && s.dts+int64(s.cto) < c.edit.mediaTime {
+				out.samples[len(out.samples)-1].dur += s.dur
+				continue
+			}
+			keyed = keyed || s.sync
 			s.dts += shift
 			out.samples = append(out.samples, s)
-		}
-		if withSdtp {
-			out.sdtp = append(out.sdtp, tt.sdtp[from:to]...)
-		}
-		for typ := range groupTypes {
-			out.groups[typ] = append(out.groups[typ], tt.groups[typ][from:to]...)
+			if withSdtp {
+				out.sdtp = append(out.sdtp, tt.sdtp[i])
+			}
+			for typ := range groupTypes {
+				out.groups[typ] = append(out.groups[typ], tt.groups[typ][i])
+			}
 		}
 		if n := len(out.samples); n > 0 {
 			end = out.samples[n-1].dts + int64(out.samples[n-1].dur)
