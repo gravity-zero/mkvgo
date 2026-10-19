@@ -70,6 +70,9 @@ func TestSplitJoinMatrix(t *testing.T) {
 					t.Errorf("chapter %d: %+v, want %+v", i+1, gc[i], wc[i])
 				}
 			}
+			if w, g := chapterTrackCount(t, src), chapterTrackCount(t, joined); w != g {
+				t.Errorf("the chapter track holds %d samples, the source's %d", g, w)
+			}
 			if tags := splitLinkTags(t, joined); len(tags) != 0 {
 				t.Errorf("the join carries %v", tags)
 			}
