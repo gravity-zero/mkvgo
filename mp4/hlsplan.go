@@ -358,7 +358,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, err
 	}
 	p := &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
-		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil && !o.NoIFrames}
+		trackDurs: reader.TrackDefaultDurations(c.Tracks), hasIframe: o.Encrypt == nil && o.CENC == nil && !o.NoIFrames}
 	if o.SubtitleIndex != nil {
 		if st, serr := fs.DoStat(srcPath); serr == nil && o.SubtitleIndex.Matches(st.Size(), c.Info.SegmentUID, c.Info.TimecodeScale) {
 			p.subIndex = o.SubtitleIndex

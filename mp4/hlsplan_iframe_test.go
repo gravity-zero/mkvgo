@@ -338,6 +338,31 @@ func TestPlanHLSIframeMatroska_Encrypted(t *testing.T) {
 	}
 }
 
+// A CENC Matroska plan exposes no trick-play surface either, as the MP4 plan and the full pass: the BYTERANGEs would
+// point into fragments whose senc/saiz/saio the I-frame slice leaves out.
+func TestPlanHLSIframeMatroska_CENC(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var gblocks []genBlock
+	for i := 0; i < 100; i++ {
+		key := i%25 == 0
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: key, data: iframeTestFrame(i, key)})
+	}
+	src := buildMKV(t,
+		[]mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}},
+		gblocks)
+	cenc := &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 1000, CENC: cenc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsName(plan.Resources(), "iframe.m3u8") {
+		t.Error("Resources() must not list iframe.m3u8 for a CENC plan")
+	}
+	if _, _, err := plan.Resource(context.Background(), "iframe.m3u8"); err == nil {
+		t.Error("Resource(iframe.m3u8) must error for a CENC plan")
+	}
+}
+
 // The lazy I-frame pass costs block HEADERS, never payload volume: on a
 // fixture whose video frames are all large enough (128 KiB) to be worth
 // seeking over, building iframe.m3u8 must read next to nothing of the
