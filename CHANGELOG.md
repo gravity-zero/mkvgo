@@ -245,6 +245,15 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   on the blocks it lost; a walk that skips damage records the cut.
 - An ABR master counts the shared audio in the `BANDWIDTH` of every video-only
   variant, which declared its video alone and looked cheaper than it plays.
+- A Matroska join no longer plays a later file's encoder priming left inside
+  its first kept frame (an Opus pre-skip, 6.5 ms): it is marked as a negative
+  `DiscardPadding`, which a decoder drops, so that file's sound is not pushed
+  late by it.
+- `HLSPlanStats.StreamedBytes` counts what an `Open` handle sends: a range its
+  part, a write cut short what it wrote, a handle closed unwritten nothing, and
+  bytes `Bytes()` hands out once; `ResourceHandle.Whole` tells a held resource
+  without counting it, and `mkvhttp` serves one through its handle, so a range,
+  a HEAD or a 304 counts only what goes out.
 - The HLS plan of an MP4 source settles an audio stride nothing confirms as
   the full pass does: an Opus track whose first samples share a time served
   other segment timings than `RemuxToHLS` wrote.
