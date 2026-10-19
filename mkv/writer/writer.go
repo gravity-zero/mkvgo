@@ -251,6 +251,9 @@ func WriteTracks(w io.Writer, tracks []mkv.Track) error {
 		if enc := tracks[i].Encryption; enc != "" {
 			return fmt.Errorf("track %d is encrypted (%s): mkvgo does not carry encrypted tracks", tracks[i].ID, enc)
 		}
+		if tracks[i].Type.Number() == 0 {
+			return fmt.Errorf("track %d has no TrackType Matroska defines (%q): mkvgo cannot write it", tracks[i].ID, tracks[i].Type)
+		}
 		if tracks[i].Compression == mkv.CompressionUnknown {
 			return fmt.Errorf("track %d is compressed with %s: mkvgo cannot carry it", tracks[i].ID, tracks[i].Compression)
 		}
@@ -269,16 +272,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	}
 	e.uint(mkv.IDTrackUID, uid)
 
-	var tt uint64
-	switch t.Type {
-	case mkv.VideoTrack:
-		tt = mkv.TrackTypeVideo
-	case mkv.AudioTrack:
-		tt = mkv.TrackTypeAudio
-	case mkv.SubtitleTrack:
-		tt = mkv.TrackTypeSubtitle
-	}
-	e.uint(mkv.IDTrackType, tt)
+	e.uint(mkv.IDTrackType, t.Type.Number())
 	e.str(mkv.IDCodecID, CodecIDFromShort(t.Codec))
 	if len(t.CodecPrivate) > 0 {
 		e.raw(mkv.IDCodecPrivate, t.CodecPrivate)

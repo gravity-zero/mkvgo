@@ -92,14 +92,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err != nil {
 				return t, err
 			}
-			switch v {
-			case mkv.TrackTypeVideo:
-				t.Type = mkv.VideoTrack
-			case mkv.TrackTypeAudio:
-				t.Type = mkv.AudioTrack
-			case mkv.TrackTypeSubtitle:
-				t.Type = mkv.SubtitleTrack
-			}
+			t.Type = mkv.TrackTypeOf(v)
 		case mkv.IDCodecID:
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return t, err

@@ -215,7 +215,12 @@ const (
 const (
 	TrackTypeVideo    = 1
 	TrackTypeAudio    = 2
+	TrackTypeComplex  = 3
+	TrackTypeLogo     = 16
 	TrackTypeSubtitle = 17
+	TrackTypeButtons  = 18
+	TrackTypeControl  = 32
+	TrackTypeMetadata = 33
 )
 
 var CodecShortName = map[string]string{

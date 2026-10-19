@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -87,5 +88,24 @@ func TestJoinTakesAnOmittedAudioFieldAsItsDefault(t *testing.T) {
 	}
 	if err := Join(ctx, []string{a, c}, filepath.Join(dir, "ac.mkv")); err == nil {
 		t.Error("mono and stereo joined")
+	}
+}
+
+// TestOtherTrackTypesSurviveARewrite: a metadata or buttons track is written back with its own TrackType, where every
+// type past video, audio and subtitle came out as 0; a type Matroska does not define is refused by name.
+func TestOtherTrackTypesSurviveARewrite(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	sparseTracksMKV(t, src, []mkv.Track{videoTrack(1), {ID: 2, Type: mkv.MetadataTrack, Codec: "D_WEBVTT/METADATA"}, {ID: 3, Type: mkv.ButtonsTrack, Codec: "B_VOBBTN"}})
+	out := filepath.Join(dir, "out.mkv")
+	mustNil(t, EditMetadata(ctx, src, out, func(c *mkv.Container) { c.Info.Title = "t" }))
+	c, err := reader.Open(ctx, out)
+	mustNil(t, err)
+	if len(c.Tracks) != 3 || c.Tracks[1].Type != mkv.MetadataTrack || c.Tracks[2].Type != mkv.ButtonsTrack {
+		t.Errorf("types after a rewrite: %v %v", c.Tracks[1].Type, c.Tracks[2].Type)
+	}
+	var w bytes.Buffer
+	if err := writer.WriteTracks(&w, []mkv.Track{{ID: 1, Type: "hologram", Codec: "X"}}); err == nil {
+		t.Error("a TrackType Matroska does not define was written")
 	}
 }

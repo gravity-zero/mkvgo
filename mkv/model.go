@@ -15,7 +15,31 @@ const (
 	VideoTrack    TrackType = "video"
 	AudioTrack    TrackType = "audio"
 	SubtitleTrack TrackType = "subtitle"
+	// The other Matroska track types, carried through a rewrite as they are.
+	ComplexTrack  TrackType = "complex"
+	LogoTrack     TrackType = "logo"
+	ButtonsTrack  TrackType = "buttons"
+	ControlTrack  TrackType = "control"
+	MetadataTrack TrackType = "metadata"
 )
+
+var trackTypeNumbers = map[TrackType]uint64{
+	VideoTrack: TrackTypeVideo, AudioTrack: TrackTypeAudio, SubtitleTrack: TrackTypeSubtitle, ComplexTrack: TrackTypeComplex,
+	LogoTrack: TrackTypeLogo, ButtonsTrack: TrackTypeButtons, ControlTrack: TrackTypeControl, MetadataTrack: TrackTypeMetadata,
+}
+
+// Number is the Matroska TrackType value of t, 0 for a type Matroska does not define.
+func (t TrackType) Number() uint64 { return trackTypeNumbers[t] }
+
+// TrackTypeOf is the TrackType of a Matroska TrackType value, "" for one Matroska does not define.
+func TrackTypeOf(v uint64) TrackType {
+	for t, n := range trackTypeNumbers {
+		if n == v {
+			return t
+		}
+	}
+	return ""
+}
 
 // Compression is a track's ContentCompression scheme. The values are NOT the
 // Matroska ContentCompAlgo numbers: they are shifted by one so that the zero
