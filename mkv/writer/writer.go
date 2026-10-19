@@ -312,7 +312,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 		e.uint(mkv.IDFlagForced, 1)
 	}
 	rollable := (t.Rotation%360 != 0 || t.HFlip) && (t.Projection == "" || t.Projection == "rectangular")
-	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t) || rollable) {
+	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t) || rollable || hasUnmodeled(t, mkv.IDVideo)) {
 		e.master(mkv.IDVideo, func(v *ew) {
 			if t.Width != nil {
 				v.uint(mkv.IDPixelWidth, uint64(*t.Width))
@@ -357,6 +357,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 					}
 				})
 			}
+			writeUnmodeled(v, t, mkv.IDVideo)
 		})
 	}
 	if t.DolbyVision != nil {
@@ -368,7 +369,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			m.raw(mkv.IDBlockAddIDExtraData, rec)
 		})
 	}
-	if t.Type == mkv.AudioTrack && (t.SampleRate != nil || t.OutputSampleRate != nil || t.Channels != nil || t.BitDepth != nil) {
+	if t.Type == mkv.AudioTrack && (t.SampleRate != nil || t.OutputSampleRate != nil || t.Channels != nil || t.BitDepth != nil || hasUnmodeled(t, mkv.IDAudio)) {
 		e.master(mkv.IDAudio, func(a *ew) {
 			if t.SampleRate != nil {
 				a.float64(mkv.IDSamplingFreq, *t.SampleRate)
@@ -382,8 +383,10 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			if t.BitDepth != nil {
 				a.uint(mkv.IDBitDepth, uint64(*t.BitDepth))
 			}
+			writeUnmodeled(a, t, mkv.IDAudio)
 		})
 	}
+	writeUnmodeled(e, t, mkv.IDTrackEntry)
 	switch {
 	case len(t.HeaderStripping) > 0:
 		e.master(mkv.IDContentEncodings, func(enc *ew) {
@@ -872,6 +875,25 @@ func hasColour(t *mkv.Track) bool {
 	return mkv.Stated16(t.ColorPrimaries, d.ColorPrimaries) || mkv.Stated16(t.ColorTransfer, d.ColorTransfer) ||
 		mkv.Stated16(t.ColorSpace, d.ColorSpace) || mkv.Stated16(t.ColorRange, d.ColorRange) ||
 		t.ColourLayout != nil || t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
+}
+
+// hasUnmodeled reports a kept child of parent on t.
+func hasUnmodeled(t *mkv.Track, parent uint32) bool {
+	for _, r := range t.Unmodeled {
+		if r.Parent == parent {
+			return true
+		}
+	}
+	return false
+}
+
+// writeUnmodeled writes back, as read, the children of parent the writer has no field for.
+func writeUnmodeled(e *ew, t *mkv.Track, parent uint32) {
+	for _, r := range t.Unmodeled {
+		if r.Parent == parent {
+			e.raw(r.ID, r.Data)
+		}
+	}
 }
 
 // derived returns what the reader derived for t, empty when nothing.

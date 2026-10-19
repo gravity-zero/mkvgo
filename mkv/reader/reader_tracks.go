@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"io"
 	"math"
 	"unsafe"
@@ -52,6 +53,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	p.rateRejected, p.channelsRejected = false, false
 
 	for {
+		p.unhold() // the child kept last was parsed from its copy: back to the source
 		if err := p.checkCtx(); err != nil {
 			return t, err
 		}
@@ -65,6 +67,9 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 		}
 		if p.pastParent(eh, end) {
 			break
+		}
+		if err := p.keepUnmodeled(&t, mkv.IDTrackEntry, eh); err != nil {
+			return t, err
 		}
 		switch eh.ID {
 		case mkv.IDTrackNumber:
@@ -349,6 +354,7 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 	var fieldOrder *uint64
 	defer func() { scanFromVideo(t, flagInterlaced, fieldOrder) }()
 	for {
+		p.unhold() // the child kept last was parsed from its copy: back to the source
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
@@ -359,6 +365,9 @@ func (p *parser) parseVideoSettings(size int64, t *mkv.Track) error {
 		}
 		if p.pastParent(eh, end) {
 			break
+		}
+		if err := p.keepUnmodeled(t, mkv.IDVideo, eh); err != nil {
+			return err
 		}
 		switch eh.ID {
 		case mkv.IDPixelWidth:
@@ -633,6 +642,7 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	for {
+		p.unhold() // the child kept last was parsed from its copy: back to the source
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
 			break
@@ -643,6 +653,9 @@ func (p *parser) parseAudioSettings(size int64, t *mkv.Track) error {
 		}
 		if p.pastParent(eh, end) {
 			break
+		}
+		if err := p.keepUnmodeled(t, mkv.IDAudio, eh); err != nil {
+			return err
 		}
 		switch eh.ID {
 		case mkv.IDSamplingFreq:
@@ -708,4 +721,50 @@ func colourLayoutField(l *mkv.ColourLayout, id uint32) **uint16 {
 		return &l.ChromaSitingHorz
 	}
 	return &l.ChromaSitingVert
+}
+
+// maxUnmodeledChild bounds one kept child: the elements kept are flags and small numbers, a large one is no such.
+const maxUnmodeledChild = 4096
+
+// keepUnmodeled records a child of parent the writer has no field for as read, and has the parse that follows read
+// it from that copy (unhold puts the source back), so the source is read once, forward.
+func (p *parser) keepUnmodeled(t *mkv.Track, parent uint32, eh ebml.ElementHeader) error {
+	if _, streamed := p.r.(*bodyReader); streamed || eh.Size < 0 || eh.Size > maxUnmodeledChild || mkv.WrittenTrackChild(parent, eh.ID) {
+		return nil // a streamed element cannot be read twice; ReadStream feeds no rewrite
+	}
+	if err := p.chargeMeta(eh.Size); err != nil {
+		return err
+	}
+	pos, err := p.r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	data := make([]byte, eh.Size)
+	if _, err := io.ReadFull(p.r, data); err != nil {
+		return err
+	}
+	t.Unmodeled = append(t.Unmodeled, mkv.RawElement{Parent: parent, ID: eh.ID, Data: data})
+	p.held, p.r = p.r, &heldChild{Reader: bytes.NewReader(data), base: pos}
+	return nil
+}
+
+// unhold puts the source back after a child parsed from its kept copy.
+func (p *parser) unhold() {
+	if p.held != nil {
+		p.r, p.held = p.held, nil
+	}
+}
+
+// heldChild reads a kept child from memory at the file positions it came from.
+type heldChild struct {
+	*bytes.Reader
+	base int64
+}
+
+func (h *heldChild) Seek(off int64, whence int) (int64, error) {
+	if whence == io.SeekStart {
+		off -= h.base
+	}
+	n, err := h.Reader.Seek(off, whence)
+	return n + h.base, err
 }

@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska rewrite keeps the TrackEntry, Video and Audio children mkvgo has no
+  field for, as they were read (`Track.Unmodeled`): FlagLacing, FlagOriginal and
+  the accessibility flags, StereoMode, DisplayUnit (whose loss changed what the
+  display size means), the Video FrameRate and the like were dropped.
 - `EditInPlace` measures the head's elements with their size fields as wide as
   the file writes them (FFmpeg and libwebm use 8 bytes): the head's end was
   counted short, and the old bytes left before the first Cluster broke the

@@ -273,6 +273,9 @@ type Track struct {
 	// Derived holds what the Matroska reader took from the codec bitstream where the container stated nothing: a
 	// rewrite leaves out a field that still holds that value, so it adds nothing the container did not say.
 	Derived *DerivedFields `json:"-"`
+	// Unmodeled holds the TrackEntry, Video and Audio children the writer has no field for, as read, so a rewrite
+	// carries them over (FlagLacing, StereoMode, DisplayUnit, the accessibility flags...).
+	Unmodeled []RawElement `json:"-"`
 	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour
 	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) - even when it resolves

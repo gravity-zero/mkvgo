@@ -138,6 +138,7 @@ type parser struct {
 	metaBudget int64           // remaining bytes allowed for in-memory metadata
 	segStart   int64           // Segment body start offset (set once the Segment header is read)
 	segEnd     int64           // Segment body end offset, or -1 for an unknown-size Segment
+	held       io.ReadSeeker   // the source while a kept track child is parsed from its copy (keepUnmodeled)
 	ctx        context.Context // cancellation, also honoured in the inner element loops
 	// lazyAttachments records where an attachment payload lives instead of
 	// loading it (reader.WithoutAttachmentData); path is the file it refers to.
