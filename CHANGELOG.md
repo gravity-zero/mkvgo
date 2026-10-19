@@ -162,6 +162,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   stay out of both parts.
 - `Join` gives a chapter a split carried over a cut the end of its
   continuation, not the cut.
+- `Join` keeps a chapter of a linked part that reuses an earlier chapter's UID
+  (muxers drawing small UIDs repeat them): only a chapter opening its part is a
+  continuation of one cut there; three chapters of a film were dropped.
 - Every Matroska writer of the library refuses an output that is one of its
   inputs, as the MP4 engine does: `EditMetadata(p, p)`, `AddTrack`,
   `RemoveTrack`, `Join`, `Mux`, `MergeSubtitle`, `MergeASS`, `ExtractSubtitle`,

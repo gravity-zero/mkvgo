@@ -106,7 +106,7 @@ func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapt
 		if extentMs > 0 && ch.StartMs >= extentMs {
 			continue // past what this source actually wrote
 		}
-		if continues && uids.seen[ch.ID] {
+		if continues && uids.seen[ch.ID] && ch.StartMs == 0 { // carried across the cut, it opens this part
 			if ch.EndMs > 0 {
 				ends[ch.ID] = max(ends[ch.ID], ch.EndMs+offsetMs)
 			}

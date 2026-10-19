@@ -550,3 +550,18 @@ func TestConcatChapters_ContinuedChapterKeepsItsEnd(t *testing.T) {
 		t.Errorf("joined chapters %+v, want Two at 2500-6000", got)
 	}
 }
+
+// TestConcatChapters_ReusedUIDIsNoContinuation pins that a chapter of a linked part reusing the UID of an earlier
+// chapter (muxers that draw small UIDs repeat them) is kept when it does not open its part: only a chapter carried
+// across the cut starts at the part's zero.
+func TestConcatChapters_ReusedUIDIsNoContinuation(t *testing.T) {
+	uid1, uid2 := []byte{1}, []byte{2}
+	a := cont(mkv.Chapter{ID: 41, Title: "One", StartMs: 0}, mkv.Chapter{ID: 7, Title: "Two", StartMs: 2000})
+	a.Info.SegmentUID, a.Info.NextUID = uid1, uid2
+	b := cont(mkv.Chapter{ID: 7, Title: "Two", StartMs: 0}, mkv.Chapter{ID: 41, Title: "Three", StartMs: 1500})
+	b.Info.SegmentUID, b.Info.PrevUID = uid2, uid1
+	got := concatChapters([]*mkv.Container{a, b}, []int64{0, 3000})
+	if len(got) != 3 || got[2].Title != "Three" || got[2].StartMs != 4500 {
+		t.Errorf("joined chapters %+v, want One, Two and Three at 4500", got)
+	}
+}
