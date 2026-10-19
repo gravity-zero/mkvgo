@@ -41,3 +41,32 @@ func TestJoinDropsTheRoundingHoldOnlyAtALinkedSeam(t *testing.T) {
 		t.Errorf("a join of files that do not continue each other holds %d pictures, want each copy's last one", n)
 	}
 }
+
+// A source whose every picture states its duration gets them all back from split then join, the last before the cut
+// included: only a hold the split added is dropped.
+func TestJoinKeepsTheDurationsASourceStates(t *testing.T) {
+	ctx := context.Background()
+	c := matrix.Case{NTSC: true, Cuts: 1}
+	dir := t.TempDir()
+	video := c.Blocks()[matrix.VideoTrack]
+	var sets [][]mkv.Block
+	for j := range video {
+		if j+1 < len(video) {
+			video[j].Duration = video[j+1].Timecode - video[j].Timecode
+		} else {
+			video[j].Duration = 33
+		}
+		if video[j].Keyframe {
+			sets = append(sets, nil)
+		}
+		sets[len(sets)-1] = append(sets[len(sets)-1], video[j])
+	}
+	src := buildMKVWithCuesDur(t, dir, "timed.mkv", c.Tracks(), sets, nil, c.EndMs())
+	parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
+	mustNil(t, err)
+	joined := filepath.Join(dir, "j.mkv")
+	mustNil(t, Join(ctx, parts, joined))
+	if g, w := blockSeq(trackBlocks(collectAllBlocks(t, joined))[matrix.VideoTrack]), blockSeq(video); g != w {
+		t.Errorf("the join does not give the source back:\n got %s\nwant %s", g, w)
+	}
+}
