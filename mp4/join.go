@@ -262,7 +262,8 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 				// The previous file's last sample runs past this file's start: it ends there, the timeline does not drift.
 				last.dur = uint32(int64(last.dur) + gap)
 			case gap < 0 && !allSync:
-				return nil, 0, fmt.Errorf("file %d's edit list hides the last %d ms of this track, frames a join would have to show: remux the files to MKV (from-mp4) and join there", k, rescale(-gap, c.ts, 1000))
+				// This file's pictures are reordered deeper than the previous one's (an open GOP's leading pictures): its decoding would start inside it.
+				return nil, 0, fmt.Errorf("file %d starts decoding %d ms before file %d ends, its first pictures reordered further ahead than that file's: remux the files to MKV (from-mp4) and join there", k+1, rescale(-gap, c.ts, 1000), k)
 			case gap < 0:
 				shift = end - firstDts
 			}
