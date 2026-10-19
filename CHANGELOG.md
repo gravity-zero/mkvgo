@@ -121,6 +121,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   when the edit does not change them, and rewrites them there when the head
   cannot hold them: a title edit was refused once those tags outgrew the
   head's free space, and the whole file had to be rewritten.
+- `EditInPlace` treats Chapters and Attachments after the clusters as it does
+  Tags: FFmpeg-made files keep their chapters there, and an edit wrote a second
+  copy in the head, every chapter then read twice.
 - `EditInPlace` on a file with no SeekHead finds the Tags after the clusters
   instead of writing a second copy of them in the head.
 - A Matroska `Split` opens every part on its keyframe at 0: the sound stored

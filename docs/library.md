@@ -1885,9 +1885,9 @@ The attachments the callback inherits are not loaded: `Attachment.Data` is nil, 
 
 Files written by mkvgo reserve `writer.MetadataReserve` bytes of Void after
 the metadata, so in-place edits that grow it usually fit. The head SeekHead is
-rebuilt (keeping its Cues entry). Tags that sit after the clusters (mux
-statistics, or what mkvpropedit leaves) stay there when the callback does not
-change them, so a title edit never needs room for them in the head; changed,
+rebuilt (keeping its Cues entry). Tags, Chapters or Attachments that sit after
+the clusters (mux statistics, what mkvpropedit leaves, FFmpeg's chapters) stay
+there when the callback does not change them, so a title edit never needs room for them in the head; changed,
 they are folded into the head without duplication, or rewritten in their old
 element when the head cannot hold them and they are no larger.
 A file with no SeekHead is stepped through, element by element past the

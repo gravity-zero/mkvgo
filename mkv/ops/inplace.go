@@ -3,6 +3,7 @@ package ops
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,11 +24,11 @@ import (
 // can atomically rename.
 //
 // The head SeekHead is rebuilt to point at the edited elements (keeping its
-// entries to elements outside the head, e.g. the Cues). A Tags element sitting
-// after the clusters (as Mux writes statistics tags) stays there when the edit
-// leaves the tags as they are; edited, they are folded into the head metadata
-// and the old bytes voided, or rewritten in the old element's place when the
-// head cannot hold them.
+// entries to elements outside the head, e.g. the Cues). Tags, Chapters or
+// Attachments sitting after the clusters (Mux's statistics tags, FFmpeg's
+// chapters) stay there when the edit leaves them as they are; edited, they are
+// folded into the head metadata and the old bytes voided, or, Tags and
+// Chapters, rewritten in the old element's place when the head cannot hold them.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, path, fs)
@@ -35,8 +36,8 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		return err
 	}
 
-	var oldTags bytes.Buffer
-	if err := writer.WriteTags(&oldTags, c.Tags); err != nil {
+	before, err := tailForms(c)
+	if err != nil {
 		return err
 	}
 	applyEdit(c, edit)
@@ -46,38 +47,51 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err != nil {
 		return fmt.Errorf("scan metadata: %w", err)
 	}
-	var newTags bytes.Buffer
-	if err := writer.WriteTags(&newTags, c.Tags); err != nil {
+	after, err := tailForms(c)
+	if err != nil {
 		return err
 	}
-	if region.tailUnknown && !region.headTags && oldTags.Len() > 0 {
-		return fmt.Errorf("the tags sit after the clusters, which no SeekHead indexes and which cannot be stepped through: %w", ErrNoRoomInPlace)
+	for _, id := range tailIDs {
+		if region.tailUnknown && !region.inHead[id] && len(before[id]) > 0 {
+			return fmt.Errorf("the %s sit after the clusters, which no SeekHead indexes and which cannot be stepped through: %w", tailNames[id], ErrNoRoomInPlace)
+		}
 	}
-	tailOnly := region.tailTags.size > 0 && !region.headTags // every tag lives after the clusters
-	keepTail := tailOnly && bytes.Equal(oldTags.Bytes(), newTags.Bytes())
-
+	// stay: the tail elements the head does not hold too and the edit left as they were.
+	stay := map[uint32]bool{}
+	for id := range region.tail {
+		stay[id] = !region.inHead[id] && bytes.Equal(before[id], after[id])
+	}
 	kept := region.keptSeekEntries
-	if keepTail {
-		region.keptSeekEntries = append(kept, region.tailTagsEntry)
+	lay := func() ([]byte, []writer.SeekEntry, int64, []byte, error) {
+		region.keptSeekEntries = kept
+		for id, t := range region.tail {
+			if stay[id] {
+				region.keptSeekEntries = append(region.keptSeekEntries, t.entry)
+			}
+		}
+		metaBytes, entries, err := serializeHead(c, stay)
+		if err != nil {
+			return nil, nil, 0, nil, err
+		}
+		reserve, seekData, err := layoutRegion(region, &metaBytes, &entries, region.end-region.start)
+		return metaBytes, entries, reserve, seekData, err
 	}
-	metaBytes, entries, err := serializeHead(c, !keepTail)
+	metaBytes, _, reserve, seekData, err := lay()
+	rewrite := map[uint32]bool{} // edited tail elements the head cannot hold, back in their old place
+	if err != nil {
+		for id, t := range region.tail {
+			if slack := t.size - int64(len(after[id])); !stay[id] && !region.inHead[id] && id != mkv.IDAttachments && len(after[id]) > 0 && (slack == 0 || slack >= 2) {
+				rewrite[id], stay[id] = true, true
+			}
+		}
+		if len(rewrite) > 0 {
+			metaBytes, _, reserve, seekData, err = lay()
+		}
+	}
 	if err != nil {
 		return err
 	}
 	available := region.end - region.start
-	reserve, seekData, err := layoutRegion(region, &metaBytes, &entries, available)
-	tailSlack := region.tailTags.size - int64(newTags.Len())
-	rewriteTail := err != nil && tailOnly && !keepTail && len(c.Tags) > 0 && (tailSlack == 0 || tailSlack >= 2)
-	if rewriteTail { // the head cannot hold the edited tags, their old element can
-		region.keptSeekEntries = append(kept, region.tailTagsEntry)
-		if metaBytes, entries, err = serializeHead(c, false); err != nil {
-			return err
-		}
-		reserve, seekData, err = layoutRegion(region, &metaBytes, &entries, available)
-	}
-	if err != nil {
-		return err
-	}
 	newSize := int64(len(metaBytes))
 
 	f, err := fs.DoOpenFile(path, os.O_RDWR, 0)
@@ -115,18 +129,21 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		}
 	}
 
-	// Tags folded into the head are voided where they were, so they are not read twice; tags the head could not
-	// hold are rewritten there.
-	if region.tailTags.size > 0 && !keepTail {
-		if _, err := f.Seek(region.tailTags.pos, io.SeekStart); err != nil {
+	// Tail elements folded into the head are voided where they were, so they are not read twice; those the head
+	// could not hold are rewritten there.
+	for id, t := range region.tail {
+		if stay[id] && !rewrite[id] {
+			continue
+		}
+		if _, err := f.Seek(t.pos, io.SeekStart); err != nil {
 			return err
 		}
-		voided := region.tailTags.size
-		if rewriteTail {
-			if _, err := f.Write(newTags.Bytes()); err != nil {
+		voided := t.size
+		if rewrite[id] {
+			if _, err := f.Write(after[id]); err != nil {
 				return err
 			}
-			voided = tailSlack
+			voided -= int64(len(after[id]))
 		}
 		if voided > 0 {
 			if err := writer.WriteVoid(f, int(voided)); err != nil {
@@ -146,9 +163,36 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	return nil
 }
 
-// serializeHead serialises the head metadata elements, recording each one's offset for the rebuilt SeekHead;
-// withTags false leaves the Tags out, to stay after the clusters.
-func serializeHead(c *mkv.Container, withTags bool) ([]byte, []writer.SeekEntry, error) {
+// tailIDs are the metadata elements a muxer may leave after the clusters.
+var tailIDs = []uint32{mkv.IDTags, mkv.IDChapters, mkv.IDAttachments}
+
+var tailNames = map[uint32]string{mkv.IDTags: "tags", mkv.IDChapters: "chapters", mkv.IDAttachments: "attachments"}
+
+// tailForms serialises what each tail element would hold, to tell whether an edit changed it (attachments by their
+// description: their payloads stay where they are).
+func tailForms(c *mkv.Container) (map[uint32][]byte, error) {
+	var tags, chapters bytes.Buffer
+	if err := writer.WriteTags(&tags, c.Tags); err != nil {
+		return nil, err
+	}
+	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
+		if err := writer.WriteEditions(&chapters, c.Chapters, c.OtherEditions); err != nil {
+			return nil, err
+		}
+	}
+	attachments, err := json.Marshal(c.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	if len(c.Attachments) == 0 {
+		attachments = nil
+	}
+	return map[uint32][]byte{mkv.IDTags: tags.Bytes(), mkv.IDChapters: chapters.Bytes(), mkv.IDAttachments: attachments}, nil
+}
+
+// serializeHead serialises the head metadata elements, recording each one's offset for the rebuilt SeekHead; the
+// elements in skip stay after the clusters.
+func serializeHead(c *mkv.Container, skip map[uint32]bool) ([]byte, []writer.SeekEntry, error) {
 	var newMeta bytes.Buffer
 	var entries []writer.SeekEntry
 	mark := func(id uint32) { entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())}) }
@@ -163,19 +207,19 @@ func serializeHead(c *mkv.Container, withTags bool) ([]byte, []writer.SeekEntry,
 			return nil, nil, err
 		}
 	}
-	if len(c.Chapters) > 0 || len(c.OtherEditions) > 0 {
+	if (len(c.Chapters) > 0 || len(c.OtherEditions) > 0) && !skip[mkv.IDChapters] {
 		mark(mkv.IDChapters)
 		if err := writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions); err != nil {
 			return nil, nil, err
 		}
 	}
-	if len(c.Attachments) > 0 {
+	if len(c.Attachments) > 0 && !skip[mkv.IDAttachments] {
 		mark(mkv.IDAttachments)
 		if err := writer.WriteAttachments(&newMeta, c.Attachments); err != nil {
 			return nil, nil, err
 		}
 	}
-	if withTags && len(c.Tags) > 0 {
+	if len(c.Tags) > 0 && !skip[mkv.IDTags] {
 		mark(mkv.IDTags)
 		if err := writer.WriteTags(&newMeta, c.Tags); err != nil {
 			return nil, nil, err
@@ -340,13 +384,11 @@ type metadataRegion struct {
 	// keptSeekEntries are the old SeekHead entries pointing OUTSIDE the head
 	// region (e.g. the Cues after the clusters), preserved verbatim.
 	keptSeekEntries []writer.SeekEntry
-	// tailTags is a Tags element sitting after the head region (Mux writes the
-	// statistics tags there); its bytes are voided after an in-place edit.
-	tailTags struct{ pos, size int64 }
-	// tailTagsEntry is the old SeekHead's entry for tailTags, kept when they stay where they are.
-	tailTagsEntry writer.SeekEntry
-	// headTags is set when a Tags element sits in the head region too.
-	headTags bool
+	// tail holds the Tags, Chapters and Attachments elements after the clusters, by ID, with the old SeekHead
+	// entry kept when they stay where they are.
+	tail map[uint32]tailElement
+	// inHead holds the metadata element IDs the head region holds.
+	inHead map[uint32]bool
 	// tailUnknown is set when a file with no SeekHead could not be stepped through to its end.
 	tailUnknown bool
 }
@@ -375,7 +417,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 	}
 
 	var segEnd int64 = -1
-	region := metadataRegion{start: -1}
+	region := metadataRegion{start: -1, tail: map[uint32]tailElement{}, inHead: map[uint32]bool{}}
 	region.segDataStart, _ = f.Seek(0, io.SeekCurrent)
 	if h.Size >= 0 {
 		segEnd = region.segDataStart + h.Size
@@ -407,7 +449,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 				region.start = pos
 			}
 			region.end = pos + int64(ebml.ElementIDLen(eh.ID)) + int64(ebml.DataSizeLen(eh.Size)) + eh.Size
-			region.headTags = region.headTags || eh.ID == mkv.IDTags
+			region.inHead[eh.ID] = true
 			if eh.ID == mkv.IDSeekHead {
 				if !region.hadSeekHead {
 					region.hadSeekHead, region.seekHeadPos = true, pos
@@ -433,7 +475,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 				}
 				return region, nil
 			}
-			return region, scanTailTags(f, pos, segEnd, &region)
+			return region, scanTail(f, pos, segEnd, &region)
 		default:
 			if eh.Size < 0 {
 				return metadataRegion{}, fmt.Errorf("unknown-size element 0x%X", eh.ID)
@@ -450,9 +492,20 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 	return region, nil
 }
 
-// scanTailTags finds, in a file with no SeekHead to point at it, a Tags element after the clusters by stepping over
-// the top-level elements; a cluster of unknown size stops the step, and leaves the tail unknown.
-func scanTailTags(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegion) error {
+// tailElement is a metadata element after the clusters: where it starts, its full size, its SeekHead entry.
+type tailElement struct {
+	pos, size int64
+	entry     writer.SeekEntry
+}
+
+// isTailID reports a metadata element a muxer may leave after the clusters.
+func isTailID(id uint32) bool {
+	return id == mkv.IDTags || id == mkv.IDChapters || id == mkv.IDAttachments
+}
+
+// scanTail finds, in a file with no SeekHead to point at them, the tail elements after the clusters by stepping
+// over the top-level elements; a cluster of unknown size, or a second element of one kind, leaves the tail unknown.
+func scanTail(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegion) error {
 	for segEnd < 0 || pos < segEnd {
 		if _, err := f.Seek(pos, io.SeekStart); err != nil {
 			return err
@@ -465,12 +518,12 @@ func scanTailTags(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegio
 			region.tailUnknown = true
 			return nil
 		}
-		if eh.ID == mkv.IDTags {
-			if region.tailTags.size > 0 {
+		if isTailID(eh.ID) {
+			if _, twice := region.tail[eh.ID]; twice {
 				region.tailUnknown = true // more than one: not one element to keep or rewrite
 				return nil
 			}
-			region.tailTags.pos, region.tailTags.size = pos, int64(hdrLen)+eh.Size
+			region.tail[eh.ID] = tailElement{pos: pos, size: int64(hdrLen) + eh.Size}
 		}
 		pos += int64(hdrLen) + eh.Size
 	}
@@ -479,8 +532,8 @@ func scanTailTags(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegio
 
 // classifyTailEntries re-reads the old SeekHead and sorts its entries: those
 // pointing outside the head region are preserved for the rebuilt SeekHead  -
-// except a post-cluster Tags element, which the in-place edit folds into the
-// head (its location and full size are recorded so it can be voided).
+// except a post-cluster Tags, Chapters or Attachments element, recorded with its
+// location and full size, which EditInPlace keeps, folds or rewrites.
 func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *metadataRegion) error {
 	entries, err := readSeekHeadEntries(path, fs, region)
 	if err != nil || entries == nil {
@@ -491,18 +544,19 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 		if abs >= region.start && abs < region.end {
 			continue // head element: rewritten, gets a fresh entry
 		}
-		if e.ID == mkv.IDTags {
-			// Measure the element so its bytes can be voided.
+		if isTailID(e.ID) {
 			if _, err := f.Seek(abs, io.SeekStart); err != nil {
 				return err
 			}
 			th, hdrLen, err := ebml.ReadElementHeader(f)
-			if err != nil || th.ID != mkv.IDTags || th.Size < 0 {
+			if err != nil || th.ID != e.ID || th.Size < 0 {
 				continue // stale entry: leave it out, void nothing
 			}
-			region.tailTags.pos = abs
-			region.tailTags.size = int64(hdrLen) + th.Size
-			region.tailTagsEntry = e
+			if _, twice := region.tail[e.ID]; twice {
+				region.tailUnknown = true
+				continue
+			}
+			region.tail[e.ID] = tailElement{pos: abs, size: int64(hdrLen) + th.Size, entry: e}
 			continue
 		}
 		region.keptSeekEntries = append(region.keptSeekEntries, e)

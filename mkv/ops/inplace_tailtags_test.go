@@ -145,3 +145,29 @@ func TestEditInPlaceWithoutSeekHead(t *testing.T) {
 		t.Errorf("title %q, %d simple tags; want the title and the 2 notes once", c.Info.Title, n)
 	}
 }
+
+// TestEditInPlaceWithChaptersAfterTheClusters pins that chapters a muxer left after the clusters (as FFmpeg-made
+// files carry them) stay there, once, when an edit does not touch them, and are not written a second time in the head.
+func TestEditInPlaceWithChaptersAfterTheClusters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tailchap.mkv")
+	f, err := os.Create(path)
+	mustNil(t, err)
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}}, []mkv.Track{videoTrack(1)}, 2000))
+	for tc := int64(0); tc < 2000; tc += 1000 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: make([]byte, 100)}}))
+	}
+	mw.ChaptersPos = mw.RelPos()
+	mustNil(t, writer.WriteEditions(f, []mkv.Chapter{{ID: 1, Title: "One", StartMs: 0}, {ID: 2, Title: "Two", StartMs: 1000}}, nil))
+	mustNil(t, mw.Finalize())
+	f.Close()
+	before, _ := os.Stat(path)
+	mustNil(t, EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "t" }))
+	c, err := reader.Open(context.Background(), path)
+	mustNil(t, err)
+	after, _ := os.Stat(path)
+	if c.Info.Title != "t" || len(c.Chapters) != 2 || after.Size() != before.Size() {
+		t.Errorf("title %q, %d chapters, size %d -> %d; want the title, the 2 chapters once, the same size", c.Info.Title, len(c.Chapters), before.Size(), after.Size())
+	}
+}
