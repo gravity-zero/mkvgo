@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
@@ -66,13 +67,13 @@ var reservedOnWindows = map[string]bool{"CON": true, "PRN": true, "AUX": true, "
 // CON, PRN, AUX, NUL, COM1-9 and LPT1-9.
 func TestDeviceNamesWindowsReserves(t *testing.T) {
 	for _, s := range []string{"CON", "NUL", "COM0", "COM9", "LPT0", "COM¹", "COM²", "LPT³"} {
-		if !deviceName(s) {
-			t.Errorf("deviceName(%q) = false, want reserved", s)
+		if !splitplan.DeviceName(s) {
+			t.Errorf("DeviceName(%q) = false, want reserved", s)
 		}
 	}
 	for _, s := range []string{"COM", "COM10", "LPT⁴", "CONSOLE", "COMA"} {
-		if deviceName(s) {
-			t.Errorf("deviceName(%q) = true, want free", s)
+		if splitplan.DeviceName(s) {
+			t.Errorf("DeviceName(%q) = true, want free", s)
 		}
 	}
 }

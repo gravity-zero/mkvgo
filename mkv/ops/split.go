@@ -386,8 +386,6 @@ func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 	return splitplan.EveryRanges(keyframes, everyMs)
 }
 
-func deviceName(s string) bool { return splitplan.DeviceName(s) }
-
 func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	return splitplan.ChapterRanges(chapters)
 }
