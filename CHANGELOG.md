@@ -20,6 +20,13 @@ this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 - `s3fs` refuses to send a session token to an `http://` endpoint unless
   `Options.AllowHTTPSessionToken` is set; the refusal names the way out a CLI
   user has, an `https://` endpoint or unsetting `AWS_SESSION_TOKEN`.
+- `GrowingHLSPlan.Complete` returns the error that kept it from reading the
+  tail, the playlist then left open for another call, instead of swallowing it;
+  a call that ignores the result compiles as before.
+- `-segment` takes more than 0 and at most 86400 seconds on every command:
+  `1e300` or `NaN` is refused by name instead of wrapping to a negative length.
+- `mkvhttp` answers 404 for a name a plan does not serve (an unknown name, a
+  segment or rendition out of range), 502 only when the source fails.
 
 ### Security
 
@@ -57,9 +64,29 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - `LoadAttachmentData` grows its buffer as bytes arrive instead of trusting
   the declared size.
 - Empty CuePoints are skipped and Cues past 8M points are refused as damage.
+- `Join` compares a QuickTime `wave` one level deep and a `wave` nested in it
+  byte for byte, so a crafted nest cannot exhaust the stack.
+- A PGS decoder bounds the objects one epoch holds together to 16 MiB: a stream
+  that never starts a new epoch could pile them up.
+- `Fingerprint` of an MP4 remuxes through a temp file on local disk, as
+  documented, instead of holding the source and its Matroska in memory (WASM
+  keeps the in-memory path).
+- A box read past 8 MiB grows its buffer to its own size, not the next power
+  of two.
+- `s3fs` refuses a key segment `.` or `..` before any request, so no server or
+  proxy resolving the URL path can step out of the bucket.
 
 ### Added
 
+- `HLSPlan.Stat` says what `Open` would hand out (size, ETag, content type)
+  without handing it out; `mkvhttp` answers a HEAD and a matching revalidation
+  from it, so neither counts a segment served nor takes one the walk kept.
+- `mp4.ErrNoResource`: every plan's error for a name it does not serve matches
+  it.
+- `mp4.OpensLikeISOBMFF` reports whether a file's first 8 bytes open an
+  MP4/MOV; `Track.Derived` holds what the Matroska reader took from the codec
+  bitstream where the container stated nothing, so a rewrite writes only what
+  was stated.
 - `matroska.ErrNoRoomInPlace`: `EditInPlace` refusals for want of room match
   it with `errors.Is`, message unchanged, the file left as it was.
 - `ExtractSubtitleWebVTT` on Matroska reads a track the source's Cues fully
@@ -107,6 +134,43 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- Split by chapters starts the first part at 0: what plays before the first
+  chapter is no longer lost from every part (MKV and MP4).
+- Split never opens an MP4 part on a keyframe the edit list hides, and a track
+  whose edit list has ended by a cut is left empty in that part instead of
+  playing its hidden media.
+- Split refuses a range that ends before it starts or starts past the end,
+  naming it, before any part is written (MKV and MP4).
+- Split by chapters keeps a Matroska chapter that starts after the last video
+  keyframe in the part before, as MP4 already did.
+- Split cuts a Matroska file on keyframes of its first video track only, as MP4
+  does: a second all-intra video track no longer opens a part mid-GOP.
+- Split keeps every sound block stored after a Matroska cut keyframe yet timed
+  before it, however many dense audio tracks there are.
+- Split by chapters no longer holds every subtitle cue of a part in memory,
+  only those that can still be on screen at a cut.
+- Join keeps an MP4 file's own subtitle and audio times when its first sample
+  starts before the previous file's last, instead of pushing the whole file
+  late.
+- Join refuses an MP4 track turned or sized for display unlike the first
+  file's, instead of showing it under the first file's matrix.
+- Join refuses Matroska tracks stored with another compression or encryption,
+  or of another picture size, sample rate, channel count or bit depth, instead
+  of joining them under the first file's declaration.
+- Join continues a Matroska part's chapters only from the part just before it:
+  an earlier unrelated file's chapter is no longer stretched, nor a new chapter
+  dropped.
+- Join drops a later Matroska file's encoder priming frames (CodecDelay), so
+  its sound no longer plays late by the priming.
+- An on-demand plan over an MP4 counts the bytes of the segments it builds and
+  serves (`BuiltBytes`, `ServedBytes`): a server's read-to-served ratio had
+  nothing on the served side.
+- A CENC Matroska plan offers no I-frame playlist, as the MP4 plan and the full
+  pass already did.
+- The AC-3, E-AC-3 and Opus sample entry refusals and retime's header refusals
+  wrap their cause.
+- `RemuxToMP4` ends an open last chapter at the movie's end instead of two
+  seconds after it starts.
 - A Matroska split part's SegmentUID hashes its range too: parts of two splits
   of one source cut at other points named each other as predecessor and
   successor, and a join of them merged a chapter across a seam that was none.
