@@ -483,6 +483,11 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 		segDataStart: pos + int64(segHdrBytes),
 	}
 	pos = scan.segDataStart
+	// The Cues go right after the file's last byte and the Segment is extended over them: bytes past the Segment's
+	// declared end (a file appended to another) would be swallowed into it.
+	if segEnd := scan.segDataStart + segHdr.Size; totalBytes > 0 && segEnd < totalBytes {
+		return nil, fmt.Errorf("reindex inplace: %d bytes follow the Segment's end at byte %d: repair the file with mkvgo reindex (a copy), which leaves them out", totalBytes-segEnd, segEnd)
+	}
 
 	var firstClusterSeen bool
 	var clusterBuf []byte // reused across clusters, grown as needed (mirrors reindexFastCopy)

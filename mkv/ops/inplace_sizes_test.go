@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -68,6 +69,25 @@ func TestEditInPlaceRefusesAHeadRunningOverTheClusters(t *testing.T) {
 	}
 	after, _ := os.ReadFile(out)
 	if !bytes.Equal(after, data) {
+		t.Error("the file was changed")
+	}
+}
+
+// TestReindexInPlaceRefusesBytesPastTheSegment: a file with another appended after its Segment would have the
+// appended bytes swallowed into the extended Segment; the in-place reindex is refused and the file left as it was.
+func TestReindexInPlaceRefusesBytesPastTheSegment(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
+	sparseTracksMKV(t, a, []mkv.Track{videoTrack(1)})
+	sparseTracksMKV(t, b, []mkv.Track{videoTrack(1)})
+	da, _ := os.ReadFile(a)
+	db, _ := os.ReadFile(b)
+	cat := append(append([]byte(nil), da...), db...)
+	mustNil(t, os.WriteFile(a, cat, 0o644))
+	if err := ReindexInPlace(context.Background(), a); err == nil || !strings.Contains(err.Error(), "mkvgo reindex") {
+		t.Errorf("in-place reindex of a file with bytes past its Segment: %v", err)
+	}
+	if after, _ := os.ReadFile(a); !bytes.Equal(after, cat) {
 		t.Error("the file was changed")
 	}
 }
