@@ -234,7 +234,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   in the part before, and the next part opens it there, so split then join
   gives every picture back (MKV and MP4): the MKV parts lost them, the MP4
   join refused the parts. An MP4 part declares the length of its longest
-  track; Join places a linked part at its cut.
+  track and records where its split cut it (`SPLIT_CUT`); Join places a linked
+  part there, so an open GOP with a second video track and no sound joins back
+  whole too.
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
