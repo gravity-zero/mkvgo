@@ -674,7 +674,36 @@ func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
 		k.lastDTS, k.started = dtsTS, true
 		e.iv = cencSampleIV(k.c.IV, dtsTS, k.domain)
 	}
+	if k.isVideo {
+		subs, err := fitSaiz(e.subs, len(e.iv))
+		if err != nil {
+			return e, errf("Options.CENC: track %d: %w", k.trackID, err)
+		}
+		e.subs = subs
+	}
 	return e, nil
+}
+
+// fitSaiz folds the subsamples protecting least into the next one's clear bytes until the entry's size fits saiz's one byte.
+func fitSaiz(subs []cencSubsample, ivLen int) ([]cencSubsample, error) {
+	maxSubs := (255 - ivLen - 2) / 6
+	for len(subs) > maxSubs {
+		best := -1
+		for i := 0; i+1 < len(subs); i++ {
+			if int(subs[i+1].clear)+int(subs[i].clear)+int(subs[i].protected) > 0xFFFF {
+				continue
+			}
+			if best < 0 || subs[i].protected < subs[best].protected {
+				best = i
+			}
+		}
+		if best < 0 {
+			return nil, errf("a picture of %d NAL units too large to describe in one CENC entry: re-encode it with fewer slices", len(subs))
+		}
+		subs[best+1].clear += subs[best].clear + uint16(subs[best].protected)
+		subs = append(subs[:best], subs[best+1:]...)
+	}
+	return subs, nil
 }
 
 // encrypt encrypts a plaintext sample in place as its entry says.
