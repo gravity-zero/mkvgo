@@ -363,3 +363,16 @@ func TestHandlerCutsConnectionOnMidStreamError(t *testing.T) {
 		t.Fatalf("client read %d of %d bytes with no error", len(body), resp.ContentLength)
 	}
 }
+
+// TestByteRangeOfAnEmptyResource: no Range can be satisfied on an empty resource; a suffix range gave a 206 with
+// Content-Range "bytes 0--1/0".
+func TestByteRangeOfAnEmptyResource(t *testing.T) {
+	for _, h := range []string{"bytes=-5", "bytes=0-", "bytes=0-10"} {
+		if _, _, _, ok := byteRange(h, 0); ok {
+			t.Errorf("%s on an empty resource was satisfiable", h)
+		}
+	}
+	if _, n, status, ok := byteRange("", 0); !ok || n != 0 || status != http.StatusOK {
+		t.Errorf("no Range on an empty resource: %d %d %v", n, status, ok)
+	}
+}

@@ -263,6 +263,9 @@ func byteRange(header string, size int64) (start, n int64, status int, ok bool) 
 	if !found || strings.Contains(spec, ",") {
 		return 0, size, http.StatusOK, true
 	}
+	if size == 0 {
+		return 0, 0, 0, false // no byte of an empty resource can be ranged
+	}
 	a, b, _ := strings.Cut(spec, "-")
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	switch {
