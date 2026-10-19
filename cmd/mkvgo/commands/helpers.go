@@ -126,20 +126,20 @@ func CmdHelp(cmd string) {
 	}
 }
 
-// osExit is the process-exit hook Fatal uses. It is a variable so tests can
-// override it (recovering from a panic) to exercise the CLI error paths
 // maxSegmentSeconds bounds -segment: a day, far past any segment, so the milliseconds always fit.
 const maxSegmentSeconds = 86400
 
-// parseSegmentSeconds reads a -segment duration in seconds (the HLS convention) as milliseconds.
+// parseSegmentSeconds reads a -segment duration in seconds (the HLS convention) as milliseconds, at least one.
 func parseSegmentSeconds(v string) int64 {
 	secs, err := strconv.ParseFloat(v, 64)
-	if err != nil || !(secs > 0 && secs <= maxSegmentSeconds) {
-		Fatal(fmt.Sprintf("invalid -segment duration %q (seconds, more than 0 and at most %d)", v, maxSegmentSeconds))
+	if err != nil || !(secs >= 0.001 && secs <= maxSegmentSeconds) {
+		Fatal(fmt.Sprintf("invalid -segment duration %q (seconds, at least 0.001 and at most %d)", v, maxSegmentSeconds))
 	}
 	return int64(secs * 1000)
 }
 
+// osExit is the process-exit hook Fatal uses. It is a variable so tests can
+// override it (recovering from a panic) to exercise the CLI error paths
 // in-process; in production it is os.Exit.
 var osExit = os.Exit
 

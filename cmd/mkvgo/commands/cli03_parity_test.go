@@ -31,8 +31,8 @@ func oldParseHLSFlags(args []string) hlsFlags {
 			// Segment length in seconds, the HLS convention.
 			needValue(args, &i)
 			secs, err := strconv.ParseFloat(args[i], 64)
-			if err != nil || !(secs > 0 && secs <= 86400) {
-				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds, more than 0 and at most 86400)", args[i]))
+			if err != nil || !(secs >= 0.001 && secs <= 86400) {
+				Fatal(fmt.Sprintf("invalid -segment duration %q (seconds, at least 0.001 and at most 86400)", args[i]))
 			}
 			f.segMs = int64(secs * 1000)
 		case "--aes-key":
@@ -223,7 +223,7 @@ func runParse(c *fatalCapture, parse func([]string) hlsFlags, args []string) (f 
 
 func TestCLI03_HLSFlagsParity(t *testing.T) {
 	values := map[string][]string{
-		"-o": {"out"}, "-segment": {"6", "0.5", "x", "-1", "1e300", "NaN"}, "--segment": {"4"},
+		"-o": {"out"}, "-segment": {"6", "0.5", "x", "-1", "1e300", "NaN", "0.0004"}, "--segment": {"4"},
 		"--aes-key":     {"00112233445566778899aabbccddeeff", "zz", "00112233445566778899aabbccddeeff,ffeeddccbbaa99887766554433221100"},
 		"--aes-key-uri": {"https://k/a", "https://k/a,https://k/b"}, "--aes-rotate-segments": {"2", "0", "x"},
 		"--cenc-scheme": {"cenc", "cbcs"}, "--cenc-key": {"00112233445566778899aabbccddeeff"}, "--cenc-kid": {"ffeeddccbbaa99887766554433221100"},
