@@ -102,6 +102,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- `EditInPlace` measures the head's elements with their size fields as wide as
+  the file writes them (FFmpeg and libwebm use 8 bytes): the head's end was
+  counted short, and the old bytes left before the first Cluster broke the
+  file's structure for any reader that does not resync.
 - A Matroska rewrite (`EditInPlace`, `EditMetadata`, `Split`, `Join`, `Mux`...)
   no longer writes into the container the colour and display size the reader
   took from the codec's SPS where the container stated none: a title edit added

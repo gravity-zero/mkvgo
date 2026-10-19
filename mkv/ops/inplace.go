@@ -432,7 +432,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		}
 
 		pos, _ := f.Seek(0, io.SeekCurrent)
-		eh, _, err := ebml.ReadElementHeader(f)
+		eh, hdrLen, err := ebml.ReadElementHeader(f)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -448,7 +448,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 			if region.start < 0 {
 				region.start = pos
 			}
-			region.end = pos + int64(ebml.ElementIDLen(eh.ID)) + int64(ebml.DataSizeLen(eh.Size)) + eh.Size
+			region.end = pos + int64(hdrLen) + eh.Size // the size field as wide as the file has it
 			region.inHead[eh.ID] = true
 			if eh.ID == mkv.IDSeekHead {
 				if !region.hadSeekHead {

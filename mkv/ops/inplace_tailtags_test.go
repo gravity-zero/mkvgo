@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,5 +170,57 @@ func TestEditInPlaceWithChaptersAfterTheClusters(t *testing.T) {
 	after, _ := os.Stat(path)
 	if c.Info.Title != "t" || len(c.Chapters) != 2 || after.Size() != before.Size() {
 		t.Errorf("title %q, %d chapters, size %d -> %d; want the title, the 2 chapters once, the same size", c.Info.Title, len(c.Chapters), before.Size(), after.Size())
+	}
+}
+
+// TestEditInPlaceWithWideSizeFields pins that a head whose last element states its size in more bytes than it needs
+// (FFmpeg and libwebm write 8) is rewritten to its real end: the bytes before the first Cluster are all accounted for,
+// none of the old element left between the new head and the Cluster.
+func TestEditInPlaceWithWideSizeFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wide.mkv")
+	var tracks bytes.Buffer
+	mustNil(t, writer.WriteTracks(&tracks, []mkv.Track{videoTrack(1)}))
+	h, hdrLen, err := ebml.ReadElementHeader(bytes.NewReader(tracks.Bytes()))
+	mustNil(t, err)
+	var wide bytes.Buffer
+	wide.Write([]byte{0x16, 0x54, 0xAE, 0x6B})
+	_, err = ebml.WriteDataSizeWidth(&wide, h.Size, 8)
+	mustNil(t, err)
+	wide.Write(tracks.Bytes()[hdrLen:])
+	var info bytes.Buffer
+	mustNil(t, writer.WriteSegmentInfo(&info, &mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}, 1000))
+	var cluster bytes.Buffer
+	_, err = writer.WriteClusterOffsets(&cluster, 0, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: make([]byte, 50)}})
+	mustNil(t, err)
+	var seg bytes.Buffer
+	seg.Write(info.Bytes())
+	mustNil(t, writer.WriteVoid(&seg, 64)) // room for the title, ahead of the Tracks so they stay last
+	seg.Write(wide.Bytes())
+	seg.Write(cluster.Bytes())
+	var file bytes.Buffer
+	file.Write([]byte{0x1A, 0x45, 0xDF, 0xA3, 0xA3, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01, 0x42, 0xF2, 0x81, 0x04, 0x42, 0xF3, 0x81, 0x08, 0x42, 0x82, 0x88, 'm', 'a', 't', 'r', 'o', 's', 'k', 'a', 0x42, 0x87, 0x81, 0x04, 0x42, 0x85, 0x81, 0x02})
+	file.Write([]byte{0x18, 0x53, 0x80, 0x67})
+	_, err = ebml.WriteDataSizeWidth(&file, int64(seg.Len()), 8)
+	mustNil(t, err)
+	file.Write(seg.Bytes())
+	mustNil(t, os.WriteFile(path, file.Bytes(), 0o644))
+	mustNil(t, EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "x" }))
+	data, err := os.ReadFile(path)
+	mustNil(t, err)
+	clusterAt := bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+	r := bytes.NewReader(data[bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})+12:])
+	pos := int64(len(data) - r.Len())
+	for pos < int64(clusterAt) {
+		eh, n, err := ebml.ReadElementHeader(r)
+		if err != nil {
+			t.Fatalf("head unreadable at %d: %v", pos, err)
+		}
+		pos += int64(n) + eh.Size
+		if _, err := r.Seek(eh.Size, io.SeekCurrent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if pos != int64(clusterAt) {
+		t.Errorf("the head's elements end at %d, the Cluster starts at %d: bytes of the old head left between", pos, clusterAt)
 	}
 }
