@@ -558,7 +558,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 }
 
 // behindCutMaxBytes bounds what behindCut holds: a cluster's worth of every track, however many blocks that is.
-const behindCutMaxBytes = 64 << 20
+var behindCutMaxBytes = 64 << 20
 
 // behindCut reads the blocks stored right after a cut keyframe: the sound timed before it goes to the segment
 // ending there (behind), the rest, the keyframe first, to the next one; an open GOP's leading pictures to neither.
@@ -583,7 +583,7 @@ func behindCut(br walkReader, key mkv.Block, video map[uint64]bool) (behind, res
 			behind = append(behind, blk)
 		}
 	}
-	return behind, rest, nil
+	return nil, nil, fmt.Errorf("the sound stored after the cut keyframe at %d ms runs past %d MiB before the picture moves on, more than a cut holds: remux the file so its tracks interleave (mkvgo mux), then split it", key.Timecode, behindCutMaxBytes>>20)
 }
 
 // holdToCut gives a segment's last picture, when the cut keyframe's leading pictures leave a gap before the cut,

@@ -486,3 +486,19 @@ func TestSplitByChaptersKeepsGapsAndTheTail(t *testing.T) {
 		t.Errorf("the parts hold %d frames of the source's %d", total, want)
 	}
 }
+
+// TestSplitRefusesSoundStoredPastWhatACutHolds: past the bound behindCut holds, the cut is refused, not the sound dropped.
+func TestSplitRefusesSoundStoredPastWhatACutHolds(t *testing.T) {
+	defer func(n int) { behindCutMaxBytes = n }(behindCutMaxBytes)
+	behindCutMaxBytes = 100
+	dir := t.TempDir()
+	blocks := []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("k0")}, {TrackNumber: 1, Timecode: 1000, Keyframe: true, Data: []byte("k1")}}
+	for tc := int64(0); tc < 1000; tc++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("a")})
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 2000)
+	_, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 1000}, {StartMs: 1000}}})
+	if err == nil || !strings.Contains(err.Error(), "interleave") {
+		t.Errorf("err = %v, want a refusal of sound stored too far past the cut", err)
+	}
+}
