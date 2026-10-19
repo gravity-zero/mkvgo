@@ -30,7 +30,14 @@ func (t *signingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return base.RoundTrip(r)
+	resp, err := base.RoundTrip(r)
+	if err == nil && resp.StatusCode == http.StatusMovedPermanently {
+		if region := resp.Header.Get("x-amz-bucket-region"); region != "" && region != t.region {
+			resp.Body.Close()
+			return nil, fmt.Errorf("s3fs: the bucket is in region %s, not %s: set Region (or AWS_REGION) to %s", region, t.region, region)
+		}
+	}
+	return resp, err
 }
 
 // amzDateLayout and dateStampLayout are the two SigV4 timestamp formats: the
