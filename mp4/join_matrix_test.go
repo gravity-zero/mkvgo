@@ -170,6 +170,25 @@ func checkJoinedEndToEnd(t *testing.T, files []string, dst string) {
 			diffFirst(t, want[ti], g)
 		}
 	}
+	// Independently of the seam rule above: every picture of file k presents after the files before it, at its own time.
+	jm := mustCutModel(t, dst)
+	jv := &jm.tracks[jm.ref]
+	var offset int64
+	idx := 0
+	for _, f := range files {
+		m := mustCutModel(t, f)
+		v := &m.tracks[m.ref]
+		for i := range v.tt.samples {
+			if idx+i >= len(jv.tt.samples) {
+				t.Fatalf("the join holds %d pictures, fewer than its files", len(jv.tt.samples))
+			}
+			if want, got := offset+v.ptNs(i, m.movieTS), jv.ptNs(idx+i, jm.movieTS); absMs((got-want)/1_000_000) > 1 {
+				t.Fatalf("%s picture %d presents at %d ms in the join, want %d", filepath.Base(f), i+1, got/1_000_000, want/1_000_000)
+			}
+		}
+		idx += len(v.tt.samples)
+		offset += m.movieNs
+	}
 }
 
 // shownAtSeam is the run of an all-sync track a seam keeps: after the priming wholly ahead of its media start (head), up to the padding past its presentation end (tail).

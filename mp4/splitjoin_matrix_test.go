@@ -31,6 +31,25 @@ func TestSplitJoinMatrix(t *testing.T) {
 			if len(parts) != c.Cuts+1 {
 				t.Fatalf("%d parts, want %d", len(parts), c.Cuts+1)
 			}
+			// Each part after the first opens, at its zero, on the keyframe at or after the cut it was asked for.
+			for k, p := range parts[1:] {
+				var want []byte
+				for _, b := range c.Blocks()[matrix.VideoTrack] {
+					if b.Keyframe && b.Timecode == c.ExpectedCuts()[k] {
+						want = b.Data
+					}
+				}
+				m := mustCutModel(t, p)
+				v := &m.tracks[m.ref]
+				f, err := os.ReadFile(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s := v.tt.samples[0]
+				if got := f[s.src : s.src+int64(s.size)]; !s.sync || v.ptNs(0, m.movieTS) != 0 || !bytes.Equal(got, want) {
+					t.Errorf("%s opens on %x at %d ns (sync %v), want the keyframe at %d ms, %x, at 0", filepath.Base(p), got, v.ptNs(0, m.movieTS), s.sync, c.ExpectedCuts()[k], want)
+				}
+			}
 			// The cue is on screen at the first cut, and at the second too when it runs over both.
 			covered := map[matrix.Subtitle]int{matrix.CueOverCut: 1, matrix.CueOverTwoCuts: 2}[c.Subtitle]
 			if covered > 0 {
@@ -59,6 +78,13 @@ func TestSplitJoinMatrix(t *testing.T) {
 				if strings.Join(want[ti], ",") != strings.Join(got[ti], ",") {
 					t.Errorf("track %d: the join does not give the source back", ti+1)
 					diffFirst(t, want[ti], got[ti])
+				}
+			}
+			// The samples' own times leave the edit list out: each track must also present first where the source's does.
+			sm, jm := mustCutModel(t, src), mustCutModel(t, joined)
+			for ti := range sm.tracks {
+				if a, b := sm.tracks[ti].ptNs(0, sm.movieTS), jm.tracks[ti].ptNs(0, jm.movieTS); a != b {
+					t.Errorf("track %d presents first at %d ns, the source at %d", ti+1, b, a)
 				}
 			}
 			wc, gc := mustMeta(t, src).Chapters, mustMeta(t, joined).Chapters
