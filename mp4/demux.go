@@ -345,6 +345,9 @@ func newTrackWindows(src io.ReadSeeker, size int64, tracks int) *trackWindows {
 // bytes, the oldest window refilled from the first byte none holds.
 func (sr *trackWindows) read(ti int, samples []inSample, idx int) ([]byte, error) {
 	off, end := samples[idx].offset, samples[idx].offset+int64(samples[idx].size)
+	if off < 0 || end > sr.size {
+		return nil, io.ErrUnexpectedEOF // a size the table declares past the source is not allocated
+	}
 	out := make([]byte, 0, end-off)
 	for pos := off; pos < end; {
 		if w := sr.holding(pos); w != nil {
