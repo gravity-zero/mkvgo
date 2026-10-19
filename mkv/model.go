@@ -29,14 +29,15 @@ const (
 	CompressionBzlib                          // ContentCompAlgo 1
 	CompressionLZO1X                          // ContentCompAlgo 2
 	CompressionHeaderStrip                    // ContentCompAlgo 3 - see Track.HeaderStripping
+	CompressionUnknown                        // a ContentCompAlgo Matroska does not define: nothing can decode or rewrite it
 )
 
 // Verbatim reports whether a block's bytes on disk are the payload, a stripped header aside: what a copy from the source may serve.
 func (c Compression) Verbatim() bool { return c == CompressionNone || c == CompressionHeaderStrip }
 
 // CompressionFromAlgo maps a Matroska ContentCompAlgo value to a Compression.
-// An algorithm this build does not know maps to CompressionNone, so an unknown
-// scheme reads as "nothing declared" rather than as the wrong codec.
+// An algorithm Matroska does not define maps to CompressionUnknown: the blocks are compressed with something, never
+// read as plain.
 func CompressionFromAlgo(algo uint64) Compression {
 	switch algo {
 	case 0:
@@ -48,7 +49,7 @@ func CompressionFromAlgo(algo uint64) Compression {
 	case 3:
 		return CompressionHeaderStrip
 	}
-	return CompressionNone
+	return CompressionUnknown
 }
 
 // Algo is the Matroska ContentCompAlgo value to write for c. Only meaningful
@@ -66,6 +67,8 @@ func (c Compression) String() string {
 		return "lzo1x"
 	case CompressionHeaderStrip:
 		return "header stripping"
+	case CompressionUnknown:
+		return "an algorithm Matroska does not define"
 	}
 	return "none"
 }

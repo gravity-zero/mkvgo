@@ -251,6 +251,9 @@ func WriteTracks(w io.Writer, tracks []mkv.Track) error {
 		if enc := tracks[i].Encryption; enc != "" {
 			return fmt.Errorf("track %d is encrypted (%s): mkvgo does not carry encrypted tracks", tracks[i].ID, enc)
 		}
+		if tracks[i].Compression == mkv.CompressionUnknown {
+			return fmt.Errorf("track %d is compressed with %s: mkvgo cannot carry it", tracks[i].ID, tracks[i].Compression)
+		}
 		e.master(mkv.IDTrackEntry, func(te *ew) {
 			writeTrackFields(te, &tracks[i])
 		})

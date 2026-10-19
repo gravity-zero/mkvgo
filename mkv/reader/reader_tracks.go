@@ -2,6 +2,7 @@ package reader
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"math"
 	"unsafe"
@@ -52,6 +53,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	end := cur + size
 	t := mkv.Track{}
 	p.rateRejected, p.channelsRejected = false, false
+	p.privateCompression, p.privateStripped = mkv.CompressionNone, nil
 
 	for {
 		p.unhold() // the child kept last was parsed from its copy: back to the source
@@ -242,6 +244,14 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 	// reports r_frame_rate for video streams.
 	if t.Type != mkv.VideoTrack {
 		t.FrameRate = nil
+	}
+	if p.privateCompression != mkv.CompressionNone && len(t.CodecPrivate) > 0 {
+		enc := mkv.Track{ID: t.ID, Compression: p.privateCompression, HeaderStripping: p.privateStripped}
+		cp, err := enc.DecodePayload(t.CodecPrivate)
+		if err != nil {
+			return t, fmt.Errorf("track %d: its CodecPrivate is declared compressed: %w", t.ID, err)
+		}
+		t.CodecPrivate = cp
 	}
 	// Fill colour/bit-depth/profile from the codec bitstream when the container
 	// Colour element didn't (container values, parsed above, still win per field).

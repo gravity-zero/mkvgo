@@ -159,6 +159,9 @@ type parser struct {
 	rateRejected bool
 	// channelsRejected says it stated a channel count past 255.
 	channelsRejected bool
+	// privateCompression is how it compressed its CodecPrivate (ContentEncodingScope 2), privateStripped the header.
+	privateCompression mkv.Compression
+	privateStripped    []byte
 	// gotInfo and gotTracks say the first Info and Tracks are read: the spec allows one of each, and the first wins,
 	// met at the head or in the tail.
 	gotInfo, gotTracks bool

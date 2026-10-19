@@ -39,6 +39,7 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	var encType uint64
+	scope := uint64(1)
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
 		if pos >= end {
@@ -58,6 +59,8 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 			err = p.parseContentEncryption(eh.Size, t)
 		case mkv.IDContentEncodingType:
 			encType, err = readUintOf(p.r, eh)
+		case mkv.IDContentEncodingScope:
+			scope, err = readUintOf(p.r, eh)
 		default:
 			err = p.skip(eh.Size)
 		}
@@ -67,6 +70,15 @@ func (p *parser) parseContentEncoding(size int64, t *mkv.Track) error {
 	}
 	if encType == 1 && t.Encryption == "" {
 		t.Encryption = encryptionName(0, 0)
+	}
+	if encType == 0 && t.Compression != mkv.CompressionNone {
+		// The scope says what the compression covers: the blocks, the CodecPrivate, or both.
+		if scope&2 != 0 {
+			p.privateCompression, p.privateStripped = t.Compression, t.HeaderStripping
+		}
+		if scope&1 == 0 {
+			t.Compression, t.HeaderStripping = mkv.CompressionNone, nil
+		}
 	}
 	return nil
 }

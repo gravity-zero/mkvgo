@@ -98,7 +98,7 @@ func TestContentCompressionAlgo(t *testing.T) {
 		{"bzlib", compAlgo(1), mkv.CompressionBzlib},
 		{"lzo1x", compAlgo(2), mkv.CompressionLZO1X},
 		{"header stripping", compAlgo(3), mkv.CompressionHeaderStrip},
-		{"an algorithm this build does not know", compAlgo(99), mkv.CompressionNone},
+		{"an algorithm Matroska does not define, never plain", compAlgo(99), mkv.CompressionUnknown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

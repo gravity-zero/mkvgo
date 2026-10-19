@@ -58,6 +58,7 @@ const (
 	IDContentCompAlgo       = 0x4254
 	IDContentCompSettings   = 0x4255
 	IDContentEncodingType   = 0x5033 // 0 compression, 1 encryption
+	IDContentEncodingScope  = 0x5032 // 1 the blocks, 2 the CodecPrivate, 4 the next encoding
 	IDContentEncryption     = 0x5035
 	IDContentEncAlgo        = 0x47E1 // 0 none, 1 DES, 2 3DES, 3 Twofish, 4 Blowfish, 5 AES
 	IDContentEncAESSettings = 0x47E7
