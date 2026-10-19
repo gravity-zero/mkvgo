@@ -652,7 +652,6 @@ type Block struct {
 	Size int64
 }
 
-// RestoreHeader prepends the stripped header bytes to block data.
 // DecodePayload returns a block's payload as content: inflated when the track
 // declares zlib or bzlib compression, its stripped header put back, untouched
 // otherwise. An MKV-to-MKV copy must NOT call it (it copies compressed blocks
@@ -723,6 +722,7 @@ func inflatePayload(data []byte, open func(io.Reader) (io.Reader, error)) ([]byt
 	return out, nil
 }
 
+// RestoreHeader prepends the stripped header bytes to block data.
 func (t *Track) RestoreHeader(data []byte) []byte {
 	if len(t.HeaderStripping) == 0 {
 		return data
