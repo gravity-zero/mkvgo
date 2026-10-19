@@ -89,6 +89,27 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	return a.variants[k-1].Resource(ctx, rest)
 }
 
+// Open opens the named resource as Resource names it; a variant's resource is its plan's Open, so a media segment
+// streams from that variant's source, and the ABR master and manifest come back whole.
+func (a *ABRPlan) Open(ctx context.Context, name string) (*ResourceHandle, error) {
+	if k, rest, ok := parseVariantPath(name); ok && k >= 1 && k <= len(a.variants) {
+		return a.variants[k-1].Open(ctx, rest)
+	}
+	data, ct, err := a.Resource(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
+}
+
+// Stat is HLSPlan.Stat for a variant's resource; ok is false for the ABR master and manifest, handed out whole.
+func (a *ABRPlan) Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error) {
+	if k, rest, isVariant := parseVariantPath(name); isVariant && k >= 1 && k <= len(a.variants) {
+		return a.variants[k-1].Stat(ctx, rest)
+	}
+	return 0, "", "", false, nil
+}
+
 // Resources lists every resource name the presentation serves: the master, then
 // each variant's resources under its v{k}/ prefix. A variant's own master.m3u8
 // and manifest.mpd are superseded by the ABR master and omitted (combined DASH

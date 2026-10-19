@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -21,6 +22,7 @@ import (
 var (
 	_ Opener = (*mp4.HLSPlan)(nil)
 	_ Opener = (*mp4.ConcatPlan)(nil)
+	_ Opener = (*mp4.ABRPlan)(nil)
 )
 
 // streamFixture writes 10 s of fake H.264 (keyframe every second) with 20 ms AAC audio.
@@ -206,6 +208,41 @@ func TestHandlerConcatHeadServesNothing(t *testing.T) {
 	}
 	if got := cp.Part(1).Stats().ServedSegments; got != before {
 		t.Errorf("a HEAD and a 304 counted %d segments served", got-before)
+	}
+}
+
+// An ABR variant's segment streams through its variant's Open like an HLSPlan's, where the ABR plan was served whole
+// from memory, and its HEAD answers from Stat.
+func TestHandlerStreamsABRVariants(t *testing.T) {
+	ctx := context.Background()
+	src := streamFixture(t)
+	abr, err := mp4.PlanABR(ctx, []string{src, src}, mp4.Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _, err := abr.Resource(ctx, "v1/seg00002.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(abr))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/v1/seg00002.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !bytes.Equal(got, want) || !strings.HasPrefix(resp.Header.Get("ETag"), "W/") {
+		t.Errorf("v1 segment: %d bytes (want %d), ETag %q, want streamed under a weak ETag", len(got), len(want), resp.Header.Get("ETag"))
+	}
+	before := abr.Variant(0).Stats().ServedSegments
+	head, err := http.Head(srv.URL + "/v1/seg00002.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head.Body.Close()
+	if head.ContentLength != int64(len(want)) || abr.Variant(0).Stats().ServedSegments != before {
+		t.Errorf("HEAD: Content-Length %d (want %d), %d segments counted served", head.ContentLength, len(want), abr.Variant(0).Stats().ServedSegments-before)
 	}
 }
 
