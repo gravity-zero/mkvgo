@@ -202,6 +202,12 @@ Matroska/WebM sources only for now (MP4 support is a follow-up).
 
 ## Playing a local file with bounded memory
 
+The loop below is the shortest form: it appends every segment at once, so the
+whole film ends up in the SourceBuffer, and a long one hits the browser's quota.
+The React and Vue `useHLSPlayer` hooks keep at most 30 s ahead of playback and
+remove what played; use them, or regulate the appends on `video.currentTime`
+the same way.
+
 ```js
 const plan = await MkvGo.openHLS(file, { segmentSeconds: 6 })   // File from an <input>
 const ms = new MediaSource()

@@ -663,7 +663,7 @@ w.Header().Set("Content-Length", strconv.FormatInt(h.Size(), 10))
 if _, err := h.WriteTo(ctx, w); err != nil { panic(http.ErrAbortHandler) }
 ```
 
-`plan.Stat(ctx, name)` (an `HLSPlan`, or a `ConcatPlan` for its parts' segments) says what `Open` would hand out - size, ETag, content type - without handing it out: no
+`plan.Stat(ctx, name)` (an `HLSPlan`, a `ConcatPlan` or an `ABRPlan` for their parts' and variants' segments) says what `Open` would hand out - size, ETag, content type - without handing it out: no
 segment is counted served and none the walk kept is taken, so a HEAD or a revalidation leaves it to the GET. Its
 `ok` is false where only `Open` can tell (not a streamed segment, a CENC one, or a network source's light audio, which `Open` hands out whole). Every plan's error for a name it
 does not serve (an unknown name, a segment or rendition out of range, a playlist it does not offer) matches
@@ -1853,7 +1853,7 @@ err := matroska.Demux(ctx, matroska.DemuxOptions{
 })
 ```
 
-Each track lands in `OutputDir/<trackID>.<codec>` - the codec being mkvgo's short name (`1.h264`), or the name the CodecID resolves to when it has none (`theora`), or the CodecID itself when nothing resolves it. `Demux`, `Mux` and `RemuxToWebM` leave no file under their output names when they fail; `Mux` reads its sources before creating the output, so a request naming a missing file or track leaves a file already at the output path untouched.
+`DemuxOptions.NoOverwrite` refuses the demux before anything is written when a file is already at an output name (the CLI sets it unless `-f`). Each track lands in `OutputDir/<trackID>.<codec>` - the codec being mkvgo's short name (`1.h264`), or the name the CodecID resolves to when it has none (`theora`), or the CodecID itself when nothing resolves it. `Demux`, `Mux` and `RemuxToWebM` leave no file under their output names when they fail; `Mux` reads its sources before creating the output, so a request naming a missing file or track leaves a file already at the output path untouched.
 
 **Merge** -- combine all tracks from multiple MKVs:
 
@@ -2514,7 +2514,12 @@ err := matroska.Join(ctx, []string{"part1.mkv", "part2.mkv"}, "full.mkv")
 ```
 
 Join requires the same track layout (count, types, codecs, codec
-configuration) in every file and errors on mismatch. Title and tags come from the first file
+configuration, compression, picture size, sample rate, channels) in every file
+and errors on mismatch. It pairs tracks by position, so a track stating another
+language than the first file's (an English and a French audio swapped) is
+refused too; a track stating none, or `und`, pairs with any. An Opus file's
+pre-skip (a few ms inside its first frame) stays: only whole priming frames can
+be dropped without re-encoding. Title and tags come from the first file
 (first-wins). Attachments are pooled from every source, identified by content
 rather than by name, with the conventional cover art kept single.
 

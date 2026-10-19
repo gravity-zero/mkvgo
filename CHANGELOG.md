@@ -20,11 +20,13 @@ this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 - `s3fs` refuses to send a session token to an `http://` endpoint unless
   `Options.AllowHTTPSessionToken` is set; the refusal names the way out a CLI
   user has, an `https://` endpoint or unsetting `AWS_SESSION_TOKEN`.
-- `GrowingHLSPlan.Complete` returns the error that kept it from reading the
-  tail, the playlist then left open for another call, instead of swallowing it;
-  a call that ignores the result compiles as before.
-- `-segment` takes more than 0 and at most 86400 seconds on every command:
-  `1e300` or `NaN` is refused by name instead of wrapping to a negative length.
+- `GrowingHLSPlan.Complete` returns an error instead of swallowing it: a tail
+  it cannot read closes the playlist on the segments published and says so, a
+  source it cannot reach leaves the playlist open for another call. A call
+  statement compiles as before; a method value of type `func()` does not.
+- `-segment` takes at least 0.001 and at most 86400 seconds on every command:
+  `1e300`, `NaN` or `0.0004` is refused by name instead of wrapping to a
+  negative length or falling back to the default.
 - `mkvhttp` answers 404 for a name a plan does not serve (an unknown name, a
   segment or rendition out of range), 502 only when the source fails.
 
@@ -75,12 +77,41 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   of two.
 - `s3fs` refuses a key segment `.` or `..` before any request, so no server or
   proxy resolving the URL path can step out of the bucket.
+- `EditInPlace` and `ReindexInPlace` bound the SeekHead they read (a Seek
+  declaring 2^56 bytes panicked), and `EditInPlace` refuses a head whose
+  declared sizes run over the clusters instead of zeroing them with its Void.
+- `serve --direct` mounts a file whose name holds a space or a brace, where the
+  route panicked.
+- A fragment sample declared past the source is refused before its buffer is
+  allocated.
+- An attachment left on disk (`WithoutAttachmentData`) and written with
+  nothing to read it is refused instead of panicking.
+- CENC: a picture of more NAL units than a saiz entry can size has its
+  least-protected subsamples left clear, so saiz states each senc entry exactly
+  (it was truncated past 40); an AV1 frame of several tiles is refused, not
+  encrypted as one tile.
+- MP4: a probe, subtitle or first-frame sample declared past its bound (64 KiB,
+  1 MiB, 64 MiB) is refused before reading.
+- Watermark: a negative segment number no longer panics; refusals show the
+  source path without credentials.
+- A forged CueTime no longer yields negative keyframes.
+- CMAF: a representation ID is refused unless it is a plain name (letters,
+  digits, `-`, `_`, `.`) other than `master`, since it is written in the MPD
+  and names its playlist.
 
 ### Added
 
-- `HLSPlan.Stat` says what `Open` would hand out (size, ETag, content type)
-  without handing it out; `mkvhttp` answers a HEAD and a matching revalidation
-  from it, so neither counts a segment served nor takes one the walk kept.
+- `HLSPlan.Stat`, `ConcatPlan.Stat` and `ABRPlan.Stat` say what `Open` would
+  hand out (size, ETag, content type) without handing it out; `mkvhttp`
+  answers a HEAD and a matching revalidation from them, so neither counts a
+  segment served nor takes one the walk kept.
+- `ABRPlan.Open`: a variant's segment streams from its source through
+  `mkvhttp` as an `HLSPlan`'s does, where it was built whole in memory.
+- `DemuxOptions.NoOverwrite` refuses before writing when an output name is
+  taken; `demux` sets it unless `-f`.
+- `TrackType` names the complex, logo, buttons, control and metadata types
+  (`TrackTypeOf`, `Number`), so a rewrite carries them; `CompressionUnknown`
+  marks a `ContentCompAlgo` Matroska does not define.
 - `mp4.ErrNoResource`: every plan's error for a name it does not serve matches
   it.
 - `mp4.OpensLikeISOBMFF` reports whether a file's first 8 bytes open an
@@ -171,6 +202,56 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   wrap their cause.
 - `RemuxToMP4` ends an open last chapter at the movie's end instead of two
   seconds after it starts.
+- `add-track`, `merge-subtitle` and `MergeASS` number the new track after every
+  track and give it a free TrackUID: a file numbered 1 and 3 got two tracks 3.
+- `GrowingHLSPlan.Complete` closes the playlist on what was published when the
+  tail cannot be read, instead of leaving it open for good.
+- A concat part's subtitle window past its last and an ABR manifest the
+  variants lack answer 404 like every other unknown name.
+- SRT and ASS extraction end each cue at its BlockDuration (every cue lasted
+  3 s), and SRT extraction refuses a bitmap track, naming `-format pgs`.
+- `MergeASS` keeps each event's layer, and both `MergeASS` and `merge-subtitle`
+  mux the events in time order.
+- `ContentEncodingScope` is read: a compressed CodecPrivate is inflated, and a
+  compression scoped to the CodecPrivate leaves the blocks plain.
+- An SRT timestamp with a dot before its milliseconds is read; a negative one
+  is refused.
+- `ReadStream`'s BlockReader times laced frames by their DefaultDuration and
+  drops blocks of undeclared tracks.
+- `ReindexInPlace` refuses a file with bytes past its Segment's end, which the
+  extended Segment would have swallowed; a damaged in-place journal's refusal
+  says to rebuild the file with the copy reindex.
+- Joins refuse a track in another language than the first file's (MKV and
+  MP4), since they pair tracks by position; an MP4 join compares the display
+  matrix of video tracks only. A Matroska file that leaves an audio field out
+  joins one that states its default value.
+- A Matroska join keeps the sub-chapters of a chapter continued across a seam.
+- An MP4 chpl listed out of order is read in time order, each chapter ending at
+  the next; a split by chapters cuts chapters in time order.
+- A split by chapters of a Matroska file without Cues looks for its last video
+  keyframe in the file's tail, block headers only, instead of reading it all.
+- A Matroska part opens a second video track on its own keyframe, as MP4 does.
+- `s3fs` takes an endpoint written with a trailing slash; a bucket in another
+  region says which region to set, instead of HTTP 301.
+- `httpfs` `ReadAt` asks again for the rest when a server serves less than
+  asked short of the object's end, instead of reporting the end; `httpfs`
+  refuses Rename like every other write.
+- `mkvhttp` finds no satisfiable Range on an empty resource, and a HEAD or a
+  revalidation of a playlist, an init or a subtitle counts nothing streamed.
+- A time bound like `1.001` is rounded to 1001 ms, not truncated.
+- `--replace` flushes the verified copy to disk before renaming it over the
+  original; `--keep-backup` refuses to overwrite an existing `.bak`.
+- A language set on a Matroska track (edit, mux, add-track) is written as its
+  ISO 639-2 code plus its BCP-47 tag: `pt-BR` becomes `por` + `pt-BR`.
+- WebVTT: a blank line or an arrow in a cue's text no longer ends the cue or
+  times another; an MP4 tx3g `<` that no tag closes is kept.
+- Split by chapters puts gaps between stated chapter ends, and what follows the
+  last one, in a part; Split refuses, naming what to do, sound stored more than
+  64 MiB past a cut keyframe instead of dropping it.
+- Join keeps the opening sound of a Matroska part that continues the one
+  before, CodecDelay stated or not.
+- web: `useHLSPlayer` (React, Vue) keeps at most 30 s buffered ahead of
+  playback, removes what played, and fails on a SourceBuffer error.
 - A Matroska split part's SegmentUID hashes its range too: parts of two splits
   of one source cut at other points named each other as predecessor and
   successor, and a join of them merged a chapter across a seam that was none.
