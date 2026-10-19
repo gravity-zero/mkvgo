@@ -104,9 +104,9 @@ func windowStats(p *HLSPlan) HLSPlanStats {
 }
 
 // What a plan served is counted on both paths: a segment Resource hands out
-// whole is ServedBytes; what Open hands out is StreamedBytes, a streamed
-// segment as it is written (a range writes only its part), a kept segment or
-// an init whole when opened; each segment is one ServedSegments.
+// whole is ServedBytes; what Open hands out is StreamedBytes as it is sent,
+// streamed or kept (a range writes only its part), and a resource Bytes hands
+// out whole, once; each segment is one ServedSegments.
 func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 	for _, kept := range []bool{true, false} {
 		t.Run(fmt.Sprintf("kept=%v", kept), func(t *testing.T) {
@@ -141,10 +141,7 @@ func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 				t.Fatalf("audio: wrote %d of %d: %v", n, half, err)
 			}
 			a.Close()
-			want := v.Size() + half // streamed: what was written
-			if kept {
-				want = v.Size() + a.Size() // kept: whole when opened
-			}
+			want := v.Size() + half // streamed or kept: what was written
 			if st := plan.Stats(); st.StreamedBytes != want || st.ServedSegments != 2 {
 				t.Errorf("then half an audio (%d of %d bytes): %+v, want %d streamed", half, a.Size(), st, want)
 			}
@@ -155,14 +152,33 @@ func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 			if st := plan.Stats(); st.StreamedBytes != want || st.ServedBytes != int64(len(data)) || st.ServedSegments != 3 {
 				t.Errorf("then a video built whole by Resource (%d bytes): %+v", len(data), st)
 			}
-			// A handle holding its bytes (an init here) counts whole when opened: a
-			// server may write Bytes() itself and never call WriteRange.
+			// A handle opened and closed unwritten sent nothing.
+			idle := open("init.mp4")
+			if !idle.Whole() {
+				t.Fatal("init.mp4: not held whole")
+			}
+			idle.Close()
+			if st := plan.Stats(); st.StreamedBytes != want {
+				t.Errorf("then an init opened and closed unwritten: %d streamed, want %d", st.StreamedBytes, want)
+			}
+			// Bytes hands it out whole, counted once: a server writes it itself, and a write after counts nothing more.
 			in := open("init.mp4")
-			if in.Bytes() == nil {
+			if in.Bytes() == nil || in.Bytes() == nil {
 				t.Fatal("init.mp4: not handed out whole")
 			}
+			if _, err := in.WriteTo(ctx, io.Discard); err != nil {
+				t.Fatal(err)
+			}
 			if st := plan.Stats(); st.StreamedBytes != want+in.Size() || st.ServedSegments != 3 {
-				t.Errorf("then an init opened, not written (%d bytes): %+v", in.Size(), st)
+				t.Errorf("then an init taken by Bytes twice and written (%d bytes): %+v", in.Size(), st)
+			}
+			// A range of a whole resource counts its part.
+			part := open("init.mp4")
+			if n, err := part.WriteRange(ctx, io.Discard, 10, 20); err != nil || n != 20 {
+				t.Fatalf("init range: wrote %d: %v", n, err)
+			}
+			if st := plan.Stats(); st.StreamedBytes != want+in.Size()+20 {
+				t.Errorf("then 20 bytes of an init: %d streamed, want %d", st.StreamedBytes, want+in.Size()+20)
 			}
 		})
 	}

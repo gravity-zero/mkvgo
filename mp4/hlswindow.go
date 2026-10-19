@@ -350,9 +350,9 @@ type HLSPlanStats struct {
 	Evictions int64
 	// BuiltBytes is the media the walks framed, ServedBytes what Resource
 	// handed out whole, DroppedBytes what was built and released without
-	// being served. StreamedBytes is what Open handed out beside those: a
-	// segment streamed from the source as it is written, a kept segment, a
-	// playlist, an init or a subtitle whole when opened. ServedBytes plus
+	// being served. StreamedBytes is what Open's handles sent beside those:
+	// what WriteTo/WriteRange wrote (a range its part, a cut write what it
+	// wrote) and what Bytes handed out whole, once. ServedBytes plus
 	// StreamedBytes is what the plan served through Open. ServedSegments
 	// counts the media segments handed out, whole by Resource or opened by Open.
 	BuiltBytes     int64

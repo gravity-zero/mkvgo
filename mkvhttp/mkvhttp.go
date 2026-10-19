@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -159,12 +160,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		var rh *mp4.ResourceHandle
 		rh, err = op.Open(req.Context(), name)
-		if err == nil && rh.Bytes() == nil {
+		if err == nil && !rh.Whole() {
 			h.serveStreamed(w, req, name, rh)
 			return
 		}
 		if err == nil {
-			data, contentType = rh.Bytes(), rh.ContentType()
+			h.serveWhole(w, req, name, rh)
+			return
 		}
 	} else {
 		data, contentType, err = h.resolver.Resource(req.Context(), name)
@@ -207,6 +209,42 @@ func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name s
 	if _, err := rh.WriteRange(req.Context(), w, start, n); err != nil {
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// serveWhole answers from a handle holding the resource whole, as from bytes in hand (strong ETag, any Range), its
+// bytes read through the handle so the plan counts what is sent: nothing for a HEAD or a 304, a range its part.
+func (h *handler) serveWhole(w http.ResponseWriter, req *http.Request, name string, rh *mp4.ResourceHandle) {
+	defer rh.Close()
+	etag := rh.ETag()
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", cacheControlFor(name, h.opts.Immutable))
+	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if ct := rh.ContentType(); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	http.ServeContent(w, req, name, time.Time{}, io.NewSectionReader(handleReaderAt{req.Context(), rh}, 0, rh.Size()))
+}
+
+// handleReaderAt reads a whole handle's bytes through WriteRange, which counts them.
+type handleReaderAt struct {
+	ctx context.Context
+	rh  *mp4.ResourceHandle
+}
+
+func (r handleReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n := min(int64(len(p)), r.rh.Size()-off)
+	if n <= 0 {
+		return 0, io.EOF
+	}
+	b := bytes.NewBuffer(p[:0])
+	m, err := r.rh.WriteRange(r.ctx, b, off, n)
+	if err == nil && n < int64(len(p)) {
+		err = io.EOF
+	}
+	return int(m), err
 }
 
 // stater is what a plan that can describe a streamed resource without serving it offers (mp4.HLSPlan.Stat).

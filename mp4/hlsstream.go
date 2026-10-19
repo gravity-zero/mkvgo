@@ -535,10 +535,12 @@ type ResourceHandle struct {
 	plan        *HLSPlan
 	table       *windowTable
 	ti          int
-	n           int         // the segment's 0-based window
-	head        []byte      // the segment's head when it is not the table's (CENC: framed with its senc)
-	cenc        *cencStream // a CENC segment's cipher and auxiliary data
-	held        *heldBytes  // the window budget a kept video segment holds until written whole or closed
+	n           int           // the segment's 0-based window
+	head        []byte        // the segment's head when it is not the table's (CENC: framed with its senc)
+	cenc        *cencStream   // a CENC segment's cipher and auxiliary data
+	held        *heldBytes    // the window budget a kept video segment holds until written whole or closed
+	served      *atomic.Int64 // the plan's StreamedBytes, nil for a handle Resource counts
+	taken       bool          // Bytes handed the resource out whole: counted served then, never again by a write
 }
 
 // Open opens the named resource (the same names Resource serves); the handle's
@@ -558,10 +560,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 			p.winMu.Lock()
 			p.stats.StreamFallbacks++
 			p.winMu.Unlock()
-		} else {
-			p.streamed.Add(int64(len(data))) // a playlist, an init or a subtitle handed out whole; a segment Resource counted in ServedBytes
+			return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil // counted in ServedBytes
 		}
-		return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
+		return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data, served: &p.streamed}, nil
 	}
 	if err := p.checkSource(); err != nil {
 		return nil, err
@@ -578,8 +579,7 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 			p.stats.KeptSegments++
 			p.stats.ServedSegments++
 			p.winMu.Unlock()
-			p.streamed.Add(int64(len(d)))
-			h := &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p, held: held}
+			h := &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p, held: held, served: &p.streamed}
 			runtime.AddCleanup(h, (*heldBytes).release, held)
 			return h, nil
 		}
@@ -593,10 +593,9 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 		p.stats.KeptSegments++
 		p.stats.ServedSegments++
 		p.winMu.Unlock()
-		p.streamed.Add(int64(len(d)))
-		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p}, nil
+		return &ResourceHandle{name: name, contentType: "video/iso.segment", size: int64(len(d)), data: d, plan: p, served: &p.streamed}, nil
 	}
-	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti]}
+	h := &ResourceHandle{name: name, contentType: "video/iso.segment", plan: p, table: t, ti: ti, n: n, head: t.heads[ti], served: &p.streamed}
 	if p.opts.CENC != nil {
 		if err := p.openCENC(ctx, h); err != nil {
 			return nil, err
@@ -662,9 +661,9 @@ func (p *HLSPlan) Stat(ctx context.Context, name string) (size int64, etag, cont
 	return size, h.ETag(), "video/iso.segment", true, nil
 }
 
-// ETag identifies the resource's bytes: strong for a resource built whole, else weak from the size, the source's SourceID and the name.
+// ETag identifies the resource's bytes: strong for a resource held whole, else weak from the size, the source's SourceID and the name.
 func (h *ResourceHandle) ETag() string {
-	if h.data != nil && h.plan == nil {
+	if h.Whole() {
 		sum := sha256.Sum256(h.data)
 		return `"` + hex.EncodeToString(sum[:]) + `"`
 	}
@@ -738,12 +737,20 @@ func (h *ResourceHandle) Close() error {
 	return nil
 }
 
+// Whole reports whether the handle holds the resource whole, which Bytes then hands out; it counts nothing served.
+func (h *ResourceHandle) Whole() bool { return h.data != nil && h.held == nil }
+
 // Bytes returns the resource when the handle holds it whole and unbudgeted; nil when it streams from the source or
-// holds a kept video segment, which is written through the handle and given back by Close.
+// holds a kept video segment, which is written through the handle and given back by Close. Bytes handed out are
+// counted served whole (HLSPlanStats.StreamedBytes), once: the plan cannot see what the caller writes of them.
 func (h *ResourceHandle) Bytes() []byte {
-	if h.held != nil {
+	if !h.Whole() {
 		return nil
 	}
+	if h.served != nil && !h.taken {
+		h.served.Add(int64(len(h.data)))
+	}
+	h.taken = true
 	return h.data
 }
 
@@ -761,8 +768,8 @@ func (h *ResourceHandle) WriteRange(ctx context.Context, w io.Writer, off, n int
 		return 0, errors.New("mp4: range outside the resource")
 	}
 	m, err := h.writeRange(ctx, w, off, n)
-	if h.plan != nil && h.data == nil { // streamed from the source; a handle holding its bytes was counted whole when opened
-		h.plan.streamed.Add(m)
+	if h.served != nil && !h.taken { // what reached w: a range its part, a write cut short what it wrote
+		h.served.Add(m)
 	}
 	return m, err
 }

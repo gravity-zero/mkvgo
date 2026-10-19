@@ -514,9 +514,12 @@ full read of the window: a plan whose `WindowRebuilds` grows with its audience
 is reading its source more than once per viewer. An MP4-source plan reads each
 rendition's samples on their own and counts nothing of the windows here.
 `ServedBytes` is what `Resource` handed out whole (`Open`'s fallbacks
-included); `StreamedBytes` is the rest `Open` handed out: a segment streamed
-from the source as it is written, a kept segment, a playlist, an init or a
-subtitle whole when opened. A server that serves through `Open` sums the two
+included); `StreamedBytes` is the rest `Open` handed out, counted as it is sent:
+what `WriteTo`/`WriteRange` wrote (a range its part, a write cut short what
+reached the writer, a handle opened and closed unwritten nothing), and a
+resource `Bytes()` handed out whole, once (the plan cannot see what the caller
+then writes of it; `Whole()` asks whether a handle holds its bytes without
+counting them). A server that serves through `Open` sums the two
 for what the plan served, against `SourceReadBytes` below. `ServedSegments`
 counts the media segments handed out either way. `DamageSkips` and
 `DamageRefusals` count the damaged regions the walks passed over and those
