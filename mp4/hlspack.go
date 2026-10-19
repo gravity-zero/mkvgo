@@ -244,6 +244,12 @@ func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack)
 		grid := audioGridTS(t, ft.timescale)
 		if grid == 0 {
 			grid = laceGridTS(t, len(ft.samples), func(i int) int64 { return ft.samples[i].blockPtsMs }, ft.timescale)
+			last := ft.samples[len(ft.samples)-1].blockPtsMs
+			lastFrames := int64(0)
+			for i := len(ft.samples) - 1; i >= 0 && ft.samples[i].blockPtsMs == last; i-- {
+				lastFrames++
+			}
+			grid = settleStride(grid, ps.c, t, ft.timescale, ft.samples[0].blockPtsMs, last, lastFrames)
 		}
 		if grid == 0 {
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
