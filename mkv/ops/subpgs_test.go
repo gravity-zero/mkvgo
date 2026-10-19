@@ -218,7 +218,7 @@ func TestForEachSubtitlePGS_CallbackErrorStops(t *testing.T) {
 	}
 }
 
-// The refusals are Evey's operator-facing text: each must say what the track
+// The refusals are an operator-facing text: each must say what the track
 // actually is, so the next move is obvious.
 func TestExtractSubtitlePGS_Refusals(t *testing.T) {
 	path := buildPGSFixture(t, t.TempDir())

@@ -378,7 +378,7 @@ func TestExtractKeyframesCodecs(t *testing.T) {
 	}
 }
 
-// The errors Evey falls back on are typed.
+// The errors a caller falls back on are typed.
 func TestExtractKeyframesErrors(t *testing.T) {
 	ctx := context.Background()
 	noop := func(*KeyframeBatchSample) error { return nil }
