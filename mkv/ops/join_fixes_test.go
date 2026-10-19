@@ -460,4 +460,7 @@ func TestJoin_KeepsALinkedPartsOpeningSound(t *testing.T) {
 	if got := countBlocksFromFile(t, out, 1_000_000)[1]; got != 40 {
 		t.Errorf("the join holds %d frames, want 40: a linked part has no priming to drop", got)
 	}
+	if got := discardPaddings(t, out, 1); len(got) != 0 {
+		t.Errorf("a linked part's opening sound is cut by DiscardPadding %v", got)
+	}
 }

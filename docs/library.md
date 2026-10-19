@@ -2517,9 +2517,11 @@ Join requires the same track layout (count, types, codecs, codec
 configuration, compression, picture size, sample rate, channels) in every file
 and errors on mismatch. It pairs tracks by position, so a track stating another
 language than the first file's (an English and a French audio swapped) is
-refused too; a track stating none, or `und`, pairs with any. An Opus file's
-pre-skip (a few ms inside its first frame) stays: only whole priming frames can
-be dropped without re-encoding. Title and tags come from the first file
+refused too; a track stating none, or `und`, pairs with any. A later file's
+encoder priming (`CodecDelay`) is not played at the seam: its whole priming
+frames are dropped, and what is left inside the next frame (an Opus pre-skip, a
+few ms) is marked as a negative `DiscardPadding`, which a decoder drops from that
+frame's start; a part that continues the one before has no priming. Title and tags come from the first file
 (first-wins). Attachments are pooled from every source, identified by content
 rather than by name, with the conventional cover art kept single.
 

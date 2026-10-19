@@ -111,6 +111,16 @@ type streamOpts struct {
 // primingCut is where a track's encoder priming ends and how long its frames last, in milliseconds.
 type primingCut struct{ endMs, frameMs float64 }
 
+// leftInside is the priming, in ns, still inside the frame stored at tcMs: its start taken on the frame grid, which
+// a millisecond timecode only rounds.
+func (pc primingCut) leftInside(tcMs int64) int64 {
+	start := float64(tcMs)
+	if k := math.Round(start / pc.frameMs); math.Abs(k*pc.frameMs-start) < 1 {
+		start = k * pc.frameMs
+	}
+	return int64(math.Round((pc.endMs - start) * 1e6))
+}
+
 // sourceWalk carries one source walk across consecutive keyframe-aligned calls:
 // a call whose range starts at or after the previous call's end opens on the
 // block that call stopped at, the first cut keyframe at or after its end, which
@@ -408,6 +418,8 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 
 		if pc, ok := opts.primingEndsMs[blk.TrackNumber]; ok && float64(blk.Timecode)+pc.frameMs <= pc.endMs {
 			continue
+		} else if ok && float64(blk.Timecode) < pc.endMs && blk.DiscardPaddingNs == 0 {
+			blk.DiscardPaddingNs = -pc.leftInside(blk.Timecode) // a decoder drops it from the frame's start (DiscardPadding < 0)
 		}
 		// cutKeyframe: a keyframe a segment may start or end on. With a video
 		// track only a video keyframe qualifies (see videoTracks above).
