@@ -331,7 +331,8 @@ func absMs(d int64) int64 {
 	return d
 }
 
-// TestJoinReadsOneWaveLevel: QuickTime puts one wave in a sample entry; one inside it is compared byte for byte, never walked, so a crafted nest cannot exhaust the stack.
+// TestJoinReadsOneWaveLevel: QuickTime puts one wave in a sample entry; one inside it is compared byte for byte,
+// never walked (its btrt kept), and a nest of 100 000 is copied as it is: the walk no longer recurses at all.
 func TestJoinReadsOneWaveLevel(t *testing.T) {
 	describe := func(rate byte) []byte {
 		var w bw
