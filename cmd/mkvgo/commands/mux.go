@@ -26,7 +26,7 @@ func CmdDemux(args []string) {
 	}
 
 	err := matroska.Demux(context.Background(), matroska.DemuxOptions{
-		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs,
+		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force,
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {

@@ -27,7 +27,7 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		return err
 	}
 
-	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, fs)
+	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs)
 	if err != nil {
 		return err
 	}
@@ -128,9 +128,20 @@ type demuxOutput struct {
 // alone is tens of KiB, and a write call costs the same whatever it carries.
 const demuxWriteBuf = 1 << 20
 
-func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
+func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	outputs := make([]demuxOutput, 0, len(tracks))
+	if noOverwrite {
+		for _, id := range sortedTracks(tracks) {
+			path, err := safePath(dir, fmt.Sprintf("%d.%s", id, sanitizeCodec(demuxCodecName(tracks[id]))))
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := fs.DoStat(path); err == nil {
+				return nil, nil, fmt.Errorf("%s already exists: remove it, or demux into another directory", path)
+			}
+		}
+	}
 	abandon := func(err error) (map[uint64]*bufio.Writer, []demuxOutput, error) {
 		for _, o := range outputs {
 			o.file.Close()

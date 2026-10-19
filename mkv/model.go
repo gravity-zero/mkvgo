@@ -747,6 +747,8 @@ type DemuxOptions struct {
 	SourcePath string
 	OutputDir  string
 	TrackIDs   []uint64
+	// NoOverwrite refuses the demux, before anything is written, when a file is already at one of its output names.
+	NoOverwrite bool
 }
 
 type TrackInput struct {
