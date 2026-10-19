@@ -91,9 +91,9 @@ type streamOpts struct {
 	// dropLeadingSub holds, per output track, a cue the previous linked part already shows past its end: the
 	// copy a split opened this part on is dropped.
 	dropLeadingSub map[uint64][]byte
-	// roundedHold holds, per output video track, its frame duration in ns: a part followed by its linked next part, whose
-	// first picture states no duration, writes a BlockDuration within a millisecond of it as none, the hold holdToCut gave it.
-	roundedHold map[uint64]int64
+	// heldAt holds, per output track, the timecode of the picture a split held to its cut (splitHoldTag): a part followed
+	// by its linked next part writes it with no BlockDuration, as the source stores it.
+	heldAt map[uint64]int64
 	// primingEndsMs holds, per source track, where its encoder priming ends: a frame ending by then is dropped, the
 	// decoder discarding CodecDelay at the start of the output track only, not at a later file's.
 	primingEndsMs map[uint64]primingCut
@@ -211,6 +211,8 @@ type streamBounds struct {
 	// PREVIOUS segment, and giving it to this one puts it on the wrong picture.
 	cutStartMs int64
 	cutEndMs   int64
+	// heldMs holds, per output track, the source timecode of the picture holdToCut gave the duration reaching the cut.
+	heldMs map[uint64]int64
 }
 
 // trackEndState tracks one output track's end while streaming: the last frame's
@@ -348,7 +350,6 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	// base that defines it is only settled once a cluster has been written.
 	cutEnd := int64(0)
 	ending, behind := false, []mkv.Block(nil) // past the cut: the sound stored behind it, still this segment's
-	timed := map[uint64]bool{}                // per held track (roundedHold): its first picture states a duration, as a source that times them all does
 
 	recordEnds := func() {
 		if opts.bounds != nil {
@@ -569,13 +570,8 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if err := injectSubs(blk.Timecode); err != nil {
 			return err
 		}
-		if frame, ok := opts.roundedHold[newID]; ok {
-			if _, seen := timed[newID]; !seen {
-				timed[newID] = blk.Duration > 0
-			}
-			if !timed[newID] && blk.Duration > 0 && abs64(blk.Duration*1_000_000-frame) < 1_000_000 {
-				blk.Duration = 0 // the hold holdToCut gave the last picture: the next part's keyframe follows at once
-			}
+		if tc, ok := opts.heldAt[newID]; ok && blk.Timecode == tc {
+			blk.Duration = 0 // the hold a split gave the last picture: the next part's keyframe follows at once
 		}
 		cluster = append(cluster, blk)
 	}
@@ -646,6 +642,12 @@ func holdToCut(cluster []mkv.Block, ends map[uint64]*trackEndState, opts streamO
 		for i := range cluster {
 			if cluster[i].TrackNumber == id && cluster[i].Timecode == s.maxTC {
 				cluster[i].Duration, s.lastDur = cutEnd-s.maxTC, cutEnd-s.maxTC
+				if opts.bounds != nil {
+					if opts.bounds.heldMs == nil {
+						opts.bounds.heldMs = map[uint64]int64{}
+					}
+					opts.bounds.heldMs[id] = s.maxTC
+				}
 			}
 		}
 	}

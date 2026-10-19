@@ -215,19 +215,21 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		if i > 0 && !linkedTo(&conts[i-1].Info, &c.Info) {
 			priming = primingCuts(c.Tracks) // a part continuing the one before opens on real sound
 		}
-		var hold map[uint64]int64
+		var held map[uint64]int64 // the picture the split held to the cut its linked next part opens on
 		if i+1 < len(conts) && linkedTo(&c.Info, &conts[i+1].Info) {
-			hold = map[uint64]int64{}
-			for _, t := range first.Tracks {
-				if outVideo[t.ID] && t.DefaultDurationNs > 0 {
-					hold[t.ID] = t.DefaultDurationNs
+			for id, at := range splitHoldAt(c.Tracks, c.Tags) {
+				if out, ok := remap[id]; ok {
+					if held == nil {
+						held = map[uint64]int64{}
+					}
+					held[out] = at
 				}
 			}
 		}
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
 			subtitleTracks: subtitleTrackSet(c.Tracks), lastSubs: lastSubs, dropLeadingSub: dropLeading,
-			primingEndsMs: priming, roundedHold: hold,
+			primingEndsMs: priming, heldAt: held,
 			outScale:       first.Info.TimecodeScale,
 			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,

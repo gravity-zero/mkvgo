@@ -67,7 +67,7 @@ func TestSplitJoinMatrix(t *testing.T) {
 }
 
 // joinedBlocks is what a join of the case's parts gives back: the source, less, on an open GOP, the leading pictures
-// stored after each cut keyframe, the picture before them held to the cut.
+// stored after each cut keyframe; the hold the split gave the picture before them is dropped with its mark.
 func joinedBlocks(c matrix.Case) map[uint64][]mkv.Block {
 	out := c.Blocks()
 	if !c.OpenGOP {
@@ -86,13 +86,6 @@ func joinedBlocks(c matrix.Case) map[uint64][]mkv.Block {
 			}
 			video = append(video, b)
 		}
-		last := -1
-		for i, b := range video {
-			if b.Timecode < cut && (last < 0 || b.Timecode > video[last].Timecode) {
-				last = i
-			}
-		}
-		video[last].Duration = cut - video[last].Timecode
 		out[matrix.VideoTrack] = video
 	}
 	return out

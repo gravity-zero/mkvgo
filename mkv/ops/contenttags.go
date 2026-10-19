@@ -14,6 +14,10 @@ import (
 // Copying them onto a cut or a concatenation - which is what carrying the
 // source's Tags verbatim does - leaves the output certifying content it does
 // not hold. VerifyContentHashes then reports mkvgo's own output as corrupt.
+// splitHoldTag marks, on a part's track, the timecode of the picture its split held to the cut, a duration its source
+// does not state: Join writes it without one. It is true of that part only, so no op carries it over.
+const splitHoldTag = "SPLIT_HOLD"
+
 var contentDerivedTags = map[string]bool{
 	ContentHashTag:                 true,
 	"BPS":                          true,
@@ -67,6 +71,7 @@ func planContentTags(tags []mkv.Tag) contentTagPlan {
 			switch {
 			case name == ContentHashTag:
 				plan.wantHashes = true
+			case name == splitHoldTag:
 			case contentDerivedTags[name]:
 				plan.wantStats = true
 			default:

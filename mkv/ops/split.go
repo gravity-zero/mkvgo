@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
+	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
@@ -270,7 +273,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.ReserveChapters(clipChapters(c.Chapters, r.StartMs, windowEndMs)); err != nil {
 		return err
 	}
-	if err := mw.ReserveTags(plan.upperBoundTags(tracks)); err != nil {
+	if err := mw.ReserveTags(append(plan.upperBoundTags(tracks), splitHoldTags(tracks, nil, 0, true)...)); err != nil {
 		return err
 	}
 	var bounds streamBounds
@@ -311,10 +314,49 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := mw.WriteReservedChapters(rebaseChapters(chapters, bounds.startMs-bounds.cutStartMs)); err != nil {
 		return err
 	}
-	if err := mw.WriteReservedTags(plan.tagsForOutput(tracks, digests, stats)); err != nil {
+	if err := mw.WriteReservedTags(append(plan.tagsForOutput(tracks, digests, stats), splitHoldTags(tracks, bounds.heldMs, bounds.startMs, false)...)); err != nil {
 		return err
 	}
 	return mw.Finalize()
+}
+
+// splitHoldTags marks each video track's picture held to the cut (held, source timecodes; base, the part's zero);
+// widest books room for any of them.
+func splitHoldTags(tracks []mkv.Track, held map[uint64]int64, base int64, widest bool) []mkv.Tag {
+	var out []mkv.Tag
+	for i := range tracks {
+		at, ok := held[tracks[i].ID]
+		if widest {
+			at, ok = math.MinInt64, tracks[i].Type == mkv.VideoTrack
+		} else {
+			at -= base
+		}
+		if ok {
+			out = append(out, mkv.Tag{TargetID: trackUID(&tracks[i]), SimpleTags: []mkv.SimpleTag{{Name: splitHoldTag, Value: strconv.FormatInt(at, 10)}}})
+		}
+	}
+	return out
+}
+
+// splitHoldAt reads, per track number of tracks, the picture its split held to the cut (splitHoldTag).
+func splitHoldAt(tracks []mkv.Track, tags []mkv.Tag) map[uint64]int64 {
+	var out map[uint64]int64
+	for i := range tracks {
+		for _, tag := range tags {
+			if tag.TargetID != trackUID(&tracks[i]) {
+				continue
+			}
+			for _, st := range tag.SimpleTags {
+				if at, err := strconv.ParseInt(st.Value, 10, 64); err == nil && strings.EqualFold(st.Name, splitHoldTag) {
+					if out == nil {
+						out = map[uint64]int64{}
+					}
+					out[tracks[i].ID] = at
+				}
+			}
+		}
+	}
+	return out
 }
 
 // videoTrackSet returns the source track numbers of the video tracks, for

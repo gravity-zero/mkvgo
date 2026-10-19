@@ -2509,7 +2509,11 @@ Each part is a segment of its own: it gets its own `Info.SegmentUID` (derived
 from the source, so splitting the same file twice writes the same bytes) rather
 than the source's, and consecutive parts are chained through `Info.PrevUID` and
 `Info.NextUID`. That chain is what `Join` reads to tell slices of one timeline
-from files that merely follow each other.
+from files that merely follow each other. When the part's last picture had to be
+given a duration to reach the cut (a cut between milliseconds, an open GOP's
+leading pictures left to the next part), a `SPLIT_HOLD` tag on its track names
+that picture; `Join` of the linked parts writes it without that duration, as
+the source stores it, and no op carries the tag over.
 
 **Join sequential files:**
 ```go
