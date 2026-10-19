@@ -92,7 +92,7 @@ func mp4FrameGridTS(ps *packagingSource, t *outTrack, mts uint32) int64 {
 	if tk.sttsLo == 0 || len(tk.samples) == 0 {
 		return 0
 	}
-	data, err := readSample(ps.src, tk.samples[0].offset, tk.samples[0].size)
+	data, err := readSampleMax(ps.src, tk.samples[0].offset, tk.samples[0].size, maxProbeSampleBytes, "AC-3")
 	if err != nil {
 		return 0
 	}

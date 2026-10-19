@@ -90,7 +90,7 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		id := uint64(ref.track + 1)
 
 		if st, ok := subRouting[id]; ok {
-			data, err := readSample(ps.src, s.offset, s.size)
+			data, err := readSampleMax(ps.src, s.offset, s.size, maxSubtitleSampleBytes, "subtitle")
 			if err != nil {
 				return errf("read subtitle sample: %w", err)
 			}
@@ -231,7 +231,7 @@ func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack)
 		}
 		// The sample entry: from CodecPrivate, or lazily from the first frame.
 		if t.sampleEntry == nil {
-			data, rerr := readSample(ps.src, samples[0].offset, samples[0].size)
+			data, rerr := readSampleMax(ps.src, samples[0].offset, samples[0].size, maxFrameSampleBytes, "first")
 			if rerr != nil {
 				return nil, nil, rerr
 			}

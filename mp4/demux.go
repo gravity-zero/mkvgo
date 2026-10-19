@@ -507,6 +507,21 @@ func decodeTx3g(data []byte) ([]byte, bool) {
 	return append([]byte(nil), data[2:2+n]...), true
 }
 
+// Bounds on the samples read whole outside a segment: a probe, a subtitle, the first frame a sample entry comes from.
+const (
+	maxProbeSampleBytes    = 64 << 10
+	maxSubtitleSampleBytes = 1 << 20
+	maxFrameSampleBytes    = 64 << 20
+)
+
+// readSampleMax is readSample refusing, before reading, a sample the table declares larger than limit.
+func readSampleMax(r io.ReadSeeker, off int64, size uint32, limit int, what string) ([]byte, error) {
+	if int64(size) > int64(limit) {
+		return nil, errf("a %s sample of %d bytes, past the %d one holds: the file's sample table is damaged", what, size, limit)
+	}
+	return readSample(r, off, size)
+}
+
 func readSample(r io.ReadSeeker, off int64, size uint32) ([]byte, error) {
 	if _, err := r.Seek(off, io.SeekStart); err != nil {
 		return nil, err

@@ -55,7 +55,7 @@ func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, 
 			return err
 		}
 		s := &t.samples[i]
-		data, err := readSample(src, s.offset, s.size)
+		data, err := readSampleMax(src, s.offset, s.size, maxSubtitleSampleBytes, "subtitle")
 		if err != nil {
 			return errf("read subtitle sample: %w", err)
 		}
