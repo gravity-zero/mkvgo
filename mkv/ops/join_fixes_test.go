@@ -394,3 +394,25 @@ func TestJoin_RefusesTracksStoredOrShapedDifferently(t *testing.T) {
 		}
 	}
 }
+
+// TestJoin_DropsTheNextFilesEncoderPriming: a decoder discards CodecDelay at the start of the track only, so a later file's priming frames would play as sound and push it late.
+func TestJoin_DropsTheNextFilesEncoderPriming(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	audio := audioTrack(1)
+	audio.CodecDelay = 44_000_000 // 2112 samples at 48 kHz
+	audio.DefaultDurationNs = 21_333_333
+	var blocks []mkv.Block
+	for i := int64(0); i < 20; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: i * 21_333_333 / 1_000_000, Keyframe: true, Data: []byte{byte(i)}})
+	}
+	a := buildMinimalMKV(t, dir, "a.mkv", []mkv.Track{audio}, blocks, 427)
+	b := buildMinimalMKV(t, dir, "b.mkv", []mkv.Track{audio}, blocks, 427)
+	out := filepath.Join(dir, "j.mkv")
+	if err := Join(ctx, []string{a, b}, out); err != nil {
+		t.Fatal(err)
+	}
+	if got := countBlocksFromFile(t, out, 1_000_000)[1]; got != 38 {
+		t.Errorf("the join holds %d frames, want 38: the second file's two priming frames dropped", got)
+	}
+}

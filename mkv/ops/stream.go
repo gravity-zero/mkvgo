@@ -89,7 +89,10 @@ type streamOpts struct {
 	// dropLeadingSub holds, per output track, a cue the previous linked part already shows past its end: the
 	// copy a split opened this part on is dropped.
 	dropLeadingSub map[uint64][]byte
-	extraSubs      []mkv.Block
+	// primingEndsMs holds, per source track, where its encoder priming ends: a frame ending by then is dropped, the
+	// decoder discarding CodecDelay at the start of the output track only, not at a later file's.
+	primingEndsMs map[uint64]primingCut
+	extraSubs     []mkv.Block
 	// bounds, when non-nil, receives where the segment really began. A
 	// keyframe-aligned cut starts where the source's GOPs fall, not where it was
 	// asked to, so a caller that has to agree with the blocks - chapters to
@@ -99,6 +102,9 @@ type streamOpts struct {
 	// walk, when non-nil, carries the source walk across consecutive calls (Split's parts).
 	walk *sourceWalk
 }
+
+// primingCut is where a track's encoder priming ends and how long its frames last, in milliseconds.
+type primingCut struct{ endMs, frameMs float64 }
 
 // sourceWalk carries one source walk across consecutive keyframe-aligned calls:
 // a call whose range starts at or after the previous call's end opens on the
@@ -395,6 +401,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 
 		// cutKeyframe: a keyframe a segment may start or end on. With a video
 		// track only a video keyframe qualifies (see videoTracks above).
+		if pc, ok := opts.primingEndsMs[blk.TrackNumber]; ok && float64(blk.Timecode)+pc.frameMs <= pc.endMs {
+			continue
+		}
 		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
 		if blk.Keyframe && opts.videoTracks[blk.TrackNumber] {
 			lastKey = max(lastKey, blk.Timecode)

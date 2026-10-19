@@ -202,9 +202,14 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 			}
 		}
 		lastSubs = map[uint64]mkv.Block{}
+		var priming map[uint64]primingCut
+		if i > 0 {
+			priming = primingCuts(c.Tracks)
+		}
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
 			subtitleTracks: subtitleTrackSet(c.Tracks), lastSubs: lastSubs, dropLeadingSub: dropLeading,
+			primingEndsMs:  priming,
 			outScale:       first.Info.TimecodeScale,
 			contentDigests: digests, contentStats: stats,
 			progress: srcProgress,
@@ -384,6 +389,21 @@ func soundTracks(tracks []mkv.Track, video, subs map[uint64]bool) int {
 		}
 	}
 	return n
+}
+
+// primingCuts gives the audio tracks whose CodecDelay and frame duration are known where their priming ends.
+func primingCuts(tracks []mkv.Track) map[uint64]primingCut {
+	var out map[uint64]primingCut
+	for _, t := range tracks {
+		if t.Type != mkv.AudioTrack || t.CodecDelay <= 0 || t.DefaultDurationNs <= 0 {
+			continue
+		}
+		if out == nil {
+			out = map[uint64]primingCut{}
+		}
+		out[t.ID] = primingCut{endMs: float64(t.CodecDelay) / 1e6, frameMs: float64(t.DefaultDurationNs) / 1e6}
+	}
+	return out
 }
 
 // samePtr reports whether two optional values are both absent or equal.
