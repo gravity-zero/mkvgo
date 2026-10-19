@@ -747,12 +747,19 @@ mkvgo split <file.mkv> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00]
 Exactly one of `-chapters`, `-range` or `-every` must be given.
 
 Cut policy (keyframe alignment): a segment starts at the first **video
-keyframe** at/after its start time (leading audio and mid-GOP video are
-dropped so the segment starts decodable), and ends right before the next video
-keyframe at/after its end time (the GOP straddling the cut is kept, so
-chaining segments loses no frame). A range that contains media but no video
-keyframe is an explicit error. Audio-only files cut exactly at the requested
-times.
+keyframe** at/after its start time, at 0 (mid-GOP video before it is dropped so
+the segment starts decodable), and ends right before the next video keyframe
+at/after its end time (the GOP straddling the cut is kept, so chaining segments
+loses no frame). Sound stored after that keyframe but timed before it goes to
+the segment that ends there. On an open GOP, the pictures stored after the
+keyframe and shown before it decode only with the GOP before: they stay out of
+both segments, and the segment before holds its last picture to the cut, so a
+`join` of the parts keeps the timeline and the sound, without those pictures
+(split and join through MP4 for an exact round trip). A subtitle cue on screen
+across a cut opens the next segment. A range that contains media but no video
+keyframe is an explicit error, and so is a source that stops before the end its
+Segment declares (a download not finished), before any segment is written.
+Audio-only files cut exactly at the requested times.
 
 The source is read once from start to end: each part continues the walk where
 the previous one stopped, as long as the ranges come in order (`-every` and
