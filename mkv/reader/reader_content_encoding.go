@@ -134,7 +134,7 @@ func (p *parser) parseAESCipherMode(size int64) (uint64, error) {
 
 func (p *parser) parseContentCompression(size int64, t *mkv.Track) error {
 	// ContentCompAlgo defaults to 0 (zlib) when the element is absent, so the
-	// presence of ContentCompression is itself the declaration. mkvmerge writes
+	// presence of ContentCompression is itself the declaration. A common muxer writes
 	// a compressed subtitle track as an EMPTY ContentCompression element - no
 	// children at all - which is why "no child parsed" must not be read as "no
 	// compression": that is how a whole PGS track came back as raw zlib.

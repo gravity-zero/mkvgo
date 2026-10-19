@@ -25,8 +25,8 @@ import (
 //
 // The head SeekHead is rebuilt to point at the edited elements (keeping its
 // entries to elements outside the head, e.g. the Cues). Tags, Chapters or
-// Attachments sitting after the clusters (Mux's statistics tags, FFmpeg's
-// chapters) stay there when the edit leaves them as they are; edited, they are
+// Attachments sitting after the clusters (mux statistics tags, chapters some
+// muxers write there) stay there when the edit leaves them as they are; edited, they are
 // folded into the head metadata and the old bytes voided, or, Tags and
 // Chapters, rewritten in the old element's place when the head cannot hold them.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {

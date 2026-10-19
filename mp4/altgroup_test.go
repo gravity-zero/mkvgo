@@ -40,7 +40,7 @@ func trakGroups(t *testing.T, data []byte) [][2]string {
 }
 
 // TestRemuxGroupsAlternateTracksAsTheMainstreamMuxer pins that to-mp4 states which tracks are alternatives, as
-// ffmpeg measured does (video 0, audio 1, subtitles 3, whatever their count): with every group 0, Apple players
+// the mainstream muxer was measured to (video 0, audio 1, subtitles 3, whatever their count): with every group 0, Apple players
 // showed one audio language and hid the other. The chapter track stays out of any group.
 func TestRemuxGroupsAlternateTracksAsTheMainstreamMuxer(t *testing.T) {
 	tracks := synthFixtureTracks()

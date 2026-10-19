@@ -117,7 +117,7 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   millisecond off per seam on 23.976 fps video, chapters included.
 - `EditInPlace` copies the metadata elements an edit leaves as they were from
   the file, rather than writing them again: a title edit on a file holding Tags
-  both in its head and after its clusters (as mkvmerge leaves them) gathered
+  both in its head and after its clusters (as common muxers leave them) gathered
   them all in the head, and was refused for want of room.
 - `Join` places linked parts whose sound was muxed more than a second ahead of
   the picture at the picture's cut when each sound track of the next part takes
@@ -131,7 +131,7 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   the accessibility flags, StereoMode, DisplayUnit (whose loss changed what the
   display size means), the Video FrameRate and the like were dropped.
 - `EditInPlace` measures the head's elements with their size fields as wide as
-  the file writes them (FFmpeg and libwebm use 8 bytes): the head's end was
+  the file writes them (common muxers use 8 bytes): the head's end was
   counted short, and the old bytes left before the first Cluster broke the
   file's structure for any reader that does not resync.
 - A Matroska rewrite (`EditInPlace`, `EditMetadata`, `Split`, `Join`, `Mux`...)
@@ -159,7 +159,7 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   cannot hold them: a title edit was refused once those tags outgrew the
   head's free space, and the whole file had to be rewritten.
 - `EditInPlace` treats Chapters and Attachments after the clusters as it does
-  Tags: FFmpeg-made files keep their chapters there, and an edit wrote a second
+  Tags: many muxers keep their chapters there, and an edit wrote a second
   copy in the head, every chapter then read twice.
 - `EditInPlace` on a file with no SeekHead finds the Tags after the clusters
   instead of writing a second copy of them in the head.

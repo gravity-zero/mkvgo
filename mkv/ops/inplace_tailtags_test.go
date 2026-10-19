@@ -17,7 +17,7 @@ import (
 )
 
 // tailTagsMKV writes a file whose Tags (n SimpleTags of 200 characters) sit after the clusters, past what the
-// head's reserve can hold, as mkvpropedit leaves them.
+// head's reserve can hold, as in-place tag editors leave them.
 func tailTagsMKV(t *testing.T, path string, n int) []mkv.Tag {
 	f, err := os.Create(path)
 	mustNil(t, err)
@@ -147,8 +147,8 @@ func TestEditInPlaceWithoutSeekHead(t *testing.T) {
 	}
 }
 
-// TestEditInPlaceWithChaptersAfterTheClusters pins that chapters a muxer left after the clusters (as FFmpeg-made
-// files carry them) stay there, once, when an edit does not touch them, and are not written a second time in the head.
+// TestEditInPlaceWithChaptersAfterTheClusters pins that chapters a muxer left after the clusters (as many
+// muxers write them) stay there, once, when an edit does not touch them, and are not written a second time in the head.
 func TestEditInPlaceWithChaptersAfterTheClusters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tailchap.mkv")
 	f, err := os.Create(path)
@@ -174,7 +174,7 @@ func TestEditInPlaceWithChaptersAfterTheClusters(t *testing.T) {
 }
 
 // TestEditInPlaceWithWideSizeFields pins that a head whose last element states its size in more bytes than it needs
-// (FFmpeg and libwebm write 8) is rewritten to its real end: the bytes before the first Cluster are all accounted for,
+// (common muxers write 8) is rewritten to its real end: the bytes before the first Cluster are all accounted for,
 // none of the old element left between the new head and the Cluster.
 func TestEditInPlaceWithWideSizeFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wide.mkv")
@@ -226,7 +226,7 @@ func TestEditInPlaceWithWideSizeFields(t *testing.T) {
 }
 
 // TestEditInPlaceWithTagsInTheHeadAndAfterTheClusters pins a title edit on a file holding Tags in its head and more
-// after its clusters (as mkvmerge leaves them): both stay where they are, as they were, and the edit lands in place.
+// after its clusters (as common muxers leave them): both stay where they are, as they were, and the edit lands in place.
 func TestEditInPlaceWithTagsInTheHeadAndAfterTheClusters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "both.mkv")
 	f, err := os.Create(path)
