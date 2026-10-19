@@ -33,6 +33,19 @@ func ChapterRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	return ranges
 }
 
+// CheckRanges refuses a range that ends before it starts or starts past durationMs (0: unknown), naming it by number.
+func CheckRanges(ranges []mkv.TimeRange, durationMs int64) error {
+	for i, r := range ranges {
+		if r.EndMs > 0 && r.EndMs <= r.StartMs {
+			return fmt.Errorf("range %d ends at %d ms, before it starts (%d ms): give an end after the start, or none to run to the end", i+1, r.EndMs, r.StartMs)
+		}
+		if durationMs > 0 && r.StartMs >= durationMs {
+			return fmt.Errorf("range %d starts at %d ms, past the end of the file (%d ms): start it earlier", i+1, r.StartMs, durationMs)
+		}
+	}
+	return nil
+}
+
 // EveryRanges builds keyframe-aligned ranges of roughly everyMs each.
 func EveryRanges(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 	if len(keyframes) == 0 {

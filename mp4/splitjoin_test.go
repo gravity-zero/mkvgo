@@ -206,7 +206,8 @@ func TestSplitRefusals(t *testing.T) {
 		want string
 	}{
 		{[]mkv.TimeRange{{StartMs: 2200, EndMs: 2600}}, "holds no keyframe"},
-		{[]mkv.TimeRange{{StartMs: 9000}}, "no keyframe at or after"},
+		{[]mkv.TimeRange{{StartMs: 9000}}, "past the end"},
+		{[]mkv.TimeRange{{StartMs: 4000, EndMs: 3000}}, "before it starts"},
 		{nil, "no split ranges"},
 	} {
 		_, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: t.TempDir(), Ranges: tc.r})

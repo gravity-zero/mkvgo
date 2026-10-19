@@ -365,3 +365,25 @@ func TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter(t *testing.T) {
 		t.Errorf("the parts hold %d frames of the source's %d", total, want)
 	}
 }
+
+// TestSplitRefusesRangesPastTheEndOrInverted: a range past the end or ending before it starts is refused before any part is written.
+func TestSplitRefusesRangesPastTheEndOrInverted(t *testing.T) {
+	dir := t.TempDir()
+	src := buildChapteredMKV(t, dir, "src.mkv", nil, 6000, 2000)
+	for _, tc := range []struct {
+		r    []mkv.TimeRange
+		want string
+	}{
+		{[]mkv.TimeRange{{StartMs: 0, EndMs: 2000}, {StartMs: 9000, EndMs: 10000}}, "past the end"},
+		{[]mkv.TimeRange{{StartMs: 0, EndMs: 2000}, {StartMs: 4000, EndMs: 3000}}, "before it starts"},
+	} {
+		out := filepath.Join(t.TempDir(), "out")
+		_, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: out, Ranges: tc.r})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ranges %v: err = %v, want %q", tc.r, err, tc.want)
+		}
+		if entries, _ := os.ReadDir(out); len(entries) != 0 {
+			t.Errorf("ranges %v: a refused split wrote %d parts", tc.r, len(entries))
+		}
+	}
+}

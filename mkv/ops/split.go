@@ -53,6 +53,9 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		}
 	default:
 		ranges = opts.Ranges
+		if err := splitplan.CheckRanges(ranges, c.DurationMs); err != nil {
+			return nil, err
+		}
 	}
 	if len(ranges) == 0 {
 		return nil, fmt.Errorf("no split ranges specified")

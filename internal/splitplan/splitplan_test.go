@@ -24,3 +24,23 @@ func TestChapterRangesOpenOnTheHead(t *testing.T) {
 		t.Errorf("ranges %+v", r)
 	}
 }
+
+// TestCheckRanges: a range ending before it starts, or starting past the end, is refused by its number.
+func TestCheckRanges(t *testing.T) {
+	for _, tc := range []struct {
+		r    []mkv.TimeRange
+		want string
+	}{
+		{[]mkv.TimeRange{{StartMs: 0, EndMs: 1000}, {StartMs: 3000, EndMs: 3000}}, "range 2 ends at 3000 ms, before it starts"},
+		{[]mkv.TimeRange{{StartMs: 7000}}, "range 1 starts at 7000 ms, past the end"},
+		{[]mkv.TimeRange{{StartMs: 0, EndMs: 9000}, {StartMs: 5000}}, ""},
+	} {
+		err := CheckRanges(tc.r, 6000)
+		if (tc.want == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ranges %v: err = %v, want %q", tc.r, err, tc.want)
+		}
+	}
+	if err := CheckRanges([]mkv.TimeRange{{StartMs: 7000}}, 0); err != nil {
+		t.Errorf("an unknown duration refused a range: %v", err)
+	}
+}
