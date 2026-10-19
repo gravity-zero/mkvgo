@@ -445,3 +445,40 @@ func TestJoinRefusesTracksInAnotherLanguageOrder(t *testing.T) {
 		t.Errorf("same language: %v", err)
 	}
 }
+
+// TestSplitByChaptersListedOutOfOrder: a chpl another tool wrote out of order is read in time order, each chapter
+// ending where the next in time starts, so a split by chapters gives parts that do not overlap.
+func TestSplitByChaptersListedOutOfOrder(t *testing.T) {
+	src := copyFixture(t, "fps30.mp4")
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A0", StartMs: 0}, {ID: 2, Title: "B1", StartMs: 900}, {ID: 3, Title: "C2", StartMs: 1800}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(data), "chpl")
+	if i < 0 {
+		t.Fatal("no chpl")
+	}
+	e := i + 13 // version and flags, reserved, count: then 11-byte entries (time, length, two-letter title)
+	first := append([]byte(nil), data[e:e+11]...)
+	copy(data[e:e+11], data[e+11:e+22])
+	copy(data[e+11:e+22], first)
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustMeta(t, src).Chapters; len(got) != 3 || got[0].Title != "A0" || got[0].EndMs != 900 || got[1].EndMs != 1800 {
+		t.Errorf("chapters read in time order, each ending at the next: %+v", got)
+	}
+	total := len(mustCutModel(t, src).tracks[0].tt.samples)
+	n := 0
+	for _, p := range splitInto(t, src, mkv.SplitOptions{ByChapters: true}) {
+		n += len(mustCutModel(t, p).tracks[0].tt.samples)
+	}
+	if n != total {
+		t.Errorf("the parts hold %d pictures of the source's %d", n, total)
+	}
+}

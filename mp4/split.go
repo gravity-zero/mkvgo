@@ -346,7 +346,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 			return nil, errf("split: no chapters to split by")
 		}
 		lastKey := lastKeyMs(&m.tracks[m.ref], m.movieTS)
-		for _, ch := range m.meta.Chapters {
+		for _, ch := range splitplan.ByStart(m.meta.Chapters) {
 			if ch.StartMs > lastKey && len(chs) > 0 {
 				continue // no keyframe left to open a part on: the previous part runs on through it
 			}

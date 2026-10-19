@@ -48,7 +48,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 			return nil, kerr
 		}
 		var chs []mkv.Chapter
-		for _, ch := range c.Chapters {
+		for _, ch := range splitplan.ByStart(c.Chapters) {
 			if lastKey >= 0 && ch.StartMs > lastKey && len(chs) > 0 {
 				continue // no keyframe left to open a part on: the previous part runs on through it
 			}

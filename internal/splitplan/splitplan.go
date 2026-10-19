@@ -2,14 +2,23 @@
 package splitplan
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
+
+// ByStart is chapters in the order they play, as a split by chapters cuts them: a file may list them in any order.
+func ByStart(chapters []mkv.Chapter) []mkv.Chapter {
+	out := slices.Clone(chapters)
+	slices.SortStableFunc(out, func(a, b mkv.Chapter) int { return cmp.Compare(a.StartMs, b.StartMs) })
+	return out
+}
 
 // ChapterRanges turns chapters into ranges covering the whole file: each runs at least to the next chapter in time, the
 // first from 0, the last to the end.

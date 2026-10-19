@@ -1,8 +1,10 @@
 package mp4
 
 import (
+	"cmp"
 	"encoding/binary"
 	"io"
+	"slices"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -132,6 +134,8 @@ func parseChpl(payload []byte) []mkv.Chapter {
 		})
 		pos += titleLen
 	}
+	// A chapter ends where the next one in time starts, whatever order the file lists them in.
+	slices.SortStableFunc(out, func(a, b mkv.Chapter) int { return cmp.Compare(a.StartMs, b.StartMs) })
 	for i := 0; i+1 < len(out); i++ {
 		out[i].EndMs = out[i+1].StartMs
 	}
