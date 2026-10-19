@@ -11,8 +11,8 @@ All notable changes to mkvgo are documented here. The format is based on
 Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
 this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 
-Highlights: split then join gives the source back sample for sample, in
-Matroska and MP4 alike; MP4 and MOV are edited natively (split, join, mux,
+Highlights: split then join gives the source back sample for sample (in
+Matroska, an open GOP's leading pictures aside); MP4 and MOV are edited natively (split, join, mux,
 merge, in-place metadata) without a round trip through Matroska; CENC
 packaging is hardened; a subtitle cue without a duration ends once read, by one
 rule everywhere; on-demand serving counts what it really sends, and a growing
@@ -179,9 +179,10 @@ Split and join:
   it starts or starts past the end, sound stored more than 64 MiB past a cut
   keyframe, a Matroska source that stops before its declared end
   (`ErrSourceTruncated`), and a part that would be named like its source.
-- Split then join gives the source back sample for sample, in Matroska and MP4
-  alike, open GOP, second video track and cuts between milliseconds (29.97 fps)
-  included. Linked parts are placed at the cut the split recorded (an MP4 part's
+- Split then join gives the source back sample for sample, second video track
+  and cuts between milliseconds (29.97 fps) included: in MP4 an open GOP's
+  leading pictures too, hidden by the next part's edit list; in Matroska, which
+  has no edit list, they are in neither part (see the cut policy in cli.md). Linked parts are placed at the cut the split recorded (an MP4 part's
   `SPLIT_CUT`, the picture's cut in Matroska, sound muxed far ahead included),
   so no seam drifts by a millisecond or by the sound's lead. The duration a
   split gave a part's last picture to reach the cut is marked (`SPLIT_HOLD`,
