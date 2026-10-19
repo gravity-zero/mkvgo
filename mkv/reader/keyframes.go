@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"math"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -28,8 +29,10 @@ func scaleCueTimesToMs(c *mkv.Container) {
 	if c.Info.TimecodeScale == mkv.DefaultTimecodeScale {
 		return // one tick is one millisecond: the stored value already is TimeMs
 	}
+	limit := math.MaxInt64 / c.Info.TimecodeScale
 	for i := range c.Cues {
-		c.Cues[i].TimeMs = c.Cues[i].TimeMs * c.Info.TimecodeScale / mkv.DefaultTimecodeScale
+		// A CueTime no file reaches saturates rather than wrapping to a negative keyframe.
+		c.Cues[i].TimeMs = min(max(c.Cues[i].TimeMs, 0), limit) * c.Info.TimecodeScale / mkv.DefaultTimecodeScale
 	}
 }
 

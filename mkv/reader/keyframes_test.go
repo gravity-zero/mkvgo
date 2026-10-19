@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -93,5 +94,14 @@ func TestKeyframesMKVNoCues(t *testing.T) {
 	}
 	if c.Keyframes != nil {
 		t.Errorf("Keyframes = %v, want nil for a file without Cues", c.Keyframes)
+	}
+}
+
+// TestScaleCueTimesSaturatesAForgedCueTime: a CueTime past what the timescale can state in milliseconds never wraps negative.
+func TestScaleCueTimesSaturatesAForgedCueTime(t *testing.T) {
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000_000}, Cues: []mkv.CuePoint{{TimeMs: math.MaxInt64/1_000_000_000 + 1}, {TimeMs: 5}}}
+	scaleCueTimesToMs(c)
+	if c.Cues[0].TimeMs < 0 || c.Cues[1].TimeMs != 5000 {
+		t.Errorf("cue times %d, %d; want a non-negative saturated one and 5000", c.Cues[0].TimeMs, c.Cues[1].TimeMs)
 	}
 }
