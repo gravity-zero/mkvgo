@@ -213,6 +213,7 @@ func (f *FS) Port() *mkv.FS {
 		MkdirAll:  func(string, os.FileMode) error { return roErr("mkdir") },
 		WriteFile: func(string, []byte, os.FileMode) error { return roErr("write") },
 		Remove:    func(string) error { return roErr("remove") },
+		Rename:    func(string, string) error { return roErr("rename") },
 	}
 }
 

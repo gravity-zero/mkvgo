@@ -326,6 +326,7 @@ func TestPortIsReadOnly(t *testing.T) {
 	checks["mkdir"] = fs.DoMkdirAll("http://x/y", 0)
 	checks["write"] = fs.DoWriteFile("http://x/y", nil, 0)
 	checks["remove"] = fs.DoRemove("http://x/y")
+	checks["rename"] = fs.DoRename("http://x/y", "http://x/z")
 	_, checks["create"] = fs.DoCreate("http://x/y")
 	for op, err := range checks {
 		if err == nil || !strings.Contains(err.Error(), "read-only") {
