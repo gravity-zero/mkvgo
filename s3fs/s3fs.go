@@ -237,6 +237,11 @@ func splitS3Path(path string) (bucket, key string, err error) {
 	if err := checkBucket(bucket); err != nil {
 		return "", "", fmt.Errorf("s3fs: %s: %w", path, err)
 	}
+	for seg := range strings.SplitSeq(key, "/") {
+		if seg == "." || seg == ".." {
+			return "", "", fmt.Errorf("s3fs: %s: a key segment %q could step out of the bucket on a server or proxy that resolves it; rename the object", path, seg)
+		}
+	}
 	return bucket, key, nil
 }
 

@@ -75,3 +75,21 @@ func TestSEC04_S3RedirectNotFollowed(t *testing.T) {
 		t.Fatalf("the redirect target got %d requests, credentials %q", n, leaked.Load())
 	}
 }
+
+// TestKeyDotSegmentsRefused: a key segment "." or ".." would step out of the bucket wherever the URL path is resolved
+// (a proxy in front of a path-style endpoint), so it is refused before any request; a dot inside a name is kept.
+func TestKeyDotSegmentsRefused(t *testing.T) {
+	for _, style := range []bool{false, true} {
+		fs := New(Options{Region: "eu-west-1", AccessKey: "AKID", SecretKey: "SECRET", PathStyle: style})
+		for _, p := range []string{"s3://abc/../other/k", "s3://abc/x/../../other/k", "s3://abc/./k", "s3://abc/.."} {
+			if _, err := fs.resolveURL(p); err == nil {
+				t.Errorf("pathStyle=%v: %s resolved", style, p)
+			}
+		}
+		for _, ok := range []string{"s3://abc/a..b/k", "s3://abc/.hidden", "s3://abc/v1.2/k"} {
+			if _, err := fs.resolveURL(ok); err != nil {
+				t.Errorf("pathStyle=%v: %s refused: %v", style, ok, err)
+			}
+		}
+	}
+}
