@@ -214,3 +214,18 @@ func TestTrackDefaultDurationsHelper(t *testing.T) {
 		t.Errorf("no tracks: map = %v, want nil", m)
 	}
 }
+
+// ReadStream reads the Tracks itself before handing out its BlockReader: the reader times laced frames by their
+// DefaultDuration as a sequential walk does, where every frame kept the block's timecode.
+func TestReadStreamTimesLacedFrames(t *testing.T) {
+	data, _ := lacedTimingFixture(true)
+	_, br, err := ReadStream(t.Context(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range collectBlocks(t, br, len(wantLacedTimecodes)) {
+		if b.Timecode != wantLacedTimecodes[i] {
+			t.Errorf("frame %d: timecode %d, want %d", i, b.Timecode, wantLacedTimecodes[i])
+		}
+	}
+}

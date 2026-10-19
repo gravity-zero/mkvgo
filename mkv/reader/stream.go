@@ -315,6 +315,9 @@ metaLoop:
 		segEnd:        segEnd, // -1 for an unknown-size segment, which ends on EOF
 		clusterEnd:    -1,
 	}
+	// The Tracks were read above, not walked over by this reader: it learns them as a sequential walk would.
+	br.SetTrackDefaultDurations(TrackDefaultDurations(c.Tracks))
+	br.SetKnownTracks(c.Tracks)
 	// Seed countingReader at the current position. The underlying reader is
 	// wrapped in a readOnlySeeker so countingReader.src.Seek(0,Current) works.
 	br.r = newCountingReader(&readOnlySeeker{r: r}, p.pos)
