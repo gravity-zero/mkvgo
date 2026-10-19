@@ -27,16 +27,16 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 		return err
 	}
 
-	newID := uint64(len(c.Tracks) + 1)
 	codec := "ass"
 	if strings.HasSuffix(strings.ToLower(assPath), ".ssa") {
 		codec = "ssa"
 	}
 
-	subTrack := mkv.Track{
-		ID: newID, Type: mkv.SubtitleTrack, Codec: codec,
+	subTrack := appendedTrack(c.Tracks, mkv.Track{
+		Type: mkv.SubtitleTrack, Codec: codec,
 		Language: lang, Name: name, CodecPrivate: []byte(ass.Header),
-	}
+	})
+	newID := subTrack.ID
 	tracks := append(c.Tracks, subTrack)
 
 	subBlocks := make([]mkv.Block, len(ass.Events))

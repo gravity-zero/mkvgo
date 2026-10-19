@@ -110,11 +110,10 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 		return fmt.Errorf("track %d not found in %s", input.TrackID, shown.Path(input.SourcePath))
 	}
 
-	newID := uint64(len(c.Tracks) + 1)
 	remap := identityRemap(c.Tracks)
 
-	t := *addedTrack
-	t.ID = newID
+	t := appendedTrack(c.Tracks, *addedTrack)
+	newID := t.ID
 	setLanguage(&t, input.Language)
 	if input.Name != "" {
 		t.Name = input.Name
@@ -230,4 +229,24 @@ func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, out
 		}
 	}
 	return fmt.Errorf("attachment %d not found", attachID)
+}
+
+// appendedTrack is t numbered after every track of tracks, under a TrackUID none of them has: numbering by count
+// gave a source with tracks 1 and 3 a second track 3, and a track added from the same file kept its UID.
+func appendedTrack(tracks []mkv.Track, t mkv.Track) mkv.Track {
+	uids := make(map[uint64]bool, len(tracks))
+	var maxID, maxUID uint64
+	for _, x := range tracks {
+		uid := x.UID
+		if uid == 0 {
+			uid = x.ID // the writer's default
+		}
+		uids[uid] = true
+		maxID, maxUID = max(maxID, x.ID), max(maxUID, uid)
+	}
+	t.ID = maxID + 1
+	if uid := t.UID; uid == 0 && uids[t.ID] || uid != 0 && uids[uid] {
+		t.UID = maxUID + 1
+	}
+	return t
 }

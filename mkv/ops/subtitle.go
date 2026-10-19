@@ -276,14 +276,13 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 		return err
 	}
 
-	newID := uint64(len(c.Tracks) + 1)
-	subTrack := mkv.Track{
-		ID:       newID,
+	subTrack := appendedTrack(c.Tracks, mkv.Track{
 		Type:     mkv.SubtitleTrack,
 		Codec:    "srt",
 		Language: lang,
 		Name:     name,
-	}
+	})
+	newID := subTrack.ID
 	tracks := append(c.Tracks, subTrack)
 
 	subBlocks := make([]mkv.Block, len(entries))
