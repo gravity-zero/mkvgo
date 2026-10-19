@@ -565,3 +565,24 @@ func TestConcatChapters_ReusedUIDIsNoContinuation(t *testing.T) {
 		t.Errorf("joined chapters %+v, want One, Two and Three at 4500", got)
 	}
 }
+
+// TestConcatChapters_ContinuationIsTheNeighboursUID: a part continues the chapters of the part just before it, not a UID an unrelated earlier file holds.
+func TestConcatChapters_ContinuationIsTheNeighboursUID(t *testing.T) {
+	a := &mkv.Container{Info: mkv.SegmentInfo{SegmentUID: []byte("a")}, Chapters: []mkv.Chapter{{ID: 2, Title: "A", StartMs: 0, EndMs: 1000}, {ID: 5, Title: "A2", StartMs: 500}}}
+	b1 := &mkv.Container{Info: mkv.SegmentInfo{SegmentUID: []byte("b1")}, Chapters: []mkv.Chapter{{ID: 2, Title: "B", StartMs: 0, EndMs: 2000}}}
+	b2 := &mkv.Container{Info: mkv.SegmentInfo{SegmentUID: []byte("b2"), PrevUID: []byte("b1")}, Chapters: []mkv.Chapter{{ID: 2, Title: "B", StartMs: 0, EndMs: 1500}, {ID: 5, Title: "New", StartMs: 0}}}
+	got := concatChapters([]*mkv.Container{a, b1, b2}, []int64{0, 1000, 3000})
+	byTitle := map[string]mkv.Chapter{}
+	for _, ch := range got {
+		byTitle[ch.Title] = ch
+	}
+	if ch := byTitle["A"]; ch.EndMs != 1000 {
+		t.Errorf("the unrelated first file's chapter ends at %d ms, want 1000", ch.EndMs)
+	}
+	if ch := byTitle["B"]; ch.StartMs != 1000 || ch.EndMs != 4500 {
+		t.Errorf("the chapter carried across the cut is [%d, %d] ms, want [1000, 4500]", ch.StartMs, ch.EndMs)
+	}
+	if _, ok := byTitle["New"]; !ok {
+		t.Errorf("the second part's own chapter was taken for a continuation: %+v", got)
+	}
+}
