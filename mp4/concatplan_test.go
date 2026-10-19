@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,5 +178,31 @@ func TestPlanConcatOpenMatchesResource(t *testing.T) {
 				t.Error("no segment streamed from its part")
 			}
 		})
+	}
+}
+
+// TestPlansRefuseNamesTheyDoNotServeAsNoResource: a part's subtitle window past its last and an ABR manifest the
+// variants do not have are names the plan does not serve, matched by ErrNoResource for a 404.
+func TestPlansRefuseNamesTheyDoNotServeAsNoResource(t *testing.T) {
+	ctx := context.Background()
+	src0 := buildConcatSource(t, 4000, "eng", "part0 cue", 500)
+	src1 := buildConcatSource(t, 2000, "eng", "part1 cue", 300)
+	cp, err := PlanConcat(ctx, []string{src0, src1}, Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := cp.Resource(ctx, "p1/sub1_00001.vtt"); err != nil {
+		t.Fatalf("part 1's first subtitle window: %v", err)
+	}
+	if _, _, err := cp.Resource(ctx, "p1/sub1_99999.vtt"); !errors.Is(err, ErrNoResource) {
+		t.Errorf("concat subtitle window past the last: %v", err)
+	}
+	src, _ := buildLacedFixture(t)
+	abr, err := PlanABR(ctx, []string{src, src}, Options{SegmentMs: 2000, Encrypt: &HLSEncryption{Key: cencKey, KeyURI: "https://example.test/key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := abr.Resource(ctx, "manifest.mpd"); !errors.Is(err, ErrNoResource) {
+		t.Errorf("ABR manifest of an encrypted presentation: %v", err)
 	}
 }

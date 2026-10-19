@@ -78,7 +78,7 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	}
 	if name == "manifest.mpd" {
 		if a.mpd == nil {
-			return nil, "", errf("no combined DASH manifest (the variants are not segment-aligned, or the presentation is encrypted); use master.m3u8, or each v{k}/manifest.mpd")
+			return nil, "", noResource("no combined DASH manifest (the variants are not segment-aligned, or the presentation is encrypted); use master.m3u8, or each v{k}/manifest.mpd")
 		}
 		return a.mpd, "application/dash+xml", nil
 	}

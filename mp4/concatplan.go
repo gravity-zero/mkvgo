@@ -242,7 +242,7 @@ func (cp *ConcatPlan) windowedSubtitle(ctx context.Context, k, j, n int) ([]byte
 		return nil, noResource("subtitle rendition %d out of range (0..%d)", j, len(p.subs)-1)
 	}
 	if n < 0 || n >= p.segCount {
-		return nil, errf("subtitle segment %d out of range for part %d (0..%d)", n, k, p.segCount-1)
+		return nil, noResource("subtitle segment %d out of range for part %d (0..%d)", n, k, p.segCount-1)
 	}
 	segStart := p.bounds[n]
 	var segEnd int64 = math.MaxInt64
