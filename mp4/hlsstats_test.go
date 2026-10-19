@@ -163,7 +163,8 @@ func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 			}
 			// Bytes hands it out whole, counted once: a server writes it itself, and a write after counts nothing more.
 			in := open("init.mp4")
-			if in.Bytes() == nil || in.Bytes() == nil {
+			first, again := in.Bytes(), in.Bytes()
+			if first == nil || again == nil {
 				t.Fatal("init.mp4: not handed out whole")
 			}
 			if _, err := in.WriteTo(ctx, io.Discard); err != nil {
