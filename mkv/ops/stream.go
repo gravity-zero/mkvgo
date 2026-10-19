@@ -238,7 +238,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		carried, opts.walk.onScreen = opts.walk.onScreen, nil
 	}
 	firstTC, firstSet := int64(0), false
-	lastKey := int64(math.MinInt64) // the latest video keyframe read: a cut lands on it or later
+	lastKey := int64(math.MinInt64) // the latest cut keyframe read: every one before the cut is timed before it
 
 	// The output's timebase decides how long a cluster may run: block offsets
 	// are 16-bit counts of ITS units, not of milliseconds.
@@ -399,13 +399,13 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			return err
 		}
 
-		// cutKeyframe: a keyframe a segment may start or end on. With a video
-		// track only a video keyframe qualifies (see videoTracks above).
 		if pc, ok := opts.primingEndsMs[blk.TrackNumber]; ok && float64(blk.Timecode)+pc.frameMs <= pc.endMs {
 			continue
 		}
+		// cutKeyframe: a keyframe a segment may start or end on. With a video
+		// track only a video keyframe qualifies (see videoTracks above).
 		cutKeyframe := blk.Keyframe && (len(opts.videoTracks) == 0 || opts.videoTracks[blk.TrackNumber])
-		if blk.Keyframe && opts.videoTracks[blk.TrackNumber] {
+		if cutKeyframe && !opts.subtitleTracks[blk.TrackNumber] {
 			lastKey = max(lastKey, blk.Timecode)
 		}
 

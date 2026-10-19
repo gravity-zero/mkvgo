@@ -154,3 +154,27 @@ func TestDropEndedCuesKeepsOnlyWhatCanRunThroughACut(t *testing.T) {
 		t.Errorf("kept %+v, want the cues at 400 and 1000", kept)
 	}
 }
+
+// TestSplitWithoutVideoCarriesTheCueOverTheCut: with no video track the cues ended long before a cut are let go, not the one it runs through.
+func TestSplitWithoutVideoCarriesTheCueOverTheCut(t *testing.T) {
+	dir := t.TempDir()
+	var blocks []mkv.Block
+	for tc := int64(0); tc < 6000; tc += 20 {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte("a")})
+		switch tc {
+		case 500, 1500:
+			blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Duration: 300, Data: []byte("Gone")})
+		case 2500:
+			blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Duration: 1000, Data: []byte("Across")})
+		}
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{audioTrack(1), subtitleTrack(2, "srt")}, blocks, 6000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 3000}, {StartMs: 3000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := trackBlocks(collectAllBlocks(t, parts[1]))[2]
+	if len(subs) == 0 || subs[0].Timecode != 0 || string(subs[0].Data) != "Across" {
+		t.Errorf("part 2 opens its subtitles on %+v, want the cue across the cut at 0", subs)
+	}
+}
