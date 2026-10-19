@@ -22,7 +22,7 @@ func CmdHash(args []string) {
 	}
 	source := rest[0]
 	if isMP4Path(source) {
-		Fatal("mkvgo does not rewrite MP4 metadata in place; produce a hashed MP4 at remux time: mkvgo to-mp4 --hash <in.mkv> <out.mp4>")
+		Fatal("mkvgo hashes an MP4 when it writes one, not in place: remux it hashed with mkvgo to-mp4 --hash <in.mkv> <out.mp4>; an edit, split, join or mux of a hashed MP4 stays hashed")
 	}
 	GuardOverwrite(outPath) // "" (in-place) passes through
 

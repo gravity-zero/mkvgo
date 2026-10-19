@@ -8,12 +8,12 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// parseMovieHeader reads the movie timescale and duration from an mvhd box.
 // headerDurationSet reports whether a header's duration states one: 0 and all ones (0xFFFFFFFF, recorders still writing) mean unset.
 func headerDurationSet(ticks uint64) bool {
 	return ticks > 0 && ticks != 0xFFFFFFFF && ticks < 1<<62
 }
 
+// parseMovieHeader reads the movie timescale and duration from an mvhd box.
 func parseMovieHeader(payload []byte) (timescale uint32, durationTicks uint64) {
 	if len(payload) < 4 {
 		return 0, 0
