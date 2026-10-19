@@ -380,12 +380,15 @@ func (d *PGSDecoder) parseObject(p []byte) error {
 		if d.objects == nil {
 			d.objects = make(map[uint16]*pgsObjectDef, 2)
 		}
+		held := d.objBytes + len(d.pending.rle)
 		if old := d.objects[id]; old != nil {
-			d.objBytes -= len(old.rle)
+			held -= len(old.rle)
 		}
-		if d.objBytes += len(d.pending.rle); d.objBytes > pgsMaxEpochBytes {
-			return fmt.Errorf("PGS: object %d brings the objects held since the last epoch start to %d bytes (limit %d)", id, d.objBytes, pgsMaxEpochBytes)
+		if held > pgsMaxEpochBytes {
+			d.pending = nil
+			return fmt.Errorf("PGS: object %d brings the objects held since the last epoch start to %d bytes (limit %d)", id, held, pgsMaxEpochBytes)
 		}
+		d.objBytes = held
 		d.objects[id] = d.pending
 		d.pending = nil
 	}

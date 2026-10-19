@@ -76,3 +76,22 @@ func TestPGSEpochObjectRedefinedCountsOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestPGSEpochRefusalLeavesTheBudgetAsItWas: an object refused for the budget is not counted, so a caller that skips
+// the block can still define one that fits.
+func TestPGSEpochRefusalLeavesTheBudgetAsItWas(t *testing.T) {
+	d := NewPGSDecoder()
+	rle := make([]byte, 60_000)
+	n := 0
+	for ; n < 1000; n++ {
+		if _, err := d.Decode(pgsODS(uint16(n), 64, 64, rle)); err != nil {
+			break
+		}
+	}
+	if _, err := d.Decode(pgsODS(uint16(n), 64, 64, rle)); err == nil {
+		t.Fatal("the same object fit after its refusal")
+	}
+	if _, err := d.Decode(pgsODS(uint16(n+1), 64, 64, make([]byte, 1000))); err != nil {
+		t.Errorf("an object that fits was refused after a refusal: %v", err)
+	}
+}
