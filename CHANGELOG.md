@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-10-19
+
 Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
 this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 
