@@ -223,6 +223,15 @@ func (cp *ConcatPlan) Open(ctx context.Context, name string) (*ResourceHandle, e
 	return &ResourceHandle{name: name, contentType: ct, size: int64(len(data)), data: data}, nil
 }
 
+// Stat is HLSPlan.Stat for a part's resource; ok is false for the concatenated playlists and subtitles, which Open
+// hands out whole.
+func (cp *ConcatPlan) Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error) {
+	if k, rest, isPart := parsePartPath(name); isPart && k >= 0 && k < len(cp.parts) && !isWindowedSubtitle(rest) {
+		return cp.parts[k].Stat(ctx, rest)
+	}
+	return 0, "", "", false, nil
+}
+
 // isWindowedSubtitle reports whether a part's resource name is a windowed subtitle segment, re-served shifted.
 func isWindowedSubtitle(rest string) bool {
 	var j, n int

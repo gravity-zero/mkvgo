@@ -615,7 +615,8 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 
 // Stat says what Open would hand out under name - its size, ETag and content type - without handing it out: no
 // segment is counted served, none kept is taken, so a HEAD or a revalidation costs the plan nothing. ok is false
-// where only Open can tell: not a streamed segment, or a CENC one, whose head Open frames from the samples.
+// where only Open can tell: not a streamed segment, a CENC one, whose head Open frames from the samples, or a network
+// source's light audio, handed out whole.
 func (p *HLSPlan) Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error) {
 	ti, n, isSeg := p.segmentName(name)
 	if !isSeg || !p.streams() || !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim() || p.opts.CENC != nil {

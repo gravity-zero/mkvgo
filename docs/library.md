@@ -663,9 +663,9 @@ w.Header().Set("Content-Length", strconv.FormatInt(h.Size(), 10))
 if _, err := h.WriteTo(ctx, w); err != nil { panic(http.ErrAbortHandler) }
 ```
 
-`plan.Stat(ctx, name)` says what `Open` would hand out - size, ETag, content type - without handing it out: no
+`plan.Stat(ctx, name)` (an `HLSPlan`, or a `ConcatPlan` for its parts' segments) says what `Open` would hand out - size, ETag, content type - without handing it out: no
 segment is counted served and none the walk kept is taken, so a HEAD or a revalidation leaves it to the GET. Its
-`ok` is false where only `Open` can tell (not a streamed segment, or a CENC one). Every plan's error for a name it
+`ok` is false where only `Open` can tell (not a streamed segment, a CENC one, or a network source's light audio, which `Open` hands out whole). Every plan's error for a name it
 does not serve (an unknown name, a segment or rendition out of range, a playlist it does not offer) matches
 `mp4.ErrNoResource`: a server answers 404 there, 502 for the rest.
 

@@ -169,6 +169,46 @@ func TestHandlerHeadAndRevalidationServeNothing(t *testing.T) {
 	}
 }
 
+// A concat part's segment answers a HEAD and a revalidation from its part's Stat: the part counts nothing served.
+func TestHandlerConcatHeadServesNothing(t *testing.T) {
+	ctx := context.Background()
+	src := streamFixture(t)
+	cp, err := mp4.PlanConcat(ctx, []string{src, src}, mp4.Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(cp))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/p1/seg00002.m4s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	before := cp.Part(1).Stats().ServedSegments
+	for _, inm := range []string{"", resp.Header.Get("ETag")} {
+		method := http.MethodHead
+		if inm != "" {
+			method = http.MethodGet
+		}
+		req, _ := http.NewRequest(method, srv.URL+"/p1/seg00002.m4s", nil)
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if want := map[bool]int{true: http.StatusNotModified, false: http.StatusOK}[inm != ""]; r.StatusCode != want || r.Header.Get("ETag") != resp.Header.Get("ETag") {
+			t.Errorf("%s (If-None-Match %q): status %d ETag %q", method, inm, r.StatusCode, r.Header.Get("ETag"))
+		}
+	}
+	if got := cp.Part(1).Stats().ServedSegments; got != before {
+		t.Errorf("a HEAD and a 304 counted %d segments served", got-before)
+	}
+}
+
 // A name the plan does not serve answers 404, not the 502 of a source that failed: an unknown name, a segment past
 // the last, a subtitle rendition the plan does not have.
 func TestHandlerUnknownNamesAre404(t *testing.T) {
