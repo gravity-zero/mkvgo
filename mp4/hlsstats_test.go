@@ -167,3 +167,24 @@ func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 		})
 	}
 }
+
+// TestHLSPlanStatsCountsMP4SourceSegments: a segment cut from an MP4's sample table and handed out whole is built and
+// served like a Matroska window's, so a server's read-to-served ratio has bytes on both sides.
+func TestHLSPlanStatsCountsMP4SourceSegments(t *testing.T) {
+	ctx := context.Background()
+	plan, err := PlanHLS(ctx, hlsplanMP4Source(t), Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total int64
+	for _, name := range []string{"seg00001.m4s", "seg_a1_00001.m4s"} {
+		b, _, err := plan.Resource(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += int64(len(b))
+	}
+	if st := plan.Stats(); st.ServedBytes != total || st.BuiltBytes != total || st.ServedSegments != 2 {
+		t.Errorf("two MP4-source segments of %d bytes: %+v", total, st)
+	}
+}

@@ -87,7 +87,14 @@ func (p *HLSPlan) buildSegmentTrack(ctx context.Context, ti, n int) ([]byte, err
 		return nil, err
 	}
 	if p.mp4src {
-		return p.mp4SegmentTrack(ctx, ti, n)
+		data, err := p.mp4SegmentTrack(ctx, ti, n)
+		if err == nil {
+			p.winMu.Lock()
+			p.stats.BuiltBytes += int64(len(data))
+			p.stats.ServedBytes += int64(len(data))
+			p.winMu.Unlock()
+		}
+		return data, err
 	}
 	b, built, err := p.window(ctx, n)
 	if err != nil {
