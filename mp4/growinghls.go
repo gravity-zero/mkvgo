@@ -72,6 +72,7 @@ package mp4
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -301,7 +302,8 @@ func (p *GrowingHLSPlan) Refresh(ctx context.Context) (int, error) {
 // fixed part of this API): the scan it performs is a small, bounded, one-shot
 // read over data that by the caller's own assertion will not grow further, so
 // context.Background() is used internally rather than threading one through.
-// An error leaves the plan open (no EXT-X-ENDLIST): the tail could not be read, and Complete may be called again.
+// A tail the scan cannot read (a damaged or unknown-size cluster) closes the plan on the segments published and is
+// returned beside; a source it cannot reach leaves the plan open (no EXT-X-ENDLIST) for another call.
 func (p *GrowingHLSPlan) Complete() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -313,11 +315,14 @@ func (p *GrowingHLSPlan) Complete() error {
 	if err != nil {
 		return err
 	}
-	if _, err := p.scanLocked(ctx, st.Size()); err != nil {
-		return err
-	}
+	_, scanErr := p.scanLocked(ctx, st.Size())
 	if !p.done {
-		return p.finalizeLocked(ctx)
+		if err := p.finalizeLocked(ctx); err != nil {
+			return errors.Join(scanErr, err)
+		}
+	}
+	if scanErr != nil {
+		return fmt.Errorf("closed on the %d segments published, the rest unread: %w", p.published, scanErr)
 	}
 	return nil
 }

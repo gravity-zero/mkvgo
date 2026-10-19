@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -468,5 +469,26 @@ func TestGrowingHLSCompleteReportsAnUnreadableTail(t *testing.T) {
 	}
 	if pl := plan.MediaPlaylist(); !bytes.Contains(pl, []byte("#EXT-X-ENDLIST")) {
 		t.Errorf("Complete once the source is back left the playlist open:\n%s", pl)
+	}
+}
+
+// TestGrowingHLSCompleteClosesOnAnUnreadableCluster: a cluster the scan can never read (here of unknown size) makes
+// Complete close the playlist on the segments published and say so, instead of leaving it open for good.
+func TestGrowingHLSCompleteClosesOnAnUnreadableCluster(t *testing.T) {
+	data := buildGrowingFixture(t)
+	clusters := scanAllClusters(t, data)
+	m := mkv.NewMemFS()
+	m.Put("in.mkv", data[:clusters[2].end])
+	plan, err := PlanGrowingHLS(context.Background(), "in.mkv", Options{FS: m.FS(), SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := []byte{0x1F, 0x43, 0xB6, 0x75, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	m.Put("in.mkv", append(append([]byte(nil), data[:clusters[2].end]...), unknown...))
+	if err := plan.Complete(); err == nil || !strings.Contains(err.Error(), "known-size") {
+		t.Errorf("Complete over an unknown-size cluster: %v, want its error", err)
+	}
+	if pl := plan.MediaPlaylist(); !bytes.Contains(pl, []byte("#EXT-X-ENDLIST")) {
+		t.Errorf("the playlist stayed open:\n%s", pl)
 	}
 }

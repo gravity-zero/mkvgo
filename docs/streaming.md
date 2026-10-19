@@ -143,7 +143,9 @@ for range time.Tick(time.Second) {
 // once the downloader signals "done" (or Refresh auto-detects it: a Cues
 // index now parses, or a known-size Segment element's declared end is
 // reached with its last cluster whole):
-plan.Complete()
+if err := plan.Complete(); err != nil {
+    log.Print(err) // a damaged tail: closed on what was published; an unreachable source: still open, call again
+}
 ```
 
 **Mechanics.**

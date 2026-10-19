@@ -437,8 +437,10 @@ no LL-HLS, just a resumable cursor over a regular file.
 only, media sequence 0 forever - this is **not** a live sliding window: the
 whole presentation is retained since the source is known to be finite).
 `Complete()` - an explicit "the download finished" signal, since the source
-itself may never write a trailer; it returns the error that kept it from
-reading the tail, the playlist then left open for another call - or auto-detection during `Refresh` (a
+itself may never write a trailer; a tail it cannot read (a damaged or
+unknown-size cluster) closes the playlist on the segments published and is
+returned, a source it cannot reach leaves the playlist open for another call -
+or auto-detection during `Refresh` (a
 Cues index now parses, or a known-size Segment element's declared end is
 reached with its last cluster whole) switches to
 `#EXT-X-PLAYLIST-TYPE:VOD` + `#EXT-X-ENDLIST` and fixes every duration
