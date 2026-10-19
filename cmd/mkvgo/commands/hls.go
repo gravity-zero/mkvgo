@@ -44,11 +44,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl := newFlags("hls")
 	fl.String(&f.outDir, "-o")
 	fl.Func(func(v string) { // segment length in seconds, the HLS convention
-		secs, err := strconv.ParseFloat(v, 64)
-		if err != nil || secs <= 0 {
-			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
-		}
-		f.segMs = int64(secs * 1000)
+		f.segMs = parseSegmentSeconds(v)
 	}, "-segment", "--segment")
 	fl.String(&keyHex, "--aes-key")
 	fl.String(&keyFile, "--aes-key-file")

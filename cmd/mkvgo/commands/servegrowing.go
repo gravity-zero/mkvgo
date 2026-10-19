@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/mkvhttp"
@@ -107,11 +106,7 @@ func parseServeGrowingFlags(args []string) serveGrowingFlags {
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.cors, "-cors", "--cors")
 	fl.Func(func(v string) {
-		secs, err := strconv.ParseFloat(v, 64)
-		if err != nil || secs <= 0 {
-			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
-		}
-		cfg.segMs = int64(secs * 1000)
+		cfg.segMs = parseSegmentSeconds(v)
 	}, "-segment", "--segment")
 	cfg.rest = fl.Parse(args)
 	return cfg

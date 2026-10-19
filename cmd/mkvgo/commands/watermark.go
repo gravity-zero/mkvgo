@@ -27,11 +27,7 @@ func CmdWatermarkSegment(args []string) {
 	fl := newFlags("watermark-segment")
 	fl.String(&outPath, "-o")
 	fl.Func(func(v string) {
-		secs, err := strconv.ParseFloat(v, 64)
-		if err != nil || secs <= 0 {
-			Fatal(fmt.Sprintf("invalid -segment duration %q (seconds)", v))
-		}
-		segMs = int64(secs * 1000)
+		segMs = parseSegmentSeconds(v)
 	}, "-segment", "--segment")
 	fl.String(&variant, "--variant")
 	fl.String(&patternHex, "--pattern")
