@@ -75,15 +75,32 @@ export function useHLSPlayer(
       await new Promise<void>((r) => ms.addEventListener('sourceopen', () => r(), { once: true }))
       const feed = async (mime: string, init: string, seg: (n: number) => string) => {
         const sb = ms.addSourceBuffer(mime)
-        const append = (b: BufferSource) =>
-          new Promise<void>((r) => {
-            sb.addEventListener('updateend', () => r(), { once: true })
-            sb.appendBuffer(b)
+        // One SourceBuffer operation, settled by its updateend or its error.
+        const run = (op: () => void) =>
+          new Promise<void>((resolve, reject) => {
+            const done = () => (sb.removeEventListener('error', fail), resolve())
+            const fail = () => (sb.removeEventListener('updateend', done), reject(new Error(`${mime}: SourceBuffer error`)))
+            sb.addEventListener('updateend', done, { once: true })
+            sb.addEventListener('error', fail, { once: true })
+            op()
           })
-        await append((await plan!.resource(init, { signal: ctl.signal })).data)
+        // Memory stays bounded: at most AHEAD seconds buffered past the playhead, what played AHEAD seconds ago let go.
+        const AHEAD = 30
+        const end = () => (sb.buffered.length ? sb.buffered.end(sb.buffered.length - 1) : 0)
+        const played = () =>
+          new Promise<void>((r) => {
+            el.addEventListener('timeupdate', () => r(), { once: true })
+            ctl.signal.addEventListener('abort', () => r(), { once: true })
+          })
+        const head = (await plan!.resource(init, { signal: ctl.signal })).data
+        await run(() => sb.appendBuffer(head))
         for (let n = 1; n <= plan!.numSegments; n++) {
+          while (!ctl.signal.aborted && end() - el.currentTime > AHEAD) await played()
           if (ctl.signal.aborted) return
-          await append((await plan!.resource(seg(n), { signal: ctl.signal })).data)
+          const data = (await plan!.resource(seg(n), { signal: ctl.signal })).data
+          if (sb.buffered.length && el.currentTime - sb.buffered.start(0) > AHEAD)
+            await run(() => sb.remove(0, el.currentTime - AHEAD))
+          await run(() => sb.appendBuffer(data))
         }
       }
       const pad = (n: number) => String(n).padStart(5, '0')
