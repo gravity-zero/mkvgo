@@ -53,9 +53,10 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 					return fmt.Errorf("%s track %d: its blocks are stored with another compression or encryption than the first file's (cannot concatenate): remux the files the same way first", sources[i], j+1)
 				case !samePtr(t.Width, ft.Width) || !samePtr(t.Height, ft.Height):
 					return fmt.Errorf("%s track %d: the picture size differs from the first file's (cannot concatenate)", sources[i], j+1)
-				case !samePtr(t.SampleRate, ft.SampleRate) || !samePtr(t.OutputSampleRate, ft.OutputSampleRate):
+				case t.Type == mkv.AudioTrack && (orDefault(t.SampleRate, 8000) != orDefault(ft.SampleRate, 8000) ||
+					orDefault(t.OutputSampleRate, orDefault(t.SampleRate, 8000)) != orDefault(ft.OutputSampleRate, orDefault(ft.SampleRate, 8000))):
 					return fmt.Errorf("%s track %d: the sample rate differs from the first file's (cannot concatenate)", sources[i], j+1)
-				case !samePtr(t.Channels, ft.Channels) || !samePtr(t.BitDepth, ft.BitDepth):
+				case t.Type == mkv.AudioTrack && (orDefault(t.Channels, 1) != orDefault(ft.Channels, 1) || t.BitDepth != nil && ft.BitDepth != nil && *t.BitDepth != *ft.BitDepth):
 					return fmt.Errorf("%s track %d: the channels or bit depth differ from the first file's (cannot concatenate)", sources[i], j+1)
 				}
 			}
@@ -203,8 +204,8 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}
 		lastSubs = map[uint64]mkv.Block{}
 		var priming map[uint64]primingCut
-		if i > 0 {
-			priming = primingCuts(c.Tracks)
+		if i > 0 && !linkedTo(&conts[i-1].Info, &c.Info) {
+			priming = primingCuts(c.Tracks) // a part continuing the one before opens on real sound
 		}
 		if err := streamToWriter(ctx, mw, src, c.Info.TimecodeScale, fs, streamOpts{
 			remap: remap, timeOffset: offset, trackEnds: trackEnds,
@@ -407,6 +408,14 @@ func primingCuts(tracks []mkv.Track) map[uint64]primingCut {
 }
 
 // samePtr reports whether two optional values are both absent or equal.
+// orDefault is *v, or def where the file leaves the element out: the schema default a reader assumes.
+func orDefault[T any](v *T, def T) T {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
 func samePtr[T comparable](a, b *T) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
 // TestJoin_CodecMismatch covers the codec validation: joining tracks that line up
@@ -414,5 +415,49 @@ func TestJoin_DropsTheNextFilesEncoderPriming(t *testing.T) {
 	}
 	if got := countBlocksFromFile(t, out, 1_000_000)[1]; got != 38 {
 		t.Errorf("the join holds %d frames, want 38: the second file's two priming frames dropped", got)
+	}
+}
+
+// TestJoin_KeepsALinkedPartsOpeningSound: a part that continues the one before opens on real sound, CodecDelay stated or not.
+func TestJoin_KeepsALinkedPartsOpeningSound(t *testing.T) {
+	dir := t.TempDir()
+	audio := audioTrack(1)
+	audio.CodecDelay = 44_000_000
+	audio.DefaultDurationNs = 21_333_333
+	var blocks []mkv.Block
+	for i := int64(0); i < 20; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: i * 21_333_333 / 1_000_000, Keyframe: true, Data: []byte{byte(i)}})
+	}
+	part := func(name string, info mkv.SegmentInfo) string {
+		path := filepath.Join(dir, name)
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		mw := writer.NewMKVWriter(f)
+		info.TimecodeScale, info.MuxingApp, info.WritingApp = 1_000_000, "test", "test"
+		if err := mw.WriteStart(); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.WriteMetadata(&mkv.Container{Info: info}, []mkv.Track{audio}, 427); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.WriteClusterWithCues(0, 1_000_000, blocks); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.Finalize(); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	a := part("a.mkv", mkv.SegmentInfo{SegmentUID: []byte("0123456789abcdef"), NextUID: []byte("fedcba9876543210")})
+	b := part("b.mkv", mkv.SegmentInfo{SegmentUID: []byte("fedcba9876543210"), PrevUID: []byte("0123456789abcdef")})
+	out := filepath.Join(dir, "j.mkv")
+	if err := Join(context.Background(), []string{a, b}, out); err != nil {
+		t.Fatal(err)
+	}
+	if got := countBlocksFromFile(t, out, 1_000_000)[1]; got != 40 {
+		t.Errorf("the join holds %d frames, want 40: a linked part has no priming to drop", got)
 	}
 }
