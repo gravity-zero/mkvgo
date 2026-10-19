@@ -104,6 +104,11 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska `Split` keeps its last output cluster open near the end asked for,
+  so the picture shown last before the cut is still there to be held to it
+  even when sound muxed ahead opens a new cluster in between: a join of the
+  parts then lands every seam on the source's keyframe, where it was a
+  millisecond off per seam on 23.976 fps video, chapters included.
 - `EditInPlace` copies the metadata elements an edit leaves as they were from
   the file, rather than writing them again: a title edit on a file holding Tags
   both in its head and after its clusters (as mkvmerge leaves them) gathered

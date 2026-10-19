@@ -240,6 +240,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		outScale = timecodeScale
 	}
 	clusterMs := clusterSpanMs(outScale)
+	hardSpanMs := maxBlockRelTC * max(outScale, 1) / mkv.DefaultTimecodeScale // the widest offset a block can carry
 
 	// base is the source timecode that lands on opts.timeOffset in the output:
 	// blocks are shifted by base-timeOffset on their way out, and they are held
@@ -512,7 +513,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if clusterTS < 0 {
 			clusterTS = blk.Timecode
 		}
-		if blk.Timecode-clusterTS >= clusterMs && len(cluster) > 0 {
+		// Near the end asked for, the cluster stays open up to the offsets' hard limit: the picture shown last before
+		// the cut must still be pending when the cut is met (holdToCut), even when sound muxed ahead would roll it over.
+		nearEnd := opts.keyframeAlign && opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd-clusterMs &&
+			blk.Timecode-clusterTS < hardSpanMs
+		if blk.Timecode-clusterTS >= clusterMs && len(cluster) > 0 && !nearEnd {
 			if err := injectSubs(blk.Timecode); err != nil {
 				return err
 			}

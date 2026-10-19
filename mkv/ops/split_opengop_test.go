@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -166,5 +167,78 @@ func TestSplitOfACutSourceSaysSo(t *testing.T) {
 	_, err = Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
 	if !errors.Is(err, ErrSourceTruncated) || !strings.Contains(err.Error(), "once the file is complete") {
 		t.Errorf("err = %v, want ErrSourceTruncated saying to split once the file is complete", err)
+	}
+}
+
+// TestJoinOfMillisecondRoundedFramesIsExact pins a split then join of 23.976 fps video stamped to the millisecond
+// (frames 41 and 42 ms apart): every part's last picture ends exactly at its cut, so each seam lands on the source's
+// keyframe, not a millisecond off on either side, which a film of a hundred chapters accumulated.
+func TestJoinOfMillisecondRoundedFramesIsExact(t *testing.T) {
+	var blocks []mkv.Block
+	for j := 0; j < 240; j++ { // 10 s, a keyframe every 24 frames (1001 ms)
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: int64(math.Round(float64(j) * 1001 / 24)), Keyframe: j%24 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(j)}})
+	}
+	// Stored as an HEVC B-pyramid is: each keyframe, then every 4 pictures the 4th, 2nd, 1st and 3rd, so the picture
+	// shown last before a cut is stored a few ahead of it, an output cluster boundary possibly between.
+	var stored []mkv.Block
+	for g := 0; g < 240; g += 24 {
+		stored = append(stored, blocks[g:g+4]...)
+		for j := g + 4; j < g+24; j += 4 { // the last group ends on the picture shown just before the next keyframe
+			stored = append(stored, blocks[j+3], blocks[j+1], blocks[j], blocks[j+2])
+		}
+	}
+	// Sound muxed a second ahead of the picture, as on a real 2160p episode: its blocks roll the output cluster
+	// over at almost every one.
+	var muxed []mkv.Block
+	k := int64(0)
+	for i, b := range stored {
+		for ; k*32 <= int64(float64(i)*1001/24)+1000 && k < 320; k++ {
+			muxed = append(muxed, mkv.Block{TrackNumber: 2, Timecode: k * 32, Keyframe: true, Data: []byte{0xAA, byte(k)}})
+		}
+		muxed = append(muxed, b)
+	}
+	dir := t.TempDir()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, muxed, 10240)
+	var ranges []mkv.TimeRange
+	for s := int64(0); s < 9000; s += 1000 {
+		ranges = append(ranges, mkv.TimeRange{StartMs: s, EndMs: s + 1000})
+	}
+	ranges = append(ranges, mkv.TimeRange{StartMs: 9000})
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: ranges})
+	mustNil(t, err)
+	joined := filepath.Join(dir, "j.mkv")
+	mustNil(t, Join(context.Background(), parts, joined))
+	got := trackBlocks(collectAllBlocks(t, joined))[1]
+	if len(got) != len(stored) {
+		t.Fatalf("%d pictures joined, %d in the source", len(got), len(stored))
+	}
+	for i := range stored {
+		if got[i].Timecode != stored[i].Timecode {
+			t.Fatalf("picture %d at %d ms, the source has it at %d", i, got[i].Timecode, stored[i].Timecode)
+		}
+	}
+}
+
+// TestSplitHoldsTheLastPictureWrittenBeforeTheCut pins the hold when the picture shown last before a cut was already
+// written: sound muxed ahead of the picture opens a new output cluster between it and the cut keyframe (seen on a
+// 2160p episode), so the part's last cluster no longer holds it; a join then lands a millisecond off at each seam.
+func TestSplitHoldsTheLastPictureWrittenBeforeTheCut(t *testing.T) {
+	var blocks []mkv.Block
+	for j := 0; j < 48; j++ { // 23.976 fps stamped to the ms: 959 is followed by 1001, 41 ms the smallest gap
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: int64(math.Round(float64(j) * 1001 / 24)), Keyframe: j%24 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(j)}})
+		if j == 23 { // a block of sound a second ahead, stored between the last picture and the keyframe
+			blocks = append(blocks, mkv.Block{TrackNumber: 2, Timecode: 1000, Keyframe: true, Data: []byte{0xAA}})
+		}
+	}
+	dir := t.TempDir()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 2002)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: []mkv.TimeRange{{EndMs: 1000}, {StartMs: 1000}}})
+	mustNil(t, err)
+	joined := filepath.Join(dir, "j.mkv")
+	mustNil(t, Join(context.Background(), parts, joined))
+	for _, b := range trackBlocks(collectAllBlocks(t, joined))[1] {
+		if b.Keyframe && b.Timecode > 0 && b.Timecode != 1001 {
+			t.Errorf("the second part's keyframe joined at %d ms, the source has it at 1001", b.Timecode)
+		}
 	}
 }
