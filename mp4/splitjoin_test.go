@@ -5,15 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// sampleSeqs lists, per probe track, every sample as "dts/cto/dur/sync/sha" with decode times rebased to the track's first.
+// sampleSeqs lists, per probe track, every sample as "dts/cto/dur/sync/sha", then "/type=index" per sample group, with decode times rebased to the track's first.
 func sampleSeqs(t *testing.T, path string) [][]string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -29,12 +31,17 @@ func sampleSeqs(t *testing.T, path string) [][]string {
 	var out [][]string
 	for _, c := range m.tracks {
 		var seq []string
-		for _, s := range c.tt.samples {
+		types := slices.Sorted(maps.Keys(c.tt.groups))
+		for i, s := range c.tt.samples {
 			buf := make([]byte, s.size)
 			if _, err := f.ReadAt(buf, s.src); err != nil {
 				t.Fatal(err)
 			}
-			seq = append(seq, fmt.Sprintf("%d/%d/%d/%v/%x", s.dts, s.cto, s.dur, s.sync, sha256.Sum256(buf)))
+			e := fmt.Sprintf("%d/%d/%d/%v/%x", s.dts, s.cto, s.dur, s.sync, sha256.Sum256(buf))
+			for _, typ := range types {
+				e += fmt.Sprintf("/%s=%d", typ, c.tt.groups[typ][i])
+			}
+			seq = append(seq, e)
 		}
 		out = append(out, seq)
 	}
