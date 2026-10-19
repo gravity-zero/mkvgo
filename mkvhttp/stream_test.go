@@ -246,6 +246,44 @@ func TestHandlerStreamsABRVariants(t *testing.T) {
 	}
 }
 
+// A HEAD or a revalidation of a playlist or an init counts nothing streamed: only a GET hands the bytes out.
+func TestHandlerHeadOfAPlaylistStreamsNothing(t *testing.T) {
+	ctx := context.Background()
+	plan, err := mp4.PlanHLS(ctx, streamFixture(t), mp4.Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(plan))
+	defer srv.Close()
+	for _, name := range []string{"playlist.m3u8", "init.mp4"} {
+		resp, err := http.Get(srv.URL + "/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		before := plan.Stats().StreamedBytes
+		head, err := http.Head(srv.URL + "/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		head.Body.Close()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/"+name, nil)
+		req.Header.Set("If-None-Match", resp.Header.Get("ETag"))
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if head.ContentLength != resp.ContentLength || head.Header.Get("ETag") != resp.Header.Get("ETag") || r.StatusCode != http.StatusNotModified {
+			t.Errorf("%s: HEAD %d %q, revalidation %d; GET said %d %q", name, head.ContentLength, head.Header.Get("ETag"), r.StatusCode, resp.ContentLength, resp.Header.Get("ETag"))
+		}
+		if got := plan.Stats().StreamedBytes - before; got != 0 {
+			t.Errorf("%s: a HEAD and a 304 counted %d bytes streamed", name, got)
+		}
+	}
+}
+
 // A name the plan does not serve answers 404, not the 502 of a source that failed: an unknown name, a segment past
 // the last, a subtitle rendition the plan does not have.
 func TestHandlerUnknownNamesAre404(t *testing.T) {

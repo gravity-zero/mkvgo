@@ -615,11 +615,20 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 
 // Stat says what Open would hand out under name - its size, ETag and content type - without handing it out: no
 // segment is counted served, none kept is taken, so a HEAD or a revalidation costs the plan nothing. ok is false
-// where only Open can tell: not a streamed segment, a CENC one, whose head Open frames from the samples, or a network
-// source's light audio, handed out whole.
+// where only Open can tell: a segment that does not stream, a CENC one, whose head Open frames from the samples, or a
+// network source's light audio, handed out whole.
 func (p *HLSPlan) Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error) {
 	ti, n, isSeg := p.segmentName(name)
-	if !isSeg || !p.streams() || !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim() || p.opts.CENC != nil {
+	if !isSeg {
+		// A playlist, an init or a subtitle: Open hands it out whole under its bytes' own ETag, counted as streamed.
+		data, ct, err := p.Resource(ctx, name)
+		if err != nil {
+			return 0, "", "", false, err
+		}
+		sum := sha256.Sum256(data)
+		return int64(len(data)), `"` + hex.EncodeToString(sum[:]) + `"`, ct, true, nil
+	}
+	if !p.streams() || !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim() || p.opts.CENC != nil {
 		return 0, "", "", false, nil
 	}
 	if err := p.checkSource(); err != nil {
