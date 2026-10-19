@@ -296,7 +296,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 	yes := func(k int) bool { asked[k] = true; return true }
 	no := func(k int) bool { asked[k] = true; return false }
 
-	even := []segInfo{{6, 600}, {6, 660}, {6, 540}, {6, 1500}, {6, 600}} // 2.5x peak: never asked
+	even := []segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 660}, {durSec: 6, bytes: 540}, {durSec: 6, bytes: 1500}, {durSec: 6, bytes: 600}} // 2.5x peak: never asked
 	for i, s := range boundSegmentSpans(even, yes) {
 		if s != even[i] {
 			t.Errorf("span %d changed: %+v -> %+v", i, even[i], s)
@@ -306,7 +306,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 		t.Errorf("spans under 3x the median must not be checked: %v", asked)
 	}
 
-	peak := []segInfo{{6, 600}, {6, 660}, {6, 3300}, {6, 540}, {6, 600}} // 5.5x real peak, the file says no
+	peak := []segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 660}, {durSec: 6, bytes: 3300}, {durSec: 6, bytes: 540}, {durSec: 6, bytes: 600}} // 5.5x real peak, the file says no
 	asked = map[int]bool{}
 	for i, s := range boundSegmentSpans(peak, no) {
 		if s != peak[i] {
@@ -317,7 +317,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 		t.Errorf("only the 5.5x span must be checked: %v", asked)
 	}
 
-	block := []segInfo{{6, 600}, {6, 660}, {6, 60000}, {6, 540}, {3, 300}} // a swallowed block, confirmed
+	block := []segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 660}, {durSec: 6, bytes: 60000}, {durSec: 6, bytes: 540}, {durSec: 3, bytes: 300}} // a swallowed block, confirmed
 	got := boundSegmentSpans(block, yes)
 	// The block is bounded to the median rate (100 B/s x 6 s = 600) and the
 	// 59400 bytes taken out - the other tracks' media - come back to every
@@ -328,7 +328,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 			t.Errorf("span %d: got %d bytes, want %d", i, got[i].bytes, want[i])
 		}
 	}
-	if short := boundSegmentSpans([]segInfo{{6, 600}, {6, 60000}}, yes); short[1].bytes != 60000 {
+	if short := boundSegmentSpans([]segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 60000}}, yes); short[1].bytes != 60000 {
 		t.Error("fewer than three segments: no statistics, nothing bounded")
 	}
 	if nilc := boundSegmentSpans(block, nil); nilc[2].bytes != 60000 {

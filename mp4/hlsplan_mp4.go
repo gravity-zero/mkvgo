@@ -137,7 +137,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 		if k+1 < p.segCount {
 			segEnd = p.bounds[k+1]
 		}
-		var segBytes int64
+		var segBytes, audioBytes int64
 		for i, ft := range fts {
 			starts[i] = append(starts[i], int32(cursors[i]))
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
@@ -146,9 +146,12 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 				iframes = append(iframes, iframeRef{seg: k, length: head + int64(seg.samples[0].size)})
 			}
 			segBytes += head + seg.dataLen
+			if !ft.outTrack.spec.video {
+				audioBytes += head + seg.dataLen
+			}
 		}
 		p.durs[k] = float64(segEndOrLast(p.bounds, k, fts)-segStart) / 1000
-		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes})
+		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes, audioBytes: audioBytes})
 	}
 	if video != nil && o.Encrypt == nil && o.CENC == nil && len(iframes) > 0 {
 		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)

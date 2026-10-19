@@ -171,8 +171,9 @@ type hlsSubTrack struct {
 // segInfo describes one written media segment, for the playlists: its duration
 // (seconds) and its total byte size (BANDWIDTH computation).
 type segInfo struct {
-	durSec float64
-	bytes  int64
+	durSec     float64
+	bytes      int64
+	audioBytes int64 // the part of bytes in non-video renditions: what a video-only ABR variant shares from the reference
 }
 
 // RemuxToHLS reads the Matroska/WebM file at srcPath and writes a fragmented-MP4
@@ -857,7 +858,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 			segEnd = bounds[k+1]
 		}
 
-		var segBytes int64
+		var segBytes, audioBytes int64
 		for i, ft := range fts {
 			from := cursors[i]
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
@@ -926,10 +927,14 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				fileBytes = int64(len(head)) + seg.dataLen
 			}
 			segBytes += fileBytes
+			if !ft.outTrack.spec.video {
+				audioBytes += fileBytes
+			}
 		}
 		infos = append(infos, segInfo{
-			durSec: float64(segEndOrLast(bounds, k, fts)-segStart) / 1000,
-			bytes:  segBytes,
+			durSec:     float64(segEndOrLast(bounds, k, fts)-segStart) / 1000,
+			bytes:      segBytes,
+			audioBytes: audioBytes,
 		})
 	}
 	return infos, iframes, nil

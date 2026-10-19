@@ -149,8 +149,19 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 		}
 	}
 
+	// A video-only variant plays the reference's audio alongside: its BANDWIDTH carries that audio's peak too.
+	var sharedAudio int64
+	for _, s := range ref.segs {
+		if s.durSec > 0 {
+			sharedAudio = max(sharedAudio, int64(float64(s.audioBytes)*8/s.durSec))
+		}
+	}
 	for vi, res := range results {
-		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", peakBandwidth(res.segs))
+		bw := peakBandwidth(res.segs)
+		if vi > 0 {
+			bw += sharedAudio
+		}
+		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", bw)
 		if v := pickVideoFrag(res.fts); v != nil {
 			t := &v.outTrack.mkv
 			if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
