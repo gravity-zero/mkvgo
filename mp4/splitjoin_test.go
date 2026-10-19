@@ -361,3 +361,35 @@ func TestJoinRefusesAnotherDisplayMatrix(t *testing.T) {
 		t.Errorf("err = %v, want a refusal of the other display matrix", err)
 	}
 }
+
+// TestSplitLeavesATrackItsEditListEndedEmpty: a track the edit list has ended before a cut holds nothing in the part after it.
+func TestSplitLeavesATrackItsEditListEndedEmpty(t *testing.T) {
+	src := editShiftFixture(t, false)
+	rewriteTailMoov(t, src, func(p []byte) []byte {
+		return mapTraks(t, p, func(k int, trak []byte) []byte {
+			if k != 1 {
+				return trak
+			}
+			tb, _ := iterBoxes(trak)
+			var w bw
+			for _, b := range tb {
+				if b.typ == "edts" {
+					continue
+				}
+				w.bytes(box(b.typ, b.payload))
+				if b.typ == "tkhd" {
+					w.bytes(buildEdit(0, 0, 2500)) // the sound shows 2.5 s of its 6
+				}
+			}
+			return w.b
+		})
+	})
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 3000}, {StartMs: 3000}}})
+	m := mustCutModel(t, parts[1])
+	if n := len(m.tracks[1].tt.samples); n != 0 {
+		t.Errorf("part 2 holds %d sound samples the edit list hides", n)
+	}
+	if n := len(m.tracks[0].tt.samples); n == 0 {
+		t.Error("part 2 lost its pictures")
+	}
+}
