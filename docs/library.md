@@ -2446,7 +2446,7 @@ stays as it is, leading and trailing spaces and dots are trimmed, a name Windows
 an existing file: a part whose name is taken is overwritten, but a part that
 would be the source itself is refused before any part is written. The modes
 are read in this order when several are set: `ByChapters`, then `EveryMs`,
-then `Ranges` (the CLI refuses more than one).
+then `Ranges` (the CLI refuses more than one). Under `ByChapters` the first part starts at 0, so what plays before the first chapter is in it.
 
 **Split by chapters:**
 ```go

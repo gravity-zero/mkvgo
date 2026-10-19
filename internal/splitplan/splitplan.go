@@ -11,14 +11,23 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// ChapterRanges turns chapters into ranges, a chapter without an end running to the next one in time.
+// ChapterRanges turns chapters into ranges, a chapter without an end running to the next one in time, the first from 0.
 func ChapterRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 	ranges := make([]mkv.TimeRange, len(chapters))
 	next := nextStarts(chapters)
+	first := int64(-1)
+	for _, ch := range chapters {
+		if first < 0 || ch.StartMs < first {
+			first = ch.StartMs
+		}
+	}
 	for i, ch := range chapters {
 		ranges[i] = mkv.TimeRange{StartMs: ch.StartMs, EndMs: ch.EndMs}
 		if ranges[i].EndMs == 0 && next[i] > 0 {
 			ranges[i].EndMs = next[i]
+		}
+		if ch.StartMs == first {
+			ranges[i].StartMs = 0
 		}
 	}
 	return ranges

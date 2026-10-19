@@ -261,3 +261,26 @@ func newBudget() *int64 {
 	b := int64(maxSamples)
 	return &b
 }
+
+// TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter: pictures before the first chapter's start belong to the first part, none is lost.
+func TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter(t *testing.T) {
+	src := editFixture(t)
+	if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+		c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 500}, {ID: 2, Title: "B", StartMs: 2500}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parts := splitInto(t, src, mkv.SplitOptions{ByChapters: true})
+	want := sampleSeqs(t, src)
+	got := make([]int, len(want))
+	for _, p := range parts {
+		for ti, seq := range sampleSeqs(t, p) {
+			got[ti] += len(seq)
+		}
+	}
+	for ti := range want {
+		if got[ti] != len(want[ti]) {
+			t.Errorf("track %d: the parts hold %d samples of the source's %d", ti+1, got[ti], len(want[ti]))
+		}
+	}
+}

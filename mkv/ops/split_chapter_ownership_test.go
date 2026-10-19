@@ -348,3 +348,20 @@ func TestSplit_ChaptersCloserThanTheKeyframesFailOnTheRange(t *testing.T) {
 		t.Errorf("error is %q, want the range's own diagnosis (no video keyframe)", err)
 	}
 }
+
+// TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter: frames before the first chapter's start belong to the first part, none is lost.
+func TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter(t *testing.T) {
+	dir := t.TempDir()
+	src := buildChapteredMKV(t, dir, "src.mkv", []mkv.Chapter{{ID: 1, Title: "A", StartMs: 1000}, {ID: 2, Title: "B", StartMs: 4000}}, 6000, 2000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), ByChapters: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, p := range parts {
+		total += countBlocksFromFile(t, p, 1_000_000)[1]
+	}
+	if want := countBlocksFromFile(t, src, 1_000_000)[1]; total != want {
+		t.Errorf("the parts hold %d frames of the source's %d", total, want)
+	}
+}
