@@ -24,9 +24,9 @@ const metaBufSize = 2 << 10
 // for the next segment-level element.
 const headResyncCap = 1 << 20
 
-// OpenMeta opens path and returns only its Info + Tracks via the fast
-// metadata-only path (see ReadMeta). Chapters, Attachments, Tags and Cues are
-// left nil. Use Open for a full read.
+// OpenMeta opens path and returns its Info, Tracks and Keyframes via the fast
+// metadata-only path (see ReadMeta); Cues, Chapters, Attachments and Tags only
+// when a ReadOption asks for them. Use Open for a full read.
 func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -490,7 +490,7 @@ type headOffsets struct {
 	seekHeads                                       []int64 // further SeekHeads this one points at
 }
 
-// merge keeps the other SeekHead's entries where this one has none.
+// merge takes every entry the other SeekHead states, over this one's.
 func (h *headOffsets) merge(o headOffsets) {
 	for _, p := range []struct {
 		dst *int64

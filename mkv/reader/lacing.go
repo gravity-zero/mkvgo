@@ -6,11 +6,6 @@ import (
 	"math/bits"
 )
 
-// decodeLacingSizes reads the per-frame sizes from a laced block's lacing
-// header and returns them with the exact number of header bytes consumed -
-// parseBlock slices the frame data right after them. Returning the consumed
-// length (instead of re-deriving it from the sizes) stays correct even when a
-// muxer encoded a size or diff in a wider-than-minimal VINT.
 // readLaceHeader reads a lace header (after its count byte) from r and returns
 // each frame's size and the header's length, the last frame sized from
 // dataLen - the bytes the header and frames take together - as
@@ -71,6 +66,11 @@ func readLaceHeader(r io.ByteReader, lacing byte, frameCount int, dataLen int64)
 	return sizes, headerLen, err
 }
 
+// decodeLacingSizes reads the per-frame sizes from a laced block's lacing
+// header and returns them with the exact number of header bytes consumed -
+// parseBlock slices the frame data right after them. Returning the consumed
+// length (instead of re-deriving it from the sizes) stays correct even when a
+// muxer encoded a size or diff in a wider-than-minimal VINT.
 func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, headerLen int, err error) {
 	return decodeLacingSizesLen(lacing, raw, frameCount, int64(len(raw)))
 }

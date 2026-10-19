@@ -18,6 +18,9 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// maxDecompressedBlock is the inflated-block bound the model enforces.
+const maxDecompressedBlock = mkv.MaxDecodedPayload
+
 // decompressSubtitleBlock returns the block's payload as content: inflated when
 // the track says its payloads are compressed, untouched otherwise.
 //
@@ -25,9 +28,6 @@ import (
 // consumer of a given codec knows how to put back (the MP4 path does exactly
 // that), and no subtitle codec mkvgo extracts uses it - so silently prepending
 // nothing would be a lie either way.
-// maxDecompressedBlock is the inflated-block bound the model enforces.
-const maxDecompressedBlock = mkv.MaxDecodedPayload
-
 func decompressSubtitleBlock(t *mkv.Track, data []byte) ([]byte, error) {
 	if t == nil || t.Compression == mkv.CompressionHeaderStrip {
 		return data, nil

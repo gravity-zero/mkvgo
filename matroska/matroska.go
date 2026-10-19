@@ -109,10 +109,10 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	return reader.Read(ctx, r, path, opts...)
 }
 
-// OpenMeta is the fast metadata-only counterpart of Open: it returns Tracks +
-// Info (and DurationMs) but stops as soon as it has them, never parsing Cues or
-// traversing Clusters. Chapters/Attachments/Tags/Cues are left nil. Use it for
-// library indexing where only stream metadata is needed.
+// OpenMeta is the fast metadata-only counterpart of Open: it returns Tracks,
+// Info, DurationMs and Keyframes (from the Cues the SeekHead points at) without
+// traversing Clusters. Cues, Chapters, Attachments and Tags stay nil unless a
+// ReadOption asks for them (WithCues, WithChapters...). Use it for library indexing.
 func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*Container, error) {
 	return reader.OpenMeta(ctx, path, opts...)
 }

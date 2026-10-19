@@ -122,12 +122,12 @@ type demuxOutput struct {
 	file io.Closer
 }
 
-// openOutputFiles creates one output per track, in track order. On a failure
-// it closes and removes the files it had already created.
 // demuxWriteBuf batches a track's frames into 1 MiB writes: a video frame
 // alone is tens of KiB, and a write call costs the same whatever it carries.
 const demuxWriteBuf = 1 << 20
 
+// openOutputFiles creates one output per track, in track order. On a failure
+// it closes and removes the files it had already created.
 func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	outputs := make([]demuxOutput, 0, len(tracks))
