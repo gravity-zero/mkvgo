@@ -34,6 +34,7 @@ const (
 	VideoTrack    = 1
 	AudioTrack    = 2
 	SubtitleTrack = 3
+	SecondVideo   = 4
 )
 
 // Case is one source: its traits, and the cuts a split asks for.
@@ -45,11 +46,12 @@ type Case struct {
 	Chapters Chapters
 	Cuts     int  // 1 or 2
 	Late     bool // the cuts asked 300 ms past a keyframe: each part opens on the next one
+	Second   bool // a second video track whose keyframes fall every 1.5 GOP, between the cuts
 }
 
 // Name labels a case for a subtest.
 func (c Case) Name() string {
-	return fmt.Sprintf("audio=%v/opengop=%v/ntsc=%v/sub=%d/chapters=%d/cuts=%d/late=%v", c.Audio, c.OpenGOP, c.NTSC, c.Subtitle, c.Chapters, c.Cuts, c.Late)
+	return fmt.Sprintf("audio=%v/opengop=%v/ntsc=%v/sub=%d/chapters=%d/cuts=%d/late=%v/second=%v", c.Audio, c.OpenGOP, c.NTSC, c.Subtitle, c.Chapters, c.Cuts, c.Late, c.Second)
 }
 
 // Cases is every combination, a cue over two cuts only where there are two.
@@ -69,6 +71,21 @@ func Cases() []Case {
 							}
 						}
 					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// SecondVideoCases are the cases with a second video track, its GOP out of step with the first: the cuts land inside it.
+func SecondVideoCases() []Case {
+	var out []Case
+	for _, ntsc := range []bool{false, true} {
+		for _, cuts := range []int{1, 2} {
+			for _, late := range []bool{false, true} {
+				for _, sub := range []Subtitle{NoSubtitle, CueOverCut} {
+					out = append(out, Case{Audio: true, NTSC: ntsc, Subtitle: sub, Chapters: OpenChapters, Cuts: cuts, Late: late, Second: true})
 				}
 			}
 		}
@@ -157,6 +174,9 @@ func (c Case) Tracks() []mkv.Track {
 	if c.Subtitle != NoSubtitle {
 		tracks = append(tracks, mkv.Track{ID: SubtitleTrack, Type: mkv.SubtitleTrack, Codec: "srt", Language: "fre"})
 	}
+	if c.Second {
+		tracks = append(tracks, mkv.Track{ID: SecondVideo, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcC, Width: &w, Height: &h, DefaultDurationNs: int64(math.Round(c.frameNs()))})
+	}
 	return tracks
 }
 
@@ -176,6 +196,11 @@ func (c Case) Blocks() map[uint64][]mkv.Block {
 		}
 	}
 	out[VideoTrack] = video
+	if c.Second {
+		for j := 0; j < c.frames(); j++ {
+			out[SecondVideo] = append(out[SecondVideo], mkv.Block{TrackNumber: SecondVideo, Timecode: c.frameMs(j), Keyframe: j%(c.gop()*3/2) == 0, Data: []byte{0x00, 0x00, 0x00, 0x01, 0x41, byte(j >> 8), byte(j)}})
+		}
+	}
 	if c.Audio {
 		for i := 0; i < 300; i++ {
 			out[AudioTrack] = append(out[AudioTrack], mkv.Block{TrackNumber: AudioTrack, Timecode: int64(i) * 20, Keyframe: true, Data: []byte{0xAA, byte(i >> 8), byte(i)}})

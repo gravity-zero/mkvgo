@@ -18,6 +18,9 @@ func TestCasesAndCuts(t *testing.T) {
 	if n := len(Cases()); n != 240 {
 		t.Errorf("%d cases, want 240", n)
 	}
+	if n := len(SecondVideoCases()); n != 16 {
+		t.Errorf("%d second-video cases, want 16", n)
+	}
 	for _, tc := range []struct {
 		c    Case
 		want []int64
@@ -38,7 +41,7 @@ func TestCasesAndCuts(t *testing.T) {
 
 // TestBuildMKVStoresWhatBlocksSays: every case's file reads back, track by track, as Blocks states it, an open GOP's leading pictures behind their keyframe.
 func TestBuildMKVStoresWhatBlocksSays(t *testing.T) {
-	for _, c := range Cases() {
+	for _, c := range append(Cases(), SecondVideoCases()...) {
 		path := filepath.Join(t.TempDir(), "src.mkv")
 		if err := c.BuildMKV(path); err != nil {
 			t.Fatalf("%s: %v", c.Name(), err)

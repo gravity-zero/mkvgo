@@ -97,3 +97,50 @@ func joinedBlocks(c matrix.Case) map[uint64][]mkv.Block {
 	}
 	return out
 }
+
+// TestSplitJoinSecondVideoMatrix: a second video track whose GOPs straddle the cuts comes back whole from split and join,
+// each part opening it on one of its keyframes and lasting as its cut track does.
+func TestSplitJoinSecondVideoMatrix(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range matrix.SecondVideoCases() {
+		t.Run(c.Name(), func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "src.mkv")
+			mustNil(t, c.BuildMKV(src))
+			parts, err := Split(ctx, mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
+			mustNil(t, err)
+			cuts := c.ExpectedCuts()
+			if len(parts) != len(cuts)+1 {
+				t.Fatalf("%d parts, want %d", len(parts), len(cuts)+1)
+			}
+			// The same case without the second track: what each part lasts must not move.
+			twin := c
+			twin.Second = false
+			twinSrc := filepath.Join(dir, "twin.mkv")
+			mustNil(t, twin.BuildMKV(twinSrc))
+			twinParts, err := Split(ctx, mkv.SplitOptions{SourcePath: twinSrc, OutputDir: filepath.Join(dir, "twin"), Ranges: twin.Ranges()})
+			mustNil(t, err)
+			for k, p := range parts {
+				blocks := trackBlocks(collectAllBlocks(t, p))
+				if v := blocks[matrix.SecondVideo]; k > 0 && len(v) > 0 && !v[0].Keyframe {
+					t.Errorf("%s opens the second video on %s, want one of its keyframes", filepath.Base(p), blockSeq(v[:1]))
+				}
+				pc, err := reader.Open(ctx, p)
+				mustNil(t, err)
+				tc, err := reader.Open(ctx, twinParts[k])
+				mustNil(t, err)
+				if d := pc.DurationMs - tc.DurationMs; d < -1 || d > 1 {
+					t.Errorf("%s lasts %d ms, %d without the second video", filepath.Base(p), pc.DurationMs, tc.DurationMs)
+				}
+			}
+			joined := filepath.Join(dir, "j.mkv")
+			mustNil(t, Join(ctx, parts, joined))
+			got := trackBlocks(collectAllBlocks(t, joined))
+			for _, track := range []uint64{matrix.VideoTrack, matrix.SecondVideo, matrix.AudioTrack} {
+				if g, w := blockSeq(got[track]), blockSeq(c.Blocks()[track]); g != w {
+					t.Errorf("track %d: the join does not give the source back:\n got %s\nwant %s", track, g, w)
+				}
+			}
+		})
+	}
+}
