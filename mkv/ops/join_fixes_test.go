@@ -360,3 +360,37 @@ func TestJoin_SourcesWithoutADeclaredDuration(t *testing.T) {
 		}
 	}
 }
+
+// TestJoin_RefusesTracksStoredOrShapedDifferently: same codec and configuration, but compressed, encrypted or sized differently: the output could declare only one.
+func TestJoin_RefusesTracksStoredOrShapedDifferently(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	zlib := subtitleTrack(1, "srt")
+	zlib.Compression = mkv.CompressionZlib
+	strip := subtitleTrack(1, "srt")
+	strip.HeaderStripping = []byte{0x00}
+	strip.Compression = mkv.CompressionHeaderStrip
+	tall := videoTrack(1)
+	tall.Height = u32(720)
+	rate := audioTrack(1)
+	rate.SampleRate = f64(44100)
+	stereo := audioTrack(1)
+	stereo.Channels = u8(6)
+	for _, tc := range []struct {
+		name string
+		a, b mkv.Track
+		want string
+	}{
+		{"zlib", subtitleTrack(1, "srt"), zlib, "compression"},
+		{"header stripping", subtitleTrack(1, "srt"), strip, "compression"},
+		{"height", videoTrack(1), tall, "picture size"},
+		{"sample rate", audioTrack(1), rate, "sample rate"},
+		{"channels", audioTrack(1), stereo, "channels"},
+	} {
+		a := buildMinimalMKV(t, dir, tc.name+"-a.mkv", []mkv.Track{tc.a}, testBlocks(1), 200)
+		b := buildMinimalMKV(t, dir, tc.name+"-b.mkv", []mkv.Track{tc.b}, testBlocks(1), 200)
+		if err := Join(ctx, []string{a, b}, filepath.Join(dir, tc.name+".mkv")); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}

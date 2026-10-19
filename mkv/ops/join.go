@@ -49,6 +49,14 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 					return fmt.Errorf("%s track %d: codec %s, expected %s (cannot concatenate)", sources[i], j+1, t.Codec, ft.Codec)
 				case !bytes.Equal(t.CodecPrivate, ft.CodecPrivate):
 					return fmt.Errorf("%s track %d: codec configuration differs from the first file (cannot concatenate)", sources[i], j+1)
+				case t.Compression != ft.Compression || !bytes.Equal(t.HeaderStripping, ft.HeaderStripping) || t.Encryption != ft.Encryption:
+					return fmt.Errorf("%s track %d: its blocks are stored with another compression or encryption than the first file's (cannot concatenate): remux the files the same way first", sources[i], j+1)
+				case !samePtr(t.Width, ft.Width) || !samePtr(t.Height, ft.Height):
+					return fmt.Errorf("%s track %d: the picture size differs from the first file's (cannot concatenate)", sources[i], j+1)
+				case !samePtr(t.SampleRate, ft.SampleRate) || !samePtr(t.OutputSampleRate, ft.OutputSampleRate):
+					return fmt.Errorf("%s track %d: the sample rate differs from the first file's (cannot concatenate)", sources[i], j+1)
+				case !samePtr(t.Channels, ft.Channels) || !samePtr(t.BitDepth, ft.BitDepth):
+					return fmt.Errorf("%s track %d: the channels or bit depth differ from the first file's (cannot concatenate)", sources[i], j+1)
 				}
 			}
 		}
@@ -376,4 +384,9 @@ func soundTracks(tracks []mkv.Track, video, subs map[uint64]bool) int {
 		}
 	}
 	return n
+}
+
+// samePtr reports whether two optional values are both absent or equal.
+func samePtr[T comparable](a, b *T) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
