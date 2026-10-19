@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -47,11 +49,110 @@ func TestSplitJoinFixtureMatrix(t *testing.T) {
 						start = ask
 					}
 					ranges = append(ranges, mkv.TimeRange{StartMs: start})
-					checkSplitJoin(t, src, ranges, d != bare)
+					checkSplitJoin(t, src, mkv.SplitOptions{Ranges: ranges}, len(ranges), d != bare)
 				})
 			}
 		}
 	}
+}
+
+// TestSplitJoinFixtureModes: split every so often, or by the chapters a dress sets 300 ms ahead of each cut, comes back from the join too.
+func TestSplitJoinFixtureModes(t *testing.T) {
+	for _, name := range fixtureCutSources {
+		t.Run(name+"/every", func(t *testing.T) {
+			src := copyFixture(t, name)
+			kf := mustCutModel(t, src).keyframesMs()
+			every := kf[1]
+			if len(kf) > 2 {
+				every++ // past one GOP: parts of two
+			}
+			ranges, err := splitplan.EveryRanges(kf, every)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := checkSplitJoin(t, src, mkv.SplitOptions{EveryMs: every}, len(ranges), false)
+			for _, p := range parts[:len(parts)-1] {
+				if d := mustMeta(t, p).DurationMs; d < every {
+					t.Errorf("%s lasts %d ms, under the %d asked", filepath.Base(p), d, every)
+				}
+			}
+		})
+		for _, d := range []dress{marked, crowded} {
+			t.Run(fmt.Sprintf("%s/chapters/dress=%d", name, d), func(t *testing.T) {
+				src := copyFixture(t, name)
+				kf := mustCutModel(t, src).keyframesMs()
+				cuts := kf[1:min(len(kf), 3)]
+				src = dressed(t, src, d, cuts)
+				parts := checkSplitJoin(t, src, mkv.SplitOptions{ByChapters: true, Pattern: "{title}" + filepath.Ext(src)}, len(cuts)+1, true)
+				for i, p := range parts {
+					if want := fmt.Sprintf("Chapter %d%s", i+1, filepath.Ext(src)); filepath.Base(p) != want {
+						t.Errorf("part %d named %q, want %q", i+1, filepath.Base(p), want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestSplitLeavingGaps: parts that skip the head or a stretch between two cuts each hold the source's samples from their keyframe on, and their join holds them end to end.
+func TestSplitLeavingGaps(t *testing.T) {
+	for _, name := range fixtureCutSources {
+		src := copyFixture(t, name)
+		kf := mustCutModel(t, src).keyframesMs()
+		if len(kf) < 3 {
+			continue
+		}
+		for _, ranges := range [][]mkv.TimeRange{
+			{{StartMs: kf[1], EndMs: kf[2]}},
+			{{StartMs: kf[1]}},
+			{{StartMs: 0, EndMs: kf[1]}, {StartMs: kf[2]}},
+		} {
+			t.Run(fmt.Sprintf("%s/%v", name, ranges), func(t *testing.T) {
+				parts := splitInto(t, src, mkv.SplitOptions{Ranges: ranges})
+				whole := sampleSeqs(t, src)
+				joined := make([][]string, len(whole))
+				end, sum := mustMeta(t, src).DurationMs, int64(0)
+				for i, p := range parts {
+					want := cmp.Or(ranges[i].EndMs, end) - ranges[i].StartMs
+					got := mustMeta(t, p).DurationMs
+					if d := got - want; d < -1 || d > 1 {
+						t.Errorf("%s lasts %d ms, its range %d", filepath.Base(p), got, want)
+					}
+					sum += got
+					seqs := sampleSeqs(t, p)
+					if len(seqs) != len(whole) {
+						t.Fatalf("%s: %d tracks, %d in the source", filepath.Base(p), len(seqs), len(whole))
+					}
+					for ti, seq := range seqs {
+						if !containsRun(bodies(whole[ti]), bodies(seq)) {
+							t.Errorf("%s track %d: its samples are not a stretch of the source's", filepath.Base(p), ti+1)
+						}
+						joined[ti] = append(joined[ti], bodies(seq)...)
+					}
+				}
+				if len(parts) < 2 {
+					return
+				}
+				out := filepath.Join(t.TempDir(), "j"+filepath.Ext(src))
+				if err := Join(context.Background(), parts, out); err != nil {
+					t.Fatal(err)
+				}
+				for ti, seq := range sampleSeqs(t, out) {
+					if strings.Join(bodies(seq), ",") != strings.Join(joined[ti], ",") {
+						t.Errorf("track %d: the join does not hold its parts end to end", ti+1)
+					}
+				}
+				if d := mustMeta(t, out).DurationMs - sum; d < -1 || d > 1 {
+					t.Errorf("the join lasts %d ms, its parts %d", sum+d, sum)
+				}
+			})
+		}
+	}
+}
+
+// containsRun reports whether run appears in seq as consecutive entries.
+func containsRun(seq, run []string) bool {
+	return strings.Contains(","+strings.Join(seq, ",")+",", ","+strings.Join(run, ",")+",")
 }
 
 // TestSplitJoinAudioOnly: a source with no picture is cut at the asked times and joined back.
@@ -65,18 +166,18 @@ func TestSplitJoinAudioOnly(t *testing.T) {
 				}
 				cuts := []int64{700, 1300}
 				src = dressed(t, src, d, cuts)
-				checkSplitJoin(t, src, []mkv.TimeRange{{StartMs: 0, EndMs: cuts[0]}, {StartMs: cuts[0], EndMs: cuts[1]}, {StartMs: cuts[1]}}, d != bare)
+				checkSplitJoin(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: cuts[0]}, {StartMs: cuts[0], EndMs: cuts[1]}, {StartMs: cuts[1]}}}, 3, d != bare)
 			})
 		}
 	}
 }
 
-// checkSplitJoin splits src at ranges and requires the join to give back its samples, chapters, chapter track, groups and length, with no link left; cued: the second part opens on a cue.
-func checkSplitJoin(t *testing.T, src string, ranges []mkv.TimeRange, cued bool) {
+// checkSplitJoin splits src into n parts, returned, and requires the join to give back its samples, chapters, chapter track, groups and length, with no link left; cued: the second part opens on a cue.
+func checkSplitJoin(t *testing.T, src string, opts mkv.SplitOptions, n int, cued bool) []string {
 	t.Helper()
-	parts := splitInto(t, src, mkv.SplitOptions{Ranges: ranges})
-	if len(parts) != len(ranges) {
-		t.Fatalf("%d parts, want %d", len(parts), len(ranges))
+	parts := splitInto(t, src, opts)
+	if len(parts) != n {
+		t.Fatalf("%d parts, want %d", len(parts), n)
 	}
 	if cued {
 		m := mustCutModel(t, parts[1])
@@ -121,6 +222,7 @@ func checkSplitJoin(t *testing.T, src string, ranges []mkv.TimeRange, cued bool)
 	if ws, gs := trakGroups(t, sd), trakGroups(t, jd); fmt.Sprint(ws) != fmt.Sprint(gs) {
 		t.Errorf("alternate groups %v, the source's %v", gs, ws)
 	}
+	return parts
 }
 
 // copyFixture copies a real fixture into the test's directory, where edits may write.
