@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -107,5 +108,24 @@ func TestOtherTrackTypesSurviveARewrite(t *testing.T) {
 	var w bytes.Buffer
 	if err := writer.WriteTracks(&w, []mkv.Track{{ID: 1, Type: "hologram", Codec: "X"}}); err == nil {
 		t.Error("a TrackType Matroska does not define was written")
+	}
+}
+
+// TestJoinRefusesTracksInAnotherLanguageOrder: the join pairs tracks by position, so a second file whose audio is in
+// another language (French and English swapped) is refused; the same language written two ways joins.
+func TestJoinRefusesTracksInAnotherLanguageOrder(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	eng, fre, en := audioTrack(1), audioTrack(1), audioTrack(1)
+	fre.Language = "fre"
+	en.LanguageBCP47 = "en-US"
+	a, b, c := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv"), filepath.Join(dir, "c.mkv")
+	sparseTracksMKV(t, a, []mkv.Track{eng})
+	sparseTracksMKV(t, b, []mkv.Track{fre})
+	sparseTracksMKV(t, c, []mkv.Track{en})
+	if err := Join(ctx, []string{a, b}, filepath.Join(dir, "ab.mkv")); err == nil || !strings.Contains(err.Error(), "same order") {
+		t.Errorf("English then French audio: %v", err)
+	}
+	if err := Join(ctx, []string{a, c}, filepath.Join(dir, "ac.mkv")); err != nil {
+		t.Errorf("eng and en-US: %v", err)
 	}
 }

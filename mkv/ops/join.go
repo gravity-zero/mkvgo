@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -45,6 +46,8 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 				switch {
 				case t.Type != ft.Type:
 					return fmt.Errorf("%s track %d: type %s, expected %s", sources[i], j+1, t.Type, ft.Type)
+				case otherLanguage(&t, &ft):
+					return fmt.Errorf("%s track %d is in %s here and %s in the first file: the join pairs tracks by position, so put them in the same order first (mux), or correct a wrong language (edit-track -lang)", shown.Path(sources[i]), j+1, t.ResolvedLanguage(), ft.ResolvedLanguage())
 				case t.Codec != ft.Codec:
 					return fmt.Errorf("%s track %d: codec %s, expected %s (cannot concatenate)", sources[i], j+1, t.Codec, ft.Codec)
 				case !bytes.Equal(t.CodecPrivate, ft.CodecPrivate):
@@ -408,6 +411,15 @@ func primingCuts(tracks []mkv.Track) map[uint64]primingCut {
 }
 
 // samePtr reports whether two optional values are both absent or equal.
+// otherLanguage reports two tracks that both state a language, and not the same one: tracks in another order.
+func otherLanguage(a, b *mkv.Track) bool {
+	if !a.LanguagePresent || !b.LanguagePresent {
+		return false
+	}
+	la, lb := lang.Primary(a.ResolvedLanguage()), lang.Primary(b.ResolvedLanguage())
+	return la != "und" && lb != "und" && la != lb
+}
+
 // orDefault is *v, or def where the file leaves the element out: the schema default a reader assumes.
 func orDefault[T any](v *T, def T) T {
 	if v == nil {

@@ -393,3 +393,55 @@ func TestSplitLeavesATrackItsEditListEndedEmpty(t *testing.T) {
 		t.Error("part 2 lost its pictures")
 	}
 }
+
+// TestJoinComparesDisplayOnVideoOnly: a sound track's tkhd states no picture, so a width one muxer leaves there does
+// not refuse the join; only the video's matrix and size are compared.
+func TestJoinComparesDisplayOnVideoOnly(t *testing.T) {
+	a, b := editFixture(t), editFixture(t)
+	rewriteTailMoov(t, b, func(p []byte) []byte {
+		return mapTraks(t, p, func(k int, trak []byte) []byte {
+			if k != 1 {
+				return trak
+			}
+			tb, _ := iterBoxes(trak)
+			var w bw
+			for _, x := range tb {
+				if x.typ == "tkhd" {
+					q := append([]byte(nil), x.payload...)
+					off := 40
+					if q[0] == 1 {
+						off = 52
+					}
+					binary.BigEndian.PutUint32(q[off+36:], 320<<16) // a width on a sound track
+					w.bytes(box("tkhd", q))
+					continue
+				}
+				w.bytes(box(x.typ, x.payload))
+			}
+			return w.b
+		})
+	})
+	if err := Join(context.Background(), []string{a, b}, filepath.Join(t.TempDir(), "j.mp4")); err != nil {
+		t.Errorf("a sound track's tkhd width refused the join: %v", err)
+	}
+}
+
+// TestJoinRefusesTracksInAnotherLanguageOrder: an MP4 join pairs tracks by position as a Matroska one does, so a
+// second file whose audio states another language is refused; a track that states none joins.
+func TestJoinRefusesTracksInAnotherLanguageOrder(t *testing.T) {
+	a, b := editFixture(t), editFixture(t)
+	setLang := func(path, l string) {
+		if err := EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Tracks[1].Language, c.Tracks[1].LanguageBCP47 = l, "" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setLang(a, "eng")
+	setLang(b, "fre")
+	if err := Join(context.Background(), []string{a, b}, filepath.Join(t.TempDir(), "j.mp4")); err == nil || !strings.Contains(err.Error(), "same order") {
+		t.Errorf("English then French audio: %v", err)
+	}
+	setLang(b, "eng")
+	if err := Join(context.Background(), []string{a, b}, filepath.Join(t.TempDir(), "j.mp4")); err != nil {
+		t.Errorf("same language: %v", err)
+	}
+}

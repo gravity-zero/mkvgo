@@ -32,6 +32,22 @@ func Fields(tag string, style Style) (code, bcp47 string) {
 	return primary, tag
 }
 
+// Primary is a language's ISO 639-2 bibliographic code whatever form it comes in (a 2 or 3-letter code, either 639-2
+// form, a BCP-47 tag), "und" when none can be told: two tracks state the same language when their Primary match.
+func Primary(tag string) string {
+	p, _, _ := strings.Cut(strings.ToLower(tag), "-")
+	if c, ok := iso6391To6392T[p]; ok {
+		p = c
+	}
+	if b, ok := terminologyToBibliographic[p]; ok {
+		p = b
+	}
+	if len(p) != 3 || !isLowerAlpha(p) {
+		return "und"
+	}
+	return p
+}
+
 // Set is the language and tag a Matroska track keeps when newLang is set on it: a new one is split into its code and
 // BCP-47 tag (Fields), dropping the old tag; one empty or unchanged (merge passes every track's own) keeps both.
 func Set(oldLang, oldTag, newLang string) (language, bcp47 string) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -154,11 +155,24 @@ func sameStreams(a, b *cutModel) error {
 		if !bytes.Equal(decodingDescription(sx, x.handler), decodingDescription(sy, y.handler)) {
 			return fmt.Errorf("track %d is encoded differently from the first file's (its sample description differs): a join copies samples, so every file needs the same encoding settings", i+1)
 		}
-		if !bytes.Equal(tkhdDisplay(x.trak), tkhdDisplay(y.trak)) {
-			return fmt.Errorf("track %d is turned or sized for display differently from the first file's (its tkhd matrix or size differs), which the join could state only one way: set the same orientation first (edit), or remux the files to MKV (from-mp4) and join there", i+1)
+		if lx, ly := trakLanguage(x.trak), trakLanguage(y.trak); lx != "und" && ly != "und" && lx != ly {
+			return fmt.Errorf("track %d is in %s here and %s in the first file: the join pairs tracks by position, so put them in the same order first (mux), or correct a wrong language (edit-track -lang)", i+1, ly, lx)
+		}
+		if x.handler == "vide" && !bytes.Equal(tkhdDisplay(x.trak), tkhdDisplay(y.trak)) {
+			return fmt.Errorf("track %d is turned or sized for display differently from the first file's (its tkhd matrix or size differs), which the join could state only one way: join files that display the same way", i+1)
 		}
 	}
 	return nil
+}
+
+// trakLanguage is the language a trak's mdhd states, as its ISO 639-2 bibliographic code ("und" when it states none).
+func trakLanguage(trak []byte) string {
+	p, err := boxAt(trak, "mdia", "mdhd")
+	if err != nil {
+		return "und"
+	}
+	_, l := parseMdhd(p)
+	return lang.Primary(l)
 }
 
 // tkhdDisplay is a trak's display matrix and size as its tkhd states them (nil when it has none).
