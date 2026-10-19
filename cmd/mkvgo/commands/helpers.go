@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -504,7 +505,11 @@ func ParseTimePoint(s string) (int64, error) {
 		}
 		total += float64(v) * mult
 	}
-	return int64(total * 1000), nil
+	ms := math.Round(total * 1000) // 1.001 s is 1000.9999... ms in binary floating point: rounded, not truncated
+	if ms > math.MaxInt64/2 {
+		return 0, fmt.Errorf("time %q is out of range", s)
+	}
+	return int64(ms), nil
 }
 
 func FmtMs(ms int64) string {

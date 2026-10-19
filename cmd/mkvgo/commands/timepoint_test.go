@@ -19,6 +19,8 @@ func TestParseTimePoint(t *testing.T) {
 		{"1:30.5", 90500},     // MM:SS.fraction
 		{"01:30:00", 5400000}, // HH:MM:SS
 		{" 1:00 ", 60000},     // trimmed
+		{"1.001", 1001},       // rounded, where binary floating point truncated it to 1000
+		{"0:01.001", 1001},
 	} {
 		got, err := commands.ParseTimePoint(tc.in)
 		if err != nil {
