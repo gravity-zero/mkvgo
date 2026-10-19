@@ -140,13 +140,14 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	outSubs := subtitleTrackSet(first.Tracks)
 	var offset, prevEnd, prevVideoEnd, prevMediaEnd int64 // prevMediaEnd: the end without the subtitle cues
 	var lastSubs map[uint64]mkv.Block                     // the previous source's last cue per output subtitle track
+	var prevTrackEnds map[uint64]int64                    // the previous source's end per output track
 	var prevHasVideoEnd bool
 	offsets := make([]int64, len(sources)) // where each source's timeline starts
 	for i, src := range sources {
 		if i > 0 {
 			offset = prevEnd
 			if prevHasVideoEnd && linkedTo(&conts[i-1].Info, &conts[i].Info) {
-				seam, sound, ok, err := videoSeamOffset(ctx, conts[i], prevVideoEnd, fs)
+				seam, sounds, ok, err := videoSeamOffset(ctx, conts[i], prevVideoEnd, fs)
 				if err != nil {
 					return err
 				}
@@ -157,7 +158,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 				// Unless the next part's sound takes up exactly where the previous part's stops: that is
 				// interleaving, however far ahead of its picture the sound was muxed.
 				// A cue on screen past the cut (one a split carried over it) holds no picture: it does not count.
-				continuous := sound >= 0 && abs64(prevMediaEnd-(seam+sound)) <= seamSoundSlackMs
+				continuous := soundContinues(sounds, conts[i].Tracks, first.Tracks, prevTrackEnds, seam)
 				if ok && seam >= offsets[i-1] && (prevMediaEnd-seam <= defaultClusterDurationMs || continuous) {
 					offset = seam
 				}
@@ -202,7 +203,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		}); err != nil {
 			return fmt.Errorf("join %s: %w", shown.Path(src), err)
 		}
-		prevEnd, prevVideoEnd, prevMediaEnd, prevHasVideoEnd = offset, 0, offset, false
+		prevEnd, prevVideoEnd, prevMediaEnd, prevHasVideoEnd, prevTrackEnds = offset, 0, offset, false, trackEnds
 		for id, end := range trackEnds {
 			if end > prevEnd {
 				prevEnd = end
@@ -258,6 +259,28 @@ const seamSoundSlackMs = 50
 // seamSoundWindowMs is how far into a part its first sound is looked for: past any lead a muxer gives its sound.
 const seamSoundWindowMs = 5000
 
+// soundContinues reports whether every sound track the next source starts within reach takes up, at the seam, where
+// the same output track of the previous source stops: the two are one stream cut there. next and out are the next
+// source's and the output's tracks, in the order that pairs them.
+func soundContinues(sounds map[uint64]int64, next, out []mkv.Track, prevEnds map[uint64]int64, seam int64) bool {
+	matched := 0
+	for j, t := range next {
+		first, ok := sounds[t.ID]
+		if !ok || j >= len(out) {
+			continue
+		}
+		end, ok := prevEnds[out[j].ID]
+		if !ok {
+			continue
+		}
+		if abs64(end-(seam+first)) > seamSoundSlackMs {
+			return false
+		}
+		matched++
+	}
+	return matched > 0
+}
+
 func abs64(v int64) int64 {
 	if v < 0 {
 		return -v
@@ -266,8 +289,8 @@ func abs64(v int64) int64 {
 }
 
 // videoSeamOffset returns where a slice's timeline must start for its picture to
-// carry on from the previous slice's, where in the slice its first sound sits (-1 when none is in reach), and
-// whether that could be established.
+// carry on from the previous slice's, where in the slice each other track (no subtitle) starts, as far as it was
+// looked for, and whether that could be established.
 //
 // A keyframe-aligned cut runs down the file at a video keyframe, so it is exact
 // on the video track and on no other: interleaving leaves the part BEFORE the
@@ -281,19 +304,19 @@ func abs64(v int64) int64 {
 // So the seam is the picture's: the previous part's last frame ends, less how
 // far into this one its own first frame sits. Both parts keep the overlap they
 // were cut with, which is the interleaving the source was muxed with.
-func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int64, fs *mkv.FS) (int64, int64, bool, error) {
+func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int64, fs *mkv.FS) (int64, map[uint64]int64, bool, error) {
 	video, subs := videoTrackSet(next.Tracks), subtitleTrackSet(next.Tracks)
 	if len(video) == 0 {
-		return 0, -1, false, nil
+		return 0, nil, false, nil
 	}
 	f, err := fs.DoOpen(next.Path)
 	if err != nil {
-		return 0, -1, false, err
+		return 0, nil, false, err
 	}
 	defer f.Close()
 	br, err := reader.NewBlockReader(f, next.Info.TimecodeScale)
 	if err != nil {
-		return 0, -1, false, err
+		return 0, nil, false, err
 	}
 	br.SetHeaderOnly(true) // where the blocks are, not what they hold
 
@@ -304,18 +327,18 @@ func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int6
 	// The sound may start further on, in a later cluster, when it was muxed far ahead of the picture: it is looked
 	// for up to seamSoundWindowMs in.
 	var firstTC, best int64
-	sound := int64(-1)
+	sounds := map[uint64]int64{}
 	var seen, found bool
 	for {
 		if ctx.Err() != nil {
-			return 0, -1, false, ctx.Err()
+			return 0, nil, false, ctx.Err()
 		}
 		blk, err := br.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return 0, -1, false, err
+			return 0, nil, false, err
 		}
 		if !seen {
 			firstTC, seen = blk.Timecode, true
@@ -329,15 +352,28 @@ func videoSeamOffset(ctx context.Context, next *mkv.Container, prevVideoEnd int6
 			if inWindow && (!found || blk.Timecode < best) {
 				best, found = blk.Timecode, true
 			}
-		case !subs[blk.TrackNumber] && (sound < 0 || blk.Timecode < sound):
-			sound = blk.Timecode
+		case !subs[blk.TrackNumber]:
+			if first, ok := sounds[blk.TrackNumber]; !ok || blk.Timecode < first {
+				sounds[blk.TrackNumber] = blk.Timecode
+			}
 		}
-		if blk.Timecode-firstTC >= seamSoundWindowMs || (!inWindow && sound >= 0) {
+		if blk.Timecode-firstTC >= seamSoundWindowMs || (!inWindow && len(sounds) >= soundTracks(next.Tracks, video, subs)) {
 			break
 		}
 	}
 	if !found {
-		return 0, -1, false, nil
+		return 0, nil, false, nil
 	}
-	return prevVideoEnd - best, sound, true, nil
+	return prevVideoEnd - best, sounds, true, nil
+}
+
+// soundTracks counts the tracks that are neither video nor subtitles.
+func soundTracks(tracks []mkv.Track, video, subs map[uint64]bool) int {
+	n := 0
+	for _, t := range tracks {
+		if !video[t.ID] && !subs[t.ID] {
+			n++
+		}
+	}
+	return n
 }

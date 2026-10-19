@@ -126,8 +126,9 @@ func TestJoinOfPartsWithSoundMuxedFarAhead(t *testing.T) {
 	for j := int64(0); j < 100; j++ {
 		all = append(all, stored{j * 40, mkv.Block{TrackNumber: 1, Timecode: j * 40, Keyframe: j%25 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(j)}}})
 	}
-	for k := int64(0); k < 200; k++ {
+	for k := int64(0); k < 200; k++ { // two sound tracks, muxed 1.2 s and 1.3 s ahead
 		all = append(all, stored{k*20 - 1200, mkv.Block{TrackNumber: 2, Timecode: k * 20, Keyframe: true, Data: []byte{0xAA, byte(k)}}})
+		all = append(all, stored{k*20 - 1300, mkv.Block{TrackNumber: 3, Timecode: k * 20, Keyframe: true, Data: []byte{0xBB, byte(k)}}})
 	}
 	sort.SliceStable(all, func(a, b int) bool { return all[a].dts < all[b].dts })
 	blocks := make([]mkv.Block, len(all))
@@ -135,7 +136,7 @@ func TestJoinOfPartsWithSoundMuxedFarAhead(t *testing.T) {
 		blocks[i] = s.b
 	}
 	dir := t.TempDir()
-	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 4000)
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2), audioTrack(3)}, blocks, 4000)
 	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: []mkv.TimeRange{{EndMs: 2000}, {StartMs: 2000}}})
 	mustNil(t, err)
 	joined := filepath.Join(dir, "j.mkv")
@@ -147,8 +148,8 @@ func TestJoinOfPartsWithSoundMuxedFarAhead(t *testing.T) {
 			break
 		}
 	}
-	if n := len(got[2]); n != 200 {
-		t.Errorf("the join holds %d audio frames, the source 200", n)
+	if n, m := len(got[2]), len(got[3]); n != 200 || m != 200 {
+		t.Errorf("the join holds %d and %d audio frames, the source 200 each", n, m)
 	}
 }
 

@@ -103,8 +103,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 ### Fixed
 
 - `Join` places linked parts whose sound was muxed more than a second ahead of
-  the picture at the picture's cut when the next part's sound takes up where
-  the previous one's stops: it fell back on the sound's end, and every later
+  the picture at the picture's cut when each sound track of the next part takes
+  up where the same track of the previous one stops: it fell back on the sound's end, and every later
   part came that much late, its chapters and subtitle cues with it.
 - A Matroska `Split` of a source that stops before its declared end is refused
   (`ErrSourceTruncated`) before any part is written: its parts stopped where
