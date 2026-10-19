@@ -36,8 +36,8 @@ func TestExtractSubtitleWebVTTMP4(t *testing.T) {
 	if !strings.HasPrefix(got, "WEBVTT") {
 		t.Errorf("output is not WebVTT:\n%s", got)
 	}
-	// tx3g carries plain text (markup stripped at remux); cue 1 spans to cue 2.
-	for _, want := range []string{"00:00:01.000 --> 00:00:03.000\nFirst", "Second"} {
+	// tx3g carries plain text (markup stripped at remux); cue 1 stays the second it takes to read.
+	for _, want := range []string{"00:00:01.000 --> 00:00:02.000\nFirst", "Second"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}

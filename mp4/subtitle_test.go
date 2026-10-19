@@ -30,9 +30,9 @@ func textSamples(written []byte, tr *outTrack) (durations []int64, texts []strin
 }
 
 func TestTextLookaheadLeadInAndDefault(t *testing.T) {
-	// Two cues without BlockDuration: a lead-in empty sample fills [0,1000), the
-	// first cue runs until the next (gap-derived 2000ms), the last uses the
-	// default duration.
+	// Two cues without BlockDuration: a lead-in empty sample fills [0,1000), each
+	// cue stays the second its text takes to read, an empty sample bridging the
+	// first one's to the next.
 	var buf bytes.Buffer
 	tr := outTrack{spec: codecTable["srt"]}
 	cw := &countWriter{w: &buf}
@@ -46,10 +46,10 @@ func TestTextLookaheadLeadInAndDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	durs, texts := textSamples(buf.Bytes(), &tr)
-	if !reflect.DeepEqual(durs, []int64{1000, 2000, defaultCueDurMs}) {
-		t.Errorf("durations = %v, want [1000 2000 %d]", durs, defaultCueDurMs)
+	if !reflect.DeepEqual(durs, []int64{1000, 1000, 1000, 1000}) {
+		t.Errorf("durations = %v, want [1000 1000 1000 1000]", durs)
 	}
-	if !reflect.DeepEqual(texts, []string{"", "First", "Second"}) {
+	if !reflect.DeepEqual(texts, []string{"", "First", "", "Second"}) {
 		t.Errorf("texts = %q", texts)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // subtitle.go - SRT (S_TEXT/UTF8) subtitles carried as MP4 timed text (tx3g,
@@ -11,7 +12,7 @@ import (
 // payload is a 16-bit length followed by UTF-8 text; the gaps between cues are
 // filled with empty samples so the text track is continuous, as players expect.
 
-// defaultCueDurMs is used for the last cue when its BlockDuration is absent.
+// defaultCueDurMs is a last chapter's span when neither its end nor the movie's is known.
 const defaultCueDurMs = 2000
 
 // emptyCue is a zero-length tx3g sample (text length 0), used to fill the gaps
@@ -126,6 +127,14 @@ func (t *outTrack) addTextBlock(cw *countWriter, b mkv.Block) error {
 	return nil
 }
 
+// pendCueReading is the buffered cue's text as it reads on screen.
+func (t *outTrack) pendCueReading() string {
+	if c := canonicalSubCodec(t.mkv.Codec); c == "ass" || c == "ssa" {
+		return string(flattenASS(t.pendCueText))
+	}
+	return string(t.pendCueText)
+}
+
 // flushPendingCue emits the buffered cue (and any surrounding empty samples).
 // nextStart is the next cue's PTS, or -1 at end of stream.
 func (t *outTrack) flushPendingCue(cw *countWriter, nextStart int64) error {
@@ -137,13 +146,14 @@ func (t *outTrack) flushPendingCue(cw *countWriter, nextStart int64) error {
 	}
 
 	dur := t.pendCueDur
-	if nextStart >= 0 && nextStart > t.pendCuePTS {
-		if gap := nextStart - t.pendCuePTS; dur <= 0 || dur > gap {
-			dur = gap // clamp to avoid overlap; also covers missing BlockDuration
-		}
+	if dur <= 0 { // no BlockDuration: read, up to the next cue or the film's end
+		dur = subtitle.CueEndMs(t.pendCuePTS, t.pendCueReading(), nextStart, nextStart >= 0, t.mediaEndMs) - t.pendCuePTS
+	}
+	if gap := nextStart - t.pendCuePTS; nextStart >= 0 && gap > 0 && dur > gap {
+		dur = gap // clamp to avoid overlap
 	}
 	if dur <= 0 {
-		dur = defaultCueDurMs
+		dur = 1
 	}
 	if err := t.emitSample(cw, t.spec.cueSample(t.pendCueText), t.pendCuePTS, t.pendCuePTS, dur, true); err != nil {
 		return err

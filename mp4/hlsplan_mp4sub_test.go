@@ -34,8 +34,8 @@ func TestMP4PlanReadsNoSubtitleText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "00:00:00.500 --> 00:00:01.500\ncue one\n\n00:00:01.500 --> 00:00:03.500\ncue two\n"; !bytes.Contains(vtt, []byte(want)) {
-		t.Errorf("segment 2 = %q, want both cues (cue one spans its 1000 ms start)", vtt)
+	if want := "00:00:00.500 --> 00:00:01.500\ncue one\n\n00:00:01.500 --> 00:00:02.368\ncue two\n"; !bytes.Contains(vtt, []byte(want)) {
+		t.Errorf("segment 2 = %q, want both cues (cue one spans its 1000 ms start, cue two ends with the film)", vtt)
 	}
 }
 
