@@ -77,7 +77,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   `merge-subtitle`, `split`, `join`), and `to-mp4` on an MP4/MOV rewrites it
   fast start. An in-place edit rewrites the moov alone, crash-ordered like
   `retime`. A split opens each part on a keyframe with its audio in sync; a
-  join resumes each file where the previous one ends, without replaying
+  join compares how the files decode (the bitrates each declares aside),
+  takes a file's length from its tracks when its movie header leaves it unset,
+  resumes each file where the previous one ends, without replaying
   priming or padding, holds the last audio sample over a gap up to 500 ms and
   refuses a longer one, and gives a split's parts back sample for sample.
   A split's parts are chained by `org.mkvgo` freeform tags (`SPLIT_UID`,
@@ -263,6 +265,9 @@ MP4:
   stored a tick apart) reports its average rate, not 90000 fps.
 - `retime` addresses tracks as the probe lists them (a timecode track first
   could shift the video).
+- An MP4 `retime` moves only the empty edit ahead of a track's media: a pause
+  after it moved too. A shift refused for presenting a track before the start
+  says how far to delay the other tracks instead.
 - `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a
   timecode or chapter track ahead of the audio, its `retime --shift` remedy
   named the wrong track, and its `sample-table` findings used the file's

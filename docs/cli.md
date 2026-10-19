@@ -257,8 +257,9 @@ no room needs `-o` for a full rewrite). Re-hashing replaces the tags.
 mkvgo hash <file.mkv> [-o <out.mkv>]
 ```
 
-MP4s are hashed at remux time instead (`to-mp4 --hash`): mkvgo does not
-rewrite MP4 metadata in place.
+MP4s are hashed when mkvgo writes them instead: at remux time (`to-mp4 --hash`),
+then by every edit, split, join or mux of a hashed MP4, which hashes its own
+tracks. `hash` does not write MP4 hashes in place.
 
 ```bash
 mkvgo hash archive.mkv                # in place
@@ -461,7 +462,7 @@ mkvgo to-vtt subs.fr.srt -o subs.fr.vtt
 
 ## Editing
 
-**MP4/MOV sources** (sniffed from the first bytes) are edited natively by `edit`, `edit-title`, `edit-track`, `edit-inplace`, `set-chapters`, `remove-track`, `add-track`, `mux`, `merge`, `merge-subtitle`, `split` and `join`: samples and sample descriptions are copied byte for byte, only new tables are written, and the output is a fast-start MP4 (an MP4 source with a `.mkv` output name is refused; mixing MP4 and Matroska inputs is refused). What can change on an MP4: the title, the file-level tags (`TITLE`, `ARTIST`, `ALBUM`, `DATE_RELEASED`, `GENRE`, `COMMENT`, `ENCODER`, `COMPOSER`, `DESCRIPTION`), the chapters and each track's `language` (3-letter ISO 639-2), `language_bcp47`, `name`, `is_default`, `is_forced`; anything else is refused by name. `edit-inplace` rewrites the moov alone (crash-ordered: the new moov is appended and synced, then the old one becomes a `free` box), so it is instant whatever the size; `to-mp4 in.mp4 out.mp4` compacts the file again. `edit-track -lang` on an MP4 takes either a 3-letter code (the `mdhd` language) or a BCP-47 tag (an `elng` box, which some players ignore: set both through `edit`). Fragmented and encrypted MP4 are refused. Tracks a split, join or mux does not carry (a timecode track) are reported as `dropped track ...`. See [library.md](library.md#editing-mp4mov-natively) for the cut and seam rules.
+**MP4/MOV sources** (sniffed from the first bytes) are edited natively by `edit`, `edit-title`, `edit-track`, `edit-inplace`, `set-chapters`, `remove-track`, `add-track`, `mux`, `merge`, `merge-subtitle`, `split` and `join`: samples and sample descriptions are copied byte for byte, only new tables are written, and the output is a fast-start MP4 (an MP4 source with a `.mkv` output name is refused; mixing MP4 and Matroska inputs is refused). What can change on an MP4: the title, the file-level tags (`TITLE`, `ARTIST`, `ALBUM`, `DATE_RELEASED`, `GENRE`, `COMMENT`, `ENCODER`, `COMPOSER`, `DESCRIPTION`), the chapters and each track's `language` (3-letter ISO 639-2), `language_bcp47`, `name`, `is_default`, `is_forced`; anything else is refused by name. `edit-inplace` rewrites the moov alone (crash-ordered: the new moov is appended and synced, then the old one becomes a `free` box), so it is instant whatever the size; `to-mp4 in.mp4 out.mp4` compacts the file again. `edit-track -lang` on an MP4 takes either a 3-letter code (the `mdhd` language) or a BCP-47 tag (an `elng` box, which some players ignore: set both through `edit`). Fragmented and encrypted MP4 are refused. Tracks a split, join or mux does not carry (a timecode track) are reported as `dropped track ...`. A split chains its parts by `org.mkvgo` tags (`SPLIT_UID`, `SPLIT_PREV`), so their join makes a chapter cut at a seam whole again and keeps a cue carried over a cut once; the joined file carries no link. `mux`, `merge`, `add-track` and `merge-subtitle` group the tracks by type (audio, subtitles), as `to-mp4` does. An output written from a hashed MP4 hashes its own tracks, so `verify` passes on it. See [library.md](library.md#editing-mp4mov-natively) for the cut and seam rules.
 
 The JSON patch of `edit` and `edit-inplace` refuses a field it does not know and a track ID the file does not have, for both containers.
 
