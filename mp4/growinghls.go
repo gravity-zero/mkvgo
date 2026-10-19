@@ -766,7 +766,7 @@ func (p *GrowingHLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if n < 0 || n >= p.published {
-		return nil, errf("segment %d out of range (0..%d)", n, p.published-1)
+		return nil, noResource("segment %d out of range (0..%d)", n, p.published-1)
 	}
 	return p.full.Segment(ctx, n)
 }
@@ -807,7 +807,7 @@ func (p *GrowingHLSPlan) Resource(ctx context.Context, name string) ([]byte, str
 	var n int
 	if _, err := fmt.Sscanf(name, "seg%d.m4s", &n); err == nil && name == fmt.Sprintf("seg%05d.m4s", n) {
 		if n < 1 || n > p.published {
-			return nil, "", errf("segment %d out of range (0..%d)", n-1, p.published-1)
+			return nil, "", noResource("segment %d out of range (0..%d)", n-1, p.published-1)
 		}
 		data, err := p.full.segmentTrack(ctx, p.full.videoIndex(), n-1)
 		return data, mimeSeg, err
@@ -817,14 +817,14 @@ func (p *GrowingHLSPlan) Resource(ctx context.Context, name string) ([]byte, str
 		for i := range fts {
 			if name == renditionSegment(fts, i, n-1) {
 				if n < 1 || n > p.published {
-					return nil, "", errf("segment %d out of range (0..%d)", n-1, p.published-1)
+					return nil, "", noResource("segment %d out of range (0..%d)", n-1, p.published-1)
 				}
 				data, err := p.full.segmentTrack(ctx, i, n-1)
 				return data, mimeSeg, err
 			}
 		}
 	}
-	return nil, "", errf("unknown HLS resource %q (see Resources())", name)
+	return nil, "", noResource("unknown HLS resource %q (see Resources())", name)
 }
 
 // buildGrowingMediaPlaylist renders a media playlist EVENT-typed with no

@@ -104,7 +104,7 @@ type Opener interface {
 //     init and media segments "public, max-age=31536000, immutable" for a
 //     handler mounted where the URL names the source's version (under its
 //     plan.SourceID()); playlists and manifests stay "no-cache".
-//   - A Resolver error that is (or wraps) ErrNotFound answers 404; any other
+//   - A Resolver error that is (or wraps) ErrNotFound or mp4.ErrNoResource answers 404; any other
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
 func Handler(r Resolver, opts ...Options) http.Handler {
@@ -170,7 +170,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		data, contentType, err = h.resolver.Resource(req.Context(), name)
 	}
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, mp4.ErrNoResource) {
 			http.Error(w, "mkvhttp: resource not found", http.StatusNotFound)
 			return
 		}

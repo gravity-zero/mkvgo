@@ -16,16 +16,16 @@ import (
 // the subtitle-cue scan's).
 func (p *HLSPlan) iframePlaylist(ctx context.Context) ([]byte, error) {
 	if p.opts.NoIFrames {
-		return nil, errf("no I-frame playlist for this plan (Options.NoIFrames is set)")
+		return nil, noResource("no I-frame playlist for this plan (Options.NoIFrames is set)")
 	}
 	if p.mp4src {
 		if p.iframe == nil {
-			return nil, errf("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
+			return nil, noResource("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
 		}
 		return p.iframe, nil
 	}
 	if !p.hasIframe {
-		return nil, errf("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
+		return nil, noResource("no I-frame playlist for this plan (an encrypted presentation does not expose one)")
 	}
 	p.iframeMu.Lock()
 	defer p.iframeMu.Unlock()

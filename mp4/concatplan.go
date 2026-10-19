@@ -180,13 +180,13 @@ func (cp *ConcatPlan) Resource(ctx context.Context, name string) ([]byte, string
 	var j int
 	if _, err := fmt.Sscanf(name, "audio%d.m3u8", &j); err == nil && name == fmt.Sprintf("audio%d.m3u8", j) {
 		if j < 1 || j > len(cp.audio) {
-			return nil, "", errf("unknown concat resource %q", name)
+			return nil, "", noResource("unknown concat resource %q", name)
 		}
 		return cp.audio[j-1], mimeM3U8, nil
 	}
 	if _, err := fmt.Sscanf(name, "sub%d.m3u8", &j); err == nil && name == fmt.Sprintf("sub%d.m3u8", j) {
 		if !cp.subsOK || j < 1 || j > len(cp.subPl) {
-			return nil, "", errf("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j)
+			return nil, "", noResource("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j)
 		}
 		return cp.subPl[j-1], mimeM3U8, nil
 	}
@@ -197,7 +197,7 @@ func (cp *ConcatPlan) Resource(ctx context.Context, name string) ([]byte, string
 
 	k, rest, ok := parsePartPath(name)
 	if !ok || k < 0 || k >= len(cp.parts) {
-		return nil, "", errf("unknown concat resource %q", name)
+		return nil, "", noResource("unknown concat resource %q", name)
 	}
 	var pj, pn int
 	if _, err := fmt.Sscanf(rest, "sub%d_%d.vtt", &pj, &pn); err == nil && rest == fmt.Sprintf("sub%d_%05d.vtt", pj, pn) {
@@ -235,11 +235,11 @@ func isWindowedSubtitle(rest string) bool {
 // counterpart of writeConcatSubtitles' per-segment file.
 func (cp *ConcatPlan) windowedSubtitle(ctx context.Context, k, j, n int) ([]byte, error) {
 	if !cp.subsOK {
-		return nil, errf("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j+1)
+		return nil, noResource("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j+1)
 	}
 	p := cp.parts[k]
 	if j < 0 || j >= len(p.subs) {
-		return nil, errf("subtitle rendition %d out of range (0..%d)", j, len(p.subs)-1)
+		return nil, noResource("subtitle rendition %d out of range (0..%d)", j, len(p.subs)-1)
 	}
 	if n < 0 || n >= p.segCount {
 		return nil, errf("subtitle segment %d out of range for part %d (0..%d)", n, k, p.segCount-1)
@@ -261,7 +261,7 @@ func (cp *ConcatPlan) windowedSubtitle(ctx context.Context, k, j, n int) ([]byte
 // concatenated in part order.
 func (cp *ConcatPlan) wholeSubtitle(ctx context.Context, j int) ([]byte, error) {
 	if !cp.subsOK || j < 0 || j >= len(cp.subPl) {
-		return nil, errf("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j+1)
+		return nil, noResource("no subtitle rendition %d in the concatenated presentation (the parts' subtitle layouts do not align)", j+1)
 	}
 	var all []subtitle.Cue
 	for k, p := range cp.parts {

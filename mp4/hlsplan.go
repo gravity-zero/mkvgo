@@ -734,7 +734,7 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		return pl, mimeM3U8, nil
 	case "manifest.mpd":
 		if p.mpd == nil {
-			return nil, "", errf("no DASH manifest for an AES-128-encrypted presentation (HLS only)")
+			return nil, "", noResource("no DASH manifest for an AES-128-encrypted presentation (HLS only)")
 		}
 		return p.mpd, "application/dash+xml", nil
 	}
@@ -764,7 +764,7 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	var i int
 	if _, err := fmt.Sscanf(name, "sub%d.m3u8", &i); err == nil && name == fmt.Sprintf("sub%d.m3u8", i) {
 		if i < 1 || i > len(p.subs) {
-			return nil, "", errf("no subtitle rendition %d (have %d)", i, len(p.subs))
+			return nil, "", noResource("no subtitle rendition %d (have %d)", i, len(p.subs))
 		}
 		// Windowed like the full pass (byte-identical playlist); the cues are
 		// loaded once, so each window is served from the cache.
@@ -780,5 +780,5 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		data, err := p.Subtitle(ctx, i-1)
 		return data, mimeVTT, err
 	}
-	return nil, "", errf("unknown HLS resource %q (see Resources())", name)
+	return nil, "", noResource("unknown HLS resource %q (see Resources())", name)
 }

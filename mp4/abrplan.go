@@ -84,7 +84,7 @@ func (a *ABRPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	}
 	k, rest, ok := parseVariantPath(name)
 	if !ok || k < 1 || k > len(a.variants) {
-		return nil, "", errf("unknown ABR resource %q", name)
+		return nil, "", noResource("unknown ABR resource %q", name)
 	}
 	return a.variants[k-1].Resource(ctx, rest)
 }

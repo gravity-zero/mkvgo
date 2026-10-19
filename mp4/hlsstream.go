@@ -362,7 +362,7 @@ func (p *HLSPlan) storeTable(n int, t *windowTable) {
 // buildTable walks window n structure-only and times every rendition exactly as buildWindow does.
 func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	if n < 0 || n >= p.segCount {
-		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
+		return nil, noResource("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
 	release, waited, err := acquireWalk(ctx)
 	if err != nil {
@@ -512,7 +512,7 @@ func (p *HLSPlan) onNetwork(src io.Reader) bool {
 // mp4Table is segment n of an MP4 source's track ti as a table: the sample table holds its timing and offsets, nothing is walked or kept.
 func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
 	if n < 0 || n >= p.segCount {
-		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
+		return nil, noResource("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
 	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
 	t.segs[ti], t.offs[ti] = p.mp4Segment(ti, n)

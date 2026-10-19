@@ -169,6 +169,30 @@ func TestHandlerHeadAndRevalidationServeNothing(t *testing.T) {
 	}
 }
 
+// A name the plan does not serve answers 404, not the 502 of a source that failed: an unknown name, a segment past
+// the last, a subtitle rendition the plan does not have.
+func TestHandlerUnknownNamesAre404(t *testing.T) {
+	plan, err := mp4.PlanHLS(context.Background(), streamFixture(t), mp4.Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(plan))
+	defer srv.Close()
+	for _, name := range []string{"nope.m3u8", "seg99999.m4s", "seg_a1_99999.m4s", "sub7.m3u8"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			req, _ := http.NewRequest(method, srv.URL+"/"+name, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Errorf("%s %s answered %d, want 404", method, name, resp.StatusCode)
+			}
+		}
+	}
+}
+
 // failingFile fails every read past a shared byte budget: the source breaking midway.
 type failingFile struct {
 	f    *os.File

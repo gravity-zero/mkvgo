@@ -78,7 +78,7 @@ func (p *HLSPlan) segmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 // video - are already built when they are asked for, and cost no I/O at all.
 func (p *HLSPlan) buildSegmentTrack(ctx context.Context, ti, n int) ([]byte, error) {
 	if n < 0 || n >= p.segCount {
-		return nil, errf("segment %d out of range (0..%d)", n, p.segCount-1)
+		return nil, noResource("segment %d out of range (0..%d)", n, p.segCount-1)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

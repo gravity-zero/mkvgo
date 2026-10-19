@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -155,3 +156,18 @@ func isLowerAlpha(s string) bool {
 
 // errf is a small helper to keep error construction terse and consistent.
 func errf(format string, a ...any) error { return fmt.Errorf("mp4: "+format, a...) }
+
+// ErrNoResource is what a plan's Resource, Open and Stat errors match (errors.Is) when the name serves nothing: an
+// unknown name, a segment or rendition out of range, a playlist the plan does not offer. A server answers 404.
+var ErrNoResource = errors.New("mp4: no such resource")
+
+// noResourceError keeps its own message and matches ErrNoResource.
+type noResourceError struct{ msg string }
+
+func (e noResourceError) Error() string        { return e.msg }
+func (e noResourceError) Is(target error) bool { return target == ErrNoResource }
+
+// noResource is errf for a name that serves nothing.
+func noResource(format string, a ...any) error {
+	return noResourceError{fmt.Sprintf("mp4: "+format, a...)}
+}

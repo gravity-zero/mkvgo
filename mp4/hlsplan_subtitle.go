@@ -450,7 +450,7 @@ func subNeedsNextCue(cues []subtitle.Cue, uptoMs int64) bool {
 // it is written.
 func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
-		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
+		return nil, noResource("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
 	}
 	if err := p.checkSource(); err != nil {
 		return nil, err
@@ -480,10 +480,10 @@ func (p *HLSPlan) Subtitle(ctx context.Context, i int) ([]byte, error) {
 // source cues are pulled in for any offset, however large.
 func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error) {
 	if i < 0 || i >= len(p.subs) {
-		return nil, errf("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
+		return nil, noResource("subtitle rendition %d out of range (0..%d)", i, len(p.subs)-1)
 	}
 	if n < 0 || n >= p.segCount {
-		return nil, errf("subtitle segment %d out of range (0..%d)", n, p.segCount-1)
+		return nil, noResource("subtitle segment %d out of range (0..%d)", n, p.segCount-1)
 	}
 	if err := p.checkSource(); err != nil {
 		return nil, err
