@@ -716,8 +716,11 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				var err error
 				h, _, err = ebml.ReadElementHeader(br.r)
 				if err != nil {
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) && br.clusterEnd < 0 {
 						return mkv.Block{}, io.EOF
+					}
+					if errors.Is(err, io.EOF) {
+						return mkv.Block{}, io.ErrUnexpectedEOF // a known-size Cluster cut short between two of its elements
 					}
 					return mkv.Block{}, err
 				}
