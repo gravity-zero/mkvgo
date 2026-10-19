@@ -63,7 +63,7 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		remap[t.ID] = t.ID
 	}
 
-	uids := splitSegmentUIDs(c, len(ranges))
+	uids := splitSegmentUIDs(c, ranges)
 
 	// Every part is named, and checked against the source, before any is written: a part over the source would
 	// truncate it before its clusters are read.
@@ -124,19 +124,23 @@ type segmentLink struct {
 //
 // Derived from the source rather than drawn at random: splitting the same file
 // twice has to write the same bytes, or the byte-for-byte comparisons this
-// package is checked with compare nothing.
-func splitSegmentUIDs(c *mkv.Container, n int) [][]byte {
+// package is checked with compare nothing. Each one hashes its part's range too:
+// split again at other points, a part names a predecessor that is not the part
+// of the first split, which a join must not take for its continuation.
+func splitSegmentUIDs(c *mkv.Container, ranges []mkv.TimeRange) [][]byte {
 	seed := c.Info.SegmentUID
 	if len(seed) == 0 {
 		seed = []byte(c.Path)
 	}
-	uids := make([][]byte, n)
-	for i := range uids {
+	uids := make([][]byte, len(ranges))
+	for i, r := range ranges {
 		h := sha256.New()
-		h.Write([]byte("mkvgo.split.segment-uid.v1"))
+		h.Write([]byte("mkvgo.split.segment-uid.v2"))
 		h.Write(seed)
-		var idx [8]byte
-		binary.BigEndian.PutUint64(idx[:], uint64(i))
+		var idx [24]byte
+		binary.BigEndian.PutUint64(idx[:8], uint64(i))
+		binary.BigEndian.PutUint64(idx[8:16], uint64(r.StartMs))
+		binary.BigEndian.PutUint64(idx[16:], uint64(r.EndMs))
 		h.Write(idx[:])
 		uids[i] = h.Sum(nil)[:16] // a SegmentUID is 128 bits
 	}

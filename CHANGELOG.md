@@ -105,6 +105,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- A Matroska split part's SegmentUID hashes its range too: parts of two splits
+  of one source cut at other points named each other as predecessor and
+  successor, and a join of them merged a chapter across a seam that was none.
 - A Matroska `Split` keeps its last output cluster open near the end asked for,
   so the picture shown last before the cut is still there to be held to it
   even when sound muxed ahead opens a new cluster in between: a join of the
