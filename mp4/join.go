@@ -265,7 +265,21 @@ func joinTables(models []*cutModel, offsets []int64, ti int, vs *vsource) (out *
 				// This file's pictures are reordered deeper than the previous one's (an open GOP's leading pictures): its decoding would start inside it.
 				return nil, 0, fmt.Errorf("file %d starts decoding %d ms before file %d ends, its first pictures reordered further ahead than that file's: remux the files to MKV (from-mp4) and join there", k+1, rescale(-gap, c.ts, 1000), k)
 			case gap < 0:
-				shift = end - firstDts
+				// This file's first sample starts before the previous one's last: the samples it covers give way, its own times stay.
+				start := shift + firstDts
+				for n > 0 && out.samples[n-1].dts >= start {
+					n--
+				}
+				out.samples = out.samples[:n]
+				if withSdtp {
+					out.sdtp = out.sdtp[:n]
+				}
+				for typ := range groupTypes {
+					out.groups[typ] = out.groups[typ][:n]
+				}
+				if n > 0 && out.samples[n-1].dts+int64(out.samples[n-1].dur) > start {
+					out.samples[n-1].dur = uint32(start - out.samples[n-1].dts)
+				}
 			}
 		}
 		for i := from; i < to; i++ {

@@ -84,3 +84,30 @@ func TestSplitCarriesASubtitleOverTwoCuts(t *testing.T) {
 	}
 	sameSubtitlesAfterJoin(t, src, parts)
 }
+
+// TestJoinOfUnrelatedFilesKeepsEachFilesSubtitleTimes: a cue the previous file holds past where the next file's first cue starts does not push the next file's subtitles late.
+func TestJoinOfUnrelatedFilesKeepsEachFilesSubtitleTimes(t *testing.T) {
+	src := subtitled(t, "00:00:02,500 --> 00:00:03,500")
+	parts := splitInto(t, src, mkv.SplitOptions{Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 3000}, {StartMs: 3000}}})
+	twice := filepath.Join(t.TempDir(), "twice.mp4")
+	if err := Join(context.Background(), []string{parts[0], parts[0]}, twice); err != nil {
+		t.Fatal(err)
+	}
+	joined := filepath.Join(t.TempDir(), "j.mp4")
+	if err := Join(context.Background(), []string{twice, parts[1]}, joined); err != nil {
+		t.Fatal(err)
+	}
+	offset := mustMeta(t, twice).DurationMs * 1_000_000
+	p, j := mustCutModel(t, parts[1]), mustCutModel(t, joined)
+	pc, jc := &p.tracks[textTrackIndex(t, p)], &j.tracks[textTrackIndex(t, j)]
+	n, m := len(pc.tt.samples), len(jc.tt.samples)
+	if m < n {
+		t.Fatalf("the join holds %d subtitle samples, the last file alone %d", m, n)
+	}
+	for i := 0; i < n; i++ {
+		want, got := offset+pc.ptNs(i, p.movieTS), jc.ptNs(m-n+i, j.movieTS)
+		if d := got - want; d < -1_000_000 || d > 1_000_000 {
+			t.Errorf("subtitle sample %d of the last file presents at %d ms in the join, want %d", i+1, got/1_000_000, want/1_000_000)
+		}
+	}
+}
