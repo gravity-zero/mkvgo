@@ -1,9 +1,6 @@
 package mp4
 
-import (
-	"bytes"
-	"io"
-)
+import "io"
 
 // readExactAllocEager is the upfront allocation ceiling for readExact: reads up
 // to this size allocate their buffer in one shot (the common, fast case); above
@@ -28,13 +25,22 @@ func readExact(r io.Reader, n int64) ([]byte, error) {
 		}
 		return buf, nil
 	}
-	var buf bytes.Buffer
-	buf.Grow(readExactAllocEager)
-	if _, err := io.CopyN(&buf, r, n); err != nil {
-		if err == io.EOF {
+	buf := make([]byte, 0, readExactAllocEager)
+	for int64(len(buf)) < n {
+		if len(buf) == cap(buf) {
+			// Doubling, capped at n: the last growth allocates what is left to reach n, never twice the box.
+			grown := make([]byte, len(buf), min(2*int64(cap(buf)), n))
+			copy(grown, buf)
+			buf = grown
+		}
+		m, err := r.Read(buf[len(buf):min(int64(cap(buf)), n)])
+		buf = buf[:len(buf)+m]
+		if err == io.EOF && int64(len(buf)) < n {
 			return nil, io.ErrUnexpectedEOF
 		}
-		return nil, err
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
 	}
-	return buf.Bytes(), nil
+	return buf, nil
 }

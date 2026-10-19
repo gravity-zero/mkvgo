@@ -54,3 +54,25 @@ func TestReadExact_ShortDeliveryDoesNotOverAllocate(t *testing.T) {
 		t.Errorf("allocated %d bytes for a %d-byte short read of a %d-declared size; the declared size must not be allocated up front", alloc, delivered, int64(declared))
 	}
 }
+
+// TestReadExact_LargeReadHoldsItsSize: a box read past the eager ceiling ends in a buffer of its own size, not the
+// next power of two, and growing to it allocates under three times what it reads (a buffer doubling past the size
+// held up to twice the box at the end, 1.9 times it in passing).
+func TestReadExact_LargeReadHoldsItsSize(t *testing.T) {
+	const n = 5*readExactAllocEager + 1
+	src := bytes.Repeat([]byte{3}, n)
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	got, err := readExact(bytes.NewReader(src), n)
+	runtime.ReadMemStats(&m1)
+	if err != nil || !bytes.Equal(got, src) {
+		t.Fatalf("read %d bytes: %v", len(got), err)
+	}
+	if cap(got) != n {
+		t.Errorf("a %d-byte read holds a %d-byte buffer", n, cap(got))
+	}
+	if alloc := m1.TotalAlloc - m0.TotalAlloc; alloc >= 3*n {
+		t.Errorf("reading %d bytes allocated %d", n, alloc)
+	}
+}
