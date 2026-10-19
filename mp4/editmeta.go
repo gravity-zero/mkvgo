@@ -453,7 +453,7 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 				children = append(children, box("udta", b.payload))
 				continue
 			}
-			u, err := patchMovieUdta(b.payload, before, after, chaptersChanged, metaChanged)
+			u, err := patchMovieUdta(b.payload, before, after, chs, chaptersChanged, metaChanged)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -468,7 +468,7 @@ func patchMoovMeta(payload []byte, mv *movie, before, after *mkv.Container, chap
 		children = slices.Insert(children, lastTrak+1, chapTrak)
 	}
 	if !sawUdta && (chaptersChanged || metaChanged) {
-		u, err := patchMovieUdta(nil, before, after, chaptersChanged, metaChanged)
+		u, err := patchMovieUdta(nil, before, after, chs, chaptersChanged, metaChanged)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -821,8 +821,8 @@ func renameHdlr(h []byte, name string) ([]byte, error) {
 	return append(append(out, name...), 0), nil
 }
 
-// patchMovieUdta rebuilds the movie-level udta (nil p: none yet) with after's chapter list and title/tags; nil when nothing is left in it.
-func patchMovieUdta(p []byte, before, after *mkv.Container, chaptersChanged, metaChanged bool) ([]byte, error) {
+// patchMovieUdta rebuilds the movie-level udta (nil p: none yet) with chs, after's chapters as the chapter track holds them, and after's title/tags; nil when nothing is left in it.
+func patchMovieUdta(p []byte, before, after *mkv.Container, chs []mkv.Chapter, chaptersChanged, metaChanged bool) ([]byte, error) {
 	ub, err := iterBoxes(p)
 	if err != nil {
 		return nil, err
@@ -847,7 +847,7 @@ func patchMovieUdta(p []byte, before, after *mkv.Container, chaptersChanged, met
 		}
 	}
 	if chaptersChanged {
-		if chpl := buildChplBox(after.Chapters); chpl != nil {
+		if chpl := buildChplBox(chs); chpl != nil { // the chapter track's list: both end with the movie
 			children = append([][]byte{chpl}, children...)
 		}
 	}

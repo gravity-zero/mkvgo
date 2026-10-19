@@ -111,6 +111,7 @@ func TestRoundTripChapters(t *testing.T) {
 	blocks := []genBlock{
 		{track: 1, pts: 0, key: true, data: []byte{1}},
 		{track: 1, pts: 40, key: false, data: []byte{2}},
+		{track: 1, pts: 110_000, key: true, data: []byte{3}}, // the film runs past its last chapter
 	}
 	chapters := []mkv.Chapter{
 		{StartMs: 0, Title: "Alpha"},
@@ -234,6 +235,7 @@ func TestRemuxToMP4WritesChapters(t *testing.T) {
 	blocks := []genBlock{
 		{track: 1, pts: 0, key: true, data: []byte{1}},
 		{track: 1, pts: 40, key: false, data: []byte{2}},
+		{track: 1, pts: 2000, key: true, data: []byte{3}}, // the film runs past its last chapter
 	}
 	chapters := []mkv.Chapter{{StartMs: 0, Title: "Start"}, {StartMs: 1000, Title: "Middle"}}
 	src := buildMKVWithChapters(t, tracks, blocks, chapters)
@@ -262,7 +264,7 @@ func TestToMP4TakesTheDefaultEdition(t *testing.T) {
 	tracks := []mkv.Track{
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32p(320), Height: u32p(240), FrameRate: f64p(25)},
 	}
-	blocks := []genBlock{{track: 1, pts: 0, key: true, data: []byte{1}}, {track: 1, pts: 40, data: []byte{2}}}
+	blocks := []genBlock{{track: 1, pts: 0, key: true, data: []byte{1}}, {track: 1, pts: 40, data: []byte{2}}, {track: 1, pts: 50_000, key: true, data: []byte{3}}}
 	chapters := []mkv.Chapter{{StartMs: 0, Title: "Alpha"}, {StartMs: 49000, Title: "Bravo"}}
 	others := []mkv.Edition{{Chapters: []mkv.Chapter{{StartMs: 0, Title: "X"}, {StartMs: 10000, Title: "Y"}, {StartMs: 20000, Title: "Z"}}}}
 	mp4Path := filepath.Join(t.TempDir(), "out.mp4")

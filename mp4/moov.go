@@ -3,6 +3,7 @@ package mp4
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,7 +54,7 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 		maxID    uint32
 	)
 	for _, t := range tracks {
-		if len(t.samples.samples) == 0 {
+		if len(t.samples.samples) == 0 || t.isChapter {
 			continue
 		}
 		trak, dur := buildTrak(t, mdatBase, co64)
@@ -65,6 +66,15 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 			maxID = t.mp4ID
 		}
 	}
+	// The chapters end with the media: neither list runs past it, nor makes the movie last longer.
+	for _, t := range tracks {
+		if len(t.samples.samples) == 0 || !t.isChapter {
+			continue
+		}
+		trak, _ := buildTrak(chapterTrackWithin(t, int64(movieDur)), mdatBase, co64)
+		traks = append(traks, trak)
+		maxID = max(maxID, t.mp4ID)
+	}
 	children := make([][]byte, 0, len(traks)+2)
 	children = append(children, buildMvhd(movieDur, maxID+1))
 	children = append(children, traks...)
@@ -74,7 +84,7 @@ func buildMoov(tracks []*outTrack, mdatBase int64, co64 bool, meta movieMeta) []
 	if mb := buildMovieMeta(meta.title, meta.tags, meta.cover, meta.hashes); mb != nil {
 		udtaKids = append(udtaKids, mb)
 	}
-	if chpl := buildChplBox(meta.chapters); chpl != nil {
+	if chpl := buildChplBox(closeChapters(flattenChapters(meta.chapters), int64(movieDur))); chpl != nil {
 		udtaKids = append(udtaKids, chpl)
 	}
 	if len(udtaKids) > 0 {
@@ -635,4 +645,30 @@ func orientationMatrix(deg int, hflip bool) [9]uint32 {
 	m := unityMatrix
 	m[0], m[1], m[3], m[4] = fx(a), fx(b), fx(c), fx(d)
 	return m
+}
+
+// chapterTrackWithin is the chapter track t ending with the media at endMs (movie timescale, 0 unknown): the chapters
+// starting at or past it left out, the first always kept, and the last one held to it.
+func chapterTrackWithin(t *outTrack, endMs int64) *outTrack {
+	ss := t.samples.samples
+	if endMs <= 0 || len(ss) == 0 {
+		return t
+	}
+	n := len(ss)
+	for n > 1 && ss[n-1].pts >= endMs {
+		n--
+	}
+	c := *t
+	c.samples.samples = slices.Clone(ss[:n])
+	if last := &c.samples.samples[n-1]; last.pts < endMs {
+		last.dur = endMs - last.pts
+	}
+	c.samples.chunks = slices.Clone(t.samples.chunks)
+	for i, drop := len(c.samples.chunks)-1, len(ss)-n; i >= 0 && drop > 0; i-- {
+		k := min(drop, c.samples.chunks[i].count)
+		c.samples.chunks[i].count -= k
+		drop -= k
+	}
+	c.samples.chunks = slices.DeleteFunc(c.samples.chunks, func(ch chunk) bool { return ch.count == 0 })
+	return &c
 }
