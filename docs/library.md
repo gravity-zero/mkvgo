@@ -2469,8 +2469,9 @@ last picture to the cut, and a Matroska `Join` of the parts therefore lacks
 them, two or so pictures per seam, its timeline and sound intact. For an exact
 round trip of an open-GOP source, split and join it as MP4, whose edit list
 keeps them hidden. A range that contains media but no video keyframe is an
-explicit error. Audio-only sources
-cut exactly at the requested times.
+explicit error, and so is a source that stops before the end its Segment
+declares (a download not finished): `ErrSourceTruncated`, before any part is
+written. Audio-only sources cut exactly at the requested times.
 
 A segment's timeline starts at the first frame it actually keeps, not at the
 time it was asked for: those differ by however far the source's next keyframe

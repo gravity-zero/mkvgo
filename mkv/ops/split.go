@@ -16,6 +16,9 @@ import (
 
 func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]string, error) {
 	fs := mkv.FSFrom(extra)
+	if err := refuseCutSource(opts.SourcePath, fs); err != nil {
+		return nil, err
+	}
 	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return nil, err
@@ -353,4 +356,18 @@ func chaptersToRanges(chapters []mkv.Chapter) []mkv.TimeRange {
 
 func clipChapters(chapters []mkv.Chapter, startMs, endMs int64) []mkv.Chapter {
 	return splitplan.ClipChapters(chapters, startMs, endMs)
+}
+
+// refuseCutSource refuses a source shorter than its Segment declares (a download not finished): its parts would stop
+// where the file does, the last ones missing or short, with nothing to say so.
+func refuseCutSource(path string, fs *mkv.FS) error {
+	declared, known, err := segmentDeclaredEndOf(path, fs)
+	if err != nil || !known {
+		return nil
+	}
+	st, err := fs.DoStat(path)
+	if err != nil || declared <= st.Size() {
+		return nil
+	}
+	return fmt.Errorf("%w: it ends at byte %d of the %d its Segment declares: split it once the file is complete", ErrSourceTruncated, st.Size(), declared)
 }

@@ -2,9 +2,12 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/internal/matrix"
@@ -146,5 +149,21 @@ func TestJoinOfPartsWithSoundMuxedFarAhead(t *testing.T) {
 	}
 	if n := len(got[2]); n != 200 {
 		t.Errorf("the join holds %d audio frames, the source 200", n)
+	}
+}
+
+// TestSplitOfACutSourceSaysSo pins that a split running into the end of a source cut short (a download not
+// finished) is refused as ErrSourceTruncated, saying where the file stops and what to do, not as a bare EOF.
+func TestSplitOfACutSourceSaysSo(t *testing.T) {
+	c := matrix.Case{Audio: true, Cuts: 1}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	mustNil(t, c.BuildMKV(src))
+	data, err := os.ReadFile(src)
+	mustNil(t, err)
+	mustNil(t, os.WriteFile(src, data[:len(data)*6/10], 0o644))
+	_, err = Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: c.Ranges()})
+	if !errors.Is(err, ErrSourceTruncated) || !strings.Contains(err.Error(), "once the file is complete") {
+		t.Errorf("err = %v, want ErrSourceTruncated saying to split once the file is complete", err)
 	}
 }

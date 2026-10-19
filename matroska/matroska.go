@@ -782,8 +782,8 @@ var (
 	ErrTrackNotIndexed = ops.ErrTrackNotIndexed
 )
 
-// ErrSourceTruncated is returned, after the cues it holds are written, by a WebVTT extraction from a source that
-// stops before its declared end. See ops.ErrSourceTruncated.
+// ErrSourceTruncated reports a source that stops before its declared end (a download not finished): a WebVTT
+// extraction returns it after writing the cues it holds, Split before writing any part. See ops.ErrSourceTruncated.
 var ErrSourceTruncated = ops.ErrSourceTruncated
 
 // BuildSubtitleIndex walks a source once and records the block positions of the
