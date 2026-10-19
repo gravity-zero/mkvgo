@@ -240,6 +240,11 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - An MP4 join of a file that does not continue the one before (not its split's
   next part) drops the open-GOP leading pictures that file's edit list hides:
   they decoded from references the file before never held.
+- A Matroska file cut between two elements of a Cluster of known size is read
+  as truncated, as a cut inside a block already was, instead of ending cleanly
+  on the blocks it lost; a walk that skips damage records the cut.
+- An ABR master counts the shared audio in the `BANDWIDTH` of every video-only
+  variant, which declared its video alone and looked cheaper than it plays.
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
