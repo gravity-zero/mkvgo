@@ -441,3 +441,32 @@ func TestGrowingHLSConcurrency(t *testing.T) {
 		t.Errorf("final NumSegments = %d, want %d", plan.NumSegments(), goldenSegs)
 	}
 }
+
+// TestGrowingHLSCompleteReportsAnUnreadableTail: Complete on a source it cannot read says so and leaves the playlist
+// open, so the caller may call it again once the file is back.
+func TestGrowingHLSCompleteReportsAnUnreadableTail(t *testing.T) {
+	data := buildGrowingFixture(t)
+	clusters := scanAllClusters(t, data)
+	m := mkv.NewMemFS()
+	m.Put("in.mkv", data[:clusters[2].end])
+	plan, err := PlanGrowingHLS(context.Background(), "in.mkv", Options{FS: m.FS(), SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.FS().Remove("in.mkv"); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Complete(); err == nil {
+		t.Error("Complete on a source gone succeeded")
+	}
+	if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXT-X-ENDLIST")) {
+		t.Errorf("a Complete that failed closed the playlist:\n%s", pl)
+	}
+	m.Put("in.mkv", data)
+	if err := plan.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if pl := plan.MediaPlaylist(); !bytes.Contains(pl, []byte("#EXT-X-ENDLIST")) {
+		t.Errorf("Complete once the source is back left the playlist open:\n%s", pl)
+	}
+}

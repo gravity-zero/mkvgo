@@ -301,19 +301,25 @@ func (p *GrowingHLSPlan) Refresh(ctx context.Context) (int, error) {
 // fixed part of this API): the scan it performs is a small, bounded, one-shot
 // read over data that by the caller's own assertion will not grow further, so
 // context.Background() is used internally rather than threading one through.
-func (p *GrowingHLSPlan) Complete() {
+// An error leaves the plan open (no EXT-X-ENDLIST): the tail could not be read, and Complete may be called again.
+func (p *GrowingHLSPlan) Complete() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.done {
-		return
+		return nil
 	}
 	ctx := context.Background()
-	if st, err := p.fs.DoStat(p.srcPath); err == nil {
-		_, _ = p.scanLocked(ctx, st.Size())
+	st, err := p.fs.DoStat(p.srcPath)
+	if err != nil {
+		return err
+	}
+	if _, err := p.scanLocked(ctx, st.Size()); err != nil {
+		return err
 	}
 	if !p.done {
-		_ = p.finalizeLocked(ctx)
+		return p.finalizeLocked(ctx)
 	}
+	return nil
 }
 
 // scanLocked resumes the cluster cursor over [cursor, size), folding every
