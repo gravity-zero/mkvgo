@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -594,6 +595,9 @@ func WriteAttachmentsFrom(w io.Writer, attachments []mkv.Attachment, open func(*
 		}
 		// The payload was left on disk (reader.WithoutAttachmentData): copy it
 		// through, so a font never becomes resident just to be forwarded.
+		if open == nil {
+			return fmt.Errorf("attachment %q: its payload was left in %s (WithoutAttachmentData) and nothing reads it there: load it first (LoadAttachmentData), or open the file with its attachments", att.Name, shown.Path(att.DataPath))
+		}
 		src, err := open(att)
 		if err != nil {
 			return fmt.Errorf("attachment %q: %w", att.Name, err)
