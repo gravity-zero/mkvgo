@@ -19,6 +19,9 @@ func TestParseSRTTimestamp(t *testing.T) {
 		{"bad", 0, false},
 		{"00:00:00", 0, false},
 		{"", 0, false},
+		{"00:00:01.500", 1500, true}, // a dot for the comma, as some editors write it
+		{"00:-1:00,000", 0, false},   // a negative component
+		{"00:00:01,-500", 0, false},
 	}
 	for _, tt := range tests {
 		got, ok := ParseSRTTimestamp(tt.input)

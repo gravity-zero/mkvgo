@@ -86,11 +86,14 @@ func parseSRTTimeLine(line string) (int64, int64, bool) {
 	return start, end, ok1 && ok2
 }
 
+// ParseSRTTimestamp reads hh:mm:ss,mmm, the milliseconds after a comma or, as some editors write them, a dot.
 func ParseSRTTimestamp(s string) (int64, bool) {
 	var h, m, sec, ms int64
-	s = strings.Replace(s, ",", ":", 1)
+	if i := strings.IndexAny(s, ",."); i >= 0 {
+		s = s[:i] + ":" + s[i+1:]
+	}
 	n, _ := fmt.Sscanf(s, "%d:%d:%d:%d", &h, &m, &sec, &ms)
-	if n != 4 {
+	if n != 4 || h < 0 || m < 0 || sec < 0 || ms < 0 {
 		return 0, false
 	}
 	return h*mkv.MsPerHour + m*mkv.MsPerMinute + sec*mkv.MsPerSecond + ms, true
