@@ -8,7 +8,6 @@ import (
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
-	"github.com/gravity-zero/mkvgo/mkv/ops"
 )
 
 // CmdToWebM remuxes an MKV/WebM file to a WebM file. It copies the media
@@ -32,7 +31,7 @@ func CmdToWebM(args []string) {
 		}
 	}
 
-	err := ops.RemuxToWebM(context.Background(), src, dst, mkv.Options{Progress: NewProgressBar()})
+	err := matroska.RemuxToWebM(context.Background(), src, dst, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
