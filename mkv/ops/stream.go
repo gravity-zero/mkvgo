@@ -424,6 +424,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 				}
 				opts.walk.stopped(rest, opts.timeEnd, prevMax)
 				ending = true
+				holdToCut(cluster, endStates, opts, cutEnd) // now: the sound behind the cut may roll the cluster over
 				continue
 			}
 			// keyframeAlign: the cut lands on the next cut keyframe at/after

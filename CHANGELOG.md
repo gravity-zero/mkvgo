@@ -142,7 +142,8 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - A Matroska `Split` opens every part on its keyframe at 0: the sound stored
   after the cut keyframe but timed before it goes to the part before, which was
   missing it, instead of moving the next part's zero ahead of its first picture.
-  On an open GOP the part before holds its last picture to the cut, so `Join`
+  On an open GOP the part before holds its last picture to the cut (decided at
+  the cut, before the sound read past it can start a new cluster), so `Join`
   no longer places the rest of the next part that much early; the leading
   pictures stored after the keyframe, which decode only with the GOP before,
   stay out of both parts.

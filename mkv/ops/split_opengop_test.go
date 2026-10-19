@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/internal/matrix"
@@ -70,4 +71,42 @@ func blockSeq(blocks []mkv.Block) string {
 		s += fmt.Sprintf("%d/%v/%d/%x ", b.Timecode, b.Keyframe, b.Duration, b.Data)
 	}
 	return s
+}
+
+// TestSplitHoldsTheLastPictureWhenTheSoundBehindTheCutRollsTheCluster pins the hold to the cut when the sound read
+// past the cut keyframe starts a new output cluster: the last picture, written in the cluster before, already reaches
+// the cut, so a join places the next part at it, not the length of the leading pictures early.
+func TestSplitHoldsTheLastPictureWhenTheSoundBehindTheCutRollsTheCluster(t *testing.T) {
+	type stored struct {
+		dts int64
+		b   mkv.Block
+	}
+	var all []stored
+	video := make([]mkv.Block, 100) // 25 fps, keyframes at 0 and 2040, the second ahead of the 2 pictures shown before it
+	for j := range video {
+		video[j] = mkv.Block{TrackNumber: 1, Timecode: int64(j) * 40, Keyframe: j%51 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(j)}}
+	}
+	video[49], video[50], video[51] = video[51], video[49], video[50]
+	for j, b := range video {
+		all = append(all, stored{int64(j) * 40, b})
+	}
+	for k := int64(0); k < 200; k++ {
+		all = append(all, stored{k*20 + 1, mkv.Block{TrackNumber: 2, Timecode: k * 20, Keyframe: true, Data: []byte{0xAA, byte(k)}}})
+	}
+	sort.SliceStable(all, func(a, b int) bool { return all[a].dts < all[b].dts })
+	blocks := make([]mkv.Block, len(all))
+	for i, s := range all {
+		blocks[i] = s.b
+	}
+	dir := t.TempDir()
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, blocks, 4000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "parts"), Ranges: []mkv.TimeRange{{EndMs: 2000}, {StartMs: 2000}}})
+	mustNil(t, err)
+	joined := filepath.Join(dir, "j.mkv")
+	mustNil(t, Join(context.Background(), parts, joined))
+	for _, b := range trackBlocks(collectAllBlocks(t, joined))[1] {
+		if b.Keyframe && b.Timecode > 0 && b.Timecode != 2040 {
+			t.Errorf("the joined keyframe of the second part sits at %d ms, want 2040", b.Timecode)
+		}
+	}
 }
