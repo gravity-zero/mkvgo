@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // TestExtractedCuesEndWhereTheirBlocksSay: SRT and ASS extraction end each cue at its BlockDuration, as WebVTT does,
@@ -53,5 +54,35 @@ func TestExtractSubtitleRefusesABitmapTrackAsSRT(t *testing.T) {
 	}
 	if _, err := os.Stat(out); !os.IsNotExist(err) {
 		t.Error("an output was written")
+	}
+}
+
+// TestMergeASSKeepsLayersAndTimeOrder: an ASS listing its events out of time order is muxed in time order, each
+// event keeping its layer and its place in the file (ReadOrder).
+func TestMergeASSKeepsLayersAndTimeOrder(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	sparseTracksMKV(t, src, []mkv.Track{videoTrack(1)})
+	ass := filepath.Join(dir, "in.ass")
+	mustNil(t, os.WriteFile(ass, []byte("[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 2,0:00:40.00,0:00:41.00,Default,,0,0,0,,Late\nDialogue: 1,0:00:00.00,0:00:01.00,Default,,0,0,0,,Early\n"), 0o644))
+	out := filepath.Join(dir, "out.mkv")
+	mustNil(t, MergeASS(ctx, src, ass, out, "eng", ""))
+	var got []string
+	f, err := os.Open(out)
+	mustNil(t, err)
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	mustNil(t, err)
+	for {
+		blk, err := br.Next()
+		if err != nil {
+			break
+		}
+		if blk.TrackNumber == 2 {
+			got = append(got, string(blk.Data))
+		}
+	}
+	if len(got) != 2 || !strings.HasPrefix(got[0], "1,1,Default") || !strings.HasPrefix(got[1], "0,2,Default") {
+		t.Errorf("ASS blocks %q, want Early (ReadOrder 1, layer 1) then Late (ReadOrder 0, layer 2)", got)
 	}
 }

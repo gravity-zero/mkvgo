@@ -2,10 +2,12 @@ package ops
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -307,6 +309,8 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 			Data:        []byte(e.Text),
 		}
 	}
+	// Blocks go out in time order: a cue listed out of order would land in a cluster it is timed before.
+	slices.SortStableFunc(subBlocks, func(a, b mkv.Block) int { return cmp.Compare(a.Timecode, b.Timecode) })
 
 	out, err := createOutput(fs, dstPath, srcPath, srtPath)
 	if err != nil {

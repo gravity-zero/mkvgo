@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -17,6 +18,7 @@ type ASSFile struct {
 type ASSEvent struct {
 	StartMs int64
 	EndMs   int64
+	Layer   string // the Dialogue's first field: the layer a renderer stacks it on
 	Fields  string // Style,Name,MarginL,MarginR,MarginV,Effect,Text
 }
 
@@ -103,5 +105,9 @@ func parseASSDialogue(line string) (ASSEvent, error) {
 		return ASSEvent{}, fmt.Errorf("invalid timestamps")
 	}
 
-	return ASSEvent{StartMs: start, EndMs: end, Fields: strings.Join(parts[3:], ",")}, nil
+	layer := strings.TrimSpace(parts[0])
+	if _, err := strconv.Atoi(layer); err != nil {
+		layer = "0" // an SSA "Marked=0" or a malformed layer: the bottom one
+	}
+	return ASSEvent{StartMs: start, EndMs: end, Layer: layer, Fields: strings.Join(parts[3:], ",")}, nil
 }

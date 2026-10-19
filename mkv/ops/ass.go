@@ -1,9 +1,11 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -49,9 +51,11 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 		subBlocks[i] = mkv.Block{
 			TrackNumber: newID, Timecode: ev.StartMs, Duration: dur,
 			Keyframe: true, // a text event depends on no other
-			Data:     []byte(fmt.Sprintf("%d,0,%s", i, ev.Fields)),
+			Data:     []byte(fmt.Sprintf("%d,%s,%s", i, cmp.Or(ev.Layer, "0"), ev.Fields)),
 		}
 	}
+	// Blocks go out in time order (an ASS lists events in any order); ReadOrder keeps the file's.
+	slices.SortStableFunc(subBlocks, func(a, b mkv.Block) int { return cmp.Compare(a.Timecode, b.Timecode) })
 
 	out, err := createOutput(fs, dstPath, srcPath, assPath)
 	if err != nil {
