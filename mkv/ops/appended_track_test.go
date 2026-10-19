@@ -70,3 +70,22 @@ func TestAddedTracksTakeAFreeNumberAndUID(t *testing.T) {
 		}
 	}
 }
+
+// TestJoinTakesAnOmittedAudioFieldAsItsDefault: a file that leaves Channels out (mono by the schema) joins one that
+// writes Channels 1, and a bit depth stated by one file only is no difference; a real one is still refused.
+func TestJoinTakesAnOmittedAudioFieldAsItsDefault(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	omitted, stated, stereo := audioTrack(1), audioTrack(1), audioTrack(1)
+	omitted.Channels = nil
+	stated.Channels, stated.BitDepth = u8(1), u8(16)
+	a, b, c := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv"), filepath.Join(dir, "c.mkv")
+	sparseTracksMKV(t, a, []mkv.Track{omitted})
+	sparseTracksMKV(t, b, []mkv.Track{stated})
+	sparseTracksMKV(t, c, []mkv.Track{stereo})
+	if err := Join(ctx, []string{a, b}, filepath.Join(dir, "ab.mkv")); err != nil {
+		t.Errorf("Channels omitted and Channels 1: %v", err)
+	}
+	if err := Join(ctx, []string{a, c}, filepath.Join(dir, "ac.mkv")); err == nil {
+		t.Error("mono and stereo joined")
+	}
+}
