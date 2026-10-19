@@ -264,8 +264,14 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   characters a second, 1 to 7 s), at the next cue or at the film's end,
   whichever comes first, in SRT, ASS and WebVTT extraction and in HLS alike:
   SRT and ASS extraction gave every such cue 3 s, over the next one, and the
-  others stayed up to the next cue however far it was (`subtitle.SettleCueEnds`,
-  `CueEndMs`, `ReadingMs`).
+  others stayed up to the next cue however far it was, and a remux to MP4 gave
+  them up to the next cue or 2 s (`subtitle.SettleCueEnds`, `CueEndMs`,
+  `ReadingMs`).
+- A remux to MP4 (and `EditInPlace`) writes one chapter list, in `chpl` and in
+  the QuickTime chapter track alike, that ends with the media: `chpl` kept the
+  chapters starting past the end the chapter track left out, the last chapter
+  ran 2 s when the source's duration was unknown, and the chapter track could
+  make the movie last longer than its media.
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
