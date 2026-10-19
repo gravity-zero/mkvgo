@@ -148,8 +148,13 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	//
 	// Slices of one timeline get a tighter seam - see videoSeamOffset - because
 	// for them the latest end overshoots by the interleaving the cut ran through.
-	outVideo := videoTrackSet(first.Tracks) // output track numbers
-	outSubs := subtitleTrackSet(first.Tracks)
+	outVideo := cutVideoTrack(first.Tracks) // output track number of the picture parts are cut on
+	// The other video tracks run past a cut up to their own keyframe (Split): neither their end nor the subtitles'
+	// says where the picture's seam is.
+	outLoose := subtitleTrackSet(first.Tracks)
+	for id := range otherVideoTracks(first.Tracks) {
+		outLoose[id] = true
+	}
 	var offset, prevEnd, prevVideoEnd, prevMediaEnd int64 // prevMediaEnd: the end without the subtitle cues
 	var lastSubs map[uint64]mkv.Block                     // the previous source's last cue per output subtitle track
 	var prevTrackEnds map[uint64]int64                    // the previous source's end per output track
@@ -225,7 +230,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 			if end > prevEnd {
 				prevEnd = end
 			}
-			if !outSubs[id] && end > prevMediaEnd {
+			if !outLoose[id] && end > prevMediaEnd {
 				prevMediaEnd = end
 			}
 			if outVideo[id] && (!prevHasVideoEnd || end > prevVideoEnd) {

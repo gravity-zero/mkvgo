@@ -536,7 +536,40 @@ func TestSplitOpensASecondVideoTrackOnItsOwnKeyframe(t *testing.T) {
 			if !blk.Keyframe {
 				t.Errorf("part 2 opens the second video track at %d ms on a picture that is not a keyframe", blk.Timecode)
 			}
-			return
+			break
 		}
+	}
+	// The pictures between the cut and that keyframe stay in part 1: a join gives every block back where it was.
+	joined := filepath.Join(dir, "joined.mkv")
+	if err := Join(context.Background(), parts, joined); err != nil {
+		t.Fatal(err)
+	}
+	if want, got := blocksByTrack(t, src), blocksByTrack(t, joined); fmt.Sprint(want) != fmt.Sprint(got) {
+		t.Errorf("split then join:\n got %v\nwant %v", got, want)
+	}
+	if c, err := reader.Open(context.Background(), parts[0]); err != nil || c.DurationMs != 2000 {
+		t.Errorf("part 1 declares %v ms (%v), want the cut track's 2000", c.DurationMs, err)
+	}
+}
+
+// blocksByTrack lists each track's blocks of a file as "timecode:data", in file order.
+func blocksByTrack(t *testing.T, path string) map[uint64][]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[uint64][]string{}
+	for {
+		blk, err := br.Next()
+		if err != nil {
+			return out
+		}
+		out[blk.TrackNumber] = append(out[blk.TrackNumber], fmt.Sprintf("%d:%s", blk.Timecode, blk.Data))
 	}
 }

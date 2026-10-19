@@ -442,7 +442,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 				rest := []mkv.Block{blk}
 				if opts.keyframeAlign {
 					var err error
-					if behind, rest, err = behindCut(br, blk, opts.videoTracks); err != nil {
+					if behind, rest, err = behindCut(br, blk, opts.videoTracks, opts.otherVideo); err != nil {
 						return err
 					}
 				}
@@ -572,8 +572,12 @@ var behindCutMaxBytes = 64 << 20
 
 // behindCut reads the blocks stored right after a cut keyframe: the sound timed before it goes to the segment
 // ending there (behind), the rest, the keyframe first, to the next one; an open GOP's leading pictures to neither.
-func behindCut(br walkReader, key mkv.Block, video map[uint64]bool) (behind, rest []mkv.Block, err error) {
+// Another video track's pictures go to the segment ending there up to that track's own next keyframe, which opens
+// the next segment on it (as an MP4 cut partitions each track at its own sync sample): the read goes on until every
+// such track has met its keyframe.
+func behindCut(br walkReader, key mkv.Block, video, other map[uint64]bool) (behind, rest []mkv.Block, err error) {
 	rest = []mkv.Block{key}
+	opened := make(map[uint64]bool, len(other))
 	for held := 0; held < behindCutMaxBytes; {
 		blk, err := br.Next()
 		if err == io.EOF {
@@ -584,16 +588,23 @@ func behindCut(br walkReader, key mkv.Block, video map[uint64]bool) (behind, res
 		}
 		held += len(blk.Data)
 		switch {
+		case other[blk.TrackNumber] && blk.Timecode >= key.Timecode && !opened[blk.TrackNumber]:
+			if !blk.Keyframe {
+				behind = append(behind, blk) // still the GOP before the cut on that track
+				break
+			}
+			opened[blk.TrackNumber] = true
+			rest = append(rest, blk)
 		case blk.Timecode >= key.Timecode:
 			rest = append(rest, blk)
-			if blk.Timecode-key.Timecode >= defaultClusterDurationMs {
-				return behind, rest, nil
-			}
 		case !video[blk.TrackNumber]:
 			behind = append(behind, blk)
 		}
+		if blk.Timecode-key.Timecode >= defaultClusterDurationMs && len(opened) == len(other) {
+			return behind, rest, nil
+		}
 	}
-	return nil, nil, fmt.Errorf("the sound stored after the cut keyframe at %d ms runs past %d MiB before the picture moves on, more than a cut holds: remux the file so its tracks interleave (mkvgo mux), then split it", key.Timecode, behindCutMaxBytes>>20)
+	return nil, nil, fmt.Errorf("the blocks stored after the cut keyframe at %d ms run past %d MiB before the picture moves on and every video track meets its next keyframe, more than a cut holds: remux the file so its tracks interleave (mkvgo mux), then split it", key.Timecode, behindCutMaxBytes>>20)
 }
 
 // holdToCut gives a segment's last picture, when the cut keyframe's leading pictures leave a gap before the cut,

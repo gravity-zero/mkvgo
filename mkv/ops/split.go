@@ -293,8 +293,9 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	// outwards. Declaring the requested range instead left the seek bar of every
 	// part describing a slice that is not the one inside it.
 	var extent int64
-	for _, end := range trackEnds {
-		if end > extent {
+	other := otherVideoTracks(c.Tracks)
+	for id, end := range trackEnds {
+		if end > extent && !other[id] { // another video track runs past the cut to its keyframe, as an MP4 part's edit list hides
 			extent = end
 		}
 	}
