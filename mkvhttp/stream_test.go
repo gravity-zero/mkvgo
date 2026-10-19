@@ -122,6 +122,53 @@ func TestHandlerStreamsSegments(t *testing.T) {
 	}
 }
 
+// A HEAD and a revalidation answered 304 serve no segment: the plan counts none and a GET after them still gets
+// the bytes the walk kept, without reading the source again.
+func TestHandlerHeadAndRevalidationServeNothing(t *testing.T) {
+	src := streamFixture(t)
+	ctx := context.Background()
+	plan, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(plan))
+	defer srv.Close()
+	get := func(method, name, inm string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+"/"+name, nil)
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp
+	}
+	first := get(http.MethodGet, "seg00002.m4s", "")
+	before := plan.Stats()
+	head := get(http.MethodHead, "seg_a1_00002.m4s", "")
+	if head.StatusCode != 200 || head.ContentLength <= 0 || head.Header.Get("ETag") == "" {
+		t.Fatalf("HEAD: status %d, Content-Length %d, ETag %q", head.StatusCode, head.ContentLength, head.Header.Get("ETag"))
+	}
+	if r := get(http.MethodGet, "seg00002.m4s", first.Header.Get("ETag")); r.StatusCode != http.StatusNotModified {
+		t.Fatalf("revalidation answered %d", r.StatusCode)
+	}
+	if st := plan.Stats(); st.ServedSegments != before.ServedSegments || st.StreamedBytes != before.StreamedBytes || st.KeptSegments != before.KeptSegments {
+		t.Errorf("a HEAD and a 304 counted as served:\nbefore %+v\nafter  %+v", before, st)
+	}
+	read := plan.Stats().SourceReadBytes
+	audio := get(http.MethodGet, "seg_a1_00002.m4s", "")
+	if audio.ContentLength != head.ContentLength || audio.Header.Get("ETag") != head.Header.Get("ETag") {
+		t.Errorf("GET after HEAD: Content-Length %d ETag %q, HEAD said %d %q", audio.ContentLength, audio.Header.Get("ETag"), head.ContentLength, head.Header.Get("ETag"))
+	}
+	if st := plan.Stats(); st.KeptSegments > before.KeptSegments && st.SourceReadBytes != read {
+		t.Errorf("the kept audio was read from the source again (%d bytes)", st.SourceReadBytes-read)
+	}
+}
+
 // failingFile fails every read past a shared byte budget: the source breaking midway.
 type failingFile struct {
 	f    *os.File

@@ -613,6 +613,45 @@ func (p *HLSPlan) Open(ctx context.Context, name string) (*ResourceHandle, error
 	return h, nil
 }
 
+// Stat says what Open would hand out under name - its size, ETag and content type - without handing it out: no
+// segment is counted served, none kept is taken, so a HEAD or a revalidation costs the plan nothing. ok is false
+// where only Open can tell: not a streamed segment, or a CENC one, whose head Open frames from the samples.
+func (p *HLSPlan) Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error) {
+	ti, n, isSeg := p.segmentName(name)
+	if !isSeg || !p.streams() || !p.tracks[ti].ft.outTrack.mkv.Compression.Verbatim() || p.opts.CENC != nil {
+		return 0, "", "", false, nil
+	}
+	if err := p.checkSource(); err != nil {
+		return 0, "", "", false, err
+	}
+	var t *windowTable
+	if p.mp4src {
+		t, err = p.mp4Table(ti, n)
+	} else if t, err = p.table(ctx, n); err == nil {
+		p.tabMu.Lock()
+		kept := t.kept != nil && t.kept[ti] > 0
+		size = int64(len(t.data[ti]))
+		p.tabMu.Unlock()
+		if !kept {
+			t, size = t.view(ti), 0
+		}
+	}
+	if err != nil {
+		return 0, "", "", false, err
+	}
+	if size == 0 {
+		if t.data[ti] != nil { // handed out whole by Open, under its bytes' own ETag
+			return 0, "", "", false, nil
+		}
+		size = int64(len(t.heads[ti])) + t.segs[ti].dataLen
+		if p.opts.Encrypt != nil {
+			size = size/aes.BlockSize*aes.BlockSize + aes.BlockSize
+		}
+	}
+	h := ResourceHandle{name: name, size: size, plan: p}
+	return size, h.ETag(), "video/iso.segment", true, nil
+}
+
 // ETag identifies the resource's bytes: strong for a resource built whole, else weak from the size, the source's SourceID and the name.
 func (h *ResourceHandle) ETag() string {
 	if h.data != nil && h.plan == nil {

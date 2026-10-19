@@ -151,6 +151,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var contentType string
 	var err error
 	if op, ok := h.resolver.(Opener); ok && !h.opts.Buffered {
+		if st, ok := h.resolver.(stater); ok && (req.Method == http.MethodHead || req.Header.Get("If-None-Match") != "") {
+			size, etag, ct, known, err := st.Stat(req.Context(), name)
+			if err == nil && known && h.answerWithoutBody(w, req, name, size, etag, ct) {
+				return
+			}
+		}
 		var rh *mp4.ResourceHandle
 		rh, err = op.Open(req.Context(), name)
 		if err == nil && rh.Bytes() == nil {
@@ -194,17 +200,42 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // truncated segment for a whole one.
 func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name string, rh *mp4.ResourceHandle) {
 	defer rh.Close()
-	size := rh.Size()
-	etag := rh.ETag()
+	start, n, done := h.streamedHead(w, req, name, rh.Size(), rh.ETag(), rh.ContentType())
+	if done {
+		return
+	}
+	if _, err := rh.WriteRange(req.Context(), w, start, n); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// stater is what a plan that can describe a streamed resource without serving it offers (mp4.HLSPlan.Stat).
+type stater interface {
+	Stat(ctx context.Context, name string) (size int64, etag, contentType string, ok bool, err error)
+}
+
+// answerWithoutBody answers a HEAD or a matching revalidation from what Stat says, the segment never opened; false
+// when the request needs the body.
+func (h *handler) answerWithoutBody(w http.ResponseWriter, req *http.Request, name string, size int64, etag, contentType string) bool {
+	if req.Method != http.MethodHead && !etagMatches(req.Header.Get("If-None-Match"), etag) {
+		return false
+	}
+	h.streamedHead(w, req, name, size, etag, contentType)
+	return true
+}
+
+// streamedHead writes a streamed resource's status line and headers: done when nothing follows (a 304, a 416, a
+// HEAD), else the span to write.
+func (h *handler) streamedHead(w http.ResponseWriter, req *http.Request, name string, size int64, etag, contentType string) (start, n int64, done bool) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Cache-Control", cacheControlFor(name, h.opts.Immutable))
 	if inm := req.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
 		w.WriteHeader(http.StatusNotModified)
-		return
+		return 0, 0, true
 	}
-	if ct := rh.ContentType(); ct != "" {
-		w.Header().Set("Content-Type", ct)
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
 	}
 	rangeHeader := req.Header.Get("Range")
 	if req.Header.Get("If-Range") != "" {
@@ -214,19 +245,14 @@ func (h *handler) serveStreamed(w http.ResponseWriter, req *http.Request, name s
 	if !ok {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
 		http.Error(w, "mkvhttp: range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
-		return
+		return 0, 0, true
 	}
 	if status == http.StatusPartialContent {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+n-1, size))
 	}
 	w.Header().Set("Content-Length", strconv.FormatInt(n, 10))
 	w.WriteHeader(status)
-	if req.Method == http.MethodHead {
-		return
-	}
-	if _, err := rh.WriteRange(req.Context(), w, start, n); err != nil {
-		panic(http.ErrAbortHandler)
-	}
+	return start, n, req.Method == http.MethodHead
 }
 
 // byteRange parses a single "bytes=a-b" Range header against size: the span to
