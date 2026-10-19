@@ -359,7 +359,7 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 	}
 	// Synthesize a QuickTime chapter track (titles as text samples), referenced
 	// from every media track via tref/chap, for Apple-player chapter support.
-	if chs := flattenChapters(c.Chapters); len(chs) > 0 {
+	if chs := closeChapters(flattenChapters(c.Chapters), c.DurationMs); len(chs) > 0 {
 		chapID := nextID
 		for _, t := range tracks {
 			if !t.spec.text { // reference from audio/video only, not subtitle tracks

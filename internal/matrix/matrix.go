@@ -43,12 +43,13 @@ type Case struct {
 	NTSC     bool // 29.97 fps: keyframes, hence cuts, fall between milliseconds on a fine timescale
 	Subtitle Subtitle
 	Chapters Chapters
-	Cuts     int // 1 or 2
+	Cuts     int  // 1 or 2
+	Late     bool // the cuts asked 300 ms past a keyframe: each part opens on the next one
 }
 
 // Name labels a case for a subtest.
 func (c Case) Name() string {
-	return fmt.Sprintf("audio=%v/opengop=%v/ntsc=%v/sub=%d/chapters=%d/cuts=%d", c.Audio, c.OpenGOP, c.NTSC, c.Subtitle, c.Chapters, c.Cuts)
+	return fmt.Sprintf("audio=%v/opengop=%v/ntsc=%v/sub=%d/chapters=%d/cuts=%d/late=%v", c.Audio, c.OpenGOP, c.NTSC, c.Subtitle, c.Chapters, c.Cuts, c.Late)
 }
 
 // Cases is every combination, a cue over two cuts only where there are two.
@@ -63,7 +64,9 @@ func Cases() []Case {
 							if sub == CueOverTwoCuts && cuts == 1 {
 								continue
 							}
-							out = append(out, Case{Audio: audio, OpenGOP: open, NTSC: ntsc, Subtitle: sub, Chapters: chs, Cuts: cuts})
+							for _, late := range []bool{false, true} {
+								out = append(out, Case{Audio: audio, OpenGOP: open, NTSC: ntsc, Subtitle: sub, Chapters: chs, Cuts: cuts, Late: late})
+							}
 						}
 					}
 				}
@@ -105,10 +108,16 @@ func (c Case) DurationMs() int64 {
 
 // RequestedCuts are the times the split ranges name, in ms.
 func (c Case) RequestedCuts() []int64 {
+	cuts := []int64{3000}
 	if c.Cuts == 2 {
-		return []int64{2000, 4000}
+		cuts = []int64{2000, 4000}
 	}
-	return []int64{3000}
+	if c.Late {
+		for i := range cuts {
+			cuts[i] += 300
+		}
+	}
+	return cuts
 }
 
 // ExpectedCuts are where the parts really open: the first keyframe at or after each requested cut.
