@@ -433,18 +433,48 @@ func lastVideoKeyMs(ctx context.Context, path string, fs *mkv.FS, c *mkv.Contain
 		return 0, err
 	}
 	defer f.Close()
-	var br *reader.BlockReader
 	if last != nil {
-		br, err = reader.NewBlockReaderAt(f, c.Info.TimecodeScale, c.SegmentStart+last.ClusterPos)
-	} else {
-		br, err = reader.NewBlockReader(f, c.Info.TimecodeScale)
+		return videoKeyFrom(ctx, f, c, video, c.SegmentStart+last.ClusterPos, last.TimeMs)
 	}
+	// No Cues: the file's tail is read, from a cluster found in its last few MiB, widening the window until it
+	// holds a video keyframe; the whole file is read only when one sits at its very start.
+	st, err := fs.DoStat(path)
 	if err != nil {
 		return 0, err
 	}
-	key := int64(-1)
-	if last != nil {
-		key = last.TimeMs
+	for window := lastKeyWindow; ; window *= 4 {
+		from := max(c.SegmentStart, st.Size()-window)
+		if _, err := f.Seek(from, io.SeekStart); err != nil {
+			return 0, err
+		}
+		at, err := reader.ResyncToCluster(f, st.Size())
+		if err != nil {
+			return 0, err
+		}
+		if at >= 0 {
+			if key, err := videoKeyFrom(ctx, f, c, video, at, -1); err != nil || key >= 0 {
+				return key, err
+			}
+		}
+		if from == c.SegmentStart {
+			return -1, nil
+		}
+	}
+}
+
+// lastKeyWindow is the tail lastVideoKeyMs reads first in a file without Cues: a few GOPs of a high-rate film.
+var lastKeyWindow int64 = 32 << 20
+
+// videoKeyFrom is the latest video keyframe from the cluster at offset on (key when there is none), block headers
+// only: the payloads are skipped.
+func videoKeyFrom(ctx context.Context, f io.ReadSeeker, c *mkv.Container, video map[uint64]bool, offset, key int64) (int64, error) {
+	br, err := reader.NewBlockReaderAt(f, c.Info.TimecodeScale, offset)
+	if err != nil {
+		return 0, err
+	}
+	br.SetHeaderOnly(true)
+	for id := range video {
+		br.KeepTracks(id) // the other tracks' blocks are skipped unread
 	}
 	for {
 		if err := ctx.Err(); err != nil {

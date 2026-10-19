@@ -11,6 +11,8 @@ import (
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
 // TestParseSeekHeadBodyBoundsADeclaredSize: a Seek entry declaring 2^56 bytes inside a SeekHead of a few bytes ends
@@ -106,5 +108,56 @@ func TestDamagedJournalSaysWhatToDo(t *testing.T) {
 	err := ReindexInPlace(context.Background(), path)
 	if err == nil || !strings.Contains(err.Error(), "mkvgo reindex (a copy") {
 		t.Errorf("in-place reindex over a damaged journal: %v", err)
+	}
+}
+
+type countingReadSeeker struct {
+	mkv.ReadSeekCloser
+	n *int64
+}
+
+func (c countingReadSeeker) Read(p []byte) (int, error) {
+	n, err := c.ReadSeekCloser.Read(p)
+	*c.n += int64(n)
+	return n, err
+}
+
+// TestLastVideoKeyWithoutCuesReadsTheTail: a split by chapters on a file without Cues looks for its last video
+// keyframe in the file's tail, where it read the whole file once before splitting it.
+func TestLastVideoKeyWithoutCuesReadsTheTail(t *testing.T) {
+	old := lastKeyWindow
+	lastKeyWindow = 1 << 20
+	t.Cleanup(func() { lastKeyWindow = old })
+	path := filepath.Join(t.TempDir(), "nocues.mkv")
+	f, err := os.Create(path)
+	mustNil(t, err)
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"},
+		Chapters: []mkv.Chapter{{ID: 1, Title: "a", StartMs: 0}, {ID: 2, Title: "b", StartMs: 4000}}}, []mkv.Track{videoTrack(1), audioTrack(2)}, 5000))
+	for tc := int64(0); tc < 5000; tc += 100 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: make([]byte, 200<<10)},
+			{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: make([]byte, 50<<10)},
+		}))
+	}
+	mw.Cues = nil
+	mustNil(t, mw.Finalize())
+	mustNil(t, f.Close())
+	c, err := reader.Open(context.Background(), path)
+	mustNil(t, err)
+	if len(c.Cues) != 0 {
+		t.Fatal("the fixture has Cues")
+	}
+	var read int64
+	fs := &mkv.FS{Open: func(p string) (mkv.ReadSeekCloser, error) {
+		f, err := os.Open(p)
+		return countingReadSeeker{f, &read}, err
+	}}
+	key, err := lastVideoKeyMs(context.Background(), path, fs, c)
+	mustNil(t, err)
+	st, _ := os.Stat(path)
+	if key != 4000 || read > st.Size()/4 { // a 1 MiB window, then 4 MiB to reach a keyframe
+		t.Errorf("last key %d (want 4000), %d of the file's %d bytes read", key, read, st.Size())
 	}
 }
