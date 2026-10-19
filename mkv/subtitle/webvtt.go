@@ -48,7 +48,7 @@ func WriteWebVTT(w io.Writer, cues []Cue) error {
 		return err
 	}
 	for _, c := range cues {
-		text := strings.TrimRight(c.Text, "\n")
+		text := vttCueText(c.Text)
 		if text == "" {
 			continue
 		}
@@ -61,6 +61,19 @@ func WriteWebVTT(w io.Writer, cues []Cue) error {
 		}
 	}
 	return bw.Flush()
+}
+
+// vttCueText is a cue's text as one cue's payload: line ends as \n, no blank line to end it early, no arrow to time another.
+func vttCueText(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	s = strings.ReplaceAll(s, "-->", "--&gt;")
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // SRTToCues converts parsed SRT entries to WebVTT cues. SRT and WebVTT share the
