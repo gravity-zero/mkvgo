@@ -858,9 +858,3 @@ type DerivedFields struct {
 	ColorPrimaries, ColorTransfer, ColorSpace, ColorRange *uint16
 	DisplayWidth, DisplayHeight                           *uint32
 }
-
-// Stated16 reports whether v is a value to write: set, and not the one the reader derived.
-func Stated16(v, derived *uint16) bool { return v != nil && (derived == nil || *derived != *v) }
-
-// Stated32 is Stated16 for the display dimensions.
-func Stated32(v, derived *uint32) bool { return v != nil && (derived == nil || *derived != *v) }

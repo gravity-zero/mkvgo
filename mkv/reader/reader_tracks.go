@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/trackchild"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -729,7 +730,7 @@ const maxUnmodeledChild = 4096
 // keepUnmodeled records a child of parent the writer has no field for as read, and has the parse that follows read
 // it from that copy (unhold puts the source back), so the source is read once, forward.
 func (p *parser) keepUnmodeled(t *mkv.Track, parent uint32, eh ebml.ElementHeader) error {
-	if _, streamed := p.r.(*bodyReader); streamed || eh.Size < 0 || eh.Size > maxUnmodeledChild || mkv.WrittenTrackChild(parent, eh.ID) {
+	if _, streamed := p.r.(*bodyReader); streamed || eh.Size < 0 || eh.Size > maxUnmodeledChild || trackchild.Written(parent, eh.ID) {
 		return nil // a streamed element cannot be read twice; ReadStream feeds no rewrite
 	}
 	if err := p.chargeMeta(eh.Size); err != nil {

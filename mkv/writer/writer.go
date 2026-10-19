@@ -320,25 +320,25 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			if t.Height != nil {
 				v.uint(mkv.IDPixelHeight, uint64(*t.Height))
 			}
-			if mkv.Stated32(t.DisplayWidth, derived(t).DisplayWidth) {
+			if stated32(t.DisplayWidth, derived(t).DisplayWidth) {
 				v.uint(mkv.IDDisplayWidth, uint64(*t.DisplayWidth))
 			}
-			if mkv.Stated32(t.DisplayHeight, derived(t).DisplayHeight) {
+			if stated32(t.DisplayHeight, derived(t).DisplayHeight) {
 				v.uint(mkv.IDDisplayHeight, uint64(*t.DisplayHeight))
 			}
 			if hasColour(t) {
 				v.master(mkv.IDColour, func(c *ew) {
 					d := derived(t)
-					if mkv.Stated16(t.ColorRange, d.ColorRange) {
+					if stated16(t.ColorRange, d.ColorRange) {
 						c.uint(mkv.IDColourRange, uint64(*t.ColorRange))
 					}
-					if mkv.Stated16(t.ColorSpace, d.ColorSpace) {
+					if stated16(t.ColorSpace, d.ColorSpace) {
 						c.uint(mkv.IDColourMatrix, uint64(*t.ColorSpace))
 					}
-					if mkv.Stated16(t.ColorTransfer, d.ColorTransfer) {
+					if stated16(t.ColorTransfer, d.ColorTransfer) {
 						c.uint(mkv.IDColourTransfer, uint64(*t.ColorTransfer))
 					}
-					if mkv.Stated16(t.ColorPrimaries, d.ColorPrimaries) {
+					if stated16(t.ColorPrimaries, d.ColorPrimaries) {
 						c.uint(mkv.IDColourPrimaries, uint64(*t.ColorPrimaries))
 					}
 					writeColourLayout(c, t.ColourLayout)
@@ -872,8 +872,8 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 // hasColour reports whether a track carries any colour code points.
 func hasColour(t *mkv.Track) bool {
 	d := derived(t)
-	return mkv.Stated16(t.ColorPrimaries, d.ColorPrimaries) || mkv.Stated16(t.ColorTransfer, d.ColorTransfer) ||
-		mkv.Stated16(t.ColorSpace, d.ColorSpace) || mkv.Stated16(t.ColorRange, d.ColorRange) ||
+	return stated16(t.ColorPrimaries, d.ColorPrimaries) || stated16(t.ColorTransfer, d.ColorTransfer) ||
+		stated16(t.ColorSpace, d.ColorSpace) || stated16(t.ColorRange, d.ColorRange) ||
 		t.ColourLayout != nil || t.HDR.HasContentLightLevel() || t.HDR.HasMasteringDisplay()
 }
 
@@ -1060,3 +1060,9 @@ func CodecIDFromShort(short string) string {
 	}
 	return short
 }
+
+// stated16 reports whether v is a value to write: set, and not the one the reader derived.
+func stated16(v, derived *uint16) bool { return v != nil && (derived == nil || *derived != *v) }
+
+// stated32 is stated16 for the display dimensions.
+func stated32(v, derived *uint32) bool { return v != nil && (derived == nil || *derived != *v) }
