@@ -110,7 +110,7 @@ func TestWatermarkSegmentForPattern(t *testing.T) {
 
 func TestPatternBit(t *testing.T) {
 	pat := []byte{0b0000_0101, 0b0000_0010} // bits 0,2 set in byte0; bit 9 set
-	cases := map[int]bool{0: true, 1: false, 2: true, 3: false, 8: false, 9: true, 16: false, 100: false}
+	cases := map[int]bool{0: true, 1: false, 2: true, 3: false, 8: false, 9: true, 16: false, 100: false, -1: false, -9: false}
 	for n, want := range cases {
 		if got := patternBit(pat, n); got != want {
 			t.Errorf("patternBit(%d) = %v, want %v", n, got, want)

@@ -25,6 +25,8 @@ package mp4
 import (
 	"bytes"
 	"context"
+
+	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
 // WatermarkPlan serves an A/B session-watermarked HLS presentation on demand.
@@ -47,11 +49,11 @@ func PlanWatermark(ctx context.Context, srcA, srcB string, opts ...Options) (*Wa
 	}
 	a, err := PlanHLS(ctx, srcA, o)
 	if err != nil {
-		return nil, errf("watermark variant A (%s): %w", srcA, err)
+		return nil, errf("watermark variant A (%s): %w", shown.Path(srcA), err)
 	}
 	b, err := PlanHLS(ctx, srcB, o)
 	if err != nil {
-		return nil, errf("watermark variant B (%s): %w", srcB, err)
+		return nil, errf("watermark variant B (%s): %w", shown.Path(srcB), err)
 	}
 	if err := assertSpliceable(a, b); err != nil {
 		return nil, err
@@ -118,7 +120,7 @@ func (w *WatermarkPlan) SegmentForPattern(ctx context.Context, n int, pattern []
 // n is past the end.
 func patternBit(pattern []byte, n int) bool {
 	byteIdx := n / 8
-	if byteIdx >= len(pattern) {
+	if n < 0 || byteIdx >= len(pattern) {
 		return false
 	}
 	return pattern[byteIdx]&(1<<(uint(n)%8)) != 0
