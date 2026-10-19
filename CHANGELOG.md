@@ -249,6 +249,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   its first kept frame (an Opus pre-skip, 6.5 ms): it is marked as a negative
   `DiscardPadding`, which a decoder drops, so that file's sound is not pushed
   late by it.
+- `GrowingHLSPlan` serves its requests side by side, and on while `Refresh`
+  reads the clusters that landed: the plan's lock is held over a request's
+  I/O for reading only, and taken by a scan only to publish what it found.
 - `HLSPlanStats.StreamedBytes` counts what an `Open` handle sends: a range its
   part, a write cut short what it wrote, a handle closed unwritten nothing, and
   bytes `Bytes()` hands out once; `ResourceHandle.Whole` tells a held resource
