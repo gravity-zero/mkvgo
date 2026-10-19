@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -22,6 +23,9 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 	if _, err := fs.DoStat(tmp); err == nil {
 		return fmt.Errorf("reindex replace: leftover temporary file %s exists; remove it first", tmp)
 	}
+	if err := backupFree(fs, path, mkv.KeepBackupFrom(opts)); err != nil {
+		return err
+	}
 
 	if err := Reindex(ctx, path, tmp, opts...); err != nil {
 		_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched either way
@@ -35,6 +39,14 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 // original, optionally keeping the original as path+".bak". Shared by
 // ReindexReplace and RetimeTracksReplace.
 func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
+	if err := backupFree(fs, path, keepBackup); err != nil {
+		_ = fs.DoRemove(tmp)
+		return err
+	}
+	if err := syncCopy(fs, tmp); err != nil {
+		_ = fs.DoRemove(tmp)
+		return fmt.Errorf("replace: flush verified copy: %w", err)
+	}
 	if !keepBackup {
 		if err := fs.DoRename(tmp, path); err != nil {
 			_ = fs.DoRemove(tmp) // do not leave a blocker for the next run
@@ -55,6 +67,33 @@ func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
 		}
 		_ = fs.DoRemove(tmp) // original restored; drop the copy so the next run is not blocked
 		return installErr
+	}
+	return nil
+}
+
+// backupFree refuses a replace that keeps a backup when path+".bak" already holds one: an earlier run's original.
+func backupFree(fs *mkv.FS, path string, keepBackup bool) error {
+	if !keepBackup {
+		return nil
+	}
+	if _, err := fs.DoStat(path + ".bak"); err == nil {
+		return fmt.Errorf("replace: %s.bak already holds the original an earlier run kept: move it away, then run again", path)
+	}
+	return nil
+}
+
+// syncCopy flushes the copy to the disk before it takes the original's name, where the FS can reopen it (the OS, or an OpenFile).
+func syncCopy(fs *mkv.FS, tmp string) error {
+	if fs != nil && fs.OpenFile == nil && (fs.Create != nil || fs.Open != nil) {
+		return nil // a custom store finalises its own writes
+	}
+	f, err := fs.DoOpenFile(tmp, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if s, ok := f.(interface{ Sync() error }); ok {
+		return s.Sync()
 	}
 	return nil
 }

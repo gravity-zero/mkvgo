@@ -159,6 +159,9 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 	if len(shift) == 0 {
 		return fmt.Errorf("retime: no tracks to shift")
 	}
+	if err := backupFree(fs, path, mkv.KeepBackupFrom(opts)); err != nil {
+		return err
+	}
 	meta, err := reader.OpenMetaWithFS(ctx, path, fs)
 	if err != nil {
 		return fmt.Errorf("retime: read metadata: %w", err)
