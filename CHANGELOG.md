@@ -251,6 +251,12 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - A Matroska join of linked parts gives back the source's last picture before a
   cut that falls between milliseconds (29.97 fps) as the source stores it: it
   kept the duration the split gave that picture to reach the cut.
+- A subtitle cue that states no duration leaves the screen once read (17
+  characters a second, 1 to 7 s), at the next cue or at the film's end,
+  whichever comes first, in SRT, ASS and WebVTT extraction and in HLS alike:
+  SRT and ASS extraction gave every such cue 3 s, over the next one, and the
+  others stayed up to the next cue however far it was (`subtitle.SettleCueEnds`,
+  `CueEndMs`, `ReadingMs`).
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
