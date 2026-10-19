@@ -36,6 +36,29 @@ func sampleMP4(tb testing.TB) []byte {
 	return data
 }
 
+// sampleFMP4 is a real fragmented MP4: the HLS video rendition's init segment followed by its media segments.
+func sampleFMP4(tb testing.TB) []byte {
+	tb.Helper()
+	src := filepath.Join(tb.TempDir(), "seed.mp4")
+	if err := os.WriteFile(src, sampleMP4(tb), 0o644); err != nil {
+		tb.Fatal(err)
+	}
+	dir := tb.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 40}); err != nil {
+		tb.Fatal(err)
+	}
+	segs, _ := filepath.Glob(filepath.Join(dir, "seg[0-9]*.m4s"))
+	var out []byte
+	for _, name := range append([]string{filepath.Join(dir, "init.mp4")}, segs...) {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		out = append(out, data...)
+	}
+	return out
+}
+
 // FuzzParseMP4 feeds arbitrary bytes to the MP4 parser. It must never panic;
 // malformed input must surface as an error.
 func FuzzParseMP4(f *testing.F) {
@@ -44,6 +67,7 @@ func FuzzParseMP4(f *testing.F) {
 	f.Add([]byte{0x00, 0x00, 0x00, 0x08, 'm', 'o', 'o', 'v'})
 	f.Add([]byte{0x00, 0x00, 0xFF, 0xFF, 'm', 'o', 'o', 'v', 0x01, 0x02})
 	f.Add(sampleMP4(f))
+	f.Add(sampleFMP4(f))
 	// A real QuickTime file (brand "qt  ", wide+mdat first, trailing moov,
 	// SoundDescription v1 with a wave-wrapped esds) seeds the QT-specific paths.
 	if qt, err := os.ReadFile("../internal/testdata/quicktime.mov"); err == nil {
