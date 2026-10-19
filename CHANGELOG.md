@@ -248,6 +248,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 - The HLS plan of an MP4 source settles an audio stride nothing confirms as
   the full pass does: an Opus track whose first samples share a time served
   other segment timings than `RemuxToHLS` wrote.
+- A Matroska join of linked parts gives back the source's last picture before a
+  cut that falls between milliseconds (29.97 fps) as the source stores it: it
+  kept the duration the split gave that picture to reach the cut.
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
