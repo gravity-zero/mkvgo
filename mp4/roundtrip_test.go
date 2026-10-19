@@ -619,7 +619,7 @@ func TestEditListEmptyEditOutsideTkhd(t *testing.T) {
 		}
 	}
 	if empty <= 0 {
-		t.Skip("the writer delays the late track without an empty edit")
+		t.Fatal("the late track has no empty edit: the case this test guards (an empty edit outside the tkhd) is no longer built")
 	}
 	audioTkhd := -1
 	for i := bytes.Index(b, []byte("tkhd")); i >= 0; i = nextIndex(b, []byte("tkhd"), i) {
