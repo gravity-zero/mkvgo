@@ -277,7 +277,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	trackEnds := make(map[uint64]int64, len(c.Tracks))
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
-		videoTracks:    videoTrackSet(c.Tracks),
+		videoTracks:    cutVideoTrack(c.Tracks),
 		subtitleTracks: subtitleTrackSet(c.Tracks),
 		contentDigests: digests, contentStats: stats,
 		trackEnds: trackEnds,
@@ -329,6 +329,16 @@ func videoTrackSet(tracks []mkv.Track) map[uint64]bool {
 		}
 	}
 	return set
+}
+
+// cutVideoTrack is the track a split cuts on, as a set: the first video track, as MP4 cuts on (nil without video).
+func cutVideoTrack(tracks []mkv.Track) map[uint64]bool {
+	for _, t := range tracks {
+		if t.Type == mkv.VideoTrack {
+			return map[uint64]bool{t.ID: true}
+		}
+	}
+	return nil
 }
 
 // rebaseChapters moves an already-clipped list by deltaMs (back for a positive
@@ -403,7 +413,7 @@ func refuseCutSource(path string, fs *mkv.FS) error {
 // lastVideoKeyMs is where the last video keyframe presents (-1: no video, or no chapter past the last cued one): the
 // Cues prove keyframes up to their last video entry, so only the clusters from there on are read.
 func lastVideoKeyMs(ctx context.Context, path string, fs *mkv.FS, c *mkv.Container) (int64, error) {
-	video := videoTrackSet(c.Tracks)
+	video := cutVideoTrack(c.Tracks)
 	if len(video) == 0 {
 		return -1, nil
 	}

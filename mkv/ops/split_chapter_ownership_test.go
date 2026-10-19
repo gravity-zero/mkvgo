@@ -432,3 +432,40 @@ func TestSplitKeepsEverySoundBlockStoredPastTheCut(t *testing.T) {
 		t.Errorf("the parts hold %d sound blocks of the source's 2000", total)
 	}
 }
+
+// TestSplitCutsOnTheFirstVideoTrack: a second, all-intra video track does not open a part in the middle of the first one's GOP.
+func TestSplitCutsOnTheFirstVideoTrack(t *testing.T) {
+	dir := t.TempDir()
+	var blocks []mkv.Block
+	for tc := int64(0); tc < 4000; tc += 500 {
+		blocks = append(blocks,
+			mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%2000 == 0, Data: []byte("v")},
+			mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: true, Data: []byte("i")})
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), videoTrack(2)}, blocks, 4000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 1000}, {StartMs: 1000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		blk, err := br.Next()
+		if err != nil {
+			t.Fatalf("part 2 holds no block of the first video track: %v", err)
+		}
+		if blk.TrackNumber == 1 {
+			if !blk.Keyframe {
+				t.Error("part 2 opens the first video track on a picture that is not a keyframe")
+			}
+			return
+		}
+	}
+}
