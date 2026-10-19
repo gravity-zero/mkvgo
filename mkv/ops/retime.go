@@ -464,15 +464,21 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 	r := bufio.NewReaderSize(f, reindexBufSize)
 
 	ebmlHdr, ebmlHdrBytes, err := ebml.ReadElementHeader(r)
-	if err != nil || ebmlHdr.ID != ebml.IDEBMLHeader || ebmlHdr.Size < 0 {
-		return nil, nil, fmt.Errorf("retime: not a Matroska file (EBML header: %v)", err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("retime: not a Matroska file (EBML header): %w", err)
+	}
+	if ebmlHdr.ID != ebml.IDEBMLHeader || ebmlHdr.Size < 0 {
+		return nil, nil, fmt.Errorf("retime: not a Matroska file (no EBML header)")
 	}
 	if _, err := io.CopyN(io.Discard, r, ebmlHdr.Size); err != nil {
 		return nil, nil, fmt.Errorf("retime: skip EBML header: %w", err)
 	}
 	segHdr, segHdrBytes, err := ebml.ReadElementHeader(r)
-	if err != nil || segHdr.ID != mkv.IDSegment {
-		return nil, nil, fmt.Errorf("retime: expected Segment (%v)", err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("retime: expected Segment: %w", err)
+	}
+	if segHdr.ID != mkv.IDSegment {
+		return nil, nil, fmt.Errorf("retime: expected Segment, found element %#x", segHdr.ID)
 	}
 	if segHdr.Size < 0 {
 		// The crash-safety journal lands past the end of the file and relies

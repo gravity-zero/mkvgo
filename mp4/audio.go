@@ -162,7 +162,7 @@ func eac3Channels(dec3 []byte) uint8 {
 func ac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	dac3, err := parseAC3(firstFrame)
 	if err != nil {
-		return nil, errf("track %d (ac3): %v", t.ID, err)
+		return nil, errf("track %d (ac3): %w", t.ID, err)
 	}
 	return audioSampleEntry("ac-3", t, dac3), nil
 }
@@ -216,7 +216,7 @@ func parseAC3(frame []byte) ([]byte, error) {
 func eac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	dec3, err := parseEAC3(firstFrame)
 	if err != nil {
-		return nil, errf("track %d (eac3): %v", t.ID, err)
+		return nil, errf("track %d (eac3): %w", t.ID, err)
 	}
 	return audioSampleEntry("ec-3", t, dec3), nil
 }

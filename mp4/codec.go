@@ -471,7 +471,7 @@ func esdsBox(objType byte, asc []byte) []byte {
 func opusEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 	dops, err := dOpsBox(t.CodecPrivate)
 	if err != nil {
-		return nil, errf("track %d (opus): %v", t.ID, err)
+		return nil, errf("track %d (opus): %w", t.ID, err)
 	}
 	return audioSampleEntry("Opus", t, dops), nil
 }
