@@ -902,7 +902,7 @@ func readInPlaceJournal(f mkv.ReadSeekCloser, fileSize int64) (*inplaceJournal, 
 		return nil, fmt.Errorf("read journal payload: %w", err)
 	}
 	if crc32.ChecksumIEEE(payload) != wantCRC {
-		return nil, fmt.Errorf("journal CRC mismatch, refusing to touch the file: %w", errCorruptJournal)
+		return nil, fmt.Errorf("journal CRC mismatch, refusing to touch the file: the in-place journal at its end is damaged, so whether the last in-place edit landed cannot be told; rebuild the file with mkvgo reindex (a copy, which leaves the journal out), or restore it from a backup: %w", errCorruptJournal)
 	}
 
 	j, err := parseInplaceJournalPayload(payload)

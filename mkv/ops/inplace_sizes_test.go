@@ -91,3 +91,20 @@ func TestReindexInPlaceRefusesBytesPastTheSegment(t *testing.T) {
 		t.Error("the file was changed")
 	}
 }
+
+// TestDamagedJournalSaysWhatToDo: a journal whose CRC fails blocks every in-place operation, rightly (whether the last
+// edit landed cannot be told); the refusal names the copy reindex that rebuilds the file.
+func TestDamagedJournalSaysWhatToDo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.mkv")
+	sparseTracksMKV(t, path, []mkv.Track{videoTrack(1)})
+	data, _ := os.ReadFile(path)
+	trailer := make([]byte, inplaceTrailerLen)
+	binary.BigEndian.PutUint32(trailer[0:4], 4)
+	binary.BigEndian.PutUint32(trailer[4:8], 0xDEADBEEF)
+	copy(trailer[8:24], inplaceJournalMagic[:])
+	mustNil(t, os.WriteFile(path, append(append(data, "junk"...), trailer...), 0o644))
+	err := ReindexInPlace(context.Background(), path)
+	if err == nil || !strings.Contains(err.Error(), "mkvgo reindex (a copy") {
+		t.Errorf("in-place reindex over a damaged journal: %v", err)
+	}
+}
