@@ -62,13 +62,10 @@ package mp4
 // reported as an explicit error, never silently mishandled).
 //
 // Concurrency: Refresh and Resource/Segment may run on different goroutines (a
-// server polling Refresh while requests hit Resource). Every exported method
-// takes the plan's mutex for its whole body, including the Segment/Resource
-// I/O - simple and provably race-free, at the cost of serialising concurrent
-// requests against each other and against Refresh. A future version could
-// snapshot the immutable-once-published state (bounds/offsets never mutate in
-// place, only grow) and release the lock before the read, like HLSPlan.Segment
-// does; v1 keeps the simpler, safe form.
+// server polling Refresh while requests hit Resource). Requests share the plan
+// (a read lock, held over their I/O), so they run side by side; Refresh and
+// Complete run one at a time and read the new clusters without the lock,
+// taking it only to publish what they found.
 
 import (
 	"context"
@@ -101,7 +98,11 @@ type GrowingHLSPlan struct {
 	// signals: the other is a non-Cluster trailing element (typically Cues).
 	segDeclaredEnd int64
 
-	mu sync.Mutex
+	// scanMu serialises Refresh and Complete: the scan's own state (cursor, head and lead resolution) is theirs alone.
+	scanMu sync.Mutex
+	// mu guards what requests read (bounds, offsets, segment counts, outputs): read-held by a request over its I/O,
+	// write-held by a scan only to publish.
+	mu sync.RWMutex
 
 	// full is reused verbatim for segment building: PlanHLS's own
 	// tracks/bounds/offsets/segCount, extended in place as the cursor scans
@@ -283,8 +284,8 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 // the last call, and extends the segment list. It returns the number of newly
 // published (closed) segments - 0, not an error, when nothing new has landed.
 func (p *GrowingHLSPlan) Refresh(ctx context.Context) (int, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.scanMu.Lock()
+	defer p.scanMu.Unlock()
 	if p.done {
 		return 0, nil
 	}
@@ -305,8 +306,8 @@ func (p *GrowingHLSPlan) Refresh(ctx context.Context) (int, error) {
 // A tail the scan cannot read (a damaged or unknown-size cluster) closes the plan on the segments published and is
 // returned beside; a source it cannot reach leaves the plan open (no EXT-X-ENDLIST) for another call.
 func (p *GrowingHLSPlan) Complete() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.scanMu.Lock()
+	defer p.scanMu.Unlock()
 	if p.done {
 		return nil
 	}
@@ -317,7 +318,10 @@ func (p *GrowingHLSPlan) Complete() error {
 	}
 	_, scanErr := p.scanLocked(ctx, st.Size())
 	if !p.done {
-		if err := p.finalizeLocked(ctx); err != nil {
+		p.mu.Lock()
+		err := p.finalizeLocked(ctx)
+		p.mu.Unlock()
+		if err != nil {
 			return errors.Join(scanErr, err)
 		}
 	}
@@ -329,7 +333,7 @@ func (p *GrowingHLSPlan) Complete() error {
 
 // scanLocked resumes the cluster cursor over [cursor, size), folding every
 // newly whole cluster into head resolution and boundary discovery, then
-// rebuilds the served outputs. Caller holds p.mu.
+// rebuilds the served outputs. Caller holds p.scanMu; p.mu is taken here to publish.
 func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error) {
 	p.lastSize = size
 	before := p.published
@@ -366,7 +370,7 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 		if h.ID != mkv.IDCluster {
 			// A non-Cluster top-level element after the last cluster (typically
 			// Cues, written once the source finalizes): auto-detected completion.
-			if ferr := p.finalizeLocked(ctx); ferr != nil {
+			if ferr := p.publish(func() error { return p.finalizeLocked(ctx) }); ferr != nil {
 				return p.published - before, ferr
 			}
 			break
@@ -378,29 +382,88 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 		if bodyEnd > size {
 			break // partial trailing cluster: not yet whole, stop before it
 		}
-		if serr := p.scanClusterLocked(ctx, src, p.cursor, bodyEnd); serr != nil {
+		if serr := p.scanCluster(ctx, src, p.cursor, bodyEnd); serr != nil {
 			return p.published - before, serr
 		}
 		p.cursor = bodyEnd
 	}
 
 	if !p.done && p.segDeclaredEnd >= 0 && size >= p.segDeclaredEnd && p.cursor >= p.segDeclaredEnd {
-		if ferr := p.finalizeLocked(ctx); ferr != nil {
+		if ferr := p.publish(func() error { return p.finalizeLocked(ctx) }); ferr != nil {
 			return p.published - before, ferr
 		}
 	}
 
 	if p.headDone && p.leadDone {
-		p.rebuildOutputsLocked()
+		_ = p.publish(func() error { p.rebuildOutputsLocked(); return nil })
 	}
 	return p.published - before, nil
 }
 
-// scanClusterLocked walks one confirmed-whole cluster's blocks (bounded to its
-// declared byte range via boundedReadSeeker, so a concurrently-growing file
-// past that point is never touched), folding them into head resolution (while
-// unresolved) and video-keyframe boundary discovery. Caller holds p.mu.
+// publish runs fn with p.mu write-held: the only way a scan changes what requests read.
+func (p *GrowingHLSPlan) publish(fn func() error) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return fn()
+}
+
+// scanCluster folds one whole cluster in. Once the head and the lead have resolved, only its video keyframes matter:
+// they are read without the lock and published together, so requests run on while the cluster is read.
+func (p *GrowingHLSPlan) scanCluster(ctx context.Context, src mkv.ReadSeekCloser, clusterStart, bodyEnd int64) error {
+	if !p.headDone || !p.leadDone {
+		return p.publish(func() error { return p.scanClusterLocked(ctx, src, clusterStart, bodyEnd) })
+	}
+	var keys []int64
+	err := p.walkCluster(ctx, src, clusterStart, bodyEnd, func(pt *planTrack, b mkv.Block) error {
+		if pt.ft.outTrack.spec.video && b.Keyframe {
+			keys = append(keys, b.BlockTimecode)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return p.publish(func() error {
+		for _, ms := range keys {
+			p.recordKeyframeLocked(ms, clusterStart)
+		}
+		p.updateSegCountLocked()
+		return nil
+	})
+}
+
+// scanClusterLocked folds one confirmed-whole cluster's blocks into head
+// resolution (while unresolved) and video-keyframe boundary discovery. Caller
+// holds p.mu.
 func (p *GrowingHLSPlan) scanClusterLocked(ctx context.Context, src mkv.ReadSeekCloser, clusterStart, bodyEnd int64) error {
+	err := p.walkCluster(ctx, src, clusterStart, bodyEnd, func(pt *planTrack, b mkv.Block) error {
+		if !p.headDone {
+			if herr := p.extendHeadLocked(pt, b); herr != nil {
+				return herr
+			}
+		}
+		if pt.ft.outTrack.spec.video {
+			p.extendLeadLocked(b)
+			if b.Keyframe {
+				p.recordKeyframeLocked(b.BlockTimecode, clusterStart)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !p.headDone && p.headNeed == 0 && p.headNeedGrid == 0 {
+		p.resolveHeadLocked()
+	}
+	p.updateSegCountLocked()
+	return nil
+}
+
+// walkCluster hands fn each block of a selected track in one confirmed-whole
+// cluster, bounded to its declared byte range via boundedReadSeeker, so a
+// concurrently-growing file past that point is never touched.
+func (p *GrowingHLSPlan) walkCluster(ctx context.Context, src mkv.ReadSeekCloser, clusterStart, bodyEnd int64, fn func(*planTrack, mkv.Block) error) error {
 	bounded := &boundedReadSeeker{r: src, limit: bodyEnd}
 	br, err := reader.NewBlockReaderAt(bounded, p.full.tcScale, clusterStart)
 	if err != nil {
@@ -421,32 +484,17 @@ func (p *GrowingHLSPlan) scanClusterLocked(ctx context.Context, src mkv.ReadSeek
 		}
 		b, berr := br.Next()
 		if isBlockWalkEnd(berr) {
-			break
+			return nil
 		}
 		if berr != nil {
 			return errf("read block: %w", berr)
 		}
-		pt, ok := routing[b.TrackNumber]
-		if !ok {
-			continue
-		}
-		if !p.headDone {
-			if herr := p.extendHeadLocked(pt, b); herr != nil {
-				return herr
-			}
-		}
-		if pt.ft.outTrack.spec.video {
-			p.extendLeadLocked(b)
-			if b.Keyframe {
-				p.recordKeyframeLocked(b.BlockTimecode, clusterStart)
+		if pt, ok := routing[b.TrackNumber]; ok {
+			if err := fn(pt, b); err != nil {
+				return err
 			}
 		}
 	}
-	if !p.headDone && p.headNeed == 0 && p.headNeedGrid == 0 {
-		p.resolveHeadLocked()
-	}
-	p.updateSegCountLocked()
-	return nil
 }
 
 // extendLeadLocked folds one video block into the composition-shift prefix: the
@@ -717,15 +765,15 @@ func (p *GrowingHLSPlan) rebuildOutputsLocked() {
 // not counted until it closes (a new boundary is found, or the plan
 // finalizes).
 func (p *GrowingHLSPlan) NumSegments() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.published
 }
 
 // MasterPlaylist returns master.m3u8, or nil before the head has resolved.
 func (p *GrowingHLSPlan) MasterPlaylist() []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.master
 }
 
@@ -733,8 +781,8 @@ func (p *GrowingHLSPlan) MasterPlaylist() []byte {
 // ENDLIST while growing, VOD+ENDLIST once finalized. nil before the head has
 // resolved.
 func (p *GrowingHLSPlan) MediaPlaylist() []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if len(p.medias) == 0 {
 		return nil
 	}
@@ -745,8 +793,8 @@ func (p *GrowingHLSPlan) MediaPlaylist() []byte {
 // read 0 (unknown) while growing and the exact totals once finalized - see
 // the package doc's byte-identity note. nil before the head has resolved.
 func (p *GrowingHLSPlan) InitSegment() []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if len(p.inits) == 0 {
 		return nil
 	}
@@ -757,8 +805,8 @@ func (p *GrowingHLSPlan) InitSegment() []byte {
 // segments are published, exactly like HLSPlan.Resources but without the
 // subtitle/DASH/trick-play names this version does not carry.
 func (p *GrowingHLSPlan) Resources() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	names := []string{"master.m3u8"}
 	fts := p.full.fts()
 	for i := range fts {
@@ -774,8 +822,8 @@ func (p *GrowingHLSPlan) Resources() []string {
 // the same segment RemuxToHLS/PlanHLS would produce for the finished file
 // (HLSPlan.Segment does the actual work - see the package doc).
 func (p *GrowingHLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if n < 0 || n >= p.published {
 		return nil, noResource("segment %d out of range (0..%d)", n, p.published-1)
 	}
@@ -791,8 +839,8 @@ func (p *GrowingHLSPlan) Resource(ctx context.Context, name string) ([]byte, str
 		mimeMP4  = "video/mp4"
 		mimeSeg  = "video/iso.segment"
 	)
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	if name == "master.m3u8" {
 		if p.master == nil {
