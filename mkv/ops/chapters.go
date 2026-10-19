@@ -52,8 +52,9 @@ import (
 func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 	var out []mkv.Chapter
 	uids := &chapterUIDs{seen: map[uint64]bool{}, next: 1}
-	ends := map[uint64]int64{} // where a chapter carried across a cut really ends, by output UID
-	var prev map[uint64]uint64 // the previous source's chapter UIDs, as written
+	ends := map[uint64]int64{}            // where a chapter carried across a cut really ends, by output UID
+	carried := map[uint64][]mkv.Chapter{} // the sub-chapters its continuation holds, by output UID
+	var prev map[uint64]uint64            // the previous source's chapter UIDs, as written
 	for i, c := range sources {
 		// Continuation dedup happens on the WRITE pass only. The sizing pass
 		// (nil offsets) has no extents, so the two passes can disagree on which
@@ -79,20 +80,21 @@ func concatChapters(sources []*mkv.Container, offsets []int64) []mkv.Chapter {
 		if !continues {
 			prev = nil
 		}
-		out = append(out, shiftChapters(c.Chapters, off, extent, uids, prev, ids, ends)...)
+		out = append(out, shiftChapters(c.Chapters, off, extent, uids, prev, ids, ends, carried)...)
 		prev = ids
 	}
-	extendContinued(out, ends)
+	extendContinued(out, ends, carried)
 	return out
 }
 
-// extendContinued gives a chapter clipped at a cut the end of its continuation.
-func extendContinued(chapters []mkv.Chapter, ends map[uint64]int64) {
+// extendContinued gives a chapter clipped at a cut the end and the sub-chapters of its continuation.
+func extendContinued(chapters []mkv.Chapter, ends map[uint64]int64, carried map[uint64][]mkv.Chapter) {
 	for i := range chapters {
 		if ch := &chapters[i]; ch.EndMs > 0 && ends[ch.ID] > ch.EndMs {
 			ch.EndMs = ends[ch.ID]
 		}
-		extendContinued(chapters[i].SubChapters, ends)
+		chapters[i].SubChapters = append(chapters[i].SubChapters, carried[chapters[i].ID]...)
+		extendContinued(chapters[i].SubChapters, ends, carried)
 	}
 }
 
@@ -103,7 +105,7 @@ func extendContinued(chapters []mkv.Chapter, ends map[uint64]int64) {
 // is the last source and the sizing pass.
 // prev, set when this source is the previous one still running, maps that source's UIDs to the ones written: one
 // of them opening this part names the same chapter, not a new one. ids records this source's the same way.
-func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapterUIDs, prev, ids map[uint64]uint64, ends map[uint64]int64) []mkv.Chapter {
+func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapterUIDs, prev, ids map[uint64]uint64, ends map[uint64]int64, carried map[uint64][]mkv.Chapter) []mkv.Chapter {
 	var out []mkv.Chapter
 	for _, ch := range chapters {
 		if len(ch.SegmentUID) > 0 {
@@ -117,6 +119,8 @@ func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapt
 				ends[was] = max(ends[was], ch.EndMs+offsetMs)
 			}
 			ids[ch.ID] = was
+			// Its sub-chapters past the cut go under the chapter it continues.
+			carried[was] = append(carried[was], shiftChapters(ch.SubChapters, offsetMs, extentMs, uids, prev, ids, ends, carried)...)
 			continue // the same chapter, carried across the cut: see concatChapters
 		}
 		shifted := ch
@@ -126,7 +130,7 @@ func shiftChapters(chapters []mkv.Chapter, offsetMs, extentMs int64, uids *chapt
 		if ch.EndMs > 0 {
 			shifted.EndMs = ch.EndMs + offsetMs
 		}
-		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, extentMs, uids, prev, ids, ends)
+		shifted.SubChapters = shiftChapters(ch.SubChapters, offsetMs, extentMs, uids, prev, ids, ends, carried)
 		out = append(out, shifted)
 	}
 	return out

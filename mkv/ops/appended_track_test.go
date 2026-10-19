@@ -129,3 +129,16 @@ func TestJoinRefusesTracksInAnotherLanguageOrder(t *testing.T) {
 		t.Errorf("eng and en-US: %v", err)
 	}
 }
+
+// TestJoinKeepsTheSubChaptersOfAContinuedChapter: a chapter a split carried over a cut comes back whole, its
+// sub-chapters from both parts under it, where those of the part it continued in were dropped.
+func TestJoinKeepsTheSubChaptersOfAContinuedChapter(t *testing.T) {
+	a := &mkv.Container{Info: mkv.SegmentInfo{SegmentUID: []byte{1}}, Chapters: []mkv.Chapter{{ID: 10, Title: "P", StartMs: 0, EndMs: 2000,
+		SubChapters: []mkv.Chapter{{ID: 11, Title: "s1", StartMs: 500, EndMs: 1000}}}}}
+	b := &mkv.Container{Info: mkv.SegmentInfo{SegmentUID: []byte{2}, PrevUID: []byte{1}}, Chapters: []mkv.Chapter{{ID: 10, Title: "P", StartMs: 0, EndMs: 1000,
+		SubChapters: []mkv.Chapter{{ID: 12, Title: "s2", StartMs: 200, EndMs: 800}}}}}
+	out := concatChapters([]*mkv.Container{a, b}, []int64{0, 2000})
+	if len(out) != 1 || out[0].EndMs != 3000 || len(out[0].SubChapters) != 2 || out[0].SubChapters[1].Title != "s2" || out[0].SubChapters[1].StartMs != 2200 {
+		t.Errorf("joined chapters: %+v", out)
+	}
+}
