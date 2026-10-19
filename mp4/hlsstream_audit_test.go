@@ -13,6 +13,36 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// awaitFlight waits until window n's flight on plan (the table's with table) meets ok, instead of a sleep guessing it.
+func awaitFlight(t *testing.T, plan *HLSPlan, table bool, n int, ok func(*flight) bool) {
+	t.Helper()
+	mu := &plan.winMu
+	if table {
+		mu = &plan.tabMu
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		mu.Lock()
+		var f *flight
+		if table {
+			if tf := plan.tabFlight[n]; tf != nil {
+				f = tf.flight
+			}
+		} else if wf := plan.winFlight[n]; wf != nil {
+			f = wf.flight
+		}
+		met := f != nil && ok(f)
+		mu.Unlock()
+		if met {
+			return
+		}
+	}
+	t.Fatal("the flight never reached the state the test waits for")
+}
+
+func flightStarted(*flight) bool      { return true }
+func flightJoined(f *flight) bool     { return f.waiters > 0 }
+func flightLeaderGone(f *flight) bool { return f.gone }
+
 // A client that gives up on the window build it started does not fail the
 // clients waiting on that build: the build goes on for them.
 func TestWindowBuildSurvivesLeaderCancel(t *testing.T) {
@@ -40,12 +70,12 @@ func TestWindowBuildSurvivesLeaderCancel(t *testing.T) {
 			leaderCtx, cancel := context.WithCancel(context.Background())
 			leader := make(chan error, 1)
 			go func() { leader <- build(leaderCtx) }()
-			time.Sleep(50 * time.Millisecond) // the leader is queued on the slot
+			awaitFlight(t, plan, mode == "table", 1, flightStarted) // the leader is queued on the slot
 			waiter := make(chan error, 1)
 			go func() { waiter <- build(context.Background()) }()
-			time.Sleep(50 * time.Millisecond) // the waiter is on the flight
+			awaitFlight(t, plan, mode == "table", 1, flightJoined)
 			cancel()
-			time.Sleep(50 * time.Millisecond)
+			awaitFlight(t, plan, mode == "table", 1, flightLeaderGone)
 			release()
 			select {
 			case err := <-waiter:
@@ -80,7 +110,7 @@ func TestWindowBuildStopsWhenEveryoneLeaves(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { _, _, err := plan.window(ctx, 1); done <- err }()
-	time.Sleep(50 * time.Millisecond)
+	awaitFlight(t, plan, false, 1, flightStarted)
 	cancel()
 	select {
 	case err := <-done:
@@ -273,9 +303,9 @@ func TestWindowBuildCancelsOnceLastWaiterLeaves(t *testing.T) {
 	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
 	leader, waiter := make(chan error, 1), make(chan error, 1)
 	go func() { _, _, err := plan.window(leaderCtx, 1); leader <- err }()
-	time.Sleep(50 * time.Millisecond)
+	awaitFlight(t, plan, false, 1, flightStarted)
 	go func() { _, _, err := plan.window(waiterCtx, 1); waiter <- err }()
-	time.Sleep(50 * time.Millisecond)
+	awaitFlight(t, plan, false, 1, flightJoined)
 	cancelLeader()
 	select {
 	case err := <-leader:
