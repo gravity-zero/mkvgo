@@ -690,8 +690,8 @@ func TestChaptersToRanges_WithEndTimes(t *testing.T) {
 	if ranges[0].StartMs != 0 || ranges[0].EndMs != 100 {
 		t.Fatalf("range 0 = %+v", ranges[0])
 	}
-	if ranges[1].StartMs != 100 || ranges[1].EndMs != 200 {
-		t.Fatalf("range 1 = %+v", ranges[1])
+	if ranges[1].StartMs != 100 || ranges[1].EndMs != 0 {
+		t.Fatalf("range 1 = %+v, want the last chapter's part to run to the end", ranges[1])
 	}
 }
 

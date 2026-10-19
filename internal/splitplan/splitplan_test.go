@@ -44,3 +44,17 @@ func TestCheckRanges(t *testing.T) {
 		t.Errorf("an unknown duration refused a range: %v", err)
 	}
 }
+
+// TestChapterRangesLeaveNoGap: stated ends that leave a gap, or stop before the end, still put every instant in a part.
+func TestChapterRangesLeaveNoGap(t *testing.T) {
+	r := ChapterRanges([]mkv.Chapter{{StartMs: 0, EndMs: 1000}, {StartMs: 2000, EndMs: 3000}, {StartMs: 4000, EndMs: 5000}})
+	want := []mkv.TimeRange{{StartMs: 0, EndMs: 2000}, {StartMs: 2000, EndMs: 4000}, {StartMs: 4000, EndMs: 0}}
+	for i := range want {
+		if r[i] != want[i] {
+			t.Errorf("range %d = %+v, want %+v", i, r[i], want[i])
+		}
+	}
+	if o := ChapterRanges([]mkv.Chapter{{StartMs: 0, EndMs: 1500}, {StartMs: 1000}}); o[0].EndMs != 1500 {
+		t.Errorf("an overlap a chapter states became %+v", o[0])
+	}
+}
