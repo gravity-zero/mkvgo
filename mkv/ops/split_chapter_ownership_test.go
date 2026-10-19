@@ -502,3 +502,41 @@ func TestSplitRefusesSoundStoredPastWhatACutHolds(t *testing.T) {
 		t.Errorf("err = %v, want a refusal of sound stored too far past the cut", err)
 	}
 }
+
+// TestSplitOpensASecondVideoTrackOnItsOwnKeyframe: a second video track with its own GOP (an angle) opens each part on
+// its own keyframe, as MP4 does, never on pictures that need the GOP before the cut.
+func TestSplitOpensASecondVideoTrackOnItsOwnKeyframe(t *testing.T) {
+	dir := t.TempDir()
+	var blocks []mkv.Block
+	for tc := int64(0); tc < 4000; tc += 250 {
+		blocks = append(blocks,
+			mkv.Block{TrackNumber: 1, Timecode: tc, Keyframe: tc%1000 == 0, Data: []byte("v")},
+			mkv.Block{TrackNumber: 2, Timecode: tc, Keyframe: tc%1500 == 0, Data: []byte("w")})
+	}
+	src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), videoTrack(2)}, blocks, 4000)
+	parts, err := Split(context.Background(), mkv.SplitOptions{SourcePath: src, OutputDir: filepath.Join(dir, "out"), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 2000}, {StartMs: 2000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	br, err := reader.NewBlockReader(f, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		blk, err := br.Next()
+		if err != nil {
+			t.Fatalf("part 2 holds no block of the second video track: %v", err)
+		}
+		if blk.TrackNumber == 2 {
+			if !blk.Keyframe {
+				t.Errorf("part 2 opens the second video track at %d ms on a picture that is not a keyframe", blk.Timecode)
+			}
+			return
+		}
+	}
+}

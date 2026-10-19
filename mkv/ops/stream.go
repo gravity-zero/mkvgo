@@ -81,6 +81,8 @@ type streamOpts struct {
 	// "any keyframe" would start a segment mid-GOP (corrupt video until the
 	// next real video keyframe). Empty means no video track: any keyframe cuts.
 	videoTracks map[uint64]bool
+	// otherVideo holds the other video tracks' SOURCE numbers: a part opens each on its own keyframe, as MP4 does.
+	otherVideo map[uint64]bool
 	// subtitleTracks holds the SOURCE track numbers of subtitle tracks: a cue on screen across a cut opens the
 	// next part too (walk.onScreen), and lastSubs / dropLeadingSub let Join keep it once.
 	subtitleTracks map[uint64]bool
@@ -225,7 +227,8 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	var cluster []mkv.Block
 	clusterTS := int64(-1)
 	subIdx := 0
-	gateSkipped := false // keyframeAlign dropped in-range blocks waiting for a cut keyframe
+	gateSkipped := false             // keyframeAlign dropped in-range blocks waiting for a cut keyframe
+	otherOpened := map[uint64]bool{} // the other video tracks that met their first keyframe in this part
 	maxMs := int64(math.MinInt64)
 	if len(carry) > 0 {
 		// A walk from the top would have dropped the blocks read before carry at the gate.
@@ -422,6 +425,13 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		if opts.keyframeAlign && opts.timeStart > 0 && clusterTS < 0 && !cutKeyframe {
 			gateSkipped = true
 			continue
+		}
+		// Another video track opens on its own keyframe: the pictures before it would decode on a GOP left behind.
+		if opts.keyframeAlign && opts.timeStart > 0 && opts.otherVideo[blk.TrackNumber] && !otherOpened[blk.TrackNumber] {
+			if !blk.Keyframe {
+				continue
+			}
+			otherOpened[blk.TrackNumber] = true
 		}
 		if opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd && !ending {
 			if clusterTS < 0 && gateSkipped {

@@ -278,6 +278,7 @@ func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.Tim
 	if err := streamToWriter(ctx, mw, c.Path, c.Info.TimecodeScale, fs, streamOpts{
 		remap: remap, timeStart: r.StartMs, timeEnd: r.EndMs, keyframeAlign: true,
 		videoTracks:    cutVideoTrack(c.Tracks),
+		otherVideo:     otherVideoTracks(c.Tracks),
 		subtitleTracks: subtitleTrackSet(c.Tracks),
 		contentDigests: digests, contentStats: stats,
 		trackEnds: trackEnds,
@@ -339,6 +340,21 @@ func cutVideoTrack(tracks []mkv.Track) map[uint64]bool {
 		}
 	}
 	return nil
+}
+
+// otherVideoTracks are the video tracks after the first, the one parts are cut on.
+func otherVideoTracks(tracks []mkv.Track) map[uint64]bool {
+	cut := cutVideoTrack(tracks)
+	var out map[uint64]bool
+	for _, t := range tracks {
+		if t.Type == mkv.VideoTrack && !cut[t.ID] {
+			if out == nil {
+				out = map[uint64]bool{}
+			}
+			out[t.ID] = true
+		}
+	}
+	return out
 }
 
 // rebaseChapters moves an already-clipped list by deltaMs (back for a positive
