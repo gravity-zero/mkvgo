@@ -53,6 +53,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 	offsets := make([]int64, len(models)) // where each file starts on the output timeline (ns)
 	for i := 1; i < len(models); i++ {
 		offsets[i] = offsets[i-1] + models[i-1].movieNs
+		if models[i].link.continues(models[i-1].link) {
+			offsets[i] = offsets[i-1] + models[i-1].cutNs()
+		}
 	}
 	totalNs := offsets[len(models)-1] + models[len(models)-1].movieNs
 
@@ -464,4 +467,21 @@ func dropSgpds(trak []byte) ([]byte, error) {
 		}
 		return out, nil
 	})
+}
+
+// cutNs is where a split part's cut falls: its length, or with another video track run past it, the end the others present.
+func (m *cutModel) cutNs() int64 {
+	var end int64
+	other := false
+	for i := range m.tracks {
+		if c := &m.tracks[i]; c.otherVideo(i, m.ref) {
+			other = true
+		} else {
+			end = max(end, c.presentEndNs(m.movieTS))
+		}
+	}
+	if !other || end == 0 {
+		return m.movieNs
+	}
+	return end
 }

@@ -157,6 +157,9 @@ func (c *cutTrack) presentEndNs(movieTS uint32) int64 {
 	return rescale(c.edit.empty, movieTS, nsPerSec) + rescale(c.tt.maxEnd()-c.edit.mediaTime, c.ts, nsPerSec)
 }
 
+// otherVideo reports whether track i is a video track other than the one cuts land on.
+func (c *cutTrack) otherVideo(i, ref int) bool { return i != ref && c.handler == "vide" }
+
 // isText reports whether the track is timed text, whose samples hold the screen until the next one.
 func (c *cutTrack) isText() bool {
 	switch c.handler {
@@ -501,7 +504,12 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 	for i := range m.tracks {
 		c := &m.tracks[i]
 		tt := c.tt.slice(p.a[i], p.b[i])
-		edts, dur := partEdit(c, tt, min(p.a[i], len(c.tt.samples)-1), m.movieTS, m.outTS, p.tsNs, p.teNs)
+		// Another video track shows its frames up to its own keyframe, where the next part opens it.
+		teNs := p.teNs
+		if c.otherVideo(i, m.ref) {
+			teNs = 0
+		}
+		edts, dur := partEdit(c, tt, min(p.a[i], len(c.tt.samples)-1), m.movieTS, m.outTS, p.tsNs, teNs)
 		t, err := rebuildTrak(c.trak, tt, edts, dur)
 		if err != nil {
 			return fmt.Errorf("track %d: %w", i+1, err)
