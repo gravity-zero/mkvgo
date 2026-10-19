@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
@@ -42,8 +43,28 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]
 		if len(c.Chapters) == 0 {
 			return nil, fmt.Errorf("no chapters to split by")
 		}
-		ranges = chaptersToRanges(c.Chapters)
+		lastKey, kerr := lastVideoKeyMs(ctx, opts.SourcePath, fs, c)
+		if kerr != nil {
+			return nil, kerr
+		}
+		var chs []mkv.Chapter
 		for _, ch := range c.Chapters {
+			if lastKey >= 0 && ch.StartMs > lastKey && len(chs) > 0 {
+				continue // no keyframe left to open a part on: the previous part runs on through it
+			}
+			chs = append(chs, ch)
+		}
+		ranges = chaptersToRanges(chs)
+		if len(chs) < len(c.Chapters) {
+			latest := 0
+			for i, ch := range chs {
+				if ch.StartMs > chs[latest].StartMs {
+					latest = i
+				}
+			}
+			ranges[latest].EndMs = 0 // the last part runs on through the chapters it could not open
+		}
+		for _, ch := range chs {
 			titles = append(titles, ch.Title)
 		}
 	case opts.EveryMs > 0:
@@ -377,4 +398,59 @@ func refuseCutSource(path string, fs *mkv.FS) error {
 		return nil
 	}
 	return fmt.Errorf("%w: it ends at byte %d of the %d its Segment declares: split it once the file is complete", ErrSourceTruncated, st.Size(), declared)
+}
+
+// lastVideoKeyMs is where the last video keyframe presents (-1: no video, or no chapter past the last cued one): the
+// Cues prove keyframes up to their last video entry, so only the clusters from there on are read.
+func lastVideoKeyMs(ctx context.Context, path string, fs *mkv.FS, c *mkv.Container) (int64, error) {
+	video := videoTrackSet(c.Tracks)
+	if len(video) == 0 {
+		return -1, nil
+	}
+	var last *mkv.CuePoint
+	for i := range c.Cues {
+		if cue := &c.Cues[i]; (cue.Track == 0 || video[cue.Track]) && (last == nil || cue.TimeMs > last.TimeMs) {
+			last = cue
+		}
+	}
+	latest := int64(-1)
+	for _, ch := range c.Chapters {
+		latest = max(latest, ch.StartMs)
+	}
+	if last != nil && latest <= last.TimeMs {
+		return -1, nil
+	}
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	var br *reader.BlockReader
+	if last != nil {
+		br, err = reader.NewBlockReaderAt(f, c.Info.TimecodeScale, c.SegmentStart+last.ClusterPos)
+	} else {
+		br, err = reader.NewBlockReader(f, c.Info.TimecodeScale)
+	}
+	if err != nil {
+		return 0, err
+	}
+	key := int64(-1)
+	if last != nil {
+		key = last.TimeMs
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		blk, err := br.Next()
+		if err == io.EOF {
+			return key, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		if blk.Keyframe && video[blk.TrackNumber] {
+			key = max(key, blk.Timecode)
+		}
+	}
 }
