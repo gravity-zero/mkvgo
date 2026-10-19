@@ -239,6 +239,35 @@ func TestFingerprint_MP4MatchesMKV(t *testing.T) {
 	}
 }
 
+// TestFingerprint_MP4RemuxesToATempFile: the Matroska an MP4 is hashed through is a temp file on local disk, removed
+// after; reading the whole MP4 and that Matroska into memory held twice a film's size.
+func TestFingerprint_MP4RemuxesToATempFile(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32(320), Height: u32(240), FrameRate: f64(25)}}
+	blocks := []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("keyframe-payload-0")}, {TrackNumber: 1, Timecode: 40, Data: []byte("interframe-payload-1")}}
+	mp4Path := filepath.Join(dir, "src.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), buildFingerprintMKV(t, dir, "src.mkv", "t", tracks, blocks), mp4Path); err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	sawTemp := false
+	progress := func(_, _ int64) {
+		if entries, err := os.ReadDir(tmp); err == nil && len(entries) > 0 {
+			sawTemp = true
+		}
+	}
+	if _, err := Fingerprint(context.Background(), mp4Path, mkv.Options{Progress: progress}); err != nil {
+		t.Fatal(err)
+	}
+	if !sawTemp {
+		t.Error("no temp file while the MP4 was remuxed, want the Matroska on local disk")
+	}
+	if entries, _ := os.ReadDir(tmp); len(entries) > 0 {
+		t.Errorf("%d temp file(s) left behind", len(entries))
+	}
+}
+
 // TestFingerprint_MP4Extensionless proves the content-sniffing fallback: an
 // MP4 file with no recognized extension still fingerprints via the MP4 path
 // (reader.ErrNotMatroska triggers digestTracksMP4), matching openAnyMeta's
