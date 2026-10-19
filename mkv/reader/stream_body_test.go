@@ -33,7 +33,11 @@ func TestReadStreamAttachmentHeldOnce(t *testing.T) {
 		t.Fatal("the attachment did not come back whole")
 	}
 	// The data's own read grows its buffer by doubling (about twice its size); the element body must add nothing.
-	if got := after.TotalAlloc - before.TotalAlloc; got > size*3 {
+	limit := uint64(size * 3)
+	if raceBuild {
+		limit = size * 5 // the race detector's own allocations ride on top
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > limit {
 		t.Errorf("reading a %d-byte attachment allocated %d bytes", size, got)
 	}
 }
