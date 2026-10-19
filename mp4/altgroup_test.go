@@ -29,7 +29,11 @@ func trakGroups(t *testing.T, data []byte) [][2]string {
 		}
 		tb, _ := iterBoxes(k.payload)
 		tkhd, _ := findMemBox(tb, "tkhd")
-		group := binary.BigEndian.Uint16(tkhd.payload[34:36])
+		off := 34
+		if tkhd.payload[0] == 1 {
+			off = 46 // version 1: creation and modification times on 64 bits
+		}
+		group := binary.BigEndian.Uint16(tkhd.payload[off : off+2])
 		out = append(out, [2]string{trakHandler(tb), string(rune('0' + group))})
 	}
 	return out
