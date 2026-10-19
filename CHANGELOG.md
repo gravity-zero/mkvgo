@@ -237,6 +237,9 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   track and records where its split cut it (`SPLIT_CUT`); Join places a linked
   part there, so an open GOP with a second video track and no sound joins back
   whole too.
+- An MP4 join of a file that does not continue the one before (not its split's
+  next part) drops the open-GOP leading pictures that file's edit list hides:
+  they decoded from references the file before never held.
 - `s3fs` takes an endpoint written with a trailing slash; a bucket in another
   region says which region to set, instead of HTTP 301.
 - `httpfs` `ReadAt` asks again for the rest when a server serves less than
