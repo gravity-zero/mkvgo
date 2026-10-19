@@ -91,6 +91,9 @@ type streamOpts struct {
 	// dropLeadingSub holds, per output track, a cue the previous linked part already shows past its end: the
 	// copy a split opened this part on is dropped.
 	dropLeadingSub map[uint64][]byte
+	// roundedHold holds, per output video track, its frame duration in ns: a part followed by its linked next part writes
+	// a BlockDuration within a millisecond of it as none, the hold holdToCut gave it to cover the timecodes' rounding.
+	roundedHold map[uint64]int64
 	// primingEndsMs holds, per source track, where its encoder priming ends: a frame ending by then is dropped, the
 	// decoder discarding CodecDelay at the start of the output track only, not at a later file's.
 	primingEndsMs map[uint64]primingCut
@@ -552,6 +555,9 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 
 		if err := injectSubs(blk.Timecode); err != nil {
 			return err
+		}
+		if frame, ok := opts.roundedHold[newID]; ok && blk.Duration > 0 && abs64(blk.Duration*1_000_000-frame) < 1_000_000 {
+			blk.Duration = 0 // the next part's keyframe follows at once: the frame's own duration reaches it
 		}
 		cluster = append(cluster, blk)
 	}

@@ -27,11 +27,11 @@ func TestCasesAndCuts(t *testing.T) {
 	}{
 		{Case{Cuts: 1}, []int64{3000}},
 		{Case{Cuts: 2}, []int64{2000, 4000}},
-		{Case{Cuts: 1, NTSC: true}, []int64{3003}},
-		{Case{Cuts: 2, NTSC: true}, []int64{2002, 4004}},
+		{Case{Cuts: 1, NTSC: true}, []int64{3337}}, // 3336.67 ms: NTSC keyframes fall between milliseconds
+		{Case{Cuts: 2, NTSC: true}, []int64{2503, 4171}},
 		{Case{Cuts: 1, Late: true}, []int64{4000}},
 		{Case{Cuts: 2, Late: true}, []int64{3000, 5000}},
-		{Case{Cuts: 2, NTSC: true, Late: true}, []int64{3003, 5005}},
+		{Case{Cuts: 2, NTSC: true, Late: true}, []int64{2503, 5005}},
 	} {
 		if got := tc.c.ExpectedCuts(); len(got) != len(tc.want) || got[0] != tc.want[0] || got[len(got)-1] != tc.want[len(tc.want)-1] {
 			t.Errorf("%s: cuts %v, want %v", tc.c.Name(), got, tc.want)

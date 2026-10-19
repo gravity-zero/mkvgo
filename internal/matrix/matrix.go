@@ -95,7 +95,7 @@ func SecondVideoCases() []Case {
 	return out
 }
 
-// frameNs and gop are the video cadence: 25 fps with a keyframe a second, or 30000/1001 fps with one every 30 frames.
+// frameNs and gop are the video cadence: 25 fps with a keyframe a second, or 30000/1001 fps with one every 25 frames, so keyframes fall between milliseconds.
 func (c Case) frameNs() float64 {
 	if c.NTSC {
 		return 1e9 * 1001 / 30000
@@ -104,9 +104,6 @@ func (c Case) frameNs() float64 {
 }
 
 func (c Case) gop() int {
-	if c.NTSC {
-		return 30
-	}
 	return 25
 }
 
