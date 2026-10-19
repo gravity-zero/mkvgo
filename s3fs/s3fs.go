@@ -133,12 +133,13 @@ func New(opts Options) *S3FS {
 func (s *S3FS) BytesFetched() int64 { return s.hfs.BytesFetched() }
 
 // parseEndpoint splits an endpoint into (scheme, host), defaulting to https
-// when the endpoint carries no scheme.
+// when the endpoint carries no scheme; a trailing slash, as AWS_ENDPOINT_URL is often written, is dropped.
 func parseEndpoint(e string) (scheme, host string) {
+	scheme, host = "https", e
 	if i := strings.Index(e, "://"); i >= 0 {
-		return e[:i], e[i+3:]
+		scheme, host = e[:i], e[i+3:]
 	}
-	return "https", e
+	return scheme, strings.TrimRight(host, "/")
 }
 
 // Port returns the mkv.FS wired to this S3 filesystem. It is read-only:

@@ -93,3 +93,13 @@ func TestKeyDotSegmentsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestEndpointWithATrailingSlash: AWS_ENDPOINT_URL is often written with a trailing slash; it names the same host,
+// where every path was refused as not resolving to "host/".
+func TestEndpointWithATrailingSlash(t *testing.T) {
+	fs := New(Options{Region: "eu-west-1", AccessKey: "AKID", SecretKey: "SECRET", Endpoint: "http://127.0.0.1:9000/", PathStyle: true})
+	u, err := fs.resolveURL("s3://abc/k.mkv")
+	if err != nil || u != "http://127.0.0.1:9000/abc/k.mkv" {
+		t.Errorf("resolveURL = %q, %v", u, err)
+	}
+}
