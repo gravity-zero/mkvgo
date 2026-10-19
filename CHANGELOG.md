@@ -11,6 +11,13 @@ All notable changes to mkvgo are documented here. The format is based on
 Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
 this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 
+Highlights: split then join gives the source back sample for sample, in
+Matroska and MP4 alike; MP4 and MOV are edited natively (split, join, mux,
+merge, in-place metadata) without a round trip through Matroska; CENC
+packaging is hardened; a subtitle cue without a duration ends once read, by one
+rule everywhere; on-demand serving counts what it really sends, and a growing
+plan serves while it scans.
+
 ### Changed
 
 - `serve` and `serve-growing` listen on `127.0.0.1:8478` by default;
@@ -131,30 +138,16 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   of the cues it holds in the error's `partial`.
 - Native MP4/MOV editing: `mp4.EditInPlace`, `EditMetadata`, `SetChapters`,
   `RemoveTrack`, `Rewrite`, `Split`, `Join`, `Mux`, `Merge`, `AddTrack` and
-  `MergeSubtitle` copy samples byte for byte and rewrite only the tables; the
-  CLI routes an MP4/MOV to them (`edit`, `edit-title`, `edit-track`,
-  `edit-inplace`, `set-chapters`, `remove-track`, `add-track`, `mux`, `merge`,
-  `merge-subtitle`, `split`, `join`), and `to-mp4` on an MP4/MOV rewrites it
-  fast start. An in-place edit rewrites the moov alone, crash-ordered like
-  `retime`. A split opens each part on a keyframe with its audio in sync; a
-  join compares how the files decode (the bitrates each declares aside, in a
-  QuickTime `wave` too),
-  takes a file's length from its tracks when its movie header leaves it unset,
-  resumes each file where the previous one ends, without replaying
-  priming or padding, holds the last audio sample over a gap up to 500 ms and
-  refuses a longer one, and gives a split's parts back sample for sample.
-  A split's parts are chained by `org.mkvgo` freeform tags (`SPLIT_UID`,
-  `SPLIT_PREV`): a join makes a chapter the split cut whole again only
-  between linked parts, keeps at most 255 chapters, and writes no link.
-  A subtitle cue on screen at a cut opens the next part too, and a join of
-  linked parts keeps it once.
-  An output written from a hashed MP4 (`to-mp4 --hash`) hashes its own
-  tracks, as a Matroska edit does, so `verify` passes on split parts and
-  reordered muxes; the hashes cost one more read of the media.
-  Fragmented and encrypted MP4 are refused, as are an output that is one of
-  the inputs and a mux, merge or join mixing MP4 and Matroska; what MP4
-  cannot hold (attachments, styled ASS) still goes through `from-mp4` / `to-mp4`. A track
-  reference naming no trak is dropped.
+  `MergeSubtitle` copy samples byte for byte and rewrite only the tables, and
+  the CLI routes an MP4/MOV to them (`edit*`, `set-chapters`, `remove-track`,
+  `add-track`, `mux`, `merge`, `merge-subtitle`, `split`, `join`; `to-mp4`
+  rewrites it fast start). An in-place edit rewrites the moov alone,
+  crash-ordered like `retime`. Split parts are chained by `org.mkvgo` freeform
+  tags (`SPLIT_UID`, `SPLIT_PREV`, `SPLIT_CUT`) that a join reads and does not
+  write; a join holds an audio gap up to 500 ms and refuses a longer one. An
+  output of a hashed MP4 (`to-mp4 --hash`) hashes its own tracks, so `verify`
+  passes on split parts. Fragmented and encrypted MP4, an output that is one of
+  the inputs, and a mux, merge or join mixing MP4 and Matroska are refused.
 - `mp4.LanguageFields` turns a user's language into the 3-letter code and the
   BCP-47 tag; `mkvgo.EditInPlace` routes either container.
 - `subtitle.ParseSRTReader` (and `matroska.ParseSRTReader`) parses SRT from a reader.
@@ -165,358 +158,195 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
-- Split by chapters starts the first part at 0: what plays before the first
-  chapter is no longer lost from every part (MKV and MP4).
-- Split never opens an MP4 part on a keyframe the edit list hides, and a track
-  whose edit list has ended by a cut is left empty in that part instead of
-  playing its hidden media.
-- Split refuses a range that ends before it starts or starts past the end,
-  naming it, before any part is written (MKV and MP4).
-- Split by chapters keeps a Matroska chapter that starts after the last video
-  keyframe in the part before, as MP4 already did.
-- Split cuts a Matroska file on keyframes of its first video track only, as MP4
-  does: a second all-intra video track no longer opens a part mid-GOP.
-- Split keeps every sound block stored after a Matroska cut keyframe yet timed
-  before it, however many dense audio tracks there are.
-- Split by chapters no longer holds every subtitle cue of a part in memory,
-  only those that can still be on screen at a cut.
-- Join keeps an MP4 file's own subtitle and audio times when its first sample
-  starts before the previous file's last, instead of pushing the whole file
-  late.
-- Join refuses an MP4 track turned or sized for display unlike the first
-  file's, instead of showing it under the first file's matrix.
-- Join refuses Matroska tracks stored with another compression or encryption,
-  or of another picture size, sample rate, channel count or bit depth, instead
-  of joining them under the first file's declaration.
-- Join continues a Matroska part's chapters only from the part just before it:
-  an earlier unrelated file's chapter is no longer stretched, nor a new chapter
-  dropped.
-- Join drops a later Matroska file's encoder priming frames (CodecDelay), so
-  its sound no longer plays late by the priming.
-- An on-demand plan over an MP4 counts the bytes of the segments it builds and
-  serves (`BuiltBytes`, `ServedBytes`): a server's read-to-served ratio had
-  nothing on the served side.
-- A CENC Matroska plan offers no I-frame playlist, as the MP4 plan and the full
-  pass already did.
-- The AC-3, E-AC-3 and Opus sample entry refusals and retime's header refusals
-  wrap their cause.
-- `RemuxToMP4` ends an open last chapter at the movie's end instead of two
-  seconds after it starts.
+Split and join:
+
+- Split opens every part on its keyframe at 0 (MKV and MP4). The sound stored
+  after the cut keyframe but timed before it goes to the part before, kept
+  however many dense audio tracks there are. Another video track's pictures
+  stay in the part before up to that track's own keyframe. On an open GOP the
+  leading pictures, which decode only with the GOP before, stay out of both
+  parts. A Matroska file is cut on its first video track only, as MP4 is, and
+  an MP4 part never opens on a keyframe its edit list hides; a track whose edit
+  list has ended by a cut is left empty in that part.
+- Split by chapters starts the first part at 0, puts the gaps between stated
+  chapter ends and what follows the last chapter in a part, cuts chapters in
+  time order, and keeps a chapter starting after the last video keyframe in the
+  part before (MKV and MP4). A chapter holding no keyframe is named, with a
+  split by time offered. A Matroska file without Cues has its last keyframe
+  found in its tail, block headers only, and only the cues that can still be on
+  screen at a cut are held in memory.
+- Split refuses, by name and before writing any part: a range that ends before
+  it starts or starts past the end, sound stored more than 64 MiB past a cut
+  keyframe, a Matroska source that stops before its declared end
+  (`ErrSourceTruncated`), and a part that would be named like its source.
+- Split then join gives the source back sample for sample, in Matroska and MP4
+  alike, open GOP, second video track and cuts between milliseconds (29.97 fps)
+  included. Linked parts are placed at the cut the split recorded (an MP4 part's
+  `SPLIT_CUT`, the picture's cut in Matroska, sound muxed far ahead included),
+  so no seam drifts by a millisecond or by the sound's lead. The duration a
+  split gave a part's last picture to reach the cut is marked (`SPLIT_HOLD`,
+  carried by no op) and dropped, so every duration a source states comes back.
+  A subtitle cue on screen across a cut opens the next part for the time it has
+  left and is given back once, without holding the timeline. A chapter cut
+  across a seam is whole again, its sub-chapters and end included, only from
+  the part it continues, and a chapter reusing an earlier one's UID is kept. A Matroska part's SegmentUID
+  hashes its range, so parts of two splits cut elsewhere never chain.
+- Join of files that merely follow each other resumes after everything the
+  previous one holds, and plays no later file's encoder priming: its whole
+  priming frames are dropped and the rest inside the next frame (an Opus
+  pre-skip) is marked as a negative `DiscardPadding`, while a linked part keeps
+  its opening sound. In MP4, a file that does not continue the one before drops
+  the open-GOP leading pictures its edit list hides (they decoded from
+  references the file before never held), and a file whose first sample starts
+  before the previous one's last keeps its own times.
+- Join refuses tracks that do not pair: another compression, encryption,
+  picture size, sample rate, channel count or bit depth (Matroska), another
+  language (both; `und` pairs with any, an audio field left out joins its
+  stated default), and an MP4 video track turned or sized otherwise.
+
+Subtitles:
+
+- A cue that states no duration leaves the screen once read (17 characters a
+  second, between 1 and 7 s), at the next cue or at the film's end, whichever
+  comes first, by one rule in SRT, ASS and WebVTT extraction, in HLS and in a
+  remux to MP4 (`subtitle.SettleCueEnds`, `CueEndMs`, `ReadingMs`). SRT and ASS
+  extraction gave every cue 3 s, over the next one, and other paths kept a cue
+  up to the next however far it was. A cue with a BlockDuration ends there.
+- SRT extraction refuses a bitmap track, naming `-format pgs`. `MergeASS` keeps
+  each event's layer, and `MergeASS` and `merge-subtitle` mux events in time
+  order. An SRT timestamp with a dot before its milliseconds is read and a
+  negative one refused; a blank line or an arrow in a WebVTT cue no longer ends
+  or times it; an MP4 tx3g `<` that no tag closes is kept.
+
+Chapters:
+
+- A remux to MP4 and `EditInPlace` write one chapter list, in `chpl` and in the
+  QuickTime chapter track alike, ending with the media: `chpl` kept chapters
+  past the end, the last chapter ran 2 s when the duration was unknown, and the
+  chapter track could make the movie outlast its media.
+- An MP4 `chpl` listed out of order is read in time order, each chapter ending
+  at the next.
+
+Matroska writing:
+
+- A rewrite (`EditInPlace`, `EditMetadata`, `Split`, `Join`, `Mux`...) keeps
+  what it read and has no field for: the TrackEntry, Video and Audio children
+  (`Track.Unmodeled`: FlagLacing, the accessibility flags, StereoMode,
+  DisplayUnit, FrameRate...), the Colour sample layout (`Track.ColourLayout`)
+  and every block's `DiscardPadding` (`Block.DiscardPaddingNs`). It no longer
+  writes the colour and display size the reader took from the codec where the
+  container stated none.
+- A language set on a track (edit, mux, add-track, an `EditMetadata` callback)
+  is the one in effect, written as its ISO 639-2 code plus its BCP-47 tag
+  (`pt-BR` becomes `por` + `pt-BR`); one passed through unchanged keeps its tag.
+- `EditInPlace` copies the elements an edit leaves as they were from the file,
+  leaves Tags, Chapters and Attachments after the clusters there (rewriting
+  them there when the head cannot hold them), finds them without a SeekHead,
+  measures the head with its size fields as wide as the file writes them, and
+  bounds the SeekHead it reads; `ReindexInPlace` refuses bytes past the
+  Segment's end. Title edits were refused for want of room, chapters read
+  twice, or the head left broken for readers that do not resync.
+- No writer takes one of its inputs as output: every Matroska op, the MP4
+  remuxes, the HLS, ABR and concat packagers (a source in the output directory
+  under a name they write), the files lazy attachments are copied from, and
+  `-f` on every command. They truncated the file they read, then removed it.
 - `add-track`, `merge-subtitle` and `MergeASS` number the new track after every
-  track and give it a free TrackUID: a file numbered 1 and 3 got two tracks 3.
-- `GrowingHLSPlan.Complete` closes the playlist on what was published when the
-  tail cannot be read, instead of leaving it open for good.
-- A concat part's subtitle window past its last and an ABR manifest the
-  variants lack answer 404 like every other unknown name.
-- SRT and ASS extraction end each cue at its BlockDuration (every cue lasted
-  3 s), and SRT extraction refuses a bitmap track, naming `-format pgs`.
-- `MergeASS` keeps each event's layer, and both `MergeASS` and `merge-subtitle`
-  mux the events in time order.
-- `ContentEncodingScope` is read: a compressed CodecPrivate is inflated, and a
-  compression scoped to the CodecPrivate leaves the blocks plain.
-- An SRT timestamp with a dot before its milliseconds is read; a negative one
-  is refused.
-- `ReadStream`'s BlockReader times laced frames by their DefaultDuration and
-  drops blocks of undeclared tracks.
-- `ReindexInPlace` refuses a file with bytes past its Segment's end, which the
-  extended Segment would have swallowed; a damaged in-place journal's refusal
-  says to rebuild the file with the copy reindex.
-- Joins refuse a track in another language than the first file's (MKV and
-  MP4), since they pair tracks by position; an MP4 join compares the display
-  matrix of video tracks only. A Matroska file that leaves an audio field out
-  joins one that states its default value.
-- A Matroska join keeps the sub-chapters of a chapter continued across a seam.
-- An MP4 chpl listed out of order is read in time order, each chapter ending at
-  the next; a split by chapters cuts chapters in time order.
-- A split by chapters of a Matroska file without Cues looks for its last video
-  keyframe in the file's tail, block headers only, instead of reading it all.
-- Split keeps another video track's pictures up to that track's own keyframe
-  in the part before, and the next part opens it there, so split then join
-  gives every picture back (MKV and MP4): the MKV parts lost them, the MP4
-  join refused the parts. An MP4 part declares the length of its longest
-  track and records where its split cut it (`SPLIT_CUT`); Join places a linked
-  part there, so an open GOP with a second video track and no sound joins back
-  whole too.
-- An MP4 join of a file that does not continue the one before (not its split's
-  next part) drops the open-GOP leading pictures that file's edit list hides:
-  they decoded from references the file before never held.
-- A Matroska file cut between two elements of a Cluster of known size is read
-  as truncated, as a cut inside a block already was, instead of ending cleanly
-  on the blocks it lost; a walk that skips damage records the cut.
-- An ABR master counts the shared audio in the `BANDWIDTH` of every video-only
-  variant, which declared its video alone and looked cheaper than it plays.
-- A Matroska join no longer plays a later file's encoder priming left inside
-  its first kept frame (an Opus pre-skip, 6.5 ms): it is marked as a negative
-  `DiscardPadding`, which a decoder drops, so that file's sound is not pushed
-  late by it.
-- `GrowingHLSPlan` serves its requests side by side, and on while `Refresh`
-  reads the clusters that landed: the plan's lock is held over a request's
-  I/O for reading only, and taken by a scan only to publish what it found.
-- `HLSPlanStats.StreamedBytes` counts what an `Open` handle sends: a range its
-  part, a write cut short what it wrote, a handle closed unwritten nothing, and
-  bytes `Bytes()` hands out once; `ResourceHandle.Whole` tells a held resource
-  without counting it, and `mkvhttp` serves one through its handle, so a range,
-  a HEAD or a 304 counts only what goes out.
-- The HLS plan of an MP4 source settles an audio stride nothing confirms as
-  the full pass does: an Opus track whose first samples share a time served
-  other segment timings than `RemuxToHLS` wrote.
-- A Matroska join of linked parts gives back the source's last picture before a
-  cut as the source stores it: it kept the duration the split gave that picture
-  to reach a cut between milliseconds (29.97 fps) or past an open GOP's leading
-  pictures. The part marks that picture (`SPLIT_HOLD` on its track, carried by no
-  op), so the durations a source states, on every picture or some, all come back.
-- A subtitle cue that states no duration leaves the screen once read (17
-  characters a second, 1 to 7 s), at the next cue or at the film's end,
-  whichever comes first, in SRT, ASS and WebVTT extraction and in HLS alike:
-  SRT and ASS extraction gave every such cue 3 s, over the next one, and the
-  others stayed up to the next cue however far it was, and a remux to MP4 gave
-  them up to the next cue or 2 s (`subtitle.SettleCueEnds`, `CueEndMs`,
-  `ReadingMs`).
-- A remux to MP4 (and `EditInPlace`) writes one chapter list, in `chpl` and in
-  the QuickTime chapter track alike, that ends with the media: `chpl` kept the
-  chapters starting past the end the chapter track left out, the last chapter
-  ran 2 s when the source's duration was unknown, and the chapter track could
-  make the movie last longer than its media.
-- `s3fs` takes an endpoint written with a trailing slash; a bucket in another
-  region says which region to set, instead of HTTP 301.
-- `httpfs` `ReadAt` asks again for the rest when a server serves less than
-  asked short of the object's end, instead of reporting the end; `httpfs`
-  refuses Rename like every other write.
-- `mkvhttp` finds no satisfiable Range on an empty resource, and a HEAD or a
-  revalidation of a playlist, an init or a subtitle counts nothing streamed.
-- A time bound like `1.001` is rounded to 1001 ms, not truncated.
-- `--replace` flushes the verified copy to disk before renaming it over the
-  original; `--keep-backup` refuses to overwrite an existing `.bak`.
-- A language set on a Matroska track (edit, mux, add-track) is written as its
-  ISO 639-2 code plus its BCP-47 tag: `pt-BR` becomes `por` + `pt-BR`.
-- WebVTT: a blank line or an arrow in a cue's text no longer ends the cue or
-  times another; an MP4 tx3g `<` that no tag closes is kept.
-- Split by chapters puts gaps between stated chapter ends, and what follows the
-  last one, in a part; Split refuses, naming what to do, sound stored more than
-  64 MiB past a cut keyframe instead of dropping it.
-- Join keeps the opening sound of a Matroska part that continues the one
-  before, CodecDelay stated or not.
-- web: `useHLSPlayer` (React, Vue) keeps at most 30 s buffered ahead of
-  playback, removes what played, and fails on a SourceBuffer error.
-- A Matroska split part's SegmentUID hashes its range too: parts of two splits
-  of one source cut at other points named each other as predecessor and
-  successor, and a join of them merged a chapter across a seam that was none.
-- A Matroska `Split` keeps its last output cluster open near the end asked for,
-  so the picture shown last before the cut is still there to be held to it
-  even when sound muxed ahead opens a new cluster in between: a join of the
-  parts then lands every seam on the source's keyframe, where it was a
-  millisecond off per seam on 23.976 fps video, chapters included.
-- `EditInPlace` copies the metadata elements an edit leaves as they were from
-  the file, rather than writing them again: a title edit on a file holding Tags
-  both in its head and after its clusters (as common muxers leave them) gathered
-  them all in the head, and was refused for want of room.
-- `Join` places linked parts whose sound was muxed more than a second ahead of
-  the picture at the picture's cut when each sound track of the next part takes
-  up where the same track of the previous one stops: it fell back on the sound's end, and every later
-  part came that much late, its chapters and subtitle cues with it.
-- A Matroska `Split` of a source that stops before its declared end is refused
-  (`ErrSourceTruncated`) before any part is written: its parts stopped where
-  the file did, short or missing, with nothing to say so.
-- A Matroska rewrite keeps the TrackEntry, Video and Audio children mkvgo has no
-  field for, as they were read (`Track.Unmodeled`): FlagLacing, FlagOriginal and
-  the accessibility flags, StereoMode, DisplayUnit (whose loss changed what the
-  display size means), the Video FrameRate and the like were dropped.
-- `EditInPlace` measures the head's elements with their size fields as wide as
-  the file writes them (common muxers use 8 bytes): the head's end was
-  counted short, and the old bytes left before the first Cluster broke the
-  file's structure for any reader that does not resync.
-- A Matroska rewrite (`EditInPlace`, `EditMetadata`, `Split`, `Join`, `Mux`...)
-  no longer writes into the container the colour and display size the reader
-  took from the codec's SPS where the container stated none: a title edit added
-  a Colour element and grew the head, refused for want of room on some files.
-  A value the edit sets is written as before.
-- Junk read as an unknown Matroska element between the segment's elements (what
-  is left after a damaged parent) is resynced past, as an undecodable header
-  is, instead of skipped by the size it happens to declare, which could carry
-  the read past the Tracks and report a file without them.
-- A Matroska parent declaring less than its last child needs (a damaged Info
-  whose last string runs into the Tracks) no longer hides what follows: the
-  child is read when its end, not the parent's, opens a segment-level element.
-- A Matroska rewrite of the Tracks (`EditInPlace`, `EditMetadata`, `Split`,
-  `Join`, `Mux`...) keeps the Colour element's sample layout: bits per channel,
-  chroma and Cb subsampling and chroma siting were dropped. Read into
-  `Track.ColourLayout` (`colour_layout` in the probe JSON).
-- Matroska blocks keep their `DiscardPadding` (`Block.DiscardPaddingNs`) through
-  every rewrite (`Split`, `Join`, `EditMetadata`, `Mux`...): the padding an
-  encoder appends to a stream's last audio frame was dropped, so a decoder
-  played it.
-- `EditInPlace` on a file whose Tags sit after the clusters leaves them there
-  when the edit does not change them, and rewrites them there when the head
-  cannot hold them: a title edit was refused once those tags outgrew the
-  head's free space, and the whole file had to be rewritten.
-- `EditInPlace` treats Chapters and Attachments after the clusters as it does
-  Tags: many muxers keep their chapters there, and an edit wrote a second
-  copy in the head, every chapter then read twice.
-- `EditInPlace` on a file with no SeekHead finds the Tags after the clusters
-  instead of writing a second copy of them in the head.
-- A Matroska `Split` opens every part on its keyframe at 0: the sound stored
-  after the cut keyframe but timed before it goes to the part before, which was
-  missing it, instead of moving the next part's zero ahead of its first picture.
-  On an open GOP the part before holds its last picture to the cut (decided at
-  the cut, before the sound read past it can start a new cluster), so `Join`
-  no longer places the rest of the next part that much early; the leading
-  pictures stored after the keyframe, which decode only with the GOP before,
-  stay out of both parts.
-- `Join` gives a chapter a split carried over a cut the end of its
-  continuation, not the cut.
-- `Join` keeps a chapter of a linked part that reuses an earlier chapter's UID
-  (muxers drawing small UIDs repeat them): only a chapter opening its part is a
-  continuation of one cut there; three chapters of a film were dropped.
-- Every Matroska writer of the library refuses an output that is one of its
-  inputs, as the MP4 engine does: `EditMetadata(p, p)`, `AddTrack`,
-  `RemoveTrack`, `Join`, `Mux`, `MergeSubtitle`, `MergeASS`, `ExtractSubtitle`,
-  `ExtractASS`, `ExtractAttachment`, `Demux`, `RemuxToWebM`, `Reindex`,
-  `Salvage`, `ApplyRollback`, `Merge` and `MergeWithSubtitles` (every input,
-  the added track's file and the one that only carries attachments included)
-  truncated the file they read, then removed it as an unfinished output.
-- `mp4.RemuxToMP4` and `mp4.RemuxFromMP4` refuse their source as output, and
-  `RemuxToHLS`, `RemuxToABR` and `RemuxConcatToHLS` a source lying in the
-  output directory under a name they write (`init.mp4`, `seg00001.m4s`,
-  `v1/...`): the source was truncated, then removed.
-- The files lazy attachments are copied from count as inputs of `Mux` and
-  `EditMetadata`, and `MergeWithSubtitles` refuses to take an existing file
-  for its temporary merge, whose cleanup removed it.
-- `-f` replaces an existing output, never an input: `reindex`, `salvage`,
-  `to-webm`, `from-mp4`, `add-attachment`, `remove-attachment`,
-  `concat-segment`, `watermark-segment`, `forensic-segment`, `hls-segment`,
-  `abr-segment`, `rollback`, `extract-attachment`, `extract-subtitle`,
-  `subtitle-index`, `extract-chapters`, `to-vtt` and the frame extractions
-  wrote over the file they read when it was also the output; so did a
-  `--rollback-delta` naming the command's own file, and `set-chapters` over its
-  chapters file.
-- A Matroska `split` whose part would be named like its source (re-splitting
-  `part_001.mkv` into its own directory) truncated the source, then removed
-  it; every part is now checked before any is written, as for MP4.
+  track with a free TrackUID. `--replace` flushes the verified copy before
+  renaming it; `--keep-backup` refuses to overwrite an existing `.bak`.
 
 Matroska reading:
 
-- A language changed on a Matroska track (`edit-track -lang`, the `edit`
-  patch's `language`, `add-track`, `mux`) is the one in effect: the source's
-  LanguageBCP47, which takes precedence, kept the old language. A language
-  passed through unchanged, as `merge` does, keeps its BCP-47 tag.
-- A language an `EditMetadata` or `EditInPlace` callback changes on a Matroska
-  track takes effect: the tag the callback left untouched is dropped, as the
-  MP4 engine does.
-- `ReadStream` describes a file as `Read` does: it runs the same decoders,
-  and a differential fuzz target (`FuzzReadVsReadStream`) holds them together.
-  It streams each element through them instead of holding its body, so an
-  attachment costs its data once and Attachments past 512 MiB still read.
+- `ReadStream` describes a file as `Read` does, through the same decoders (held
+  together by `FuzzReadVsReadStream`), streaming each element instead of
+  holding its body; its BlockReader times laced frames by their DefaultDuration
+  and drops blocks of undeclared tracks.
+- A file cut between two elements of a Cluster of known size is read as
+  truncated, as a cut inside a block was. Junk between the segment's elements is
+  resynced past, and a parent declaring less than its last child needs no
+  longer hides what follows.
+- `ContentEncodingScope` is read: a compressed CodecPrivate is inflated, and a
+  compression scoped to it leaves the blocks plain.
 - Duplicate Info or Tracks keep the first; an unknown-size Tracks no longer
-  hides the next one.
-- A child overrunning its parent, or a block overrunning its Cluster, is
-  bounded or reported as damage instead of swallowing what follows.
-- Empty elements take their schema default, strings end at their first null,
-  and values past an int64 or their field's width are left unknown.
-- An empty DisplayWidth or DisplayHeight means square pixels; a cue point
-  without a time or position is dropped.
-- The EBML lace decoder refuses sizes that are not sizes and reads a one-frame
-  lace as that frame.
-- A Cluster Timestamp that would wrap a block's time is damage.
-- Every kept entry is charged to the metadata budget, and statistics tags
-  find their tracks by UID (50,000 tracks cost billions of comparisons).
-- A PGS object referenced many times is decoded once per display set.
-- A PGS display set whose objects lie more than 4096 pixels apart is refused
-  as damage: two forged dots at opposite corners asked for a 17 GB picture,
-  an out-of-memory crash no recover catches.
-
-- A subtitle cue on screen across a Matroska split's cut opens the next part
-  too, for the time it has left, and a join of the linked parts gives it back
-  once, as for MP4.
-- A join of linked Matroska parts no longer lets a cue running past a cut hold
-  the timeline: the seam is checked against the picture and the sound, and a
-  1.5 s cue left a 1.5 s hole in the video.
-
-- A Matroska split by chapters names the chapter that holds no keyframe and
-  offers a split by time, instead of asking to adjust a range nobody gave.
+  hides the next one. A child overrunning its parent, or a block its Cluster, is
+  bounded or reported as damage. Empty elements take their schema default,
+  strings end at their first null, and values past their field's width are
+  left unknown; an empty DisplayWidth or DisplayHeight means square pixels; a
+  cue point without a time or position is dropped; a forged CueTime yields no
+  negative keyframe.
+- The lace decoder refuses sizes that are not sizes and reads a one-frame lace
+  as that frame; a Cluster Timestamp that would wrap a block's time is damage.
+- Every kept entry is charged to the metadata budget, and statistics tags find
+  their tracks by UID. A PGS object referenced many times is decoded once per
+  display set, and a display set whose objects lie more than 4096 pixels apart
+  is refused as damage.
 
 Damage and resync:
 
-- The keyframe walks resync past a block that overruns its Cluster, and
-  past a damaged byte both readers resync only on an element that fits the Segment.
-- Damage ahead of the first Cluster, or running to the end of the file, is
-  reported once through `OnSkip` and ends the walk where it should.
+- The keyframe walks resync past a block that overruns its Cluster, and both
+  readers resync only on an element that fits the Segment. Damage ahead of the
+  first Cluster, or running to the end of the file, is reported once through
+  `OnSkip`.
 - A subtitle index pointing at bytes no Cluster holds is stale, not damage; a
-  WebVTT cue without a duration ends where a damaged region begins.
+  cue without a duration ends where a damaged region begins.
 - A negative `DamageBytes` refuses any damage in `mp4.Options` and the CLI too;
-  `reader.DamageError` names the repair in library terms.
-- A stream reader reads a large skip through instead of seeking.
-- `ReadStream`'s block walk ends at a known Segment's end, as the seekable one
-  does, instead of failing on the zero padding behind it, and a last Cluster
-  of unknown size ends there too.
+  `reader.DamageError` names the repair in library terms. A stream reader reads
+  a large skip through, and `ReadStream`'s walk ends at a known Segment's end.
 
 MP4:
 
 - A PCM track's one-frame samples are budgeted and built as the packets they
-  gather into: six minutes of 48 kHz LPCM (17M samples) passed the movie's
-  sample budget and was refused, and longer tracks were expanded frame by frame;
-  the keyframes walk takes such a track's end from its stts runs.
-- `to-mp4` groups alternative tracks as the mainstream muxer does (audio in
-  group 1, subtitles in group 3, the chapter track in none): with every
-  track in group 0, Apple players showed one audio language and hid the rest.
-  `mux`, `merge`, `add-track` and `merge-subtitle` on MP4 regroup the tracks
-  they gather the same way, whatever group each source gave them.
-- An MP4 cut short (a download that stopped, its moov at the head) remuxes
-  and serves what it holds, up to the cut, as players play it: one sample past
-  the end of the file refused the whole track.
-- An MP4/MOV track whose samples switch between different sample descriptions
-  (the codec setup changing partway) is refused by name for a remux or HLS,
-  which carry one: every sample was decoded with the first, grey or corrupt
-  pictures with no warning. The edits keep both descriptions as before.
-- A variable-frame-rate MP4 video reports the rate most of its frames play at,
-  not its first frame's: a screen recording holding its first frame half a
-  second read as 2 fps, in the probe and in the HLS `FRAME-RATE`, and a table
-  whose most frequent delta covers under a tenth of the time (reordered frames
-  stored a tick apart) reports its average rate, not 90000 fps.
-- `retime` addresses tracks as the probe lists them (a timecode track first
-  could shift the video).
-- An MP4 `retime` moves only the empty edit ahead of a track's media: a pause
-  after it moved too. A shift refused for presenting a track before the start
-  says how far to delay the other tracks instead.
-- `mp4.Diagnose` numbers tracks as the probe and `retime` do: with a
-  timecode or chapter track ahead of the audio, its `retime --shift` remedy
-  named the wrong track, and its `sample-table` findings used the file's
-  track_ID.
-- Tick conversions saturate instead of wrapping; a MOV opening on `pnot` or
-  `uuid` is recognised everywhere.
-- Sync tables hold only usable entries, a fragment's `trun` must fit its
-  data, a forged `elst` count is checked, the sidx boxes are read one at a
-  time, a chapter sample past 64 KiB is ignored, and containers nest at most
-  eight levels deep.
-- A MOV's QuickTime user-data title is read, and the `edit` JSON patch
-  refuses unknown fields and tracks and accepts `language_bcp47`.
+  gather into: six minutes of 48 kHz LPCM was refused.
+- `to-mp4`, `mux`, `merge`, `add-track` and `merge-subtitle` group alternative
+  tracks as players expect (audio 1, subtitles 3, the chapter track none):
+  Apple players showed one audio language.
+- An MP4 cut short (its moov at the head) remuxes and serves what it holds. A
+  track switching sample descriptions partway is refused by name for a remux
+  or HLS, which carry one.
+- A variable-frame-rate video reports the rate most of its frames play at, in
+  the probe and in the HLS `FRAME-RATE`.
+- `retime` and `mp4.Diagnose` number tracks as the probe does, and `retime`
+  moves only the empty edit ahead of a track's media, saying how far to delay
+  the others when a shift is refused.
+- Tick conversions saturate; a MOV opening on `pnot` or `uuid` is recognised;
+  sync tables, `trun`, `elst` and `sidx` are checked as read, a chapter sample
+  past 64 KiB is ignored and containers nest at most eight levels deep. A MOV's
+  QuickTime user-data title is read, and the `edit` JSON patch refuses unknown
+  fields and tracks and accepts `language_bcp47`.
 
-Serving:
+HLS and serving:
 
-- Video a window walk kept for a viewer who never came for it (audio fetched
-  ahead, then a seek) no longer holds the process-wide window budget until
-  its plan is collected: a later walk reclaims it, oldest first, from any
-  plan, so the source keeps being read once per window.
-- A grid-timed audio segment built cold keeps its bytes when the window before
-  it is built afterwards and it is built again: its decode times could move by
-  a frame under the same weak ETag, so a Range resume spliced two versions.
-- A window built twice (a cancelled walk finishing beside its retry) gives
-  back what the copy not kept had reserved, instead of leaking it for good.
-- A subtitle track no longer keeps a read that failed once, a request
-  cancelled or a server erroring, as its answer for the life of the plan;
-  only damage and a replaced source are remembered. With a subtitle index, a
-  failed read sends that one request to the walk instead of dropping the
-  index for the plan's life.
-- `serve` and `serve-growing` time out slow clients (10 s header, 2 min
-  idle, 5 min HLS response).
+- `GrowingHLSPlan` serves its requests side by side and while `Refresh` reads
+  new clusters, its lock taken by a scan only to publish; `Complete` closes the
+  playlist on what was published when the tail cannot be read.
+- `HLSPlanStats.StreamedBytes` counts what an `Open` handle sends (a range its
+  part, a cut write what it wrote, a HEAD or a 304 nothing); `ResourceHandle.Whole`
+  tells a held resource without counting it. An MP4 plan counts `BuiltBytes`
+  and `ServedBytes`.
+- An ABR master counts the shared audio in every video-only variant's
+  `BANDWIDTH`. The HLS plan of an MP4 source settles an unconfirmed audio
+  stride as the full pass does, so both serve the same bytes. A CENC Matroska
+  plan offers no I-frame playlist.
+- A name a concat or ABR plan does not serve answers 404 like every other, and
+  `mkvhttp` finds no satisfiable Range on an empty resource.
+- The window budget a walk kept for a viewer who never came is reclaimed by a
+  later walk; a grid-timed audio segment built cold keeps its bytes when built
+  again; a window built twice gives back what the extra copy reserved; a
+  subtitle read that failed once is no longer remembered for the plan's life.
+- `serve` and `serve-growing` time out slow clients (10 s header, 2 min idle,
+  5 min HLS response). web: `useHLSPlayer` (React, Vue) keeps at most 30 s
+  buffered ahead, removes what played, and fails on a SourceBuffer error.
+- `httpfs` `ReadAt` asks again for the rest of a short read and refuses Rename;
+  `s3fs` takes an endpoint with a trailing slash and names the region to set
+  instead of HTTP 301.
 
-WebAssembly:
+Other:
 
-- A string where a number belongs (a segment index, a track id, a
-  `keepTracks` entry) is a rejected promise naming the argument: it panicked
-  outside the promise and ended the Go program, so every later call failed.
-  Every function handed to JavaScript now turns such a panic into a rejected
-  promise, whatever option caused it (a key passed as an ArrayBuffer, a null
-  entry in `keys`, a `signal` that is not an AbortSignal).
+- A time bound like `1.001` is rounded to 1001 ms, not truncated; the AC-3,
+  E-AC-3 and Opus sample entry refusals and retime's header refusals wrap
+  their cause.
+- WebAssembly: a value of the wrong type (a string for a segment index, a key
+  as an ArrayBuffer, a `signal` that is not an AbortSignal) is a rejected
+  promise naming the argument; it panicked and ended the Go program.
 
 ### Documentation
 
