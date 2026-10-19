@@ -284,3 +284,43 @@ func TestSplitByChaptersKeepsTheHeadBeforeTheFirstChapter(t *testing.T) {
 		}
 	}
 }
+
+// TestSplitNeverOpensOnPicturesTheEditListHides: keyframes past the video's presented end cut nothing, and no part plays them.
+func TestSplitNeverOpensOnPicturesTheEditListHides(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		opts  mkv.SplitOptions
+		parts int
+	}{
+		{"every", mkv.SplitOptions{EveryMs: 1000}, 3},
+		{"chapters", mkv.SplitOptions{ByChapters: true}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := editShiftFixture(t, false)
+			if tc.opts.ByChapters {
+				if err := EditInPlace(context.Background(), src, func(c *mkv.Container) {
+					c.Chapters = []mkv.Chapter{{ID: 1, Title: "A", StartMs: 0}, {ID: 2, Title: "B", StartMs: 1000}, {ID: 3, Title: "C", StartMs: 4000}}
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			withVideoEdit(t, src, 0, 2500) // the video shows 2.5 s of its 6, keyframes at 3, 4 and 5 s hidden
+			parts := splitInto(t, src, tc.opts)
+			var shown int64
+			for _, p := range parts {
+				pm := mustCutModel(t, p)
+				v := &pm.tracks[0]
+				if v.edit.segDur < 0 {
+					t.Fatalf("%s: the video's media edit runs to the end of its media", filepath.Base(p))
+				}
+				shown += rescale(v.edit.segDur, pm.movieTS, nsPerSec)
+			}
+			if len(parts) != tc.parts {
+				t.Errorf("%d parts, want %d", len(parts), tc.parts)
+			}
+			if d := shown - 2_500_000_000; d < -1_000_000 || d > 1_000_000 {
+				t.Errorf("the parts show %d ms of video, the source 2500", shown/1_000_000)
+			}
+		})
+	}
+}

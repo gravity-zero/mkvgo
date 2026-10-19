@@ -176,12 +176,13 @@ func (c *cutTrack) firstSyncFrom(from int, movieTS uint32, atOrPast func(ptNs in
 	return len(c.tt.samples)
 }
 
-// keyframesMs lists the cut track's sync-sample presentation times, ascending.
+// keyframesMs lists the cut track's shown sync-sample presentation times, ascending.
 func (m *cutModel) keyframesMs() []int64 {
 	c := &m.tracks[m.ref]
+	end := c.presentEndNs(m.movieTS)
 	var out []int64
 	for i, s := range c.tt.samples {
-		if s.sync {
+		if s.sync && c.ptNs(i, m.movieTS) < end {
 			out = append(out, roundMs(c.ptNs(i, m.movieTS)))
 		}
 	}
@@ -447,6 +448,9 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 	a := 0
 	if r.StartMs > 0 {
 		a = ref.firstSyncFrom(cur[m.ref], m.movieTS, func(pt int64) bool { return roundMs(pt) >= r.StartMs })
+		if a < n && ref.ptNs(a, m.movieTS) >= ref.presentEndNs(m.movieTS) {
+			a = n // a keyframe the edit list hides opens nothing
+		}
 		if a == n {
 			return p, fmt.Errorf("no keyframe at or after %d ms (the last one is at %d ms): start the range earlier", r.StartMs, lastKeyMs(ref, m.movieTS))
 		}
@@ -472,6 +476,9 @@ func (m *cutModel) planPart(r mkv.TimeRange, cur []int) (partPlan, error) {
 				// A cue on screen at the cut opens the part too, its head hidden by the edit list; the previous part keeps it up to the cut.
 				if j := ca - 1; c.isText() && j >= cur[i] && c.ptNs(j, m.movieTS) < p.tsNs && c.ptNs(j, m.movieTS)+rescale(int64(c.tt.samples[j].dur), c.ts, nsPerSec) > p.tsNs {
 					ca = j
+				}
+				if c.presentEndNs(m.movieTS) <= p.tsNs {
+					ca = len(c.tt.samples) // a track the edit list has ended by the cut has nothing to show in the part
 				}
 			}
 			if p.teNs > 0 {
@@ -522,10 +529,11 @@ func (m *cutModel) writePart(ctx context.Context, src io.ReadSeeker, size int64,
 	return writeRelocated(ctx, vs, payload, nil, lay, outPath, o)
 }
 
-// lastKeyMs is where a track's last sync sample presents.
+// lastKeyMs is where a track's last shown sync sample presents.
 func lastKeyMs(c *cutTrack, movieTS uint32) int64 {
+	end := c.presentEndNs(movieTS)
 	for i := len(c.tt.samples) - 1; i >= 0; i-- {
-		if c.tt.samples[i].sync {
+		if c.tt.samples[i].sync && c.ptNs(i, movieTS) < end {
 			return roundMs(c.ptNs(i, movieTS))
 		}
 	}
