@@ -81,6 +81,10 @@ jobs:
           go-version: stable
           cache: false
 
+      # The same check as scripts/gate.sh: a file gofmt would rewrite fails the build.
+      - name: gofmt
+        run: test -z "$(gofmt -l . | grep -v '^bench/' | tee /dev/stderr)"
+
       # A prebuilt linter binary type-checks with the Go it was built with and
       # cannot load the standard library of a newer toolchain ("could not import
       # fmt" once stable moved from 1.27.0 to 1.27.2): the linter is built here
