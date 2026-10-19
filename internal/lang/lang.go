@@ -32,13 +32,13 @@ func Fields(tag string, style Style) (code, bcp47 string) {
 	return primary, tag
 }
 
-// Set is the language and tag a track keeps when newLang is set on it: a language that changes drops the tag
-// that would take precedence over it, one empty or unchanged (merge passes every track's own) keeps both.
+// Set is the language and tag a Matroska track keeps when newLang is set on it: a new one is split into its code and
+// BCP-47 tag (Fields), dropping the old tag; one empty or unchanged (merge passes every track's own) keeps both.
 func Set(oldLang, oldTag, newLang string) (language, bcp47 string) {
 	if newLang == "" || newLang == oldLang {
 		return oldLang, oldTag
 	}
-	return newLang, ""
+	return Fields(newLang, Bibliographic)
 }
 
 // Edited is the tag a track keeps after an edit: one the edit left while changing the language goes.

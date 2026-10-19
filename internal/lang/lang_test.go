@@ -32,6 +32,8 @@ func TestSet(t *testing.T) {
 		{"eng", "en", "fre", "fre", ""},
 		{"por", "pt-BR", "por", "por", "pt-BR"},
 		{"fre", "fr-CA", "", "fre", "fr-CA"},
+		{"eng", "", "pt-BR", "por", "pt-BR"},
+		{"eng", "", "de", "ger", "de"},
 	}
 	for _, c := range cases {
 		if lang, tag := Set(c.oldLang, c.oldTag, c.newLang); lang != c.lang || tag != c.tag {
