@@ -258,8 +258,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
   the full pass does: an Opus track whose first samples share a time served
   other segment timings than `RemuxToHLS` wrote.
 - A Matroska join of linked parts gives back the source's last picture before a
-  cut that falls between milliseconds (29.97 fps) as the source stores it: it
-  kept the duration the split gave that picture to reach the cut.
+  cut as the source stores it: it kept the duration the split gave that picture
+  to reach a cut between milliseconds (29.97 fps) or past an open GOP's leading
+  pictures. The part marks that picture (`SPLIT_HOLD` on its track, carried by no
+  op), so the durations a source states, on every picture or some, all come back.
 - A subtitle cue that states no duration leaves the screen once read (17
   characters a second, 1 to 7 s), at the next cue or at the film's end,
   whichever comes first, in SRT, ASS and WebVTT extraction and in HLS alike:
