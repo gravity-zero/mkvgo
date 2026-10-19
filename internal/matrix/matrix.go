@@ -88,6 +88,8 @@ func SecondVideoCases() []Case {
 					out = append(out, Case{Audio: true, NTSC: ntsc, Subtitle: sub, Chapters: OpenChapters, Cuts: cuts, Late: late, Second: true})
 				}
 			}
+			// Without sound the cut track alone says where the cut falls, its leading pictures hidden past it.
+			out = append(out, Case{OpenGOP: true, NTSC: ntsc, Chapters: OpenChapters, Cuts: cuts, Second: true})
 		}
 	}
 	return out

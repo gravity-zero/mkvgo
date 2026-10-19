@@ -18,8 +18,8 @@ func TestCasesAndCuts(t *testing.T) {
 	if n := len(Cases()); n != 240 {
 		t.Errorf("%d cases, want 240", n)
 	}
-	if n := len(SecondVideoCases()); n != 16 {
-		t.Errorf("%d second-video cases, want 16", n)
+	if n := len(SecondVideoCases()); n != 20 {
+		t.Errorf("%d second-video cases, want 20", n)
 	}
 	for _, tc := range []struct {
 		c    Case

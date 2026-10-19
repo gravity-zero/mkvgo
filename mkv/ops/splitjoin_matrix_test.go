@@ -136,8 +136,9 @@ func TestSplitJoinSecondVideoMatrix(t *testing.T) {
 			joined := filepath.Join(dir, "j.mkv")
 			mustNil(t, Join(ctx, parts, joined))
 			got := trackBlocks(collectAllBlocks(t, joined))
+			want := joinedBlocks(c) // an open GOP's leading pictures stay out, as in every Matroska split
 			for _, track := range []uint64{matrix.VideoTrack, matrix.SecondVideo, matrix.AudioTrack} {
-				if g, w := blockSeq(got[track]), blockSeq(c.Blocks()[track]); g != w {
+				if g, w := blockSeq(got[track]), blockSeq(want[track]); g != w {
 					t.Errorf("track %d: the join does not give the source back:\n got %s\nwant %s", track, g, w)
 				}
 			}

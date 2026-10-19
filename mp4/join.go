@@ -469,8 +469,11 @@ func dropSgpds(trak []byte) ([]byte, error) {
 	})
 }
 
-// cutNs is where a split part's cut falls: its length, or with another video track run past it, the end the others present.
+// cutNs is where a split part's cut falls: as its link states it, else as its tracks show it.
 func (m *cutModel) cutNs() int64 {
+	if m.link.cutNs > 0 {
+		return m.link.cutNs
+	}
 	var end int64
 	other := false
 	for i := range m.tracks {
