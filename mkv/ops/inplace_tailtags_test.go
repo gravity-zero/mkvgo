@@ -224,3 +224,38 @@ func TestEditInPlaceWithWideSizeFields(t *testing.T) {
 		t.Errorf("the head's elements end at %d, the Cluster starts at %d: bytes of the old head left between", pos, clusterAt)
 	}
 }
+
+// TestEditInPlaceWithTagsInTheHeadAndAfterTheClusters pins a title edit on a file holding Tags in its head and more
+// after its clusters (as mkvmerge leaves them): both stay where they are, as they were, and the edit lands in place.
+func TestEditInPlaceWithTagsInTheHeadAndAfterTheClusters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "both.mkv")
+	f, err := os.Create(path)
+	mustNil(t, err)
+	head := []mkv.Tag{{TargetType: "MOVIE", SimpleTags: []mkv.SimpleTag{{Name: "COMMENT", Value: "head"}}}}
+	var tail []mkv.SimpleTag
+	for i := range 20 {
+		tail = append(tail, mkv.SimpleTag{Name: "NOTE_" + string(rune('A'+i)), Value: strings.Repeat("x", 100)})
+	}
+	mw := writer.NewMKVWriter(f)
+	mustNil(t, mw.WriteStart())
+	mustNil(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000, MuxingApp: "t", WritingApp: "t"}, Tags: head}, []mkv.Track{videoTrack(1)}, 2000))
+	for tc := int64(0); tc < 2000; tc += 1000 {
+		mustNil(t, mw.WriteClusterWithCues(tc, 1_000_000, []mkv.Block{{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: make([]byte, 100)}}))
+	}
+	mw.TagsPos = mw.RelPos() // the SeekHead points at the Tags after the clusters, not at those in the head
+	mustNil(t, mw.WriteTagsElement([]mkv.Tag{{TargetType: "ALBUM", SimpleTags: tail}}))
+	mustNil(t, mw.Finalize())
+	f.Close()
+	before, _ := os.Stat(path)
+	mustNil(t, EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "t" }))
+	c, err := reader.Open(context.Background(), path)
+	mustNil(t, err)
+	after, _ := os.Stat(path)
+	n := 0
+	for _, tag := range c.Tags {
+		n += len(tag.SimpleTags)
+	}
+	if c.Info.Title != "t" || n != 21 || after.Size() != before.Size() {
+		t.Errorf("title %q, %d simple tags, size %d -> %d; want the title, the 21 tags once, the same size", c.Info.Title, n, before.Size(), after.Size())
+	}
+}

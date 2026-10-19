@@ -104,6 +104,10 @@ Crafted files (each was an allocation or a crash a few bytes could trigger):
 
 ### Fixed
 
+- `EditInPlace` copies the metadata elements an edit leaves as they were from
+  the file, rather than writing them again: a title edit on a file holding Tags
+  both in its head and after its clusters (as mkvmerge leaves them) gathered
+  them all in the head, and was refused for want of room.
 - `Join` places linked parts whose sound was muxed more than a second ahead of
   the picture at the picture's cut when each sound track of the next part takes
   up where the same track of the previous one stops: it fell back on the sound's end, and every later

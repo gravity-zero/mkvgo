@@ -36,7 +36,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		return err
 	}
 
-	before, err := tailForms(c)
+	before, err := metaForms(c)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	if err != nil {
 		return fmt.Errorf("scan metadata: %w", err)
 	}
-	after, err := tailForms(c)
+	after, err := metaForms(c)
 	if err != nil {
 		return err
 	}
@@ -56,10 +56,15 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 			return fmt.Errorf("the %s sit after the clusters, which no SeekHead indexes and which cannot be stepped through: %w", tailNames[id], ErrNoRoomInPlace)
 		}
 	}
-	// stay: the tail elements the head does not hold too and the edit left as they were.
+	// raw: the head elements the edit left as they were, copied as the file has them rather than written again.
+	raw, err := unchangedHead(path, fs, region, before, after)
+	if err != nil {
+		return err
+	}
+	// stay: the tail elements the edit left as they were, and whose part in the head, if any, is copied as it was.
 	stay := map[uint32]bool{}
 	for id := range region.tail {
-		stay[id] = !region.inHead[id] && bytes.Equal(before[id], after[id])
+		stay[id] = bytes.Equal(before[id], after[id]) && (!region.inHead[id] || raw[id] != nil)
 	}
 	kept := region.keptSeekEntries
 	lay := func() ([]byte, []writer.SeekEntry, int64, []byte, error) {
@@ -69,7 +74,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 				region.keptSeekEntries = append(region.keptSeekEntries, t.entry)
 			}
 		}
-		metaBytes, entries, err := serializeHead(c, stay)
+		metaBytes, entries, err := serializeHead(c, stay, raw)
 		if err != nil {
 			return nil, nil, 0, nil, err
 		}
@@ -168,10 +173,16 @@ var tailIDs = []uint32{mkv.IDTags, mkv.IDChapters, mkv.IDAttachments}
 
 var tailNames = map[uint32]string{mkv.IDTags: "tags", mkv.IDChapters: "chapters", mkv.IDAttachments: "attachments"}
 
-// tailForms serialises what each tail element would hold, to tell whether an edit changed it (attachments by their
-// description: their payloads stay where they are).
-func tailForms(c *mkv.Container) (map[uint32][]byte, error) {
-	var tags, chapters bytes.Buffer
+// metaForms serialises what each metadata element would hold, to tell whether an edit changed it (attachments by
+// their description: their payloads stay where they are).
+func metaForms(c *mkv.Container) (map[uint32][]byte, error) {
+	var info, tracks, tags, chapters bytes.Buffer
+	if err := writer.WriteSegmentInfo(&info, &c.Info, c.DurationMs); err != nil {
+		return nil, err
+	}
+	if err := writer.WriteTracks(&tracks, c.Tracks); err != nil {
+		return nil, err
+	}
 	if err := writer.WriteTags(&tags, c.Tags); err != nil {
 		return nil, err
 	}
@@ -187,43 +198,75 @@ func tailForms(c *mkv.Container) (map[uint32][]byte, error) {
 	if len(c.Attachments) == 0 {
 		attachments = nil
 	}
-	return map[uint32][]byte{mkv.IDTags: tags.Bytes(), mkv.IDChapters: chapters.Bytes(), mkv.IDAttachments: attachments}, nil
+	return map[uint32][]byte{mkv.IDInfo: info.Bytes(), mkv.IDTracks: tracks.Bytes(), mkv.IDTags: tags.Bytes(),
+		mkv.IDChapters: chapters.Bytes(), mkv.IDAttachments: attachments}, nil
 }
 
-// serializeHead serialises the head metadata elements, recording each one's offset for the rebuilt SeekHead; the
-// elements in skip stay after the clusters.
-func serializeHead(c *mkv.Container, skip map[uint32]bool) ([]byte, []writer.SeekEntry, error) {
+// unchangedHead reads the head elements whose form the edit left as it was (one of a kind in the head), as the file
+// holds them.
+func unchangedHead(path string, fs *mkv.FS, region metadataRegion, before, after map[uint32][]byte) (map[uint32][]byte, error) {
+	raw := map[uint32][]byte{}
+	var f mkv.ReadSeekCloser
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
+	}()
+	for id, h := range region.headElems {
+		if region.headTwice[id] || !bytes.Equal(before[id], after[id]) {
+			continue
+		}
+		if f == nil {
+			var err error
+			if f, err = fs.DoOpen(path); err != nil {
+				return nil, err
+			}
+		}
+		b := make([]byte, h.size)
+		if _, err := f.Seek(h.pos, io.SeekStart); err != nil {
+			return nil, err
+		}
+		if _, err := io.ReadFull(f, b); err != nil {
+			return nil, err
+		}
+		raw[id] = b
+	}
+	return raw, nil
+}
+
+// serializeHead serialises the head metadata elements, recording each one's offset for the rebuilt SeekHead: those in
+// raw as the file had them, those in skip left after the clusters, the others written from c.
+func serializeHead(c *mkv.Container, skip map[uint32]bool, raw map[uint32][]byte) ([]byte, []writer.SeekEntry, error) {
 	var newMeta bytes.Buffer
 	var entries []writer.SeekEntry
-	mark := func(id uint32) { entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())}) }
-
-	mark(mkv.IDInfo)
-	if err := writer.WriteSegmentInfo(&newMeta, &c.Info, c.DurationMs); err != nil {
+	put := func(id uint32, present bool, write func() error) error {
+		switch {
+		case raw[id] != nil:
+			entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())})
+			newMeta.Write(raw[id])
+		case present && !skip[id]:
+			entries = append(entries, writer.SeekEntry{ID: id, Pos: int64(newMeta.Len())})
+			return write()
+		}
+		return nil
+	}
+	err := put(mkv.IDInfo, true, func() error { return writer.WriteSegmentInfo(&newMeta, &c.Info, c.DurationMs) })
+	if err == nil {
+		err = put(mkv.IDTracks, len(c.Tracks) > 0, func() error { return writer.WriteTracks(&newMeta, c.Tracks) })
+	}
+	if err == nil {
+		err = put(mkv.IDChapters, len(c.Chapters) > 0 || len(c.OtherEditions) > 0, func() error {
+			return writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions)
+		})
+	}
+	if err == nil {
+		err = put(mkv.IDAttachments, len(c.Attachments) > 0, func() error { return writer.WriteAttachments(&newMeta, c.Attachments) })
+	}
+	if err == nil {
+		err = put(mkv.IDTags, len(c.Tags) > 0, func() error { return writer.WriteTags(&newMeta, c.Tags) })
+	}
+	if err != nil {
 		return nil, nil, err
-	}
-	if len(c.Tracks) > 0 {
-		mark(mkv.IDTracks)
-		if err := writer.WriteTracks(&newMeta, c.Tracks); err != nil {
-			return nil, nil, err
-		}
-	}
-	if (len(c.Chapters) > 0 || len(c.OtherEditions) > 0) && !skip[mkv.IDChapters] {
-		mark(mkv.IDChapters)
-		if err := writer.WriteEditions(&newMeta, c.Chapters, c.OtherEditions); err != nil {
-			return nil, nil, err
-		}
-	}
-	if len(c.Attachments) > 0 && !skip[mkv.IDAttachments] {
-		mark(mkv.IDAttachments)
-		if err := writer.WriteAttachments(&newMeta, c.Attachments); err != nil {
-			return nil, nil, err
-		}
-	}
-	if len(c.Tags) > 0 && !skip[mkv.IDTags] {
-		mark(mkv.IDTags)
-		if err := writer.WriteTags(&newMeta, c.Tags); err != nil {
-			return nil, nil, err
-		}
 	}
 	return newMeta.Bytes(), entries, nil
 }
@@ -387,8 +430,11 @@ type metadataRegion struct {
 	// tail holds the Tags, Chapters and Attachments elements after the clusters, by ID, with the old SeekHead
 	// entry kept when they stay where they are.
 	tail map[uint32]tailElement
-	// inHead holds the metadata element IDs the head region holds.
-	inHead map[uint32]bool
+	// inHead holds the metadata element IDs the head region holds; headElems where each sits, headTwice those met
+	// twice (copied as they were only when one of a kind).
+	inHead    map[uint32]bool
+	headElems map[uint32]tailElement
+	headTwice map[uint32]bool
 	// tailUnknown is set when a file with no SeekHead could not be stepped through to its end.
 	tailUnknown bool
 }
@@ -417,7 +463,7 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 	}
 
 	var segEnd int64 = -1
-	region := metadataRegion{start: -1, tail: map[uint32]tailElement{}, inHead: map[uint32]bool{}}
+	region := metadataRegion{start: -1, tail: map[uint32]tailElement{}, inHead: map[uint32]bool{}, headElems: map[uint32]tailElement{}, headTwice: map[uint32]bool{}}
 	region.segDataStart, _ = f.Seek(0, io.SeekCurrent)
 	if h.Size >= 0 {
 		segEnd = region.segDataStart + h.Size
@@ -450,6 +496,12 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 			}
 			region.end = pos + int64(hdrLen) + eh.Size // the size field as wide as the file has it
 			region.inHead[eh.ID] = true
+			if eh.ID != mkv.IDSeekHead && eh.ID != mkv.IDVoid {
+				if _, twice := region.headElems[eh.ID]; twice {
+					region.headTwice[eh.ID] = true
+				}
+				region.headElems[eh.ID] = tailElement{pos: pos, size: int64(hdrLen) + eh.Size}
+			}
 			if eh.ID == mkv.IDSeekHead {
 				if !region.hadSeekHead {
 					region.hadSeekHead, region.seekHeadPos = true, pos
