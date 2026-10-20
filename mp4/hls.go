@@ -25,7 +25,6 @@ import (
 	"io"
 	"math"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/shown"
@@ -1327,9 +1326,69 @@ func iframeStreamInfURI(o *Options, fts []*fragTrack, durs []float64, iframes []
 	return inf + fmt.Sprintf(",URI=%s\n", hlsURI(rw(uri)))
 }
 
-// packagedName matches, relative to the output directory, every file a packaging pass writes: playlists, init and
-// media segments, subtitles, the manifest, single-file streams, their temporary files, under an ABR or concat prefix.
-var packagedName = regexp.MustCompile(`^((v|p)\d+/)?(master\.m3u8|playlist\.m3u8|iframe\.m3u8|audio\d+\.m3u8|sub\d+(_\d+)?\.(m3u8|vtt)|manifest\.mpd|init(_a\d+)?\.mp4|seg(_a\d+_)?\d+\.m4s|stream(_a\d+)?\.mp4|\.mkvgo-hls-t\d+\.tmp)$`)
+// isPackagedName reports whether rel, relative to the output directory, names a file a packaging pass writes:
+// playlists, init and media segments, subtitles, the manifest, single-file streams, their temporary files, under an
+// ABR or concat prefix (v<n>/, p<n>/). Written out rather than as a regexp, which the WebAssembly build would carry.
+func isPackagedName(rel string) bool {
+	if len(rel) > 0 && (rel[0] == 'v' || rel[0] == 'p') {
+		if r, ok := leadingDigits(rel[1:]); ok && strings.HasPrefix(r, "/") {
+			rel = r[1:]
+		}
+	}
+	switch rel {
+	case "master.m3u8", "playlist.m3u8", "iframe.m3u8", "manifest.mpd":
+		return true
+	}
+	if r, ok := strings.CutPrefix(rel, "audio"); ok {
+		r, ok = leadingDigits(r)
+		return ok && r == ".m3u8"
+	}
+	if r, ok := strings.CutPrefix(rel, "sub"); ok {
+		if r, ok = leadingDigits(r); !ok {
+			return false
+		}
+		if strings.HasPrefix(r, "_") {
+			if r, ok = leadingDigits(r[1:]); !ok {
+				return false
+			}
+		}
+		return r == ".m3u8" || r == ".vtt"
+	}
+	for _, name := range []string{"init", "stream"} {
+		if r, ok := strings.CutPrefix(rel, name); ok {
+			if a, ok := strings.CutPrefix(r, "_a"); ok {
+				if r, ok = leadingDigits(a); !ok {
+					return false
+				}
+			}
+			return r == ".mp4"
+		}
+	}
+	if r, ok := strings.CutPrefix(rel, "seg"); ok {
+		if a, ok := strings.CutPrefix(r, "_a"); ok {
+			if r, ok = leadingDigits(a); !ok || !strings.HasPrefix(r, "_") {
+				return false
+			}
+			r = r[1:]
+		}
+		r, ok = leadingDigits(r)
+		return ok && r == ".m4s"
+	}
+	if r, ok := strings.CutPrefix(rel, ".mkvgo-hls-t"); ok {
+		r, ok = leadingDigits(r)
+		return ok && r == ".tmp"
+	}
+	return false
+}
+
+// leadingDigits drops the ASCII digits s opens with, ok when there was at least one.
+func leadingDigits(s string) (rest string, ok bool) {
+	n := 0
+	for n < len(s) && s[n] >= '0' && s[n] <= '9' {
+		n++
+	}
+	return s[n:], n > 0
+}
 
 // refusePackagedSource refuses a source lying in outputDir under a name the packaging writes: it would be written
 // over before, or while, its samples are read.
@@ -1343,7 +1402,7 @@ func refusePackagedSource(outputDir string, sources ...string) error {
 		if err != nil {
 			continue
 		}
-		if rel, err := filepath.Rel(dir, abs); err == nil && packagedName.MatchString(filepath.ToSlash(rel)) {
+		if rel, err := filepath.Rel(dir, abs); err == nil && isPackagedName(filepath.ToSlash(rel)) {
 			return errf("%s would be written over by the packaging into %s: move it, or package into another directory", shown.Path(src), outputDir)
 		}
 	}
