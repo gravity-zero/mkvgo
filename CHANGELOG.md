@@ -10,8 +10,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - mkvgo builds with Go 1.24 or newer (it required 1.27), the oldest release
   with the `weak` package it uses; CI tests 1.24, 1.26 and the latest. A
-  large element's read grows its buffer by its own doubling, under three times
-  its size on every Go release.
+  large element's read grows its buffer by its own rule, under 1.5 times its
+  size on every Go release.
 
 ### Fixed
 
