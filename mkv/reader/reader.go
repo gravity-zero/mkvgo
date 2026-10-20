@@ -311,6 +311,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 	if h.Size >= 0 {
 		endPos = segStart + h.Size
 	}
+	p.segStart, p.segEnd = segStart, endPos
 
 	var seekOffsets []int64 // absolute offsets of the elements a head SeekHead points at
 	jumpedToTail := false
