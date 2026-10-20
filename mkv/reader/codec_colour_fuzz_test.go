@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -25,24 +26,26 @@ func FuzzCodecColour(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, cp []byte) {
-		// Call the inner parsers DIRECTLY - they carry no recover(), so the
-		// bounds-checks alone must keep them panic-free on any input. The
-		// recover() in parseCodecColour is only a last-resort backstop and must
-		// never be the thing that saves us here: a panic in one of these aborts
-		// the fuzz, exposing a missing bound rather than masking it.
-		for _, bc := range []*bitstreamColour{avcColour(cp), hevcColour(cp), av1Colour(cp), vp9Colour(cp)} {
-			if bc != nil && bc.bitDepth != nil {
-				switch *bc.bitDepth {
-				case 8, 10, 12: // the only depths real video uses
-				default:
-					t.Fatalf("invalid bit depth %d on adversarial input", *bc.bitDepth)
+		costguard.Fuzz(t, len(cp), func() {
+			// Call the inner parsers DIRECTLY - they carry no recover(), so the
+			// bounds-checks alone must keep them panic-free on any input. The
+			// recover() in parseCodecColour is only a last-resort backstop and must
+			// never be the thing that saves us here: a panic in one of these aborts
+			// the fuzz, exposing a missing bound rather than masking it.
+			for _, bc := range []*bitstreamColour{avcColour(cp), hevcColour(cp), av1Colour(cp), vp9Colour(cp)} {
+				if bc != nil && bc.bitDepth != nil {
+					switch *bc.bitDepth {
+					case 8, 10, 12: // the only depths real video uses
+					default:
+						t.Fatalf("invalid bit depth %d on adversarial input", *bc.bitDepth)
+					}
 				}
 			}
-		}
-		// Also exercise the public dispatch + fill path (the one with the backstop).
-		for _, codec := range []string{"hevc", "h264", "av1", "vp9", "unknown"} {
-			tr := mkv.Track{Type: mkv.VideoTrack, Codec: codec, CodecPrivate: cp}
-			fillColourFromCodecPrivate(&tr)
-		}
+			// Also exercise the public dispatch + fill path (the one with the backstop).
+			for _, codec := range []string{"hevc", "h264", "av1", "vp9", "unknown"} {
+				tr := mkv.Track{Type: mkv.VideoTrack, Codec: codec, CodecPrivate: cp}
+				fillColourFromCodecPrivate(&tr)
+			}
+		})
 	})
 }

@@ -1,6 +1,10 @@
 package mp4
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gravity-zero/mkvgo/internal/costguard"
+)
 
 // FuzzVP9FrameHeader feeds arbitrary bytes to the VP9 uncompressed-header
 // parser (it runs on the first sample of any Matroska track labelled vp9, i.e.
@@ -14,20 +18,22 @@ func FuzzVP9FrameHeader(f *testing.F) {
 	f.Add([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		h, err := parseVP9FrameHeader(data)
-		if err != nil {
-			return
-		}
-		if h.profile > 3 {
-			t.Fatalf("profile = %d, out of the 2-bit range", h.profile)
-		}
-		switch h.bitDepth {
-		case 8, 10, 12:
-		default:
-			t.Fatalf("bitDepth = %d, want 8/10/12", h.bitDepth)
-		}
-		if h.chroma > 3 {
-			t.Fatalf("chroma = %d, out of the vpcC range", h.chroma)
-		}
+		costguard.Fuzz(t, len(data), func() {
+			h, err := parseVP9FrameHeader(data)
+			if err != nil {
+				return
+			}
+			if h.profile > 3 {
+				t.Fatalf("profile = %d, out of the 2-bit range", h.profile)
+			}
+			switch h.bitDepth {
+			case 8, 10, 12:
+			default:
+				t.Fatalf("bitDepth = %d, want 8/10/12", h.bitDepth)
+			}
+			if h.chroma > 3 {
+				t.Fatalf("chroma = %d, out of the vpcC range", h.chroma)
+			}
+		})
 	})
 }

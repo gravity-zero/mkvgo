@@ -5,6 +5,8 @@ import (
 	"context"
 	"os"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 )
 
 // FuzzReadMeta exercises the metadata-only path on arbitrary bytes: it must never
@@ -20,7 +22,9 @@ func FuzzReadMeta(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Result is irrelevant; the contract is "no panic / no hang on hostile input".
-		_, _ = ReadMeta(context.Background(), bytes.NewReader(data), "fuzz.mkv")
+		costguard.Fuzz(t, len(data), func() {
+			// Result is irrelevant; the contract is "no panic / no hang on hostile input".
+			_, _ = ReadMeta(context.Background(), bytes.NewReader(data), "fuzz.mkv")
+		})
 	})
 }

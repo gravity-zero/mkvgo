@@ -3,6 +3,8 @@ package mkv
 import (
 	"strings"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 )
 
 // FuzzParseOGMChapters feeds arbitrary text to the OGM chapter parser
@@ -17,25 +19,27 @@ func FuzzParseOGMChapters(f *testing.F) {
 	f.Add("CHAPTER99999999999999999999=00:00:00.000\n")
 
 	f.Fuzz(func(t *testing.T, data string) {
-		chapters, err := ParseOGMChapters(strings.NewReader(data))
-		if err != nil {
-			return
-		}
-		if len(chapters) == 0 {
-			t.Fatal("nil error with no chapters")
-		}
-		prev := int64(-1)
-		for i, ch := range chapters {
-			if ch.StartMs < 0 {
-				t.Fatalf("chapter[%d] negative StartMs %d", i, ch.StartMs)
+		costguard.Fuzz(t, len(data), func() {
+			chapters, err := ParseOGMChapters(strings.NewReader(data))
+			if err != nil {
+				return
 			}
-			if ch.StartMs < prev {
-				t.Fatalf("chapters not ordered: %d after %d", ch.StartMs, prev)
+			if len(chapters) == 0 {
+				t.Fatal("nil error with no chapters")
 			}
-			if ch.EndMs != 0 && ch.EndMs < ch.StartMs {
-				t.Fatalf("chapter[%d] EndMs %d < StartMs %d", i, ch.EndMs, ch.StartMs)
+			prev := int64(-1)
+			for i, ch := range chapters {
+				if ch.StartMs < 0 {
+					t.Fatalf("chapter[%d] negative StartMs %d", i, ch.StartMs)
+				}
+				if ch.StartMs < prev {
+					t.Fatalf("chapters not ordered: %d after %d", ch.StartMs, prev)
+				}
+				if ch.EndMs != 0 && ch.EndMs < ch.StartMs {
+					t.Fatalf("chapter[%d] EndMs %d < StartMs %d", i, ch.EndMs, ch.StartMs)
+				}
+				prev = ch.StartMs
 			}
-			prev = ch.StartMs
-		}
+		})
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -32,25 +33,27 @@ func FuzzReadVsReadStream(f *testing.F) {
 		}
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		cst, br, err := ReadStream(context.Background(), bytes.NewReader(data))
-		if err != nil {
-			return
-		}
-		cut := beforeCluster(data, min(int(br.r.tell()), len(data)), br.inCluster)
-		var lookedPast bool
-		cs, err := Read(context.Background(), bytes.NewReader(data[:cut]), "fuzz.mkv", withLookedPast(&lookedPast))
-		if err != nil {
-			if len(cst.Tracks) > 0 && !readOnlyElement(err) && !lookedPast {
-				t.Errorf("Read refuses the %d bytes ReadStream described %d tracks from: %v", cut, len(cst.Tracks), err)
+		costguard.Fuzz(t, len(data), func() {
+			cst, br, err := ReadStream(context.Background(), bytes.NewReader(data))
+			if err != nil {
+				return
 			}
-			return
-		}
-		if lookedPast || cs.ResyncedBytes != cst.ResyncedBytes {
-			return
-		}
-		if got, want := comparable(cst), comparable(cs); got != want {
-			t.Errorf("ReadStream and Read differ on %d bytes (cut at %d):\nstream: %s\nread:   %s", len(data), cut, got, want)
-		}
+			cut := beforeCluster(data, min(int(br.r.tell()), len(data)), br.inCluster)
+			var lookedPast bool
+			cs, err := Read(context.Background(), bytes.NewReader(data[:cut]), "fuzz.mkv", withLookedPast(&lookedPast))
+			if err != nil {
+				if len(cst.Tracks) > 0 && !readOnlyElement(err) && !lookedPast {
+					t.Errorf("Read refuses the %d bytes ReadStream described %d tracks from: %v", cut, len(cst.Tracks), err)
+				}
+				return
+			}
+			if lookedPast || cs.ResyncedBytes != cst.ResyncedBytes {
+				return
+			}
+			if got, want := comparable(cst), comparable(cs); got != want {
+				t.Errorf("ReadStream and Read differ on %d bytes (cut at %d):\nstream: %s\nread:   %s", len(data), cut, got, want)
+			}
+		})
 	})
 }
 

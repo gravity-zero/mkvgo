@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 )
 
 // trakParityFixtures are the progressive MP4/MOV files both table readers must read alike.
@@ -107,8 +109,10 @@ func FuzzTrakReadersAgree(f *testing.F) {
 		}
 	}
 	f.Fuzz(func(t *testing.T, trak []byte, movieTS uint32) {
-		if diff, _ := tableDiff(trak, 1<<30, movieTS, false); diff != "" {
-			t.Fatal(diff)
-		}
+		costguard.Fuzz(t, len(trak), func() {
+			if diff, _ := tableDiff(trak, 1<<30, movieTS, false); diff != "" {
+				t.Fatal(diff)
+			}
+		})
 	})
 }

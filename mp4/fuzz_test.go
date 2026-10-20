@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -75,22 +76,24 @@ func FuzzParseMP4(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Both the full parse and the metadata-only (head-only) parse must be safe.
-		start := time.Now()
-		for _, mode := range []sampleMode{sampleNone, sampleKeyframes, sampleFull} {
-			mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), mode)
-			if err == nil && mv == nil {
-				t.Fatal("nil movie with nil error")
+		costguard.Fuzz(t, len(data), func() {
+			// Both the full parse and the metadata-only (head-only) parse must be safe.
+			start := time.Now()
+			for _, mode := range []sampleMode{sampleNone, sampleKeyframes, sampleFull} {
+				mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), mode)
+				if err == nil && mv == nil {
+					t.Fatal("nil movie with nil error")
+				}
 			}
-		}
-		// iterBoxes is reachable on the moov payload; exercise it directly too.
-		_, _ = iterBoxes(data)
-		// Go fuzzing flags panics/crashes but NOT slow-but-completing inputs, so a
-		// complexity DoS would otherwise pass silently. Inline timing (no per-input
-		// goroutine, so fuzz throughput is unhurt) flags a stall with its bytes.
-		if d := time.Since(start); d > 3*time.Second {
-			t.Fatalf("parse took %v (complexity DoS) on %d-byte input: %x", d, len(data), data)
-		}
+			// iterBoxes is reachable on the moov payload; exercise it directly too.
+			_, _ = iterBoxes(data)
+			// Go fuzzing flags panics/crashes but NOT slow-but-completing inputs, so a
+			// complexity DoS would otherwise pass silently. Inline timing (no per-input
+			// goroutine, so fuzz throughput is unhurt) flags a stall with its bytes.
+			if d := time.Since(start); d > 3*time.Second {
+				t.Fatalf("parse took %v (complexity DoS) on %d-byte input: %x", d, len(data), data)
+			}
+		})
 	})
 }
 
@@ -102,17 +105,19 @@ func FuzzBoxParsers(f *testing.F) {
 	f.Add([]byte{1, 0, 16, 0x35, 0x10, 0, 0, 0}) // a Dolby Vision record
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = parseMdhd(data)
-		_, _, _ = parseElst(data)
-		_, _ = parseMovieHeader(data)
-		_, _ = parseKind(data)
-		_ = parseElng(data)
-		_ = tkhdEnabled(data)
-		_ = tkhdTrackID(data)
-		_ = mkv.ParseDolbyVisionConfig(data)
-		_ = aacChannels(data)
-		_ = ac3Channels(data)
-		_ = eac3Channels(data)
+		costguard.Fuzz(t, len(data), func() {
+			_, _ = parseMdhd(data)
+			_, _, _ = parseElst(data)
+			_, _ = parseMovieHeader(data)
+			_, _ = parseKind(data)
+			_ = parseElng(data)
+			_ = tkhdEnabled(data)
+			_ = tkhdTrackID(data)
+			_ = mkv.ParseDolbyVisionConfig(data)
+			_ = aacChannels(data)
+			_ = ac3Channels(data)
+			_ = eac3Channels(data)
+		})
 	})
 }
 
@@ -123,10 +128,12 @@ func FuzzDescriptors(f *testing.F) {
 	f.Add(esdsBox(0x40, []byte{0x12, 0x10})[8:])
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _, _, _ = parseESDS(data)
-		_, _ = opusHeadFromDOps(data)
-		_, _ = dOpsBox(data)
-		_, _ = parseAC3(data)
-		_, _ = parseEAC3(data)
+		costguard.Fuzz(t, len(data), func() {
+			_, _, _, _ = parseESDS(data)
+			_, _ = opusHeadFromDOps(data)
+			_, _ = dOpsBox(data)
+			_, _ = parseAC3(data)
+			_, _ = parseEAC3(data)
+		})
 	})
 }

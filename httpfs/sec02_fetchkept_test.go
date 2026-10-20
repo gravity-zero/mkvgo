@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -121,28 +122,30 @@ func FuzzHTTPFSResponse(f *testing.F) {
 	}))
 	defer srv.Close()
 	f.Fuzz(func(t *testing.T, st int, crv, clv string, b []byte) {
-		if st < 200 || st > 599 || len(b) > 1<<20 || strings.ContainsAny(crv+clv, "\r\n\x00") {
-			return
-		}
-		mu.Lock()
-		status, cr, cl, body = st, crv, clv, b
-		mu.Unlock()
-		fs := New(Options{WindowSize: 64 << 10})
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		before := m.TotalAlloc
-		if r, err := fs.Port().DoOpenContext(mkv.ShareReads(context.Background()), srv.URL+"/f"); err == nil {
-			if st, ok := r.(interface{ Stat() (os.FileInfo, error) }); ok {
-				_, _ = st.Stat()
+		costguard.Fuzz(t, len(crv)+len(clv)+len(b), func() {
+			if st < 200 || st > 599 || len(b) > 1<<20 || strings.ContainsAny(crv+clv, "\r\n\x00") {
+				return
 			}
-			_, _ = r.Seek(0, io.SeekEnd)
-			_, _ = r.Seek(0, io.SeekStart)
-			_, _ = io.ReadFull(r, make([]byte, 4096))
-			r.Close()
-		}
-		runtime.ReadMemStats(&m)
-		if grew := m.TotalAlloc - before; grew > 8<<20 {
-			t.Fatalf("a %d response with Content-Range %q allocated %d KiB", st, crv, grew>>10)
-		}
+			mu.Lock()
+			status, cr, cl, body = st, crv, clv, b
+			mu.Unlock()
+			fs := New(Options{WindowSize: 64 << 10})
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			before := m.TotalAlloc
+			if r, err := fs.Port().DoOpenContext(mkv.ShareReads(context.Background()), srv.URL+"/f"); err == nil {
+				if st, ok := r.(interface{ Stat() (os.FileInfo, error) }); ok {
+					_, _ = st.Stat()
+				}
+				_, _ = r.Seek(0, io.SeekEnd)
+				_, _ = r.Seek(0, io.SeekStart)
+				_, _ = io.ReadFull(r, make([]byte, 4096))
+				r.Close()
+			}
+			runtime.ReadMemStats(&m)
+			if grew := m.TotalAlloc - before; grew > 8<<20 {
+				t.Fatalf("a %d response with Content-Range %q allocated %d KiB", st, crv, grew>>10)
+			}
+		})
 	})
 }

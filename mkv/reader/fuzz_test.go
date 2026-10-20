@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 )
 
 // FuzzRead exercises the metadata parser against arbitrary bytes. Its only
@@ -23,6 +25,8 @@ func FuzzRead(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = Read(context.Background(), bytes.NewReader(data), "fuzz.mkv")
+		costguard.Fuzz(t, len(data), func() {
+			_, _ = Read(context.Background(), bytes.NewReader(data), "fuzz.mkv")
+		})
 	})
 }

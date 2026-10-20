@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/httpfs"
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 )
 
 // declaredSource is a source that claims size bytes but holds only head: past it, reads find EOF.
@@ -102,15 +103,17 @@ func FuzzReadMetaDeclaredSize(f *testing.F) {
 	f.Add(hugeMoovHeader(300<<20), int64(300)<<20)
 	f.Add(append([]byte{0, 0, 0, 16, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0}, hugeMoovHeader(1<<50)...), int64(1)<<50)
 	f.Fuzz(func(t *testing.T, head []byte, declared int64) {
-		if declared < int64(len(head)) {
-			declared = int64(len(head))
-		}
-		src := &declaredSource{head: head, size: declared}
-		before := totalAlloc()
-		_, _, _ = ReadMeta(context.Background(), src, "fuzz.mp4")
-		if grew := totalAlloc() - before; grew > 300<<20+64*uint64(len(head)) {
-			t.Fatalf("ReadMeta allocated %d MiB for %d real bytes declaring %d", grew>>20, len(head), declared)
-		}
+		costguard.Fuzz(t, len(head), func() {
+			if declared < int64(len(head)) {
+				declared = int64(len(head))
+			}
+			src := &declaredSource{head: head, size: declared}
+			before := totalAlloc()
+			_, _, _ = ReadMeta(context.Background(), src, "fuzz.mp4")
+			if grew := totalAlloc() - before; grew > 300<<20+64*uint64(len(head)) {
+				t.Fatalf("ReadMeta allocated %d MiB for %d real bytes declaring %d", grew>>20, len(head), declared)
+			}
+		})
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -269,17 +270,19 @@ func FuzzApplyRollback(f *testing.F) {
 	copy(seed, "MKVGRB1\x00")
 	f.Add(seed)
 	f.Fuzz(func(t *testing.T, data []byte) {
-		dir := t.TempDir()
-		repaired := filepath.Join(dir, "r.bin")
-		if err := os.WriteFile(repaired, []byte("not much of a file"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		dst := filepath.Join(dir, "out.bin")
-		if err := ApplyRollback(context.Background(), repaired, bytes.NewReader(data), dst); err == nil {
-			t.Fatal("ApplyRollback accepted fuzzed garbage")
-		}
-		if _, err := os.Stat(dst); !os.IsNotExist(err) {
-			t.Fatalf("refused rollback left an output behind (stat err=%v)", err)
-		}
+		costguard.Fuzz(t, len(data), func() {
+			dir := t.TempDir()
+			repaired := filepath.Join(dir, "r.bin")
+			if err := os.WriteFile(repaired, []byte("not much of a file"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dst := filepath.Join(dir, "out.bin")
+			if err := ApplyRollback(context.Background(), repaired, bytes.NewReader(data), dst); err == nil {
+				t.Fatal("ApplyRollback accepted fuzzed garbage")
+			}
+			if _, err := os.Stat(dst); !os.IsNotExist(err) {
+				t.Fatalf("refused rollback left an output behind (stat err=%v)", err)
+			}
+		})
 	})
 }

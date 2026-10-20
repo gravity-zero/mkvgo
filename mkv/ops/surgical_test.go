@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -135,25 +136,27 @@ func FuzzSurgicalScanCluster(f *testing.F) {
 	f.Add([]byte{0xE7, 0x81, 0x00, 0x1F, 0x43, 0xB6, 0x75, 0x83, 0xE7, 0x81, 0x01})  // ts + next cluster
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		raw := bytes.NewReader(data)
-		out, err := surgicalScanCluster(raw, 0, int64(len(data)), nil, nil, 1000)
-		if err != nil || out == nil {
-			return
-		}
-		if out.end < 0 || out.end > int64(len(data)) {
-			t.Fatalf("end %d out of bounds (len %d)", out.end, len(data))
-		}
-		prev := int64(0)
-		for _, r := range out.runs {
-			if r.start < prev || r.end < r.start || r.end > int64(len(data)) {
-				t.Fatalf("run [%d,%d) out of order or bounds (prev end %d)", r.start, r.end, prev)
+		costguard.Fuzz(t, len(data), func() {
+			raw := bytes.NewReader(data)
+			out, err := surgicalScanCluster(raw, 0, int64(len(data)), nil, nil, 1000)
+			if err != nil || out == nil {
+				return
 			}
-			prev = r.end
-		}
-		for _, g := range out.gaps {
-			if g.StartOffset < 0 || g.EndOffset < g.StartOffset || g.EndOffset > int64(len(data)) {
-				t.Fatalf("gap [%d,%d) out of bounds", g.StartOffset, g.EndOffset)
+			if out.end < 0 || out.end > int64(len(data)) {
+				t.Fatalf("end %d out of bounds (len %d)", out.end, len(data))
 			}
-		}
+			prev := int64(0)
+			for _, r := range out.runs {
+				if r.start < prev || r.end < r.start || r.end > int64(len(data)) {
+					t.Fatalf("run [%d,%d) out of order or bounds (prev end %d)", r.start, r.end, prev)
+				}
+				prev = r.end
+			}
+			for _, g := range out.gaps {
+				if g.StartOffset < 0 || g.EndOffset < g.StartOffset || g.EndOffset > int64(len(data)) {
+					t.Fatalf("gap [%d,%d) out of bounds", g.StartOffset, g.EndOffset)
+				}
+			}
+		})
 	})
 }

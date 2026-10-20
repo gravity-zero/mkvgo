@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -98,15 +99,17 @@ func FuzzBlockReader(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, clusterPayload []byte) {
-		br, err := NewBlockReader(buildBlockReaderInput(clusterPayload), 1000000)
-		if err != nil {
-			return
-		}
-		for i := 0; i < 1000; i++ { // bound iterations against a degenerate loop
-			if _, err := br.Next(); err != nil {
+		costguard.Fuzz(t, len(clusterPayload), func() {
+			br, err := NewBlockReader(buildBlockReaderInput(clusterPayload), 1000000)
+			if err != nil {
 				return
 			}
-		}
+			for i := 0; i < 1000; i++ { // bound iterations against a degenerate loop
+				if _, err := br.Next(); err != nil {
+					return
+				}
+			}
+		})
 	})
 }
 
