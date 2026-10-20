@@ -6,6 +6,20 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.56.1] - 2026-10-20
+
+### Fixed
+
+- `Diagnose` reports bytes after a sealed Segment's end as trailing junk only:
+  its walk from a cue passed them over as damage inside the file too, so a
+  sound file with a tail of junk read as damaged and was sent to
+  `reindex --resync` (a regression of 0.56.0). The block walks opened at an
+  offset stop at the Segment's end (`Container.SegmentEnd`,
+  `BlockReader.SetSegmentEnd`).
+- An on-demand HLS plan stops its walks at a sealed Segment's end: junk past it
+  no longer counts as damage, refuses the last segment under a small
+  `DamageBytes`, nor weighs in the master's `BANDWIDTH`.
+
 ## [0.56.0] - 2026-10-19
 
 Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
