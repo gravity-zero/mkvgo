@@ -27,6 +27,25 @@ func subtitleScaleSource(t testing.TB, n int) string {
 	}, blocks)
 }
 
+// Serving every WebVTT segment of a plan in order, as a player does, costs about four times as much for a track four
+// times as long: each segment is not paid for with the whole track before it.
+func TestHLSPlanSubtitleSegmentsScalesLinearly(t *testing.T) {
+	ctx := context.Background()
+	costguard.Linear(t, 8000, func(n int) time.Duration {
+		plan, err := PlanHLS(ctx, subtitleScaleSource(t, n), Options{SegmentMs: 2000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		for k := 0; k < plan.NumSegments(); k++ {
+			if _, _, err := plan.Resource(ctx, fmt.Sprintf("sub1_%05d.vtt", k+1)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return costguard.Since(start)
+	})
+}
+
 // The full pass writes every WebVTT segment in one go: a track four times as long costs about four times as much.
 func TestRemuxToHLSSubtitleScalesLinearly(t *testing.T) {
 	costguard.Linear(t, 4000, func(n int) time.Duration {

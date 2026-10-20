@@ -22,6 +22,7 @@ type subCursor struct {
 	next    int64          // cluster offset to resume from; 0 = not started
 	scanned int64          // clusters with timestamps up to this ms are consumed
 	done    bool           // scanned to EOF
+	index   subIndex       // the cues' settled ends and windows, kept as they are added
 }
 
 // subScanState is one subtitle track's serving state: the exact prefix scan
@@ -156,13 +157,23 @@ func (p *HLSPlan) subCuesForWindow(ctx context.Context, i int, segStart, segEnd 
 		}
 		st.window = nil // a violation surfaced mid-island: prefix from now on
 	}
-	cues, err := p.subPrefixLocked(ctx, i, segEnd)
+	cues, err := p.subPrefixWindowLocked(ctx, i, segStart, segEnd)
 	p.subMu[i].Unlock()
-	if err != nil {
+	return cues, err
+}
+
+// subPrefixWindowLocked extends the prefix cursor as subPrefixLocked does and returns the cues that can meet
+// [segStart, segEnd), their ends settled over the prefix: the window's cost, not the prefix's. Caller holds subMu[i].
+func (p *HLSPlan) subPrefixWindowLocked(ctx context.Context, i int, segStart, segEnd int64) ([]subtitle.Cue, error) {
+	st := &p.subScan[i]
+	target := segEnd
+	if relMax := p.relTCMaxMs(); target < math.MaxInt64-relMax {
+		target += relMax
+	}
+	if err := p.extendCursorLocked(ctx, i, &st.prefix, target, segEnd); err != nil {
 		return nil, err
 	}
-	subtitle.SettleCueEnds(cues, 0)
-	return cues, nil
+	return st.prefix.windowCues(segStart, segEnd), nil
 }
 
 // subWindowLocked serves through the sliding island: reuse it while its
@@ -259,7 +270,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 		for {
 			b, err := br.Next()
 			if errors.Is(err, reader.ErrClusterLimit) {
-				cur.cues = append(cur.cues, local...)
+				cur.add(local...)
 				local = local[:0]
 				cur.next = br.ResumeOffset()
 				cur.scanned = stopAt
@@ -268,7 +279,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 			// Clean end (incl. a truncated/over-declared tail); all cues to this
 			// point are collected, so finish cleanly.
 			if p.walkEnd(err) {
-				cur.cues = append(cur.cues, local...)
+				cur.add(local...)
 				cur.done = true
 				return nil
 			}
@@ -402,7 +413,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 			}
 			read++
 		}
-		cur.cues = append(cur.cues, local...)
+		cur.add(local...)
 		if j == len(entries) {
 			cur.done = true
 			return true, nil
