@@ -6,6 +6,14 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- A TrackEntry without a TrackNumber, or with TrackNumber 0, is no longer
+  published as a track by `Read`, `ReadMeta` and `ReadStream`: the number is
+  mandatory and never 0, so no block can belong to it. `Read` could report
+  such a track, with no type and no codec, from a Tracks element it found
+  while resynchronizing through junk.
+
 ## [0.56.1] - 2026-10-20
 
 ### Changed
