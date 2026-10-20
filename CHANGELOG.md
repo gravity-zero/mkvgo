@@ -325,6 +325,9 @@ MP4:
 
 HLS and serving:
 
+- A plan serves a WebVTT segment at the cost of its window, not of every cue
+  before it: a player walking a long subtitle track no longer pays for the
+  whole track on each segment.
 - `GrowingHLSPlan` serves its requests side by side and while `Refresh` reads
   new clusters, its lock taken by a scan only to publish; `Complete` closes the
   playlist on what was published when the tail cannot be read.
