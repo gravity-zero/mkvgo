@@ -46,7 +46,7 @@ func TestHLSPlanSubtitleSegmentsScalesLinearly(t *testing.T) {
 	})
 }
 
-// Cues out of time order cost no more: one cue starting before the one before it, or every other one doing so.
+// Cues out of time order or long cost no more: one cue starting before the one before it, every other one doing so, or every cue stating a minute.
 func TestHLSPlanSubtitleSegmentsOutOfOrderScaleLinearly(t *testing.T) {
 	ctx := context.Background()
 	for name, cue := range map[string]func(i int) mkv.Block{
@@ -58,6 +58,7 @@ func TestHLSPlanSubtitleSegmentsOutOfOrderScaleLinearly(t *testing.T) {
 			return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
 		},
 		"every other back": decreasingPairs,
+		"all long":         allLong,
 	} {
 		t.Run(name, func(t *testing.T) {
 			costguard.Linear(t, 8000, func(n int) time.Duration {

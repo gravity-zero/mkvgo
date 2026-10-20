@@ -76,6 +76,7 @@ func TestHLSPlanSubtitleIndexMatchesFullPass(t *testing.T) {
 			return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
 		},
 		"decreasing pairs": decreasingPairs,
+		"all long":         allLong,
 	} {
 		t.Run(name, func(t *testing.T) {
 			src, dir := subIndexSource(t, 600, 200, cue), t.TempDir()
@@ -111,4 +112,9 @@ func decreasingPairs(i int) mkv.Block {
 		at -= 1400
 	}
 	return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
+}
+
+// allLong is a cue a second, each stating 61 s: every one is long, and a window meets some sixty of them.
+func allLong(i int) mkv.Block {
+	return mkv.Block{Timecode: int64(i)*1000 + 100, Duration: 61000, Data: []byte(fmt.Sprintf("cue %d", i))}
 }
