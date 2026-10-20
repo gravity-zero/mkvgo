@@ -3,12 +3,14 @@ package ops
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // cueEndFixture is a film of 20 s whose cues state no duration: two a second apart, one before a 10 s silence, and a
@@ -66,5 +68,30 @@ func TestExtractedCuesEndOnceRead(t *testing.T) {
 				t.Errorf("%s lacks %q:\n%s", name, w, c.got)
 			}
 		}
+	}
+}
+
+// The extraction queue ends each cue at the first later cue that starts after it, as subtitle.SettleCueEnds does, and
+// writes the cues in the order met, blocks out of time order included.
+func TestOpenCuesFollowSettleCueEnds(t *testing.T) {
+	type cue struct{ start, end int64 }
+	in := []cue{{1000, 0}, {500, 0}, {800, 0}, {900, 950}, {1200, 0}} // closer than a second: the next cue decides
+	q := openCues{mediaEndMs: 2000}
+	var got []int64
+	for _, c := range in {
+		mustNil(t, q.add(c.start, c.end, "Oui.", func(end int64) error { got = append(got, end); return nil }))
+	}
+	mustNil(t, q.flush(0, false))
+	var want []int64
+	cues := make([]subtitle.Cue, len(in))
+	for i, c := range in {
+		cues[i] = subtitle.Cue{StartMs: c.start, EndMs: c.end, Text: "Oui."}
+	}
+	subtitle.SettleCueEnds(cues, 2000)
+	for _, c := range cues {
+		want = append(want, c.EndMs)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("ends %v, want %v", got, want)
 	}
 }

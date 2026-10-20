@@ -17,39 +17,54 @@ import (
 
 const defaultSubDurationMs = 3000
 
-// openCues holds the cues an extraction has met but not written: those at the latest start, which the next later cue
-// may end (subtitle.CueEndMs), each written by its own write once its end is known.
+// openCues holds the cues an extraction has met but not written, in the order met: each that states no end is ended
+// by the first later cue that starts after it (subtitle.SettleCueEnds' rule), and each is written by its own write once
+// it and every cue before it have their end.
 type openCues struct {
-	starts     []int64
-	texts      []string
-	ends       []int64
-	writes     []func(endMs int64) error
+	cues       []openCue
 	mediaEndMs int64
 }
 
-// add queues a cue (endMs 0 when it states none), first writing the queued ones when it starts after them.
+type openCue struct {
+	start, end int64 // end 0 until known
+	text       string
+	write      func(endMs int64) error
+}
+
+// add queues a cue (endMs 0 when it states none), ending the queued ones it starts after, then writes those now ended.
 func (q *openCues) add(startMs, endMs int64, text string, write func(endMs int64) error) error {
-	if len(q.starts) > 0 && startMs > q.starts[0] {
-		if err := q.flush(startMs, true); err != nil {
-			return err
+	for i := range q.cues {
+		if c := &q.cues[i]; c.end <= c.start && startMs > c.start {
+			c.end = subtitle.CueEndMs(c.start, c.text, startMs, true, q.mediaEndMs)
 		}
 	}
-	q.starts, q.texts, q.ends, q.writes = append(q.starts, startMs), append(q.texts, text), append(q.ends, endMs), append(q.writes, write)
+	if endMs <= startMs {
+		endMs = 0
+	}
+	q.cues = append(q.cues, openCue{start: startMs, end: endMs, text: text, write: write})
+	n := 0
+	for n < len(q.cues) && q.cues[n].end > q.cues[n].start {
+		if err := q.cues[n].write(q.cues[n].end); err != nil {
+			return err
+		}
+		n++
+	}
+	q.cues = q.cues[n:]
 	return nil
 }
 
-// flush writes the queued cues, each that states no end ended by nextMs (when hasNext), its reading or the media's end.
+// flush writes the queued cues, each still without an end ended by nextMs (when hasNext), its reading or the media's end.
 func (q *openCues) flush(nextMs int64, hasNext bool) error {
-	for i, start := range q.starts {
-		end := q.ends[i]
-		if end <= start {
-			end = subtitle.CueEndMs(start, q.texts[i], nextMs, hasNext, q.mediaEndMs)
+	for _, c := range q.cues {
+		end := c.end
+		if end <= c.start {
+			end = subtitle.CueEndMs(c.start, c.text, nextMs, hasNext, q.mediaEndMs)
 		}
-		if err := q.writes[i](end); err != nil {
+		if err := c.write(end); err != nil {
 			return err
 		}
 	}
-	q.starts, q.texts, q.ends, q.writes = q.starts[:0], q.texts[:0], q.ends[:0], q.writes[:0]
+	q.cues = q.cues[:0]
 	return nil
 }
 
