@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/costguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
@@ -98,20 +99,20 @@ func TestOpenCuesFollowSettleCueEnds(t *testing.T) {
 }
 
 // Cues stating no end that arrive ever earlier are queued and ended in one pass, not once per cue met.
-func TestOpenCuesIsLinear(t *testing.T) {
-	const n = 300_000
-	q := openCues{}
-	written := 0
-	start := time.Now()
-	for i := 0; i < n; i++ {
-		mustNil(t, q.add(int64(n-i), 0, "a", func(int64) error { written++; return nil }))
-	}
-	mustNil(t, q.add(2_000_000, 2_000_001, "a", func(int64) error { written++; return nil }))
-	mustNil(t, q.flush(0, false))
-	if d := time.Since(start); d > 2*time.Second {
-		t.Errorf("%d cues took %v", n, d)
-	}
-	if written != n+1 {
-		t.Errorf("%d cues written, want %d", written, n+1)
-	}
+func TestOpenCuesCostGrowsLinearly(t *testing.T) {
+	costguard.Linear(t, 300_000, func(n int) time.Duration {
+		q := openCues{}
+		written := 0
+		start := time.Now()
+		for i := 0; i < n; i++ {
+			mustNil(t, q.add(int64(n-i), 0, "a", func(int64) error { written++; return nil }))
+		}
+		mustNil(t, q.add(int64(4*n), int64(4*n+1), "a", func(int64) error { written++; return nil }))
+		mustNil(t, q.flush(0, false))
+		d := costguard.Since(start)
+		if written != n+1 {
+			t.Fatalf("%d cues written, want %d", written, n+1)
+		}
+		return d
+	})
 }
