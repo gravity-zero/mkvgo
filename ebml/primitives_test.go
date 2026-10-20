@@ -119,22 +119,35 @@ func TestReadBytes_HugeDeclaredSizeNoAlloc(t *testing.T) {
 	}
 }
 
-// TestReadBytesLargeGrowthIsBounded pins the large read's own growth: under three times its size whatever the Go release (a size just past a power of two is the worst case).
+// TestReadBytesLargeGrowthIsBounded pins the large read's own growth whatever the Go release: under 1.5 times its size
+// (asserted under twice), and a declared size the data does not reach costs a bounded multiple of what arrived.
 func TestReadBytesLargeGrowthIsBounded(t *testing.T) {
-	const size = 16<<20 + 3
-	data := bytes.Repeat([]byte{0xA5}, size)
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	got, err := ReadBytes(bytes.NewReader(data), size)
-	runtime.ReadMemStats(&after)
-	if err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("ReadBytes(%d) = %d bytes, %v", size, len(got), err)
+	alloc := func(f func()) uint64 {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		f()
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
 	}
-	if alloc := after.TotalAlloc - before.TotalAlloc; alloc >= 3*size {
-		t.Errorf("reading %d bytes allocated %d", size, alloc)
+	for _, size := range []int{16 << 20, 16<<20 + 3, 24 << 20, 32<<20 - 1} {
+		data := bytes.Repeat([]byte{0xA5}, size)
+		var got []byte
+		var err error
+		if a := alloc(func() { got, err = ReadBytes(bytes.NewReader(data), int64(size)) }); a >= 2*uint64(size) {
+			t.Errorf("reading %d bytes allocated %d", size, a)
+		}
+		if err != nil || !bytes.Equal(got, data) {
+			t.Fatalf("ReadBytes(%d) = %d bytes, %v", size, len(got), err)
+		}
 	}
-	if _, err := ReadBytes(bytes.NewReader(data[:3<<20]), size); !errors.Is(err, io.ErrUnexpectedEOF) {
+	const declared, arrived = 64 << 20, 2 << 20
+	short := bytes.Repeat([]byte{0xA5}, arrived)
+	var err error
+	if a := alloc(func() { _, err = ReadBytes(bytes.NewReader(short), declared) }); a > 8*arrived {
+		t.Errorf("%d bytes declared, %d arrived: %d allocated", declared, arrived, a)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Errorf("ReadBytes cut past its first MiB: %v, want io.ErrUnexpectedEOF", err)
 	}
 }
