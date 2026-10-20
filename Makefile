@@ -62,8 +62,12 @@ wasm-smoke: wasm
 
 # preflight: the pre-push gate. Everything CI can check locally, INCLUDING a
 # cross-compile for every OS the CI matrix builds on - a Linux build alone does
-# NOT catch a Windows/macOS break. Run before tagging a release.
+# NOT catch a Windows/macOS break. Run before tagging a release, naming it:
+#   make preflight RELEASE=v0.57.0
+# scripts/release-check.sh fails unless gorelease asks for exactly RELEASE against the previous tag, and reports the
+# WASM's size change against that tag's (a warning past WASM_GROWTH_WARN %).
 preflight:
+	@RELEASE=$(RELEASE) scripts/release-check.sh
 	@echo "== gofmt =="; \
 	  bad="$$(gofmt -l . | grep -v '^\.' || true)"; \
 	  [ -z "$$bad" ] || { echo "$$bad"; echo "gofmt: files need formatting"; exit 1; }
