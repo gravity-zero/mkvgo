@@ -12,9 +12,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
-// subIndexSource is 600 s of video, a keyframe every two, under the subtitle blocks cue(i) gives for i in 0..199, each
-// at its own time, written in block order in 2 s clusters: a cue point on every keyframe, as the full pass cuts.
-func subIndexSource(t *testing.T, cue func(i int) mkv.Block) string {
+// subIndexSource is secs seconds of video, a keyframe every two, under the subtitle blocks cue(i) gives for i in 0..n-1,
+// each in the cluster its time falls in, in block order there: 2 s clusters, a cue point on every keyframe, as the full
+// pass cuts.
+func subIndexSource(t testing.TB, secs, n int, cue func(i int) mkv.Block) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "subindex.mkv")
 	f, err := os.Create(path)
@@ -31,16 +32,16 @@ func subIndexSource(t *testing.T, cue func(i int) mkv.Block) string {
 		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
 		{ID: 2, Type: mkv.SubtitleTrack, Codec: "srt", Language: "eng"},
 	}
-	if err := mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "t", WritingApp: "t"}}, tracks, 600000); err != nil {
+	if err := mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1000000, MuxingApp: "t", WritingApp: "t"}}, tracks, int64(secs)*1000); err != nil {
 		t.Fatal(err)
 	}
 	subs := map[int64][]mkv.Block{}
-	for i := 0; i < 200; i++ {
+	for i := 0; i < n; i++ {
 		b := cue(i)
 		b.TrackNumber, b.Keyframe = 2, true
 		subs[b.Timecode/2000] = append(subs[b.Timecode/2000], b)
 	}
-	for at := int64(0); at < 600; at += 2 {
+	for at := int64(0); at < int64(secs); at += 2 {
 		var blocks []mkv.Block
 		for s := at; s < at+2; s++ {
 			blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: s * 1000, Keyframe: s%2 == 0, Data: []byte{0, 0, 0, 1, 0x65, byte(s)}})
@@ -74,9 +75,10 @@ func TestHLSPlanSubtitleIndexMatchesFullPass(t *testing.T) {
 			}
 			return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
 		},
+		"decreasing pairs": decreasingPairs,
 	} {
 		t.Run(name, func(t *testing.T) {
-			src, dir := subIndexSource(t, cue), t.TempDir()
+			src, dir := subIndexSource(t, 600, 200, cue), t.TempDir()
 			if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
 				t.Fatal(err)
 			}
@@ -100,4 +102,13 @@ func TestHLSPlanSubtitleIndexMatchesFullPass(t *testing.T) {
 			}
 		})
 	}
+}
+
+// decreasingPairs puts two cues in each 2 s cluster, the second starting before the first.
+func decreasingPairs(i int) mkv.Block {
+	at := int64(i/2)*2000 + 1500
+	if i%2 == 1 {
+		at -= 1400
+	}
+	return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
 }

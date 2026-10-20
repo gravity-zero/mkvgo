@@ -46,6 +46,37 @@ func TestHLSPlanSubtitleSegmentsScalesLinearly(t *testing.T) {
 	})
 }
 
+// Cues out of time order cost no more: one cue starting before the one before it, or every other one doing so.
+func TestHLSPlanSubtitleSegmentsOutOfOrderScaleLinearly(t *testing.T) {
+	ctx := context.Background()
+	for name, cue := range map[string]func(i int) mkv.Block{
+		"one back": func(i int) mkv.Block {
+			at := int64(i)*1000 + 100
+			if i == 1 {
+				at = 50 // in the first cluster, after cue 0, starting before it
+			}
+			return mkv.Block{Timecode: at, Data: []byte(fmt.Sprintf("cue %d", i))}
+		},
+		"every other back": decreasingPairs,
+	} {
+		t.Run(name, func(t *testing.T) {
+			costguard.Linear(t, 8000, func(n int) time.Duration {
+				plan, err := PlanHLS(ctx, subIndexSource(t, n, n, cue), Options{SegmentMs: 2000})
+				if err != nil {
+					t.Fatal(err)
+				}
+				start := time.Now()
+				for k := 0; k < plan.NumSegments(); k++ {
+					if _, _, err := plan.Resource(ctx, fmt.Sprintf("sub1_%05d.vtt", k+1)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return costguard.Since(start)
+			})
+		})
+	}
+}
+
 // The full pass writes every WebVTT segment in one go: a track four times as long costs about four times as much.
 func TestRemuxToHLSSubtitleScalesLinearly(t *testing.T) {
 	costguard.Linear(t, 4000, func(n int) time.Duration {

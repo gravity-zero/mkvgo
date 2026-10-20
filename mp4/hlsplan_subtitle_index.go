@@ -2,19 +2,23 @@ package mp4
 
 import (
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // subIndex serves a cursor's windows without a pass over all its cues: each cue's end is settled once, when its next
-// later cue arrives (subtitle.SettleCueEnds' rule), and while the cues start in time order a window is found by
-// search, the rare cue stating a span longer than subFastMaxCueDurMs kept aside.
+// later cue arrives (subtitle.SettleCueEnds' rule), and a window is found by search. A cue starting at or after every
+// cue before it joins ordered, whose starts never decrease; one starting earlier joins late, a tree by start; the rare
+// cue stating a span longer than subFastMaxCueDurMs is also kept in long.
 type subIndex struct {
-	ends      []int64 // per cue: its end, unsettledEnd while it waits on a later cue
-	pending   []int   // the cues waiting, their starts not increasing: a later cue settles those it starts after
-	long      []int   // cues stating a span longer than subFastMaxCueDurMs
-	unordered bool    // a cue started before the one held before it: windows take every cue, as before the index
+	ends     []int64 // per cue: its end, unsettledEnd while it waits on a later cue
+	pending  []int   // the cues waiting, their starts not increasing: a later cue settles those it starts after
+	ordered  []int   // the cues in time order, by block order
+	late     cueTree // the cues starting before one held before them
+	long     []int   // cues stating a span longer than subFastMaxCueDurMs
+	maxStart int64   // the latest start held
 }
 
 const unsettledEnd = math.MinInt64
@@ -24,9 +28,6 @@ func (cur *subCursor) add(cues ...subtitle.Cue) {
 	ix := &cur.index
 	for _, c := range cues {
 		i := len(cur.cues)
-		if i > 0 && c.StartMs < cur.cues[i-1].StartMs {
-			ix.unordered = true
-		}
 		cur.cues = append(cur.cues, c)
 		for n := len(ix.pending); n > 0 && cur.cues[ix.pending[n-1]].StartMs < c.StartMs; n-- {
 			k := ix.pending[n-1]
@@ -42,6 +43,12 @@ func (cur *subCursor) add(cues ...subtitle.Cue) {
 			ix.ends = append(ix.ends, unsettledEnd)
 			ix.pending = append(ix.pending, i)
 		}
+		if i == 0 || c.StartMs >= ix.maxStart {
+			ix.ordered = append(ix.ordered, i)
+			ix.maxStart = c.StartMs
+		} else {
+			ix.late.insert(c.StartMs, i)
+		}
 	}
 }
 
@@ -53,37 +60,119 @@ func (cur *subCursor) endOf(i int) int64 {
 	return subtitle.CueEndMs(cur.cues[i].StartMs, cur.cues[i].Text, 0, false, 0)
 }
 
-// windowCues returns, in block order and with their ends settled, every held cue that can meet [from, to): while the
-// cues start in time order, those starting within subFastMaxCueDurMs before from up to to and the long ones before,
-// at the cost of the window and not of the cues before it; otherwise every cue.
+// windowCues returns, in block order and with their ends settled, every held cue that can meet [from, to): those
+// starting within subFastMaxCueDurMs before from up to to, and the long ones starting earlier, at the cost of the
+// window and not of the cues before it.
 func (cur *subCursor) windowCues(from, to int64) []subtitle.Cue {
 	ix := &cur.index
-	var pick []int
-	if ix.unordered {
-		pick = make([]int, len(cur.cues))
-		for i := range pick {
-			pick[i] = i
-		}
-	} else {
-		lo := from
-		if lo > math.MinInt64+subFastMaxCueDurMs {
-			lo -= subFastMaxCueDurMs
-		}
-		a := sort.Search(len(cur.cues), func(k int) bool { return cur.cues[k].StartMs >= lo })
-		b := max(a, sort.Search(len(cur.cues), func(k int) bool { return cur.cues[k].StartMs >= to }))
-		for _, i := range ix.long {
-			if i < a {
-				pick = append(pick, i)
-			}
-		}
-		for i := a; i < b; i++ {
+	lo := from
+	if lo > math.MinInt64+subFastMaxCueDurMs {
+		lo -= subFastMaxCueDurMs
+	}
+	startOf := func(k int) int64 { return cur.cues[ix.ordered[k]].StartMs }
+	a := sort.Search(len(ix.ordered), func(k int) bool { return startOf(k) >= lo })
+	b := max(a, sort.Search(len(ix.ordered), func(k int) bool { return startOf(k) >= to }))
+	pick := append([]int(nil), ix.ordered[a:b]...)
+	ix.late.each(lo, to, func(i int) { pick = append(pick, i) })
+	for _, i := range ix.long {
+		if cur.cues[i].StartMs < lo {
 			pick = append(pick, i)
 		}
 	}
+	slices.Sort(pick)
 	out := make([]subtitle.Cue, len(pick))
 	for k, i := range pick {
 		out[k] = cur.cues[i]
 		out[k].EndMs = cur.endOf(i)
 	}
 	return out
+}
+
+// cueTree is a treap of cue indices keyed by (start, index): inserting a cue and visiting those starting in a range
+// cost O(log n) and the visit, whatever order the cues come in.
+type cueTree struct {
+	nodes []cueNode
+	root  int32 // -1 when empty, as the zero value holds once insert ran
+	seed  uint32
+	used  bool
+}
+
+type cueNode struct {
+	start       int64
+	idx         int32
+	pri         uint32
+	left, right int32
+}
+
+func (t *cueTree) less(a int32, start int64, idx int) bool {
+	n := &t.nodes[a]
+	return n.start < start || (n.start == start && int(n.idx) < idx)
+}
+
+// split cuts the tree at n into the nodes before (start, idx) and those at or after it.
+func (t *cueTree) split(n int32, start int64, idx int) (int32, int32) {
+	if n < 0 {
+		return -1, -1
+	}
+	if t.less(n, start, idx) {
+		l, r := t.split(t.nodes[n].right, start, idx)
+		t.nodes[n].right = l
+		return n, r
+	}
+	l, r := t.split(t.nodes[n].left, start, idx)
+	t.nodes[n].left = r
+	return l, n
+}
+
+// join links two trees whose keys are all ordered, a's before b's.
+func (t *cueTree) join(a, b int32) int32 {
+	switch {
+	case a < 0:
+		return b
+	case b < 0:
+		return a
+	case t.nodes[a].pri > t.nodes[b].pri:
+		t.nodes[a].right = t.join(t.nodes[a].right, b)
+		return a
+	default:
+		t.nodes[b].left = t.join(a, t.nodes[b].left)
+		return b
+	}
+}
+
+func (t *cueTree) insert(start int64, idx int) {
+	if !t.used {
+		t.root, t.seed, t.used = -1, 2463534242, true
+	}
+	t.seed ^= t.seed << 13
+	t.seed ^= t.seed >> 17
+	t.seed ^= t.seed << 5
+	n := int32(len(t.nodes))
+	t.nodes = append(t.nodes, cueNode{start: start, idx: int32(idx), pri: t.seed, left: -1, right: -1})
+	l, r := t.split(t.root, start, idx)
+	t.root = t.join(t.join(l, n), r)
+}
+
+// each visits, in no particular order, every cue index starting in [lo, to).
+func (t *cueTree) each(lo, to int64, fn func(int)) {
+	if !t.used {
+		return
+	}
+	var walk func(n int32)
+	walk = func(n int32) {
+		if n < 0 {
+			return
+		}
+		s := t.nodes[n].start
+		if s >= lo {
+			walk(t.nodes[n].left)
+		}
+		if s >= lo && s < to {
+			fn(int(t.nodes[n].idx))
+		}
+		if s < to {
+			walk(t.nodes[n].right)
+		}
+	}
+	walk(t.root)
 }
