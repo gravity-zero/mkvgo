@@ -25,6 +25,7 @@ package mp4
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,7 @@ type HLSPlan struct {
 	srcPath       string
 	fs            *mkv.FS
 	tcScale       int64
+	segEnd        int64 // Container.SegmentEnd: where a walk opened at an offset stops, 0 when unknown
 	tracks        []*planTrack
 	bounds        []int64 // segment start times (ms); bounds[0] == 0
 	offsets       []int64 // absolute file offset of the cluster holding bounds[k]
@@ -381,6 +383,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			firstPtsMs: -1,
 		})
 	}
+	p.segEnd = c.SegmentEnd
 	p.noteTrackCues(c.Cues, c.SegmentStart, segMs)
 
 	// Segment boundaries from the cue times (the video keyframes), like
@@ -546,6 +549,9 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	srcSize := int64(0)
 	if st, serr := fs.DoStat(srcPath); serr == nil {
 		srcSize = st.Size()
+	}
+	if p.segEnd > 0 && p.segEnd < srcSize {
+		srcSize = p.segEnd // what follows the Segment is no segment's
 	}
 	for k := 0; k < p.segCount; k++ {
 		end := srcSize
@@ -781,4 +787,22 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 		return data, mimeVTT, err
 	}
 	return nil, "", noResource("unknown HLS resource %q (see Resources())", name)
+}
+
+// blockReaderAt opens a block walk at off, bounded to the Segment's end: what lies past it is no part of the media.
+func (p *HLSPlan) blockReaderAt(src io.ReadSeeker, off int64) (*reader.BlockReader, error) {
+	br, err := reader.NewBlockReaderAt(src, p.tcScale, off)
+	if err == nil {
+		br.SetSegmentEnd(p.segEnd)
+	}
+	return br, err
+}
+
+// blockReaderFrom is blockReaderAt opened on a block's position.
+func (p *HLSPlan) blockReaderFrom(src io.ReadSeeker, pos reader.BlockPos) (*reader.BlockReader, error) {
+	br, err := reader.NewBlockReaderFrom(src, p.tcScale, pos)
+	if err == nil {
+		br.SetSegmentEnd(p.segEnd)
+	}
+	return br, err
 }

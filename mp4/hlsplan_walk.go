@@ -80,10 +80,10 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	}
 	if from.Valid() {
 		p.hintWindow(src, n, from.Off)
-		br, err = reader.NewBlockReaderFrom(src, p.tcScale, from)
+		br, err = p.blockReaderFrom(src, from)
 	} else {
 		p.hintWindow(src, n, cold)
-		br, err = reader.NewBlockReaderAt(src, p.tcScale, cold)
+		br, err = p.blockReaderAt(src, cold)
 	}
 	if err != nil {
 		return nil, nil, none, err
@@ -513,7 +513,7 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 		if span := p.windowSpan(n); span > 0 && n+1 < p.segCount {
 			farOff = starts[ti].Off + 2*span // two windows past its own opening block without crossing: far
 		}
-		br, err := reader.NewBlockReaderFrom(src, p.tcScale, starts[ti])
+		br, err := p.blockReaderFrom(src, starts[ti])
 		if err != nil {
 			return nil, nil, err
 		}

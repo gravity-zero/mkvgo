@@ -185,7 +185,7 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 		}
 		h.HintRange(off, to)
 	}
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, off)
+	br, err := p.blockReaderAt(src, off)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 		return err
 	}
 	defer src.Close()
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, p.offsets[0])
+	br, err := p.blockReaderAt(src, p.offsets[0])
 	if err != nil {
 		return err
 	}

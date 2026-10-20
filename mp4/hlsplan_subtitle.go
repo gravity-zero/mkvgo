@@ -252,7 +252,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	if perr != nil {
 		return st.keep(perr)
 	}
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, past)
+	br, err := p.blockReaderAt(src, past)
 	if err != nil {
 		return st.keep(err)
 	}
@@ -383,7 +383,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 				break
 			}
 			if br == nil {
-				if br, err = reader.NewBlockReaderFrom(src, p.tcScale, e.Pos); err != nil {
+				if br, err = p.blockReaderFrom(src, e.Pos); err != nil {
 					return walkOnce()
 				}
 				br.SetTrackDefaultDurations(p.trackDurs)

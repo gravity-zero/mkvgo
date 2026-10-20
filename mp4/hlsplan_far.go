@@ -111,7 +111,7 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 		wide = maxInt64(wide, 2*gaps[len(gaps)/2])
 	}
 	clusterEnd := func(off int64) int64 { // where the cued cluster at off ends (-1: unknown)
-		br, err := reader.NewBlockReaderAt(src, p.tcScale, off)
+		br, err := p.blockReaderAt(src, off)
 		if err != nil {
 			return -1
 		}
@@ -123,7 +123,7 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 		return br.Pos().ClusterEnd
 	}
 	opensCluster := func(off int64) bool { // a Cluster element sits at off
-		br, err := reader.NewBlockReaderAt(src, p.tcScale, off)
+		br, err := p.blockReaderAt(src, off)
 		if err != nil {
 			return false
 		}
@@ -162,7 +162,7 @@ func (p *HLSPlan) regionFirstMs(src io.ReadSeeker, i int) int64 {
 		return rg.firstMs
 	}
 	first := int64(math.MaxInt64)
-	if br, err := reader.NewBlockReaderAt(src, p.tcScale, rg.start); err == nil {
+	if br, err := p.blockReaderAt(src, rg.start); err == nil {
 		br.SetHeaderOnly(true)
 		if b, err := br.Next(); err == nil {
 			first = b.BlockTimecode
@@ -248,7 +248,7 @@ func (p *HLSPlan) probeCluster(src io.ReadSeeker, off, limit int64) (at, ms int6
 	if err != nil || at < 0 {
 		return 0, 0, false
 	}
-	br, err := reader.NewBlockReaderAt(src, p.tcScale, at)
+	br, err := p.blockReaderAt(src, at)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -379,7 +379,7 @@ func (p *HLSPlan) farTrackIn(ctx context.Context, src io.ReadSeeker, i int, rg t
 	if rg.end >= 0 {
 		rs = &boundedReadSeeker{r: src, limit: rg.end} // the region ends at the next cued cluster, whatever the reader keeps
 	}
-	br, err := reader.NewBlockReaderAt(rs, p.tcScale, seat)
+	br, err := p.blockReaderAt(rs, seat)
 	if err != nil {
 		return nil, -1, farElsewhere, err
 	}
