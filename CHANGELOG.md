@@ -20,6 +20,8 @@ a growing plan serves while it scans.
 
 ### Changed
 
+- The WebAssembly module no longer carries Go's `regexp` package, which one
+  check on the names a packager writes pulled in: 470 KB less to download.
 - `serve` and `serve-growing` listen on `127.0.0.1:8478` by default;
   `-addr :8478` opens them to the network.
 - `mp4.CENCOptions` without a `KeyURI` is refused instead of writing the key
