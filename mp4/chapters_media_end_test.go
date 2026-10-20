@@ -43,6 +43,7 @@ func TestRemuxChaptersEndWithTheMedia(t *testing.T) {
 		"past the end":     {{StartMs: 0, Title: "A"}, {StartMs: 4000, Title: "B"}, {StartMs: 30_000, Title: "Past"}},
 		"a short last end": {{StartMs: 0, Title: "A"}, {StartMs: 4000, EndMs: 5000, Title: "B"}},
 		"no last end":      {{StartMs: 0, Title: "A"}, {StartMs: 9900, Title: "B"}},
+		"past the duration the source declares, within its media": {{StartMs: 0, Title: "A"}, {StartMs: 9980, Title: "B"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := buildMKVWithChapters(t, tracks, blocks, chapters)
