@@ -287,6 +287,9 @@ Damage and resync:
   readers resync only on an element that fits the Segment. Damage ahead of the
   first Cluster, or running to the end of the file, is reported once through
   `OnSkip`.
+- `Container.ResyncedBytes` counts the junk a read passed over even when
+  nothing recognizable follows it, up to the Segment's end: such a file no
+  longer reads as sound, and `Validate` and `Diagnose` name `reindex --resync`.
 - A subtitle index pointing at bytes no Cluster holds is stale, not damage; a
   cue without a duration ends where a damaged region begins.
 - A negative `DamageBytes` refuses any damage in `mp4.Options` and the CLI too;
