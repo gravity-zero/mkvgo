@@ -22,6 +22,8 @@ const defaultSubDurationMs = 3000
 // it and every cue before it have their end.
 type openCues struct {
 	cues       []openCue
+	base       int   // the sequence number of cues[0]
+	open       []int // the cues still without an end, by sequence number, starts non-increasing: the latest on top
 	mediaEndMs int64
 }
 
@@ -33,13 +35,17 @@ type openCue struct {
 
 // add queues a cue (endMs 0 when it states none), ending the queued ones it starts after, then writes those now ended.
 func (q *openCues) add(startMs, endMs int64, text string, write func(endMs int64) error) error {
-	for i := range q.cues {
-		if c := &q.cues[i]; c.end <= c.start && startMs > c.start {
-			c.end = subtitle.CueEndMs(c.start, c.text, startMs, true, q.mediaEndMs)
+	for len(q.open) > 0 {
+		c := &q.cues[q.open[len(q.open)-1]-q.base]
+		if c.start >= startMs {
+			break
 		}
+		c.end = subtitle.CueEndMs(c.start, c.text, startMs, true, q.mediaEndMs)
+		q.open = q.open[:len(q.open)-1]
 	}
 	if endMs <= startMs {
 		endMs = 0
+		q.open = append(q.open, q.base+len(q.cues))
 	}
 	q.cues = append(q.cues, openCue{start: startMs, end: endMs, text: text, write: write})
 	n := 0
@@ -49,7 +55,7 @@ func (q *openCues) add(startMs, endMs int64, text string, write func(endMs int64
 		}
 		n++
 	}
-	q.cues = q.cues[n:]
+	q.cues, q.base = q.cues[n:], q.base+n
 	return nil
 }
 
@@ -64,7 +70,8 @@ func (q *openCues) flush(nextMs int64, hasNext bool) error {
 			return err
 		}
 	}
-	q.cues = q.cues[:0]
+	q.base += len(q.cues)
+	q.cues, q.open = q.cues[:0], q.open[:0]
 	return nil
 }
 
