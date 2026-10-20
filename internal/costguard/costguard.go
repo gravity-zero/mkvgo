@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -44,23 +45,29 @@ func Fuzz(t testing.TB, size int, fn func()) {
 	fn()
 }
 
-// Linear fails t when the measured phase of fn at 4n items costs more than 8 times its cost at n, the best of three
-// runs each: a linear path costs about 4 times, n log n about 4.5, a quadratic one 16. fn builds its input of n items,
-// then runs and times the phase under test, and returns that time, so a linear setup cannot hide what it feeds; n is
-// chosen so that phase lasts 20 ms or more. Skipped under the race detector, whose overhead is not proportional.
+// Linear fails t when the measured phase of fn at 4n items costs more than 8 times its cost at n: a linear path costs
+// about 4 times, n log n about 4.5, a quadratic one 16. Each size keeps the best of three runs, and a ratio past 8 is
+// measured again, the best of five, so a collection pause fails nothing a quadratic path would not. fn builds its
+// input of n items, then runs and times the phase under test, and returns that time, so a linear setup cannot hide
+// what it feeds; n is chosen so that phase lasts 10 ms or more. Skipped under the race detector, whose overhead is not
+// proportional.
 func Linear(t testing.TB, n int, fn func(n int) time.Duration) {
 	t.Helper()
 	if raceFactor > 1 {
 		t.Skip("costguard.Linear does not time under the race detector")
 	}
-	best := func(n int) time.Duration {
+	best := func(n, runs int) time.Duration {
 		b := time.Duration(1<<63 - 1)
-		for range 3 {
+		for range runs {
+			runtime.GC() // each run starts from a collected heap, not from the garbage of the one before
 			b = min(b, fn(n))
 		}
 		return max(b, time.Microsecond)
 	}
-	small, large := best(n), best(4*n)
+	small, large := best(n, 3), best(4*n, 3)
+	if float64(large)/float64(small) > 8 {
+		small, large = min(small, best(n, 5)), min(large, best(4*n, 5))
+	}
 	if os.Getenv("COSTGUARD_VERBOSE") != "" {
 		t.Logf("%v for %d, %v for %d", small, n, large, 4*n)
 	}
