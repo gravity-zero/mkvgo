@@ -61,9 +61,10 @@ func ReadFloat(r io.Reader, size int64) (float64, error) {
 }
 
 // readExact reads exactly size bytes. For sizes above a small threshold it
-// grows the buffer incrementally (via io.LimitReader) instead of allocating
-// size bytes upfront, so a malformed element that declares a huge size but
-// supplies little data cannot force a giant allocation (memory DoS).
+// grows the buffer as data arrives instead of allocating size bytes upfront,
+// so a malformed element that declares a huge size but supplies little data
+// cannot force a giant allocation (memory DoS). The growth is its own (doubling,
+// capped at size: under three times size allocated in all), not the stdlib's.
 func readExact(r io.Reader, size int64) ([]byte, error) {
 	if err := checkSize(size); err != nil {
 		return nil, err
@@ -76,12 +77,21 @@ func readExact(r io.Reader, size int64) ([]byte, error) {
 		}
 		return buf, nil
 	}
-	buf, err := io.ReadAll(io.LimitReader(r, size))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(buf)) != size {
-		return nil, io.ErrUnexpectedEOF
+	buf := make([]byte, 0, maxUpfront)
+	for int64(len(buf)) < size {
+		if len(buf) == cap(buf) {
+			grown := make([]byte, len(buf), min(2*int64(cap(buf)), size))
+			copy(grown, buf)
+			buf = grown
+		}
+		n, err := io.ReadFull(r, buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err == io.EOF {
+			return nil, io.ErrUnexpectedEOF
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	return buf, nil
 }

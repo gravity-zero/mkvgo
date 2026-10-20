@@ -2,6 +2,9 @@ package ebml
 
 import (
 	"bytes"
+	"errors"
+	"io"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -113,6 +116,26 @@ func TestReadBytes_HugeDeclaredSizeNoAlloc(t *testing.T) {
 	_, err := ReadBytes(r, 256*1024*1024) // 256 MB declared, 5 bytes available
 	if err == nil {
 		t.Fatal("expected error for truncated huge element")
+	}
+}
+
+// TestReadBytesLargeGrowthIsBounded pins the large read's own growth: under three times its size whatever the Go release (a size just past a power of two is the worst case).
+func TestReadBytesLargeGrowthIsBounded(t *testing.T) {
+	const size = 16<<20 + 3
+	data := bytes.Repeat([]byte{0xA5}, size)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	got, err := ReadBytes(bytes.NewReader(data), size)
+	runtime.ReadMemStats(&after)
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("ReadBytes(%d) = %d bytes, %v", size, len(got), err)
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc >= 3*size {
+		t.Errorf("reading %d bytes allocated %d", size, alloc)
+	}
+	if _, err := ReadBytes(bytes.NewReader(data[:3<<20]), size); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("ReadBytes cut past its first MiB: %v, want io.ErrUnexpectedEOF", err)
 	}
 }
 
