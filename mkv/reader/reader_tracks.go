@@ -38,6 +38,9 @@ func (p *parser) parseTracks(size int64, c *mkv.Container) error {
 			if err := p.chargeMeta(int64(unsafe.Sizeof(track))); err != nil {
 				return err
 			}
+			if track.ID == 0 { // TrackNumber is mandatory and never 0: no block can address this entry
+				continue
+			}
 			c.Tracks = append(c.Tracks, track)
 		} else {
 			if err := p.skip(eh.Size); err != nil {
