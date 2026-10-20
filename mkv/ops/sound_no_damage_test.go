@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/internal/livefixture"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -30,10 +31,13 @@ func junkPattern(n int) []byte {
 	return b
 }
 
-// soundFiles are the files known sound: the Matroska test corpus and a muxed fixture.
+// soundFiles are the files known sound: the Matroska test corpus, a muxed fixture and a live recording (unknown-size
+// Segment and Clusters, ended by the end of the file).
 func soundFiles(t *testing.T, dir string) []string {
 	t.Helper()
-	files := []string{salvageFixture(t, dir, "muxed.mkv", 4)}
+	live := filepath.Join(dir, "live.mkv")
+	writeAll(t, live, livefixture.Build(livefixture.Options{}))
+	files := []string{salvageFixture(t, dir, "muxed.mkv", 4), live}
 	for _, pat := range []string{"*.mkv", "*.webm"} {
 		m, err := filepath.Glob(filepath.Join("..", "..", "internal", "testdata", pat))
 		if err != nil {
