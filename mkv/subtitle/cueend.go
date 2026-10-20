@@ -18,13 +18,14 @@ func ReadingMs(text string) int64 {
 	n := int64(0)
 	depth, tag := 0, false
 	text = strings.ReplaceAll(strings.ReplaceAll(text, `\N`, " "), `\n`, " ")
+	last := strings.LastIndexByte(text, '>') // a '<' opens a tag only when a '>' follows it
 	for i, r := range text {
 		switch {
 		case r == '{':
 			depth++
 		case r == '}' && depth > 0:
 			depth--
-		case r == '<' && !tag && strings.ContainsRune(text[i:], '>'):
+		case r == '<' && !tag && i < last:
 			tag = true
 		case r == '>' && tag:
 			tag = false
@@ -51,18 +52,20 @@ func CueEndMs(startMs int64, text string, nextMs int64, hasNext bool, mediaEndMs
 // SettleCueEnds ends every cue whose end is unset (at or before its start) as CueEndMs does, the next cue being the
 // first that starts after it. Cues must be in start order; mediaEndMs is 0 when the media's end is unknown.
 func SettleCueEnds(cues []Cue, mediaEndMs int64) {
-	for i := range cues {
-		if cues[i].EndMs > cues[i].StartMs {
-			continue
+	// later holds, nearest last, the cues after i each starting after every cue between it and i: the first one
+	// starting after cue i is found by dropping those that do not, once for all cues.
+	var later []int
+	for i := len(cues) - 1; i >= 0; i-- {
+		for len(later) > 0 && cues[later[len(later)-1]].StartMs <= cues[i].StartMs {
+			later = later[:len(later)-1]
 		}
-		j := i + 1
-		for j < len(cues) && cues[j].StartMs <= cues[i].StartMs {
-			j++
+		if cues[i].EndMs <= cues[i].StartMs {
+			next, ok := int64(0), len(later) > 0
+			if ok {
+				next = cues[later[len(later)-1]].StartMs
+			}
+			cues[i].EndMs = CueEndMs(cues[i].StartMs, cues[i].Text, next, ok, mediaEndMs)
 		}
-		next := int64(0)
-		if j < len(cues) {
-			next = cues[j].StartMs
-		}
-		cues[i].EndMs = CueEndMs(cues[i].StartMs, cues[i].Text, next, j < len(cues), mediaEndMs)
+		later = append(later, i)
 	}
 }
