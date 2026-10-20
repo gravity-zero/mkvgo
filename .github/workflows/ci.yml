@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
           cache: false
@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: GOOS=js GOARCH=wasm go build ./cmd/mkvgo-wasm/
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: runner.os == 'Linux'
         with:
           node-version: '22.12.0'
@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false
@@ -91,7 +91,7 @@ jobs:
       # fmt" once stable moved from 1.27.0 to 1.27.2): the linter is built here
       # with the job's own toolchain instead.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
           install-mode: goinstall
@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false
@@ -117,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false
@@ -126,7 +126,7 @@ jobs:
         run: make release
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mkvgo-binaries
           path: dist/
