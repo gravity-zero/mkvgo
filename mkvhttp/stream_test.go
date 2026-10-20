@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -150,6 +151,9 @@ func TestHandlerHeadAndRevalidationServeNothing(t *testing.T) {
 		return resp
 	}
 	first := get(http.MethodGet, "seg00002.m4s", "")
+	// The handler counts what it wrote once the write returns, which can be after the client has read it all.
+	for deadline := time.Now().Add(5 * time.Second); plan.Stats().StreamedBytes < first.ContentLength && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	}
 	before := plan.Stats()
 	head := get(http.MethodHead, "seg_a1_00002.m4s", "")
 	if head.StatusCode != 200 || head.ContentLength <= 0 || head.Header.Get("ETag") == "" {
