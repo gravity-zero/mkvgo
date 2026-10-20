@@ -498,6 +498,7 @@ func (kw *keyframeWalker) seat(cue mkv.CuePoint, clusterStart int64) error {
 		if err != nil {
 			return err
 		}
+		br.SetSegmentEnd(kw.c.SegmentEnd)
 		br.KeepTracks(kw.video.ID)
 		br.SetBlockBuffer(func(_ uint64, size int) []byte {
 			kw.block = poison.Reuse(kw.block, size)

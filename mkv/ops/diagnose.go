@@ -479,6 +479,7 @@ func probeUndeclaredZlib(ctx context.Context, path string, fs *mkv.FS, meta *mkv
 	if err != nil {
 		return false, err
 	}
+	br.SetSegmentEnd(meta.SegmentEnd)
 	br.KeepTracks(t.ID)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -522,6 +523,7 @@ func unsizedLacedAudioFindings(ctx context.Context, path string, fs *mkv.FS, met
 	if err != nil {
 		return nil
 	}
+	br.SetSegmentEnd(meta.SegmentEnd)
 	ids := make([]uint64, len(candidates))
 	for i, t := range candidates {
 		ids[i] = t.ID

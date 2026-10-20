@@ -100,7 +100,7 @@ func probeCueHolesFrom(ctx context.Context, path string, fs *mkv.FS, meta *mkv.C
 				break
 			}
 		}
-		probeHole(f, scale, startOff, video, h, h.AtMs == last)
+		probeHole(f, scale, startOff, meta.SegmentEnd, video, h, h.AtMs == last)
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ const maxHoleProbeBlocks = 500_000
 // the absolute offset of the cluster to start from (-1: from the first
 // cluster); isTail says the hole runs to the end of the picture, so EOF is
 // where it is expected to end rather than a sign the walk fell short.
-func probeHole(f io.ReadSeeker, scale, startOff int64, video map[uint64]bool, h *mkv.CueHole, isTail bool) {
+func probeHole(f io.ReadSeeker, scale, startOff, segEnd int64, video map[uint64]bool, h *mkv.CueHole, isTail bool) {
 	var br *reader.BlockReader
 	var err error
 	if startOff < 0 {
@@ -130,6 +130,7 @@ func probeHole(f io.ReadSeeker, scale, startOff int64, video map[uint64]bool, h 
 	if err != nil {
 		return
 	}
+	br.SetSegmentEnd(segEnd)
 	br.SetHeaderOnly(true)
 	start, end := h.AtMs, h.AtMs+h.GapMs
 	br.StopBeforeClusterMs(end)

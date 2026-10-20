@@ -211,6 +211,33 @@ func TestDiagnose_TrailingJunk(t *testing.T) {
 	}
 }
 
+// TestDiagnose_TrailingJunkIsNoDamage: bytes after the Segment's declared end, zeros or not, are trailing junk and
+// nothing else: the walks opened at a cue stop at the Segment's end instead of passing them over as damage inside the
+// file, which made a sound file read as damaged and named reindex --resync.
+func TestDiagnose_TrailingJunkIsNoDamage(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	data := readAll(t, salvageFixture(t, dir, "src.mkv", 4))
+	pattern := make([]byte, 8192)
+	for i := range pattern {
+		pattern[i] = byte(i*7 + 3)
+	}
+	for name, junk := range map[string][]byte{"zeros": make([]byte, 512), "bytes": pattern} {
+		junked := filepath.Join(dir, name+".mkv")
+		writeAll(t, junked, append(append([]byte{}, data...), junk...))
+		d, err := Diagnose(ctx, junked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hasFinding(d, "trailing-junk") == nil || hasFinding(d, "damaged") != nil {
+			t.Errorf("%s: findings %v, want trailing-junk and no damaged", name, findingKinds(d))
+		}
+		if d.TrackEnds != nil && d.TrackEnds.SkippedBytes != 0 {
+			t.Errorf("%s: the tail walk passed over %d bytes as damage", name, d.TrackEnds.SkippedBytes)
+		}
+	}
+}
+
 // TestDiagnose_WrongContainer: a .mkv whose content is ISO base media is a
 // classification, not an error - one structured finding settles the file
 // for every future scan pass, where an error would re-enter it each time.

@@ -531,6 +531,7 @@ func videoKeyFrom(ctx context.Context, f io.ReadSeeker, c *mkv.Container, video 
 	if err != nil {
 		return 0, err
 	}
+	br.SetSegmentEnd(c.SegmentEnd)
 	br.SetHeaderOnly(true)
 	for id := range video {
 		br.KeepTracks(id) // the other tracks' blocks are skipped unread
