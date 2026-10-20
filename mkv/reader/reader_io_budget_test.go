@@ -157,8 +157,9 @@ func TestFullReadJumpWalkContainerParity(t *testing.T) {
 		t.Fatalf("walk path: %v", err)
 	}
 
-	// Path is the only field expected to differ.
+	// Path differs, and so does SegmentEnd: the SeekHead takes bytes of its own in the jump file's Segment.
 	jump.Path, walk.Path = "", ""
+	jump.SegmentEnd, walk.SegmentEnd = 0, 0
 	if !reflect.DeepEqual(jump, walk) {
 		t.Errorf("jump and walk produced different Containers:\n jump = %+v\n walk = %+v", jump, walk)
 	}

@@ -132,6 +132,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 		endPos = segStart + h.Size
 	}
 	p.segStart, p.segEnd = segStart, endPos
+	c.SegmentEnd = max(endPos, 0)
 
 	var gotInfo, gotTracks bool
 	offs := headOffsets{info: -1, tracks: -1, cues: -1, tags: -1, attachments: -1, chapters: -1} // absolute offsets from a SeekHead, if any

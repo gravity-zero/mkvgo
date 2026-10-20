@@ -132,6 +132,11 @@ type Container struct {
 	// so treat it together with Cues presence.
 	SegmentStart int64 `json:"-"`
 
+	// SegmentEnd is the absolute file offset where the Segment's declared size ends, 0 when it is unknown (a Segment
+	// of unknown size, a reader that cannot tell). Filled by Read and ReadMeta; a BlockReader opened at an offset takes
+	// it through SetSegmentEnd, so its walk stops there as one opened at the file's head does.
+	SegmentEnd int64 `json:"-"`
+
 	// Keyframes holds the video track's keyframe presentation timestamps in
 	// milliseconds (ascending, de-duplicated) - the points an "-c copy" segmenter
 	// must cut on. It is filled in the same pass as the rest of the metadata: from

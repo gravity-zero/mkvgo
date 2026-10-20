@@ -351,6 +351,16 @@ func (br *BlockReader) KeepTracks(tracks ...uint64) {
 // as before.
 func (br *BlockReader) SetBlockBuffer(buf func(track uint64, size int) []byte) { br.blockBuf = buf }
 
+// SetSegmentEnd bounds a reader opened at an offset (NewBlockReaderAt, NewBlockReaderFrom), which cannot read the
+// Segment's size, to the Segment's declared end (mkv.Container.SegmentEnd): between Clusters the walk ends there, as
+// it does for a reader opened at the file's head, and the bytes after it are trailing data, not damage. An end of 0
+// or less, unknown, leaves the reader unbounded.
+func (br *BlockReader) SetSegmentEnd(end int64) {
+	if end > 0 {
+		br.segEnd = end
+	}
+}
+
 // SetHeaderOnly enables a structure-only walk: an unlaced kept block's
 // payload is seek-skipped instead of read, and Next reports its size on
 // Block.Size with Block.Data left nil. Combined with KeepTracks (other
