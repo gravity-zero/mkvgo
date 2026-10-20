@@ -18,7 +18,9 @@ import (
 // Chapters and editions, Attachments, Tags and the EBML DocType. What legitimately differs is normalized:
 //   - ReadStream stops at the first Cluster, where Read goes on to Cues and metadata the SeekHead points past it,
 //     or found by reading the file's end back, so Read is given the input cut before that Cluster's header;
-//   - Cues, Keyframes, SegmentStart, ResyncedBytes and Path are the seekable reader's alone and are not compared.
+//   - Cues, Keyframes, SegmentStart, ResyncedBytes and Path are the seekable reader's alone and are not compared;
+//   - an input the two resync differently (Read judging an element junk by looking past its end, which a stream
+//     cannot) is not compared either: what each reader recovers past such bytes is its own.
 func FuzzReadVsReadStream(f *testing.F) {
 	f.Add(buildMinimalMKV().Bytes())
 	f.Add(liveCuesMKV())
@@ -39,6 +41,9 @@ func FuzzReadVsReadStream(f *testing.F) {
 			if len(cst.Tracks) > 0 && !readOnlyElement(err) {
 				t.Errorf("Read refuses the %d bytes ReadStream described %d tracks from: %v", cut, len(cst.Tracks), err)
 			}
+			return
+		}
+		if cs.ResyncedBytes != cst.ResyncedBytes {
 			return
 		}
 		if got, want := comparable(cst), comparable(cs); got != want {
