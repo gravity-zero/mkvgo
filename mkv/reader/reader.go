@@ -228,21 +228,60 @@ func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 	return true
 }
 
-// junkAt reports a segment child that is no segment-level element, Void or CRC-32 and whose declared end opens no
-// segment-level element short of the Segment's: bytes read as a header where the framing was lost, to resync past
-// rather than skip by the size they happen to declare. The read position is kept.
+// junkAt reports a segment child that is no segment-level element, Void or CRC-32 and whose declared end leads to no
+// segment-level element nor the Segment's end (framedTo; a Matroska ID out of place must open one at once): bytes read
+// as a header where the framing was lost, to resync past rather than skip by the size they happen to declare. The
+// read position is kept.
 func (p *parser) junkAt(eh ebml.ElementHeader) bool {
 	if eh.Size < 0 || isSegmentLevelID(eh.ID) || eh.ID == mkv.IDVoid || eh.ID == 0xBF {
 		return false
 	}
 	pos := p.pos()
-	if end := pos + eh.Size; end == p.segEnd || p.segmentElementAt(end) {
-		_, _ = p.r.Seek(pos, io.SeekStart)
-		return false
+	hops := maxFramedHops
+	if matroskaIDs[eh.ID] {
+		hops = 0
 	}
+	framed := p.framedTo(pos+eh.Size, hops)
 	_, _ = p.r.Seek(pos, io.SeekStart)
-	p.markLookedPast()
-	return true
+	if !framed {
+		p.markLookedPast()
+	}
+	return !framed
+}
+
+// maxFramedHops bounds the well-formed elements framedTo follows before deciding.
+const maxFramedHops = 8
+
+// framedTo reports whether off is the Segment's end, the file's end under an unknown-size Segment, a segment-level
+// element, or reaches one through at most hops well-formed elements a reader skips by their size (Void, CRC-32, an
+// ID outside Matroska's). The read position is left anywhere.
+func (p *parser) framedTo(off int64, hops int) bool {
+	for ; hops >= 0; hops-- {
+		if off == p.segEnd {
+			return true
+		}
+		if p.segEnd >= 0 && off > p.segEnd {
+			return false
+		}
+		if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+			return false
+		}
+		eh, n, err := ebml.ReadElementHeader(p.r)
+		if err == io.EOF && p.segEnd < 0 {
+			return true
+		}
+		if err != nil || eh.Size < 0 {
+			return false
+		}
+		if isSegmentLevelID(eh.ID) {
+			return true
+		}
+		if eh.ID != mkv.IDVoid && eh.ID != 0xBF && matroskaIDs[eh.ID] {
+			return false
+		}
+		off += int64(n) + eh.Size
+	}
+	return false
 }
 
 // markLookedPast records a judgement made by looking past an element's end (withLookedPast).
