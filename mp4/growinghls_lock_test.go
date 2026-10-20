@@ -11,11 +11,12 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// gatedFile holds a read starting at or past from until the gate opens.
+// gatedFile holds a read starting in [from, to) until the gate opens; to 0 bounds nothing.
 type gatedFile struct {
 	mkv.ReadSeekCloser
 	pos     int64
 	from    int64
+	to      int64
 	armed   *atomic.Bool
 	reached chan struct{}
 	open    chan struct{}
@@ -23,7 +24,7 @@ type gatedFile struct {
 }
 
 func (f *gatedFile) Read(b []byte) (int, error) {
-	if f.armed.Load() && f.pos >= f.from {
+	if f.armed.Load() && f.pos >= f.from && (f.to == 0 || f.pos < f.to) {
 		f.once.Do(func() { close(f.reached) })
 		<-f.open
 	}
@@ -97,6 +98,62 @@ func TestGrowingHLSServesWhileRefreshReads(t *testing.T) {
 	}
 	close(open)
 	if err := <-refreshed; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestGrowingHLSServesWhileCompleteReadsTheTail: Complete read the last segment's tail (peekTail) with the plan's
+// lock held, every request waiting on it; the tail is now read first and published after.
+func TestGrowingHLSServesWhileCompleteReadsTheTail(t *testing.T) {
+	data := buildGrowingFixture(t)
+	clusters := scanAllClusters(t, data)
+	m := mkv.NewMemFS()
+	fs := *m.FS()
+	var armed atomic.Bool
+	reached, open, once := make(chan struct{}), make(chan struct{}), &sync.Once{}
+	gate := &gatedFile{}
+	base := fs.Open
+	fs.Open = func(path string) (mkv.ReadSeekCloser, error) {
+		f, err := base(path)
+		if err != nil {
+			return nil, err
+		}
+		return &gatedFile{ReadSeekCloser: f, from: gate.from, to: gate.to, armed: &armed, reached: reached, open: open, once: once}, nil
+	}
+	fs.OpenContext = nil
+	m.Put("in.mkv", data[:clusters[8].end])
+	plan, err := PlanGrowingHLS(context.Background(), "in.mkv", Options{FS: &fs, SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := plan.Segment(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.from, gate.to = plan.full.offsets[len(plan.full.offsets)-1], clusters[8].end // the tail, not the cursor's header
+	armed.Store(true)
+	completed := make(chan error, 1)
+	go func() { completed <- plan.Complete() }()
+	<-reached // Complete is reading the tail
+
+	served := make(chan error, 1)
+	go func() {
+		got, err := plan.Segment(context.Background(), 0)
+		if err == nil && string(got) != string(want) {
+			err = io.ErrUnexpectedEOF
+		}
+		served <- err
+	}()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Errorf("a request while Complete reads the tail: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("a request waited on Complete reading the tail")
+	}
+	close(open)
+	if err := <-completed; err != nil {
 		t.Fatal(err)
 	}
 }

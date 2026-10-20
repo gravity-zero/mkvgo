@@ -318,10 +318,7 @@ func (p *GrowingHLSPlan) Complete() error {
 	}
 	_, scanErr := p.scanLocked(ctx, st.Size())
 	if !p.done {
-		p.mu.Lock()
-		err := p.finalizeLocked(ctx)
-		p.mu.Unlock()
-		if err != nil {
+		if err := p.finalize(ctx); err != nil {
 			return errors.Join(scanErr, err)
 		}
 	}
@@ -370,7 +367,7 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 		if h.ID != mkv.IDCluster {
 			// A non-Cluster top-level element after the last cluster (typically
 			// Cues, written once the source finalizes): auto-detected completion.
-			if ferr := p.publish(func() error { return p.finalizeLocked(ctx) }); ferr != nil {
+			if ferr := p.finalize(ctx); ferr != nil {
 				return p.published - before, ferr
 			}
 			break
@@ -389,7 +386,7 @@ func (p *GrowingHLSPlan) scanLocked(ctx context.Context, size int64) (int, error
 	}
 
 	if !p.done && p.segDeclaredEnd >= 0 && size >= p.segDeclaredEnd && p.cursor >= p.segDeclaredEnd {
-		if ferr := p.publish(func() error { return p.finalizeLocked(ctx) }); ferr != nil {
+		if ferr := p.finalize(ctx); ferr != nil {
 			return p.published - before, ferr
 		}
 	}
@@ -632,12 +629,33 @@ func (p *GrowingHLSPlan) updateSegCountLocked() {
 	p.published = n
 }
 
+// growingTail is what a tail peek read of the last segment: per track, its last and previous PTS and the last
+// block's frame count (HLSPlan.peekTail).
+type growingTail struct{ lastPts, prevPts, lastFrames []int64 }
+
+// finalize closes the plan, reading the tail without p.mu (the scan, holding p.scanMu, is the plan's only writer)
+// and publishing the result under it. Caller holds p.scanMu.
+func (p *GrowingHLSPlan) finalize(ctx context.Context) error {
+	if p.done {
+		return nil
+	}
+	var tail *growingTail
+	if p.headDone && p.haveFirstKF {
+		lastPts, prevPts, lastFrames, err := p.full.peekTail(ctx, p.full.offsets[len(p.full.offsets)-1])
+		if err != nil {
+			return err
+		}
+		tail = &growingTail{lastPts, prevPts, lastFrames}
+	}
+	return p.publish(func() error { return p.finalizeLocked(tail) })
+}
+
 // finalizeLocked closes the plan: the still-open final segment is given a real
-// end and every track's exact total duration is derived from a tail peek
+// end and every track's exact total duration is derived from the tail peek
 // (HLSPlan.peekTail, applied to the byte range the cursor has not yet closed),
-// exactly reproducing PlanHLS's own post-Cues duration derivation. Caller
-// holds p.mu.
-func (p *GrowingHLSPlan) finalizeLocked(ctx context.Context) error {
+// exactly reproducing PlanHLS's own post-Cues duration derivation. tail is nil
+// for a degenerate source. Caller holds p.mu.
+func (p *GrowingHLSPlan) finalizeLocked(tail *growingTail) error {
 	if p.done {
 		return nil
 	}
@@ -645,7 +663,7 @@ func (p *GrowingHLSPlan) finalizeLocked(ctx context.Context) error {
 	// GOP) is settled on what it has, so the shift - and the init's edit list - is
 	// never left unmeasured.
 	p.settleLeadLocked()
-	if !p.headDone || !p.haveFirstKF {
+	if tail == nil {
 		// Degenerate source (no video keyframe ever scanned, or the head never
 		// resolved): nothing to close into a real presentation.
 		p.done = true
@@ -656,11 +674,7 @@ func (p *GrowingHLSPlan) finalizeLocked(ctx context.Context) error {
 		return nil
 	}
 
-	tailOff := p.full.offsets[len(p.full.offsets)-1]
-	lastPts, prevPts, lastFrames, err := p.full.peekTail(ctx, tailOff)
-	if err != nil {
-		return err
-	}
+	lastPts, prevPts, lastFrames := tail.lastPts, tail.prevPts, tail.lastFrames
 
 	var video *planTrack
 	for i, pt := range p.full.tracks {
