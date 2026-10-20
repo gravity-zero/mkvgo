@@ -383,16 +383,20 @@ const cencKey = new TextEncoder().encode('0123456789abcdef') // 16 bytes
 const cencKeyId = new TextEncoder().encode('KEYID-0123456789') // 16 bytes
 const cencIv = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]) // 8 bytes
 const planCenc = await MkvGo.openHLS(mkvBytes,
-  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: cencKey, keyId: cencKeyId, iv: cencIv } })
+  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: cencKey, keyId: cencKeyId, iv: cencIv, keyURI: 'skd://example.test/k' } })
 const cencInit = await planCenc.resource('init.mp4')
 check(cencInit.data.length > 0, 'CENC init.mp4 served')
 const cencSeg = await planCenc.segment(0)
 check(cencSeg.length > 0, 'CENC segment served')
 planCenc.close()
 await MkvGo.openHLS(mkvBytes,
-  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: new Uint8Array(4), keyId: cencKeyId, iv: cencIv } })
+  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: new Uint8Array(4), keyId: cencKeyId, iv: cencIv, keyURI: 'skd://example.test/k' } })
   .then(() => check(false, 'invalid CENC key length must reject'))
   .catch(() => check(true, 'invalid CENC key length rejects'))
+await MkvGo.openHLS(mkvBytes,
+  { segmentSeconds: 0.5, cenc: { scheme: 'cenc', key: cencKey, keyId: cencKeyId, iv: cencIv } })
+  .then(() => check(false, 'CENC without keyURI must reject'))
+  .catch((e) => check(String(e).includes('KeyURI'), `CENC without keyURI rejects, naming KeyURI (${e})`))
 
 // --- AbortSignal: an aborted call rejects instead of running ---
 const aborted = AbortSignal.abort()
