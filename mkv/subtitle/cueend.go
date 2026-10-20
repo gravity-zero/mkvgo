@@ -13,17 +13,18 @@ const (
 )
 
 // ReadingMs is how long a cue's text takes to read: its visible characters (ASS overrides, markup tags and line
-// breaks left out) at 17 a second, between one and seven seconds.
+// breaks left out, a '<' that no '>' closes read as text) at 17 a second, between one and seven seconds.
 func ReadingMs(text string) int64 {
 	n := int64(0)
 	depth, tag := 0, false
-	for _, r := range strings.ReplaceAll(strings.ReplaceAll(text, `\N`, " "), `\n`, " ") {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, `\N`, " "), `\n`, " ")
+	for i, r := range text {
 		switch {
 		case r == '{':
 			depth++
 		case r == '}' && depth > 0:
 			depth--
-		case r == '<':
+		case r == '<' && !tag && strings.ContainsRune(text[i:], '>'):
 			tag = true
 		case r == '>' && tag:
 			tag = false

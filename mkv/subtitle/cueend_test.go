@@ -17,6 +17,7 @@ func TestReadingMs(t *testing.T) {
 		{"<i>" + strings.Repeat("a", 34) + "</i>", 2000},
 		{strings.Repeat("a", 17) + `\N` + strings.Repeat("a", 16), 2000}, // an ASS line break reads as a space
 		{strings.Repeat("é", 34), 2000},                                  // characters, not bytes
+		{"I <3 you" + strings.Repeat("a", 26), 2000},                     // a '<' no '>' closes is text
 	} {
 		if got := ReadingMs(c.text); got != c.want {
 			t.Errorf("ReadingMs(%q) = %d, want %d", c.text, got, c.want)
