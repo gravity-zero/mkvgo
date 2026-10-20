@@ -82,6 +82,10 @@ preflight:
 	@echo "== tests (386, 32-bit int) =="; GOARCH=386 CGO_ENABLED=0 go test ./...
 	@echo "== tests (poisoned buffers) =="; CGO_ENABLED=0 go test -tags mkvgo_poison ./...
 	@echo "== doc sizes =="; sh scripts/sizes.sh
+	@echo "== wasm smoke (Node) =="; $(MAKE) --no-print-directory wasm >/dev/null && \
+	  if command -v node >/dev/null; then node scripts/wasm_smoke.mjs; \
+	  elif command -v docker >/dev/null; then docker run --rm -v "$(CURDIR)":/src -w /src node:22 node scripts/wasm_smoke.mjs; \
+	  else echo "wasm smoke needs node or docker (CI runs it on Linux)"; exit 1; fi
 	@echo "preflight OK - cross-platform compile + tests pass locally; confirm the real matrix with 'make ci-status' after pushing"
 
 # ci-status: report the real GitHub Actions matrix result (all OSes) for the
