@@ -135,6 +135,22 @@ func (p *parser) resyncToSegmentElement(from, scanLimit, segEnd int64) (int64, e
 	return resyncToSegmentElement(p.r, scanLimit, segEnd)
 }
 
+// junkEnd is where a resync that found nothing stopped looking: the source's end, bounded by the Segment's
+// (segEnd) and by the scan's (scanLimit), -1 for either bound when there is none.
+func (p *parser) junkEnd(scanLimit, segEnd int64) int64 {
+	end, err := p.r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return -1
+	}
+	if segEnd >= 0 {
+		end = min(end, segEnd)
+	}
+	if scanLimit >= 0 {
+		end = min(end, scanLimit)
+	}
+	return end
+}
+
 // skipUnknownSizeElement walks the children of an unknown-size element that is
 // no Cluster (a live muxer's Cues, with its CuePoints of unknown size too),
 // header by header: the element ends at the first segment-level ID - no child

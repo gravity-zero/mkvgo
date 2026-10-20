@@ -342,6 +342,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				return rerr
 			}
 			if off < 0 {
+				c.ResyncedBytes += max(p.junkEnd(-1, endPos)-elemStart, 0) // passed over all the same
 				break
 			}
 			c.ResyncedBytes += off - elemStart
@@ -521,6 +522,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					return err
 				}
 				if off < 0 {
+					c.ResyncedBytes += max(p.junkEnd(-1, endPos)-elemStart, 0) // passed over all the same
 					return nil
 				}
 				c.ResyncedBytes += off - elemStart

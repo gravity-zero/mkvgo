@@ -159,6 +159,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 				return rerr
 			}
 			if off < 0 {
+				c.ResyncedBytes += max(p.junkEnd(elemStart+1+headResyncCap, endPos)-elemStart, 0)
 				break // nothing recognizable in the window: return what we have
 			}
 			c.ResyncedBytes += off - elemStart
@@ -285,6 +286,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 					return err
 				}
 				if off < 0 {
+					c.ResyncedBytes += max(p.junkEnd(elemStart+1+headResyncCap, endPos)-elemStart, 0)
 					return p.finalizeHeadMeta(c, offs, o) // nothing recognizable in the window: what we have
 				}
 				c.ResyncedBytes += off - elemStart
