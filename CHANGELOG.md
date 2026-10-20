@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.56.2] - 2026-10-20
+
 ### Changed
 
 - mkvgo builds with Go 1.24 or newer (it required 1.27), the oldest release
