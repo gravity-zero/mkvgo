@@ -49,7 +49,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path, rateReads: o.frameRateReads}
+	p := &parser{r: br, metaBudget: maxMetadataBytes, ctx: ctx, lazyAttachments: o.lazyAttachments, path: path, rateReads: o.frameRateReads, lookedPast: o.lookedPast}
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(c); err != nil {
@@ -155,6 +155,8 @@ type parser struct {
 	firstCluster int64
 	// rateReads lets the frame-rate estimate read what the source does not hold (WithFrameRateReads).
 	rateReads bool
+	// lookedPast, when set, records that an element was judged by looking past its end (withLookedPast).
+	lookedPast *bool
 	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
 	rateRejected bool
 	// channelsRejected says it stated a channel count past 255.
@@ -219,6 +221,7 @@ func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 	}
 	if _, streamed := p.r.(*bodyReader); !streamed && eh.Size >= 0 && !p.segmentElementAt(end) && p.segmentElementAt(pos+eh.Size) {
 		_, _ = p.r.Seek(pos, io.SeekStart)
+		p.markLookedPast()
 		return false
 	}
 	_, _ = p.r.Seek(end, io.SeekStart)
@@ -238,7 +241,15 @@ func (p *parser) junkAt(eh ebml.ElementHeader) bool {
 		return false
 	}
 	_, _ = p.r.Seek(pos, io.SeekStart)
+	p.markLookedPast()
 	return true
+}
+
+// markLookedPast records a judgement made by looking past an element's end (withLookedPast).
+func (p *parser) markLookedPast() {
+	if p.lookedPast != nil {
+		*p.lookedPast = true
+	}
 }
 
 // segmentElementAt reports whether a segment-level element ID starts at off; the read position is left anywhere.

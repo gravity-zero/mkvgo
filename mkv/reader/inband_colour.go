@@ -23,6 +23,13 @@ type readOpts struct {
 	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
 	frameRateReads   bool // let the frame-rate estimate read the block headers it needs (WithFrameRateReads)
 	inBandChannels   bool // read the channel count the audio streams state (WithInBandChannels)
+	lookedPast       *bool
+}
+
+// withLookedPast sets *b when the read judges an element by looking past its end (pastParent, junkAt), as a stream
+// cannot: the differential fuzz target leaves such an input out.
+func withLookedPast(b *bool) ReadOption {
+	return func(o *readOpts) { o.lookedPast = b }
 }
 
 // WithInBandChannels reads the channel count each AC-3, E-AC-3 and AAC track's
