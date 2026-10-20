@@ -13,11 +13,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # go.mod pins `toolchain go1.27.0`, so every build uses >= 1.27.0 (an older
-        # setup-go version would auto-upgrade to it). Test the pinned floor and the
-        # latest stable.
-        go-version: ['1.27.0', stable]
+        # go.mod's directive is the floor (1.24: package weak); 1.26 is the oldest
+        # release Go still supports. Each is tested as is, never auto-upgraded.
+        go-version: ['1.24.x', '1.26.x', stable]
     runs-on: ${{ matrix.os }}
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v5
 
