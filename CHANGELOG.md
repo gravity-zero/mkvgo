@@ -12,11 +12,11 @@ Every version from v0.13.0 to v0.55.1 is retracted (see Security): upgrade to
 this release, re-package what CENC 'cenc' encrypted and rotate its keys.
 
 Highlights: split then join gives the source back sample for sample (in
-Matroska, an open GOP's leading pictures aside); MP4 and MOV are edited natively (split, join, mux,
-merge, in-place metadata) without a round trip through Matroska; CENC
-packaging is hardened; a subtitle cue without a duration ends once read, by one
-rule everywhere; on-demand serving counts what it really sends, and a growing
-plan serves while it scans.
+Matroska, an open GOP's leading pictures aside); MP4 and MOV are edited
+natively (split, join, mux, merge, in-place metadata) without a round trip
+through Matroska; CENC packaging is hardened; a subtitle cue without a duration
+ends once read, by one rule; on-demand serving counts what it really sends, and
+a growing plan serves while it scans.
 
 ### Changed
 
@@ -185,8 +185,9 @@ Split and join:
   has no edit list, they are in neither part (see the cut policy in cli.md). Linked parts are placed at the cut the split recorded (an MP4 part's
   `SPLIT_CUT`, the picture's cut in Matroska, sound muxed far ahead included),
   so no seam drifts by a millisecond or by the sound's lead. The duration a
-  split gave a part's last picture to reach the cut is marked (`SPLIT_HOLD`,
-  carried by no op) and dropped, so every duration a source states comes back.
+  split gave a part's last picture to reach the cut is marked (`SPLIT_HOLD`, which
+  Split and Join never carry over) and dropped, so every duration a source states
+  comes back.
   A subtitle cue on screen across a cut opens the next part for the time it has
   left and is given back once, without holding the timeline. A chapter cut
   across a seam is whole again, its sub-chapters and end included, only from
@@ -208,9 +209,11 @@ Split and join:
 Subtitles:
 
 - A cue that states no duration leaves the screen once read (17 characters a
-  second, between 1 and 7 s), at the next cue or at the film's end, whichever
-  comes first, by one rule in SRT, ASS and WebVTT extraction, in HLS and in a
-  remux to MP4 (`subtitle.SettleCueEnds`, `CueEndMs`, `ReadingMs`). SRT and ASS
+  second, between 1 and 7 s), at the next cue that starts after it or at the
+  film's end, whichever comes first, by one rule in SRT, ASS and WebVTT
+  extraction and in a remux to MP4; HLS applies it too, the last segment
+  bounding the last cue instead of the film's end (`subtitle.SettleCueEnds`,
+  `CueEndMs`, `ReadingMs`). SRT and ASS
   extraction gave every cue 3 s, over the next one, and other paths kept a cue
   up to the next however far it was. A cue with a BlockDuration ends there.
 - SRT extraction refuses a bitmap track, naming `-format pgs`. `MergeASS` keeps
@@ -288,7 +291,8 @@ Damage and resync:
   first Cluster, or running to the end of the file, is reported once through
   `OnSkip`.
 - `Container.ResyncedBytes` counts the junk a read passed over even when
-  nothing recognizable follows it, up to the Segment's end: such a file no
+  nothing recognizable follows it, up to the Segment's end (`ReadMeta` up to the
+  window it scans): such a file no
   longer reads as sound, and `Validate` and `Diagnose` name `reindex --resync`.
 - A subtitle index pointing at bytes no Cluster holds is stale, not damage; a
   cue without a duration ends where a damaged region begins.

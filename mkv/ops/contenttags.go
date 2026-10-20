@@ -15,7 +15,7 @@ import (
 // source's Tags verbatim does - leaves the output certifying content it does
 // not hold. VerifyContentHashes then reports mkvgo's own output as corrupt.
 // splitHoldTag marks, on a part's track, the timecode of the picture its split held to the cut, a duration its source
-// does not state: Join writes it without one. It is true of that part only, so no op carries it over.
+// does not state: Join writes it without one. It is true of that part only, so Split and Join never carry it over.
 const splitHoldTag = "SPLIT_HOLD"
 
 var contentDerivedTags = map[string]bool{

@@ -1484,7 +1484,7 @@ err = mp4.ExtractSubtitleWebVTT(ctx, "movie.mp4", trackID, w)
 err = subtitle.FileToWebVTT("subs.fr.srt", w)
 ```
 
-S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration; a cue that states none ends once read (`subtitle.ReadingMs`: 17 characters a second, between 1 and 7 s), at the next cue or at the media's end, whichever comes first - the same rule in SRT, ASS and WebVTT extraction and in HLS. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `SettleCueEnds`, `CueEndMs`, `ReadingMs`, and the older fixed-default `ResolveCueEnds` - are exported for custom pipelines.
+S_TEXT/UTF8 (srt) and S_TEXT/WEBVTT pass through; S_TEXT/ASS and `.ass` files are flattened to plain text (override tags dropped, `\N`/`\h` converted). Cue ends come from the BlockDuration / sample duration; a cue that states none ends once read (`subtitle.ReadingMs`: 17 characters a second, between 1 and 7 s), at the next cue that starts after it or at the media's end, whichever comes first - the same rule in SRT, ASS and WebVTT extraction, in HLS (whose last segment bounds the last cue instead of the media's end) and in a remux to MP4. A `<` that no `>` closes is read as text. The lower-level pieces - `subtitle.Cue`, `WriteWebVTT`, `SRTToCues`, `ASSToCues`, `SettleCueEnds`, `CueEndMs`, `ReadingMs`, and the older fixed-default `ResolveCueEnds` - are exported for custom pipelines.
 
 A Matroska track whose blocks the source's own Cues all name - their count matches a trusted `NUMBER_OF_FRAMES` statistic, the guard `SubtitleIndexFromCues` reports as verified - is read where the Cues put it: the metadata, one header per cued cluster and the subtitle blocks, not the file. Cues naming only some of the blocks, none of them, a file without the statistic, an indexed block that does not hold what the Cues say, or one in a damaged region, all leave the extraction to the walk, so no cue is ever dropped for the index's sake; the WebVTT is the same either way. A statistic is trusted only when its `_STATISTICS_WRITING_APP` is the file's `WritingApp` (and its `_STATISTICS_WRITING_DATE_UTC`, when present, the file's date) and it states a `DURATION`: tags a later tool left stale are not believed, but a count that lies in agreement with Cues that name only part of the blocks would be. A file whose statistics state `DURATION` alone, without `NUMBER_OF_FRAMES`, always has its subtitles take the walk. A source that stops before the end its Segment declares (a download not finished) writes the cues it holds, then returns an error matching `ops.ErrSourceTruncated` (`matroska.ErrSourceTruncated`) that says how far they reach: keep the output, or extract again once the file is complete.
 
@@ -2513,7 +2513,8 @@ from files that merely follow each other. When the part's last picture had to be
 given a duration to reach the cut (a cut between milliseconds, an open GOP's
 leading pictures left to the next part), a `SPLIT_HOLD` tag on its track names
 that picture; `Join` of the linked parts writes it without that duration, as
-the source stores it, and no op carries the tag over.
+the source stores it. Split and Join never carry the tag over; an edit that
+keeps a part's tags (EditMetadata, Merge, retime...) keeps it with them.
 
 **Join sequential files:**
 ```go
