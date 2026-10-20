@@ -280,6 +280,7 @@ type mp4SubTable struct {
 	durMs   []int64
 	state   []uint8 // subUnread, subEmpty or subText
 	text    []string
+	later   []int // per sample, the first text sample after it that starts after it (-1 none), once known (laterText)
 }
 
 const (
@@ -384,10 +385,7 @@ func (t *mp4SubTable) window(ctx context.Context, open func(context.Context) (mk
 		}
 		end := t.startMs[j] + t.durMs[j]
 		if t.durMs[j] <= 0 {
-			next, err := t.nextText(ctx, open, j)
-			for err == nil && next >= 0 && t.startMs[next] <= t.startMs[j] {
-				next, err = t.nextText(ctx, open, next)
-			}
+			next, err := t.laterText(ctx, open, j)
 			if err != nil {
 				return nil, err
 			}
@@ -402,6 +400,45 @@ func (t *mp4SubTable) window(ctx context.Context, open func(context.Context) (mk
 		}
 	}
 	return cues, nil
+}
+
+// laterText is the first text sample after j that starts after it (-1 for none), subtitle.SettleCueEnds' next cue:
+// each sample's answer is kept, and one starting no later than j hands over its own, so the whole track costs one pass.
+func (t *mp4SubTable) laterText(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), j int) (int, error) {
+	const unknown = -2
+	if t.later == nil {
+		t.later = make([]int, len(t.samples))
+		for i := range t.later {
+			t.later[i] = unknown
+		}
+	}
+	if t.later[j] != unknown {
+		return t.later[j], nil
+	}
+	stack := []int{j} // samples waiting for their answer, each hanging on the one above it
+	cand := map[int]int{}
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		k, ok := cand[top]
+		if !ok {
+			var err error
+			if k, err = t.nextText(ctx, open, top); err != nil {
+				return -1, err
+			}
+		}
+		for k >= 0 && t.startMs[k] <= t.startMs[top] && t.later[k] != unknown {
+			k = t.later[k]
+		}
+		if k >= 0 && t.startMs[k] <= t.startMs[top] {
+			cand[top] = k
+			stack = append(stack, k) // k's answer first
+			continue
+		}
+		t.later[top] = k
+		delete(cand, top)
+		stack = stack[:len(stack)-1]
+	}
+	return t.later[j], nil
 }
 
 // nextText is the first sample after j that holds text (-1 for none), reading ahead as far as that takes.
