@@ -8,6 +8,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [0.56.1] - 2026-10-20
 
+### Changed
+
+Two changes of 0.56.0 that its notes did not list:
+
+- The probe reports a video track's chroma siting
+  (`colour_layout.chroma_siting_horz` and `chroma_siting_vert`) when the
+  Colour element states it.
+- In WebVTT output, a CRLF or CR line end in a cue's text becomes LF (SRT
+  written on Windows, typically): the `.vtt` bytes change, its text and timing
+  do not, and all three are WebVTT line ends.
+
 ### Fixed
 
 - `Diagnose` reports bytes after a sealed Segment's end as trailing junk only:
@@ -18,7 +29,8 @@ All notable changes to mkvgo are documented here. The format is based on
   `BlockReader.SetSegmentEnd`).
 - An on-demand HLS plan stops its walks at a sealed Segment's end: junk past it
   no longer counts as damage, refuses the last segment under a small
-  `DamageBytes`, nor weighs in the master's `BANDWIDTH`.
+  `DamageBytes`, nor weighs in the master's `BANDWIDTH`; a file whose junk
+  read as an invalid element, which `PlanHLS` refused, is planned and served.
 
 ## [0.56.0] - 2026-10-19
 
