@@ -68,6 +68,14 @@ type Options struct {
 	// can stream (Opener): the behaviour before streaming existed, a strong
 	// ETag included.
 	Buffered bool
+	// MaxInFlight caps the resources served at once, playlists and manifests
+	// aside; 0 is no cap. Each holds a buffer, or a whole segment, until its
+	// client has read it: past what the source can feed, requests pile up and
+	// memory with them. Over the cap a request waits for a slot.
+	MaxInFlight int
+	// MaxWaiting bounds the requests waiting under MaxInFlight; one more is
+	// answered 503 with Retry-After: 1.
+	MaxWaiting int
 }
 
 // Opener is what a plan that writes a resource on demand offers
@@ -105,6 +113,9 @@ type Opener interface {
 //     init and media segments "public, max-age=31536000, immutable" for a
 //     handler mounted where the URL names the source's version (under its
 //     plan.SourceID()); playlists and manifests stay "no-cache".
+//   - Options.MaxInFlight bounds the resources served at once and
+//     Options.MaxWaiting the requests queued behind them; a request past both
+//     is answered 503 with Retry-After: 1.
 //   - A Resolver error that is (or wraps) ErrNotFound or mp4.ErrNoResource answers 404; any other
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
@@ -113,12 +124,13 @@ func Handler(r Resolver, opts ...Options) http.Handler {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	return &handler{resolver: r, opts: o}
+	return &handler{resolver: r, opts: o, gate: newGate(o)}
 }
 
 type handler struct {
 	resolver Resolver
 	opts     Options
+	gate     *gate // nil without Options.MaxInFlight
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -146,6 +158,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if name == "" {
 		http.Error(w, "mkvhttp: empty resource name", http.StatusNotFound)
 		return
+	}
+	if h.gate != nil && gated(name) {
+		release, ok := h.gate.enter(req.Context())
+		if !ok {
+			busy(w)
+			return
+		}
+		defer release()
 	}
 
 	var data []byte
