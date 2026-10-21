@@ -150,7 +150,7 @@ func (p *HLSPlan) coldAhead(ctx context.Context, src io.ReadSeeker, br *reader.B
 			if _, err := io.ReadFull(src, data); err != nil {
 				return nil, errf("read block ahead of its cluster: %w", err)
 			}
-			p.srcRead.Add(int64(len(data)))
+			p.walkRead.Add(int64(len(data)))
 			b.Data = data
 		}
 	}

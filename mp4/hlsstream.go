@@ -812,7 +812,7 @@ func (h *ResourceHandle) writeRange(ctx context.Context, w io.Writer, off, n int
 // large ones to the writer straight from the file.
 func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti, win int, off, n int64) (int64, error) {
 	// Audio sits in short runs between video frames: read run by run, through the small frames only.
-	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts(), read: &p.srcRead}
+	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts(), read: &p.copyRead}
 	defer c.release()
 	// clip is the part [a, b) of a piece spanning [pos, pos+size) that falls in the range.
 	clip := func(pos, size int64) (a, b int64, ok bool) {

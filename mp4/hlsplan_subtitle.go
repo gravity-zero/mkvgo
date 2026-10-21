@@ -372,7 +372,7 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 				return true, err
 			}
 			e := &entries[j]
-			if err := cues.resolve(countedSource{src, &p.srcRead}, e); err != nil {
+			if err := cues.resolve(countedSource{src, &p.walkRead}, e); err != nil {
 				return walkOnce()
 			}
 			clusterMs, ok := p.clusterMs(e.Pos.ClusterTS)

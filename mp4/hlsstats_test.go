@@ -95,11 +95,11 @@ func TestHLSPlanStatsCountsWindowWalks(t *testing.T) {
 	}
 }
 
-// windowStats is the plan's counters without SourceReadBytes, whose value depends on the walks' read sizes and
+// windowStats is the plan's counters without the read counters, whose value depends on the walks' read sizes and
 // has its own test (TestSourceReadBytesCountsEveryRead).
 func windowStats(p *HLSPlan) HLSPlanStats {
 	s := p.Stats()
-	s.SourceReadBytes = 0
+	s.SourceReadBytes, s.WalkReadBytes, s.CopyReadBytes = 0, 0, 0
 	return s
 }
 

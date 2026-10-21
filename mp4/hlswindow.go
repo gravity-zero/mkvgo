@@ -382,11 +382,19 @@ type HLSPlanStats struct {
 	// block's span rather than timed on a measured stride that would drift.
 	// mkvgo diagnose reports such tracks as unsized-laced-audio.
 	SpreadLacedTracks int64
-	// SourceReadBytes is how many bytes the plan's requests have read from the
-	// source since the plan was built - every window, table, streamed segment
-	// and subtitle scan, through whatever reader the plan opens - cumulative;
-	// the build's own walks are not counted.
+	// SourceReadBytes is how many bytes the plan's requests have asked of the
+	// source since the plan was built, cumulative: WalkReadBytes plus
+	// CopyReadBytes. WalkReadBytes is what reading windows took - a Matroska
+	// window's walk, its reads ahead or far, the checks of foreign blocks, the
+	// subtitle cues; CopyReadBytes, what writing segments took - a streamed
+	// segment in the clear or AES-128, a CENC segment's samples, an MP4
+	// segment built whole, a remote MP4 window's shared read. An MP4 source
+	// has no walk: all it reads is copy. The three count bytes asked of the
+	// source, not physical reads: what the page cache already held is counted
+	// all the same. The build's own walks are not counted.
 	SourceReadBytes int64
+	WalkReadBytes   int64
+	CopyReadBytes   int64
 }
 
 // Stats returns the plan's window counters. Safe to call while segments are
@@ -395,22 +403,23 @@ func (p *HLSPlan) Stats() HLSPlanStats {
 	p.winMu.Lock()
 	defer p.winMu.Unlock()
 	s := p.stats
-	s.SourceReadBytes = p.srcRead.Load()
+	s.WalkReadBytes, s.CopyReadBytes = p.walkRead.Load(), p.copyRead.Load()
+	s.SourceReadBytes = s.WalkReadBytes + s.CopyReadBytes
 	s.StreamedBytes = p.streamed.Load()
 	return s
 }
 
-// countWalk returns the deferred step that adds what a block reader read of the source to SourceReadBytes.
+// countWalk returns the deferred step that adds what a block reader read of the source to WalkReadBytes.
 func (p *HLSPlan) countWalk(br **reader.BlockReader) func() {
 	return func() {
 		if *br != nil {
-			p.srcRead.Add((*br).BytesRead())
+			p.walkRead.Add((*br).BytesRead())
 			p.noteSkipped(*br)
 		}
 	}
 }
 
-// countedSource is the plan's source with every Read added to SourceReadBytes.
+// countedSource is the plan's source with every Read added to a read counter.
 type countedSource struct {
 	io.ReadSeeker
 	n *atomic.Int64

@@ -222,7 +222,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 			return err
 		}
 		defer src.Close()
-		return readSampleRuns(ctx, countedSource{src, &p.srcRead}, samples, offs, dst)
+		return readSampleRuns(ctx, countedSource{src, &p.copyRead}, samples, offs, dst)
 	}
 
 	if err := segmentFits(seg.dataLen); err != nil {

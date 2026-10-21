@@ -116,7 +116,7 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 			return -1
 		}
 		br.SetHeaderOnly(true)
-		defer func() { p.srcRead.Add(br.BytesRead()) }()
+		defer func() { p.walkRead.Add(br.BytesRead()) }()
 		if _, err := br.Next(); err != nil {
 			return -1
 		}
@@ -128,7 +128,7 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 			return false
 		}
 		br.SetHeaderOnly(true)
-		defer func() { p.srcRead.Add(br.BytesRead()) }()
+		defer func() { p.walkRead.Add(br.BytesRead()) }()
 		_, err = br.Next()
 		return err == nil
 	}
@@ -167,7 +167,7 @@ func (p *HLSPlan) regionFirstMs(src io.ReadSeeker, i int) int64 {
 		if b, err := br.Next(); err == nil {
 			first = b.BlockTimecode
 		}
-		p.srcRead.Add(br.BytesRead())
+		p.walkRead.Add(br.BytesRead())
 	}
 	p.segMu.Lock()
 	p.uncuedRegions[i].firstMs = first
@@ -253,7 +253,7 @@ func (p *HLSPlan) probeCluster(src io.ReadSeeker, off, limit int64) (at, ms int6
 		return 0, 0, false
 	}
 	br.SetHeaderOnly(true)
-	defer func() { p.srcRead.Add(br.BytesRead()) }()
+	defer func() { p.walkRead.Add(br.BytesRead()) }()
 	if _, err := br.Next(); err != nil {
 		return 0, 0, false
 	}

@@ -155,7 +155,7 @@ func (p *HLSPlan) foreignBlockChecker(ctx context.Context, srcPath string, fs *m
 		if k+1 < len(p.offsets) {
 			end = p.offsets[k+1]
 		}
-		return spanHoldsForeignBlock(ctx, countedSource{src, &p.srcRead}, p.offsets[k], end)
+		return spanHoldsForeignBlock(ctx, countedSource{src, &p.walkRead}, p.offsets[k], end)
 	}
 	return confirm, func() {
 		if src != nil {

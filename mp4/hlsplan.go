@@ -185,7 +185,8 @@ type HLSPlan struct {
 	// guarded by winMu.
 	stats    HLSPlanStats
 	winBuilt []uint64
-	srcRead  atomic.Int64 // HLSPlanStats.SourceReadBytes
+	walkRead atomic.Int64 // HLSPlanStats.WalkReadBytes
+	copyRead atomic.Int64 // HLSPlanStats.CopyReadBytes
 	streamed atomic.Int64 // HLSPlanStats.StreamedBytes
 	// damaged (segMu, sorted by start) are the unreadable regions the walks met: passed over, or refused.
 	damaged []damagedRange
@@ -251,12 +252,14 @@ func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 			return nil, err
 		}
 		p.fs, p.opts.FS = fs, fs // serving stats and opens the source itself
-		p.srcRead.Store(0)       // SourceReadBytes counts the requests, not the build
+		p.walkRead.Store(0)      // SourceReadBytes counts the requests, not the build
+		p.copyRead.Store(0)
 		return p, nil
 	}
 	p, err := planHLS(ctx, srcPath, opts...)
 	if p != nil {
-		p.srcRead.Store(0)
+		p.walkRead.Store(0)
+		p.copyRead.Store(0)
 	}
 	if !known {
 		return p, err
