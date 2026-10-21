@@ -90,7 +90,8 @@ func TestKeptWindowServesWithoutRereading(t *testing.T) {
 		t.Error("window 2 served again differs from Resource's")
 	}
 
-	copyFromSource(t)
+	SetWindowBytes(1) // a budget no window fits
+	defer SetWindowBytes(0)
 	full, err := PlanHLS(ctx, src, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -140,5 +141,38 @@ func TestLocalWindowKeepsNothing(t *testing.T) {
 	}
 	if held := windowBytesTotal.Load(); held != 0 {
 		t.Errorf("%d window bytes held by a local source", held)
+	}
+}
+
+// KeptFallbacks counts the windows the budget refused, nothing else: a local
+// source never keeps by policy, and a keep turned off refuses nothing.
+func TestKeptFallbacksCountsRefusalsOnly(t *testing.T) {
+	src := buildInterleavedSource(t, 20)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name   string
+		access SourceAccess
+		budget int64
+		want   int64
+	}{
+		{"local", SourceLocal, 0, 0},
+		{"network, keep off", SourceNetwork, -1, 0},
+		{"network, budget full", SourceNetwork, 1, 3},
+		{"network, room", SourceNetwork, 0, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			SetWindowBytes(c.budget)
+			defer SetWindowBytes(0)
+			plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000, SourceAccess: c.access})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for n := 1; n < 4; n++ {
+				serveWindow(t, plan, n)
+			}
+			if got := plan.Stats().KeptFallbacks; got != c.want {
+				t.Errorf("KeptFallbacks = %d, want %d", got, c.want)
+			}
+		})
 	}
 }

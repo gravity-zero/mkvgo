@@ -327,9 +327,10 @@ type HLSPlanStats struct {
 	StreamFallbacks  int64
 	// KeptSegments is the number of segments Open served from the bytes the
 	// walk that built their window had read (one read of the source for the
-	// window); KeptFallbacks, the tables built headers only - the process-wide
-	// window budget was full (SetWindowBytes), or the window's span was
-	// unknown - whose segments are copied from the source.
+	// window); KeptFallbacks, the tables a network source's walk built headers
+	// only because the process-wide window budget (SetWindowBytes) refused
+	// them: their segments are copied from the source. A local source, which
+	// never keeps, and a keep turned off count in neither.
 	KeptSegments  int64
 	KeptFallbacks int64
 	// FarLookups counts the walks that looked for a track still missing two windows past the window's bytes in the

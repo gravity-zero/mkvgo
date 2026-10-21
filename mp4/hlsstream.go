@@ -387,7 +387,8 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	// its offset when served, and only a network source's light audio rides
 	// in the table (read with the walk, it costs no round trip of its own).
 	est := p.windowSpan(n)
-	keep := est > 0 && est <= maxWindowInPlace && p.networkSrc(ctx) && (reserveWindowBytes(est) || p.reclaimKept(est) && reserveWindowBytes(est))
+	keepable := est > 0 && est <= maxWindowInPlace && p.networkSrc(ctx) && windowBytesBudget.Load() > 0 // the window keep applies here
+	keep := keepable && (reserveWindowBytes(est) || p.reclaimKept(est) && reserveWindowBytes(est))
 	keepAudio := !keep && p.otherEstimate(n) <= audioInTableBytes && p.networkSrc(ctx)
 	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, !keep, keepAudio)
 	if err != nil {
@@ -461,7 +462,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 	if waited {
 		p.stats.SlotWaits++
 	}
-	if !keep {
+	if keepable && !keep { // the budget refused: a local source or a keep turned off is no fallback
 		p.stats.KeptFallbacks++
 	}
 	if inPlace.buf != nil && inPlace.media() == nil {
