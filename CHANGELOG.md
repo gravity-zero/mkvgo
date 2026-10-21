@@ -20,10 +20,13 @@ All notable changes to mkvgo are documented here. The format is based on
   no request of its own.
   A window whose audio lies away from its video (a span over 1.5 times the
   video's) is read as before. Costs: an audio segment asked alone waits up
-  to 10 ms more, and under requests that never take every rendition of a
-  window the kept audio fills the window budget, which the collector can
-  double in peak memory. `KeptSegments` and `KeptFallbacks` count these
-  windows too.
+  to 10 ms for a video read that may come (the 99th percentile of isolated
+  audio at 100 requests per second from 6.8 to 15.4 ms; a local source waits
+  nothing), and under requests that never take every rendition of a window
+  the kept audio fills the window budget: the budget bounds the bytes kept,
+  and the process's peak can reach about twice the budget over the rest
+  unless `GOMEMLIMIT` bounds it (64 MiB budget, random requests: 41 to
+  153 MiB). `KeptSegments` and `KeptFallbacks` count these windows too.
 
 ## [0.57.0] - 2026-10-21
 

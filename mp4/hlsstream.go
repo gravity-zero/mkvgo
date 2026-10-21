@@ -66,7 +66,9 @@ const defaultWindowBytes = 64 << 20
 
 // SetWindowBytes caps, process-wide, the video segments Open keeps from the walks that built them (held until written
 // whole or closed) rather than copying them from the source again; zero restores the default of 64 MiB, negative keeps nothing.
-// Only a network source's walks keep: a local file's copy is read from the page cache the walk just filled.
+// Only a network source keeps (a Matroska walk's segments, a remote MP4 window's audio): a local file's copy is read
+// from the page cache. The budget bounds the bytes kept, not the process's peak: dropped windows wait for the collector,
+// which can take the peak to about twice the budget over the rest (GOMEMLIMIT bounds it).
 func SetWindowBytes(total int64) {
 	switch {
 	case total == 0:

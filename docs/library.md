@@ -596,7 +596,11 @@ serves `Open` from memory and counts it in `Stats().StreamFallbacks`; an encrypt
 is never served in the clear, and the pooled buffers that held its plaintext
 go back zeroed. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player
-could take for a whole segment.
+could take for a whole segment. The budget bounds the bytes kept, not the process's peak memory: a window
+given back waits for the collector, so the peak can reach about twice the
+budget over the rest of the process (measured: 64 MiB of kept audio under
+random requests on a remote MP4, peak 41 MiB to 153 MiB), unless
+`GOMEMLIMIT` bounds the heap.
 
 **How the source is read: `Options.SourceAccess`.** A streamed segment is read
 one way from a local disk and another across a network. Local: the byte ranges
