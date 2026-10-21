@@ -858,13 +858,18 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		}
 		pos += raw
 	}
+	if ra, ok := src.(io.ReaderAt); ok && c.file == nil && c.exact && p.onNetwork(src) && rangeCount(pieces, remoteReadGap) <= remoteMaxRanges {
+		// A remote source answers a range exactly: only the samples' runs are asked for, those closer than remoteReadGap
+		// together, when that takes few requests; else one request reads through the holes, each a round trip saved.
+		err := c.copyParallel(ctx, w, pieces, ra, remoteReadGap, parallelMaxBytes, remoteReads)
+		return c.written, err
+	}
 	var dense *ahead // a dense rendition read ahead of its copy, nil otherwise
 	if c.file != nil {
 		if c.exact && p.onNetwork(c.file) {
 			// Each read is a round trip on a network mount: the reads go out together.
-			if ok, err := c.copyParallel(ctx, w, pieces); ok || err != nil {
-				return c.written, err
-			}
+			err := c.copyParallel(ctx, w, pieces, c.file, exactReadGap, int64(len(c.buf)), parallelReads)
+			return c.written, err
 		}
 		if !p.onNetwork(c.file) {
 			dense = prefetch(c.file, pieces, c.exact, len(c.buf))
@@ -964,101 +969,151 @@ func prefetch(f *os.File, pieces []span, exact bool, bufLen int) *ahead {
 // networkSource is onNetwork, swappable for a test.
 var networkSource = onNetwork
 
-// Reads in flight at once for one segment on a network mount, and the most
-// bytes they may hold: a light rendition's (audio) whole segment.
-const (
-	parallelReads    = 8
-	parallelMaxBytes = 4 << 20
-)
+// remoteReads is how many ranges of one segment a remote source is asked for at once.
+var remoteReads = 8
 
-// copyParallel copies an exact rendition's pieces with their reads in flight
-// together (parallelReads at a time), into one buffer, then written in order.
-// It declines (false, nil) when the reads would hold more than parallelMaxBytes.
-func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []span) (bool, error) {
-	type read struct{ off, end, at int64 }
-	var reads []read
-	var total int64
+// remoteMaxRanges is the most requests an exact rendition's runs may take from a remote source: two round trips of
+// remoteReads. Past it (audio stored sample by sample between video frames, 147 ranges a segment) one request reads
+// through: measured at 10 ms a request, 200 ms a segment by ranges against 28 ms read through.
+var remoteMaxRanges = 16
+
+// rangeCount is how many reads the pieces take, holes up to gap read through.
+func rangeCount(pieces []span, gap int64) int {
+	n := 0
 	for i := 0; i < len(pieces); {
 		if pieces[i].emit != nil {
 			i++
 			continue
 		}
-		end := exactReach(pieces, i, len(c.buf))
-		reads = append(reads, read{pieces[i].off, end, total})
-		total += end - pieces[i].off
+		end := reachThrough(pieces, i, gap, parallelMaxBytes)
+		n++
+		for i++; i < len(pieces) && (pieces[i].emit != nil || pieces[i].off+pieces[i].n <= end); i++ {
+		}
+	}
+	return n
+}
+
+// remoteReadGap is the largest hole between two runs of an exact rendition a remote source is asked for in one range.
+var remoteReadGap int64 = 64 << 10
+
+// Reads in flight at once for one segment on a network mount, and the most
+// bytes they hold at once.
+const (
+	parallelReads    = 8
+	parallelMaxBytes = 4 << 20
+)
+
+// copyParallel copies an exact rendition's pieces from ra, each read gathering
+// the runs whose holes are at most gap, up to maxRead bytes: inFlight reads at
+// once, parallelMaxBytes held at most, written in order.
+func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []span, ra io.ReaderAt, gap, maxRead int64, inFlight int) error {
+	type read struct{ off, end, at int64 }
+	var reads []read
+	for i := 0; i < len(pieces); {
+		if pieces[i].emit != nil {
+			i++
+			continue
+		}
+		end := reachThrough(pieces, i, gap, maxRead)
+		reads = append(reads, read{off: pieces[i].off, end: end})
 		i++
 		for i < len(pieces) && (pieces[i].emit != nil || pieces[i].off+pieces[i].n <= end) {
 			i++ // within that read
 		}
 	}
-	if total > parallelMaxBytes {
-		return false, nil
-	}
-	buf := make([]byte, total)
+	var buf []byte
 	defer func() {
 		if c.wipe {
 			clear(buf)
 		}
 	}()
-	errs := make([]error, len(reads))
-	sem := make(chan struct{}, parallelReads)
-	var wg sync.WaitGroup
-	for k, r := range reads {
-		if err := ctx.Err(); err != nil {
-			wg.Wait()
-			return true, err
+	// fetch reads reads[k:] in flight together, as many as parallelMaxBytes holds (one at least), and returns past the last.
+	fetch := func(k int) (int, error) {
+		var total int64
+		last := k
+		for last < len(reads) && (last == k || total+reads[last].end-reads[last].off <= parallelMaxBytes) {
+			reads[last].at = total
+			total += reads[last].end - reads[last].off
+			last++
 		}
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(k int, r read) {
-			defer func() { <-sem; wg.Done() }()
-			n, err := c.file.ReadAt(buf[r.at:r.at+r.end-r.off], r.off)
-			c.count(int64(n))
-			if err != nil && (err != io.EOF || int64(n) < r.end-r.off) {
-				errs[k] = err
+		if int64(cap(buf)) < total {
+			if c.wipe {
+				clear(buf)
 			}
-		}(k, r)
-	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return true, err
+			buf = make([]byte, total)
 		}
+		buf = buf[:total]
+		errs := make([]error, last-k)
+		sem := make(chan struct{}, inFlight)
+		var wg sync.WaitGroup
+		for x := k; x < last; x++ {
+			if err := ctx.Err(); err != nil {
+				wg.Wait()
+				return last, err
+			}
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(x int) {
+				defer func() { <-sem; wg.Done() }()
+				r := reads[x]
+				n, err := ra.ReadAt(buf[r.at:r.at+r.end-r.off], r.off)
+				c.count(int64(n))
+				if err != nil && (err != io.EOF || int64(n) < r.end-r.off) {
+					errs[x-k] = err
+				}
+			}(x)
+		}
+		wg.Wait()
+		return last, errors.Join(errs...)
 	}
-	k := 0
+	k, fetched := 0, 0 // reads[k] holds the next piece; reads before fetched are in buf
 	for _, pc := range pieces {
 		if pc.emit != nil {
 			if err := c.emit(w, pc.emit); err != nil {
-				return true, err
+				return err
 			}
 			continue
 		}
 		for pc.off >= reads[k].end {
 			k++
 		}
+		if k >= fetched {
+			if err := c.flush(w); err != nil { // the queued writes are slices of buf
+				return err
+			}
+			var err error
+			if fetched, err = fetch(k); err != nil {
+				return err
+			}
+		}
 		at := reads[k].at + pc.off - reads[k].off
 		if err := c.queue(w, buf[at:at+pc.n]); err != nil {
-			return true, err
+			return err
 		}
 	}
-	return true, c.flush(w) // before buf is wiped: the queued writes are slices of it
+	return c.flush(w) // before buf is wiped
+}
+
+// reachThrough is how far one read for run i may go: through the runs after it while the hole before each is at most gap and the read stays within maxRead.
+func reachThrough(pieces []span, i int, gap, maxRead int64) int64 {
+	start, end := pieces[i].off, pieces[i].off+pieces[i].n
+	for _, pc := range pieces[i+1:] {
+		if pc.emit != nil {
+			continue
+		}
+		if pc.off < end || pc.off-end > gap || pc.off+pc.n-start > maxRead {
+			break
+		}
+		end = pc.off + pc.n
+	}
+	return end
 }
 
 // exactReach is how far one read for run i may go: through the runs after it
 // while the hole before each is at most exactReadGap and the read fits the
 // buffer.
 func exactReach(pieces []span, i, bufLen int) int64 {
-	start, end := pieces[i].off, pieces[i].off+pieces[i].n
-	for _, pc := range pieces[i+1:] {
-		if pc.emit != nil {
-			continue
-		}
-		if pc.off < end || pc.off-end > exactReadGap || pc.off+pc.n-start > int64(bufLen) {
-			break
-		}
-		end = pc.off + pc.n
-	}
-	return end
+	return reachThrough(pieces, i, exactReadGap, int64(bufLen))
 }
 
 // spansEnd is where in the source the bytes of track ti's samples falling in
