@@ -111,7 +111,7 @@ type serveFlags struct {
 	direct, auto   bool
 	windowCache    int64 // what the plan may hold for a window's un-collected renditions; 0 sizes it from the source
 	windowBytes    int64 // the kept video the process holds for Open (0 = default, -1 = off)
-	maxWalks       int   // windows built at once, NumCPU unless --max-walks says otherwise (0 = no cap)
+	maxWalks       int   // windows built at once, GOMAXPROCS unless --max-walks says otherwise (0 = no cap)
 	maxInFlight    int   // segments served at once (0 = no cap)
 	maxWaiting     int   // requests queued behind them before a 503
 	buffered, cors bool
@@ -120,7 +120,7 @@ type serveFlags struct {
 
 // parseServeFlags reads serve's flags; the shared HLS flags are left in rest.
 func parseServeFlags(args []string) serveFlags {
-	cfg := serveFlags{addr: defaultServeAddr, target: "mse-generic", maxWalks: runtime.NumCPU(), maxInFlight: defaultMaxInFlight, maxWaiting: defaultMaxWaiting}
+	cfg := serveFlags{addr: defaultServeAddr, target: "mse-generic", maxWalks: runtime.GOMAXPROCS(0), maxInFlight: defaultMaxInFlight, maxWaiting: defaultMaxWaiting}
 	fl := newFlags("serve")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.direct, "-direct", "--direct")
