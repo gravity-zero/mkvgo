@@ -48,8 +48,9 @@ func gated(name string) bool {
 	return !strings.HasSuffix(name, ".m3u8") && !strings.HasSuffix(name, ".mpd")
 }
 
-// busy answers a request the gate turned away.
+// busy answers a request the gate turned away; no cache may keep the refusal.
 func busy(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "1")
+	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, "mkvhttp: server busy, retry", http.StatusServiceUnavailable)
 }

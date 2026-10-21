@@ -47,8 +47,8 @@ func TestHandlerAdmission(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seg00001.m4s", nil))
-	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
-		t.Fatalf("over the queue: %d Retry-After=%q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("over the queue: %d Retry-After=%q Cache-Control=%q, want 503, 1 and no-store", rec.Code, rec.Header().Get("Retry-After"), rec.Header().Get("Cache-Control"))
 	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/master.m3u8", nil))

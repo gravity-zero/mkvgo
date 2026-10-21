@@ -74,7 +74,7 @@ type Options struct {
 	// memory with them. Over the cap a request waits for a slot.
 	MaxInFlight int
 	// MaxWaiting bounds the requests waiting under MaxInFlight; one more is
-	// answered 503 with Retry-After: 1.
+	// answered 503 with Retry-After: 1 and Cache-Control: no-store.
 	MaxWaiting int
 }
 
@@ -115,7 +115,8 @@ type Opener interface {
 //     plan.SourceID()); playlists and manifests stay "no-cache".
 //   - Options.MaxInFlight bounds the resources served at once and
 //     Options.MaxWaiting the requests queued behind them; a request past both
-//     is answered 503 with Retry-After: 1.
+//     is answered 503 with Retry-After: 1 and Cache-Control: no-store, so no
+//     cache in front keeps the refusal.
 //   - A Resolver error that is (or wraps) ErrNotFound or mp4.ErrNoResource answers 404; any other
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
