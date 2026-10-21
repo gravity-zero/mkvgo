@@ -10,6 +10,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - `mkvgo serve` answers `503` with `Retry-After: 1` to a segment request
   past 64 in flight and 1024 waiting (`--max-in-flight 0` restores no cap).
+- `mp4.SetWindowBytes` defaults to 64 MiB (it was 256 MiB), and only a
+  network source's walks keep segments (a URL, a network mount,
+  `SourceAccess: SourceNetwork`); a local file's are copied from the file.
 - `mkvgo serve` on a URL serves media segments with a weak ETag (size,
   SourceID, name) instead of the SHA-256 of their bytes, and one range at a
   time, as it already did for a local file.
@@ -23,6 +26,23 @@ All notable changes to mkvgo are documented here. The format is based on
   waiting request held its buffer: at twice the capacity of a local file the
   heap reached 1.3 GiB in 20 seconds and the 99th percentile 4 s; it now
   stays at 130 MiB, with a 99th percentile of 0.6 s.
+
+### Changed
+
+- A local Matroska file no longer keeps the segments its window walks read:
+  the copy comes from the page cache the walk just filled, so keeping them
+  saved no disk read (16 sequential viewers read 1,387 MiB from disk either
+  way) while a burst of first requests filled the window budget and the
+  collector doubled it. With 16 clients on a 1080p 20 Mbit/s file, peak
+  memory falls from 545 MiB to 30 MiB, and from 600 MiB to 75 MiB with 256;
+  a cold video segment is served in 6.9 ms instead of 8.6, a cold audio one
+  in 4.9 ms instead of 6.5, a sequential viewer's step in 28 ms instead of
+  44 for a third less CPU, and the 99th percentile with 256 clients falls
+  from 415 ms to 195 ms.
+- The window budget (`mp4.SetWindowBytes`, `--window-bytes`) defaults to
+  64 MiB: over an HTTP source it reads the origin as 256 MiB did (1.4 times
+  the video served, against 2.4 times with nothing kept) and serves as many
+  requests, for a peak of 175 MiB instead of 580 MiB with 16 clients.
 
 ### Fixed
 

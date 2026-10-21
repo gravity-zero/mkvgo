@@ -554,10 +554,16 @@ the window then reads the source once: measured on a 1080p film, a viewer
 taking video and one audio track read 2.56x the bytes served (the walk, then
 the copies) and reads 1.21x (the window once, the other language and the
 subtitles with it); on a 2160p remux with a TrueHD track and PGS subtitles,
-3.17x down to 1.70x. The kept segments are budgeted process-wide, apart from
+3.17x down to 1.70x. Only a network source keeps (a URL, a network mount, or
+`Options.SourceAccess: SourceNetwork`): a local file's copy is read from the
+page cache the walk just filled, so the 2.56x above is read calls, not disk
+reads - measured with 16 sequential viewers, the disk read 1,387 MiB with or
+without kept segments, and keeping them raised the peak memory from 30 MiB
+to 600 MiB (a burst of first requests fills the budget, the collector
+doubles it). The kept segments are budgeted process-wide, apart from
 the table cache so that tables stay the few KiB of structure they were:
 `SetWindowBytes(n)` caps the bytes held by tables and by handles not yet
-written whole or closed (default 256 MiB), and a window built while the
+written whole or closed (default 64 MiB), and a window built while the
 budget is full is kept headers only, its segments copied from the file at
 each write as before, counted in `Stats().KeptFallbacks` (served from the
 walk's bytes: `KeptSegments`). A kept handle's `Bytes()` is nil: write it
