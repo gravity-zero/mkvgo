@@ -87,7 +87,12 @@ func (p *HLSPlan) buildSegmentTrack(ctx context.Context, ti, n int) ([]byte, err
 		return nil, err
 	}
 	if p.mp4src {
+		release, _, err := acquireWalk(ctx) // the segment is held whole while it is built: the walk cap bounds them
+		if err != nil {
+			return nil, err
+		}
 		data, err := p.mp4SegmentTrack(ctx, ti, n)
+		release()
 		if err == nil {
 			p.winMu.Lock()
 			p.stats.BuiltBytes += int64(len(data))

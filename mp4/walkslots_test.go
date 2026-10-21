@@ -160,3 +160,32 @@ func TestArenaVariableAudioFallsBackOnce(t *testing.T) {
 		t.Errorf("%d arena fallbacks, want exactly one (the first quiet window)", st.ArenaFallbacks)
 	}
 }
+
+// An MP4 source's segment is held whole while it is built: it takes a walk
+// slot like a Matroska window, so a capped process does not hold one per
+// request (a remote source past capacity grew to 15 GiB, measured).
+func TestMP4SegmentTakesAWalkSlot(t *testing.T) {
+	plan, err := PlanHLS(context.Background(), hlsplanMP4Source(t), Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := plan.SegmentName(0)
+	SetMaxConcurrentWalks(1)
+	defer SetMaxConcurrentWalks(0)
+	release, _, err := acquireWalk(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, _, err := plan.Resource(ctx, name); err == nil {
+		t.Fatal("the segment was built while the only slot was held")
+	}
+	release()
+	if _, _, err := plan.Resource(context.Background(), name); err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	if WalksInFlight() != 0 {
+		t.Fatalf("in flight after the build: %d", WalksInFlight())
+	}
+}
