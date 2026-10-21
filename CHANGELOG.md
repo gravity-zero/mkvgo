@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-21
+
 ### Breaking
 
 - `mkvgo serve` answers `503` with `Retry-After: 1` and
@@ -26,7 +28,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - `mkvhttp.Options.MaxInFlight` and `MaxWaiting` bound the resources a
   handler serves at once and the requests queued behind them; one past both
-  is answered `503` with `Retry-After: 1`. `mkvgo serve` sets 64 and 1024
+  is answered `503` with `Retry-After: 1` and `Cache-Control: no-store`.
+  `mkvgo serve` sets 64 and 1024
   (`--max-in-flight`, `--max-waiting`). Past what the source could feed, every
   waiting request held its buffer: at twice the capacity of a local file the
   heap reached 1.3 GiB in 20 seconds and the 99th percentile 4 s; it now
@@ -83,8 +86,8 @@ All notable changes to mkvgo are documented here. The format is based on
   1080p 20 Mbit/s MP4 behind a loopback origin, 16 clients get 2.4 times the
   requests per second for 2.6 times less CPU per request, and peak memory
   falls from 325 MiB to 45 MiB. A Matroska source serves 2.5 times the
-  requests and now holds the kept-window budget (`--window-bytes`, 256 MiB by
-  default), as it does from a local file.
+  requests and now holds the kept-window budget (`--window-bytes`, 64 MiB by
+  default).
 - An MP4 source's segment built whole (`Resource`, a converted track, or a
   plan that does not stream) takes a slot of `mp4.SetMaxConcurrentWalks`, as a
   Matroska window does: the cap now bounds the segments held while they are
