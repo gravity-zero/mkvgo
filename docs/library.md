@@ -554,7 +554,15 @@ the window then reads the source once: measured on a 1080p film, a viewer
 taking video and one audio track read 2.56x the bytes served (the walk, then
 the copies) and reads 1.21x (the window once, the other language and the
 subtitles with it); on a 2160p remux with a TrueHD track and PGS subtitles,
-3.17x down to 1.70x. A Matroska source has no index of its audio blocks: a light rendition's
+3.17x down to 1.70x. A remote MP4's video segment reads the span of its window that holds the
+window's audio too, in one request, and keeps that audio (every rendition)
+for the window's audio segments, within the window budget, for 30 s and
+until every rendition was served; an audio segment asked within 10 ms of its
+window's video read waits for that read rather than asking the origin. A
+window whose audio lies away from its video is read as before. Measured on a
+NAS's MP4s behind an HTTP origin, 16 sequential viewers: 1.02 to 1.09 times
+the file's size pulled from the origin, against 1.23 to 2.95 before.
+A Matroska source has no index of its audio blocks: a light rendition's
 segment asked for alone (a CDN in front fetches audio and video apart) walks
 its window, the video with it - measured on a 1080p 20 Mbit/s source over
 HTTP, 14.6 to 19.9 MiB from the origin for a 90 KiB audio segment, cold. An

@@ -6,6 +6,25 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- A remote MP4's video segment reads its window's span with the audio stored
+  in it, in one request, and keeps that audio, every rendition, for the
+  window's audio segments: within the window budget (`SetWindowBytes`), for
+  30 s, and only until every rendition was served. An audio segment asked
+  within 10 ms of its window's video read waits for it. On a NAS's MP4s
+  behind an HTTP origin, 16 sequential viewers pull from the origin 1.02 to
+  1.07 times the file's size for files interleaved frame by frame (2.0 to
+  2.9 times before) and 1.09 times for files stored in chunks (1.23); with
+  one audio rendition, an audio segment asked 10 s after its video still took
+  no request of its own.
+  A window whose audio lies away from its video (a span over 1.5 times the
+  video's) is read as before. Costs: an audio segment asked alone waits up
+  to 10 ms more, and under requests that never take every rendition of a
+  window the kept audio fills the window budget, which the collector can
+  double in peak memory. `KeptSegments` and `KeptFallbacks` count these
+  windows too.
+
 ## [0.57.0] - 2026-10-21
 
 ### Breaking
