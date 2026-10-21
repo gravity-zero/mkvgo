@@ -31,6 +31,10 @@ func findMoov(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err er
 // says. errors.Is-able, so a caller can route the file elsewhere.
 var ErrNotMP4 = errors.New("not an MP4/MOV file (it does not start with an ISO base media box)")
 
+// ErrMPEGTS is returned, along with ErrNotMP4, for an MPEG transport stream (or a Blu-ray M2TS) handed to the MP4
+// reader, whatever its name says: mkvgo does not read MPEG-TS.
+var ErrMPEGTS = errors.New("MPEG-TS detected: mkvgo does not read MPEG transport streams; remux the file to MP4 or Matroska first")
+
 // isoBMFFOpeners are the box types an ISO base media or QuickTime file - or a
 // fragment of one - opens with.
 var isoBMFFOpeners = map[string]bool{
@@ -57,9 +61,40 @@ func checkISOBMFFHead(r io.ReadSeeker, size int64) error {
 		return errf("read box header: %w", err)
 	}
 	if !isoBMFFOpeners[string(hdr[4:8])] {
+		if isMPEGTS(r, hdr, size) {
+			return mpegtsError{}
+		}
 		return errf("%w", ErrNotMP4)
 	}
 	return nil
+}
+
+// mpegtsError says ErrMPEGTS and is ErrNotMP4 too, for a caller that routes any other container elsewhere.
+type mpegtsError struct{}
+
+func (mpegtsError) Error() string   { return "mp4: " + ErrMPEGTS.Error() }
+func (mpegtsError) Unwrap() []error { return []error{ErrMPEGTS, ErrNotMP4} }
+
+// isMPEGTS reports whether a source opens on MPEG-TS packets, its first bytes head: the sync byte 0x47 every 188 bytes,
+// or every 192 after a 4-byte timecode (M2TS), three packets in a row; it reads one byte per packet past the head.
+func isMPEGTS(r io.ReadSeeker, head [8]byte, size int64) bool {
+	at := func(off int64) bool {
+		var b [1]byte
+		if off >= size {
+			return false
+		}
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
+			return false
+		}
+		_, err := io.ReadFull(r, b[:])
+		return err == nil && b[0] == 0x47
+	}
+	for _, f := range []struct{ start, stride int64 }{{0, 188}, {4, 192}} {
+		if head[f.start] == 0x47 && at(f.start+f.stride) && at(f.start+2*f.stride) {
+			return true
+		}
+	}
+	return false
 }
 
 func findMoovForward(r io.ReadSeeker, size int64) (dataOffset, payloadLen int64, err error) {
