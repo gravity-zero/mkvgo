@@ -112,13 +112,15 @@ type serveFlags struct {
 	windowCache    int64 // what the plan may hold for a window's un-collected renditions; 0 sizes it from the source
 	windowBytes    int64 // the kept video the process holds for Open (0 = default, -1 = off)
 	maxWalks       int   // windows built at once, NumCPU unless --max-walks says otherwise (0 = no cap)
+	maxInFlight    int   // segments served at once (0 = no cap)
+	maxWaiting     int   // requests queued behind them before a 503
 	buffered, cors bool
 	rest           []string
 }
 
 // parseServeFlags reads serve's flags; the shared HLS flags are left in rest.
 func parseServeFlags(args []string) serveFlags {
-	cfg := serveFlags{addr: defaultServeAddr, target: "mse-generic", maxWalks: runtime.NumCPU()}
+	cfg := serveFlags{addr: defaultServeAddr, target: "mse-generic", maxWalks: runtime.NumCPU(), maxInFlight: defaultMaxInFlight, maxWaiting: defaultMaxWaiting}
 	fl := newFlags("serve")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.direct, "-direct", "--direct")
@@ -133,10 +135,27 @@ func parseServeFlags(args []string) serveFlags {
 		}
 		cfg.maxWalks = n
 	}, "-max-walks", "--max-walks")
+	fl.Func(func(v string) { cfg.maxInFlight = countFlag(v, "--max-in-flight") }, "-max-in-flight", "--max-in-flight")
+	fl.Func(func(v string) { cfg.maxWaiting = countFlag(v, "--max-waiting") }, "-max-waiting", "--max-waiting")
 	fl.Func(func(v string) { cfg.windowCache = mibOrOff(v, "--window-cache") }, "-window-cache", "--window-cache")
 	fl.Func(func(v string) { cfg.windowBytes = mibOrOff(v, "--window-bytes") }, "-window-bytes", "--window-bytes")
 	cfg.rest = fl.ParseKnown(args) // the shared HLS flags and the source, for parseHLSFlags
 	return cfg
+}
+
+// Default admission: segments served at once, and requests queued behind them before a 503.
+const (
+	defaultMaxInFlight = 64
+	defaultMaxWaiting  = 1024
+)
+
+// countFlag reads a non-negative count.
+func countFlag(v, flag string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		Fatal("serve: " + flag + ": expected a non-negative count, got " + v)
+	}
+	return n
 }
 
 // mibOrOff reads a size in MiB as bytes, or "off" as -1.
@@ -153,7 +172,7 @@ func mibOrOff(v, flag string) int64 {
 
 // httpOptions are the handler options serve runs with: CORS only on --cors.
 func (cfg serveFlags) httpOptions(cors bool) mkvhttp.Options {
-	return mkvhttp.Options{AllowCORS: cors, Buffered: cfg.buffered}
+	return mkvhttp.Options{AllowCORS: cors, Buffered: cfg.buffered, MaxInFlight: cfg.maxInFlight, MaxWaiting: cfg.maxWaiting}
 }
 
 // serveModeLabel names the server mode --auto picked, for the log line.
