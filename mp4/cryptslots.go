@@ -8,28 +8,9 @@ import (
 	"sync/atomic"
 )
 
-// cryptGate runs as many encryption steps at once as there are processors, the oldest request's first (encrypted segments finish in turn; one blocked on its client holds no slot).
+// cryptGate lets as many encrypted segments work at once as there are processors, the oldest request first: each
+// holds its slot but while writing to its client, so they finish in turn and a slow client holds none.
 var cryptGate = newCryptOrder(runtime.GOMAXPROCS(0))
-
-// cryptQuantum is the most one slot encrypts before it is handed on: smaller, the hand-overs cost CPU of their own.
-const cryptQuantum = 256 << 10
-
-// cryptSmall is a step too short to wait in turn for: an audio sample.
-const cryptSmall = 16 << 10
-
-// encryptInTurn runs enc, a step over n bytes, in a slot of cryptGate, or at once when n is small.
-func encryptInTurn(ctx context.Context, seq int64, n int, enc func()) error {
-	if n < cryptSmall {
-		enc()
-		return nil
-	}
-	if err := cryptGate.acquire(ctx, seq); err != nil {
-		return err
-	}
-	enc()
-	cryptGate.release()
-	return nil
-}
 
 // cryptSeq orders the encrypted writes by when they started.
 var cryptSeq atomic.Int64

@@ -2,6 +2,8 @@ package mp4
 
 import (
 	"context"
+	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -84,4 +86,63 @@ func waitFor(t *testing.T, cond func() bool) {
 		}
 	}
 	t.Fatal("condition not reached")
+}
+
+// blockingWriter blocks its first write until released.
+type blockingWriter struct {
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingWriter) Write(p []byte) (int, error) {
+	b.once.Do(func() { close(b.entered); <-b.release })
+	return len(p), nil
+}
+
+// An encrypted segment whose client stops reading holds no slot: with one
+// slot, another request is served while the first is blocked on its write.
+func TestCryptSlotFreeWhileWriting(t *testing.T) {
+	defer func(g *cryptOrder) { cryptGate = g }(cryptGate)
+	cryptGate = newCryptOrder(1)
+	ctx := context.Background()
+	for _, o := range []Options{
+		{SegmentMs: 2000, Encrypt: &HLSEncryption{Key: []byte("0123456789abcdef"), KeyURI: "k"}},
+		{SegmentMs: 2000, CENC: &CENCOptions{Scheme: "cenc", Key: []byte("0123456789abcdef"), KeyID: []byte("0123456789abcdef"), IV: []byte("01234567"), KeyURI: "k"}},
+	} {
+		plan, err := PlanHLS(ctx, interleavedMP4, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slow := &blockingWriter{entered: make(chan struct{}), release: make(chan struct{})}
+		done := make(chan error, 1)
+		go func() {
+			h, err := plan.Open(ctx, plan.SegmentName(0))
+			if err == nil {
+				_, err = h.WriteTo(ctx, slow)
+				h.Close()
+			}
+			done <- err
+		}()
+		<-slow.entered
+		h, err := plan.Open(ctx, plan.SegmentName(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		served := make(chan error, 1)
+		go func() { _, err := h.WriteTo(ctx, io.Discard); served <- err }()
+		select {
+		case err := <-served:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a request blocked on its client held the only slot")
+		}
+		h.Close()
+		close(slow.release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
 }
