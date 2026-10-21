@@ -566,8 +566,9 @@ func TestTableCacheProcessBudget(t *testing.T) {
 	}
 }
 
-// prefetch asks for a dense rendition's whole range at once, and for each read
-// of an exact one (runs gathered through holes up to exactReadGap).
+// prefetch asks for a dense rendition prefetchAhead in front of its copy, and
+// for each read of an exact one at once (runs gathered through holes up to
+// exactReadGap).
 func TestPrefetchRanges(t *testing.T) {
 	type rng struct{ off, n int64 }
 	var will []rng
@@ -577,6 +578,15 @@ func TestPrefetchRanges(t *testing.T) {
 	prefetch(nil, pieces, false, streamBufBytes)
 	if len(will) != 1 || will[0] != (rng{1000, 200<<10 + 350}) {
 		t.Fatalf("dense: %v", will)
+	}
+	will = nil
+	const mib = 1 << 20
+	a := prefetch(nil, []span{{off: 0, n: 3 * mib}, {off: 3 * mib, n: 3 * mib}, {off: 6 * mib, n: 6 * mib}, {off: 12 * mib, n: 8 * mib}}, false, streamBufBytes)
+	for _, at := range []int64{0, 3 * mib, 6 * mib, 12 * mib} {
+		a.advance(at)
+	}
+	if want := []rng{{0, 8 * mib}, {8 * mib, 6 * mib}, {14 * mib, 6 * mib}}; fmt.Sprint(will) != fmt.Sprint(want) {
+		t.Fatalf("dense, 20 MiB: %v, want %v", will, want)
 	}
 	will = nil
 	prefetch(nil, pieces, true, streamBufBytes)
