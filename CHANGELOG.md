@@ -14,6 +14,10 @@ All notable changes to mkvgo are documented here. The format is based on
 - `mp4.SetWindowBytes` defaults to 64 MiB (it was 256 MiB), and only a
   network source's walks keep segments (a URL, a network mount,
   `SourceAccess: SourceNetwork`); a local file's are copied from the file.
+- `HLSPlanStats.KeptFallbacks` counts only the windows a network source's
+  walk built headers only because the window budget refused them; a local
+  source, which never keeps, a keep turned off (`SetWindowBytes(-1)`) and a
+  window of unknown span no longer count.
 - `mkvgo serve` on a URL serves media segments with a weak ETag (size,
   SourceID, name) instead of the SHA-256 of their bytes, and one range at a
   time, as it already did for a local file.
