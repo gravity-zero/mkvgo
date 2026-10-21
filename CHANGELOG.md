@@ -8,6 +8,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- `mp4.ErrMPEGTS`: an MPEG transport stream or a Blu-ray M2TS handed to the
+  MP4 reader (a `.ts` renamed `.mp4`, say) is refused as such, "MPEG-TS
+  detected: mkvgo does not read MPEG transport streams; remux the file to MP4
+  or Matroska first", instead of "not an MP4/MOV file"; the error is still
+  `mp4.ErrNotMP4` for `errors.Is`.
 - `HLSPlanStats.WalkReadBytes` and `CopyReadBytes` split `SourceReadBytes`,
   which stays their sum: what reading windows took (a Matroska window's walk,
   its reads ahead or far, foreign-block checks, subtitle cues) and what
