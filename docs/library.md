@@ -554,7 +554,12 @@ the window then reads the source once: measured on a 1080p film, a viewer
 taking video and one audio track read 2.56x the bytes served (the walk, then
 the copies) and reads 1.21x (the window once, the other language and the
 subtitles with it); on a 2160p remux with a TrueHD track and PGS subtitles,
-3.17x down to 1.70x. Only a network source keeps (a URL, a network mount, or
+3.17x down to 1.70x. A Matroska source has no index of its audio blocks: a light rendition's
+segment asked for alone (a CDN in front fetches audio and video apart) walks
+its window, the video with it - measured on a 1080p 20 Mbit/s source over
+HTTP, 14.6 to 19.9 MiB from the origin for a 90 KiB audio segment, cold. An
+MP4 source is asked only for its samples' ranges when they take 16 requests
+or fewer. Only a network source keeps (a URL, a network mount, or
 `Options.SourceAccess: SourceNetwork`): a local file's copy is read from the
 page cache the walk just filled, so the 2.56x above is read calls, not disk
 reads - measured with 16 sequential viewers, the disk read 1,387 MiB with or

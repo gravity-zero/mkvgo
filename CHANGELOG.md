@@ -8,7 +8,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Breaking
 
-- `mkvgo serve` answers `503` with `Retry-After: 1` to a segment request
+- `mkvgo serve` answers `503` with `Retry-After: 1` and
+  `Cache-Control: no-store` to a segment request
   past 64 in flight and 1024 waiting (`--max-in-flight 0` restores no cap).
 - `mp4.SetWindowBytes` defaults to 64 MiB (it was 256 MiB), and only a
   network source's walks keep segments (a URL, a network mount,
@@ -29,6 +30,23 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Changed
 
+- A video segment's bytes are asked of the disk 8 MiB ahead of its copy,
+  instead of its whole range before the first byte: a cold 1080p 20 Mbit/s
+  video segment comes in 3.9 ms instead of 5.1 from a fast disk; from one
+  capped at 250 MB/s, as fast as before, with the 99th percentile under 16
+  clients at 200 ms instead of 300 to 390.
+- AES-128 and CENC segments encrypt in as many slots as there are
+  processors, 256 KiB at a time, the oldest request first, so that under load
+  they finish in turn: with 16 clients on 2 cores the 99th percentile falls
+  from 187 to 159 ms for AES-128 and from 106 to 74 ms for CENC, for the same
+  requests per second, and unencrypted serving is untouched.
+- A remote MP4's audio segment is asked of the origin by its samples' ranges,
+  holes under 64 KiB read through, when that takes 16 requests or fewer: the
+  video between them is no longer fetched. A source storing its audio sample
+  by sample between video frames (147 ranges a segment on a 1080p ffmpeg
+  encode) is still read through in one request, each range otherwise a round
+  trip (measured at 10 ms a request: 200 ms a segment by ranges, 28 ms read
+  through).
 - A local Matroska file no longer keeps the segments its window walks read:
   the copy comes from the page cache the walk just filled, so keeping them
   saved no disk read (16 sequential viewers read 1,387 MiB from disk either
@@ -46,6 +64,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- `httpfs` and `s3fs` keep 64 idle connections per host instead of the
+  2 of Go's default transport: under 16 clients a remote source opened a new
+  connection for 37 % of its requests, now 14 in all.
 - `mkvgo serve` on a URL held each media segment whole per request, hashed
   its bytes for a strong ETag and built it with no cap: at twice its capacity
   the process grew past 15 GiB in eight seconds and was killed. Its segments
