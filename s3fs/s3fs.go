@@ -78,6 +78,13 @@ func IsURL(path string) bool {
 	return strings.HasPrefix(path, s3Prefix)
 }
 
+// defaultTransport keeps up to 64 idle connections per host, what a server reads at once (http.DefaultTransport keeps 2).
+var defaultTransport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = 64
+	return t
+}()
+
 // New builds an S3FS. Region/credentials/endpoint left empty fall back to the
 // environment (see the Options doc); Region still empty after that defaults
 // to "us-east-1".
@@ -110,7 +117,7 @@ func New(opts Options) *S3FS {
 	}
 
 	transport := &signingTransport{
-		base:         http.DefaultTransport,
+		base:         defaultTransport,
 		accessKey:    opts.AccessKey,
 		secretKey:    opts.SecretKey,
 		sessionToken: opts.SessionToken,
