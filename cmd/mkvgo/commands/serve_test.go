@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -154,4 +155,49 @@ func TestCmdServe_DirectAndAutoMutuallyExclusive(t *testing.T) {
 	mustFatal(t, func() {
 		commands.CmdServe([]string{src, "--direct", "--auto"})
 	})
+}
+
+// TestCmdServe_RemoteStreams serves a URL: its media segments stream from the
+// origin (weak ETag) instead of being held whole per request, which grew
+// without bound past capacity.
+func TestCmdServe_RemoteStreams(t *testing.T) {
+	skipIfNoInterrupt(t)
+	src := sampleMKV(t)
+	origin := httptest.NewServer(http.FileServer(http.Dir(filepath.Dir(src))))
+	defer origin.Close()
+	const addr = "127.0.0.1:18483"
+
+	done := make(chan struct{})
+	go func() {
+		commands.CmdServe([]string{origin.URL + "/" + filepath.Base(src), "-addr", addr})
+		close(done)
+	}()
+	var resp *http.Response
+	var err error
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if resp, err = http.Get("http://" + addr + "/seg00001.m4s"); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("server did not come up in time: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(body) == 0 {
+		t.Fatalf("GET seg00001.m4s: %d, %d bytes", resp.StatusCode, len(body))
+	}
+	if etag := resp.Header.Get("ETag"); !strings.HasPrefix(etag, "W/") {
+		t.Errorf("ETag %q: a remote segment must stream, not be held whole", etag)
+	}
+
+	proc, _ := os.FindProcess(os.Getpid())
+	if err := proc.Signal(os.Interrupt); err != nil {
+		t.Fatalf("send interrupt: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("CmdServe did not shut down after SIGINT")
+	}
 }

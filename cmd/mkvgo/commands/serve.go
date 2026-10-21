@@ -65,6 +65,7 @@ func CmdServe(args []string) {
 
 	opts := f.options(src)
 	opts.WindowCacheBytes = cfg.windowCache
+	opts.StreamFromFS = true // a remote source streams too: a segment held whole per request grew without bound past capacity
 	mp4.SetMaxConcurrentWalks(cfg.maxWalks)
 	mp4.SetWindowBytes(cfg.windowBytes)
 	opts.OnDrop = func(d mp4.DroppedTrack) {
