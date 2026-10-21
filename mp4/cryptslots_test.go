@@ -2,7 +2,11 @@ package mp4
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -144,5 +148,23 @@ func TestCryptSlotFreeWhileWriting(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// The encryption slots are the processors the process may use (GOMAXPROCS,
+// which follows a container's CPU limit), read in a process started with 2.
+func TestCryptGateFollowsGOMAXPROCS(t *testing.T) {
+	if os.Getenv("MKVGO_CRYPTGATE_CHILD") == "1" {
+		fmt.Printf("slots=%d\n", cryptGate.free)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCryptGateFollowsGOMAXPROCS$")
+	cmd.Env = append(os.Environ(), "MKVGO_CRYPTGATE_CHILD=1", "GOMAXPROCS=2")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "slots=2\n") {
+		t.Fatalf("encryption slots under GOMAXPROCS 2: %s", out)
 	}
 }
