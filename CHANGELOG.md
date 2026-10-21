@@ -6,6 +6,40 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Breaking
+
+- `mkvgo serve` answers `503` with `Retry-After: 1` to a segment request
+  past 64 in flight and 1024 waiting (`--max-in-flight 0` restores no cap).
+- `mkvgo serve` on a URL serves media segments with a weak ETag (size,
+  SourceID, name) instead of the SHA-256 of their bytes, and one range at a
+  time, as it already did for a local file.
+
+### Added
+
+- `mkvhttp.Options.MaxInFlight` and `MaxWaiting` bound the resources a
+  handler serves at once and the requests queued behind them; one past both
+  is answered `503` with `Retry-After: 1`. `mkvgo serve` sets 64 and 1024
+  (`--max-in-flight`, `--max-waiting`). Past what the source could feed, every
+  waiting request held its buffer: at twice the capacity of a local file the
+  heap reached 1.3 GiB in 20 seconds and the 99th percentile 4 s; it now
+  stays at 130 MiB, with a 99th percentile of 0.6 s.
+
+### Fixed
+
+- `mkvgo serve` on a URL held each media segment whole per request, hashed
+  its bytes for a strong ETag and built it with no cap: at twice its capacity
+  the process grew past 15 GiB in eight seconds and was killed. Its segments
+  now stream from the origin, as a local file's do, with the same bytes: on a
+  1080p 20 Mbit/s MP4 behind a loopback origin, 16 clients get 2.4 times the
+  requests per second for 2.6 times less CPU per request, and peak memory
+  falls from 325 MiB to 45 MiB. A Matroska source serves 2.5 times the
+  requests and now holds the kept-window budget (`--window-bytes`, 256 MiB by
+  default), as it does from a local file.
+- An MP4 source's segment built whole (`Resource`, a converted track, or a
+  plan that does not stream) takes a slot of `mp4.SetMaxConcurrentWalks`, as a
+  Matroska window does: the cap now bounds the segments held while they are
+  built.
+
 ## [0.56.2] - 2026-10-20
 
 ### Changed
