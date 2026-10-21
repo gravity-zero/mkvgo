@@ -187,8 +187,29 @@ func TestCmdServe_RemoteStreams(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(body) == 0 {
 		t.Fatalf("GET seg00001.m4s: %d, %d bytes", resp.StatusCode, len(body))
 	}
-	if etag := resp.Header.Get("ETag"); !strings.HasPrefix(etag, "W/") {
+	etag := resp.Header.Get("ETag")
+	if !strings.HasPrefix(etag, "W/") {
 		t.Errorf("ETag %q: a remote segment must stream, not be held whole", etag)
+	}
+	// A weak ETag never satisfies If-Range (RFC 9110 13.1.5): the whole segment, 200; a plain Range gets its 206.
+	for _, ifRange := range []string{etag, ""} {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/seg00001.m4s", nil)
+		req.Header.Set("Range", "bytes=0-99")
+		if ifRange != "" {
+			req.Header.Set("If-Range", ifRange)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		switch {
+		case ifRange != "" && (r.StatusCode != http.StatusOK || len(b) != len(body)):
+			t.Errorf("Range under If-Range: %d, %d bytes, want 200 and %d", r.StatusCode, len(b), len(body))
+		case ifRange == "" && (r.StatusCode != http.StatusPartialContent || !bytes.Equal(b, body[:100])):
+			t.Errorf("plain Range: %d, %d bytes, want 206 and the first 100", r.StatusCode, len(b))
+		}
 	}
 
 	proc, _ := os.FindProcess(os.Getpid())
