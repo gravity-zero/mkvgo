@@ -103,6 +103,7 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 	}
 	pos := int64(len(h.head))
 	var rd *sampleReader
+	seq := cryptSeq.Add(1)
 	bufp := sampleBufs.Get().(*[]byte)
 	defer putSampleBuf(bufp)
 	buf := (*bufp)[:0]
@@ -130,7 +131,9 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 			return cw.pos, err
 		}
 		*bufp = buf
-		h.cenc.k.encrypt(buf, h.cenc.td.entries[x])
+		if err := encryptInTurn(ctx, seq, len(buf), func() { h.cenc.k.encrypt(buf, h.cenc.td.entries[x]) }); err != nil {
+			return cw.pos, err
+		}
 		if err := write(buf, pos); err != nil {
 			return cw.pos, err
 		}
@@ -150,7 +153,7 @@ func (p *HLSPlan) writeAES(ctx context.Context, w io.Writer, h *ResourceHandle, 
 	if err != nil {
 		return 0, err
 	}
-	cw := &cbcWriter{w: w, mode: cipher.NewCBCEncrypter(block, segmentIV(k, uint32(h.n))), off: off, end: off + n, scratch: make([]byte, stageBytes)}
+	cw := &cbcWriter{w: w, mode: cipher.NewCBCEncrypter(block, segmentIV(k, uint32(h.n))), off: off, end: off + n, scratch: make([]byte, cryptQuantum), ctx: ctx, seq: cryptSeq.Add(1)}
 	defer clear(cw.scratch)
 	plain := int64(len(h.head)) + h.table.segs[h.ti].dataLen
 	need := min(plain, (off+n+aes.BlockSize-1)/aes.BlockSize*aes.BlockSize) // the plaintext the range's last block chains from
@@ -179,6 +182,8 @@ type cbcWriter struct {
 	nc       int
 	scratch  []byte
 	written  int64
+	ctx      context.Context
+	seq      int64 // the request's place in cryptGate's order
 }
 
 func (c *cbcWriter) Write(p []byte) (int, error) {
@@ -205,7 +210,9 @@ func (c *cbcWriter) emit(s []byte) error {
 	if len(s) == 0 {
 		return nil
 	}
-	c.mode.CryptBlocks(s, s)
+	if err := encryptInTurn(c.ctx, c.seq, len(s), func() { c.mode.CryptBlocks(s, s) }); err != nil {
+		return err
+	}
 	from, to := max(c.off, c.pos), min(c.end, c.pos+int64(len(s)))
 	c.pos += int64(len(s))
 	if from >= to {
