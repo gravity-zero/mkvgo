@@ -47,6 +47,7 @@ func main() {
 	opts := mp4.Options{SegmentMs: int64(*segment * 1000)}
 	if httpfs.IsURL(*src) {
 		opts.FS = httpfs.New().Port() // read the remote source over HTTP Range
+		opts.StreamFromFS = true      // and stream its segments, never one held whole per request
 	}
 	plan, err := mp4.PlanHLS(context.Background(), *src, opts)
 	if err != nil {
