@@ -59,15 +59,18 @@ var (
 	windowBytesTotal  atomic.Int64
 )
 
-func init() { windowBytesBudget.Store(256 << 20) }
+func init() { windowBytesBudget.Store(defaultWindowBytes) }
+
+// defaultWindowBytes is SetWindowBytes' default: 64 MiB served a network source's windows as 256 did (origin bytes and requests), for a peak a quarter as high.
+const defaultWindowBytes = 64 << 20
 
 // SetWindowBytes caps, process-wide, the video segments Open keeps from the walks that built them (held until written
-// whole or closed) rather than copying them from the source again; zero restores the default of 256 MiB, negative keeps nothing.
+// whole or closed) rather than copying them from the source again; zero restores the default of 64 MiB, negative keeps nothing.
 // Only a network source's walks keep: a local file's copy is read from the page cache the walk just filled.
 func SetWindowBytes(total int64) {
 	switch {
 	case total == 0:
-		total = 256 << 20
+		total = defaultWindowBytes
 	case total < 0:
 		total = 0
 	}
