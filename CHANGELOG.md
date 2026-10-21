@@ -70,6 +70,9 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Fixed
 
+- `mkvgo serve`'s default `--max-walks` is the processors the process may use
+  (`runtime.GOMAXPROCS(0)`, which follows a container's CPU limit when built
+  with Go 1.25 or newer) instead of the host's cores (`runtime.NumCPU()`).
 - `httpfs` and `s3fs` keep 64 idle connections per host instead of the
   2 of Go's default transport: under 16 clients a remote source opened a new
   connection for 37 % of its requests, now 14 in all.
