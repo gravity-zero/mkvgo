@@ -180,14 +180,21 @@ func TestShareBudgetRefused(t *testing.T) {
 	}
 }
 
-// A local MP4 shares nothing: its copies come from the page cache.
+// A local MP4 shares nothing, and its audio waits for no grace: its copies come from the page cache.
 func TestShareLocalNone(t *testing.T) {
+	defer func(d time.Duration) { shareGrace = d }(shareGrace)
+	shareGrace = 2 * time.Second
 	src := twoAudioMP4(t)
 	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	serveTo(t, plan, plan, "seg00002.m4s", io.Discard)
+	start := time.Now()
+	serveTo(t, plan, plan, "seg_a1_00001.m4s", io.Discard) // no video read of its window: a network source would wait the grace
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("a local audio segment took %s: it waited a grace", d)
+	}
 	serveTo(t, plan, plan, "seg_a1_00002.m4s", io.Discard)
 	if st := plan.Stats(); st.KeptSegments != 0 || windowBytesTotal.Load() != 0 {
 		t.Errorf("a local source kept %d segments, %d bytes", st.KeptSegments, windowBytesTotal.Load())
