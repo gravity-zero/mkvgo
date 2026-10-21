@@ -35,11 +35,13 @@ All notable changes to mkvgo are documented here. The format is based on
   video segment comes in 3.9 ms instead of 5.1 from a fast disk; from one
   capped at 250 MB/s, as fast as before, with the 99th percentile under 16
   clients at 200 ms instead of 300 to 390.
-- AES-128 and CENC segments encrypt in as many slots as there are
-  processors, 256 KiB at a time, the oldest request first, so that under load
-  they finish in turn: with 16 clients on 2 cores the 99th percentile falls
-  from 187 to 159 ms for AES-128 and from 106 to 74 ms for CENC, for the same
-  requests per second, and unencrypted serving is untouched.
+- AES-128 and CENC segments are served in as many slots as there are
+  processors, the oldest request first, each holding its slot for all its
+  work but its writes to the client (a slow client holds none), so that under
+  load they finish in turn: with 16 clients on 2 cores the 99th percentile
+  falls from 225 to 155 ms for AES-128 and from 135 to 65 ms for CENC, for 10 %
+  (AES-128) and 7 % (CENC) fewer requests per second; unencrypted serving is
+  untouched.
 - A remote MP4's audio segment is asked of the origin by its samples' ranges,
   holes under 64 KiB read through, when that takes 16 requests or fewer: the
   video between them is no longer fetched. A source storing its audio sample
