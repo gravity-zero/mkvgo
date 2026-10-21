@@ -249,6 +249,7 @@ type sampleReader struct {
 	bufp   *[]byte
 	prefix []byte
 	pieces []span // one per sample, for the copier's read-ahead bound
+	ahead  *ahead // a video rendition read ahead of the samples, nil otherwise
 }
 
 func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (*sampleReader, error) {
@@ -268,7 +269,7 @@ func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (
 		r.pieces[x] = span{off: t.offs[ti][x], n: int64(s.size) - int64(len(r.prefix))}
 	}
 	if r.c.file != nil && !p.onNetwork(r.c.file) {
-		prefetch(r.c.file, r.pieces, r.c.exact, len(r.c.buf))
+		r.ahead = prefetch(r.c.file, r.pieces, r.c.exact, len(r.c.buf))
 	}
 	return r, nil
 }
@@ -279,6 +280,7 @@ func (r *sampleReader) read(x int, dst []byte) ([]byte, error) {
 	if r.c.exact {
 		r.c.reach = exactReach(r.pieces, x, len(r.c.buf))
 	}
+	r.ahead.advance(r.pieces[x].off)
 	if err := r.c.copy(a, r.pieces[x].off, r.pieces[x].n); err != nil {
 		return a.b, err
 	}

@@ -3,7 +3,10 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -113,5 +116,47 @@ func TestRangeCount(t *testing.T) {
 	}
 	if n := rangeCount(pieces, 128<<10); n != 1 {
 		t.Errorf("100 KiB holes, 128 KiB gap: %d reads, want 1", n)
+	}
+}
+
+// A CENC video segment read sample by sample is read ahead over its whole
+// range, the window topped up as the samples go, not over its first 8 MiB only.
+func TestCENCSamplesReadAhead(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var blocks []genBlock
+	for i := 0; i < 60; i++ { // 12 MiB of video in one segment, one length-prefixed NAL a frame
+		frame := bytes.Repeat([]byte{byte(i)}, 200<<10)
+		binary.BigEndian.PutUint32(frame, uint32(len(frame)-4))
+		frame[4] = 0x65
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i == 0, data: frame})
+	}
+	src := buildMKV(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}, blocks)
+	type rng struct{ off, n int64 }
+	var asked []rng
+	defer func(f func(*os.File, int64, int64)) { adviseWillNeed = f }(adviseWillNeed)
+	adviseWillNeed = func(_ *os.File, off, n int64) { asked = append(asked, rng{off, n}) }
+	defer func(f func(*os.File) bool) { networkSource = f }(networkSource)
+	networkSource = func(*os.File) bool { return false }
+	ctx := context.Background()
+	key := []byte("0123456789abcdef")
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 6000, SourceAccess: SourceLocal, CENC: &CENCOptions{Scheme: "cenc", Key: key, KeyID: key, IV: key[:8], KeyURI: "k"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := plan.Open(ctx, plan.SegmentName(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked = nil
+	if _, err := h2.WriteTo(ctx, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	h2.Close()
+	var covered int64
+	for _, r := range asked {
+		covered += r.n
+	}
+	if covered < 11<<20 {
+		t.Fatalf("read ahead %d bytes of a 12 MiB segment in %d requests", covered, len(asked))
 	}
 }
