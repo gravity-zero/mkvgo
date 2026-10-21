@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-10-22
+
 ### Added
 
 - `mp4.ErrMPEGTS`: an MPEG transport stream or a Blu-ray M2TS handed to the
