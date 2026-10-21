@@ -326,11 +326,12 @@ type HLSPlanStats struct {
 	StreamedSegments int64
 	StreamFallbacks  int64
 	// KeptSegments is the number of segments Open served from the bytes the
-	// walk that built their window had read (one read of the source for the
-	// window); KeptFallbacks, the tables a network source's walk built headers
-	// only because the process-wide window budget (SetWindowBytes) refused
-	// them: their segments are copied from the source. A local source, which
-	// never keeps, and a keep turned off count in neither.
+	// read of their window had already taken (a Matroska walk, or a remote
+	// MP4's video read, which keeps its window's audio); KeptFallbacks, the
+	// windows a network source read without keeping because the process-wide
+	// window budget (SetWindowBytes) refused them: their segments are copied
+	// from the source. A local source, which never keeps, and a keep turned
+	// off count in neither.
 	KeptSegments  int64
 	KeptFallbacks int64
 	// FarLookups counts the walks that looked for a track still missing two windows past the window's bytes in the

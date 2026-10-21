@@ -79,6 +79,7 @@ func TestRemoteAudioRanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(plan.share.dropAll)
 			rs.mu.Lock()
 			from := len(rs.ranges)
 			rs.mu.Unlock()

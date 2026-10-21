@@ -181,7 +181,7 @@ func (p *HLSPlan) writeAES(ctx context.Context, w io.Writer, h *ResourceHandle, 
 	}()
 	plain := int64(len(h.head)) + h.table.segs[h.ti].dataLen
 	need := min(plain, (off+n+aes.BlockSize-1)/aes.BlockSize*aes.BlockSize) // the plaintext the range's last block chains from
-	if _, err := p.writeSpans(ctx, cw, h.head, h.table, h.ti, 0, need); err != nil && !errors.Is(err, errRangeWritten) {
+	if _, err := p.writeSpans(ctx, cw, h.head, h.table, h.ti, h.n, 0, need); err != nil && !errors.Is(err, errRangeWritten) {
 		return cw.written, err
 	}
 	if cw.pos < cw.end {

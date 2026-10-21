@@ -66,6 +66,7 @@ type HLSPlan struct {
 	subScan    []subScanState  // per-track incremental cue scan state
 	segs       []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
 	mp4src     bool            // MP4 source: windows cut from the sample table, exact by construction
+	share      mp4Share        // a remote MP4 window's audio, kept by its video read
 	mp4tabs    []*mp4PlanTable // per track: the compact sample table the windows are built from (MP4 source)
 	mp4subs    []*mp4SubTable  // per subtitle rendition: its samples, text read on first use (MP4 source)
 	iframe     []byte          // trick-play playlist: MP4 plans build it eagerly (free, head-only);

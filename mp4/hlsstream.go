@@ -320,6 +320,9 @@ func (p *HLSPlan) dropOldestKept(need int64) bool {
 			freed = true
 		}
 	}
+	if windowBytesTotal.Load()+need > windowBytesBudget.Load() {
+		freed = p.share.reclaim(need) || freed // a remote MP4's kept audio
+	}
 	return freed
 }
 
@@ -798,14 +801,14 @@ func (h *ResourceHandle) writeRange(ctx context.Context, w io.Writer, off, n int
 	case h.plan.opts.Encrypt != nil:
 		return h.plan.writeAES(ctx, w, h, off, n)
 	}
-	return h.plan.writeSpans(ctx, w, h.head, h.table, h.ti, off, n)
+	return h.plan.writeSpans(ctx, w, h.head, h.table, h.ti, h.n, off, n)
 }
 
 // writeSpans writes [off, off+n) of track ti's segment in table t: the head
 // first, then each sample as its stripped header (if any) and its bytes from
 // the source, through one copier that gathers the small spans and hands the
 // large ones to the writer straight from the file.
-func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti int, off, n int64) (int64, error) {
+func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *windowTable, ti, win int, off, n int64) (int64, error) {
 	// Audio sits in short runs between video frames: read run by run, through the small frames only.
 	c := &spanCopier{exact: !p.tracks[ti].ft.outTrack.spec.video, wipe: p.encrypts(), read: &p.srcRead}
 	defer c.release()
@@ -858,6 +861,13 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 			}
 		}
 		pos += raw
+	}
+	if p.shareable(src) {
+		// A whole video segment reads its window's audio with it; an audio segment takes what that read kept.
+		whole := off == 0 && off+n >= int64(len(head))+t.segs[ti].dataLen
+		if shared, err := p.shareWindow(ctx, w, c, src, pieces, win, ti, whole); shared || err != nil {
+			return c.written, err
+		}
 	}
 	if ra, ok := src.(io.ReaderAt); ok && c.file == nil && c.exact && p.onNetwork(src) && rangeCount(pieces, remoteReadGap) <= remoteMaxRanges {
 		// A remote source answers a range exactly: only the samples' runs are asked for, those closer than remoteReadGap
