@@ -10,7 +10,7 @@ import (
 func TestStaleKeptSegmentsMakeRoom(t *testing.T) {
 	src := buildInterleavedSource(t, 60)
 	ctx := context.Background()
-	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 6000})
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 6000, SourceAccess: SourceNetwork})
 	if err != nil {
 		t.Fatal(err)
 	}

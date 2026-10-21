@@ -14,6 +14,14 @@ func copyFromSource(t *testing.T) {
 	t.Cleanup(func() { SetWindowBytes(0) })
 }
 
+// keptOptions is o with the source taken for a network one when kept: only a network source's walks keep segments.
+func keptOptions(kept bool, o Options) Options {
+	if kept {
+		o.SourceAccess = SourceNetwork
+	}
+	return o
+}
+
 // serveWindow opens and writes window n's video and first audio segments the way a viewer takes them.
 func serveWindow(t *testing.T, p *HLSPlan, n int) (video, audio []byte) {
 	t.Helper()
@@ -32,8 +40,8 @@ func serveWindow(t *testing.T, p *HLSPlan, n int) (video, audio []byte) {
 	return out[0].Bytes(), out[1].Bytes()
 }
 
-// TestKeptWindowServesWithoutRereading: the walk that builds a window's table
-// reads the whole window, so its segments are written from what it read - the
+// TestKeptWindowServesWithoutRereading: the walk that builds a network
+// source's window table reads the whole window, so its segments are written from what it read - the
 // source is not read a second time for the video nor for the audio - and the
 // bytes are Resource's. With the process-wide budget full (SetWindowBytes) the
 // table is built structure-only and the segments are copied from the source,
@@ -42,7 +50,7 @@ func TestKeptWindowServesWithoutRereading(t *testing.T) {
 	src := buildInterleavedSource(t, 20)
 	ctx := context.Background()
 	var tally ioTally
-	opts := Options{FS: tallyFS(&tally), SegmentMs: 2000, StreamFromFS: true, SourceAccess: SourceLocal}
+	opts := Options{FS: tallyFS(&tally), SegmentMs: 2000, StreamFromFS: true, SourceAccess: SourceNetwork}
 	plan, err := PlanHLS(ctx, src, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +108,37 @@ func TestKeptWindowServesWithoutRereading(t *testing.T) {
 	if !bytes.Equal(video, wantV) || !bytes.Equal(audio, wantA) {
 		t.Error("budget full: copied segments differ from Resource's")
 	}
-	if st := full.Stats(); st.KeptSegments != 0 || st.KeptFallbacks != 1 {
-		t.Errorf("budget full: kept %d segments, %d fallbacks, want 0 and 1", st.KeptSegments, st.KeptFallbacks)
+	if st := full.Stats(); st.KeptSegments != 1 || st.KeptFallbacks != 1 { // the light audio rides in a network source's table
+		t.Errorf("budget full: kept %d segments, %d fallbacks, want 1 (the audio) and 1", st.KeptSegments, st.KeptFallbacks)
+	}
+}
+
+// A local file's walk keeps nothing, budget or not: its segments are copied from
+// the page cache the walk just filled, the bytes Resource's (keeping them cost a
+// peak of twice the budget for no read saved, measured).
+func TestLocalWindowKeepsNothing(t *testing.T) {
+	src := buildInterleavedSource(t, 20)
+	ctx := context.Background()
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000, SourceAccess: SourceLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := PlanHLS(ctx, src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 1; n < 4; n++ {
+		video, audio := serveWindow(t, plan, n)
+		wantV, _, _ := ref.Resource(ctx, ref.SegmentName(n))
+		wantA, _, _ := ref.Resource(ctx, fmt.Sprintf("seg_a1_%05d.m4s", n+1))
+		if !bytes.Equal(video, wantV) || !bytes.Equal(audio, wantA) {
+			t.Errorf("window %d: copied segments differ from Resource's", n)
+		}
+	}
+	if st := plan.Stats(); st.KeptSegments != 0 || st.StreamedSegments != 6 {
+		t.Errorf("kept %d, streamed %d, want 0 and 6", st.KeptSegments, st.StreamedSegments)
+	}
+	if held := windowBytesTotal.Load(); held != 0 {
+		t.Errorf("%d window bytes held by a local source", held)
 	}
 }

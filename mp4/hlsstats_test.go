@@ -115,7 +115,7 @@ func TestHLSPlanStatsCountsStreamedBytes(t *testing.T) {
 			}
 			src, _ := zeroTailMKV(t, 0)
 			ctx := context.Background()
-			plan, err := PlanHLS(ctx, src, Options{SegmentMs: 2000})
+			plan, err := PlanHLS(ctx, src, keptOptions(kept, Options{SegmentMs: 2000}))
 			if err != nil {
 				t.Fatal(err)
 			}

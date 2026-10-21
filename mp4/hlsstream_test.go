@@ -105,7 +105,7 @@ func TestOpenStreamsIdenticalBytes(t *testing.T) {
 				if name == "open-gop" {
 					segMs = openGOPMs
 				}
-				plan, err := PlanHLS(ctx, src, Options{SegmentMs: segMs})
+				plan, err := PlanHLS(ctx, src, keptOptions(kept, Options{SegmentMs: segMs}))
 				if err != nil {
 					t.Fatal(err)
 				}

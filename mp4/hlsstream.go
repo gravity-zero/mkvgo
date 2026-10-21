@@ -63,6 +63,7 @@ func init() { windowBytesBudget.Store(256 << 20) }
 
 // SetWindowBytes caps, process-wide, the video segments Open keeps from the walks that built them (held until written
 // whole or closed) rather than copying them from the source again; zero restores the default of 256 MiB, negative keeps nothing.
+// Only a network source's walks keep: a local file's copy is read from the page cache the walk just filled.
 func SetWindowBytes(total int64) {
 	switch {
 	case total == 0:
@@ -375,14 +376,15 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		segEnd = p.bounds[n+1]
 	}
 	// The walk reads the whole window whatever it keeps (every payload sits
-	// under the reader's seek threshold): under the window budget it keeps
-	// the segments it read - the video, each light audio - for the Opens
-	// that take them, so serving the window reads the source once. Over the
-	// budget, headers only: each sample's bytes are copied from the file at
+	// under the reader's seek threshold): a network source's walk keeps,
+	// under the window budget, the segments it read - the video, each light
+	// audio - for the Opens that take them, so serving the window reads the
+	// source once. A local file's copy comes from the page cache the walk
+	// just filled. Otherwise headers only: each sample's bytes are copied from the file at
 	// its offset when served, and only a network source's light audio rides
 	// in the table (read with the walk, it costs no round trip of its own).
 	est := p.windowSpan(n)
-	keep := est > 0 && est <= maxWindowInPlace && (reserveWindowBytes(est) || p.reclaimKept(est) && reserveWindowBytes(est))
+	keep := est > 0 && est <= maxWindowInPlace && p.networkSrc(ctx) && (reserveWindowBytes(est) || p.reclaimKept(est) && reserveWindowBytes(est))
 	keepAudio := !keep && p.otherEstimate(n) <= audioInTableBytes && p.networkSrc(ctx)
 	windows, nextPts, inPlace, err := p.walkWindow(ctx, n, segStart, segEnd, !keep, keepAudio)
 	if err != nil {
