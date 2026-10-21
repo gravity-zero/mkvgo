@@ -529,7 +529,15 @@ it was built (the build's own walks are not counted), cumulative and whatever
 the source (Matroska or MP4, a local file or a custom FS): every window walk,
 table, streamed segment and subtitle scan - the figure a server sums over its
 live and evicted plans to know what it reads, where the process's own I/O
-counters are out of reach.
+counters are out of reach. It is the sum of `WalkReadBytes`, what reading
+windows took (a Matroska window's walk, its reads ahead or far, the checks
+of foreign blocks, the subtitle cues), and `CopyReadBytes`, what writing
+segments took (a streamed segment in the clear or AES-128, a CENC segment's
+samples, an MP4 segment built whole, a remote MP4 window's shared read). An
+MP4 source has no walk. The three count bytes asked of the source, not
+physical reads: a local Matroska segment's copy re-reads from the page cache
+what its walk just read and counts it again, so on a local file
+`CopyReadBytes` says what the copies asked, not what the disk did.
 
 ```go
 st := plan.Stats()

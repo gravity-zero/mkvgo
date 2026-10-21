@@ -6,6 +6,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `HLSPlanStats.WalkReadBytes` and `CopyReadBytes` split `SourceReadBytes`,
+  which stays their sum: what reading windows took (a Matroska window's walk,
+  its reads ahead or far, foreign-block checks, subtitle cues) and what
+  writing segments took (a streamed segment in the clear or AES-128, a CENC
+  segment's samples, an MP4 segment built whole, a remote MP4 window's shared
+  read). An MP4 source has no walk. The three count bytes asked of the
+  source, not physical reads: a local Matroska segment's copy re-reads from
+  the page cache what its walk read, and counts it again.
+
 ### Changed
 
 - A remote MP4's video segment reads its window's span with the audio stored
