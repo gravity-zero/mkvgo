@@ -26,6 +26,14 @@ All notable changes to mkvgo are documented here. The format is based on
   second on a remote source peaked at 130 MB (MP4) and 142 MB (Matroska)
   instead of 137 and 191, at the same CPU per request.
 
+### Fixed
+
+- `hash` picks its engine from the file's first bytes, as `diagnose` does,
+  not from its extension. A Matroska named `.mp4` is hashed instead of being
+  told to remux, an MP4 named `.mkv` gets the MP4 answer (`to-mp4 --hash`)
+  instead of "not Matroska/WebM", and an MPEG-TS or M2TS named `.mp4` is
+  refused as MPEG-TS instead of getting the MP4 answer.
+
 ## [0.59.1] - 2026-10-22
 
 ### Fixed
