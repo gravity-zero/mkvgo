@@ -8,6 +8,17 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ### Added
 
+- `matroska.ErrMPEGTS` (and `mkv.ErrMPEGTS`): the error `mp4.ErrMPEGTS` is,
+  now returned by every reader. An MPEG transport stream or a Blu-ray M2TS
+  handed to the Matroska reader (`Open`, `OpenMeta`, `ReadStream`), to the
+  content dispatch (`mkvgo.Diagnose`, `EditInPlace`) or to the repairs
+  (`Reindex`, `Salvage`) is refused as "MPEG-TS detected: mkvgo does not read
+  MPEG transport streams; remux the file to MP4 or Matroska first", whatever
+  its name. They answered "ebml header: expected EBML header (0x1A45DFA3), got
+  0x4740", or for an M2TS "invalid element ID: 5-octet VINT exceeds 4-octet
+  limit", and the dispatch missed M2TS. It is not `ErrNotMatroska`, which sends
+  a caller to the MP4 reader. The dispatch now asks three packets in a row, as
+  the MP4 reader does, where it took two.
 - `serve --memory-limit <MiB>` (off by default) sets the Go runtime's soft
   memory limit, as `GOMEMLIMIT` does. The window budget bounds the bytes kept,
   not the peak: the collector lets the heap grow to about twice what is live,
