@@ -6,6 +6,13 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- `RemuxToHLS` (`to-hls`) read each keyframe twice since 0.59.0: once for its
+  segment, then back from the segment just written for its I-frame fragment,
+  2-3 % of the source read again. It reads it once for both; the files written
+  are unchanged.
+
 ## [0.59.0] - 2026-10-22
 
 ### Breaking
