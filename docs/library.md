@@ -2199,6 +2199,7 @@ Refusals are explicit AND typed - route on `errors.Is` instead of parsing messag
 | `ErrUnknownSizeSegment` | Streamed (unknown-size) Segment - in-place engines only; the automatic mode routes it to the rewrite by itself. |
 | `ErrCorruptSource` | The source does not parse (also wrapped by `Reindex`'s strict refusals): repair first - `Reindex` with `Options.Resync`, or `Salvage` - then retry. |
 | `ErrNotMatroska` | The content is not Matroska at all (e.g. an MP4 disguised as `.mkv`): reroute, never retry. |
+| `ErrMPEGTS` | The content is an MPEG transport stream or a Blu-ray M2TS, whatever its name: mkvgo does not read MPEG-TS, remux it to MP4 or Matroska first. The same error from every reader, the dispatch (`mkvgo.Diagnose`) and the repairs (`matroska.ErrMPEGTS` is `mp4.ErrMPEGTS`); never `ErrNotMatroska`, which sends a caller to the MP4 reader. |
 
 Cues that mix shifted and unshifted tracks refuse the in-place engine only (the rewrite regenerates the index and lifts it, so the automatic mode never surfaces it). Trailing junk past the declared Segment end never blocks the rewrite engine: it is dropped from the output and reported through `Options.OnSkip` (see Reindex below). `Options.DeepVerify` re-walks the file afterwards and checks every shifted track's first block moved by exactly the requested shift, on top of the always-on read-back verification of every patch.
 
