@@ -6,6 +6,27 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Breaking
+
+- Trick play: each entry of `iframe.m3u8` is a fragment of its own,
+  `iframeNNNNN.m4s` (the I-frame of `segNNNNN.m4s`), holding the segment's
+  leading keyframe alone behind a moof listing it alone, instead of an
+  `EXT-X-BYTERANGE` into the segment. A byte range handed a player a trun
+  listing every sample of the segment with only the first one present, and
+  Chrome's Media Source refused the second I-frame appended ("Failed to
+  prepare video sample for decode"): trick play showed one frozen image.
+  `RemuxToHLS` writes these files beside the segments (a keyframe's size
+  each, unless `NoIFrames`); a plan serves them through `Resource` and
+  `Open` (one read of the keyframe from the source) and lists them in
+  `Resources()`, a Matroska plan once `iframe.m3u8` was built. A server that
+  routes by name must hand these names to the plan.
+
+### Fixed
+
+- A Matroska plan's `iframe.m3u8` for a video track stored compressed
+  (zlib, bzlib, LZO) sized each I-frame from its compressed block; it reads
+  the blocks to size them inflated, as the full pass does.
+
 ## [0.58.0] - 2026-10-22
 
 ### Added
