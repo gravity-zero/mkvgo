@@ -259,7 +259,9 @@ mkvgo hash <file.mkv> [-o <out.mkv>]
 
 MP4s are hashed when mkvgo writes them instead: at remux time (`to-mp4 --hash`),
 then by every edit, split, join or mux of a hashed MP4, which hashes its own
-tracks. `hash` does not write MP4 hashes in place.
+tracks. `hash` does not write MP4 hashes in place. The first bytes decide, not
+the name: a Matroska named `.mp4` is hashed, an MP4 named `.mkv` gets the MP4
+answer, an MPEG-TS is refused by name.
 
 ```bash
 mkvgo hash archive.mkv                # in place
