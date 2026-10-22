@@ -21,7 +21,8 @@ func CmdHash(args []string) {
 		Fatal("usage: " + CmdUsage["hash"])
 	}
 	source := rest[0]
-	if isMP4Path(source) {
+	// The content routes, as in diagnose: an MP4 named .mkv gets the MP4 answer, a TS named .mp4 the MPEG-TS refusal.
+	if isMP4Content(source) {
 		Fatal("mkvgo hashes an MP4 when it writes one, not in place: remux it hashed with mkvgo to-mp4 --hash <in.mkv> <out.mp4>; an edit, split, join or mux of a hashed MP4 stays hashed")
 	}
 	GuardOverwrite(outPath) // "" (in-place) passes through
