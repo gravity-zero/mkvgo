@@ -19,7 +19,10 @@ All notable changes to mkvgo are documented here. The format is based on
   each, unless `NoIFrames`); a plan serves them through `Resource` and
   `Open` (one read of the keyframe from the source) and lists them in
   `Resources()`, a Matroska plan once `iframe.m3u8` was built. A server that
-  routes by name must hand these names to the plan.
+  routes by name must hand these names to the plan. The master's I-frame
+  `BANDWIDTH` follows: `to-hls` and an MP4 plan declare the fragments' exact
+  peak; a Matroska plan, whose master comes before any keyframe walk, keeps
+  declaring an upper bound, the bit rate of its peak segment.
 
 ### Fixed
 
