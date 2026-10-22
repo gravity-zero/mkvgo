@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-10-22
+
 ### Added
 
 - `matroska.ErrMPEGTS` (and `mkv.ErrMPEGTS`): the error `mp4.ErrMPEGTS` is,
