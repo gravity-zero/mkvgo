@@ -243,7 +243,7 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 	defer p.countWalk(&br)()
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(vid)
-	br.SetHeaderOnly(true)
+	br.SetHeaderOnly(p.tracks[p.videoIndex()].ft.outTrack.mkv.Compression.Verbatim()) // a compressed frame's size is its inflated one
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

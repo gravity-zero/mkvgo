@@ -822,13 +822,28 @@ func segmentWindow(ft *fragTrack, cursor *int, segStart, segEnd int64) trackSegm
 	return seg
 }
 
-// iframeRef locates one I-frame for the trick-play playlist: the containing
-// segment and the byte length from the segment start through the keyframe
-// sample (styp + moof + mdat header + first sample - segments are
-// keyframe-cut, so sample 0 IS the I-frame).
+// iframeRef locates one I-frame for the trick-play playlist: the segment it
+// opens (segments are keyframe-cut, so sample 0 IS the I-frame) and the
+// fragment that serves it alone, iframeNNNNN.m4s.
 type iframeRef struct {
-	seg    int   // 0-based segment index
-	length int64 // bytes from offset 0 covering the keyframe
+	seg    int    // 0-based segment index
+	length int64  // the fragment's bytes
+	head   []byte // the fragment's styp + moof + mdat header (on-demand Matroska plans)
+	off    int64  // where the keyframe's stored payload starts in the source (on-demand Matroska plans)
+	raw    uint32 // the stored payload's size
+}
+
+// iframeName is the resource serving segment seg's I-frame.
+func iframeName(seg int) string { return fmt.Sprintf("iframe%05d.m4s", seg+1) }
+
+// iframeSegment is seg's leading keyframe alone: what its I-frame fragment frames, a player appending each one
+// after the other without the rest of the segment its trun would otherwise list.
+func iframeSegment(seg trackSegment) trackSegment {
+	one := seg
+	one.samples = seg.samples[:1]
+	one.dataLen = int64(seg.samples[0].size)
+	one.hasCTS = windowHasCTS(one.samples)
+	return one
 }
 
 // writeSegments writes each rendition's .m4s per boundary interval and returns
@@ -880,8 +895,10 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				cipherData = cipher
 			}
 			head := buildSegmentFile(uint32(k+1), seg)
-			if ft == video && !o.NoIFrames && len(seg.samples) > 0 && seg.samples[0].sync {
-				iframes = append(iframes, iframeRef{seg: k, length: int64(len(head)) + int64(seg.samples[0].size)})
+			var ifrHead []byte // this segment's I-frame fragment head, written once the segment is
+			if ft == video && !o.NoIFrames && o.Encrypt == nil && o.CENC == nil && len(seg.samples) > 0 && seg.samples[0].sync {
+				ifrHead = buildSegmentFile(uint32(k+1), iframeSegment(seg))
+				iframes = append(iframes, iframeRef{seg: k, length: int64(len(ifrHead)) + int64(seg.samples[0].size)})
 			}
 			var fileBytes int64
 			switch {
@@ -923,6 +940,11 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				if werr != nil {
 					return nil, nil, werr
 				}
+				if ifrHead != nil {
+					if err := writeIframe(fs, dir, k, ifrHead, filepath.Join(dir, renditionSegment(fts, i, k)), int64(len(head)), seg.samples[0].size); err != nil {
+						return nil, nil, err
+					}
+				}
 				fileBytes = int64(len(head)) + seg.dataLen
 			}
 			segBytes += fileBytes
@@ -959,6 +981,21 @@ func segmentFileLen(seg trackSegment) int64 {
 	)
 	traf := int64(smallBoxHeaderLen + tfhd + tfdt + trun)
 	return styp + smallBoxHeaderLen + mfhd + traf + int64(len(seg.samples))*perSample + mdatHeaderLen
+}
+
+// writeIframe writes segment k's I-frame fragment: head, then the keyframe read back from the segment file just
+// written at off, so it holds the very bytes the segment does.
+func writeIframe(fs *mkv.FS, dir string, k int, head []byte, segPath string, off int64, size uint32) error {
+	f, err := fs.DoOpen(segPath)
+	if err != nil {
+		return err
+	}
+	key, err := readSample(f, off, size)
+	f.Close()
+	if err != nil {
+		return errf("read back keyframe: %w", err)
+	}
+	return fs.DoWriteFile(filepath.Join(dir, iframeName(k)), append(head, key...), 0o644)
 }
 
 func buildSegmentFile(seq uint32, seg trackSegment) []byte {
@@ -1271,9 +1308,8 @@ func dursOf(segs []segInfo) []float64 {
 }
 
 // buildIFramePlaylist renders the trick-play playlist (EXT-X-I-FRAMES-ONLY):
-// one entry per segment-leading keyframe, as a byte range from the segment
-// start through the keyframe sample (styp + moof + mdat header + sample 0  -
-// what a player needs to decode just that I-frame).
+// one entry per segment-leading keyframe, its fragment of its own (a byte
+// range of the segment would hand a player a trun listing samples it lacks).
 func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes []iframeRef) []byte {
 	rw := urlRewriter(o)
 	var max float64
@@ -1288,8 +1324,7 @@ func buildIFramePlaylist(o *Options, fts []*fragTrack, durs []float64, iframes [
 	b = append(b, "#EXT-X-PLAYLIST-TYPE:VOD\n"...)
 	b = append(b, fmt.Sprintf("#EXT-X-MAP:URI=%s\n", hlsURI(rw("init.mp4")))...)
 	for _, ifr := range iframes {
-		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n#EXT-X-BYTERANGE:%d@0\n%s\n",
-			durs[ifr.seg], ifr.length, uriLine(rw(fmt.Sprintf("seg%05d.m4s", ifr.seg+1))))...)
+		b = append(b, fmt.Sprintf("#EXTINF:%.3f,\n%s\n", durs[ifr.seg], uriLine(rw(iframeName(ifr.seg))))...)
 	}
 	b = append(b, "#EXT-X-ENDLIST\n"...)
 	return b
@@ -1363,6 +1398,10 @@ func isPackagedName(rel string) bool {
 			}
 			return r == ".mp4"
 		}
+	}
+	if r, ok := strings.CutPrefix(rel, "iframe"); ok {
+		r, ok = leadingDigits(r)
+		return ok && r == ".m4s"
 	}
 	if r, ok := strings.CutPrefix(rel, "seg"); ok {
 		if a, ok := strings.CutPrefix(r, "_a"); ok {

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -694,11 +695,18 @@ func (p *HLSPlan) InitSegment() []byte { return p.inits[p.videoIndex()] }
 // DASH manifest (same CMAF segments, second manifest), then per rendition its
 // media playlist, init segment and media segments (video first, then each
 // audio track), and each subtitle rendition (its HLS playlist and its WebVTT).
+// The I-frame fragments iframe.m3u8 names are listed beside it, a Matroska
+// plan's once that playlist was built.
 // Serving a presentation is: answer any of these names through Resource.
 func (p *HLSPlan) Resources() []string {
 	names := []string{"master.m3u8"}
 	if p.iframe != nil || p.hasIframe {
 		names = append(names, "iframe.m3u8")
+		p.iframeMu.Lock()
+		for _, ifr := range p.iframes { // a Matroska plan's, once iframe.m3u8 was built
+			names = append(names, iframeName(ifr.seg))
+		}
+		p.iframeMu.Unlock()
 	}
 	if p.mpd != nil {
 		names = append(names, "manifest.mpd")
@@ -760,6 +768,10 @@ func (p *HLSPlan) Resource(ctx context.Context, name string) ([]byte, string, er
 	var n int
 	if _, err := fmt.Sscanf(name, "seg%d.m4s", &n); err == nil && name == fmt.Sprintf("seg%05d.m4s", n) {
 		data, err := p.segmentTrack(ctx, p.videoIndex(), n-1)
+		return data, mimeSeg, err
+	}
+	if strings.HasPrefix(name, "iframe") {
+		data, err := p.iframeFragment(ctx, name)
 		return data, mimeSeg, err
 	}
 	var a int

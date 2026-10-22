@@ -125,6 +125,9 @@ func isConcatSuperseded(name string) bool {
 		return true
 	}
 	var n int
+	if _, err := fmt.Sscanf(name, "iframe%d.m4s", &n); err == nil && name == fmt.Sprintf("iframe%05d.m4s", n) {
+		return true // that playlist's fragments
+	}
 	if _, err := fmt.Sscanf(name, "audio%d.m3u8", &n); err == nil && name == fmt.Sprintf("audio%d.m3u8", n) {
 		return true
 	}

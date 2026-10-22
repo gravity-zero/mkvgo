@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -43,102 +44,93 @@ func mp4box(b []byte, typ string) (off, headerLen, size int, ok bool) {
 	return 0, 0, 0, false
 }
 
-// mp4child is mp4box scoped to a container box's payload (skip its own header).
-func mp4child(b []byte, headerLen int, typ string) (off, hdr, size int, ok bool) {
-	o, h, s, found := mp4box(b[headerLen:], typ)
-	if !found {
-		return 0, 0, 0, false
-	}
-	return o + headerLen, h, s, true
-}
-
-// trunFirstSampleSize reads sample[0]'s size field from a trun box (as
-// buildTraf writes it: version 1, flags always carrying data_offset +
-// duration + size + flags, optionally + composition offset): 12 bytes of
-// fullbox header, 4 bytes sample_count, 4 bytes data_offset, 4 bytes
-// duration, then the size field.
-func trunFirstSampleSize(trun []byte) uint32 {
-	return binary.BigEndian.Uint32(trun[24:28])
-}
-
-func trunSampleCount(trun []byte) uint32 {
-	return binary.BigEndian.Uint32(trun[12:16])
-}
-
-// parseIframePlaylist extracts the (length, segment-name) pairs of an
-// EXT-X-BYTERANGE playlist, in order.
-func parseIframePlaylist(t *testing.T, pl []byte) (lengths []int, segs []string) {
+// parseIframePlaylist returns the URIs of an I-frame playlist, in order: each a resource of its own, never a byte range.
+func parseIframePlaylist(t *testing.T, pl []byte) []string {
 	t.Helper()
+	if bytes.Contains(pl, []byte("BYTERANGE")) {
+		t.Errorf("I-frame playlist addresses byte ranges:\n%s", pl)
+	}
+	var uris []string
 	lines := strings.Split(string(pl), "\n")
 	for i, l := range lines {
-		if !strings.HasPrefix(l, "#EXT-X-BYTERANGE:") {
-			continue
+		if strings.HasPrefix(l, "#EXTINF:") && i+1 < len(lines) {
+			uris = append(uris, lines[i+1])
 		}
-		lenStr, _, ok := strings.Cut(strings.TrimPrefix(l, "#EXT-X-BYTERANGE:"), "@")
-		if !ok {
-			t.Fatalf("malformed byterange line %q", l)
-		}
-		n, err := strconv.Atoi(lenStr)
-		if err != nil {
-			t.Fatalf("malformed byterange length %q: %v", lenStr, err)
-		}
-		if i+1 >= len(lines) {
-			t.Fatalf("byterange line with no following URI")
-		}
-		lengths = append(lengths, n)
-		segs = append(segs, lines[i+1])
 	}
-	return lengths, segs
+	return uris
 }
 
-// assertIframeSlice slices dir/segName at [0, length) and checks it box-parses
-// structurally: styp, moof (with a trun) and mdat all present, and the bytes
-// physically available for the mdat payload equal wantKeyframeSize exactly -
-// the trick-play contract (a player fetching this range gets exactly the
-// segment-opening keyframe's bytes, nothing more).
-func assertIframeSlice(t *testing.T, dir, segName string, length int, wantKeyframeSize int) {
+// assertIframeFragment checks an I-frame resource is a fragment of its own holding the segment's opening keyframe
+// alone: one sync sample, the segment's decode time, duration and composition offset, the same bytes, and nothing
+// after them. A negative
+// wantKeyframeSize takes the segment's.
+func assertIframeFragment(t *testing.T, name string, frag, seg []byte, wantKeyframeSize int) {
 	t.Helper()
-	full, err := os.ReadFile(filepath.Join(dir, segName))
+	if _, _, _, ok := mp4box(frag, "styp"); !ok {
+		t.Errorf("%s: no styp box", name)
+	}
+	ftfdt, fs := readFragment(t, frag)
+	stfdt, ss := readFragment(t, seg)
+	if len(fs) != 1 || !fs[0].sync {
+		t.Fatalf("%s: %d samples (sync %v), want the keyframe alone", name, len(fs), len(fs) > 0 && fs[0].sync)
+	}
+	if wantKeyframeSize < 0 {
+		wantKeyframeSize = len(ss[0].data)
+	}
+	if len(fs[0].data) != wantKeyframeSize || !bytes.Equal(fs[0].data, ss[0].data) || ftfdt != stfdt {
+		t.Errorf("%s: keyframe of %d bytes at %d, want the segment's %d bytes at %d", name, len(fs[0].data), ftfdt, len(ss[0].data), stfdt)
+	}
+	_, fdurs, fcts := segmentTiming(t, frag)
+	_, sdurs, scts := segmentTiming(t, seg)
+	if fdurs[0] != sdurs[0] || fcts[0] != scts[0] {
+		t.Errorf("%s: keyframe lasts %d at composition offset %d, want the segment's %d at %d", name, fdurs[0], fcts[0], sdurs[0], scts[0])
+	}
+	mdatOff, mdatHdr, mdatSize, ok := mp4box(frag, "mdat")
+	if !ok || mdatOff+mdatSize != len(frag) || mdatSize-mdatHdr != wantKeyframeSize {
+		t.Errorf("%s: mdat at %d of %d bytes in a %d-byte fragment, want the keyframe's %d bytes ending it", name, mdatOff, mdatSize, len(frag), wantKeyframeSize)
+	}
+}
+
+// assertIframeFragments checks the full pass in dir wrote each I-frame resource its playlist names as a fragment of
+// its segment's keyframe, and the plan lists and serves the same bytes.
+func assertIframeFragments(t *testing.T, dir string, plan *HLSPlan, keySize int) {
+	t.Helper()
+	pl, err := os.ReadFile(filepath.Join(dir, "iframe.m3u8"))
 	if err != nil {
-		t.Fatalf("read %s: %v", segName, err)
+		t.Fatal(err)
 	}
-	if length > len(full) {
-		t.Fatalf("%s: byterange length %d exceeds segment size %d", segName, length, len(full))
+	uris := parseIframePlaylist(t, pl)
+	if len(uris) < 5 {
+		t.Fatalf("fixture produced only %d I-frames, want 5+", len(uris))
 	}
-	slice := full[:length]
-
-	if _, _, _, ok := mp4box(slice, "styp"); !ok {
-		t.Errorf("%s[:%d]: no styp box", segName, length)
-	}
-	moofOff, moofHdr, moofSize, ok := mp4box(slice, "moof")
-	if !ok {
-		t.Fatalf("%s[:%d]: no moof box", segName, length)
-	}
-	moof := slice[moofOff : moofOff+moofSize]
-	trafOff, trafHdr, trafSize, ok := mp4child(moof, moofHdr, "traf")
-	if !ok {
-		t.Fatalf("%s[:%d]: moof has no traf", segName, length)
-	}
-	traf := moof[trafOff : trafOff+trafSize]
-	trunOff, _, trunSize, ok := mp4child(traf, trafHdr, "trun")
-	if !ok {
-		t.Fatalf("%s[:%d]: traf has no trun", segName, length)
-	}
-	trun := traf[trunOff : trunOff+trunSize]
-	if n := trunSampleCount(trun); n == 0 {
-		t.Errorf("%s[:%d]: trun declares 0 samples", segName, length)
-	}
-	if got := int(trunFirstSampleSize(trun)); got != wantKeyframeSize {
-		t.Errorf("%s[:%d]: trun sample[0].size = %d, want %d", segName, length, got, wantKeyframeSize)
-	}
-
-	mdatOff, mdatHdr, _, ok := mp4box(slice, "mdat")
-	if !ok {
-		t.Fatalf("%s[:%d]: no mdat box", segName, length)
-	}
-	if payload := len(slice) - (mdatOff + mdatHdr); payload != wantKeyframeSize {
-		t.Errorf("%s[:%d]: mdat payload available in the slice = %d bytes, want exactly the keyframe size %d",
-			segName, length, payload, wantKeyframeSize)
+	names := plan.Resources()
+	for _, uri := range uris {
+		var n int
+		if _, err := fmt.Sscanf(uri, "iframe%d.m4s", &n); err != nil || uri != fmt.Sprintf("iframe%05d.m4s", n) {
+			t.Fatalf("I-frame URI %q, want iframeNNNNN.m4s", uri)
+		}
+		frag, err := os.ReadFile(filepath.Join(dir, uri))
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("seg%05d.m4s", n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertIframeFragment(t, uri, frag, seg, keySize)
+		got, mime, err := plan.Resource(context.Background(), uri)
+		if err != nil {
+			t.Fatalf("Resource(%s): %v", uri, err)
+		}
+		if !bytes.Equal(got, frag) || mime != "video/iso.segment" {
+			t.Errorf("plan %s (%d bytes, %s) differs from the full pass's (%d bytes)", uri, len(got), mime, len(frag))
+		}
+		if !containsName(names, uri) {
+			t.Errorf("Resources() does not list %s", uri)
+		}
+		if !isPackagedName(uri) || !isPackagedName("v2/"+uri) {
+			t.Errorf("%s is not a packaged name", uri)
+		}
 	}
 }
 
@@ -184,11 +176,6 @@ func TestPlanHLSIframeMatroska(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullLens, fullSegs := parseIframePlaylist(t, fullIframe)
-	if len(fullSegs) < 5 {
-		t.Fatalf("fixture produced only %d I-frames, want 5+", len(fullSegs))
-	}
-
 	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 1000})
 	if err != nil {
 		t.Fatal(err)
@@ -216,10 +203,8 @@ func TestPlanHLSIframeMatroska(t *testing.T) {
 		t.Error("iframe.m3u8 changed across repeated requests")
 	}
 
-	// Every advertised byte range decodes to exactly the leading keyframe.
-	for i, segName := range fullSegs {
-		assertIframeSlice(t, dir, segName, fullLens[i], iframeTestKeySize)
-	}
+	// Every I-frame is a fragment of exactly the leading keyframe.
+	assertIframeFragments(t, dir, plan, iframeTestKeySize)
 
 	// The master advertises the trick-play variant, mirroring the MP4 path.
 	master, err := os.ReadFile(filepath.Join(dir, "master.m3u8"))
@@ -282,11 +267,6 @@ func TestPlanHLSIframeMatroska_ReorderedPTS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullLens, fullSegs := parseIframePlaylist(t, fullIframe)
-	if len(fullSegs) < 5 {
-		t.Fatalf("fixture produced only %d I-frames, want 5+", len(fullSegs))
-	}
-
 	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: gopMs})
 	if err != nil {
 		t.Fatal(err)
@@ -298,9 +278,7 @@ func TestPlanHLSIframeMatroska_ReorderedPTS(t *testing.T) {
 	if !bytes.Equal(planIframe, fullIframe) {
 		t.Errorf("plan iframe.m3u8 differs from the full pass with reordered PTS:\nplan: %s\nfull: %s", planIframe, fullIframe)
 	}
-	for i, segName := range fullSegs {
-		assertIframeSlice(t, dir, segName, fullLens[i], iframeTestKeySize)
-	}
+	assertIframeFragments(t, dir, plan, iframeTestKeySize)
 }
 
 // An encrypted presentation exposes no trick-play surface (an AES-CBC
@@ -426,5 +404,81 @@ func TestPlanHLSIframeMatroska_SkipsPayload(t *testing.T) {
 	if limit := st.Size() / 20; readBytes > limit {
 		t.Errorf("iframe.m3u8 build read %d of %d bytes (%.0f%%) - media payloads must be skipped, not read",
 			readBytes, st.Size(), 100*float64(readBytes)/float64(st.Size()))
+	}
+}
+
+// An MP4 source's I-frames are fragments of their own too, the plan's built from the sample table equal to the full
+// pass's files.
+func TestPlanHLSIframeMP4Source(t *testing.T) {
+	src := hlsplanMP4Source(t)
+	dir := t.TempDir()
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl, _, err := plan.Resource(context.Background(), "iframe.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full, _ := os.ReadFile(filepath.Join(dir, "iframe.m3u8")); !bytes.Equal(pl, full) {
+		t.Errorf("plan iframe.m3u8 differs from the full pass:\nplan: %s\nfull: %s", pl, full)
+	}
+	assertIframeFragments(t, dir, plan, 6)
+}
+
+// A keyframe stored compressed or header-stripped is served as the segment carries it: inflated, its stripped bytes
+// put back, the plan's fragment equal to the full pass's.
+func TestPlanHLSIframeStoredFrames(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var zblocks []genBlock
+	for i := 0; i < 150; i++ {
+		key := i%25 == 0
+		zblocks = append(zblocks, genBlock{track: 1, pts: int64(i) * 40, key: key, data: zlibBytes(iframeTestFrame(i, key))})
+	}
+	sources := map[string]string{
+		"zlib": buildMKV(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h,
+			Compression: mkv.CompressionZlib}}, zblocks),
+		"header stripping": lacedStripMKV(t, 1, true),
+	}
+	keySize := map[string]int{"zlib": iframeTestKeySize, "header stripping": len(cryptVecFrame(0))}
+	for kind, src := range sources {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 1000}); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 1000})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pl, _, err := plan.Resource(context.Background(), "iframe.m3u8")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if full, _ := os.ReadFile(filepath.Join(dir, "iframe.m3u8")); !bytes.Equal(pl, full) {
+				t.Errorf("plan iframe.m3u8 differs from the full pass:\nplan: %s\nfull: %s", pl, full)
+			}
+			assertIframeFragments(t, dir, plan, keySize[kind])
+		})
+	}
+}
+
+// A name that is no I-frame of the plan is refused, and a concatenation leaves its parts' fragments out with the
+// playlist naming them.
+func TestPlanHLSIframeNames(t *testing.T) {
+	plan, err := PlanHLS(context.Background(), hlsplanMP4Source(t), Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"iframe1.m4s", "iframe00000.m4s", "iframe99999.m4s", "iframe00001.mp4"} {
+		if _, _, err := plan.Resource(context.Background(), name); !errors.Is(err, ErrNoResource) {
+			t.Errorf("Resource(%s) = %v, want a missing resource", name, err)
+		}
+	}
+	if !isConcatSuperseded("iframe00001.m4s") || isConcatSuperseded("iframe1.m4s") {
+		t.Error("a concatenated part's I-frame fragments are not left out with its iframe.m3u8")
 	}
 }

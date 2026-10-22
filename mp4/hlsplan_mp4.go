@@ -143,7 +143,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
 			head := segmentFileLen(seg)
 			if ft == video && !o.NoIFrames && len(seg.samples) > 0 && seg.samples[0].sync {
-				iframes = append(iframes, iframeRef{seg: k, length: head + int64(seg.samples[0].size)})
+				iframes = append(iframes, iframeRef{seg: k, length: segmentFileLen(iframeSegment(seg)) + int64(seg.samples[0].size)})
 			}
 			segBytes += head + seg.dataLen
 			if !ft.outTrack.spec.video {

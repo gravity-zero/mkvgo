@@ -103,8 +103,8 @@ func assertPlanMatchesFullPass(t *testing.T, src string, segMs int64) (string, *
 		t.Fatal(err)
 	}
 	names := []string{"init.mp4", "playlist.m3u8", "manifest.mpd"}
-	if _, err := os.Stat(filepath.Join(dir, "iframe.m3u8")); err == nil {
-		names = append(names, "iframe.m3u8")
+	if pl, err := os.ReadFile(filepath.Join(dir, "iframe.m3u8")); err == nil {
+		names = append(append(names, "iframe.m3u8"), parseIframePlaylist(t, pl)...)
 	}
 	fts := plan.fts()
 	for n := 0; n < plan.NumSegments(); n++ {

@@ -89,16 +89,17 @@ func TestNoIFrames(t *testing.T) {
 			if strings.Join(kept, "") != string(off["master.m3u8"]) {
 				t.Errorf("master differs beyond the I-frame line:\n%s\nvs\n%s", on["master.m3u8"], off["master.m3u8"])
 			}
+			fragments := len(parseIframePlaylist(t, on["iframe.m3u8"]))
 			for name, b := range on {
-				if name == "iframe.m3u8" || name == "master.m3u8" {
+				if strings.HasPrefix(name, "iframe") || name == "master.m3u8" {
 					continue
 				}
 				if !bytes.Equal(off[name], b) {
 					t.Errorf("%s differs with NoIFrames", name)
 				}
 			}
-			if len(off) != len(on)-1 {
-				t.Errorf("%d files with NoIFrames, %d without", len(off), len(on))
+			if fragments == 0 || len(off) != len(on)-1-fragments {
+				t.Errorf("%d files with NoIFrames, %d without, of which %d I-frame fragments", len(off), len(on), fragments)
 			}
 		})
 
@@ -128,7 +129,13 @@ func TestNoIFrames(t *testing.T) {
 			}
 			// Every other resource is served and identical to the default plan's.
 			for _, name := range def.Resources() {
-				if name == "iframe.m3u8" || name == "master.m3u8" {
+				if strings.HasPrefix(name, "iframe") {
+					if _, _, err := plan.Resource(ctx, name); err == nil || !strings.Contains(err.Error(), "NoIFrames") {
+						t.Errorf("Resource(%s) = %v, want the NoIFrames refusal", name, err)
+					}
+					continue
+				}
+				if name == "master.m3u8" {
 					continue
 				}
 				want, _, err := def.Resource(ctx, name)

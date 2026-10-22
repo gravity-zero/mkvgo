@@ -462,7 +462,7 @@ func TestOpenMasterDeclaresIframesOnDemand(t *testing.T) {
 	if declared != variant {
 		t.Errorf("I-frame BANDWIDTH %d, want the variant's %d", declared, variant)
 	}
-	if peak := iframePeakBps(t, pl); declared < peak || peak <= 0 {
+	if peak := iframePeakBps(t, plan, pl); declared < peak || peak <= 0 {
 		t.Errorf("I-frame BANDWIDTH %d below the I-frames' measured peak %d", declared, peak)
 	}
 	strip := func(l string) string { return bwHLS.ReplaceAllString(l, "") }
@@ -476,17 +476,20 @@ func TestOpenMasterDeclaresIframesOnDemand(t *testing.T) {
 
 var bwHLS = regexp.MustCompile(`BANDWIDTH=\d+`)
 
-// iframePeakBps is an I-frame playlist's highest byte range over its EXTINF, in bits per second.
-func iframePeakBps(t *testing.T, pl []byte) int64 {
+// iframePeakBps is an I-frame playlist's largest resource over its EXTINF, in bits per second.
+func iframePeakBps(t *testing.T, plan *HLSPlan, pl []byte) int64 {
 	t.Helper()
 	var dur, peak float64
 	for _, l := range strings.Split(string(pl), "\n") {
 		switch {
 		case strings.HasPrefix(l, "#EXTINF:"):
 			dur, _ = strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(l, "#EXTINF:"), ","), 64)
-		case strings.HasPrefix(l, "#EXT-X-BYTERANGE:"):
-			n, _ := strconv.ParseFloat(strings.SplitN(strings.TrimPrefix(l, "#EXT-X-BYTERANGE:"), "@", 2)[0], 64)
-			if dur > 0 && n*8/dur > peak {
+		case strings.HasPrefix(l, "iframe"):
+			b, _, err := plan.Resource(context.Background(), l)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := float64(len(b)); dur > 0 && n*8/dur > peak {
 				peak = n * 8 / dur
 			}
 		}

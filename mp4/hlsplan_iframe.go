@@ -2,6 +2,8 @@ package mp4
 
 import (
 	"context"
+	"fmt"
+	"sort"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -67,22 +69,32 @@ func peakSegmentIframe(segs []segInfo) []iframeRef {
 // buildMatroskaIframePlaylist performs the one-time structure-only walk: for
 // every segment it collects the video track's samples (size/pts/blockPts/
 // sync, never the bytes) and feeds them to timeSegmentWindow - the very
-// derivation Segment(n) uses - to build the SAME trun/moof RemuxToHLS and
-// Segment(n) would write, byte for byte, since that derivation never touches
-// sample content. Each segment's I-frame byte range is then the moof's exact
-// length plus its leading (keyframe) sample's exact size.
+// derivation Segment(n) uses - so each I-frame fragment carries the timing
+// RemuxToHLS writes, and where its keyframe lies in the source.
 func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []iframeRef, error) {
 	vi := p.videoIndex()
 	pt := p.tracks[vi]
 	windows := make([][]fragSample, p.segCount)
 
+	stored := make([]segSample, p.segCount) // each window's first frame, where it lies in the source
 	k := 0
 	err := p.walkVideoHeadersOnly(ctx, func(b mkv.Block) (bool, error) {
 		for k+1 < p.segCount && b.BlockTimecode >= p.bounds[k+1] {
 			k++
 		}
+		size := uint32(int64(len(pt.ft.outTrack.mkv.HeaderStripping)) + b.Size)
+		if b.Data != nil {
+			data, err := pt.ft.outTrack.mkv.DecodePayload(b.Data)
+			if err != nil {
+				return false, err
+			}
+			size = uint32(len(data))
+		}
+		if len(windows[k]) == 0 {
+			stored[k] = segSample{off: b.DataOffset, end: b.DataOffset + b.Size}
+		}
 		windows[k] = append(windows[k], fragSample{
-			size:       uint32(int64(len(pt.ft.outTrack.mkv.HeaderStripping)) + b.Size),
+			size:       size,
 			ptsMs:      b.Timecode,
 			blockPtsMs: b.BlockTimecode,
 			sync:       b.Keyframe,
@@ -111,9 +123,10 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 				ts.dataLen += int64(s.size)
 			}
 		}
-		head := buildSegmentFile(uint32(seg+1), ts)
 		if len(window) > 0 && window[0].sync {
-			iframes = append(iframes, iframeRef{seg: seg, length: int64(len(head)) + int64(window[0].size)})
+			head := buildSegmentFile(uint32(seg+1), iframeSegment(ts))
+			iframes = append(iframes, iframeRef{seg: seg, length: int64(len(head)) + int64(window[0].size),
+				head: head, off: stored[seg].off, raw: uint32(stored[seg].end - stored[seg].off)})
 		}
 	}
 	if len(iframes) == 0 {
@@ -121,4 +134,52 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 	}
 	fts := p.fts()
 	return buildIFramePlaylist(&p.opts, fts, p.durs, iframes), iframes, nil
+}
+
+// iframeFragment builds the I-frame fragment name serves: the leading keyframe of its segment alone, behind a moof
+// listing it alone, read straight from the source.
+func (p *HLSPlan) iframeFragment(ctx context.Context, name string) ([]byte, error) {
+	var n int
+	if _, err := fmt.Sscanf(name, "iframe%d.m4s", &n); err != nil || name != iframeName(n-1) {
+		return nil, noResource("unknown HLS resource %q (see Resources())", name)
+	}
+	if _, err := p.iframePlaylist(ctx); err != nil {
+		return nil, err
+	}
+	x := sort.Search(len(p.iframes), func(i int) bool { return p.iframes[i].seg >= n-1 })
+	if x == len(p.iframes) || p.iframes[x].seg != n-1 {
+		return nil, noResource("no I-frame %d: segment %d does not open on a keyframe or is out of range (see iframe.m3u8)", n, n)
+	}
+	if err := p.checkSource(); err != nil {
+		return nil, err
+	}
+	ifr := p.iframes[x]
+	var prefix []byte
+	t := &p.tracks[p.videoIndex()].ft.outTrack.mkv
+	if p.mp4src {
+		seg, offs := p.mp4Segment(p.videoIndex(), ifr.seg)
+		ifr.head, ifr.off, ifr.raw = buildSegmentFile(uint32(ifr.seg+1), iframeSegment(seg)), offs[0], seg.samples[0].size
+	} else if t.Compression.Verbatim() {
+		prefix = t.HeaderStripping
+	}
+	src, err := p.openSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	raw, err := readSample(countedSource{src, &p.copyRead}, ifr.off, ifr.raw)
+	if err != nil {
+		return nil, errf("read keyframe: %w", err)
+	}
+	if !p.mp4src && !t.Compression.Verbatim() {
+		if raw, err = t.DecodePayload(raw); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]byte, 0, int(ifr.length))
+	out = append(append(append(out, ifr.head...), prefix...), raw...)
+	if int64(len(out)) != ifr.length {
+		return nil, errf("I-frame %d: %d bytes, the playlist's walk counted %d (the source changed? plan it again)", n, len(out), ifr.length)
+	}
+	return out, nil
 }
