@@ -609,11 +609,12 @@ serves `Open` from memory and counts it in `Stats().StreamFallbacks`; an encrypt
 is never served in the clear, and the pooled buffers that held its plaintext
 go back zeroed. `mkvhttp.Handler` uses `Open` on its own; a write
 that fails midway must end as a broken connection, never a short body a player
-could take for a whole segment. The budget bounds the bytes kept, not the process's peak memory: a window
-given back waits for the collector, so the peak can reach about twice the
-budget over the rest of the process (measured: 64 MiB of kept audio under
-random requests on a remote MP4, peak 41 MiB to 153 MiB), unless
-`GOMEMLIMIT` bounds the heap.
+could take for a whole segment. The budget bounds the bytes kept, not the process's peak memory: the Go
+collector lets the heap grow to about twice what is live, kept windows included, so the peak can reach about
+twice the budget over the rest of the process. The caller bounds the peak with `GOMEMLIMIT`
+(`debug.SetMemoryLimit`), as a server embedding mkvgo does: with the limit at the budget plus 64 MiB, 100
+random requests a second on a remote source peaked at 130 MB (MP4) and 142 MB (Matroska) instead of 137 and
+191, at the same CPU per request; `GOGC=25` peaked lower but cost 10 % more CPU per Matroska request.
 
 **How the source is read: `Options.SourceAccess`.** A streamed segment is read
 one way from a local disk and another across a network. Local: the byte ranges
