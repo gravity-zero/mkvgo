@@ -38,3 +38,14 @@ func TestSEC08_ServeGrowingCORSOptIn(t *testing.T) {
 		t.Error("serve-growing: --cors ignored")
 	}
 }
+
+// TestServeAdmissionByDefault: serve bounds what it serves at once and queues the rest out of the box, the bound that kept
+// it alive at 1200 req/s offered where an unbounded serve ran out of memory.
+func TestServeAdmissionByDefault(t *testing.T) {
+	if o := parseServeFlags([]string{"in.mkv"}).httpOptions(false); o.MaxInFlight != 64 || o.MaxWaiting != 1024 {
+		t.Errorf("default admission: in flight %d, waiting %d, want 64 and 1024", o.MaxInFlight, o.MaxWaiting)
+	}
+	if o := parseServeFlags([]string{"in.mkv", "--max-in-flight", "0", "--max-waiting", "8"}).httpOptions(false); o.MaxInFlight != 0 || o.MaxWaiting != 8 {
+		t.Errorf("--max-in-flight 0 --max-waiting 8: in flight %d, waiting %d", o.MaxInFlight, o.MaxWaiting)
+	}
+}
