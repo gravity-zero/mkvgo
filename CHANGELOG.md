@@ -6,6 +6,15 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `serve --memory-limit <MiB>` (off by default) sets the Go runtime's soft
+  memory limit, as `GOMEMLIMIT` does. The window budget bounds the bytes kept,
+  not the peak: the collector lets the heap grow to about twice what is live,
+  kept windows included. At the budget plus 64 MiB, 100 random requests a
+  second on a remote source peaked at 130 MB (MP4) and 142 MB (Matroska)
+  instead of 137 and 191, at the same CPU per request.
+
 ## [0.59.1] - 2026-10-22
 
 ### Fixed
