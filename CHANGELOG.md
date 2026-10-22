@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-10-22
+
 ### Fixed
 
 - `RemuxToHLS` (`to-hls`) read each keyframe twice since 0.59.0: once for its
