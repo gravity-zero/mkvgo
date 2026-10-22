@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/mpegts"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -1248,7 +1249,11 @@ func lastCueMs(cues []mkv.CuePoint) int64 {
 // copyEBMLHeaderVerbatim reads the source EBML header from r and writes it byte
 // for byte to out, so the DocType (e.g. "webm") is preserved across a rewrite.
 // Returns the source bytes consumed. Shared by reindexCopy and salvageCopy.
-func copyEBMLHeaderVerbatim(r io.Reader, out io.Writer, rb *rollbackBuilder) (int64, error) {
+// A transport stream is refused by name: repairing it would mean remuxing it.
+func copyEBMLHeaderVerbatim(r *bufio.Reader, out io.Writer, rb *rollbackBuilder) (int64, error) {
+	if head, _ := r.Peek(mpegts.PrefixLen); mpegts.Prefix(head) {
+		return 0, mkv.ErrMPEGTS
+	}
 	ebmlHdr, hdrBytes, err := ebml.ReadElementHeader(r)
 	if err != nil {
 		return 0, fmt.Errorf("read EBML header: %w", err)

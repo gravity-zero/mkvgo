@@ -25,6 +25,7 @@ import (
 	"io"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/mpegts"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -181,6 +182,9 @@ func ReadStream(ctx context.Context, r io.Reader) (*mkv.Container, *BlockReader,
 	br0 := bufio.NewReaderSize(r, streamResyncWindow)
 	r = br0
 	p := &streamParser{r: r, ctx: ctx, metaBudget: maxMetadataBytes}
+	if head, _ := br0.Peek(mpegts.PrefixLen); mpegts.Prefix(head) {
+		return nil, nil, mkv.ErrMPEGTS
+	}
 
 	// EBML header.
 	h, _, err := p.readHeader()

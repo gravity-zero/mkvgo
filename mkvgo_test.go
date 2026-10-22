@@ -2,6 +2,7 @@ package mkvgo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,21 +152,34 @@ func TestRetimeTracksUnknownContainer(t *testing.T) {
 	}
 }
 
-// TestSniffNamesMPEGTS: a transport stream (0x47 sync every 188 bytes) is
-// named as MPEG-TS with remux guidance, not lumped into "unrecognised" - a
-// common mislabel that a bare "not a container" message leaves the user
-// guessing about.
+// TestSniffNamesMPEGTS: a transport stream (0x47 sync every 188 bytes) or an M2TS (every 192 after a timecode) is
+// refused as MPEG-TS whatever its name, by the dispatch and by the Matroska reader alike, one error for both
+// (matroska.ErrMPEGTS is mp4.ErrMPEGTS), not lumped into "unrecognised" or an EBML parse error.
 func TestSniffNamesMPEGTS(t *testing.T) {
-	ts := make([]byte, 200)
-	ts[0] = 0x47   // first packet sync
-	ts[188] = 0x47 // next packet sync, confirming the 188-byte cadence
-	path := filepath.Join(t.TempDir(), "stream.mp4")
-	if err := os.WriteFile(path, ts, 0o644); err != nil {
-		t.Fatal(err)
+	packets := func(prefix, stride int) []byte {
+		b := make([]byte, 20*stride)
+		for i := range 20 {
+			b[i*stride+prefix] = 0x47
+		}
+		return b
 	}
-	_, err := Diagnose(context.Background(), path)
-	if err == nil || !strings.Contains(err.Error(), "MPEG-TS") {
-		t.Errorf("MPEG-TS must be named, got %v", err)
+	for _, c := range []struct {
+		name string
+		data []byte
+	}{{"ts", packets(0, 188)}, {"m2ts", packets(4, 192)}} {
+		for _, ext := range []string{".mp4", ".mkv", ".ts"} {
+			path := filepath.Join(t.TempDir(), c.name+ext)
+			if err := os.WriteFile(path, c.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Diagnose(context.Background(), path)
+			if !errors.Is(err, mp4.ErrMPEGTS) || !errors.Is(err, matroska.ErrMPEGTS) || !strings.Contains(err.Error(), "MPEG-TS detected") {
+				t.Errorf("Diagnose %s%s: %v, want the MPEG-TS refusal", c.name, ext, err)
+			}
+			if _, err := matroska.Open(context.Background(), path); !errors.Is(err, matroska.ErrMPEGTS) {
+				t.Errorf("matroska.Open %s%s: %v, want matroska.ErrMPEGTS", c.name, ext, err)
+			}
+		}
 	}
 
 	// A lone 0x47 with no second sync stays "unrecognised": one byte is not a
@@ -177,7 +191,7 @@ func TestSniffNamesMPEGTS(t *testing.T) {
 	if err := os.WriteFile(lonePath, lone, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Diagnose(context.Background(), lonePath)
+	_, err := Diagnose(context.Background(), lonePath)
 	if err == nil || !strings.Contains(err.Error(), "unrecognised") {
 		t.Errorf("a lone 0x47 must stay unrecognised, got %v", err)
 	}

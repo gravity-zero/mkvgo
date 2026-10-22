@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/mpegts"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -53,10 +54,7 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	c := &mkv.Container{Path: path}
 
 	if err := p.parseEBMLHeader(c); err != nil {
-		if looksLikeISOBMFF(r) {
-			return nil, fmt.Errorf("%s: %w", shown.Path(path), ErrNotMatroska)
-		}
-		return nil, fmt.Errorf("ebml header: %w", err)
+		return nil, notMatroska(r, path, err)
 	}
 	if err := p.parseSegment(ctx, c); err != nil && !tolerableTailError(err, c) {
 		return nil, fmt.Errorf("segment: %w", err)
@@ -96,6 +94,18 @@ var ErrNotMatroska = errors.New("not Matroska/WebM (looks like ISO base media / 
 // looksLikeISOBMFF peeks the first box header to tell an MP4-family file from
 // genuinely-corrupt Matroska: ISOBMFF opens with [size][type] where type is a
 // known box. Best-effort; a read/seek failure just reports false.
+// notMatroska is the error for a source whose EBML header did not parse: ErrNotMatroska for an MP4, the MPEG-TS
+// refusal for a transport stream, else the header's own error.
+func notMatroska(r io.ReadSeeker, path string, err error) error {
+	switch {
+	case looksLikeISOBMFF(r):
+		return fmt.Errorf("%s: %w", shown.Path(path), ErrNotMatroska)
+	case mpegts.At(r, -1): // not ErrNotMatroska, which sends a caller to the MP4 reader
+		return fmt.Errorf("%s: %w", shown.Path(path), mkv.ErrMPEGTS)
+	}
+	return fmt.Errorf("ebml header: %w", err)
+}
+
 func looksLikeISOBMFF(r io.ReadSeeker) bool {
 	var b [8]byte
 	if _, err := r.Seek(0, io.SeekStart); err != nil {

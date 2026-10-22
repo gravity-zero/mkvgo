@@ -12,6 +12,10 @@ import (
 // path serves another version of it: open or plan the source again.
 var ErrSourceChanged = errors.New("mkv: the source changed since it was opened or planned: open or plan it again")
 
+// ErrMPEGTS is returned for an MPEG transport stream (or a Blu-ray M2TS) handed to any reader, whatever its name
+// says: mkvgo does not read MPEG-TS. matroska.ErrMPEGTS and mp4.ErrMPEGTS are this error.
+var ErrMPEGTS = errors.New("MPEG-TS detected: mkvgo does not read MPEG transport streams; remux the file to MP4 or Matroska first")
+
 // FileIdentity is what a FileInfo may offer beyond size and mtime: a token
 // for the version of the file (an ETag, a version id, a Last-Modified date).
 // Strong reports a token that changes with every change of the bytes (a

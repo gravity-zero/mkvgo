@@ -52,6 +52,10 @@ type Severity = mkv.Severity
 // errors.Is to re-route to the mp4 reader.
 var ErrNotMatroska = reader.ErrNotMatroska
 
+// ErrMPEGTS is returned for an MPEG transport stream (or a Blu-ray M2TS) handed to the reader, whatever its name
+// says: mkvgo does not read MPEG-TS. It is mp4.ErrMPEGTS too.
+var ErrMPEGTS = mkv.ErrMPEGTS
+
 // ErrDamagedRegion is what a block walk returns (errors.Is) when an element
 // runs past the end of the file while a valid Cluster follows further on:
 // damage inside the file, as opposed to a truncated tail. A whole-file remux
