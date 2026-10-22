@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# release-check.sh - preflight's release checks against the previous tag: gorelease must suggest exactly RELEASE,
-# and the WASM's size is compared with the previous tag's, both built here with the same toolchain and flags.
+# release-check.sh - preflight's release checks against the previous tag: RELEASE must be at least what gorelease
+# suggests, above it only with a Breaking section (scripts/version-check.sh), and the WASM's size is compared with
+# the previous tag's, both built here with the same toolchain and flags.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 GORELEASE=golang.org/x/exp/cmd/gorelease@v0.0.0-20261014143641-f0251eb4aa3e
@@ -13,7 +14,7 @@ report=$(go run "$GORELEASE" -base="$base" 2>&1)
 echo "$report"
 suggested=$(echo "$report" | sed -n 's/^Suggested version: \(v[^ ]*\).*/\1/p' | tail -1)
 [ -n "$suggested" ] || { echo "gorelease suggested no version"; exit 1; }
-[ "$suggested" = "$RELEASE" ] || { echo "RELEASE=$RELEASE but gorelease asks for $suggested against $base"; exit 1; }
+scripts/version-check.sh "$suggested" "$RELEASE" CHANGELOG.md || exit 1
 
 echo "== WASM size against $base =="
 tmp=$(mktemp -d)
@@ -33,4 +34,4 @@ if awk -v p="$pct" -v t="$WASM_GROWTH_WARN" 'BEGIN { exit !(p > t || p < -t) }';
 	section=$(awk -v v="## [${RELEASE#v}]" 'index($0, v) == 1 || index($0, "## [Unreleased]") == 1 { on = 1; next } /^## \[/ { on = 0 } on' CHANGELOG.md)
 	echo "$section" | grep -q WASM || echo "WARNING: the CHANGELOG's ${RELEASE#v} section does not mention the WASM"
 fi
-echo "release check OK: $RELEASE is what gorelease asks for against $base"
+echo "release check OK: $RELEASE against $base (gorelease asks for $suggested)"
