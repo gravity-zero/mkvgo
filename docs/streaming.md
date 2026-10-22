@@ -23,7 +23,7 @@ stream/
   seg00001.m4s  seg00002.m4s  ...                       -'
   audio1.m3u8  init_a1.mp4  seg_a1_00001.m4s  ...    each audio track (demuxed)
   sub1.m3u8  sub1.vtt  sub1_00001.vtt  ...           each subtitle track (WebVTT)
-  iframe.m3u8                                        trick-play (video keyframes)
+  iframe.m3u8  iframe00001.m4s  ...                  trick-play (video keyframes)
 ```
 
 Tracks are **demuxed** - one rendition per track, as Apple recommends for HLS
@@ -518,8 +518,9 @@ mp4.Options{RewriteURL: func(name string) string {
 Two complementary tools:
 
 - **I-frame playlist** - `to-hls` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`,
-  declared in the master), one keyframe per segment as a byte range into the
-  **existing** segments. Zero extra media; what hls.js/Safari use for smooth
+  declared in the master), one keyframe per segment, each a fragment of its
+  own (`iframeNNNNN.m4s`, the keyframe alone behind a moof listing it alone,
+  so a player appends one after the other); what players use for smooth
   scrubbing previews. Both MKV/WebM and MP4/MOV sources get it, full pass and
   on-demand plan alike.
 - **`extract-frame`** - pull the keyframe nearest any timestamp as a
@@ -532,11 +533,13 @@ is free. A Matroska plan builds it **lazily**, on the first request for
 `iframe.m3u8` (cached after that): `PlanHLS` itself still does only its usual
 few bounded reads. The lazy pass walks the video track's block headers only --
 sizes, timecodes, sync flags -- never the sample bytes, so its cost is bounded
-by the video track's block *count*, not by any payload volume.
+by the video track's block *count*, not by any payload volume. Each
+`iframeNNNNN.m4s` then costs one read of its keyframe from the source (a
+Matroska fragment asked for before `iframe.m3u8` runs that walk first).
 
 **Turning it off.** `Options.NoIFrames` (CLI `--no-iframes`) drops the
 I-frame stream everywhere: no `EXT-X-I-FRAME-STREAM-INF` in the master (single
-or ABR), no `iframe.m3u8` written, listed by `Resources` or served
+or ABR), no `iframe.m3u8` nor fragment written, listed by `Resources` or served
 (`Resource` refuses it), and no Matroska keyframe walk behind it. For a server
 whose players scrub with their own trickplay images, so that a stray
 `iframe.m3u8` request from a player cannot start that walk. Segments and the

@@ -1094,7 +1094,7 @@ mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--sub-offset <ms>] [--audio-shif
 | `--sub-offset` | Shift every WebVTT subtitle cue by this many milliseconds (negative allowed) -- a virtual resync, no file rewritten. A cue whose shifted end is at or before 0 is dropped; one straddling 0 is clamped to start at 0 |
 | `--audio-shift` | Re-base an audio track in presentation (`track=ms`, repeatable; positive = the track's content starts late and is presented earlier - feed it `diagnose`'s per-track delay). The samples are copied verbatim and the media segments are byte-identical with or without the shift: only the init segment's edit list moves, so a constant A/V desync is cancelled in the served stream without touching the source. Over-shifts clamp to the presentation start. The persistent repair remains `mkvgo retime` |
 | `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
-| `--no-iframes` | Drop the trick-play I-frame stream: no `EXT-X-I-FRAME-STREAM-INF` in the master, no `iframe.m3u8` written or served (`hls-segment iframe` refuses it). For players that scrub with their own trickplay images. Segments and the other playlists are unchanged. Also on `hls-segment`, `to-abr`, `abr-segment`. See [streaming.md](streaming.md#trick-play-scrubbing) |
+| `--no-iframes` | Drop the trick-play I-frame stream: no `EXT-X-I-FRAME-STREAM-INF` in the master, no `iframe.m3u8` nor `iframeNNNNN.m4s` written or served (`hls-segment iframe` refuses it). For players that scrub with their own trickplay images. Segments and the other playlists are unchanged. Also on `hls-segment`, `to-abr`, `abr-segment`. See [streaming.md](streaming.md#trick-play-scrubbing) |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
@@ -1113,9 +1113,10 @@ An **audio-only** source (music, podcasts) packages fine: the first audio
 track becomes the primary rendition and boundaries follow its sample grid.
 When the source has video, a **trick-play I-frame playlist** (`iframe.m3u8`,
 `EXT-X-I-FRAMES-ONLY`) is emitted and declared in the master
-(`EXT-X-I-FRAME-STREAM-INF`): one keyframe per segment as a byte range into
-the existing segments - zero extra media, what players use for scrubbing
-previews. Not emitted when encrypting. Both MKV/WebM and MP4/MOV sources get
+(`EXT-X-I-FRAME-STREAM-INF`): one keyframe per segment, each a fragment of
+its own (`iframe00001.m4s`, the keyframe opening `seg00001.m4s`, written
+beside the segments - a keyframe's size each), what players use for
+scrubbing previews. Not emitted when encrypting. Both MKV/WebM and MP4/MOV sources get
 it, full pass and on-demand plan alike -- see [streaming.md](streaming.md#trick-play-scrubbing)
 for the on-demand cost model (MP4 is free at plan time; Matroska builds it
 lazily, on the first `iframe.m3u8` request, from block headers only).
@@ -1164,7 +1165,7 @@ Security flags (shared with `hls-segment`; both must use the same values):
   gets a `manifest.mpd` (`ContentProtection` with the key ID). Media playlists
   (video and audio) carry `EXT-X-KEY` (`METHOD=SAMPLE-AES-CTR` for cenc,
   `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is
-  emitted (a ciphertext byte range is not independently decryptable). Packaging
+  emitted (its fragments would carry keyframes in the clear). Packaging
   only -- no license server: `--cenc-key-uri` is what an EME-capable player's
   DRM path resolves through its own CDM. It is required: without it the
   playlist would carry the key itself in a `data:` URI, which the CLI refuses

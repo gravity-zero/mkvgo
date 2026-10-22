@@ -491,13 +491,18 @@ case in more depth.
 
 `RemuxToHLS` emits `iframe.m3u8` (`EXT-X-I-FRAMES-ONLY`, declared in the master
 as `EXT-X-I-FRAME-STREAM-INF`) whenever the presentation has video and is not
-encrypted: one keyframe per segment, referenced by `EXT-X-BYTERANGE` into the
-**existing** segment files -- no extra media. Both MKV/WebM and MP4/MOV sources
-get it, full pass and on-demand plan alike.
+encrypted: one keyframe per segment, each a fragment of its own,
+`iframeNNNNN.m4s` (the keyframe opening `segNNNNN.m4s`, behind a moof listing
+it alone, so a player appends one after the other). Both MKV/WebM and MP4/MOV
+sources get it, full pass and on-demand plan alike; the full pass writes the
+fragments beside the segments, a plan reads each keyframe from the source
+when asked and lists the names in `Resources()` (a Matroska plan once
+`iframe.m3u8` was built).
 
 ```go
 plan, _ := mp4.PlanHLS(ctx, "movie.mkv", mp4.Options{SegmentMs: 6000})
 data, mime, err := plan.Resource(ctx, "iframe.m3u8")
+frag, _, err := plan.Resource(ctx, "iframe00001.m4s")
 ```
 
 **What serving costs: `HLSPlan.Stats()`.** A Matroska source interleaves its
@@ -774,9 +779,10 @@ video track's block headers only (size, timecode, sync flag) via a
 structure-only `BlockReader` mode (`SetHeaderOnly`) that seek-skips an
 unlaced block's payload instead of reading it -- real muxers never lace
 video, so this is the effective cost for real content: bounded by the
-video track's block *count*, never by any payload volume. The result is
+video track's block *count*, never by any payload volume (a video track
+stored compressed is read whole, to size its frames inflated). The result is
 byte-identical to `RemuxToHLS`'s `iframe.m3u8` for the same source and
-`SegmentMs`.
+`SegmentMs`, and so are the fragments.
 
 ### Virtual Edit Layer (`Options.KeepTracks`)
 
@@ -1355,8 +1361,8 @@ describing the per-sample auxiliary information.
 
 Signaling: HLS media playlists (video and audio) carry `EXT-X-KEY`
 (`METHOD=SAMPLE-AES-CTR` for cenc, `METHOD=SAMPLE-AES` for cbcs,
-`KEYFORMAT="identity"`); no I-frame playlist is emitted (a ciphertext byte
-range is not independently decryptable). Unlike `Encrypt`, a CENC presentation
+`KEYFORMAT="identity"`); no I-frame playlist is emitted (its fragments would
+carry keyframes in the clear). Unlike `Encrypt`, a CENC presentation
 still gets a `manifest.mpd`, with a `ContentProtection` element
 (`urn:mpeg:dash:mp4protection:2011`, carrying `cenc:default_KID`) on the video
 and audio AdaptationSets.
