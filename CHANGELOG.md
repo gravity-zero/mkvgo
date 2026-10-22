@@ -6,6 +6,8 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-10-22
+
 ### Breaking
 
 - Trick play: each entry of `iframe.m3u8` is a fragment of its own,
