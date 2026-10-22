@@ -929,11 +929,20 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				}
 				fileBytes = int64(len(out))
 			default:
+				lead, samples, at, rest := head, seg.samples, from, seg.dataLen
+				var key []byte // the keyframe, read once for the segment and its I-frame fragment
+				if ifrHead != nil {
+					if key, err = media[i].read(seg.samples[:1], from, int64(seg.samples[0].size)); err != nil {
+						return nil, nil, err
+					}
+					lead = append(append(make([]byte, 0, len(head)+len(key)), head...), key...)
+					samples, at, rest = seg.samples[1:], from+1, seg.dataLen-int64(len(key))
+				}
 				out, err := fs.DoCreate(filepath.Join(dir, renditionSegment(fts, i, k)))
 				if err != nil {
 					return nil, nil, err
 				}
-				werr := media[i].write(out, head, seg.samples, from, seg.dataLen)
+				werr := media[i].write(out, lead, samples, at, rest)
 				if cerr := out.Close(); werr == nil {
 					werr = cerr
 				}
@@ -941,7 +950,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 					return nil, nil, werr
 				}
 				if ifrHead != nil {
-					if err := writeIframe(fs, dir, k, ifrHead, filepath.Join(dir, renditionSegment(fts, i, k)), int64(len(head)), seg.samples[0].size); err != nil {
+					if err := fs.DoWriteFile(filepath.Join(dir, iframeName(k)), append(ifrHead, key...), 0o644); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -981,21 +990,6 @@ func segmentFileLen(seg trackSegment) int64 {
 	)
 	traf := int64(smallBoxHeaderLen + tfhd + tfdt + trun)
 	return styp + smallBoxHeaderLen + mfhd + traf + int64(len(seg.samples))*perSample + mdatHeaderLen
-}
-
-// writeIframe writes segment k's I-frame fragment: head, then the keyframe read back from the segment file just
-// written at off, so it holds the very bytes the segment does.
-func writeIframe(fs *mkv.FS, dir string, k int, head []byte, segPath string, off int64, size uint32) error {
-	f, err := fs.DoOpen(segPath)
-	if err != nil {
-		return err
-	}
-	key, err := readSample(f, off, size)
-	f.Close()
-	if err != nil {
-		return errf("read back keyframe: %w", err)
-	}
-	return fs.DoWriteFile(filepath.Join(dir, iframeName(k)), append(head, key...), 0o644)
 }
 
 func buildSegmentFile(seq uint32, seg trackSegment) []byte {

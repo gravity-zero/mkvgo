@@ -4,24 +4,31 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// ioTally counts the bytes a full pass reads and writes through Options.FS.
+// ioTally counts the bytes a full pass reads and writes through Options.FS, and those it reads back from under out.
 type ioTally struct {
 	read, written int64
+	out           string
+	readBack      int64
 }
 
 type ioTallyReader struct {
-	f mkv.ReadSeekCloser
-	t *ioTally
+	f    mkv.ReadSeekCloser
+	t    *ioTally
+	back bool
 }
 
 func (r *ioTallyReader) Read(p []byte) (int, error) {
 	n, err := r.f.Read(p)
 	r.t.read += int64(n)
+	if r.back {
+		r.t.readBack += int64(n)
+	}
 	return n, err
 }
 func (r *ioTallyReader) Seek(off int64, whence int) (int64, error) { return r.f.Seek(off, whence) }
@@ -47,7 +54,7 @@ func tallyFS(t *ioTally) *mkv.FS {
 			if err != nil {
 				return nil, err
 			}
-			return &ioTallyReader{f: f, t: t}, nil
+			return &ioTallyReader{f: f, t: t, back: t.out != "" && strings.HasPrefix(path, t.out)}, nil
 		},
 		Create: func(path string) (mkv.WriteSeekCloser, error) {
 			f, err := os.Create(path)
@@ -79,7 +86,7 @@ func dirBytes(tb testing.TB, dir string) int64 {
 }
 
 // TestRemuxToHLSReadsAndWritesOnce: a full pass reads the source once and
-// writes each output byte once - no copy of the media through a temp file.
+// writes each output byte once - no copy of the media through a temp file, no I-frame read back from its segment.
 func TestRemuxToHLSReadsAndWritesOnce(t *testing.T) {
 	mkvSrc := buildInterleavedSource(t, 60)
 	mp4Src := filepath.Join(t.TempDir(), "src.mp4")
@@ -92,8 +99,8 @@ func TestRemuxToHLSReadsAndWritesOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var tally ioTally
 			out := filepath.Join(t.TempDir(), "hls")
+			tally := ioTally{out: out}
 			if err := RemuxToHLS(context.Background(), src, out, Options{FS: tallyFS(&tally), SourceAccess: SourceLocal}); err != nil {
 				t.Fatal(err)
 			}
@@ -106,6 +113,12 @@ func TestRemuxToHLSReadsAndWritesOnce(t *testing.T) {
 			}
 			if writeRatio > 1.01 {
 				t.Errorf("wrote %.3fx the output, want at most 1.01x", writeRatio)
+			}
+			if tally.readBack != 0 {
+				t.Errorf("read back %d bytes of the output", tally.readBack)
+			}
+			if m, _ := filepath.Glob(filepath.Join(out, "iframe*.m4s")); len(m) == 0 {
+				t.Error("no I-frame fragment written")
 			}
 		})
 	}
