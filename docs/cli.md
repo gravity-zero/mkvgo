@@ -1119,7 +1119,9 @@ beside the segments - a keyframe's size each), what players use for
 scrubbing previews. Not emitted when encrypting. Both MKV/WebM and MP4/MOV sources get
 it, full pass and on-demand plan alike -- see [streaming.md](streaming.md#trick-play-scrubbing)
 for the on-demand cost model (MP4 is free at plan time; Matroska builds it
-lazily, on the first `iframe.m3u8` request, from block headers only).
+lazily, on the first `iframe.m3u8` request, from block headers only, so its
+master declares the I-frame `BANDWIDTH` as an upper bound, the peak segment's
+bit rate; `to-hls` declares the exact value).
 
 `--single-file` packs each rendition into ONE progressive file (`stream.mp4`,
 `stream_a1.mp4` …: init + `sidx` + all fragments) served by byte ranges - the

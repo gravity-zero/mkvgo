@@ -536,6 +536,10 @@ sizes, timecodes, sync flags -- never the sample bytes, so its cost is bounded
 by the video track's block *count*, not by any payload volume. Each
 `iframeNNNNN.m4s` then costs one read of its keyframe from the source (a
 Matroska fragment asked for before `iframe.m3u8` runs that walk first).
+Since the master is built before that walk, a Matroska plan declares the
+I-frame stream's `BANDWIDTH` as an upper bound, the bit rate of its peak
+segment (every I-frame lies inside its segment, over the same duration);
+`to-hls`, and an MP4 plan, declare the exact value.
 
 **Turning it off.** `Options.NoIFrames` (CLI `--no-iframes`) drops the
 I-frame stream everywhere: no `EXT-X-I-FRAME-STREAM-INF` in the master (single

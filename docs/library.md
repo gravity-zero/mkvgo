@@ -782,7 +782,10 @@ video, so this is the effective cost for real content: bounded by the
 video track's block *count*, never by any payload volume (a video track
 stored compressed is read whole, to size its frames inflated). The result is
 byte-identical to `RemuxToHLS`'s `iframe.m3u8` for the same source and
-`SegmentMs`, and so are the fragments.
+`SegmentMs`, and so are the fragments. The master, built before that pass,
+declares the I-frame stream's `BANDWIDTH` as an upper bound, the bit rate of
+the plan's peak segment (each I-frame lies inside its segment, over the same
+duration); `RemuxToHLS` and an MP4 plan declare the exact value.
 
 ### Virtual Edit Layer (`Options.KeepTracks`)
 
