@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -33,6 +34,7 @@ const directPlayVerdict = "direct-play"
 // --keep-lang, ...) when packaging. Ctrl-C shuts the server down gracefully.
 func CmdServe(args []string) {
 	cfg := parseServeFlags(args)
+	cfg.applyMemoryLimit()
 	addr, direct, auto, targetName := cfg.addr, cfg.direct, cfg.auto, cfg.target
 	rest := cfg.rest
 	if direct && auto {
@@ -114,6 +116,7 @@ type serveFlags struct {
 	maxWalks       int   // windows built at once, GOMAXPROCS unless --max-walks says otherwise (0 = no cap)
 	maxInFlight    int   // segments served at once (0 = no cap)
 	maxWaiting     int   // requests queued behind them before a 503
+	memoryLimit    int64 // the Go runtime's soft memory limit in bytes (0 = left as GOMEMLIMIT sets it)
 	buffered, cors bool
 	rest           []string
 }
@@ -139,6 +142,13 @@ func parseServeFlags(args []string) serveFlags {
 	fl.Func(func(v string) { cfg.maxWaiting = countFlag(v, "--max-waiting") }, "-max-waiting", "--max-waiting")
 	fl.Func(func(v string) { cfg.windowCache = mibOrOff(v, "--window-cache") }, "-window-cache", "--window-cache")
 	fl.Func(func(v string) { cfg.windowBytes = mibOrOff(v, "--window-bytes") }, "-window-bytes", "--window-bytes")
+	fl.Func(func(v string) {
+		mib, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || mib <= 0 {
+			Fatal("serve: --memory-limit takes a size in MiB, more than 0 (the budget of --window-bytes plus 64 bounds the peak)")
+		}
+		cfg.memoryLimit = mib << 20
+	}, "-memory-limit", "--memory-limit")
 	cfg.rest = fl.ParseKnown(args) // the shared HLS flags and the source, for parseHLSFlags
 	return cfg
 }
@@ -148,6 +158,14 @@ const (
 	defaultMaxInFlight = 64
 	defaultMaxWaiting  = 1024
 )
+
+// applyMemoryLimit sets the runtime's soft memory limit on --memory-limit: the collector then runs as the heap nears
+// it instead of at twice what is live, kept windows included.
+func (cfg serveFlags) applyMemoryLimit() {
+	if cfg.memoryLimit > 0 {
+		debug.SetMemoryLimit(cfg.memoryLimit)
+	}
+}
 
 // countFlag reads a non-negative count.
 func countFlag(v, flag string) int {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkvhttp"
@@ -47,5 +48,21 @@ func TestServeAdmissionByDefault(t *testing.T) {
 	}
 	if o := parseServeFlags([]string{"in.mkv", "--max-in-flight", "0", "--max-waiting", "8"}).httpOptions(false); o.MaxInFlight != 0 || o.MaxWaiting != 8 {
 		t.Errorf("--max-in-flight 0 --max-waiting 8: in flight %d, waiting %d", o.MaxInFlight, o.MaxWaiting)
+	}
+}
+
+// TestServeMemoryLimit: --memory-limit sets the Go runtime's soft memory limit in MiB; without it serve leaves the
+// runtime's limit (GOMEMLIMIT, or none) alone.
+func TestServeMemoryLimit(t *testing.T) {
+	was := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(was) })
+	parseServeFlags([]string{"in.mkv"}).applyMemoryLimit()
+	if got := debug.SetMemoryLimit(-1); got != was {
+		t.Errorf("no --memory-limit: the limit moved from %d to %d", was, got)
+	}
+	cfg := parseServeFlags([]string{"in.mkv", "--memory-limit", "128"})
+	cfg.applyMemoryLimit()
+	if got := debug.SetMemoryLimit(-1); got != 128<<20 {
+		t.Errorf("--memory-limit 128: limit %d, want %d", got, 128<<20)
 	}
 }
