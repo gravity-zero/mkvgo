@@ -157,6 +157,8 @@ copy-paste ready, CLI **and** Go side by side.
 
 Requires **Go 1.24 or newer**. Zero third-party dependencies: the module graph
 is empty, so `go get` pulls nothing but mkvgo itself.
+On 32-bit x86 (`GOARCH=386`), take Go 1.26.5 or newer within 1.26: earlier
+1.26 releases can corrupt the heap on 386, which mkvgo's tests hit on 1.26.2 as "found bad pointer in Go heap" ([golang/go#80004](https://github.com/golang/go/issues/80004)).
 
 ```bash
 go install github.com/gravity-zero/mkvgo/cmd/mkvgo@latest   # CLI
