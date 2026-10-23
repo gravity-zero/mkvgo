@@ -1165,7 +1165,13 @@ Security flags (shared with `hls-segment`; both must use the same values):
   1-encrypted:9-clear 16-byte-block pattern on video (`--cenc-iv` must be 16
   bytes, used as a constant IV). Under `cenc`, give each title its own key or
   its own `--cenc-iv`: two titles packaged with the same pair share their
-  keystream wherever their timestamps overlap. Unlike `--aes-key`, a CENC presentation still
+  keystream wherever their timestamps overlap. Left out, `--cenc-iv` is drawn
+  at random (8 bytes for cenc, 16 for cbcs) and printed on stderr: pass it back
+  to package the same title again byte for byte. `hls-segment`, `abr-segment`
+  and `concat-segment` build one resource per call and require it (the
+  presentation's IV); `serve` draws one per start, so a restart under cbcs
+  changes the IV its init segments carry - pass `--cenc-iv` to a server that
+  restarts while players hold its init segments. Unlike `--aes-key`, a CENC presentation still
   gets a `manifest.mpd` (`ContentProtection` with the key ID). Media playlists
   (video and audio) carry `EXT-X-KEY` (`METHOD=SAMPLE-AES-CTR` for cenc,
   `METHOD=SAMPLE-AES` for cbcs, `KEYFORMAT="identity"`); no I-frame playlist is
@@ -1176,8 +1182,8 @@ Security flags (shared with `hls-segment`; both must use the same values):
   unless `--cenc-inline-key` asks for exactly that (local testing only, never
   production). Video
   may be H.264, HEVC, AV1 or VP9 - each codec's decoder-visible header bytes
-  stay clear and the coded data is protected (verified decrypting and decoding
-  in a real Clear Key player); AV1/VP9 refuse rather than mis-protect the frame
+  stay clear and the coded data is protected (H.264/HEVC: parameter sets, SEI
+  and slice headers); AV1/VP9 refuse rather than mis-protect the frame
   constructs their parsers do not yet cover. See
   [streaming.md](streaming.md#securing-delivery) for the library form
   (`mp4.CENCOptions`) and the exact clear/protected byte rules.

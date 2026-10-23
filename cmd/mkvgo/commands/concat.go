@@ -16,6 +16,7 @@ func CmdConcatHLS(args []string) {
 	if len(f.rest) < 2 || f.outDir == "" {
 		Fatal("usage: " + CmdUsage["concat-hls"])
 	}
+	f.randomCENCIV()
 	opts := f.options(f.rest[0])
 	opts.Progress = NewProgressBar()
 	opts.OnDrop = func(d mp4.DroppedTrack) {
@@ -39,6 +40,7 @@ func CmdConcatSegment(args []string) {
 	if len(rest) < 3 { // resource + at least two sources
 		Fatal("usage: " + CmdUsage["concat-segment"])
 	}
+	f.needCENCIV()
 	what, sources := rest[0], rest[1:]
 
 	opts := f.options(sources[0])

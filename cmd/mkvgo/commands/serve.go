@@ -45,6 +45,7 @@ func CmdServe(args []string) {
 	if len(f.rest) < 1 {
 		Fatal("usage: " + CmdUsage["serve"])
 	}
+	f.randomCENCIV()
 	src := f.rest[0]
 
 	if auto {

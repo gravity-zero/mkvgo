@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -194,6 +195,32 @@ func splitCSV(s string) []string {
 // mustHex decodes a hex-encoded flag value, exiting with a clear error on
 // malformed input (odd length, non-hex characters) - validated up front
 // rather than surfacing as a confusing key/IV-length error from mp4.CENCOptions.
+// cencRandRead fills a generated CENC IV.
+var cencRandRead = rand.Read
+
+// randomCENCIV gives a CENC presentation packaged without --cenc-iv a random IV, printed so it can be packaged again alike.
+func (f *hlsFlags) randomCENCIV() {
+	if f.cenc == nil || f.cenc.IV != nil {
+		return
+	}
+	iv := make([]byte, 16)
+	if f.cenc.Scheme == "cenc" {
+		iv = iv[:8]
+	}
+	if _, err := cencRandRead(iv); err != nil {
+		Fatal("cannot generate a CENC IV: " + err.Error() + "; pass --cenc-iv")
+	}
+	f.cenc.IV = iv
+	fmt.Fprintf(os.Stderr, "--cenc-iv not given: generated %x. Pass --cenc-iv %x to package or serve this presentation again with the same bytes (hls-segment, abr-segment and concat-segment need it)\n", iv, iv)
+}
+
+// needCENCIV refuses an on-demand resource without --cenc-iv: a fresh IV per call would not match the rest of the presentation.
+func (f hlsFlags) needCENCIV() {
+	if f.cenc != nil && f.cenc.IV == nil {
+		Fatal("--cenc-iv is required here: each call packages one resource, which must use the IV of the rest of the presentation. Pass the --cenc-iv the presentation was packaged with (to-hls prints the one it generates)")
+	}
+}
+
 func mustHex(s, what string) []byte {
 	if s == "" {
 		return nil
@@ -262,6 +289,7 @@ func CmdToHLS(args []string) {
 	if len(rest) < 1 || outDir == "" {
 		Fatal("usage: " + CmdUsage["to-hls"])
 	}
+	f.randomCENCIV()
 	src := rest[0]
 
 	opts := f.options(src)
@@ -289,6 +317,7 @@ func CmdHLSSegment(args []string) {
 	if len(rest) < 2 {
 		Fatal("usage: " + CmdUsage["hls-segment"])
 	}
+	f.needCENCIV()
 	src, what := rest[0], rest[1]
 
 	opts := f.options(src)
@@ -350,6 +379,7 @@ func CmdToABR(args []string) {
 	if len(f.rest) < 2 || f.outDir == "" {
 		Fatal("usage: " + CmdUsage["to-abr"])
 	}
+	f.randomCENCIV()
 	opts := f.options(f.rest[0])
 	opts.Progress = NewProgressBar()
 	opts.OnDrop = func(d mp4.DroppedTrack) {
@@ -374,6 +404,7 @@ func CmdABRSegment(args []string) {
 	if len(rest) < 3 { // resource + at least two variants
 		Fatal("usage: " + CmdUsage["abr-segment"])
 	}
+	f.needCENCIV()
 	what, sources := rest[0], rest[1:]
 
 	opts := f.options(sources[0])
