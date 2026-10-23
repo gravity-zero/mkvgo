@@ -6,6 +6,50 @@ All notable changes to mkvgo are documented here. The format is based on
 
 ## [Unreleased]
 
+### Breaking
+
+- CENC on H.264 and HEVC follows the subsample rule of ISO/IEC 23001-7 (3rd
+  edition) and CMAF: a NAL unit that is not a coded slice (parameter sets,
+  SEI, access unit delimiter, Dolby Vision RPU) stays clear whole, and a slice
+  keeps its slice header clear, its slice data protected. Under `cenc` a
+  slice's protected bytes are a whole number of 16-byte blocks. Until now only
+  each NAL unit's length field and header stayed clear: parameter sets, SEI and
+  slice headers were encrypted, in both schemes. The NAL length field size now
+  comes from the CodecPrivate (it was taken as 4 bytes). The output of every
+  CENC H.264/HEVC presentation changes: segments packaged by an earlier version
+  still decrypt (each describes its own layout), but they no longer match the
+  bytes this version packages, so a cache keyed on the source and options
+  should be emptied of them. Slice headers are read against the parameter sets
+  of the CodecPrivate and those each segment carries in band; a stream whose
+  slices cannot be read that way is refused ("this video cannot be encrypted
+  with CENC"): slice groups (FMO), multi-layer HEVC, the HEVC screen content
+  profile, a slice referring to a parameter set the segment never carries.
+  Checked: slice header sizes match an independent bitstream trace on 1,280
+  slices of six streams from four encoders; both schemes decrypt to the
+  source's exact packets; every NAL unit other than slice data is identical in
+  the ciphertext. Not yet played back in a browser or on a hardware decoder.
+
+### Changed
+
+- CLI: `to-hls`, `to-abr`, `concat-hls` and `serve` given `--cenc-*` without
+  `--cenc-iv` draw a random IV (8 bytes for cenc, 16 for cbcs) and print it on
+  stderr, so two titles no longer share a keystream by default. `hls-segment`,
+  `abr-segment` and `concat-segment` refuse to run without `--cenc-iv` and say
+  to pass the presentation's IV (they failed on its missing length before). The
+  library still takes the IV it is given.
+
+### Fixed
+
+- An MP4 whose stco, co64, stsc, stts or ctts declares more entries than it
+  holds no longer panics on 32-bit targets (386, arm): `8+count*size` wrapped
+  around and let the table through. Same for a VP9 superframe index declaring
+  a frame size past 2 GiB, under CENC.
+
+### Documentation
+
+- README: head-only probing reads every cluster header of an MKV with neither
+  SeekHead nor Cues; a CENC key and base IV pair must be unique per title.
+
 ## [0.60.0] - 2026-10-22
 
 ### Added
