@@ -258,7 +258,7 @@ func parseStsz(payload []byte, fileSize int64) ([]uint32, error) {
 		}
 		return sizes, nil
 	}
-	if len(payload) < 12+int(count)*4 {
+	if !tableFits(payload, 12, count, 4) {
 		return nil, errf("stsz declares %d samples but is too short", count)
 	}
 	sizes := make([]uint32, count)
@@ -268,13 +268,18 @@ func parseStsz(payload []byte, fileSize int64) ([]uint32, error) {
 	return sizes, nil
 }
 
+// tableFits reports whether payload holds count entries of size bytes after its hdr-byte header, without overflowing int on 32-bit targets.
+func tableFits(payload []byte, hdr int, count uint32, size int) bool {
+	return len(payload) >= hdr && uint64(count) <= uint64(len(payload)-hdr)/uint64(size)
+}
+
 func parseChunkOffsets(stblBoxes []memBox) ([]int64, error) {
 	if stco, ok := findMemBox(stblBoxes, "stco"); ok {
 		if len(stco.payload) < 8 {
 			return nil, errf("stco too short")
 		}
 		count := binary.BigEndian.Uint32(stco.payload[4:8])
-		if len(stco.payload) < 8+int(count)*4 {
+		if !tableFits(stco.payload, 8, count, 4) {
 			return nil, errf("stco declares %d chunks but is too short", count)
 		}
 		out := make([]int64, count)
@@ -288,7 +293,7 @@ func parseChunkOffsets(stblBoxes []memBox) ([]int64, error) {
 			return nil, errf("co64 too short")
 		}
 		count := binary.BigEndian.Uint32(co64.payload[4:8])
-		if len(co64.payload) < 8+int(count)*8 {
+		if !tableFits(co64.payload, 8, count, 8) {
 			return nil, errf("co64 declares %d chunks but is too short", count)
 		}
 		out := make([]int64, count)
@@ -305,7 +310,7 @@ func parseStsc(payload []byte) ([]stscEntry, error) {
 		return nil, errf("stsc too short")
 	}
 	count := binary.BigEndian.Uint32(payload[4:8])
-	if len(payload) < 8+int(count)*12 {
+	if !tableFits(payload, 8, count, 12) {
 		return nil, errf("stsc declares %d entries but is too short", count)
 	}
 	out := make([]stscEntry, count)
@@ -346,7 +351,7 @@ func parseStts(payload []byte, n int) ([]uint32, error) {
 		return nil, errf("stts missing or too short")
 	}
 	count := binary.BigEndian.Uint32(payload[4:8])
-	if len(payload) < 8+int(count)*8 {
+	if !tableFits(payload, 8, count, 8) {
 		return nil, errf("stts declares %d entries but is too short", count)
 	}
 	idx := 0
@@ -391,7 +396,7 @@ func parseCtts(stblBoxes []memBox, n int) []int32 {
 		return offsets
 	}
 	count := binary.BigEndian.Uint32(ctts.payload[4:8])
-	if len(ctts.payload) < 8+int(count)*8 {
+	if !tableFits(ctts.payload, 8, count, 8) {
 		return offsets
 	}
 	idx := 0

@@ -112,7 +112,7 @@ func vp9SplitSuperframe(sample []byte) (frames [][2]int, indexLen int, err error
 		var buf [4]byte
 		copy(buf[:], body[i*bytesPerSize:(i+1)*bytesPerSize])
 		sz := int(binary.LittleEndian.Uint32(buf[:]))
-		if off+sz > framesEnd {
+		if sz < 0 || off+sz > framesEnd {
 			return nil, 0, errf("VP9 CENC: superframe index frame size exceeds sample bounds")
 		}
 		frames = append(frames, [2]int{off, off + sz})

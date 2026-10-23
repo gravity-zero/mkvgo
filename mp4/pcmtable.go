@@ -103,7 +103,7 @@ func newSttsRuns(payload []byte, n uint32) (*sttsRuns, error) {
 		return nil, errf("stts missing or too short")
 	}
 	r.entries = binary.BigEndian.Uint32(payload[4:8])
-	if len(payload) < 8+int(r.entries)*8 {
+	if !tableFits(payload, 8, r.entries, 8) {
 		return nil, errf("stts declares %d entries but is too short", r.entries)
 	}
 	r.exhausted = false
