@@ -26,7 +26,9 @@ mkvgo is three things in one tool. Pick the pillar you need:
 Read what's inside a file - **head-only**: the metadata comes from the header,
 without decoding a frame or reading the whole file, so the work is proportional
 to the metadata rather than the file size and indexing a large library stays
-fast even on multi-gigabyte sources.
+fast even on multi-gigabyte sources. The exception is an MKV with neither a
+SeekHead nor Cues: reaching what lies behind its clusters means reading every
+cluster's header (never its payload).
 
 - Codecs, profile/level, pixel format, aspect ratio, rotation, frame rate,
   per-track bitrate, channel layout, keyframes.
@@ -285,9 +287,11 @@ Full library guide: **[docs/library.md](docs/library.md)**.
   the WebM subset only (VP8/VP9/AV1, Vorbis/Opus, WebVTT).
 - **Encryption, packaging only.** HLS AES-128 (whole-segment, with mid-stream
   **key rotation**) and Common Encryption (**CENC** `cenc`/`cbcs`, for the
-  EME/DASH path, H.264/HEVC/AV1/VP9 - validated decrypting and decoding in a
-  Clear Key player) are supported: mkvgo produces the ciphertext and boxes, you
-  run the license server. LL-HLS (live ingest) is out of scope - see
+  EME/DASH path, H.264/HEVC/AV1/VP9) are supported: mkvgo produces the
+  ciphertext and boxes, you run the license server. Under `cenc`, a key and
+  base IV pair must be unique per title: two titles sharing both share their
+  keystream. The library takes the IV you give it; the CLI draws a random one
+  when `--cenc-iv` is left out. LL-HLS (live ingest) is out of scope - see
   [docs/library.md](docs/library.md).
 - **Timing resolution.** Cluster-rebuilding operations (mux/merge/split/join/
   edit/remux) use millisecond-quantised timecodes - exact for the default

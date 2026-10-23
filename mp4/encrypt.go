@@ -6,7 +6,7 @@ package mp4
 // playlist carries no IV attribute), or a fixed caller-supplied IV. The init
 // segments and subtitle files stay clear, as players expect. AES-128 is an
 // HLS mechanism: when encryption is enabled the DASH manifest is not emitted
-// (DASH uses CENC, a different scheme mkvgo does not implement).
+// (DASH encryption is CENC, see Options.CENC and cenc.go).
 
 import (
 	"crypto/aes"
