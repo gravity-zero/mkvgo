@@ -42,7 +42,7 @@ type cencStream struct {
 // with them: the moof must hold them before the first media byte goes out.
 func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 	pt := p.tracks[h.ti]
-	k, err := newCENCCipher(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, pt.ft.outTrack.mkv.ID)
+	k, err := newCENCCipher(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, pt.ft.outTrack.mkv.CodecPrivate, pt.ft.outTrack.mkv.ID)
 	if err != nil {
 		return err
 	}

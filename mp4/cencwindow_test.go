@@ -24,12 +24,12 @@ func TestWindowReachingTheNextKeepsItsIVs(t *testing.T) {
 			}
 		}
 		c := &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}
-		_, _, err := prepareCENCSegment(c, false, "aac", 1, window, make([]byte, len(window)))
+		_, _, err := prepareCENCSegment(c, false, "aac", nil, 1, window, make([]byte, len(window)))
 		if err == nil || !strings.Contains(err.Error(), "cbcs") {
 			t.Errorf("%v: 'cenc' over a window reaching the next: err = %v, want a refusal naming cbcs", pts, err)
 		}
 		cbcs := &CENCOptions{Scheme: "cbcs", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cbcs"), InlineKey: true}
-		if _, _, err := prepareCENCSegment(cbcs, false, "aac", 1, window, make([]byte, len(window))); err != nil {
+		if _, _, err := prepareCENCSegment(cbcs, false, "aac", nil, 1, window, make([]byte, len(window))); err != nil {
 			t.Errorf("%v: cbcs refused: %v", pts, err)
 		}
 	}

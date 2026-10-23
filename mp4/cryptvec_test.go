@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -14,8 +13,8 @@ import (
 )
 
 // Fixed encryption vectors, checked without any outside tool. cryptvec/src.mkv
-// is a synthetic source: 6 H.264 frames of 3 NAL units each (AVCC, so 3
-// subsamples a frame) and 8 AAC frames. Regenerate with
+// is a synthetic source: 6 H.264 frames of 3 slices each (AVCC, so 3
+// subsamples a frame, parameter sets in band on keyframes) and 12 AAC frames. Regenerate with
 //
 //	MKVGO_GEN_CRYPTVEC=1 go test ./mp4 -run TestGenerateCryptVectors
 //	cd internal/testdata/cryptvec
@@ -36,10 +35,10 @@ var (
 	// sha256 of init + seg00001 (video) as mkvgo encrypts them, and the
 	// streamhash of their decryption by ffmpeg, equal to the source's video.
 	cryptVecSums = map[string]string{
-		"cenc": "0b06aef6aac129549fd0f8a6132a3237d323a1af9faa091fefcb1c098c3801bd",
-		"cbcs": "4d57f8a5d616d386c17a2766e573d67632ff4f2a2a085632eee36485b2da103f",
+		"cenc": "9e2faa284476f762201264f9e523d7a854141382ba37c65ea927a79d3ac17c0d",
+		"cbcs": "f36b1cdae872e3bed48daa88666990f598bfb398391727d0d901ee1f84f06204",
 	}
-	cryptVecPlainVideo = "c6aa4333ad666cd1b0ec33288cbdeaa1bb053bfc87f25d562641d768a75d3265"
+	cryptVecPlainVideo = "119527985453b51e58d57c25185c7b69a8f2743bf6799006574bf9722d04b76d"
 )
 
 func cryptVecOptions(mode string) Options {
@@ -55,19 +54,18 @@ func cryptVecOptions(mode string) Options {
 	return o
 }
 
-// cryptVecFrame is frame i: three AVCC NAL units (slices) of a few dozen bytes.
-func cryptVecFrame(i int) []byte {
-	var f []byte
-	for s := 0; s < 3; s++ {
-		nal := bytes.Repeat([]byte{byte(i*16 + s)}, 40+13*s)
-		nal[0] = 0x41
-		if i%3 == 0 {
-			nal[0] = 0x65
-		}
-		f = binary.BigEndian.AppendUint32(f, uint32(len(nal)))
-		f = append(f, nal...)
+// cryptVecFrame is frame i: in-band SPS and PPS on a keyframe, then three
+// slices of a few dozen bytes, every frame of a kind the same size.
+func cryptVecFrame(i int, key bool) []byte {
+	var nals [][]byte
+	if key {
+		nals = append(nals, testAVCSPS(), testAVCPPS())
 	}
-	return f
+	for s := 0; s < 3; s++ {
+		nal, _ := testAVCSlice(uint32(s*4), uint32(7+i%8), 40+13*s)
+		nals = append(nals, nal)
+	}
+	return lengthPrefixed(4, nals...)
 }
 
 // TestGenerateCryptVectors writes cryptvec/src.mkv and mkvgo's segments; see cryptVecDir.
@@ -79,7 +77,7 @@ func TestGenerateCryptVectors(t *testing.T) {
 	sr, ch := 44100.0, uint8(2)
 	var blocks []genBlock
 	for i := 0; i < 6; i++ {
-		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 200, key: i%3 == 0, data: cryptVecFrame(i)})
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 200, key: i%3 == 0, data: cryptVecFrame(i, i%3 == 0)})
 		for a := 0; a < 2; a++ {
 			blocks = append(blocks, genBlock{track: 2, pts: int64(i)*200 + int64(a)*100, key: true, data: bytes.Repeat([]byte{0x21, byte(i*2 + a)}, 30)})
 		}

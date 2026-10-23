@@ -14,9 +14,9 @@ package mp4
 // EME-capable player); mkvgo only produces spec-correct boxes and ciphertext.
 //
 // Clear/protected split (subsample encryption), video: for H.264/HEVC (MKV
-// samples are length-prefixed NALs, matching AVCC/HVCC) the clear region per
-// NAL is the 4-byte length field plus the NAL header (1 byte for H.264, 2 for
-// HEVC), everything after is protected - see splitNALSubsamples. AV1 (see
+// samples are length-prefixed NALs, matching AVCC/HVCC) a NAL unit other than
+// a coded slice stays clear, and a slice keeps its length field, NAL header
+// and slice header clear - see cenc_slice.go. AV1 (see
 // cenc_av1.go) and VP9 (cenc_vp9.go) follow their own codec conventions and
 // handle the tractable frame structures, failing loud on the cases that need a
 // stateful parser rather than mis-protecting. Audio (and any non-NAL codec) is
@@ -88,8 +88,8 @@ type CENCOptions struct {
 	PSSH [][]byte
 }
 
-// validate checks the scheme/key/IV lengths. Codec compatibility (h264/hevc
-// only) is checked once the video track is known - see cencPreflight.
+// validate checks the scheme/key/IV lengths. Codec compatibility (h264, hevc,
+// av1, vp9) is checked once the video track is known - see cencPreflight.
 func (c *CENCOptions) validate() error {
 	switch c.Scheme {
 	case "cenc", "cbcs":
@@ -194,31 +194,22 @@ func cencSupportsCodec(codec string) bool {
 // segment (newVideoSubsampleSplitter) so a codec that needs cross-sample state
 // - VP9's reference-frame dimensions, AV1's active sequence header - can carry
 // it: the segment opens on a keyframe, so that state is self-contained within
-// the segment. H.264/HEVC are stateless (length-prefixed NALs are
-// self-describing).
+// the segment. H.264/HEVC carry their parameter sets, which slice headers are
+// read against.
 type videoSubsampleSplitter interface {
 	split(sample []byte) ([]cencSubsample, error)
 }
 
-func newVideoSubsampleSplitter(codec string) (videoSubsampleSplitter, error) {
+func newVideoSubsampleSplitter(codec string, private []byte, scheme string) (videoSubsampleSplitter, error) {
 	switch codec {
-	case "h264":
-		return nalSplitter{nalHeaderLen: 1}, nil
-	case "hevc":
-		return nalSplitter{nalHeaderLen: 2}, nil
+	case "h264", "hevc":
+		return newH26xSplitter(codec, private, scheme)
 	case "av1":
 		return &av1Splitter{}, nil
 	case "vp9":
 		return &vp9Splitter{}, nil
 	}
 	return nil, errf("cenc: video codec %q not supported for subsample encryption", codec)
-}
-
-// nalSplitter is the stateless H.264/HEVC splitter (length-prefixed NAL units).
-type nalSplitter struct{ nalHeaderLen int }
-
-func (n nalSplitter) split(sample []byte) ([]cencSubsample, error) {
-	return splitNALSubsamples(sample, n.nalHeaderLen)
 }
 
 // --- init segment: encv/enca sample entry + sinf (frma/schm/schi>tenc) -----
@@ -389,32 +380,6 @@ func buildSaio(offset int64) []byte {
 // it, in build order.
 func sencAuxOffset(trafStart int64, tfhd, tfdt, trun []byte) int64 {
 	return trafStart + smallBoxHeaderLen + int64(len(tfhd)+len(tfdt)+len(trun)) + sencAuxInfoHeaderLen
-}
-
-// splitNALSubsamples parses one video sample's length-prefixed NAL units
-// (AVCC/HVCC style - exactly how mkvgo's fMP4/MP4 samples are already laid
-// out) into their clear (length field + NAL header) / protected (the rest)
-// regions.
-func splitNALSubsamples(data []byte, nalHeaderLen int) ([]cencSubsample, error) {
-	var subs []cencSubsample
-	i := 0
-	for i < len(data) {
-		if i+4 > len(data) {
-			return nil, errf("cenc: truncated NAL length prefix in sample")
-		}
-		n := int(binary.BigEndian.Uint32(data[i : i+4]))
-		if n < 0 || i+4+n > len(data) {
-			return nil, errf("cenc: NAL length %d exceeds sample bounds", n)
-		}
-		clear := 4 + nalHeaderLen
-		if clear > 4+n {
-			clear = 4 + n
-		}
-		protected := 4 + n - clear
-		subs = append(subs, cencSubsample{clear: uint16(clear), protected: uint32(protected)})
-		i += 4 + n
-	}
-	return subs, nil
 }
 
 // addUint64BE adds v to the big-endian unsigned integer held in b, in place,
@@ -592,8 +557,8 @@ func cbcsEncryptWholeSample(block cipher.Block, iv []byte, sample []byte) {
 // data holds every sample in samples back-to-back, in decode order, exactly
 // as segmentWindow/segmentTrack lay them out; samples' dtsTS values are what
 // the per-sample 'cenc' IV derives from (see this file's doc comment).
-func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, trackID uint64, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
-	k, err := newCENCCipher(c, isVideo, codec, trackID)
+func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
+	k, err := newCENCCipher(c, isVideo, codec, private, trackID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -628,7 +593,7 @@ type cencCipher struct {
 	started  bool
 }
 
-func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (*cencCipher, error) {
+func newCENCCipher(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64) (*cencCipher, error) {
 	block, err := aes.NewCipher(c.Key)
 	if err != nil {
 		return nil, err
@@ -638,7 +603,7 @@ func newCENCCipher(c *CENCOptions, isVideo bool, codec string, trackID uint64) (
 	}
 	k := &cencCipher{c: c, block: block, isVideo: isVideo, domain: cencIVDomain(isVideo, trackID), trackID: trackID}
 	if isVideo {
-		if k.splitter, err = newVideoSubsampleSplitter(codec); err != nil {
+		if k.splitter, err = newVideoSubsampleSplitter(codec, private, c.Scheme); err != nil {
 			return nil, err
 		}
 	}

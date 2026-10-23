@@ -28,7 +28,7 @@ func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts, star
 		for x := range window {
 			plain = append(plain, window[x].data...)
 		}
-		td, cipher, err := prepareCENCSegment(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, pt.ft.outTrack.mkv.ID, seg.samples, plain)
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, pt.ft.outTrack.spec.video, pt.ft.outTrack.mkv.Codec, pt.ft.outTrack.mkv.CodecPrivate, pt.ft.outTrack.mkv.ID, seg.samples, plain)
 		if err != nil {
 			return nil, err
 		}

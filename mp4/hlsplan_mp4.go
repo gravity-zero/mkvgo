@@ -236,7 +236,7 @@ func (p *HLSPlan) mp4SegmentTrack(ctx context.Context, ti, n int) ([]byte, error
 		}
 		// Same requirement as the full pass and the Matroska on-demand path:
 		// CENC needs the plaintext bytes before the head is built.
-		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.ID, seg.samples, plain)
+		td, cipher, err := prepareCENCSegment(p.opts.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.CodecPrivate, ft.outTrack.mkv.ID, seg.samples, plain)
 		if err != nil {
 			return nil, err
 		}

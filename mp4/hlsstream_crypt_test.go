@@ -75,8 +75,13 @@ func TestOpenStreamsEncryptedSegments(t *testing.T) {
 						t.Fatal(err)
 					}
 					for x, e := range h.cenc.td.entries {
-						if len(e.subs) < 4 {
+						if o.CENC.Scheme == "cbcs" && len(e.subs) < 4 {
 							t.Fatalf("sample %d: %d subsamples, want the 4 slices", x, len(e.subs))
+						}
+						for _, sub := range e.subs {
+							if o.CENC.Scheme == "cenc" && sub.protected%16 != 0 {
+								t.Fatalf("sample %d: %d protected bytes, not whole AES blocks", x, sub.protected)
+							}
 						}
 					}
 				}

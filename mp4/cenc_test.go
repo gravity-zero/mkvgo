@@ -37,32 +37,11 @@ func cencIVFor(scheme string) []byte {
 	return cencIV16
 }
 
-// avccNAL prepends a 4-byte big-endian length to a NAL unit's bytes (payload
-// already includes the NAL header byte(s)).
-func avccNAL(payload []byte) []byte {
-	var b []byte
-	var l [4]byte
-	binary.BigEndian.PutUint32(l[:], uint32(len(payload)))
-	b = append(b, l[:]...)
-	b = append(b, payload...)
-	return b
-}
-
-// cencVideoNAL1 / cencVideoNAL2 are the two NAL units of every synthetic H.264
-// sample below: a tiny one (SPS-ish) and a big one (300-byte payload, > 160
-// bytes protected - enough to see several cbcs pattern cycles).
-func cencVideoNAL1() []byte { return []byte{0x67, 0xAA, 0xBB, 0xCC} }
-func cencVideoNAL2() []byte {
-	b := make([]byte, 301)
-	b[0] = 0x65
-	for i := 1; i < len(b); i++ {
-		b[i] = byte(i)
-	}
-	return b
-}
-
+// cencVideoSample is every synthetic H.264 sample below: in-band SPS and PPS,
+// then an IDR slice of 300 bytes of slice data (several cbcs pattern cycles).
 func cencVideoSample() []byte {
-	return append(avccNAL(cencVideoNAL1()), avccNAL(cencVideoNAL2())...)
+	slice, _ := testAVCSlice(0, 0, 300)
+	return lengthPrefixed(4, testAVCSPS(), testAVCPPS(), slice)
 }
 
 func cencAudioSample(i int) []byte {
@@ -469,7 +448,11 @@ func TestCENCRoundTrip(t *testing.T) {
 						// and matching senc's own recorded subsample split.
 						if r.isVideo {
 							for i, ct := range cipherSamples {
-								subs, err := splitNALSubsamples(ct, 1)
+								sp, err := newH26xSplitter("h264", fakeAVCC, scheme)
+								if err != nil {
+									t.Fatal(err)
+								}
+								subs, err := sp.split(ct)
 								if err != nil {
 									t.Fatalf("segment %d sample %d: NAL lengths unreadable in ciphertext: %v", segN, i, err)
 								}
@@ -484,13 +467,12 @@ func TestCENCRoundTrip(t *testing.T) {
 								}
 							}
 
-							// cbcs pattern, first sample's big NAL (300-byte
+							// cbcs pattern, first sample's slice data (300-byte
 							// protected region): block 0 must differ from clear
 							// (encrypted), blocks 1-9 must equal clear (skipped).
 							if scheme == "cbcs" && segN == 1 {
-								sub := ps.samples[0].subs[1] // NAL2
-								clearStart := 8 + sub[0]     // NAL1 (8 bytes) + NAL2's clear prefix
-								protStart := clearStart
+								sub := ps.samples[0].subs[0] // parameter sets and slice header, then slice data
+								protStart := sub[0]
 								ctProt := cipherSamples[0][protStart : protStart+sub[1]]
 								ptProt := plainSamples[0][protStart : protStart+sub[1]]
 								if bytes.Equal(ctProt[:16], ptProt[:16]) {

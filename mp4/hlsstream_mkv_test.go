@@ -43,7 +43,7 @@ func lacedStripMKV(t *testing.T, lacing byte, strip bool) string {
 		var cl bytes.Buffer
 		cl.Write(rawUintElem(mkv.IDTimestamp, uint64(ts), 2))
 		for i := 0; i < 25; i++ {
-			fr := cryptVecFrame(int(ts/40) + i)
+			fr := cryptVecFrame(int(ts/40)+i, i == 0)
 			if strip {
 				fr = fr[2:]
 			}

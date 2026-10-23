@@ -1339,9 +1339,19 @@ DRM handshake. Two schemes:
 Subsample encryption (video) keeps the bytes a decoder/CDM must read in the
 clear and protects the rest, per each codec's convention:
 
-- **H.264/HEVC** (length-prefixed NALs): per NAL unit the clear region is the
-  4-byte length field plus the NAL header (1 byte H.264, 2 bytes HEVC); the
-  rest is protected.
+- **H.264/HEVC** (length-prefixed NALs, the length field size taken from the
+  CodecPrivate): a NAL unit that is not a coded slice (parameter sets, SEI,
+  access unit delimiter, Dolby Vision RPU) stays clear whole; a slice keeps its
+  length field, NAL header and slice header clear and its slice data protected
+  (ISO/IEC 23001-7 3rd edition, CMAF). Under `cenc` a slice's protected bytes
+  are a whole number of 16-byte blocks, the remainder joining the clear bytes
+  in front; under `cbcs` they start right after the slice header. A slice
+  header is read against the parameter sets of the CodecPrivate, then those the
+  segment carries in band, in decode order - per segment, so a segment packaged
+  alone reads what a full pass reads: a parameter set redefined in band must be
+  repeated with the next segment's keyframe (encoders that redefine them do).
+  Slice groups (FMO), multi-layer HEVC and the HEVC screen content profile are
+  refused.
 - **AV1**: the OBU header, its leb128 size and the `frame_header_obu()` bits
   (rounded up to a byte) stay clear, the tile data is protected. Combined
   `OBU_FRAME` is handled by parsing `frame_header_obu()` against the segment's
@@ -1353,8 +1363,11 @@ clear and protects the rest, per each codec's convention:
   reuse a reference frame's dimensions are resolved from the segment keyframe
   (per-segment stateful parse).
 
-All four decrypt and decode in a real EME player (verified with Shaka Player +
-Clear Key in headless Chromium). AV1/VP9 fail loud rather than mis-protect on
+AV1 and VP9 decrypt and decode in a real EME player (verified with Shaka Player +
+Clear Key in headless Chromium). H.264 and HEVC decrypt to the source's exact
+packets under both schemes, on several encoders' output; their current layout
+(slice headers clear, since 0.61.0) has not been played back in a browser or on
+a hardware decoder yet. AV1/VP9 fail loud rather than mis-protect on
 the frame constructs the parsers do not yet cover (e.g. multi-tile tile groups,
 some AV1 short-signalled reference frames), so a stream that cannot be split
 correctly is refused, never served clear-but-signalled-protected. Audio (and

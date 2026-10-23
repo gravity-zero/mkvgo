@@ -3,7 +3,6 @@ package mp4
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -125,11 +124,8 @@ func TestRangeCount(t *testing.T) {
 func TestCENCSamplesReadAhead(t *testing.T) {
 	w, h := uint32(320), uint32(240)
 	var blocks []genBlock
-	for i := 0; i < 60; i++ { // 12 MiB of video in one segment, one length-prefixed NAL a frame
-		frame := bytes.Repeat([]byte{byte(i)}, 200<<10)
-		binary.BigEndian.PutUint32(frame, uint32(len(frame)-4))
-		frame[4] = 0x65
-		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i == 0, data: frame})
+	for i := 0; i < 60; i++ { // 12 MiB of video in one segment, one H.264 picture a frame
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i == 0, data: testAVCFrame(200 << 10)})
 	}
 	src := buildMKV(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}, blocks)
 	type rng struct{ off, n int64 }

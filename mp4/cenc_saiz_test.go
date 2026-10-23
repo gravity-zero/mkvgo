@@ -1,25 +1,19 @@
 package mp4
 
-import (
-	"encoding/binary"
-	"testing"
-)
+import "testing"
 
 // TestSaizStatesEachSencEntryWhole: a picture of more NAL units than one saiz byte can size still gets an entry saiz
 // states exactly, every NAL length and header left clear.
 func TestSaizStatesEachSencEntryWhole(t *testing.T) {
-	var sample []byte
+	sample := lengthPrefixed(4, testAVCSPS(), testAVCPPS())
 	var starts []int
 	for i := range 60 {
 		starts = append(starts, len(sample))
-		nal := make([]byte, 50)
-		nal[0] = 0x01 // a non-IDR slice header byte
-		nal[1] = byte(i)
-		sample = binary.BigEndian.AppendUint32(sample, uint32(len(nal)))
-		sample = append(sample, nal...)
+		nal, _ := testAVCSlice(uint32(i), 0, 50)
+		sample = append(sample, lengthPrefixed(4, nal)...)
 	}
 	for _, scheme := range []string{"cenc", "cbcs"} {
-		k, err := newCENCCipher(&CENCOptions{Scheme: scheme, Key: cencKey, KeyID: cencKID, IV: cencIVFor(scheme), InlineKey: true}, true, "h264", 1)
+		k, err := newCENCCipher(&CENCOptions{Scheme: scheme, Key: cencKey, KeyID: cencKID, IV: cencIVFor(scheme), InlineKey: true}, true, "h264", nil, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

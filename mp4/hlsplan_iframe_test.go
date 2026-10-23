@@ -443,7 +443,7 @@ func TestPlanHLSIframeStoredFrames(t *testing.T) {
 			Compression: mkv.CompressionZlib}}, zblocks),
 		"header stripping": lacedStripMKV(t, 1, true),
 	}
-	keySize := map[string]int{"zlib": iframeTestKeySize, "header stripping": len(cryptVecFrame(0))}
+	keySize := map[string]int{"zlib": iframeTestKeySize, "header stripping": len(cryptVecFrame(0, true))}
 	for kind, src := range sources {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()

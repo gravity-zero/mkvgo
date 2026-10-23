@@ -317,8 +317,7 @@ const plan = await MkvGo.openHLS(file, {
 ```
 
 Video may be H.264, HEVC, AV1 or VP9 (subsample encryption keeps each codec's
-decoder-visible header bytes clear and protects the coded data, verified in a
-real Clear Key player); a bad key/keyId/IV length or a frame construct the
+decoder-visible header bytes clear and protects the coded data); a bad key/keyId/IV length or a frame construct the
 AV1/VP9 parsers do not yet cover rejects the returned Promise with the same
 error the CLI's `--cenc-*` flags surface. Unlike `Options.Encrypt` (AES-128,
 HLS-only), a CENC presentation still gets a DASH manifest (with a

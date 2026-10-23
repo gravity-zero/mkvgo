@@ -484,9 +484,10 @@ mp4.Options{CENC: &mp4.CENCOptions{
 ```
 
 Video may be H.264, HEVC, AV1 or VP9: subsample encryption keeps each codec's
-decoder-visible header bytes clear (NAL length+header for H.264/HEVC, the
-`frame_header_obu()` for AV1, the uncompressed header for VP9) and protects the
-coded data - verified decrypting and decoding in a real Clear Key player. No
+decoder-visible header bytes clear (parameter sets, SEI and slice headers for
+H.264/HEVC, the `frame_header_obu()` for AV1, the uncompressed header for VP9)
+and protects the coded data - AV1/VP9 verified decrypting and decoding in a real
+Clear Key player, H.264/HEVC decrypting to the source's exact packets. No
 I-frame playlist is emitted (a ciphertext byte range is not independently
 decryptable). Full detail -- exact clear/protected rules, IV derivation, key
 delivery -- in [library.md](library.md#common-encryption-cenc).

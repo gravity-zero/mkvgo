@@ -561,15 +561,17 @@ func TestPkgcovSingleFileDASHSubtitleAdaptationSet(t *testing.T) {
 	mustContain(t, string(mpd), `<BaseURL>sub1.vtt</BaseURL>`)
 }
 
-// --- cenc.go: splitNALSubsamples clamp, cbcsPatternEncrypt crypt-run clamp ---
+// --- cenc.go: empty NAL unit, cbcsPatternEncrypt crypt-run clamp ---
 
-// TestPkgcovSplitNALSubsamplesEmptyNALClearClamp pins the "clear region wider
-// than the whole NAL" clamp (cenc.go): a bare zero-length NAL (a 4-byte
-// length prefix with no payload, no NAL header byte to include) has clear =
-// 4 + nalHeaderLen naturally exceed 4 + n and must clamp down to 4 + n.
+// TestPkgcovSplitNALSubsamplesEmptyNALClearClamp: a bare zero-length NAL (a
+// 4-byte length prefix, no NAL header byte) is its length field, clear.
 func TestPkgcovSplitNALSubsamplesEmptyNALClearClamp(t *testing.T) {
 	data := []byte{0, 0, 0, 0} // one NAL, length=0, no payload
-	subs, err := splitNALSubsamples(data, 1)
+	sp, err := newH26xSplitter("h264", nil, "cbcs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs, err := sp.split(data)
 	if err != nil {
 		t.Fatal(err)
 	}
