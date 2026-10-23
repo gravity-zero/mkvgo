@@ -27,7 +27,10 @@ All notable changes to mkvgo are documented here. The format is based on
   Checked: slice header sizes match an independent bitstream trace on 1,280
   slices of six streams from four encoders; both schemes decrypt to the
   source's exact packets; every NAL unit other than slice data is identical in
-  the ciphertext. Not yet played back in a browser or on a hardware decoder.
+  the ciphertext. Played back with Clear Key: H.264 cenc/cbcs in Chrome and
+  Firefox; HEVC cenc/cbcs only in Chrome on Windows (GPU decoding), Firefox
+  not tested (browser limit). Nothing is proven on FairPlay or on hardware
+  CDMs.
 
 ### Changed
 

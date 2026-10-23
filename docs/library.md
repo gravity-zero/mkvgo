@@ -1365,9 +1365,11 @@ clear and protects the rest, per each codec's convention:
 
 AV1 and VP9 decrypt and decode in a real EME player (verified with Shaka Player +
 Clear Key in headless Chromium). H.264 and HEVC decrypt to the source's exact
-packets under both schemes, on several encoders' output; their current layout
-(slice headers clear, since 0.61.0) has not been played back in a browser or on
-a hardware decoder yet. AV1/VP9 fail loud rather than mis-protect on
+packets under both schemes, on several encoders' output. Their current layout
+(slice headers clear, since 0.61.0) is played back with Clear Key: H.264
+cenc/cbcs in Chrome and Firefox; HEVC cenc/cbcs only in Chrome on Windows (GPU
+decoding), Firefox not tested (browser limit). Nothing is proven on FairPlay or
+on hardware CDMs. AV1/VP9 fail loud rather than mis-protect on
 the frame constructs the parsers do not yet cover (e.g. multi-tile tile groups,
 some AV1 short-signalled reference frames), so a stream that cannot be split
 correctly is refused, never served clear-but-signalled-protected. Audio (and
