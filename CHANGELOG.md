@@ -52,6 +52,11 @@ All notable changes to mkvgo are documented here. The format is based on
 
 - README: head-only probing reads every cluster header of an MKV with neither
   SeekHead nor Cues; a CENC key and base IV pair must be unique per title.
+- The `matroska` and `mp4` packages are no longer described as a stable API,
+  nor `mkv/*` as experimental: the facade re-exports the `mkv` types and `mp4`
+  takes them, so no package could hold that promise alone. Until 1.0 any
+  package may change between minor versions, and the Breaking section names
+  each change.
 
 ## [0.60.0] - 2026-10-22
 

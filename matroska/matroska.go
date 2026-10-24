@@ -1,12 +1,10 @@
-// Package matroska is the stable, supported public API of mkvgo: a small,
-// curated facade over the lower-level building blocks in mkv and its
-// subpackages. Prefer it for application code - its exported surface is the one
-// kept backward-compatible.
+// Package matroska is the MKV/WebM facade of mkvgo: a small, curated set of
+// functions over the building blocks in mkv and its subpackages, whose types it
+// re-exports as aliases. Prefer it for application code.
 //
-// The mkv, mkv/reader, mkv/writer, mkv/ops and mkv/subtitle packages are
-// lower-level and EXPERIMENTAL: their APIs may change between minor versions.
-// Import them directly only for capabilities this facade does not expose yet
-// (e.g. streaming readers/writers, NewWebMStreamWriter).
+// The mkv, mkv/reader, mkv/writer, mkv/ops and mkv/subtitle packages hold the
+// capabilities this facade does not expose yet (e.g. streaming readers/writers,
+// NewWebMStreamWriter).
 package matroska
 
 import (

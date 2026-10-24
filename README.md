@@ -221,8 +221,8 @@ Full CLI reference: **[docs/cli.md](docs/cli.md)**
 ## Library
 
 ```go
-import "github.com/gravity-zero/mkvgo/matroska" // MKV/WebM facade - stable API
-import "github.com/gravity-zero/mkvgo/mp4"       // MP4 remux/probe + streaming - stable API
+import "github.com/gravity-zero/mkvgo/matroska" // MKV/WebM facade
+import "github.com/gravity-zero/mkvgo/mp4"       // MP4 remux/probe + streaming
 ```
 
 **Probe (head-only, fast for indexing):**
@@ -302,10 +302,11 @@ Full library guide: **[docs/library.md](docs/library.md)**.
 
 ## Versioning
 
-Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). The `matroska` facade **and**
-the `mp4` package are the stable public API: held additive and
-backward-compatible across 0.x releases by policy. The `mkv/*` and `ebml`
-sub-packages are lower-level and may change between minor versions.
+Pre-1.0 (SemVer, [Keep a Changelog](CHANGELOG.md)). Until 1.0, any package may
+change between minor versions, and a release that breaks an exported API or
+changes the bytes mkvgo writes names it in the CHANGELOG's Breaking section.
+The `matroska` facade and the `mp4` package are the shortest path for most
+uses; the `mkv/*` and `ebml` sub-packages hold the building blocks under them.
 
 ## Architecture
 
@@ -313,11 +314,11 @@ sub-packages are lower-level and may change between minor versions.
 cmd/mkvgo/         CLI binary (one file per command group)
 cmd/mkvgo-wasm/    WebAssembly entry point (global MkvGo object)
 
-matroska/          facade - stable public API, re-exports everything
-mp4/               MP4 remux + the HLS/DASH/CMAF streaming packager - stable API
+matroska/          facade over mkv/*, re-exports everything
+mp4/               MP4 remux + the HLS/DASH/CMAF streaming packager
 httpfs/            FS port over HTTP Range (remote/S3 sources)
 
-mkv/               core types, FS port, MemFS, EBML IDs (experimental)
+mkv/               core types, FS port, MemFS, EBML IDs
   reader/ writer/  parse / emit MKV
   ops/             high-level operations (mux, split, merge, edit, thumbnails…)
   subtitle/        SRT/ASS parsing

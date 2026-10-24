@@ -18,7 +18,4 @@
 // QuickTime .mov files are read as well, including the raw-camera layout
 // (mdat before a trailing moov, wide preamble, brand "qt  ") and QuickTime
 // version 1/2 sound descriptions with a wave-wrapped esds.
-//
-// Like the matroska facade, this package's API is stable: held additive and
-// backward-compatible across 0.x releases by policy.
 package mp4
