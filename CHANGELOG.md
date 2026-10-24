@@ -9,6 +9,8 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-10-24
+
 ### Breaking
 
 - CENC on H.264/HEVC leaves parameter sets, SEI and slice headers clear, as
