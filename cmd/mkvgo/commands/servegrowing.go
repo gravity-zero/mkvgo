@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/mkvhttp"
@@ -42,7 +43,8 @@ func CmdServeGrowing(args []string) {
 		FatalErr(err)
 	}
 
-	srv := newServer(addr, mkvhttp.Handler(plan, mkvhttp.Options{AllowCORS: cfg.cors}), segmentWriteTimeout)
+	cfg.applyMemoryLimit()
+	srv := newServer(addr, mkvhttp.Handler(plan, cfg.httpOptions()), segmentWriteTimeout)
 
 	fmt.Printf("serving %s (play while downloading)\n  %s\n", src, playableURL(addr))
 	fmt.Println("press Ctrl-C to stop")
@@ -91,23 +93,41 @@ func refreshLoop(ctx context.Context, plan *mp4.GrowingHLSPlan) {
 	}
 }
 
-// serveGrowingFlags are serve-growing's flags.
+// serveGrowingFlags are serve-growing's flags; the admission and memory caps are serve's, with its defaults.
 type serveGrowingFlags struct {
-	addr  string
-	segMs int64
-	cors  bool
-	rest  []string
+	addr        string
+	segMs       int64
+	cors        bool
+	maxInFlight int   // segments served at once (0 = no cap)
+	maxWaiting  int   // requests queued behind them before a 503
+	memoryLimit int64 // the Go runtime's soft memory limit in bytes (0 = left as GOMEMLIMIT sets it)
+	rest        []string
 }
 
 // parseServeGrowingFlags reads serve-growing's flags.
 func parseServeGrowingFlags(args []string) serveGrowingFlags {
-	cfg := serveGrowingFlags{addr: defaultServeAddr}
+	cfg := serveGrowingFlags{addr: defaultServeAddr, maxInFlight: defaultMaxInFlight, maxWaiting: defaultMaxWaiting}
 	fl := newFlags("serve-growing")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.cors, "-cors", "--cors")
+	fl.Func(func(v string) { cfg.maxInFlight = countFlag(v, "--max-in-flight") }, "-max-in-flight", "--max-in-flight")
+	fl.Func(func(v string) { cfg.maxWaiting = countFlag(v, "--max-waiting") }, "-max-waiting", "--max-waiting")
+	fl.Func(func(v string) { cfg.memoryLimit = memoryLimitFlag(v) }, "-memory-limit", "--memory-limit")
 	fl.Func(func(v string) {
 		cfg.segMs = parseSegmentSeconds(v)
 	}, "-segment", "--segment")
 	cfg.rest = fl.Parse(args)
 	return cfg
+}
+
+// httpOptions are the handler options serve-growing runs with: serve's admission caps, CORS only on --cors.
+func (cfg serveGrowingFlags) httpOptions() mkvhttp.Options {
+	return mkvhttp.Options{AllowCORS: cfg.cors, MaxInFlight: cfg.maxInFlight, MaxWaiting: cfg.maxWaiting}
+}
+
+// applyMemoryLimit sets the runtime's soft memory limit on --memory-limit.
+func (cfg serveGrowingFlags) applyMemoryLimit() {
+	if cfg.memoryLimit > 0 {
+		debug.SetMemoryLimit(cfg.memoryLimit)
+	}
 }

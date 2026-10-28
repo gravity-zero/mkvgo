@@ -143,13 +143,7 @@ func parseServeFlags(args []string) serveFlags {
 	fl.Func(func(v string) { cfg.maxWaiting = countFlag(v, "--max-waiting") }, "-max-waiting", "--max-waiting")
 	fl.Func(func(v string) { cfg.windowCache = mibOrOff(v, "--window-cache") }, "-window-cache", "--window-cache")
 	fl.Func(func(v string) { cfg.windowBytes = mibOrOff(v, "--window-bytes") }, "-window-bytes", "--window-bytes")
-	fl.Func(func(v string) {
-		mib, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || mib <= 0 {
-			Fatal("serve: --memory-limit takes a size in MiB, more than 0 (the budget of --window-bytes plus 64 bounds the peak)")
-		}
-		cfg.memoryLimit = mib << 20
-	}, "-memory-limit", "--memory-limit")
+	fl.Func(func(v string) { cfg.memoryLimit = memoryLimitFlag(v) }, "-memory-limit", "--memory-limit")
 	cfg.rest = fl.ParseKnown(args) // the shared HLS flags and the source, for parseHLSFlags
 	return cfg
 }
@@ -166,6 +160,15 @@ func (cfg serveFlags) applyMemoryLimit() {
 	if cfg.memoryLimit > 0 {
 		debug.SetMemoryLimit(cfg.memoryLimit)
 	}
+}
+
+// memoryLimitFlag reads --memory-limit, a size in MiB, as bytes.
+func memoryLimitFlag(v string) int64 {
+	mib, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || mib <= 0 {
+		Fatal("serve: --memory-limit takes a size in MiB, more than 0 (the budget of --window-bytes plus 64 bounds the peak)")
+	}
+	return mib << 20
 }
 
 // countFlag reads a non-negative count.

@@ -66,3 +66,17 @@ func TestServeMemoryLimit(t *testing.T) {
 		t.Errorf("--memory-limit 128: limit %d, want %d", got, 128<<20)
 	}
 }
+
+// TestServeGrowingAdmissionByDefault: serve-growing served every request at once, with none of serve's caps; it takes
+// serve's admission defaults and flags, and --memory-limit.
+func TestServeGrowingAdmissionByDefault(t *testing.T) {
+	if o := parseServeGrowingFlags([]string{"in.mkv"}).httpOptions(); o.MaxInFlight != 64 || o.MaxWaiting != 1024 {
+		t.Errorf("default admission: in flight %d, waiting %d, want 64 and 1024", o.MaxInFlight, o.MaxWaiting)
+	}
+	if o := parseServeGrowingFlags([]string{"in.mkv", "--max-in-flight", "2", "--max-waiting", "8", "--cors"}).httpOptions(); o.MaxInFlight != 2 || o.MaxWaiting != 8 || !o.AllowCORS {
+		t.Errorf("--max-in-flight 2 --max-waiting 8 --cors: %+v", o)
+	}
+	if cfg := parseServeGrowingFlags([]string{"in.mkv", "--memory-limit", "128"}); cfg.memoryLimit != 128<<20 {
+		t.Errorf("--memory-limit 128: %d bytes", cfg.memoryLimit)
+	}
+}

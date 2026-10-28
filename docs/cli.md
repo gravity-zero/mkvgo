@@ -1320,7 +1320,7 @@ See `docs/library.md` (`mkvhttp.Handler`, `mkvhttp.FileHandler`) for the full ca
 Play while downloading: serve a file that may still be growing (a download landing on disk) as HLS -- `mp4.PlanGrowingHLS` wrapped in the same long-running server `serve` uses. The media playlist is `EVENT`-typed and lengthens as new whole clusters land; once the source finishes (a Cues index appears, or the file simply stops growing and `Complete()` is signalled), it switches to `VOD` + `ENDLIST`.
 
 ```
-mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors]
+mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--cors]
 ```
 
 - `-addr` sets the listen address (default `127.0.0.1:8478`, this machine only, as for `serve`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
@@ -1328,7 +1328,7 @@ mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors]
 - Polls the source once a second for new whole clusters (a stat plus, at most, a bounded read of what's new) and extends the playlist as they land; a partial trailing cluster (still being written) is never served from.
 - A published segment's bytes are byte-identical to what `to-hls`/`hls-segment` would produce for the finished file, and never change once served (stable numbering).
 - Encrypted/CENC presentations, subtitle renditions, the DASH manifest and the I-frame trick-play playlist are not available in this version (see `docs/library.md` for the full list of v1 limits).
-- The same timeouts as `serve` apply.
+- The same timeouts as `serve` apply, and the same caps: `--max-in-flight` (default 64), `--max-waiting` (default 1024) and `--memory-limit`, as `serve` reads them.
 - Ctrl-C shuts the server down gracefully.
 
 ```bash
