@@ -10,6 +10,13 @@ func TestPath(t *testing.T) {
 		"/media/what?.mkv":                  "/media/what?.mkv",
 		"https://u:secret@h/a.mkv?sig=s":    "https://h/a.mkv?...",
 		"https://u@h/a@b.mkv":               "https://h/a@b.mkv",
+		// A password the authority's end cuts short ('/', '?', '#' in it) made a URL that does not parse; what was
+		// shown of it was the user and the password's start.
+		"https://user:pa/ss@host/x.mkv": "https://(a URL that does not parse)",
+		"https://u:p?w@h/a.mkv":         "https://(a URL that does not parse)",
+		"https://u:p#w@h/a.mkv":         "https://(a URL that does not parse)",
+		"http://[::1]:8080/a b.mkv":     "http://[::1]:8080/a b.mkv",
+		"https://h?sig=s":               "https://h?...",
 	} {
 		if got := Path(in); got != want {
 			t.Errorf("Path(%q) = %q, want %q", in, got, want)
