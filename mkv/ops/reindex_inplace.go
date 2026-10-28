@@ -755,12 +755,27 @@ func clearIntent(f mkv.ReadWriteSeekCloser, off int64) error {
 // follow it, never patches) is cleared back to the zeros it covered. It
 // reports whether there was either.
 func recoverIntent(f mkv.ReadWriteSeekCloser, trunc interface{ Truncate(size int64) error }, size int64) (bool, error) {
-	head := make([]byte, min(size, intentHeadScan))
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	at, orig, found, err := findIntent(f, size)
+	if err != nil || !found {
 		return false, err
 	}
+	if orig >= 0 && orig < size {
+		if err := trunc.Truncate(orig); err != nil {
+			return false, err
+		}
+	}
+	return true, clearIntent(f, at)
+}
+
+// findIntent finds the intent record recoverIntent acts on: its offset, and the size it names (-1 for a record a crash
+// cut short).
+func findIntent(f mkv.ReadSeekCloser, size int64) (at, orig int64, found bool, err error) {
+	head := make([]byte, min(size, intentHeadScan))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, 0, false, err
+	}
 	if _, err := io.ReadFull(f, head); err != nil {
-		return false, err
+		return 0, 0, false, err
 	}
 	for _, end := range headVoidEnds(head) {
 		at := end - intentLen
@@ -774,17 +789,27 @@ func recoverIntent(f mkv.ReadWriteSeekCloser, trunc interface{ Truncate(size int
 			if orig < int64(end) || orig > size {
 				continue
 			}
-			if orig < size {
-				if err := trunc.Truncate(orig); err != nil {
-					return false, err
-				}
-			}
-			return true, clearIntent(f, int64(at))
+			return int64(at), orig, true, nil
 		case tornIntent(rec):
-			return true, clearIntent(f, int64(at))
+			return int64(at), -1, true, nil
 		}
 	}
-	return false, nil
+	return 0, 0, false, nil
+}
+
+// errPendingInPlacePatch refuses an edit of a file an in-place patch (reindex-inplace, retime --in-place) was
+// interrupted on: its journal or intent record is still in the file, and the edit would write over what rolling it
+// back needs.
+var errPendingInPlacePatch = errors.New("an interrupted in-place patch left its journal in the file; run mkvgo reindex-inplace on it first, which rolls the patch back")
+
+// pendingInPlacePatch reports whether f holds the journal or the intent record of an interrupted in-place patch.
+func pendingInPlacePatch(f mkv.ReadSeekCloser, size int64) (bool, error) {
+	j, err := readInPlaceJournal(f, size)
+	if err != nil || j != nil {
+		return j != nil, err
+	}
+	_, _, found, err := findIntent(f, size)
+	return found, err
 }
 
 // tornIntent reports whether rec is the start of an intent record a crash cut short: the magic, or its first bytes,

@@ -113,3 +113,45 @@ func TestEditInPlaceKeepsCuesInTheHead(t *testing.T) {
 		}
 	}
 }
+
+// TestEditInPlaceRefusesAPendingJournal: a file an in-place reindex died on keeps its journal at its end; an edit in
+// place rewrote the head the rollback restores. It is refused, and the file left as it was.
+func TestEditInPlaceRefusesAPendingJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.mkv")
+	tailTagsMKV(t, path, 2)
+	data, err := os.ReadFile(path)
+	mustNil(t, err)
+	var tail bytes.Buffer
+	mustNil(t, writeInPlaceJournal(&tail, nil, int64(len(data)), []inplaceZone{{off: 100, orig: append([]byte(nil), data[100:116]...)}}))
+	pending := append(append([]byte(nil), data...), tail.Bytes()...)
+	mustNil(t, os.WriteFile(path, pending, 0o644))
+	err = EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "edited" })
+	if !errors.Is(err, errPendingInPlacePatch) {
+		t.Errorf("EditInPlace over a pending journal = %v; want errPendingInPlacePatch", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, pending) {
+		t.Error("the file was changed")
+	}
+}
+
+// TestEditInPlaceRefusesAPendingIntent: the intent record an in-place patch leaves in a head Void before its journal
+// lands is refused the same way: the edit would write over it.
+func TestEditInPlaceRefusesAPendingIntent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "intent.mkv")
+	tailTagsMKV(t, path, 2)
+	data, err := os.ReadFile(path)
+	mustNil(t, err)
+	ends := headVoidEnds(data[:min(len(data), intentHeadScan)])
+	if len(ends) == 0 {
+		t.Fatal("fixture: no head Void")
+	}
+	copy(data[ends[0]-intentLen:], intentBytes(int64(len(data))))
+	mustNil(t, os.WriteFile(path, data, 0o644))
+	err = EditInPlace(context.Background(), path, func(c *mkv.Container) { c.Info.Title = "edited" })
+	if !errors.Is(err, errPendingInPlacePatch) {
+		t.Errorf("EditInPlace over a pending intent = %v; want errPendingInPlacePatch", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, data) {
+		t.Error("the file was changed")
+	}
+}

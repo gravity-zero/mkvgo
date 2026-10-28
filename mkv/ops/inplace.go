@@ -31,6 +31,9 @@ import (
 // Chapters, rewritten in the old element's place when the head cannot hold them.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	fs := mkv.FSFrom(opts)
+	if err := refusePendingPatch(path, fs); err != nil {
+		return err
+	}
 	c, err := reader.OpenWithFS(ctx, path, fs)
 	if err != nil {
 		return err
@@ -173,6 +176,28 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 
 // tailIDs are the metadata elements a muxer may leave after the clusters.
 var tailIDs = []uint32{mkv.IDTags, mkv.IDChapters, mkv.IDAttachments}
+
+// refusePendingPatch refuses a file an interrupted in-place patch left its journal or intent record in: the edit
+// rewrites the head the rollback restores, and its Void the intent record sits in.
+func refusePendingPatch(path string, fs *mkv.FS) error {
+	f, err := fs.DoOpen(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	st, err := fs.DoStat(path)
+	if err != nil {
+		return err
+	}
+	pending, err := pendingInPlacePatch(f, st.Size())
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("edit in place %s: %w", path, errPendingInPlacePatch)
+	}
+	return nil
+}
 
 var tailNames = map[uint32]string{mkv.IDTags: "tags", mkv.IDChapters: "chapters", mkv.IDAttachments: "attachments"}
 
