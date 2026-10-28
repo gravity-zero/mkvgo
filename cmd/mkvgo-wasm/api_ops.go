@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"syscall/js"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -243,11 +242,10 @@ func diagnoseJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("diagnose: %w", err)
 		}
-		head := make([]byte, 8)
-		_, herr := io.ReadFull(src, head)
+		head, herr := sniffHead(src)
 		src.Close()
 		if herr != nil {
-			return nil, fmt.Errorf("diagnose: read head: %w", herr)
+			return nil, fmt.Errorf("diagnose: %w", herr)
 		}
 		format, err := sniffFormat(head)
 		if err != nil {
@@ -361,10 +359,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 		})
 		var closeFn js.Func
 		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			segmentFn.Release()
-			patternFn.Release()
-			distinctFn.Release()
-			closeFn.Release()
+			closeHandle(h, map[string]js.Func{"segment": segmentFn, "segmentForPattern": patternFn, "distinct": distinctFn}, closeFn)
 			return nil
 		})
 		h.Set("segment", segmentFn)
@@ -482,9 +477,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 		})
 		var closeFn js.Func
 		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			segmentFn.Release()
-			patternFn.Release()
-			closeFn.Release()
+			closeHandle(h, map[string]js.Func{"segment": segmentFn, "segmentForPattern": patternFn}, closeFn)
 			return nil
 		})
 		h.Set("segment", segmentFn)

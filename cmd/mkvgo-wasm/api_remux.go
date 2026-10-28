@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"syscall/js"
@@ -29,22 +30,33 @@ func readRemuxOpts(args []js.Value, idx int) (mp4.Options, error) {
 	o.NativeWebVTT = v.Get("nativeWebVTT").Truthy()
 	o.MP3ContainerDelay = v.Get("mp3ContainerDelay").Truthy()
 	o.ContentHashes = v.Get("contentHashes").Truthy()
-	if s := v.Get("segmentSeconds"); s.Type() == js.TypeNumber {
-		o.SegmentMs = int64(s.Float() * 1000)
+	if s := v.Get("segmentSeconds"); s.Type() != js.TypeUndefined {
+		f, err := numArg(s, "segmentSeconds")
+		if err != nil {
+			return o, err
+		}
+		if f < 0.001 || f > 86400 {
+			return o, fmt.Errorf("segmentSeconds must be between 0.001 and 86400 seconds, got %v", f)
+		}
+		o.SegmentMs = int64(f * 1000)
 	}
 	if k := v.Get("keepTracks"); k.Type() == js.TypeObject && k.Get("length").Type() == js.TypeNumber {
 		n := k.Get("length").Int()
 		o.KeepTracks = make([]uint64, 0, n)
 		for i := 0; i < n; i++ {
-			id, err := intArg(k.Index(i), "keepTracks: each track id")
+			id, err := idArg(k.Index(i), "keepTracks: each track id")
 			if err != nil {
 				return o, err
 			}
-			o.KeepTracks = append(o.KeepTracks, uint64(id))
+			o.KeepTracks = append(o.KeepTracks, id)
 		}
 	}
-	if s := v.Get("subOffsetMs"); s.Type() == js.TypeNumber {
-		o.SubtitleOffsetMs = int64(s.Float())
+	if s := v.Get("subOffsetMs"); s.Type() != js.TypeUndefined {
+		n, err := intArg(s, "subOffsetMs")
+		if err != nil {
+			return o, err
+		}
+		o.SubtitleOffsetMs = int64(n)
 	}
 	o.SynthesizeIndex = v.Get("synthesizeIndex").Truthy()
 	// windowCacheBytes: what an on-demand plan may hold for the renditions of a
@@ -52,8 +64,12 @@ func readRemuxOpts(args []js.Value, idx int) (mp4.Options, error) {
 	// source; a negative value turns the sharing off (every rendition then
 	// re-walks its own window, so a viewer's video and audio read the source
 	// twice - through the Blob, that is twice the range requests).
-	if s := v.Get("windowCacheBytes"); s.Type() == js.TypeNumber {
-		o.WindowCacheBytes = int64(s.Float())
+	if s := v.Get("windowCacheBytes"); s.Type() != js.TypeUndefined {
+		n, err := intArg(s, "windowCacheBytes")
+		if err != nil {
+			return o, err
+		}
+		o.WindowCacheBytes = int64(n)
 	}
 	// audioShiftMs: {trackNumber: ms} - the browser-side ms shape converts to
 	// the library's nanoseconds here.
@@ -65,12 +81,17 @@ func readRemuxOpts(args []js.Value, idx int) (mp4.Options, error) {
 			if err != nil {
 				continue
 			}
-			if val := m.Get(k); val.Type() == js.TypeNumber {
-				if o.AudioPresentationShift == nil {
-					o.AudioPresentationShift = map[uint64]int64{}
-				}
-				o.AudioPresentationShift[track] = int64(val.Float()) * 1_000_000
+			ms, err := intArg(m.Get(k), "audioShiftMs["+k+"]")
+			if err != nil {
+				return o, err
 			}
+			if ms > math.MaxInt64/1_000_000 || ms < math.MinInt64/1_000_000 {
+				return o, fmt.Errorf("audioShiftMs[%s] of %d ms is past what a shift holds", k, ms)
+			}
+			if o.AudioPresentationShift == nil {
+				o.AudioPresentationShift = map[uint64]int64{}
+			}
+			o.AudioPresentationShift[track] = int64(ms) * 1_000_000
 		}
 	}
 	return o, nil
@@ -108,9 +129,9 @@ func resolveKeepLangs(ctx context.Context, fs *mkv.FS, path string, langs []stri
 		return nil, err
 	}
 	defer rs.Close()
-	head := make([]byte, 8)
-	if _, err := io.ReadFull(rs, head); err != nil {
-		return nil, fmt.Errorf("read head: %w", err)
+	head, err := sniffHead(rs)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := rs.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -196,8 +217,12 @@ func readEncryptOpts(v js.Value) (*mp4.HLSEncryption, error) {
 	// Rotating schedule: { rotateEverySegments: N, keys: [{ key, keyURI, iv? }] }.
 	// A leaked key then decrypts only its period. Length/count validation happens
 	// on the Go side (HLSEncryption.validate, via PlanHLS/PlanABR).
-	if rot := e.Get("rotateEverySegments"); rot.Type() == js.TypeNumber {
-		out := &mp4.HLSEncryption{RotateEverySegments: rot.Int()}
+	if rot := e.Get("rotateEverySegments"); rot.Type() != js.TypeUndefined {
+		every, err := intArg(rot, "encrypt.rotateEverySegments")
+		if err != nil {
+			return nil, err
+		}
+		out := &mp4.HLSEncryption{RotateEverySegments: every}
 		keys := e.Get("keys")
 		if keys.Type() != js.TypeObject || keys.Get("length").Type() != js.TypeNumber {
 			return nil, fmt.Errorf("encrypt: rotateEverySegments needs a keys array")
@@ -349,11 +374,11 @@ func extractSubtitleVTTJS(_ js.Value, args []js.Value) any {
 		return promise(func() (any, error) { return nil, fmt.Errorf("extractSubtitleVTT: need (input, trackId)") })
 	}
 	input := args[0]
-	id, err := intArg(args[1], "extractSubtitleVTT: the track id")
+	id, err := idArg(args[1], "extractSubtitleVTT: the track id")
 	if err != nil {
 		return rejected(err)
 	}
-	trackID := uint64(id)
+	trackID := id
 	return promise(func() (any, error) {
 		fs, err := singleSourceFS(input) // a Blob/File is read by ranges, as every Blob-backed export
 		if err != nil {

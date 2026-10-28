@@ -100,9 +100,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 		})
 		var closeFn js.Func
 		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			resourceFn.Release()
-			segmentFn.Release()
-			closeFn.Release()
+			closeHandle(h, map[string]js.Func{"resource": resourceFn, "segment": segmentFn}, closeFn)
 			return nil
 		})
 		h.Set("resource", resourceFn)
@@ -191,8 +189,7 @@ func openABRJS(_ js.Value, args []js.Value) any {
 		})
 		var closeFn js.Func
 		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			resourceFn.Release()
-			closeFn.Release()
+			closeHandle(h, map[string]js.Func{"resource": resourceFn}, closeFn)
 			return nil
 		})
 		h.Set("resource", resourceFn)
@@ -281,8 +278,7 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 		})
 		var closeFn js.Func
 		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			resourceFn.Release()
-			closeFn.Release()
+			closeHandle(h, map[string]js.Func{"resource": resourceFn}, closeFn)
 			return nil
 		})
 		h.Set("resource", resourceFn)

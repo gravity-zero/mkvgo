@@ -21,7 +21,8 @@
 // `json:` tags the CLI's -json output uses, so shapes are interchangeable).
 // ---------------------------------------------------------------------------
 
-export type TrackType = 'video' | 'audio' | 'subtitle'
+/** A track's kind; the last five are the other Matroska types, carried through a rewrite as they are. */
+export type TrackType = 'video' | 'audio' | 'subtitle' | 'complex' | 'logo' | 'buttons' | 'control' | 'metadata'
 
 /** One media track. Optional fields are omitted when absent, like the CLI JSON. */
 export interface Track {
@@ -563,8 +564,19 @@ export interface RemuxOptions extends AbortOptions {
   mp3ContainerDelay?: boolean
   /** Store per-track content SHA-256 for later verification. */
   contentHashes?: boolean
-  /** HLS only: target segment duration in seconds (default 6). */
+  /** HLS only: target segment duration in seconds (default 6), from 0.001 to 86400. */
   segmentSeconds?: number
+  /**
+   * Keep only these tracks (Matroska track numbers, MP4 track IDs); every
+   * other track is left out. Omitted, every track is kept.
+   */
+  keepTracks?: number[]
+  /**
+   * openHLS only: the bytes an on-demand plan may hold for the renditions of
+   * a window nobody has collected yet. Omitted, the plan sizes it from the
+   * source; negative turns the sharing off.
+   */
+  windowCacheBytes?: number
   /**
    * HLS/PlanHLS only: shift every subtitle cue's timing by this many
    * milliseconds (negative allowed) - a virtual per-session resync, no file
@@ -608,12 +620,15 @@ export interface CENCOptions {
   iv: Uint8Array
   /**
    * What the HLS EXT-X-KEY line advertises as URI="..." and what an
-   * EME-capable player's license request ultimately needs to resolve. Left
-   * empty, it defaults to a data: URI embedding key directly - convenient for
-   * local testing, but it puts the raw key in the playlist text; production
-   * deployments should always set a real keyURI.
+   * EME-capable player's license request ultimately needs to resolve.
+   * Required unless inlineKey is set.
    */
   keyURI?: string
+  /**
+   * With keyURI empty, advertise a data: URI embedding key itself - for local
+   * testing only: it puts the raw key in the playlist text.
+   */
+  inlineKey?: boolean
 }
 
 /**

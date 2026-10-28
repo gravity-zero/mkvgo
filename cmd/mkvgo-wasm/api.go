@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"syscall/js"
 
+	"github.com/gravity-zero/mkvgo/internal/mpegts"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
 
@@ -29,13 +31,54 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// intArg reads v as an integer, refusing anything that is not a number: Value.Int panics on a string, outside any
-// promise, and the panic ends the Go program.
-func intArg(v js.Value, what string) (int, error) {
+// numArg reads v as a finite number: NaN and the infinities convert to integers as nothing in particular.
+func numArg(v js.Value, what string) (float64, error) {
 	if v.Type() != js.TypeNumber {
 		return 0, fmt.Errorf("%s must be a number, got %s", what, v.Type())
 	}
-	return v.Int(), nil
+	f := v.Float()
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("%s must be a finite number, got %v", what, f)
+	}
+	return f, nil
+}
+
+// maxSafeInt is the largest integer a JS number holds exactly (Number.MAX_SAFE_INTEGER).
+const maxSafeInt = 1<<53 - 1
+
+// intArg reads v as an integer, refusing anything that is not a number: Value.Int panics on a string, outside any
+// promise, and the panic ends the Go program; a fraction, or past what a number holds exactly, is refused too.
+func intArg(v js.Value, what string) (int, error) {
+	f, err := numArg(v, what)
+	if err != nil {
+		return 0, err
+	}
+	if f != math.Trunc(f) || math.Abs(f) > maxSafeInt {
+		return 0, fmt.Errorf("%s must be a whole number of at most %d, got %v", what, int64(maxSafeInt), f)
+	}
+	return int(f), nil
+}
+
+// idArg reads v as a track id: a whole number, not negative.
+func idArg(v js.Value, what string) (uint64, error) {
+	n, err := intArg(v, what)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("%s must not be negative, got %d", what, n)
+	}
+	return uint64(n), nil
+}
+
+// sniffHead reads the source's first bytes, as many as sniffFormat looks at; a shorter source is all of it.
+func sniffHead(r io.Reader) ([]byte, error) {
+	head := make([]byte, mpegts.PrefixLen)
+	n, err := io.ReadFull(r, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("read head: %w", err)
+	}
+	return head[:n], nil
 }
 
 // rejected is a promise that rejects with err.
@@ -56,6 +99,24 @@ func guarded(fn func(js.Value, []js.Value) any) func(js.Value, []js.Value) any {
 
 // jsFunc is js.FuncOf over guarded(fn): the form every function handed to JavaScript takes.
 func jsFunc(fn func(js.Value, []js.Value) any) js.Func { return js.FuncOf(guarded(fn)) }
+
+// closedMethod is what a closed handle's methods become: a Promise rejected by name, where a call to the released
+// function ended the Go program, every handle with it. closedNoop is its close, which may be called again. Shared by
+// every closed handle, never released.
+var (
+	closedMethod = js.FuncOf(func(js.Value, []js.Value) any { return rejected(errors.New("mkvgo: the handle is closed")) })
+	closedNoop   = js.FuncOf(func(js.Value, []js.Value) any { return nil })
+)
+
+// closeHandle points h's methods at closedMethod and its close at closedNoop, then releases the functions they were.
+func closeHandle(h js.Value, methods map[string]js.Func, closeFn js.Func) {
+	for name, fn := range methods {
+		h.Set(name, closedMethod)
+		fn.Release()
+	}
+	h.Set("close", closedNoop)
+	closeFn.Release()
+}
 
 // promise runs fn on its own goroutine and returns a JS Promise for its
 // result - the only sane calling convention for wasm exports, since fn may
@@ -151,8 +212,6 @@ func isBlob(v js.Value) bool {
 	return blob.Type() == js.TypeFunction && v.InstanceOf(blob)
 }
 
-// sniffFormat classifies the input from its first bytes: "mkv" for an EBML
-// header (Matroska/WebM), "mp4" for an ISO-BMFF box structure.
 // sniffSource reads the head of the source "in" of fs and names its container.
 func sniffSource(fs *mkv.FS) (string, error) {
 	f, err := fs.DoOpen("in")
@@ -160,20 +219,24 @@ func sniffSource(fs *mkv.FS) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	head := make([]byte, 8)
-	n, _ := io.ReadFull(f, head)
-	return sniffFormat(head[:n])
+	head, err := sniffHead(f)
+	if err != nil {
+		return "", err
+	}
+	return sniffFormat(head)
 }
 
+// sniffFormat classifies the input from its first bytes, as the CLI and the readers do: "mkv" for an EBML header
+// (Matroska/WebM), "mp4" for a box an ISO-BMFF file opens with (mp4.OpensLikeISOBMFF); an MPEG-TS is refused by name
+// (mkv.ErrMPEGTS).
 func sniffFormat(head []byte) (string, error) {
-	if len(head) >= 4 && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3 {
+	switch {
+	case len(head) >= 4 && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3:
 		return "mkv", nil
-	}
-	if len(head) >= 8 {
-		switch string(head[4:8]) {
-		case "ftyp", "moov", "styp", "wide", "free", "skip", "mdat":
-			return "mp4", nil
-		}
+	case mp4.OpensLikeISOBMFF(head):
+		return "mp4", nil
+	case mpegts.Prefix(head):
+		return "", mkv.ErrMPEGTS
 	}
 	return "", fmt.Errorf("unrecognised container (neither an EBML/Matroska header nor an ISO-BMFF box)")
 }
@@ -283,9 +346,9 @@ func inputReadSeeker(input js.Value) (io.ReadSeeker, error) {
 }
 
 func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, error) {
-	head := make([]byte, 8)
-	if _, err := io.ReadFull(rs, head); err != nil {
-		return nil, fmt.Errorf("read head: %w", err)
+	head, err := sniffHead(rs)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := rs.Seek(0, io.SeekStart); err != nil {
 		return nil, err
