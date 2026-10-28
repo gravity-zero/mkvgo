@@ -1020,6 +1020,16 @@ const (
 // the runs whose holes are at most gap, up to maxRead bytes: inFlight reads at
 // once, parallelMaxBytes held at most, written in order.
 func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []span, ra io.ReaderAt, gap, maxRead int64, inFlight int) error {
+	if !ascendingSpans(pieces) {
+		// Runs that go back in the source (chunks out of order) would fall before the read gathering them: each one is
+		// read alone, in turn.
+		for i := range pieces {
+			if err := c.copyParallel(ctx, w, pieces[i:i+1], ra, 0, maxRead, 1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	type read struct{ off, end, at int64 }
 	var reads []read
 	for i := 0; i < len(pieces); {
@@ -1105,6 +1115,21 @@ func (c *spanCopier) copyParallel(ctx context.Context, w io.Writer, pieces []spa
 		}
 	}
 	return c.flush(w) // before buf is wiped
+}
+
+// ascendingSpans reports whether each source run starts at or past where the one before it ends.
+func ascendingSpans(pieces []span) bool {
+	end := int64(-1)
+	for _, pc := range pieces {
+		if pc.emit != nil {
+			continue
+		}
+		if pc.off < end {
+			return false
+		}
+		end = pc.off + pc.n
+	}
+	return true
 }
 
 // reachThrough is how far one read for run i may go: through the runs after it while the hole before each is at most gap and the read stays within maxRead.
