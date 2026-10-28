@@ -37,11 +37,10 @@ func CmdRollback(args []string) {
 // into opts and returns the printer to call after ClearProgress on success:
 // defects the file already carried do not block a correct operation, but the
 // operator must see them (they have their own remedy).
-func armPreexisting(opts *matroska.Options) (printPreexisting func()) {
-	var seen []matroska.Issue
-	opts.OnPreexisting = func(is matroska.Issue) { seen = append(seen, is) }
+func armPreexisting(opts *matroska.Options, rep *rewriteReport) (printPreexisting func()) {
+	opts.OnPreexisting = func(is matroska.Issue) { rep.Preexisting = append(rep.Preexisting, is) }
 	return func() {
-		for _, is := range seen {
+		for _, is := range rep.Preexisting {
 			fmt.Printf("  preexisting issue (not from this operation): %s\n", is.Message)
 		}
 	}
@@ -54,7 +53,7 @@ func armPreexisting(opts *matroska.Options) (printPreexisting func()) {
 // printSummary reports the written entry (call it after ClearProgress, on the
 // success path); closeFn closes the delta file and must be called when the
 // command is done writing.
-func armRollbackDelta(opts *matroska.Options, path string, files ...string) (printSummary, closeFn func()) {
+func armRollbackDelta(opts *matroska.Options, written **rollbackDelta, path string, files ...string) (printSummary, closeFn func()) {
 	guardOutput(path, files...) // the delta is created before the repair reads anything: never over one of its files
 	f, err := os.Create(path)
 	if err != nil {
@@ -62,12 +61,11 @@ func armRollbackDelta(opts *matroska.Options, path string, files ...string) (pri
 	}
 	opts.RollbackSink = f
 	opts.RollbackRequired = true
-	var written *matroska.RollbackInfo
-	opts.OnRollback = func(i matroska.RollbackInfo) { written = &i }
+	opts.OnRollback = func(i matroska.RollbackInfo) { *written = &rollbackDelta{Path: path, Bytes: i.Bytes} }
 	printSummary = func() {
-		if written != nil {
+		if *written != nil {
 			fmt.Printf("  rollback delta: %s (%s) - restore with: mkvgo rollback <repaired> %s <restored>\n",
-				path, FormatBytes(written.Bytes), path)
+				path, FormatBytes((*written).Bytes), path)
 		}
 	}
 	closeFn = func() {

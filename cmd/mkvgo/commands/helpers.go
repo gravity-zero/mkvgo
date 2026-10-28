@@ -171,16 +171,24 @@ func parseSegmentSeconds(v string) int64 {
 var osExit = os.Exit
 
 // Fatal ends a command that failed: exit status 1.
-func Fatal(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	osExit(1)
-}
+func Fatal(msg string) { exitWith(msg, 1) }
 
 // FatalUsage ends a command used wrongly (unknown flag, missing argument, invalid value), decided from the
 // command line alone: exit status 2.
-func FatalUsage(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	osExit(2)
+func FatalUsage(msg string) { exitWith(msg, 2) }
+
+// exitWith writes msg to stderr, as {"error":msg,"exit":code} under --json, and exits with code.
+func exitWith(msg string, code int) {
+	if JsonOutput {
+		b, _ := json.Marshal(struct {
+			Error string `json:"error"`
+			Exit  int    `json:"exit"`
+		}{msg, code})
+		fmt.Fprintln(os.Stderr, string(b))
+	} else {
+		fmt.Fprintln(os.Stderr, msg)
+	}
+	osExit(code)
 }
 
 // FatalErr is Fatal with err's message, naming the command that repairs a damaged file when err is one.
@@ -552,6 +560,9 @@ func FmtMs(ms int64) string {
 }
 
 func NewProgressBar() matroska.ProgressFunc {
+	if JsonOutput {
+		return nil // stderr carries only the JSON error
+	}
 	var mu sync.Mutex
 	var lastPrint time.Time
 
@@ -592,6 +603,9 @@ func writeFileFrom(path string, write func(io.Writer) error) error {
 }
 
 func ClearProgress() {
+	if JsonOutput {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 70))
 }
 

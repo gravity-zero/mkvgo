@@ -29,21 +29,34 @@ func CmdReindex(args []string) {
 		FatalUsage("--clean-cut only applies together with --resync")
 	}
 
-	var skipped []matroska.DamagedRange
-	var repaired []matroska.RepairedRange
+	var rep rewriteReport
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync, CleanCut: cleanCut, StrictVerify: strict, SyncOutput: SyncOutput}
-	printPreexisting := armPreexisting(&opts)
+	printPreexisting := armPreexisting(&opts, &rep)
 	// Always collect drops: even the strict walk drops trailing junk past
 	// the declared Segment end, and the operator must see what left the file.
-	opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
+	opts.OnSkip = func(r matroska.DamagedRange) { rep.Skipped = append(rep.Skipped, r) }
 	if resync {
-		opts.OnRepair = func(r matroska.RepairedRange) { repaired = append(repaired, r) }
+		opts.OnRepair = func(r matroska.RepairedRange) { rep.Repaired = append(rep.Repaired, r) }
 	}
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
-		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
+		printDelta, closeDelta = armRollbackDelta(&opts, &rep.RollbackDelta, deltaPath, rest...)
 		defer closeDelta()
+	}
+	// done reports a reindex that succeeded: as JSON under --json, otherwise headline and detail.
+	done := func(headline string) {
+		if resync && (len(rep.Skipped) > 0 || len(rep.Repaired) > 0) {
+			noteDamage()
+		}
+		if JsonOutput {
+			PrintJSON(rep)
+			return
+		}
+		fmt.Println(headline)
+		printPreexisting()
+		printResyncOutcome(resync, rep.Skipped, rep.Repaired)
+		printDelta()
 	}
 
 	if replace {
@@ -56,10 +69,8 @@ func CmdReindex(args []string) {
 		if err != nil {
 			FatalErr(err)
 		}
-		fmt.Printf("reindexed %s (original replaced after verification)\n", src)
-		printPreexisting()
-		printResyncOutcome(resync, skipped, repaired)
-		printDelta()
+		rep.Source, rep.Output = src, src
+		done(fmt.Sprintf("reindexed %s (original replaced after verification)", src))
 		return
 	}
 
@@ -77,10 +88,8 @@ func CmdReindex(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
-	fmt.Printf("reindexed %s → %s\n", src, dst)
-	printPreexisting()
-	printResyncOutcome(resync, skipped, repaired)
-	printDelta()
+	rep.Source, rep.Output = src, dst
+	done(fmt.Sprintf("reindexed %s → %s", src, dst))
 }
 
 // printResyncOutcome reports what a --resync run repaired and dropped, so the
@@ -92,9 +101,6 @@ func printResyncOutcome(resync bool, skipped []matroska.DamagedRange, repaired [
 	if !resync {
 		printTrailingJunkDrops(skipped)
 		return
-	}
-	if len(skipped) > 0 || len(repaired) > 0 {
-		noteDamage()
 	}
 	for i, r := range repaired {
 		fmt.Printf("  repaired range %d: offset %d-%d, %s of media kept that a plain resync would have dropped\n",

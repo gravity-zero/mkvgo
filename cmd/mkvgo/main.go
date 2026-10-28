@@ -18,7 +18,7 @@ func main() {
 	var filtered []string
 	for _, a := range os.Args[1:] {
 		switch a {
-		case "-json":
+		case "-json", "--json":
 			commands.JsonOutput = true
 		case "-in-band", "--in-band":
 			commands.InBand = true
@@ -199,6 +199,9 @@ func main() {
 		commands.RequireArgs(args, 1, "mkvgo ingest [-target name] [-reindex] [-analyze] [-json] <file.mkv|.mp4|url>")
 		commands.CmdIngest(args)
 	default:
+		if commands.JsonOutput {
+			commands.FatalUsage("unknown command: " + cmd)
+		}
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
 		os.Exit(2)
@@ -270,8 +273,10 @@ ladder        Recommend an ABR ladder from the source's resolution/bitrate/codec
 ingest        One-call serving plan: direct-play, remux-hls (optionally reindexing), or transcode with a ladder
 
 Global flags:
-  -json         Output as JSON (info, tracks, chapters, attachments, tags,
-                probe, keyframes, validate, compare; ignored elsewhere)
+  -json, --json Output the report as JSON (info, tracks, chapters, attachments,
+                tags, probe, keyframes, validate, compare, analyze, reindex,
+                retime, salvage...; ignored by commands without a report); an
+                error goes to stderr as {"error":"...","exit":N}
   -in-band      Complete a video track's description from its first sample
                 when the header leaves it short: colour behind a bare hvcC,
                 VP9 profile with no vpcC, HDR10 static metadata kept in-band

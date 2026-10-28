@@ -70,15 +70,15 @@ func CmdRetime(args []string) {
 	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict, KeepBackup: keepBackup}
-	printPreexisting := armPreexisting(&opts)
+	rep := rewriteReport{Source: path, Output: path}
+	printPreexisting := armPreexisting(&opts, &rep)
 	// The rewrite engine drops trailing junk past the declared Segment end;
 	// the operator must see what left the file.
-	var skipped []matroska.DamagedRange
-	opts.OnSkip = func(r matroska.DamagedRange) { skipped = append(skipped, r) }
+	opts.OnSkip = func(r matroska.DamagedRange) { rep.Skipped = append(rep.Skipped, r) }
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
-		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
+		printDelta, closeDelta = armRollbackDelta(&opts, &rep.RollbackDelta, deltaPath, rest...)
 		defer closeDelta()
 	}
 
@@ -94,10 +94,18 @@ func CmdRetime(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
+	if JsonOutput {
+		rep.ShiftMs = make(map[uint64]int64, len(shift))
+		for track, ns := range shift {
+			rep.ShiftMs[track] = ns / 1_000_000
+		}
+		PrintJSON(rep)
+		return
+	}
 	printPreexisting()
 	fmt.Printf("retimed %s:\n", path)
 	fmt.Print(shiftLines(shift))
-	printTrailingJunkDrops(skipped)
+	printTrailingJunkDrops(rep.Skipped)
 	printDelta()
 }
 

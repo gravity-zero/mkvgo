@@ -46,17 +46,22 @@ func CmdReindexInPlace(args []string) {
 	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, StrictVerify: strict}
-	printPreexisting := armPreexisting(&opts)
+	rep := rewriteReport{Source: path, Output: path}
+	printPreexisting := armPreexisting(&opts, &rep)
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
-		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
+		printDelta, closeDelta = armRollbackDelta(&opts, &rep.RollbackDelta, deltaPath, rest...)
 		defer closeDelta()
 	}
 	err := matroska.ReindexInPlace(cliCtx, path, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
+	}
+	if JsonOutput {
+		PrintJSON(rep)
+		return
 	}
 	fmt.Printf("reindexed %s in place (index patched, clusters untouched)\n", path)
 	printPreexisting()

@@ -40,10 +40,11 @@ func CmdSalvage(args []string) {
 	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), CleanCut: cleanCut, SyncOutput: SyncOutput}
+	var delta *rollbackDelta
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()
-		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
+		printDelta, closeDelta = armRollbackDelta(&opts, &delta, deltaPath, rest...)
 		defer closeDelta()
 	}
 
@@ -82,8 +83,10 @@ func CmdSalvage(args []string) {
 	}
 
 	if jsonOut || JsonOutput {
-		PrintJSON(report)
-		printDelta()
+		PrintJSON(struct {
+			*matroska.SalvageReport
+			RollbackDelta *rollbackDelta `json:"rollback_delta,omitempty"`
+		}{report, delta})
 		return
 	}
 	fmt.Printf("salvaged %s -> %s\n", src, dst)
