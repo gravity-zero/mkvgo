@@ -290,6 +290,11 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if err := refuseFrameConverterOnPlan(o.FrameConverter); err != nil {
 		return nil, err
 	}
+	if o.Encrypt != nil {
+		if err := o.Encrypt.validate(); err != nil { // before the routing: the MP4 path checked nothing
+			return nil, err
+		}
+	}
 
 	// Source sniff: an MP4's moov IS the index (sample offsets/sizes/sync,
 	// head-only), so its plan is exact by construction; a Matroska source
@@ -356,11 +361,6 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, errf("HLS output requires a video track")
 	}
 
-	if o.Encrypt != nil {
-		if err := o.Encrypt.validate(); err != nil {
-			return nil, err
-		}
-	}
 	if err := cencPreflight(&o, media); err != nil {
 		return nil, err
 	}
