@@ -685,6 +685,24 @@ func (h *ResourceHandle) ETag() string {
 	return fmt.Sprintf("W/\"%x-%s-%s\"", h.size, h.plan.SourceID(), h.name)
 }
 
+// writeKeyPrint adds to h what of the encryption the playlists and inits leave out - the keys, a 'cenc' base IV -
+// hashed apart first: the same source under another key, same URI and key ID, is other bytes, and an ETag naming
+// them must change with it. The key itself never reaches h.
+func writeKeyPrint(h io.Writer, enc *HLSEncryption, c *CENCOptions) {
+	k := sha256.New()
+	k.Write([]byte("mkvgo segment keys\x00"))
+	if enc != nil {
+		fmt.Fprintf(k, "aes:%d:%x:%x|", enc.RotateEverySegments, enc.Key, enc.IV)
+		for _, rk := range enc.Keys {
+			fmt.Fprintf(k, "%x:%x|", rk.Key, rk.IV)
+		}
+	}
+	if c != nil {
+		fmt.Fprintf(k, "cenc:%s:%x:%x|", c.Scheme, c.Key, c.IV)
+	}
+	fmt.Fprintf(h, "keys:%x|", k.Sum(nil))
+}
+
 // SourceID names what the plan's URLs serve - the source's size, mtime and
 // identity, the packaging (playlists, init segments, so the options) and the
 // mkvgo version, hashed - for a URL prefix or a cache key that changes with
@@ -700,6 +718,7 @@ func (p *HLSPlan) SourceID() string {
 			fmt.Fprintf(h, "%d:", len(b))
 			h.Write(b)
 		}
+		writeKeyPrint(h, p.opts.Encrypt, p.opts.CENC)
 		p.sourceID = hex.EncodeToString(h.Sum(nil)[:8])
 	})
 	return p.sourceID
