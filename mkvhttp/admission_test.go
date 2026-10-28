@@ -96,3 +96,16 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not reached")
 }
+
+// TestIFramePlaylistIsAdmitted: playlists never wait, being in memory, but the I-frame playlist is built by its first
+// request from every keyframe of the source, minutes on a long film: a burst of them ran past MaxInFlight.
+func TestIFramePlaylistIsAdmitted(t *testing.T) {
+	for name, want := range map[string]bool{
+		"iframe.m3u8": true, "v2/iframe.m3u8": true, "seg00001.m4s": true,
+		"master.m3u8": false, "playlist.m3u8": false, "audio1.m3u8": false, "manifest.mpd": false,
+	} {
+		if got := gated(name); got != want {
+			t.Errorf("gated(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

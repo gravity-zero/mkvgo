@@ -69,7 +69,8 @@ type Options struct {
 	// ETag included.
 	Buffered bool
 	// MaxInFlight caps the resources served at once, playlists and manifests
-	// aside; 0 is no cap. Each holds a buffer, or a whole segment, until its
+	// aside but for the I-frame playlist (built from every keyframe of the
+	// source on its first request); 0 is no cap. Each holds a buffer, or a whole segment, until its
 	// client has read it: past what the source can feed, requests pile up and
 	// memory with them. Over the cap a request waits for a slot.
 	MaxInFlight int

@@ -3,6 +3,7 @@ package mkvhttp
 import (
 	"context"
 	"net/http"
+	"path"
 	"strings"
 	"sync/atomic"
 )
@@ -43,8 +44,13 @@ func (g *gate) enter(ctx context.Context) (release func(), ok bool) {
 
 func (g *gate) leave() { <-g.slots }
 
-// gated reports whether serving name takes a slot: playlists and manifests are in memory and never wait.
+// gated reports whether serving name takes a slot: playlists and manifests are in memory and never wait, but the
+// I-frame playlist, which its first request builds by reading every keyframe of the source (minutes on a long 4K
+// film), takes one like a segment.
 func gated(name string) bool {
+	if path.Base(name) == "iframe.m3u8" {
+		return true
+	}
 	return !strings.HasSuffix(name, ".m3u8") && !strings.HasSuffix(name, ".mpd")
 }
 
