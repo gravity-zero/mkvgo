@@ -2,18 +2,17 @@ package ops
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 
 	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// output is an operation's output file. On the OS it is written under a temporary name next to dst and moved
+// output is an operation's output file. On the OS it is written to dst+tempSuffix and moved
 // onto dst once complete, so a failed operation leaves the file dst already named as it was.
 type output struct {
 	mkv.WriteSeekCloser
@@ -43,7 +42,7 @@ func createOutput(fsys *mkv.FS, dst string, inputs ...string) (*output, error) {
 		// A device, a pipe or a link is written through, as before, and never removed.
 		return createInPlace(fsys, dst, false)
 	}
-	f, tmp, terr := createTemp(filepath.Dir(dst))
+	f, tmp, terr := createTemp(dst)
 	if errors.Is(terr, fs.ErrPermission) {
 		return createInPlace(fsys, dst, true)
 	}
@@ -65,17 +64,30 @@ func createInPlace(fsys *mkv.FS, dst string, removeDst bool) (*output, error) {
 	return &output{WriteSeekCloser: f, fs: fsys, dst: dst, removeDst: removeDst}, nil
 }
 
-// createTemp creates a new file in dir under a name no other file has.
-func createTemp(dir string) (*os.File, string, error) {
-	var err error
-	for range 100 {
-		tmp := filepath.Join(dir, ".mkvgo-"+strconv.FormatUint(rand.Uint64(), 36)+".tmp")
-		var f *os.File
-		if f, err = os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666); !errors.Is(err, fs.ErrExist) {
-			return f, tmp, err
+// tempSuffix names an output's temporary file, dst+tempSuffix, so a leftover of a killed run is recognisable.
+const tempSuffix = ".mkvgo.tmp"
+
+// createTemp creates dst's temporary file, replacing a regular file an earlier run left there. Anything else
+// under that name is refused: the output is never written through a link.
+func createTemp(dst string) (*os.File, string, error) {
+	tmp := dst + tempSuffix
+	if st, err := os.Lstat(tmp); err == nil {
+		if !st.Mode().IsRegular() {
+			return nil, "", tempInTheWay(tmp, dst)
+		}
+		if err := os.Remove(tmp); err != nil {
+			return nil, "", err
 		}
 	}
-	return nil, "", err
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+	if errors.Is(err, fs.ErrExist) {
+		return nil, "", tempInTheWay(tmp, dst)
+	}
+	return f, tmp, err
+}
+
+func tempInTheWay(tmp, dst string) error {
+	return fmt.Errorf("%s, where the output is written before it is moved onto %s, is not a regular file: remove it and try again", tmp, dst)
 }
 
 // finish ends the output: it closes it and, when *err is nil, puts the complete file under dst; otherwise it

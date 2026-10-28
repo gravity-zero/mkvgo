@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/internal/livefixture"
@@ -166,4 +167,53 @@ func sortedCopy(s []string) []string {
 	c := slices.Clone(s)
 	slices.Sort(c)
 	return c
+}
+
+// TestOutputTempName: the output is written to dst+".mkvgo.tmp", a leftover of
+// an earlier run under that name is replaced, and a link there is refused, not
+// written through.
+func TestOutputTempName(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("leftover replaced", func(t *testing.T) {
+		dir := t.TempDir()
+		src := buildTestMKV(t, dir)
+		dst := filepath.Join(dir, "out.mkv")
+		writeAll(t, dst+".mkvgo.tmp", []byte("left by a killed run"))
+		if err := Reindex(ctx, src, dst); err != nil {
+			t.Fatal(err)
+		}
+		if names, want := dirNames(t, dir), sortedCopy([]string{"out.mkv", filepath.Base(src)}); !slices.Equal(names, want) {
+			t.Errorf("files after the operation = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("link refused", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating a symlink needs a privilege on Windows")
+		}
+		dir := t.TempDir()
+		src := buildTestMKV(t, dir)
+		dst := filepath.Join(dir, "out.mkv")
+		before := []byte("an earlier result")
+		writeAll(t, dst, before)
+		victim := filepath.Join(dir, "victim")
+		writeAll(t, victim, []byte("not the output's"))
+		if err := os.Symlink(victim, dst+".mkvgo.tmp"); err != nil {
+			t.Fatal(err)
+		}
+		err := Reindex(ctx, src, dst)
+		if err == nil || !strings.Contains(err.Error(), "remove it") {
+			t.Fatalf("want the link refused with what to do, got %v", err)
+		}
+		if got, _ := os.ReadFile(victim); string(got) != "not the output's" {
+			t.Errorf("the output was written through the link: %q", got)
+		}
+		if got, _ := os.ReadFile(dst); !bytes.Equal(got, before) {
+			t.Errorf("the existing output was not kept: %q", got)
+		}
+		if _, err := os.Lstat(dst + ".mkvgo.tmp"); err != nil {
+			t.Errorf("the link was removed: %v", err)
+		}
+	})
 }
