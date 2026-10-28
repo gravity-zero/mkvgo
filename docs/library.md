@@ -1322,7 +1322,16 @@ opts := mp4.Options{
 
 Sample-level Common Encryption (ISO/IEC 23001-7) for the fMP4/HLS/DASH
 pipeline: packaging only, with a caller-supplied key -- no license server, no
-DRM handshake. Two schemes:
+DRM handshake.
+
+**One key per content.** Give each content its own `Key` and `KeyID`, and a
+new pair when its file is rewritten (a reindex, a remux): mkvgo keeps the IVs
+of one content apart, it cannot see the others. Under `"cenc"` two contents
+sharing a key share IVs wherever their samples sit at the same place in their
+files, and that keystream reuse leaks plaintext; a different base IV alone
+does not prevent it. Keeping the pairs is the key store's job, as in any DRM.
+
+Two schemes:
 
 - **`"cenc"`** -- AES-CTR, a per-sample Initialization Vector (the caller's base
   IV plus where the sample's bytes sit in the source -- the same place for

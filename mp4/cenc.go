@@ -48,16 +48,17 @@ import (
 
 // CENCOptions configures Common Encryption packaging (Options.CENC).
 //
-// Key/IV reuse is the caller's responsibility. mkvgo validates the key, key ID
-// and IV lengths, not their global uniqueness. Within a single packaging pass
-// mkvgo derives a distinct per-sample IV for "cenc" so no two samples share a
-// keystream, across the tracks of a presentation and the variants of an ABR
-// one; "cbcs" uses the scheme-mandated constant IV. But across separate
-// encodings the pair (Key, base IV) must be unique: encrypting two different
-// files with the same Key and the same base IV under "cenc" makes their
-// per-sample IVs - and therefore their AES-CTR keystreams - collide wherever
-// two samples sit at the same offset in their files, which leaks plaintext. Use a fresh Key or a
-// fresh base IV per encoding.
+// One Key per content: the caller's key store gives each content its own Key
+// and KeyID, and a new pair when the file is rewritten. Within one content
+// mkvgo derives a distinct per-sample IV for "cenc" - across the tracks of a
+// presentation, the variants of an ABR one, and whatever order its segments
+// are asked in - so no two samples share a keystream; "cbcs" uses the
+// scheme-mandated constant IV. mkvgo cannot see other contents: the
+// per-sample IV is the base IV plus the sample's place in its file, so two
+// contents under one Key share IVs wherever their samples sit at the same
+// place, and the AES-CTR keystream reuse leaks plaintext. A different base IV
+// alone does not prevent it: two bases closer than the files' size collide
+// too.
 type CENCOptions struct {
 	// Scheme selects the encryption scheme: "cenc" (AES-CTR) or "cbcs"
 	// (AES-CBC, 1:9 pattern on video). Required.
