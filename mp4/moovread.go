@@ -228,9 +228,9 @@ var lazySkipBody = map[string]bool{
 }
 
 // lazyKeepHead is how much of a skipped box's body is still read: its
-// version/flags + count + first entry - enough for headerFrameCount and
+// version/flags + count + first entry (stsc's takes 12 bytes, its sample description index last) - enough for headerFrameCount and
 // firstSampleLoc, which are all the metadata/keyframe path reads from them.
-const lazyKeepHead = 16
+const lazyKeepHead = 20
 
 // lazyChunk is how far ahead the lazy reader fills in one disk read, so the
 // scattered small boxes (headers + stsd/stts/stss/ctts bodies) come in a few
