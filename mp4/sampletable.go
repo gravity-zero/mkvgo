@@ -142,7 +142,7 @@ chunks:
 		for k := uint32(0); k < perChunk && si < n; k++ {
 			size := sizes[si]
 			end := pos + int64(size)
-			if pos < 0 {
+			if pos < 0 || end < pos { // a co64 offset near 2^63 wraps the end negative
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", si, pos, end, fileSize)
 			}
 			if end > fileSize {
