@@ -171,9 +171,12 @@ func New(opts ...Options) *FS {
 // redirectPolicy is the default client's: at most 10 hops, each to a host
 // AllowHost accepts, or with no AllowHost to the first request's host
 // whenever Header is set, and never from https to http with Header set, so the
-// caller's headers never reach another host or cross in clear.
+// caller's headers never reach another host or cross in clear. No hop carries
+// a Referer: it would hand the URL redirected from, a presigned signature
+// with it, to the next host.
 func redirectPolicy(o Options) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
+		req.Header.Del("Referer")
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
