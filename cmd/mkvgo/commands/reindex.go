@@ -93,6 +93,9 @@ func printResyncOutcome(resync bool, skipped []matroska.DamagedRange, repaired [
 		printTrailingJunkDrops(skipped)
 		return
 	}
+	if len(skipped) > 0 || len(repaired) > 0 {
+		noteDamage()
+	}
 	for i, r := range repaired {
 		fmt.Printf("  repaired range %d: offset %d-%d, %s of media kept that a plain resync would have dropped\n",
 			i+1, r.StartOffset, r.EndOffset, FormatBytes(r.BytesKept))

@@ -28,6 +28,8 @@ func main() {
 			commands.Force = true
 		case "--sync", "-sync":
 			commands.SyncOutput = true
+		case "--exit-damaged", "-exit-damaged":
+			commands.ExitDamaged = true
 		case "--version", "-version":
 			fmt.Printf("mkvgo %s\n", version)
 			os.Exit(0)
@@ -201,6 +203,9 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	if code := commands.DamagedStatus(); code != 0 {
+		os.Exit(code)
+	}
 }
 
 func usage() {
@@ -277,12 +282,17 @@ Global flags:
                 default: only the bytes already read are used)
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
+  --exit-damaged
+                Exit 3 instead of 0 when a command acted on an incomplete or
+                damaged source and said on stderr what it passed over (salvage,
+                reindex --resync, subtitle extraction, to-mp4, from-mp4, to-hls)
   --sync        Flush a new Matroska output to disk before renaming it into
                 place, so it survives a power loss (costs the wait for the
                 disk; the replace commands always flush)
 
 Exit codes: 0 success; 1 error (validate: error-severity issues, -strict:
-warnings too; compare: the files differ); 2 bad usage.
+warnings too; compare: the files differ); 2 bad usage; 3 with
+--exit-damaged, done on a damaged or incomplete source.
 
 Usage: mkvgo <command> [options]`)
 }

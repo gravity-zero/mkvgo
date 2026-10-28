@@ -42,6 +42,24 @@ var Force bool
 // flushes it to disk before renaming it into place (Options.SyncOutput).
 var SyncOutput bool
 
+// ExitDamaged is the global --exit-damaged flag: a command that acted on an incomplete or damaged source, and
+// said on stderr what it passed over, exits 3 instead of 0.
+var ExitDamaged bool
+
+// sawDamage records that the command passed over damage or a missing tail.
+var sawDamage bool
+
+func noteDamage() { sawDamage = true }
+
+// DamagedStatus is the exit status of a command that returned: 3 under --exit-damaged when it passed over damage
+// or a missing tail, 0 otherwise.
+func DamagedStatus() int {
+	if ExitDamaged && sawDamage {
+		return 3
+	}
+	return 0
+}
+
 // writeOptions are the options of a command that writes a new Matroska file.
 func writeOptions() matroska.Options {
 	return matroska.Options{Progress: NewProgressBar(), SyncOutput: SyncOutput}

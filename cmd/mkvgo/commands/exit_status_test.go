@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,5 +52,43 @@ func TestExitStatusUsage(t *testing.T) {
 	}
 	if got := exitStatus(t, func() { CmdReindex([]string{missing, out}) }); got != 1 {
 		t.Errorf("a source that cannot be read: exit status %d, want 1", got)
+	}
+}
+
+// TestExitDamaged: a salvage that found a cut source exits 3 under
+// --exit-damaged and 0 without it; a whole source exits 0 either way.
+func TestExitDamaged(t *testing.T) {
+	whole, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "testdata", "sample.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cut := filepath.Join(dir, "cut.mkv")
+	if err := os.WriteFile(cut, whole[:len(whole)*6/10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(dir, "whole.mkv")
+	if err := os.WriteFile(full, whole, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ExitDamaged, sawDamage = false, false })
+
+	for i, tc := range []struct {
+		src  string
+		flag bool
+		want int
+	}{
+		{cut, false, 0},
+		{cut, true, 3},
+		{full, true, 0},
+	} {
+		ExitDamaged, sawDamage = tc.flag, false
+		dst := filepath.Join(dir, fmt.Sprintf("out%d.mkv", i))
+		if got := exitStatus(t, func() { CmdSalvage([]string{tc.src, dst}) }); got != -1 {
+			t.Fatalf("salvage %s: exit status %d, want it to return", filepath.Base(tc.src), got)
+		}
+		if got := DamagedStatus(); got != tc.want {
+			t.Errorf("salvage %s, --exit-damaged %v: status %d, want %d", filepath.Base(tc.src), tc.flag, got, tc.want)
+		}
 	}
 }

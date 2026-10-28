@@ -63,6 +63,7 @@ func CmdToMP4(args []string) {
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()
 			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))
+			noteDamage()
 		},
 	})
 	ClearProgress()
@@ -99,6 +100,7 @@ func CmdFromMP4(args []string) {
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()
 			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))
+			noteDamage()
 		},
 	})
 	ClearProgress()

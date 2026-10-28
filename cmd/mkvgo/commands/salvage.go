@@ -77,6 +77,9 @@ func CmdSalvage(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
+	if len(report.DamagedRanges) > 0 || len(report.RepairedRanges) > 0 || report.TruncatedTail {
+		noteDamage()
+	}
 
 	if jsonOut || JsonOutput {
 		PrintJSON(report)

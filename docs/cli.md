@@ -13,6 +13,7 @@ Global flags:
 - `-fps-reads` -- the inspection commands (`info`, `tracks`, `probe`) let the frame-rate estimate of a Matroska track without DefaultDuration read the block headers it needs in the first 512 KiB, one exact 32-byte read each; off by default, when the estimate uses only the bytes the head read already holds and the statistics tags. The library's `WithFrameRateReads`. On 63 real files without DefaultDuration (local ext4 disk, page cache dropped per file): 12 estimated by default, 63 with the flag, about 126 more reads per file and a median probe of 7.8 ms instead of 5.0 ms (no difference once cached)
 - `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`); with it, an output that is one of the command's inputs is still refused. `edit-inplace` modifies its input file by design, and `split` overwrites existing parts (but never its source).
 - `--sync` -- a command writing a new Matroska file flushes it to disk before renaming it into place, so a completed output survives a power loss; without it the output is still written to `<output>.mkvgo.tmp` and renamed, so a failure keeps the file already there. The replace commands always flush.
+- `--exit-damaged` -- a command that acted on an incomplete or damaged source, and said on stderr what it passed over, exits `3` instead of `0` (see [Exit status](#exit-status)).
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
 
@@ -56,9 +57,10 @@ AWS_REGION=eu-west-1 mkvgo probe s3://my-bucket/movies/one.mkv
 | `0` | Done. |
 | `1` | The operation failed, or a check said no (below). |
 | `2` | Bad usage, decided from the command line alone: unknown command or flag, missing argument, invalid value, flags that do not go together. |
+| `3` | With `--exit-damaged` only: done, on a source that is incomplete or damaged. Without the flag these runs exit `0`. |
 | `130` | Interrupted twice (Ctrl-C). |
 
-A check that says no exits `1` so it can gate a script (`mkvgo validate f.mkv && ...`): `validate` on error-severity issues (`-strict`: warnings too), `compare` when the files differ, `verify` and `hash` on a digest that does not match, `cue-health` on an unhealthy index, `diagnose` on a file that is not healthy, `fingerprint` on an incomplete file. A flag that takes a value but is the last argument (`mkvgo to-hls in.mkv -o out -segment`) is bad usage: exit `2`, naming the flag.
+A check that says no exits `1` so it can gate a script (`mkvgo validate f.mkv && ...`): `validate` on error-severity issues (`-strict`: warnings too), `compare` when the files differ, `verify` and `hash` on a digest that does not match, `cue-health` on an unhealthy index, `diagnose` on a file that is not healthy, `fingerprint` on an incomplete file. `--exit-damaged` gives `3` to `salvage` that dropped or repaired a region or found the tail missing, `reindex --resync` that skipped or repaired a region, `extract-subtitle` and `subtitle-index` that passed over a damaged region (`--damage-bytes`), and `to-mp4`, `from-mp4` and `to-hls` on an incomplete source. Trailing junk past the declared end, which a strict `reindex` drops, is not damage. A flag that takes a value but is the last argument (`mkvgo to-hls in.mkv -o out -segment`) is bad usage: exit `2`, naming the flag.
 
 ## Inspection
 
@@ -419,7 +421,7 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-o` | Output file path (required) |
 | `-format` | Output format: `srt` (default), `ass`, or `vtt` |
 | `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, MKV/WebM only) |
-| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. `-1` refuses any damage. Default 64 MiB |
+| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
@@ -991,7 +993,7 @@ mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]
 - `--clean-cut` resumes video after each damage gap at the next video keyframe (audio resumes immediately); the dropped video bytes are reported.
 - `--json` prints the report (`SalvageReport`) as JSON instead of the human summary.
 - Never in-place: `<out.mkv>` is always a separate file.
-- Exit contract: exit 0 whenever an output file was written (or the dry-run completed), damage or not. Exit 1 with no output only on a hard failure -- the bounded resync scan giving up without reaching a valid resume point or real EOF (garbage longer than the internal cap), or a genuine I/O error.
+- Exit contract: exit 0 whenever an output file was written (or the dry-run completed), damage or not; with `--exit-damaged`, 3 when a written output passed over damage. Exit 1 with no output only on a hard failure -- the bounded resync scan giving up without reaching a valid resume point or real EOF (garbage longer than the internal cap), or a genuine I/O error.
 
 ```bash
 mkvgo salvage damaged.mkv --dry-run
@@ -1050,7 +1052,7 @@ Cover art IS carried: the first JPEG/PNG image attachment (one named `cover.*` p
 
 Not carried into MP4: **other attachments** (fonts - note an ASS track flattened with `--flatten-subs` loses its attached fonts), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
 
-An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead.
+An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0, with `--exit-damaged`: 3. A cut that leaves an audio or video track without any sample is refused instead.
 
 ```bash
 mkvgo to-mp4 video.mkv video.mp4
@@ -1072,7 +1074,7 @@ The one rule of every remux, in both directions: an audio or video track the out
 QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
 (`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).
 
-An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead (`--skip-unsupported` drops it).
+An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0, with `--exit-damaged`: 3. A cut that leaves an audio or video track without any sample is refused instead (`--skip-unsupported` drops it).
 
 ```bash
 mkvgo from-mp4 video.mp4 video.mkv
@@ -1211,7 +1213,7 @@ Security flags (shared with `hls-segment`; both must use the same values):
   `Options.RewriteURL func(name) string`, which can append per-resource signed
   tokens instead.
 
-An incomplete source (it stops before the end it declares) is packaged up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead.
+An incomplete source (it stops before the end it declares) is packaged up to where it stops, with a warning on stderr saying how far its media plays; exit 0, with `--exit-damaged`: 3. A cut that leaves an audio or video track without any sample is refused instead.
 
 ### hls-segment
 
