@@ -151,6 +151,9 @@ func (s *av1Splitter) split(sample []byte) ([]cencSubsample, error) {
 				return nil, err
 			}
 			i += n
+			if v > uint64(len(sample)-i) { // compared as uint64: a 32-bit int would wrap a size past 2^31
+				return nil, errf("cenc: av1: OBU payload size %d exceeds sample bounds", v)
+			}
 			payloadLen = int(v)
 		} else {
 			// Only the last OBU of the sample may omit obu_size: its payload
