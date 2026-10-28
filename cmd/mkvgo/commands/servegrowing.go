@@ -31,7 +31,7 @@ func CmdServeGrowing(args []string) {
 	cfg := parseServeGrowingFlags(args)
 	addr, segMs, rest := cfg.addr, cfg.segMs, cfg.rest
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["serve-growing"])
+		FatalUsage("usage: " + CmdUsage["serve-growing"])
 	}
 	src := rest[0]
 

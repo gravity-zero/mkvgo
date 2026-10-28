@@ -17,7 +17,7 @@ func CmdHash(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["hash"])
+		FatalUsage("usage: " + CmdUsage["hash"])
 	}
 	source := rest[0]
 	// The content routes, as in diagnose: an MP4 named .mkv gets the MP4 answer, a TS named .mp4 the MPEG-TS refusal.
@@ -45,7 +45,7 @@ func CmdHash(args []string) {
 func CmdVerify(args []string) {
 	newFlags("CmdVerify").Parse(args)
 	if len(args) < 1 {
-		Fatal("usage: " + CmdUsage["verify"])
+		FatalUsage("usage: " + CmdUsage["verify"])
 	}
 	path := args[0]
 

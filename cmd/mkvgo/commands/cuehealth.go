@@ -26,7 +26,7 @@ func CmdCueHealth(args []string) {
 	fl.Bool(&probe, "-probe", "--probe")
 	rest = fl.Parse(args)
 	if len(rest) != 1 {
-		Fatal(cueHealthUsage)
+		FatalUsage(cueHealthUsage)
 	}
 
 	report, err := matroska.CueHealth(cliCtx, rest[0])

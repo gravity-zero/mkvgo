@@ -36,7 +36,7 @@ func CmdSalvage(args []string) {
 	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
 	rest = fl.Parse(args)
 	if dryRun && deltaPath != "" {
-		Fatal("--rollback-delta does not apply to --dry-run (nothing is written, nothing to roll back)")
+		FatalUsage("--rollback-delta does not apply to --dry-run (nothing is written, nothing to roll back)")
 	}
 
 	opts := matroska.Options{Progress: NewProgressBar(), CleanCut: cleanCut, SyncOutput: SyncOutput}
@@ -49,7 +49,7 @@ func CmdSalvage(args []string) {
 
 	if dryRun {
 		if len(rest) != 1 {
-			Fatal(salvageUsage)
+			FatalUsage(salvageUsage)
 		}
 		src := rest[0]
 		report, err := matroska.MapDamage(cliCtx, src, opts)
@@ -67,7 +67,7 @@ func CmdSalvage(args []string) {
 	}
 
 	if len(rest) != 2 {
-		Fatal(salvageUsage)
+		FatalUsage(salvageUsage)
 	}
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)

@@ -18,13 +18,13 @@ func CmdPlayability(args []string) {
 	fl.Missing("-target", "usage: "+CmdUsage["playability"])
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["playability"])
+		FatalUsage("usage: " + CmdUsage["playability"])
 	}
 	path := rest[0]
 
 	target, ok := matroska.TargetByName(targetName)
 	if !ok {
-		Fatal(fmt.Sprintf("unknown target %q (known: safari, chrome, firefox, chromecast-gen3, mse-generic, chromium-generic, brave, opera, vivaldi, samsung-internet, edge)", targetName))
+		FatalUsage(fmt.Sprintf("unknown target %q (known: safari, chrome, firefox, chromecast-gen3, mse-generic, chromium-generic, brave, opera, vivaldi, samsung-internet, edge)", targetName))
 	}
 
 	var opts []matroska.Options
@@ -60,7 +60,7 @@ func CmdPlayability(args []string) {
 func CmdLadder(args []string) {
 	newFlags("CmdLadder").Parse(args)
 	if len(args) < 1 {
-		Fatal("usage: " + CmdUsage["ladder"])
+		FatalUsage("usage: " + CmdUsage["ladder"])
 	}
 	path := args[0]
 

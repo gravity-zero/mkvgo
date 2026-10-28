@@ -40,12 +40,12 @@ func CmdServe(args []string) {
 	addr, direct, auto, targetName := cfg.addr, cfg.direct, cfg.auto, cfg.target
 	rest := cfg.rest
 	if direct && auto {
-		Fatal("serve: --direct and --auto are mutually exclusive")
+		FatalUsage("serve: --direct and --auto are mutually exclusive")
 	}
 
 	f := parseHLSFlags(rest)
 	if len(f.rest) < 1 {
-		Fatal("usage: " + CmdUsage["serve"])
+		FatalUsage("usage: " + CmdUsage["serve"])
 	}
 	f.randomCENCIV()
 	src := f.rest[0]
@@ -53,7 +53,7 @@ func CmdServe(args []string) {
 	if auto {
 		target, ok := matroska.TargetByName(targetName)
 		if !ok {
-			Fatal(fmt.Sprintf("unknown target %q", targetName))
+			FatalUsage(fmt.Sprintf("unknown target %q", targetName))
 		}
 		report, err := matroska.Playability(cliCtx, src, target)
 		if err != nil {
@@ -168,7 +168,7 @@ func parseServeFlags(args []string) serveFlags {
 	fl.Func(func(v string) {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			Fatal("-max-walks: expected a non-negative count, got " + v)
+			FatalUsage("-max-walks: expected a non-negative count, got " + v)
 		}
 		cfg.maxWalks = n
 	}, "-max-walks", "--max-walks")
@@ -199,7 +199,7 @@ func (cfg serveFlags) applyMemoryLimit() {
 func memoryLimitFlag(v string) int64 {
 	mib, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || mib <= 0 {
-		Fatal("serve: --memory-limit takes a size in MiB, more than 0 (the budget of --window-bytes plus 64 bounds the peak)")
+		FatalUsage("serve: --memory-limit takes a size in MiB, more than 0 (the budget of --window-bytes plus 64 bounds the peak)")
 	}
 	return mib << 20
 }
@@ -208,7 +208,7 @@ func memoryLimitFlag(v string) int64 {
 func countFlag(v, flag string) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 0 {
-		Fatal("serve: " + flag + ": expected a non-negative count, got " + v)
+		FatalUsage("serve: " + flag + ": expected a non-negative count, got " + v)
 	}
 	return n
 }
@@ -220,7 +220,7 @@ func mibOrOff(v, flag string) int64 {
 	}
 	mib, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || mib < 0 {
-		Fatal("serve: " + flag + " takes a size in MiB, or \"off\"")
+		FatalUsage("serve: " + flag + " takes a size in MiB, or \"off\"")
 	}
 	return mib << 20
 }

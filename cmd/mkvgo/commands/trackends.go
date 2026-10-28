@@ -20,7 +20,7 @@ func CmdTrackEnds(args []string) {
 	fl.Bool(&jsonOut, "-json", "--json")
 	rest = fl.Parse(args)
 	if len(rest) != 1 {
-		Fatal(trackEndsUsage)
+		FatalUsage(trackEndsUsage)
 	}
 	report, err := matroska.TrackEnds(cliCtx, rest[0])
 	if err != nil {

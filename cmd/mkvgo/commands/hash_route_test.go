@@ -40,7 +40,7 @@ func TestHashRoutesByContent(t *testing.T) {
 			if err := os.WriteFile(p, b, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			msg := fatalMessage(t, func() { commands.CmdHash([]string{p}) })
+			msg := fatalMessage(t, 1, func() { commands.CmdHash([]string{p}) })
 			if !strings.Contains(msg, "MPEG-TS detected") {
 				t.Errorf("hash %s%s: %q, want the MPEG-TS refusal", stride.name, ext, msg)
 			}
@@ -60,7 +60,7 @@ func TestHashRoutesByContent(t *testing.T) {
 
 	mp4AsMKV := copyAs("fps30.mp4", "isobmff.mkv")
 	before, _ := os.ReadFile(mp4AsMKV)
-	msg := fatalMessage(t, func() { commands.CmdHash([]string{mp4AsMKV}) })
+	msg := fatalMessage(t, 1, func() { commands.CmdHash([]string{mp4AsMKV}) })
 	if !strings.Contains(msg, "to-mp4 --hash") {
 		t.Errorf("an MP4 named .mkv: %q, want the MP4 answer (to-mp4 --hash)", msg)
 	}

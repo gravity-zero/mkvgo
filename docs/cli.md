@@ -16,12 +16,7 @@ Global flags:
 - `--version` -- print version and exit
 - `-h`, `--help` -- show help for a command
 
-Exit codes: `0` success, `1` any error (bad usage, unreadable input, failed
-operation). A flag that takes a value but is the last argument
-(`mkvgo to-hls in.mkv -o out -segment`) is bad usage: it exits `1` naming
-the flag, rather than being ignored. `validate` also exits `1` when error-severity issues are found
-(`-strict` makes warnings fail too) and `compare` when the files differ, so
-they can gate scripts (`mkvgo validate f.mkv && ...`).
+See [Exit status](#exit-status).
 
 **Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
 is accepted as the input by the inspection commands (`info`, `tracks`,
@@ -53,6 +48,17 @@ AWS_REGION=eu-west-1 mkvgo probe s3://my-bucket/movies/one.mkv
 ```
 
 ---
+
+## Exit status
+
+| Status | Meaning |
+|---|---|
+| `0` | Done. |
+| `1` | The operation failed, or a check said no (below). |
+| `2` | Bad usage, decided from the command line alone: unknown command or flag, missing argument, invalid value, flags that do not go together. |
+| `130` | Interrupted twice (Ctrl-C). |
+
+A check that says no exits `1` so it can gate a script (`mkvgo validate f.mkv && ...`): `validate` on error-severity issues (`-strict`: warnings too), `compare` when the files differ, `verify` and `hash` on a digest that does not match, `cue-health` on an unhealthy index, `diagnose` on a file that is not healthy, `fingerprint` on an incomplete file. A flag that takes a value but is the last argument (`mkvgo to-hls in.mkv -o out -segment`) is bad usage: exit `2`, naming the flag.
 
 ## Inspection
 

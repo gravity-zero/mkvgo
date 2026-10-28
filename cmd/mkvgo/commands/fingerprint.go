@@ -16,7 +16,7 @@ import (
 func CmdFingerprint(args []string) {
 	rest := newFlags("CmdFingerprint").Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["fingerprint"])
+		FatalUsage("usage: " + CmdUsage["fingerprint"])
 	}
 	path := rest[0]
 

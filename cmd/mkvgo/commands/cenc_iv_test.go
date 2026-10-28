@@ -73,7 +73,7 @@ func TestCENCIVRequiredOnDemand(t *testing.T) {
 		"abr-segment":    func() { commands.CmdABRSegment(append([]string{"-o", out, "master.m3u8", src, src}, cenc...)) },
 		"concat-segment": func() { commands.CmdConcatSegment(append([]string{"-o", out, "master.m3u8", src, src}, cenc...)) },
 	} {
-		if msg := fatalMessage(t, run); !strings.Contains(msg, "--cenc-iv is required") {
+		if msg := fatalMessage(t, 2, run); !strings.Contains(msg, "--cenc-iv is required") {
 			t.Fatalf("%s: %q", name, msg)
 		}
 	}

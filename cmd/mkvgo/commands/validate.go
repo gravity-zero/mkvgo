@@ -16,7 +16,7 @@ func CmdValidate(args []string) {
 	fl.Bool(&strict, "-strict", "--strict")
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["validate"])
+		FatalUsage("usage: " + CmdUsage["validate"])
 	}
 	path := rest[0]
 
@@ -57,14 +57,14 @@ func CmdCompare(args []string) {
 	fl.Bool(&blocks, "-blocks", "--blocks")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
-		Fatal("usage: " + CmdUsage["compare"])
+		FatalUsage("usage: " + CmdUsage["compare"])
 	}
 	pathA, pathB := rest[0], rest[1]
 	// More than two paths means "this file against those parts, in order",
 	// which only the content compare can answer.
 	parts := rest[1:]
 	if len(parts) > 1 && !blocks {
-		Fatal("comparing against several files needs -blocks (metadata has no concatenation)")
+		FatalUsage("comparing against several files needs -blocks (metadata has no concatenation)")
 	}
 
 	a, _ := loadContainer(pathA, false)

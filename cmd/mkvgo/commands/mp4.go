@@ -23,7 +23,7 @@ func CmdToMP4(args []string) {
 	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
-		Fatal("usage: " + CmdUsage["to-mp4"])
+		FatalUsage("usage: " + CmdUsage["to-mp4"])
 	}
 	src, dst := rest[0], rest[1]
 	GuardOverwrite(dst)
@@ -83,7 +83,7 @@ func CmdFromMP4(args []string) {
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
-		Fatal("usage: " + CmdUsage["from-mp4"])
+		FatalUsage("usage: " + CmdUsage["from-mp4"])
 	}
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)

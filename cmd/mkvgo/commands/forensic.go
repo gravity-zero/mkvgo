@@ -33,7 +33,7 @@ func CmdForensicSegment(args []string) {
 	fl.Bool(&distinct, "--distinct")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
-		Fatal("usage: " + CmdUsage["forensic-segment"])
+		FatalUsage("usage: " + CmdUsage["forensic-segment"])
 	}
 	src, what := rest[0], rest[1]
 

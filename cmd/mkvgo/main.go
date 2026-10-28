@@ -12,7 +12,7 @@ var version = "dev"
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(1)
+		os.Exit(2)
 	}
 
 	var filtered []string
@@ -199,7 +199,7 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
-		os.Exit(1)
+		os.Exit(2)
 	}
 }
 
@@ -281,8 +281,8 @@ Global flags:
                 place, so it survives a power loss (costs the wait for the
                 disk; the replace commands always flush)
 
-Exit codes: 0 success; 1 error. validate also exits 1 on error-severity issues
-(-strict: warnings too); compare exits 1 when the files differ.
+Exit codes: 0 success; 1 error (validate: error-severity issues, -strict:
+warnings too; compare: the files differ); 2 bad usage.
 
 Usage: mkvgo <command> [options]`)
 }

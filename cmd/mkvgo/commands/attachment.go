@@ -23,7 +23,7 @@ func CmdAddAttachment(args []string) {
 	fl.String(&mime, "-mime")
 	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	source, attPath = rest[0], rest[1]
 	guardOutput(outPath, source, attPath)
@@ -61,7 +61,7 @@ func CmdRemoveAttachment(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	source, target := rest[0], rest[1]
 	guardOutput(outPath, source)

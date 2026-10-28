@@ -16,7 +16,7 @@ import (
 func CmdToWebM(args []string) {
 	newFlags("CmdToWebM").Parse(args)
 	if len(args) < 2 {
-		Fatal("usage: mkvgo to-webm <input.mkv> <output.webm>")
+		FatalUsage("usage: mkvgo to-webm <input.mkv> <output.webm>")
 	}
 	src, dst := args[0], args[1]
 	guardOutput(dst, src)

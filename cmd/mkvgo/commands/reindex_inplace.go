@@ -25,13 +25,13 @@ func CmdReindexInPlace(args []string) {
 	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
 	rest = fl.Parse(args)
 	if len(rest) != 1 {
-		Fatal(reindexInPlaceUsage)
+		FatalUsage(reindexInPlaceUsage)
 	}
 	path := rest[0]
 
 	if rollback {
 		if deepVerify || deltaPath != "" {
-			Fatal("--rollback only restores an interrupted run; it does not reindex, so --deep-verify and --rollback-delta do not apply")
+			FatalUsage("--rollback only restores an interrupted run; it does not reindex, so --deep-verify and --rollback-delta do not apply")
 		}
 		recovered, err := matroska.RecoverInPlace(cliCtx, path)
 		if err != nil {

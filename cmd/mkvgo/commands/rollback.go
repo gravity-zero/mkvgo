@@ -16,7 +16,7 @@ const rollbackUsage = "usage: mkvgo rollback <repaired.mkv> <delta.rbd> <restore
 func CmdRollback(args []string) {
 	rest := newFlags("CmdRollback").Parse(args)
 	if len(rest) != 3 {
-		Fatal(rollbackUsage)
+		FatalUsage(rollbackUsage)
 	}
 	repaired, deltaPath, out := rest[0], rest[1], rest[2]
 	guardOutput(out, repaired, deltaPath)

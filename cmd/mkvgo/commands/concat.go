@@ -13,7 +13,7 @@ import (
 func CmdConcatHLS(args []string) {
 	f := parseHLSFlags(args)
 	if len(f.rest) < 2 || f.outDir == "" {
-		Fatal("usage: " + CmdUsage["concat-hls"])
+		FatalUsage("usage: " + CmdUsage["concat-hls"])
 	}
 	f.randomCENCIV()
 	opts := f.options(f.rest[0])
@@ -37,7 +37,7 @@ func CmdConcatSegment(args []string) {
 	f := parseHLSFlags(args)
 	outPath, rest := f.outDir, f.rest
 	if len(rest) < 3 { // resource + at least two sources
-		Fatal("usage: " + CmdUsage["concat-segment"])
+		FatalUsage("usage: " + CmdUsage["concat-segment"])
 	}
 	f.needCENCIV()
 	what, sources := rest[0], rest[1:]

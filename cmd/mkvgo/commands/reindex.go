@@ -23,10 +23,10 @@ func CmdReindex(args []string) {
 	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal(reindexUsage)
+		FatalUsage(reindexUsage)
 	}
 	if cleanCut && !resync {
-		Fatal("--clean-cut only applies together with --resync")
+		FatalUsage("--clean-cut only applies together with --resync")
 	}
 
 	var skipped []matroska.DamagedRange
@@ -48,7 +48,7 @@ func CmdReindex(args []string) {
 
 	if replace {
 		if len(rest) != 1 {
-			Fatal("--replace takes exactly one path: the source is reindexed in place, no separate output")
+			FatalUsage("--replace takes exactly one path: the source is reindexed in place, no separate output")
 		}
 		src := rest[0]
 		err := matroska.ReindexReplace(cliCtx, src, opts)
@@ -64,10 +64,10 @@ func CmdReindex(args []string) {
 	}
 
 	if keepBackup {
-		Fatal("--keep-backup only applies together with --replace")
+		FatalUsage("--keep-backup only applies together with --replace")
 	}
 	if len(rest) < 2 {
-		Fatal(reindexUsage)
+		FatalUsage(reindexUsage)
 	}
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)

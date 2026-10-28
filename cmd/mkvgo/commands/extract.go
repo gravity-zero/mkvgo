@@ -18,19 +18,19 @@ import (
 
 func CmdExtractAttachment(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
+		FatalUsage("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
 	source := args[0]
 	attID, err := strconv.ParseUint(args[1], 10, 64)
 	if err != nil {
-		Fatal(fmt.Sprintf("invalid attachment ID %q", args[1]))
+		FatalUsage(fmt.Sprintf("invalid attachment ID %q", args[1]))
 	}
 	var outPath string
 	fl := newFlags("extract-attachment")
 	fl.String(&outPath, "-o")
 	fl.Parse(args[2:])
 	if outPath == "" {
-		Fatal("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
+		FatalUsage("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
 	guardOutput(outPath, source)
 
@@ -44,7 +44,7 @@ func CmdExtractAttachment(args []string) {
 func CmdExtractSubtitle(args []string) {
 	usage := CmdUsage["extract-subtitle"]
 	if len(args) < 5 {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	source := args[0]
 	var outPath, format, indexPath string
@@ -59,14 +59,14 @@ func CmdExtractSubtitle(args []string) {
 	fl.Func(func(v string) {
 		id, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid track ID %q", v))
+			FatalUsage(fmt.Sprintf("invalid track ID %q", v))
 		}
 		trackID = id
 	}, "-t")
 	fl.String(&format, "-format")
 	fl.Parse(args[1:])
 	if outPath == "" || trackID == 0 {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	guardOutput(outPath, source, indexPath)
 	opts := subtitleReadOptions(damageBytes)
@@ -74,7 +74,7 @@ func CmdExtractSubtitle(args []string) {
 
 	if indexPath != "" {
 		if format != "vtt" && format != "pgs" {
-			Fatal("-index applies to -format vtt and -format pgs only")
+			FatalUsage("-index applies to -format vtt and -format pgs only")
 		}
 		if isMP4Path(source) {
 			Fatal("-index applies to MKV/WebM only: an MP4 already carries its own sample table")
@@ -118,7 +118,7 @@ func CmdExtractSubtitle(args []string) {
 		}
 		err = matroska.ExtractASS(cliCtx, source, trackID, outPath, opts)
 	default:
-		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
+		FatalUsage(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
 	}
 	if err != nil {
 		FatalErr(err)
@@ -228,7 +228,7 @@ func writePGSDir(outDir string, each func(func(matroska.PGSCue) error) error) (i
 func CmdSubtitleIndex(args []string) {
 	usage := CmdUsage["subtitle-index"]
 	if len(args) < 3 {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	source := args[0]
 	var outPath string
@@ -243,14 +243,14 @@ func CmdSubtitleIndex(args []string) {
 		for _, part := range strings.Split(v, ",") {
 			id, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64)
 			if err != nil {
-				Fatal(fmt.Sprintf("invalid track ID %q", part))
+				FatalUsage(fmt.Sprintf("invalid track ID %q", part))
 			}
 			trackIDs = append(trackIDs, id)
 		}
 	}, "-t")
 	fl.Parse(args[1:])
 	if outPath == "" {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	guardOutput(outPath, source)
 

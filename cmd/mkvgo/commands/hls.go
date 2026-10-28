@@ -54,7 +54,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Func(func(v string) {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
-			Fatal(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", v))
+			FatalUsage(fmt.Sprintf("invalid --aes-rotate-segments %q (positive integer)", v))
 		}
 		rotateSegs = n
 	}, "--aes-rotate-segments")
@@ -69,7 +69,7 @@ func parseHLSFlags(args []string) hlsFlags {
 		for _, p := range strings.Split(v, ",") {
 			id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
 			if err != nil {
-				Fatal(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
+				FatalUsage(fmt.Sprintf("invalid --keep-tracks id %q (comma-separated track IDs)", p))
 			}
 			f.keepTracks = append(f.keepTracks, id)
 		}
@@ -84,7 +84,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Func(func(v string) {
 		ms, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", v))
+			FatalUsage(fmt.Sprintf("invalid --sub-offset %q (integer milliseconds, negative allowed)", v))
 		}
 		f.subOffset = ms
 	}, "--sub-offset")
@@ -101,7 +101,7 @@ func parseHLSFlags(args []string) hlsFlags {
 		case "network":
 			f.sourceAccess = mp4.SourceNetwork
 		default:
-			Fatal("--source-access takes auto, local or network, not " + v)
+			FatalUsage("--source-access takes auto, local or network, not " + v)
 		}
 	}, "--source-access")
 	fl.Missing("--source-access", "--source-access needs auto, local or network")
@@ -109,7 +109,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Func(func(v string) {
 		track, ms, err := parseShift(v)
 		if err != nil {
-			Fatal(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
+			FatalUsage(strings.ReplaceAll(err.Error(), "--shift", "--audio-shift"))
 		}
 		if f.audioShift == nil {
 			f.audioShift = map[uint64]int64{}
@@ -128,13 +128,13 @@ func parseHLSFlags(args []string) hlsFlags {
 			keys := splitCSV(keyHex)
 			uris := splitCSV(keyURI)
 			if len(keys) < 2 || len(keys) != len(uris) {
-				Fatal("--aes-rotate-segments needs matching comma-separated --aes-key and --aes-key-uri lists of at least 2 entries")
+				FatalUsage("--aes-rotate-segments needs matching comma-separated --aes-key and --aes-key-uri lists of at least 2 entries")
 			}
 			var ks []mp4.HLSKey
 			for j := range keys {
 				k, err := hex.DecodeString(keys[j])
 				if err != nil {
-					Fatal(fmt.Sprintf("invalid --aes-key entry %d (expected 32 hex chars): %s", j+1, err.Error()))
+					FatalUsage(fmt.Sprintf("invalid --aes-key entry %d (expected 32 hex chars): %s", j+1, err.Error()))
 				}
 				ks = append(ks, mp4.HLSKey{Key: k, KeyURI: uris[j]})
 			}
@@ -142,7 +142,7 @@ func parseHLSFlags(args []string) hlsFlags {
 		} else {
 			key, err := hex.DecodeString(keyHex)
 			if err != nil {
-				Fatal("invalid --aes-key (expected 32 hex chars): " + err.Error())
+				FatalUsage("invalid --aes-key (expected 32 hex chars): " + err.Error())
 			}
 			f.encrypt = &mp4.HLSEncryption{Key: key, KeyURI: keyURI}
 		}
@@ -152,7 +152,7 @@ func parseHLSFlags(args []string) hlsFlags {
 		kid := mustHex(cencKIDHex, "--cenc-kid (expected 32 hex chars)")
 		iv := mustHex(cencIVHex, "--cenc-iv (expected 16 or 32 hex chars)")
 		if cencKeyURI == "" && !cencInline {
-			Fatal("--cenc-key-uri is required: without it the playlist would carry the content key in clear (a data: URI). Pass --cenc-key-uri with the URI of your key or license server, or --cenc-inline-key to embed the key on purpose (testing only)")
+			FatalUsage("--cenc-key-uri is required: without it the playlist would carry the content key in clear (a data: URI). Pass --cenc-key-uri with the URI of your key or license server, or --cenc-inline-key to embed the key on purpose (testing only)")
 		}
 		f.cenc = &mp4.CENCOptions{Scheme: cencScheme, Key: key, KeyID: kid, IV: iv, KeyURI: cencKeyURI, InlineKey: cencInline}
 	}
@@ -163,7 +163,7 @@ func parseHLSFlags(args []string) hlsFlags {
 // ignored), else env when the encryption it belongs to is asked for.
 func keyValue(argv, file, env, flag string, asked bool) string {
 	if argv != "" && file != "" {
-		Fatal(flag + " and " + flag + "-file both given: pass the key once")
+		FatalUsage(flag + " and " + flag + "-file both given: pass the key once")
 	}
 	switch {
 	case argv != "":
@@ -216,7 +216,7 @@ func (f *hlsFlags) randomCENCIV() {
 // needCENCIV refuses an on-demand resource without --cenc-iv: a fresh IV per call would not match the rest of the presentation.
 func (f hlsFlags) needCENCIV() {
 	if f.cenc != nil && f.cenc.IV == nil {
-		Fatal("--cenc-iv is required here: each call packages one resource, which must use the IV of the rest of the presentation. Pass the --cenc-iv the presentation was packaged with (to-hls prints the one it generates)")
+		FatalUsage("--cenc-iv is required here: each call packages one resource, which must use the IV of the rest of the presentation. Pass the --cenc-iv the presentation was packaged with (to-hls prints the one it generates)")
 	}
 }
 
@@ -226,7 +226,7 @@ func mustHex(s, what string) []byte {
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		Fatal("invalid " + what + ": " + err.Error())
+		FatalUsage("invalid " + what + ": " + err.Error())
 	}
 	return b
 }
@@ -286,7 +286,7 @@ func CmdToHLS(args []string) {
 	f := parseHLSFlags(args)
 	outDir, rest := f.outDir, f.rest
 	if len(rest) < 1 || outDir == "" {
-		Fatal("usage: " + CmdUsage["to-hls"])
+		FatalUsage("usage: " + CmdUsage["to-hls"])
 	}
 	f.randomCENCIV()
 	src := rest[0]
@@ -318,7 +318,7 @@ func CmdHLSSegment(args []string) {
 	f := parseHLSFlags(args)
 	outPath, rest := f.outDir, f.rest
 	if len(rest) < 2 {
-		Fatal("usage: " + CmdUsage["hls-segment"])
+		FatalUsage("usage: " + CmdUsage["hls-segment"])
 	}
 	f.needCENCIV()
 	src, what := rest[0], rest[1]
@@ -380,7 +380,7 @@ func CmdHLSSegment(args []string) {
 func CmdToABR(args []string) {
 	f := parseHLSFlags(args)
 	if len(f.rest) < 2 || f.outDir == "" {
-		Fatal("usage: " + CmdUsage["to-abr"])
+		FatalUsage("usage: " + CmdUsage["to-abr"])
 	}
 	f.randomCENCIV()
 	opts := f.options(f.rest[0])
@@ -405,7 +405,7 @@ func CmdABRSegment(args []string) {
 	f := parseHLSFlags(args)
 	outPath, rest := f.outDir, f.rest
 	if len(rest) < 3 { // resource + at least two variants
-		Fatal("usage: " + CmdUsage["abr-segment"])
+		FatalUsage("usage: " + CmdUsage["abr-segment"])
 	}
 	f.needCENCIV()
 	what, sources := rest[0], rest[1:]

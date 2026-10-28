@@ -62,7 +62,7 @@ func CmdToVTT(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 1 || outPath == "" {
-		Fatal("usage: " + CmdUsage["to-vtt"])
+		FatalUsage("usage: " + CmdUsage["to-vtt"])
 	}
 	src := rest[0]
 	guardOutput(outPath, src)
@@ -85,7 +85,7 @@ func CmdExtractFrame(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
-		Fatal("usage: " + CmdUsage["extract-frame"])
+		FatalUsage("usage: " + CmdUsage["extract-frame"])
 	}
 	atMs, err := ParseTimePoint(rest[1])
 	if err != nil {
@@ -119,7 +119,7 @@ func CmdExtractFrames(args []string) {
 		fl.Func(func(v string) {
 			ms, err := ParseTimePoint(v)
 			if err != nil {
-				Fatal(fmt.Sprintf("%s: %v", flag, err))
+				FatalUsage(fmt.Sprintf("%s: %v", flag, err))
 			}
 			*dst = ms
 		}, flag)
@@ -132,7 +132,7 @@ func CmdExtractFrames(args []string) {
 		for _, s := range strings.Split(v, ",") {
 			ms, err := ParseTimePoint(s)
 			if err != nil {
-				Fatal(fmt.Sprintf("-at: %v", err))
+				FatalUsage(fmt.Sprintf("-at: %v", err))
 			}
 			sel.TargetsMs = append(sel.TargetsMs, ms)
 		}
@@ -141,7 +141,7 @@ func CmdExtractFrames(args []string) {
 	fl.Bool(&asJSON, "-json", "--json")
 	rest = fl.Parse(args)
 	if len(rest) != 1 || outPath == "" || (sel.EveryMs <= 0) == (len(sel.TargetsMs) == 0) {
-		Fatal("usage: " + CmdUsage["extract-frames"])
+		FatalUsage("usage: " + CmdUsage["extract-frames"])
 	}
 	src := rest[0]
 	var opts []mkv.Options

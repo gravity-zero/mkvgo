@@ -10,7 +10,7 @@ import (
 
 func CmdMerge(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: " + CmdUsage["merge"])
+		FatalUsage("usage: " + CmdUsage["merge"])
 	}
 	var outPath string
 	var inputs []matroska.MergeInput
@@ -21,7 +21,7 @@ func CmdMerge(args []string) {
 		inputs = append(inputs, matroska.MergeInput{SourcePath: src})
 	}
 	if outPath == "" || len(inputs) == 0 {
-		Fatal("usage: " + CmdUsage["merge"])
+		FatalUsage("usage: " + CmdUsage["merge"])
 	}
 	GuardOverwrite(outPath)
 
@@ -45,7 +45,7 @@ func CmdMerge(args []string) {
 
 func CmdMergeSubtitle(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: " + CmdUsage["merge-subtitle"])
+		FatalUsage("usage: " + CmdUsage["merge-subtitle"])
 	}
 	source := args[0]
 	var outPath, subPath, format, lang, name string
@@ -60,7 +60,7 @@ func CmdMergeSubtitle(args []string) {
 		subPath = ops[len(ops)-1]
 	}
 	if outPath == "" || subPath == "" {
-		Fatal("usage: " + CmdUsage["merge-subtitle"])
+		FatalUsage("usage: " + CmdUsage["merge-subtitle"])
 	}
 	GuardOverwrite(outPath)
 
@@ -96,7 +96,7 @@ func CmdMergeSubtitle(args []string) {
 	case "ass", "ssa":
 		err = matroska.MergeASS(cliCtx, source, subPath, outPath, lang, name, opts)
 	default:
-		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass)", format))
+		FatalUsage(fmt.Sprintf("unknown format %q (supported: srt, ass)", format))
 	}
 	ClearProgress()
 	if err != nil {

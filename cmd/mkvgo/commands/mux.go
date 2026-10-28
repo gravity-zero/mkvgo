@@ -10,7 +10,7 @@ import (
 
 func CmdDemux(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: mkvgo demux <file.mkv> -o <dir> [-t trackID,...]")
+		FatalUsage("usage: mkvgo demux <file.mkv> -o <dir> [-t trackID,...]")
 	}
 	source := args[0]
 	var outDir string
@@ -21,7 +21,7 @@ func CmdDemux(args []string) {
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
 	fl.Parse(args[1:])
 	if outDir == "" {
-		Fatal("missing -o <dir>")
+		FatalUsage("missing -o <dir>")
 	}
 
 	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
@@ -36,7 +36,7 @@ func CmdDemux(args []string) {
 
 func CmdMux(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: " + CmdUsage["mux"])
+		FatalUsage("usage: " + CmdUsage["mux"])
 	}
 	var outPath string
 	var inputs []matroska.TrackInput
@@ -46,21 +46,21 @@ func CmdMux(args []string) {
 	for _, spec := range fl.Parse(args) {
 		srcPath, trackID, ok := splitTrackSpec(spec)
 		if !ok {
-			Fatal(fmt.Sprintf("invalid track spec %q, expected file:trackID", spec))
+			FatalUsage(fmt.Sprintf("invalid track spec %q, expected file:trackID", spec))
 		}
 		id, err := strconv.ParseUint(trackID, 10, 64)
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid track ID %q: %v", trackID, err))
+			FatalUsage(fmt.Sprintf("invalid track ID %q: %v", trackID, err))
 		}
 		inputs = append(inputs, matroska.TrackInput{
 			SourcePath: srcPath, TrackID: id, IsDefault: true,
 		})
 	}
 	if outPath == "" {
-		Fatal("missing -o <out.mkv>")
+		FatalUsage("missing -o <out.mkv>")
 	}
 	if len(inputs) == 0 {
-		Fatal("no track inputs specified")
+		FatalUsage("no track inputs specified")
 	}
 	GuardOverwrite(outPath)
 
@@ -84,7 +84,7 @@ func CmdMux(args []string) {
 
 func CmdRemoveTrack(args []string) {
 	if len(args) < 5 {
-		Fatal("usage: " + CmdUsage["remove-track"])
+		FatalUsage("usage: " + CmdUsage["remove-track"])
 	}
 	source := args[0]
 	var outPath string
@@ -95,7 +95,7 @@ func CmdRemoveTrack(args []string) {
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
 	fl.Parse(args[1:])
 	if outPath == "" || len(trackIDs) == 0 {
-		Fatal("usage: " + CmdUsage["remove-track"])
+		FatalUsage("usage: " + CmdUsage["remove-track"])
 	}
 	GuardOverwrite(outPath)
 
@@ -116,7 +116,7 @@ func CmdRemoveTrack(args []string) {
 
 func CmdAddTrack(args []string) {
 	if len(args) < 4 {
-		Fatal("usage: " + CmdUsage["add-track"])
+		FatalUsage("usage: " + CmdUsage["add-track"])
 	}
 	base := args[0]
 	var outPath string
@@ -130,14 +130,14 @@ func CmdAddTrack(args []string) {
 		if srcPath, trackID, ok := splitTrackSpec(op); ok {
 			id, err := strconv.ParseUint(trackID, 10, 64)
 			if err != nil {
-				Fatal(fmt.Sprintf("invalid track ID %q", trackID))
+				FatalUsage(fmt.Sprintf("invalid track ID %q", trackID))
 			}
 			input.SourcePath = srcPath
 			input.TrackID = id
 		}
 	}
 	if outPath == "" || input.SourcePath == "" {
-		Fatal("usage: " + CmdUsage["add-track"])
+		FatalUsage("usage: " + CmdUsage["add-track"])
 	}
 	guardOutput(outPath, base, input.SourcePath)
 

@@ -85,12 +85,12 @@ func (c *cliFlags) parse(args []string, strict bool) []string {
 		v := "true"
 		if b, isBool := f.Value.(interface{ IsBoolFlag() bool }); !isBool || !b.IsBoolFlag() {
 			if msg, own := c.missing[name]; own && i+1 >= len(args) {
-				Fatal(msg)
+				FatalUsage(msg)
 			}
 			v = needValue(args, &i)
 		}
 		if err := c.fs.Set(name, v); err != nil {
-			Fatal(tok + ": " + err.Error())
+			FatalUsage(tok + ": " + err.Error())
 		}
 	}
 	return operands
@@ -127,7 +127,7 @@ func damageBytesFlag(n *int64) func(string) {
 	return func(v string) {
 		b, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || b == 0 {
-			Fatal(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count, or -1 to refuse any damage)", v))
+			FatalUsage(fmt.Sprintf("invalid --damage-bytes %q (a positive byte count, or -1 to refuse any damage)", v))
 		}
 		*n = b
 	}

@@ -40,16 +40,16 @@ func CmdRetime(args []string) {
 	fl.Missing("--rollback-delta", "--rollback-delta needs a file path")
 	rest = fl.Parse(args)
 	if len(rest) != 1 {
-		Fatal(retimeUsage)
+		FatalUsage(retimeUsage)
 	}
 	if len(shift) == 0 {
-		Fatal("at least one --shift <track>=<ms> is required")
+		FatalUsage("at least one --shift <track>=<ms> is required")
 	}
 	if inPlace && replace {
-		Fatal("--in-place and --replace are mutually exclusive (omit both for the automatic choice)")
+		FatalUsage("--in-place and --replace are mutually exclusive (omit both for the automatic choice)")
 	}
 	if keepBackup && inPlace {
-		Fatal("--keep-backup only applies to the rewrite engine (--replace or automatic)")
+		FatalUsage("--keep-backup only applies to the rewrite engine (--replace or automatic)")
 	}
 	path := rest[0]
 

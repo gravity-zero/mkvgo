@@ -16,7 +16,7 @@ import (
 func CmdAnalyze(args []string) {
 	rest := newFlags("CmdAnalyze").Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["analyze"])
+		FatalUsage("usage: " + CmdUsage["analyze"])
 	}
 	path := rest[0]
 	if isMP4Path(path) {

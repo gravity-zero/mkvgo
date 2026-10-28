@@ -10,7 +10,7 @@ import (
 
 func CmdSplit(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: " + CmdUsage["split"])
+		FatalUsage("usage: " + CmdUsage["split"])
 	}
 	source := args[0]
 	var outDir, pattern string
@@ -25,14 +25,14 @@ func CmdSplit(args []string) {
 	fl.Func(func(v string) {
 		ms, err := ParseTimePoint(v)
 		if err != nil || ms <= 0 {
-			Fatal(fmt.Sprintf("invalid -every duration %q", v))
+			FatalUsage(fmt.Sprintf("invalid -every duration %q", v))
 		}
 		everyMs = ms
 	}, "-every")
 	fl.String(&pattern, "-pattern")
 	fl.Parse(args[1:])
 	if outDir == "" {
-		Fatal("missing -o <dir>")
+		FatalUsage("missing -o <dir>")
 	}
 	modes := 0
 	for _, on := range []bool{byChapters, len(ranges) > 0, everyMs > 0} {
@@ -41,7 +41,7 @@ func CmdSplit(args []string) {
 		}
 	}
 	if modes != 1 {
-		Fatal("specify exactly one of -chapters, -range or -every")
+		FatalUsage("specify exactly one of -chapters, -range or -every")
 	}
 
 	so := matroska.SplitOptions{
@@ -71,7 +71,7 @@ func CmdSplit(args []string) {
 
 func CmdJoin(args []string) {
 	if len(args) < 3 {
-		Fatal("usage: " + CmdUsage["join"])
+		FatalUsage("usage: " + CmdUsage["join"])
 	}
 	var outPath string
 	var sources []string
@@ -80,7 +80,7 @@ func CmdJoin(args []string) {
 	fl.String(&outPath, "-o")
 	sources = fl.Parse(args)
 	if outPath == "" || len(sources) == 0 {
-		Fatal("usage: " + CmdUsage["join"])
+		FatalUsage("usage: " + CmdUsage["join"])
 	}
 	GuardOverwrite(outPath)
 

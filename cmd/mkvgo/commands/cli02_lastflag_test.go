@@ -21,7 +21,7 @@ func TestCLI02_ValueFlagLast(t *testing.T) {
 		"join -o":                  func() { commands.CmdJoin([]string{"a.mkv", "b.mkv", "-o"}) },
 	}
 	for name, run := range cases {
-		msg := fatalMessage(t, run)
+		msg := fatalMessage(t, 2, run)
 		flag := name[strings.LastIndex(name, " ")+1:]
 		if !strings.HasPrefix(msg, flag+" needs a value") {
 			t.Errorf("%s: the error does not name the flag: %q", name, msg)

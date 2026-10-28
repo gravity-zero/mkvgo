@@ -142,7 +142,7 @@ const maxSegmentSeconds = 86400
 func parseSegmentSeconds(v string) int64 {
 	secs, err := strconv.ParseFloat(v, 64)
 	if err != nil || !(secs >= 0.001 && secs <= maxSegmentSeconds) {
-		Fatal(fmt.Sprintf("invalid -segment duration %q (seconds, at least 0.001 and at most %d)", v, maxSegmentSeconds))
+		FatalUsage(fmt.Sprintf("invalid -segment duration %q (seconds, at least 0.001 and at most %d)", v, maxSegmentSeconds))
 	}
 	return int64(secs * 1000)
 }
@@ -152,9 +152,17 @@ func parseSegmentSeconds(v string) int64 {
 // in-process; in production it is os.Exit.
 var osExit = os.Exit
 
+// Fatal ends a command that failed: exit status 1.
 func Fatal(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 	osExit(1)
+}
+
+// FatalUsage ends a command used wrongly (unknown flag, missing argument, invalid value), decided from the
+// command line alone: exit status 2.
+func FatalUsage(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	osExit(2)
 }
 
 // FatalErr is Fatal with err's message, naming the command that repairs a damaged file when err is one.
@@ -171,13 +179,13 @@ func FatalErr(err error) {
 // being treated as a filename. A lone "-" (conventionally stdin) is allowed.
 func rejectFlagArg(a string) {
 	if len(a) > 1 && a[0] == '-' {
-		Fatal("unknown flag: " + a)
+		FatalUsage("unknown flag: " + a)
 	}
 }
 
 func RequireArgs(args []string, n int, usage string) {
 	if len(args) < n {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 }
 
@@ -221,7 +229,7 @@ func s3Hybrid() *mkv.FS {
 
 func OpenMKV(path string) *matroska.Container {
 	if isRemoteURL(path) {
-		Fatal("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes, chapters, tags, attachments)")
+		FatalUsage("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes, chapters, tags, attachments)")
 	}
 	c, err := matroska.Open(cliCtx, path)
 	if err != nil {
@@ -460,7 +468,7 @@ func ParseTrackIDs(s string) []uint64 {
 	for _, part := range strings.Split(s, ",") {
 		id, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64)
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid track ID %q: %v", part, err))
+			FatalUsage(fmt.Sprintf("invalid track ID %q: %v", part, err))
 		}
 		ids = append(ids, id)
 	}
@@ -472,15 +480,15 @@ func ParseTimeRanges(s string) []matroska.TimeRange {
 	for _, part := range strings.Split(s, ",") {
 		parts := strings.SplitN(part, "-", 2)
 		if len(parts) != 2 {
-			Fatal(fmt.Sprintf("invalid range %q, expected start-end", part))
+			FatalUsage(fmt.Sprintf("invalid range %q, expected start-end", part))
 		}
 		start, err := ParseTimePoint(parts[0])
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid start time %q: %v", parts[0], err))
+			FatalUsage(fmt.Sprintf("invalid start time %q: %v", parts[0], err))
 		}
 		end, err := ParseTimePoint(parts[1])
 		if err != nil {
-			Fatal(fmt.Sprintf("invalid end time %q: %v", parts[1], err))
+			FatalUsage(fmt.Sprintf("invalid end time %q: %v", parts[1], err))
 		}
 		ranges = append(ranges, matroska.TimeRange{StartMs: start, EndMs: end})
 	}
@@ -587,7 +595,7 @@ func needValue(args []string, i *int) string {
 	flag := args[*i]
 	*i++
 	if *i >= len(args) {
-		Fatal(flag + " needs a value")
+		FatalUsage(flag + " needs a value")
 	}
 	return args[*i]
 }

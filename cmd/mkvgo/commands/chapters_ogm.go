@@ -18,7 +18,7 @@ func CmdSetChapters(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 2 || outPath == "" {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	source, chapPath := rest[0], rest[1]
 	GuardOverwrite(outPath)
@@ -58,7 +58,7 @@ func CmdExtractChapters(args []string) {
 	fl.String(&outPath, "-o")
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + usage)
+		FatalUsage("usage: " + usage)
 	}
 	c, _ := loadContainer(rest[0], false)
 	if len(c.Chapters) == 0 {

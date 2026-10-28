@@ -46,7 +46,7 @@ func CmdCMAFMPD(args []string) {
 func CmdCMAFHLS(args []string) {
 	outDir, videos, audios := parseCMAFArgs(args, "cmaf-hls")
 	if outDir == "" || outDir == "-" {
-		Fatal("usage: " + CmdUsage["cmaf-hls"])
+		FatalUsage("usage: " + CmdUsage["cmaf-hls"])
 	}
 	p := cmafPresentationFromDirs(videos, audios, outDir)
 	playlists, err := mp4.HLSFromCMAF(cliCtx, p)
@@ -79,7 +79,7 @@ func parseCMAFArgs(args []string, cmd string) (out string, videos, audios []stri
 	fl.Func(func(v string) { audios = append(audios, v) }, "--audio")
 	videos = fl.Parse(args)
 	if len(videos) == 0 && len(audios) == 0 {
-		Fatal("usage: " + CmdUsage[cmd])
+		FatalUsage("usage: " + CmdUsage[cmd])
 	}
 	return out, videos, audios
 }

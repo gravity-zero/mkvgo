@@ -35,7 +35,7 @@ func CmdDiagnose(args []string) {
 	fl.Bool(&deep, "--deep-verify")
 	rest = fl.Parse(args)
 	if len(rest) != 1 {
-		Fatal(diagnoseUsage)
+		FatalUsage(diagnoseUsage)
 	}
 
 	diagnose := matroska.Diagnose

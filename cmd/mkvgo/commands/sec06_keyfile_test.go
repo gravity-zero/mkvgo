@@ -76,8 +76,8 @@ func TestSEC06_CENCKeyFile(t *testing.T) {
 	sameFiles(t, argv, hlsDir(t, common...))
 }
 
-// fatalMessage runs fn, which must call Fatal, and returns what it wrote to stderr.
-func fatalMessage(t *testing.T, fn func()) string {
+// fatalMessage runs fn, which must exit with status want, and returns what it wrote to stderr.
+func fatalMessage(t *testing.T, want int, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -95,15 +95,15 @@ func fatalMessage(t *testing.T, fn func()) string {
 	os.Stderr = old
 	w.Close()
 	msg, _ := io.ReadAll(r)
-	if code != 1 {
-		t.Fatalf("exit code %d, want 1 (stderr %q)", code, msg)
+	if code != want {
+		t.Fatalf("exit code %d, want %d (stderr %q)", code, want, msg)
 	}
 	return string(msg)
 }
 
 func TestSEC07_CENCNeedsKeyURI(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "hls")
-	msg := fatalMessage(t, func() {
+	msg := fatalMessage(t, 2, func() {
 		commands.CmdToHLS([]string{"../../../internal/testdata/sample.mkv", "-o", out, "--cenc-scheme", "cenc", "--cenc-key", sec06Key, "--cenc-kid", "ffeeddccbbaa99887766554433221100", "--cenc-iv", "0102030405060708"})
 	})
 	if !strings.Contains(msg, "--cenc-key-uri") || !strings.Contains(msg, "--cenc-inline-key") {

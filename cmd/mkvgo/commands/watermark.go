@@ -32,7 +32,7 @@ func CmdWatermarkSegment(args []string) {
 	fl.String(&patternHex, "--pattern")
 	rest = fl.Parse(args)
 	if len(rest) < 3 {
-		Fatal("usage: " + CmdUsage["watermark-segment"])
+		FatalUsage("usage: " + CmdUsage["watermark-segment"])
 	}
 	srcA, srcB, what := rest[0], rest[1], rest[2]
 

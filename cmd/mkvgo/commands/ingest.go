@@ -23,7 +23,7 @@ func CmdIngest(args []string) {
 	fl.Bool(&analyze, "-analyze", "--analyze")
 	rest = fl.Parse(args)
 	if len(rest) < 1 {
-		Fatal("usage: " + CmdUsage["ingest"])
+		FatalUsage("usage: " + CmdUsage["ingest"])
 	}
 	path := rest[0]
 
