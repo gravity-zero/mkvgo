@@ -21,6 +21,10 @@ const defaultClusterDurationMs = 1000
 // milliseconds.
 const maxBlockRelTC = 32767
 
+// noCluster is a stream writer's cluster timestamp before its first cluster opens: a block may be timed before 0
+// (a codec delay), so no negative value can stand for it.
+const noCluster int64 = math.MinInt64
+
 // clusterSpanMs is how long a rewritten cluster may run, in milliseconds, on a
 // file with this timebase: the 1s default, unless the timebase is fine enough
 // that a second of media no longer fits a block's 16-bit offset.
@@ -240,7 +244,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	}
 
 	var cluster []mkv.Block
-	clusterTS := int64(-1)
+	clusterTS := noCluster
 	subIdx := 0
 	gateSkipped := false             // keyframeAlign dropped in-range blocks waiting for a cut keyframe
 	otherOpened := map[uint64]bool{} // the other video tracks that met their first keyframe in this part
@@ -312,12 +316,12 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		s := shift()
 		for i := range cluster {
-			if cluster[i].Timecode < base {
+			if cluster[i].Timecode < base && opts.timeStart > 0 { // uncut, a block before 0 keeps its time
 				return fmt.Errorf("block at %dms precedes the segment's first frame (%dms) by more than one cluster: refusing to write a negative timestamp", cluster[i].Timecode, base)
 			}
 			cluster[i].Timecode -= s
 		}
-		err := mw.WriteClusterWithCues(clusterTS-s, outScale, cluster)
+		err := mw.WriteClusterWithCues(max(clusterTS-s, 0), outScale, cluster) // a Cluster Timestamp is unsigned: blocks before 0 sit at negative offsets from it
 		cluster = cluster[:0]
 		return err
 	}
@@ -329,13 +333,13 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 	injectSubs := func(upTo int64) error {
 		for subIdx < len(opts.extraSubs) && opts.extraSubs[subIdx].Timecode <= upTo {
 			sub := opts.extraSubs[subIdx]
-			if clusterTS >= 0 && sub.Timecode-clusterTS >= clusterMs {
+			if clusterTS != noCluster && sub.Timecode-clusterTS >= clusterMs {
 				if err := flush(); err != nil {
 					return err
 				}
 				clusterTS = sub.Timecode
 			}
-			if clusterTS < 0 {
+			if clusterTS == noCluster {
 				clusterTS = sub.Timecode
 			}
 			cluster = append(cluster, sub)
@@ -401,7 +405,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			maxMs = blk.Timecode
 		}
 		if err == io.EOF {
-			if clusterTS < 0 && gateSkipped {
+			if clusterTS == noCluster && gateSkipped {
 				return noCutKeyframeErr(opts.timeStart)
 			}
 			if err := injectSubs(1 << 62); err != nil {
@@ -439,7 +443,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 		}
 		// keyframeAlign: drop everything (audio included) until the first cut
 		// keyframe, so the segment starts decodable and A/V start together.
-		if opts.keyframeAlign && opts.timeStart > 0 && clusterTS < 0 && !cutKeyframe {
+		if opts.keyframeAlign && opts.timeStart > 0 && clusterTS == noCluster && !cutKeyframe {
 			gateSkipped = true
 			continue
 		}
@@ -451,7 +455,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			otherOpened[blk.TrackNumber] = true
 		}
 		if opts.timeEnd > 0 && blk.Timecode >= opts.timeEnd && !ending {
-			if clusterTS < 0 && gateSkipped {
+			if clusterTS == noCluster && gateSkipped {
 				return noCutKeyframeErr(opts.timeStart)
 			}
 			if !opts.keyframeAlign || cutKeyframe {
@@ -550,7 +554,7 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			}
 		}
 
-		if clusterTS < 0 {
+		if clusterTS == noCluster {
 			clusterTS = blk.Timecode
 		}
 		// Near the end asked for, the cluster stays open up to the offsets' hard limit: the picture shown last before
@@ -800,12 +804,12 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 	}
 
 	var cluster []mkv.Block
-	clusterTS := int64(-1)
+	clusterTS := noCluster
 	flush := func() error {
 		if len(cluster) == 0 {
 			return nil
 		}
-		err := mw.WriteClusterWithCues(clusterTS, outScale, cluster)
+		err := mw.WriteClusterWithCues(max(clusterTS, 0), outScale, cluster) // a Cluster Timestamp is unsigned
 		cluster = cluster[:0]
 		return err
 	}
@@ -841,7 +845,7 @@ func streamMergeToWriter(ctx context.Context, mw *writer.MKVWriter, outScale int
 		}
 		ts.add(&blk)
 
-		if clusterTS < 0 {
+		if clusterTS == noCluster {
 			clusterTS = blk.Timecode
 		}
 		if blk.Timecode-clusterTS >= clusterSpanMs(outScale) && len(cluster) > 0 {

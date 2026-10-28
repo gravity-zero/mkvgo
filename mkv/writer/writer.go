@@ -679,6 +679,9 @@ func writeClusterOffsets(w io.Writer, e *ew, clusterTS int64, timecodeScale int6
 	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
 		timecodeScale = 1000000
 	}
+	if clusterTS < 0 {
+		return nil, fmt.Errorf("cluster timestamp %dms is negative, which a Cluster Timestamp (unsigned) cannot hold", clusterTS)
+	}
 	rawTS := uint64(clusterTS * 1000000 / timecodeScale)
 	e.Reset()
 	e.err = nil
@@ -958,8 +961,9 @@ func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {
 	var e ew
 	for i := range cues {
 		cp := &cues[i]
-		// CueTime is in timecode units, not milliseconds
-		cueTime := uint64(cp.TimeMs) * 1000000 / uint64(timecodeScale)
+		// CueTime is in timecode units, not milliseconds, and unsigned: a block timed before 0 is cued at 0, where its
+		// cluster starts.
+		cueTime := uint64(max(cp.TimeMs, 0)) * 1000000 / uint64(timecodeScale)
 		e.master(mkv.IDCuePoint, func(ce *ew) {
 			ce.uint(mkv.IDCueTime, cueTime)
 			ce.master(mkv.IDCueTrackPositions, func(tp *ew) {

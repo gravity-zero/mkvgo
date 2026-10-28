@@ -111,8 +111,11 @@ func newStreamWriter(w io.Writer, info mkv.SegmentInfo, tracks []mkv.Track, writ
 }
 
 // openCluster writes the header of a new unknown-size Cluster with the given
-// cluster timestamp (in milliseconds, converted to raw timecode units).
+// cluster timestamp (in milliseconds, converted to raw timecode units). A
+// Cluster Timestamp is unsigned: a block timed before 0 opens its cluster at 0,
+// at a negative offset from it.
 func (s *StreamWriter) openCluster(tsMs int64) error {
+	tsMs = max(tsMs, 0)
 	rawTS := uint64(tsMs * 1_000_000 / s.timecodeScale)
 	s.clusterTS = tsMs
 
