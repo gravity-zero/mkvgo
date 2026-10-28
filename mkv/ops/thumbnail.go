@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -37,6 +38,9 @@ type KeyframeSample struct {
 // The read is bounded: metadata + Cues head-only, then one window at the
 // cued cluster.
 func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts ...mkv.Options) (*KeyframeSample, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithCues())
 	if err != nil {

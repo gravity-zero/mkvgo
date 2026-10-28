@@ -14,6 +14,7 @@ import (
 	"image/draw"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -51,6 +52,9 @@ type PGSCue struct {
 // 1.7 GB of decoded NRGBA - more than mkvgo's whole budget. Use
 // ForEachSubtitlePGS unless the track is known to be short.
 func ExtractSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, opts ...mkv.Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	var cues []PGSCue
 	err := ForEachSubtitlePGS(ctx, srcPath, trackID, func(c PGSCue) error {
 		cues = append(cues, c)
@@ -67,6 +71,9 @@ func ExtractSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, opt
 // track can be written out in bounded memory. An error from fn stops the walk
 // and is returned as is.
 func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn func(PGSCue) error, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -121,6 +128,9 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 // MEMORY: as ExtractSubtitlePGS - see ForEachSubtitlePGSFrom for the bounded
 // form.
 func ExtractSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, opts ...mkv.Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	var cues []PGSCue
 	err := ForEachSubtitlePGSFrom(ctx, srcPath, trackID, ix, func(c PGSCue) error {
 		cues = append(cues, c)
@@ -139,6 +149,9 @@ func ExtractSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 // state (palettes, objects) spans display sets within an epoch, so a cue decoded
 // from a mid-track start could reference pictures that were never read.
 func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(PGSCue) error, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if ix == nil {
 		return fmt.Errorf("nil subtitle index")
 	}

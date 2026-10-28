@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -144,6 +145,9 @@ func (ix *SubtitleIndex) SourceSize() int64 {
 // This is the expensive half: it is the same single pass a direct extraction
 // makes. It pays for itself from the second extraction of the file onwards.
 func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, opts ...mkv.Options) (*SubtitleIndex, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs)
 	if err != nil {
@@ -267,6 +271,9 @@ func resolveIndexTracks(c *mkv.Container, trackIDs []uint64) ([]uint64, error) {
 // and every block read must carry the track and timecode the index recorded -
 // or ErrIndexStale is returned before any cue is written.
 func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, w io.Writer, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if ix == nil {
 		return fmt.Errorf("nil subtitle index")
 	}
@@ -601,6 +608,9 @@ func (ix *SubtitleIndex) Unresolved() bool { return ix != nil && ix.unresolved }
 // settles every entry's position from them. An interrupted call leaves the
 // index unresolved; the next one settles the entries it did not reach.
 func (ix *SubtitleIndex) Resolve(ctx context.Context, srcPath string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if ix == nil || !ix.unresolved {
 		return nil
 	}

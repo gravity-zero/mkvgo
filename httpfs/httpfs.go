@@ -39,6 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -153,8 +154,9 @@ func (f *recentReads) lookup(url, id string, off int64) (recentRange, bool) {
 }
 
 // New returns an HTTP Range-backed FS. Paths passed to the returned port must
-// be absolute http:// or https:// URLs.
+// be absolute http:// or https:// URLs. More than one Options panics.
 func New(opts ...Options) *FS {
+	oneopt.Must(opts)
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]
@@ -898,8 +900,9 @@ func (i fileInfo) Strong() bool { return strongIdentity(i.id) }
 //	mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4", mp4.Options{FS: httpfs.Hybrid()})
 //
 // A remux reads the source sequentially, so the ranged windows amount to a
-// streamed download.
+// streamed download. More than one Options panics.
 func Hybrid(opts ...Options) *mkv.FS {
+	oneopt.Must(opts)
 	remote := New(opts...).Port()
 	return &mkv.FS{
 		Open: func(path string) (mkv.ReadSeekCloser, error) {

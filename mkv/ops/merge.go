@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -15,6 +16,9 @@ import (
 // attachments come from the FIRST input only; the other inputs contribute
 // tracks, not metadata.
 func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(extra)
 	if err := refuseInput(fs, opts.OutputPath, mergePaths(opts.Inputs)...); err != nil {
 		return err // every input counts, the one that only carries the attachments too
@@ -82,6 +86,9 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 }
 
 func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, srtLang, srtName string, extraSources []mkv.MergeInput, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	if err := refuseInput(fs, dstPath, append([]string{basePath, srtPath}, mergePaths(extraSources)...)...); err != nil {
 		return err

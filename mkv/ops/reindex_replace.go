@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -19,6 +20,9 @@ import (
 // permission on the directory (temp file + rename). Options.Resync (tolerate
 // and skip corrupted regions) applies here too - see Reindex.
 func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	path, err := replaceTarget(fs, path)
 	if err != nil {

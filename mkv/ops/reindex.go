@@ -15,6 +15,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/mpegts"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -591,6 +592,9 @@ func writeClusterVerbatim(mw *writer.MKVWriter, body []byte, bodySize int64, tim
 // walked for a verbatim proof); the full-read Validate of the output always
 // runs.
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 
 	if mkv.ResyncFrom(opts) {

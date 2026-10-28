@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -57,6 +58,9 @@ var inplaceJournalMagic = [16]byte{'m', 'k', 'v', 'g', 'o', '.', 'j', 'r', 'n', 
 // therefore fall back to a full rewrite); a file with neither a head SeekHead
 // nor a Void large enough to hold the rebuilt SeekHead is refused the same way.
 func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	deep := mkv.DeepVerifyFrom(opts)
 	progress := mkv.ProgressFrom(opts)
@@ -250,6 +254,9 @@ func ReindexInPlace(ctx context.Context, path string, opts ...mkv.Options) error
 // doing anything else, so calling RecoverInPlace directly is only needed to
 // clean up a file without immediately reindexing it again.
 func RecoverInPlace(ctx context.Context, path string, opts ...mkv.Options) (recovered bool, err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return false, err
+	}
 	fs := mkv.FSFrom(opts)
 
 	f, err := fs.DoOpenFile(path, os.O_RDWR, 0)

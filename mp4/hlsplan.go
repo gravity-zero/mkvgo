@@ -31,6 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -228,6 +229,9 @@ type planTrack struct {
 // so a source replaced meanwhile fails a read rather than mix in, and the
 // planning's readers share what they fetch (mkv.ShareReads).
 func PlanHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

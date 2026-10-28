@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gravity-zero/mkvgo/internal/fileid"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 )
 
 // FileHandler serves a single local file over HTTP for direct-play clients:
@@ -29,7 +30,10 @@ import (
 // guarantee - os.Open is the correct, documented fallback for a local path.
 //
 //	http.Handle("/play/movie.mkv", mkvhttp.FileHandler("movie.mkv"))
+//
+// More than one Options panics.
 func FileHandler(path string, opts ...Options) http.Handler {
+	oneopt.Must(opts)
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]

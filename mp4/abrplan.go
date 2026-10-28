@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
@@ -36,6 +37,9 @@ type ABRPlan struct {
 // to every variant. Each source must carry a Cues index (MKV) or be a
 // progressive MP4/MOV, as PlanHLS requires.
 func PlanABR(ctx context.Context, sources []string, opts ...Options) (*ABRPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	if len(sources) < 2 {
 		return nil, errf("ABR planning needs at least two sources (got %d) - use PlanHLS for one", len(sources))
 	}

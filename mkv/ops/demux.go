@@ -7,11 +7,15 @@ import (
 	"io"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (err error) {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(extra)
 	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {

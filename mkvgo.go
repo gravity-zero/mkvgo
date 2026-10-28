@@ -13,6 +13,7 @@ import (
 	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/mpegts"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -36,6 +37,9 @@ import (
 // container. Sources that are neither container are refused with the sniffed
 // reason.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...matroska.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := matroska.Options{}
 	if len(opts) > 0 {
 		o = opts[0]
@@ -55,6 +59,9 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 
 // EditInPlace edits a file's metadata in place whatever the container: matroska.EditInPlace for Matroska/WebM, mp4.EditInPlace for MP4/MOV.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...matroska.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := matroska.Options{}
 	if len(opts) > 0 {
 		o = opts[0]
@@ -83,6 +90,9 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 // CueHealth/Damage sections - the sample table is the index by
 // construction), so one scan loop covers a mixed library.
 func Diagnose(ctx context.Context, path string, opts ...matroska.Options) (*mkv.Diagnosis, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := matroska.Options{}
 	if len(opts) > 0 {
 		o = opts[0]

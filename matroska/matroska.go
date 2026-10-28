@@ -11,6 +11,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/ops"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -140,6 +141,9 @@ type KeyframeSample = ops.KeyframeSample
 // building block of thumbnail/storyboard pipelines - decoding the image is
 // the consumer's job (any decoder takes it as-is).
 func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts ...Options) (*KeyframeSample, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.ExtractKeyframeSample(ctx, srcPath, atMs, opts...)
 }
 
@@ -171,6 +175,9 @@ var (
 // on its bitstream to be a picture a decoder can start on. fn gets each sample;
 // its buffers are reused after fn returns.
 func ExtractKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, fn func(*KeyframeBatchSample) error, opts ...Options) (KeyframeStats, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return KeyframeStats{}, err
+	}
 	return ops.ExtractKeyframes(ctx, srcPath, sel, fn, opts...)
 }
 
@@ -179,6 +186,9 @@ func ExtractKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, f
 // Vision configuration kept) to w, one Cluster per keyframe as it is read: a
 // decoder reading w outputs exactly KeyframeStats.Samples pictures.
 func WriteKeyframeStream(ctx context.Context, srcPath string, sel KeyframeSelect, w io.Writer, opts ...Options) (KeyframeStats, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return KeyframeStats{}, err
+	}
 	return ops.WriteKeyframeStream(ctx, srcPath, sel, w, opts...)
 }
 
@@ -195,6 +205,9 @@ type PlayabilityReport = ops.PlayabilityReport
 // (head-only metadata only - no decode) and returns the per-track and
 // overall direct-play/remux/transcode verdicts. See ops.Playability.
 func Playability(ctx context.Context, path string, target Target, opts ...Options) (*PlayabilityReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Playability(ctx, path, target, opts...)
 }
 
@@ -221,6 +234,9 @@ func RecommendLadder(in LadderInput) []Rung {
 // RecommendLadderFor derives a LadderInput from a file's video track
 // (head-only metadata) and returns RecommendLadder's result.
 func RecommendLadderFor(ctx context.Context, path string, opts ...Options) ([]Rung, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.RecommendLadderFor(ctx, path, opts...)
 }
 
@@ -380,6 +396,9 @@ func WebMDocTypeVersion(c *Container) uint64 {
 // Non-subset elements (Chapters/Attachments/Tags) are dropped - see
 // WebMNonSubsetElements to detect that loss beforehand.
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RemuxToWebM(ctx, srcPath, dstPath, opts...)
 }
 
@@ -392,24 +411,45 @@ func WebMNonSubsetElements(c *Container) []string {
 // --- Operations ---
 
 func Mux(ctx context.Context, opts MuxOptions, extra ...Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	return ops.Mux(ctx, opts, extra...)
 }
 func Demux(ctx context.Context, opts DemuxOptions, extra ...Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	return ops.Demux(ctx, opts, extra...)
 }
 func Split(ctx context.Context, opts SplitOptions, extra ...Options) ([]string, error) {
+	if err := oneopt.Check(extra); err != nil {
+		return nil, err
+	}
 	return ops.Split(ctx, opts, extra...)
 }
 func Join(ctx context.Context, sources []string, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.Join(ctx, sources, dstPath, opts...)
 }
 func Merge(ctx context.Context, opts MergeOptions, extra ...Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	return ops.Merge(ctx, opts, extra...)
 }
 func Validate(ctx context.Context, path string, opts ...Options) ([]Issue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Validate(ctx, path, opts...)
 }
 func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Compare(ctx, pathA, pathB, opts...)
 }
 
@@ -426,6 +466,9 @@ type AnalyzeReport = ops.AnalyzeReport
 // block header is visited and the payloads between them are mostly read
 // through: plan on a full read of the file. See ops.Analyze.
 func Analyze(ctx context.Context, path string, opts ...Options) (*AnalyzeReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Analyze(ctx, path, opts...)
 }
 
@@ -444,12 +487,18 @@ type TrackFingerprint = ops.TrackFingerprint
 // identical content regardless of container. Unlike Analyze, this is a full
 // read of every track's frame payload. See ops.Fingerprint.
 func Fingerprint(ctx context.Context, path string, opts ...Options) (*FingerprintReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Fingerprint(ctx, path, opts...)
 }
 
 // AddAttachment rewrites srcPath to dstPath with att appended to the
 // attachments (ID auto-assigned when 0). See ops.AddAttachment.
 func AddAttachment(ctx context.Context, srcPath, dstPath string, att Attachment, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.AddAttachment(ctx, srcPath, dstPath, att, opts...)
 }
 
@@ -457,12 +506,18 @@ func AddAttachment(ctx context.Context, srcPath, dstPath string, att Attachment,
 // target (a decimal ID or an exact name); it errors before writing anything
 // when no attachment matches. See ops.RemoveAttachment.
 func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RemoveAttachment(ctx, srcPath, dstPath, target, opts...)
 }
 
 // SetChapters rewrites srcPath to dstPath with its chapters replaced (e.g.
 // from ParseOGMChapters). See ops.SetChapters.
 func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []Chapter, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.SetChapters(ctx, srcPath, dstPath, chapters, opts...)
 }
 
@@ -484,12 +539,18 @@ type HashMismatch = ops.HashMismatch
 // tag, making the file self-verifying (dstPath == "" edits in place). See
 // ops.WriteContentHashes.
 func WriteContentHashes(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.WriteContentHashes(ctx, srcPath, dstPath, opts...)
 }
 
 // VerifyContentHashes recomputes the per-track content digests and compares
 // them with the stored CONTENT_SHA256 tags. See ops.VerifyContentHashes.
 func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]HashMismatch, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.VerifyContentHashes(ctx, path, opts...)
 }
 
@@ -497,6 +558,9 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 // block count, payload byte total and payload SHA-256 in stream order. An
 // empty result proves a lossless round-trip. See ops.CompareBlocks.
 func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.CompareBlocks(ctx, pathA, pathB, opts...)
 }
 
@@ -505,6 +569,9 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...Options) ([
 // end, still hold everything the source did?" - answered without building the
 // joined file. Tracks are matched by position. See ops.CompareBlocksConcat.
 func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts ...Options) ([]Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.CompareBlocksConcat(ctx, path, parts, opts...)
 }
 
@@ -519,6 +586,9 @@ func CompareContainers(a, b *Container) []Diff {
 // tolerate corrupted regions (bounded skip-and-resume, each dropped span
 // reported via Options.OnSkip) instead of refusing the file. See ops.Reindex.
 func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.Reindex(ctx, srcPath, dstPath, opts...)
 }
 
@@ -527,6 +597,9 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...Options) erro
 // via Options.KeepBackup). Needs write permission on the directory; see
 // ReindexInPlace for the file-only-permission variant. See ops.ReindexReplace.
 func ReindexReplace(ctx context.Context, path string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ReindexReplace(ctx, path, opts...)
 }
 
@@ -546,6 +619,9 @@ var ErrIndexNotHeadDiscoverable = ops.ErrIndexNotHeadDiscoverable
 // journal is truncated away only after the checks pass. Any failure restores
 // the original bytes. See ops.ReindexInPlace.
 func ReindexInPlace(ctx context.Context, path string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ReindexInPlace(ctx, path, opts...)
 }
 
@@ -554,6 +630,9 @@ func ReindexInPlace(ctx context.Context, path string, opts ...Options) error {
 // bytes are restored and the journal removed. Returns false when the file
 // carries no journal (nothing to do). See ops.RecoverInPlace.
 func RecoverInPlace(ctx context.Context, path string, opts ...Options) (bool, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return false, err
+	}
 	return ops.RecoverInPlace(ctx, path, opts...)
 }
 
@@ -578,6 +657,9 @@ type SalvageReport = ops.SalvageReport
 // design) whenever the source is expected to be intact; reach for Salvage
 // only once Reindex/Validate have confirmed damage. See ops.Salvage.
 func Salvage(ctx context.Context, srcPath, dstPath string, opts ...Options) (*SalvageReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Salvage(ctx, srcPath, dstPath, opts...)
 }
 
@@ -585,6 +667,9 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...Options) (*Sa
 // that reports what a repair would keep, reconstruct, and lose, so the
 // decision to repair can be made with the numbers in hand. See ops.MapDamage.
 func MapDamage(ctx context.Context, srcPath string, opts ...Options) (*SalvageReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.MapDamage(ctx, srcPath, opts...)
 }
 
@@ -607,6 +692,9 @@ type CueHealthReport = ops.CueHealthReport
 // against a file: seeking never uses them. The scan-time complement of Validate.
 // See ops.CueHealth.
 func CueHealth(ctx context.Context, path string, opts ...Options) (*CueHealthReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.CueHealth(ctx, path, opts...)
 }
 
@@ -620,6 +708,9 @@ type TrackEndsReport = ops.TrackEndsReport
 // end, and how far any audio track stops before it. Diagnose draws its
 // "audio-short" finding from it. See ops.TrackEnds.
 func TrackEnds(ctx context.Context, path string, opts ...Options) (*TrackEndsReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.TrackEnds(ctx, path, opts...)
 }
 
@@ -630,6 +721,9 @@ func TrackEnds(ctx context.Context, path string, opts ...Options) (*TrackEndsRep
 // probe cannot conclude on keeps Content "". Diagnose runs it on its own for an
 // index-sparse finding. See ops.ProbeCueHoles.
 func ProbeCueHoles(ctx context.Context, path string, r *CueHealthReport, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ProbeCueHoles(ctx, path, r, opts...)
 }
 
@@ -647,6 +741,9 @@ type Diagnosis = ops.Diagnosis
 // failed: one "wrong-container" finding (remedy: rename/remux), so a scan
 // settles the file instead of erroring on it every pass. See ops.Diagnose.
 func Diagnose(ctx context.Context, path string, opts ...Options) (*Diagnosis, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.Diagnose(ctx, path, opts...)
 }
 
@@ -656,6 +753,9 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*Diagnosis, er
 // the delay). Track numbers and delays come from the same parse.
 // See ops.AudioStartDelays.
 func AudioStartDelays(ctx context.Context, path string, opts ...Options) (map[uint64]int64, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.AudioStartDelays(ctx, path, opts...)
 }
 
@@ -666,6 +766,9 @@ func AudioStartDelays(ctx context.Context, path string, opts ...Options) (map[ui
 // the sequential rewrite when they are dense (multi-track movies).
 // See ops.RetimeTracks.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RetimeTracks(ctx, path, shift, opts...)
 }
 
@@ -704,6 +807,9 @@ var (
 // under the crash-safe journal, no rewrite, file-only permission.
 // See ops.RetimeTracksInPlace.
 func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RetimeTracksInPlace(ctx, path, shift, opts...)
 }
 
@@ -713,6 +819,9 @@ func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int6
 // end is dropped and reported through Options.OnSkip instead of blocking the
 // repair. See ops.RetimeTracksReplace.
 func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RetimeTracksReplace(ctx, path, shift, opts...)
 }
 
@@ -722,18 +831,30 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 // delivers a reconstruction that does not hash back to the original.
 // See ops.ApplyRollback.
 func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ApplyRollback(ctx, repairedPath, delta, dstPath, opts...)
 }
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.RemoveTrack(ctx, srcPath, dstPath, removeIDs, opts...)
 }
 
 func AddTrack(ctx context.Context, srcPath, dstPath string, input TrackInput, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.AddTrack(ctx, srcPath, dstPath, input, opts...)
 }
 
 func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*Container), opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.EditMetadata(ctx, srcPath, dstPath, edit, opts...)
 }
 
@@ -742,10 +863,16 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*Conta
 var ErrNoRoomInPlace = ops.ErrNoRoomInPlace
 
 func EditInPlace(ctx context.Context, path string, edit func(*Container), opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.EditInPlace(ctx, path, edit, opts...)
 }
 
 func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, outPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ExtractAttachment(ctx, srcPath, attachID, outPath, opts...)
 }
 
@@ -755,20 +882,32 @@ func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, out
 // returns). The one way a caller that needs the bytes gets them; forwarding an
 // attachment never requires it. See ops.LoadAttachmentData.
 func LoadAttachmentData(ctx context.Context, a *Attachment, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.LoadAttachmentData(ctx, a, opts...)
 }
 
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ExtractSubtitle(ctx, srcPath, trackID, outPath, opts...)
 }
 
 func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ExtractASS(ctx, srcPath, trackID, outPath, opts...)
 }
 
 // ExtractSubtitleWebVTT writes an embedded Matroska/WebM text subtitle track as
 // WebVTT to w. See ops.ExtractSubtitleWebVTT.
 func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ExtractSubtitleWebVTT(ctx, srcPath, trackID, w, opts...)
 }
 
@@ -793,6 +932,9 @@ var ErrSourceTruncated = ops.ErrSourceTruncated
 // given subtitle tracks (all of them when none are named). mkvgo does not store
 // the result: marshal it and keep it wherever suits. See ops.BuildSubtitleIndex.
 func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, opts ...Options) (*SubtitleIndex, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.BuildSubtitleIndex(ctx, srcPath, trackIDs, opts...)
 }
 
@@ -804,6 +946,9 @@ func BuildSubtitleIndex(ctx context.Context, srcPath string, trackIDs []uint64, 
 // index and BuildSubtitleIndex. The index must be Resolve'd (one cluster header
 // read per cued cluster) before it serves or marshals. See ops.SubtitleIndexFromCues.
 func SubtitleIndexFromCues(ctx context.Context, srcPath string, trackIDs []uint64, opts ...Options) (ix *SubtitleIndex, verified map[uint64]bool, err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs, reader.WithCues(), reader.WithTags())
 	if err != nil {
@@ -819,6 +964,9 @@ func SubtitleIndexFromCues(ctx context.Context, srcPath string, trackIDs []uint6
 // ExtractSubtitleWebVTTFrom is ExtractSubtitleWebVTT served from a prebuilt
 // index. See ops.ExtractSubtitleWebVTTFrom.
 func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, w io.Writer, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ExtractSubtitleWebVTTFrom(ctx, srcPath, trackID, ix, w, opts...)
 }
 
@@ -830,12 +978,18 @@ type PGSCue = ops.PGSCue
 // the source once. The whole track's pictures are held at once - prefer
 // ForEachSubtitlePGS on a feature-length track. See ops.ExtractSubtitlePGS.
 func ExtractSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, opts ...Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.ExtractSubtitlePGS(ctx, srcPath, trackID, opts...)
 }
 
 // ForEachSubtitlePGS is ExtractSubtitlePGS in bounded memory: one cue's picture
 // is alive at a time. See ops.ForEachSubtitlePGS.
 func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn func(PGSCue) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ForEachSubtitlePGS(ctx, srcPath, trackID, fn, opts...)
 }
 
@@ -844,12 +998,18 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 // one built by an earlier release already holds the PGS track's blocks. See
 // ops.ExtractSubtitlePGSFrom.
 func ExtractSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, opts ...Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	return ops.ExtractSubtitlePGSFrom(ctx, srcPath, trackID, ix, opts...)
 }
 
 // ForEachSubtitlePGSFrom is ExtractSubtitlePGSFrom in bounded memory. See
 // ops.ForEachSubtitlePGSFrom.
 func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(PGSCue) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.ForEachSubtitlePGSFrom(ctx, srcPath, trackID, ix, fn, opts...)
 }
 
@@ -860,14 +1020,23 @@ func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {
 }
 
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.MergeSubtitle(ctx, srcPath, srtPath, dstPath, lang, name, opts...)
 }
 
 func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.MergeASS(ctx, srcPath, assPath, dstPath, lang, name, opts...)
 }
 
 func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, srtLang, srtName string, extraSources []MergeInput, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return ops.MergeWithSubtitles(ctx, basePath, srtPath, dstPath, srtLang, srtName, extraSources, opts...)
 }
 

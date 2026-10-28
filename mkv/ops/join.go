@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -14,6 +15,9 @@ import (
 )
 
 func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	if len(sources) == 0 {
 		return fmt.Errorf("no sources to join")

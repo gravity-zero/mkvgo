@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
@@ -34,6 +35,9 @@ func (m HashMismatch) String() string {
 // every hashed track is byte-intact) and errors when the file carries no
 // content hashes (produce a hashed MP4 with `to-mp4 --hash`).
 func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]HashMismatch, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	src, err := o.FS.DoOpen(path)
 	if err != nil {

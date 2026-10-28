@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -23,6 +24,9 @@ import (
 //
 // Unlike writer.WriteWebM (metadata only), this produces a file with frames.
 func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Options) (err error) {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(extra)
 
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())

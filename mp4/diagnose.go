@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -35,6 +36,9 @@ const diagnoseDelayThresholdNs = 100_000_000 // 100ms
 // relative to the video, fragmented sources excepted (fragment timelines do
 // not honour edit lists consistently, so no delay is derived or judged).
 func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -75,6 +79,9 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 // the size itself for a whole file. Trailing junk, and a last box that runs to the end of the file, declare no more
 // than the size. A file of more than 16 top-level boxes (a fragmented one) is not walked: declared is 0, unknown.
 func DeclaredSize(ctx context.Context, path string, opts ...Options) (size, declared int64, err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return 0, 0, err
+	}
 	o := optionsFrom(opts)
 	if err := ctx.Err(); err != nil {
 		return 0, 0, err

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -316,6 +317,9 @@ func (m *cutModel) keptIDs() map[uint32]bool {
 
 // Split cuts an MP4/MOV into parts opening on video keyframes, samples copied untouched; opts follow matroska.Split.
 func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]string, error) {
+	if err := oneopt.Check(extra); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(extra)
 	src, err := o.FS.DoOpen(opts.SourcePath)
 	if err != nil {

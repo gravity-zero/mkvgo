@@ -17,6 +17,10 @@ task-first starting point (CLI and Go side by side).
 
 `matroska` and `mp4` are the entry points for most use cases. The `mkv`, `mkv/reader`, `mkv/writer`, `mkv/ops` and `mkv/subtitle` packages hold the building blocks under the facade: import them directly when you need capabilities it does not expose (streaming, `NewWebMStreamWriter`). Until 1.0, any package may change between minor versions; the CHANGELOG's Breaking section names each change.
 
+Every function that takes options (`opts ...Options`) reads one value at most: pass the settings in one `Options`.
+A second value is refused (`mkv.ErrTooManyOptions`) rather than ignored; `httpfs.New`, `httpfs.Hybrid`,
+`mkvhttp.Handler` and `mkvhttp.FileHandler`, which return no error, panic on it.
+
 Operations process the container incrementally -- they read and write block by block (or cluster by cluster) and never hold the whole file in memory, so multi-gigabyte inputs run with bounded memory.
 
 ---

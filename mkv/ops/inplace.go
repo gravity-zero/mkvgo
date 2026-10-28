@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -30,6 +31,9 @@ import (
 // folded into the head metadata and the old bytes voided, or, Tags and
 // Chapters, rewritten in the old element's place when the head cannot hold them.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	if err := refusePendingPatch(path, fs); err != nil {
 		return err

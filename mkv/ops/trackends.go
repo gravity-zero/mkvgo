@@ -6,6 +6,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -49,6 +50,9 @@ type TrackEndsReport = mkv.TrackEndsReport
 // and any audio track's shortfall against it. See the file comment for how
 // each end is established and what its Source means.
 func TrackEnds(ctx context.Context, path string, opts ...mkv.Options) (*TrackEndsReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	meta, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithTags(), reader.WithCues())
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -40,6 +41,9 @@ func attachmentSource(fs *mkv.FS) func(*mkv.Attachment) (io.Reader, error) {
 // inspect an inherited font - gets them; everything that merely forwards an
 // attachment never has to.
 func LoadAttachmentData(ctx context.Context, a *mkv.Attachment, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if a.Data != nil || a.DataPath == "" || a.Size <= 0 {
 		return nil
 	}
@@ -71,6 +75,9 @@ func LoadAttachmentData(ctx context.Context, a *mkv.Attachment, opts ...mkv.Opti
 // attachments. A zero att.ID is assigned the next free ID; att.Size defaults
 // to len(att.Data).
 func AddAttachment(ctx context.Context, srcPath, dstPath string, att mkv.Attachment, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if len(att.Data) == 0 {
 		return fmt.Errorf("attachment %q has no data", att.Name)
 	}
@@ -96,6 +103,9 @@ func AddAttachment(ctx context.Context, srcPath, dstPath string, att mkv.Attachm
 // target - a decimal attachment ID or an exact attachment name. It errors
 // (before writing anything) when no attachment matches.
 func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	id, idErr := strconv.ParseUint(target, 10, 64)
 	matches := func(a mkv.Attachment) bool {
 		return (idErr == nil && a.ID == id) || a.Name == target
@@ -132,6 +142,9 @@ func RemoveAttachment(ctx context.Context, srcPath, dstPath, target string, opts
 // SetChapters rewrites srcPath to dstPath with its chapters replaced by
 // chapters (e.g. from mkv.ParseOGMChapters).
 func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []mkv.Chapter, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return EditMetadata(ctx, srcPath, dstPath, func(c *mkv.Container) {
 		c.Chapters = chapters
 	}, opts...)

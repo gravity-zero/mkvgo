@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -361,6 +362,9 @@ func (a *trackAcc) addToWindow(tsMs, size int64) int64 {
 // bounded: only small per-track counters and a trailing-1-second bitrate
 // window are kept, never the blocks themselves.
 func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 
 	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())

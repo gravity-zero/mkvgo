@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -47,6 +48,9 @@ type Diagnosis = mkv.Diagnosis
 // MP4's sample table is its index by construction, and its triage needs none
 // of this.
 func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	d := &Diagnosis{}
 

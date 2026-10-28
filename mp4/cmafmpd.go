@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -73,6 +74,9 @@ type CMAFPresentation struct {
 // with a SegmentList. Every timeline keeps its track's native timescale.
 // Encryption is not described (Options.CENC and Options.Encrypt are ignored).
 func DASHFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) ([]byte, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	video, audio, err := readCMAFPresentation(ctx, &o, p)
 	if err != nil {

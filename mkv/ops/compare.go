@@ -7,12 +7,16 @@ import (
 	"hash"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	a, err := reader.OpenWithFS(ctx, pathA, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -39,6 +43,9 @@ type trackDigest struct {
 // result proves a remux/reindex/split+join round-trip carried every frame
 // byte-identically - beyond what the metadata compare can show.
 func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	_, a, err := digestTracks(ctx, pathA, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
@@ -65,6 +72,9 @@ func CompareBlocks(ctx context.Context, pathA, pathB string, opts ...mkv.Options
 // already requires: a part whose track count differs is an error, not a diff,
 // because nothing sensible can be lined up after that.
 func CompareBlocksConcat(ctx context.Context, path string, parts []string, opts ...mkv.Options) ([]mkv.Diff, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("no parts to compare against")
 	}

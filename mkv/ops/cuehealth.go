@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -54,6 +55,9 @@ type CueHealthReport = mkv.CueHealthReport
 // can classify the mislabeled file instead of retrying it forever (Diagnose
 // converts the same condition into a "wrong-container" finding).
 func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealthReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	// WithTags: the video track's statistics (DURATION, NUMBER_OF_FRAMES) are
 	// what lets the tail be measured against the picture's end rather than the

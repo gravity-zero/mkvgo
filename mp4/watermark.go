@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
@@ -43,6 +44,9 @@ type WatermarkPlan struct {
 // mix of A and B segments plays seamlessly. Anything else is rejected, because
 // splicing mismatched encodes would break playback. Options apply to both.
 func PlanWatermark(ctx context.Context, srcA, srcB string, opts ...Options) (*WatermarkPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	if o.Encrypt != nil || o.CENC != nil {
 		return nil, errf("watermark planning does not support encryption in this version (encrypt the served bytes at your edge, or splice before encrypting)")

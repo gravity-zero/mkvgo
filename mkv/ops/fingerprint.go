@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -83,6 +84,9 @@ type TrackFingerprint struct {
 // of the file (ErrSourceTruncated) - rather than digested over what arrived:
 // that digest would pass for the complete file's.
 func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*FingerprintReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	var cut *mp4.Truncation
 	c, digests, err := digestTracksAny(ctx, path, fs, mkv.ProgressFrom(opts), func(t mp4.Truncation) { cut = &t })

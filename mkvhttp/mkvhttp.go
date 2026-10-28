@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -121,7 +122,10 @@ type Opener interface {
 //   - A Resolver error that is (or wraps) ErrNotFound or mp4.ErrNoResource answers 404; any other
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
+//
+// More than one Options panics.
 func Handler(r Resolver, opts ...Options) http.Handler {
+	oneopt.Must(opts)
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]

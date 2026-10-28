@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -192,6 +193,9 @@ type segInfo struct {
 // as WebVTT renditions; bitmap subtitles (PGS/VOBSUB) are dropped and reported
 // via Options.OnDrop.
 func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if err := refusePackagedSource(outputDir, srcPath); err != nil {
 		return err
 	}

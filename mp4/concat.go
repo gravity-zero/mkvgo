@@ -43,6 +43,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -498,6 +499,9 @@ func writeConcatSubtitles(o *Options, fs *mkv.FS, outDir string, results []*hlsR
 // and the v1 limits (no Encrypt, no SingleFile, no combined DASH manifest, no
 // combined I-frame playlist).
 func RemuxConcatToHLS(ctx context.Context, sources []string, outputDir string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if len(sources) < 2 {
 		return errf("concat packaging needs at least two sources (got %d); use RemuxToHLS for one", len(sources))
 	}

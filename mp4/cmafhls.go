@@ -12,6 +12,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 )
 
 // HLSFromCMAF returns the HLS playlists describing the presentation, keyed by
@@ -22,6 +24,9 @@ import (
 // form one EXT-X-MEDIA group; the first is DEFAULT=YES (an external init's
 // track flags say "enabled", not "default"). Encryption is not described.
 func HLSFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) (map[string][]byte, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	video, audio, err := readCMAFPresentation(ctx, &o, p)
 	if err != nil {

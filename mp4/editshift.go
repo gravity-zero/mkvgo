@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -54,6 +55,9 @@ import (
 // successful run there is no built-in undo. A caller whose workflow demands
 // a restorable copy makes one before calling.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if len(shift) == 0 {
 		return errf("retime: no track shifts given")

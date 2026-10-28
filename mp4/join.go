@@ -8,12 +8,16 @@ import (
 	"math"
 
 	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // Join concatenates MP4/MOV files with the same streams (tracks, timescales, sample descriptions), each from the previous one's end.
 func Join(ctx context.Context, sources []string, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if len(sources) < 2 {
 		return errf("join: at least two files are needed")

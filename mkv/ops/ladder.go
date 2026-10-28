@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -136,6 +137,9 @@ func cappedBitrate(baseKbps int, factor float64, sourceKbps int) int {
 // only metadata: Matroska/WebM or MP4/MOV) and returns RecommendLadder's
 // result. Returns an error when the source has no video track.
 func RecommendLadderFor(ctx context.Context, path string, opts ...mkv.Options) ([]Rung, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	c, _, err := openAnyMeta(ctx, path, mkv.FSFrom(opts))
 	if err != nil {
 		return nil, err

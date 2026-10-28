@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -154,6 +155,9 @@ func (t *outTrack) emitSized(cw *countWriter, size, pts, blockPts, dur int64, sy
 // flattened (sub-chapters and untitled chapters are omitted) and the Nero chpl
 // list caps at 255 entries; the QuickTime chapter track carries the full list.
 func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	fs := o.FS
 

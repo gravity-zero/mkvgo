@@ -24,6 +24,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -105,6 +106,9 @@ type KeyframeStats struct {
 // next one, so fn must copy what it keeps. An error from fn stops the walk
 // and is returned as is; so does ctx's.
 func ExtractKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, fn func(*KeyframeBatchSample) error, opts ...mkv.Options) (KeyframeStats, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return KeyframeStats{}, err
+	}
 	return walkKeyframes(ctx, srcPath, sel, true, func(_ *mkv.Track, s *KeyframeBatchSample) error { return fn(s) }, opts)
 }
 
@@ -125,6 +129,9 @@ func ExtractKeyframes(ctx context.Context, srcPath string, sel KeyframeSelect, f
 // Write blocked on a consumer that never reads again is released by closing
 // the consumer's end. w is not closed.
 func WriteKeyframeStream(ctx context.Context, srcPath string, sel KeyframeSelect, w io.Writer, opts ...mkv.Options) (KeyframeStats, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return KeyframeStats{}, err
+	}
 	bw := bufio.NewWriterSize(w, 64<<10)
 	var sw *writer.StreamWriter
 	return walkKeyframes(ctx, srcPath, sel, false, func(t *mkv.Track, s *KeyframeBatchSample) error {

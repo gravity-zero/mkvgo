@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -62,6 +63,9 @@ var retimeDispersionFactor = int64(5)
 // RetimeTracksInPlace / RetimeTracksReplace; the refusal rules and the
 // verification chain are shared.
 func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	err := retimeInPlace(ctx, path, shift, opts, true)
 	if errors.Is(err, errRetimeScattered) || errors.Is(err, ErrUnknownSizeSegment) || errors.Is(err, errRetimeCueUnpatchable) {
 		return RetimeTracksReplace(ctx, path, shift, opts...)
@@ -87,6 +91,9 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 // mid-operation is repaired by the automatic recovery the next in-place run
 // performs, or explicitly by RecoverInPlace.
 func RetimeTracksInPlace(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return retimeInPlace(ctx, path, shift, opts, false)
 }
 
@@ -156,6 +163,9 @@ var (
 // routes on errors.Is instead of parsing text; all of them are permanent for
 // the same call.
 func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int64, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	if len(shift) == 0 {
 		return fmt.Errorf("retime: no tracks to shift")

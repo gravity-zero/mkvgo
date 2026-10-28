@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -15,6 +16,9 @@ import (
 )
 
 func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	ass, err := subtitle.ParseASS(assPath)
 	if err != nil {
 		return fmt.Errorf("parse ASS: %w", err)
@@ -85,6 +89,9 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 }
 
 func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {

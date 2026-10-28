@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/internal/splitplan"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -19,6 +20,9 @@ import (
 )
 
 func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]string, error) {
+	if err := oneopt.Check(extra); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(extra)
 	if err := refuseCutSource(opts.SourcePath, fs); err != nil {
 		return nil, err

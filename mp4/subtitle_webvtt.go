@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
@@ -18,6 +19,9 @@ import (
 // movie header and the track's subtitle samples are read. tx3g and wvtt are
 // supported; other (e.g. bitmap) subtitle entries are rejected.
 func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	fs := o.FS
 

@@ -15,12 +15,16 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // EditInPlace applies fn's changes to an MP4/MOV's title, tags, chapters and track language/name/default/forced flags by a crash-ordered moov-only rewrite (see RetimeTracks); any other change is refused.
 func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if err := ctx.Err(); err != nil {
 		return err

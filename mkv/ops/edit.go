@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -11,6 +12,9 @@ import (
 )
 
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -88,6 +92,9 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 }
 
 func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -157,6 +164,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 }
 
 func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -212,6 +222,9 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 }
 
 func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, outPath string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	if err := refuseInput(fs, outPath, srcPath); err != nil {
 		return err

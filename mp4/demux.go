@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -31,6 +32,9 @@ const clusterWindowMs = 1000
 // timestamp, so B-frame ordering is preserved. The output is a normal seekable
 // MKV with a SeekHead and Cues.
 func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	fs := o.FS
 	progress := o.Progress

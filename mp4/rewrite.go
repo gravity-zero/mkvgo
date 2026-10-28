@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/outguard"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -18,21 +19,33 @@ import (
 
 // Rewrite copies an MP4/MOV to a fast-start file (ftyp, moov, mdat) keeping samples, sample entries and timing byte for byte.
 func Rewrite(ctx context.Context, srcPath, dstPath string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return rewriteMP4(ctx, srcPath, dstPath, rewriteOptions{}, optionsFrom(opts))
 }
 
 // EditMetadata writes srcPath to dstPath with fn's metadata changes, under the rules of EditInPlace.
 func EditMetadata(ctx context.Context, srcPath, dstPath string, fn func(c *mkv.Container), opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return rewriteMP4(ctx, srcPath, dstPath, rewriteOptions{edit: fn}, optionsFrom(opts))
 }
 
 // SetChapters writes srcPath to dstPath with its chapters replaced (nil removes them).
 func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []mkv.Chapter, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	return EditMetadata(ctx, srcPath, dstPath, func(c *mkv.Container) { c.Chapters = chapters }, opts...)
 }
 
 // RemoveTrack writes srcPath to dstPath without the given tracks (probe track IDs); the other samples are copied untouched.
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if len(removeIDs) == 0 {
 		return errf("remove-track: no track given")
 	}

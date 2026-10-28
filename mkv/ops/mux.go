@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -15,6 +16,9 @@ import (
 )
 
 func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err error) {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(extra)
 	// The sources are read before the output is created: a request naming a
 	// missing file or track is refused without emptying whatever already

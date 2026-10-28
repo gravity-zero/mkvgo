@@ -75,6 +75,7 @@ import (
 	"sync"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -175,6 +176,9 @@ type growingGridProbe struct {
 // performs one scan of whatever whole clusters already exist, exactly like a
 // first Refresh.
 func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*GrowingHLSPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	fs := o.FS
 	segMs := o.SegmentMs

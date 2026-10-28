@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -35,6 +36,9 @@ var audioDelayScanCap int64 = 64 << 20 // 64 MiB
 // just long enough to see every track's first block (typically the first
 // cluster or two).
 func AudioStartDelays(ctx context.Context, path string, opts ...mkv.Options) (map[uint64]int64, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	meta, err := reader.OpenMetaWithFS(ctx, path, fs)
 	if err != nil {

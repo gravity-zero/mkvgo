@@ -24,6 +24,8 @@ package mp4
 import (
 	"context"
 	"encoding/binary"
+
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 )
 
 // ForensicPlan serves a single-source A/B session-watermarked HLS
@@ -45,6 +47,9 @@ type ForensicPlan struct {
 // supported yet). Encryption is refused like PlanWatermark - encrypt the
 // served bytes at the edge.
 func PlanForensic(ctx context.Context, src string, opts ...Options) (*ForensicPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	if o.Encrypt != nil || o.CENC != nil {
 		return nil, errf("forensic planning does not support encryption in this version (encrypt the served bytes at your edge, or splice before encrypting)")

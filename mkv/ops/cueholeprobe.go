@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -49,6 +50,9 @@ import (
 // a hole the probe cannot conclude on is left with Content "" and does not
 // fail the others.
 func ProbeCueHoles(ctx context.Context, path string, r *CueHealthReport, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if r == nil || len(r.Holes) == 0 {
 		return nil
 	}

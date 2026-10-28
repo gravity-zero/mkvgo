@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	var issues []mkv.Issue
 

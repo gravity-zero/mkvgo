@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 )
 
@@ -32,6 +33,9 @@ import (
 // package layout above. Options apply to every variant (same SegmentMs,
 // Encrypt, RewriteURL…).
 func RemuxToABR(ctx context.Context, sources []string, outputDir string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if len(sources) < 2 {
 		return errf("ABR packaging needs at least two sources (got %d) - use RemuxToHLS for one", len(sources))
 	}

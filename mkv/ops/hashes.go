@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -21,6 +22,9 @@ const ContentHashTag = "CONTENT_SHA256"
 // reserve); otherwise a new file is written. Existing CONTENT_SHA256 tags are
 // replaced, so the operation is idempotent.
 func WriteContentHashes(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, digests, err := digestTracks(ctx, srcPath, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {
@@ -56,6 +60,9 @@ func (m HashMismatch) String() string {
 // track (nil = all hashed tracks intact) and errors when the file carries no
 // content hashes at all (run WriteContentHashes first).
 func VerifyContentHashes(ctx context.Context, path string, opts ...mkv.Options) ([]HashMismatch, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	c, digests, err := digestTracks(ctx, path, fs, mkv.ProgressFrom(opts), false)
 	if err != nil {

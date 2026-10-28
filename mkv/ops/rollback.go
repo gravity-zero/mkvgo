@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -541,6 +542,9 @@ func hashFileSHA256(ctx context.Context, path string, fs *mkv.FS) ([32]byte, err
 // the repair was taken), and deletes dstPath rather than return success when
 // the entry's crc or the reconstructed sha256 does not check out.
 func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, dstPath string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 
 	// ── Entry header ────────────────────────────────────────────────────

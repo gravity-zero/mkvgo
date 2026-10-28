@@ -19,6 +19,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
@@ -51,6 +52,9 @@ type ConcatPlan struct {
 // limits (no Encrypt, no SingleFile, no combined DASH manifest, no combined
 // I-frame playlist).
 func PlanConcat(ctx context.Context, sources []string, opts ...Options) (*ConcatPlan, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	if len(sources) < 2 {
 		return nil, errf("concat planning needs at least two sources (got %d); use PlanHLS for one", len(sources))
 	}

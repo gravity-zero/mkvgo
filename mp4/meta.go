@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -32,6 +33,9 @@ import (
 // them lets a probe report, for instance, that a file external probers count as having two
 // video streams has one playable video track plus a cover image.
 func OpenMeta(ctx context.Context, path string, opts ...Options) (*mkv.Container, []DroppedTrack, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, nil, err
+	}
 	o := optionsFrom(opts)
 	src, err := o.FS.DoOpen(path)
 	if err != nil {
@@ -43,6 +47,9 @@ func OpenMeta(ctx context.Context, path string, opts ...Options) (*mkv.Container
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS (nil = the real OS FS).
 func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...Options) (*mkv.Container, []DroppedTrack, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, nil, err
+	}
 	o := optionsFrom(opts)
 	o.FS = fs
 	return OpenMeta(ctx, path, o)
@@ -54,6 +61,9 @@ func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...Option
 // support seeking (the moov box may sit after the media). No sample data is read.
 // Pass Options{Keyframes: true} to also populate Container.Keyframes.
 func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...Options) (*mkv.Container, []DroppedTrack, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, nil, err
+	}
 	return readMeta(ctx, r, path, optionsFrom(opts))
 }
 

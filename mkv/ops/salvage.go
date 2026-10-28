@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -70,6 +71,9 @@ type SalvageReport = mkv.SalvageReport
 // light verification Reindex always runs), so a bug in Salvage itself - not
 // the source's damage - still surfaces as an error.
 func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) (*SalvageReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 
 	var rb *rollbackBuilder
@@ -104,6 +108,9 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 // before touching anything. The returned report is the one the equivalent
 // Salvage (or Reindex with Options.Resync) run would produce.
 func MapDamage(ctx context.Context, srcPath string, opts ...mkv.Options) (*SalvageReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	fs := mkv.FSFrom(opts)
 	dry := &mkv.FS{
 		Open:     fs.DoOpen,

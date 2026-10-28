@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -40,6 +41,9 @@ type muxSource struct {
 
 // Mux builds an MP4 from tracks of MP4/MOV sources, samples copied untouched; opts set the metadata, as matroska.Mux.
 func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	if len(opts.Attachments) > 0 {
 		return errf("mux: an MP4 carries no attachments; mux to MKV to keep them")
 	}
@@ -95,6 +99,9 @@ func LanguageFields(tag string) (language, bcp47 string) {
 
 // Merge combines the selected tracks of MP4/MOV inputs (all of an input's when it names none); title, tags and chapters come from the first input.
 func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...Options) error {
+	if err := oneopt.Check(extra); err != nil {
+		return err
+	}
 	if len(opts.Inputs) == 0 {
 		return errf("merge: no inputs")
 	}
@@ -124,6 +131,9 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...Options) error {
 
 // AddTrack writes srcPath to dstPath with one track of an MP4/MOV source appended (Language and Name override when set, IsDefault always).
 func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	inputs, err := allTracks(ctx, srcPath, o)
 	if err != nil {
@@ -135,6 +145,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 
 // MergeSubtitle writes srcPath to dstPath with an SRT file added as a timed-text (tx3g) subtitle track.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	// The SRT reaches the mux as memory, out of sight of its own output check.
 	if err := distinctOutput(o.FS, dstPath, srtPath); err != nil {

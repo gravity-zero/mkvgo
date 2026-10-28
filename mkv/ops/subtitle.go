@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/subtitle"
@@ -76,6 +77,9 @@ func (q *openCues) flush(nextMs int64, hasNext bool) error {
 }
 
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	fs := mkv.FSFrom(opts)
 	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -180,6 +184,9 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 // region within Options.DamageBytes is passed over (OnSkip), a larger one, or
 // one the bound refuses, fails the extraction with nothing written.
 func ExtractSubtitleWebVTT(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	if ix := verifiedCueIndex(ctx, srcPath, trackID, opts); ix != nil {
 		var out bytes.Buffer // written only once every indexed block read as the Cues say
 		err := ExtractSubtitleWebVTTFrom(ctx, srcPath, trackID, ix, &out, opts...)
@@ -332,6 +339,9 @@ func decodeSubtitleCue(codec string, data []byte) string {
 }
 
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	entries, err := subtitle.ParseSRT(srtPath)
 	if err != nil {
 		return fmt.Errorf("parse SRT: %w", err)

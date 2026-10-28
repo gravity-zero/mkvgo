@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -97,6 +98,9 @@ func verdictRank(v string) int {
 // only (Matroska/WebM via reader.OpenMetaWithFS, MP4/MOV via mp4.OpenMeta) -
 // no block walk, no decode.
 func Playability(ctx context.Context, path string, target Target, opts ...mkv.Options) (*PlayabilityReport, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	c, srcContainer, err := openAnyMeta(ctx, path, mkv.FSFrom(opts))
 	if err != nil {
 		return nil, err
