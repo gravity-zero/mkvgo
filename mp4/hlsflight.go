@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// buildPanicked, deferred in a flight's leader around its build, turns a panic of the build into the build's error:
+// the leader then finishes the flight, and its waiters get the error instead of waiting on a flight never finished.
+func buildPanicked(err *error, what string) {
+	if r := recover(); r != nil {
+		*err = errf("%s: the build panicked: %v", what, r)
+	}
+}
+
 // flight is one window build others wait on: it runs under the leader's
 // context kept alive for the waiters, cancelled once the leader has gone and
 // no waiter remains, when it also leaves its map so a newcomer starts afresh.

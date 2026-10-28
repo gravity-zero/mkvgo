@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"io"
+	"strconv"
 	"sync/atomic"
 )
 
@@ -79,7 +80,10 @@ func (p *HLSPlan) window(ctx context.Context, n int) (b *windowBundle, built boo
 	p.winFlight[n] = f
 	p.winMu.Unlock()
 
-	f.bundle, f.err = p.buildWindow(f.ctx, n)
+	func() {
+		defer buildPanicked(&f.err, "window "+strconv.Itoa(n))
+		f.bundle, f.err = p.buildWindow(f.ctx, n)
+	}()
 
 	p.winMu.Lock()
 	if p.winFlight[n] == f {

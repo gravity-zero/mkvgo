@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -190,7 +191,10 @@ func (p *HLSPlan) table(ctx context.Context, n int) (*windowTable, error) {
 	p.tabFlight[n] = f
 	p.tabMu.Unlock()
 
-	f.table, f.err = p.buildTable(f.ctx, n)
+	func() {
+		defer buildPanicked(&f.err, "window table "+strconv.Itoa(n))
+		f.table, f.err = p.buildTable(f.ctx, n)
+	}()
 
 	p.tabMu.Lock()
 	if p.tabFlight[n] == f {

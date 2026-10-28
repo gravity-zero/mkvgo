@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -253,7 +254,10 @@ func (p *HLSPlan) copyShared(ctx context.Context, w io.Writer, c *spanCopier, sr
 		p.winMu.Unlock()
 		return false, nil
 	}
-	err := p.readThrough(ctx, w, c, src, pieces, runs, lo, hi)
+	err := func() (err error) {
+		defer buildPanicked(&err, "the shared read of window "+strconv.Itoa(win))
+		return p.readThrough(ctx, w, c, src, pieces, runs, lo, hi)
+	}()
 	for _, r := range runs {
 		if err == nil && len(r.data) < cap(r.data) {
 			err = errf("the shared read of window %d left an audio run short", win) // the source ended early: nothing kept
