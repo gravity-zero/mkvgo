@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 )
 
-// cryptGate lets as many encrypted segments work at once as there are processors, the oldest request first: each
-// holds its slot but while writing to its client, so they finish in turn and a slow client holds none.
+// cryptGate lets as many encrypted segments encrypt at once as there are processors, the oldest request first: each
+// holds its slot only while it encrypts, so a slow client, or a slow source read, holds none.
 var cryptGate = newCryptOrder(runtime.GOMAXPROCS(0))
 
 // cryptSeq orders the encrypted writes by when they started.

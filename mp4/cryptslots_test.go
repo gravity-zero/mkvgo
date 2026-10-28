@@ -8,8 +8,11 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // The slot goes to the oldest request waiting, not the first to ask; a waiter
@@ -166,5 +169,98 @@ func TestCryptGateFollowsGOMAXPROCS(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "slots=2\n") {
 		t.Fatalf("encryption slots under GOMAXPROCS 2: %s", out)
+	}
+}
+
+// stallFS reads from base; armed, the first read after it blocks until release closes.
+type stallFS struct {
+	base    *mkv.FS
+	armed   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+type stallFile struct {
+	mkv.ReadSeekCloser
+	fs *stallFS
+}
+
+func (f *stallFile) Read(p []byte) (int, error) {
+	if f.fs.armed.CompareAndSwap(true, false) { // the first read only: a sync.Once would hold the others behind it
+		close(f.fs.entered)
+		<-f.fs.release
+	}
+	return f.ReadSeekCloser.Read(p)
+}
+
+func (s *stallFS) fs() *mkv.FS {
+	fs := *s.base
+	fs.Open = func(p string) (mkv.ReadSeekCloser, error) {
+		f, err := s.base.Open(p)
+		if err != nil {
+			return nil, err
+		}
+		return &stallFile{ReadSeekCloser: f, fs: s}, nil
+	}
+	return &fs
+}
+
+// TestCryptSlotFreeWhileReading: an encrypted segment held its slot while it read the source; with one slot, a
+// read that stalled (a disk asleep, a network share) held every other encrypted segment behind it. Another request is
+// served while the first waits on its read.
+func TestCryptSlotFreeWhileReading(t *testing.T) {
+	defer func(g *cryptOrder) { cryptGate = g }(cryptGate)
+	cryptGate = newCryptOrder(1)
+	ctx := context.Background()
+	data, err := os.ReadFile(interleavedMP4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range []Options{
+		{SegmentMs: 2000, Encrypt: &HLSEncryption{Key: []byte("0123456789abcdef"), KeyURI: "k"}},
+		{SegmentMs: 2000, CENC: &CENCOptions{Scheme: "cenc", Key: []byte("0123456789abcdef"), KeyID: []byte("0123456789abcdef"), IV: []byte("01234567"), KeyURI: "k"}},
+	} {
+		m := mkv.NewMemFS()
+		m.Put("in.mp4", data)
+		sf := &stallFS{base: m.FS(), entered: make(chan struct{}), release: make(chan struct{})}
+		o.FS, o.StreamFromFS = sf.fs(), true
+		plan, err := PlanHLS(ctx, "in.mp4", o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, err := plan.Open(ctx, plan.SegmentName(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := plan.Open(ctx, plan.SegmentName(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sf.armed.Store(true)
+		done := make(chan error, 1)
+		go func() { _, err := first.WriteTo(ctx, io.Discard); done <- err }()
+		select {
+		case <-sf.entered:
+		case err := <-done:
+			t.Fatalf("the segment was written without a source read after Open (%v)", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the segment never read its source")
+		}
+		served := make(chan error, 1)
+		go func() { _, err := second.WriteTo(ctx, io.Discard); served <- err }()
+		select {
+		case err := <-served:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a request waiting on its source read held the only slot")
+		}
+		close(sf.release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		first.Close()
+		second.Close()
 	}
 }

@@ -104,15 +104,6 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 	pos := int64(len(h.head))
 	var rd *sampleReader
 	seq := cryptSeq.Add(1)
-	if err := cryptGate.acquire(ctx, seq); err != nil {
-		return 0, err
-	}
-	held := true
-	defer func() {
-		if held {
-			cryptGate.release()
-		}
-	}()
 	bufp := sampleBufs.Get().(*[]byte)
 	defer putSampleBuf(bufp)
 	buf := (*bufp)[:0]
@@ -140,20 +131,17 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 			return cw.pos, err
 		}
 		*bufp = buf
-		h.cenc.k.encrypt(buf, h.cenc.td.entries[x])
-		cryptGate.release()
-		held = false
-		if err := write(buf, pos); err != nil {
-			return cw.pos, err
-		}
+		// The slot is the cipher's alone: the sample was read from the source, and goes to the client, without it.
 		if err := cryptGate.acquire(ctx, seq); err != nil {
 			return cw.pos, err
 		}
-		held = true
+		h.cenc.k.encrypt(buf, h.cenc.td.entries[x])
+		cryptGate.release()
+		if err := write(buf, pos); err != nil {
+			return cw.pos, err
+		}
 		pos += size
 	}
-	cryptGate.release() // the last bytes go to the client without the slot
-	held = false
 	err := bw.Flush()
 	return cw.pos, err
 }
@@ -170,15 +158,6 @@ func (p *HLSPlan) writeAES(ctx context.Context, w io.Writer, h *ResourceHandle, 
 	}
 	cw := &cbcWriter{w: w, mode: cipher.NewCBCEncrypter(block, segmentIV(k, uint32(h.n))), off: off, end: off + n, scratch: make([]byte, stageBytes), ctx: ctx, seq: cryptSeq.Add(1)}
 	defer clear(cw.scratch)
-	if err := cryptGate.acquire(ctx, cw.seq); err != nil {
-		return 0, err
-	}
-	cw.held = true
-	defer func() {
-		if cw.held {
-			cryptGate.release()
-		}
-	}()
 	plain := int64(len(h.head)) + h.table.segs[h.ti].dataLen
 	need := min(plain, (off+n+aes.BlockSize-1)/aes.BlockSize*aes.BlockSize) // the plaintext the range's last block chains from
 	if _, err := p.writeSpans(ctx, cw, h.head, h.table, h.ti, h.n, 0, need); err != nil && !errors.Is(err, errRangeWritten) {
@@ -208,7 +187,6 @@ type cbcWriter struct {
 	written  int64
 	ctx      context.Context
 	seq      int64 // the request's place in cryptGate's order
-	held     bool
 }
 
 func (c *cbcWriter) Write(p []byte) (int, error) {
@@ -235,22 +213,19 @@ func (c *cbcWriter) emit(s []byte) error {
 	if len(s) == 0 {
 		return nil
 	}
+	// The slot is the cipher's alone: the plaintext was read from the source, and the ciphertext goes to the client,
+	// without it.
+	if err := cryptGate.acquire(c.ctx, c.seq); err != nil {
+		return err
+	}
 	c.mode.CryptBlocks(s, s)
+	cryptGate.release()
 	from, to := max(c.off, c.pos), min(c.end, c.pos+int64(len(s)))
 	c.pos += int64(len(s))
 	if from >= to {
 		return nil
 	}
-	if c.held {
-		cryptGate.release()
-		c.held = false
-	}
 	m, err := c.w.Write(s[from-(c.pos-int64(len(s))) : to-(c.pos-int64(len(s)))])
-	if aerr := cryptGate.acquire(c.ctx, c.seq); aerr == nil {
-		c.held = true
-	} else if err == nil {
-		err = aerr
-	}
 	c.written += int64(m)
 	if err == nil && int64(m) < to-from {
 		err = io.ErrShortWrite
