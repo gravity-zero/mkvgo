@@ -61,6 +61,10 @@ func CmdToMP4(args []string) {
 		OnDrop: func(d mp4.DroppedTrack) {
 			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 		},
+		OnTruncated: func(t mp4.Truncation) {
+			ClearProgress()
+			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))
+		},
 	})
 	ClearProgress()
 	if err != nil {
@@ -93,10 +97,20 @@ func CmdFromMP4(args []string) {
 		OnDrop: func(d mp4.DroppedTrack) {
 			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 		},
+		OnTruncated: func(t mp4.Truncation) {
+			ClearProgress()
+			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))
+		},
 	})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
 	}
 	fmt.Printf("remuxed %s → %s\n", src, dst)
+}
+
+// cutShortWarning is the stderr line for a source cut short: how far its media plays, and
+// what that means for the result.
+func cutShortWarning(path string, t mp4.Truncation, result string) string {
+	return fmt.Sprintf("warning: %s is incomplete: its media stops at %s; %s, not the complete file", path, t.Reach(), result)
 }

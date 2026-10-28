@@ -15,10 +15,17 @@ type HashMismatch struct {
 	TrackID uint32
 	Stored  string
 	Actual  string
+	// CutShort is set when the file stops inside the track's media: its tail is
+	// missing, not corrupted.
+	CutShort bool
 }
 
 func (m HashMismatch) String() string {
-	return fmt.Sprintf("track %d: content hash mismatch (stored %.12s…, actual %.12s…)", m.TrackID, m.Stored, m.Actual)
+	s := fmt.Sprintf("track %d: content hash mismatch (stored %.12s…, actual %.12s…)", m.TrackID, m.Stored, m.Actual)
+	if m.CutShort {
+		s += ": the file is incomplete, its tail is missing"
+	}
+	return s
 }
 
 // VerifyContentHashes recomputes each track's content SHA-256 from the sample
@@ -72,7 +79,7 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 		}
 		got := hex.EncodeToString(h.Sum(nil))
 		if got != want {
-			mismatches = append(mismatches, HashMismatch{TrackID: t.trackID, Stored: want, Actual: got})
+			mismatches = append(mismatches, HashMismatch{TrackID: t.trackID, Stored: want, Actual: got, CutShort: t.cutEnd > 0})
 		}
 	}
 	return mismatches, nil

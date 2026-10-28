@@ -196,7 +196,10 @@ func RemuxToHLS(ctx context.Context, srcPath, outputDir string, opts ...Options)
 		return err
 	}
 	o := optionsFrom(opts)
-	_, err := remuxToHLSInto(ctx, srcPath, outputDir, &o)
+	res, err := remuxToHLSInto(ctx, srcPath, outputDir, &o)
+	if err == nil && res.cut != nil && o.OnTruncated != nil {
+		o.OnTruncated(*res.cut)
+	}
 	return err
 }
 
@@ -210,6 +213,7 @@ type hlsResult struct {
 	durs    []float64
 	bounds  []int64     // segment start times (ms), same length as durs
 	iframes []iframeRef // trick-play I-frames (MP4 sources, unencrypted); nil otherwise
+	cut     *Truncation // the source is cut short: the packaging holds what arrived; nil when whole
 }
 
 // remuxToHLSInto is RemuxToHLS's body, returning the packaging facts.
@@ -339,8 +343,24 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if err != nil {
 		return nil, err
 	}
+	// A source cut short packages what arrived; RemuxToHLS reports it once the packaging succeeds.
+	var cut Truncation
+	var isCut bool
+	if ps.mv != nil {
+		cut, isCut = ps.mv.truncation(ps.size)
+	} else {
+		cut, isCut = matroskaCut(fs, srcPath, c, media)
+	}
+	defer func() {
+		if err == nil && isCut && res != nil {
+			res.cut = &cut
+		}
+	}()
 	for _, ft := range fts {
 		if len(ft.samples) == 0 {
+			if isCut {
+				return nil, errf("%w: track %d holds none of its media, the file ends before its first sample: try again once the file is complete", mkv.ErrSourceTruncated, ft.outTrack.mp4ID)
+			}
 			return nil, errf("track %d produced no samples", ft.outTrack.mp4ID)
 		}
 		if ft.tmp != nil {
@@ -585,6 +605,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if !ok {
 			continue
 		}
+		ft.outTrack.reachMs = max(ft.outTrack.reachMs, b.Timecode)
 		if ft.offs != nil {
 			if err := collectDirectSample(ft, b, direct); err != nil {
 				return err

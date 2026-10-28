@@ -186,7 +186,9 @@ audio/video/subtitle content produces the same `presentation` hash whether
 the source is Matroska or WebM, independent of track order or container
 metadata, so a client-side media library can detect that two files are
 re-muxes of the same content (different title, muxing app, or track order)
-without a byte-for-byte comparison of the containers themselves.
+without a byte-for-byte comparison of the containers themselves. An
+incomplete file (it stops before the end it declares) is rejected rather
+than fingerprinted over what it holds.
 
 ```js
 const fp = await MkvGo.fingerprint(file)

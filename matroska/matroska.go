@@ -785,7 +785,8 @@ var (
 )
 
 // ErrSourceTruncated reports a source that stops before its declared end (a download not finished): a WebVTT
-// extraction returns it after writing the cues it holds, Split before writing any part. See ops.ErrSourceTruncated.
+// extraction returns it after writing the cues it holds, Split before writing any part, Fingerprint instead of a
+// digest over what arrived. See ops.ErrSourceTruncated.
 var ErrSourceTruncated = ops.ErrSourceTruncated
 
 // BuildSubtitleIndex walks a source once and records the block positions of the

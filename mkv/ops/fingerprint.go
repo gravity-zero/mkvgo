@@ -77,9 +77,27 @@ type TrackFingerprint struct {
 // that decoded text, not the MP4 container bytes. Tracks in a codec
 // RemuxFromMP4 does not carry (see its doc) are absent from the report, the
 // same way CompareBlocks/RemuxFromMP4 drop them.
+//
+// A source cut short is refused - a Matroska that
+// stops inside its media, an MP4 whose sample tables place media past the end
+// of the file (ErrSourceTruncated) - rather than digested over what arrived:
+// that digest would pass for the complete file's.
 func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*FingerprintReport, error) {
 	fs := mkv.FSFrom(opts)
-	c, digests, err := digestTracksAny(ctx, path, fs, mkv.ProgressFrom(opts))
+	var cut *mp4.Truncation
+	c, digests, err := digestTracksAny(ctx, path, fs, mkv.ProgressFrom(opts), func(t mp4.Truncation) { cut = &t })
+	if err == nil && cut != nil {
+		err = fmt.Errorf("%w: it ends at byte %d, its media at %s: fingerprint it once the file is complete", ErrSourceTruncated, cut.FileSize, cut.Reach())
+	}
+	// A Matroska cut inside a Cluster fails the walk, one cut between two ends it cleanly: either way the Segment
+	// declares more than the file holds (surplus bytes past its end are trailing junk, not a cut).
+	if (err == nil && cut == nil) || errors.Is(err, io.ErrUnexpectedEOF) {
+		if declared, known, derr := segmentDeclaredEndOf(path, fs); derr == nil && known {
+			if st, serr := fs.DoStat(path); serr == nil && declared > st.Size() {
+				err = fmt.Errorf("%w: it ends at byte %d of the %d its Segment declares: fingerprint it once the file is complete", ErrSourceTruncated, st.Size(), declared)
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("digest %s: %w", shown.Path(path), err)
 	}
@@ -109,13 +127,13 @@ func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*Finger
 // digestTracksAny is digestTracks extended to MP4/MOV sources: it dispatches
 // by extension first and, for a mislabeled file, falls back on content
 // sniffing (reader.ErrNotMatroska), mirroring Playability's openAnyMeta.
-func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
+func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
 	if isMP4Ext(path) {
-		return digestTracksMP4(ctx, path, fs, progress)
+		return digestTracksMP4(ctx, path, fs, progress, onCut)
 	}
 	c, digests, err := digestTracks(ctx, path, fs, progress, true)
 	if err != nil && errors.Is(err, reader.ErrNotMatroska) {
-		return digestTracksMP4(ctx, path, fs, progress)
+		return digestTracksMP4(ctx, path, fs, progress, onCut)
 	}
 	return c, digests, err
 }
@@ -127,9 +145,9 @@ func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 // always lives on local disk regardless of fs, since it is throwaway scratch
 // space, not the caller's data; only the read of the MP4 source goes through
 // fs (so a remote MP4 fingerprints like a remote MKV).
-func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
+func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
 	if runtime.GOOS == "js" {
-		return digestTracksMP4InMemory(ctx, path, fs, progress)
+		return digestTracksMP4InMemory(ctx, path, fs, progress, onCut)
 	}
 	tmp, err := os.CreateTemp("", "mkvgo-fingerprint-*.mkv")
 	if err != nil {
@@ -141,14 +159,14 @@ func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 		return nil, nil, err
 	}
 	srcFS := &mkv.FS{Open: fs.DoOpen, OpenContext: fs.DoOpenContext, Stat: fs.DoStat}
-	if err := mp4.RemuxFromMP4(ctx, path, tmpPath, mp4.Options{FS: srcFS, Progress: progress}); err != nil {
+	if err := mp4.RemuxFromMP4(ctx, path, tmpPath, mp4.Options{FS: srcFS, Progress: progress, OnTruncated: onCut}); err != nil {
 		return nil, nil, fmt.Errorf("remux to temporary matroska: %w", err)
 	}
 	return digestTracks(ctx, tmpPath, nil, nil, true)
 }
 
 // digestTracksMP4InMemory is digestTracksMP4 under WASM, which has no temp files: source and Matroska are both held in memory.
-func digestTracksMP4InMemory(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc) (*mkv.Container, []trackDigest, error) {
+func digestTracksMP4InMemory(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
 	r, err := fs.DoOpen(path)
 	if err != nil {
 		return nil, nil, err
@@ -160,7 +178,7 @@ func digestTracksMP4InMemory(ctx context.Context, path string, fs *mkv.FS, progr
 	}
 	mem := mkv.NewMemFS()
 	mem.Put("src.mp4", data)
-	if err := mp4.RemuxFromMP4(ctx, "src.mp4", "out.mkv", mp4.Options{FS: mem.FS(), Progress: progress}); err != nil {
+	if err := mp4.RemuxFromMP4(ctx, "src.mp4", "out.mkv", mp4.Options{FS: mem.FS(), Progress: progress, OnTruncated: onCut}); err != nil {
 		return nil, nil, fmt.Errorf("remux to in-memory matroska: %w", err)
 	}
 	return digestTracks(ctx, "out.mkv", mem.FS(), nil, true)

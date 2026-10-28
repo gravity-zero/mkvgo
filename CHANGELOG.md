@@ -9,6 +9,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Fixed
+
+- An incomplete file (it stops before the end it declares): `fingerprint`
+  refuses it, MP4 as MKV (#2); `to-mp4`, `from-mp4`, `to-hls` convert it with
+  a warning (`mp4.Options.OnTruncated`); `info` shows `Truncated`.
+
 ## [0.61.0] - 2026-10-24
 
 ### Breaking

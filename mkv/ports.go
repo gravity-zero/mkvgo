@@ -16,6 +16,12 @@ var ErrSourceChanged = errors.New("mkv: the source changed since it was opened o
 // says: mkvgo does not read MPEG-TS. matroska.ErrMPEGTS and mp4.ErrMPEGTS are this error.
 var ErrMPEGTS = errors.New("MPEG-TS detected: mkvgo does not read MPEG transport streams; remux the file to MP4 or Matroska first")
 
+// ErrSourceTruncated reports a source that stops before its declared end, returned by a
+// path whose result states the whole file's content (a fingerprint, a split's parts): stated over what arrived, it
+// would be false. Paths that play or convert the media carry what arrived and report it instead.
+// matroska.ErrSourceTruncated and ops.ErrSourceTruncated are this error.
+var ErrSourceTruncated = errors.New("the source stops before its declared end")
+
 // FileIdentity is what a FileInfo may offer beyond size and mtime: a token
 // for the version of the file (an ETag, a version id, a Last-Modified date).
 // Strong reports a token that changes with every change of the bytes (a

@@ -37,6 +37,7 @@ type outTrack struct {
 	mp4ID       uint32 // 1-based MP4 track_ID
 	sampleEntry []byte // pre-built stsd sample entry (validated up front)
 	frameDurMs  int64  // duration hint for the final sample (0 = unknown)
+	reachMs     int64  // the latest block time the walk carried (ms), for a source cut short
 	// frameSamples is the samples one frame covers at the track's rate, from
 	// its header (frameSamplesFromHeader) or its first payload (learnFrame); 0 unknown.
 	frameSamples int64
@@ -206,6 +207,15 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	if err := distinctOutput(fs, dstPath, srcPath); err != nil {
 		return err
 	}
+	// A source cut short is reported once the output is written and closed (runs after the defers below).
+	defer func() {
+		if err != nil || o.OnTruncated == nil {
+			return
+		}
+		if t, ok := matroskaCut(fs, srcPath, c, tracks); ok {
+			o.OnTruncated(t)
+		}
+	}()
 	dst, err := fs.DoCreate(dstPath)
 	if err != nil {
 		return err
@@ -232,6 +242,29 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	// A remote source is read once: its fast start goes through a temporary file.
 	remote := o.FastStart && hintsRanges(fs, srcPath)
 	return writeMP4(ctx, dst, srcPath, dstPath, remote, c, openBlocks, tracks, brands, meta, o)
+}
+
+// matroskaCut reports a Matroska source that stops before the end its Segment declares,
+// with where the first audio or video track runs out. A Segment of unknown size declares no end: it is never cut.
+func matroskaCut(fs *mkv.FS, path string, c *mkv.Container, tracks []*outTrack) (Truncation, bool) {
+	if c.SegmentEnd <= 0 {
+		return Truncation{}, false
+	}
+	fi, err := fs.DoStat(path)
+	if err != nil || c.SegmentEnd <= fi.Size() {
+		return Truncation{}, false
+	}
+	t := Truncation{FileSize: fi.Size(), DurationMs: c.DurationMs, ReachedMs: -1}
+	for _, tr := range tracks {
+		if tr.reachMs == 0 || tr.isChapter || tr.spec.text {
+			continue // a track without a block, or a sparse subtitle one, says nothing of where the cut is
+		}
+		if t.ReachedMs < 0 || tr.reachMs < t.ReachedMs {
+			t.ReachedMs = tr.reachMs
+		}
+	}
+	t.ReachedMs = max(t.ReachedMs, 0)
+	return t, true
 }
 
 // movieMeta bundles the file-level metadata carried into the moov box.
@@ -623,6 +656,7 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 		if !ok {
 			continue
 		}
+		t.reachMs = max(t.reachMs, b.Timecode)
 		if t.spec.text {
 			if err := t.addTextBlock(cw, b); err != nil {
 				return 0, err

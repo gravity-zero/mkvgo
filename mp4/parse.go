@@ -45,6 +45,7 @@ type inSample struct {
 // inTrack is a parsed MP4 track ready to be written as a Matroska track.
 type inTrack struct {
 	tableSamples     int64  // the samples its sample table declares, when parsed past the header
+	cutEnd           int64  // where the first sample past the end of the file ends; 0 when whole
 	trackID          uint32 // tkhd track_ID, for correlating mvex/trex and mfra/tfra
 	trakIndex        int    // 0-based position of the trak among the moov's traks
 	trackType        mkv.TrackType

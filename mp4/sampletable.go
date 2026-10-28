@@ -145,11 +145,12 @@ chunks:
 			if pos < 0 {
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", si, pos, end, fileSize)
 			}
-			if end > fileSize && si > 0 { // the file was cut there: the samples before play, as a player plays them
-				cut = true
-				break chunks
-			}
 			if end > fileSize {
+				tr.cutEnd = end
+				if si > 0 { // the file was cut there: the samples before play, as a player plays them
+					cut = true
+					break chunks
+				}
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", si, pos, end, fileSize)
 			}
 			samples[si].offset = pos

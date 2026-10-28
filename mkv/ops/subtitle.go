@@ -291,8 +291,8 @@ func extractSubtitleWebVTTWalk(ctx context.Context, srcPath string, trackID uint
 }
 
 // ErrSourceTruncated reports a source that stops before the end its Segment declares (a download not finished):
-// a WebVTT extraction wrote what it holds, Split wrote nothing.
-var ErrSourceTruncated = errors.New("the source stops before its declared end")
+// a WebVTT extraction wrote what it holds, Split wrote nothing, Fingerprint stated no digest. It is mkv.ErrSourceTruncated.
+var ErrSourceTruncated = mkv.ErrSourceTruncated
 
 // truncatedSource returns ErrSourceTruncated, saying how far the written cues reach, when the file is shorter
 // than its Segment declares.

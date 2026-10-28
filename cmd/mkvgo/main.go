@@ -256,7 +256,7 @@ Commands:
 extract-frame Extract the video keyframe nearest a time, decoder-ready (thumbnails/scrubbing)
 extract-frames  Write a keyframe-only Matroska stream (one keyframe every -every, or at -at times) for a decoder: trickplay strips in one pass
 analyze       Stream statistics: per-track frame/keyframe counts, bitrate, GOP, duration, cfr/vfr (head-only, no decode; Matroska/WebM only)
-fingerprint   Container-independent content identity hash for cross-format dedup (full read of every track's payload; Matroska/WebM only)
+fingerprint   Container-independent content identity hash for cross-format dedup (full read of every track's payload; MKV/WebM or MP4)
 playability   Per-track and overall direct-play/remux/transcode verdict against a target (no probe, no decode)
 ladder        Recommend an ABR ladder from the source's resolution/bitrate/codec (guidance, not a guarantee)
 ingest        One-call serving plan: direct-play, remux-hls (optionally reindexing), or transcode with a ladder

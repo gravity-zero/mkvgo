@@ -66,6 +66,13 @@ mkvgo info [-json] <file.mkv|->
 `Timebase` (`timecode_scale` in JSON) is the declared TimecodeScale in nanoseconds
 per timecode unit; 1000000 (one millisecond) is what nearly every file uses.
 
+`Truncated` (`truncated` in JSON: `file_size`, `declared_size`) appears only for a
+file that stops before the end it declares: its metadata
+reads whole, its media does not, and `diagnose` says how much is missing. It is read
+from the head (the Matroska Segment size, the top-level MP4 boxes; an MP4 of more
+than 16 of them, a fragmented one, is not judged). Bytes past the declared end are
+trailing junk, not a cut.
+
 `DocType` (`doc_type` in JSON) is the EBML header's DocType as the file declares
 it: `matroska` or `webm` - the one thing that tells a WebM file from a Matroska
 one, which a prober reporting the demuxer family cannot. It is the declaration,
@@ -203,7 +210,7 @@ mkvgo analyze -json video.mkv    # AnalyzeReport
 
 ### fingerprint
 
-Container-independent content identity: a `Presentation` hash over every track's payload content, plus one SHA-256 digest per track (decode order) - the same digest `compare -blocks` uses to prove a round-trip byte-identical. Two files carrying the same audio/video/subtitle streams fingerprint identically even with different container metadata (title, muxing app), a different track order, or a different container (Matroska/WebM vs MP4/MOV) - the use case is cross-container dedup in a media library. Like `analyze` this reads the whole file, and every track's frame payload is also hashed. MP4/MOV sources are hashed by remuxing to a temporary Matroska file first (sample bytes are copied verbatim), so an MP4 and an MKV carrying the same encode fingerprint identically.
+Container-independent content identity: a `Presentation` hash over every track's payload content, plus one SHA-256 digest per track (decode order) - the same digest `compare -blocks` uses to prove a round-trip byte-identical. Two files carrying the same audio/video/subtitle streams fingerprint identically even with different container metadata (title, muxing app), a different track order, or a different container (Matroska/WebM vs MP4/MOV) - the use case is cross-container dedup in a media library. Like `analyze` this reads the whole file, and every track's frame payload is also hashed. MP4/MOV sources are hashed by remuxing to a temporary Matroska file first (sample bytes are copied verbatim), so an MP4 and an MKV carrying the same encode fingerprint identically. An incomplete file (a Matroska that ends before its declared Segment end, an MP4 whose media runs past the end of the file) prints no digest and exits 1: a digest over what arrived would pass for the complete file's. The conversions (`to-mp4`, `from-mp4`, `to-hls`) do the opposite: they write what arrived and warn on stderr how far it plays, exit 0 - unless the cut leaves an audio or video track without any sample, which fails them the same way (`from-mp4 --skip-unsupported` drops that track). `verify` on an incomplete hashed MP4 says its tail is missing.
 
 ```
 mkvgo fingerprint [-json] <file.mkv|.mp4|url>
@@ -273,7 +280,8 @@ mkvgo hash video.mkv -o hashed.mkv    # full rewrite
 Recompute the per-track content hashes and compare them with the stored
 hashes - MKV/WebM: the `CONTENT_SHA256` tags written by `hash`; MP4: the
 freeform atoms written by `to-mp4 --hash`. Exits `0` when every hashed track
-is intact, `1` on any mismatch; errors when the file was never hashed.
+is intact, `1` on any mismatch; errors when the file was never hashed. A
+mismatch on an incomplete MP4 says its tail is missing rather than corrupted.
 
 ```
 mkvgo verify [-json] <file.mkv|.mp4>
@@ -1035,6 +1043,8 @@ Cover art IS carried: the first JPEG/PNG image attachment (one named `cover.*` p
 
 Not carried into MP4: **other attachments** (fonts - note an ASS track flattened with `--flatten-subs` loses its attached fonts), **track-targeted tags**, and global tags outside the mapped set (ARTIST, ALBUM, DATE_RELEASED, GENRE, COMMENT, ENCODER, COMPOSER, DESCRIPTION). Nested and untitled chapters are flattened out, and the Nero `chpl` chapter list caps at 255 entries (the QuickTime chapter track carries the full list).
 
+An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead.
+
 ```bash
 mkvgo to-mp4 video.mkv video.mp4
 mkvgo to-mp4 --faststart --skip-unsupported video.mkv video.mp4
@@ -1054,6 +1064,8 @@ The one rule of every remux, in both directions: an audio or video track the out
 
 QuickTime `.mov` files are read too, including the raw-camera/iPhone layout
 (`mdat` first, `moov` at the end, QuickTime v1/v2 sound descriptions).
+
+An incomplete source (it stops before the end it declares) is converted up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead (`--skip-unsupported` drops it).
 
 ```bash
 mkvgo from-mp4 video.mp4 video.mkv
@@ -1191,6 +1203,8 @@ Security flags (shared with `hls-segment`; both must use the same values):
   MPD reference (CDN base, or a token route). The library form is
   `Options.RewriteURL func(name) string`, which can append per-resource signed
   tokens instead.
+
+An incomplete source (it stops before the end it declares) is packaged up to where it stops, with a warning on stderr saying how far its media plays; exit 0. A cut that leaves an audio or video track without any sample is refused instead.
 
 ### hls-segment
 

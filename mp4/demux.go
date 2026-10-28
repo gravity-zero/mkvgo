@@ -54,6 +54,13 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	for _, d := range mv.dropped {
 		o.report(d) // cover art / non-media tracks the MKV output does not carry
 	}
+	// Taken before carriableTracks drops a track the cut left empty, reported once the output is closed.
+	cut, isCut := mv.truncation(size)
+	defer func() {
+		if err == nil && isCut && o.OnTruncated != nil {
+			o.OnTruncated(cut)
+		}
+	}()
 	if err := carriableTracks(mv, &o); err != nil {
 		return err
 	}
@@ -83,6 +90,32 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 	}()
 
 	return writeMKV(ctx, dst, src, mv, tracks, size, progress)
+}
+
+// truncation reports a movie whose sample tables place media past the end of the size-byte file, with where the
+// first audio or video track the cut stops runs out (a track it left empty, or a sparse subtitle one, says nothing).
+func (mv *movie) truncation(size int64) (Truncation, bool) {
+	t := Truncation{FileSize: size, DurationMs: mv.durationMs, ReachedMs: -1}
+	cut := false
+	for i := range mv.tracks {
+		tr := &mv.tracks[i]
+		if tr.cutEnd == 0 {
+			continue
+		}
+		cut = true
+		if len(tr.samples) == 0 || (tr.trackType != mkv.VideoTrack && tr.trackType != mkv.AudioTrack) {
+			continue
+		}
+		var reach int64
+		for _, s := range tr.samples {
+			reach = max(reach, s.ctsMs+s.durMs)
+		}
+		if t.ReachedMs < 0 || reach < t.ReachedMs {
+			t.ReachedMs = reach
+		}
+	}
+	t.ReachedMs = max(t.ReachedMs, 0)
+	return t, cut
 }
 
 // buildMKVTracks maps the parsed MP4 tracks to Matroska tracks (1-based IDs).

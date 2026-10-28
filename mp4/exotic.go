@@ -345,6 +345,9 @@ func carriableTracks(mv *movie, o *Options) error {
 			continue
 		}
 		if !o.SkipUnsupported && t.trackType != mkv.SubtitleTrack {
+			if t.cutEnd > 0 && len(t.samples) == 0 { // the file stops before its first sample: not a codec to drop
+				return errf("%w: track %d (%s) holds none of its media, the file ends before its first sample: try again once the file is complete", mkv.ErrSourceTruncated, t.trackID, t.codec)
+			}
 			return errf("track %d (%s): %s (set Options.SkipUnsupported to drop it)", t.trackID, t.codec, reason)
 		}
 		o.report(DroppedTrack{ID: uint64(t.trackID), Type: t.trackType, Codec: t.codec, Reason: reason})

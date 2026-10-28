@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -236,6 +238,71 @@ func TestFingerprint_MP4MatchesMKV(t *testing.T) {
 		if !mkvShas[tr.SHA256] {
 			t.Errorf("MP4 track %d (%s/%s) sha %s has no matching MKV track digest", tr.TrackID, tr.Type, tr.Codec, tr.SHA256)
 		}
+	}
+}
+
+// TestFingerprint_TruncatedMP4Refused: an MP4 whose moov survives a cut but whose media does not is refused with
+// ErrSourceTruncated, as a cut Matroska is refused, instead of a digest over what arrived that would pass for the
+// complete file's (issue #2).
+func TestFingerprint_TruncatedMP4Refused(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32(320), Height: u32(240), FrameRate: f64(25)}}
+	blocks := []mkv.Block{{TrackNumber: 1, Timecode: 0, Keyframe: true, Data: []byte("keyframe-payload-0")}, {TrackNumber: 1, Timecode: 40, Data: []byte("interframe-payload-1")}}
+	mp4Path := filepath.Join(dir, "src.mp4")
+	if err := mp4.RemuxToMP4(context.Background(), buildFingerprintMKV(t, dir, "src.mkv", "t", tracks, blocks), mp4Path, mp4.Options{FastStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(mp4Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := filepath.Join(dir, "cut.mp4")
+	if err := os.WriteFile(cut, data[:len(data)-5], 0o644); err != nil { // the last sample loses its tail
+		t.Fatal(err)
+	}
+	if fp, err := Fingerprint(context.Background(), cut); !errors.Is(err, ErrSourceTruncated) {
+		t.Fatalf("Fingerprint of a cut MP4 = %+v, %v; want ErrSourceTruncated", fp, err)
+	}
+	if _, err := Fingerprint(context.Background(), mp4Path); err != nil {
+		t.Fatalf("Fingerprint of the whole MP4: %v", err)
+	}
+}
+
+// TestFingerprint_TruncatedMKVRefused: a Matroska that stops before the end its Segment declares is refused with
+// the same ErrSourceTruncated as a cut MP4, not a bare unexpected EOF.
+func TestFingerprint_TruncatedMKVRefused(t *testing.T) {
+	dir := t.TempDir()
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: []byte{1, 2, 3, 4}, Width: u32(320), Height: u32(240), FrameRate: f64(25)}}
+	var blocks []mkv.Block
+	for i := 0; i < 50; i++ {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: int64(i) * 40, Keyframe: i%10 == 0, Data: make([]byte, 500)})
+	}
+	src := buildFingerprintMKV(t, dir, "src.mkv", "t", tracks, blocks)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inside a Cluster, and on the boundary before the last one: the walk then ends on a clean EOF.
+	lastCluster := bytes.LastIndex(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+	if lastCluster <= 0 {
+		t.Fatal("fixture has no Cluster")
+	}
+	for name, n := range map[string]int{"inside a cluster": len(data) * 7 / 10, "between clusters": lastCluster} {
+		cut := filepath.Join(dir, "cut.mkv")
+		if err := os.WriteFile(cut, data[:n], 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if fp, err := Fingerprint(context.Background(), cut); !errors.Is(err, ErrSourceTruncated) {
+			t.Errorf("%s: Fingerprint of a cut MKV = %+v, %v; want ErrSourceTruncated", name, fp, err)
+		}
+	}
+	// Surplus bytes past the declared Segment end are not a cut.
+	junk := filepath.Join(dir, "junk.mkv")
+	if err := os.WriteFile(junk, append(append([]byte{}, data...), make([]byte, 33)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fingerprint(context.Background(), junk); err != nil {
+		t.Errorf("Fingerprint of a whole MKV with trailing junk: %v", err)
 	}
 }
 

@@ -175,10 +175,11 @@ func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 			if pos < 0 {
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", first+j, pos, end, fileSize)
 			}
-			if end > fileSize && len(out) > 0 {
-				return errFileCut // the file was cut there: the packets before play
-			}
 			if end > fileSize {
+				tr.cutEnd = end
+				if len(out) > 0 {
+					return errFileCut // the file was cut there: the packets before play
+				}
 				return errf("sample %d at [%d:%d] is outside the file (size %d)", first+j, pos, end, fileSize)
 			}
 			sum, last := runs.take(k)

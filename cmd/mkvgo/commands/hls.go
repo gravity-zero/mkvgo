@@ -297,6 +297,10 @@ func CmdToHLS(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
+	opts.OnTruncated = func(t mp4.Truncation) {
+		ClearProgress()
+		fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the HLS holds what arrived"))
+	}
 	err := mp4.RemuxToHLS(context.Background(), src, outDir, opts)
 	ClearProgress()
 	if err != nil {

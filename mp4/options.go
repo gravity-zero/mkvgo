@@ -1,6 +1,8 @@
 package mp4
 
 import (
+	"fmt"
+
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -14,6 +16,24 @@ type DroppedTrack struct {
 	Type   mkv.TrackType
 	Codec  string
 	Reason string
+}
+
+// Truncation describes a source cut short: an MP4 whose sample tables place media past the
+// end of the file (its moov at the head), a Matroska that stops before the end its Segment declares. A remux or an
+// HLS packaging carries what arrived and reports it through Options.OnTruncated.
+type Truncation struct {
+	FileSize   int64 `json:"file_size"`   // where the file ends
+	ReachedMs  int64 `json:"reached_ms"`  // where the first audio or video track the cut stops runs out
+	DurationMs int64 `json:"duration_ms"` // the duration the source declares; 0 when it states none
+}
+
+// Reach says how far the media that arrived plays, against the declared duration when there is one: "2.7 s of 4.0 s".
+func (t Truncation) Reach() string {
+	s := fmt.Sprintf("%.1f s", float64(t.ReachedMs)/1000)
+	if t.DurationMs > 0 {
+		s += fmt.Sprintf(" of %.1f s", float64(t.DurationMs)/1000)
+	}
+	return s
 }
 
 // SubtitleBlockIndex is what an on-demand plan needs from a subtitle index;
@@ -103,6 +123,12 @@ type Options struct {
 	// and subtitle/other tracks the format cannot carry). It never receives a
 	// track that was successfully included.
 	OnDrop func(DroppedTrack)
+	// OnTruncated, when non-nil, is called once by RemuxFromMP4, RemuxToMP4 and
+	// RemuxToHLS, after they succeed, for a source cut short (see Truncation):
+	// the output holds what arrived, not the whole file. A track the cut left
+	// without any sample fails the remux with mkv.ErrSourceTruncated instead,
+	// unless SkipUnsupported drops it.
+	OnTruncated func(Truncation)
 	// FastStart writes the moov box before the mdat box ("fast start"), so a
 	// player can begin without first reading to the end of the file - useful for
 	// progressive HTTP streaming. From a local source the output is written in

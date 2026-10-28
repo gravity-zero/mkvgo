@@ -1,29 +1,65 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
+// cutShort is a source that stops before the end it declares: its metadata reads whole,
+// its media does not.
+type cutShort struct {
+	FileSize     int64 `json:"file_size"`
+	DeclaredSize int64 `json:"declared_size"`
+}
+
+// sourceCutShort reports whether path stops before the end it declares - a Matroska Segment, the top-level MP4
+// boxes - from the head only; nil for a whole file, trailing junk, stdin, or a size that cannot be read.
+func sourceCutShort(path string, c *matroska.Container) *cutShort {
+	if path == "-" {
+		return nil
+	}
+	fs := sourceFS(path)
+	var size, declared int64
+	if c.DocType != "" { // Matroska/WebM; a Segment of unknown size declares no end
+		fi, err := fs.DoStat(path)
+		if err != nil {
+			return nil
+		}
+		size, declared = fi.Size(), c.SegmentEnd
+	} else {
+		var err error
+		if size, declared, err = mp4.DeclaredSize(context.Background(), path, mp4.Options{FS: fs}); err != nil {
+			return nil
+		}
+	}
+	if declared <= size {
+		return nil
+	}
+	return &cutShort{FileSize: size, DeclaredSize: declared}
+}
+
 func CmdInfo(path string) {
 	c, _ := loadContainer(path, false)
+	cut := sourceCutShort(path, c)
 	if JsonOutput {
 		PrintJSON(struct {
-			Path          string `json:"path"`
-			Title         string `json:"title"`
-			DurationMs    int64  `json:"duration_ms"`
-			TimecodeScale int64  `json:"timecode_scale"`
-			DocType       string `json:"doc_type"`
-			MuxingApp     string `json:"muxing_app"`
-			WritingApp    string `json:"writing_app"`
-			Tracks        int    `json:"tracks"`
-			Chapters      int    `json:"chapters"`
-			Attachments   int    `json:"attachments"`
-			Tags          int    `json:"tags"`
+			Path          string    `json:"path"`
+			Title         string    `json:"title"`
+			DurationMs    int64     `json:"duration_ms"`
+			Truncated     *cutShort `json:"truncated,omitempty"`
+			TimecodeScale int64     `json:"timecode_scale"`
+			DocType       string    `json:"doc_type"`
+			MuxingApp     string    `json:"muxing_app"`
+			WritingApp    string    `json:"writing_app"`
+			Tracks        int       `json:"tracks"`
+			Chapters      int       `json:"chapters"`
+			Attachments   int       `json:"attachments"`
+			Tags          int       `json:"tags"`
 		}{
-			c.Path, c.Info.Title, c.DurationMs, c.Info.TimecodeScale, c.DocType,
+			c.Path, c.Info.Title, c.DurationMs, cut, c.Info.TimecodeScale, c.DocType,
 			c.Info.MuxingApp, c.Info.WritingApp,
 			len(c.Tracks), len(c.Chapters), len(c.Attachments), len(c.Tags),
 		})
@@ -32,6 +68,9 @@ func CmdInfo(path string) {
 	fmt.Printf("File:        %s\n", c.Path)
 	fmt.Printf("Title:       %s\n", c.Info.Title)
 	fmt.Printf("Duration:    %d ms\n", c.DurationMs)
+	if cut != nil {
+		fmt.Printf("Truncated:   %d of %d bytes - run `mkvgo diagnose`\n", cut.FileSize, cut.DeclaredSize)
+	}
 	fmt.Printf("Timebase:    %d ns/unit\n", c.Info.TimecodeScale)
 	if c.DocType != "" {
 		fmt.Printf("DocType:     %s\n", c.DocType)
