@@ -227,11 +227,12 @@ func TestCmdKeyframes_BadPath(t *testing.T) {
 }
 
 func TestCmdKeyframes_BadMP4(t *testing.T) {
-	f, err := os.CreateTemp(t.TempDir(), "bad*.mp4")
+	// An ftyp header routes to the MP4 engine; the truncated body fails there.
+	f, err := os.CreateTemp(t.TempDir(), "bad*.mkv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.WriteString("not an mp4")
+	f.WriteString("\x00\x00\x00\x20ftypisom not an mp4")
 	f.Close()
 	mustFatal(t, func() { commands.CmdKeyframes(f.Name()) })
 }
@@ -470,27 +471,19 @@ func TestCmdExtractSubtitle_UnknownFormat(t *testing.T) {
 
 func TestCmdExtractSubtitle_MP4SrtFatal(t *testing.T) {
 	// MP4 source + -format srt → Fatal (MP4 subtitle extraction supports only vtt).
-	f, err := os.CreateTemp(t.TempDir(), "fake*.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
+	src := mp4Copy(t, "bframes_aac.mp4")
 	out := filepath.Join(t.TempDir(), "sub.srt")
 	mustFatal(t, func() {
-		commands.CmdExtractSubtitle([]string{f.Name(), "-t", "1", "-o", out, "-format", "srt"})
+		commands.CmdExtractSubtitle([]string{src, "-t", "1", "-o", out, "-format", "srt"})
 	})
 }
 
 func TestCmdExtractSubtitle_MP4AssFatal(t *testing.T) {
 	// MP4 source + -format ass → Fatal.
-	f, err := os.CreateTemp(t.TempDir(), "fake*.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
+	src := mp4Copy(t, "bframes_aac.mp4")
 	out := filepath.Join(t.TempDir(), "sub.ass")
 	mustFatal(t, func() {
-		commands.CmdExtractSubtitle([]string{f.Name(), "-t", "1", "-o", out, "-format", "ass"})
+		commands.CmdExtractSubtitle([]string{src, "-t", "1", "-o", out, "-format", "ass"})
 	})
 }
 
@@ -511,11 +504,12 @@ func TestCmdExtractSubtitle_BadVTTOutputDir(t *testing.T) {
 }
 
 func TestCmdExtractSubtitle_MP4VTTPath(t *testing.T) {
-	// extractWebVTT with MP4 source path (covers isMP4Path branch in extractWebVTT).
-	// Use a nonexistent .mp4 so mp4.ExtractSubtitleWebVTT fails → Fatal.
+	// extractWebVTT with MP4 source path (covers isMP4Content branch in extractWebVTT).
+	// An MP4 without track 99 so mp4.ExtractSubtitleWebVTT fails → Fatal.
+	src := mp4Copy(t, "bframes_aac.mp4")
 	out := filepath.Join(t.TempDir(), "sub.vtt")
 	mustFatal(t, func() {
-		commands.CmdExtractSubtitle([]string{"/no/such/file.mp4", "-t", "1", "-o", out, "-format", "vtt"})
+		commands.CmdExtractSubtitle([]string{src, "-t", "99", "-o", out, "-format", "vtt"})
 	})
 }
 

@@ -16,12 +16,9 @@ import (
 // Cues seek index head-only; MP4 builds the sample table (opt-in). A Cues-less
 // Matroska builds the complete keyframe index from a sequential structural pass.
 func CmdKeyframes(path string) {
-	var fs *mkv.FS
-	if isRemoteURL(path) {
-		fs = remotePort(path) // head-only over HTTP Range requests / s3 SigV4
-	}
+	isMP4, fs := sniffSource(path) // remote: head-only over HTTP Range requests / s3 SigV4
 	var ks []int64
-	if isMP4Path(path) {
+	if isMP4 {
 		c, _, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: true, FS: fs})
 		if err != nil {
 			FatalErr(err)

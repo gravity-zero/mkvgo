@@ -2,13 +2,13 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,34 +279,121 @@ func openInput(path string) *matroska.Container {
 	return OpenMKV(path)
 }
 
-// isMP4Path reports whether path looks like an ISO-BMFF file the mp4 package
-// handles (by extension; query/fragment suffixes of a URL are ignored).
-func isMP4Path(path string) bool {
-	if i := strings.IndexAny(path, "?#"); i >= 0 {
-		path = path[:i]
-	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp4", ".m4v", ".m4a", ".mov":
-		return true
-	}
-	return false
+// isMP4Content sniffs the source's first bytes for an ISO-BMFF box structure,
+// as the library does (mp4.OpensLikeISOBMFF): the extension never decides, so
+// a mislabeled file routes correctly. "-" and read errors return false and let
+// the Matroska engine report them.
+func isMP4Content(path string) bool {
+	isMP4, _ := sniffSource(path)
+	return isMP4
 }
 
-// isMP4Content sniffs the file's first bytes for an ISO-BMFF box structure -
-// the extension never decides, so a mislabeled file routes correctly. Used by
-// the commands whose two engines write differently (retime, diagnose); read
-// errors return false and let the Matroska engine report them.
-func isMP4Content(path string) bool {
-	f, err := os.Open(path)
+// sniffSource is isMP4Content plus the FS to open path with: nil for a local
+// file, for a remote one a port whose first open of path is the sniffing
+// reader itself, so the sniff costs no request of its own.
+func sniffSource(path string) (bool, *mkv.FS) {
+	if path == "-" {
+		return false, nil
+	}
+	if !isRemoteURL(path) {
+		f, err := os.Open(path)
+		if err != nil {
+			return false, nil
+		}
+		defer f.Close()
+		head := make([]byte, 8)
+		if _, err := io.ReadFull(f, head); err != nil {
+			return false, nil
+		}
+		return mp4.OpensLikeISOBMFF(head), nil
+	}
+	port := remotePort(path)
+	f, err := port.DoOpen(path)
 	if err != nil {
-		return false
+		return false, port
 	}
-	defer f.Close()
 	head := make([]byte, 8)
-	if _, err := io.ReadFull(f, head); err != nil {
-		return false
+	n, err := io.ReadFull(f, head)
+	r, ok := f.(remoteReader)
+	if !ok {
+		f.Close()
+		return err == nil && mp4.OpensLikeISOBMFF(head), port
 	}
-	return mp4.OpensLikeISOBMFF(head)
+	replay := &headReplay{remoteReader: r, head: head[:n]}
+	var once sync.Once
+	first := func(p string) (mkv.ReadSeekCloser, bool) {
+		var h mkv.ReadSeekCloser
+		if p == path {
+			once.Do(func() { h = replay })
+		}
+		return h, h != nil
+	}
+	fs := *port
+	fs.Open = func(p string) (mkv.ReadSeekCloser, error) {
+		if h, ok := first(p); ok {
+			return h, nil
+		}
+		return port.DoOpen(p)
+	}
+	fs.OpenContext = func(ctx context.Context, p string) (mkv.ReadSeekCloser, error) {
+		if h, ok := first(p); ok {
+			return h, nil
+		}
+		return port.DoOpenContext(ctx, p)
+	}
+	return err == nil && mp4.OpensLikeISOBMFF(head), &fs
+}
+
+// remoteReader is what an httpfs/s3fs reader offers beyond reading: headReplay
+// keeps it so the engines still pin, hint and read ranges through it.
+type remoteReader interface {
+	mkv.ReadSeekCloser
+	io.ReaderAt
+	mkv.PinnedReader
+	mkv.RangeHinter
+	Free(off, n int64) bool
+	Stat() (os.FileInfo, error)
+}
+
+// headReplay serves the sniffed head again, then reads on from the response
+// the sniff left open.
+type headReplay struct {
+	remoteReader
+	head []byte
+	pos  int64
+}
+
+func (h *headReplay) Read(p []byte) (int, error) {
+	if h.pos < int64(len(h.head)) {
+		n := copy(p, h.head[h.pos:])
+		h.pos += int64(n)
+		return n, nil
+	}
+	if _, err := h.remoteReader.Seek(h.pos, io.SeekStart); err != nil {
+		return 0, err
+	}
+	n, err := h.remoteReader.Read(p)
+	h.pos += int64(n)
+	return n, err
+}
+
+func (h *headReplay) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+		h.pos = offset
+	case io.SeekCurrent:
+		h.pos += offset
+	default:
+		next, err := h.remoteReader.Seek(offset, whence)
+		if err != nil {
+			return 0, err
+		}
+		h.pos = next
+	}
+	if h.pos < 0 {
+		return 0, fmt.Errorf("negative seek %d", h.pos)
+	}
+	return h.pos, nil
 }
 
 // loadContainer reads metadata from path, handling MP4 (mp4.OpenMeta) as well as
@@ -317,7 +404,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	if isRemoteURL(path) {
 		return loadRemote(path, keyframes)
 	}
-	if path != "-" && isMP4Path(path) {
+	if path != "-" && isMP4Content(path) {
 		return loadMP4Meta(path, keyframes)
 	}
 	if path == "-" {
@@ -384,8 +471,8 @@ func sourceFS(src string) *mkv.FS {
 // walk of every Cluster, a full download. url may be an http(s):// or an
 // s3://bucket/key reference.
 func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	fs := remotePort(url)
-	if isMP4Path(url) {
+	isMP4, fs := sniffSource(url)
+	if isMP4 {
 		c, dropped, err := mp4.OpenMeta(cliCtx, url,
 			mp4.Options{Keyframes: keyframes, InBandColour: InBand, FS: fs})
 		if err != nil {

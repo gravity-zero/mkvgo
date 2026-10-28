@@ -19,6 +19,8 @@ Global flags:
 
 See [Exit status](#exit-status).
 
+A source is told MP4/MOV or Matroska/WebM from its first bytes, never its extension: a Matroska named `.mp4` is read as a Matroska, an MP4 named `.mkv` as an MP4. A remote source is sniffed with one ranged read.
+
 **Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
 is accepted as the input by the inspection commands (`info`, `tracks`,
 `probe`, `keyframes`, `analyze`, `chapters`, `tags`, `attachments`) and as

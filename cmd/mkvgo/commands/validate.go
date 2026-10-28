@@ -75,7 +75,7 @@ func CmdCompare(args []string) {
 	}
 	if blocks {
 		for _, p := range append([]string{pathA}, parts...) {
-			if isMP4Path(p) {
+			if isMP4Content(p) {
 				Fatal("-blocks compares Matroska/WebM content only (remux the MP4 side to MKV first)")
 			}
 		}

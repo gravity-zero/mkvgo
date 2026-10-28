@@ -76,7 +76,7 @@ func CmdExtractSubtitle(args []string) {
 		if format != "vtt" && format != "pgs" {
 			FatalUsage("-index applies to -format vtt and -format pgs only")
 		}
-		if isMP4Path(source) {
+		if isMP4Content(source) {
 			Fatal("-index applies to MKV/WebM only: an MP4 already carries its own sample table")
 		}
 		n, err := extractFromIndex(source, trackID, format, indexPath, outPath, opts)
@@ -96,7 +96,7 @@ func CmdExtractSubtitle(args []string) {
 	case "vtt":
 		err = extractWebVTT(source, trackID, outPath, opts)
 	case "pgs":
-		if isMP4Path(source) {
+		if isMP4Content(source) {
 			Fatal("PGS bitmap subtitles are a Matroska codec: -format pgs applies to MKV/WebM only")
 		}
 		var n int
@@ -108,12 +108,12 @@ func CmdExtractSubtitle(args []string) {
 			return
 		}
 	case "srt":
-		if isMP4Path(source) {
+		if isMP4Content(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
 		err = matroska.ExtractSubtitle(cliCtx, source, trackID, outPath, opts)
 	case "ass", "ssa":
-		if isMP4Path(source) {
+		if isMP4Content(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
 		err = matroska.ExtractASS(cliCtx, source, trackID, outPath, opts)
@@ -130,7 +130,7 @@ func CmdExtractSubtitle(args []string) {
 // outPath as WebVTT.
 func extractWebVTT(source string, trackID uint64, outPath string, opts matroska.Options) error {
 	return writeFileFrom(outPath, func(out io.Writer) error {
-		if isMP4Path(source) {
+		if isMP4Content(source) {
 			return mp4.ExtractSubtitleWebVTT(cliCtx, source, trackID, out)
 		}
 		return matroska.ExtractSubtitleWebVTT(cliCtx, source, trackID, out, opts)

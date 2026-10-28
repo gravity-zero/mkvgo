@@ -19,13 +19,14 @@ func CmdAnalyze(args []string) {
 		FatalUsage("usage: " + CmdUsage["analyze"])
 	}
 	path := rest[0]
-	if isMP4Path(path) {
+	isMP4, fs := sniffSource(path)
+	if isMP4 {
 		Fatal("analyze supports Matroska/WebM only for now (MP4 is a follow-up - see docs/library.md)")
 	}
 
 	var opts []matroska.Options
-	if isRemoteURL(path) {
-		opts = append(opts, matroska.Options{FS: remotePort(path)})
+	if fs != nil {
+		opts = append(opts, matroska.Options{FS: fs})
 	}
 
 	report, err := matroska.Analyze(cliCtx, path, opts...)

@@ -528,8 +528,9 @@ func TestProbeQuickTimeChapterTrack(t *testing.T) {
 	}
 }
 
-// chplRequests and qtChapterRequests are what a remote probe of chaptersMP4 costs, with its chpl and without it.
-const chplRequests, qtChapterRequests = 2, 3
+// chplRequests and qtChapterRequests are what a remote probe of chaptersMP4 costs, with its chpl and without it:
+// the head window once (the content sniff hands its reader on), then the chapter samples.
+const chplRequests, qtChapterRequests = 1, 2
 
 // chplReads and qtChapterReads are the read calls of a local metadata read of chaptersMP4, with its chpl and without it.
 const chplReads, qtChapterReads = 4, 5

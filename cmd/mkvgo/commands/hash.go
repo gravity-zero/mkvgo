@@ -60,7 +60,7 @@ func CmdVerify(args []string) {
 		}
 	}
 
-	if isMP4Path(path) {
+	if isMP4Content(path) {
 		mismatches, err := mp4.VerifyContentHashes(cliCtx, path,
 			mp4.Options{Progress: NewProgressBar()})
 		ClearProgress()
