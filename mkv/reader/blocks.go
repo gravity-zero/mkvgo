@@ -996,7 +996,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 	offset := 0
 	for i := 0; i < frameCount; i++ {
 		end := offset + frameSizes[i]
-		if int64(end) > framesLen {
+		if end < offset || int64(end) > framesLen {
 			return mkv.Block{}, fmt.Errorf("laced frame %d overflows: need %d, have %d", i, end, framesLen)
 		}
 		tcI := tc

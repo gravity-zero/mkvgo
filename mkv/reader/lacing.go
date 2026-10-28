@@ -3,6 +3,7 @@ package reader
 import (
 	"fmt"
 	"io"
+	"math"
 	"math/bits"
 )
 
@@ -11,6 +12,9 @@ import (
 // dataLen - the bytes the header and frames take together - as
 // decodeLacingSizes does from the whole payload.
 func readLaceHeader(r io.ByteReader, lacing byte, frameCount int, dataLen int64) (sizes []int, headerLen int, err error) {
+	if dataLen > math.MaxInt {
+		return nil, 0, fmt.Errorf("laced block of %d bytes is larger than this platform addresses", dataLen)
+	}
 	if lacing == lacingFixed {
 		if dataLen%int64(frameCount) != 0 {
 			return nil, 0, fmt.Errorf("fixed lacing: %d data bytes not divisible by %d frames", dataLen, frameCount)
@@ -76,31 +80,37 @@ func decodeLacingSizes(lacing byte, raw []byte, frameCount int) (sizes []int, he
 }
 
 // decodeLacingSizesLen decodes a lace header from raw, the last frame sized from total, the payload's length (raw may hold only the header).
+// Sizes are summed as int64 and checked against the payload before they are taken as int: a 32-bit int would wrap.
 func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64) (sizes []int, headerLen int, err error) {
+	if total64 < 0 || total64 > math.MaxInt {
+		return nil, 0, fmt.Errorf("laced block of %d bytes is larger than this platform addresses", total64)
+	}
 	n := int(total64)
 	sizes = make([]int, frameCount)
 	switch lacing {
 	case lacingXiph:
 		pos := 0
-		total := 0
+		var total int64
 		for i := 0; i < frameCount-1; i++ {
-			sz := 0
+			var sz int64
 			for pos < len(raw) {
 				val := raw[pos]
 				pos++
-				sz += int(val)
+				sz += int64(val)
 				if val < 255 {
 					break
 				}
 			}
-			sizes[i] = sz
-			total += sz
+			if total += sz; total > total64 {
+				return nil, 0, fmt.Errorf("xiph lacing: frames past %d run over the data %d", i, n)
+			}
+			sizes[i] = int(sz)
 		}
-		last := n - pos - total
+		last := total64 - int64(pos) - total
 		if last < 0 {
 			return nil, 0, fmt.Errorf("xiph lacing: total %d exceeds data %d", total, n-pos)
 		}
-		sizes[frameCount-1] = last
+		sizes[frameCount-1] = int(last)
 		return sizes, pos, nil
 	case lacingFixed:
 		if n%frameCount != 0 {
@@ -121,13 +131,13 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 		if width == 0 {
 			return nil, 0, fmt.Errorf("ebml lacing: invalid first-size vint")
 		}
-		firstSize := int(first & ^(uint64(1) << uint(width*7)))
-		if firstSize > n {
+		firstSize := first & ^(uint64(1) << uint(width*7))
+		if firstSize > uint64(n) {
 			return nil, 0, fmt.Errorf("ebml lacing: first frame of %d bytes runs over the data %d", firstSize, n)
 		}
-		sizes[0] = firstSize
+		sizes[0] = int(firstSize)
 		pos += width
-		total := firstSize
+		total := int64(firstSize)
 		for i := 1; i < frameCount-1; i++ {
 			if pos > len(raw) {
 				return nil, 0, fmt.Errorf("ebml lacing: header truncated at frame %d", i)
@@ -145,19 +155,20 @@ func decodeLacingSizesLen(lacing byte, raw []byte, frameCount int, total64 int64
 			bias := int64(1)<<(dataBits-1) - 1
 			stripped := int64(val & ^(uint64(1) << dataBits))
 			diff := stripped - bias
-			sizes[i] = sizes[i-1] + int(diff)
-			if sizes[i] < 0 {
+			sz := int64(sizes[i-1]) + diff
+			if sz < 0 {
 				return nil, 0, fmt.Errorf("ebml lacing: negative frame size at index %d", i)
 			}
-			if total += sizes[i]; sizes[i] > n || total > n {
+			if total += sz; sz > total64 || total > total64 {
 				return nil, 0, fmt.Errorf("ebml lacing: frames past %d run over the data %d", i, n)
 			}
+			sizes[i] = int(sz)
 		}
-		last := n - pos - total
+		last := total64 - int64(pos) - total
 		if last < 0 {
 			return nil, 0, fmt.Errorf("ebml lacing: total %d exceeds data %d", total, n-pos)
 		}
-		sizes[frameCount-1] = last
+		sizes[frameCount-1] = int(last)
 		return sizes, pos, nil
 	}
 	return nil, 0, fmt.Errorf("unknown lacing type %d", lacing)
