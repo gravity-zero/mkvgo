@@ -65,6 +65,7 @@ func unpackTrack(b []byte) (trackSegment, []int64) {
 		seg.samples[i] = fragSample{size: uint32(v >> 1), sync: v&1 == 1, dtsTS: dts, durTS: s(), ctsTS: int32(s())}
 		off += s()
 		offs[i] = off
+		seg.samples[i].srcOff = off
 	}
 	return seg, offs
 }

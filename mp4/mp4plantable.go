@@ -285,6 +285,7 @@ func (t *mp4PlanTable) window(n int) (samples []fragSample, offs []int64) {
 			}
 		}
 		offs[i] = off
+		samples[i].srcOff = off
 		off += int64(samples[i].size)
 		samples[i].dtsTS = dts
 		dts += samples[i].durTS

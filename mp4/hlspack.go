@@ -119,7 +119,7 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 				}
 			}
 			ft.offs = append(ft.offs, s.offset)
-			ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
+			ft.samples = append(ft.samples, fragSample{size: s.size, ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync, srcOff: s.offset})
 			if ft.ptsTS != nil {
 				ft.ptsTS = append(ft.ptsTS, s.ctsTicks)
 			}
@@ -149,7 +149,11 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		}
 		// size is the written (possibly converted) byte count; processed tracks
 		// progress against the source, so it keeps the source sample size.
-		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)), ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync})
+		fs := fragSample{size: uint32(len(data)), ptsMs: s.ctsMs, blockPtsMs: s.ctsMs, sync: s.sync}
+		if ft.outTrack.conv == nil {
+			fs.srcOff = s.offset // a converted frame is not the source's bytes: it has no place there
+		}
+		ft.samples = append(ft.samples, fs)
 		if ft.ptsTS != nil {
 			ft.ptsTS = append(ft.ptsTS, s.ctsTicks)
 		}
@@ -220,7 +224,7 @@ func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack)
 				}
 			}
 			ft.samples[i] = fragSample{size: samples[i].size, ptsMs: samples[i].ctsMs,
-				blockPtsMs: samples[i].ctsMs, sync: samples[i].sync}
+				blockPtsMs: samples[i].ctsMs, sync: samples[i].sync, srcOff: samples[i].offset}
 			offs[i] = samples[i].offset
 			if ptsTS != nil {
 				ptsTS[i] = samples[i].ctsTicks

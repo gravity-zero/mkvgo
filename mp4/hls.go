@@ -631,8 +631,11 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 		if _, err := ft.tmp.Write(data); err != nil {
 			return errf("buffer sample: %w", err)
 		}
-		ft.samples = append(ft.samples, fragSample{size: uint32(len(data)),
-			ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe})
+		fs := fragSample{size: uint32(len(data)), ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe}
+		if ft.outTrack.conv == nil {
+			fs.srcOff = b.DataOffset // a converted frame is not the source's bytes: it has no place there
+		}
+		ft.samples = append(ft.samples, fs)
 	}
 	return nil
 }
@@ -651,7 +654,7 @@ func collectDirectSample(ft *fragTrack, b mkv.Block, src io.ReadSeeker) error {
 	}
 	ft.offs = append(ft.offs, b.DataOffset)
 	ft.samples = append(ft.samples, fragSample{size: uint32(size),
-		ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe})
+		ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe, srcOff: b.DataOffset})
 	return nil
 }
 

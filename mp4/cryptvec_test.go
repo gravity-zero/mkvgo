@@ -35,7 +35,7 @@ var (
 	// sha256 of init + seg00001 (video) as mkvgo encrypts them, and the
 	// streamhash of their decryption by ffmpeg, equal to the source's video.
 	cryptVecSums = map[string]string{
-		"cenc": "9e2faa284476f762201264f9e523d7a854141382ba37c65ea927a79d3ac17c0d",
+		"cenc": "9b678fdf1c779c6f6082985964f8049d09df6c3c6e70150d37544d9a57fa936b",
 		"cbcs": "f36b1cdae872e3bed48daa88666990f598bfb398391727d0d901ee1f84f06204",
 	}
 	cryptVecPlainVideo = "119527985453b51e58d57c25185c7b69a8f2743bf6799006574bf9722d04b76d"

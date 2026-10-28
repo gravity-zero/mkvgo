@@ -14,6 +14,7 @@ func TestPackTrackRoundTrip(t *testing.T) {
 	dts, off := int64(90000), int64(5_000_000_000)
 	for i := 0; i < 50; i++ {
 		s := fragSample{size: uint32(1000 + 977*i), sync: i%25 == 0, dtsTS: dts, durTS: 3750 + int64(i%3), ctsTS: int32(7500 - 3750*(i%4))}
+		s.srcOff = off // unpacked from the offsets
 		seg.samples = append(seg.samples, s)
 		offs = append(offs, off)
 		dts += s.durTS

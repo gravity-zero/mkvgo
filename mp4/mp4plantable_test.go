@@ -81,6 +81,7 @@ func TestMP4PlanTableWindowsMatchSamples(t *testing.T) {
 				for i := range got {
 					want := tc.samples[start+i]
 					want.ptsMs, want.blockPtsMs = 0, 0 // not carried: no window reader uses them
+					want.srcOff = tc.offs[start+i]
 					if got[i] != want {
 						t.Errorf("window %d sample %d = %+v, want %+v", k, i, got[i], want)
 					}

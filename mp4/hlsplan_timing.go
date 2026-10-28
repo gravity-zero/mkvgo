@@ -18,7 +18,7 @@ type segSample struct {
 
 // sampleOf frames one walked block as a window sample: its decoded bytes, or when the walk skipped its payload its place in the source.
 func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
-	meta := fragSample{ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe}
+	meta := fragSample{ptsMs: b.Timecode, blockPtsMs: b.BlockTimecode, sync: b.Keyframe, srcOff: b.DataOffset}
 	if structure {
 		meta.size = uint32(len(pt.ft.outTrack.mkv.HeaderStripping) + int(b.Size))
 		return segSample{fragSample: meta, off: b.DataOffset, end: b.DataOffset + b.Size}, nil
@@ -165,7 +165,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 		if nextPts >= 0 {
 			nextK = clock.peek(nextPts)
 			window[len(window)-1].durTS = nextK*gridTS - clock.k*gridTS
-			markReachingNext(window, nextK*gridTS)
+			keepLastForward(window)
 		}
 		if nextPts < 0 || window[len(window)-1].cut { // the track's final sample (fillFragTiming's grid rule), or one a damaged region cut short
 			window[len(window)-1].durTS = gridTS
@@ -196,19 +196,16 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts, startK int64
 	}
 	if last := len(window) - 1; nextPts >= 0 && !window[last].cut {
 		window[last].durTS = scale(nextPts) - dts[last]
-		markReachingNext(window, scale(nextPts)-base)
+		keepLastForward(window)
 	} else { // the track's final sample (fillFragTiming's rule), or one a damaged region cut short
 		window[last].durTS = pt.lastDurTS
 	}
 	return dts[0] - base, windowHasCTS(window), nextK
 }
 
-// markReachingNext flags the samples timed at or past nextDTS, where the next window opens, and keeps the last one
-// lasting forward: the whole-track pass would have pushed the next window instead.
-func markReachingNext(window []fragSample, nextDTS int64) {
-	for x := range window {
-		window[x].reachesNext = window[x].dtsTS >= nextDTS
-	}
+// keepLastForward keeps the window's last sample lasting forward: the whole-track pass would have pushed the next
+// window instead.
+func keepLastForward(window []fragSample) {
 	if last := &window[len(window)-1]; last.durTS <= 0 {
 		last.durTS = 1
 	}

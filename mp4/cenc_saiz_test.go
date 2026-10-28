@@ -17,7 +17,7 @@ func TestSaizStatesEachSencEntryWhole(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		e, err := k.entry(sample, 0)
+		e, err := k.entry(sample, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

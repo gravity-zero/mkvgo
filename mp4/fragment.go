@@ -47,13 +47,14 @@ type fragSample struct {
 	dtsTS int64
 	durTS int64
 	ctsTS int32
-	// reachesNext marks a sample an on-demand window times at or past the next window's first decode time, which
-	// the next segment's 'cenc' IV would repeat.
-	reachesNext bool
 	// cut marks the last sample before a damaged region a window walk passed
 	// over: its duration is the track's frame duration, not the gap to the
 	// first sample past the region.
 	cut bool
+	// srcOff is where the sample's stored bytes sit in the source (after any
+	// stripped header): what its 'cenc' IV derives from, one sample one place.
+	// 0 when the sample has none there, a converted frame.
+	srcOff int64
 }
 
 // buildInitSegment assembles the fMP4 initialisation segment: ftyp (with the

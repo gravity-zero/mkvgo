@@ -1325,11 +1325,15 @@ pipeline: packaging only, with a caller-supplied key -- no license server, no
 DRM handshake. Two schemes:
 
 - **`"cenc"`** -- AES-CTR, a per-sample Initialization Vector (the caller's base
-  IV plus the sample's absolute decode timestamp -- computed identically by
-  `RemuxToHLS` and `PlanHLS`, so the ciphertext is byte-identical between the
-  two). Every track shares the key, so each track but the video adds its own
-  value to the IV's top byte, and each ABR variant past the first its index
-  times 2^48: no two samples of a presentation share an IV. No pattern: every
+  IV plus where the sample's bytes sit in the source -- the same place for
+  `RemuxToHLS`, `Resource` and `Open`, whatever order the segments are asked in,
+  so the ciphertext is byte-identical between them). One place holds one
+  sample, so no two different samples of a track share an IV. Every track
+  shares the key, so each track but the video adds its own value to the IV's
+  top byte, and each ABR variant past the first its index times 2^48: no two
+  samples of a presentation share an IV. A sample with no place in the source
+  (a frame an `Options.FrameConverter` converted), or one 2^48 bytes or more
+  into it, is refused: package such a source with `"cbcs"`. No pattern: every
   protected byte is encrypted.
 - **`"cbcs"`** -- AES-CBC with a constant IV and, on video, a
   1-encrypted:9-clear 16-byte-block pattern per NAL unit's protected region

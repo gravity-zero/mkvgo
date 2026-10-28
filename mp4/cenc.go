@@ -24,13 +24,14 @@ package mp4
 //
 // IV derivation (the part that must hold plan ↔ full-pass byte parity, see
 // hlsplan.go's doc comment): the per-sample 'cenc' IV is the caller's base IV
-// plus the sample's dtsTS - its absolute decode timestamp in the track's
-// media timescale, rebased to 0 at the track's first sample. dtsTS is exactly
-// the value fillFragTiming (full pass) and segmentTrack/mp4SegmentTrack (the
-// on-demand plan) already compute identically for the trun - that identity is
-// what makes the derived ciphertext byte-identical between the two paths
-// without needing a literal running sample counter (which the on-demand plan
-// cannot derive without walking every prior segment). 'cbcs' has no per-sample
+// plus where the sample's stored bytes sit in the source (Block.DataOffset, an
+// MP4's stco/co64 plus stsz), plus the track's domain. One place holds one
+// sample's bytes, so no two different plaintexts of a track share an IV, and
+// the place is known alike to the full pass, Resource and Open, whatever
+// order the segments are asked in - the decode time it replaces was not: two
+// samples could share one, and an on-demand window's timing could depend on
+// which window was built first. A sample with no place in the source (a
+// converted frame) is refused under 'cenc'. 'cbcs' has no per-sample
 // IV at all - every sample reuses the track's constant IV (from tenc), so its
 // ciphertext trivially agrees between the two paths.
 
@@ -55,7 +56,7 @@ import (
 // encodings the pair (Key, base IV) must be unique: encrypting two different
 // files with the same Key and the same base IV under "cenc" makes their
 // per-sample IVs - and therefore their AES-CTR keystreams - collide wherever
-// the decode timestamps overlap, which leaks plaintext. Use a fresh Key or a
+// two samples sit at the same offset in their files, which leaks plaintext. Use a fresh Key or a
 // fresh base IV per encoding.
 type CENCOptions struct {
 	// Scheme selects the encryption scheme: "cenc" (AES-CTR) or "cbcs"
@@ -395,25 +396,25 @@ func addUint64BE(b []byte, v uint64) {
 }
 
 // cencSampleIV returns the scheme-'cenc' per-sample Initialization Vector:
-// base (the caller's IV, 8 or 16 bytes) plus dtsTS - see this file's doc
-// comment for why dtsTS (rather than a literal enumerated counter) is what
-// keeps the plan and the full pass byte-identical.
+// base (the caller's IV, 8 or 16 bytes) plus srcOff, where the sample's bytes
+// sit in the source - see this file's doc comment.
 //
-// dtsTS is added to the HIGH-order 8 bytes only. For a 16-byte IV the low 8
+// srcOff is added to the HIGH-order 8 bytes only. For a 16-byte IV the low 8
 // bytes are the AES-CTR block counter (incremented once per 16-byte block
 // within a sample): perturbing them per sample would let a large sample's
 // block counter run into the next sample's starting counter and reuse the
 // keystream - a catastrophic CTR failure (e.g. a 50 KB keyframe spans ~3125
-// blocks while dtsTS advances by far less between frames). Varying only the
+// blocks while the next sample sits 50 KB on). Varying only the
 // high 8 bytes keeps every sample's counter range disjoint. For an 8-byte IV
 // the whole IV IS the high 8 bytes (the counter block's low 8 are zero), so
 // the same code is correct and unchanged there.
 //
 // domain sets the track apart: every track shares the key, so two tracks'
-// samples at the same dtsTS would otherwise share an IV and a keystream.
-func cencSampleIV(base []byte, dtsTS int64, domain uint64) []byte {
+// samples at the same offset - an ABR ladder's variants - would otherwise share
+// an IV and a keystream.
+func cencSampleIV(base []byte, srcOff int64, domain uint64) []byte {
 	iv := append([]byte(nil), base...)
-	addUint64BE(iv[:8], uint64(dtsTS)+domain)
+	addUint64BE(iv[:8], uint64(srcOff)+domain)
 	return iv
 }
 
@@ -431,7 +432,8 @@ func cencVariantsFit(c *CENCOptions, n int) error {
 
 // cencForVariant is c for ABR variant i (0-based): 'cenc' variants share the
 // key, so each past the first takes the base IV plus i·2^48, below the track
-// domains (cencIVDomain) and past any dtsTS a variant reaches; the first is c.
+// domains (cencIVDomain) and past any sample offset a variant has (2^48); the
+// first is c.
 func cencForVariant(c *CENCOptions, i int) *CENCOptions {
 	if c == nil || c.Scheme != "cenc" || i == 0 {
 		return c
@@ -442,9 +444,9 @@ func cencForVariant(c *CENCOptions, i int) *CENCOptions {
 	return &v
 }
 
-// cencIVDomain is what a track adds to its samples' IVs: 0 for the video, so
-// its IVs are what they always were, and for any other track its ID's own
-// value in the top byte, never 0, past any dtsTS a presentation reaches (2^56).
+// cencIVDomain is what a track adds to its samples' IVs: 0 for the video, and
+// for any other track its ID's own value in the top byte, never 0, past any
+// sample offset and variant a presentation reaches (2^56).
 func cencIVDomain(isVideo bool, trackID uint64) uint64 {
 	if isVideo {
 		return 0
@@ -555,7 +557,7 @@ func cbcsEncryptWholeSample(block cipher.Block, iv []byte, sample []byte) {
 // prepareCENCSegment encrypts one track's segment in place (over a copy of
 // data) and returns the traf's CENC auxiliary data alongside the ciphertext.
 // data holds every sample in samples back-to-back, in decode order, exactly
-// as segmentWindow/segmentTrack lay them out; samples' dtsTS values are what
+// as segmentWindow/segmentTrack lay them out; samples' srcOff values are what
 // the per-sample 'cenc' IV derives from (see this file's doc comment).
 func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
 	k, err := newCENCCipher(c, isVideo, codec, private, trackID)
@@ -589,8 +591,6 @@ type cencCipher struct {
 	domain   uint64 // added to every 'cenc' IV of the track (cencIVDomain)
 	splitter videoSubsampleSplitter
 	trackID  uint64
-	lastDTS  int64 // the previous sample's decode time, past the first ('cenc' IVs must not repeat)
-	started  bool
 }
 
 func newCENCCipher(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64) (*cencCipher, error) {
@@ -610,16 +610,14 @@ func newCENCCipher(c *CENCOptions, isVideo bool, codec string, private []byte, t
 	return k, nil
 }
 
-// sampleEntry is entry for a sample of a segment, refusing one whose 'cenc' IV the next segment repeats.
+// sampleEntry is entry for a sample of a segment.
 func (k *cencCipher) sampleEntry(sample []byte, s fragSample) (sencEntry, error) {
-	if s.reachesNext && k.c.Scheme == "cenc" {
-		return sencEntry{}, errf("Options.CENC: track %d has samples decoded at the same time on both sides of a segment boundary, which the 'cenc' scheme would encrypt with one IV; package it with the cbcs scheme", k.trackID)
-	}
-	return k.entry(sample, s.dtsTS)
+	return k.entry(sample, s.srcOff)
 }
 
-// entry is a plaintext sample's senc entry: its IV ('cenc') and, for video, its clear/protected subsamples.
-func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
+// entry is a plaintext sample's senc entry: its IV ('cenc', from srcOff, where its bytes sit in the source) and, for
+// video, its clear/protected subsamples.
+func (k *cencCipher) entry(sample []byte, srcOff int64) (sencEntry, error) {
 	var e sencEntry
 	if k.isVideo {
 		subs, err := k.splitter.split(sample)
@@ -629,15 +627,14 @@ func (k *cencCipher) entry(sample []byte, dtsTS int64) (sencEntry, error) {
 		e.subs = subs
 	}
 	if k.c.Scheme == "cenc" {
-		if dtsTS < 0 || dtsTS >= 1<<48 {
-			// The track domains (2^56 up) and the variant offsets (2^48 up) stay apart only below 2^48 ticks.
-			return e, errf("Options.CENC: track %d has a decode time of %d ticks, past the 2^48 the 'cenc' IV domains keep apart; package it with the cbcs scheme", k.trackID, dtsTS)
+		if srcOff <= 0 {
+			return e, errf("Options.CENC: track %d has samples converted on the way (Options.FrameConverter), which have no place in the source the 'cenc' scheme derives its IVs from; package it with the cbcs scheme", k.trackID)
 		}
-		if k.started && dtsTS <= k.lastDTS {
-			return e, errf("Options.CENC: track %d has two samples decoded at the same time, which the 'cenc' scheme would encrypt with one IV; package it with the cbcs scheme", k.trackID)
+		if srcOff >= 1<<48 {
+			// The track domains (2^56 up) and the variant offsets (2^48 up) stay apart only below 2^48 bytes.
+			return e, errf("Options.CENC: track %d has a sample %d bytes into the source, past the 2^48 the 'cenc' IV domains keep apart; package it with the cbcs scheme", k.trackID, srcOff)
 		}
-		k.lastDTS, k.started = dtsTS, true
-		e.iv = cencSampleIV(k.c.IV, dtsTS, k.domain)
+		e.iv = cencSampleIV(k.c.IV, srcOff, k.domain)
 	}
 	if k.isVideo {
 		subs, err := fitSaiz(e.subs, len(e.iv))

@@ -9,10 +9,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// TestCENCIVsDistinctWithinATrack: a 'cenc' sample's IV is the base plus its decode time, and the decode times were
-// the sorted presentation times as they are: two video blocks stamped alike - a broken remux's duplicate timestamp -
-// took one IV, and their AES-CTR keystream with it. Every sample of a track takes an IV of its own now, in the full
-// pass and the plan alike.
+// TestCENCIVsDistinctWithinATrack: a 'cenc' sample's IV was the base plus its decode time, and two video blocks
+// stamped alike - a broken remux's duplicate timestamp - took one IV, and their AES-CTR keystream with it. The IV
+// comes from the sample's place in the source: every sample of a track takes one of its own, in the full pass and
+// the plan alike.
 func TestCENCIVsDistinctWithinATrack(t *testing.T) {
 	w, h := uint32(64), uint32(48)
 	var blocks []genBlock
@@ -59,29 +59,29 @@ func TestCENCIVsDistinctWithinATrack(t *testing.T) {
 	}
 }
 
-// TestCENCRefusesARepeatedIV: whatever derived the decode times - an MP4 source's stts may hold a zero delta - two
-// samples of a fragment at one decode time are refused under 'cenc' rather than encrypted with one IV.
-func TestCENCRefusesARepeatedIV(t *testing.T) {
+// TestCENCIVFromTheSourceOffset: the IV is the base plus where the sample's bytes sit in the source; a sample with no
+// place there (a converted frame), or one past 2^48 bytes, where the variant offsets (2^48 up) and the track domains
+// (2^56 up) start, is refused under 'cenc'.
+func TestCENCIVFromTheSourceOffset(t *testing.T) {
 	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}, false, "aac", nil, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.entry([]byte{1}, 100); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := k.entry([]byte{2}, 100); err == nil {
-		t.Error("a second sample at decode time 100 took an IV, want it refused")
-	}
-}
-
-// TestCENCRefusesADecodeTimePastTheDomains: the IV is the base plus the decode time plus the track's domain (2^56
-// up) or the variant's offset (2^48 up); a forged stts reaching 2^48 ticks would walk one track's IVs into another's.
-func TestCENCRefusesADecodeTimePastTheDomains(t *testing.T) {
-	k, err := newCENCCipher(&CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: cencIVFor("cenc"), InlineKey: true}, false, "aac", nil, 2)
+	a, err := k.entry([]byte{1}, 100)
 	if err != nil {
 		t.Fatal(err)
+	}
+	b, err := k.entry([]byte{2}, 101)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a.iv) == string(b.iv) {
+		t.Error("two samples at two places took one IV")
+	}
+	if _, err := k.entry([]byte{1}, 0); err == nil {
+		t.Error("a sample with no place in the source took an IV")
 	}
 	if _, err := k.entry([]byte{1}, 1<<48); err == nil {
-		t.Error("a decode time of 2^48 ticks took an IV, want it refused")
+		t.Error("a sample 2^48 bytes into the source took an IV")
 	}
 }
