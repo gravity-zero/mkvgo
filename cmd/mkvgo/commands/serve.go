@@ -53,7 +53,7 @@ func CmdServe(args []string) {
 		if !ok {
 			Fatal(fmt.Sprintf("unknown target %q", targetName))
 		}
-		report, err := matroska.Playability(context.Background(), src, target)
+		report, err := matroska.Playability(cliCtx, src, target)
 		if err != nil {
 			FatalErr(err)
 		}
@@ -74,7 +74,7 @@ func CmdServe(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	plan, err := mp4.PlanHLS(context.Background(), src, opts)
+	plan, err := mp4.PlanHLS(cliCtx, src, opts)
 	if err != nil {
 		FatalErr(err)
 	}

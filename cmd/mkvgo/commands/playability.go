@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -32,7 +31,7 @@ func CmdPlayability(args []string) {
 	if isRemoteURL(path) {
 		opts = append(opts, matroska.Options{FS: remotePort(path)})
 	}
-	report, err := matroska.Playability(context.Background(), path, target, opts...)
+	report, err := matroska.Playability(cliCtx, path, target, opts...)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -69,7 +68,7 @@ func CmdLadder(args []string) {
 	if isRemoteURL(path) {
 		opts = append(opts, matroska.Options{FS: remotePort(path)})
 	}
-	rungs, err := matroska.RecommendLadderFor(context.Background(), path, opts...)
+	rungs, err := matroska.RecommendLadderFor(cliCtx, path, opts...)
 	if err != nil {
 		FatalErr(err)
 	}

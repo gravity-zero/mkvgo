@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -29,7 +28,7 @@ func CmdAnalyze(args []string) {
 		opts = append(opts, matroska.Options{FS: remotePort(path)})
 	}
 
-	report, err := matroska.Analyze(context.Background(), path, opts...)
+	report, err := matroska.Analyze(cliCtx, path, opts...)
 	if err != nil {
 		FatalErr(err)
 	}

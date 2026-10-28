@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -28,7 +27,7 @@ func CmdRollback(args []string) {
 	}
 	defer delta.Close()
 
-	if err := matroska.ApplyRollback(context.Background(), repaired, delta, out); err != nil {
+	if err := matroska.ApplyRollback(cliCtx, repaired, delta, out); err != nil {
 		FatalErr(err)
 	}
 	fmt.Printf("restored %s from %s + %s (verified against the original's sha256)\n", out, repaired, deltaPath)

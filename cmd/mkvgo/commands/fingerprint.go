@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -26,7 +25,7 @@ func CmdFingerprint(args []string) {
 		opts = append(opts, matroska.Options{FS: remotePort(path)})
 	}
 
-	fp, err := matroska.Fingerprint(context.Background(), path, opts...)
+	fp, err := matroska.Fingerprint(cliCtx, path, opts...)
 	if err != nil {
 		FatalErr(err)
 	}

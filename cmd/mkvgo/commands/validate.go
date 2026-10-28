@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -21,7 +20,7 @@ func CmdValidate(args []string) {
 	}
 	path := rest[0]
 
-	issues, err := matroska.Validate(context.Background(), path)
+	issues, err := matroska.Validate(cliCtx, path)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -80,7 +79,7 @@ func CmdCompare(args []string) {
 				Fatal("-blocks compares Matroska/WebM content only (remux the MP4 side to MKV first)")
 			}
 		}
-		bd, err := matroska.CompareBlocksConcat(context.Background(), pathA, parts)
+		bd, err := matroska.CompareBlocksConcat(cliCtx, pathA, parts)
 		if err != nil {
 			FatalErr(err)
 		}

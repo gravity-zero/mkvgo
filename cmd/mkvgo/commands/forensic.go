@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -39,7 +38,7 @@ func CmdForensicSegment(args []string) {
 	src, what := rest[0], rest[1]
 
 	opts := mp4.Options{FS: sourceFS(src), SegmentMs: segMs}
-	plan, err := mp4.PlanForensic(context.Background(), src, opts)
+	plan, err := mp4.PlanForensic(cliCtx, src, opts)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -58,7 +57,7 @@ func CmdForensicSegment(args []string) {
 			Fatal(fmt.Sprintf("resource must be master|playlist|init|N (1..%d), got %q", plan.NumSegments(), what))
 		}
 		if distinct {
-			d, derr := plan.Distinct(context.Background(), n-1)
+			d, derr := plan.Distinct(cliCtx, n-1)
 			if derr != nil {
 				Fatal(derr.Error())
 			}
@@ -69,7 +68,7 @@ func CmdForensicSegment(args []string) {
 		if serr != nil {
 			Fatal(serr.Error())
 		}
-		data, err = plan.Segment(context.Background(), n-1, fromB)
+		data, err = plan.Segment(cliCtx, n-1, fromB)
 		if err != nil {
 			FatalErr(err)
 		}

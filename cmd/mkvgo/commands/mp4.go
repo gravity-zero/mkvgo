@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -41,7 +40,7 @@ func CmdToMP4(args []string) {
 		if skip || flatten || wvtt || mp3delay || hashes {
 			Fatal("the source is already an MP4: to-mp4 rewrites it sample for sample (fast start, free space dropped), so --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay and --hash do not apply")
 		}
-		err := mp4.Rewrite(context.Background(), src, dst, mp4Options())
+		err := mp4.Rewrite(cliCtx, src, dst, mp4Options())
 		ClearProgress()
 		if err != nil {
 			FatalErr(err)
@@ -49,7 +48,7 @@ func CmdToMP4(args []string) {
 		fmt.Printf("rewritten %s → %s\n", src, dst)
 		return
 	}
-	err := mp4.RemuxToMP4(context.Background(), src, dst, mp4.Options{
+	err := mp4.RemuxToMP4(cliCtx, src, dst, mp4.Options{
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		FastStart:         faststart,
@@ -89,7 +88,7 @@ func CmdFromMP4(args []string) {
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)
 
-	err := mp4.RemuxFromMP4(context.Background(), src, dst, mp4.Options{
+	err := mp4.RemuxFromMP4(cliCtx, src, dst, mp4.Options{
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		SkipUnsupported:   skip,

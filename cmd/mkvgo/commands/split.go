@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -57,9 +56,9 @@ func CmdSplit(args []string) {
 	var err error
 	if isMP4Content(source) {
 		guardMP4Output(pattern)
-		outputs, err = mp4.Split(context.Background(), so, mp4Options())
+		outputs, err = mp4.Split(cliCtx, so, mp4Options())
 	} else {
-		outputs, err = matroska.Split(context.Background(), so, matroska.Options{Progress: NewProgressBar()})
+		outputs, err = matroska.Split(cliCtx, so, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {
@@ -87,9 +86,9 @@ func CmdJoin(args []string) {
 
 	var err error
 	if allMP4(outPath, sources...) {
-		err = mp4.Join(context.Background(), sources, outPath, mp4Options())
+		err = mp4.Join(cliCtx, sources, outPath, mp4Options())
 	} else {
-		err = matroska.Join(context.Background(), sources, outPath, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Join(cliCtx, sources, outPath, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {

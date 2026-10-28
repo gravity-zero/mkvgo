@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -37,7 +36,7 @@ func CmdIngest(args []string) {
 		opts.FS = remotePort(path)
 	}
 
-	plan, err := matroska.Ingest(context.Background(), path, opts)
+	plan, err := matroska.Ingest(cliCtx, path, opts)
 	if err != nil {
 		FatalErr(err)
 	}

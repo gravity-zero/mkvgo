@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -301,7 +300,7 @@ func CmdToHLS(args []string) {
 		ClearProgress()
 		fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the HLS holds what arrived"))
 	}
-	err := mp4.RemuxToHLS(context.Background(), src, outDir, opts)
+	err := mp4.RemuxToHLS(cliCtx, src, outDir, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -328,7 +327,7 @@ func CmdHLSSegment(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	plan, err := mp4.PlanHLS(context.Background(), src, opts)
+	plan, err := mp4.PlanHLS(cliCtx, src, opts)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -347,7 +346,7 @@ func CmdHLSSegment(args []string) {
 				Fatal(fmt.Sprintf("segment %d out of range (1..%d)", n, plan.NumSegments()))
 			}
 			var serr error
-			data, serr = plan.Segment(context.Background(), n-1)
+			data, serr = plan.Segment(cliCtx, n-1)
 			if serr != nil {
 				Fatal(serr.Error())
 			}
@@ -356,7 +355,7 @@ func CmdHLSSegment(args []string) {
 		// Any resource name a player would request: seg00042.m4s, sub1.m3u8,
 		// sub1.vtt, master.m3u8, … - the declarative entry point.
 		var rerr error
-		data, _, rerr = plan.Resource(context.Background(), what)
+		data, _, rerr = plan.Resource(cliCtx, what)
 		if rerr != nil {
 			Fatal(rerr.Error())
 		}
@@ -389,7 +388,7 @@ func CmdToABR(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	err := mp4.RemuxToABR(context.Background(), f.rest, f.outDir, opts)
+	err := mp4.RemuxToABR(cliCtx, f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -415,11 +414,11 @@ func CmdABRSegment(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	plan, err := mp4.PlanABR(context.Background(), sources, opts)
+	plan, err := mp4.PlanABR(cliCtx, sources, opts)
 	if err != nil {
 		FatalErr(err)
 	}
-	data, _, rerr := plan.Resource(context.Background(), what)
+	data, _, rerr := plan.Resource(cliCtx, what)
 	if rerr != nil {
 		Fatal(rerr.Error())
 	}

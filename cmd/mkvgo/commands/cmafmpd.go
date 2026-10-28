@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ func CmdCMAFMPD(args []string) {
 		base = filepath.Dir(outPath)
 	}
 	p := cmafPresentationFromDirs(videos, audios, base)
-	data, err := mp4.DASHFromCMAF(context.Background(), p)
+	data, err := mp4.DASHFromCMAF(cliCtx, p)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -50,7 +49,7 @@ func CmdCMAFHLS(args []string) {
 		Fatal("usage: " + CmdUsage["cmaf-hls"])
 	}
 	p := cmafPresentationFromDirs(videos, audios, outDir)
-	playlists, err := mp4.HLSFromCMAF(context.Background(), p)
+	playlists, err := mp4.HLSFromCMAF(cliCtx, p)
 	if err != nil {
 		FatalErr(err)
 	}

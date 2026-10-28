@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +42,7 @@ func CmdAddAttachment(args []string) {
 		mime = sniffMIME(name, data)
 	}
 
-	err = matroska.AddAttachment(context.Background(), source, outPath, matroska.Attachment{
+	err = matroska.AddAttachment(cliCtx, source, outPath, matroska.Attachment{
 		Name: name, MIMEType: mime, Data: data,
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
@@ -69,7 +68,7 @@ func CmdRemoveAttachment(args []string) {
 
 	// RemoveAttachment resolves the target BEFORE writing anything, so a bad
 	// ID/name fails without leaving an output file behind.
-	err := matroska.RemoveAttachment(context.Background(), source, outPath, target,
+	err := matroska.RemoveAttachment(cliCtx, source, outPath, target,
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {

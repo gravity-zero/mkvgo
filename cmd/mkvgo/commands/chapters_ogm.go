@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -37,9 +36,9 @@ func CmdSetChapters(args []string) {
 	guardDistinct(outPath, source, chapPath)
 	if isMP4Content(source) {
 		guardMP4Output(outPath)
-		err = mp4.SetChapters(context.Background(), source, outPath, chapters, mp4Options())
+		err = mp4.SetChapters(cliCtx, source, outPath, chapters, mp4Options())
 	} else {
-		err = matroska.SetChapters(context.Background(), source, outPath, chapters,
+		err = matroska.SetChapters(cliCtx, source, outPath, chapters,
 			matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()

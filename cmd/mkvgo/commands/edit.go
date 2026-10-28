@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -112,9 +111,9 @@ func editMetadata(source, outPath string, edit func(*matroska.Container)) error 
 	guardDistinct(outPath, source)
 	if isMP4Content(source) {
 		guardMP4Output(outPath)
-		return mp4.EditMetadata(context.Background(), source, outPath, edit, mp4Options())
+		return mp4.EditMetadata(cliCtx, source, outPath, edit, mp4Options())
 	}
-	return matroska.EditMetadata(context.Background(), source, outPath, edit, matroska.Options{Progress: NewProgressBar()})
+	return matroska.EditMetadata(cliCtx, source, outPath, edit, matroska.Options{Progress: NewProgressBar()})
 }
 
 // guardMP4Output refuses a Matroska name for the MP4 an MP4 source's edit writes.
@@ -291,9 +290,9 @@ MP4: appends a new moov and retires the old one (crash-ordered).`)
 	edit := func(c *matroska.Container) { applyPatch(c, patch) }
 	var err error
 	if isMP4Content(source) {
-		err = mp4.EditInPlace(context.Background(), source, edit)
+		err = mp4.EditInPlace(cliCtx, source, edit)
 	} else {
-		err = matroska.EditInPlace(context.Background(), source, edit)
+		err = matroska.EditInPlace(cliCtx, source, edit)
 	}
 	if err != nil {
 		FatalErr(err)

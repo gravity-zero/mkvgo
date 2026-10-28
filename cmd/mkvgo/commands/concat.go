@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -22,7 +21,7 @@ func CmdConcatHLS(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	err := mp4.RemuxConcatToHLS(context.Background(), f.rest, f.outDir, opts)
+	err := mp4.RemuxConcatToHLS(cliCtx, f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -47,11 +46,11 @@ func CmdConcatSegment(args []string) {
 	opts.OnDrop = func(d mp4.DroppedTrack) {
 		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 	}
-	plan, err := mp4.PlanConcat(context.Background(), sources, opts)
+	plan, err := mp4.PlanConcat(cliCtx, sources, opts)
 	if err != nil {
 		FatalErr(err)
 	}
-	data, _, rerr := plan.Resource(context.Background(), what)
+	data, _, rerr := plan.Resource(cliCtx, what)
 	if rerr != nil {
 		Fatal(rerr.Error())
 	}

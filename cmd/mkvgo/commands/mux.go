@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 
@@ -25,7 +24,7 @@ func CmdDemux(args []string) {
 		Fatal("missing -o <dir>")
 	}
 
-	err := matroska.Demux(context.Background(), matroska.DemuxOptions{
+	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
 		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force,
 	}, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
@@ -72,9 +71,9 @@ func CmdMux(args []string) {
 	mo := matroska.MuxOptions{OutputPath: outPath, Tracks: inputs}
 	var err error
 	if allMP4(outPath, paths...) {
-		err = mp4.Mux(context.Background(), mo, mp4Options())
+		err = mp4.Mux(cliCtx, mo, mp4Options())
 	} else {
-		err = matroska.Mux(context.Background(), mo, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Mux(cliCtx, mo, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {
@@ -104,9 +103,9 @@ func CmdRemoveTrack(args []string) {
 	var err error
 	if isMP4Content(source) {
 		guardMP4Output(outPath)
-		err = mp4.RemoveTrack(context.Background(), source, outPath, trackIDs, mp4Options())
+		err = mp4.RemoveTrack(cliCtx, source, outPath, trackIDs, mp4Options())
 	} else {
-		err = matroska.RemoveTrack(context.Background(), source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.RemoveTrack(cliCtx, source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {
@@ -144,9 +143,9 @@ func CmdAddTrack(args []string) {
 
 	var err error
 	if allMP4(outPath, base, input.SourcePath) {
-		err = mp4.AddTrack(context.Background(), base, outPath, input, mp4Options())
+		err = mp4.AddTrack(cliCtx, base, outPath, input, mp4Options())
 	} else {
-		err = matroska.AddTrack(context.Background(), base, outPath, input, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.AddTrack(cliCtx, base, outPath, input, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {

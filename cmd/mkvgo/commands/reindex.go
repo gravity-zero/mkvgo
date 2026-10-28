@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -52,7 +51,7 @@ func CmdReindex(args []string) {
 			Fatal("--replace takes exactly one path: the source is reindexed in place, no separate output")
 		}
 		src := rest[0]
-		err := matroska.ReindexReplace(context.Background(), src, opts)
+		err := matroska.ReindexReplace(cliCtx, src, opts)
 		ClearProgress()
 		if err != nil {
 			FatalErr(err)
@@ -73,7 +72,7 @@ func CmdReindex(args []string) {
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)
 
-	err := matroska.Reindex(context.Background(), src, dst, opts)
+	err := matroska.Reindex(cliCtx, src, dst, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

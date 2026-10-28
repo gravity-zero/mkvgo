@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -38,7 +37,7 @@ func CmdWatermarkSegment(args []string) {
 	srcA, srcB, what := rest[0], rest[1], rest[2]
 
 	opts := mp4.Options{FS: sourceFS(srcA), SegmentMs: segMs}
-	plan, err := mp4.PlanWatermark(context.Background(), srcA, srcB, opts)
+	plan, err := mp4.PlanWatermark(cliCtx, srcA, srcB, opts)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -60,7 +59,7 @@ func CmdWatermarkSegment(args []string) {
 		if serr != nil {
 			Fatal(serr.Error())
 		}
-		data, err = plan.Segment(context.Background(), n-1, fromB)
+		data, err = plan.Segment(cliCtx, n-1, fromB)
 		if err != nil {
 			FatalErr(err)
 		}

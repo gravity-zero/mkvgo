@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -53,7 +52,7 @@ func CmdSalvage(args []string) {
 			Fatal(salvageUsage)
 		}
 		src := rest[0]
-		report, err := matroska.MapDamage(context.Background(), src, opts)
+		report, err := matroska.MapDamage(cliCtx, src, opts)
 		ClearProgress()
 		if err != nil {
 			FatalErr(err)
@@ -73,7 +72,7 @@ func CmdSalvage(args []string) {
 	src, dst := rest[0], rest[1]
 	guardOutput(dst, src)
 
-	report, err := matroska.Salvage(context.Background(), src, dst, opts)
+	report, err := matroska.Salvage(cliCtx, src, dst, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -23,7 +22,7 @@ func CmdTrackEnds(args []string) {
 	if len(rest) != 1 {
 		Fatal(trackEndsUsage)
 	}
-	report, err := matroska.TrackEnds(context.Background(), rest[0])
+	report, err := matroska.TrackEnds(cliCtx, rest[0])
 	if err != nil {
 		FatalErr(err)
 	}

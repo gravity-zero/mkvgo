@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -62,7 +61,7 @@ func CmdRetime(args []string) {
 		if inPlace || replace || keepBackup || deepVerify || strict || deltaPath != "" {
 			Fatal("retime on an MP4 edits the moov only; --in-place/--replace/--keep-backup/--deep-verify/--strict/--rollback-delta do not apply")
 		}
-		if err := mp4.RetimeTracks(context.Background(), path, shift); err != nil {
+		if err := mp4.RetimeTracks(cliCtx, path, shift); err != nil {
 			FatalErr(err)
 		}
 		fmt.Printf("retimed %s (edit list):\n", path)
@@ -90,7 +89,7 @@ func CmdRetime(args []string) {
 	case replace:
 		retimeFn = matroska.RetimeTracksReplace
 	}
-	err := retimeFn(context.Background(), path, shift, opts)
+	err := retimeFn(cliCtx, path, shift, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

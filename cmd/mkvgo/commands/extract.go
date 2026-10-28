@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -35,7 +34,7 @@ func CmdExtractAttachment(args []string) {
 	}
 	guardOutput(outPath, source)
 
-	err = matroska.ExtractAttachment(context.Background(), source, attID, outPath)
+	err = matroska.ExtractAttachment(cliCtx, source, attID, outPath)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -101,7 +100,7 @@ func CmdExtractSubtitle(args []string) {
 		}
 		var n int
 		n, err = writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
-			return matroska.ForEachSubtitlePGS(context.Background(), source, trackID, fn, opts)
+			return matroska.ForEachSubtitlePGS(cliCtx, source, trackID, fn, opts)
 		})
 		if err == nil {
 			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d → %s\n", n, trackID, outPath)
@@ -111,12 +110,12 @@ func CmdExtractSubtitle(args []string) {
 		if isMP4Path(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
-		err = matroska.ExtractSubtitle(context.Background(), source, trackID, outPath, opts)
+		err = matroska.ExtractSubtitle(cliCtx, source, trackID, outPath, opts)
 	case "ass", "ssa":
 		if isMP4Path(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
 		}
-		err = matroska.ExtractASS(context.Background(), source, trackID, outPath, opts)
+		err = matroska.ExtractASS(cliCtx, source, trackID, outPath, opts)
 	default:
 		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
 	}
@@ -131,9 +130,9 @@ func CmdExtractSubtitle(args []string) {
 func extractWebVTT(source string, trackID uint64, outPath string, opts matroska.Options) error {
 	return writeFileFrom(outPath, func(out io.Writer) error {
 		if isMP4Path(source) {
-			return mp4.ExtractSubtitleWebVTT(context.Background(), source, trackID, out)
+			return mp4.ExtractSubtitleWebVTT(cliCtx, source, trackID, out)
 		}
-		return matroska.ExtractSubtitleWebVTT(context.Background(), source, trackID, out, opts)
+		return matroska.ExtractSubtitleWebVTT(cliCtx, source, trackID, out, opts)
 	})
 }
 
@@ -151,11 +150,11 @@ func extractFromIndex(source string, trackID uint64, format, indexPath, outPath 
 	}
 	if format == "pgs" {
 		return writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
-			return matroska.ForEachSubtitlePGSFrom(context.Background(), source, trackID, &ix, fn, opts)
+			return matroska.ForEachSubtitlePGSFrom(cliCtx, source, trackID, &ix, fn, opts)
 		})
 	}
 	return 0, writeFileFrom(outPath, func(out io.Writer) error {
-		return matroska.ExtractSubtitleWebVTTFrom(context.Background(), source, trackID, &ix, out, opts)
+		return matroska.ExtractSubtitleWebVTTFrom(cliCtx, source, trackID, &ix, out, opts)
 	})
 }
 
@@ -279,12 +278,12 @@ func buildSubtitleIndex(source string, trackIDs []uint64, fromCues bool, opts ..
 	if fromCues {
 		return subtitleIndexFromCues(source, trackIDs, opts...)
 	}
-	return matroska.BuildSubtitleIndex(context.Background(), source, trackIDs, opts...)
+	return matroska.BuildSubtitleIndex(cliCtx, source, trackIDs, opts...)
 }
 
 // subtitleIndexFromCues derives the index from the Cues and refuses when a track's completeness cannot be verified.
 func subtitleIndexFromCues(source string, trackIDs []uint64, opts ...matroska.Options) (*matroska.SubtitleIndex, error) {
-	ctx := context.Background()
+	ctx := cliCtx
 	ix, verified, err := matroska.SubtitleIndexFromCues(ctx, source, trackIDs, opts...)
 	if err != nil {
 		return nil, err

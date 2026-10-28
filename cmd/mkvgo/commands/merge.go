@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -33,9 +32,9 @@ func CmdMerge(args []string) {
 	mo := matroska.MergeOptions{OutputPath: outPath, Inputs: inputs}
 	var err error
 	if allMP4(outPath, paths...) {
-		err = mp4.Merge(context.Background(), mo, mp4Options())
+		err = mp4.Merge(cliCtx, mo, mp4Options())
 	} else {
-		err = matroska.Merge(context.Background(), mo, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Merge(cliCtx, mo, matroska.Options{Progress: NewProgressBar()})
 	}
 	ClearProgress()
 	if err != nil {
@@ -81,7 +80,7 @@ func CmdMergeSubtitle(args []string) {
 		if format != "srt" {
 			Fatal("an MP4 carries subtitles as plain timed text: merge an SRT file (styled ASS/SSA has no MP4 form; convert it to SRT first)")
 		}
-		err := mp4.MergeSubtitle(context.Background(), source, subPath, outPath, lang, name, mp4Options())
+		err := mp4.MergeSubtitle(cliCtx, source, subPath, outPath, lang, name, mp4Options())
 		ClearProgress()
 		if err != nil {
 			FatalErr(err)
@@ -93,9 +92,9 @@ func CmdMergeSubtitle(args []string) {
 	var err error
 	switch format {
 	case "srt":
-		err = matroska.MergeSubtitle(context.Background(), source, subPath, outPath, lang, name, opts)
+		err = matroska.MergeSubtitle(cliCtx, source, subPath, outPath, lang, name, opts)
 	case "ass", "ssa":
-		err = matroska.MergeASS(context.Background(), source, subPath, outPath, lang, name, opts)
+		err = matroska.MergeASS(cliCtx, source, subPath, outPath, lang, name, opts)
 	default:
 		Fatal(fmt.Sprintf("unknown format %q (supported: srt, ass)", format))
 	}

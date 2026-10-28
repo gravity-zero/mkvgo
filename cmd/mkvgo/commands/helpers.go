@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -215,7 +214,7 @@ func OpenMKV(path string) *matroska.Container {
 	if isRemoteURL(path) {
 		Fatal("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes, chapters, tags, attachments)")
 	}
-	c, err := matroska.Open(context.Background(), path)
+	c, err := matroska.Open(cliCtx, path)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -227,7 +226,7 @@ func OpenMKV(path string) *matroska.Container {
 // path the existing seekable reader is used so behaviour is identical to before.
 func openInput(path string) *matroska.Container {
 	if path == "-" {
-		c, _, err := reader.ReadStream(context.Background(), os.Stdin)
+		c, _, err := reader.ReadStream(cliCtx, os.Stdin)
 		if err != nil {
 			FatalErr(err)
 		}
@@ -285,7 +284,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 	// are actually ISO base media (a .mkv that is really an MP4/MOV - mislabeled
 	// rips happen), route to the mp4 reader transparently instead of failing
 	// with a cryptic EBML error.
-	c, err := matroska.Open(context.Background(), path, append(globalReadOptions(), matroska.WithoutAttachmentData())...) // the listing, not the payloads
+	c, err := matroska.Open(cliCtx, path, append(globalReadOptions(), matroska.WithoutAttachmentData())...) // the listing, not the payloads
 	if err != nil {
 		if errors.Is(err, matroska.ErrNotMatroska) {
 			return loadMP4Meta(path, keyframes)
@@ -311,7 +310,7 @@ func globalReadOptions() []matroska.ReadOption {
 // keyframe index. Shared by the extension dispatch and the mislabeled-container
 // fallback in loadContainer.
 func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	c, dropped, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: keyframes, InBandColour: InBand})
+	c, dropped, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: keyframes, InBandColour: InBand})
 	if err != nil {
 		FatalErr(err)
 	}
@@ -344,7 +343,7 @@ func sourceFS(src string) *mkv.FS {
 func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
 	fs := remotePort(url)
 	if isMP4Path(url) {
-		c, dropped, err := mp4.OpenMeta(context.Background(), url,
+		c, dropped, err := mp4.OpenMeta(cliCtx, url,
 			mp4.Options{Keyframes: keyframes, InBandColour: InBand, FS: fs})
 		if err != nil {
 			FatalErr(err)
@@ -353,7 +352,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 	}
 	ro := append(globalReadOptions(), matroska.WithChapters(), matroska.WithTags(),
 		matroska.WithAttachments(), matroska.WithoutAttachmentData())
-	c, err := matroska.OpenMetaWithFS(context.Background(), url, fs, ro...)
+	c, err := matroska.OpenMetaWithFS(cliCtx, url, fs, ro...)
 	if err != nil {
 		FatalErr(err)
 	}

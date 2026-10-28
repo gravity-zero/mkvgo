@@ -35,7 +35,7 @@ func CmdServeGrowing(args []string) {
 	}
 	src := rest[0]
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
 
 	plan, err := mp4.PlanGrowingHLS(ctx, src, mp4.Options{SegmentMs: segMs})

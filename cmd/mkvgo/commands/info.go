@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -31,7 +30,7 @@ func sourceCutShort(path string, c *matroska.Container) *cutShort {
 		size, declared = fi.Size(), c.SegmentEnd
 	} else {
 		var err error
-		if size, declared, err = mp4.DeclaredSize(context.Background(), path, mp4.Options{FS: fs}); err != nil {
+		if size, declared, err = mp4.DeclaredSize(cliCtx, path, mp4.Options{FS: fs}); err != nil {
 			return nil
 		}
 	}

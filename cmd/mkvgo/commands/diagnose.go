@@ -42,7 +42,7 @@ func CmdDiagnose(args []string) {
 	if isMP4Content(rest[0]) {
 		diagnose = mp4Diagnose
 	}
-	d, err := diagnose(context.Background(), rest[0], matroska.Options{DeepVerify: deep})
+	d, err := diagnose(cliCtx, rest[0], matroska.Options{DeepVerify: deep})
 	if err != nil {
 		FatalErr(err)
 	}

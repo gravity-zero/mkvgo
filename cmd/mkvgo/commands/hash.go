@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -27,7 +26,7 @@ func CmdHash(args []string) {
 	}
 	GuardOverwrite(outPath) // "" (in-place) passes through
 
-	err := matroska.WriteContentHashes(context.Background(), source, outPath,
+	err := matroska.WriteContentHashes(cliCtx, source, outPath,
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
@@ -62,7 +61,7 @@ func CmdVerify(args []string) {
 	}
 
 	if isMP4Path(path) {
-		mismatches, err := mp4.VerifyContentHashes(context.Background(), path,
+		mismatches, err := mp4.VerifyContentHashes(cliCtx, path,
 			mp4.Options{Progress: NewProgressBar()})
 		ClearProgress()
 		if err != nil {
@@ -80,7 +79,7 @@ func CmdVerify(args []string) {
 		return
 	}
 
-	mismatches, err := matroska.VerifyContentHashes(context.Background(), path,
+	mismatches, err := matroska.VerifyContentHashes(cliCtx, path,
 		matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {

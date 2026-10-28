@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -34,7 +33,7 @@ func CmdReindexInPlace(args []string) {
 		if deepVerify || deltaPath != "" {
 			Fatal("--rollback only restores an interrupted run; it does not reindex, so --deep-verify and --rollback-delta do not apply")
 		}
-		recovered, err := matroska.RecoverInPlace(context.Background(), path)
+		recovered, err := matroska.RecoverInPlace(cliCtx, path)
 		if err != nil {
 			FatalErr(err)
 		}
@@ -54,7 +53,7 @@ func CmdReindexInPlace(args []string) {
 		printDelta, closeDelta = armRollbackDelta(&opts, deltaPath, rest...)
 		defer closeDelta()
 	}
-	err := matroska.ReindexInPlace(context.Background(), path, opts)
+	err := matroska.ReindexInPlace(cliCtx, path, opts)
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

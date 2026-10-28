@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +22,7 @@ func CmdKeyframes(path string) {
 	}
 	var ks []int64
 	if isMP4Path(path) {
-		c, _, err := mp4.OpenMeta(context.Background(), path, mp4.Options{Keyframes: true, FS: fs})
+		c, _, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: true, FS: fs})
 		if err != nil {
 			FatalErr(err)
 		}
@@ -32,7 +31,7 @@ func CmdKeyframes(path string) {
 		// WithKeyframeIndex is a no-op when the file has Cues, so passing it always
 		// keeps Cues-indexed files head-only while building the complete index for
 		// Cues-less ones (the "no external fallback" path). A nil fs is the OS.
-		c, err := matroska.OpenMetaWithFS(context.Background(), path, fs, matroska.WithKeyframeIndex())
+		c, err := matroska.OpenMetaWithFS(cliCtx, path, fs, matroska.WithKeyframeIndex())
 		if err != nil {
 			FatalErr(err)
 		}
@@ -92,7 +91,7 @@ func CmdExtractFrame(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
-	ks, err := matroska.ExtractKeyframeSample(context.Background(), rest[0], atMs)
+	ks, err := matroska.ExtractKeyframeSample(cliCtx, rest[0], atMs)
 	if err != nil {
 		FatalErr(err)
 	}
@@ -152,7 +151,7 @@ func CmdExtractFrames(args []string) {
 	var st matroska.KeyframeStats
 	write := func(out io.Writer) error {
 		var err error
-		st, err = matroska.WriteKeyframeStream(context.Background(), src, sel, out, opts...)
+		st, err = matroska.WriteKeyframeStream(cliCtx, src, sel, out, opts...)
 		return err
 	}
 	var err error

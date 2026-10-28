@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -30,14 +29,14 @@ func CmdCueHealth(args []string) {
 		Fatal(cueHealthUsage)
 	}
 
-	report, err := matroska.CueHealth(context.Background(), rest[0])
+	report, err := matroska.CueHealth(cliCtx, rest[0])
 	if err != nil {
 		FatalErr(err)
 	}
 	// -probe: look inside each hole (bounded, header-only) so the printout
 	// says what a reindex would find there - the same pass diagnose runs.
 	if probe {
-		if err := matroska.ProbeCueHoles(context.Background(), rest[0], report); err != nil {
+		if err := matroska.ProbeCueHoles(cliCtx, rest[0], report); err != nil {
 			FatalErr(err)
 		}
 	}

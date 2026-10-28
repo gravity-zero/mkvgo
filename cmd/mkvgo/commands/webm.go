@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -24,14 +23,14 @@ func CmdToWebM(args []string) {
 
 	// Warn about the non-WebM elements this remux will drop, so the loss is
 	// explicit at run time (not only in the docs).
-	if c, err := matroska.OpenMeta(context.Background(), src); err == nil {
+	if c, err := matroska.OpenMeta(cliCtx, src); err == nil {
 		if dropped := mkv.WebMNonSubsetElements(c); len(dropped) > 0 {
 			fmt.Fprintf(os.Stderr, "warning: %s are not carried into WebM and will be dropped\n",
 				strings.Join(dropped, ", "))
 		}
 	}
 
-	err := matroska.RemuxToWebM(context.Background(), src, dst, matroska.Options{Progress: NewProgressBar()})
+	err := matroska.RemuxToWebM(cliCtx, src, dst, matroska.Options{Progress: NewProgressBar()})
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

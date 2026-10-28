@@ -40,6 +40,7 @@ func main() {
 
 	cmd := filtered[0]
 	args := filtered[1:]
+	defer commands.WatchInterrupt()()
 
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
 		commands.CmdHelp(cmd)
