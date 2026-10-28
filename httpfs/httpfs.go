@@ -619,47 +619,62 @@ func (r *reader) ReadAt(p []byte, off int64) (int, error) {
 			return copy(p, e.data[off-e.off:]), nil
 		}
 	}
+	var n int
+	for short := 0; ; short++ {
+		m, end, err := r.readRange(p[n:], off+int64(n))
+		n += m
+		if err != nil || n == len(p) {
+			return n, err
+		}
+		if end {
+			return n, io.EOF
+		}
+		// The server served less than asked short of the object's end (a range cap): the rest is asked for again.
+		if short == maxShortResponses-1 {
+			return n, fmt.Errorf("httpfs: %s: %d responses in a row served less than asked at %d", shown.Path(r.url), maxShortResponses, off+int64(n))
+		}
+	}
+}
+
+// maxShortResponses is how many 206 responses in a row ReadAt takes that serve less than asked before it gives up.
+const maxShortResponses = 8
+
+// readRange is one ranged GET of p's span at off, its response closed on return; end reports the response reached
+// the object's end.
+func (r *reader) readRange(p []byte, off int64) (n int, end bool, err error) {
 	resp, done, err := r.fs.do(r.ctx, http.MethodGet, r.url, fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1), r.id)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer done()
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 	case http.StatusPreconditionFailed:
-		return 0, fmt.Errorf("httpfs: %s: %w", shown.Path(r.url), mkv.ErrSourceChanged)
+		return 0, false, fmt.Errorf("httpfs: %s: %w", shown.Path(r.url), mkv.ErrSourceChanged)
 	case http.StatusRequestedRangeNotSatisfiable:
-		return 0, io.EOF
+		return 0, false, io.EOF
 	case http.StatusOK:
-		return 0, errIgnoresRange(r.url)
+		return 0, false, errIgnoresRange(r.url)
 	default:
-		return 0, fmt.Errorf("httpfs: %s: HTTP %s", shown.Path(r.url), resp.Status)
+		return 0, false, fmt.Errorf("httpfs: %s: HTTP %s", shown.Path(r.url), resp.Status)
 	}
 	start, last, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 	if err != nil {
-		return 0, fmt.Errorf("httpfs: %s: %w", shown.Path(r.url), err)
+		return 0, false, fmt.Errorf("httpfs: %s: %w", shown.Path(r.url), err)
 	}
 	if start != off || last >= off+int64(len(p)) {
-		return 0, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", shown.Path(r.url), start, last, off, off+int64(len(p))-1)
+		return 0, false, fmt.Errorf("httpfs: %s: 206 served bytes %d-%d for a request of %d-%d", shown.Path(r.url), start, last, off, off+int64(len(p))-1)
 	}
 	if err := checkVersion(r.url, r.id, resp.Header); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	n, err := io.ReadFull(resp.Body, p[:last-start+1])
+	n, err = io.ReadFull(resp.Body, p[:last-start+1])
 	r.fs.fetched.Add(int64(n))
 	if err != nil {
-		return n, fmt.Errorf("httpfs: %s: read body: %w", shown.Path(r.url), err)
+		return n, false, fmt.Errorf("httpfs: %s: read body: %w", shown.Path(r.url), err)
 	}
-	if n < len(p) {
-		if total >= 0 && last+1 >= total {
-			return n, io.EOF
-		}
-		// The server served less than asked short of the object's end (a range cap): the rest is asked for again.
-		m, err := r.ReadAt(p[n:], off+int64(n))
-		return n + m, err
-	}
-	return n, nil
+	return n, total >= 0 && last+1 >= total, nil
 }
 
 // Stat answers for the object the reader reads. Opened under a mkv.ShareReads
