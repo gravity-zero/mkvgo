@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -18,6 +20,10 @@ import (
 // and skip corrupted regions) applies here too - see Reindex.
 func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error {
 	fs := mkv.FSFrom(opts)
+	path, err := replaceTarget(fs, path)
+	if err != nil {
+		return fmt.Errorf("reindex replace: %w", err)
+	}
 	tmp := path + ".mkvgo.tmp"
 
 	if _, err := fs.DoStat(tmp); err == nil {
@@ -27,8 +33,15 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 		return err
 	}
 
-	if err := Reindex(ctx, path, tmp, opts...); err != nil {
-		_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched either way
+	xopts := append([]mkv.Options(nil), opts...)
+	if len(xopts) == 0 {
+		xopts = []mkv.Options{{}}
+	}
+	xopts[0].FS = exclusiveTemp(fs, path, tmp)
+	if err := Reindex(ctx, path, tmp, xopts...); err != nil {
+		if !errors.Is(err, os.ErrExist) { // what stood at tmp is not this run's to remove
+			_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched either way
+		}
 		return err
 	}
 
@@ -43,6 +56,10 @@ func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
 		_ = fs.DoRemove(tmp)
 		return err
 	}
+	if err := keepMode(fs, path, tmp); err != nil {
+		_ = fs.DoRemove(tmp)
+		return fmt.Errorf("replace: give the copy the original's mode: %w", err)
+	}
 	if err := syncCopy(fs, tmp); err != nil {
 		_ = fs.DoRemove(tmp)
 		return fmt.Errorf("replace: flush verified copy: %w", err)
@@ -52,7 +69,7 @@ func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
 			_ = fs.DoRemove(tmp) // do not leave a blocker for the next run
 			return fmt.Errorf("replace: install verified copy: %w", err)
 		}
-		return nil
+		return syncDir(fs, path)
 	}
 
 	backup := path + ".bak"
@@ -67,6 +84,67 @@ func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
 		}
 		_ = fs.DoRemove(tmp) // original restored; drop the copy so the next run is not blocked
 		return installErr
+	}
+	return syncDir(fs, path)
+}
+
+// osFS reports whether fs is the operating system's: the mode, link and directory steps below apply to it only.
+func osFS(fs *mkv.FS) bool {
+	return fs == nil || fs.Open == nil && fs.Create == nil && fs.OpenFile == nil && fs.Rename == nil
+}
+
+// replaceTarget is the file a replace rewrites: the file a symbolic link names, so the link stays a link to the
+// repaired file instead of becoming a copy beside the original.
+func replaceTarget(fs *mkv.FS, path string) (string, error) {
+	if !osFS(fs) {
+		return path, nil
+	}
+	return filepath.EvalSymlinks(path)
+}
+
+// exclusiveTemp is fs creating tmp only where nothing stands, a dangling link included, with path's mode: a plain
+// create follows a link planted at tmp and writes where it points.
+func exclusiveTemp(fs *mkv.FS, path, tmp string) *mkv.FS {
+	if !osFS(fs) {
+		return fs
+	}
+	mode := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	return &mkv.FS{Create: func(p string) (mkv.WriteSeekCloser, error) {
+		if p != tmp {
+			return os.Create(p)
+		}
+		return os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, mode)
+	}}
+}
+
+// keepMode gives the copy the original's permission bits, which the process umask cut at its creation.
+func keepMode(fs *mkv.FS, path, tmp string) error {
+	if !osFS(fs) {
+		return nil
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(tmp, st.Mode().Perm())
+}
+
+// syncDir flushes the directory holding path, so the rename that installed the copy survives a crash (not on
+// Windows, whose directories take no flush).
+func syncDir(fs *mkv.FS, path string) error {
+	if !osFS(fs) || runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("replace: flush the directory: %w", err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("replace: flush the directory: %w", err)
 	}
 	return nil
 }

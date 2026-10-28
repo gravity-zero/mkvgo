@@ -11,6 +11,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"sort"
 
@@ -159,6 +160,10 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 	if len(shift) == 0 {
 		return fmt.Errorf("retime: no tracks to shift")
 	}
+	path, err := replaceTarget(fs, path)
+	if err != nil {
+		return fmt.Errorf("retime replace: %w", err)
+	}
 	if err := backupFree(fs, path, mkv.KeepBackupFrom(opts)); err != nil {
 		return err
 	}
@@ -175,8 +180,11 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 	if _, err := fs.DoStat(tmp); err == nil {
 		return fmt.Errorf("retime replace: leftover temporary file %s exists; remove it first", tmp)
 	}
+	xfs := exclusiveTemp(fs, path, tmp)
 	fail := func(err error) error {
-		_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched
+		if !errors.Is(err, os.ErrExist) { // what stood at tmp is not this run's to remove
+			_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched
+		}
 		return err
 	}
 
@@ -199,7 +207,7 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 		return ps, nil
 	}
 
-	cues, scale, dropped, err := reindexCopy(ctx, path, tmp, fs, mkv.ProgressFrom(opts), rb, mutate, nil)
+	cues, scale, dropped, err := reindexCopy(ctx, path, tmp, xfs, mkv.ProgressFrom(opts), rb, mutate, nil)
 	if err != nil {
 		return fail(err)
 	}
