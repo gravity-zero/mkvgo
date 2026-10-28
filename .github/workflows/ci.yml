@@ -22,9 +22,8 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ matrix.go-version }}
           cache: false
@@ -36,7 +35,7 @@ jobs:
         shell: bash
         run: GOOS=js GOARCH=wasm go build ./cmd/mkvgo-wasm/
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         if: runner.os == 'Linux'
         with:
           node-version: '22.12.0'
@@ -66,20 +65,19 @@ jobs:
 
       - name: Test
         shell: bash
-        run: go test -race -coverprofile=coverage.out -covermode=atomic -coverpkg=github.com/gravity-zero/mkvgo/ebml,github.com/gravity-zero/mkvgo/mkv/...,github.com/gravity-zero/mkvgo/matroska,github.com/gravity-zero/mkvgo/mp4,github.com/gravity-zero/mkvgo/cmd/mkvgo/commands ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic -coverpkg=./... ./...
 
       - name: Upload coverage reports to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: stable
           cache: false
@@ -93,7 +91,7 @@ jobs:
       # fmt" once stable moved from 1.27.0 to 1.27.2): the linter is built here
       # with the job's own toolchain instead.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           install-mode: goinstall
@@ -101,25 +99,30 @@ jobs:
   vulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: stable
           cache: false
 
+      # govulncheck needs a recent Go to build; it then judges the standard library of the go on PATH, set below to
+      # the oldest the module supports (go.mod), the one a user of the minimum version runs.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
-      - name: Vulnerability check
-        run: govulncheck ./...
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.24.x'
+          cache: false
+
+      - name: Vulnerability check (Go 1.24)
+        run: go version && "$(go env GOPATH)/bin/govulncheck" ./...
 
   release-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: stable
           cache: false
@@ -128,7 +131,7 @@ jobs:
         run: make release
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: mkvgo-binaries
           path: dist/
