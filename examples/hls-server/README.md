@@ -11,7 +11,7 @@ is pre-generated, and the same segments are served as both HLS and DASH.
 go run ./examples/hls-server -src movie.mkv
 
 # Remote source over HTTP Range (S3, NAS…) - only the watched bytes transfer:
-go run ./examples/hls-server -src https://nas.local/movie.mp4 -addr :9000
+go run ./examples/hls-server -src https://nas.local/movie.mp4 -addr :9000   # every interface
 ```
 
 Then open **http://localhost:8080/** and pick a player, or point any client at:
@@ -21,7 +21,7 @@ Then open **http://localhost:8080/** and pick a player, or point any client at:
 | `http://localhost:8080/hls/master.m3u8` | HLS - hls.js, Safari |
 | `http://localhost:8080/hls/manifest.mpd` | DASH - dash.js |
 
-Flags: `-src` (required), `-addr` (default `:8080`), `-segment` seconds
+Flags: `-src` (required), `-addr` (default `127.0.0.1:8080`, this machine only; `:8080` opens it to the network), `-segment` seconds
 (default `6`).
 
 ## What to look at

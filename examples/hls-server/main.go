@@ -5,7 +5,7 @@
 // requests it, so first-play latency is milliseconds and storage cost is zero.
 //
 //	go run ./examples/hls-server -src movie.mkv
-//	go run ./examples/hls-server -src https://nas.local/movie.mp4 -addr :9000
+//	go run ./examples/hls-server -src https://nas.local/movie.mp4 -addr :9000   (every interface)
 //
 // Then open http://localhost:8080/ and pick a player, or point any HLS/DASH
 // client at:
@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -34,11 +35,11 @@ import (
 
 func main() {
 	src := flag.String("src", "", "source file (path or http(s):// URL) - MKV/WebM or MP4/MOV")
-	addr := flag.String("addr", ":8080", "listen address")
+	addr := flag.String("addr", "127.0.0.1:8080", "listen address (this machine only; :8080 opens it to the network)")
 	segment := flag.Float64("segment", 6, "target segment duration, seconds")
 	flag.Parse()
 	if *src == "" {
-		log.Fatal("usage: hls-server -src <file|url> [-addr :8080] [-segment 6]")
+		log.Fatal("usage: hls-server -src <file|url> [-addr 127.0.0.1:8080] [-segment 6]")
 	}
 
 	// One plan per source. It is immutable and safe for concurrent Open
@@ -65,9 +66,20 @@ func main() {
 	base := "/hls/" + plan.SourceID() + "/"
 	mux.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
 		name := path.Base(r.URL.Path)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h, err := plan.Open(r.Context(), name)
+		if errors.Is(err, mp4.ErrNoResource) {
+			http.NotFound(w, r)
+			return
+		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			// The error names paths and offsets of the source: it goes to the log, not to the client.
+			log.Printf("%s: %v", name, err)
+			http.Error(w, "segment unavailable", http.StatusInternalServerError)
 			return
 		}
 		defer h.Close()
@@ -79,6 +91,9 @@ func main() {
 			cache = "no-cache" // a playlist names the segments of the current source
 		}
 		w.Header().Set("Cache-Control", cache)
+		if r.Method == http.MethodHead {
+			return // the headers say all a HEAD asks; the source is not read
+		}
 		// A segment is written from the source as it goes: an error midway
 		// must break the connection, never end a short body cleanly.
 		if _, err := h.WriteTo(r.Context(), w); err != nil {
@@ -102,7 +117,8 @@ func main() {
 	})
 
 	log.Printf("serving on http://localhost%s  (HLS: /hls/master.m3u8 · DASH: /hls/manifest.mpd)", *addr)
-	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// The timeouts mkvgo serve runs with: a client that stops reading cannot hold a connection open for ever.
+	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: 5 * time.Minute}
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -124,8 +140,8 @@ const landingPage = `<!doctype html>
 <video id="v" controls></video>
 <p id="status"></p>
 
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-<script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
 <script>
   const v = document.getElementById('v'), status = document.getElementById('status')
   let hls, dash
