@@ -37,14 +37,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	defer removeUnfinished(fs, opts.OutputPath, &err) // a failed write leaves no truncated output
-	// Surface a Close error on the success path (e.g. a custom FS that finalises
-	// the write on Close) instead of silently dropping it.
-	defer func() {
-		if cerr := out.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	c := &mkv.Container{
 		Info: mkv.SegmentInfo{

@@ -117,8 +117,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, outPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	seq := 1
 	q := openCues{mediaEndMs: c.DurationMs}
@@ -379,8 +378,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))

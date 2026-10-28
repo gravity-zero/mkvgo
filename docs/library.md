@@ -2719,6 +2719,8 @@ FS methods and their OS fallbacks:
 | `WriteFile` | `os.WriteFile` | Writing small files (attachments) |
 | `Remove` | `os.Remove` | Cleanup on error |
 
+Without a `Create`, a Matroska operation (`mkv/ops`) writes its output under a temporary name in the output's directory, flushes it to disk and renames it into place once complete: a failure leaves the file already under that name as it was, and no temporary file. A custom `Create` gets the output's own name, removed on failure.
+
 ### In-memory FS (`mkv.MemFS`)
 
 A ready-made implementation covering the whole port: every operation runs on

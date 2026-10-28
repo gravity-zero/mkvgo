@@ -61,8 +61,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
@@ -125,8 +124,7 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, outPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	if len(track.CodecPrivate) > 0 {
 		if _, err := fmt.Fprintf(out, "%s\n", track.CodecPrivate); err != nil {

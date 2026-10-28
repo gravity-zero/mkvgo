@@ -71,8 +71,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	if err := writeStartLike(mw, joinedDocTypeSource(conts), first.Tracks); err != nil {

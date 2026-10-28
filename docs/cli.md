@@ -345,7 +345,7 @@ mkvgo demux video.mkv -o ./streams/
 mkvgo demux video.mkv -o ./streams/ -t 1,2
 ```
 
-Each track lands in `<dir>/<trackID>.<codec>` (`1.h264`, `2.aac`, `3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to, and the CodecID itself when nothing resolves it. A demux that fails leaves no file behind.
+Each track lands in `<dir>/<trackID>.<codec>` (`1.h264`, `2.aac`, `3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to, and the CodecID itself when nothing resolves it. A demux that fails leaves no file behind, and the files already under those names as they were.
 
 ### extract-attachment
 

@@ -585,14 +585,7 @@ func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, ds
 		return fmt.Errorf("rollback: create output: %w", err)
 	}
 	// On any failure below, do not leave a half-reconstructed file around.
-	defer func() {
-		if cerr := out.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-		if err != nil {
-			_ = fs.DoRemove(dstPath)
-		}
-	}()
+	defer out.finish(&err)
 
 	// ── Stream the ops: write the reconstruction while running the crc and
 	// the output hash. ───────────────────────────────────────────────────

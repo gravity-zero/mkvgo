@@ -65,8 +65,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
@@ -137,8 +136,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))
@@ -172,8 +170,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, dstPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))

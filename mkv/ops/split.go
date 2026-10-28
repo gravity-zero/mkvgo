@@ -216,12 +216,11 @@ func chapterWindowEnd(ranges []mkv.TimeRange, i int) int64 {
 }
 
 func splitRange(ctx context.Context, c *mkv.Container, outPath string, r mkv.TimeRange, remap map[uint64]uint64, durationMs, windowEndMs int64, link segmentLink, fs *mkv.FS, walk *sourceWalk, progress mkv.ProgressFunc) (err error) {
-	out, err := fs.DoCreate(outPath)
+	out, err := createOutput(fs, outPath)
 	if err != nil {
 		return err
 	}
-	defer removeUnfinished(fs, outPath, &err) // a failed write leaves no truncated output
-	defer closeWithErr(out, &err)
+	defer out.finish(&err) // a failed write leaves no truncated output, nor touches a file already there
 
 	mw := writer.NewMKVWriter(out)
 	mw.SetAttachmentSource(attachmentSource(fs))

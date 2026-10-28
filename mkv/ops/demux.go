@@ -31,18 +31,15 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 	if err != nil {
 		return err
 	}
-	// A demux that fails leaves no truncated stream under its output names
-	// (runs after the closes below).
+	// A demux that fails leaves no truncated stream under its output names, nor
+	// touches the files already there; every output is closed before any is
+	// moved into place, so one that fails to close keeps them all out.
 	defer func() {
-		if err != nil {
-			removeOutputs(fs, outputs)
-		}
-	}()
-	defer func() {
-		// A custom FS (S3/network) may finalise the write on Close: dropping
-		// that error would report success over N outputs that never landed.
 		for _, o := range outputs {
-			closeWithErr(o.file, &err)
+			o.close(&err)
+		}
+		for _, o := range outputs {
+			o.commit(&err)
 		}
 	}()
 
@@ -116,21 +113,15 @@ func buildTrackSet(c *mkv.Container, trackIDs []uint64) map[uint64]mkv.Track {
 	return m
 }
 
-// demuxOutput is one track file a demux created.
-type demuxOutput struct {
-	path string
-	file io.Closer
-}
-
 // demuxWriteBuf batches a track's frames into 1 MiB writes: a video frame
 // alone is tens of KiB, and a write call costs the same whatever it carries.
 const demuxWriteBuf = 1 << 20
 
 // openOutputFiles creates one output per track, in track order. On a failure
 // it closes and removes the files it had already created.
-func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS) (map[uint64]*bufio.Writer, []demuxOutput, error) {
+func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS) (map[uint64]*bufio.Writer, []*output, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
-	outputs := make([]demuxOutput, 0, len(tracks))
+	outputs := make([]*output, 0, len(tracks))
 	if noOverwrite {
 		for _, id := range sortedTracks(tracks) {
 			path, err := safePath(dir, fmt.Sprintf("%d.%s", id, sanitizeCodec(demuxCodecName(tracks[id]))))
@@ -142,11 +133,10 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrit
 			}
 		}
 	}
-	abandon := func(err error) (map[uint64]*bufio.Writer, []demuxOutput, error) {
+	abandon := func(err error) (map[uint64]*bufio.Writer, []*output, error) {
 		for _, o := range outputs {
-			o.file.Close()
+			o.finish(&err)
 		}
-		removeOutputs(fs, outputs)
 		return nil, nil, err
 	}
 	for _, id := range sortedTracks(tracks) {
@@ -160,16 +150,9 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrit
 			return abandon(err)
 		}
 		writers[id] = bufio.NewWriterSize(f, demuxWriteBuf)
-		outputs = append(outputs, demuxOutput{path: path, file: f})
+		outputs = append(outputs, f)
 	}
 	return writers, outputs, nil
-}
-
-// removeOutputs removes the track files of a demux that returned an error.
-func removeOutputs(fs *mkv.FS, outputs []demuxOutput) {
-	for _, o := range outputs {
-		_ = fs.DoRemove(o.path)
-	}
 }
 
 // demuxCodecName is the codec an output file is named after: mkvgo's short
