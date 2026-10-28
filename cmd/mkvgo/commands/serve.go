@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -100,9 +102,40 @@ func serveDirect(addr, src string, opts mkvhttp.Options) {
 const segmentWriteTimeout = 5 * time.Minute
 
 // newServer is an http.Server whose clients cannot hold a connection open without sending or reading: a header must
-// arrive within 10 s and an idle connection closes after 2 min; writeTimeout > 0 bounds writing a response.
+// arrive within 10 s and an idle connection closes after 2 min; writeTimeout > 0 bounds writing a response. On a
+// loopback address it answers only requests that name this machine (loopbackOnly).
 func newServer(addr string, h http.Handler, writeTimeout time.Duration) *http.Server {
-	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: writeTimeout}
+	return &http.Server{Addr: addr, Handler: loopbackOnly(addr, h), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: writeTimeout}
+}
+
+// loopbackOnly refuses, on a server listening on a loopback address, a request whose Host names another machine: a
+// web page the user opens can point a name it controls at 127.0.0.1 (DNS rebinding) and read what the server serves
+// as if from its own origin. A server open to the network is left as it is.
+func loopbackOnly(addr string, h http.Handler) http.Handler {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || !loopbackName(host) {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.Host
+		if hn, _, err := net.SplitHostPort(r.Host); err == nil {
+			name = hn
+		}
+		if !loopbackName(name) {
+			http.Error(w, "this server answers requests for localhost only: open it at http://"+hostOf(addr)+"/", http.StatusMisdirectedRequest)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// loopbackName reports whether host names this machine: localhost, or a loopback address.
+func loopbackName(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // defaultServeAddr keeps serve and serve-growing on this machine; -addr :8478 opens them to the network.
