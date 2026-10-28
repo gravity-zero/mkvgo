@@ -70,6 +70,7 @@ func CmdExtractSubtitle(args []string) {
 	}
 	guardOutput(outPath, source, indexPath)
 	opts := subtitleReadOptions(damageBytes)
+	opts.SyncOutput = SyncOutput
 
 	if indexPath != "" {
 		if format != "vtt" && format != "pgs" {

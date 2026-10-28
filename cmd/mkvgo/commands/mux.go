@@ -26,7 +26,7 @@ func CmdDemux(args []string) {
 
 	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
 		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force,
-	}, matroska.Options{Progress: NewProgressBar()})
+	}, writeOptions())
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -73,7 +73,7 @@ func CmdMux(args []string) {
 	if allMP4(outPath, paths...) {
 		err = mp4.Mux(cliCtx, mo, mp4Options())
 	} else {
-		err = matroska.Mux(cliCtx, mo, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Mux(cliCtx, mo, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {
@@ -105,7 +105,7 @@ func CmdRemoveTrack(args []string) {
 		guardMP4Output(outPath)
 		err = mp4.RemoveTrack(cliCtx, source, outPath, trackIDs, mp4Options())
 	} else {
-		err = matroska.RemoveTrack(cliCtx, source, outPath, trackIDs, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.RemoveTrack(cliCtx, source, outPath, trackIDs, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {
@@ -145,7 +145,7 @@ func CmdAddTrack(args []string) {
 	if allMP4(outPath, base, input.SourcePath) {
 		err = mp4.AddTrack(cliCtx, base, outPath, input, mp4Options())
 	} else {
-		err = matroska.AddTrack(cliCtx, base, outPath, input, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.AddTrack(cliCtx, base, outPath, input, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {

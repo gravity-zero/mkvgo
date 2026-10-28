@@ -126,6 +126,13 @@ type Options struct {
 	// issue that predates the operation (present before and after), as seen
 	// by a non-strict DeepVerify.
 	OnPreexisting func(Issue)
+	// SyncOutput makes an operation that writes a new Matroska file (mkv/ops)
+	// flush it and its directory to disk before renaming it into place, so a
+	// completed output survives a power loss, at the cost of waiting for the
+	// disk to write the whole file. Off by default: the output is still
+	// written aside and renamed, so a failure keeps the file already under its
+	// name. The Replace operations always flush.
+	SyncOutput bool
 }
 
 func ProgressFrom(opts []Options) ProgressFunc {
@@ -206,6 +213,10 @@ func OnRollbackFrom(opts []Options) func(RollbackInfo) {
 
 func StrictVerifyFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].StrictVerify
+}
+
+func SyncOutputFrom(opts []Options) bool {
+	return len(opts) > 0 && opts[0].SyncOutput
 }
 
 func OnPreexistingFrom(opts []Options) func(Issue) {

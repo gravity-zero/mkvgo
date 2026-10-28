@@ -48,7 +48,7 @@ func RemuxToWebM(ctx context.Context, srcPath, dstPath string, extra ...mkv.Opti
 		}
 	}
 
-	dst, err := createOutput(fs, dstPath, srcPath)
+	dst, err := createOutput(fs, mkv.SyncOutputFrom(extra), dstPath, srcPath)
 	if err != nil {
 		return err
 	}

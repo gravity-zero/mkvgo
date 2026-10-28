@@ -30,7 +30,7 @@ func CmdToWebM(args []string) {
 		}
 	}
 
-	err := matroska.RemuxToWebM(cliCtx, src, dst, matroska.Options{Progress: NewProgressBar()})
+	err := matroska.RemuxToWebM(cliCtx, src, dst, writeOptions())
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)

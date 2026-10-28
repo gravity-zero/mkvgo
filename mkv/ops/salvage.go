@@ -79,7 +79,7 @@ func Salvage(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	}
 
 	var seal durationSeal
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb, &seal)
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.SyncOutputFrom(opts), mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb, &seal)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func MapDamage(ctx context.Context, srcPath string, opts ...mkv.Options) (*Salva
 	// Options.RollbackSink is deliberately ignored: nothing is written, so
 	// there is nothing to roll back (and COPY ops would reference a
 	// discarded output).
-	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), nil, nil)
+	report, _, _, err := salvageCopy(ctx, srcPath, "", dry, false, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (d *discardWriteSeeker) Close() error { return nil }
 // verification pass) and the timecode scale used to derive them. cleanCut
 // resumes video only at the next keyframe after each damage gap. The walk
 // itself lives on salvageWalker, one method per element class.
-func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, cleanCut bool, rb *rollbackBuilder, seal *durationSeal) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
+func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, sync bool, progress mkv.ProgressFunc, cleanCut bool, rb *rollbackBuilder, seal *durationSeal) (report *SalvageReport, cues []mkv.CuePoint, timecodeScale int64, err error) {
 	stat, err := fs.DoStat(srcPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: stat src: %w", err)
@@ -184,7 +184,7 @@ func salvageCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	}
 	defer raw.Close()
 
-	out, err := createOutput(fs, dstPath, srcPath)
+	out, err := createOutput(fs, sync, dstPath, srcPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("salvage: create dst: %w", err)
 	}

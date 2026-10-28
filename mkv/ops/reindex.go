@@ -604,7 +604,7 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 	}
 
 	var seal durationSeal
-	cues, timecodeScale, dropped, err := reindexCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), rb, nil, &seal)
+	cues, timecodeScale, dropped, err := reindexCopyOut(ctx, srcPath, dstPath, fs, mkv.SyncOutputFrom(opts), mkv.ProgressFrom(opts), rb, nil, &seal)
 	if err != nil {
 		return err
 	}
@@ -657,7 +657,12 @@ var ErrCorruptSource = errors.New("the source is structurally corrupt")
 // to keep reconstructing the source. body offsets are body-relative.
 type clusterMutator func(body []byte) ([]retimePatch, error)
 
-// reindexCopy performs the actual byte-faithful copy from srcPath to dstPath,
+// reindexCopy is reindexCopyOut without Options.SyncOutput: a Replace flushes its own result.
+func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator, seal *durationSeal) ([]mkv.CuePoint, int64, []mkv.DamagedRange, error) {
+	return reindexCopyOut(ctx, srcPath, dstPath, fs, false, progress, rb, mutate, seal)
+}
+
+// reindexCopyOut performs the actual byte-faithful copy from srcPath to dstPath,
 // rebuilding only the seek index (SeekHead + Cues). It returns the cue points
 // built during the walk and the timecode scale used to derive them, so the
 // caller can verify the result against them. See Reindex for the full contract.
@@ -671,8 +676,8 @@ type clusterMutator func(body []byte) ([]retimePatch, error)
 // and returned in dropped (at most one range, running to EOF), never an
 // error: surplus bytes must not make an otherwise-healthy file unrepairable.
 // The caller reports the range through Options.OnSkip once its own checks
-// pass.
-func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator, seal *durationSeal) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
+// pass. sync is Options.SyncOutput.
+func reindexCopyOut(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, sync bool, progress mkv.ProgressFunc, rb *rollbackBuilder, mutate clusterMutator, seal *durationSeal) (cues []mkv.CuePoint, timecodeScale int64, dropped []mkv.DamagedRange, err error) {
 	// A cheap head-only read of the track list, so the rebuilt cues key on
 	// VIDEO keyframes (every audio block is flagged keyframe).
 	var videoTracks, allTracks map[uint64]bool
@@ -692,7 +697,7 @@ func reindexCopy(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, progr
 	}
 	defer raw.Close()
 
-	out, err := createOutput(fs, dstPath, srcPath)
+	out, err := createOutput(fs, sync, dstPath, srcPath)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("reindex create dst: %w", err)
 	}

@@ -113,7 +113,7 @@ func editMetadata(source, outPath string, edit func(*matroska.Container)) error 
 		guardMP4Output(outPath)
 		return mp4.EditMetadata(cliCtx, source, outPath, edit, mp4Options())
 	}
-	return matroska.EditMetadata(cliCtx, source, outPath, edit, matroska.Options{Progress: NewProgressBar()})
+	return matroska.EditMetadata(cliCtx, source, outPath, edit, writeOptions())
 }
 
 // guardMP4Output refuses a Matroska name for the MP4 an MP4 source's edit writes.

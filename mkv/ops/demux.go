@@ -27,7 +27,7 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		return err
 	}
 
-	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs)
+	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs, mkv.SyncOutputFrom(extra))
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ const demuxWriteBuf = 1 << 20
 
 // openOutputFiles creates one output per track, in track order. On a failure
 // it closes and removes the files it had already created.
-func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS) (map[uint64]*bufio.Writer, []*output, error) {
+func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS, sync bool) (map[uint64]*bufio.Writer, []*output, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	outputs := make([]*output, 0, len(tracks))
 	if noOverwrite {
@@ -145,7 +145,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrit
 		if err != nil {
 			return abandon(err)
 		}
-		f, err := createOutput(fs, path, source)
+		f, err := createOutput(fs, sync, path, source)
 		if err != nil {
 			return abandon(err)
 		}

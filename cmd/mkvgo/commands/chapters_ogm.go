@@ -39,7 +39,7 @@ func CmdSetChapters(args []string) {
 		err = mp4.SetChapters(cliCtx, source, outPath, chapters, mp4Options())
 	} else {
 		err = matroska.SetChapters(cliCtx, source, outPath, chapters,
-			matroska.Options{Progress: NewProgressBar()})
+			writeOptions())
 	}
 	ClearProgress()
 	if err != nil {

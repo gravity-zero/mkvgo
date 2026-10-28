@@ -31,7 +31,7 @@ func CmdReindex(args []string) {
 
 	var skipped []matroska.DamagedRange
 	var repaired []matroska.RepairedRange
-	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync, CleanCut: cleanCut, StrictVerify: strict}
+	opts := matroska.Options{Progress: NewProgressBar(), DeepVerify: deepVerify, KeepBackup: keepBackup, Resync: resync, CleanCut: cleanCut, StrictVerify: strict, SyncOutput: SyncOutput}
 	printPreexisting := armPreexisting(&opts)
 	// Always collect drops: even the strict walk drops trailing junk past
 	// the declared Segment end, and the operator must see what left the file.

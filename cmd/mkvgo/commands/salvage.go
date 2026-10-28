@@ -39,7 +39,7 @@ func CmdSalvage(args []string) {
 		Fatal("--rollback-delta does not apply to --dry-run (nothing is written, nothing to roll back)")
 	}
 
-	opts := matroska.Options{Progress: NewProgressBar(), CleanCut: cleanCut}
+	opts := matroska.Options{Progress: NewProgressBar(), CleanCut: cleanCut, SyncOutput: SyncOutput}
 	printDelta := func() {}
 	if deltaPath != "" {
 		var closeDelta func()

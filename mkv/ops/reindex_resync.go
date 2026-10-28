@@ -27,7 +27,7 @@ func reindexResync(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, opt
 	}
 
 	var seal durationSeal
-	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb, &seal)
+	report, cues, timecodeScale, err := salvageCopy(ctx, srcPath, dstPath, fs, mkv.SyncOutputFrom(opts), mkv.ProgressFrom(opts), mkv.CleanCutFrom(opts), rb, &seal)
 	if err != nil {
 		return fmt.Errorf("reindex resync: %w", err)
 	}

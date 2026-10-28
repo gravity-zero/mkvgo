@@ -22,11 +22,16 @@ type output struct {
 	// a regular file, a directory nothing can be created in), removed on failure when removeDst.
 	tmp       string
 	removeDst bool
+	sync      bool // Options.SyncOutput
 }
 
+// syncFile flushes a file to disk; a test counts the calls.
+var syncFile = (*os.File).Sync
+
 // createOutput creates the output for dst, refusing a dst that is one of the inputs: writing it would destroy
-// what the operation is about to read. The operation defers finish right after.
-func createOutput(fsys *mkv.FS, dst string, inputs ...string) (*output, error) {
+// what the operation is about to read. With sync (Options.SyncOutput) the output reaches the disk before it is
+// renamed. The operation defers finish right after.
+func createOutput(fsys *mkv.FS, sync bool, dst string, inputs ...string) (*output, error) {
 	if err := refuseInput(fsys, dst, inputs...); err != nil {
 		return nil, err
 	}
@@ -52,7 +57,7 @@ func createOutput(fsys *mkv.FS, dst string, inputs ...string) (*output, error) {
 	if err == nil {
 		_ = f.Chmod(st.Mode().Perm())
 	}
-	return &output{WriteSeekCloser: f, fs: fsys, dst: dst, tmp: tmp}, nil
+	return &output{WriteSeekCloser: f, fs: fsys, dst: dst, tmp: tmp, sync: sync}, nil
 }
 
 // createInPlace creates the output as dst itself.
@@ -97,10 +102,10 @@ func (o *output) finish(err *error) {
 	o.commit(err)
 }
 
-// close flushes a temporary file to disk and closes the output.
+// close closes the output, flushing a temporary file to disk first under sync.
 func (o *output) close(err *error) {
-	if f, ok := o.WriteSeekCloser.(*os.File); ok && o.tmp != "" && *err == nil {
-		if serr := f.Sync(); serr != nil && !errors.Is(serr, errors.ErrUnsupported) {
+	if f, ok := o.WriteSeekCloser.(*os.File); ok && o.tmp != "" && o.sync && *err == nil {
+		if serr := syncFile(f); serr != nil && !errors.Is(serr, errors.ErrUnsupported) {
 			*err = serr
 		}
 	}
@@ -122,7 +127,9 @@ func (o *output) commit(err *error) {
 		_ = os.Remove(o.tmp)
 		return
 	}
-	flushDir(filepath.Dir(o.dst))
+	if o.sync {
+		flushDir(filepath.Dir(o.dst))
+	}
 }
 
 // flushDir flushes dir's entries to disk so a completed move survives a crash; Windows has no such call.
@@ -131,7 +138,7 @@ func flushDir(dir string) {
 		return
 	}
 	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
+		_ = syncFile(d)
 		_ = d.Close()
 	}
 }

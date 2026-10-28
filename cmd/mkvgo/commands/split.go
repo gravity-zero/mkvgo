@@ -58,7 +58,7 @@ func CmdSplit(args []string) {
 		guardMP4Output(pattern)
 		outputs, err = mp4.Split(cliCtx, so, mp4Options())
 	} else {
-		outputs, err = matroska.Split(cliCtx, so, matroska.Options{Progress: NewProgressBar()})
+		outputs, err = matroska.Split(cliCtx, so, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {
@@ -88,7 +88,7 @@ func CmdJoin(args []string) {
 	if allMP4(outPath, sources...) {
 		err = mp4.Join(cliCtx, sources, outPath, mp4Options())
 	} else {
-		err = matroska.Join(cliCtx, sources, outPath, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Join(cliCtx, sources, outPath, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {

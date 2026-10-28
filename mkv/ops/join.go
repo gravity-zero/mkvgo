@@ -67,7 +67,7 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Opt
 		totalDurationMs += c.DurationMs
 	}
 
-	out, err := createOutput(fs, dstPath, sources...)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), dstPath, sources...)
 	if err != nil {
 		return err
 	}

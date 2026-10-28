@@ -38,6 +38,15 @@ var FrameRateReads bool
 // file. Without it, commands that write a new file refuse to clobber one.
 var Force bool
 
+// SyncOutput is the global --sync flag: a command writing a new Matroska file
+// flushes it to disk before renaming it into place (Options.SyncOutput).
+var SyncOutput bool
+
+// writeOptions are the options of a command that writes a new Matroska file.
+func writeOptions() matroska.Options {
+	return matroska.Options{Progress: NewProgressBar(), SyncOutput: SyncOutput}
+}
+
 // GuardOverwrite refuses to overwrite an existing output file unless the
 // global -f/--force flag is set, so a typo cannot silently destroy a file.
 func GuardOverwrite(path string) {

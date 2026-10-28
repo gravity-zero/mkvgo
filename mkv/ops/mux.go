@@ -33,7 +33,7 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err er
 	for _, in := range opts.Tracks {
 		inputs = append(inputs, in.SourcePath)
 	}
-	out, err := createOutput(fs, opts.OutputPath, append(inputs, attachmentPaths(opts.Attachments)...)...)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(extra), opts.OutputPath, append(inputs, attachmentPaths(opts.Attachments)...)...)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}

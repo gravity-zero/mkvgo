@@ -57,7 +57,7 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	// Blocks go out in time order (an ASS lists events in any order); ReadOrder keeps the file's.
 	slices.SortStableFunc(subBlocks, func(a, b mkv.Block) int { return cmp.Compare(a.Timecode, b.Timecode) })
 
-	out, err := createOutput(fs, dstPath, srcPath, assPath)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), dstPath, srcPath, assPath)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath str
 	br.KeepTracks(trackID)
 	dmg := tolerateSubtitleDamage(br, opts)
 
-	out, err := createOutput(fs, outPath, srcPath)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), outPath, srcPath)
 	if err != nil {
 		return err
 	}

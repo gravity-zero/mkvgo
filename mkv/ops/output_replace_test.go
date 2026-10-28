@@ -217,3 +217,30 @@ func TestOutputTempName(t *testing.T) {
 		}
 	})
 }
+
+// TestSyncOutputOptIn: an output reaches the disk through Sync (the file, then
+// its directory) only under Options.SyncOutput; by default it is renamed
+// without one.
+func TestSyncOutputOptIn(t *testing.T) {
+	var synced int
+	orig := syncFile
+	syncFile = func(f *os.File) error { synced++; return orig(f) }
+	t.Cleanup(func() { syncFile = orig })
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := buildTestMKV(t, dir)
+	if err := Reindex(ctx, src, filepath.Join(dir, "a.mkv")); err != nil {
+		t.Fatal(err)
+	}
+	if synced != 0 {
+		t.Errorf("default output: %d Sync calls, want none", synced)
+	}
+	synced = 0
+	if err := Reindex(ctx, src, filepath.Join(dir, "b.mkv"), mkv.Options{SyncOutput: true}); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && synced != 2 || runtime.GOOS == "windows" && synced != 1 {
+		t.Errorf("SyncOutput: %d Sync calls, want the file and its directory", synced)
+	}
+}

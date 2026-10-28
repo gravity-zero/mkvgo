@@ -580,7 +580,7 @@ func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, ds
 		repairedSize = st.Size()
 	}
 
-	out, err := createOutput(fs, dstPath, repairedPath)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), dstPath, repairedPath)
 	if err != nil {
 		return fmt.Errorf("rollback: create output: %w", err)
 	}

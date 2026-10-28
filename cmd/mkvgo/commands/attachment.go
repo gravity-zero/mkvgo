@@ -44,7 +44,7 @@ func CmdAddAttachment(args []string) {
 
 	err = matroska.AddAttachment(cliCtx, source, outPath, matroska.Attachment{
 		Name: name, MIMEType: mime, Data: data,
-	}, matroska.Options{Progress: NewProgressBar()})
+	}, writeOptions())
 	ClearProgress()
 	if err != nil {
 		FatalErr(err)
@@ -69,7 +69,7 @@ func CmdRemoveAttachment(args []string) {
 	// RemoveAttachment resolves the target BEFORE writing anything, so a bad
 	// ID/name fails without leaving an output file behind.
 	err := matroska.RemoveAttachment(cliCtx, source, outPath, target,
-		matroska.Options{Progress: NewProgressBar()})
+		writeOptions())
 	ClearProgress()
 	if err != nil {
 		Fatal(fmt.Sprintf("%v (use `mkvgo attachments` to list them)", err))

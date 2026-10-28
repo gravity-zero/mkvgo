@@ -113,7 +113,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	br.KeepTracks(trackID)
 	dmg := tolerateSubtitleDamage(br, opts)
 
-	out, err := createOutput(fs, outPath, srcPath)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), outPath, srcPath)
 	if err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	// Blocks go out in time order: a cue listed out of order would land in a cluster it is timed before.
 	slices.SortStableFunc(subBlocks, func(a, b mkv.Block) int { return cmp.Compare(a.Timecode, b.Timecode) })
 
-	out, err := createOutput(fs, dstPath, srcPath, srtPath)
+	out, err := createOutput(fs, mkv.SyncOutputFrom(opts), dstPath, srcPath, srtPath)
 	if err != nil {
 		return err
 	}

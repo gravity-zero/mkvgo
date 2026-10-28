@@ -34,7 +34,7 @@ func CmdMerge(args []string) {
 	if allMP4(outPath, paths...) {
 		err = mp4.Merge(cliCtx, mo, mp4Options())
 	} else {
-		err = matroska.Merge(cliCtx, mo, matroska.Options{Progress: NewProgressBar()})
+		err = matroska.Merge(cliCtx, mo, writeOptions())
 	}
 	ClearProgress()
 	if err != nil {
@@ -88,7 +88,7 @@ func CmdMergeSubtitle(args []string) {
 		fmt.Printf("merged %s subtitle → %s\n", format, outPath)
 		return
 	}
-	opts := matroska.Options{Progress: NewProgressBar()}
+	opts := writeOptions()
 	var err error
 	switch format {
 	case "srt":

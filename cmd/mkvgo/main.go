@@ -26,6 +26,8 @@ func main() {
 			commands.FrameRateReads = true
 		case "-f", "--force", "-force":
 			commands.Force = true
+		case "--sync", "-sync":
+			commands.SyncOutput = true
 		case "--version", "-version":
 			fmt.Printf("mkvgo %s\n", version)
 			os.Exit(0)
@@ -275,6 +277,9 @@ Global flags:
                 default: only the bytes already read are used)
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
+  --sync        Flush a new Matroska output to disk before renaming it into
+                place, so it survives a power loss (costs the wait for the
+                disk; the replace commands always flush)
 
 Exit codes: 0 success; 1 error. validate also exits 1 on error-severity issues
 (-strict: warnings too); compare exits 1 when the files differ.
