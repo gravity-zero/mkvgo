@@ -17,6 +17,7 @@ var (
 	shareTTL   = 30 * time.Second
 	shareGrace = 10 * time.Millisecond // how long an audio segment waits for its window's video read to begin: 30 ms shared no more and cost a lone audio segment 20 ms
 	shareReach = 1.5                   // the most the span with the audio may be of the video's: past it the audio lies elsewhere
+	shareWait  = time.Second           // how long an audio segment waits for a video read begun: the read writes to its client as it goes, and a client that stops reading holds it
 )
 
 // mp4Share holds, per window, the audio samples a video read kept, or the read in flight.
@@ -167,8 +168,8 @@ func (s *mp4Share) reclaim(need int64) bool {
 	return freed
 }
 
-// lookup returns window win's kept audio, waiting for its read to end, or up to grace for one to begin; nil when
-// there is none.
+// lookup returns window win's kept audio, waiting up to shareWait for its read to end, or up to grace for one to
+// begin; nil when there is none.
 func (s *mp4Share) lookup(ctx context.Context, win int, grace time.Duration) []sharedRun {
 	deadline := time.Now().Add(grace)
 	for {
@@ -181,9 +182,14 @@ func (s *mp4Share) lookup(ctx context.Context, win int, grace time.Duration) []s
 		started := s.started
 		s.mu.Unlock()
 		if w != nil {
+			wait := time.NewTimer(shareWait)
 			select {
 			case <-w.done:
+				wait.Stop()
+			case <-wait.C:
+				return nil // the read is held up, by its client: the audio is read on its own
 			case <-ctx.Done():
+				wait.Stop()
 				return nil
 			}
 			s.mu.Lock()

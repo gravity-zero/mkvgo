@@ -235,3 +235,25 @@ func TestShareDropReleases(t *testing.T) {
 		t.Errorf("%d bytes still counted", held)
 	}
 }
+
+// TestShareAudioNotHeldByAStalledVideoClient: a video client that stops reading holds its window's shared read; the
+// audio segments of that window waited for it as long as their own context lasted. They wait shareWait, then read on
+// their own, the same bytes.
+func TestShareAudioNotHeldByAStalledVideoClient(t *testing.T) {
+	old := shareWait
+	shareWait = 200 * time.Millisecond
+	t.Cleanup(func() { shareWait = old })
+	plan, ref, _ := shareFixture(t)
+	slow := &slowWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() { serveTo(t, plan, ref, "seg00002.m4s", slow); close(done) }()
+	defer func() { close(slow.release); <-done }()
+	<-slow.entered
+	audio := make(chan struct{})
+	go func() { serveTo(t, plan, ref, "seg_a1_00002.m4s", io.Discard); close(audio) }()
+	select {
+	case <-audio:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the audio segment is still waiting on the stalled video client's read")
+	}
+}
