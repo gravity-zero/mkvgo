@@ -28,12 +28,17 @@ var metaAtomNames = map[string]string{
 // attachment. Other non-text values are skipped.
 func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover *mkv.Attachment, hashes map[uint32]string) {
 	tags, title, cover, hashes = parseIlstTags(udtaBoxes)
+	have := make(map[string]bool, len(tags)) // a set, not a scan of the tags per atom: a forged udta holds thousands of each
+	for _, t := range tags {
+		have[t.Name] = true
+	}
 	for _, b := range udtaBoxes {
 		name, ok := metaAtomNames[b.typ]
-		if !ok || hasTag(tags, name) {
+		if !ok || have[name] {
 			continue
 		}
 		if val := quickTimeText(b.payload); val != "" {
+			have[name] = true
 			tags = append(tags, mkv.SimpleTag{Name: name, Value: val})
 			if name == "TITLE" {
 				title = val
@@ -41,15 +46,6 @@ func parseMP4Tags(udtaBoxes []memBox) (tags []mkv.SimpleTag, title string, cover
 		}
 	}
 	return tags, title, cover, hashes
-}
-
-func hasTag(tags []mkv.SimpleTag, name string) bool {
-	for _, t := range tags {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // quickTimeText reads the first string of a QuickTime user-data text atom (16-bit size, 16-bit language, text).

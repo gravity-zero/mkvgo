@@ -350,36 +350,51 @@ func statsFrameRates(c *mkv.Container) {
 			tagsByUID[tag.TargetID] = append(tagsByUID[tag.TargetID], k)
 		}
 	}
+	rates := map[uint64]*float64{} // a UID's tags read once: tracks sharing one would each read all of them
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
 		if t.Type != mkv.VideoTrack || t.FrameRate != nil || t.UID == 0 {
 			continue
 		}
-		for _, k := range tagsByUID[t.UID] {
-			tag := c.Tags[k]
-			var frames, seconds float64
-			for _, st := range tag.SimpleTags {
-				switch strings.ToUpper(st.Name) {
-				case "NUMBER_OF_FRAMES":
-					if n, err := strconv.ParseUint(strings.TrimSpace(st.Value), 10, 64); err == nil {
-						frames = float64(n)
-					}
-				case "DURATION":
-					seconds = tagSeconds(st.Value)
-				}
-			}
-			if frames < 2 || seconds <= 0 {
-				continue
-			}
-			r := frames / seconds
-			for _, s := range standardRates {
-				if std := float64(s[0]) / float64(s[1]); math.Abs(r-std) <= 2e-4*std {
-					r = std
-				}
-			}
-			t.EstimatedFrameRate = &r
+		r, known := rates[t.UID]
+		if !known {
+			r = uidStatsRate(c.Tags, tagsByUID[t.UID])
+			rates[t.UID] = r
+		}
+		if r != nil {
+			v := *r
+			t.EstimatedFrameRate = &v
 		}
 	}
+}
+
+// uidStatsRate is the rate the statistics tags at idx give, the last that gives one; nil when none does.
+func uidStatsRate(tags []mkv.Tag, idx []int) *float64 {
+	var rate *float64
+	for _, k := range idx {
+		var frames, seconds float64
+		for _, st := range tags[k].SimpleTags {
+			switch strings.ToUpper(st.Name) {
+			case "NUMBER_OF_FRAMES":
+				if n, err := strconv.ParseUint(strings.TrimSpace(st.Value), 10, 64); err == nil {
+					frames = float64(n)
+				}
+			case "DURATION":
+				seconds = tagSeconds(st.Value)
+			}
+		}
+		if frames < 2 || seconds <= 0 {
+			continue
+		}
+		r := frames / seconds
+		for _, s := range standardRates {
+			if std := float64(s[0]) / float64(s[1]); math.Abs(r-std) <= 2e-4*std {
+				r = std
+			}
+		}
+		rate = &r
+	}
+	return rate
 }
 
 // tagSeconds parses a statistics DURATION, HH:MM:SS.nnnnnnnnn, into seconds; 0 when malformed.

@@ -71,6 +71,12 @@ func readFragmentKeyframes(r io.ReadSeeker, size int64, mv *movie) {
 }
 
 func trackByID(mv *movie, id uint32) *inTrack {
+	if mv.trackIdx != nil {
+		if i, ok := mv.trackIdx[id]; ok {
+			return &mv.tracks[i]
+		}
+		return nil
+	}
 	for i := range mv.tracks {
 		if mv.tracks[i].trackID == id {
 			return &mv.tracks[i]

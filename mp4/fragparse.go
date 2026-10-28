@@ -72,6 +72,15 @@ func parseTrexDefaults(moovBoxes []memBox) map[uint32]trexDefault {
 // defaults.
 func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []memBox) error {
 	trex := parseTrexDefaults(moovBoxes)
+	mv.fragHeld = 0
+	mv.trackIdx = make(map[uint32]int, len(mv.tracks))
+	for i := range mv.tracks {
+		mv.fragHeld += int64(len(mv.tracks[i].samples))
+		if _, dup := mv.trackIdx[mv.tracks[i].trackID]; !dup {
+			mv.trackIdx[mv.tracks[i].trackID] = i
+		}
+	}
+	defer func() { mv.trackIdx = nil }()
 	var hdr [16]byte
 	for off := int64(0); off+8 <= size; {
 		if _, err := r.Seek(off, io.SeekStart); err != nil {
@@ -299,10 +308,7 @@ func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uin
 	case !h.defaultBaseIsMoof && prevEnd > 0:
 		base, chained = prevEnd, true
 	}
-	room := int64(maxSamples)
-	for i := range mv.tracks {
-		room -= int64(len(mv.tracks[i].samples))
-	}
+	room := int64(maxSamples) - mv.fragHeld // summed over the tracks once, not per traf: a forged file pairs thousands of each
 	if n := trafSampleCount(boxes); n > room {
 		return 0, errf("a fragment declares %d samples, past the %d a movie may hold: the file is damaged or forged", n, max(room, 0))
 	}
@@ -321,6 +327,7 @@ func parseTrafSamples(traf []byte, moofStart, prevEnd, limit int64, trex map[uin
 		}
 	}
 	t.fragDecodeEnd = dts
+	mv.fragHeld += int64(len(t.samples) - first)
 	return dataEnd, nil
 }
 

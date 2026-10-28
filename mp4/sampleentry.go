@@ -666,14 +666,20 @@ func oneSampleDescription(stblBoxes []memBox) error {
 		return nil
 	}
 	n := binary.BigEndian.Uint32(stsc.payload[4:8])
+	same := make([]bool, len(entries)) // each description compared once, not once per run: runs × its bytes is quadratic
+	same[0] = true
 	for i := uint32(0); i < n && 20+int(i)*12 <= len(stsc.payload); i++ {
 		sdi := binary.BigEndian.Uint32(stsc.payload[16+i*12:])
 		if sdi < 1 || int(sdi) > len(entries) {
 			return errf("chunk run %d names sample description %d of %d", i+1, sdi, len(entries))
 		}
+		if same[sdi-1] {
+			continue
+		}
 		if e := entries[sdi-1]; e.typ != entries[0].typ || !bytes.Equal(e.payload, entries[0].payload) {
 			return errf("its samples switch between %d different sample descriptions (the codec setup changes partway), and a remux carries one: re-encode it, or set Options.SkipUnsupported to drop the track", len(entries))
 		}
+		same[sdi-1] = true
 	}
 	return nil
 }

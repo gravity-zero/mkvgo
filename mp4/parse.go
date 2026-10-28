@@ -133,6 +133,8 @@ type movie struct {
 	fragmented  bool              // an mvex box is present → sample data is in moof fragments
 	mehdKnown   bool              // the mvex's mehd stated the fragments' total duration
 	chapterTrak []byte            // the trak of a QuickTime chapter track (tref/chap), read when there is no chpl
+	fragHeld    int64             // the samples every track holds, kept by readFragmentSamples for each traf's room
+	trackIdx    map[uint32]int    // tracks by track_ID (the first of an ID), for trackByID while fragments are read
 }
 
 // memBox is a box parsed from an in-memory buffer.
