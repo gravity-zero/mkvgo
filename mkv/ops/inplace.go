@@ -472,6 +472,9 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		segEnd = region.segDataStart + h.Size
 	}
 
+	// closedBy is the first element in the head that is neither metadata nor a Void (the Cues, say): the region ends
+	// before it, so the edit never writes over it.
+	var closedBy uint32
 	for {
 		if segEnd >= 0 {
 			cur, _ := f.Seek(0, io.SeekCurrent)
@@ -493,6 +496,15 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		case mkv.IDInfo, mkv.IDTracks, mkv.IDChapters, mkv.IDAttachments, mkv.IDTags, mkv.IDSeekHead, mkv.IDVoid:
 			if eh.Size < 0 { // unknown-size metadata: a negative Seek would corrupt the scan
 				return metadataRegion{}, fmt.Errorf("unknown-size metadata element 0x%X", eh.ID)
+			}
+			if closedBy != 0 {
+				if eh.ID != mkv.IDVoid {
+					return metadataRegion{}, fmt.Errorf("metadata element 0x%X sits after element 0x%X in the head, which an edit in place would overwrite: %w", eh.ID, closedBy, ErrNoRoomInPlace)
+				}
+				if _, err := f.Seek(eh.Size, io.SeekCurrent); err != nil {
+					return metadataRegion{}, err
+				}
+				continue
 			}
 			if region.start < 0 {
 				region.start = pos
@@ -534,6 +546,9 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		default:
 			if eh.Size < 0 {
 				return metadataRegion{}, fmt.Errorf("unknown-size element 0x%X", eh.ID)
+			}
+			if region.start >= 0 && closedBy == 0 {
+				closedBy = eh.ID
 			}
 			if _, err := f.Seek(eh.Size, io.SeekCurrent); err != nil {
 				return metadataRegion{}, err
