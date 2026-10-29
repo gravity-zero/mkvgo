@@ -12,9 +12,9 @@ package ops
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
+	"github.com/gravity-zero/mkvgo/internal/sniff"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -362,18 +362,14 @@ func pickRemuxContainer(target Target, tracks []mkv.Track, verdicts []TrackVerdi
 }
 
 // opensLikeMP4 reports whether path's first bytes are those of an MP4/MOV (mp4.OpensLikeISOBMFF): the content
-// chooses the reader, never the name. A source that cannot be read is left to the Matroska reader, which says why.
-func opensLikeMP4(ctx context.Context, path string, fs *mkv.FS) bool {
-	f, err := fs.DoOpenContext(ctx, path)
+// chooses the reader, never the name. The returned FS is the one to read path with: a remote source reads on from
+// the response the sniff opened (sniff.Head), so the sniff costs no request. A source that cannot be read is an error.
+func opensLikeMP4(ctx context.Context, path string, fs *mkv.FS) (bool, *mkv.FS, error) {
+	head, fs, err := sniff.Head(ctx, path, fs, 8)
 	if err != nil {
-		return false
+		return false, fs, err
 	}
-	defer f.Close()
-	head := make([]byte, 8)
-	if _, err := io.ReadFull(f, head); err != nil {
-		return false
-	}
-	return mp4.OpensLikeISOBMFF(head)
+	return mp4.OpensLikeISOBMFF(head), fs, nil
 }
 
 // openAnyMeta reads head-only metadata from either a Matroska/WebM or an
@@ -382,7 +378,11 @@ func opensLikeMP4(ctx context.Context, path string, fs *mkv.FS) bool {
 // Playability needs it to know whether the source container already plays on
 // the target.
 func openAnyMeta(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, string, error) {
-	if opensLikeMP4(ctx, path, fs) {
+	isMP4, fs, err := opensLikeMP4(ctx, path, fs)
+	if err != nil {
+		return nil, "", err
+	}
+	if isMP4 {
 		c, _, err := mp4.OpenMetaWithFS(ctx, path, fs)
 		if err != nil {
 			return nil, "", err

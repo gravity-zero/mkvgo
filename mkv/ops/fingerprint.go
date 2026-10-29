@@ -130,7 +130,11 @@ func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*Finger
 // digestTracksAny is digestTracks extended to MP4/MOV sources, the reader
 // chosen by the first bytes (opensLikeMP4), as Playability's openAnyMeta.
 func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
-	if opensLikeMP4(ctx, path, fs) {
+	isMP4, fs, err := opensLikeMP4(ctx, path, fs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if isMP4 {
 		return digestTracksMP4(ctx, path, fs, progress, onCut)
 	}
 	return digestTracks(ctx, path, fs, progress, true)

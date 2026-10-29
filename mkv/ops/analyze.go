@@ -427,7 +427,11 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		return nil, err
 	}
 	fs := mkv.FSFrom(opts)
-	if opensLikeMP4(ctx, path, fs) {
+	isMP4, fs, err := opensLikeMP4(ctx, path, fs)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse: %w", err)
+	}
+	if isMP4 {
 		return analyzeMP4(ctx, path, fs)
 	}
 
