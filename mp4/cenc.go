@@ -629,11 +629,11 @@ func (k *cencCipher) entry(sample []byte, srcOff int64) (sencEntry, error) {
 	}
 	if k.c.Scheme == "cenc" {
 		if srcOff <= 0 {
-			return e, errf("Options.CENC: track %d has samples converted on the way (Options.FrameConverter), which have no place in the source the 'cenc' scheme derives its IVs from; package it with the cbcs scheme", k.trackID)
+			return e, errf("Options.CENC: track %d has samples with no place in the source (converted on the way by Options.FrameConverter, or a sample table pointing at offset 0), where the 'cenc' scheme derives its IVs; package it with the cbcs scheme", k.trackID)
 		}
 		if srcOff >= 1<<48 {
 			// The track domains (2^56 up) and the variant offsets (2^48 up) stay apart only below 2^48 bytes.
-			return e, errf("Options.CENC: track %d has a sample %d bytes into the source, past the 2^48 the 'cenc' IV domains keep apart; package it with the cbcs scheme", k.trackID, srcOff)
+			return e, errf("Options.CENC: track %d has samples 256 TiB or more into the source, past what the 'cenc' IV domains keep apart; package it with the cbcs scheme", k.trackID)
 		}
 		e.iv = cencSampleIV(k.c.IV, srcOff, k.domain)
 	}
