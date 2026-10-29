@@ -284,3 +284,35 @@ func itoa(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// TestFileHandler_ContentTypeByContent: the Content-Type came from the name alone, so a Matroska file named .mp4 went
+// out as video/mp4 and a browser tried to play it as one. The first bytes decide when they say what the file is.
+func TestFileHandler_ContentTypeByContent(t *testing.T) {
+	ebml := func(docType string) []byte {
+		return append([]byte{0x1A, 0x45, 0xDF, 0xA3, 0x80 | byte(3+len(docType)), 0x42, 0x82, 0x80 | byte(len(docType))}, docType...)
+	}
+	mp4Head := []byte{0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0}
+	cases := []struct {
+		name   string
+		data   []byte
+		wantCT string
+	}{
+		{"really-mkv.mp4", ebml("matroska"), "video/x-matroska"},
+		{"really-webm.mkv", ebml("webm"), "video/webm"},
+		{"really-mp4.mkv", mp4Head, "video/mp4"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(FileHandler(writeTempFile(t, c.name, c.data)))
+			defer srv.Close()
+			resp, err := http.Get(srv.URL + "/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if got := resp.Header.Get("Content-Type"); got != c.wantCT {
+				t.Errorf("Content-Type = %q, want %q", got, c.wantCT)
+			}
+		})
+	}
+}

@@ -1,9 +1,11 @@
 package mkvhttp
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,11 +14,12 @@ import (
 
 	"github.com/gravity-zero/mkvgo/internal/fileid"
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // FileHandler serves a single local file over HTTP for direct-play clients:
 // GET/HEAD only, full Range support (seeking/scrubbing), a strong ETag, the
-// right Content-Type from the extension, a strong ETag from the size, mtime
+// right Content-Type from the content (the extension when it says nothing), a strong ETag from the size, mtime
 // and file identity (not the bytes), no Last-Modified (a date cannot tell
 // apart two versions within one second) and "no-cache" (Options.Immutable for
 // a URL that names the file's version). It never reads the whole file into
@@ -92,7 +95,7 @@ func (h *fileHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", contentTypeFor(h.path))
+	w.Header().Set("Content-Type", contentTypeFor(h.path, f))
 
 	// No modtime: a date validator (If-Modified-Since, a dated If-Range) cannot tell apart two versions within one second, the ETag can.
 	http.ServeContent(w, req, filepath.Base(h.path), time.Time{}, f)
@@ -107,10 +110,22 @@ func fileETag(fi os.FileInfo) string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-// contentTypeFor maps a file extension to the Content-Type FileHandler sets
-// before handing off to http.ServeContent, so ServeContent's own
-// extension/sniffing detection never overrides it.
-func contentTypeFor(path string) string {
+// contentTypeFor is the Content-Type FileHandler sets before handing off to http.ServeContent, so ServeContent's own
+// detection never overrides it: from the file's first bytes when they say what it is (an ISO-BMFF box, an EBML header
+// and its DocType), else from its extension.
+func contentTypeFor(path string, f io.ReaderAt) string {
+	head := make([]byte, 64)
+	n, _ := f.ReadAt(head, 0)
+	head = head[:n]
+	switch {
+	case mp4.OpensLikeISOBMFF(head):
+		return "video/mp4"
+	case bytes.HasPrefix(head, []byte{0x1A, 0x45, 0xDF, 0xA3}):
+		if i := bytes.Index(head, []byte{0x42, 0x82}); i >= 0 && i+3 < len(head) && head[i+2] == 0x84 && bytes.HasPrefix(head[i+3:], []byte("webm")) {
+			return "video/webm"
+		}
+		return "video/x-matroska"
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mkv":
 		return "video/x-matroska"
