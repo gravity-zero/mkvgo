@@ -75,3 +75,32 @@ func TestReplaceTempIsCreatedExclusively(t *testing.T) {
 		t.Errorf("the link's target was written by the retime: %v", err)
 	}
 }
+
+// TestReplaceReadOnlyOriginal: the copy took the original's mode from its creation, so a read-only original (0444)
+// left a copy the replace could not reopen to finish it, and every replace of such a file failed. The copy is
+// written writable and given the original's mode once complete.
+func TestReplaceReadOnlyOriginal(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("POSIX modes, and root writes through them")
+	}
+	for _, op := range []struct {
+		name string
+		run  func(path string) error
+	}{
+		{"ReindexReplace", func(p string) error { return ReindexReplace(context.Background(), p) }},
+		{"RetimeTracksReplace", func(p string) error {
+			return RetimeTracksReplace(context.Background(), p, map[uint64]int64{1: 40_000_000})
+		}},
+	} {
+		path := filepath.Join(t.TempDir(), "film.mkv")
+		tailTagsMKV(t, path, 2)
+		mustNil(t, os.Chmod(path, 0o444))
+		if err := op.run(path); err != nil {
+			t.Errorf("%s on a read-only original: %v", op.name, err)
+			continue
+		}
+		if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o444 {
+			t.Errorf("%s: the file's mode is %v (%v), want 0444", op.name, st.Mode().Perm(), err)
+		}
+	}
+}

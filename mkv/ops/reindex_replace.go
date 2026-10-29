@@ -60,13 +60,14 @@ func installReplacement(fs *mkv.FS, tmp, path string, keepBackup bool) error {
 		_ = fs.DoRemove(tmp)
 		return err
 	}
-	if err := keepMode(fs, path, tmp); err != nil {
-		_ = fs.DoRemove(tmp)
-		return fmt.Errorf("replace: give the copy the original's mode: %w", err)
-	}
 	if err := syncCopy(fs, tmp); err != nil {
 		_ = fs.DoRemove(tmp)
 		return fmt.Errorf("replace: flush verified copy: %w", err)
+	}
+	// The mode comes last: a read-only original's mode would keep the copy from being reopened to flush it.
+	if err := keepMode(fs, path, tmp); err != nil {
+		_ = fs.DoRemove(tmp)
+		return fmt.Errorf("replace: give the copy the original's mode: %w", err)
 	}
 	if !keepBackup {
 		if err := fs.DoRename(tmp, path); err != nil {
@@ -106,21 +107,18 @@ func replaceTarget(fs *mkv.FS, path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
-// exclusiveTemp is fs creating tmp only where nothing stands, a dangling link included, with path's mode: a plain
-// create follows a link planted at tmp and writes where it points.
+// exclusiveTemp is fs creating tmp only where nothing stands, a dangling link included: a plain create follows a
+// link planted at tmp and writes where it points. The copy is its owner's alone while it is written (0600), the
+// operation reopening it to finish it; installReplacement gives it the original's mode once complete.
 func exclusiveTemp(fs *mkv.FS, path, tmp string) *mkv.FS {
 	if !osFS(fs) {
 		return fs
-	}
-	mode := os.FileMode(0o644)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
 	}
 	return &mkv.FS{Create: func(p string) (mkv.WriteSeekCloser, error) {
 		if p != tmp {
 			return os.Create(p)
 		}
-		return os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, mode)
+		return os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	}}
 }
 
