@@ -311,6 +311,14 @@ keyframe. When the Cues skip keyframes, a boundary due on an uncued keyframe
 moves to the next cue and the two presentations differ (a 13-minute file
 with a keyframe every 2 s whose Cues hold 312 of its 390 keyframes plans 8 s
 segments where the full pass cuts at 6 s: 117 segments against 130).
+One known exception: grid-timed audio (a DefaultDuration, AAC's 1024-sample
+frames) whose stored timecodes run a frame ahead of the grid for a while. The
+full pass numbers the frames without stepping back, so the frames after such a
+run stay one frame late until the next real gap; a window built before the one
+ahead of it opens on its own slot instead, one frame (about 23 ms) earlier, and
+that segment's bytes then depend on the order it was asked in. Timecodes that
+fall behind the grid are timed identically in every order. Measured on 19 real
+films and episodes (about 31,000 audio windows): no such run found.
 `HLSPlan.CueDensity()` reports what the plan cut on - the number of video cue
 points, the widest gap between two of them and where it opens, the median
 gap, the last one, and whether `SynthesizeIndex` built them (then every
