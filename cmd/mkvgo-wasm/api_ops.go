@@ -299,7 +299,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 		h.Set("mediaPlaylist", toUint8Array(fp.MediaPlaylist()))
 		h.Set("init", toUint8Array(fp.InitSegment()))
 
-		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -318,7 +318,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		patternFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		patternFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 2 || !isUint8(rargs[1]) {
 				return promise(func() (any, error) {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
@@ -339,7 +339,7 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		distinctFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		distinctFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("distinct: missing index") })
 			}
@@ -357,15 +357,15 @@ func openForensicJS(_ js.Value, args []js.Value) any {
 				return d, nil
 			})
 		})
-		var closeFn js.Func
-		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			closeHandle(h, map[string]js.Func{"segment": segmentFn, "segmentForPattern": patternFn, "distinct": distinctFn}, closeFn)
+		var closeFn *handleMethod
+		closeFn = newMethod(func(js.Value, []js.Value) any {
+			closeHandle(h, map[string]*handleMethod{"segment": segmentFn, "segmentForPattern": patternFn, "distinct": distinctFn}, closeFn)
 			return nil
 		})
-		h.Set("segment", segmentFn)
-		h.Set("segmentForPattern", patternFn)
-		h.Set("distinct", distinctFn)
-		h.Set("close", closeFn)
+		h.Set("segment", segmentFn.Func)
+		h.Set("segmentForPattern", patternFn.Func)
+		h.Set("distinct", distinctFn.Func)
+		h.Set("close", closeFn.Func)
 		return h, nil
 	})
 }
@@ -435,7 +435,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 		h.Set("mediaPlaylist", toUint8Array(wm.MediaPlaylist()))
 		h.Set("init", toUint8Array(wm.InitSegment()))
 
-		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -454,7 +454,7 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		patternFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		patternFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 2 || !isUint8(rargs[1]) {
 				return promise(func() (any, error) {
 					return nil, fmt.Errorf("segmentForPattern: needs an index and a Uint8Array pattern")
@@ -475,14 +475,14 @@ func openWatermarkJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		var closeFn js.Func
-		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			closeHandle(h, map[string]js.Func{"segment": segmentFn, "segmentForPattern": patternFn}, closeFn)
+		var closeFn *handleMethod
+		closeFn = newMethod(func(js.Value, []js.Value) any {
+			closeHandle(h, map[string]*handleMethod{"segment": segmentFn, "segmentForPattern": patternFn}, closeFn)
 			return nil
 		})
-		h.Set("segment", segmentFn)
-		h.Set("segmentForPattern", patternFn)
-		h.Set("close", closeFn)
+		h.Set("segment", segmentFn.Func)
+		h.Set("segmentForPattern", patternFn.Func)
+		h.Set("close", closeFn.Func)
 		return h, nil
 	})
 }

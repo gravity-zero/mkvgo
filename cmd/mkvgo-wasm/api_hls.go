@@ -61,7 +61,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -80,7 +80,7 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 				return obj, nil
 			})
 		})
-		segmentFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		segmentFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("segment: missing index") })
 			}
@@ -98,14 +98,14 @@ func openHLSJS(_ js.Value, args []js.Value) any {
 				return toUint8Array(data), nil
 			})
 		})
-		var closeFn js.Func
-		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			closeHandle(h, map[string]js.Func{"resource": resourceFn, "segment": segmentFn}, closeFn)
+		var closeFn *handleMethod
+		closeFn = newMethod(func(js.Value, []js.Value) any {
+			closeHandle(h, map[string]*handleMethod{"resource": resourceFn, "segment": segmentFn}, closeFn)
 			return nil
 		})
-		h.Set("resource", resourceFn)
-		h.Set("segment", segmentFn)
-		h.Set("close", closeFn)
+		h.Set("resource", resourceFn.Func)
+		h.Set("segment", segmentFn.Func)
+		h.Set("close", closeFn.Func)
 		return h, nil
 	})
 }
@@ -168,7 +168,7 @@ func openABRJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -187,13 +187,13 @@ func openABRJS(_ js.Value, args []js.Value) any {
 				return obj, nil
 			})
 		})
-		var closeFn js.Func
-		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			closeHandle(h, map[string]js.Func{"resource": resourceFn}, closeFn)
+		var closeFn *handleMethod
+		closeFn = newMethod(func(js.Value, []js.Value) any {
+			closeHandle(h, map[string]*handleMethod{"resource": resourceFn}, closeFn)
 			return nil
 		})
-		h.Set("resource", resourceFn)
-		h.Set("close", closeFn)
+		h.Set("resource", resourceFn.Func)
+		h.Set("close", closeFn.Func)
 		return h, nil
 	})
 }
@@ -257,7 +257,7 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 		}
 		h.Set("resources", arr)
 
-		resourceFn := jsFunc(func(_ js.Value, rargs []js.Value) any {
+		resourceFn := newMethod(func(_ js.Value, rargs []js.Value) any {
 			if len(rargs) < 1 {
 				return promise(func() (any, error) { return nil, fmt.Errorf("resource: missing name") })
 			}
@@ -276,13 +276,13 @@ func openConcatJS(_ js.Value, args []js.Value) any {
 				return obj, nil
 			})
 		})
-		var closeFn js.Func
-		closeFn = jsFunc(func(js.Value, []js.Value) any {
-			closeHandle(h, map[string]js.Func{"resource": resourceFn}, closeFn)
+		var closeFn *handleMethod
+		closeFn = newMethod(func(js.Value, []js.Value) any {
+			closeHandle(h, map[string]*handleMethod{"resource": resourceFn}, closeFn)
 			return nil
 		})
-		h.Set("resource", resourceFn)
-		h.Set("close", closeFn)
+		h.Set("resource", resourceFn.Func)
+		h.Set("close", closeFn.Func)
 		return h, nil
 	})
 }

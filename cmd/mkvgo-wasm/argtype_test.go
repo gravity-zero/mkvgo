@@ -117,29 +117,36 @@ func TestSniffFormatSharesTheReaders(t *testing.T) {
 	}
 }
 
-// TestClosedHandleRejects: a method called after close() reached a released function, and the Go program ended,
-// every handle with it. It rejects by name, and close may be called again.
+// TestClosedHandleRejects: a method called after close() - through the handle or through a copy taken before
+// (const {resource, close} = h) - reached a released function, which returns undefined: an await of it went on with
+// nothing. It rejects by name, close may be called again, and what the method called is dropped.
 func TestClosedHandleRejects(t *testing.T) {
 	h := js.Global().Get("Object").New()
 	called := false
-	fn := js.FuncOf(func(js.Value, []js.Value) any { called = true; return nil })
-	var closeFn js.Func
-	closeFn = js.FuncOf(func(js.Value, []js.Value) any {
-		closeHandle(h, map[string]js.Func{"resource": fn}, closeFn)
+	resource := newMethod(func(js.Value, []js.Value) any { called = true; return nil })
+	var closeM *handleMethod
+	closeM = newMethod(func(js.Value, []js.Value) any {
+		closeHandle(h, map[string]*handleMethod{"resource": resource}, closeM)
 		return nil
 	})
-	h.Set("resource", fn)
-	h.Set("close", closeFn)
+	h.Set("resource", resource.Func)
+	h.Set("close", closeM.Func)
+	copied, copiedClose := h.Get("resource"), h.Get("close")
 	h.Call("close")
-	p := h.Call("resource", "seg00001.m4s")
-	if p.Type() != js.TypeObject || p.Get("then").Type() != js.TypeFunction {
-		t.Fatalf("resource after close returned %v, want a promise", p)
-	}
 	ignore := js.FuncOf(func(js.Value, []js.Value) any { return nil })
 	defer ignore.Release()
-	p.Call("catch", ignore)
-	h.Call("close") // again: a no-op
+	for _, p := range []js.Value{h.Call("resource", "seg00001.m4s"), copied.Invoke("seg00001.m4s")} {
+		if p.Type() != js.TypeObject || p.Get("then").Type() != js.TypeFunction {
+			t.Fatalf("resource after close returned %v, want a promise", p)
+		}
+		p.Call("catch", ignore)
+	}
+	h.Call("close")      // again: a no-op
+	copiedClose.Invoke() // through the copy too
 	if called {
-		t.Error("the released method ran")
+		t.Error("the closed method ran")
+	}
+	if resource.inner.Load() != nil {
+		t.Error("the closed method still holds what it called")
 	}
 }

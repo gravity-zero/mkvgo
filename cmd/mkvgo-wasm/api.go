@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync/atomic"
 	"syscall/js"
 
 	"github.com/gravity-zero/mkvgo/internal/mpegts"
@@ -100,22 +101,47 @@ func guarded(fn func(js.Value, []js.Value) any) func(js.Value, []js.Value) any {
 // jsFunc is js.FuncOf over guarded(fn): the form every function handed to JavaScript takes.
 func jsFunc(fn func(js.Value, []js.Value) any) js.Func { return js.FuncOf(guarded(fn)) }
 
-// closedMethod is what a closed handle's methods become: a Promise rejected by name, where a call to the released
-// function ended the Go program, every handle with it. closedNoop is its close, which may be called again. Shared by
-// every closed handle, never released.
+// errHandleClosed rejects a closed handle's methods by name.
+var errHandleClosed = errors.New("mkvgo: the handle is closed")
+
+// closedMethod is what a closed handle's methods become: a Promise rejected by name. closedNoop is its close, which
+// may be called again. Shared by every closed handle, never released.
 var (
-	closedMethod = js.FuncOf(func(js.Value, []js.Value) any { return rejected(errors.New("mkvgo: the handle is closed")) })
+	closedMethod = js.FuncOf(func(js.Value, []js.Value) any { return rejected(errHandleClosed) })
 	closedNoop   = js.FuncOf(func(js.Value, []js.Value) any { return nil })
 )
 
-// closeHandle points h's methods at closedMethod and its close at closedNoop, then releases the functions they were.
-func closeHandle(h js.Value, methods map[string]js.Func, closeFn js.Func) {
-	for name, fn := range methods {
+// handleMethod is a handle's method as JavaScript holds it. It is never released: a copy taken before close()
+// (const {resource, close} = h) would reach a released function, which only logs "call to released function" and
+// returns undefined, so an await of it went on with nothing. Closing drops what it calls instead, the plan with it,
+// and the copy rejects by name.
+type handleMethod struct {
+	js.Func
+	inner atomic.Pointer[func(js.Value, []js.Value) any]
+}
+
+func newMethod(fn func(js.Value, []js.Value) any) *handleMethod {
+	m := &handleMethod{}
+	m.inner.Store(&fn)
+	m.Func = jsFunc(func(this js.Value, args []js.Value) any {
+		if f := m.inner.Load(); f != nil {
+			return (*f)(this, args)
+		}
+		return rejected(errHandleClosed)
+	})
+	return m
+}
+
+// closeHandle points h's methods at closedMethod and its close at closedNoop, and empties every method: a copy of
+// one rejects, a copy of close does nothing.
+func closeHandle(h js.Value, methods map[string]*handleMethod, closeM *handleMethod) {
+	for name, m := range methods {
 		h.Set(name, closedMethod)
-		fn.Release()
+		m.inner.Store(nil)
 	}
 	h.Set("close", closedNoop)
-	closeFn.Release()
+	noop := func(js.Value, []js.Value) any { return nil }
+	closeM.inner.Store(&noop)
 }
 
 // promise runs fn on its own goroutine and returns a JS Promise for its
