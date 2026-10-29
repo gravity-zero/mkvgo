@@ -27,8 +27,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
@@ -137,6 +139,19 @@ type handler struct {
 	resolver Resolver
 	opts     Options
 	gate     *gate // nil without Options.MaxInFlight
+	// iframeBuilds holds the I-frame playlists a request is admitted for: the plan builds one once, so the
+	// requests that arrive meanwhile only wait for it and take no slot.
+	iframeBuilds sync.Map
+}
+
+// waitsForIFrameBuild reports whether name is an I-frame playlist another admitted request is building, and else
+// marks it as this request's to build.
+func (h *handler) waitsForIFrameBuild(name string) bool {
+	if path.Base(name) != "iframe.m3u8" {
+		return false
+	}
+	_, building := h.iframeBuilds.LoadOrStore(name, struct{}{})
+	return building
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -165,7 +180,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "mkvhttp: empty resource name", http.StatusNotFound)
 		return
 	}
-	if h.gate != nil && gated(name) {
+	if h.gate != nil && gated(name) && !h.waitsForIFrameBuild(name) {
+		if path.Base(name) == "iframe.m3u8" {
+			defer h.iframeBuilds.Delete(name) // admitted or turned away, the next request decides afresh
+		}
 		release, ok := h.gate.enter(req.Context())
 		if !ok {
 			busy(w)

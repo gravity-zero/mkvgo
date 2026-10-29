@@ -109,3 +109,37 @@ func TestIFramePlaylistIsAdmitted(t *testing.T) {
 		}
 	}
 }
+
+// TestIFrameWaitersHoldNoSlot: every iframe.m3u8 request took a slot, though all but the first only wait for the
+// one build (the plan builds it once): a burst of them held every slot for the whole build and the segments got
+// 503. Only the request that builds holds one.
+func TestIFrameWaitersHoldNoSlot(t *testing.T) {
+	r := &blockingResolver{fakeResolver: newFakeResolver(), entered: make(chan string, 8), release: make(chan struct{})}
+	h := Handler(r, Options{MaxInFlight: 2, MaxWaiting: 0})
+	var wg sync.WaitGroup
+	get := func(path string, code *int) {
+		defer wg.Done()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if code != nil {
+			*code = rec.Code
+		}
+	}
+	for range 2 {
+		wg.Add(1)
+		go get("/iframe.m3u8", nil)
+		<-r.entered
+	}
+	var segCode int
+	wg.Add(1)
+	go get("/seg00001.m4s", &segCode)
+	select {
+	case <-r.entered: // admitted
+	case <-time.After(2 * time.Second):
+	}
+	close(r.release)
+	wg.Wait()
+	if segCode == http.StatusServiceUnavailable {
+		t.Fatal("a segment was turned away while two iframe.m3u8 requests waited for one build")
+	}
+}
