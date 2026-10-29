@@ -105,10 +105,13 @@ jobs:
           go-version: stable
           cache: false
 
-      # govulncheck needs a recent Go to build; it then judges the standard library of the go on PATH, set below to
-      # the oldest the module supports (go.mod), the one a user of the minimum version runs.
+      # govulncheck judges the standard library of the go on PATH: stable first, the one the published binaries are
+      # built with, then the oldest the module supports (go.mod), the one a user of the minimum version runs.
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+      - name: Vulnerability check (stable)
+        run: go version && "$(go env GOPATH)/bin/govulncheck" ./...
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
