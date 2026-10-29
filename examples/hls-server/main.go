@@ -92,7 +92,7 @@ func main() {
 		}
 		w.Header().Set("Cache-Control", cache)
 		if r.Method == http.MethodHead {
-			return // the headers say all a HEAD asks; the source is not read
+			return // the headers say all a HEAD asks: no body is written
 		}
 		// A segment is written from the source as it goes: an error midway
 		// must break the connection, never end a short body cleanly.
@@ -116,7 +116,11 @@ func main() {
 		fmt.Fprint(w, landingPage)
 	})
 
-	log.Printf("serving on http://localhost%s  (HLS: /hls/master.m3u8 · DASH: /hls/manifest.mpd)", *addr)
+	shown := *addr
+	if strings.HasPrefix(shown, ":") {
+		shown = "localhost" + shown // ":8080" listens everywhere; this machine reaches it as localhost
+	}
+	log.Printf("serving on http://%s  (HLS: /hls/master.m3u8 · DASH: /hls/manifest.mpd)", shown)
 	// The timeouts mkvgo serve runs with: a client that stops reading cannot hold a connection open for ever.
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, WriteTimeout: 5 * time.Minute}
 	log.Fatal(srv.ListenAndServe())
