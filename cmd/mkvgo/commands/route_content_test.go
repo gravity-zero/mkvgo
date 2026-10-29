@@ -37,6 +37,7 @@ func TestRoutesByContent(t *testing.T) {
 		"keyframes, Matroska named .mp4": func() { commands.CmdKeyframes(mkvAsMP4) },
 		"keyframes, MP4 named .mkv":      func() { commands.CmdKeyframes(mp4AsMKV) },
 		"analyze, Matroska named .mp4":   func() { commands.CmdAnalyze([]string{mkvAsMP4}) },
+		"analyze, MP4 named .mkv":        func() { commands.CmdAnalyze([]string{mp4AsMKV}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			exited := false
@@ -55,5 +56,4 @@ func TestRoutesByContent(t *testing.T) {
 			}
 		})
 	}
-	mustFatal(t, func() { commands.CmdAnalyze([]string{mp4AsMKV}) })
 }

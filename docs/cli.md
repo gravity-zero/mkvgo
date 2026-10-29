@@ -193,14 +193,14 @@ mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 
 ### analyze
 
-Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans, a declared-vs-true duration reconciliation, and a per-video-track constant/variable frame rate (cfr/vfr) classification - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. No sample is decoded, but every block header is visited, and the payloads between them are mostly read through: plan on a full read of the file (a 6.2 GB 1080p film: 97 % of its bytes read, 46 s on a local disk). Matroska/WebM only for now; MP4 is a follow-up.
+Stream statistics: per-track exact frame/keyframe counts (lacing expanded), byte totals, average/peak bitrate, GOP spans, a declared-vs-true duration reconciliation, and a per-video-track constant/variable frame rate (cfr/vfr) classification - computed from block HEADERS alone (track, timecode, keyframe flag, byte size, duration), never a decoded sample. No sample is decoded, but every block header is visited, and the payloads between them are mostly read through: plan on a full read of the file (a 6.2 GB 1080p film: 97 % of its bytes read, 46 s on a local disk). An MP4/MOV is analyzed from its sample tables instead, without reading the media: the same report, counting samples where a Matroska counts clusters and blocks.
 
 The cfr/vfr column comes from the deltas between consecutively PRESENTED video frame timecodes - a bounded window restores presentation order first, since blocks are stored in decode order and B-frame reordering would otherwise read as duration variance - compared against the modal (most common) delta with +-1ms slack (Matroska timecodes are millisecond-scale, so a constant 23.976fps track legitimately alternates 41ms/42ms deltas). Only when more than 1% of the deltas (and at least 2) fall outside that slack is the track reported variable, with a warning (some pipelines assume constant frame rate) - isolated dropped-frame holes or splices on an otherwise constant-rate track stay constant instead of flipping the whole title to vfr.
 
 When the timeline does not start at 0 (a live recording, a stream cut from a longer one) the start is printed and reported as `start_ms`: the durations are end positions on that timeline, and the bitrates and frame rates are measured over the span the content actually covers.
 
 ```
-mkvgo analyze [-json] <file.mkv|url>
+mkvgo analyze [-json] <file.mkv|.mp4|url>
 ```
 
 ```bash

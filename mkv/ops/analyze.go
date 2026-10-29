@@ -9,6 +9,7 @@ import (
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
 // bitrateWindowMs is the sliding-window width for TrackStats.PeakBitrateBps:
@@ -348,6 +349,66 @@ func (a *trackAcc) addToWindow(tsMs, size int64) int64 {
 	return bps
 }
 
+// observe feeds one frame, in stored (decode) order, into the track's stats:
+// tc is its presentation time and durMs its duration (0 when unknown), in ms.
+func (a *trackAcc) observe(tc, durMs, size int64, keyframe, newPacket bool) {
+	a.frames++
+	if newPacket {
+		a.packets++
+	}
+	if keyframe {
+		a.keyframes++
+	}
+	a.bytes += size
+
+	if durMs > 0 {
+		a.haveDuration = true
+	}
+	if end := tc + durMs; end > a.durationMs {
+		a.durationMs = end
+	}
+	if a.frames == 1 || tc < a.firstMs {
+		a.firstMs = tc
+	}
+
+	a.addToWindow(tc, size)
+
+	if a.haveTimecode && tc < a.lastTimecode {
+		if a.track.Type == mkv.VideoTrack {
+			a.reordered = true
+		}
+		if a.lastTimecode-tc > backwardTimecodeWarnMs {
+			a.backwardWarned = true
+		}
+	}
+	a.lastTimecode = tc
+	a.haveTimecode = true
+
+	if a.track.Type == mkv.VideoTrack {
+		a.pushFrameTime(tc)
+
+		if keyframe {
+			a.closeGOP()
+			a.haveGOP = true
+			a.framesInGOP = 0
+			if a.haveKf {
+				gap := tc - a.lastKfTC
+				a.kfGapSum += gap
+				a.kfGapCount++
+				// Keyframes present in order even under B-frame reordering
+				// (nothing crosses a keyframe), so a positive delta is a
+				// real span; a negative one is a broken stream, not a gap.
+				if gap > a.kfGapMax {
+					a.kfGapMax, a.kfGapMaxAt = gap, a.lastKfTC
+				}
+			}
+			a.lastKfTC = tc
+			a.haveKf = true
+		}
+		a.framesInGOP++
+	}
+}
+
 // Analyze walks path's block headers (never a decoded sample) to compute
 // per-track and container-wide stream statistics: exact frame/keyframe
 // counts, byte totals, average/peak bitrate, GOP spans and a duration
@@ -366,6 +427,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		return nil, err
 	}
 	fs := mkv.FSFrom(opts)
+	if opensLikeMP4(ctx, path, fs) {
+		return analyzeMP4(ctx, path, fs)
+	}
 
 	c, err := reader.OpenWithFS(ctx, path, fs, reader.WithoutAttachmentData())
 	if err != nil {
@@ -423,89 +487,40 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 			continue // block for a track absent from Tracks (malformed source)
 		}
 
-		acc.frames++
-		if !acc.haveBlockTC || blk.BlockTimecode != acc.lastBlockTC {
-			acc.packets++
-			acc.lastBlockTC = blk.BlockTimecode
-			acc.haveBlockTC = true
-		}
-		if blk.Keyframe {
-			acc.keyframes++
-		}
-		acc.bytes += blk.Size
-
 		durMs := blk.Duration
 		if durMs == 0 {
 			if ns, ok := defaultDurNs[blk.TrackNumber]; ok {
 				durMs = (ns + 500_000) / 1_000_000
 			}
 		}
-		if durMs > 0 {
-			acc.haveDuration = true
-		}
-		if end := blk.Timecode + durMs; end > acc.durationMs {
-			acc.durationMs = end
-		}
-		if acc.frames == 1 || blk.Timecode < acc.firstMs {
-			acc.firstMs = blk.Timecode
-		}
-
-		acc.addToWindow(blk.Timecode, blk.Size)
-
-		if acc.haveTimecode && blk.Timecode < acc.lastTimecode {
-			if acc.track.Type == mkv.VideoTrack {
-				acc.reordered = true
-			}
-			if acc.lastTimecode-blk.Timecode > backwardTimecodeWarnMs {
-				acc.backwardWarned = true
-			}
-		}
-		acc.lastTimecode = blk.Timecode
-		acc.haveTimecode = true
-
-		if acc.track.Type == mkv.VideoTrack {
-			acc.pushFrameTime(blk.Timecode)
-
-			if blk.Keyframe {
-				acc.closeGOP()
-				acc.haveGOP = true
-				acc.framesInGOP = 0
-				if acc.haveKf {
-					gap := blk.Timecode - acc.lastKfTC
-					acc.kfGapSum += gap
-					acc.kfGapCount++
-					// Keyframes present in order even under B-frame reordering
-					// (nothing crosses a keyframe), so a positive delta is a
-					// real span; a negative one is a broken stream, not a gap.
-					if gap > acc.kfGapMax {
-						acc.kfGapMax, acc.kfGapMaxAt = gap, acc.lastKfTC
-					}
-				}
-				acc.lastKfTC = blk.Timecode
-				acc.haveKf = true
-			}
-			acc.framesInGOP++
-		}
+		newPacket := !acc.haveBlockTC || blk.BlockTimecode != acc.lastBlockTC
+		acc.lastBlockTC, acc.haveBlockTC = blk.BlockTimecode, true
+		acc.observe(blk.Timecode, durMs, blk.Size, blk.Keyframe, newPacket)
 	}
 
-	report := &AnalyzeReport{
+	return finishAnalyzeReport(&AnalyzeReport{
 		DeclaredDurationMs:        c.DurationMs,
 		ClusterCount:              br.ClusterCount(),
 		ClusterTimecodeBackstepMs: maxBackstepTicks * c.Info.TimecodeScale / 1_000_000,
-	}
+	}, c.Tracks, accs), nil
+}
+
+// finishAnalyzeReport derives report's per-track stats, totals and Warnings
+// from the accumulated walk, whichever engine fed it.
+func finishAnalyzeReport(report *AnalyzeReport, tracks []mkv.Track, accs map[uint64]*trackAcc) *AnalyzeReport {
 
 	// Where the timeline starts: rates are bytes and frames over the time the
 	// content spans, not over its end position - the two differ on a file that
 	// does not start at 0 (a live recording, a stream cut from a longer one).
 	started := false
-	for _, t := range c.Tracks {
+	for _, t := range tracks {
 		if acc := accs[t.ID]; acc.frames > 0 && (!started || acc.firstMs < report.StartMs) {
 			report.StartMs, started = acc.firstMs, true
 		}
 	}
 
 	var totalBytes int64
-	for _, t := range c.Tracks {
+	for _, t := range tracks {
 		acc := accs[t.ID]
 		ts := TrackStats{
 			TrackID: t.ID, Type: string(t.Type), Codec: t.Codec,
@@ -583,5 +598,31 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		}
 	}
 
-	return report, nil
+	return report
+}
+
+// analyzeMP4 is Analyze on an MP4/MOV: the same stats from the movie's sample
+// tables (sizes, durations, composition offsets, sync samples), no media read.
+// Every sample is one packet; ClusterCount and ClusterTimecodeBackstepMs are
+// Matroska measures and stay 0.
+func analyzeMP4(ctx context.Context, path string, fs *mkv.FS) (*AnalyzeReport, error) {
+	accs := map[uint64]*trackAcc{}
+	c, headerMs, err := mp4.ForEachSample(ctx, path, func(t *mkv.Track, s mp4.Sample) error {
+		acc := accs[t.ID]
+		if acc == nil {
+			acc = &trackAcc{track: *t}
+			accs[t.ID] = acc
+		}
+		acc.observe(s.PtsMs, s.DurMs, s.Size, s.Sync, true)
+		return nil
+	}, mp4.Options{FS: fs})
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse: %w", err)
+	}
+	for _, t := range c.Tracks {
+		if accs[t.ID] == nil {
+			accs[t.ID] = &trackAcc{track: t}
+		}
+	}
+	return finishAnalyzeReport(&AnalyzeReport{DeclaredDurationMs: headerMs}, c.Tracks, accs), nil
 }

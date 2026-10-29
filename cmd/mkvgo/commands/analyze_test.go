@@ -44,13 +44,10 @@ func runExpectingFatal(t *testing.T, fn func()) (called bool) {
 	return called
 }
 
-func TestCmdAnalyze_MP4Rejected(t *testing.T) {
-	var called bool
-	capture(t, func() {
-		called = runExpectingFatal(t, func() { commands.CmdAnalyze([]string{mp4Copy(t, "bframes_aac.mp4")}) })
-	})
-	if !called {
-		t.Error("CmdAnalyze on an MP4: expected Fatal (not supported yet)")
+func TestCmdAnalyze_MP4(t *testing.T) {
+	out := capture(t, func() { commands.CmdAnalyze([]string{mp4Copy(t, "bframes_aac.mp4")}) })
+	if !strings.Contains(out, "Samples: ") || strings.Contains(out, "Clusters: ") {
+		t.Errorf("CmdAnalyze on an MP4: want a report counting samples, got %q", out)
 	}
 }
 

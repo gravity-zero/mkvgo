@@ -2401,7 +2401,7 @@ Supports the FS port like every other operation (`mkv.Options{FS: ...}`), so a r
 
 The facade re-exports it: `matroska.Analyze`, `matroska.AnalyzeReport`, `matroska.TrackStats`.
 
-MP4 support is a follow-up: an MP4's sample table (`stsz`/`stss`/`stts`) already carries most of the per-sample data `Analyze` needs, but wiring it through the same report shape is not done yet.
+An MP4/MOV (told from its first bytes, not its name) is analyzed from its sample tables (`stsz` sizes, `stts` durations, `ctts` composition offsets, `stss` sync samples; a fragmented file's from its `moof`s) through the same accumulators, so it reads as its Matroska remux does: no media is read, only the movie header and fragment headers. Every sample is one packet (`BlockCount`); `ClusterCount` and `ClusterTimecodeBackstepMs` are Matroska measures and stay 0, and `DeclaredDurationMs` is the `mvhd` duration (0 for a fragmented file). The sample walk is exported as `mp4.ForEachSample`.
 
 ---
 

@@ -11,18 +11,15 @@ import (
 // counts (lacing expanded), byte totals, average/peak bitrate, GOP spans and a
 // declared-vs-true duration reconciliation - computed from block headers
 // alone, a structural pass that never decodes a sample but reads about the
-// whole file (the payloads between the headers are read through). MP4 is not
-// supported yet (Matroska/WebM only) - see docs/library.md.
+// whole file (the payloads between the headers are read through). An MP4/MOV
+// is analyzed from its sample tables, without reading the media.
 func CmdAnalyze(args []string) {
 	rest := newFlags("CmdAnalyze").Parse(args)
 	if len(rest) < 1 {
 		FatalUsage("usage: " + CmdUsage["analyze"])
 	}
 	path := rest[0]
-	isMP4, fs := sniffSource(path)
-	if isMP4 {
-		Fatal("analyze supports Matroska/WebM only for now (MP4 is a follow-up - see docs/library.md)")
-	}
+	_, fs := sniffSource(path)
 
 	var opts []matroska.Options
 	if fs != nil {
@@ -47,7 +44,11 @@ func printAnalyzeReport(r *matroska.AnalyzeReport) {
 		fmt.Printf("Timeline starts at %.3fs: the content spans %s (rates are measured over that span)\n", float64(r.StartMs)/1000, FmtMs(r.DurationMs-r.StartMs))
 	}
 	fmt.Printf("Overall bitrate: %d kb/s\n", r.OverallBitrateBps/1000)
-	fmt.Printf("Clusters: %d, blocks: %d\n", r.ClusterCount, r.BlockCount)
+	if r.ClusterCount > 0 {
+		fmt.Printf("Clusters: %d, blocks: %d\n", r.ClusterCount, r.BlockCount)
+	} else {
+		fmt.Printf("Samples: %d\n", r.BlockCount)
+	}
 	if r.ClusterTimecodeBackstepMs > 0 {
 		fmt.Printf("Cluster order: timestamp steps back by up to %s in file order (tracks stored in blocks)\n", FmtMs(r.ClusterTimecodeBackstepMs))
 	}
