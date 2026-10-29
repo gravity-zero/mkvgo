@@ -132,9 +132,10 @@ func TestReindexReplace_SourceInvalid(t *testing.T) {
 	}
 }
 
-// TestReindexReplace_LeftoverTmpRefused verifies that a pre-existing temp file
-// is refused rather than silently overwritten, and that nothing is modified.
-func TestReindexReplace_LeftoverTmpRefused(t *testing.T) {
+// TestReindexReplace_LeftoverTmpReplaced verifies that a temp file a killed
+// run left (nothing holds it) is replaced, as every other output's is, and
+// that no temp file remains.
+func TestReindexReplace_LeftoverTmpReplaced(t *testing.T) {
 	dir := t.TempDir()
 	src := buildMultiClusterMKV(t, dir, "video.mkv",
 		[]mkv.Track{videoTrack(1)},
@@ -146,33 +147,11 @@ func TestReindexReplace_LeftoverTmpRefused(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("leftover"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	origBytes, err := os.ReadFile(src)
-	if err != nil {
-		t.Fatal(err)
+	if err := ReindexReplace(context.Background(), src); err != nil {
+		t.Fatalf("ReindexReplace over a leftover temp file: %v", err)
 	}
-
-	ctx := context.Background()
-	err = ReindexReplace(ctx, src)
-	if err == nil {
-		t.Fatal("expected error for a leftover temp file, got nil")
-	}
-	if !strings.Contains(err.Error(), "leftover temporary file") {
-		t.Errorf("error = %q, want it to mention the leftover temporary file", err.Error())
-	}
-
-	afterBytes, err := os.ReadFile(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(origBytes, afterBytes) {
-		t.Error("original file was modified")
-	}
-	tmpBytes, err := os.ReadFile(tmp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(tmpBytes) != "leftover" {
-		t.Error("leftover temp file was modified")
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind (stat err=%v)", err)
 	}
 }
 

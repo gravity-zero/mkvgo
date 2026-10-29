@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/gravity-zero/mkvgo/internal/outguard"
+	"github.com/gravity-zero/mkvgo/internal/tmplock"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -21,6 +22,7 @@ type output struct {
 	// tmp is the temporary file; "" when the output is written to dst itself (a custom FS, a dst that is not
 	// a regular file, a directory nothing can be created in), removed on failure when removeDst.
 	tmp       string
+	lock      *tmplock.Lock // held on tmp until it is renamed or removed
 	removeDst bool
 	sync      bool // Options.SyncOutput
 }
@@ -47,7 +49,7 @@ func createOutput(fsys *mkv.FS, sync bool, dst string, inputs ...string) (*outpu
 		// A device, a pipe or a link is written through, as before, and never removed.
 		return createInPlace(fsys, dst, false)
 	}
-	f, tmp, terr := createTemp(dst)
+	f, tmp, lock, terr := createTemp(dst)
 	if errors.Is(terr, fs.ErrPermission) {
 		return createInPlace(fsys, dst, true)
 	}
@@ -57,7 +59,7 @@ func createOutput(fsys *mkv.FS, sync bool, dst string, inputs ...string) (*outpu
 	if err == nil {
 		_ = f.Chmod(st.Mode().Perm())
 	}
-	return &output{WriteSeekCloser: f, fs: fsys, dst: dst, tmp: tmp, sync: sync}, nil
+	return &output{WriteSeekCloser: f, fs: fsys, dst: dst, tmp: tmp, lock: lock, sync: sync}, nil
 }
 
 // createInPlace creates the output as dst itself.
@@ -72,23 +74,43 @@ func createInPlace(fsys *mkv.FS, dst string, removeDst bool) (*output, error) {
 // tempSuffix names an output's temporary file, dst+tempSuffix, so a leftover of a killed run is recognisable.
 const tempSuffix = ".mkvgo.tmp"
 
-// createTemp creates dst's temporary file, replacing a regular file an earlier run left there. Anything else
-// under that name is refused: the output is never written through a link.
-func createTemp(dst string) (*os.File, string, error) {
+// createTemp creates dst's temporary file and locks it, replacing a regular file a killed run left there and
+// refusing one a live run holds (internal/tmplock). Anything else under that name is refused: the output is never
+// written through a link.
+func createTemp(dst string) (*os.File, string, *tmplock.Lock, error) {
 	tmp := dst + tempSuffix
 	if st, err := os.Lstat(tmp); err == nil {
 		if !st.Mode().IsRegular() {
-			return nil, "", tempInTheWay(tmp, dst)
+			return nil, "", nil, tempInTheWay(tmp, dst)
 		}
-		if err := os.Remove(tmp); err != nil {
-			return nil, "", err
+		if err := tmplock.Clear(tmp); err != nil {
+			return nil, "", nil, busy(dst, err)
 		}
 	}
 	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 	if errors.Is(err, fs.ErrExist) {
-		return nil, "", tempInTheWay(tmp, dst)
+		if st, serr := os.Lstat(tmp); serr == nil && st.Mode().IsRegular() {
+			return nil, "", nil, busy(dst, tmplock.ErrBusy)
+		}
+		return nil, "", nil, tempInTheWay(tmp, dst)
 	}
-	return f, tmp, err
+	if err != nil {
+		return nil, "", nil, err
+	}
+	lock, err := tmplock.Take(tmp, f)
+	if err != nil {
+		_ = f.Close()
+		return nil, "", nil, busy(dst, err)
+	}
+	return f, tmp, lock, nil
+}
+
+// busy is err with tmplock.ErrBusy said as mkv.ErrOutputBusy, naming the file two runs aimed at.
+func busy(dst string, err error) error {
+	if errors.Is(err, tmplock.ErrBusy) {
+		return fmt.Errorf("%s: %w", dst, mkv.ErrOutputBusy)
+	}
+	return err
 }
 
 func tempInTheWay(tmp, dst string) error {
@@ -120,6 +142,7 @@ func (o *output) commit(err *error) {
 		}
 		return
 	}
+	defer o.lock.Release()
 	if *err == nil {
 		*err = os.Rename(o.tmp, o.dst)
 	}

@@ -20,6 +20,10 @@ var ErrMPEGTS = errors.New("MPEG-TS detected: mkvgo does not read MPEG transport
 // second one would be ignored without a word.
 var ErrTooManyOptions = errors.New("more than one Options value passed: merge their fields into one Options")
 
+// ErrOutputBusy is returned by an operation whose output another run is writing at the same moment: two runs
+// writing one file would leave a mix of both, or the result of the one that lost.
+var ErrOutputBusy = errors.New("another run is writing this file: try again once it ends")
+
 // ErrSourceTruncated reports a source that stops before its declared end, returned by a
 // path whose result states the whole file's content (a fingerprint, a split's parts): stated over what arrived, it
 // would be false. Paths that play or convert the media carry what arrived and report it instead.

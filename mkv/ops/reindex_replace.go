@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
+	"github.com/gravity-zero/mkvgo/internal/tmplock"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -28,10 +29,9 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 	if err != nil {
 		return fmt.Errorf("reindex replace: %w", err)
 	}
-	tmp := path + ".mkvgo.tmp"
-
-	if _, err := fs.DoStat(tmp); err == nil {
-		return fmt.Errorf("reindex replace: leftover temporary file %s exists; remove it first", tmp)
+	tmp := path + tempSuffix
+	if err := clearLeftover(fs, "reindex replace", path, tmp); err != nil {
+		return err
 	}
 	if err := backupFree(fs, path, mkv.KeepBackupFrom(opts)); err != nil {
 		return err
@@ -41,9 +41,11 @@ func ReindexReplace(ctx context.Context, path string, opts ...mkv.Options) error
 	if len(xopts) == 0 {
 		xopts = []mkv.Options{{}}
 	}
-	xopts[0].FS = exclusiveTemp(fs, path, tmp)
+	var hold tempHold
+	defer hold.release()
+	xopts[0].FS = exclusiveTemp(fs, path, tmp, &hold)
 	if err := Reindex(ctx, path, tmp, xopts...); err != nil {
-		if !errors.Is(err, os.ErrExist) { // what stood at tmp is not this run's to remove
+		if !notOurs(err) { // what stood at tmp is not this run's to remove
 			_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched either way
 		}
 		return err
@@ -107,10 +109,38 @@ func replaceTarget(fs *mkv.FS, path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
+// clearLeftover readies a replace's temporary name: on the OS a file a killed run left there is removed and one a
+// live run holds refused (internal/tmplock); on another FS any file there is refused.
+func clearLeftover(fs *mkv.FS, op, path, tmp string) error {
+	if !osFS(fs) {
+		if _, err := fs.DoStat(tmp); err == nil {
+			return fmt.Errorf("%s: leftover temporary file %s exists; remove it first", op, tmp)
+		}
+		return nil
+	}
+	if st, err := os.Lstat(tmp); err != nil || !st.Mode().IsRegular() {
+		return nil // nothing, or what the exclusive create refuses
+	}
+	if err := tmplock.Clear(tmp); err != nil {
+		return fmt.Errorf("%s: %w", op, busy(path, err))
+	}
+	return nil
+}
+
+// notOurs reports a failure to create the temporary file because something else stands there: not this run's to
+// remove.
+func notOurs(err error) bool { return errors.Is(err, os.ErrExist) || errors.Is(err, mkv.ErrOutputBusy) }
+
+// tempHold is the lock on a replace's temporary copy, held until the replace is over.
+type tempHold struct{ lock *tmplock.Lock }
+
+func (h *tempHold) release() { h.lock.Release() }
+
 // exclusiveTemp is fs creating tmp only where nothing stands, a dangling link included: a plain create follows a
 // link planted at tmp and writes where it points. The copy is its owner's alone while it is written (0600), the
-// operation reopening it to finish it; installReplacement gives it the original's mode once complete.
-func exclusiveTemp(fs *mkv.FS, path, tmp string) *mkv.FS {
+// operation reopening it to finish it; installReplacement gives it the original's mode once complete. The copy is
+// locked into hold, so a second run aiming at path is refused.
+func exclusiveTemp(fs *mkv.FS, path, tmp string, hold *tempHold) *mkv.FS {
 	if !osFS(fs) {
 		return fs
 	}
@@ -118,7 +148,15 @@ func exclusiveTemp(fs *mkv.FS, path, tmp string) *mkv.FS {
 		if p != tmp {
 			return os.Create(p)
 		}
-		return os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		if hold.lock, err = tmplock.Take(p, f); err != nil {
+			_ = f.Close()
+			return nil, busy(path, err)
+		}
+		return f, nil
 	}}
 }
 

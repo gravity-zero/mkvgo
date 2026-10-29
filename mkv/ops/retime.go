@@ -11,7 +11,6 @@ import (
 	"io"
 	"maps"
 	"math"
-	"os"
 	"slices"
 	"sort"
 
@@ -186,13 +185,15 @@ func RetimeTracksReplace(ctx context.Context, path string, shift map[uint64]int6
 		return err
 	}
 
-	tmp := path + ".mkvgo.tmp"
-	if _, err := fs.DoStat(tmp); err == nil {
-		return fmt.Errorf("retime replace: leftover temporary file %s exists; remove it first", tmp)
+	tmp := path + tempSuffix
+	if err := clearLeftover(fs, "retime replace", path, tmp); err != nil {
+		return err
 	}
-	xfs := exclusiveTemp(fs, path, tmp)
+	var hold tempHold
+	defer hold.release()
+	xfs := exclusiveTemp(fs, path, tmp, &hold)
 	fail := func(err error) error {
-		if !errors.Is(err, os.ErrExist) { // what stood at tmp is not this run's to remove
+		if !notOurs(err) { // what stood at tmp is not this run's to remove
 			_ = fs.DoRemove(tmp) // best-effort cleanup; original is untouched
 		}
 		return err

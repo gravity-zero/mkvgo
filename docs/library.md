@@ -2193,7 +2193,7 @@ err := ops.ReindexReplace(ctx, "video.mkv")
 err := ops.ReindexReplace(ctx, "video.mkv", mkv.Options{KeepBackup: true, DeepVerify: true})
 ```
 
-If a leftover `path+".mkvgo.tmp"` already exists (a previous run crashed mid-copy), `ReindexReplace` refuses to run rather than silently overwrite it -- remove the file first if it is safe to discard.
+A leftover `path+".mkvgo.tmp"` of a killed run is replaced, as any output's is; one another run is still writing is refused with `mkv.ErrOutputBusy` (see [Custom Filesystem](#custom-filesystem-fs-port) for the rule).
 
 ### ReindexInPlace
 
@@ -2740,7 +2740,7 @@ FS methods and their OS fallbacks:
 | `WriteFile` | `os.WriteFile` | Writing small files (attachments) |
 | `Remove` | `os.Remove` | Cleanup on error |
 
-Without a `Create`, a Matroska operation (`mkv/ops`) writes its output to `<output>.mkvgo.tmp` and renames it into place once complete (`Options.SyncOutput` flushes the file and its directory to disk first, so a completed output survives a power loss, at the cost of waiting for the disk): a failure leaves the file already under that name as it was, and no temporary file. A leftover `.mkvgo.tmp` of a killed run is replaced by the next one; a link or any non-regular file under that name is refused. A custom `Create` gets the output's own name, removed on failure.
+Without a `Create`, a Matroska operation (`mkv/ops`) writes its output to `<output>.mkvgo.tmp` and renames it into place once complete (`Options.SyncOutput` flushes the file and its directory to disk first, so a completed output survives a power loss, at the cost of waiting for the disk): a failure leaves the file already under that name as it was, and no temporary file. The run holds a lock on its `.mkvgo.tmp` until the rename, so a leftover of a killed run is replaced by the next one, while a second run aiming at the same output as a live one is refused with `mkv.ErrOutputBusy` instead of mixing both into the file (`ReindexReplace` and `RetimeTracksReplace` follow the same rule). On a file system without locks the leftover is replaced as before. A link or any non-regular file under that name is refused. A custom `Create` gets the output's own name, removed on failure.
 
 ### In-memory FS (`mkv.MemFS`)
 
