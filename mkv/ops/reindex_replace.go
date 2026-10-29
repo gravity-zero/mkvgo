@@ -122,7 +122,7 @@ func clearLeftover(fs *mkv.FS, op, path, tmp string) error {
 		return nil // nothing, or what the exclusive create refuses
 	}
 	if err := tmplock.Clear(tmp); err != nil {
-		return fmt.Errorf("%s: %w", op, busy(path, err))
+		return fmt.Errorf("%s: %w", op, busy(path, tmp, err))
 	}
 	return nil
 }
@@ -151,7 +151,7 @@ func exclusiveTemp(fs *mkv.FS, path, tmp string, hold *tempHold) *mkv.FS {
 		f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, os.ErrExist) {
 			if st, serr := os.Lstat(p); serr == nil && st.Mode().IsRegular() {
-				return nil, busy(path, tmplock.ErrBusy) // another run created it since the leftover check
+				return nil, busy(path, tmp, tmplock.ErrBusy) // another run created it since the leftover check
 			}
 		}
 		if err != nil {
@@ -159,7 +159,7 @@ func exclusiveTemp(fs *mkv.FS, path, tmp string, hold *tempHold) *mkv.FS {
 		}
 		if hold.lock, err = tmplock.Take(p, f); err != nil {
 			_ = f.Close()
-			return nil, busy(path, err)
+			return nil, busy(path, tmp, err)
 		}
 		return f, nil
 	}}

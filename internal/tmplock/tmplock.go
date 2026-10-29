@@ -11,6 +11,10 @@ import (
 // ErrBusy reports a temporary file another run holds.
 var ErrBusy = errors.New("held by another run")
 
+// ErrUnchecked reports a temporary file this user cannot open, so whether a live run holds it cannot be told: it
+// is neither removed nor written over.
+var ErrUnchecked = errors.New("cannot be checked for a live run")
+
 // Lock is a held lock; the zero Lock holds nothing (a file system without locks).
 type Lock struct{ h *os.File }
 
@@ -50,17 +54,14 @@ func (l *Lock) Release() {
 }
 
 // Clear removes the regular file a killed run left at path, ErrBusy when a live run holds it. A missing file is
-// no error; one this user cannot read cannot be checked, and is removed as before.
+// no error; one this user cannot read is ErrUnchecked.
 func Clear(path string) error {
 	h, err := openForLock(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			return rerr
-		}
-		return nil
+		return ErrUnchecked
 	}
 	if err != nil {
 		return err

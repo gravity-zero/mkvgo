@@ -84,13 +84,13 @@ func createTemp(dst string) (*os.File, string, *tmplock.Lock, error) {
 			return nil, "", nil, tempInTheWay(tmp, dst)
 		}
 		if err := tmplock.Clear(tmp); err != nil {
-			return nil, "", nil, busy(dst, err)
+			return nil, "", nil, busy(dst, tmp, err)
 		}
 	}
 	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 	if errors.Is(err, fs.ErrExist) {
 		if st, serr := os.Lstat(tmp); serr == nil && st.Mode().IsRegular() {
-			return nil, "", nil, busy(dst, tmplock.ErrBusy)
+			return nil, "", nil, busy(dst, tmp, tmplock.ErrBusy)
 		}
 		return nil, "", nil, tempInTheWay(tmp, dst)
 	}
@@ -100,15 +100,19 @@ func createTemp(dst string) (*os.File, string, *tmplock.Lock, error) {
 	lock, err := tmplock.Take(tmp, f)
 	if err != nil {
 		_ = f.Close()
-		return nil, "", nil, busy(dst, err)
+		return nil, "", nil, busy(dst, tmp, err)
 	}
 	return f, tmp, lock, nil
 }
 
-// busy is err with tmplock.ErrBusy said as mkv.ErrOutputBusy, naming the file two runs aimed at.
-func busy(dst string, err error) error {
-	if errors.Is(err, tmplock.ErrBusy) {
+// busy is err with tmplock's refusals said for the user: mkv.ErrOutputBusy naming the file two runs aimed at, and
+// a temporary file that cannot be checked. Neither wraps fs.ErrPermission, which would write over dst instead.
+func busy(dst, tmp string, err error) error {
+	switch {
+	case errors.Is(err, tmplock.ErrBusy):
 		return fmt.Errorf("%s: %w", dst, mkv.ErrOutputBusy)
+	case errors.Is(err, tmplock.ErrUnchecked):
+		return fmt.Errorf("%s, where %s is written before it is moved into place, belongs to another user or cannot be read: remove it if no other run is writing %s", tmp, dst, dst)
 	}
 	return err
 }

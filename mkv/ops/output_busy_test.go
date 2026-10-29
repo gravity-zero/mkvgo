@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/internal/tmplock"
@@ -93,20 +94,47 @@ func TestReplaceLeftoverReplaced(t *testing.T) {
 	}
 }
 
-// TestUnreadableLeftover: a leftover the user cannot read could not be opened to check its lock, and the output
-// fell back to being written over dst itself, lost if the operation then failed. It is removed as before.
+// TestUnreadableLeftover: a temporary file this user cannot read cannot be checked for a live run's lock (another
+// user's replace creates its copy 0600). Removing it took that run's copy away; writing over dst instead lost dst
+// on a failure. Every operation refuses it, saying what to do, and touches neither file.
 func TestUnreadableLeftover(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("POSIX modes, and root reads through them")
 	}
-	dir := t.TempDir()
-	src := buildTestMKV(t, dir)
-	dst := filepath.Join(dir, "out.mkv")
-	writeAll(t, dst+".mkvgo.tmp", []byte("left by a killed run"))
-	mustNil(t, os.Chmod(dst+".mkvgo.tmp", 0))
-	mustNil(t, Reindex(context.Background(), src, dst))
-	if _, err := os.Lstat(dst + ".mkvgo.tmp"); !os.IsNotExist(err) {
-		t.Errorf("the unreadable leftover is still there, so the output was written in place: %v", err)
+	ctx := context.Background()
+	for _, op := range []struct {
+		name string
+		run  func(src, dst string) error
+	}{
+		{"Reindex", func(src, dst string) error { return Reindex(ctx, src, dst) }},
+		{"ReindexReplace", func(src, _ string) error { return ReindexReplace(ctx, src) }},
+		{"RetimeTracksReplace", func(src, _ string) error { return RetimeTracksReplace(ctx, src, map[uint64]int64{1: 40_000_000}) }},
+	} {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "film.mkv")
+		tailTagsMKV(t, src, 2)
+		dst := filepath.Join(dir, "out.mkv")
+		writeAll(t, dst, []byte("an earlier result"))
+		target := dst
+		if op.name != "Reindex" {
+			target = src
+		}
+		before, err := os.ReadFile(target)
+		mustNil(t, err)
+		tmp := target + ".mkvgo.tmp"
+		writeAll(t, tmp, []byte("another user's run"))
+		mustNil(t, os.Chmod(tmp, 0))
+		err = op.run(src, dst)
+		if err == nil || !strings.Contains(err.Error(), "remove it") {
+			t.Errorf("%s over an unreadable temporary file: %v, want a refusal saying what to do", op.name, err)
+		}
+		if _, serr := os.Lstat(tmp); serr != nil {
+			t.Errorf("%s: the unreadable temporary file was removed: %v", op.name, serr)
+		}
+		if got, _ := os.ReadFile(target); string(got) != string(before) {
+			t.Errorf("%s: the output was written", op.name)
+		}
+		mustNil(t, os.Chmod(tmp, 0o600))
 	}
 }
 
