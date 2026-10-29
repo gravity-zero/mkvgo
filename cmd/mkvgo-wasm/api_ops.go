@@ -16,7 +16,7 @@ import (
 // GOP spans, bitrate), never just the head - so the input handling matches
 // remux/openHLS: a Uint8Array is read in place, a Blob/File through ranged
 // slices, so a large file stays memory-bounded even though every block
-// header is visited.
+// header is visited. An MP4/MOV is read from its sample tables only.
 func analyzeJS(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("analyze: missing input") })
@@ -148,7 +148,7 @@ func ingestJS(_ js.Value, args []js.Value) any {
 // track order. This is a FULL read - every frame payload is read and hashed -
 // so the input handling matches analyze: a Uint8Array is read in place, a
 // Blob/File through ranged slices, staying memory-bounded even though every
-// payload byte is visited. Matroska/WebM only (see ops.Fingerprint).
+// payload byte is visited, MP4/MOV included (see ops.Fingerprint).
 func fingerprintJS(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("fingerprint: missing input") })

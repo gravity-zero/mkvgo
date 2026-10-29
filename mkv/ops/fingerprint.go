@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"runtime"
 	"sort"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
@@ -66,9 +64,9 @@ type TrackFingerprint struct {
 // and hashed, so the cost is proportional to the media volume, not just the
 // block-header count.
 //
-// MP4/MOV sources are supported by remuxing to a temporary Matroska file
-// first (see digestTracksMP4) and hashing that: RemuxFromMP4 copies every
-// audio/video sample's compressed bytes verbatim, so the digest is over the
+// MP4/MOV sources are hashed straight from their samples as the blocks a
+// remux to Matroska would hold (see digestTracksMP4), one sample at a time:
+// RemuxFromMP4 copies every audio/video sample's compressed bytes verbatim, so the digest is over the
 // exact same bytes CompareBlocks and this function hash for a native
 // Matroska/WebM source, and an MP4 carrying the same encode as an MKV
 // fingerprints identically. The one normalization is subtitles: RemuxFromMP4
@@ -140,48 +138,32 @@ func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.
 	return digestTracks(ctx, path, fs, progress, true)
 }
 
-// digestTracksMP4 hashes an MP4/MOV source's tracks the same way digestTracks
-// hashes a Matroska one, by remuxing it to a temporary Matroska file (raw
-// sample bytes copied verbatim for every codec RemuxFromMP4 supports) and
-// running the exact same digest engine on that file. The temporary file
-// always lives on local disk regardless of fs, since it is throwaway scratch
-// space, not the caller's data; only the read of the MP4 source goes through
-// fs (so a remote MP4 fingerprints like a remote MKV).
+// digestTracksMP4 hashes an MP4/MOV source's tracks the way digestTracks
+// hashes a Matroska one: each block its remux would write (mp4.ForEachBlock:
+// sample bytes verbatim, subtitles decoded to text) folded into its track's
+// digest, read straight from the source through fs, one sample held at a time.
 func digestTracksMP4(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
-	if runtime.GOOS == "js" {
-		return digestTracksMP4InMemory(ctx, path, fs, progress, onCut)
-	}
-	tmp, err := os.CreateTemp("", "mkvgo-fingerprint-*.mkv")
-	if err != nil {
-		return nil, nil, err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Close(); err != nil {
-		return nil, nil, err
-	}
+	byID := map[uint64]*digestAcc{}
 	srcFS := &mkv.FS{Open: fs.DoOpen, OpenContext: fs.DoOpenContext, Stat: fs.DoStat}
-	if err := mp4.RemuxFromMP4(ctx, path, tmpPath, mp4.Options{FS: srcFS, Progress: progress, OnTruncated: onCut}); err != nil {
-		return nil, nil, fmt.Errorf("remux to temporary matroska: %w", err)
-	}
-	return digestTracks(ctx, tmpPath, nil, nil, true)
-}
-
-// digestTracksMP4InMemory is digestTracksMP4 under WASM, which has no temp files: source and Matroska are both held in memory.
-func digestTracksMP4InMemory(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
-	r, err := fs.DoOpen(path)
+	c, err := mp4.ForEachBlock(ctx, path, func(b mkv.Block) error {
+		a := byID[b.TrackNumber]
+		if a == nil {
+			a = &digestAcc{h: sha256.New()}
+			byID[b.TrackNumber] = a
+		}
+		a.d.blocks++
+		a.d.bytes += int64(len(b.Data))
+		_, _ = a.h.Write(b.Data) // hash.Hash.Write never errors
+		return nil
+	}, mp4.Options{FS: srcFS, Progress: progress, OnTruncated: onCut})
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := io.ReadAll(r)
-	r.Close()
-	if err != nil {
-		return nil, nil, err
+	accs := newTrackAccs(len(c.Tracks))
+	for i, t := range c.Tracks {
+		if a := byID[t.ID]; a != nil {
+			accs[i] = a
+		}
 	}
-	mem := mkv.NewMemFS()
-	mem.Put("src.mp4", data)
-	if err := mp4.RemuxFromMP4(ctx, "src.mp4", "out.mkv", mp4.Options{FS: mem.FS(), Progress: progress, OnTruncated: onCut}); err != nil {
-		return nil, nil, fmt.Errorf("remux to in-memory matroska: %w", err)
-	}
-	return digestTracks(ctx, "out.mkv", mem.FS(), nil, true)
+	return c, sealTrackAccs(accs), nil
 }

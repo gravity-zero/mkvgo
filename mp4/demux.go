@@ -278,17 +278,12 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		return errf("write metadata: %w", err)
 	}
 
-	// Merge all tracks' samples into one decode-ordered stream.
-	merged := mergeByDTS(mv)
-	sr := newTrackWindows(src, size, len(mv.tracks))
-
 	var (
 		group        []mkv.Block
 		groupStart   int64
 		groupLo      int64 // the group's lowest and highest block timecode: a SimpleBlock's offset is an int16
 		groupHi      int64
 		groupHasData bool
-		processed    int64
 	)
 	flush := func() error {
 		if len(group) == 0 {
@@ -303,6 +298,41 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		return nil
 	}
 
+	err := forEachBlock(ctx, src, mv, size, progress, func(block mkv.Block, dtsMs int64) error {
+		if groupHasData && (dtsMs-groupStart >= clusterWindowMs ||
+			max(groupHi, block.Timecode)-min(groupLo, block.Timecode) > clusterSpanMax) {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if !groupHasData {
+			groupStart = dtsMs
+			groupLo, groupHi = block.Timecode, block.Timecode
+			groupHasData = true
+		}
+		groupLo, groupHi = min(groupLo, block.Timecode), max(groupHi, block.Timecode)
+		group = append(group, block)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	if err := m.Finalize(); err != nil {
+		return errf("finalize: %w", err)
+	}
+	return nil
+}
+
+// forEachBlock reads mv's samples in one decode-ordered stream (all tracks merged by DTS) and hands fn each as the
+// Matroska block a remux writes, with its decode time: the media bytes verbatim, a subtitle sample decoded to its
+// text (an empty cue is no block). Only the sample being handed out is held.
+func forEachBlock(ctx context.Context, src io.ReadSeeker, mv *movie, size int64, progress mkv.ProgressFunc, fn func(block mkv.Block, dtsMs int64) error) error {
+	merged := mergeByDTS(mv)
+	sr := newTrackWindows(src, size, len(mv.tracks))
+	var processed int64
 	for _, ref := range merged {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -328,26 +358,9 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 			block.Keyframe = true
 			block.Duration = s.durMs
 		}
-
-		if groupHasData && (s.dtsMs-groupStart >= clusterWindowMs ||
-			max(groupHi, block.Timecode)-min(groupLo, block.Timecode) > clusterSpanMax) {
-			if err := flush(); err != nil {
-				return err
-			}
+		if err := fn(block, s.dtsMs); err != nil {
+			return err
 		}
-		if !groupHasData {
-			groupStart = s.dtsMs
-			groupLo, groupHi = block.Timecode, block.Timecode
-			groupHasData = true
-		}
-		groupLo, groupHi = min(groupLo, block.Timecode), max(groupHi, block.Timecode)
-		group = append(group, block)
-	}
-	if err := flush(); err != nil {
-		return err
-	}
-	if err := m.Finalize(); err != nil {
-		return errf("finalize: %w", err)
 	}
 	return nil
 }

@@ -60,3 +60,48 @@ func ForEachSample(ctx context.Context, path string, fn func(t *mkv.Track, s Sam
 	}
 	return c, headerMs, nil
 }
+
+// ForEachBlock hands fn every block RemuxFromMP4 would write for path, in the same order and with the same bytes,
+// without writing anything: what a digest of the remux would read, read straight from the source, one sample held
+// at a time. It refuses what RemuxFromMP4 refuses. The returned Container is the remux's metadata; fn's
+// TrackNumber is a Container track ID.
+func ForEachBlock(ctx context.Context, path string, fn func(b mkv.Block) error, opts ...Options) (*mkv.Container, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
+	o := optionsFrom(opts)
+	src, err := o.FS.DoOpen(path)
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	fi, err := o.FS.DoStat(path)
+	if err != nil {
+		return nil, err
+	}
+	size := fi.Size()
+	mv, err := parseMP4Limit(src, size, sampleFull, o.moovLimit())
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range mv.dropped {
+		o.report(d)
+	}
+	cut, isCut := mv.truncation(size)
+	if err := carriableTracks(mv, &o); err != nil {
+		return nil, err
+	}
+	if sampleCount(mv) == 0 {
+		return nil, errf("the source holds no samples (an initialisation segment?): nothing to read")
+	}
+	c := containerFromMovie(mv)
+	c.Tracks = buildMKVTracks(mv, o.MP3ContainerDelay)
+	c.Path = path
+	if err := forEachBlock(ctx, src, mv, size, o.Progress, func(b mkv.Block, _ int64) error { return fn(b) }); err != nil {
+		return nil, err
+	}
+	if isCut && o.OnTruncated != nil {
+		o.OnTruncated(cut)
+	}
+	return c, nil
+}

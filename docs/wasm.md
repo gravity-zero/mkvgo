@@ -103,7 +103,9 @@ and a duration reconciliation (the container's declared duration vs. the true
 end-of-track timecode), all read from Matroska/WebM block headers - never a
 decoded sample. Unlike `probe`, this needs a FULL walk of the file (every
 block header, not just the head), so a `Blob`/`File` is read through ranged
-slices to stay memory-bounded rather than head-only.
+slices to stay memory-bounded rather than head-only. An MP4/MOV (told from
+its first bytes) gives the same report from its sample tables: only the movie
+header and fragment headers are read, never the media.
 
 ```js
 const report = await MkvGo.analyze(file)   // File/Blob: ranged reads, full walk
@@ -183,7 +185,7 @@ CLI - which own real files - run `ops.Ingest(Reindex: true)` (library) or the
 identity: a per-track SHA-256 over that track's frame payloads in decode
 order, plus a `presentation` hash over all of them - the same
 audio/video/subtitle content produces the same `presentation` hash whether
-the source is Matroska or WebM, independent of track order or container
+the source is Matroska, WebM or MP4/MOV, independent of track order or container
 metadata, so a client-side media library can detect that two files are
 re-muxes of the same content (different title, muxing app, or track order)
 without a byte-for-byte comparison of the containers themselves. An
@@ -649,10 +651,11 @@ in a worker (`importScripts('/wasm_exec.js')` or a module worker), and
   `Blob`/`File` and have **no size limit** - they read head-only. `analyze`
   and `fingerprint` also accept a `Blob`/`File` (they walk every block header
   / read every payload respectively, so the input itself stays
-  memory-bounded even on a huge file, unlike remux).
+  memory-bounded even on a huge file, unlike remux), MP4/MOV included:
+  `fingerprint` hashes its samples as it reads them, `analyze` reads its
+  sample tables only.
 - **`ingest` never reindexes in wasm** - it is a read-only decision client;
-  see [Onboarding a file](#onboarding-a-file-ingest). `fingerprint` is
-  Matroska/WebM only for now.
+  see [Onboarding a file](#onboarding-a-file-ingest).
 - **No transcoding**, by design: only the codecs the native remuxers support
   are carried (see [cli.md](cli.md)); unsupported tracks fail or are dropped
   with `skipUnsupported`/reported in `droppedTracks`.
