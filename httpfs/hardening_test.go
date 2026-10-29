@@ -183,7 +183,9 @@ func hangingServer(t *testing.T) (url string, released chan struct{}) {
 	return srv.URL + "/o.bin", released
 }
 
-// A request to a server that never answers ends at RequestTimeout.
+// A request to a server that never answers ends at RequestTimeout, with the deadline as its error. The wait is
+// generous: a machine short of memory can freeze every process for seconds (measured: 3.7 s, then 34 s), which a
+// tight bound failed on; a request without its timeout would still be blocked, the server never answering.
 func TestRequestTimeout(t *testing.T) {
 	url, released := hangingServer(t)
 	f, _ := New(Options{RequestTimeout: 100 * time.Millisecond}).Port().DoOpen(url)
@@ -191,15 +193,15 @@ func TestRequestTimeout(t *testing.T) {
 	go func() { _, err := f.Read(make([]byte, 10)); done <- err }()
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("a hung request read successfully")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a hung request ended with %v, want its deadline", err)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("the read is still blocked after 3 s with a 100 ms timeout")
+	case <-time.After(30 * time.Second):
+		t.Fatal("the read is still blocked after 30 s with a 100 ms timeout")
 	}
 	select {
 	case <-released:
-	case <-time.After(3 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the server never saw the request end")
 	}
 }
