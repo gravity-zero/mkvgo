@@ -149,6 +149,11 @@ func exclusiveTemp(fs *mkv.FS, path, tmp string, hold *tempHold) *mkv.FS {
 			return os.Create(p)
 		}
 		f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			if st, serr := os.Lstat(p); serr == nil && st.Mode().IsRegular() {
+				return nil, busy(path, tmplock.ErrBusy) // another run created it since the leftover check
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

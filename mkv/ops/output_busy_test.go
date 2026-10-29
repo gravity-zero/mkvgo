@@ -92,3 +92,35 @@ func TestReplaceLeftoverReplaced(t *testing.T) {
 		}
 	}
 }
+
+// TestUnreadableLeftover: a leftover the user cannot read could not be opened to check its lock, and the output
+// fell back to being written over dst itself, lost if the operation then failed. It is removed as before.
+func TestUnreadableLeftover(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("POSIX modes, and root reads through them")
+	}
+	dir := t.TempDir()
+	src := buildTestMKV(t, dir)
+	dst := filepath.Join(dir, "out.mkv")
+	writeAll(t, dst+".mkvgo.tmp", []byte("left by a killed run"))
+	mustNil(t, os.Chmod(dst+".mkvgo.tmp", 0))
+	mustNil(t, Reindex(context.Background(), src, dst))
+	if _, err := os.Lstat(dst + ".mkvgo.tmp"); !os.IsNotExist(err) {
+		t.Errorf("the unreadable leftover is still there, so the output was written in place: %v", err)
+	}
+}
+
+// TestReplaceTempTakenMeanwhile: another run created the replace's temporary file between the leftover check and
+// the create; the error said "file exists", where every other output says what to do.
+func TestReplaceTempTakenMeanwhile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "film.mkv")
+	tmp := path + ".mkvgo.tmp"
+	var hold tempHold
+	defer hold.release()
+	xfs := exclusiveTemp(nil, path, tmp, &hold)
+	writeAll(t, tmp, []byte("another run's"))
+	if _, err := xfs.Create(tmp); !errors.Is(err, mkv.ErrOutputBusy) {
+		t.Errorf("create over a temporary file another run made: %v, want ErrOutputBusy", err)
+	}
+}

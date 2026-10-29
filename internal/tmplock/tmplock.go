@@ -50,10 +50,16 @@ func (l *Lock) Release() {
 }
 
 // Clear removes the regular file a killed run left at path, ErrBusy when a live run holds it. A missing file is
-// no error.
+// no error; one this user cannot read cannot be checked, and is removed as before.
 func Clear(path string) error {
 	h, err := openForLock(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			return rerr
+		}
 		return nil
 	}
 	if err != nil {
