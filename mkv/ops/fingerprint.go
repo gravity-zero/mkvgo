@@ -14,7 +14,6 @@ import (
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
-	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -128,18 +127,13 @@ func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*Finger
 	return fp, nil
 }
 
-// digestTracksAny is digestTracks extended to MP4/MOV sources: it dispatches
-// by extension first and, for a mislabeled file, falls back on content
-// sniffing (reader.ErrNotMatroska), mirroring Playability's openAnyMeta.
+// digestTracksAny is digestTracks extended to MP4/MOV sources, the reader
+// chosen by the first bytes (opensLikeMP4), as Playability's openAnyMeta.
 func digestTracksAny(ctx context.Context, path string, fs *mkv.FS, progress mkv.ProgressFunc, onCut func(mp4.Truncation)) (*mkv.Container, []trackDigest, error) {
-	if isMP4Ext(path) {
+	if opensLikeMP4(ctx, path, fs) {
 		return digestTracksMP4(ctx, path, fs, progress, onCut)
 	}
-	c, digests, err := digestTracks(ctx, path, fs, progress, true)
-	if err != nil && errors.Is(err, reader.ErrNotMatroska) {
-		return digestTracksMP4(ctx, path, fs, progress, onCut)
-	}
-	return c, digests, err
+	return digestTracks(ctx, path, fs, progress, true)
 }
 
 // digestTracksMP4 hashes an MP4/MOV source's tracks the same way digestTracks

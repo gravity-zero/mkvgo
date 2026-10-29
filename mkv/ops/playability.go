@@ -11,10 +11,8 @@ package ops
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -363,28 +361,28 @@ func pickRemuxContainer(target Target, tracks []mkv.Track, verdicts []TrackVerdi
 	return ""
 }
 
-// isMP4Ext reports whether path looks like an ISO-BMFF file by extension
-// (query/fragment suffixes of a URL are ignored). Mirrors the CLI's
-// extension dispatch (cmd/mkvgo/commands.isMP4Path).
-func isMP4Ext(path string) bool {
-	if i := strings.IndexAny(path, "?#"); i >= 0 {
-		path = path[:i]
+// opensLikeMP4 reports whether path's first bytes are those of an MP4/MOV (mp4.OpensLikeISOBMFF): the content
+// chooses the reader, never the name. A source that cannot be read is left to the Matroska reader, which says why.
+func opensLikeMP4(ctx context.Context, path string, fs *mkv.FS) bool {
+	f, err := fs.DoOpenContext(ctx, path)
+	if err != nil {
+		return false
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp4", ".m4v", ".m4a", ".mov":
-		return true
+	defer f.Close()
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false
 	}
-	return false
+	return mp4.OpensLikeISOBMFF(head)
 }
 
 // openAnyMeta reads head-only metadata from either a Matroska/WebM or an
-// MP4/MOV source, dispatching by extension first and falling back to content
-// sniffing (reader.ErrNotMatroska) for a mislabeled file. It returns the
+// MP4/MOV source, the reader chosen by the first bytes (opensLikeMP4). It returns the
 // container's format name ("mkv" or "mp4") alongside the metadata, since
 // Playability needs it to know whether the source container already plays on
 // the target.
 func openAnyMeta(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, string, error) {
-	if isMP4Ext(path) {
+	if opensLikeMP4(ctx, path, fs) {
 		c, _, err := mp4.OpenMetaWithFS(ctx, path, fs)
 		if err != nil {
 			return nil, "", err
@@ -393,13 +391,6 @@ func openAnyMeta(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, 
 	}
 	c, err := reader.OpenMetaWithFS(ctx, path, fs)
 	if err != nil {
-		if errors.Is(err, reader.ErrNotMatroska) {
-			c2, _, mp4Err := mp4.OpenMetaWithFS(ctx, path, fs)
-			if mp4Err != nil {
-				return nil, "", mp4Err
-			}
-			return c2, "mp4", nil
-		}
 		return nil, "", err
 	}
 	return c, "mkv", nil
