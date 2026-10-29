@@ -17,6 +17,13 @@ func TestPath(t *testing.T) {
 		"https://u:p#w@h/a.mkv":         "https://(a URL that does not parse)",
 		"http://[::1]:8080/a b.mkv":     "http://[::1]:8080/a b.mkv",
 		"https://h?sig=s":               "https://h?...",
+		// A numeric password cut by '/' parsed as a port, and the user, password and real host were shown whole.
+		"https://user:1234/ab@host/x.mkv": "https://(a URL that does not parse)",
+		"https://h:8080/a@b.mkv":          "https://(a URL that does not parse)",
+		// Not URLs with an authority: shown as they are.
+		"file:///media/a.mkv": "file:///media/a.mkv",
+		"/media/a://b.mkv":    "/media/a://b.mkv",
+		"C:/films/x://y.mkv":  "C:/films/x://y.mkv",
 	} {
 		if got := Path(in); got != want {
 			t.Errorf("Path(%q) = %q, want %q", in, got, want)
