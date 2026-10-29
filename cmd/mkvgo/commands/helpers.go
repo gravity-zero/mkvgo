@@ -193,6 +193,11 @@ func exitWith(msg string, code int) {
 
 // FatalErr is Fatal with err's message, naming the command that repairs a damaged file when err is one.
 func FatalErr(err error) {
+	if interruptedBy(err) {
+		fmt.Fprintln(os.Stderr, "interrupted")
+		dieOfInterrupt()
+		return
+	}
 	msg := err.Error()
 	if errors.Is(err, reader.ErrDamagedRegion) {
 		msg += "\nrepair it with `mkvgo reindex --resync`"

@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 )
 
 // cliCtx is the context the commands run their operations under: an Interrupt (Ctrl-C) cancels it, so an operation
@@ -12,8 +14,15 @@ import (
 // truncated file behind it. A second Interrupt ends the process at once.
 var cliCtx = context.Background()
 
-// WatchInterrupt makes an Interrupt cancel the commands' context, and a second one exit with status 130; main calls
-// it once. The returned stop undoes it.
+// interrupted is set once an Interrupt cancelled cliCtx.
+var interrupted atomic.Bool
+
+// dieOfInterrupt ends the process as an Interrupt does, so a shell running it in a loop stops too (see
+// interrupt_unix.go); a variable so tests do not end theirs.
+var dieOfInterrupt = raiseInterrupt
+
+// WatchInterrupt makes an Interrupt cancel the commands' context, and a second one end the process at once; main
+// calls it once. The returned stop undoes it.
 func WatchInterrupt() (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cliCtx = ctx
@@ -23,6 +32,7 @@ func WatchInterrupt() (stop func()) {
 	go func() {
 		select {
 		case <-sig:
+			interrupted.Store(true)
 			cancel()
 		case <-done:
 			return
@@ -30,7 +40,7 @@ func WatchInterrupt() (stop func()) {
 		select {
 		case <-sig:
 			fmt.Fprintln(os.Stderr, "interrupted")
-			os.Exit(130)
+			dieOfInterrupt()
 		case <-done:
 		}
 	}()
@@ -40,4 +50,9 @@ func WatchInterrupt() (stop func()) {
 		cancel()
 		cliCtx = context.Background()
 	}
+}
+
+// interruptedBy reports whether err is the cancellation an Interrupt caused.
+func interruptedBy(err error) bool {
+	return interrupted.Load() && errors.Is(err, context.Canceled)
 }

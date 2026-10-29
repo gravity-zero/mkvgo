@@ -60,7 +60,7 @@ AWS_REGION=eu-west-1 mkvgo probe s3://my-bucket/movies/one.mkv
 | `1` | The operation failed, or a check said no (below). |
 | `2` | Bad usage, decided from the command line alone: unknown command or flag, missing argument, invalid value, flags that do not go together. |
 | `3` | With `--exit-damaged` only: done, on a source that is incomplete or damaged. Without the flag these runs exit `0`. |
-| `130` | Interrupted twice (Ctrl-C). |
+| `130` | Interrupted (Ctrl-C): the command stops and removes what it was writing, then the process dies of the interrupt, as a shell expects (a loop running it stops too); Windows exits `130`. A second Ctrl-C ends it at once. |
 
 A check that says no exits `1` so it can gate a script (`mkvgo validate f.mkv && ...`): `validate` on error-severity issues (`-strict`: warnings too), `compare` when the files differ, `verify` and `hash` on a digest that does not match, `cue-health` on an unhealthy index, `diagnose` on a file that is not healthy, `fingerprint` on an incomplete file. `--exit-damaged` gives `3` to `salvage` that dropped or repaired a region or found the tail missing, `reindex --resync` that skipped or repaired a region, `extract-subtitle` and `subtitle-index` that passed over a damaged region (`--damage-bytes`), and `to-mp4`, `from-mp4` and `to-hls` on an incomplete source. Trailing junk past the declared end, which a strict `reindex` drops, is not damage. A flag that takes a value but is the last argument (`mkvgo to-hls in.mkv -o out -segment`) is bad usage: exit `2`, naming the flag.
 
