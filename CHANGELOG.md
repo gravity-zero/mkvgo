@@ -9,6 +9,27 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Breaking
+
+- Bytes served: every `cenc` segment changes (see Security); grid-timed audio
+  whose timecodes run ahead of the grid changes (experimental, see Fixed); the
+  DefaultDuration audio `serve-growing` serves changes (see Fixed).
+- CLI: bad usage exits 2 (was 1).
+- A second `Options` value is refused (`mkv.ErrTooManyOptions`) instead of
+  ignored; `httpfs.New`, `httpfs.Hybrid`, `mkvhttp.Handler` and
+  `mkvhttp.FileHandler` panic on it where they are built, their `Checked`
+  variants return it.
+- `serve` on loopback answers 421 to a request naming another host: a local
+  reverse proxy must send `Host: 127.0.0.1` ([cli.md](docs/cli.md#serve)).
+- An output is written to `<dst>.mkvgo.tmp` and renamed into place, so a
+  failure keeps the file already there; a second run writing the same output
+  meanwhile is refused (`mkv.ErrOutputBusy`). Without `--sync`
+  (`Options.SyncOutput`) a power loss can leave an empty file under the
+  output's name ([cli.md](docs/cli.md)).
+- The source's bytes, not its name, choose the MP4 or Matroska engine, and
+  `mkvhttp.FileHandler`'s Content-Type.
+- An encrypted plan's `SourceID` changes with its key.
+
 ### Security
 
 - CENC `cenc`: from 0.56.0 to 0.61.0 an on-demand plan could reuse an IV
@@ -21,26 +42,14 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   damaged or incomplete source) and `--sync`; `analyze` reads MP4/MOV;
   `serve-growing` takes `serve`'s admission caps and `--memory-limit`.
 - Library: `mp4.ForEachSample`, `mp4.ForEachBlock`, `mkv.ErrOutputBusy`,
-  `mkv.ErrTooManyOptions`.
+  `mkv.ErrTooManyOptions`, `httpfs.NewChecked`, `httpfs.HybridChecked`,
+  `mkvhttp.HandlerChecked`, `mkvhttp.FileHandlerChecked`.
 
 ### Changed
 
-- An output is written to `<dst>.mkvgo.tmp` and renamed into place, so a
-  failure keeps the file already there; a second run writing the same output
-  meanwhile is refused (`mkv.ErrOutputBusy`). Without `--sync`
-  (`Options.SyncOutput`) a power loss can leave an empty file under the
-  output's name ([cli.md](docs/cli.md)).
-- A second `Options` value is refused (`mkv.ErrTooManyOptions`) instead of
-  ignored; `httpfs.New`, `httpfs.Hybrid`, `mkvhttp.Handler` and
-  `mkvhttp.FileHandler` return a value every use of which fails with it.
-- CLI: bad usage exits 2 (was 1); Ctrl-C ends mkvgo as an interrupt, so a
-  shell loop stops.
-- `serve` on loopback answers 421 to a request naming another host: a local
-  reverse proxy must send `Host: 127.0.0.1` ([cli.md](docs/cli.md#serve)).
-- The source's bytes, not its name, choose the MP4 or Matroska engine.
+- CLI: Ctrl-C ends mkvgo as an interrupt, so a shell loop stops.
 - `fingerprint` of an MP4 hashes its samples as it reads them: no temporary
-  file, bounded memory, in wasm too. An encrypted plan's `SourceID` changes
-  with its key.
+  file, bounded memory, in wasm too.
 
 ### Fixed
 
