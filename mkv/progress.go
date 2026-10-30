@@ -131,7 +131,9 @@ type Options struct {
 	// completed output survives a power loss, at the cost of waiting for the
 	// disk to write the whole file. Off by default: the output is still
 	// written aside and renamed, so a failure keeps the file already under its
-	// name. The Replace operations always flush.
+	// name, but a power loss soon after the operation returns can leave an
+	// empty file under that name, the one it replaced gone. The Replace
+	// operations always flush.
 	SyncOutput bool
 }
 

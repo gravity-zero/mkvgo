@@ -293,7 +293,8 @@ Global flags:
                 reindex --resync, subtitle extraction, to-mp4, from-mp4, to-hls)
   --sync        Flush a new Matroska output to disk before renaming it into
                 place, so it survives a power loss (costs the wait for the
-                disk; the replace commands always flush)
+                disk; without it a power loss can leave an empty file under
+                the output's name; the replace commands always flush)
 
 Exit codes: 0 success; 1 error (validate: error-severity issues, -strict:
 warnings too; compare: the files differ); 2 bad usage; 3 with
