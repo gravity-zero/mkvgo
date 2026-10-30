@@ -9,11 +9,63 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Security
+
+- CENC `cenc`: from 0.56.0 to 0.61.0 an on-demand plan could reuse an IV
+  between segments; fixed, every `cenc` segment changes: update if you use
+  `cenc` ([library.md](docs/library.md#common-encryption-cenc)).
+
+### Added
+
+- CLI: global `--json`, `--exit-damaged` (exit 3 when a command acted on a
+  damaged or incomplete source) and `--sync`; `analyze` reads MP4/MOV;
+  `serve-growing` takes `serve`'s admission caps and `--memory-limit`.
+- Library: `mp4.ForEachSample`, `mp4.ForEachBlock`, `mkv.ErrOutputBusy`,
+  `mkv.ErrTooManyOptions`.
+
+### Changed
+
+- An output is written to `<dst>.mkvgo.tmp` and renamed into place, so a
+  failure keeps the file already there; a second run writing the same output
+  meanwhile is refused (`mkv.ErrOutputBusy`). Without `--sync`
+  (`Options.SyncOutput`) a power loss can leave an empty file under the
+  output's name ([cli.md](docs/cli.md)).
+- A second `Options` value is refused (`mkv.ErrTooManyOptions`) instead of
+  ignored; `httpfs.New`, `httpfs.Hybrid`, `mkvhttp.Handler` and
+  `mkvhttp.FileHandler` return a value every use of which fails with it.
+- CLI: bad usage exits 2 (was 1); Ctrl-C ends mkvgo as an interrupt, so a
+  shell loop stops.
+- `serve` on loopback answers 421 to a request naming another host: a local
+  reverse proxy must send `Host: 127.0.0.1` ([cli.md](docs/cli.md#serve)).
+- The source's bytes, not its name, choose the MP4 or Matroska engine.
+- `fingerprint` of an MP4 hashes its samples as it reads them: no temporary
+  file, bounded memory, in wasm too. An encrypted plan's `SourceID` changes
+  with its key.
+
 ### Fixed
 
 - An incomplete file (it stops before the end it declares): `fingerprint`
   refuses it, MP4 as MKV (#2); `to-mp4`, `from-mp4`, `to-hls` convert it with
   a warning (`mp4.Options.OnTruncated`); `info` shows `Truncated`.
+- Experimental: grid-timed audio whose timecodes run a frame ahead of the grid
+  for a while no longer stays a frame late until the end; the segment where
+  the delay ends absorbs it, so an on-demand segment is the full pass's bytes
+  whatever order the segments are asked in. Playback of the absorbing segment
+  is still being measured across players.
+- `serve-growing` (`mp4.PlanGrowingHLS`): audio with a DefaultDuration (AAC,
+  AC-3, E-AC-3) is timed on its grid like the full pass; it was timed by its
+  millisecond timecodes, every audio segment differing from the full pass's.
+- Review of v0.61.0: in-place edits, the Replace operations and hostile input
+  (lacing, co64, quadratic reads) made safe; serving no longer stalls on a
+  panic, a slow client, a slow read or a burst of I-frame playlist requests.
+
+### Deferred
+
+- The `mkv/ops` -> `mp4` dependency edge.
+- A static `make release` (`CGO_ENABLED=0 -trimpath`).
+- Coverage over every package (`-coverpkg` complete).
+- TypeScript types for the wasm module.
+- The `js && wasm` tests in CI.
 
 ## [0.61.0] - 2026-10-24
 
