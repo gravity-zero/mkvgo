@@ -34,9 +34,11 @@ import (
 //
 //	http.Handle("/play/movie.mkv", mkvhttp.FileHandler("movie.mkv"))
 //
-// More than one Options panics.
+// More than one Options returns a handler answering every request 500 with mkv.ErrTooManyOptions.
 func FileHandler(path string, opts ...Options) http.Handler {
-	oneopt.Must(opts)
+	if err := oneopt.Check(opts); err != nil {
+		return refused(err)
+	}
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]

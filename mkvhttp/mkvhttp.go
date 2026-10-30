@@ -125,14 +125,23 @@ type Opener interface {
 //     error answers 502 with a terse body (the source read failed, which is
 //     not the client's fault).
 //
-// More than one Options panics.
+// More than one Options returns a handler answering every request 500 with mkv.ErrTooManyOptions.
 func Handler(r Resolver, opts ...Options) http.Handler {
-	oneopt.Must(opts)
+	if err := oneopt.Check(opts); err != nil {
+		return refused(err)
+	}
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]
 	}
 	return &handler{resolver: r, opts: o, gate: newGate(o)}
+}
+
+// refused is the handler of a constructor handed more than one Options: every request is answered 500 with err.
+func refused(err error) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "mkvhttp: "+err.Error(), http.StatusInternalServerError)
+	})
 }
 
 type handler struct {

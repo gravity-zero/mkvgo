@@ -19,7 +19,8 @@ task-first starting point (CLI and Go side by side).
 
 Every function that takes options (`opts ...Options`) reads one value at most: pass the settings in one `Options`.
 A second value is refused (`mkv.ErrTooManyOptions`) rather than ignored; `httpfs.New`, `httpfs.Hybrid`,
-`mkvhttp.Handler` and `mkvhttp.FileHandler`, which return no error, panic on it.
+`mkvhttp.Handler` and `mkvhttp.FileHandler`, which return no error, return a value whose every use fails with it
+(every request answered 500 for the handlers).
 
 Operations process the container incrementally -- they read and write block by block (or cluster by cluster) and never hold the whole file in memory, so multi-gigabyte inputs run with bounded memory.
 
