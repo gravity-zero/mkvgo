@@ -421,7 +421,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		t.kept, t.taken = make([]int64, len(p.tracks)), make([]bool, len(p.tracks))
 	}
 	for ti := range p.tracks {
-		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
+		span, err := p.gridSpanFor(ctx, n, ti, windows[ti], nextPts[ti])
 		if err != nil {
 			if keep {
 				windowBytesTotal.Add(-est)
@@ -438,7 +438,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 			if ti == inPlace.track && inPlace.media() != nil {
 				arena = inPlace.buf
 			}
-			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, arena)
+			data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], span, arena)
 			if err != nil {
 				if keep {
 					windowBytesTotal.Add(-est)
@@ -454,7 +454,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 				continue
 			}
 		}
-		seg := p.timeWindow(ti, n, windows[ti], nextPts[ti], k)
+		seg := p.timeWindow(ti, n, windows[ti], nextPts[ti], span)
 		offs := make([]int64, len(windows[ti]))
 		for x := range windows[ti] {
 			offs[x] = windows[ti][x].off

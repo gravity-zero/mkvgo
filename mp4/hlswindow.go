@@ -139,11 +139,11 @@ func (p *HLSPlan) buildWindow(ctx context.Context, n int) (*windowBundle, error)
 		if ti == inPlace.track && inPlace.media() != nil {
 			arena = inPlace.buf
 		}
-		k, err := p.gridStartFor(ctx, n, ti, windows[ti])
+		span, err := p.gridSpanFor(ctx, n, ti, windows[ti], nextPts[ti])
 		if err != nil {
 			return nil, err
 		}
-		data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], k, arena)
+		data, err := p.buildTrackSegment(ti, n, windows[ti], nextPts[ti], span, arena)
 		if err != nil {
 			return nil, err
 		}

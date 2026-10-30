@@ -116,7 +116,7 @@ func (p *HLSPlan) buildMatroskaIframePlaylist(ctx context.Context) ([]byte, []if
 			}
 		}
 		ts := trackSegment{trackID: pt.ft.outTrack.mp4ID}
-		ts.baseDecodeTS, ts.hasCTS, _ = timeSegmentWindow(window, pt, nextPts, -1)
+		ts.baseDecodeTS, ts.hasCTS = timeSegmentWindow(window, pt, nextPts, noGridSpan)
 		if len(window) > 0 {
 			ts.samples = window
 			for _, s := range window {

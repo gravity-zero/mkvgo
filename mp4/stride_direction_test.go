@@ -21,7 +21,7 @@ func TestStrideErrorDirection(t *testing.T) {
 	}
 	deviation := func(gridTS int64) float64 {
 		s := build()
-		fillFragTimingTS(s, nil, 0, mts, gridTS)
+		fillFragTimingTS(s, nil, 0, mts, gridTS, nil)
 		var worst float64
 		for i := 0; i < len(s); i += frames {
 			if d := float64(s[i].dtsTS)*1000/mts - float64(s[i].blockPtsMs-s[0].blockPtsMs); d > worst || -d > worst {

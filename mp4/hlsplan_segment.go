@@ -15,9 +15,9 @@ func (p *HLSPlan) Segment(ctx context.Context, n int) ([]byte, error) {
 // arena, when not nil, is the buffer the walk read this rendition's blocks
 // into, back to back behind windowHeadroom bytes of room (windowInPlace): the
 // head is then written in front of them and that buffer is the segment.
-func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts, startK int64, arena []byte) ([]byte, error) {
+func (p *HLSPlan) buildTrackSegment(ti, n int, window []segSample, nextPts int64, span gridSpan, arena []byte) ([]byte, error) {
 	pt := p.tracks[ti]
-	seg := p.timeWindow(ti, n, window, nextPts, startK)
+	seg := p.timeWindow(ti, n, window, nextPts, span)
 
 	var cipherData []byte
 	if p.opts.CENC != nil {

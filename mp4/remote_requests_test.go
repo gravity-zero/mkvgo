@@ -43,7 +43,7 @@ func TestRemotePlanRequestCount(t *testing.T) {
 			if stream {
 				limit = 2
 			}
-			if n == 2 { // the first window served cold winds its audio grid over the one before (warmGridStart)
+			if n == 2 { // the first window served cold takes one range request more
 				limit++
 			}
 			if g1-g0 > limit {

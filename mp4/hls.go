@@ -360,6 +360,12 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 			res.cut = &cut
 		}
 	}()
+	// Matroska grid-timed audio is timed window by window, as the on-demand plan times it (gridTimeWindows): the
+	// boundaries come from the primary track's keyframe timecodes, which no timing changes.
+	var gridBounds []int64
+	if ps.mv == nil {
+		gridBounds = segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
+	}
 	for _, ft := range fts {
 		if len(ft.samples) == 0 {
 			if isCut {
@@ -386,7 +392,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid)
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid, gridBounds)
 		ft.ptsTS = nil
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift

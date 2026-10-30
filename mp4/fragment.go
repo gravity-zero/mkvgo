@@ -346,7 +346,7 @@ func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
 func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
-	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS)
+	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS, nil)
 }
 
 // fillFragTimingTS is fillFragTiming with, when ptsTS is not nil, each
@@ -355,7 +355,10 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 // own ticks, so a 24000/1001 stream keeps 1001-tick frames rather than a run
 // of 41 and 42 ms ones. The final sample then takes the duration of the one
 // before it. The presentation offset stays the smallest millisecond time.
-func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
+//
+// bounds, when not nil, are the segment starts (ms): grid-timed audio is then
+// timed window by window (gridTimeWindows), as an on-demand plan times it.
+func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64, bounds []int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
 	n := len(samples)
 	if n == 0 {
 		return 0, false, 0, 0
@@ -384,6 +387,15 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 	// (then +1 within a lace). Millisecond rounding never reaches the trun  -
 	// no ±1 ms duration jitter, no duplicated DTS at a lace boundary, no
 	// one-frame drift per segment - while a real gap still moves k.
+	if gridTS > 0 && bounds != nil {
+		gridTimeWindows(samples, bounds, scale, gridTS)
+		offsetMs = samples[0].ptsMs
+		for i := range samples {
+			offsetMs = min(offsetMs, samples[i].ptsMs)
+			totalTS += samples[i].durTS
+		}
+		return offsetMs, false, totalTS, 0 // grid audio never reorders
+	}
 	if gridTS > 0 {
 		anchor := scale(samples[0].blockPtsMs)
 		offsetMs = samples[0].ptsMs

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func segmentOrders(names []string) [][]string {
 }
 
 // cencPlaintexts decrypts every sample of a 'cenc' segment, keyed by its IV.
-func cencPlaintexts(t *testing.T, name string, seg []byte, ivSize int, ivs map[string][32]byte, owner map[string]string) {
+func cencPlaintexts(t *testing.T, name string, seg []byte, ivSize int, ivs map[string][32]byte, seenIn map[string]string) {
 	t.Helper()
 	block, err := aes.NewCipher(cencKey)
 	if err != nil {
@@ -52,16 +53,16 @@ func cencPlaintexts(t *testing.T, name string, seg []byte, ivSize int, ivs map[s
 		cencCTREncrypt(block, cencCounterBlock(s.iv), data, subs) // CTR: encrypting again decrypts
 		sum := sha256.Sum256(data)
 		if prev, ok := ivs[string(s.iv)]; ok && prev != sum {
-			t.Errorf("IV %x encrypts two plaintexts: %s and sample %d of %s", s.iv, owner[string(s.iv)], i, name)
+			t.Errorf("IV %x encrypts two plaintexts: %s and sample %d of %s", s.iv, seenIn[string(s.iv)], i, name)
 		}
-		ivs[string(s.iv)], owner[string(s.iv)] = sum, name
+		ivs[string(s.iv)], seenIn[string(s.iv)] = sum, name
 	}
 }
 
-// TestCENCSegmentsSameInEveryOrder: every 'cenc' segment of an MKV and of an MP4 source, through the full pass,
-// Resource and Open, asked in four orders on a fresh plan and again on the same plan, is the same bytes; and no IV
-// encrypts two different plaintexts. The IV was the sample's decode time, which two samples could share and an
-// on-demand window could time by what was built before it.
+// TestCENCSegmentsSameInEveryOrder: every 'cenc' segment of an MKV, an MP4 and a grid-audio source running ahead of
+// its grid, through the full pass, Resource and Open, asked in four orders on a fresh plan and again on the same plan,
+// is the same bytes; and no IV, across all of them, encrypts two different plaintexts. The IV was the sample's decode
+// time, which two samples could share and an on-demand window could time by what was built before it.
 func TestCENCSegmentsSameInEveryOrder(t *testing.T) {
 	ctx := context.Background()
 	mkvSrc := buildCENCFixture(t)
@@ -69,7 +70,7 @@ func TestCENCSegmentsSameInEveryOrder(t *testing.T) {
 	if err := RemuxToMP4(ctx, mkvSrc, mp4Src, Options{FastStart: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, src := range []struct{ name, path string }{{"mkv", mkvSrc}, {"mp4", mp4Src}} {
+	for _, src := range []struct{ name, path string }{{"mkv", mkvSrc}, {"mp4", mp4Src}, {"ahead", transientGridSource(t)}} {
 		for _, iv := range [][]byte{cencIV8, cencIV16} {
 			label := src.name + "/iv" + string(rune('0'+len(iv)/8))
 			o := Options{SegmentMs: 1000, CENC: &CENCOptions{Scheme: "cenc", Key: cencKey, KeyID: cencKID, IV: iv, KeyURI: "https://k/"}}
@@ -97,9 +98,9 @@ func TestCENCSegmentsSameInEveryOrder(t *testing.T) {
 			if len(names) < 4 {
 				t.Fatalf("%s: %d segments", label, len(names))
 			}
-			ivs, owner := map[string][32]byte{}, map[string]string{}
+			ivs, seenIn := map[string][32]byte{}, map[string]string{}
 			for _, name := range names {
-				cencPlaintexts(t, label+" "+name, full[name], len(iv), ivs, owner)
+				cencPlaintexts(t, label+" "+name, full[name], len(iv), ivs, seenIn)
 			}
 			serve := map[string]func(p *HLSPlan, name string) ([]byte, error){
 				"Resource": func(p *HLSPlan, name string) ([]byte, error) {
@@ -132,6 +133,7 @@ func TestCENCSegmentsSameInEveryOrder(t *testing.T) {
 							if !bytes.Equal(got, full[name]) {
 								t.Errorf("%s %s order %d pass %d: %s differs from the full pass", label, via, k, pass, name)
 							}
+							cencPlaintexts(t, fmt.Sprintf("%s %s order %d pass %d %s", label, via, k, pass, name), got, len(iv), ivs, seenIn)
 						}
 					}
 				}
@@ -194,7 +196,7 @@ func TestCENCIVOncePerPlaintextInEveryOrder(t *testing.T) {
 			names = append(names, name)
 		}
 	}
-	ivs, owner := map[string][32]byte{}, map[string]string{}
+	ivs, seenIn := map[string][32]byte{}, map[string]string{}
 	for k, order := range segmentOrders(names) {
 		p, err := PlanHLS(ctx, src, o)
 		if err != nil {
@@ -205,7 +207,7 @@ func TestCENCIVOncePerPlaintextInEveryOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cencPlaintexts(t, name+" in order "+string(rune('0'+k)), seg, len(cencIV8), ivs, owner)
+			cencPlaintexts(t, name+" in order "+string(rune('0'+k)), seg, len(cencIV8), ivs, seenIn)
 		}
 	}
 }
@@ -219,7 +221,7 @@ func TestGridSegmentsSameInEveryOrder(t *testing.T) {
 	for _, src := range []struct {
 		name string
 		path string
-	}{{"behind", jitteredGridSource(t)}} {
+	}{{"behind", jitteredGridSource(t)}, {"ahead", transientGridSource(t)}} {
 		o := Options{SegmentMs: 2000}
 		dir := t.TempDir()
 		if err := RemuxToHLS(ctx, src.path, dir, o); err != nil {

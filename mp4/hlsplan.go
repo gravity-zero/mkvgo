@@ -151,8 +151,7 @@ type HLSPlan struct {
 	tabBytes  int64
 	tabFlight map[int]*tableFlight
 	// gridStart holds, per segment, per grid-timed audio track, the frame index
-	// its window opens on (-1 unknown): learned by the window before it, as the
-	// full pass's running clock has it, or wound up from the window before (warmGridStart).
+	// its window opens on (-1 unknown), as gridSpanFor derives it.
 	gridStart [][]int64
 
 	// windows caches, per segment index, the media of EVERY rendition - built

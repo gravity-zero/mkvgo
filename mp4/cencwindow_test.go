@@ -17,7 +17,7 @@ func TestWindowReachingTheNextKeepsItsIVs(t *testing.T) {
 			window[i] = fragSample{size: 1, ptsMs: p, blockPtsMs: p, sync: i == 0}
 		}
 		pt := &planTrack{ft: &fragTrack{outTrack: video, timescale: movieTimescale}, gridTS: noGridTS}
-		timeSegmentWindow(window, pt, 1000, -1)
+		timeSegmentWindow(window, pt, 1000, noGridSpan)
 		for i, s := range window {
 			if s.durTS <= 0 {
 				t.Errorf("%v: sample %d lasts %d ticks", pts, i, s.durTS)
