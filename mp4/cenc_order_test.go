@@ -178,6 +178,25 @@ func transientGridSource(t testing.TB) string {
 	}, blocks)
 }
 
+// onGridSource is transientGridSource without the run ahead: 12 s of video with AAC on its 1024-sample grid.
+func onGridSource(t testing.TB) string {
+	t.Helper()
+	w, h := uint32(320), uint32(240)
+	sr, ch := 44100.0, uint8(2)
+	var blocks []genBlock
+	for i := 0; i < 300; i++ {
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: cencVideoSample()})
+	}
+	for i := 0; int64(i)*1024*1000/44100 < 12000; i++ {
+		blocks = append(blocks, genBlock{track: 2, pts: int64(i) * 1024 * 1000 / 44100, key: true, data: []byte{0xAA, byte(i)}})
+	}
+	sortGenBlocks(blocks)
+	return buildMKV(t, []mkv.Track{
+		{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h},
+		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch, DefaultDurationNs: 1024 * 1_000_000_000 / 44100},
+	}, blocks)
+}
+
 // TestCENCIVOncePerPlaintextInEveryOrder: grid-timed audio whose timecodes run ahead of the grid is timed on demand
 // by the window built first, so a sample served in one order takes the decode time its neighbour has in another. The
 // IV was that decode time: two clients asking in two orders got two plaintexts under one IV. No IV, across every

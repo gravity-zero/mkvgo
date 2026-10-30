@@ -154,6 +154,11 @@ type GrowingHLSPlan struct {
 	// published is the separate, smaller number GrowingHLSPlan exposes.
 	published int
 
+	// gridPts holds, per audio track, the block timecode of every frame the scan met from window gridWin on: a
+	// window whose grid-timed audio ends late is published only once the window after it is whole (gridSettledLocked).
+	gridPts map[*planTrack][]int64
+	gridWin int
+
 	master []byte
 	inits  [][]byte
 	medias [][]byte
@@ -266,6 +271,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	}
 	p.headNeed = len(p.full.tracks)
 	p.headProbes = map[*planTrack]*growingGridProbe{}
+	p.gridPts = map[*planTrack][]int64{}
 	for _, pt := range p.full.tracks {
 		mk := &pt.ft.outTrack.mkv
 		if mk.Type == mkv.AudioTrack && mk.DefaultDurationNs <= 0 {
@@ -415,9 +421,13 @@ func (p *GrowingHLSPlan) scanCluster(ctx context.Context, src mkv.ReadSeekCloser
 		return p.publish(func() error { return p.scanClusterLocked(ctx, src, clusterStart, bodyEnd) })
 	}
 	var keys []int64
+	audio := map[*planTrack][]int64{}
 	err := p.walkCluster(ctx, src, clusterStart, bodyEnd, func(pt *planTrack, b mkv.Block) error {
 		if pt.ft.outTrack.spec.video && b.Keyframe {
 			keys = append(keys, b.BlockTimecode)
+		}
+		if pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
+			audio[pt] = append(audio[pt], b.BlockTimecode)
 		}
 		return nil
 	})
@@ -427,6 +437,9 @@ func (p *GrowingHLSPlan) scanCluster(ctx context.Context, src mkv.ReadSeekCloser
 	return p.publish(func() error {
 		for _, ms := range keys {
 			p.recordKeyframeLocked(ms, clusterStart)
+		}
+		for pt, pts := range audio {
+			p.gridPts[pt] = append(p.gridPts[pt], pts...)
 		}
 		p.updateSegCountLocked()
 		return nil
@@ -442,6 +455,9 @@ func (p *GrowingHLSPlan) scanClusterLocked(ctx context.Context, src mkv.ReadSeek
 			if herr := p.extendHeadLocked(pt, b); herr != nil {
 				return herr
 			}
+		}
+		if pt.ft.outTrack.mkv.Type == mkv.AudioTrack {
+			p.gridPts[pt] = append(p.gridPts[pt], b.BlockTimecode)
 		}
 		if pt.ft.outTrack.spec.video {
 			p.extendLeadLocked(b)
@@ -587,6 +603,11 @@ func (p *GrowingHLSPlan) resolveHeadLocked() {
 			return pr.secondTC
 		}, pt.ft.timescale)
 	}
+	for _, pt := range p.full.tracks {
+		if pt.gridTS <= 0 { // a DefaultDuration's grid, as PlanHLS sets it
+			pt.gridTS = audioGridTS(pt.ft.outTrack, pt.ft.timescale)
+		}
+	}
 	p.headDone = true
 }
 
@@ -630,7 +651,64 @@ func (p *GrowingHLSPlan) updateSegCountLocked() {
 	if n < 0 {
 		n = 0
 	}
-	p.published = n
+	for p.gridWin < n && p.gridSettledLocked(p.gridWin) {
+		p.dropGridWindowLocked()
+	}
+	p.published = p.gridWin
+}
+
+// gridWindowEnd is the index past window m's frames in pts, window m's first frame at i: the windows cut as the full
+// pass cuts them (segmentWindow), a frame belonging to the window its timecode is under.
+func (p *GrowingHLSPlan) gridWindowEnd(pts []int64, i, m int) int {
+	for i < len(pts) && pts[i] < p.full.bounds[m+1] {
+		i++
+	}
+	return i
+}
+
+// gridSettledLocked reports whether window m (gridWin, the first not yet published, its next bound known) is timed for
+// good on every grid-timed audio track: its frames and the first after them are met, and, when its audio ends past
+// that frame's own slot, the window after it is whole too, since where it opens decides where m ends (gridSpanFor).
+// A track the video has gone a whole window past without a frame is taken as it was before.
+func (p *GrowingHLSPlan) gridSettledLocked(m int) bool {
+	for pt, pts := range p.gridPts {
+		if pt.gridTS <= 0 {
+			continue
+		}
+		from := 0 // pts opens on window m: the windows before it were dropped as published
+		to := p.gridWindowEnd(pts, from, m)
+		if to == len(pts) {
+			if m+2 < len(p.full.bounds) {
+				continue
+			}
+			return false
+		}
+		if to == from {
+			continue
+		}
+		scale := tsScale(pt.ft.timescale)
+		anchor := scale(pt.firstPtsMs)
+		slot := func(ms int64) int64 { return gridIndex(scale(ms)-anchor, pt.gridTS) }
+		window := pts[from:to]
+		if gridColdEnd(len(window), func(i int) int64 { return window[i] }, slot) <= slot(pts[to]) {
+			continue
+		}
+		if m+2 >= len(p.full.bounds) {
+			return false
+		}
+		if p.gridWindowEnd(pts, to, m+1) == len(pts) && m+3 >= len(p.full.bounds) {
+			return false
+		}
+	}
+	return true
+}
+
+// dropGridWindowLocked publishes window gridWin: its frames are no longer needed.
+func (p *GrowingHLSPlan) dropGridWindowLocked() {
+	for pt, pts := range p.gridPts {
+		p.gridPts[pt] = pts[p.gridWindowEnd(pts, 0, p.gridWin):]
+	}
+	p.gridWin++
 }
 
 // growingTail is what a tail peek read of the last segment: per track, its last and previous PTS and the last

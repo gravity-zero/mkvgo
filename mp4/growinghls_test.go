@@ -492,3 +492,72 @@ func TestGrowingHLSCompleteClosesOnAnUnreadableCluster(t *testing.T) {
 		t.Errorf("the playlist stayed open:\n%s", pl)
 	}
 }
+
+// TestGrowingGridAudioByteIdentity: grid-timed audio on its grid, running ahead of it or behind it, served while
+// the file grows, cluster by cluster: every audio segment published at every stage is the full pass's bytes. The
+// growing plan timed a DefaultDuration's audio by its millisecond timecodes, never on the grid. A window ending late
+// waits for the one after it to be whole; one on time is published as soon as its next bound is known.
+func TestGrowingGridAudioByteIdentity(t *testing.T) {
+	for _, src := range []struct{ name, path string }{{"grid", onGridSource(t)}, {"ahead", transientGridSource(t)}, {"behind", jitteredGridSource(t)}} {
+		data, err := os.ReadFile(src.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		golden := t.TempDir()
+		if err := RemuxToHLS(context.Background(), src.path, golden, Options{SegmentMs: 2000}); err != nil {
+			t.Fatal(err)
+		}
+		clusters := scanAllClusters(t, data)
+		m := mkv.NewMemFS()
+		m.Put("in.mkv", data[:clusters[0].start])
+		plan, err := PlanGrowingHLS(context.Background(), "in.mkv", Options{FS: m.FS(), SegmentMs: 2000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		served := 0
+		check := func(stage int) {
+			for _, name := range plan.Resources() {
+				if !strings.HasSuffix(name, ".m4s") || strings.HasPrefix(name, "seg0") || strings.Contains(name, "init") {
+					continue
+				}
+				got, _, err := plan.Resource(context.Background(), name)
+				if err != nil {
+					t.Fatalf("%s stage %d: %s: %v", src.name, stage, name, err)
+				}
+				want, err := os.ReadFile(filepath.Join(golden, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Errorf("%s stage %d: %s differs from the full pass", src.name, stage, name)
+				}
+				served++
+			}
+		}
+		held := 0
+		for i, cr := range clusters {
+			m.Put("in.mkv", data[:cr.end])
+			if _, err := plan.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if open := max(len(plan.full.bounds)-1, 0); plan.NumSegments() < open {
+				held++
+			}
+			check(i)
+		}
+		if src.name == "grid" && held > 0 {
+			t.Errorf("grid: a window held back at %d stages, its audio ending on time", held)
+		}
+		if src.name == "behind" && held == 0 {
+			t.Errorf("behind: no window held back, though one ends late before a window whose blocks leave the grid")
+		}
+		m.Put("in.mkv", data)
+		if _, err := plan.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		check(len(clusters))
+		if served == 0 {
+			t.Fatalf("%s: no audio segment served", src.name)
+		}
+	}
+}
