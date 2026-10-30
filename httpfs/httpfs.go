@@ -83,7 +83,6 @@ type Options struct {
 type FS struct {
 	opts    Options
 	fetched atomic.Int64
-	refused error // New was handed more than one Options: every operation fails with it
 }
 
 // recentReads holds the last responses of a window or less read under a
@@ -155,12 +154,11 @@ func (f *recentReads) lookup(url, id string, off int64) (recentRange, bool) {
 }
 
 // New returns an HTTP Range-backed FS. Paths passed to the returned port must
-// be absolute http:// or https:// URLs. More than one Options returns an FS
-// whose every operation fails with mkv.ErrTooManyOptions.
+// be absolute http:// or https:// URLs. More than one Options panics: a
+// configuration error stops the program where it is built (NewChecked returns
+// it instead).
 func New(opts ...Options) *FS {
-	if err := oneopt.Check(opts); err != nil {
-		return &FS{refused: err}
-	}
+	oneopt.Must(opts)
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]
@@ -211,11 +209,16 @@ func hideQuery(err error) error {
 // BytesFetched returns the total bytes transferred so far across all readers.
 func (f *FS) BytesFetched() int64 { return f.fetched.Load() }
 
+// NewChecked is New returning mkv.ErrTooManyOptions instead of panicking on more than one Options.
+func NewChecked(opts ...Options) (*FS, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
+	return New(opts...), nil
+}
+
 // Port returns the mkv.FS wired to this HTTP filesystem.
 func (f *FS) Port() *mkv.FS {
-	if f.refused != nil {
-		return refusedFS(f.refused)
-	}
 	roErr := func(op string) error { return fmt.Errorf("httpfs: %s: read-only filesystem", op) }
 	return &mkv.FS{
 		Open: func(url string) (mkv.ReadSeekCloser, error) {
@@ -234,21 +237,6 @@ func (f *FS) Port() *mkv.FS {
 		WriteFile: func(string, []byte, os.FileMode) error { return roErr("write") },
 		Remove:    func(string) error { return roErr("remove") },
 		Rename:    func(string, string) error { return roErr("rename") },
-	}
-}
-
-// refusedFS is an FS every operation of which fails with err, local paths included.
-func refusedFS(err error) *mkv.FS {
-	return &mkv.FS{
-		Open:        func(string) (mkv.ReadSeekCloser, error) { return nil, err },
-		OpenContext: func(context.Context, string) (mkv.ReadSeekCloser, error) { return nil, err },
-		Stat:        func(string) (os.FileInfo, error) { return nil, err },
-		Create:      func(string) (mkv.WriteSeekCloser, error) { return nil, err },
-		OpenFile:    func(string, int, os.FileMode) (mkv.ReadWriteSeekCloser, error) { return nil, err },
-		MkdirAll:    func(string, os.FileMode) error { return err },
-		WriteFile:   func(string, []byte, os.FileMode) error { return err },
-		Remove:      func(string) error { return err },
-		Rename:      func(string, string) error { return err },
 	}
 }
 
@@ -914,6 +902,14 @@ func (i fileInfo) Identity() string { return i.id }
 // Strong reports an identity that is a strong ETag.
 func (i fileInfo) Strong() bool { return strongIdentity(i.id) }
 
+// HybridChecked is Hybrid returning mkv.ErrTooManyOptions instead of panicking on more than one Options.
+func HybridChecked(opts ...Options) (*mkv.FS, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
+	return Hybrid(opts...), nil
+}
+
 // Hybrid returns an FS that reads http(s) URLs through HTTP Range requests and
 // passes every other path - including all writes - to the operating system.
 // It is what a "remux from a URL to a local file" invocation needs, since one
@@ -922,12 +918,10 @@ func (i fileInfo) Strong() bool { return strongIdentity(i.id) }
 //	mp4.RemuxToMP4(ctx, "https://nas/movie.mkv", "out.mp4", mp4.Options{FS: httpfs.Hybrid()})
 //
 // A remux reads the source sequentially, so the ranged windows amount to a
-// streamed download. More than one Options returns an FS whose every
-// operation fails with mkv.ErrTooManyOptions.
+// streamed download. More than one Options panics (HybridChecked returns the
+// error instead).
 func Hybrid(opts ...Options) *mkv.FS {
-	if err := oneopt.Check(opts); err != nil {
-		return refusedFS(err)
-	}
+	oneopt.Must(opts)
 	remote := New(opts...).Port()
 	return &mkv.FS{
 		Open: func(path string) (mkv.ReadSeekCloser, error) {

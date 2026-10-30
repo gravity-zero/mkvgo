@@ -11,3 +11,10 @@ func Check[T any](opts []T) error {
 	}
 	return nil
 }
+
+// Must is Check for a function that returns no error: more than one value is a programming error, it panics.
+func Must[T any](opts []T) {
+	if err := Check(opts); err != nil {
+		panic(err)
+	}
+}

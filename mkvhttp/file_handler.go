@@ -34,16 +34,22 @@ import (
 //
 //	http.Handle("/play/movie.mkv", mkvhttp.FileHandler("movie.mkv"))
 //
-// More than one Options returns a handler answering every request 500 with mkv.ErrTooManyOptions.
+// More than one Options panics (FileHandlerChecked returns the error instead).
 func FileHandler(path string, opts ...Options) http.Handler {
-	if err := oneopt.Check(opts); err != nil {
-		return refused(err)
-	}
+	oneopt.Must(opts)
 	var o Options
 	if len(opts) > 0 {
 		o = opts[0]
 	}
 	return &fileHandler{path: path, opts: o}
+}
+
+// FileHandlerChecked is FileHandler returning mkv.ErrTooManyOptions instead of panicking on more than one Options.
+func FileHandlerChecked(path string, opts ...Options) (http.Handler, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
+	return FileHandler(path, opts...), nil
 }
 
 type fileHandler struct {

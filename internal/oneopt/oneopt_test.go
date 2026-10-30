@@ -11,8 +11,8 @@ import (
 )
 
 // TestEveryExportedFunctionChecksItsOptions: an exported function taking variadic options read only the first and
-// ignored the others without a word. Each one, in every public package, opens on an if on oneopt.Check of its options;
-// a constructor that returns no error hands back a value that fails with the refusal, never a panic.
+// ignored the others without a word. Each one, in every public package, opens on oneopt.Check (or oneopt.Must when it
+// returns no error) of its options.
 func TestEveryExportedFunctionChecksItsOptions(t *testing.T) {
 	root := filepath.Join("..", "..")
 	fset := token.NewFileSet()
@@ -50,7 +50,7 @@ func TestEveryExportedFunctionChecksItsOptions(t *testing.T) {
 			}
 			seen++
 			if !opensOnCheck(fn.Body, name) {
-				t.Errorf("%s: %s takes ...Options but does not open on oneopt.Check(%s)", fset.Position(fn.Pos()), fn.Name.Name, name)
+				t.Errorf("%s: %s takes ...Options but does not open on oneopt.Check(%s) or oneopt.Must(%s)", fset.Position(fn.Pos()), fn.Name.Name, name, name)
 			}
 		}
 		return nil
@@ -100,13 +100,16 @@ func variadicOptions(ft *ast.FuncType) (string, bool) {
 	return last.Names[0].Name, ok
 }
 
-// opensOnCheck reports whether body's first statement is an if on oneopt.Check(name).
+// opensOnCheck reports whether body's first statement is oneopt.Must(name) or an if on oneopt.Check(name).
 func opensOnCheck(body *ast.BlockStmt, name string) bool {
 	if len(body.List) == 0 {
 		return false
 	}
 	var call ast.Expr
-	if s, ok := body.List[0].(*ast.IfStmt); ok {
+	switch s := body.List[0].(type) {
+	case *ast.ExprStmt:
+		call = s.X
+	case *ast.IfStmt:
 		if as, ok := s.Init.(*ast.AssignStmt); ok && len(as.Rhs) == 1 {
 			call = as.Rhs[0]
 		}
@@ -121,5 +124,5 @@ func opensOnCheck(body *ast.BlockStmt, name string) bool {
 	}
 	pkg, ok := sel.X.(*ast.Ident)
 	arg, ok2 := c.Args[0].(*ast.Ident)
-	return ok && ok2 && pkg.Name == "oneopt" && sel.Sel.Name == "Check" && arg.Name == name
+	return ok && ok2 && pkg.Name == "oneopt" && (sel.Sel.Name == "Check" || sel.Sel.Name == "Must") && arg.Name == name
 }
