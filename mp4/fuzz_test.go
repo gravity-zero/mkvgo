@@ -117,6 +117,8 @@ func FuzzBoxParsers(f *testing.F) {
 			_ = aacChannels(data)
 			_ = ac3Channels(data)
 			_ = eac3Channels(data)
+			_, _, _ = parseTfra(data)
+			_, _ = decodeWVTT(data)
 		})
 	})
 }
