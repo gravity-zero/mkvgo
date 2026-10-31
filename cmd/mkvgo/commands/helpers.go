@@ -17,7 +17,6 @@ import (
 	"github.com/gravity-zero/mkvgo/internal/sniff"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
-	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mp4"
 	"github.com/gravity-zero/mkvgo/s3fs"
 )
@@ -199,7 +198,7 @@ func FatalErr(err error) {
 		return
 	}
 	msg := err.Error()
-	if errors.Is(err, reader.ErrDamagedRegion) {
+	if errors.Is(err, matroska.ErrDamagedRegion) {
 		msg += "\nrepair it with `mkvgo reindex --resync`"
 	}
 	Fatal(msg)
