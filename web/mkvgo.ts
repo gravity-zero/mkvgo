@@ -102,6 +102,20 @@ export interface Track {
   stereo_mode_name?: string
   /** The track's effective language (BCP-47 when present, else the legacy tag; "eng" for a Matroska/WebM track that stores neither, with language_present false). */
   resolved_language?: string
+  /** A FlagDefault / FlagForced element was read (else is_default / is_forced are the spec defaults). */
+  default_present: boolean
+  forced_present: boolean
+  /** The Matroska DefaultDuration in nanoseconds, when stated. */
+  default_duration_ns?: number
+  effective_sample_rate?: number
+  /** The Matroska StereoMode code; stereo_mode_name says it in words. */
+  stereo_mode?: number
+  projection?: string
+  scan_type?: string
+  /** The encryption scheme the source states; absent when the track is clear. */
+  encryption?: string
+  colour_layout?: unknown
+  colour_determined?: boolean
   /** Remaining probe fields; see docs/library.md for the full Track reference. */
   [key: string]: unknown
 }
