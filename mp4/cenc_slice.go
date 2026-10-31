@@ -813,7 +813,7 @@ func parseSTRPS(r *nalReader, sets []stRPS, idx, num int) (stRPS, bool) {
 		}
 		ref := sets[idx-delta]
 		sign := r.bit()
-		abs := int32(r.ue()) + 1
+		abs := int32(r.ueMax(1<<15-1)) + 1 // abs_delta_rps_minus1, in 0..2^15-1
 		if r.err || abs > 1<<15 {
 			return out, false
 		}
@@ -866,12 +866,12 @@ func parseSTRPS(r *nalReader, sets []stRPS, idx, num int) (stRPS, bool) {
 	}
 	var poc int32
 	for j := uint32(0); j < neg; j++ {
-		poc -= int32(r.ue()) + 1
+		poc -= int32(r.ueMax(1<<15-1)) + 1 // delta_poc_s0_minus1
 		out.s0, out.used0 = append(out.s0, poc), append(out.used0, r.flag())
 	}
 	poc = 0
 	for j := uint32(0); j < pos; j++ {
-		poc += int32(r.ue()) + 1
+		poc += int32(r.ueMax(1<<15-1)) + 1 // delta_poc_s1_minus1
 		out.s1, out.used1 = append(out.s1, poc), append(out.used1, r.flag())
 	}
 	return out, !r.err
