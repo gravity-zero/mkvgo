@@ -234,11 +234,11 @@ func metaForms(c *mkv.Container) (map[uint32][]byte, error) {
 		mkv.IDChapters: chapters.Bytes(), mkv.IDAttachments: attachments}, nil
 }
 
-// unchangedHead reads the head elements whose form the edit left as it was (one of a kind in the head), as the file
-// holds them.
 // maxHeadElementBytes bounds one head element read whole for an in-place edit, the reader's own metadata budget.
 const maxHeadElementBytes = 1 << 30
 
+// unchangedHead reads the head elements whose form the edit left as it was (one of a kind in the head), as the file
+// holds them.
 func unchangedHead(path string, fs *mkv.FS, region metadataRegion, before, after map[uint32][]byte) (map[uint32][]byte, error) {
 	var fileSize int64
 	raw := map[uint32][]byte{}
