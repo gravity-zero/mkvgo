@@ -493,3 +493,112 @@ func TestPlanHLSSegmentCancelledBeforeCallRejects(t *testing.T) {
 		}
 	}
 }
+
+// headCuesFixture writes a Matroska file whose Cues sit before the clusters, as a muxer reserving index space or a
+// reindex leaves them: a reader has the whole index whatever the file holds after it.
+func headCuesFixture(t testing.TB, tracks []mkv.Track, blocks []genBlock) string {
+	t.Helper()
+	const scale = 1_000_000
+	var blks []mkv.Block
+	var durationMs int64
+	for _, gb := range blocks {
+		blks = append(blks, mkv.Block{TrackNumber: gb.track, Timecode: gb.pts, Keyframe: gb.key, Data: gb.data})
+		durationMs = max(durationMs, gb.pts)
+	}
+	var info, trk, clusters bytes.Buffer
+	if err := writer.WriteSegmentInfo(&info, &mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}, durationMs); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteTracks(&trk, tracks); err != nil {
+		t.Fatal(err)
+	}
+	var starts, times []int64
+	for start, i := 0, 1; i <= len(blks); i++ {
+		if i == len(blks) || blks[i].Timecode-blks[start].Timecode >= 1000 {
+			starts, times = append(starts, int64(clusters.Len())), append(times, blks[start].Timecode)
+			if err := writer.WriteCluster(&clusters, blks[start].Timecode, scale, blks[start:i]); err != nil {
+				t.Fatal(err)
+			}
+			start = i
+		}
+	}
+	// The Cues name the clusters' positions in the Segment body, which their own size moves: iterate to a fixed point.
+	var cuesBytes []byte
+	for cuesLen := 0; ; {
+		cues := make([]mkv.CuePoint, len(starts))
+		for k := range starts {
+			cues[k] = mkv.CuePoint{TimeMs: times[k], Track: tracks[0].ID, ClusterPos: int64(info.Len()+trk.Len()+cuesLen) + starts[k]}
+		}
+		var b bytes.Buffer
+		if err := writer.WriteCues(&b, cues, scale); err != nil {
+			t.Fatal(err)
+		}
+		cuesBytes = b.Bytes()
+		if b.Len() == cuesLen {
+			break
+		}
+		cuesLen = b.Len()
+	}
+	body := append(append(append(info.Bytes(), trk.Bytes()...), cuesBytes...), clusters.Bytes()...)
+	var f bytes.Buffer
+	if err := writer.WriteEBMLHeader(&f); err != nil {
+		t.Fatal(err)
+	}
+	n := uint64(len(body))
+	f.Write([]byte{0x18, 0x53, 0x80, 0x67, 0x01, byte(n >> 48), byte(n >> 40), byte(n >> 32), byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
+	f.Write(body)
+	path := filepath.Join(t.TempDir(), "headcues.mkv")
+	if err := os.WriteFile(path, f.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass pins that a plan takes a head index no further than the
+// file goes: the cue points past its end made empty segments and a negative final duration, where the full pass
+// serves what the file holds.
+func TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	var gblocks []genBlock
+	for i := 0; i < 250; i++ { // 10 s of video, 40 ms frames, a keyframe every second
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	}
+	src := headCuesFixture(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}, gblocks)
+	whole, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := filepath.Join(t.TempDir(), "cut.mkv")
+	if err := os.WriteFile(cut, whole[:len(whole)*6/10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := RemuxToHLS(ctx, cut, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanHLS(ctx, cut, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
+	if plan.NumSegments() != len(fullSegs) {
+		t.Errorf("plan has %d segments, the full pass wrote %d", plan.NumSegments(), len(fullSegs))
+	}
+	if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
+		t.Errorf("the plan's playlist has a negative duration:\n%s", pl)
+	}
+	for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
+		got, err := plan.Segment(ctx, n)
+		if err != nil {
+			t.Fatalf("Segment(%d): %v", n, err)
+		}
+		want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("segment %d differs from the full pass (%d vs %d bytes)", n, len(got), len(want))
+		}
+	}
+}

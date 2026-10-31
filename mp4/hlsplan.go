@@ -430,6 +430,21 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 	}
 	p.cueDensity = cueDensityOf(cues, synthesized)
+	srcSize := int64(0)
+	if st, serr := fs.DoStat(srcPath); serr == nil {
+		srcSize = st.Size()
+	}
+	if p.segEnd > 0 && p.segEnd < srcSize {
+		srcSize = p.segEnd // what follows the Segment is no segment's
+	}
+	// A head index names clusters the file may not hold (cut short after it was written): a cue past the end would
+	// bound an empty segment and a negative final duration, where the full pass serves what the file holds.
+	for srcSize > 0 && len(cues) > 0 && c.SegmentStart+cues[len(cues)-1].ClusterPos >= srcSize {
+		cues = cues[:len(cues)-1]
+	}
+	if len(cues) == 0 {
+		return nil, errf("%s: the file ends before the first cluster its Cues name", shown.Path(srcPath))
+	}
 	p.bounds = []int64{0}
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}
 	last := int64(0)
@@ -554,13 +569,6 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// Master playlist with BANDWIDTH estimated from the cue cluster offsets  -
 	// the source bytes between two boundaries approximate the fragment size.
 	var segs []segInfo
-	srcSize := int64(0)
-	if st, serr := fs.DoStat(srcPath); serr == nil {
-		srcSize = st.Size()
-	}
-	if p.segEnd > 0 && p.segEnd < srcSize {
-		srcSize = p.segEnd // what follows the Segment is no segment's
-	}
 	for k := 0; k < p.segCount; k++ {
 		end := srcSize
 		if k+1 < p.segCount {
