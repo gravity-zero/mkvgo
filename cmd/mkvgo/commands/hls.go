@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -267,13 +270,38 @@ func (f hlsFlags) options(src string) mp4.Options {
 // control.
 func resolveKeepLangs(src string, langs []string) []uint64 {
 	c, _ := loadContainer(src, false)
-	want := make(map[string]bool, len(langs))
+	ids := keepLangIDs(c, langs)
+	audio := func(id uint64) bool {
+		for i := range c.Tracks {
+			if c.Tracks[i].ID == id && c.Tracks[i].Type == mkv.AudioTrack {
+				return true
+			}
+		}
+		return false
+	}
+	if slices.ContainsFunc(c.Tracks, func(t matroska.Track) bool { return t.Type == mkv.AudioTrack }) && !slices.ContainsFunc(ids, audio) {
+		fmt.Fprintf(os.Stderr, "--keep-lang %s: no audio track in that language, the video alone is kept\n", strings.Join(langs, ","))
+	}
+	return ids
+}
+
+// keepLangIDs is every video track plus the tracks in one of the wanted languages: by the legacy code, the BCP 47 tag
+// or its primary subtag, or the language the container resolves (the Matroska default "eng" for a track stating
+// none), where matching the legacy code alone kept the video alone for a BCP 47-only or a default-language track.
+func keepLangIDs(c *matroska.Container, langs []string) []uint64 {
+	exact, primary := make(map[string]bool, len(langs)), make(map[string]bool, len(langs))
 	for _, l := range langs {
-		want[l] = true
+		l = strings.ToLower(strings.TrimSpace(l))
+		exact[l] = true
+		if p := lang.Primary(l); p != "und" {
+			primary[p] = true
+		}
 	}
 	var ids []uint64
-	for _, t := range c.Tracks {
-		if t.Type == mkv.VideoTrack || want[strings.ToLower(t.Language)] {
+	for i := range c.Tracks {
+		t := &c.Tracks[i]
+		if t.Type == mkv.VideoTrack || exact[strings.ToLower(t.LanguageBCP47)] ||
+			slices.ContainsFunc([]string{t.Language, c.TrackLanguage(t)}, func(l string) bool { return l != "" && primary[lang.Primary(l)] }) {
 			ids = append(ids, t.ID)
 		}
 	}
