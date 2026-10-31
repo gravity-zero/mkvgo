@@ -236,7 +236,11 @@ func metaForms(c *mkv.Container) (map[uint32][]byte, error) {
 
 // unchangedHead reads the head elements whose form the edit left as it was (one of a kind in the head), as the file
 // holds them.
+// maxHeadElementBytes bounds one head element read whole for an in-place edit, the reader's own metadata budget.
+const maxHeadElementBytes = 1 << 30
+
 func unchangedHead(path string, fs *mkv.FS, region metadataRegion, before, after map[uint32][]byte) (map[uint32][]byte, error) {
+	var fileSize int64
 	raw := map[uint32][]byte{}
 	var f mkv.ReadSeekCloser
 	defer func() {
@@ -253,6 +257,13 @@ func unchangedHead(path string, fs *mkv.FS, region metadataRegion, before, after
 			if f, err = fs.DoOpen(path); err != nil {
 				return nil, err
 			}
+			if fi, err := fs.DoStat(path); err == nil {
+				fileSize = fi.Size()
+			}
+		}
+		// Sized by the file's own header: a forged size must not buy the allocation, nor one past the file's end.
+		if h.size > maxHeadElementBytes || (fileSize > 0 && h.pos+h.size > fileSize) {
+			return nil, fmt.Errorf("edit in place: the head element 0x%X declares %d bytes, past the file or the %d one may hold: the file is damaged or forged", id, h.size, maxHeadElementBytes)
 		}
 		b := make([]byte, h.size)
 		if _, err := f.Seek(h.pos, io.SeekStart); err != nil {

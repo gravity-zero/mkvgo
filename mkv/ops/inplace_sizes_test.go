@@ -161,3 +161,15 @@ func TestLastVideoKeyWithoutCuesReadsTheTail(t *testing.T) {
 		t.Errorf("last key %d (want 4000), %d of the file's %d bytes read", key, read, st.Size())
 	}
 }
+
+// TestInPlaceRefusesAForgedHeadElementSize pins that a head element whose size field says more than the file holds
+// is refused before a buffer of that size is allocated: the size came from the file, unchecked.
+func TestInPlaceRefusesAForgedHeadElementSize(t *testing.T) {
+	path := buildMinimalMKV(t, t.TempDir(), "src.mkv", []mkv.Track{videoTrack(1)}, testBlocks(1), 300)
+	region := metadataRegion{headElems: map[uint32]tailElement{mkv.IDTags: {pos: 64, size: 1 << 40}}, headTwice: map[uint32]bool{}}
+	same := map[uint32][]byte{mkv.IDTags: {1}}
+	_, err := unchangedHead(path, mkv.FSFrom(nil), region, same, same)
+	if err == nil || !strings.Contains(err.Error(), "forged") {
+		t.Errorf("a 1 TiB head element: %v, want a refusal", err)
+	}
+}
