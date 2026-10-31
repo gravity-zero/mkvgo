@@ -77,7 +77,7 @@ func (t *pcmTable) walkChunks(fn func(off int64, first, n uint32) error) (uint32
 func (t *pcmTable) blocks() int64 {
 	var total int64
 	_, _ = t.walkChunks(func(_ int64, _, n uint32) error {
-		total += int64((n + t.perBlock - 1) / t.perBlock)
+		total += (int64(n) + int64(t.perBlock) - 1) / int64(t.perBlock)
 		return nil
 	})
 	return total
@@ -168,7 +168,7 @@ func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 	var out []inSample
 	dts := int64(0)
 	covered, err := t.walkChunks(func(off int64, first, n uint32) error {
-		for j := uint32(0); j < n; j += t.perBlock {
+		for j := uint32(0); j < n; { // advanced by k below: j += perBlock wrapped at 2^32 on a full count
 			k := min(t.perBlock, n-j)
 			pos := off + int64(j)*int64(t.size)
 			end := pos + int64(k)*int64(t.size)
@@ -192,6 +192,7 @@ func buildPCMBlocks(tr *inTrack, t *pcmTable, fileSize int64) error {
 			}
 			out = append(out, s)
 			dts += sum
+			j += k
 		}
 		return nil
 	})

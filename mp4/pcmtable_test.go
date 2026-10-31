@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -130,5 +131,30 @@ func TestPCMKeyframesModeKeepsTheSampleBudget(t *testing.T) {
 	_, endMs, err := buildKeyframeTimes(mustTrakStbl(t, data), 48000, 0, false, 1<<40)
 	if err != nil || endMs != mv.tracks[0].sampleEndMs {
 		t.Errorf("the sample-by-sample end is %d ms (%v), the runs' %d", endMs, err, mv.tracks[0].sampleEndMs)
+	}
+}
+
+// TestPCMBlockWalkEndsAtAFullCount pins that a chunk of 2^32-1 one-byte frames is walked to its end: the packet
+// loop's counter wrapped at 2^32 and the walk never ended, and blocks() counted zero packets for it.
+func TestPCMBlockWalkEndsAtAFullCount(t *testing.T) {
+	const n = 0xFFFFFFFF
+	stts := fullBox("stts", 0, 0, func(w *bw) { w.u32(1); w.u32(n); w.u32(1) })
+	tab := &pcmTable{size: 1, count: n, chunks: []int64{0}, stsc: []stscEntry{{firstChunk: 1, perChunk: n}}, stts: stts[8:], perBlock: 1 << 30}
+	if got := tab.blocks(); got != 4 {
+		t.Errorf("blocks() = %d, want 4", got)
+	}
+	tr := &inTrack{timescale: 48000}
+	done := make(chan error, 1)
+	go func() { done <- buildPCMBlocks(tr, tab, 1<<33) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tr.samples) != 4 {
+			t.Errorf("%d packets, want 4", len(tr.samples))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the packet walk did not end")
 	}
 }
