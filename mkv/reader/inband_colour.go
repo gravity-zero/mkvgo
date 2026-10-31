@@ -279,6 +279,8 @@ func needsInBandColour(t *mkv.Track) bool {
 // description first (it may be what names the transfer), then the HDR10 static
 // metadata for a track that turns out to need it.
 func applyInBandHeader(t *mkv.Track, frame []byte) {
+	// The walkers bound every length; this backstop keeps a frame they could not read from ending the read.
+	defer func() { _ = recover() }()
 	switch {
 	case isVP9Codec(t.Codec):
 		if h, err := ParseVP9KeyframeHeader(frame); err == nil {
@@ -333,16 +335,16 @@ func forEachHEVCNAL(frame []byte, nalLen int, fn func(nalType int, nal []byte) b
 		return
 	}
 	for off := 0; off+nalLen <= len(frame); {
-		n := 0
+		n := int64(0) // compared in int64: off+n wrapped a 32-bit int
 		for i := 0; i < nalLen; i++ {
-			n = n<<8 | int(frame[off+i])
+			n = n<<8 | int64(frame[off+i])
 		}
 		off += nalLen
-		if n < 2 || off+n > len(frame) {
+		if n < 2 || n > int64(len(frame)-off) {
 			return
 		}
-		nal := frame[off : off+n]
-		off += n
+		nal := frame[off : off+int(n)]
+		off += int(n)
 		if fn(int((nal[0]>>1)&0x3f), nal) {
 			return
 		}
@@ -391,12 +393,17 @@ func atcFromSEI(rbsp []byte) (transfer uint16, ok bool) {
 	return transfer, ok
 }
 
+// maxSEIValue bounds an SEI payload type or size: a run of 0xFF bytes summed past it is no SEI.
+const maxSEIValue = 1 << 24
+
 // readSEIValue reads an SEI ff-coded value (sum of 0xFF bytes plus the final
 // byte), advancing *i. ok is false on truncation.
 func readSEIValue(b []byte, i *int) (int, bool) {
 	v := 0
 	for *i < len(b) && b[*i] == 0xff {
-		v += 255
+		if v += 255; v > maxSEIValue {
+			return 0, false
+		}
 		*i++
 	}
 	if *i >= len(b) {

@@ -307,3 +307,21 @@ func TestInBandColourErrorPaths(t *testing.T) {
 		t.Error("invalid MKV must leave colour nil")
 	}
 }
+
+// TestInBandWalkersRefuseLengthsPastAnInt pins that a NAL or OBU length near the top of a 32-bit int ends the walk
+// instead of wrapping past the frame (a 386 build sliced out of bounds), and that an SEI size is bounded.
+func TestInBandWalkersRefuseLengthsPastAnInt(t *testing.T) {
+	if got := firstHEVCNAL([]byte{0x7F, 0xFF, 0xFF, 0xFC, 0x42, 0x01}, 4, 33); got != nil {
+		t.Errorf("a 2 GiB NAL length yielded %x", got)
+	}
+	called := false
+	forEachAV1OBU([]byte{0x0A, 0xF0, 0xFF, 0xFF, 0xFF, 0x07, 0, 0}, func(int, []byte) bool { called = true; return true })
+	if called {
+		t.Error("a 2 GiB OBU size yielded a payload")
+	}
+	ff := bytes.Repeat([]byte{0xFF}, 1<<24/255+1)
+	i := 0
+	if _, ok := readSEIValue(append(ff, 1), &i); ok {
+		t.Error("an SEI value past 16 MiB was accepted")
+	}
+}

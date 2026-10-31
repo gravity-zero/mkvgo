@@ -206,7 +206,7 @@ func forEachAV1OBU(b []byte, fn func(obuType int, payload []byte) bool) {
 		size := len(b) - i
 		if hdr&0x02 != 0 { // obu_has_size_field
 			sz, n, ok := leb128(b[i:])
-			if !ok {
+			if !ok || sz > uint64(len(b)-i-n) { // compared before the int conversion: it wrapped on 32 bits
 				return
 			}
 			i += n
