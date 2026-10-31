@@ -127,7 +127,7 @@ func parsePCM(tr *inTrack, typ string, payload []byte, headerLen int) {
 		bits = uint32(pcmC[5])
 		float = typ == "fpcm"
 	case "lpcm":
-		if headerLen != 64 {
+		if headerLen != 64 || len(payload) < 64 {
 			tr.unsupported = "lpcm entry without the version 2 sound description"
 			return
 		}

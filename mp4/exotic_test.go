@@ -805,3 +805,17 @@ func TestProResBitDepthFromFourcc(t *testing.T) {
 		}
 	}
 }
+
+// TestShortLPCMEntryIsRefused pins that an lpcm entry declaring the 64-byte version 2 layout in fewer bytes is
+// refused, where it was read past its end.
+func TestShortLPCMEntryIsRefused(t *testing.T) {
+	payload := make([]byte, 16)
+	payload[9] = 2 // version 2: a 64-byte sound description
+	var tr inTrack
+	if _, _, err := parseEntry(&tr, "lpcm", payload); err != nil {
+		t.Fatal(err)
+	}
+	if tr.unsupported == "" {
+		t.Error("a 16-byte lpcm entry was accepted")
+	}
+}
