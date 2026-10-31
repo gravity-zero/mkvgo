@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"syscall/js"
 
+	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
-	"github.com/gravity-zero/mkvgo/mkv/ops"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -29,7 +29,7 @@ func analyzeJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("analyze: %w", err)
 		}
-		report, err := ops.Analyze(ctx, "in", mkv.Options{FS: fs})
+		report, err := matroska.Analyze(ctx, "in", mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func playabilityJS(_ js.Value, args []js.Value) any {
 	ctx, release := signalContext(optArg(args, 2))
 	return promise(func() (any, error) {
 		defer release()
-		target, ok := ops.TargetByName(targetName)
+		target, ok := matroska.TargetByName(targetName)
 		if !ok {
 			return nil, fmt.Errorf("playability: unknown target %q", targetName)
 		}
@@ -60,7 +60,7 @@ func playabilityJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("playability: %w", err)
 		}
-		report, err := ops.Playability(ctx, "in", target, mkv.Options{FS: fs})
+		report, err := matroska.Playability(ctx, "in", target, mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func ladderJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("ladder: %w", err)
 		}
-		rungs, err := ops.RecommendLadderFor(ctx, "in", mkv.Options{FS: fs})
+		rungs, err := matroska.RecommendLadderFor(ctx, "in", mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -108,10 +108,10 @@ func readIngestOpts(args []js.Value, idx int) (target string, analyze bool) {
 // Read-only decision client: Reindex is always false here - a browser MemFS
 // write is not the use case a wasm caller has (there is nothing durable to
 // write back to). A server/CLI that needs the repairing path calls
-// ops.Ingest(Reindex: true) directly (or the CLI's own ingest command); this
+// matroska.Ingest(Reindex: true) directly (or the CLI's own ingest command); this
 // binding only ever reports NeedsReindex/ReindexInPlacePossible for the
 // caller to act on out of band. opts.analyze also runs the full
-// block-header walk (ops.Analyze) and attaches it to the plan, regardless of
+// block-header walk (matroska.Analyze) and attaches it to the plan, regardless of
 // the decided strategy - see IngestOptions.IncludeAnalysis. Input handling
 // is head-only-capable but works the same whether or not analyze forces a
 // full walk: singleSourceFS's ranged Blob reader serves either.
@@ -128,7 +128,7 @@ func ingestJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("ingest: %w", err)
 		}
-		plan, err := ops.Ingest(ctx, "in", ops.IngestOptions{
+		plan, err := matroska.Ingest(ctx, "in", matroska.IngestOptions{
 			Options:         mkv.Options{FS: fs},
 			Target:          target,
 			IncludeAnalysis: analyze,
@@ -148,7 +148,7 @@ func ingestJS(_ js.Value, args []js.Value) any {
 // track order. This is a FULL read - every frame payload is read and hashed -
 // so the input handling matches analyze: a Uint8Array is read in place, a
 // Blob/File through ranged slices, staying memory-bounded even though every
-// payload byte is visited, MP4/MOV included (see ops.Fingerprint).
+// payload byte is visited, MP4/MOV included (see matroska.Fingerprint).
 func fingerprintJS(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return promise(func() (any, error) { return nil, fmt.Errorf("fingerprint: missing input") })
@@ -161,7 +161,7 @@ func fingerprintJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("fingerprint: %w", err)
 		}
-		report, err := ops.Fingerprint(ctx, "in", mkv.Options{FS: fs})
+		report, err := matroska.Fingerprint(ctx, "in", mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +187,7 @@ func cueHealthJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("cueHealth: %w", err)
 		}
-		report, err := ops.CueHealth(ctx, "in", mkv.Options{FS: fs})
+		report, err := matroska.CueHealth(ctx, "in", mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +212,7 @@ func trackEndsJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("trackEnds: %w", err)
 		}
-		report, err := ops.TrackEnds(ctx, "in", mkv.Options{FS: fs})
+		report, err := matroska.TrackEnds(ctx, "in", mkv.Options{FS: fs})
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +253,7 @@ func diagnoseJS(_ js.Value, args []js.Value) any {
 		}
 		var d *mkv.Diagnosis
 		if format == "mkv" {
-			d, err = ops.Diagnose(ctx, "in", mkv.Options{FS: fs})
+			d, err = matroska.Diagnose(ctx, "in", mkv.Options{FS: fs})
 		} else {
 			d, err = mp4.Diagnose(ctx, "in", mp4.Options{FS: fs})
 		}
@@ -392,7 +392,7 @@ func mapDamageJS(_ js.Value, args []js.Value) any {
 		if err != nil {
 			return nil, fmt.Errorf("mapDamage: %w", err)
 		}
-		report, err := ops.MapDamage(ctx, "in", mkv.Options{FS: fs, CleanCut: cleanCut})
+		report, err := matroska.MapDamage(ctx, "in", mkv.Options{FS: fs, CleanCut: cleanCut})
 		if err != nil {
 			return nil, err
 		}

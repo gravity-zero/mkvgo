@@ -112,6 +112,13 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	return reader.Read(ctx, r, path, opts...)
 }
 
+// ReadStream reads a Matroska stream from a forward-only io.Reader (a pipe, a socket, stdin): the Container filled
+// from the head metadata (SeekHead and Cues are of no use without seeking) and a BlockReader positioned on the first
+// Cluster. See reader.ReadStream.
+func ReadStream(ctx context.Context, r io.Reader) (*Container, *BlockReader, error) {
+	return reader.ReadStream(ctx, r)
+}
+
 // OpenMeta is the fast metadata-only counterpart of Open: it returns Tracks,
 // Info, DurationMs and Keyframes (from the Cues the SeekHead points at) without
 // traversing Clusters. Cues, Chapters, Attachments and Tags stay nil unless a

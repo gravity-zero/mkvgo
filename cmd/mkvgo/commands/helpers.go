@@ -274,7 +274,7 @@ func OpenMKV(path string) *matroska.Container {
 // path the existing seekable reader is used so behaviour is identical to before.
 func openInput(path string) *matroska.Container {
 	if path == "-" {
-		c, _, err := reader.ReadStream(cliCtx, os.Stdin)
+		c, _, err := matroska.ReadStream(cliCtx, os.Stdin)
 		if err != nil {
 			FatalErr(err)
 		}
