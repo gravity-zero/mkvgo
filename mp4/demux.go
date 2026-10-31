@@ -398,6 +398,9 @@ func (sr *trackWindows) read(ti int, samples []inSample, idx int) ([]byte, error
 	if off < 0 || end < off || end > sr.size {
 		return nil, io.ErrUnexpectedEOF // a size the table declares past the source is not allocated
 	}
+	if end-off > maxSegmentBytes {
+		return nil, errf("sample of %d bytes, past the %d one may hold: the sample table is damaged or forged", end-off, maxSegmentBytes)
+	}
 	out := make([]byte, 0, end-off)
 	for pos := off; pos < end; {
 		if w := sr.holding(pos); w != nil {
