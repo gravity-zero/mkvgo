@@ -53,7 +53,8 @@ c, err := reader.Read(ctx, myReadSeeker, "label.mkv")
 **WebM or Matroska?** The two share every structure; the only thing that tells
 them apart is the EBML header's `DocType`, and a prober that reports the demuxer
 family (`matroska,webm`) cannot separate them. Every Matroska reader
-(`Open`/`Read`, `OpenMeta`/`ReadMeta`, `ReadStream`) fills it from the header in
+(`Open`/`Read`, `OpenMeta`/`ReadMeta`, `ReadStream` - on the facade too, for a
+forward-only reader such as stdin) fills it from the header in
 the same pass, at no cost - the header is a few dozen bytes at the start of the
 file:
 

@@ -9,6 +9,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [0.62.1] - unreleased
 
+### Breaking
+
+- Bytes written: a remux of a Matroska source that states a disposition flag
+  as 0 (`FlagOriginal` 0, ...) leaves the element out, the spec default; the
+  other bytes are unchanged.
+
 ### Fixed
 
 - The disposition flags (`HearingImpaired`, `VisualImpaired`,
@@ -19,6 +25,38 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `Attachment.Description` (the Matroska `FileDescription`) is read, written
   when not empty, and kept by every operation that rewrites the attachments;
   before, a rewrite dropped it. `attachments --json` shows it.
+- Hostile or damaged input, each refused or bounded where it panicked, looped
+  or allocated what it declared: an `lpcm` entry shorter than its layout, a
+  PCM table of 2^32-1 frames, a NAL, OBU or SEI length near 2 GiB and an HEVC
+  syntax value past its range on a 32-bit build, an H.264 crop past the
+  picture, more than a million chapter atoms or simple tags, an MP4 sample past
+  256 MiB, a VP9 superframe index short of its sample (`cenc`), a head element
+  sized past the file (`edit-inplace`). `verify` hashes a sample as it reads
+  it, no sample held whole.
+- On-demand HLS of a Matroska source cut short after its head index declared
+  segments past the file's end and a negative final duration; the plan serves
+  what the file holds, as the full pass does.
+- `--keep-lang` matches the language the container resolves (a BCP 47 tag, the
+  default English of a track stating none), where such tracks were dropped; a
+  language matching no audio track is said.
+- `probe --json` carries `truncated` for a local file, as `info --json` does.
+- An AV1 sequence header with decoder model parameters keeps its colour
+  config; a `BlockReader` given a TimecodeScale of 0 uses the default; MP3
+  frame sizes are known under the Matroska CodecID.
+- wasm: `codec_name` is written; the TypeScript types say the CICP colour
+  fields are numbers and declare the analyze fields the JSON carries.
+- `serve` prints the source without its query (a presigned URL's signature
+  stayed on stdout).
+
+### Added
+
+- `matroska.ReadStream`: the forward-only reader on the facade; the CLI and the
+  wasm go through the facade alone.
+
+### Changed
+
+- The 0.62.0 Deferred list no longer names the static release build, the full
+  coverage and the TypeScript types, which that version shipped.
 
 ## [0.62.0] - 2026-10-31
 
@@ -87,9 +125,6 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 ### Deferred
 
 - The `mkv/ops` -> `mp4` dependency edge.
-- A static `make release` (`CGO_ENABLED=0 -trimpath`).
-- Coverage over every package (`-coverpkg` complete).
-- TypeScript types for the wasm module.
 - The `js && wasm` tests in CI.
 
 ## [0.61.0] - 2026-10-24
