@@ -75,6 +75,43 @@ func TestFarLookupsOnAFreshPlanAtOnce(t *testing.T) {
 	}
 }
 
+// TestSecondRegionDiscoveryKeepsWhatTheFirstLearnt: two walks of a plan just built find the uncued regions at once;
+// the first records them and learns where one opens, the second records what it found later: the plan keeps the
+// first's regions, the opening it learnt included.
+func TestSecondRegionDiscoveryKeepsWhatTheFirstLearnt(t *testing.T) {
+	ctx := context.Background()
+	plan, err := PlanHLS(ctx, openGOPSource(t, 8, false, true), Options{SegmentMs: openGOPMs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := plan.openSource(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	first := plan.findUncuedRegions(src)
+	if len(first) == 0 {
+		t.Fatal("the layout left no uncued region to discover")
+	}
+	second := plan.findUncuedRegions(src) // the other walk's find, before any record
+	if n := plan.recordUncuedRegions(first); n != len(first) {
+		t.Fatalf("recorded %d regions, found %d", n, len(first))
+	}
+	opens := plan.regionFirstMs(src, 0)
+	if opens < 0 || plan.region(0).firstMs != opens {
+		t.Fatalf("the first region opens at %d, the plan holds %d", opens, plan.region(0).firstMs)
+	}
+	if n := plan.recordUncuedRegions(second); n != len(first) {
+		t.Fatalf("the second discovery left %d regions, want the first's %d", n, len(first))
+	}
+	if got := plan.region(0).firstMs; got != opens {
+		t.Fatalf("the second discovery forgot where the first region opens: %d, want %d", got, opens)
+	}
+	if n := plan.uncuedRegionsOf(src); n != len(first) {
+		t.Fatalf("a later walk sees %d regions, want %d", n, len(first))
+	}
+}
+
 // Fifty clients cancelled at random while the builds they share queue and
 // run: every client left gets its exact bytes, a cancelled one gets them or
 // context.Canceled, no flight or walk slot is left behind, every goroutine

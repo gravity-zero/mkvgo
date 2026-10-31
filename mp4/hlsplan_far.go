@@ -91,8 +91,7 @@ type tailRegion struct {
 	maxMs      int64
 }
 
-// uncuedRegionsOf finds, once, the stretches of clusters the Cues never name: between two cued clusters further apart
-// than clusters run (the first one's header says where it ends), and after the last cued one. It returns how many
+// uncuedRegionsOf finds, once, the stretches of clusters the Cues never name (findUncuedRegions) and returns how many
 // there are: the regions themselves stay the plan's, read one at a time through region.
 func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) int {
 	p.segMu.Lock()
@@ -101,6 +100,23 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) int {
 	if known {
 		return count
 	}
+	return p.recordUncuedRegions(p.findUncuedRegions(src))
+}
+
+// recordUncuedRegions keeps the regions a walk found, unless another walk recorded them meanwhile: what it learnt
+// of them since (where each opens, how far it runs) stays. It returns how many regions the plan holds.
+func (p *HLSPlan) recordUncuedRegions(regions []tailRegion) int {
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	if !p.uncuedKnown {
+		p.uncuedRegions, p.uncuedKnown = regions, true
+	}
+	return len(p.uncuedRegions)
+}
+
+// findUncuedRegions reads the stretches of clusters the Cues never name: between two cued clusters further apart
+// than clusters run (the first one's header says where it ends), and after the last cued one.
+func (p *HLSPlan) findUncuedRegions(src io.ReadSeeker) []tailRegion {
 	var regions []tailRegion
 	n := len(p.clusters)
 	gaps := make([]int64, 0, n)
@@ -149,12 +165,7 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) int {
 		}
 		regions = append(regions, rg)
 	}
-	p.segMu.Lock()
-	defer p.segMu.Unlock()
-	if !p.uncuedKnown { // another walk found them meanwhile: what it learnt of them since stays
-		p.uncuedRegions, p.uncuedKnown = regions, true
-	}
-	return len(p.uncuedRegions)
+	return regions
 }
 
 // region is a copy of the i-th uncued region as the walks have learnt it so far (they write it under segMu).
