@@ -183,15 +183,20 @@ func CmdTags(path string) {
 func CmdProbe(path string) {
 	c, dropped := loadContainer(path, true)
 	if JsonOutput {
+		var cut *cutShort
+		if !isRemoteURL(path) { // a remote probe keeps its request budget: no stat for the cut
+			cut = sourceCutShort(path, c)
+		}
 		if len(dropped) == 0 {
-			PrintJSON(containerForJSON(c))
+			PrintJSON(containerForJSON(c, cut))
 			return
 		}
 		PrintJSON(struct {
 			*matroska.Container
-			Tracks  []trackJSON        `json:"tracks"`
-			Dropped []mp4.DroppedTrack `json:"dropped_tracks"`
-		}{c, tracksForJSON(c), dropped})
+			Tracks    []trackJSON        `json:"tracks"`
+			Truncated *cutShort          `json:"truncated,omitempty"`
+			Dropped   []mp4.DroppedTrack `json:"dropped_tracks"`
+		}{c, tracksForJSON(c), cut, dropped})
 		return
 	}
 	fmt.Printf("File:        %s\n", c.Path)

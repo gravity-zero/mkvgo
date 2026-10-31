@@ -77,8 +77,9 @@ mkvgo info [-json] <file.mkv|->
 `Timebase` (`timecode_scale` in JSON) is the declared TimecodeScale in nanoseconds
 per timecode unit; 1000000 (one millisecond) is what nearly every file uses.
 
-`Truncated` (`truncated` in JSON: `file_size`, `declared_size`) appears only for a
-file that stops before the end it declares: its metadata
+`Truncated` (`truncated` in JSON: `file_size`, `declared_size`; in `probe --json`
+too for a local file, a remote probe keeping its request budget) appears only for
+a file that stops before the end it declares: its metadata
 reads whole, its media does not, and `diagnose` says how much is missing. It is read
 from the head (the Matroska Segment size, the top-level MP4 boxes; an MP4 of more
 than 16 of them, a fragmented one, is not judged). Bytes past the declared end are

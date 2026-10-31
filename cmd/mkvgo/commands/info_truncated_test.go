@@ -55,5 +55,12 @@ func TestCLIInfoTruncated(t *testing.T) {
 		if got := strings.Contains(js, `"truncated"`); got != tc.cut {
 			t.Errorf("%s: JSON names a cut = %v, want %v:\n%s", filepath.Base(tc.path), got, tc.cut, js)
 		}
+		// probe --json is what a server reads: it names the cut too.
+		commands.JsonOutput = true
+		probe := capture(t, func() { commands.CmdProbe(tc.path) })
+		commands.JsonOutput = false
+		if got := strings.Contains(probe, `"truncated"`); got != tc.cut {
+			t.Errorf("%s: probe JSON names a cut = %v, want %v", filepath.Base(tc.path), got, tc.cut)
+		}
 	}
 }
