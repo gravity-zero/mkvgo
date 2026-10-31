@@ -7,7 +7,7 @@ changes for the user and what to do; the detail lives in the docs. When a
 series of minor versions closes (0.6x at 0.70.0), its versions move to
 [changelog/](changelog/).
 
-## [Unreleased]
+## [0.62.0] - 2026-10-31
 
 ### Breaking
 

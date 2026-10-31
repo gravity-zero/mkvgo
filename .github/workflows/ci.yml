@@ -105,13 +105,22 @@ jobs:
           go-version: stable
           cache: false
 
-      # govulncheck judges the standard library of the go on PATH: stable, the one the published binaries are built
-      # with. Go 1.24 (go.mod's floor) is out of support and gets no fixes: judged on it, the standard library alone
-      # fails the job for good, whatever this module does.
+      # govulncheck judges the standard library of the go on PATH: stable first, the one the published binaries are
+      # built with, then the oldest release Go still supports, the one a user on the minimum supported toolchain runs.
+      # Go 1.24 (go.mod's floor) is out of support and gets no fixes: judged on it, the standard library alone fails
+      # the job for good, whatever this module does.
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: Vulnerability check (stable)
+        run: go version && "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Vulnerability check (Go 1.26)
         run: go version && "$(go env GOPATH)/bin/govulncheck" ./...
 
   release-build:
