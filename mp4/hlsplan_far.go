@@ -92,14 +92,16 @@ type tailRegion struct {
 }
 
 // uncuedRegionsOf finds, once, the stretches of clusters the Cues never name: between two cued clusters further apart
-// than clusters run (the first one's header says where it ends), and after the last cued one.
-func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
+// than clusters run (the first one's header says where it ends), and after the last cued one. It returns how many
+// there are: the regions themselves stay the plan's, read one at a time through region.
+func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) int {
 	p.segMu.Lock()
-	known, regions := p.uncuedKnown, p.uncuedRegions
+	known, count := p.uncuedKnown, len(p.uncuedRegions)
 	p.segMu.Unlock()
 	if known {
-		return regions
+		return count
 	}
+	var regions []tailRegion
 	n := len(p.clusters)
 	gaps := make([]int64, 0, n)
 	for k := 0; k+1 < n; k++ {
@@ -148,9 +150,11 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 		regions = append(regions, rg)
 	}
 	p.segMu.Lock()
-	p.uncuedRegions, p.uncuedKnown = regions, true
-	p.segMu.Unlock()
-	return regions
+	defer p.segMu.Unlock()
+	if !p.uncuedKnown { // another walk found them meanwhile: what it learnt of them since stays
+		p.uncuedRegions, p.uncuedKnown = regions, true
+	}
+	return len(p.uncuedRegions)
 }
 
 // region is a copy of the i-th uncued region as the walks have learnt it so far (they write it under segMu).
@@ -314,16 +318,16 @@ func (p *HLSPlan) farTrackWindow(ctx context.Context, n, ti int, segStart, segEn
 	p.stats.FarLookups++
 	p.winMu.Unlock()
 	var out []segSample
-	regions := p.uncuedRegionsOf(src)
+	count := p.uncuedRegionsOf(src)
 	from := 0 // the last region opening at or before the window, when they run in time order; the guard catches the rest
-	for i := range regions {
+	for i := 0; i < count; i++ {
 		if p.regionFirstMs(src, i) <= segStart {
 			from = i
 		}
 	}
 	span := p.windowSpan(n)
-	for i := from; i < len(regions); i++ {
-		rg := p.region(i) // regions is the plan's own slice: another walk may be recording what it learnt of this one
+	for i := from; i < count; i++ {
+		rg := p.region(i) // a copy: another walk may be recording what it learnt of this region
 		if rg.complete && rg.maxMs < segStart {
 			continue // walked to its end once: it holds nothing as late as the window
 		}
