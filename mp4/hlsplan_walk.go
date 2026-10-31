@@ -179,13 +179,17 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 		}
 		b, err := br.Next()
 		if k := len(br.SkippedRanges()); k > skips { // passed over a damaged region: what it cut goes, the video waits for a keyframe
-			for _, r := range br.SkippedRanges()[skips:] {
-				for ti := range windows {
-					windows[ti] = dropCut(windows[ti], r.From)
+			// A region running to the source's end is the file's cut, not damage between two frames: the blocks read
+			// before it are whole, and the full pass keeps them; the slack dropped the last of them.
+			if !isSourceEnd(err) {
+				for _, r := range br.SkippedRanges()[skips:] {
+					for ti := range windows {
+						windows[ti] = dropCut(windows[ti], r.From)
+					}
 				}
-			}
-			for ti, pt := range p.tracks {
-				needKey[ti] = needKey[ti] || pt.ft.outTrack.spec.video
+				for ti, pt := range p.tracks {
+					needKey[ti] = needKey[ti] || pt.ft.outTrack.spec.video
+				}
 			}
 			skips, inPlace = k, none
 		}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
@@ -556,49 +557,61 @@ func headCuesFixture(t testing.TB, tracks []mkv.Track, blocks []genBlock) string
 
 // TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass pins that a plan takes a head index no further than the
 // file goes: the cue points past its end made empty segments and a negative final duration, where the full pass
-// serves what the file holds.
+// serves what the file holds; and that a cut inside a cluster's first block keeps the whole blocks before it, which
+// the walk's damage slack dropped.
 func TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass(t *testing.T) {
 	w, h := uint32(320), uint32(240)
 	var gblocks []genBlock
-	for i := 0; i < 250; i++ { // 10 s of video, 40 ms frames, a keyframe every second
-		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}})
+	for i := 0; i < 250; i++ { // 10 s of video, 40 ms frames, a 1000-byte keyframe every second
+		data := []byte{0x00, 0x00, 0x00, 0x01, 0x65, byte(i)}
+		if i%25 == 0 {
+			data = append(data, make([]byte, 994)...)
+		}
+		gblocks = append(gblocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: data})
 	}
 	src := headCuesFixture(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}, gblocks)
 	whole, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cut := filepath.Join(t.TempDir(), "cut.mkv")
-	if err := os.WriteFile(cut, whole[:len(whole)*6/10], 0o644); err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	dir := t.TempDir()
-	if err := RemuxToHLS(ctx, cut, dir, Options{SegmentMs: 2000}); err != nil {
-		t.Fatal(err)
-	}
-	plan, err := PlanHLS(ctx, cut, Options{SegmentMs: 2000})
+	meta, err := reader.ReadMeta(ctx, bytes.NewReader(whole), src, reader.WithCues())
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
-	if plan.NumSegments() != len(fullSegs) {
-		t.Errorf("plan has %d segments, the full pass wrote %d", plan.NumSegments(), len(fullSegs))
-	}
-	if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
-		t.Errorf("the plan's playlist has a negative duration:\n%s", pl)
-	}
-	for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
-		got, err := plan.Segment(ctx, n)
-		if err != nil {
-			t.Fatalf("Segment(%d): %v", n, err)
+	lastCued := meta.SegmentStart + meta.Cues[len(meta.Cues)-1].ClusterPos
+	for name, at := range map[string]int{"between clusters": len(whole) * 6 / 10, "inside the last cued keyframe": int(lastCued) + 300} {
+		cut := filepath.Join(t.TempDir(), "cut.mkv")
+		if err := os.WriteFile(cut, whole[:at], 0o644); err != nil {
+			t.Fatal(err)
 		}
-		want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+		dir := t.TempDir()
+		if err := RemuxToHLS(ctx, cut, dir, Options{SegmentMs: 2000}); err != nil {
+			t.Fatal(err)
+		}
+		plan, err := PlanHLS(ctx, cut, Options{SegmentMs: 2000})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("segment %d differs from the full pass (%d vs %d bytes)", n, len(got), len(want))
+		fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
+		if plan.NumSegments() != len(fullSegs) {
+			t.Errorf("cut %s: plan has %d segments, the full pass wrote %d", name, plan.NumSegments(), len(fullSegs))
+		}
+		if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
+			t.Errorf("cut %s: the plan's playlist has a negative duration:\n%s", name, pl)
+		}
+		for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
+			got, err := plan.Segment(ctx, n)
+			if err != nil {
+				t.Fatalf("cut %s: Segment(%d): %v", name, n, err)
+			}
+			want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("cut %s: segment %d differs from the full pass (%d vs %d bytes)", name, n, len(got), len(want))
+			}
 		}
 	}
 }
