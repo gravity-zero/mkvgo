@@ -383,3 +383,21 @@ func BenchmarkBlockReaderOnSampleMKV(b *testing.B) {
 		}
 	}
 }
+
+// TestBlockReaderTakesAZeroScaleAsTheDefault pins that a TimecodeScale of 0 means the Matroska default: every block
+// came out at 0 ms before.
+func TestBlockReaderTakesAZeroScaleAsTheDefault(t *testing.T) {
+	src := "../../internal/testdata/sample.mkv"
+	f, err := os.Open(src)
+	if err != nil {
+		t.Skip("fixture not available")
+	}
+	defer f.Close()
+	br, err := NewBlockReader(f, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if br.timecodeScale != mkv.DefaultTimecodeScale {
+		t.Errorf("scale 0 kept as %d, want the default %d", br.timecodeScale, mkv.DefaultTimecodeScale)
+	}
+}

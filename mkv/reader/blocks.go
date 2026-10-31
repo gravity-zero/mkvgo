@@ -156,10 +156,12 @@ type BlockReader struct {
 	progressTick  int
 }
 
+// NewBlockReader walks the blocks of a Matroska file from its start; timecodeScale is the Segment's TimecodeScale
+// (a zero or negative one means the Matroska default of 1 ms, where it stamped every block at 0 ms).
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	br := &BlockReader{
 		raw:           r,
-		timecodeScale: timecodeScale,
+		timecodeScale: scaleOrDefault(timecodeScale),
 		segEnd:        -1,
 		clusterEnd:    -1,
 	}
@@ -167,6 +169,14 @@ func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) 
 		return nil, err
 	}
 	return br, nil
+}
+
+// scaleOrDefault is the TimecodeScale a caller gave, the Matroska default when it gave none.
+func scaleOrDefault(timecodeScale int64) int64 {
+	if timecodeScale <= 0 {
+		return mkv.DefaultTimecodeScale
+	}
+	return timecodeScale
 }
 
 // NewBlockReaderAt is NewBlockReader starting mid-file: r is positioned at
@@ -181,7 +191,7 @@ func NewBlockReaderAt(r io.ReadSeeker, timecodeScale int64, offset int64) (*Bloc
 	}
 	br := &BlockReader{
 		raw:           r,
-		timecodeScale: timecodeScale,
+		timecodeScale: scaleOrDefault(timecodeScale),
 		segEnd:        -1,
 		clusterEnd:    -1,
 	}
@@ -203,7 +213,7 @@ func NewBlockReaderFrom(r io.ReadSeeker, timecodeScale int64, p BlockPos) (*Bloc
 	}
 	br := &BlockReader{
 		raw:           r,
-		timecodeScale: timecodeScale,
+		timecodeScale: scaleOrDefault(timecodeScale),
 		segEnd:        -1,
 		inCluster:     true,
 		clusterEnd:    p.ClusterEnd,
