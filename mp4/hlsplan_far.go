@@ -153,11 +153,16 @@ func (p *HLSPlan) uncuedRegionsOf(src io.ReadSeeker) []tailRegion {
 	return regions
 }
 
+// region is a copy of the i-th uncued region as the walks have learnt it so far (they write it under segMu).
+func (p *HLSPlan) region(i int) tailRegion {
+	p.segMu.Lock()
+	defer p.segMu.Unlock()
+	return p.uncuedRegions[i]
+}
+
 // regionFirstMs is the timecode of the i-th uncued region's first block, read once (math.MaxInt64 when it cannot be).
 func (p *HLSPlan) regionFirstMs(src io.ReadSeeker, i int) int64 {
-	p.segMu.Lock()
-	rg := p.uncuedRegions[i]
-	p.segMu.Unlock()
+	rg := p.region(i)
 	if rg.firstMs >= 0 {
 		return rg.firstMs
 	}
@@ -318,7 +323,7 @@ func (p *HLSPlan) farTrackWindow(ctx context.Context, n, ti int, segStart, segEn
 	}
 	span := p.windowSpan(n)
 	for i := from; i < len(regions); i++ {
-		rg := regions[i]
+		rg := p.region(i) // regions is the plan's own slice: another walk may be recording what it learnt of this one
 		if rg.complete && rg.maxMs < segStart {
 			continue // walked to its end once: it holds nothing as late as the window
 		}

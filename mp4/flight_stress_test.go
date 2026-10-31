@@ -13,6 +13,68 @@ import (
 	"time"
 )
 
+// TestFarLookupsOnAFreshPlanAtOnce: the first clients of a plan just built ask for a window's table and for a track's
+// segment at once, every window in turn; each walk looks for the audio in the uncued regions, reading and recording
+// where each region opens as it goes, and both clients get the full pass's bytes (the walks share the regions
+// through the plan: under -race, a read of one outside the lock is a failure).
+func TestFarLookupsOnAFreshPlanAtOnce(t *testing.T) {
+	const windows, rounds = 8, 4
+	src := openGOPSource(t, windows, false, true)
+	ctx := context.Background()
+	ref, err := PlanHLS(ctx, src, Options{SegmentMs: openGOPMs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]byte{}
+	for n := 1; n <= windows; n++ {
+		for _, name := range []string{fmt.Sprintf("seg%05d.m4s", n), fmt.Sprintf("seg_a1_%05d.m4s", n)} {
+			if want[name], _, err = ref.Resource(ctx, name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for round := 0; round < rounds; round++ {
+		plan, err := PlanHLS(ctx, src, Options{SegmentMs: openGOPMs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n := 1; n <= windows; n++ {
+			video, audio := fmt.Sprintf("seg%05d.m4s", n), fmt.Sprintf("seg_a1_%05d.m4s", n)
+			var wg sync.WaitGroup
+			var got [2][]byte
+			var errs [2]error
+			start := make(chan struct{})
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				h, err := plan.Open(ctx, video)
+				if err == nil {
+					var out bytes.Buffer
+					_, err = h.WriteTo(ctx, &out)
+					got[0] = out.Bytes()
+				}
+				errs[0] = err
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				got[1], _, errs[1] = plan.Resource(ctx, audio)
+			}()
+			close(start)
+			wg.Wait()
+			for i, name := range []string{video, audio} {
+				if errs[i] != nil || !bytes.Equal(got[i], want[name]) {
+					t.Fatalf("round %d %s: err %v, %d bytes (want %d)", round, name, errs[i], len(got[i]), len(want[name]))
+				}
+			}
+		}
+		if st := plan.Stats(); st.FarLookups == 0 {
+			t.Fatalf("round %d: no far lookup, the layout did not exercise the uncued regions", round)
+		}
+	}
+}
+
 // Fifty clients cancelled at random while the builds they share queue and
 // run: every client left gets its exact bytes, a cancelled one gets them or
 // context.Canceled, no flight or walk slot is left behind, every goroutine

@@ -64,6 +64,9 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `serve-growing` (`mp4.PlanGrowingHLS`): audio with a DefaultDuration (AAC,
   AC-3, E-AC-3) is timed on its grid like the full pass; it was timed by its
   millisecond timecodes, every audio segment differing from the full pass's.
+- Two walks of a plan just built, looking for a track in the uncued regions at
+  once, read what the other was recording about them (a data race under
+  `-race`); every read of a region goes through the plan's lock.
 - Review of v0.61.0: in-place edits, the Replace operations and hostile input
   (lacing, co64, quadratic reads) made safe; serving no longer stalls on a
   panic, a slow client, a slow read or a burst of I-frame playlist requests.
