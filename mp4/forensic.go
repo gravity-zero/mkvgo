@@ -325,8 +325,8 @@ func h264AllDisposable(sample []byte) bool {
 		if len(sample)-off < 5 {
 			return false
 		}
-		n := int(binary.BigEndian.Uint32(sample[off:]))
-		if n <= 0 || off+4+n > len(sample) {
+		n := int64(binary.BigEndian.Uint32(sample[off:])) // compared in int64: off+4+n wrapped a 32-bit int
+		if n <= 0 || n > int64(len(sample)-off-4) {
 			return false
 		}
 		h := sample[off+4]
@@ -341,7 +341,7 @@ func h264AllDisposable(sample []byte) bool {
 			}
 			vcl++
 		}
-		off += 4 + n
+		off += 4 + int(n)
 	}
 	return vcl > 0
 }

@@ -278,6 +278,17 @@ func (r *nalReader) u(n int) uint32 {
 
 func (r *nalReader) flag() bool { return r.bit() == 1 }
 
+// ueMax is ue bounded by the syntax element's range: a larger value marks the reader failed, where converted to an
+// int it went negative on 32 bits and passed the guards that followed.
+func (r *nalReader) ueMax(max uint32) uint32 {
+	v := r.ue()
+	if v > max {
+		r.err = true
+		return 0
+	}
+	return v
+}
+
 func (r *nalReader) skip(n int) {
 	for ; n > 0 && !r.err; n-- {
 		r.bit()
@@ -378,11 +389,11 @@ func parseAVCSPS(r *nalReader) (uint32, *avcSPS, bool) {
 			}
 		}
 	}
-	sps.log2MaxFrameNum = int(r.ue()) + 4
+	sps.log2MaxFrameNum = int(r.ueMax(12)) + 4
 	sps.pocType = r.ue()
 	switch sps.pocType {
 	case 0:
-		sps.log2MaxPocLsb = int(r.ue()) + 4
+		sps.log2MaxPocLsb = int(r.ueMax(12)) + 4
 	case 1:
 		sps.deltaPicOrderAlwaysZero = r.flag()
 		r.se()
@@ -678,7 +689,7 @@ func parseHEVCSPS(r *nalReader) (uint32, *hevcSPS, bool) {
 	}
 	r.ue() // bit_depth_luma_minus8
 	r.ue() // bit_depth_chroma_minus8
-	sps.log2MaxPocLsb = int(r.ue()) + 4
+	sps.log2MaxPocLsb = int(r.ueMax(12)) + 4
 	first := maxSubLayersMinus1
 	if r.flag() { // sps_sub_layer_ordering_info_present_flag
 		first = 0
@@ -794,10 +805,11 @@ func parseSTRPS(r *nalReader, sets []stRPS, idx, num int) (stRPS, bool) {
 	if idx != 0 && r.flag() { // inter_ref_pic_set_prediction_flag
 		delta := 1
 		if idx == num {
-			delta = int(r.ue()) + 1
-		}
-		if delta > idx {
-			return out, false
+			d := r.ue() // delta_idx_minus1, kept unsigned: int(d)+1 went negative on 32 bits
+			if d >= uint32(idx) {
+				return out, false
+			}
+			delta = int(d) + 1
 		}
 		ref := sets[idx-delta]
 		sign := r.bit()
@@ -1132,7 +1144,7 @@ func (s *h26xSplitter) hevcSliceHeaderLen(payload []byte, nalType byte) (int, er
 	if pps.tilesOrEntropySync {
 		n := r.ue()
 		if n > 0 {
-			w := int(r.ue()) + 1
+			w := int(r.ueMax(31)) + 1
 			if w > 32 || n > 1<<16 {
 				return 0, fmt.Errorf("%d entry points of %d bits", n, w)
 			}

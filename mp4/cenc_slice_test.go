@@ -242,3 +242,16 @@ func TestNALReaderSkipsEmulationPrevention(t *testing.T) {
 		t.Errorf("%d escaped bytes, want 4", n)
 	}
 }
+
+// TestSTRPSDeltaIdxPastAnIntIsRefused pins that a delta_idx_minus1 near 2^32 is refused: on a 32-bit int it went
+// negative, passed the bound and indexed past the sets.
+func TestSTRPSDeltaIdxPastAnIntIsRefused(t *testing.T) {
+	var w bitWriter
+	w.write(1, 1)    // inter_ref_pic_set_prediction_flag
+	w.ue(0xFFFFFFFE) // delta_idx_minus1
+	w.write(0, 1)    // delta_rps_sign
+	w.ue(0)          // abs_delta_rps_minus1
+	if _, ok := parseSTRPS(newNALReader(w.trailing()), []stRPS{{}}, 1, 1); ok {
+		t.Error("a delta_idx past the sets was accepted")
+	}
+}
