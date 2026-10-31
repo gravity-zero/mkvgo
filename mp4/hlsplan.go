@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -439,8 +440,8 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	}
 	// A head index names clusters the file may not hold (cut short after it was written): a cue past the end would
 	// bound an empty segment and a negative final duration, where the full pass serves what the file holds.
-	for srcSize > 0 && len(cues) > 0 && c.SegmentStart+cues[len(cues)-1].ClusterPos >= srcSize {
-		cues = cues[:len(cues)-1]
+	if srcSize > 0 {
+		cues = slices.DeleteFunc(cues, func(cue mkv.CuePoint) bool { return c.SegmentStart+cue.ClusterPos >= srcSize })
 	}
 	if len(cues) == 0 {
 		return nil, errf("%s: the file ends before the first cluster its Cues name", shown.Path(srcPath))
