@@ -1502,7 +1502,7 @@ Each `Track` carries the stream metadata probers report, read head-only from the
 | `HDR` (`MaxCLL`/`MaxFALL`, `MasteringDisplay`) | side data (Content light level / Mastering display metadata) | Matroska Colour `MaxCLL`/`MaxFALL`/`MasteringMetadata` / MP4 `clli`/`mdcv` |
 | `StereoMode` (`StereoModeName()`), `Projection` | Stereo 3D / Spherical Mapping side data | Matroska `StereoMode`/`Projection` / MP4 `st3d`/`sv3d` |
 | `Bitrate` | `bit_rate` | MP4 `btrt`/`esds` / Matroska `BPS` tag |
-| `HearingImpaired`, `VisualImpaired`, `TextDescriptions`, `Original`, `Commentary` | `disposition.*` | Matroska Flag* elements (Matroska only) |
+| `HearingImpaired`, `VisualImpaired`, `TextDescriptions`, `Original`, `Commentary` | `disposition.*` | Matroska Flag* elements (Matroska only); every rewrite writes them back from the fields, a true one as the element, a false one as no element, so a callback that clears one clears it in the output |
 | `Channels` / `ChannelLayout()` | `channels` / `channel_layout` | codec config (HE-AACv2 PS counted) |
 | `SampleRate`, `OutputSampleRate`, `EffectiveSampleRate()` | `sample_rate` | sample entry / Matroska; SBR output rate from the AAC ASC (both containers - a Matroska muxer rarely writes `OutputSamplingFrequency`) or `OutputSamplingFrequency`; channels and core rate from the ASC when the container omits them |
 
@@ -2014,6 +2014,7 @@ err := matroska.EditInPlace(ctx, "video.mkv",
 // when it is a cover.* image.
 err := matroska.AddAttachment(ctx, "in.mkv", "out.mkv", matroska.Attachment{
     Name: "cover.jpg", MIMEType: "image/jpeg", Data: jpg,
+    Description: "front cover", // the FileDescription, optional; read back and carried by every rewrite
 })
 
 // Remove by decimal ID or exact name; errors BEFORE writing when nothing matches.

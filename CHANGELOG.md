@@ -7,6 +7,19 @@ changes for the user and what to do; the detail lives in the docs. When a
 series of minor versions closes (0.6x at 0.70.0), its versions move to
 [changelog/](changelog/).
 
+## [0.62.1] - unreleased
+
+### Fixed
+
+- The disposition flags (`HearingImpaired`, `VisualImpaired`,
+  `TextDescriptions`, `Original`, `Commentary`) are written from the `Track`
+  fields: one set through the API is now in the output, one cleared is now
+  left out (before, the source's elements were copied back as they were, and a
+  flag set in code was lost).
+- `Attachment.Description` (the Matroska `FileDescription`) is read, written
+  when not empty, and kept by every operation that rewrites the attachments;
+  before, a rewrite dropped it. `attachments --json` shows it.
+
 ## [0.62.0] - 2026-10-31
 
 ### Breaking
