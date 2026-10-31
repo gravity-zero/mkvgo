@@ -113,8 +113,9 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 }
 
 // ReadStream reads a Matroska stream from a forward-only io.Reader (a pipe, a socket, stdin): the Container filled
-// from the head metadata (SeekHead and Cues are of no use without seeking) and a BlockReader positioned on the first
-// Cluster. See reader.ReadStream.
+// from the metadata ahead of the first Cluster (Chapters, Attachments and Tags included when they sit there; SeekHead
+// and Cues are of no use without seeking) and a BlockReader on what follows, which ends at once when the Segment holds
+// no Cluster. See reader.ReadStream.
 func ReadStream(ctx context.Context, r io.Reader) (*Container, *BlockReader, error) {
 	return reader.ReadStream(ctx, r)
 }
