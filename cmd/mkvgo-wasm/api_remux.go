@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall/js"
 
+	"github.com/gravity-zero/mkvgo/internal/keeplang"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -140,32 +141,18 @@ func resolveKeepLangs(ctx context.Context, fs *mkv.FS, path string, langs []stri
 	if err != nil {
 		return nil, err
 	}
-	var tracks []mkv.Track
+	var c *mkv.Container
 	switch format {
 	case "mkv":
-		c, err := matroska.ReadMeta(ctx, rs, path)
-		if err != nil {
+		if c, err = matroska.ReadMeta(ctx, rs, path); err != nil {
 			return nil, err
 		}
-		tracks = c.Tracks
 	case "mp4":
-		c, _, err := mp4.ReadMeta(ctx, rs, path)
-		if err != nil {
+		if c, _, err = mp4.ReadMeta(ctx, rs, path); err != nil {
 			return nil, err
 		}
-		tracks = c.Tracks
 	}
-	want := make(map[string]bool, len(langs))
-	for _, l := range langs {
-		want[l] = true
-	}
-	var ids []uint64
-	for _, t := range tracks {
-		if t.Type == mkv.VideoTrack || want[strings.ToLower(t.Language)] {
-			ids = append(ids, t.ID)
-		}
-	}
-	return ids, nil
+	return keeplang.IDs(c, langs), nil
 }
 
 // readCENCOpts reads an optional `cenc` object from the given opts object:

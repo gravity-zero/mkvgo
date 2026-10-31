@@ -38,6 +38,7 @@ func TestKeepLangIDsUsesTheResolvedLanguage(t *testing.T) {
 		{ID: 3, Type: mkv.AudioTrack, LanguageBCP47: "fr-CA"}, // BCP 47 only
 		{ID: 4, Type: mkv.AudioTrack, Language: "spa"},        // legacy only
 		{ID: 5, Type: mkv.SubtitleTrack, LanguageBCP47: "de"},
+		{ID: 6, Type: mkv.AudioTrack, Language: "und"},
 	}}
 	for _, tc := range []struct {
 		langs []string
@@ -47,6 +48,7 @@ func TestKeepLangIDsUsesTheResolvedLanguage(t *testing.T) {
 		{[]string{"fr"}, []uint64{1, 3}},
 		{[]string{"fr-ca"}, []uint64{1, 3}},
 		{[]string{"spa", "de"}, []uint64{1, 4, 5}},
+		{[]string{"und"}, []uint64{1, 6}}, // "und" as written, which the primary-language match alone dropped
 		{[]string{"ita"}, []uint64{1}},
 	} {
 		if got := keepLangIDs(c, tc.langs); !reflect.DeepEqual(got, tc.want) {

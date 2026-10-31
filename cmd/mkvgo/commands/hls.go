@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gravity-zero/mkvgo/internal/lang"
+	"github.com/gravity-zero/mkvgo/internal/keeplang"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -285,28 +285,8 @@ func resolveKeepLangs(src string, langs []string) []uint64 {
 	return ids
 }
 
-// keepLangIDs is every video track plus the tracks in one of the wanted languages: by the legacy code, the BCP 47 tag
-// or its primary subtag, or the language the container resolves (the Matroska default "eng" for a track stating
-// none), where matching the legacy code alone kept the video alone for a BCP 47-only or a default-language track.
-func keepLangIDs(c *matroska.Container, langs []string) []uint64 {
-	exact, primary := make(map[string]bool, len(langs)), make(map[string]bool, len(langs))
-	for _, l := range langs {
-		l = strings.ToLower(strings.TrimSpace(l))
-		exact[l] = true
-		if p := lang.Primary(l); p != "und" {
-			primary[p] = true
-		}
-	}
-	var ids []uint64
-	for i := range c.Tracks {
-		t := &c.Tracks[i]
-		if t.Type == mkv.VideoTrack || exact[strings.ToLower(t.LanguageBCP47)] ||
-			slices.ContainsFunc([]string{t.Language, c.TrackLanguage(t)}, func(l string) bool { return l != "" && primary[lang.Primary(l)] }) {
-			ids = append(ids, t.ID)
-		}
-	}
-	return ids
-}
+// keepLangIDs is keeplang.IDs: the language match the wasm's keepLangs shares.
+func keepLangIDs(c *matroska.Container, langs []string) []uint64 { return keeplang.IDs(c, langs) }
 
 // CmdToHLS remuxes an MKV/WebM file to a fragmented-MP4 HLS presentation
 // (init.mp4 + segments + playlist.m3u8) in an output directory.
