@@ -395,6 +395,15 @@ func chromaSubsampling(idc *uint16) (uint32, uint32) {
 // PictureSizeFromCodecPrivate returns the coded picture size an H.264 avcC or
 // HEVC hvcC states in its SPS, cropping applied; ok is false when the record
 // holds no readable SPS or the codec carries none.
+// croppedPicture is the picture less its crop, no picture at all when the crop reaches it: a subtraction that
+// wrapped gave a width of four billion pixels a sample entry then adopted.
+func croppedPicture(width, height, cropW, cropH uint32) (w, h uint32) {
+	if cropW >= width || cropH >= height {
+		return 0, 0
+	}
+	return width - cropW, height - cropH
+}
+
 func PictureSizeFromCodecPrivate(codec string, cp []byte) (width, height uint32, ok bool) {
 	var bc *bitstreamColour
 	switch codec {
@@ -485,13 +494,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	if r.bit() == 1 { // frame_cropping_flag: the crop is counted in chroma units
 		left, right, top, bottom := r.ue(), r.ue(), r.ue(), r.ue()
 		cropX, cropY := chromaSubsampling(bc.chroma)
-		cw, ch := uint64(cropX)*(uint64(left)+uint64(right)), uint64(cropY)*uint64(heightUnits)*(uint64(top)+uint64(bottom))
-		if cw >= uint64(bc.width) || ch >= uint64(bc.height) { // a crop past the picture: no size, where the subtraction wrapped
-			bc.width, bc.height = 0, 0
-		} else {
-			bc.width -= uint32(cw)
-			bc.height -= uint32(ch)
-		}
+		bc.width, bc.height = croppedPicture(bc.width, bc.height, cropX*(left+right), cropY*heightUnits*(top+bottom))
 	}
 	if r.bit() == 1 { // vui_parameters_present_flag
 		parseAVCVUI(r, bc)
@@ -735,8 +738,7 @@ func parseHEVCSPS(rbsp []byte, bc *bitstreamColour) {
 	if r.bit() == 1 {  // conformance_window_flag: the window is counted in chroma units
 		left, right, top, bottom := r.ue(), r.ue(), r.ue(), r.ue()
 		cropX, cropY := chromaSubsampling(bc.chroma)
-		bc.width -= cropX * (left + right)
-		bc.height -= cropY * (top + bottom)
+		bc.width, bc.height = croppedPicture(bc.width, bc.height, cropX*(left+right), cropY*(top+bottom))
 	}
 	if d := r.ue(); !r.err { // bit_depth_luma_minus8: the stream's own, over the hvcC header's
 		bc.bitDepth, bc.spsDepth = validBitDepth(d+8), true

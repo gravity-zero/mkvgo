@@ -209,3 +209,17 @@ func TestAVCColourInBandSPSOnly(t *testing.T) {
 		t.Errorf("color_space should be nil (this avcC SPS carries no colour), got %d", *tr.ColorSpace)
 	}
 }
+
+// TestCroppedPictureRefusesACropPastIt pins the crop arithmetic both SPS parsers share, HEVC's included.
+func TestCroppedPictureRefusesACropPastIt(t *testing.T) {
+	for _, tc := range []struct{ w, h, cw, ch, wantW, wantH uint32 }{
+		{1920, 1088, 0, 8, 1920, 1080},
+		{64, 64, 64, 0, 0, 0},
+		{64, 64, 0, 2000, 0, 0},
+		{64, 64, 2 * 1000, 0, 0, 0},
+	} {
+		if w, h := croppedPicture(tc.w, tc.h, tc.cw, tc.ch); w != tc.wantW || h != tc.wantH {
+			t.Errorf("croppedPicture(%d, %d, %d, %d) = %dx%d, want %dx%d", tc.w, tc.h, tc.cw, tc.ch, w, h, tc.wantW, tc.wantH)
+		}
+	}
+}
