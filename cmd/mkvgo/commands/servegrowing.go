@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkvhttp"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
@@ -46,7 +47,7 @@ func CmdServeGrowing(args []string) {
 	cfg.applyMemoryLimit()
 	srv := newServer(addr, mkvhttp.Handler(plan, cfg.httpOptions()), segmentWriteTimeout)
 
-	fmt.Printf("serving %s (play while downloading)\n  %s\n", src, playableURL(addr))
+	fmt.Printf("serving %s (play while downloading)\n  %s\n", shown.Path(src), playableURL(addr))
 	fmt.Println("press Ctrl-C to stop")
 
 	go refreshLoop(ctx, plan)

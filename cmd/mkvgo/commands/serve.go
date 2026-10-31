@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mkvhttp"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -83,7 +84,7 @@ func CmdServe(args []string) {
 
 	srv := newServer(addr, mkvhttp.Handler(plan, cfg.httpOptions(cfg.cors)), segmentWriteTimeout)
 
-	fmt.Printf("serving %s\n  %s\n", src, playableURL(addr))
+	fmt.Printf("serving %s\n  %s\n", shown.Path(src), playableURL(addr))
 	runServer(srv)
 }
 
@@ -93,7 +94,7 @@ func serveDirect(addr, src string, opts mkvhttp.Options) {
 	name := filepath.Base(src)
 	srv := newServer(addr, directMux(name, mkvhttp.FileHandler(src, mkvhttp.Options{AllowCORS: opts.AllowCORS})), 0) // a direct-play response is the whole film: no deadline on writing it
 
-	fmt.Printf("serving %s (direct-play, no packaging)\n  %s\n", src, directPlayableURL(addr, name))
+	fmt.Printf("serving %s (direct-play, no packaging)\n  %s\n", shown.Path(src), directPlayableURL(addr, name))
 	runServer(srv)
 }
 
