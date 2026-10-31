@@ -295,6 +295,7 @@ type trackJSON struct {
 	FrameRate           *float64 `json:"frame_rate,omitempty"`
 	FrameRateEstimated  bool     `json:"frame_rate_estimated,omitempty"`
 	EstimatedFrameRate  *float64 `json:"estimated_frame_rate,omitempty"` // folded into frame_rate
+	CodecName           string   `json:"codec_name,omitempty"`
 	CodecLongName       string   `json:"codec_long_name,omitempty"`
 	ChannelLayout       string   `json:"channel_layout,omitempty"`
 	AvgFrameRate        float64  `json:"avg_frame_rate,omitempty"`
@@ -317,6 +318,7 @@ func trackJSONOf(c *matroska.Container, t matroska.Track) trackJSON {
 		fr = t.EstimatedFrameRate
 	}
 	return trackJSON{Track: t, FrameRate: fr, FrameRateEstimated: estimated,
+		CodecName:           c.TrackCodecName(&t),
 		CodecLongName:       t.CodecLongName(),
 		ChannelLayout:       t.ChannelLayout(),
 		AvgFrameRate:        t.AvgFrameRate(),
