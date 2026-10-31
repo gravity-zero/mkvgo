@@ -485,8 +485,13 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	if r.bit() == 1 { // frame_cropping_flag: the crop is counted in chroma units
 		left, right, top, bottom := r.ue(), r.ue(), r.ue(), r.ue()
 		cropX, cropY := chromaSubsampling(bc.chroma)
-		bc.width -= cropX * (left + right)
-		bc.height -= cropY * heightUnits * (top + bottom)
+		cw, ch := uint64(cropX)*(uint64(left)+uint64(right)), uint64(cropY)*uint64(heightUnits)*(uint64(top)+uint64(bottom))
+		if cw >= uint64(bc.width) || ch >= uint64(bc.height) { // a crop past the picture: no size, where the subtraction wrapped
+			bc.width, bc.height = 0, 0
+		} else {
+			bc.width -= uint32(cw)
+			bc.height -= uint32(ch)
+		}
 	}
 	if r.bit() == 1 { // vui_parameters_present_flag
 		parseAVCVUI(r, bc)

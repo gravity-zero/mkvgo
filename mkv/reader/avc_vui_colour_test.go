@@ -43,7 +43,10 @@ func spsPrefix() *tbw { return spsPrefixScan(true) }
 
 // spsPrefixScan is spsPrefix with frame_mbs_only_flag chosen: false declares
 // field coding possible (interlaced), which adds mb_adaptive_frame_field_flag.
-func spsPrefixScan(frameMbsOnly bool) *tbw {
+func spsPrefixScan(frameMbsOnly bool) *tbw { return spsPrefixCrop(frameMbsOnly, nil) }
+
+// spsPrefixCrop is spsPrefixScan with a frame crop (left, right, top, bottom in chroma units) when crop is not nil.
+func spsPrefixCrop(frameMbsOnly bool, crop *[4]uint32) *tbw {
 	b := &tbw{}
 	b.u(100, 8) // profile_idc = High
 	b.u(0, 8)   // constraint flags + reserved
@@ -68,9 +71,28 @@ func spsPrefixScan(frameMbsOnly bool) *tbw {
 		b.u(0, 1) // mb_adaptive_frame_field_flag
 	}
 	b.u(1, 1) // direct_8x8_inference_flag
-	b.u(0, 1) // frame_cropping_flag = 0
+	if crop == nil {
+		b.u(0, 1) // frame_cropping_flag = 0
+	} else {
+		b.u(1, 1) // frame_cropping_flag = 1
+		for _, c := range crop {
+			b.ue(c)
+		}
+	}
 	b.u(1, 1) // vui_parameters_present_flag = 1
 	return b
+}
+
+// TestSPSCropPastThePictureYieldsNoSize pins that a frame crop wider than the picture yields no size: the
+// subtraction wrapped to a width of four billion pixels that a sample entry then adopted.
+func TestSPSCropPastThePictureYieldsNoSize(t *testing.T) {
+	b := spsPrefixCrop(true, &[4]uint32{1000, 0, 0, 0})
+	b.u(0, 1) // aspect_ratio_info_present_flag
+	b.u(0, 1) // overscan_info_present_flag
+	b.u(0, 1) // video_signal_type_present_flag
+	if w, h, ok := PictureSizeFromCodecPrivate("h264", wrapAvcC(b)); ok {
+		t.Errorf("a crop past the picture yielded %dx%d", w, h)
+	}
 }
 
 // wrapAvcC wraps a completed SPS RBSP in an AVCDecoderConfigurationRecord.
