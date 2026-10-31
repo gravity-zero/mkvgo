@@ -155,3 +155,13 @@ func TestSplitVP9SubsamplesSuperframe(t *testing.T) {
 		t.Fatalf("sum of clear+protected = %d, want %d (len(sample))", total, len(sample))
 	}
 }
+
+// TestSplitVP9SubsamplesRefusesAnIndexShortOfTheSample pins that frame sizes summing short of the data are refused:
+// the bytes after the last frame went out neither described nor encrypted.
+func TestSplitVP9SubsamplesRefusesAnIndexShortOfTheSample(t *testing.T) {
+	frame := vp9SyntheticFrame(20, 0x10)
+	sample := append(append(append([]byte{}, frame...), make([]byte, 17)...), 0xC0, byte(len(frame)), 0xC0)
+	if _, err := splitVP9Subsamples(sample); err == nil {
+		t.Errorf("a superframe index covering %d of %d bytes was accepted", len(frame), len(sample)-3)
+	}
+}

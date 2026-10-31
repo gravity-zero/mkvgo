@@ -119,6 +119,9 @@ func vp9SplitSuperframe(sample []byte) (frames [][2]int, indexLen int, err error
 		frames = append(frames, [2]int{off, off + sz})
 		off += sz
 	}
+	if off != framesEnd { // ISO 23001-7: the subsamples cover the sample; bytes no frame claims would go out neither described nor encrypted
+		return nil, 0, errf("VP9 CENC: superframe index frame sizes cover %d of %d bytes", off, framesEnd)
+	}
 	return frames, indexLen, nil
 }
 
