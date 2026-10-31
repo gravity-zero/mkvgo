@@ -40,3 +40,32 @@ func TestRemuxToMP4ReusesTheBlockBuffer(t *testing.T) {
 		t.Errorf("a fast-start remux of a %d-byte source allocated %d bytes, want <= %d", st.Size(), alloc, st.Size()/2)
 	}
 }
+
+// TestVerifyContentHashesStreamsEachSample pins that a sample is hashed as it is read, not held whole: an 8 MiB
+// sample was allocated whole, a forged table's 4 GiB one too.
+func TestVerifyContentHashesStreamsEachSample(t *testing.T) {
+	if poison.On {
+		t.Skip("poisoning allocates a fresh buffer at each reuse")
+	}
+	const big = 8 << 20
+	data := append([]byte{0, 0, 0, 1, 0x65}, make([]byte, big)...)
+	w, h := uint32(320), uint32(240)
+	src := buildMKV(t, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}},
+		[]genBlock{{track: 1, pts: 0, key: true, data: data}})
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "out.mp4")
+	if err := RemuxToMP4(ctx, src, out, Options{ContentHashes: true}); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	mismatches, err := VerifyContentHashes(ctx, out)
+	runtime.ReadMemStats(&after)
+	if err != nil || len(mismatches) != 0 {
+		t.Fatalf("verify: %v, %v", mismatches, err)
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > big/4 {
+		t.Errorf("verify allocated %d bytes for an %d-byte sample", alloc, big)
+	}
+}

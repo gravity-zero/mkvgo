@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
@@ -71,12 +72,14 @@ func VerifyContentHashes(ctx context.Context, path string, opts ...Options) ([]H
 				return nil, err
 			}
 			s := &t.samples[j]
-			data, err := readSample(src, s.offset, s.size)
-			if err != nil {
+			// Hashed as it is read: a sample is up to 4 GiB by its table, held whole it was the process budget.
+			if _, err := src.Seek(s.offset, io.SeekStart); err != nil {
 				return nil, errf("track %d sample %d: %w", t.trackID, j, err)
 			}
-			h.Write(data)
-			processed += int64(len(data))
+			if _, err := io.CopyN(h, src, int64(s.size)); err != nil {
+				return nil, errf("track %d sample %d: %w", t.trackID, j, err)
+			}
+			processed += int64(s.size)
 			if o.Progress != nil && j%64 == 0 {
 				o.Progress(processed, fi.Size())
 			}
