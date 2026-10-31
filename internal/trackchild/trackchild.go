@@ -8,8 +8,9 @@ import "github.com/gravity-zero/mkvgo/mkv"
 var written = map[uint32]map[uint32]bool{
 	mkv.IDTrackEntry: {mkv.IDTrackNumber: true, mkv.IDTrackUID: true, mkv.IDTrackType: true, mkv.IDCodecID: true, mkv.IDCodecPrivate: true,
 		mkv.IDDefaultDuration: true, mkv.IDLanguage: true, mkv.IDLanguageBCP47: true, mkv.IDName: true, mkv.IDCodecDelay: true,
-		mkv.IDSeekPreRoll: true, mkv.IDFlagDefault: true, mkv.IDFlagForced: true, mkv.IDVideo: true, mkv.IDAudio: true,
-		mkv.IDBlockAdditionMapping: true, mkv.IDContentEncodings: true},
+		mkv.IDSeekPreRoll: true, mkv.IDFlagDefault: true, mkv.IDFlagForced: true, mkv.IDFlagHearingImpaired: true,
+		mkv.IDFlagVisualImpaired: true, mkv.IDFlagTextDescriptions: true, mkv.IDFlagOriginal: true, mkv.IDFlagCommentary: true,
+		mkv.IDVideo: true, mkv.IDAudio: true, mkv.IDBlockAdditionMapping: true, mkv.IDContentEncodings: true},
 	mkv.IDVideo: {mkv.IDPixelWidth: true, mkv.IDPixelHeight: true, mkv.IDDisplayWidth: true, mkv.IDDisplayHeight: true, mkv.IDColour: true,
 		mkv.IDProjection: true},
 	mkv.IDAudio: {mkv.IDSamplingFreq: true, mkv.IDOutputSamplingFreq: true, mkv.IDChannels: true, mkv.IDBitDepth: true},

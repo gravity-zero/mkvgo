@@ -226,6 +226,7 @@ type Track struct {
 	// Extended disposition flags (Matroska FlagHearingImpaired/…/FlagCommentary),
 	// mapping to the conventional stream dispositions of the same name. All false when
 	// absent. Matroska-only; MP4 has no equivalent boxes so they stay false there.
+	// At write time the field is what counts: a true one is written, a false one is left out.
 	HearingImpaired  bool   `json:"hearing_impaired,omitempty"`
 	VisualImpaired   bool   `json:"visual_impaired,omitempty"`
 	TextDescriptions bool   `json:"text_descriptions,omitempty"` // the conventional "descriptions" field
@@ -306,7 +307,7 @@ type Track struct {
 	// rewrite leaves out a field that still holds that value, so it adds nothing the container did not say.
 	Derived *DerivedFields `json:"-"`
 	// Unmodeled holds the TrackEntry, Video and Audio children the writer has no field for, as read, so a rewrite
-	// carries them over (FlagLacing, StereoMode, DisplayUnit, the accessibility flags...).
+	// carries them over (FlagLacing, StereoMode, DisplayUnit...).
 	Unmodeled []RawElement `json:"-"`
 	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour

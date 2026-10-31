@@ -309,6 +309,16 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	if t.IsForced {
 		e.uint(mkv.IDFlagForced, 1)
 	}
+	// The spec default of each disposition flag is 0: a false one is no element, a true one writes 1.
+	for _, f := range [...]struct {
+		id  uint32
+		set bool
+	}{{mkv.IDFlagHearingImpaired, t.HearingImpaired}, {mkv.IDFlagVisualImpaired, t.VisualImpaired},
+		{mkv.IDFlagTextDescriptions, t.TextDescriptions}, {mkv.IDFlagOriginal, t.Original}, {mkv.IDFlagCommentary, t.Commentary}} {
+		if f.set {
+			e.uint(f.id, 1)
+		}
+	}
 	rollable := (t.Rotation%360 != 0 || t.HFlip) && (t.Projection == "" || t.Projection == "rectangular")
 	if t.Type == mkv.VideoTrack && (t.Width != nil || t.Height != nil || t.DisplayWidth != nil || t.DisplayHeight != nil || hasColour(t) || rollable || hasUnmodeled(t, mkv.IDVideo)) {
 		e.master(mkv.IDVideo, func(v *ew) {
@@ -545,6 +555,9 @@ func WriteAttachmentsFrom(w io.Writer, attachments []mkv.Attachment, open func(*
 		}
 		if att.MIMEType != "" {
 			m.str(mkv.IDFileMimeType, att.MIMEType)
+		}
+		if att.Description != "" {
+			m.str(mkv.IDFileDescription, att.Description)
 		}
 		if att.ID > 0 {
 			m.uint(mkv.IDFileUID, att.ID)
