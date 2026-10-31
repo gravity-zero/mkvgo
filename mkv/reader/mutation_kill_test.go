@@ -1082,3 +1082,60 @@ func TestVP9ColourFullRangeFlag(t *testing.T) {
 		}
 	}
 }
+
+// av1CWithSeqHeader wraps a sequence header OBU in an AV1CodecConfigurationRecord (profile 0, 10-bit).
+func av1CWithSeqHeader(seq []byte) []byte {
+	cp := []byte{0x81, 0x00, 0x40, 0x00, 0x0A, byte(len(seq))} // marker/version, seq_profile 0, high_bitdepth, then OBU_SEQUENCE_HEADER with a size
+	return append(cp, seq...)
+}
+
+// TestAV1SeqHeaderWithDecoderModelReachesTheColourConfig pins that an operating point carrying decoder model
+// parameters is read through to the colour config: the parser gave up there, and an HDR AV1 stream with a
+// decoder model lost its colour, bit depth and subsampling.
+func TestAV1SeqHeaderWithDecoderModelReachesTheColourConfig(t *testing.T) {
+	b := &tbw{}
+	b.u(0, 3)  // seq_profile
+	b.u(0, 1)  // still_picture
+	b.u(0, 1)  // reduced_still_picture_header
+	b.u(1, 1)  // timing_info_present_flag
+	b.u(1, 32) // num_units_in_display_tick
+	b.u(25, 32)
+	b.u(0, 1)  // equal_picture_interval
+	b.u(1, 1)  // decoder_model_info_present_flag
+	b.u(9, 5)  // buffer_delay_length_minus_1
+	b.u(1, 32) // num_units_in_decoding_tick
+	b.u(0, 5)  // buffer_removal_time_length_minus_1
+	b.u(0, 5)  // frame_presentation_time_length_minus_1
+	b.u(0, 1)  // initial_display_delay_present_flag
+	b.u(0, 5)  // operating_points_cnt_minus_1
+	b.u(0, 12) // operating_point_idc[0]
+	b.u(8, 5)  // seq_level_idx[0] = 4.0
+	b.u(0, 1)  // seq_tier[0]
+	b.u(1, 1)  // decoder_model_present_for_this_op[0]
+	b.u(0, 10) // decoder_buffer_delay
+	b.u(0, 10) // encoder_buffer_delay
+	b.u(0, 1)  // low_delay_mode_flag
+	b.u(7, 4)  // frame_width_bits_minus_1
+	b.u(7, 4)  // frame_height_bits_minus_1
+	b.u(63, 8) // max_frame_width_minus_1
+	b.u(63, 8) // max_frame_height_minus_1
+	b.u(0, 1)  // frame_id_numbers_present_flag
+	b.u(0, 8)  // use_128x128_superblock ... enable_order_hint (8 flags, all 0)
+	b.u(1, 1)  // seq_choose_screen_content_tools
+	b.u(1, 1)  // seq_choose_integer_mv
+	b.u(0, 3)  // enable_superres, enable_cdef, enable_restoration
+	b.u(1, 1)  // high_bitdepth
+	b.u(0, 1)  // mono_chrome
+	b.u(1, 1)  // color_description_present_flag
+	b.u(9, 8)  // color_primaries BT.2020
+	b.u(16, 8) // transfer_characteristics PQ
+	b.u(9, 8)  // matrix_coefficients BT.2020 NCL
+	b.u(0, 1)  // color_range
+	b.u(0, 2)  // chroma_sample_position
+	b.u(0, 1)  // separate_uv_delta_q
+	b.u(0, 1)  // film_grain_params_present
+	bc := av1Colour(av1CWithSeqHeader(b.bytes()))
+	if bc == nil || !bc.determined || bc.primaries == nil || *bc.primaries != 9 || bc.transfer == nil || *bc.transfer != 16 || bc.matrix == nil || *bc.matrix != 9 {
+		t.Fatalf("colour config not reached past the decoder model: %+v", bc)
+	}
+}

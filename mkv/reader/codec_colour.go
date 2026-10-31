@@ -1004,6 +1004,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 	} else {
 		timing := r.bit()
 		decoderModel := uint32(0)
+		bufDelayLen := uint32(0) // buffer_delay_length_minus_1 + 1: sizes each operating point's decoder parameters
 		if timing == 1 {
 			r.bits(32)        // num_units_in_display_tick
 			r.bits(32)        // time_scale
@@ -1012,7 +1013,7 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 			}
 			decoderModel = r.bit()
 			if decoderModel == 1 {
-				r.bits(5)  // buffer_delay_length_minus_1
+				bufDelayLen = r.bits(5) + 1
 				r.bits(32) // num_units_in_decoding_tick
 				r.bits(5)  // buffer_removal_time_length_minus_1
 				r.bits(5)  // frame_presentation_time_length_minus_1
@@ -1020,8 +1021,6 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 		}
 		initialDisplayDelay := r.bit()
 		opCnt := r.bits(5) + 1
-		bufDelayLen := uint32(0) // not needed precisely; recompute if decoderModel
-		_ = bufDelayLen
 		for i := uint32(0); i < opCnt; i++ {
 			r.bits(12) // operating_point_idc
 			levelIdx := r.bits(5)
@@ -1033,11 +1032,11 @@ func parseAV1SeqHeader(payload []byte, seqProfile uint32, bc *bitstreamColour) {
 			}
 			if decoderModel == 1 {
 				if r.bit() == 1 { // decoder_model_present_for_this_op
-					// operating_parameters_info: 2*(buffer_delay_length)+1 bits.
-					// buffer_delay_length was read above only if decoderModel; re-read
-					// is impossible, so bail defensively (rare path).
-					r.err = true
-					return
+					// operating_parameters_info: decoder_buffer_delay, encoder_buffer_delay (bufDelayLen bits each),
+					// low_delay_mode_flag. The colour config follows the operating points: bailing here lost it.
+					r.bits(int(bufDelayLen))
+					r.bits(int(bufDelayLen))
+					r.bit()
 				}
 			}
 			if initialDisplayDelay == 1 {
