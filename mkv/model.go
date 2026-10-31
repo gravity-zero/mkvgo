@@ -597,8 +597,10 @@ type Attachment struct {
 	ID       uint64 `json:"id"`
 	Name     string `json:"name"`
 	MIMEType string `json:"mime_type"`
-	Size     int64  `json:"size"`
-	Data     []byte `json:"-"`
+	// Description is the attachment's FileDescription, "" when it has none; written when not empty.
+	Description string `json:"description,omitempty"`
+	Size        int64  `json:"size"`
+	Data        []byte `json:"-"`
 	// DataPath and DataOffset say where the payload lives when Data is nil,
 	// which is what reader.WithoutAttachmentData leaves behind: the file it was
 	// read from and the offset of the FileData payload inside it, Size holding

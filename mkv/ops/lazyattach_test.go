@@ -146,3 +146,62 @@ func TestAttachmentsAreCarriedWithoutBecomingResident(t *testing.T) {
 		t.Errorf("add-attachment: got %d attachment(s), want the carried font and the new one", len(got))
 	}
 }
+
+// TestAttachmentDescriptionSurvivesEveryRewrite pins that an attachment's FileDescription is read, and comes back
+// from each op that rewrites the attachments: EditMetadata, Mux, Join and Split.
+func TestAttachmentDescriptionSurvivesEveryRewrite(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	const desc = "the font the subtitles use"
+	fixture := func(name string) string {
+		tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+		src := buildMinimalMKV(t, dir, name, tracks, append(testBlocks(1), testBlocks(2)...), 4000)
+		out := filepath.Join(dir, "described-"+name)
+		mustNil(t, EditMetadata(ctx, src, out, func(c *mkv.Container) {
+			c.Attachments = []mkv.Attachment{{ID: 1, Name: "a.ttf", MIMEType: "font/ttf", Description: desc, Data: []byte("font-bytes")}}
+		}))
+		return out
+	}
+	described := func(path string) string {
+		c, err := reader.Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(c.Attachments) != 1 {
+			t.Fatalf("%s: %d attachments, want 1", filepath.Base(path), len(c.Attachments))
+		}
+		return c.Attachments[0].Description
+	}
+	a, b := fixture("a.mkv"), fixture("b.mkv")
+	if got := described(a); got != desc {
+		t.Fatalf("read back from the writer: %q, want %q", got, desc)
+	}
+	lazy, err := reader.OpenWithFS(ctx, a, mkv.FSFrom(nil), reader.WithoutAttachmentData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := map[string]func(dst string) error{
+		"edit-metadata": func(dst string) error {
+			return EditMetadata(ctx, a, dst, func(c *mkv.Container) { c.Info.Title = "edited" })
+		},
+		"mux": func(dst string) error {
+			return Mux(ctx, mkv.MuxOptions{OutputPath: dst, Tracks: []mkv.TrackInput{{SourcePath: a, TrackID: 1}}, Attachments: lazy.Attachments})
+		},
+		"join": func(dst string) error { return Join(ctx, []string{a, b}, dst) },
+		"split": func(dst string) error {
+			parts, err := Split(ctx, mkv.SplitOptions{SourcePath: a, OutputDir: filepath.Dir(dst), Ranges: []mkv.TimeRange{{StartMs: 0, EndMs: 2000}}})
+			if err != nil {
+				return err
+			}
+			return os.Rename(parts[0], dst)
+		},
+	}
+	for name, run := range ops {
+		dst := filepath.Join(t.TempDir(), name+".mkv")
+		if err := run(dst); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := described(dst); got != desc {
+			t.Errorf("%s: description %q, want %q", name, got, desc)
+		}
+	}
+}

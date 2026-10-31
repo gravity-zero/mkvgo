@@ -142,7 +142,7 @@ export interface ProbeResult {
   /** The other chapter editions, never mixed into `chapters`. */
   other_editions?: Edition[]
   /** `id` is the FileUID, a 64-bit integer: a decimal string, exact. */
-  attachments: { id: string; name: string; mime_type: string; size: number; [key: string]: unknown }[]
+  attachments: { id: string; name: string; mime_type: string; description?: string; size: number; [key: string]: unknown }[]
   tags: Tag[]
   /** Video keyframe timestamps (ms), when requested via options.keyframes. */
   keyframes?: number[]

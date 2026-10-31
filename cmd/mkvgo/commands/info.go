@@ -128,14 +128,15 @@ func CmdAttachments(path string) {
 	c, _ := loadContainer(path, false)
 	if JsonOutput {
 		type attJSON struct {
-			ID       uint64 `json:"id"`
-			Name     string `json:"name"`
-			MIMEType string `json:"mime_type"`
-			Size     int64  `json:"size"`
+			ID          uint64 `json:"id"`
+			Name        string `json:"name"`
+			MIMEType    string `json:"mime_type"`
+			Description string `json:"description,omitempty"`
+			Size        int64  `json:"size"`
 		}
 		out := make([]attJSON, len(c.Attachments))
 		for i, a := range c.Attachments {
-			out[i] = attJSON{a.ID, a.Name, a.MIMEType, a.Size}
+			out[i] = attJSON{a.ID, a.Name, a.MIMEType, a.Description, a.Size}
 		}
 		PrintJSON(out)
 		return

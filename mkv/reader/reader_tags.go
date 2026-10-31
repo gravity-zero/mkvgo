@@ -88,6 +88,15 @@ func (p *parser) parseAttachedFile(size int64) (mkv.Attachment, error) {
 				return att, err
 			}
 			att.MIMEType = v
+		case mkv.IDFileDescription:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return att, err
+			}
+			v, err := readStringOf(p.r, eh)
+			if err != nil {
+				return att, err
+			}
+			att.Description = v
 		case mkv.IDFileData:
 			att.Size = eh.Size
 			if p.lazyAttachments {
