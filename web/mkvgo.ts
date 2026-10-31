@@ -70,10 +70,11 @@ export interface Track {
   rotation?: number
   /** The picture is also mirrored horizontally (the display matrix's first column negated); a vertical mirror is this one with rotation 180. */
   hflip?: boolean
-  color_space?: string
-  color_transfer?: string
-  color_primaries?: string
-  color_range?: string
+  /** Colour code points (CICP / ITU-T H.273) as numbers; the prober strings are in color_*_name. */
+  color_space?: number
+  color_transfer?: number
+  color_primaries?: number
+  color_range?: number
   hdr?: unknown
   dolby_vision?: unknown
   /** Derived display fields (same as the CLI -json output). */
@@ -202,6 +203,9 @@ export interface TrackStats {
   /** Fraction (0..1) of deltas farther than 1ms from the modal delta - the
    * signal frame_rate_mode thresholds on. */
   frame_duration_outlier_frac?: number
+  /** The widest gap between two keyframes (ms) and where it starts; absent when 0. */
+  max_keyframe_gap_ms?: number
+  max_keyframe_gap_at_ms?: number
 }
 
 /**
@@ -224,6 +228,8 @@ export interface AnalyzeReport {
   overall_bitrate_bps: number
   cluster_count: number
   block_count: number
+  /** The largest step a cluster timecode went back by (ms); 0 when they only go forward. */
+  cluster_timecode_backstep_ms: number
   tracks: TrackStats[]
   /** Timing sanity issues found during the walk (duration mismatch, backward
    * timecode jump, a track with zero frames, ...). */
