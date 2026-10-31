@@ -29,7 +29,7 @@ func frameSamplesFromHeader(t *mkv.Track) int64 {
 			n *= c.OutputRate / c.SampleRate
 		}
 		return int64(n + 0.5)
-	case "mp3":
+	case "mp3", "A_MPEG/L3": // the Matroska reader keeps the CodecID, the MP4 side the short name
 		if rate >= 32000 {
 			return 1152
 		}
@@ -67,7 +67,7 @@ func frameSamplesFromPayload(codec string, data []byte) int64 {
 				return int64(nblks+1) * 32
 			}
 		}
-	case "mp3":
+	case "mp3", "A_MPEG/L3": // the Matroska reader keeps the CodecID, the MP4 side the short name
 		if len(data) >= 4 && data[0] == 0xFF && data[1]&0xE0 == 0xE0 {
 			version, layer := data[1]>>3&3, data[1]>>1&3
 			switch layer {
@@ -99,7 +99,7 @@ func codecFrameSamples(codec string) []int64 {
 	switch codec {
 	case "aac":
 		return []int64{1024, 960, 2048, 512, 480}
-	case "mp3":
+	case "mp3", "A_MPEG/L3": // the Matroska reader keeps the CodecID, the MP4 side the short name
 		return []int64{1152, 576, 384}
 	case "ac3", "eac3":
 		return []int64{1536, 768, 512, 256}

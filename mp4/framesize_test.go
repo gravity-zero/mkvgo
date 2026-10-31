@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -97,5 +98,18 @@ func TestSnapGridTSToCodecFrame(t *testing.T) {
 		if got := snapGridTS(tc.measured, tc.t, 48000); got != tc.want {
 			t.Errorf("%s: %d snapped to %d, want %d", tc.name, tc.measured, got, tc.want)
 		}
+	}
+}
+
+// TestMP3FrameSizesUnderBothNames pins that MP3 is known by its Matroska CodecID too: the reader keeps "A_MPEG/L3"
+// where the MP4 side says "mp3", and the laced-MP3 grid was never confirmed from a Matroska source.
+func TestMP3FrameSizesUnderBothNames(t *testing.T) {
+	if a, b := codecFrameSamples("mp3"), codecFrameSamples("A_MPEG/L3"); len(b) == 0 || fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Errorf("codecFrameSamples: mp3 %v, A_MPEG/L3 %v", a, b)
+	}
+	rate := 48000.0
+	tr := &mkv.Track{Type: mkv.AudioTrack, Codec: "A_MPEG/L3", SampleRate: &rate}
+	if got := frameSamplesFromHeader(tr); got != 1152 {
+		t.Errorf("frameSamplesFromHeader(A_MPEG/L3, 48 kHz) = %d, want 1152", got)
 	}
 }
