@@ -248,9 +248,15 @@ func (p *parser) parseTargets(size int64, tag *mkv.Tag) error {
 
 const maxTagDepth = 64
 
+// maxSimpleTags caps the SimpleTags a file yields, for the same reason as maxChapterAtoms; a var for tests.
+var maxSimpleTags = 1 << 20
+
 func (p *parser) parseSimpleTagDepth(size int64, depth int) (mkv.SimpleTag, error) {
 	if depth > maxTagDepth {
 		return mkv.SimpleTag{}, fmt.Errorf("SimpleTag nesting exceeds %d levels", maxTagDepth)
+	}
+	if p.simpleTags++; p.simpleTags > maxSimpleTags {
+		return mkv.SimpleTag{}, fmt.Errorf("the Tags hold more than %d SimpleTags: the file is damaged or forged", maxSimpleTags)
 	}
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size

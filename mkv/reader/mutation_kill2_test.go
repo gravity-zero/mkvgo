@@ -890,3 +890,38 @@ func TestRead2CueFields(t *testing.T) {
 		t.Errorf("TimeMs = %d, want 500", cp.TimeMs)
 	}
 }
+
+// TestChapterAndTagCountsAreCapped pins that a Chapters or Tags element of more atoms than the cap is refused: an
+// empty atom costs 2 bytes of file and a struct in memory, a 20 MB element held a gigabyte before the budget spoke.
+func TestChapterAndTagCountsAreCapped(t *testing.T) {
+	defer func(c, s int) { maxChapterAtoms, maxSimpleTags = c, s }(maxChapterAtoms, maxSimpleTags)
+	maxChapterAtoms, maxSimpleTags = 1000, 1000
+	atom := masterElem(mkv.IDChapterAtom, uintElem(mkv.IDChapterUID, 1, 1))
+	tag := masterElem(mkv.IDSimpleTag, strElem(mkv.IDTagName, "x"))
+	for _, tc := range []struct {
+		name string
+		n    int
+		ok   bool
+	}{{"chapters", 1000, true}, {"chapters", 1001, false}, {"tags", 1000, true}, {"tags", 1001, false}} {
+		var seg bytes.Buffer
+		seg.Write(masterElem(mkv.IDInfo, uintElem(mkv.IDTimecodeScale, 1_000_000, 3)))
+		seg.Write(masterElem(mkv.IDTracks, masterElem(mkv.IDTrackEntry, uintElem(mkv.IDTrackNumber, 1, 1), uintElem(mkv.IDTrackType, mkv.TrackTypeVideo, 1))))
+		var body []byte
+		for i := 0; i < tc.n; i++ {
+			if tc.name == "chapters" {
+				body = append(body, atom...)
+			} else {
+				body = append(body, tag...)
+			}
+		}
+		if tc.name == "chapters" {
+			seg.Write(masterElem(mkv.IDChapters, masterElem(mkv.IDEditionEntry, body)))
+		} else {
+			seg.Write(masterElem(mkv.IDTags, masterElem(mkv.IDTag, body)))
+		}
+		_, _, err := ReadStream(context.Background(), bytes.NewReader(streamFixture(seg.Bytes())))
+		if (err == nil) != tc.ok {
+			t.Errorf("%d %s: err=%v, want ok=%v", tc.n, tc.name, err, tc.ok)
+		}
+	}
+}

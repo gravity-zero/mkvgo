@@ -167,6 +167,8 @@ type parser struct {
 	rateReads bool
 	// lookedPast, when set, records that an element was judged by looking past its end (withLookedPast).
 	lookedPast *bool
+	// chapterAtoms and simpleTags count what the file yielded so far, against maxChapterAtoms and maxSimpleTags.
+	chapterAtoms, simpleTags int
 	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
 	rateRejected bool
 	// channelsRejected says it stated a channel count past 255.

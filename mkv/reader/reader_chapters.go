@@ -120,6 +120,9 @@ func (p *parser) parseChapterAtom(size int64, depth int) (mkv.Chapter, error) {
 	if depth > maxChapterDepth {
 		return mkv.Chapter{}, fmt.Errorf("chapter nesting exceeds %d levels", maxChapterDepth)
 	}
+	if p.chapterAtoms++; p.chapterAtoms > maxChapterAtoms {
+		return mkv.Chapter{}, fmt.Errorf("the Chapters hold more than %d atoms: the file is damaged or forged", maxChapterAtoms)
+	}
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
 	ch := mkv.Chapter{}
@@ -219,3 +222,7 @@ func (p *parser) parseChapterDisplay(size int64, ch *mkv.Chapter) error {
 }
 
 const maxChapterDepth = 64
+
+// maxChapterAtoms caps the ChapterAtoms a file yields: an empty atom is 2 bytes of file for a Chapter in memory, a
+// million of them a hundred megabytes where the metadata budget alone allowed a gigabyte; a var for tests.
+var maxChapterAtoms = 1 << 20
