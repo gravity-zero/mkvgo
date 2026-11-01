@@ -17,6 +17,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   it. A consumer that halved the frame rate on `interlaced` should treat `""`
   as unknown. `FlagInterlaced` 1 still gives `interlaced`.
 
+- `Track.FieldOrder`: the Matroska `FieldOrder` values 9 and 14 now read `tb`
+  and `bt`, the names the reference prober gives them (the first letter is
+  the field stored first); mkvgo had them swapped. A `field_order` cached
+  from an earlier release holds the swapped name: probe the file again.
+
 ### Added
 
 - The in-band option (`WithInBandColourFallback`, `mp4.Options.InBandColour`,

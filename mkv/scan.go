@@ -3,13 +3,14 @@ package mkv
 import "encoding/json"
 
 // fieldOrderNames maps the Matroska FieldOrder element (0x9D) to the
-// conventional field_order string. 2 (undetermined) and unknown values map to "".
+// conventional field_order string, whose first letter is the field coded first
+// and second the field shown first. 2 (undetermined) and unknown values map to "".
 var fieldOrderNames = map[uint64]string{
 	0:  "progressive",
-	1:  "tt", // top field first, top field stored first
-	6:  "bb", // bottom field first, bottom field stored first
-	9:  "bt", // bottom field first, top field stored first
-	14: "tb", // top field first, bottom field stored first
+	1:  "tt", // top field shown first, top field stored first
+	6:  "bb", // bottom field shown first, bottom field stored first
+	9:  "tb", // bottom field shown first, top field stored first
+	14: "bt", // top field shown first, bottom field stored first
 }
 
 // FieldOrderName maps a Matroska FieldOrder element value to the conventional

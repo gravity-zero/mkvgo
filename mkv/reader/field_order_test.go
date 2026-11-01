@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -107,6 +108,23 @@ func TestAVCScanNeedsProof(t *testing.T) {
 		tr := readFirstTrack(t, buildMKV(trackEntry(elems...)))
 		if tr.ScanType != c.scan || tr.FieldOrder != c.order {
 			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, tr.ScanType, tr.FieldOrder, c.scan, c.order)
+		}
+	}
+}
+
+// TestFieldOrderSwappedValuesReadAsTheProber: files ffmpeg wrote from tff and bff
+// interlaced encodes, FieldOrder 9 and 14 (the "swapped" values), read with the
+// names the reference prober gives them - the first letter is the field coded
+// first: 9 "tb", 14 "bt".
+func TestFieldOrderSwappedValuesReadAsTheProber(t *testing.T) {
+	for file, want := range map[string]string{"h264_fieldorder_9.mkv": "tb", "h264_fieldorder_14.mkv": "bt"} {
+		data, err := os.ReadFile("../../internal/testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr := readFirstTrack(t, data)
+		if tr.ScanType != "interlaced" || tr.FieldOrder != want {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want interlaced/%q", file, tr.ScanType, tr.FieldOrder, want)
 		}
 	}
 }
