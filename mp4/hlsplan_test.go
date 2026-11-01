@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -506,6 +507,25 @@ func headCuesFixture(t testing.TB, tracks []mkv.Track, blocks []genBlock) string
 		blks = append(blks, mkv.Block{TrackNumber: gb.track, Timecode: gb.pts, Keyframe: gb.key, Data: gb.data})
 		durationMs = max(durationMs, gb.pts)
 	}
+	var clusters [][]byte
+	var times []int64
+	for start, i := 0, 1; i <= len(blks); i++ {
+		if i == len(blks) || blks[i].Timecode-blks[start].Timecode >= 1000 {
+			var cl bytes.Buffer
+			if err := writer.WriteCluster(&cl, blks[start].Timecode, scale, blks[start:i]); err != nil {
+				t.Fatal(err)
+			}
+			clusters, times = append(clusters, cl.Bytes()), append(times, blks[start].Timecode)
+			start = i
+		}
+	}
+	return headCuesFile(t, tracks, durationMs, clusters, times)
+}
+
+// headCuesFile is headCuesFixture for clusters already assembled, each with the timestamp (ms) its cue names.
+func headCuesFile(t testing.TB, tracks []mkv.Track, durationMs int64, clusterBytes [][]byte, times []int64) string {
+	t.Helper()
+	const scale = 1_000_000
 	var info, trk, clusters bytes.Buffer
 	if err := writer.WriteSegmentInfo(&info, &mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}, durationMs); err != nil {
 		t.Fatal(err)
@@ -513,15 +533,10 @@ func headCuesFixture(t testing.TB, tracks []mkv.Track, blocks []genBlock) string
 	if err := writer.WriteTracks(&trk, tracks); err != nil {
 		t.Fatal(err)
 	}
-	var starts, times []int64
-	for start, i := 0, 1; i <= len(blks); i++ {
-		if i == len(blks) || blks[i].Timecode-blks[start].Timecode >= 1000 {
-			starts, times = append(starts, int64(clusters.Len())), append(times, blks[start].Timecode)
-			if err := writer.WriteCluster(&clusters, blks[start].Timecode, scale, blks[start:i]); err != nil {
-				t.Fatal(err)
-			}
-			start = i
-		}
+	starts := make([]int64, len(clusterBytes))
+	for k, cl := range clusterBytes {
+		starts[k] = int64(clusters.Len())
+		clusters.Write(cl)
 	}
 	// The Cues name the clusters' positions in the Segment body, which their own size moves: iterate to a fixed point.
 	var cuesBytes []byte
@@ -612,6 +627,231 @@ func TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Errorf("cut %s: segment %d differs from the full pass (%d vs %d bytes)", name, n, len(got), len(want))
 			}
+		}
+	}
+}
+
+// bFrame is one frame of a B-frame GOP in decode order: its index on the presentation timeline (40 ms a frame),
+// whether it is the IDR, and the indices of the frames it references.
+type bFrame struct {
+	idx  int
+	key  bool
+	refs []int
+}
+
+// bFrameGOPs lays out gops closed GOPs of 25 frames in decode order, I P B B P B B ...: every P references the P (or
+// I) before it, every B the P (or I) on each side of it.
+func bFrameGOPs(gops int) []bFrame {
+	var out []bFrame
+	for g := 0; g < gops; g++ {
+		base := g * 25
+		out = append(out, bFrame{idx: base, key: true})
+		for prev, p := base, base+3; p < base+25; prev, p = p, p+3 {
+			out = append(out, bFrame{idx: p, refs: []int{prev}})
+			for b := p - 2; b < p; b++ {
+				out = append(out, bFrame{idx: b, refs: []int{prev, p}})
+			}
+		}
+	}
+	return out
+}
+
+// bFramePayload is the frame's bytes as an avcC sample: one slice NAL carrying a marker bFramesServed finds again in a
+// segment, and a 1000-byte filler NAL behind an IDR, so a cut can land well inside it.
+func bFramePayload(f bFrame) []byte {
+	nal := byte(0x41)
+	if f.key {
+		nal = 0x65
+	}
+	p := append([]byte{0, 0, 0, 7, nal}, bFrameMarker(f.idx)...)
+	if f.key {
+		p = append(p, 0, 0, 0x03, 0xE8, 0x0C)
+		p = append(p, bytes.Repeat([]byte{0xFF}, 999)...)
+	}
+	return p
+}
+
+func bFrameMarker(idx int) []byte { return []byte{'m', 'k', 'v', 'g', byte(idx >> 8), byte(idx)} }
+
+// bFramesServed is the set of frame indices whose marker a segment's bytes carry.
+func bFramesServed(seg []byte, frames []bFrame) map[int]bool {
+	out := map[int]bool{}
+	for _, f := range frames {
+		if bytes.Contains(seg, bFrameMarker(f.idx)) {
+			out[f.idx] = true
+		}
+	}
+	return out
+}
+
+// bFrameCluster is one assembled cluster of bFrameClusters and where its first block lies inside it.
+type bFrameCluster struct {
+	bytes    []byte
+	timeMs   int64
+	first    int // the stored index (into the decode-order list) of its first frame
+	group    int // offset of the first BlockGroup
+	payload  int // offset of the first Block's payload
+	refs     int // offset of the first Block's first ReferenceBlock, -1 for a keyframe
+	groupEnd int
+}
+
+// bFrameClusters stores frames as BlockGroups naming their references, each GOP of 25 split over two clusters at
+// split: the second one opens on a P frame, as a muxer bounding its clusters by size leaves them.
+func bFrameClusters(t testing.TB, frames []bFrame, split int) []bFrameCluster {
+	t.Helper()
+	var out []bFrameCluster
+	for gop := 0; gop < len(frames); gop += 25 {
+		for _, half := range [][2]int{{gop, gop + split}, {gop + split, gop + 25}} {
+			out = append(out, assembleBFrameCluster(t, frames, half[0], half[1]))
+		}
+	}
+	return out
+}
+
+// assembleBFrameCluster assembles the cluster holding frames[start:end].
+func assembleBFrameCluster(t testing.TB, frames []bFrame, start, end int) bFrameCluster {
+	t.Helper()
+	clusterMs := int64(frames[start].idx) * 40
+	var body bytes.Buffer
+	if err := writer.WriteUintElement(&body, mkv.IDTimestamp, uint64(clusterMs)); err != nil {
+		t.Fatal(err)
+	}
+	cl := bFrameCluster{timeMs: clusterMs, first: start, refs: -1}
+	for i, f := range frames[start:end] {
+		rel := int64(f.idx)*40 - clusterMs
+		var inner bytes.Buffer
+		blockBody := append([]byte{0x81, byte(rel >> 8), byte(rel), 0x00}, bFramePayload(f)...)
+		if err := writer.WriteMasterElement(&inner, mkv.IDBlock, blockBody); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			cl.group, cl.payload = body.Len(), body.Len()+inner.Len()-len(bFramePayload(f))
+			if len(f.refs) > 0 {
+				cl.refs = body.Len() + inner.Len()
+			}
+		}
+		for _, r := range f.refs {
+			d := int64(r-f.idx) * 40
+			if err := writer.WriteMasterElement(&inner, mkv.IDReferenceBlock, []byte{byte(d >> 8), byte(d)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.WriteMasterElement(&body, mkv.IDBlockGroup, inner.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			cl.groupEnd = body.Len()
+		}
+	}
+	var buf bytes.Buffer
+	if err := writer.WriteMasterElement(&buf, mkv.IDCluster, body.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	hdr := buf.Len() - body.Len() // the cluster's own header moves every offset inside it
+	cl.bytes, cl.group, cl.payload, cl.groupEnd = buf.Bytes(), cl.group+hdr, cl.payload+hdr, cl.groupEnd+hdr
+	if cl.refs >= 0 {
+		cl.refs += hdr
+	}
+	return cl
+}
+
+// TestPlanHLSCutInsideAClusterFirstBlockWithBFramesMatchesFullPass pins, on B-frame GOPs stored as BlockGroups naming
+// their references and split over two clusters each, that a file cut inside the first block of a cluster - in the
+// BlockGroup's header, in the Block's payload, between the Block and its ReferenceBlocks - serves from the plan what
+// the full pass serves: the same segments byte for byte, every whole frame stored before the cut, the cut frame never,
+// and no frame referencing it. The walk's damage slack took the last whole blocks before the cut for cut ones.
+func TestPlanHLSCutInsideAClusterFirstBlockWithBFramesMatchesFullPass(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	frames := bFrameGOPs(10)
+	clusters := bFrameClusters(t, frames, 13)
+	var clusterBytes [][]byte
+	var times []int64
+	for _, cl := range clusters {
+		clusterBytes, times = append(clusterBytes, cl.bytes), append(times, cl.timeMs)
+	}
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}
+	src := headCuesFile(t, tracks, int64(len(frames)-1)*40, clusterBytes, times)
+	whole, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	meta, err := reader.ReadMeta(ctx, bytes.NewReader(whole), src, reader.WithCues())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.Cues) != len(clusters) {
+		t.Fatalf("%d cues for %d clusters", len(meta.Cues), len(clusters))
+	}
+	type cut struct {
+		cluster int
+		at      func(cl bFrameCluster) int
+	}
+	cuts := map[string]cut{
+		"an IDR's BlockGroup header":                  {12, func(cl bFrameCluster) int { return cl.group + 1 }},
+		"an IDR's payload":                            {12, func(cl bFrameCluster) int { return cl.payload + 300 }},
+		"a P frame's BlockGroup header":               {13, func(cl bFrameCluster) int { return cl.group + 1 }},
+		"a P frame's payload":                         {13, func(cl bFrameCluster) int { return cl.payload + 5 }},
+		"between a P frame's Block and its reference": {13, func(cl bFrameCluster) int { return cl.refs }},
+	}
+	for name, c := range cuts {
+		cl := clusters[c.cluster]
+		at := int(meta.SegmentStart+meta.Cues[c.cluster].ClusterPos) + c.at(cl)
+		if at <= int(meta.SegmentStart+meta.Cues[c.cluster].ClusterPos)+cl.group || at >= int(meta.SegmentStart+meta.Cues[c.cluster].ClusterPos)+cl.groupEnd {
+			t.Fatalf("cut in %s lands outside the first block", name)
+		}
+		cutFrame := frames[cl.first]
+		cutPath := filepath.Join(t.TempDir(), "cut.mkv")
+		if err := os.WriteFile(cutPath, whole[:at], 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := RemuxToHLS(ctx, cutPath, dir, Options{SegmentMs: 2000}); err != nil {
+			t.Fatalf("cut in %s: full pass: %v", name, err)
+		}
+		plan, err := PlanHLS(ctx, cutPath, Options{SegmentMs: 2000})
+		if err != nil {
+			t.Fatalf("cut in %s: plan: %v", name, err)
+		}
+		fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
+		if plan.NumSegments() != len(fullSegs) {
+			t.Errorf("cut in %s: plan has %d segments, the full pass wrote %d", name, plan.NumSegments(), len(fullSegs))
+		}
+		if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
+			t.Errorf("cut in %s: the plan's playlist has a negative duration:\n%s", name, pl)
+		}
+		served := map[int]bool{}
+		for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
+			got, err := plan.Segment(ctx, n)
+			if err != nil {
+				t.Fatalf("cut in %s: Segment(%d): %v", name, n, err)
+			}
+			want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("cut in %s: segment %d differs from the full pass (%d vs %d bytes)", name, n, len(got), len(want))
+			}
+			for idx := range bFramesServed(got, frames) {
+				served[idx] = true
+			}
+		}
+		if served[cutFrame.idx] {
+			t.Errorf("cut in %s: the cut frame %d is served", name, cutFrame.idx)
+		}
+		for _, f := range frames {
+			if served[f.idx] && slices.Contains(f.refs, cutFrame.idx) {
+				t.Errorf("cut in %s: frame %d, which references the cut frame %d, is served", name, f.idx, cutFrame.idx)
+			}
+		}
+		for _, f := range frames[:cl.first] {
+			if !served[f.idx] {
+				t.Errorf("cut in %s: whole frame %d, stored before the cut, is not served", name, f.idx)
+			}
+		}
+		if len(served) != cl.first {
+			t.Errorf("cut in %s: %d frames served, %d stored whole before the cut", name, len(served), cl.first)
 		}
 	}
 }

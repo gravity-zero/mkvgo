@@ -32,11 +32,41 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
+
+// clusterHoldsAWholeBlock reports whether the cluster at off holds its first block whole before end. A head index names
+// clusters a file cut short holds only the start of; an I/O failure other than the end of the file keeps the cue.
+func clusterHoldsAWholeBlock(ctx context.Context, srcPath string, fs *mkv.FS, off, end int64) bool {
+	f, err := fs.DoOpenContext(ctx, srcPath)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	pos, err := reader.ResolveClusterBlock(f, off, 0)
+	if err != nil {
+		return !isSourceEnd(err)
+	}
+	for at := pos.Off; at < end && (pos.ClusterEnd < 0 || at < pos.ClusterEnd); {
+		if _, err := f.Seek(at, io.SeekStart); err != nil {
+			return true
+		}
+		h, n, err := ebml.ReadElementHeader(f)
+		if err != nil || h.Size < 0 {
+			return err != nil && !isSourceEnd(err)
+		}
+		at += int64(n)
+		if h.ID == mkv.IDSimpleBlock || h.ID == mkv.IDBlockGroup {
+			return at+h.Size <= end
+		}
+		at += h.Size // the Timestamp, or another child stored before the blocks
+	}
+	return false
+}
 
 // HLSPlan is the result of PlanHLS: the playlists, the init segment, and the
 // per-segment window index. It is immutable after PlanHLS returns and safe for
@@ -442,6 +472,11 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// bound an empty segment and a negative final duration, where the full pass serves what the file holds.
 	if srcSize > 0 {
 		cues = slices.DeleteFunc(cues, func(cue mkv.CuePoint) bool { return c.SegmentStart+cue.ClusterPos >= srcSize })
+	}
+	// A file shorter than its Segment declares was cut: the last cluster it holds the start of may hold no whole block
+	// (cut inside its first one), and the full pass serves nothing from it, so it bounds no segment.
+	for p.segEnd > srcSize && srcSize > 0 && len(cues) > 0 && !clusterHoldsAWholeBlock(ctx, srcPath, fs, c.SegmentStart+cues[len(cues)-1].ClusterPos, srcSize) {
+		cues = cues[:len(cues)-1]
 	}
 	if len(cues) == 0 {
 		return nil, errf("%s: the file ends before the first cluster its Cues name", shown.Path(srcPath))

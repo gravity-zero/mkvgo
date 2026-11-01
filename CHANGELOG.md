@@ -35,9 +35,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   sized past the file (`edit-inplace`). `verify` hashes a sample as it reads
   it, no sample held whole.
 - On-demand HLS of a Matroska source cut short after its head index declared
-  segments past the file's end and a negative final duration, and one cut
-  inside a cluster lost the whole frames before the cut; the plan serves what
-  the file holds, as the full pass does.
+  segments past the file's end and a negative final duration, one cut inside
+  a cluster lost the whole frames before the cut, and one cut inside the first
+  block of a cluster served an empty last segment; the plan serves what the
+  file holds, as the full pass does.
 - `--keep-lang` and the wasm's `keepLangs` match the language the container
   resolves (a BCP 47 tag, the default English of a track stating none, `und`
   as written), where such tracks were dropped; a language matching no audio
