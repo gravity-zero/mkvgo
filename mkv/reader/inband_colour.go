@@ -182,7 +182,7 @@ func WithSampledKeyframes(n int) ReadOption {
 //     longer depend on which copy the muxer kept. The container wins per part;
 //   - H.264 whose SPS allows field coding (frame_mbs_only_flag 0) and whose
 //     container states no FlagInterlaced: within the first maxScanSamples
-//     samples (the first sample on MP4), ScanType becomes "interlaced" on proof -
+//     samples, ScanType becomes "interlaced" on proof -
 //     a field-coded slice, a frame whose two fields have different picture
 //     order counts, a picture timing SEI showing a field alone or stating an
 //     interlaced ct_type, or top/bottom pic_struct on an MBAFF stream with no
@@ -255,7 +255,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			recordDerived(t, &stated)
 		}
 		if sc, ok := scans[blk.TrackNumber]; ok {
-			sc.s.feed(blk.Data)
+			sc.s.feed(blk.Data, false)
 			if sc.left--; sc.left == 0 || sc.s.done() {
 				sc.s.apply(sc.t)
 				delete(scans, blk.TrackNumber)
@@ -267,30 +267,19 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 // NeedsInBandColour reports whether t is a video track whose stream
 // description can only be completed from its first sample: an HEVC track with a
 // bare hvcC and no colour, a VP9 track with no vpcC, or an HDR HEVC/AV1 track
-// whose static metadata the container does not carry, or an H.264 track whose
-// scan type only its samples can settle (see WithInBandColourFallback). Exposed
-// so the mp4 package can drive the same fallback off its sample table.
-func NeedsInBandColour(t *mkv.Track) bool {
-	return needsInBandColour(t) || needsInBandHDR(t) || needsInBandScan(t)
-}
+// whose static metadata the container does not carry (see
+// WithInBandColourFallback). Exposed so the mp4 package can drive the same
+// fallback off its sample table; the H.264 scan type is NewInBandScan's.
+func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needsInBandHDR(t) }
 
 // ApplyInBandColour fills t from its first sample: for HEVC, one
 // length-prefixed access unit - the SPS VUI, an Alternative Transfer
 // Characteristics SEI override if present, and the HDR10 static-metadata SEI
 // messages; for VP9, the keyframe's uncompressed header - profile, bit depth,
 // chroma subsampling, range; for AV1, the HDR10 metadata OBUs of the temporal
-// unit; for H.264, ScanType "interlaced" and the field order the access unit
-// proves (see WithInBandColourFallback). Only what the container left unknown is
-// filled. Safe on any input;
+// unit. Only what the container left unknown is filled. Safe on any input;
 // leaves the fields unset on failure.
-func ApplyInBandColour(t *mkv.Track, frame []byte) {
-	if needsInBandScan(t) {
-		s := newAVCScan(t.CodecPrivate)
-		s.feed(frame)
-		s.apply(t)
-	}
-	applyInBandHeader(t, frame)
-}
+func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame) }
 
 // needsInBandColour reports whether t is a video track whose description can
 // only come from its first sample: HEVC with no container/SPS colour yet and a

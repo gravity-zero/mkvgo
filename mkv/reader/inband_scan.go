@@ -47,6 +47,11 @@ type avcScan struct {
 	sps    map[uint32]*avcSPSInfo
 	pps    map[uint32]avcPPSInfo
 
+	// The record holds no SPS (avc3): the samples carry it, and an in-band SPS
+	// that codes frames only proves the track progressive, as it would head-only.
+	inBandSPS             bool
+	sawSPS, sawFieldCoded bool
+
 	interlaced bool
 	// Field orders the samples stated. pic_struct is the display order and wins,
 	// as in the reference prober's parser: on an x264 stream whose frames change
@@ -71,21 +76,23 @@ type avcFieldPic struct {
 	lsbBits  int
 }
 
-// newAVCScan reads the parameter sets of an avcC; nil when the record holds no
-// SPS that allows field coding.
+// newAVCScan reads the parameter sets of an avcC; nil when the record is
+// malformed or its SPS all code frames only.
 func newAVCScan(cp []byte) *avcScan {
 	if len(cp) < 7 || cp[0] != 1 {
 		return nil
 	}
 	s := &avcScan{nalLen: int(cp[4]&0x03) + 1, sps: map[uint32]*avcSPSInfo{}, pps: map[uint32]avcPPSInfo{}, structOrders: map[string]bool{}, pocOrders: map[string]bool{}}
-	field := false
+	field, hasSPS := false, false
 	if !forEachAVCSPS(cp, func(bc *bitstreamColour) bool {
 		s.addSPS(bc)
 		field = field || bc.avc.fieldCoding
+		hasSPS = true
 		return false
-	}) || !field {
+	}) || (hasSPS && !field) {
 		return nil
 	}
+	s.inBandSPS = cp[5]&0x1f == 0 && !hasSPS
 	for _, pps := range avcCPPSList(cp) {
 		s.addPPS(pps)
 	}
@@ -148,16 +155,20 @@ func avcCPPSList(cp []byte) [][]byte {
 func (s *avcScan) done() bool { return s.interlaced && len(s.structOrders) > 1 }
 
 // feed reads one length-prefixed access unit: in-band parameter sets, the picture
-// timing SEI, and the first slice of each picture in it.
-func (s *avcScan) feed(frame []byte) {
+// timing SEI, and the first slice of each picture in it. truncated says frame is
+// only the first bytes of the sample: its last NAL may then be cut short, and
+// the head of a cut slice is still read.
+func (s *avcScan) feed(frame []byte, truncated bool) {
 	defer func() { _ = recover() }() // the walkers bound every length; a frame they misread must not end the read
 	var seis [][]byte
 	var picSPS *avcSPSInfo
-	forEachHEVCNAL(frame, s.nalLen, func(_ int, nal []byte) bool { // the walk is codec-neutral; the H.264 type is the low 5 bits
+	forEachLengthPrefixed(frame, s.nalLen, truncated, func(nal []byte) {
 		switch nal[0] & 0x1f {
 		case 7:
 			if bc := parseAVCSPS(unescapeRBSP(nal[1:])); bc != nil {
 				s.addSPS(bc)
+				s.sawSPS = true
+				s.sawFieldCoded = s.sawFieldCoded || bc.avc.fieldCoding
 			}
 		case 8:
 			s.addPPS(nal)
@@ -168,7 +179,6 @@ func (s *avcScan) feed(frame []byte) {
 				picSPS = sps
 			}
 		}
-		return false
 	})
 	if picSPS != nil && picSPS.picStruct {
 		for _, sei := range seis {
@@ -327,7 +337,13 @@ func (s *avcScan) apply(t *mkv.Track) {
 		s.interlaced = true
 		s.structOrders[s.pairStruct] = true
 	}
-	if !s.interlaced || t.ScanType != "" {
+	if t.ScanType != "" {
+		return
+	}
+	if !s.interlaced {
+		if s.inBandSPS && s.sawSPS && !s.sawFieldCoded {
+			t.ScanType, t.FieldOrder = "progressive", "progressive"
+		}
 		return
 	}
 	t.ScanType = "interlaced"
@@ -341,6 +357,60 @@ func (s *avcScan) apply(t *mkv.Track) {
 		}
 	}
 }
+
+// forEachLengthPrefixed walks the NAL units of a length-prefixed access unit
+// (prefix nalLen bytes, big-endian). A length past the end ends the walk, unless
+// truncated: the cut NAL is then passed as far as it goes, and the walk ends.
+func forEachLengthPrefixed(frame []byte, nalLen int, truncated bool, fn func(nal []byte)) {
+	if nalLen < 1 || nalLen > 4 {
+		return
+	}
+	for off := 0; off+nalLen <= len(frame); {
+		n := int64(0)
+		for i := 0; i < nalLen; i++ {
+			n = n<<8 | int64(frame[off+i])
+		}
+		off += nalLen
+		if n < 1 {
+			return
+		}
+		if n > int64(len(frame)-off) {
+			if truncated && off < len(frame) {
+				fn(frame[off:])
+			}
+			return
+		}
+		fn(frame[off : off+int(n)])
+		off += int(n)
+	}
+}
+
+// InBandScanSamples is how many samples of a track an InBandScan reads at most.
+const InBandScanSamples = maxScanSamples
+
+// InBandScan settles the scan type of an H.264 track over its first samples, the
+// way WithInBandColourFallback does for Matroska (see there for what counts as
+// proof). Exposed so the mp4 package can drive it off its sample table.
+type InBandScan struct{ s *avcScan }
+
+// NewInBandScan returns the scan for t, nil when t needs none: not H.264, a scan
+// type already stated, or an SPS that codes frames only.
+func NewInBandScan(t *mkv.Track) *InBandScan {
+	if !needsInBandScan(t) {
+		return nil
+	}
+	return &InBandScan{newAVCScan(t.CodecPrivate)}
+}
+
+// Feed reads one sample, or its first bytes when truncated. It reports whether
+// more samples can no longer change the verdict.
+func (s *InBandScan) Feed(sample []byte, truncated bool) bool {
+	s.s.feed(sample, truncated)
+	return s.s.done()
+}
+
+// Apply writes the verdict into t: ScanType and FieldOrder on proof, nothing otherwise.
+func (s *InBandScan) Apply(t *mkv.Track) { s.s.apply(t) }
 
 func isAVCCodec(codec string) bool {
 	switch codec {

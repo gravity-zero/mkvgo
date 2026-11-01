@@ -3,7 +3,9 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"os"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -124,5 +126,113 @@ func TestMP4InBandColourFallback(t *testing.T) {
 		tr.ColorPrimariesName() != "bt2020" || !tr.IsHDR() {
 		t.Errorf("MP4 in-band colour: space=%q transfer=%q primaries=%q hdr=%v, want bt2020nc/arib-std-b67/bt2020/true",
 			tr.ColorSpaceName(), tr.ColorTransferName(), tr.ColorPrimariesName(), tr.IsHDR())
+	}
+}
+
+// TestMP4InBandScanX264: x264 MBAFF and fake-interlaced files ffmpeg wrote. With
+// the in-band option the first samples settle the scan type: a tff stream is
+// interlaced/tt, a stream whose 16th sample turns bottom-first keeps no order
+// (one sample read would have said tt), and fake-interlaced - field coding
+// allowed, frames throughout - stays unknown. Without the option all stay "".
+func TestMP4InBandScanX264(t *testing.T) {
+	for file, want := range map[string][2]string{
+		"h264_mbaff_tff.mp4":         {"interlaced", "tt"},
+		"h264_mbaff_mixed_order.mp4": {"interlaced", ""},
+		"h264_fake_interlaced.mp4":   {"", ""},
+	} {
+		data, err := os.ReadFile("../internal/testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, opt := range []bool{false, true} {
+			c, _, err := ReadMeta(context.Background(), bytes.NewReader(data), file, Options{InBandColour: opt})
+			if err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			got, exp := c.Tracks[0], want
+			if !opt {
+				exp = [2]string{"", ""}
+			}
+			if got.ScanType != exp[0] || got.FieldOrder != exp[1] {
+				t.Errorf("%s (in-band %v): ScanType/FieldOrder = %q/%q, want %q/%q", file, opt, got.ScanType, got.FieldOrder, exp[0], exp[1])
+			}
+		}
+	}
+}
+
+// TestHeadSampleLocs walks stsz/stsc/stco across chunks and stops at the zeroed
+// remainder a head-only read leaves.
+func TestHeadSampleLocs(t *testing.T) {
+	u32 := func(vs ...uint32) []byte {
+		var b []byte
+		for _, v := range vs {
+			b = binary.BigEndian.AppendUint32(b, v)
+		}
+		return b
+	}
+	boxes := []memBox{
+		{typ: "stsz", payload: u32(0, 0, 5, 10, 20, 30, 40, 0)}, // 5 samples, the 5th zeroed
+		{typ: "stsc", payload: u32(0, 2, 1, 2, 1, 2, 1, 1)},     // chunk 1: 2 samples, then 1 per chunk
+		{typ: "stco", payload: u32(0, 4, 100, 500, 900, 0)},
+	}
+	got := headSampleLocs(boxes, 16)
+	want := []sampleLoc{{100, 10}, {110, 20}, {500, 30}, {900, 40}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("sample %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+	if got := headSampleLocs(boxes, 1); len(got) != 1 {
+		t.Errorf("n=1 gave %d samples", len(got))
+	}
+}
+
+// scanCountingReader counts the reads that reach the underlying file.
+type scanCountingReader struct {
+	r     *bytes.Reader
+	reads int
+	bytes int64
+}
+
+func (c *scanCountingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.reads++
+	c.bytes += int64(n)
+	return n, err
+}
+
+func (c *scanCountingReader) Seek(off int64, whence int) (int64, error) { return c.r.Seek(off, whence) }
+
+// TestMP4InBandScanReadsOneRun: the head samples of the fixture sit in one run,
+// so the scan type costs one read beyond what the option reads without it.
+func TestMP4InBandScanReadsOneRun(t *testing.T) {
+	data, err := os.ReadFile("../internal/testdata/h264_mbaff_tff.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(scan bool) *scanCountingReader {
+		cr := &scanCountingReader{r: bytes.NewReader(data)}
+		c, _, err := ReadMeta(context.Background(), cr, "x.mp4", Options{InBandColour: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Tracks[0].ScanType == "interlaced"; got != scan {
+			t.Fatalf("interlaced = %v, want %v", got, scan)
+		}
+		return cr
+	}
+	with := run(true)
+	cr := &scanCountingReader{r: bytes.NewReader(data)}
+	if _, _, err := ReadMeta(context.Background(), cr, "x.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if extra := with.reads - cr.reads; extra > 1 {
+		t.Errorf("the scan type cost %d reads, want one", extra)
+	}
+	if extra := with.bytes - cr.bytes; extra > inbandScanBudget {
+		t.Errorf("the scan type read %d bytes, past the %d budget", extra, inbandScanBudget)
 	}
 }

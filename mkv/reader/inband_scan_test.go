@@ -352,41 +352,109 @@ func TestInBandScanParameterSets(t *testing.T) {
 }
 
 // TestInBandScanSurvivesGarbage: a cut or forged access unit leaves the track
-// untouched and never panics.
+// untouched and never panics, whole or as a truncated prefix.
 func TestInBandScanSurvivesGarbage(t *testing.T) {
 	avcc := scanAvcC([][]byte{scanSPS{picStruct: true, hrd: true}.nal()}, [][]byte{scanPPS(0, 0, true)})
 	good := au(picTimingSEI(true, 1, -1), scanSlice{field: true, lsb: 2}.nal())
 	for n := 0; n < len(good); n++ {
-		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
-		ApplyInBandColour(&tr, good[:n])
+		for _, cut := range []bool{false, true} {
+			tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
+			s := NewInBandScan(&tr)
+			s.Feed(good[:n], cut)
+			s.Apply(&tr)
+		}
 	}
 	for _, f := range [][]byte{{0xff, 0xff, 0xff, 0xff, 0x65}, {0, 0, 0, 2, 0x65, 0xff}, {0, 0, 0, 3, 0x06, 0x01, 0xff}} {
 		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
-		ApplyInBandColour(&tr, f)
+		s := NewInBandScan(&tr)
+		s.Feed(f, false)
+		s.Apply(&tr)
 		if tr.ScanType != "" {
 			t.Errorf("% x: ScanType = %q", f, tr.ScanType)
 		}
 	}
 }
 
-// TestNeedsInBandColourAVCScan: the mp4 driver reads the first sample of an H.264
-// track whose scan type the SPS left open, and only that one.
-func TestNeedsInBandColourAVCScan(t *testing.T) {
+// TestInBandScanAPI: what the mp4 driver uses - a scan only for an H.264 track
+// whose scan type the SPS left open, several samples, and the head of a slice
+// cut short by a bounded read.
+func TestInBandScanAPI(t *testing.T) {
 	avcc := scanAvcC([][]byte{scanSPS{}.nal()}, [][]byte{scanPPS(0, 0, true)})
 	open := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
-	if !NeedsInBandColour(&open) {
-		t.Error("an H.264 track with field coding allowed and no scan type needs no sample")
-	}
 	stated := open
 	stated.ScanType = "progressive"
 	frames := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: scanAvcC([][]byte{scanSPS{frameOnly: true}.nal()}, nil)}
-	for _, tr := range []mkv.Track{stated, frames} {
-		if NeedsInBandColour(&tr) {
-			t.Errorf("scan %q, frames-only SPS: a sample was asked for", tr.ScanType)
+	hevc := mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: avcc}
+	for _, tr := range []mkv.Track{stated, frames, hevc} {
+		if NewInBandScan(&tr) != nil {
+			t.Errorf("codec %q scan %q: a scan was returned", tr.Codec, tr.ScanType)
 		}
 	}
-	ApplyInBandColour(&open, au(scanSlice{lsb: 2, bottomPOC: true, delta: -1}.nal()))
-	if open.ScanType != "interlaced" || open.FieldOrder != "bb" {
-		t.Errorf("ApplyInBandColour: ScanType/FieldOrder = %q/%q, want interlaced/bb", open.ScanType, open.FieldOrder)
+	if NeedsInBandColour(&open) {
+		t.Error("NeedsInBandColour asks for an H.264 sample: the scan is NewInBandScan's")
 	}
+	s := NewInBandScan(&open)
+	if s == nil {
+		t.Fatal("no scan for an H.264 track with field coding allowed")
+	}
+	slice := au(scanSlice{lsb: 2, bottomPOC: true, delta: -1}.nal())
+	s.Feed(au(scanSlice{idr: true}.nal()), false)
+	s.Feed(slice[:len(slice)-2], false) // a cut slice in a whole sample is damage: ignored
+	tr := open
+	s.Apply(&tr)
+	if tr.ScanType != "" {
+		t.Fatalf("a cut slice not marked truncated proved %q", tr.ScanType)
+	}
+	s.Feed(slice[:len(slice)-2], true)
+	s.Apply(&open)
+	if open.ScanType != "interlaced" || open.FieldOrder != "bb" {
+		t.Errorf("ScanType/FieldOrder = %q/%q, want interlaced/bb", open.ScanType, open.FieldOrder)
+	}
+}
+
+// TestInBandScanAVC3: a record with no SPS (avc3) is settled from the SPS the
+// samples carry - field coding allowed and proved, or frames only.
+func TestInBandScanAVC3(t *testing.T) {
+	pps := scanPPS(0, 0, true)
+	cases := []struct {
+		name        string
+		sps         scanSPS
+		delta       int32
+		scan, order string
+	}{
+		{"in-band SPS, frames only", scanSPS{frameOnly: true}, 0, "progressive", "progressive"},
+		{"in-band SPS, field coding, fields at two instants", scanSPS{}, 1, "interlaced", "tt"},
+		{"in-band SPS, field coding, no proof", scanSPS{}, 0, "", ""},
+	}
+	for _, c := range cases {
+		slice := scanSlice{idr: true, bottomPOC: !c.sps.frameOnly, delta: c.delta}
+		if c.sps.frameOnly {
+			slice = scanSlice{idr: true}
+		}
+		frame := au(c.sps.nal(), pps, frameOnlySlice(c.sps.frameOnly, slice))
+		meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(scanAvcC(nil, nil), nil, frame)), "", WithInBandColourFallback())
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := meta.Tracks[0]; got.ScanType != c.scan || got.FieldOrder != c.order {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, got.ScanType, got.FieldOrder, c.scan, c.order)
+		}
+	}
+}
+
+// frameOnlySlice builds the slice for an SPS that codes frames only, which has no
+// field_pic_flag, or the field-coding slice otherwise.
+func frameOnlySlice(frameOnly bool, o scanSlice) []byte {
+	if !frameOnly {
+		return o.nal()
+	}
+	b := &tbw{}
+	b.ue(0)
+	b.ue(7)
+	b.ue(0)
+	b.u(0, 4) // frame_num
+	b.ue(0)   // idr_pic_id
+	b.u(0, 4) // pic_order_cnt_lsb
+	b.u(0xffff, 16)
+	return append([]byte{0x65}, b.bytes()...)
 }

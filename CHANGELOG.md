@@ -28,8 +28,9 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   always on in the remux and plan entry points) reads the first 16 samples of
   such a track and gives it `interlaced` on proof - field-coded slices, frames
   whose fields have different picture order counts, or the picture timing SEI -
-  with `FieldOrder` `tt`/`bb` when the samples agree. See
-  [docs/library.md](docs/library.md).
+  with `FieldOrder` `tt`/`bb` when the samples agree; on MP4 too, and for an
+  `avc3` record from the SPS the samples carry. `reader.NewInBandScan` drives
+  it off another sample table. See [docs/library.md](docs/library.md).
 
 ## [0.63.0] - 2026-11-01
 
