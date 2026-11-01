@@ -34,7 +34,7 @@ type bitstreamColour struct {
 	width      uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
 	height     uint32
 	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
-	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag or the hvcC source flags; "" unknown
+	scanType   string  // "progressive" from H.264 frame_mbs_only_flag=1, "progressive"/"interlaced" from the hvcC source flags; "" unknown
 	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
 	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
@@ -184,8 +184,7 @@ func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
 	if t.ScanType == "" && bc.scanType != "" {
 		t.ScanType = bc.scanType
 	}
-	// Progressive video has one possible order. Interlaced video keeps an unknown
-	// FieldOrder: the SPS does not say which field comes first.
+	// Progressive video has one possible order; any other keeps an unknown FieldOrder.
 	if t.FieldOrder == "" && t.ScanType == "progressive" {
 		t.FieldOrder = "progressive"
 	}
@@ -480,10 +479,10 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	widthMbs := r.ue() + 1       // pic_width_in_mbs_minus1
 	heightMapUnits := r.ue() + 1 // pic_height_in_map_units_minus1
 	frameMbsOnly := r.bit() == 1 // 1 → progressive
-	bc.scanType = "progressive"
-	if !frameMbsOnly {
-		bc.scanType = "interlaced" // field coding allowed; the order is not in the SPS
-		r.bit()                    // mb_adaptive_frame_field_flag
+	if frameMbsOnly {
+		bc.scanType = "progressive"
+	} else {
+		r.bit() // mb_adaptive_frame_field_flag; 0 above only allows field coding: scan unknown
 	}
 	r.bit() // direct_8x8_inference_flag
 	heightUnits := uint32(2)

@@ -7,6 +7,16 @@ changes for the user and what to do; the detail lives in the docs. When a
 series of minor versions closes (0.6x at 0.70.0), its versions move to
 [changelog/](changelog/).
 
+## [Unreleased]
+
+### Breaking
+
+- `Track.ScanType`: an H.264 track whose SPS has `frame_mbs_only_flag` 0 and
+  whose container states no `FlagInterlaced` now reads `""` (unknown), not
+  `interlaced`: the flag only allows field coding, progressive streams carry
+  it. A consumer that halved the frame rate on `interlaced` should treat `""`
+  as unknown. `FlagInterlaced` 1 still gives `interlaced`.
+
 ## [0.63.0] - 2026-11-01
 
 ### Breaking
