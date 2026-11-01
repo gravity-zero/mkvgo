@@ -411,16 +411,95 @@ func newScanner(t *mkv.Track) scanner {
 		if s := newHEVCScan(t.CodecPrivate); s != nil {
 			return s
 		}
+	case t.Codec == "V_MPEG2" || t.Codec == "mpeg2":
+		return &mpeg2Scan{orders: map[string]bool{}}
 	}
 	return nil
 }
 
-// InBandScan settles the scan type of an H.264 or HEVC track over its first
+// mpeg2Scan settles an MPEG-2 track's scan type from its first samples, where
+// muxers that write no CodecPrivate keep the sequence header: a sequence
+// extension with progressive_sequence 1 proves every frame progressive; a field
+// picture, or a frame with progressive_frame 0, proves the stream interlaced,
+// top_field_first or the first field naming the order. A progressive frame
+// repeating a field (soft telecine) proves nothing.
+type mpeg2Scan struct {
+	interlaced, progressiveSeq bool
+	orders                     map[string]bool
+	firstField                 bool // the last picture was the first field of a frame
+}
+
+func (s *mpeg2Scan) feed(frame []byte, _ bool) {
+	for i := 0; i+5 <= len(frame); i++ {
+		if frame[i] != 0 || frame[i+1] != 0 || frame[i+2] != 1 || frame[i+3] != 0xB5 {
+			continue
+		}
+		r := &bitReader{data: frame[i+4:]}
+		switch r.bits(4) {
+		case 1: // sequence extension
+			r.bits(8)
+			if p := r.bit(); !r.err {
+				s.progressiveSeq = s.progressiveSeq || p == 1
+			}
+		case 8: // picture coding extension
+			r.bits(16) // f_codes
+			r.bits(2)  // intra_dc_precision
+			structure := r.bits(2)
+			tff := r.bit() == 1
+			r.bits(6) // frame_pred_frame_dct .. repeat_first_field
+			r.bit()   // chroma_420_type
+			progressiveFrame := r.bit() == 1
+			if r.err || structure == 0 {
+				continue
+			}
+			s.picture(structure, tff, progressiveFrame)
+		}
+	}
+}
+
+func (s *mpeg2Scan) picture(structure uint32, tff, progressiveFrame bool) {
+	if structure != 3 { // a field picture: the first of a pair is shown first
+		s.interlaced = true
+		if !s.firstField {
+			s.orders[orderOf(structure == 1)] = true
+		}
+		s.firstField = !s.firstField
+		return
+	}
+	s.firstField = false
+	if !progressiveFrame {
+		s.interlaced = true
+		s.orders[orderOf(tff)] = true
+	}
+}
+
+func (s *mpeg2Scan) done() bool {
+	return (s.interlaced && len(s.orders) > 1) || (s.progressiveSeq && !s.interlaced)
+}
+
+func (s *mpeg2Scan) apply(t *mkv.Track) {
+	if t.ScanType != "" {
+		return
+	}
+	switch {
+	case s.interlaced:
+		t.ScanType = "interlaced"
+		if len(s.orders) == 1 && t.FieldOrder == "" {
+			for o := range s.orders {
+				t.FieldOrder = o
+			}
+		}
+	case s.progressiveSeq:
+		t.ScanType, t.FieldOrder = "progressive", "progressive"
+	}
+}
+
+// InBandScan settles the scan type of an H.264, HEVC or MPEG-2 track over its first
 // samples, the way WithInBandColourFallback does for Matroska (see there for what
 // counts as proof). Exposed so the mp4 package can drive it off its sample table.
 type InBandScan struct{ s scanner }
 
-// NewInBandScan returns the scan for t, nil when t needs none: not H.264 or HEVC,
+// NewInBandScan returns the scan for t, nil when t needs none: not H.264, HEVC or MPEG-2,
 // a scan type already stated, or an H.264 SPS that codes frames only.
 func NewInBandScan(t *mkv.Track) *InBandScan {
 	if s := newScanner(t); s != nil {

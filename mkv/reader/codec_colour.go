@@ -233,20 +233,33 @@ func parseCodecColour(codec string, cp []byte) (bc *bitstreamColour) {
 
 // mpeg2Colour reads the colour_description of the sequence_display_extension (extension id 2) following an MPEG-2 sequence header.
 func mpeg2Colour(cp []byte) *bitstreamColour {
+	bc := &bitstreamColour{}
 	for i := 0; i+5 <= len(cp); i++ {
-		if cp[i] != 0 || cp[i+1] != 0 || cp[i+2] != 1 || cp[i+3] != 0xB5 || cp[i+4]>>4 != 2 {
+		if cp[i] != 0 || cp[i+1] != 0 || cp[i+2] != 1 || cp[i+3] != 0xB5 {
 			continue
 		}
 		r := &bitReader{data: cp[i+4:]}
-		r.bits(4) // extension_start_code_identifier
-		r.bits(3) // video_format
-		p, t, m := readColourDescription(r)
-		if r.err {
-			return nil
+		switch r.bits(4) { // extension_start_code_identifier
+		case 1: // sequence extension: progressive_sequence 1 makes every frame progressive
+			r.bits(8) // profile_and_level_indication
+			if r.bit() == 1 && !r.err && bc.scanType == "" {
+				bc.scanType = "progressive"
+			}
+		case 2: // sequence display extension
+			if bc.determined {
+				continue
+			}
+			r.bits(3) // video_format
+			p, t, m := readColourDescription(r)
+			if !r.err {
+				bc.primaries, bc.transfer, bc.matrix, bc.determined = p, t, m, true
+			}
 		}
-		return &bitstreamColour{primaries: p, transfer: t, matrix: m, determined: true}
 	}
-	return nil
+	if !bc.determined && bc.scanType == "" {
+		return nil
+	}
+	return bc
 }
 
 // --- bit reader (MSB-first) with Exp-Golomb, over-read tracked in err ----------

@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -506,5 +507,109 @@ func TestHEVCScanPicTiming(t *testing.T) {
 	s.feed(au(hevcPicTimingSEI(1, 0)), false)
 	if s.interlaced {
 		t.Error("a timing SEI read without frame_field_info_present_flag proved interlaced")
+	}
+}
+
+// stripScanElements rewrites FlagInterlaced to 0 and FieldOrder to 2
+// (undetermined), same size, so the container states nothing.
+func stripScanElements(t *testing.T, data []byte) []byte {
+	t.Helper()
+	b := append([]byte(nil), data...)
+	if i := bytes.Index(b, []byte{0x9a, 0x81}); i >= 0 {
+		b[i+2] = 0
+	} else {
+		t.Fatal("fixture: no FlagInterlaced")
+	}
+	if i := bytes.Index(b, []byte{0x9d, 0x81}); i >= 0 {
+		b[i+2] = 2
+	}
+	return b
+}
+
+// TestMPEG2ScanFFmpegFiles: MPEG-2 files ffmpeg wrote carry no CodecPrivate - the
+// sequence header and its extensions travel in the first block. With the
+// container's scan elements cleared, the in-band option reads the order from
+// top_field_first and progressive_sequence 1 as progressive; without it the
+// scan type stays unknown.
+func TestMPEG2ScanFFmpegFiles(t *testing.T) {
+	for file, want := range map[string][2]string{
+		"mpeg2_tff.mkv":         {"interlaced", "tt"},
+		"mpeg2_bff.mkv":         {"interlaced", "bb"},
+		"mpeg2_progressive.mkv": {"progressive", "progressive"},
+	} {
+		raw, err := os.ReadFile("../../internal/testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := stripScanElements(t, raw)
+		for _, opt := range []bool{false, true} {
+			var opts []ReadOption
+			exp := [2]string{"", ""}
+			if opt {
+				opts, exp = append(opts, WithInBandColourFallback()), want
+			}
+			c, err := ReadMeta(context.Background(), bytes.NewReader(data), "", opts...)
+			if err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			if got := c.Tracks[0]; got.ScanType != exp[0] || got.FieldOrder != exp[1] {
+				t.Errorf("%s (in-band %v): ScanType/FieldOrder = %q/%q, want %q/%q", file, opt, got.ScanType, got.FieldOrder, exp[0], exp[1])
+			}
+		}
+	}
+}
+
+// mpeg2PicExt is a picture coding extension with the given picture_structure,
+// top_field_first, repeat_first_field and progressive_frame.
+func mpeg2PicExt(structure uint32, tff, rff, progressive bool) []byte {
+	b := &tbw{}
+	b.u(8, 4)       // extension_start_code_identifier
+	b.u(0xffff, 16) // f_codes
+	b.u(0, 2)
+	b.u(structure, 2)
+	b.u(boolBit(tff), 1)
+	b.u(0, 5)
+	b.u(boolBit(rff), 1)
+	b.u(0, 1)
+	b.u(boolBit(progressive), 1)
+	b.u(0, 7)
+	return append([]byte{0, 0, 1, 0xb5}, b.bytes()...)
+}
+
+func mpeg2SeqExt(progressiveSeq bool) []byte {
+	b := &tbw{}
+	b.u(1, 4)
+	b.u(0x48, 8)
+	b.u(boolBit(progressiveSeq), 1)
+	b.u(0, 3)
+	return append([]byte{0, 0, 1, 0xb5}, b.bytes()...)
+}
+
+func TestMPEG2ScanPictures(t *testing.T) {
+	cases := []struct {
+		name        string
+		samples     [][]byte
+		scan, order string
+	}{
+		{"field pair, bottom first", [][]byte{append(mpeg2PicExt(2, false, false, false), mpeg2PicExt(1, false, false, false)...)}, "interlaced", "bb"},
+		{"field pairs, top first", [][]byte{mpeg2PicExt(1, false, false, false), mpeg2PicExt(2, false, false, false), mpeg2PicExt(1, false, false, false)}, "interlaced", "tt"},
+		{"soft telecine: progressive frames repeating a field", [][]byte{append(mpeg2SeqExt(false), mpeg2PicExt(3, true, true, true)...), mpeg2PicExt(3, false, false, true)}, "", ""},
+		{"interlaced frames, orders disagree", [][]byte{mpeg2PicExt(3, true, false, false), mpeg2PicExt(3, false, false, false)}, "interlaced", ""},
+		{"progressive sequence", [][]byte{mpeg2SeqExt(true)}, "progressive", "progressive"},
+		{"cut extension", [][]byte{mpeg2PicExt(3, true, false, false)[:6]}, "", ""},
+	}
+	for _, c := range cases {
+		s := &mpeg2Scan{orders: map[string]bool{}}
+		for _, f := range c.samples {
+			s.feed(f, false)
+		}
+		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "V_MPEG2"}
+		s.apply(&tr)
+		if tr.ScanType != c.scan || tr.FieldOrder != c.order {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, tr.ScanType, tr.FieldOrder, c.scan, c.order)
+		}
+	}
+	if bc := mpeg2Colour(append([]byte{0, 0, 1, 0xb3, 0, 0, 0, 0}, mpeg2SeqExt(true)...)); bc == nil || bc.scanType != "progressive" {
+		t.Error("a CodecPrivate sequence extension with progressive_sequence 1 gave no progressive scan type")
 	}
 }
