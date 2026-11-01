@@ -48,66 +48,106 @@ func TestRewriteKeepsTheTrackChildrenItDoesNotModel(t *testing.T) {
 	}
 }
 
-// TestDispositionsAreWrittenFromTheTrackFields pins that the five disposition flags are the Track's fields at write
-// time: one a source sets is read into its field, not kept as an unmodeled child, and comes back from a rewrite; one
-// the caller sets is written; one the caller clears is left out, whatever the source said.
-func TestDispositionsAreWrittenFromTheTrackFields(t *testing.T) {
-	flags := []uint32{mkv.IDFlagHearingImpaired, mkv.IDFlagVisualImpaired, mkv.IDFlagTextDescriptions, mkv.IDFlagOriginal, mkv.IDFlagCommentary}
-	track := trackEntry(
+// dispositionFlags names the five disposition flags: the element each one is, and the Track field it is read into.
+var dispositionFlags = []struct {
+	name  string
+	id    uint32
+	field func(*mkv.Track) *bool
+}{
+	{"HearingImpaired", mkv.IDFlagHearingImpaired, func(t *mkv.Track) *bool { return &t.HearingImpaired }},
+	{"VisualImpaired", mkv.IDFlagVisualImpaired, func(t *mkv.Track) *bool { return &t.VisualImpaired }},
+	{"TextDescriptions", mkv.IDFlagTextDescriptions, func(t *mkv.Track) *bool { return &t.TextDescriptions }},
+	{"Original", mkv.IDFlagOriginal, func(t *mkv.Track) *bool { return &t.Original }},
+	{"Commentary", mkv.IDFlagCommentary, func(t *mkv.Track) *bool { return &t.Commentary }},
+}
+
+// flaggedTrackEntry is an AAC TrackEntry carrying the one flag set to 1.
+func flaggedTrackEntry(id uint32) []byte {
+	return trackEntry(
 		uintElem(mkv.IDTrackNumber, 1, 1),
 		uintElem(mkv.IDTrackType, mkv.TrackTypeAudio, 1),
 		strElem(mkv.IDCodecID, "A_AAC"),
-		uintElem(mkv.IDFlagCommentary, 1, 1),
-		uintElem(mkv.IDFlagOriginal, 1, 1),
+		uintElem(id, 1, 1),
 	)
-	c, err := Read(context.Background(), bytes.NewReader(segmentMKV(infoElem(), masterElem(mkv.IDTracks, track), clusterElem())), "x.mkv")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
+}
+
+// flagElements reports whether the written tracks carry the flag's element at all, as 0 or as 1.
+func flagElements(tracks []byte, id uint32) (asZero, asOne bool) {
+	return bytes.Contains(tracks, uintElem(id, 0, 1)), bytes.Contains(tracks, uintElem(id, 1, 1))
+}
+
+// TestDispositionFlags pins, for each of the five disposition flags, that the Track's field is what the writer writes:
+// set through the API it is written; cleared on a source that sets it, it is absent from the rewrite; set by the
+// source, it is read into its field (not kept as an unmodeled child) and comes back from a rewrite.
+func TestDispositionFlags(t *testing.T) {
+	ctx := context.Background()
+	readTracks := func(t *testing.T, tracks []byte) mkv.Track {
+		c, err := Read(ctx, bytes.NewReader(segmentMKV(infoElem(), tracks, clusterElem())), "x.mkv")
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		return c.Tracks[0]
 	}
-	for _, r := range c.Tracks[0].Unmodeled {
-		for _, id := range flags {
-			if r.ID == id {
-				t.Errorf("flag 0x%X kept as an unmodeled child: the field is what counts", id)
+	for _, fl := range dispositionFlags {
+		t.Run(fl.name+"/set-by-the-API-is-written", func(t *testing.T) {
+			tr := mkv.Track{ID: 1, Type: mkv.AudioTrack, Codec: "aac", IsDefault: true}
+			*fl.field(&tr) = true
+			var out bytes.Buffer
+			if err := writer.WriteTracks(&out, []mkv.Track{tr}); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-
-	// A source flag is kept by a rewrite, the one cleared by the caller is left out.
-	c.Tracks[0].Original = false
-	var out bytes.Buffer
-	if err := writer.WriteTracks(&out, c.Tracks); err != nil {
-		t.Fatal(err)
-	}
-	again, err := Read(context.Background(), bytes.NewReader(segmentMKV(infoElem(), out.Bytes(), clusterElem())), "y.mkv")
-	if err != nil {
-		t.Fatalf("Read after rewrite: %v", err)
-	}
-	if tr := again.Tracks[0]; !tr.Commentary || tr.Original || tr.HearingImpaired || tr.VisualImpaired || tr.TextDescriptions {
-		t.Errorf("after rewrite: commentary=%v original=%v hearing=%v visual=%v descriptions=%v, want commentary alone",
-			tr.Commentary, tr.Original, tr.HearingImpaired, tr.VisualImpaired, tr.TextDescriptions)
-	}
-	if bytes.Contains(out.Bytes(), uintElem(mkv.IDFlagOriginal, 1, 1)) || bytes.Contains(out.Bytes(), uintElem(mkv.IDFlagOriginal, 0, 1)) {
-		t.Error("a cleared flag is written")
-	}
-
-	// A flag set through the API is written.
-	out.Reset()
-	set := mkv.Track{ID: 1, Type: mkv.AudioTrack, Codec: "aac", IsDefault: true, HearingImpaired: true, VisualImpaired: true, TextDescriptions: true, Original: true, Commentary: true}
-	if err := writer.WriteTracks(&out, []mkv.Track{set}); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range flags {
-		if !bytes.Contains(out.Bytes(), uintElem(id, 1, 1)) {
-			t.Errorf("flag 0x%X set on the Track is not written", id)
-		}
-	}
-	out.Reset()
-	if err := writer.WriteTracks(&out, []mkv.Track{{ID: 1, Type: mkv.AudioTrack, Codec: "aac", IsDefault: true}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range flags {
-		if bytes.Contains(out.Bytes(), uintElem(id, 0, 1)) || bytes.Contains(out.Bytes(), uintElem(id, 1, 1)) {
-			t.Errorf("flag 0x%X is written on a Track that does not set it", id)
-		}
+			if _, asOne := flagElements(out.Bytes(), fl.id); !asOne {
+				t.Errorf("flag 0x%X set on the Track is not written", fl.id)
+			}
+			for _, other := range dispositionFlags {
+				if asZero, asOne := flagElements(out.Bytes(), other.id); other.id != fl.id && (asZero || asOne) {
+					t.Errorf("flag 0x%X, not set on the Track, is written", other.id)
+				}
+			}
+			if back := readTracks(t, out.Bytes()); !*fl.field(&back) {
+				t.Errorf("%s written, read back false", fl.name)
+			}
+		})
+		t.Run(fl.name+"/cleared-on-a-source-that-sets-it-is-absent", func(t *testing.T) {
+			tr := readTracks(t, masterElem(mkv.IDTracks, flaggedTrackEntry(fl.id)))
+			if !*fl.field(&tr) {
+				t.Fatalf("%s set by the source, read false", fl.name)
+			}
+			*fl.field(&tr) = false
+			var out bytes.Buffer
+			if err := writer.WriteTracks(&out, []mkv.Track{tr}); err != nil {
+				t.Fatal(err)
+			}
+			if asZero, asOne := flagElements(out.Bytes(), fl.id); asZero || asOne {
+				t.Errorf("flag 0x%X cleared on the Track is written (as 0: %v, as 1: %v)", fl.id, asZero, asOne)
+			}
+			if back := readTracks(t, out.Bytes()); *fl.field(&back) {
+				t.Errorf("%s cleared, read back true", fl.name)
+			}
+		})
+		t.Run(fl.name+"/set-by-the-source-is-kept-by-a-rewrite", func(t *testing.T) {
+			tr := readTracks(t, masterElem(mkv.IDTracks, flaggedTrackEntry(fl.id)))
+			if !*fl.field(&tr) {
+				t.Fatalf("%s set by the source, read false", fl.name)
+			}
+			for _, r := range tr.Unmodeled {
+				if r.ID == fl.id {
+					t.Errorf("flag 0x%X kept as an unmodeled child: the field is what counts", fl.id)
+				}
+			}
+			var out bytes.Buffer
+			if err := writer.WriteTracks(&out, []mkv.Track{tr}); err != nil {
+				t.Fatal(err)
+			}
+			back := readTracks(t, out.Bytes())
+			if !*fl.field(&back) {
+				t.Errorf("%s set by the source, false after a rewrite", fl.name)
+			}
+			for _, other := range dispositionFlags {
+				if other.id != fl.id && *other.field(&back) {
+					t.Errorf("%s, never set, true after a rewrite", other.name)
+				}
+			}
+		})
 	}
 }

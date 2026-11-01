@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -4851,4 +4852,61 @@ func (s *seekBuf) Write(p []byte) (int, error) {
 	n, err := s.Buffer.Write(p)
 	s.pos += int64(n)
 	return n, err
+}
+
+// TestDispositionFlagsSurviveARemux pins, for each of the five disposition flags, that a source setting it comes out
+// of a remux (Merge of its tracks) and of a metadata rewrite still setting it, and that one set through EditMetadata
+// is written.
+func TestDispositionFlagsSurviveARemux(t *testing.T) {
+	ctx := context.Background()
+	flags := []struct {
+		name  string
+		field func(*mkv.Track) *bool
+	}{
+		{"HearingImpaired", func(t *mkv.Track) *bool { return &t.HearingImpaired }},
+		{"VisualImpaired", func(t *mkv.Track) *bool { return &t.VisualImpaired }},
+		{"TextDescriptions", func(t *mkv.Track) *bool { return &t.TextDescriptions }},
+		{"Original", func(t *mkv.Track) *bool { return &t.Original }},
+		{"Commentary", func(t *mkv.Track) *bool { return &t.Commentary }},
+	}
+	flagged := func(t *testing.T, path string) []string {
+		c, err := reader.Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var set []string
+		for _, fl := range flags {
+			if *fl.field(&c.Tracks[1]) {
+				set = append(set, fl.name)
+			}
+		}
+		return set
+	}
+	for _, fl := range flags {
+		t.Run(fl.name, func(t *testing.T) {
+			dir := t.TempDir()
+			audio := audioTrack(2)
+			*fl.field(&audio) = true
+			src := buildMinimalMKV(t, dir, "src.mkv", []mkv.Track{videoTrack(1), audio}, append(testBlocks(1), testBlocks(2)...), 300)
+			if got := flagged(t, src); !reflect.DeepEqual(got, []string{fl.name}) {
+				t.Fatalf("source: flags %v, want [%s]", got, fl.name)
+			}
+			remuxed := filepath.Join(dir, "remuxed.mkv")
+			mustNil(t, Merge(ctx, mkv.MergeOptions{OutputPath: remuxed, Inputs: []mkv.MergeInput{{SourcePath: src, TrackIDs: []uint64{1, 2}}}}))
+			if got := flagged(t, remuxed); !reflect.DeepEqual(got, []string{fl.name}) {
+				t.Errorf("after Merge: flags %v, want [%s]", got, fl.name)
+			}
+			cleared := filepath.Join(dir, "cleared.mkv")
+			mustNil(t, EditMetadata(ctx, src, cleared, func(c *mkv.Container) { *fl.field(&c.Tracks[1]) = false }))
+			if got := flagged(t, cleared); len(got) != 0 {
+				t.Errorf("after clearing: flags %v, want none", got)
+			}
+			plain := buildMinimalMKV(t, dir, "plain.mkv", []mkv.Track{videoTrack(1), audioTrack(2)}, append(testBlocks(1), testBlocks(2)...), 300)
+			set := filepath.Join(dir, "set.mkv")
+			mustNil(t, EditMetadata(ctx, plain, set, func(c *mkv.Container) { *fl.field(&c.Tracks[1]) = true }))
+			if got := flagged(t, set); !reflect.DeepEqual(got, []string{fl.name}) {
+				t.Errorf("set through EditMetadata: flags %v, want [%s]", got, fl.name)
+			}
+		})
+	}
 }

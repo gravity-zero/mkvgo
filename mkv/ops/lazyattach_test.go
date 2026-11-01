@@ -147,41 +147,73 @@ func TestAttachmentsAreCarriedWithoutBecomingResident(t *testing.T) {
 	}
 }
 
+// describedFixture is a two-track file whose one attachment carries a description, written through EditMetadata.
+func describedFixture(t *testing.T, dir, name, desc string) string {
+	t.Helper()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	src := buildMinimalMKV(t, dir, name, tracks, append(testBlocks(1), testBlocks(2)...), 4000)
+	out := filepath.Join(dir, "described-"+name)
+	mustNil(t, EditMetadata(context.Background(), src, out, func(c *mkv.Container) {
+		c.Attachments = []mkv.Attachment{{ID: 1, Name: "a.ttf", MIMEType: "font/ttf", Description: desc, Data: []byte("font-bytes")}}
+	}))
+	return out
+}
+
+// attachmentDescription is the description of the file's one attachment named a.ttf.
+func attachmentDescription(t *testing.T, path string) string {
+	t.Helper()
+	c, err := reader.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range c.Attachments {
+		if a.Name == "a.ttf" {
+			return a.Description
+		}
+	}
+	t.Fatalf("%s: no attachment a.ttf among %d", filepath.Base(path), len(c.Attachments))
+	return ""
+}
+
 // TestAttachmentDescriptionSurvivesEveryRewrite pins that an attachment's FileDescription is read, and comes back
-// from each op that rewrites the attachments: EditMetadata, Mux, Join and Split.
+// from each op that rewrites the attachments: EditMetadata, EditInPlace, RemoveTrack, AddTrack, MergeSubtitle,
+// MergeASS, Merge, Mux, Join, Split, AddAttachment and RemoveAttachment.
 func TestAttachmentDescriptionSurvivesEveryRewrite(t *testing.T) {
 	ctx, dir := context.Background(), t.TempDir()
 	const desc = "the font the subtitles use"
-	fixture := func(name string) string {
-		tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
-		src := buildMinimalMKV(t, dir, name, tracks, append(testBlocks(1), testBlocks(2)...), 4000)
-		out := filepath.Join(dir, "described-"+name)
-		mustNil(t, EditMetadata(ctx, src, out, func(c *mkv.Container) {
-			c.Attachments = []mkv.Attachment{{ID: 1, Name: "a.ttf", MIMEType: "font/ttf", Description: desc, Data: []byte("font-bytes")}}
-		}))
-		return out
-	}
-	described := func(path string) string {
-		c, err := reader.Open(ctx, path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(c.Attachments) != 1 {
-			t.Fatalf("%s: %d attachments, want 1", filepath.Base(path), len(c.Attachments))
-		}
-		return c.Attachments[0].Description
-	}
-	a, b := fixture("a.mkv"), fixture("b.mkv")
-	if got := described(a); got != desc {
+	a, b := describedFixture(t, dir, "a.mkv", desc), describedFixture(t, dir, "b.mkv", desc)
+	if got := attachmentDescription(t, a); got != desc {
 		t.Fatalf("read back from the writer: %q, want %q", got, desc)
 	}
 	lazy, err := reader.OpenWithFS(ctx, a, mkv.FSFrom(nil), reader.WithoutAttachmentData())
 	if err != nil {
 		t.Fatal(err)
 	}
+	srt, ass := filepath.Join(dir, "sub.srt"), filepath.Join(dir, "sub.ass")
+	mustNil(t, os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:01,500\nLine\n\n"), 0o644))
+	mustNil(t, os.WriteFile(ass, []byte("[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.50,0:00:01.50,Default,,0,0,0,,Line\n"), 0o644))
 	ops := map[string]func(dst string) error{
 		"edit-metadata": func(dst string) error {
 			return EditMetadata(ctx, a, dst, func(c *mkv.Container) { c.Info.Title = "edited" })
+		},
+		"edit-in-place": func(dst string) error {
+			src, err := os.ReadFile(a)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dst, src, 0o644); err != nil {
+				return err
+			}
+			return EditInPlace(ctx, dst, func(c *mkv.Container) { c.Info.Title = "edited in place" })
+		},
+		"remove-track": func(dst string) error { return RemoveTrack(ctx, a, dst, []uint64{2}) },
+		"add-track": func(dst string) error {
+			return AddTrack(ctx, a, dst, mkv.TrackInput{SourcePath: b, TrackID: 2, Language: "fre"})
+		},
+		"merge-subtitle": func(dst string) error { return MergeSubtitle(ctx, a, srt, dst, "eng", "Sub") },
+		"merge-ass":      func(dst string) error { return MergeASS(ctx, a, ass, dst, "eng", "Sub") },
+		"merge": func(dst string) error {
+			return Merge(ctx, mkv.MergeOptions{OutputPath: dst, Inputs: []mkv.MergeInput{{SourcePath: a, TrackIDs: []uint64{1, 2}}}})
 		},
 		"mux": func(dst string) error {
 			return Mux(ctx, mkv.MuxOptions{OutputPath: dst, Tracks: []mkv.TrackInput{{SourcePath: a, TrackID: 1}}, Attachments: lazy.Attachments})
@@ -194,14 +226,66 @@ func TestAttachmentDescriptionSurvivesEveryRewrite(t *testing.T) {
 			}
 			return os.Rename(parts[0], dst)
 		},
+		"add-attachment": func(dst string) error {
+			return AddAttachment(ctx, a, dst, mkv.Attachment{Name: "b.bin", MIMEType: "application/octet-stream", Data: []byte("more")})
+		},
+		"remove-attachment": func(dst string) error {
+			two := filepath.Join(filepath.Dir(dst), "two.mkv")
+			if err := AddAttachment(ctx, a, two, mkv.Attachment{Name: "b.bin", MIMEType: "application/octet-stream", Data: []byte("more")}); err != nil {
+				return err
+			}
+			return RemoveAttachment(ctx, two, dst, "b.bin")
+		},
 	}
 	for name, run := range ops {
-		dst := filepath.Join(t.TempDir(), name+".mkv")
-		if err := run(dst); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if got := described(dst); got != desc {
-			t.Errorf("%s: description %q, want %q", name, got, desc)
-		}
+		t.Run(name, func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), name+".mkv")
+			if err := run(dst); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if got := attachmentDescription(t, dst); got != desc {
+				t.Errorf("%s: description %q, want %q", name, got, desc)
+			}
+		})
 	}
+}
+
+// TestAttachmentDescriptionEditedThroughTheAPIIsWritten pins that a description changed on the Attachment is what the
+// rewrite writes, through EditMetadata and EditInPlace alike, and that one cleared is left out.
+func TestAttachmentDescriptionEditedThroughTheAPIIsWritten(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	const old, edited = "the font the subtitles use", "the font the titles use"
+	a := describedFixture(t, dir, "a.mkv", old)
+	edit := func(desc string) func(*mkv.Container) {
+		return func(c *mkv.Container) { c.Attachments[0].Description = desc }
+	}
+	t.Run("edit-metadata", func(t *testing.T) {
+		dst := filepath.Join(dir, "edited.mkv")
+		mustNil(t, EditMetadata(ctx, a, dst, edit(edited)))
+		if got := attachmentDescription(t, dst); got != edited {
+			t.Errorf("description %q, want %q", got, edited)
+		}
+	})
+	t.Run("edit-in-place", func(t *testing.T) {
+		dst := filepath.Join(dir, "inplace.mkv")
+		src, err := os.ReadFile(a)
+		mustNil(t, err)
+		mustNil(t, os.WriteFile(dst, src, 0o644))
+		mustNil(t, EditInPlace(ctx, dst, edit(edited)))
+		if got := attachmentDescription(t, dst); got != edited {
+			t.Errorf("description %q, want %q", got, edited)
+		}
+	})
+	t.Run("cleared-is-left-out", func(t *testing.T) {
+		dst := filepath.Join(dir, "cleared.mkv")
+		mustNil(t, EditMetadata(ctx, a, dst, edit("")))
+		if got := attachmentDescription(t, dst); got != "" {
+			t.Errorf("description %q, want none", got)
+		}
+		raw, err := os.ReadFile(dst)
+		mustNil(t, err)
+		if bytes.Contains(raw, []byte(old)) {
+			t.Error("the cleared description is still in the file")
+		}
+	})
 }
