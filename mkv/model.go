@@ -320,16 +320,18 @@ type Track struct {
 	Level            *uint16 `json:"level,omitempty"`        // codec level: H.264 10×level, HEVC 30×level (SPS level_idc), AV1 seq_level_idx; VP9 level code 10×major+minor (40 = 4.0) from the vpcC, else derived from the picture size (VP9 carries no level in the bitstream; VP9Level) - the value mkvgo's MP4 remux declares
 	PixelFormat      string  `json:"pixel_format,omitempty"` // the conventional pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
 	// ScanType is how the pictures are coded - "progressive" or "interlaced" - from
-	// the Matroska FlagInterlaced element (0x9A) or the H.264 frame_mbs_only_flag;
-	// "" when unknown. It says nothing about which field comes first: that is
+	// the Matroska FlagInterlaced element (0x9A), the H.264 frame_mbs_only_flag (1
+	// only: 0 allows field coding without proving it; with WithInBandColourFallback
+	// the first samples may then prove "interlaced") or the hvcC source flags; ""
+	// when unknown. It says nothing about which field comes first: that is
 	// FieldOrder, which is known far less often.
 	ScanType string `json:"scan_type,omitempty"`
 	// FieldOrder is the conventional field_order - "progressive", or for interlaced
 	// video "tt"/"bb"/"tb"/"bt" - only when the source states it: the Matroska
-	// FieldOrder element (0x9D), or a progressive ScanType (progressive video has no
-	// order to know). "" when unknown. An interlaced H.264 SPS yields ScanType
-	// "interlaced" and no FieldOrder: frame_mbs_only_flag does not say which field
-	// comes first, so no order is invented. JSON written before the two fields were
+	// FieldOrder element (0x9D), the first samples of an H.264 track under
+	// WithInBandColourFallback, or a progressive ScanType (progressive video has no
+	// order to know). "" when unknown. No order is invented when the source
+	// does not state one. JSON written before the two fields were
 	// separate carried "interlaced" here; UnmarshalJSON moves it to ScanType.
 	FieldOrder string  `json:"field_order,omitempty"`
 	FrameCount int64   `json:"frame_count,omitempty"` // number of frames (the conventional nb_frames field), from the MP4 stsz count; 0 unknown (not head-only for Matroska)

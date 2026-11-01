@@ -99,6 +99,7 @@ type inTrack struct {
 	// in-band colour fallback; firstSampleSize == 0 when unavailable.
 	firstSampleOffset int64
 	firstSampleSize   uint32
+	headSamples       []sampleLoc // the first samples, for the in-band H.264 scan type
 
 	// colour code points (CICP), nil when the entry had no colr box.
 	colorPrimaries   *uint16
@@ -657,6 +658,7 @@ func parseTrakRoom(payload []byte, fileSize int64, movieTS uint32, mode sampleMo
 		tr.frameDurNs = headerVideoFrameDurNs(stblBoxes, tr.timescale)
 		tr.frameCount = headerFrameCount(stblBoxes)
 		tr.firstSampleOffset, tr.firstSampleSize = firstSampleLoc(stblBoxes)
+		tr.headSamples = headSampleLocs(stblBoxes, headSampleCount)
 	}
 	if tr.trackType == mkv.AudioTrack {
 		// A single-entry stts is a strictly constant frame duration: exported as

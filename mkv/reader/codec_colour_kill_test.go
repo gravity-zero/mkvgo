@@ -154,24 +154,21 @@ func TestFillColourScanPrecedence(t *testing.T) {
 	}
 }
 
-// TestAVCInterlacedSPSNoFieldOrder: frame_mbs_only_flag=0 says the stream may be
-// field-coded, not which field comes first. ScanType "interlaced", FieldOrder "".
-func TestAVCInterlacedSPSNoFieldOrder(t *testing.T) {
+// TestAVCFieldCodingAllowedIsNotInterlaced: frame_mbs_only_flag=0 only allows
+// field coding (PAFF/MBAFF); a progressive stream may carry it. Unknown, not interlaced.
+func TestAVCFieldCodingAllowedIsNotInterlaced(t *testing.T) {
 	avcc := buildHighSPSAvcCScan(2, 2, 1, false)
 	bc := avcColour(avcc)
 	if bc == nil {
 		t.Fatal("avcColour returned nil")
 	}
-	if bc.scanType != "interlaced" {
-		t.Fatalf("scanType = %q, want interlaced", bc.scanType)
+	if bc.scanType != "" {
+		t.Fatalf("scanType = %q, want \"\"", bc.scanType)
 	}
 	tr := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: avcc}
 	fillColourFromCodecPrivate(&tr)
-	if tr.ScanType != "interlaced" {
-		t.Errorf("ScanType = %q, want interlaced", tr.ScanType)
-	}
-	if tr.FieldOrder != "" {
-		t.Errorf("FieldOrder = %q, want \"\" (the SPS carries no field order)", tr.FieldOrder)
+	if tr.ScanType != "" || tr.FieldOrder != "" {
+		t.Errorf("ScanType/FieldOrder = %q/%q, want \"\"/\"\"", tr.ScanType, tr.FieldOrder)
 	}
 }
 

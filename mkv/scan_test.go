@@ -6,7 +6,7 @@ import (
 )
 
 func TestFieldOrderName(t *testing.T) {
-	cases := map[uint64]string{0: "progressive", 1: "tt", 2: "", 6: "bb", 9: "bt", 14: "tb", 3: "", 99: ""}
+	cases := map[uint64]string{0: "progressive", 1: "tt", 2: "", 6: "bb", 9: "tb", 14: "bt", 3: "", 99: ""}
 	for v, want := range cases {
 		if got := FieldOrderName(v); got != want {
 			t.Errorf("FieldOrderName(%d) = %q, want %q", v, got, want)

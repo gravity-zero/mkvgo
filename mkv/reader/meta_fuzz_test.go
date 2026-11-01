@@ -20,11 +20,18 @@ func FuzzReadMeta(f *testing.F) {
 	if b, err := os.ReadFile("testdata/probe/hdr_multi.mkv"); err == nil {
 		f.Add(b)
 	}
+	// The in-band read walks the first samples of each video track.
+	avcc := scanAvcC([][]byte{scanSPS{mbaff: true, picStruct: true}.nal()}, [][]byte{scanPPS(0, 0, true)})
+	f.Add(avcScanMKV(avcc, nil, au(picTimingSEI(false, 3, -1), scanSlice{lsb: 2, bottomPOC: true, delta: 1}.nal())))
+	if b, err := os.ReadFile("../../internal/testdata/mpeg2_tff.mkv"); err == nil {
+		f.Add(b)
+	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		costguard.Fuzz(t, len(data), func() {
 			// Result is irrelevant; the contract is "no panic / no hang on hostile input".
 			_, _ = ReadMeta(context.Background(), bytes.NewReader(data), "fuzz.mkv")
+			_, _ = ReadMeta(context.Background(), bytes.NewReader(data), "fuzz.mkv", WithInBandColourFallback())
 		})
 	})
 }

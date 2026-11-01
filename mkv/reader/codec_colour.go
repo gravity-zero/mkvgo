@@ -18,24 +18,28 @@ import "github.com/gravity-zero/mkvgo/mkv"
 // bitstreamColour holds the per-field values recovered from a bitstream. Each is
 // nil when the bitstream did not carry it.
 type bitstreamColour struct {
-	primaries  *uint16 // CICP colour_primaries
-	transfer   *uint16 // CICP transfer_characteristics
-	matrix     *uint16 // CICP matrix_coefficients (conventional color_space)
-	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
-	bitDepth   *uint16 // luma bit depth (8/10/12)
-	spsDepth   bool    // bitDepth comes from the SPS, not a configuration record header
-	fpsNum     uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
-	fpsDen     uint32
-	fpsFixed   bool    // the timing is a frame rate, not a clock that may tick faster (H.264 fixed_frame_rate_flag)
-	profile    string  // e.g. "Main 10"
-	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
-	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
-	sarHeight  uint32  // VUI sample aspect ratio height
-	width      uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
-	height     uint32
-	chroma     *uint16 // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
-	scanType   string  // "progressive"/"interlaced" from H.264 frame_mbs_only_flag or the hvcC source flags; "" unknown
-	determined bool    // the bitstream's colour signalling was read (VUI/color_config),
+	primaries *uint16 // CICP colour_primaries
+	transfer  *uint16 // CICP transfer_characteristics
+	matrix    *uint16 // CICP matrix_coefficients (conventional color_space)
+	rng       *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
+	bitDepth  *uint16 // luma bit depth (8/10/12)
+	spsDepth  bool    // bitDepth comes from the SPS, not a configuration record header
+	fpsNum    uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
+	fpsDen    uint32
+	fpsFixed  bool    // the timing is a frame rate, not a clock that may tick faster (H.264 fixed_frame_rate_flag)
+	profile   string  // e.g. "Main 10"
+	level     *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
+	sarWidth  uint32  // VUI sample aspect ratio width (0 when absent/square)
+	sarHeight uint32  // VUI sample aspect ratio height
+	width     uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
+	height    uint32
+	chroma    *uint16    // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
+	scanType  string     // "progressive" from H.264 frame_mbs_only_flag=1, "progressive"/"interlaced" from the hvcC source flags; "" unknown
+	avc       avcSPSInfo // what H.264 slice headers and SEI need from this SPS
+	// HEVC VUI: every picture is a field (field_seq_flag), and picture timing
+	// SEI carry pic_struct and source_scan_type (frame_field_info_present_flag).
+	hevcFieldSeq, hevcFrameFieldInfo bool
+	determined                       bool // the bitstream's colour signalling was read (VUI/color_config),
 	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
 }
@@ -184,8 +188,7 @@ func mergeBitstreamColour(t *mkv.Track, bc *bitstreamColour) {
 	if t.ScanType == "" && bc.scanType != "" {
 		t.ScanType = bc.scanType
 	}
-	// Progressive video has one possible order. Interlaced video keeps an unknown
-	// FieldOrder: the SPS does not say which field comes first.
+	// Progressive video has one possible order; any other keeps an unknown FieldOrder.
 	if t.FieldOrder == "" && t.ScanType == "progressive" {
 		t.FieldOrder = "progressive"
 	}
@@ -230,20 +233,33 @@ func parseCodecColour(codec string, cp []byte) (bc *bitstreamColour) {
 
 // mpeg2Colour reads the colour_description of the sequence_display_extension (extension id 2) following an MPEG-2 sequence header.
 func mpeg2Colour(cp []byte) *bitstreamColour {
+	bc := &bitstreamColour{}
 	for i := 0; i+5 <= len(cp); i++ {
-		if cp[i] != 0 || cp[i+1] != 0 || cp[i+2] != 1 || cp[i+3] != 0xB5 || cp[i+4]>>4 != 2 {
+		if cp[i] != 0 || cp[i+1] != 0 || cp[i+2] != 1 || cp[i+3] != 0xB5 {
 			continue
 		}
 		r := &bitReader{data: cp[i+4:]}
-		r.bits(4) // extension_start_code_identifier
-		r.bits(3) // video_format
-		p, t, m := readColourDescription(r)
-		if r.err {
-			return nil
+		switch r.bits(4) { // extension_start_code_identifier
+		case 1: // sequence extension: progressive_sequence 1 makes every frame progressive
+			r.bits(8) // profile_and_level_indication
+			if r.bit() == 1 && !r.err && bc.scanType == "" {
+				bc.scanType = "progressive"
+			}
+		case 2: // sequence display extension
+			if bc.determined {
+				continue
+			}
+			r.bits(3) // video_format
+			p, t, m := readColourDescription(r)
+			if !r.err {
+				bc.primaries, bc.transfer, bc.matrix, bc.determined = p, t, m, true
+			}
 		}
-		return &bitstreamColour{primaries: p, transfer: t, matrix: m, determined: true}
 	}
-	return nil
+	if !bc.determined && bc.scanType == "" {
+		return nil
+	}
+	return bc
 }
 
 // --- bit reader (MSB-first) with Exp-Golomb, over-read tracked in err ----------
@@ -354,27 +370,41 @@ func avcColour(cp []byte) *bitstreamColour {
 	if len(cp) < 7 || cp[0] != 1 {
 		return nil
 	}
+	var found *bitstreamColour
+	forEachAVCSPS(cp, func(bc *bitstreamColour) bool {
+		found = bc
+		return true
+	})
+	return found
+}
+
+// forEachAVCSPS parses each readable SPS of an avcC in order, calling fn until it
+// returns true; false when the record is malformed, its SPS list cut short.
+func forEachAVCSPS(cp []byte, fn func(*bitstreamColour) bool) bool {
+	if len(cp) < 7 || cp[0] != 1 {
+		return false
+	}
 	numSPS := int(cp[5] & 0x1f)
 	off := 6
 	for i := 0; i < numSPS; i++ {
 		if off+2 > len(cp) {
-			return nil
+			return false
 		}
 		n := int(cp[off])<<8 | int(cp[off+1])
 		off += 2
 		if n < 1 || off+n > len(cp) {
-			return nil
+			return false
 		}
 		sps := cp[off : off+n]
 		off += n
 		if sps[0]&0x1f != 7 { // nal_unit_type 7 = SPS
 			continue
 		}
-		if bc := parseAVCSPS(unescapeRBSP(sps[1:])); bc != nil {
-			return bc
+		if bc := parseAVCSPS(unescapeRBSP(sps[1:])); bc != nil && fn(bc) {
+			return true
 		}
 	}
-	return nil
+	return true
 }
 
 // chromaSubsampling is the width and height of a chroma sample in luma samples (SubWidthC, SubHeightC) for a
@@ -424,7 +454,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	profileIDC := r.bits(8)
 	constraints := r.bits(8)       // constraint_set0..5 flags (bits 7..2) + reserved
 	bc.level = avcLevel(r.bits(8)) // level_idc (conventional level)
-	r.ue()                         // seq_parameter_set_id
+	bc.avc.id = r.ue()             // seq_parameter_set_id
 	bc.profile = avcProfileName(profileIDC, constraints)
 
 	bc.chroma = u16p(1) // Baseline/Main/Extended are always 4:2:0
@@ -440,7 +470,7 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 			bc.chroma = u16p(uint16(cf))
 		}
 		if cf == 3 {
-			r.bit() // separate_colour_plane_flag
+			bc.avc.separatePlanes = r.bit() == 1
 		}
 		bdl := r.ue() // bit_depth_luma_minus8
 		r.ue()        // bit_depth_chroma_minus8
@@ -462,15 +492,16 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 			}
 		}
 	}
-	r.ue() // log2_max_frame_num_minus4
+	bc.avc.frameNumBits = int(r.ue()) + 4 // log2_max_frame_num_minus4; the slice side bounds it
 	pocType := r.ue()
+	bc.avc.pocType = int(pocType)
 	switch pocType {
 	case 0:
-		r.ue() // log2_max_pic_order_cnt_lsb_minus4
+		bc.avc.pocLsbBits = int(r.ue()) + 4 // log2_max_pic_order_cnt_lsb_minus4
 	case 1:
-		r.bit() // delta_pic_order_always_zero_flag
-		r.se()  // offset_for_non_ref_pic
-		r.se()  // offset_for_top_to_bottom_field
+		bc.avc.deltaAlwaysZero = r.bit() == 1
+		r.se() // offset_for_non_ref_pic
+		bc.avc.offsetTopBottom = r.se()
 		for n := r.ueMax(255); n > 0; n-- {
 			r.se() // num_ref_frames_in_pic_order_cnt_cycle (≤255)
 		}
@@ -480,10 +511,11 @@ func parseAVCSPS(rbsp []byte) *bitstreamColour {
 	widthMbs := r.ue() + 1       // pic_width_in_mbs_minus1
 	heightMapUnits := r.ue() + 1 // pic_height_in_map_units_minus1
 	frameMbsOnly := r.bit() == 1 // 1 → progressive
-	bc.scanType = "progressive"
-	if !frameMbsOnly {
-		bc.scanType = "interlaced" // field coding allowed; the order is not in the SPS
-		r.bit()                    // mb_adaptive_frame_field_flag
+	if frameMbsOnly {
+		bc.scanType = "progressive"
+	} else {
+		bc.avc.fieldCoding = true // allowed only: the slices say whether a picture is a field
+		bc.avc.mbaff = r.bit() == 1
 	}
 	r.bit() // direct_8x8_inference_flag
 	heightUnits := uint32(2)
@@ -530,6 +562,48 @@ func parseAVCVUI(r *bitReader, bc *bitstreamColour) {
 	vuiTiming(*r, bc, false)
 }
 
+// avcVUIPicTiming reads, after the VUI timing, what a picture timing SEI needs:
+// the HRD delay lengths and pic_struct_present_flag. A VUI cut short leaves
+// picStruct false.
+func avcVUIPicTiming(r *bitReader, bc *bitstreamColour) {
+	nal := r.bit() == 1
+	if nal {
+		bc.avc.cpbLen, bc.avc.dpbLen = avcHRDDelayLengths(r)
+	}
+	vcl := r.bit() == 1
+	if vcl {
+		c, d := avcHRDDelayLengths(r)
+		if !nal {
+			bc.avc.cpbLen, bc.avc.dpbLen = c, d
+		}
+	}
+	if nal || vcl {
+		r.bit() // low_delay_hrd_flag
+	}
+	ps := r.bit() == 1
+	if !r.err {
+		bc.avc.cpbDpbDelays = nal || vcl
+		bc.avc.picStruct = ps
+	}
+}
+
+// avcHRDDelayLengths reads hrd_parameters() and returns the widths of
+// cpb_removal_delay and dpb_output_delay.
+func avcHRDDelayLengths(r *bitReader) (cpb, dpb int) {
+	n := r.ueMax(31) + 1 // cpb_cnt_minus1
+	r.bits(8)            // bit_rate_scale, cpb_size_scale
+	for i := uint32(0); i < n && !r.err; i++ {
+		r.ue()  // bit_rate_value_minus1
+		r.ue()  // cpb_size_value_minus1
+		r.bit() // cbr_flag
+	}
+	r.bits(5) // initial_cpb_removal_delay_length_minus1
+	cpb = int(r.bits(5)) + 1
+	dpb = int(r.bits(5)) + 1
+	r.bits(5) // time_offset_length
+	return cpb, dpb
+}
+
 // vuiTiming reads the VUI timing after the colour on a copy of r, so a VUI cut short there loses nothing read before; hevc says which layout.
 func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
 	if r.err {
@@ -540,7 +614,11 @@ func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
 		r.ue()
 	}
 	if hevc {
-		r.bits(3)         // neutral_chroma_indication, field_seq, frame_field_info_present
+		r.bit() // neutral_chroma_indication_flag
+		fieldSeq, ffi := r.bit() == 1, r.bit() == 1
+		if !r.err {
+			bc.hevcFieldSeq, bc.hevcFrameFieldInfo = fieldSeq, ffi
+		}
 		if r.bit() == 1 { // default_display_window_flag
 			r.ue()
 			r.ue()
@@ -557,6 +635,9 @@ func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
 				bc.fpsDen = 2 * units
 			}
 		}
+	}
+	if !hevc && !r.err {
+		avcVUIPicTiming(&r, bc)
 	}
 }
 
@@ -692,6 +773,9 @@ func hevcColour(cp []byte) *bitstreamColour {
 				parseHEVCSPS(unescapeRBSP(nal[2:]), bc) // strip 2-byte NAL header
 			}
 		}
+	}
+	if bc.scanType == "" && bc.hevcFieldSeq { // the source flags left it open; every picture is a field
+		bc.scanType = "interlaced"
 	}
 	// A Main 10 header saying 8 bits contradicts its profile (seen on real files whose stream is 10-bit): the profile wins.
 	if !bc.spsDepth && cp[1]&0x1f == 2 && bc.bitDepth != nil && *bc.bitDepth == 8 {

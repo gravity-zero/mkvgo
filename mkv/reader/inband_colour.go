@@ -179,11 +179,19 @@ func WithSampledKeyframes(n int) ReadOption {
 //     HDR10 muxes write it, keeping only the in-band copy (HEVC SEI 137/144, AV1
 //     HDR_MDCV/HDR_CLL metadata OBUs): the missing part is filled from the first
 //     sample, so Track.HDR - and the mdcv/clli an MP4 or fMP4 init carries - no
-//     longer depend on which copy the muxer kept. The container wins per part.
+//     longer depend on which copy the muxer kept. The container wins per part;
+//   - H.264 whose SPS allows field coding (frame_mbs_only_flag 0) and whose
+//     container states no FlagInterlaced: within the first maxScanSamples
+//     samples, ScanType becomes "interlaced" on proof -
+//     a field-coded slice, a frame whose two fields have different picture
+//     order counts, a picture timing SEI showing a field alone or stating an
+//     interlaced ct_type, or top/bottom pic_struct on an MBAFF stream with no
+//     sign of soft telecine. FieldOrder gets the order those state when they
+//     all agree. Without proof both stay "".
 //
 // The cost is paid only for those tracks; files that carry the description in
 // the header never read a frame. The read is bounded to the first sample per
-// track.
+// track, maxScanSamples for the H.264 scan type.
 func WithInBandColourFallback() ReadOption {
 	return func(o *readOpts) { o.inBandColour = true }
 }
@@ -201,13 +209,28 @@ const maxInBandBlocks = 128
 // cluster, nothing usable in the frame) silently leaves the fields unset,
 // exactly as before the option.
 func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Container) {
-	need := make(map[uint64]*mkv.Track)
+	need := make(map[uint64]*mkv.Track) // first sample still to read
+	type scanning struct {
+		t    *mkv.Track
+		s    scanner
+		left int
+	}
+	scans := make(map[uint64]*scanning)
 	for i := range c.Tracks {
-		if t := &c.Tracks[i]; needsInBandColour(t) || needsInBandHDR(t) {
+		t := &c.Tracks[i]
+		if needsInBandColour(t) || needsInBandHDR(t) {
 			need[t.ID] = t
 		}
+		if needsInBandScan(t) {
+			scans[t.ID] = &scanning{t: t, s: newScanner(t), left: maxScanSamples}
+		}
 	}
-	if len(need) == 0 {
+	defer func() {
+		for _, sc := range scans {
+			sc.s.apply(sc.t)
+		}
+	}()
+	if len(need) == 0 && len(scans) == 0 {
 		return
 	}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
@@ -217,7 +240,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	if err != nil {
 		return
 	}
-	for i := 0; i < maxInBandBlocks && len(need) > 0; i++ {
+	for i := 0; i < maxInBandBlocks && len(need)+len(scans) > 0; i++ {
 		if ctx.Err() != nil {
 			return
 		}
@@ -225,14 +248,19 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 		if err != nil {
 			return
 		}
-		t, ok := need[blk.TrackNumber]
-		if !ok {
-			continue
+		if t, ok := need[blk.TrackNumber]; ok {
+			delete(need, blk.TrackNumber) // first sample carries the parameter sets
+			stated := *t
+			applyInBandHeader(t, blk.Data)
+			recordDerived(t, &stated)
 		}
-		delete(need, blk.TrackNumber) // first sample carries the parameter sets
-		stated := *t
-		applyInBandHeader(t, blk.Data)
-		recordDerived(t, &stated)
+		if sc, ok := scans[blk.TrackNumber]; ok {
+			sc.s.feed(blk.Data, false)
+			if sc.left--; sc.left == 0 || sc.s.done() {
+				sc.s.apply(sc.t)
+				delete(scans, blk.TrackNumber)
+			}
+		}
 	}
 }
 
@@ -241,7 +269,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 // bare hvcC and no colour, a VP9 track with no vpcC, or an HDR HEVC/AV1 track
 // whose static metadata the container does not carry (see
 // WithInBandColourFallback). Exposed so the mp4 package can drive the same
-// fallback off its sample table.
+// fallback off its sample table; the H.264 scan type is NewInBandScan's.
 func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needsInBandHDR(t) }
 
 // ApplyInBandColour fills t from its first sample: for HEVC, one

@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -76,5 +77,54 @@ func TestContainerScanWinsOverSPS(t *testing.T) {
 	tr := readFirstTrack(t, buildMKV(te))
 	if tr.ScanType != "interlaced" || tr.FieldOrder != "" {
 		t.Errorf("ScanType/FieldOrder = %q/%q, want interlaced/\"\"", tr.ScanType, tr.FieldOrder)
+	}
+}
+
+// TestAVCScanNeedsProof: an H.264 track is interlaced only when the container
+// says so; frame_mbs_only_flag=0 alone leaves the scan type unknown.
+func TestAVCScanNeedsProof(t *testing.T) {
+	cases := []struct {
+		name         string
+		frameMbsOnly bool
+		video        []byte
+		scan, order  string
+	}{
+		{"field coding allowed, no flag", false, nil, "", ""},
+		{"field coding allowed, FlagInterlaced 1", false, masterElem(mkv.IDVideo, uintElem(mkv.IDFlagInterlaced, 1, 1)), "interlaced", ""},
+		{"field coding allowed, FieldOrder tt", false, masterElem(mkv.IDVideo, uintElem(mkv.IDFlagInterlaced, 1, 1), uintElem(mkv.IDFieldOrder, 1, 1)), "interlaced", "tt"},
+		{"field coding allowed, FlagInterlaced 2", false, masterElem(mkv.IDVideo, uintElem(mkv.IDFlagInterlaced, 2, 1)), "progressive", "progressive"},
+		{"frame_mbs_only", true, nil, "progressive", "progressive"},
+	}
+	for _, c := range cases {
+		elems := [][]byte{
+			uintElem(mkv.IDTrackNumber, 1, 1),
+			uintElem(mkv.IDTrackType, mkv.TrackTypeVideo, 1),
+			strElem(mkv.IDCodecID, "V_MPEG4/ISO/AVC"),
+			bytesElem(mkv.IDCodecPrivate, buildHighSPSAvcCScan(1, 1, 1, c.frameMbsOnly)),
+		}
+		if c.video != nil {
+			elems = append(elems, c.video)
+		}
+		tr := readFirstTrack(t, buildMKV(trackEntry(elems...)))
+		if tr.ScanType != c.scan || tr.FieldOrder != c.order {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, tr.ScanType, tr.FieldOrder, c.scan, c.order)
+		}
+	}
+}
+
+// TestFieldOrderSwappedValuesReadAsTheProber: files ffmpeg wrote from tff and bff
+// interlaced encodes, FieldOrder 9 and 14 (the "swapped" values), read with the
+// names the reference prober gives them - the first letter is the field coded
+// first: 9 "tb", 14 "bt".
+func TestFieldOrderSwappedValuesReadAsTheProber(t *testing.T) {
+	for file, want := range map[string]string{"h264_fieldorder_9.mkv": "tb", "h264_fieldorder_14.mkv": "bt"} {
+		data, err := os.ReadFile("../../internal/testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr := readFirstTrack(t, data)
+		if tr.ScanType != "interlaced" || tr.FieldOrder != want {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want interlaced/%q", file, tr.ScanType, tr.FieldOrder, want)
+		}
 	}
 }
