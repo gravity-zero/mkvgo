@@ -179,11 +179,16 @@ func WithSampledKeyframes(n int) ReadOption {
 //     HDR10 muxes write it, keeping only the in-band copy (HEVC SEI 137/144, AV1
 //     HDR_MDCV/HDR_CLL metadata OBUs): the missing part is filled from the first
 //     sample, so Track.HDR - and the mdcv/clli an MP4 or fMP4 init carries - no
-//     longer depend on which copy the muxer kept. The container wins per part.
+//     longer depend on which copy the muxer kept. The container wins per part;
+//   - H.264 whose SPS allows field coding (frame_mbs_only_flag 0) and whose
+//     container states no FlagInterlaced: ScanType becomes "interlaced" when a
+//     slice is field-coded (field_pic_flag 1) within the first maxScanSamples
+//     samples (the first sample on MP4). Frame-coded slices prove nothing - MBAFF
+//     codes fields inside frames - so the scan type then stays "".
 //
 // The cost is paid only for those tracks; files that carry the description in
 // the header never read a frame. The read is bounded to the first sample per
-// track.
+// track, maxScanSamples for the H.264 scan type.
 func WithInBandColourFallback() ReadOption {
 	return func(o *readOpts) { o.inBandColour = true }
 }
@@ -202,9 +207,15 @@ const maxInBandBlocks = 128
 // exactly as before the option.
 func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Container) {
 	need := make(map[uint64]*mkv.Track)
+	scan := make(map[uint64]int) // samples left to look for a field-coded slice
 	for i := range c.Tracks {
-		if t := &c.Tracks[i]; needsInBandColour(t) || needsInBandHDR(t) {
+		t := &c.Tracks[i]
+		if needsInBandColour(t) || needsInBandHDR(t) {
 			need[t.ID] = t
+		}
+		if needsInBandScan(t) {
+			need[t.ID] = t
+			scan[t.ID] = maxScanSamples
 		}
 	}
 	if len(need) == 0 {
@@ -229,27 +240,38 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 		if !ok {
 			continue
 		}
+		if left, scanning := scan[blk.TrackNumber]; scanning && left < maxScanSamples {
+			applyInBandHeader(t, blk.Data) // a later sample: only the scan type is still open
+		} else {
+			stated := *t
+			applyInBandHeader(t, blk.Data)
+			recordDerived(t, &stated)
+		}
+		if left := scan[blk.TrackNumber] - 1; left > 0 && t.ScanType == "" {
+			scan[blk.TrackNumber] = left
+			continue
+		}
 		delete(need, blk.TrackNumber) // first sample carries the parameter sets
-		stated := *t
-		applyInBandHeader(t, blk.Data)
-		recordDerived(t, &stated)
 	}
 }
 
 // NeedsInBandColour reports whether t is a video track whose stream
 // description can only be completed from its first sample: an HEVC track with a
 // bare hvcC and no colour, a VP9 track with no vpcC, or an HDR HEVC/AV1 track
-// whose static metadata the container does not carry (see
-// WithInBandColourFallback). Exposed so the mp4 package can drive the same
+// whose static metadata the container does not carry, or an H.264 track whose
+// scan type only its slices can settle (see WithInBandColourFallback). Exposed so the mp4 package can drive the same
 // fallback off its sample table.
-func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needsInBandHDR(t) }
+func NeedsInBandColour(t *mkv.Track) bool {
+	return needsInBandColour(t) || needsInBandHDR(t) || needsInBandScan(t)
+}
 
 // ApplyInBandColour fills t from its first sample: for HEVC, one
 // length-prefixed access unit - the SPS VUI, an Alternative Transfer
 // Characteristics SEI override if present, and the HDR10 static-metadata SEI
 // messages; for VP9, the keyframe's uncompressed header - profile, bit depth,
 // chroma subsampling, range; for AV1, the HDR10 metadata OBUs of the temporal
-// unit. Only what the container left unknown is filled. Safe on any input;
+// unit; for H.264, ScanType "interlaced" when a slice is field-coded. Only what
+// the container left unknown is filled. Safe on any input;
 // leaves the fields unset on failure.
 func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame) }
 
@@ -292,6 +314,9 @@ func applyInBandHeader(t *mkv.Track, frame []byte) {
 	}
 	if needsInBandHDR(t) {
 		applyInBandHDR(t, frame)
+	}
+	if needsInBandScan(t) {
+		applyInBandScan(t, frame)
 	}
 }
 

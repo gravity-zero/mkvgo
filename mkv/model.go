@@ -321,8 +321,9 @@ type Track struct {
 	PixelFormat      string  `json:"pixel_format,omitempty"` // the conventional pix_fmt (e.g. "yuv420p", "yuv420p10le") from chroma subsampling + bit depth
 	// ScanType is how the pictures are coded - "progressive" or "interlaced" - from
 	// the Matroska FlagInterlaced element (0x9A), the H.264 frame_mbs_only_flag (1
-	// only: 0 allows field coding without proving it) or the hvcC source flags;
-	// "" when unknown. It says nothing about which field comes first: that is
+	// only: 0 allows field coding without proving it; with WithInBandColourFallback
+	// a field-coded slice then proves "interlaced") or the hvcC source flags; ""
+	// when unknown. It says nothing about which field comes first: that is
 	// FieldOrder, which is known far less often.
 	ScanType string `json:"scan_type,omitempty"`
 	// FieldOrder is the conventional field_order - "progressive", or for interlaced

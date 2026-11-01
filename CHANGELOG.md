@@ -17,6 +17,13 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   it. A consumer that halved the frame rate on `interlaced` should treat `""`
   as unknown. `FlagInterlaced` 1 still gives `interlaced`.
 
+### Added
+
+- The in-band option (`WithInBandColourFallback`, `mp4.Options.InBandColour`,
+  always on in the remux and plan entry points) gives such a track
+  `interlaced` when a slice of its first 16 samples is field-coded
+  (`field_pic_flag` 1). An MBAFF stream codes frames and stays `""`.
+
 ## [0.63.0] - 2026-11-01
 
 ### Breaking
