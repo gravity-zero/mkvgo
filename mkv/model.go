@@ -322,13 +322,14 @@ type Track struct {
 	// ScanType is how the pictures are coded - "progressive" or "interlaced" - from
 	// the Matroska FlagInterlaced element (0x9A), the H.264 frame_mbs_only_flag (1
 	// only: 0 allows field coding without proving it; with WithInBandColourFallback
-	// a field-coded slice then proves "interlaced") or the hvcC source flags; ""
+	// the first samples may then prove "interlaced") or the hvcC source flags; ""
 	// when unknown. It says nothing about which field comes first: that is
 	// FieldOrder, which is known far less often.
 	ScanType string `json:"scan_type,omitempty"`
 	// FieldOrder is the conventional field_order - "progressive", or for interlaced
 	// video "tt"/"bb"/"tb"/"bt" - only when the source states it: the Matroska
-	// FieldOrder element (0x9D), or a progressive ScanType (progressive video has no
+	// FieldOrder element (0x9D), the first samples of an H.264 track under
+	// WithInBandColourFallback, or a progressive ScanType (progressive video has no
 	// order to know). "" when unknown. No order is invented when the source
 	// does not state one. JSON written before the two fields were
 	// separate carried "interlaced" here; UnmarshalJSON moves it to ScanType.

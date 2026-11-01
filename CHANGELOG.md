@@ -20,9 +20,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 ### Added
 
 - The in-band option (`WithInBandColourFallback`, `mp4.Options.InBandColour`,
-  always on in the remux and plan entry points) gives such a track
-  `interlaced` when a slice of its first 16 samples is field-coded
-  (`field_pic_flag` 1). An MBAFF stream codes frames and stays `""`.
+  always on in the remux and plan entry points) reads the first 16 samples of
+  such a track and gives it `interlaced` on proof - field-coded slices, frames
+  whose fields have different picture order counts, or the picture timing SEI -
+  with `FieldOrder` `tt`/`bb` when the samples agree. See
+  [docs/library.md](docs/library.md).
 
 ## [0.63.0] - 2026-11-01
 
