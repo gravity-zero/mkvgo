@@ -160,6 +160,12 @@ func (s *avcScan) done() bool { return s.interlaced && len(s.structOrders) > 1 }
 // the head of a cut slice is still read.
 func (s *avcScan) feed(frame []byte, truncated bool) {
 	defer func() { _ = recover() }() // the walkers bound every length; a frame they misread must not end the read
+	s.walk(frame, truncated)
+}
+
+// walk is feed without the backstop, which the fuzz target calls so a missing
+// bound panics rather than hides.
+func (s *avcScan) walk(frame []byte, truncated bool) {
 	var seis [][]byte
 	var picSPS *avcSPSInfo
 	forEachLengthPrefixed(frame, s.nalLen, truncated, func(nal []byte) {
@@ -554,6 +560,11 @@ func newHEVCScan(cp []byte) *hevcScan {
 
 func (s *hevcScan) feed(frame []byte, truncated bool) {
 	defer func() { _ = recover() }() // the walkers bound every length; a frame they misread must not end the read
+	s.walk(frame, truncated)
+}
+
+// walk is feed without the backstop, for the fuzz target.
+func (s *hevcScan) walk(frame []byte, truncated bool) {
 	forEachLengthPrefixed(frame, s.nalLen, truncated, func(nal []byte) {
 		if len(nal) < 3 {
 			return

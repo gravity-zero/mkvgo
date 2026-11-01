@@ -32,7 +32,7 @@ func FuzzCodecColour(f *testing.F) {
 			// recover() in parseCodecColour is only a last-resort backstop and must
 			// never be the thing that saves us here: a panic in one of these aborts
 			// the fuzz, exposing a missing bound rather than masking it.
-			for _, bc := range []*bitstreamColour{avcColour(cp), hevcColour(cp), av1Colour(cp), vp9Colour(cp)} {
+			for _, bc := range []*bitstreamColour{avcColour(cp), hevcColour(cp), av1Colour(cp), vp9Colour(cp), mpeg2Colour(cp)} {
 				if bc != nil && bc.bitDepth != nil {
 					switch *bc.bitDepth {
 					case 8, 10, 12: // the only depths real video uses
