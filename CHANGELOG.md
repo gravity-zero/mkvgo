@@ -29,7 +29,9 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   such a track and gives it `interlaced` on proof - field-coded slices, frames
   whose fields have different picture order counts, or the picture timing SEI -
   with `FieldOrder` `tt`/`bb` when the samples agree; on MP4 too, and for an
-  `avc3` record from the SPS the samples carry. `reader.NewInBandScan` drives
+  `avc3` record from the SPS the samples carry. An HEVC track whose hvcC
+  states both source flags or neither is `interlaced` when its SPS codes every
+  picture as a field, or, with the option, when its picture timing SEI says so. `reader.NewInBandScan` drives
   it off another sample table. See [docs/library.md](docs/library.md).
 
 ## [0.63.0] - 2026-11-01

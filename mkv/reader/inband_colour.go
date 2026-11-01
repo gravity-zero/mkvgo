@@ -212,7 +212,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	need := make(map[uint64]*mkv.Track) // first sample still to read
 	type scanning struct {
 		t    *mkv.Track
-		s    *avcScan
+		s    scanner
 		left int
 	}
 	scans := make(map[uint64]*scanning)
@@ -222,7 +222,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			need[t.ID] = t
 		}
 		if needsInBandScan(t) {
-			scans[t.ID] = &scanning{t: t, s: newAVCScan(t.CodecPrivate), left: maxScanSamples}
+			scans[t.ID] = &scanning{t: t, s: newScanner(t), left: maxScanSamples}
 		}
 	}
 	defer func() {

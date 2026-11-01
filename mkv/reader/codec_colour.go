@@ -18,25 +18,28 @@ import "github.com/gravity-zero/mkvgo/mkv"
 // bitstreamColour holds the per-field values recovered from a bitstream. Each is
 // nil when the bitstream did not carry it.
 type bitstreamColour struct {
-	primaries  *uint16 // CICP colour_primaries
-	transfer   *uint16 // CICP transfer_characteristics
-	matrix     *uint16 // CICP matrix_coefficients (conventional color_space)
-	rng        *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
-	bitDepth   *uint16 // luma bit depth (8/10/12)
-	spsDepth   bool    // bitDepth comes from the SPS, not a configuration record header
-	fpsNum     uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
-	fpsDen     uint32
-	fpsFixed   bool    // the timing is a frame rate, not a clock that may tick faster (H.264 fixed_frame_rate_flag)
-	profile    string  // e.g. "Main 10"
-	level      *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
-	sarWidth   uint32  // VUI sample aspect ratio width (0 when absent/square)
-	sarHeight  uint32  // VUI sample aspect ratio height
-	width      uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
-	height     uint32
-	chroma     *uint16    // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
-	scanType   string     // "progressive" from H.264 frame_mbs_only_flag=1, "progressive"/"interlaced" from the hvcC source flags; "" unknown
-	avc        avcSPSInfo // what H.264 slice headers and SEI need from this SPS
-	determined bool       // the bitstream's colour signalling was read (VUI/color_config),
+	primaries *uint16 // CICP colour_primaries
+	transfer  *uint16 // CICP transfer_characteristics
+	matrix    *uint16 // CICP matrix_coefficients (conventional color_space)
+	rng       *uint16 // Matroska Range: 1=limited/tv, 2=full/pc
+	bitDepth  *uint16 // luma bit depth (8/10/12)
+	spsDepth  bool    // bitDepth comes from the SPS, not a configuration record header
+	fpsNum    uint32  // frame rate the SPS VUI timing states, fpsNum/fpsDen; 0 when absent
+	fpsDen    uint32
+	fpsFixed  bool    // the timing is a frame rate, not a clock that may tick faster (H.264 fixed_frame_rate_flag)
+	profile   string  // e.g. "Main 10"
+	level     *uint16 // level_idc (conventional level): H.264 10×level, HEVC 30×level, AV1 seq_level_idx
+	sarWidth  uint32  // VUI sample aspect ratio width (0 when absent/square)
+	sarHeight uint32  // VUI sample aspect ratio height
+	width     uint32  // the coded picture after cropping, as the SPS states it; 0 when not read
+	height    uint32
+	chroma    *uint16    // chroma_format_idc (0 mono, 1 4:2:0, 2 4:2:2, 3 4:4:4); nil unknown
+	scanType  string     // "progressive" from H.264 frame_mbs_only_flag=1, "progressive"/"interlaced" from the hvcC source flags; "" unknown
+	avc       avcSPSInfo // what H.264 slice headers and SEI need from this SPS
+	// HEVC VUI: every picture is a field (field_seq_flag), and picture timing
+	// SEI carry pic_struct and source_scan_type (frame_field_info_present_flag).
+	hevcFieldSeq, hevcFrameFieldInfo bool
+	determined                       bool // the bitstream's colour signalling was read (VUI/color_config),
 	// even when it resolves to "unspecified": distinguishes a confirmed-SDR stream
 	// from one whose colour could not be read at all. See Track.ColourDetermined.
 }
@@ -598,7 +601,11 @@ func vuiTiming(r bitReader, bc *bitstreamColour, hevc bool) {
 		r.ue()
 	}
 	if hevc {
-		r.bits(3)         // neutral_chroma_indication, field_seq, frame_field_info_present
+		r.bit() // neutral_chroma_indication_flag
+		fieldSeq, ffi := r.bit() == 1, r.bit() == 1
+		if !r.err {
+			bc.hevcFieldSeq, bc.hevcFrameFieldInfo = fieldSeq, ffi
+		}
 		if r.bit() == 1 { // default_display_window_flag
 			r.ue()
 			r.ue()
@@ -753,6 +760,9 @@ func hevcColour(cp []byte) *bitstreamColour {
 				parseHEVCSPS(unescapeRBSP(nal[2:]), bc) // strip 2-byte NAL header
 			}
 		}
+	}
+	if bc.scanType == "" && bc.hevcFieldSeq { // the source flags left it open; every picture is a field
+		bc.scanType = "interlaced"
 	}
 	// A Main 10 header saying 8 bits contradicts its profile (seen on real files whose stream is 10-bit): the profile wins.
 	if !bc.spsDepth && cp[1]&0x1f == 2 && bc.bitDepth != nil && *bc.bitDepth == 8 {

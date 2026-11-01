@@ -384,8 +384,8 @@ func TestInBandScanAPI(t *testing.T) {
 	stated := open
 	stated.ScanType = "progressive"
 	frames := mkv.Track{Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: scanAvcC([][]byte{scanSPS{frameOnly: true}.nal()}, nil)}
-	hevc := mkv.Track{Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: avcc}
-	for _, tr := range []mkv.Track{stated, frames, hevc} {
+	vp9 := mkv.Track{Type: mkv.VideoTrack, Codec: "vp9", CodecPrivate: avcc}
+	for _, tr := range []mkv.Track{stated, frames, vp9} {
 		if NewInBandScan(&tr) != nil {
 			t.Errorf("codec %q scan %q: a scan was returned", tr.Codec, tr.ScanType)
 		}
@@ -457,4 +457,54 @@ func frameOnlySlice(frameOnly bool, o scanSlice) []byte {
 	b.u(0, 4) // pic_order_cnt_lsb
 	b.u(0xffff, 16)
 	return append([]byte{0x65}, b.bytes()...)
+}
+
+// hevcPicTimingSEI is a prefix SEI NAL holding one picture timing message that
+// opens on pic_struct and source_scan_type (frame_field_info_present_flag 1).
+func hevcPicTimingSEI(picStruct, sst uint32) []byte {
+	b := &tbw{}
+	b.u(picStruct, 4)
+	b.u(sst, 2)
+	b.u(0, 1) // duplicate_flag
+	b.u(0, 9)
+	p := b.bytes()
+	return append(append([]byte{39 << 1, 0x01, 0x01, byte(len(p))}, p...), 0x80)
+}
+
+// TestHEVCScanPicTiming: a picture is interlaced when its timing SEI says so
+// (source_scan_type 0) or shows a field, never when it says its source is
+// progressive; pic_struct 3-6 and 9-12 name the order.
+func TestHEVCScanPicTiming(t *testing.T) {
+	cases := []struct {
+		name        string
+		sei         [][2]uint32 // pic_struct, source_scan_type per sample
+		scan, order string
+	}{
+		{"interlaced source, frame", [][2]uint32{{0, 0}}, "interlaced", ""},
+		{"top field before its bottom", [][2]uint32{{11, 2}, {12, 2}}, "interlaced", ""},
+		{"top field before its bottom, alone", [][2]uint32{{11, 2}, {10, 2}}, "interlaced", "tt"},
+		{"bottom field after its top is top first", [][2]uint32{{10, 0}}, "interlaced", "tt"},
+		{"top field after its bottom", [][2]uint32{{9, 0}}, "interlaced", "bb"},
+		{"top-bottom frame, interlaced source", [][2]uint32{{3, 0}}, "interlaced", "tt"},
+		{"top-bottom frame, source unknown", [][2]uint32{{3, 2}}, "", ""},
+		{"field, progressive source (PsF)", [][2]uint32{{1, 1}}, "", ""},
+		{"frames, progressive source", [][2]uint32{{0, 1}, {0, 1}}, "", ""},
+		{"field alone", [][2]uint32{{2, 2}}, "interlaced", ""},
+	}
+	for _, c := range cases {
+		s := &hevcScan{nalLen: 4, frameFieldInfo: true, orders: map[string]bool{}}
+		for _, v := range c.sei {
+			s.feed(au(hevcPicTimingSEI(v[0], v[1])), false)
+		}
+		tr := mkv.Track{Type: mkv.VideoTrack, Codec: "hevc"}
+		s.apply(&tr)
+		if tr.ScanType != c.scan || tr.FieldOrder != c.order {
+			t.Errorf("%s: ScanType/FieldOrder = %q/%q, want %q/%q", c.name, tr.ScanType, tr.FieldOrder, c.scan, c.order)
+		}
+	}
+	s := &hevcScan{nalLen: 4, orders: map[string]bool{}} // no frame_field_info: the SEI opens on other fields
+	s.feed(au(hevcPicTimingSEI(1, 0)), false)
+	if s.interlaced {
+		t.Error("a timing SEI read without frame_field_info_present_flag proved interlaced")
+	}
 }

@@ -236,3 +236,31 @@ func TestMP4InBandScanReadsOneRun(t *testing.T) {
 		t.Errorf("the scan type read %d bytes, past the %d budget", extra, inbandScanBudget)
 	}
 }
+
+// TestHEVCFieldSeqFlag: x265 interlaced (ffmpeg wrote the file) states its
+// source interlaced in the hvcC header and codes every picture as a field
+// (field_seq_flag 1). With both source flags cleared - how an encoder that
+// states neither writes it - field_seq_flag alone still makes it interlaced.
+func TestHEVCFieldSeqFlag(t *testing.T) {
+	data, err := os.ReadFile("../internal/testdata/hevc_x265_interlaced_tff.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(data, []byte("hvcC"))
+	if i < 0 || data[i+4+6]&0xc0 != 0x40 {
+		t.Fatal("fixture: no hvcC stating an interlaced source")
+	}
+	for _, clear := range []bool{false, true} {
+		b := append([]byte(nil), data...)
+		if clear {
+			b[i+4+6] &^= 0xc0
+		}
+		c, _, err := ReadMeta(context.Background(), bytes.NewReader(b), "x.mp4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Tracks[0].ScanType; got != "interlaced" {
+			t.Errorf("source flags cleared %v: ScanType = %q, want interlaced", clear, got)
+		}
+	}
+}

@@ -388,18 +388,45 @@ func forEachLengthPrefixed(frame []byte, nalLen int, truncated bool, fn func(nal
 // InBandScanSamples is how many samples of a track an InBandScan reads at most.
 const InBandScanSamples = maxScanSamples
 
-// InBandScan settles the scan type of an H.264 track over its first samples, the
-// way WithInBandColourFallback does for Matroska (see there for what counts as
-// proof). Exposed so the mp4 package can drive it off its sample table.
-type InBandScan struct{ s *avcScan }
+// scanner settles a track's scan type over its first samples.
+type scanner interface {
+	feed(frame []byte, truncated bool)
+	done() bool
+	apply(t *mkv.Track)
+}
 
-// NewInBandScan returns the scan for t, nil when t needs none: not H.264, a scan
-// type already stated, or an SPS that codes frames only.
-func NewInBandScan(t *mkv.Track) *InBandScan {
-	if !needsInBandScan(t) {
+// newScanner returns the scanner for t, nil when its samples have nothing to
+// settle: a scan type already stated, a codec without one, or a record that
+// already rules interlacing out.
+func newScanner(t *mkv.Track) scanner {
+	if t.Type != mkv.VideoTrack || t.ScanType != "" {
 		return nil
 	}
-	return &InBandScan{newAVCScan(t.CodecPrivate)}
+	switch {
+	case isAVCCodec(t.Codec):
+		if s := newAVCScan(t.CodecPrivate); s != nil {
+			return s
+		}
+	case isHEVCCodec(t.Codec):
+		if s := newHEVCScan(t.CodecPrivate); s != nil {
+			return s
+		}
+	}
+	return nil
+}
+
+// InBandScan settles the scan type of an H.264 or HEVC track over its first
+// samples, the way WithInBandColourFallback does for Matroska (see there for what
+// counts as proof). Exposed so the mp4 package can drive it off its sample table.
+type InBandScan struct{ s scanner }
+
+// NewInBandScan returns the scan for t, nil when t needs none: not H.264 or HEVC,
+// a scan type already stated, or an H.264 SPS that codes frames only.
+func NewInBandScan(t *mkv.Track) *InBandScan {
+	if s := newScanner(t); s != nil {
+		return &InBandScan{s}
+	}
+	return nil
 }
 
 // Feed reads one sample, or its first bytes when truncated. It reports whether
@@ -420,11 +447,87 @@ func isAVCCodec(codec string) bool {
 	return false
 }
 
-// needsInBandScan reports whether t is an H.264 track whose scan type only its
-// samples can settle: no scan type stated, and an SPS that allows field coding.
-func needsInBandScan(t *mkv.Track) bool {
-	if t.Type != mkv.VideoTrack || t.ScanType != "" || !isAVCCodec(t.Codec) {
-		return false
+// needsInBandScan reports whether t's scan type is left for its samples to settle.
+func needsInBandScan(t *mkv.Track) bool { return newScanner(t) != nil }
+
+// hevcScan gathers, over the first samples of an HEVC track whose record leaves
+// the scan type open (both source flags set, or neither), the proof the stream
+// gives: an SPS whose pictures are fields, or picture timing SEI saying a picture
+// is interlaced (source_scan_type 0) or a field (pic_struct 1, 2, 9-12) - unless
+// that picture says its source is progressive.
+type hevcScan struct {
+	nalLen         int
+	frameFieldInfo bool // pic timing SEI open on pic_struct and source_scan_type
+	interlaced     bool
+	orders         map[string]bool
+}
+
+func newHEVCScan(cp []byte) *hevcScan {
+	if len(cp) < 23 || cp[0] != 1 {
+		return nil
 	}
-	return newAVCScan(t.CodecPrivate) != nil
+	s := &hevcScan{nalLen: int(cp[21]&0x03) + 1, orders: map[string]bool{}}
+	if bc := hevcColour(cp); bc != nil {
+		s.frameFieldInfo = bc.hevcFrameFieldInfo
+	}
+	return s
+}
+
+func (s *hevcScan) feed(frame []byte, truncated bool) {
+	defer func() { _ = recover() }() // the walkers bound every length; a frame they misread must not end the read
+	forEachLengthPrefixed(frame, s.nalLen, truncated, func(nal []byte) {
+		if len(nal) < 3 {
+			return
+		}
+		switch (nal[0] >> 1) & 0x3f {
+		case 33: // SPS in-band
+			bc := &bitstreamColour{}
+			parseHEVCSPS(unescapeRBSP(nal[2:]), bc)
+			s.frameFieldInfo = bc.hevcFrameFieldInfo
+			s.interlaced = s.interlaced || bc.hevcFieldSeq
+		case 39: // prefix SEI
+			if s.frameFieldInfo {
+				forEachSEIMessage(unescapeRBSP(nal[2:]), func(pt int, payload []byte) {
+					if pt == 1 { // pic_timing
+						s.picTiming(payload)
+					}
+				})
+			}
+		}
+	})
+}
+
+// picTiming reads pic_struct and source_scan_type, which open an HEVC picture
+// timing SEI when frame_field_info_present_flag is set.
+func (s *hevcScan) picTiming(payload []byte) {
+	r := &bitReader{data: payload}
+	ps, sst := r.bits(4), r.bits(2)
+	if r.err || ps > 12 || sst == 1 { // sst 1: this picture's source is progressive
+		return
+	}
+	field := ps == 1 || ps == 2 || ps >= 9
+	if sst != 0 && !field {
+		return
+	}
+	s.interlaced = true
+	switch ps {
+	case 3, 5, 10, 11: // top shown first: a top-bottom frame, a bottom field after its top, a top field before its bottom
+		s.orders["tt"] = true
+	case 4, 6, 9, 12:
+		s.orders["bb"] = true
+	}
+}
+
+func (s *hevcScan) done() bool { return s.interlaced && len(s.orders) > 1 }
+
+func (s *hevcScan) apply(t *mkv.Track) {
+	if t.ScanType != "" || !s.interlaced {
+		return
+	}
+	t.ScanType = "interlaced"
+	if len(s.orders) == 1 && t.FieldOrder == "" {
+		for o := range s.orders {
+			t.FieldOrder = o
+		}
+	}
 }
