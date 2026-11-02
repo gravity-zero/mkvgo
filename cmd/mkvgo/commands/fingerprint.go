@@ -11,8 +11,9 @@ import (
 // digest per track (decode order) - unaffected by container metadata,
 // track order, or container format (Matroska/WebM/MP4/MOV), so two re-muxes
 // of the same content fingerprint identically. Unlike analyze this is a FULL
-// read: every track's frame payload is hashed. MP4/MOV sources are hashed by
-// remuxing to a temporary Matroska file first - see matroska.Fingerprint.
+// read: every track's frame payload is hashed. MP4/MOV sources are hashed from
+// their samples as the blocks a remux to Matroska would hold, nothing written -
+// see matroska.Fingerprint.
 func CmdFingerprint(args []string) {
 	rest := newFlags("CmdFingerprint").Parse(args)
 	if len(rest) < 1 {

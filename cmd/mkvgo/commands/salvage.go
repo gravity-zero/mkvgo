@@ -25,6 +25,7 @@ const salvageUsage = "usage: mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-
 // a hard failure - the bounded resync scan giving up without reaching a
 // valid Cluster or real EOF, or a genuine I/O error.
 func CmdSalvage(args []string) {
+	requireLocal("salvage", args...)
 	var jsonOut, dryRun, cleanCut bool
 	var deltaPath string
 	var rest []string

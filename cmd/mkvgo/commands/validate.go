@@ -10,6 +10,7 @@ import (
 // printed but do not fail), so the command is scriptable
 // (`mkvgo validate f.mkv && ...`). -strict makes warnings fail too.
 func CmdValidate(args []string) {
+	requireLocal("validate", args...)
 	var strict bool
 	var rest []string
 	fl := newFlags("CmdValidate")
@@ -67,6 +68,9 @@ func CmdCompare(args []string) {
 		FatalUsage("comparing against several files needs -blocks (metadata has no concatenation)")
 	}
 
+	if blocks {
+		requireLocal("compare -blocks", append([]string{pathA}, parts...)...)
+	}
 	a, _ := loadContainer(pathA, false)
 	b, _ := loadContainer(pathB, false)
 	var diffs []matroska.Diff

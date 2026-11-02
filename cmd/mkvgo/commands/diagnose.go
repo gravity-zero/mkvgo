@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
@@ -28,6 +27,7 @@ func mp4Diagnose(ctx context.Context, path string, _ ...matroska.Options) (*matr
 //
 // Exit contract: 0 healthy, 1 findings present (scriptable, like validate).
 func CmdDiagnose(args []string) {
+	requireLocal("diagnose", args...)
 	var jsonOut, deep bool
 	var rest []string
 	fl := newFlags("CmdDiagnose")
@@ -60,6 +60,6 @@ func CmdDiagnose(args []string) {
 		}
 	}
 	if !d.Healthy {
-		os.Exit(1)
+		osExit(1)
 	}
 }

@@ -53,25 +53,25 @@ func main() {
 
 	switch cmd {
 	case "info":
-		commands.RequireArgs(args, 1, "mkvgo info [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["info"])
 		commands.CmdInfo(args[0])
 	case "tracks":
-		commands.RequireArgs(args, 1, "mkvgo tracks [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["tracks"])
 		commands.CmdTracks(args[0])
 	case "chapters":
-		commands.RequireArgs(args, 1, "mkvgo chapters [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["chapters"])
 		commands.CmdChapters(args[0])
 	case "attachments":
-		commands.RequireArgs(args, 1, "mkvgo attachments [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["attachments"])
 		commands.CmdAttachments(args[0])
 	case "tags":
-		commands.RequireArgs(args, 1, "mkvgo tags [-json] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["tags"])
 		commands.CmdTags(args[0])
 	case "probe":
-		commands.RequireArgs(args, 1, "mkvgo probe [-json] [-in-band] [-fps-reads] <file.mkv|.mp4>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["probe"])
 		commands.CmdProbe(args[0])
 	case "keyframes":
-		commands.RequireArgs(args, 1, "mkvgo keyframes [-json] <file.mkv|.mp4>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["keyframes"])
 		commands.CmdKeyframes(args[0])
 	case "to-vtt":
 		commands.CmdToVTT(args)
@@ -108,16 +108,16 @@ func main() {
 	case "join":
 		commands.CmdJoin(args)
 	case "validate":
-		commands.RequireArgs(args, 1, "mkvgo validate [-json] [-strict] <file.mkv>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["validate"])
 		commands.CmdValidate(args)
 	case "track-ends":
-		commands.RequireArgs(args, 1, "mkvgo track-ends <file.mkv> [-json]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["track-ends"])
 		commands.CmdTrackEnds(args)
 	case "cue-health":
-		commands.RequireArgs(args, 1, "mkvgo cue-health <file.mkv> [-json] [-probe]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["cue-health"])
 		commands.CmdCueHealth(args)
 	case "diagnose":
-		commands.RequireArgs(args, 1, "mkvgo diagnose <file.mkv|.mp4> [-json]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["diagnose"])
 		commands.CmdDiagnose(args)
 	case "hash":
 		commands.CmdHash(args)
@@ -127,25 +127,25 @@ func main() {
 		commands.RequireArgs(args, 2, commands.CmdUsage["compare"])
 		commands.CmdCompare(args)
 	case "reindex":
-		commands.RequireArgs(args, 2, "mkvgo reindex <input.mkv> [output.mkv] [--deep-verify] [--replace] [--keep-backup] [--resync] [--clean-cut] [--strict] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 2, commands.CmdUsage["reindex"])
 		commands.CmdReindex(args)
 	case "reindex-inplace":
-		commands.RequireArgs(args, 1, "mkvgo reindex-inplace <file.mkv> [--deep-verify] [--rollback] [--strict] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["reindex-inplace"])
 		commands.CmdReindexInPlace(args)
 	case "salvage":
-		commands.RequireArgs(args, 1, "mkvgo salvage <in.mkv> <out.mkv> [--json] [--clean-cut] [--rollback-delta <file>] | mkvgo salvage <in.mkv> --dry-run [--json] [--clean-cut]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["salvage"])
 		commands.CmdSalvage(args)
 	case "rollback":
-		commands.RequireArgs(args, 3, "mkvgo rollback <repaired.mkv> <delta.rbd> <restored.mkv>")
+		commands.RequireArgs(args, 3, commands.CmdUsage["rollback"])
 		commands.CmdRollback(args)
 	case "retime":
-		commands.RequireArgs(args, 3, "mkvgo retime <file.mkv|.mp4> --shift <track>=<ms> [--shift ...] [--in-place | --replace] [--keep-backup] [--deep-verify] [--strict] [--rollback-delta <file>]")
+		commands.RequireArgs(args, 3, commands.CmdUsage["retime"])
 		commands.CmdRetime(args)
 	case "serve":
-		commands.RequireArgs(args, 1, "mkvgo serve <file.mkv> [-addr 127.0.0.1:8478] [--direct | --auto [-target mse-generic]]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["serve"])
 		commands.CmdServe(args)
 	case "serve-growing":
-		commands.RequireArgs(args, 1, "mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6]")
+		commands.RequireArgs(args, 1, commands.CmdUsage["serve-growing"])
 		commands.CmdServeGrowing(args)
 	case "merge":
 		commands.CmdMerge(args)
@@ -184,19 +184,19 @@ func main() {
 	case "extract-frames":
 		commands.CmdExtractFrames(args)
 	case "analyze":
-		commands.RequireArgs(args, 1, "mkvgo analyze [-json] <file.mkv|url>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["analyze"])
 		commands.CmdAnalyze(args)
 	case "fingerprint":
-		commands.RequireArgs(args, 1, "mkvgo fingerprint [-json] <file.mkv|.mp4|url>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["fingerprint"])
 		commands.CmdFingerprint(args)
 	case "playability":
-		commands.RequireArgs(args, 1, "mkvgo playability [-target name] [-json] <file.mkv|.mp4|url>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["playability"])
 		commands.CmdPlayability(args)
 	case "ladder":
-		commands.RequireArgs(args, 1, "mkvgo ladder [-json] <file.mkv|.mp4|url>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["ladder"])
 		commands.CmdLadder(args)
 	case "ingest":
-		commands.RequireArgs(args, 1, "mkvgo ingest [-target name] [-reindex] [-analyze] [-json] <file.mkv|.mp4|url>")
+		commands.RequireArgs(args, 1, commands.CmdUsage["ingest"])
 		commands.CmdIngest(args)
 	default:
 		if commands.JsonOutput {

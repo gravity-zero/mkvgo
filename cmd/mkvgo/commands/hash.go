@@ -11,6 +11,7 @@ import (
 // the file self-verifying (`mkvgo verify`). Without -o the tags are written
 // in place.
 func CmdHash(args []string) {
+	requireLocal("hash", args...)
 	var outPath string
 	var rest []string
 	fl := newFlags("hash")
@@ -43,6 +44,7 @@ func CmdHash(args []string) {
 // `to-mp4 --hash`). Exits 1 on any mismatch (bit rot, truncation, transfer
 // corruption) - scriptable like validate.
 func CmdVerify(args []string) {
+	requireLocal("verify", args...)
 	newFlags("CmdVerify").Parse(args)
 	if len(args) < 1 {
 		FatalUsage("usage: " + CmdUsage["verify"])

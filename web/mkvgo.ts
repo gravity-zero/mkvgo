@@ -41,6 +41,12 @@ export interface Track {
   language_present?: boolean
   is_default: boolean
   is_forced: boolean
+  /** Disposition flags, present only when set: FlagHearingImpaired, FlagVisualImpaired, FlagTextDescriptions, FlagOriginal, FlagCommentary. */
+  hearing_impaired?: boolean
+  visual_impaired?: boolean
+  text_descriptions?: boolean
+  original?: boolean
+  commentary?: boolean
   width?: number
   height?: number
   display_width?: number
@@ -941,7 +947,7 @@ export interface MkvGoApi {
    * payloads (decode order) plus a Presentation hash for whole-file dedup of
    * re-muxed content, regardless of track order or container metadata. This
    * is a FULL read (every frame payload is hashed), like analyze; Matroska/
-   * WebM sources only.
+   * WebM and MP4/MOV sources (an MP4 hashes as its Matroska remux would).
    */
   fingerprint(input: Uint8Array | Blob, options?: AbortOptions): Promise<FingerprintReport>
 

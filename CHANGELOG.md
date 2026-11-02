@@ -36,6 +36,16 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ### Fixed
 
+- The commands that read the whole file from a local disk (`cue-health`,
+  `track-ends`, `diagnose`, `validate`, `verify`, `hash`, `compare -blocks`,
+  `salvage`) refuse an http(s)/s3:// source with exit 2 and the commands
+  that take one (was a bare "no such file" open error).
+- Docs: the `-json` command list (`verify` has a JSON report, `hash` does
+  not), the jq examples (snake_case keys), `validate` on non-video cues,
+  the remote-capable commands, `diagnose`'s JSON keys and its MP4 usage,
+  `CompareContainers`, `TrackEndsReport.SkippedBytes`, the TypeScript
+  disposition flags; a test now holds the `-json` list and the jq keys to
+  the code, and the usage lines come from one table.
 - On a file cut short: `Analyze` adds a warning that its stats cover what
   arrived (MKV and MP4; an MP4's totals were silent); `Validate` reports the
   cue points naming clusters past the end as `cues-past-end` (was

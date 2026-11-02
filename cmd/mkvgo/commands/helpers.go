@@ -257,10 +257,20 @@ func s3Hybrid() *mkv.FS {
 	}
 }
 
-func OpenMKV(path string) *matroska.Container {
-	if isRemoteURL(path) {
-		FatalUsage("this command needs the full local file; http(s)/s3:// sources are supported by the inspection commands (info, tracks, probe, keyframes, chapters, tags, attachments)")
+// remoteCommands names the commands that read an http(s)/s3:// source, for the refusal of the others.
+const remoteCommands = "info, tracks, probe, keyframes, analyze, chapters, tags, attachments, compare, fingerprint, playability, ladder, ingest, extract-frames, and as the source of to-mp4, from-mp4, to-hls, to-abr, the segment commands and serve"
+
+// requireLocal refuses an http(s)/s3:// path for a command that reads the whole file from a local disk.
+func requireLocal(cmd string, paths ...string) {
+	for _, p := range paths {
+		if isRemoteURL(p) {
+			FatalUsage(fmt.Sprintf("%s needs the file on a local disk: download it first (http(s)/s3:// sources are read by %s)", cmd, remoteCommands))
+		}
 	}
+}
+
+func OpenMKV(path string) *matroska.Container {
+	requireLocal("this command", path)
 	c, err := matroska.Open(cliCtx, path)
 	if err != nil {
 		FatalErr(err)

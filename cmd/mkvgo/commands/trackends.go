@@ -14,6 +14,7 @@ const trackEndsUsage = "usage: mkvgo track-ends <file.mkv> [-json]"
 // picture's end and how far any audio track stops before it (the defect a
 // structurally healthy file hides: playlists promising audio that never comes).
 func CmdTrackEnds(args []string) {
+	requireLocal("track-ends", args...)
 	var jsonOut bool
 	var rest []string
 	fl := newFlags("CmdTrackEnds")

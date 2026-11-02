@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 )
@@ -19,6 +18,7 @@ const cueHealthUsage = "usage: mkvgo cue-health <file.mkv> [-json] [-probe]"
 //
 // Exit contract: 0 healthy, 1 unhealthy (scriptable, like validate).
 func CmdCueHealth(args []string) {
+	requireLocal("cue-health", args...)
 	var jsonOut, probe bool
 	var rest []string
 	fl := newFlags("CmdCueHealth")
@@ -85,6 +85,6 @@ func CmdCueHealth(args []string) {
 		}
 	}
 	if !report.Healthy {
-		os.Exit(1)
+		osExit(1)
 	}
 }

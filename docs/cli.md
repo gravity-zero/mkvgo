@@ -8,7 +8,7 @@ mkvgo <command> [options]
 ```
 
 Global flags:
-- `-json`, `--json` -- the command's report as JSON on stdout (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare, analyze, fingerprint, hash, playability, ladder, ingest, track-ends, cue-health, diagnose, salvage, reindex, reindex-inplace, retime; ignored by commands without a report). An error goes to stderr as `{"error":"...","exit":N}`.
+- `-json`, `--json` -- the command's report as JSON on stdout (info, tracks, chapters, attachments, tags, probe, keyframes, validate, compare, analyze, fingerprint, verify, playability, ladder, ingest, track-ends, cue-health, diagnose, salvage, reindex, reindex-inplace, retime; ignored by commands without a report). An error goes to stderr as `{"error":"...","exit":N}`.
 - `-in-band` -- the inspection commands (`info`, `tracks`, `probe`) complete a video track's description from its first sample where the header leaves it short: colour behind a bare `hvcC`, a VP9 profile with no `vpcC`, HDR10 static metadata (MaxCLL/MaxFALL, mastering display) kept only in the HEVC SEI / AV1 metadata OBUs. It also reads the channel count each AC-3, E-AC-3 and AAC stream states (`stream_channels` in JSON, `channels_mismatch` when the container's `channels` says otherwise; Matroska). One bounded read, only for such a track; the container wins per field. The library's `WithInBandColourFallback` / `mp4.Options.InBandColour`. Ignored on stdin (`-`) and by the writing commands, which always apply it
 - `-fps-reads` -- the inspection commands (`info`, `tracks`, `probe`) let the frame-rate estimate of a Matroska track without DefaultDuration read the block headers it needs in the first 512 KiB, one exact 32-byte read each; off by default, when the estimate uses only the bytes the head read already holds and the statistics tags. The library's `WithFrameRateReads`. On 63 real files without DefaultDuration (local ext4 disk, page cache dropped per file): 12 estimated by default, 63 with the flag, about 126 more reads per file and a median probe of 7.8 ms instead of 5.0 ms (no difference once cached)
 - `-f`, `--force` -- overwrite an existing output file. Without it, every command that writes a new file refuses to clobber an existing one (`out.mkv already exists`); with it, an output that is one of the command's inputs is still refused. `edit-inplace` modifies its input file by design, and `split` overwrites existing parts (but never its source).
@@ -23,8 +23,14 @@ A source is told MP4/MOV or Matroska/WebM from its first bytes, never its extens
 
 **Remote files.** An `http://`/`https://` URL or an `s3://bucket/key` reference
 is accepted as the input by the inspection commands (`info`, `tracks`,
-`probe`, `keyframes`, `analyze`, `chapters`, `tags`, `attachments`) and as
-the **source** of `to-mp4`, `from-mp4` and `to-hls`. Reads go through ranged requests: inspection transfers a few ranged
+`probe`, `keyframes`, `analyze`, `chapters`, `tags`, `attachments`,
+`compare` without `-blocks`, `fingerprint`, `playability`, `ladder`,
+`ingest`, `extract-frames`) and as the **source** of `to-mp4`, `from-mp4`,
+`to-hls`, `to-abr`, `hls-segment`, `abr-segment`, `serve`,
+`forensic-segment` and `watermark-segment`. The commands that read the
+whole file from a local disk (`cue-health`, `track-ends`, `diagnose`,
+`validate`, `verify`, `hash`, `compare -blocks`, `salvage`) refuse a URL
+with exit 2 and the list above. Reads go through ranged requests: inspection transfers a few ranged
 kilobytes whatever the file size; a remux reads sequentially (a streamed
 download). The server must honour `Range` (S3, nginx, caddy… do); one that
 ignores it gets an explicit error, never a silent full download. Remote
@@ -242,7 +248,10 @@ mkvgo fingerprint -json video.mkv    # FingerprintReport
 Check MKV structure for issues. Reports errors and warnings - structural
 (TimecodeScale, duplicate track IDs, missing codec data, backwards
 timecodes…) and **streaming readiness**: a missing Cues index, cue points
-referencing a non-video track (seeking would land on audio - an error),
+referencing a non-video track (an error when no cue keys on video at all -
+every seek lands mid-GOP; a warning, index bloat only, when video cues
+serve the seeks), cue points naming clusters past the end of a cut file
+(`cues-past-end`: re-download the source),
 cue times matching no actual video keyframe (stale index), subtitle blocks
 without BlockDuration (cue end times lost), video without DefaultDuration,
 AAC without its AudioSpecificConfig, undecodable bytes the reader had to
@@ -877,14 +886,15 @@ mkvgo track-ends episode.mkv
 One-call triage: classifies a file and names the remedy for every defect, so a library scan can route each file straight to the right repair without stacking separate probes. It composes the seek-index triage (`cue-health`), the per-track audio start delays (the repack defect where audio content starts late), and a declared-size coherence check; the full tolerant walk (`salvage --dry-run`) runs ONLY when the declared Segment size and the real file size disagree - the head-visible signature of truncation or trailing junk - or when `--deep-verify` asks for it. On a healthy file the whole call costs the head, the first cluster(s) and a tail walk bounded by the index; a file with no Cues is walked from its first cluster (it cannot be judged from its head).
 
 ```
-mkvgo diagnose <file.mkv> [--deep-verify] [-json]
+mkvgo diagnose <file.mkv|.mp4> [--deep-verify] [-json]
 ```
 
 - `--deep-verify` walks the whole file whatever the head says. Damage inside a cluster far from the tail - zeroed bytes in the middle of a file whose index, sizes and head are all sound - is out of reach of the head-mostly checks, and such a file reads healthy without it; with it, the damage map is in the report and every remedy names `reindex --resync`. The cost is one full read, the one a repair would pay anyway: for a scheduled deep scan, not for every pass over a library.
+- `--deep-verify` is Matroska only: an MP4's triage is head-only, its sample tables are checked against the file without reading the media, and the flag changes nothing there.
 - Exit 0 when healthy, 1 when findings are present (scriptable, like `validate`).
 - Finding kinds: `no-index`, `index-misskeyed` (not one video cue), `index-sparse` (video cues too far apart to seek into - the detail names each hole with what a bounded probe found inside it; the remedy is the reindex when a hole holds uncued keyframes, re-acquiring the source when the picture is missing there, re-encoding when the stretch has no keyframe), `index-stale-tracks`, `audio-delay` (per track, with the exact `retime` invocation), `truncated` (source incomplete: recovered X of Y declared bytes - re-download; no tool can restore the tail), `picture-missing` (a stretch the hole probe found without any video block - the picture freezes there whatever the index does; located; re-acquire the source), `audio-short` (an audio track ends more than 5 s before the picture - measured content against content by `track-ends`, a lower bound when the track was silent through the whole tail walked; re-acquire the source, playback pads it with silence), `damaged` (repairable: `reindex --resync`; raised from the tolerant walk, from the tail walk of `track-ends` when it had to pass over an unreadable element with media behind it, and head-only for undecodable bytes ahead of the metadata, in which case every other remedy names `reindex --resync` too, the strict reindex being refused on such a file), `trailing-junk` (surplus bytes past the declared Segment end - benign, a rewrite drops them; never conflated with `truncated`), `streamed-size` (unsealed Segment), `wrong-container` (the content is another container behind this extension - rename or remux; the file is classified once instead of erroring on every scan pass), `sample-table` (MP4 only: a sample table the file cannot hold, or a sample outside every `mdat`; re-download), `undeclared-compression` (a subtitle track stores zlib blocks without declaring it; mkvgo inflates them on read, other readers do not; re-mux the track), `unsized-laced-audio` (laced audio with no frame duration or count: MP4 outputs spread each block's frames over its span; re-mux with a DefaultDuration or write statistics tags).
 - `scope` (`head`, `body`, `tail`) says where a defect of the file's bytes lies: a `damaged` finding in the `body` is media lost in the middle, `truncated` and `trailing-junk` are at the `tail`, undecodable bytes ahead of the first Cluster are at the `head`; `track` is set on every per-track finding. The kinds are constants in the library (`mkv.Finding*`, `mkv.FindingKinds()`).
-- The JSON output carries the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), the source's `timecode_scale` (its declared timebase in nanoseconds per unit, Matroska only - 1000000 is one millisecond and is what nearly every file uses), and the `damage` map when the walk ran.
+- The JSON output carries `file_size`, `declared_size` and `missing_tail_bytes` (the file's size, where it declares it ends, and how much of that is missing from its end), the `track_ends` report (where each track's content really ends, from the tail walk), the full `cue_health` report, every audio track's `audio_delays_ns` (threshold or not), the source's `timecode_scale` (its declared timebase in nanoseconds per unit, Matroska only - 1000000 is one millisecond and is what nearly every file uses), and the `damage` map when the walk ran.
 
 ```bash
 mkvgo diagnose movie.mkv
@@ -1633,7 +1643,7 @@ mkvgo playability movie.mkv
 # Overall: remux
 # Suggested remux container: mp4
 
-mkvgo playability -target safari -json movie.mkv | jq .OverallVerdict
+mkvgo playability -target safari -json movie.mkv | jq .overall_verdict
 ```
 
 The library equivalent is `matroska.Playability` / `matroska.TargetByName`
@@ -1658,7 +1668,7 @@ mkvgo ladder movie.mkv
 #   480p      854x480      1200 kb/s
 #   360p      640x360       700 kb/s
 
-mkvgo ladder -json movie.mkv | jq -r '.[] | "\(.Label) \(.BitrateKbps)k"'
+mkvgo ladder -json movie.mkv | jq -r '.[] | "\(.label) \(.bitrate_kbps)k"'
 ```
 
 The library equivalent is `matroska.RecommendLadderFor` / `RecommendLadder`
