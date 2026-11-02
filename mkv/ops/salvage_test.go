@@ -3,6 +3,7 @@ package ops
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -342,8 +343,8 @@ func TestSalvage_ResyncCapExceeded(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Salvage hung past the resync cap")
 	}
-	if err == nil {
-		t.Fatalf("expected an error when the resync scan cap is exceeded, got report %+v", report)
+	if !errors.Is(err, reader.ErrDamagedRegion) {
+		t.Fatalf("want ErrDamagedRegion when the resync scan cap is exceeded, got %v (report %+v)", err, report)
 	}
 }
 

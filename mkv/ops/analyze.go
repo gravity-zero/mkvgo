@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -474,6 +475,9 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 		blk, err := br.Next()
 		if err == io.EOF {
 			break
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("read blocks: %w: it stops inside its media: analyze it once the file is complete", ErrSourceTruncated)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read blocks: %w", err)

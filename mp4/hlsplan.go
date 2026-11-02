@@ -356,7 +356,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		return nil, err
 	}
 	if len(c.Cues) == 0 && !o.SynthesizeIndex {
-		return nil, errf("%s: no Cues index - on-demand HLS seeks through the Cues (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", shown.Path(srcPath))
+		return nil, errf("%s: no Cues index: %w, or plan with Options.SynthesizeIndex (on-demand HLS seeks through the Cues)", shown.Path(srcPath), mkv.ErrNoKeyframeIndex)
 	}
 	planned, _, err := planTracks(c, o)
 	if err != nil {
@@ -450,7 +450,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		// the video cue points in memory. The synthesized index replaces
 		// nothing on disk; the plan just seeks through it.
 		if !o.SynthesizeIndex {
-			return nil, errf("%s: the Cues index no video keyframes - on-demand HLS seeks through them (run `mkvgo reindex` first, or plan with Options.SynthesizeIndex)", shown.Path(srcPath))
+			return nil, errf("%s: the Cues index no video keyframe: %w, or plan with Options.SynthesizeIndex (on-demand HLS seeks through them)", shown.Path(srcPath), mkv.ErrNoKeyframeIndex)
 		}
 		cues, err = synthesizeVideoCues(ctx, srcPath, fs, c, vidID, p.trackDurs)
 		if err != nil {
@@ -479,7 +479,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		cues = cues[:len(cues)-1]
 	}
 	if len(cues) == 0 {
-		return nil, errf("%s: the file ends before the first cluster its Cues name", shown.Path(srcPath))
+		return nil, errf("%s: %w: the file ends before the first cluster its Cues name, plan it once the file is complete", shown.Path(srcPath), mkv.ErrSourceTruncated)
 	}
 	p.bounds = []int64{0}
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}

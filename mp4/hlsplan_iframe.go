@@ -179,7 +179,7 @@ func (p *HLSPlan) iframeFragment(ctx context.Context, name string) ([]byte, erro
 	out := make([]byte, 0, int(ifr.length))
 	out = append(append(append(out, ifr.head...), prefix...), raw...)
 	if int64(len(out)) != ifr.length {
-		return nil, errf("I-frame %d: %d bytes, the playlist's walk counted %d (the source changed? plan it again)", n, len(out), ifr.length)
+		return nil, errf("I-frame %d: %d bytes, the playlist's walk counted %d: %w", n, len(out), ifr.length, mkv.ErrSourceChanged)
 	}
 	return out, nil
 }

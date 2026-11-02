@@ -443,7 +443,7 @@ func max0(v int64) int64 {
 // rangesEvery builds keyframe-aligned split ranges of roughly everyMs each.
 func rangesEvery(keyframes []int64, everyMs int64) ([]mkv.TimeRange, error) {
 	if len(keyframes) == 0 {
-		return nil, fmt.Errorf("no keyframe index (Cues) to segment on; rebuild it with reindex first")
+		return nil, fmt.Errorf("nothing to segment on: %w", ErrNoKeyframeIndex)
 	}
 	return splitplan.EveryRanges(keyframes, everyMs)
 }

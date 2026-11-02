@@ -408,7 +408,7 @@ func (w *salvageWalker) skipTo(resync func(r io.ReadSeeker, limit int64) (int64,
 			w.recordTailDamage(w.consumed)
 			return true, nil
 		}
-		return false, fmt.Errorf("salvage: no valid cluster found within %d-byte resync scan from offset %d", salvageResyncCap, w.consumed)
+		return false, fmt.Errorf("salvage: %w: no valid cluster found within %d-byte resync scan from offset %d", reader.ErrDamagedRegion, salvageResyncCap, w.consumed)
 	}
 	w.recordDamage(w.consumed, off, w.lastGoodMs, peekClusterTimestampMs(w.raw, off, w.scale))
 	w.restoreStreamAt(off)

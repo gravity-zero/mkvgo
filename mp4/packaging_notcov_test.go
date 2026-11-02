@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,7 +208,7 @@ func TestPkgcovPlanConcatPlanHLSFailureWraps(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error: part 2 has no Cues index")
 	}
-	if !strings.Contains(err.Error(), "part 2") || !strings.Contains(err.Error(), "no Cues index") {
+	if !strings.Contains(err.Error(), "part 2") || !errors.Is(err, mkv.ErrNoKeyframeIndex) {
 		t.Errorf("error must wrap part 2's no-Cues PlanHLS failure: %v", err)
 	}
 }

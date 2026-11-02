@@ -47,7 +47,7 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 		return nil, err
 	}
 	if len(c.Cues) == 0 {
-		return nil, fmt.Errorf("%s: no Cues index - keyframe extraction seeks through the Cues (run `mkvgo reindex` first)", shown.Path(srcPath))
+		return nil, fmt.Errorf("%s: %w (keyframe extraction seeks through the Cues)", shown.Path(srcPath), ErrNoKeyframeIndex)
 	}
 	var video *mkv.Track
 	for i := range c.Tracks {
@@ -57,7 +57,7 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 		}
 	}
 	if video == nil {
-		return nil, fmt.Errorf("%s: no video track", shown.Path(srcPath))
+		return nil, fmt.Errorf("%s: %w", shown.Path(srcPath), ErrNoVideo)
 	}
 
 	// The video cue at or before atMs. Cues of other tracks (subtitles, often

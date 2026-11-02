@@ -30,6 +30,13 @@ var ErrOutputBusy = errors.New("another run is writing this file: try again once
 // matroska.ErrSourceTruncated and ops.ErrSourceTruncated are this error.
 var ErrSourceTruncated = errors.New("the source stops before its declared end")
 
+// ErrNoKeyframeIndex: the source has no Cues for its video track, the index keyframe extraction, splitting and
+// on-demand HLS seek through. ops.ErrNoKeyframeIndex and matroska.ErrNoKeyframeIndex are this error.
+var ErrNoKeyframeIndex = errors.New("no keyframe index (Cues) for the video track - run `mkvgo reindex` to add one")
+
+// ErrNoVideo: the source has no video track. ops.ErrNoVideo and matroska.ErrNoVideo are this error.
+var ErrNoVideo = errors.New("no video track")
+
 // FileIdentity is what a FileInfo may offer beyond size and mtime: a token
 // for the version of the file (an ETag, a version id, a Last-Modified date).
 // Strong reports a token that changes with every change of the bytes (a

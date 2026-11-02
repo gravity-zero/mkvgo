@@ -111,7 +111,7 @@ func probeConcatSource(ctx context.Context, src string, o *Options) (concatProbe
 		p.audio = append(p.audio, audioSig{codec: t.mkv.Codec, lang: t.mkv.Language})
 	}
 	if !videoSeen {
-		return concatProbe{}, errf("%s: no video track (concat requires one in every part)", shown.Path(src))
+		return concatProbe{}, errf("%s: %w (concat requires one in every part)", shown.Path(src), mkv.ErrNoVideo)
 	}
 	return p, nil
 }

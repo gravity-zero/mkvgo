@@ -17,6 +17,18 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `BlockReader.StoppedShort`: the walk ended because the source stops inside
   an element.
 
+### Changed
+
+- Refusals carry the sentinel of their condition, for `errors.Is`:
+  `ErrNoKeyframeIndex` (PlanHLS without Cues or without a video cue, Split
+  every N without keyframes, ExtractKeyframeSample), `ErrNoVideo`
+  (ExtractKeyframeSample, RecommendLadderFor, PlanConcat), `ErrSourceTruncated`
+  (PlanHLS on a file ending before its first cued cluster, Analyze on a file
+  cut inside a block), `ErrDamagedRegion` (Salvage past its resync scan),
+  `ErrSourceChanged` (an I-frame that no longer matches its plan). The first
+  two now live in `mkv` (the `ops` and `matroska` names are the same values).
+  The messages change wording: match on the sentinels, not the text.
+
 ### Fixed
 
 - `Diagnose` reports a file cut exactly between two clusters as `truncated`

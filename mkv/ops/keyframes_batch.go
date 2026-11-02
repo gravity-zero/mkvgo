@@ -34,11 +34,10 @@ import (
 )
 
 var (
-	// ErrNoKeyframeIndex: the source has no Cues for its video track, the
-	// index batch extraction seeks through.
-	ErrNoKeyframeIndex = errors.New("no keyframe index (Cues) for the video track - run `mkvgo reindex` to add one")
-	// ErrNoVideo: the source has no video track.
-	ErrNoVideo = errors.New("no video track")
+	// ErrNoKeyframeIndex: the source has no Cues for its video track. See mkv.ErrNoKeyframeIndex.
+	ErrNoKeyframeIndex = mkv.ErrNoKeyframeIndex
+	// ErrNoVideo: the source has no video track. See mkv.ErrNoVideo.
+	ErrNoVideo = mkv.ErrNoVideo
 	// ErrUnsupportedCodec: the video codec is not one keyframe extraction
 	// packs (H.264, HEVC, VP8, VP9, AV1).
 	ErrUnsupportedCodec = errors.New("keyframe extraction supports H.264, HEVC, VP8, VP9 and AV1 only")

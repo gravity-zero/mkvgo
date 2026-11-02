@@ -152,7 +152,7 @@ func RecommendLadderFor(ctx context.Context, path string, opts ...mkv.Options) (
 		}
 	}
 	if video == nil {
-		return nil, fmt.Errorf("%s: no video track", shown.Path(path))
+		return nil, fmt.Errorf("%s: %w", shown.Path(path), ErrNoVideo)
 	}
 
 	in := LadderInput{Codec: canonicalCodec(video.Codec)}
