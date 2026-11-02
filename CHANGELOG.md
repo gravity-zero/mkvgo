@@ -9,6 +9,14 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Fixed
+
+- `Diagnose` reports a file cut exactly between two clusters as `truncated`
+  (it said `healthy`, with `missing_tail_bytes` set in the same report); the
+  declared Segment size alone decides it.
+- A file cut inside a block: `TrackEnds.SkippedBytes` no longer counts the cut
+  tail, so `Diagnose` stops reporting it as damage with media behind it.
+
 ## [0.63.0] - 2026-11-02
 
 ### Breaking

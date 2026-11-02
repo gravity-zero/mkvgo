@@ -143,3 +143,21 @@ func TestTrackEndsPastDamage(t *testing.T) {
 		t.Errorf("a sound file: %d skipped bytes (err %v), want none", report.SkippedBytes, err)
 	}
 }
+
+// TestTrackEndsCutTailNotDamage: a file cut inside a block ends on an element
+// that cannot be read, with nothing behind it: that is the cut tail, not
+// damage the walk passed over, and no skipped bytes are reported for it.
+func TestTrackEndsCutTailNotDamage(t *testing.T) {
+	dir := t.TempDir()
+	data := readAll(t, salvageFixture(t, dir, "src.mkv", 8))
+	offsets := findAll(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+	path := filepath.Join(dir, "cut.mkv")
+	writeAll(t, path, data[:offsets[5]+15])
+	report, err := TrackEnds(context.Background(), path)
+	if err != nil {
+		t.Fatalf("TrackEnds: %v", err)
+	}
+	if report.SkippedBytes != 0 {
+		t.Errorf("the cut tail counted as %d skipped bytes of damage inside the file", report.SkippedBytes)
+	}
+}

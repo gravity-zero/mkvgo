@@ -248,6 +248,28 @@ func (s *trackStride) endMs() int64 {
 	return s.blockTC + (s.frames*recent[k/2]+500)/1000
 }
 
+// cutTail returns the bytes of a skipped region that runs to the end of a
+// source shorter than its Segment (or of unknown size): the cut tail of a
+// truncated file, with no media behind it, not damage the walk passed over.
+func cutTail(f io.Seeker, skipped []reader.DamageRange, segEnd int64) int64 {
+	if len(skipped) == 0 {
+		return 0
+	}
+	cur, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0
+	}
+	size, err := f.Seek(0, io.SeekEnd)
+	if _, serr := f.Seek(cur, io.SeekStart); err != nil || serr != nil {
+		return 0
+	}
+	last := skipped[len(skipped)-1]
+	if (segEnd <= 0 || segEnd > size) && last.To >= size {
+		return last.To - last.From
+	}
+	return 0
+}
+
 // walkTailFrom walks the clusters from startOff (-1: from the first cluster)
 // to the end of the clusters, header-only, and returns the end of the last
 // block seen per pending track, the clusters entered, and whether the walk
@@ -284,7 +306,7 @@ func walkTailFrom(f io.ReadSeeker, scale, startOff, segEnd int64, tracks []mkv.T
 				last[id] = end
 			}
 		}
-		return last, br.ClusterCount(), done, br.SkippedBytes(), nil
+		return last, br.ClusterCount(), done, br.SkippedBytes() - cutTail(f, br.SkippedRanges(), segEnd), nil
 	}
 	for {
 		blk, nerr := br.Next()
