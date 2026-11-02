@@ -735,6 +735,26 @@ func ProbeCueHoles(ctx context.Context, path string, r *CueHealthReport, opts ..
 	return ops.ProbeCueHoles(ctx, path, r, opts...)
 }
 
+// CutShort is a source that stops before the end it declares. See ops.CutShort.
+type CutShort = ops.CutShort
+
+// SourceCutShort reports whether the Matroska/WebM or MP4/MOV source at path
+// stops before the end it declares (its Segment, its top-level boxes), from the
+// head only: nil for a whole file, trailing junk, or a source that declares no
+// end. Diagnose says "truncated" on the same sizes. See ops.SourceCutShort.
+func SourceCutShort(ctx context.Context, path string, opts ...Options) (*CutShort, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
+	return ops.SourceCutShort(ctx, path, opts...)
+}
+
+// CutShortOf is SourceCutShort over an open source, read from its start.
+// See ops.CutShortOf.
+func CutShortOf(ctx context.Context, r io.ReadSeeker) (*CutShort, error) {
+	return ops.CutShortOf(ctx, r)
+}
+
 // Finding is one diagnosed defect with its remedy. See ops.Finding.
 type Finding = ops.Finding
 

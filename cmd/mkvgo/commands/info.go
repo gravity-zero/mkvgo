@@ -7,56 +7,40 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-// cutShort is a source that stops before the end it declares: its metadata reads whole,
-// its media does not.
-type cutShort struct {
-	FileSize     int64 `json:"file_size"`
-	DeclaredSize int64 `json:"declared_size"`
-}
-
-// sourceCutShort reports whether path stops before the end it declares - a Matroska Segment, the top-level MP4
-// boxes - from the head only; nil for a whole file, trailing junk, stdin, or a size that cannot be read.
-func sourceCutShort(path string, c *matroska.Container) *cutShort {
+// sourceCutShort reports whether path stops before the end it declares; nil for a whole file, stdin, or a size that
+// cannot be read.
+func sourceCutShort(path string) *matroska.CutShort {
 	if path == "-" {
 		return nil
 	}
-	fs := sourceFS(path)
-	var size, declared int64
-	if c.DocType != "" { // Matroska/WebM; a Segment of unknown size declares no end
-		fi, err := fs.DoStat(path)
-		if err != nil {
-			return nil
-		}
-		size, declared = fi.Size(), c.SegmentEnd
-	} else {
-		var err error
-		if size, declared, err = mp4.DeclaredSize(cliCtx, path, mp4.Options{FS: fs}); err != nil {
-			return nil
-		}
+	var opts []matroska.Options
+	if fs := sourceFS(path); fs != nil {
+		opts = append(opts, matroska.Options{FS: fs})
 	}
-	if declared <= size {
+	cut, err := matroska.SourceCutShort(cliCtx, path, opts...)
+	if err != nil {
 		return nil
 	}
-	return &cutShort{FileSize: size, DeclaredSize: declared}
+	return cut
 }
 
 func CmdInfo(path string) {
 	c, _ := loadContainer(path, false)
-	cut := sourceCutShort(path, c)
+	cut := sourceCutShort(path)
 	if JsonOutput {
 		PrintJSON(struct {
-			Path          string    `json:"path"`
-			Title         string    `json:"title"`
-			DurationMs    int64     `json:"duration_ms"`
-			Truncated     *cutShort `json:"truncated,omitempty"`
-			TimecodeScale int64     `json:"timecode_scale"`
-			DocType       string    `json:"doc_type"`
-			MuxingApp     string    `json:"muxing_app"`
-			WritingApp    string    `json:"writing_app"`
-			Tracks        int       `json:"tracks"`
-			Chapters      int       `json:"chapters"`
-			Attachments   int       `json:"attachments"`
-			Tags          int       `json:"tags"`
+			Path          string             `json:"path"`
+			Title         string             `json:"title"`
+			DurationMs    int64              `json:"duration_ms"`
+			Truncated     *matroska.CutShort `json:"truncated,omitempty"`
+			TimecodeScale int64              `json:"timecode_scale"`
+			DocType       string             `json:"doc_type"`
+			MuxingApp     string             `json:"muxing_app"`
+			WritingApp    string             `json:"writing_app"`
+			Tracks        int                `json:"tracks"`
+			Chapters      int                `json:"chapters"`
+			Attachments   int                `json:"attachments"`
+			Tags          int                `json:"tags"`
 		}{
 			c.Path, c.Info.Title, c.DurationMs, cut, c.Info.TimecodeScale, c.DocType,
 			c.Info.MuxingApp, c.Info.WritingApp,
@@ -183,9 +167,9 @@ func CmdTags(path string) {
 func CmdProbe(path string) {
 	c, dropped := loadContainer(path, true)
 	if JsonOutput {
-		var cut *cutShort
+		var cut *matroska.CutShort
 		if !isRemoteURL(path) { // a remote probe keeps its request budget: no stat for the cut
-			cut = sourceCutShort(path, c)
+			cut = sourceCutShort(path)
 		}
 		if len(dropped) == 0 {
 			PrintJSON(containerForJSON(c, cut))
@@ -194,7 +178,7 @@ func CmdProbe(path string) {
 		PrintJSON(struct {
 			*matroska.Container
 			Tracks    []trackJSON        `json:"tracks"`
-			Truncated *cutShort          `json:"truncated,omitempty"`
+			Truncated *matroska.CutShort `json:"truncated,omitempty"`
 			Dropped   []mp4.DroppedTrack `json:"dropped_tracks"`
 		}{c, tracksForJSON(c), cut, dropped})
 		return

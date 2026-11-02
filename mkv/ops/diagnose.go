@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 
@@ -367,7 +368,12 @@ func segmentDeclaredEndOf(path string, fs *mkv.FS) (end int64, known bool, err e
 		return 0, false, err
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, 4096)
+	return segmentDeclaredEnd(f)
+}
+
+// segmentDeclaredEnd is segmentDeclaredEndOf over a source read from its start.
+func segmentDeclaredEnd(src io.Reader) (end int64, known bool, err error) {
+	r := bufio.NewReaderSize(src, 4096)
 	h1, n1, err := ebml.ReadElementHeader(r)
 	if err != nil || h1.ID != ebml.IDEBMLHeader || h1.Size < 0 {
 		return 0, false, fmt.Errorf("not a Matroska file")

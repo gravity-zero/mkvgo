@@ -91,8 +91,16 @@ func DeclaredSize(ctx context.Context, path string, opts ...Options) (size, decl
 		return 0, 0, err
 	}
 	defer f.Close()
+	return DeclaredSizeOf(ctx, f)
+}
+
+// DeclaredSizeOf is DeclaredSize over an open source, from its start: a Blob, a buffer, a ranged reader.
+func DeclaredSizeOf(ctx context.Context, r io.ReadSeeker) (size, declared int64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
 	var d mkv.Diagnosis
-	diagnoseScanBoxes(f, &d, declaredSizeBoxes)
+	diagnoseScanBoxes(r, &d, declaredSizeBoxes)
 	return d.FileSize, d.DeclaredSize, nil
 }
 
@@ -137,7 +145,7 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 // on a malformed layout it records the finding (truncated / trailing junk)
 // and still reports the moov when one is reachable. maxBoxes > 0 stops the
 // walk after that many boxes, d.DeclaredSize left 0 (unknown).
-func diagnoseScanBoxes(f mkv.ReadSeekCloser, d *mkv.Diagnosis, maxBoxes int) *topLayout {
+func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayout {
 	lay := &topLayout{moovOff: -1}
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {

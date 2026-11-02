@@ -481,11 +481,11 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 
 // containerForJSON wraps a container so its tracks carry the derived display
 // fields. The outer Tracks field shadows the embedded container's in the JSON.
-func containerForJSON(c *matroska.Container, cut *cutShort) any {
+func containerForJSON(c *matroska.Container, cut *matroska.CutShort) any {
 	return struct {
 		*matroska.Container
-		Tracks    []trackJSON `json:"tracks"`
-		Truncated *cutShort   `json:"truncated,omitempty"`
+		Tracks    []trackJSON        `json:"tracks"`
+		Truncated *matroska.CutShort `json:"truncated,omitempty"`
 	}{Container: c, Tracks: tracksForJSON(c), Truncated: cut}
 }
 

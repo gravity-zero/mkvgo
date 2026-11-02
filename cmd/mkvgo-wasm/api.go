@@ -341,6 +341,7 @@ type probeResult struct {
 	Tracks        []trackJSON        `json:"tracks"`
 	Format        string             `json:"format"` // "mkv" or "mp4"
 	DroppedTracks []mp4.DroppedTrack `json:"dropped_tracks,omitempty"`
+	Truncated     *matroska.CutShort `json:"truncated,omitempty"` // the CLI's: the source stops before its declared end
 }
 
 // probeJS(input: Uint8Array | Blob, opts?) → Promise<object>
@@ -414,6 +415,9 @@ func probeReader(ctx context.Context, rs io.ReadSeeker, opts probeOpts) (any, er
 		}
 		res.Container = c
 		res.DroppedTracks = dropped
+	}
+	if res.Truncated, err = matroska.CutShortOf(ctx, rs); err != nil {
+		return nil, err
 	}
 	res.Tracks = make([]trackJSON, len(res.Container.Tracks))
 	for i, t := range res.Container.Tracks {

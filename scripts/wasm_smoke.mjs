@@ -41,6 +41,17 @@ check(probe.tracks[0].codec_long_name?.length > 0, `derived codec_long_name (${p
     `derived probe fields (sar=${v?.sample_aspect_ratio} dar=${v?.display_aspect_ratio} hdr=${v?.hdr_format ?? 'n/a'})`)
 }
 
+// --- a source cut short says so, as the CLI's probe does ---
+{
+  check(probe.truncated === undefined, `whole file: truncated ${JSON.stringify(probe.truncated)}`)
+  const cut = mkvBytes.slice(0, mkvBytes.length - 100)
+  for (const [label, input] of [['Uint8Array', cut], ['Blob', new Blob([cut])]]) {
+    const t = (await MkvGo.probe(input)).truncated
+    check(t?.file_size === cut.length && t?.declared_size === mkvBytes.length,
+      `probe(${label}) of a cut file: truncated ${JSON.stringify(t)} (want ${cut.length} of ${mkvBytes.length})`)
+  }
+}
+
 // --- a Matroska track that stores no language is English (RFC 9559 default) ---
 {
   const p = await MkvGo.probe(new Uint8Array(fs.readFileSync(path.join(root, 'internal/testdata/sample_subs.mkv'))))

@@ -163,6 +163,8 @@ export interface ProbeResult {
   keyframes?: number[]
   /** MP4 only: tracks the probe saw but does not carry (e.g. cover art). */
   dropped_tracks?: DroppedTrack[]
+  /** The source stops before the end it declares (a download not finished): its size and the declared one. */
+  truncated?: { file_size: number; declared_size: number }
   [key: string]: unknown
 }
 

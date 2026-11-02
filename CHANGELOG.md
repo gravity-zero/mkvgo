@@ -9,6 +9,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Added
+
+- `SourceCutShort` / `CutShortOf` (ops and the `matroska` facade): whether a
+  Matroska or MP4 source stops before the end it declares, head-only; the
+  CLI's `truncated` object, now also in the WASM probe result.
+
 ### Fixed
 
 - `Diagnose` reports a file cut exactly between two clusters as `truncated`
