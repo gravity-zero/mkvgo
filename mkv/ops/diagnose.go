@@ -273,7 +273,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 				}
 			}
 			switch {
-			case declaredEnd > size && report.TruncatedTail:
+			case declaredEnd > size: // the size alone proves it, a cut between clusters walks clean
 				d.Findings = append(d.Findings, Finding{
 					Kind: "truncated",
 					Detail: fmt.Sprintf("the source ends early: %d of %d declared bytes present, a repair recovers the playable prefix only",

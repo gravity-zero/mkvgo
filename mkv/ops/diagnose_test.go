@@ -180,6 +180,52 @@ func TestDiagnose_Truncated(t *testing.T) {
 	}
 }
 
+// TestDiagnose_TruncatedCleanCut: a file cut exactly between two clusters is
+// as incomplete as one cut inside a block - the declared size says bytes are
+// missing - and is reported truncated, never healthy; a cut inside a block is
+// the same cut tail, not damage with media continuing behind it.
+func TestDiagnose_TruncatedCleanCut(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 8)
+	for i := range 8 {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: make([]byte, 64)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: make([]byte, 16)},
+		})
+	}
+	sources := map[string]string{
+		"unindexed": salvageFixture(t, dir, "src.mkv", 8),
+		"indexed":   filepath.Join(dir, "front.mkv"),
+	}
+	// Reindexed: the Cues ahead of the clusters survive the cut, so the tail
+	// walk from the index runs over the cut tail.
+	if err := Reindex(ctx, buildMultiClusterMKV(t, dir, "cued.mkv", tracks, sets, 8000), sources["indexed"]); err != nil {
+		t.Fatal(err)
+	}
+	for src, path := range sources {
+		data := readAll(t, path)
+		offsets := findAll(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+		for cutName, cut := range map[string]int64{"between clusters": offsets[5], "inside a block": offsets[5] + 15} {
+			name := src + ", " + cutName
+			trunc := filepath.Join(dir, "trunc.mkv")
+			writeAll(t, trunc, data[:cut])
+			d, err := Diagnose(ctx, trunc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Healthy || hasFinding(d, "truncated") == nil {
+				t.Errorf("%s: want the truncated finding, got %v", name, findingKinds(d))
+			}
+			if f := hasFinding(d, "damaged"); f != nil {
+				t.Errorf("%s: the cut tail is not damage inside the file: %q", name, f.Detail)
+			}
+		}
+	}
+}
+
 // TestDiagnose_TrailingJunk: bytes beyond the declared Segment end are
 // reported without being mistaken for corruption - and never for a
 // truncated download: surplus bytes are not missing bytes, and the
