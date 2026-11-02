@@ -184,6 +184,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 			total = fi.Size()
 		}
 	}
+	stoppedShort := false // a pass ended inside an element: the file is cut, sized Segment or not
 	// openBlocks opens one pass over the source's blocks; with several passes
 	// the progress runs once from 0 to the end over all of them.
 	openBlocks := func(pass, passes int) (*reader.BlockReader, func(), error) {
@@ -205,7 +206,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 				br.SetProgress(func(done, _ int64) { o.Progress(base+done, all) }, total)
 			}
 		}
-		return br, func() { src.Close() }, nil
+		return br, func() { stoppedShort = stoppedShort || br.StoppedShort(); src.Close() }, nil
 	}
 
 	if err := distinctOutput(fs, dstPath, srcPath); err != nil {
@@ -216,7 +217,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 		if err != nil || o.OnTruncated == nil {
 			return
 		}
-		if t, ok := matroskaCut(fs, srcPath, c, tracks); ok {
+		if t, ok := matroskaCut(fs, srcPath, c, tracks, stoppedShort); ok {
 			o.OnTruncated(t)
 		}
 	}()
@@ -248,14 +249,15 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	return writeMP4(ctx, dst, srcPath, dstPath, remote, c, openBlocks, tracks, brands, meta, o)
 }
 
-// matroskaCut reports a Matroska source that stops before the end its Segment declares,
-// with where the first audio or video track runs out. A Segment of unknown size declares no end: it is never cut.
-func matroskaCut(fs *mkv.FS, path string, c *mkv.Container, tracks []*outTrack) (Truncation, bool) {
-	if c.SegmentEnd <= 0 {
+// matroskaCut reports a Matroska source that stops before the end its Segment declares, with where the first audio
+// or video track runs out. A Segment of unknown size declares no end: it is cut when the walk stopped inside an
+// element (stoppedShort, BlockReader.StoppedShort).
+func matroskaCut(fs *mkv.FS, path string, c *mkv.Container, tracks []*outTrack, stoppedShort bool) (Truncation, bool) {
+	if c.SegmentEnd <= 0 && !stoppedShort {
 		return Truncation{}, false
 	}
 	fi, err := fs.DoStat(path)
-	if err != nil || c.SegmentEnd <= fi.Size() {
+	if err != nil || (c.SegmentEnd > 0 && c.SegmentEnd <= fi.Size()) {
 		return Truncation{}, false
 	}
 	t := Truncation{FileSize: fi.Size(), DurationMs: c.DurationMs, ReachedMs: -1}

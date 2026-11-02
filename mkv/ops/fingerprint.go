@@ -93,10 +93,15 @@ func Fingerprint(ctx context.Context, path string, opts ...mkv.Options) (*Finger
 	// A Matroska cut inside a Cluster fails the walk, one cut between two ends it cleanly: either way the Segment
 	// declares more than the file holds (surplus bytes past its end are trailing junk, not a cut).
 	if (err == nil && cut == nil) || errors.Is(err, io.ErrUnexpectedEOF) {
-		if declared, known, derr := segmentDeclaredEndOf(path, fs); derr == nil && known {
+		declared, known, derr := segmentDeclaredEndOf(path, fs)
+		switch {
+		case derr != nil:
+		case known:
 			if st, serr := fs.DoStat(path); serr == nil && declared > st.Size() {
 				err = fmt.Errorf("%w: it ends at byte %d of the %d its Segment declares: fingerprint it once the file is complete", ErrSourceTruncated, st.Size(), declared)
 			}
+		case err != nil: // a Segment of unknown size declares no end: the file stopping inside its media is the cut
+			err = fmt.Errorf("%w: it stops inside its media and its Segment declares no size: fingerprint it once the file is complete", ErrSourceTruncated)
 		}
 	}
 	if err != nil {

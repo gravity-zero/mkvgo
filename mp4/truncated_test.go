@@ -1,6 +1,7 @@
 package mp4
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -124,6 +125,25 @@ func cutCopy(t *testing.T, src, name string) (string, int64) {
 	return cut, int64(n)
 }
 
+// streamedCopy rewrites the Segment size of the Matroska at src as unknown (a streamed write), in place of a copy.
+func streamedCopy(t *testing.T, src string) string {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg := bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})
+	if seg < 0 || data[seg+4] != 0x01 {
+		t.Fatal("fixture has no 8-byte Segment size")
+	}
+	copy(data[seg+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	out := filepath.Join(t.TempDir(), "streamed.mkv")
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // TestConversionsReportCutSource pins that the conversions of a source cut short - a Matroska that stops before
 // the end its Segment declares, an MP4 whose media runs past the file - write what arrived and say so once through
 // OnTruncated, and that a whole source says nothing.
@@ -133,6 +153,7 @@ func TestConversionsReportCutSource(t *testing.T) {
 	mp4Src := editShiftFixture(t, true)
 	cutMKV, mkvSize := cutCopy(t, mkvSrc, "cut.mkv")
 	cutMP4, mp4Size := cutCopy(t, mp4Src, "cut.mp4")
+	streamed := streamedCopy(t, cutMKV)
 	cases := []struct {
 		name string
 		src  string
@@ -150,6 +171,18 @@ func TestConversionsReportCutSource(t *testing.T) {
 			return RemuxToMP4(ctx, src, filepath.Join(t.TempDir(), "o.mp4"), o)
 		}},
 		{"to-hls cut mkv", cutMKV, mkvSize, func(src string, o Options) error {
+			return RemuxToHLS(ctx, src, t.TempDir(), o)
+		}},
+		{"to-mp4 cut mkv of unknown size", streamed, mkvSize, func(src string, o Options) error {
+			return RemuxToMP4(ctx, src, filepath.Join(t.TempDir(), "o.mp4"), o)
+		}},
+		{"to-hls cut mkv of unknown size", streamed, mkvSize, func(src string, o Options) error {
+			return RemuxToHLS(ctx, src, t.TempDir(), o)
+		}},
+		{"to-mp4 whole mkv of unknown size", streamedCopy(t, mkvSrc), 0, func(src string, o Options) error {
+			return RemuxToMP4(ctx, src, filepath.Join(t.TempDir(), "o.mp4"), o)
+		}},
+		{"to-hls whole mkv of unknown size", streamedCopy(t, mkvSrc), 0, func(src string, o Options) error {
 			return RemuxToHLS(ctx, src, t.TempDir(), o)
 		}},
 		{"to-hls whole mkv", mkvSrc, 0, func(src string, o Options) error {

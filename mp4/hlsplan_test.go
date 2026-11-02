@@ -595,37 +595,43 @@ func TestPlanHLSOnACutShortSourceWithHeadCuesMatchesFullPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	lastCued := meta.SegmentStart + meta.Cues[len(meta.Cues)-1].ClusterPos
-	for name, at := range map[string]int{"between clusters": len(whole) * 6 / 10, "inside the last cued keyframe": int(lastCued) + 300} {
-		cut := filepath.Join(t.TempDir(), "cut.mkv")
-		if err := os.WriteFile(cut, whole[:at], 0o644); err != nil {
-			t.Fatal(err)
-		}
-		dir := t.TempDir()
-		if err := RemuxToHLS(ctx, cut, dir, Options{SegmentMs: 2000}); err != nil {
-			t.Fatal(err)
-		}
-		plan, err := PlanHLS(ctx, cut, Options{SegmentMs: 2000})
-		if err != nil {
-			t.Fatal(err)
-		}
-		fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
-		if plan.NumSegments() != len(fullSegs) {
-			t.Errorf("cut %s: plan has %d segments, the full pass wrote %d", name, plan.NumSegments(), len(fullSegs))
-		}
-		if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
-			t.Errorf("cut %s: the plan's playlist has a negative duration:\n%s", name, pl)
-		}
-		for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
-			got, err := plan.Segment(ctx, n)
-			if err != nil {
-				t.Fatalf("cut %s: Segment(%d): %v", name, n, err)
+	// The same file streamed (a Segment of unknown size) declares no end to measure the cut against.
+	streamed := append([]byte{}, whole...)
+	copy(streamed[bytes.Index(streamed, []byte{0x18, 0x53, 0x80, 0x67})+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	for cutName, at := range map[string]int{"between clusters": len(whole) * 6 / 10, "inside the last cued keyframe": int(lastCued) + 300} {
+		for size, data := range map[string][]byte{"sized": whole, "unknown size": streamed} {
+			name := cutName + ", " + size
+			cut := filepath.Join(t.TempDir(), "cut.mkv")
+			if err := os.WriteFile(cut, data[:at], 0o644); err != nil {
+				t.Fatal(err)
 			}
-			want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+			dir := t.TempDir()
+			if err := RemuxToHLS(ctx, cut, dir, Options{SegmentMs: 2000}); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := PlanHLS(ctx, cut, Options{SegmentMs: 2000})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(got, want) {
-				t.Errorf("cut %s: segment %d differs from the full pass (%d vs %d bytes)", name, n, len(got), len(want))
+			fullSegs, _ := filepath.Glob(filepath.Join(dir, "seg0*.m4s"))
+			if plan.NumSegments() != len(fullSegs) {
+				t.Errorf("cut %s: plan has %d segments, the full pass wrote %d", name, plan.NumSegments(), len(fullSegs))
+			}
+			if pl := plan.MediaPlaylist(); bytes.Contains(pl, []byte("#EXTINF:-")) {
+				t.Errorf("cut %s: the plan's playlist has a negative duration:\n%s", name, pl)
+			}
+			for n := 0; n < min(plan.NumSegments(), len(fullSegs)); n++ {
+				got, err := plan.Segment(ctx, n)
+				if err != nil {
+					t.Fatalf("cut %s: Segment(%d): %v", name, n, err)
+				}
+				want, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Errorf("cut %s: segment %d differs from the full pass (%d vs %d bytes)", name, n, len(got), len(want))
+				}
 			}
 		}
 	}

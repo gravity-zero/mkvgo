@@ -14,6 +14,8 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `SourceCutShort` / `CutShortOf` (ops and the `matroska` facade): whether a
   Matroska or MP4 source stops before the end it declares, head-only; the
   CLI's `truncated` object, now also in the WASM probe result.
+- `BlockReader.StoppedShort`: the walk ended because the source stops inside
+  an element.
 
 ### Fixed
 
@@ -22,6 +24,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   declared Segment size alone decides it.
 - A file cut inside a block: `TrackEnds.SkippedBytes` no longer counts the cut
   tail, so `Diagnose` stops reporting it as damage with media behind it.
+- A Matroska whose Segment declares no size (a streamed write) and that stops
+  inside a block: `Fingerprint` refuses it with `ErrSourceTruncated` (was a
+  bare "unexpected EOF"), and to-mp4 / to-hls report the cut through
+  `OnTruncated` (they were silent).
 
 ## [0.63.0] - 2026-11-02
 

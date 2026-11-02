@@ -138,6 +138,7 @@ type BlockReader struct {
 	// region instead of returning an error (SetSkipDamage); skippedBytes counts
 	// what was passed over.
 	skipDamage   bool
+	stoppedShort bool // Next returned io.ErrUnexpectedEOF
 	skippedBytes int64
 	skipped      []DamageRange
 	timeSkip     bool  // the last skipped region still waits for the timestamp of the Cluster it resumed on
@@ -638,6 +639,19 @@ func (br *BlockReader) BytesRead() int64 {
 // Next returns the next block, io.EOF at the clean end of the walk. See
 // DamageError and SetSkipDamage for an unreadable element in mid-file.
 func (br *BlockReader) Next() (mkv.Block, error) {
+	b, err := br.nextTolerant()
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		br.stoppedShort = true
+	}
+	return b, err
+}
+
+// StoppedShort reports whether Next ended on a source that stops inside an
+// element (io.ErrUnexpectedEOF): the file is cut there, whatever its Segment
+// declares - the one sign of a cut in a Segment of unknown size.
+func (br *BlockReader) StoppedShort() bool { return br.stoppedShort }
+
+func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 	for {
 		b, err := br.next()
 		if err == nil || errors.Is(err, io.EOF) || errors.Is(err, ErrClusterLimit) {

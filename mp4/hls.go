@@ -339,10 +339,11 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 
 	// Phase 1 - stream every sample, buffering media bytes to the per-track
 	// temp files and collecting subtitle cues (source-specific walk).
+	stoppedShort := false
 	if ps.mv != nil {
 		err = collectFromMP4(ctx, ps, routing, subs, o.Progress)
 	} else {
-		err = collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress, src)
+		err = collectFragSamples(ctx, srcPath, fs, c, routing, subs, o.Progress, src, &stoppedShort)
 	}
 	if err != nil {
 		return nil, err
@@ -353,7 +354,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if ps.mv != nil {
 		cut, isCut = ps.mv.truncation(ps.size)
 	} else {
-		cut, isCut = matroskaCut(fs, srcPath, c, media)
+		cut, isCut = matroskaCut(fs, srcPath, c, media, stoppedShort)
 	}
 	defer func() {
 		if err == nil && isCut && res != nil {
@@ -550,7 +551,7 @@ func planSubTracks(c *mkv.Container, o Options) []hlsSubTrack {
 // WebVTT cues. Lazily builds the sample entry for codecs that derive it from the
 // first frame.
 func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container,
-	routing map[uint64]*fragTrack, subs []hlsSubTrack, progress mkv.ProgressFunc, direct io.ReadSeeker) error {
+	routing map[uint64]*fragTrack, subs []hlsSubTrack, progress mkv.ProgressFunc, direct io.ReadSeeker, stoppedShort *bool) error {
 	src, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return err
@@ -560,6 +561,7 @@ func collectFragSamples(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.
 	if err != nil {
 		return err
 	}
+	defer func() { *stoppedShort = br.StoppedShort() }()
 	// Explicit (not just the walk-by pickup): the on-demand plan feeds its
 	// mid-file readers the same durations, and full-pass ↔ plan byte parity
 	// must not depend on the source's element order.

@@ -296,6 +296,18 @@ func TestFingerprint_TruncatedMKVRefused(t *testing.T) {
 			t.Errorf("%s: Fingerprint of a cut MKV = %+v, %v; want ErrSourceTruncated", name, fp, err)
 		}
 	}
+	// A Segment of unknown size (a streamed write) cut inside a Cluster declares no end to compare with: the walk
+	// stopping inside its media is the cut, refused the same way.
+	streamed := append([]byte{}, data[:len(data)*7/10]...)
+	seg := bytes.Index(streamed, []byte{0x18, 0x53, 0x80, 0x67})
+	copy(streamed[seg+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	cut := filepath.Join(dir, "streamed.mkv")
+	if err := os.WriteFile(cut, streamed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fp, err := Fingerprint(context.Background(), cut); !errors.Is(err, ErrSourceTruncated) {
+		t.Errorf("Fingerprint of a cut MKV of unknown size = %+v, %v; want ErrSourceTruncated", fp, err)
+	}
 	// Surplus bytes past the declared Segment end are not a cut.
 	junk := filepath.Join(dir, "junk.mkv")
 	if err := os.WriteFile(junk, append(append([]byte{}, data...), make([]byte, 33)...), 0o644); err != nil {
