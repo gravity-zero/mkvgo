@@ -56,6 +56,7 @@ type avcScan struct {
 	// Field orders the samples stated. pic_struct is the display order and wins,
 	// as in the reference prober's parser: on an x264 stream whose frames change
 	// field order the two disagree, the POC keeping one order throughout.
+	// Every pic_struct 3/4 counts, read before the proof or after it.
 	structOrders map[string]bool
 	pocOrders    map[string]bool
 	pending      *avcFieldPic // a field still waiting for the other of its pair
@@ -63,7 +64,7 @@ type avcScan struct {
 	// pic_struct "top, bottom" / "bottom, top" on a frame is interlaced only
 	// outside soft telecine, which repeats fields (pic_struct 5/6) or marks
 	// its frames progressive (ct_type 0); settled once all samples are read.
-	pairStruct  string
+	pairStruct  bool
 	pulldown    bool
 	progressive bool
 }
@@ -311,9 +312,8 @@ func (s *avcScan) picTiming(payload []byte, sps *avcSPSInfo) {
 	case 1, 2: // a field shown alone
 		s.interlaced = true
 	case 3, 4:
-		if ctType == 1 || sps.mbaff {
-			s.pairStruct = orderOf(ps == 3)
-		}
+		s.structOrders[orderOf(ps == 3)] = true
+		s.pairStruct = s.pairStruct || ctType == 1 || sps.mbaff
 	case 5, 6:
 		s.pulldown = true
 	}
@@ -322,9 +322,6 @@ func (s *avcScan) picTiming(payload []byte, sps *avcSPSInfo) {
 		s.progressive = true
 	case 1:
 		s.interlaced = true
-	}
-	if s.interlaced && (ps == 3 || ps == 4) {
-		s.structOrders[orderOf(ps == 3)] = true
 	}
 }
 
@@ -339,9 +336,8 @@ func orderOf(topFirst bool) string {
 // when every sample that stated one agreed - the pic_struct orders when there
 // are any, else the picture order counts. Nothing is written otherwise.
 func (s *avcScan) apply(t *mkv.Track) {
-	if s.pairStruct != "" && !s.pulldown && !s.progressive {
+	if s.pairStruct && !s.pulldown && !s.progressive {
 		s.interlaced = true
-		s.structOrders[s.pairStruct] = true
 	}
 	if t.ScanType != "" {
 		return

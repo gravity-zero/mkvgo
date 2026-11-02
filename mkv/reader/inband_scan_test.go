@@ -276,6 +276,10 @@ func scanCases() []scanCase {
 		{"frames only", base, false, nil, [][]byte{frame(0), frame(2), frame(4)}, false, "", ""},
 		{"pic_struct top-bottom on MBAFF", mbaffPS, false, nil, [][]byte{withSEI(false, 3, -1), withSEI(false, 3, -1)}, false, "interlaced", "tt"},
 		{"pic_struct bottom-top on MBAFF", mbaffPS, false, nil, [][]byte{withSEI(false, 4, -1)}, false, "interlaced", "bb"},
+		{"pic_struct orders that disagree on MBAFF", mbaffPS, false, nil, [][]byte{withSEI(false, 3, -1), withSEI(false, 4, -1)}, false, "interlaced", ""},
+		{"pic_struct read before the proof, orders disagree", scanSPS{picStruct: true}, true, nil, [][]byte{
+			au(picTimingSEI(false, 4, -1), scanSlice{lsb: 2, bottomPOC: true}.nal()),
+			au(picTimingSEI(false, 3, -1), scanSlice{lsb: 2, bottomPOC: true, delta: 1}.nal())}, false, "interlaced", ""},
 		{"pic_struct top-bottom, soft telecine", mbaffPS, false, nil, [][]byte{withSEI(false, 3, -1), withSEI(false, 5, -1)}, false, "", ""},
 		{"pic_struct top-bottom, ct_type progressive", mbaffPS, false, nil, [][]byte{withSEI(false, 3, 0)}, false, "", ""},
 		{"pic_struct top-bottom without MBAFF", scanSPS{picStruct: true}, false, nil, [][]byte{withSEI(false, 3, -1)}, false, "", ""},
