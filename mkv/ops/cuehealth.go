@@ -66,7 +66,12 @@ func CueHealth(ctx context.Context, path string, opts ...mkv.Options) (*CueHealt
 	if err != nil {
 		return nil, fmt.Errorf("cue health: %w", err)
 	}
-	return cueHealthFrom(meta, 0), nil
+	r := cueHealthFrom(meta, 0)
+	// A file cut short lost what its tail held - the Cues, more often than not: the source comes first.
+	if cut, cerr := SourceCutShort(ctx, path, opts...); cerr == nil && cut != nil && !r.Healthy {
+		r.Reason += fmt.Sprintf("; the file is cut short (%d of %d bytes): re-download the source first", cut.FileSize, cut.DeclaredSize)
+	}
+	return r, nil
 }
 
 // cueHealthFrom judges an already-read container (Tracks, Cues, Tags).

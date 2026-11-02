@@ -427,7 +427,19 @@ func Analyze(ctx context.Context, path string, opts ...mkv.Options) (*AnalyzeRep
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
-	fs := mkv.FSFrom(opts)
+	r, err := analyze(ctx, path, mkv.FSFrom(opts))
+	if err != nil {
+		return nil, err
+	}
+	// The stats cover what arrived: a file cut short says so, or its totals read as the whole file's.
+	if cut, cerr := SourceCutShort(ctx, path, opts...); cerr == nil && cut != nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("the source stops before its declared end (%d of %d bytes): these stats cover what arrived",
+			cut.FileSize, cut.DeclaredSize))
+	}
+	return r, nil
+}
+
+func analyze(ctx context.Context, path string, fs *mkv.FS) (*AnalyzeReport, error) {
 	isMP4, fs, err := opensLikeMP4(ctx, path, fs)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse: %w", err)

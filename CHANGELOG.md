@@ -36,6 +36,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ### Fixed
 
+- On a file cut short: `Analyze` adds a warning that its stats cover what
+  arrived (MKV and MP4; an MP4's totals were silent); `Validate` reports the
+  cue points naming clusters past the end as `cues-past-end` (was
+  `cues-stale` with a reindex remedy); a `CueHealth` verdict's reason names
+  the cut and the re-download before any reindex.
 - `Diagnose` reports a file cut exactly between two clusters as `truncated`
   (it said `healthy`, with `missing_tail_bytes` set in the same report); the
   declared Segment size alone decides it.
