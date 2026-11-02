@@ -190,16 +190,22 @@ func WithSampledKeyframes(n int) ReadOption {
 //     all agree. Without proof both stay "".
 //
 // The cost is paid only for those tracks; files that carry the description in
-// the header never read a frame. The read is bounded to the first sample per
-// track, maxScanSamples for the H.264 scan type.
+// the header never read a frame. Each track reads its first sample, or up to
+// maxScanSamples for the scan type, whatever the other tracks interleave; it
+// gives up after maxInBandBlocks blocks of other tracks in a row, and the whole
+// read stops at maxInBandTotalBlocks blocks.
 func WithInBandColourFallback() ReadOption {
 	return func(o *readOpts) { o.inBandColour = true }
 }
 
-// maxInBandBlocks bounds the in-band scan: the parameter sets sit in the first
-// access unit of each video track, so the first block is enough; this only caps
-// how far we look if a needed track's first block is unexpectedly late.
+// maxInBandBlocks bounds the wait for each track's next sample: a track still
+// read gives up after this many blocks of other tracks in a row. The parameter
+// sets sit in the first access unit, so this only matters for a late track.
 const maxInBandBlocks = 128
+
+// maxInBandTotalBlocks bounds the whole read: each track's own samples are
+// bounded (one, or maxScanSamples) and so is each wait between them.
+const maxInBandTotalBlocks = (maxScanSamples + 1) * maxInBandBlocks
 
 // fillColourFromFirstSample is the WithInBandColourFallback worker. For every
 // video track whose description is incomplete head-only - colour behind a bare
@@ -240,13 +246,25 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	if err != nil {
 		return
 	}
-	for i := 0; i < maxInBandBlocks && len(need)+len(scans) > 0; i++ {
+	waits := make(map[uint64]int) // blocks of other tracks since each track's last sample
+	for i := 0; i < maxInBandTotalBlocks && len(need)+len(scans) > 0; i++ {
 		if ctx.Err() != nil {
 			return
 		}
 		blk, err := br.Next()
 		if err != nil {
 			return
+		}
+		for _, id := range activeTracks(need, scans) {
+			if id == blk.TrackNumber {
+				waits[id] = 0
+			} else if waits[id]++; waits[id] >= maxInBandBlocks {
+				delete(need, id)
+				if sc, ok := scans[id]; ok {
+					sc.s.apply(sc.t)
+					delete(scans, id)
+				}
+			}
 		}
 		if t, ok := need[blk.TrackNumber]; ok {
 			delete(need, blk.TrackNumber) // first sample carries the parameter sets
@@ -262,6 +280,20 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			}
 		}
 	}
+}
+
+// activeTracks lists the tracks still read, each once.
+func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S) []uint64 {
+	ids := make([]uint64, 0, len(need)+len(scans))
+	for id := range need {
+		ids = append(ids, id)
+	}
+	for id := range scans {
+		if _, ok := need[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // NeedsInBandColour reports whether t is a video track whose stream
