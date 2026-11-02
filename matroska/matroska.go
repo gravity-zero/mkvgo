@@ -758,6 +758,33 @@ func CutShortOf(ctx context.Context, r io.ReadSeeker) (*CutShort, error) {
 // Finding is one diagnosed defect with its remedy. See ops.Finding.
 type Finding = ops.Finding
 
+// The values of Finding.Kind and Finding.Scope. See mkv.FindingKinds.
+const (
+	FindingNoIndex               = mkv.FindingNoIndex
+	FindingIndexMisskeyed        = mkv.FindingIndexMisskeyed
+	FindingIndexSparse           = mkv.FindingIndexSparse
+	FindingIndexStaleTracks      = mkv.FindingIndexStaleTracks
+	FindingAudioDelay            = mkv.FindingAudioDelay
+	FindingAudioShort            = mkv.FindingAudioShort
+	FindingPictureMissing        = mkv.FindingPictureMissing
+	FindingTruncated             = mkv.FindingTruncated
+	FindingDamaged               = mkv.FindingDamaged
+	FindingTrailingJunk          = mkv.FindingTrailingJunk
+	FindingStreamedSize          = mkv.FindingStreamedSize
+	FindingWrongContainer        = mkv.FindingWrongContainer
+	FindingNoMoov                = mkv.FindingNoMoov
+	FindingSampleTable           = mkv.FindingSampleTable
+	FindingUndeclaredCompression = mkv.FindingUndeclaredCompression
+	FindingUnsizedLacedAudio     = mkv.FindingUnsizedLacedAudio
+
+	ScopeHead = mkv.ScopeHead
+	ScopeBody = mkv.ScopeBody
+	ScopeTail = mkv.ScopeTail
+)
+
+// FindingKinds returns every value Finding.Kind takes. See mkv.FindingKinds.
+func FindingKinds() []string { return mkv.FindingKinds() }
+
 // Diagnosis is Diagnose's full triage verdict for one file. See ops.Diagnosis.
 type Diagnosis = ops.Diagnosis
 

@@ -54,7 +54,7 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 
 	if lay.moovOff < 0 {
 		d.Findings = append(d.Findings, mkv.Finding{
-			Kind:   "no-moov",
+			Kind:   mkv.FindingNoMoov,
 			Detail: "no moov box found: the movie header (and with it the sample table) is missing",
 			Remedy: "re-download the source (no tool can rebuild a missing sample table)",
 		})
@@ -114,7 +114,7 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 	const remedy = "re-download the source: no mkvgo command rebuilds a sample table"
 	mv, err := parseMoov(moovRaw, size, sampleFull)
 	if err != nil {
-		d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Detail: err.Error(), Remedy: remedy})
+		d.Findings = append(d.Findings, mkv.Finding{Kind: mkv.FindingSampleTable, Detail: err.Error(), Remedy: remedy})
 		return
 	}
 	mdats, err := mdatRanges(f, size)
@@ -124,7 +124,7 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 	for i, tr := range mv.tracks {
 		num := uint64(i + 1) // the probe's track number, the one every command takes
 		if strings.HasPrefix(tr.unsupported, "sample table: ") {
-			d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: num,
+			d.Findings = append(d.Findings, mkv.Finding{Kind: mkv.FindingSampleTable, Track: num,
 				Detail: fmt.Sprintf("track %d: %s", num, strings.TrimPrefix(tr.unsupported, "sample table: ")), Remedy: remedy})
 			continue
 		}
@@ -133,7 +133,7 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 		}
 		for k, smp := range tr.samples {
 			if !inMdat(mdats, smp.offset, int64(smp.size)) {
-				d.Findings = append(d.Findings, mkv.Finding{Kind: "sample-table", Track: num,
+				d.Findings = append(d.Findings, mkv.Finding{Kind: mkv.FindingSampleTable, Track: num,
 					Detail: fmt.Sprintf("track %d: sample %d (%d bytes at offset %d) lies outside every mdat box", num, k+1, smp.size, smp.offset), Remedy: remedy})
 				break
 			}
@@ -180,7 +180,8 @@ func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayo
 		}
 		if boxSize < hdrLen || !plausibleBoxType(typ) {
 			d.Findings = append(d.Findings, mkv.Finding{
-				Kind:   "trailing-junk",
+				Kind:   mkv.FindingTrailingJunk,
+				Scope:  mkv.ScopeTail,
 				Detail: fmt.Sprintf("%d byte(s) at offset %d are not a well-formed box", size-off, off),
 				Remedy: "remux the file (a rewrite drops them)",
 			})
@@ -189,7 +190,8 @@ func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayo
 		if off+boxSize > size {
 			d.DeclaredSize, d.MissingTailBytes = off+boxSize, off+boxSize-size
 			d.Findings = append(d.Findings, mkv.Finding{
-				Kind: "truncated",
+				Kind:  mkv.FindingTruncated,
+				Scope: mkv.ScopeTail,
 				Detail: fmt.Sprintf("box %q at offset %d declares %d bytes but only %d remain: the source ends early",
 					typ, off, boxSize, size-off),
 				Remedy: "re-download the source (the missing tail is not recoverable by any tool)",
@@ -204,7 +206,8 @@ func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayo
 	d.DeclaredSize = off
 	if off < size {
 		d.Findings = append(d.Findings, mkv.Finding{
-			Kind:   "trailing-junk",
+			Kind:   mkv.FindingTrailingJunk,
+			Scope:  mkv.ScopeTail,
 			Detail: fmt.Sprintf("%d byte(s) beyond the last box", size-off),
 			Remedy: "remux the file (a rewrite drops them)",
 		})
@@ -305,7 +308,7 @@ func diagnoseTracks(moovPayload []byte, d *mkv.Diagnosis) error {
 		d.AudioDelaysNs[t.num] = delay
 		if delay >= diagnoseDelayThresholdNs {
 			d.Findings = append(d.Findings, mkv.Finding{
-				Kind:    "audio-delay",
+				Kind:    mkv.FindingAudioDelay,
 				Detail:  fmt.Sprintf("audio track %d is presented %dms after the video (edit list)", t.num, delay/1_000_000),
 				Remedy:  fmt.Sprintf("mkvgo retime --shift %d=-%d", t.num, delay/1_000_000),
 				Track:   t.num,

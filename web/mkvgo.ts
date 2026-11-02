@@ -513,13 +513,16 @@ export interface Finding {
    * "picture-missing" (a stretch without any video block: playback freezes
    * there whatever the index does) | "audio-short" (an audio track ends
    * before the picture) | "audio-delay" | "truncated" | "damaged" |
-   * "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container"
+   * "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container" |
+   * "sample-table" (MP4) | "undeclared-compression" | "unsized-laced-audio"
    */
   kind: string
   detail: string
   /** The repair that fixes this finding (reindex / retime / resync / re-download). */
   remedy: string
-  /** Track number, for per-track findings (audio-delay). */
+  /** Where a defect of the file's bytes lies; absent for index, timing and track findings. */
+  scope?: 'head' | 'body' | 'tail'
+  /** Track number, for per-track findings (audio-delay, audio-short, sample-table, undeclared-compression, unsized-laced-audio). */
   track?: number
   delay_ns?: number
 }

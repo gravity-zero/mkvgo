@@ -14,6 +14,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `SourceCutShort` / `CutShortOf` (ops and the `matroska` facade): whether a
   Matroska or MP4 source stops before the end it declares, head-only; the
   CLI's `truncated` object, now also in the WASM probe result.
+- `Finding.Scope` (`head`, `body`, `tail`): where a defect of the file's
+  bytes lies, so a `damaged` finding says whether media is lost in the middle.
+  The Finding kinds are constants (`mkv.Finding*`, `FindingKinds()`, also in
+  the `matroska` facade); every documented list now names all 16.
+- `undeclared-compression` and `unsized-laced-audio` findings set `Track`.
 - `BlockReader.StoppedShort`: the walk ended because the source stops inside
   an element.
 

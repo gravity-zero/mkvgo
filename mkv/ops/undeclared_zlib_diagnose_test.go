@@ -30,8 +30,11 @@ func TestDiagnoseFindsUndeclaredCompression(t *testing.T) {
 	}
 	var hits []string
 	for _, f := range d.Findings {
-		if f.Kind == "undeclared-compression" {
+		if f.Kind == mkv.FindingUndeclaredCompression {
 			hits = append(hits, f.Detail)
+			if f.Track != 2 {
+				t.Errorf("Track = %d, want 2", f.Track)
+			}
 		}
 	}
 	if len(hits) != 1 || !contains(hits[0], "track 2") {

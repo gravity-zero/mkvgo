@@ -68,7 +68,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		// the Matroska engine directly.)
 		if errors.Is(err, reader.ErrNotMatroska) {
 			d.Findings = append(d.Findings, Finding{
-				Kind:   "wrong-container",
+				Kind:   mkv.FindingWrongContainer,
 				Detail: "the content is ISO base media (MP4/MOV), not Matroska/WebM",
 				Remedy: "rename or remux the file; mkvgo.Diagnose and the CLI route by content",
 			})
@@ -118,7 +118,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	switch {
 	case !known:
 		sizeFinding = &Finding{
-			Kind:   "streamed-size",
+			Kind:   mkv.FindingStreamedSize,
 			Detail: "the Segment declares no size (a streamed or interrupted write); readers cannot bound it",
 			Remedy: "mkvgo reindex (the rewrite seals the size)",
 		}
@@ -144,7 +144,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	}
 	if ends := d.TrackEnds; ends != nil && ends.SkippedBytes > 0 {
 		d.Findings = append(d.Findings, Finding{
-			Kind: "damaged",
+			Kind:  mkv.FindingDamaged,
+			Scope: mkv.ScopeBody,
 			Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
 				ends.SkippedBytes),
 			Remedy: "mkvgo reindex --resync",
@@ -158,16 +159,16 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	case ch.Healthy:
 	case ch.TotalCues == 0:
 		d.Findings = append(d.Findings, Finding{
-			Kind: "no-index", Detail: ch.Reason,
+			Kind: mkv.FindingNoIndex, Detail: ch.Reason,
 			Remedy: "mkvgo reindex (or serve with SynthesizeIndex)",
 		})
 	case ch.UnknownTrackCues > 0:
 		d.Findings = append(d.Findings, Finding{
-			Kind: "index-stale-tracks", Detail: ch.Reason, Remedy: "mkvgo reindex",
+			Kind: mkv.FindingIndexStaleTracks, Detail: ch.Reason, Remedy: "mkvgo reindex",
 		})
 	case ch.VideoCues == 0:
 		d.Findings = append(d.Findings, Finding{
-			Kind: "index-misskeyed", Detail: ch.Reason, Remedy: "mkvgo reindex",
+			Kind: mkv.FindingIndexMisskeyed, Detail: ch.Reason, Remedy: "mkvgo reindex",
 		})
 	default:
 		// Video cues exist but leave a hole too wide to seek into. Distinct from
@@ -188,7 +189,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			detail, remedy = probedSparseVerdict(ch, detail, remedy)
 		}
 		d.Findings = append(d.Findings, Finding{
-			Kind: "index-sparse", Detail: detail, Remedy: remedy,
+			Kind: mkv.FindingIndexSparse, Detail: detail, Remedy: remedy,
 		})
 		// Picture missing from the stream is a PLAYBACK defect in its own
 		// right - the picture freezes there whatever the index does - and gets
@@ -210,7 +211,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 				}
 			}
 			d.Findings = append(d.Findings, Finding{
-				Kind: "audio-short",
+				Kind: mkv.FindingAudioShort,
 				Detail: fmt.Sprintf("audio track %d ends%s %.0fs before the picture (at %s, the picture ends at %s)",
 					ends.ShortAudioTrack, bound, secs(ends.AudioShortfallMs), clockMs(ends.VideoEndMs-ends.AudioShortfallMs), clockMs(ends.VideoEndMs)),
 				Remedy: "re-acquire the source (the audio is missing from the file; playback pads it with silence)",
@@ -231,7 +232,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		ns := delays[track]
 		if ns >= audioDelayFindingThresholdNs {
 			d.Findings = append(d.Findings, Finding{
-				Kind:    "audio-delay",
+				Kind:    mkv.FindingAudioDelay,
 				Detail:  fmt.Sprintf("audio track %d starts %dms after the video", track, ns/1_000_000),
 				Remedy:  fmt.Sprintf("mkvgo retime --shift %d=-%d", track, ns/1_000_000),
 				Track:   track,
@@ -249,7 +250,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		report, derr := MapDamage(ctx, path, opts...)
 		if derr != nil {
 			d.Findings = append(d.Findings, Finding{
-				Kind:   "damaged",
+				Kind:   mkv.FindingDamaged,
 				Detail: fmt.Sprintf("the tolerant walk itself failed: %v", derr),
 				Remedy: "re-download the source",
 			})
@@ -276,14 +277,16 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			switch {
 			case declaredEnd > size: // the size alone proves it, a cut between clusters walks clean
 				d.Findings = append(d.Findings, Finding{
-					Kind: "truncated",
+					Kind:  mkv.FindingTruncated,
+					Scope: mkv.ScopeTail,
 					Detail: fmt.Sprintf("the source ends early: %d of %d declared bytes present, a repair recovers the playable prefix only",
 						size, declaredEnd),
 					Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
 				})
 				if midDamage > 0 {
 					d.Findings = append(d.Findings, Finding{
-						Kind: "damaged",
+						Kind:  mkv.FindingDamaged,
+						Scope: mkv.ScopeBody,
 						Detail: fmt.Sprintf("%d damaged range(s) inside the file as well, %d bytes unrecoverable (missing or overwritten regions before the cut)",
 							midDamage, midBytes),
 						Remedy: "re-download the source (mkvgo reindex --resync keeps what the file still holds meanwhile)",
@@ -291,7 +294,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 				}
 			case bodyDamage > 0 || len(report.RepairedRanges) > 0:
 				d.Findings = append(d.Findings, Finding{
-					Kind: "damaged",
+					Kind:  mkv.FindingDamaged,
+					Scope: mkv.ScopeBody,
 					Detail: fmt.Sprintf("%d damaged range(s), %d bytes unrecoverable, %d repairable region(s)",
 						len(report.DamagedRanges), report.BytesSkipped, len(report.RepairedRanges)),
 					Remedy: "mkvgo reindex --resync",
@@ -299,7 +303,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 			}
 			if declaredEnd < size {
 				d.Findings = append(d.Findings, Finding{
-					Kind:   "trailing-junk",
+					Kind:   mkv.FindingTrailingJunk,
+					Scope:  mkv.ScopeTail,
 					Detail: fmt.Sprintf("%d byte(s) beyond the declared Segment end", size-declaredEnd),
 					Remedy: "mkvgo reindex (the rewrite drops them; run RecoverInPlace first if an in-place repair crashed here)",
 				})
@@ -311,7 +316,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		// Junk in the head - ahead of the metadata, or between it and the first
 		// Cluster: the head read resynced past it, a strict rewrite will not.
 		d.Findings = append(d.Findings, Finding{
-			Kind: "damaged",
+			Kind:  mkv.FindingDamaged,
+			Scope: mkv.ScopeHead,
 			Detail: fmt.Sprintf("%d undecodable byte(s) ahead of the first Cluster were skipped to read the head of the file; a reader that does not resynchronize stops there, and a strict rewrite refuses the file",
 				meta.ResyncedBytes),
 			Remedy: "mkvgo reindex --resync",
@@ -421,7 +427,7 @@ func pictureMissingFinding(ch *CueHealthReport, meta *mkv.Container) (Finding, b
 		}
 	}
 	return Finding{
-		Kind:   "picture-missing",
+		Kind:   mkv.FindingPictureMissing,
 		Detail: detail,
 		Remedy: "re-acquire the source (playback freezes there; no repair restores frames the file does not hold)",
 		Track:  track,
@@ -470,9 +476,10 @@ func undeclaredCompressionFindings(ctx context.Context, path string, fs *mkv.FS,
 			continue
 		}
 		out = append(out, Finding{
-			Kind:   "undeclared-compression",
+			Kind:   mkv.FindingUndeclaredCompression,
 			Detail: fmt.Sprintf("subtitle track %d (%s) stores zlib-compressed blocks but declares no ContentCompression; mkvgo inflates them on read", t.ID, t.Codec),
 			Remedy: "re-mux the track so the file declares the compression, or decompress it",
+			Track:  t.ID,
 		})
 	}
 	return out
@@ -578,9 +585,10 @@ func unsizedLacedAudioFindings(ctx context.Context, path string, fs *mkv.FS, met
 			continue
 		}
 		out = append(out, Finding{
-			Kind:   "unsized-laced-audio",
+			Kind:   mkv.FindingUnsizedLacedAudio,
 			Detail: fmt.Sprintf("audio track %d (%s) laces its frames under one timecode with no DefaultDuration, and nothing states its frame size or frame count: MP4 outputs spread each block's frames over its span instead of timing them exactly", t.ID, t.Codec),
 			Remedy: "re-mux the track with a DefaultDuration, or write track statistics tags (NUMBER_OF_FRAMES)",
+			Track:  t.ID,
 		})
 	}
 	return out

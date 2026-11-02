@@ -183,14 +183,53 @@ type CueHole struct {
 	VideoAbsentMs int64 `json:"video_absent_ms,omitempty"`
 }
 
+// The values of Finding.Kind.
+const (
+	FindingNoIndex               = "no-index"               // no Cues
+	FindingIndexMisskeyed        = "index-misskeyed"        // not one cue keys on video
+	FindingIndexSparse           = "index-sparse"           // the video cues leave a hole too wide to seek into
+	FindingIndexStaleTracks      = "index-stale-tracks"     // cues name tracks the file no longer has
+	FindingAudioDelay            = "audio-delay"            // an audio track starts late (Track, DelayNs)
+	FindingAudioShort            = "audio-short"            // an audio track ends well before the picture (Track)
+	FindingPictureMissing        = "picture-missing"        // a stretch with no video block
+	FindingTruncated             = "truncated"              // the file ends before its declared end
+	FindingDamaged               = "damaged"                // bytes that do not parse (Scope says where)
+	FindingTrailingJunk          = "trailing-junk"          // bytes past the declared end
+	FindingStreamedSize          = "streamed-size"          // a Segment of unknown size
+	FindingWrongContainer        = "wrong-container"        // a .mkv holding MP4/MOV
+	FindingNoMoov                = "no-moov"                // MP4 without a moov box
+	FindingSampleTable           = "sample-table"           // MP4 sample table the file cannot hold (Track)
+	FindingUndeclaredCompression = "undeclared-compression" // zlib blocks with no ContentCompression (Track)
+	FindingUnsizedLacedAudio     = "unsized-laced-audio"    // laced audio with no frame size (Track)
+)
+
+// FindingKinds returns every value Finding.Kind takes.
+func FindingKinds() []string {
+	return []string{FindingNoIndex, FindingIndexMisskeyed, FindingIndexSparse, FindingIndexStaleTracks,
+		FindingAudioDelay, FindingAudioShort, FindingPictureMissing, FindingTruncated, FindingDamaged,
+		FindingTrailingJunk, FindingStreamedSize, FindingWrongContainer, FindingNoMoov, FindingSampleTable,
+		FindingUndeclaredCompression, FindingUnsizedLacedAudio}
+}
+
+// The values of Finding.Scope: where in the file the defect lies.
+const (
+	ScopeHead = "head" // ahead of the first Cluster (or the moov)
+	ScopeBody = "body" // inside the media
+	ScopeTail = "tail" // at the end: missing, or bytes past it
+)
+
 // Finding is one diagnosed defect with its remedy.
 type Finding struct {
-	// Kind: "no-index" | "index-misskeyed" | "index-sparse" |
-	// "index-stale-tracks" | "audio-delay" | "truncated" | "damaged" |
-	// "trailing-junk" | "streamed-size" | "no-moov" | "wrong-container" | "sample-table".
-	Kind    string `json:"kind"`
-	Detail  string `json:"detail"`
-	Remedy  string `json:"remedy"`
+	// Kind is one of FindingKinds: "no-index" | "index-misskeyed" | "index-sparse" |
+	// "index-stale-tracks" | "audio-delay" | "audio-short" | "picture-missing" |
+	// "truncated" | "damaged" | "trailing-junk" | "streamed-size" | "wrong-container" |
+	// "no-moov" | "sample-table" | "undeclared-compression" | "unsized-laced-audio".
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+	Remedy string `json:"remedy"`
+	// Scope says where a defect of the file's bytes lies (ScopeHead, ScopeBody,
+	// ScopeTail); empty for a finding about the index, the timing or a track.
+	Scope   string `json:"scope,omitempty"`
 	Track   uint64 `json:"track,omitempty"`
 	DelayNs int64  `json:"delay_ns,omitempty"`
 }

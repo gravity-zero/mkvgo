@@ -70,8 +70,11 @@ func TestDiagnoseFindsUnsizedLacedAudio(t *testing.T) {
 		}
 		found := false
 		for _, f := range d.Findings {
-			if f.Kind == "unsized-laced-audio" {
+			if f.Kind == mkv.FindingUnsizedLacedAudio {
 				found = true
+				if f.Track != 2 {
+					t.Errorf("Track = %d, want 2", f.Track)
+				}
 			}
 		}
 		if found != tc.want {
