@@ -9,7 +9,14 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-11-02
+
 ### Breaking
+
+- Bytes written: a remux of a Matroska source that states a disposition flag
+  as 0 (`FlagOriginal` 0, ...) leaves the element out, the spec default, and
+  writes a flag set to 1 after `FlagForced`, where the source's own sat after
+  its Video or Audio element; the media bytes are unchanged.
 
 - `Track.ScanType`: an H.264 track whose SPS has `frame_mbs_only_flag` 0 and
   whose container states no `FlagInterlaced` now reads `""` (unknown), not
@@ -21,29 +28,6 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   and `bt`, the names the reference prober gives them (the first letter is
   the field stored first); mkvgo had them swapped. A `field_order` cached
   from an earlier release holds the swapped name: probe the file again.
-
-### Added
-
-- The in-band option (`WithInBandColourFallback`, `mp4.Options.InBandColour`,
-  always on in the remux and plan entry points) reads the first 16 samples of
-  such a track and gives it `interlaced` on proof - field-coded slices, frames
-  whose fields have different picture order counts, or the picture timing SEI -
-  with `FieldOrder` `tt`/`bb` when the samples agree; on MP4 too, and for an
-  `avc3` record from the SPS the samples carry. An HEVC track whose hvcC
-  states both source flags or neither is `interlaced` when its SPS codes every
-  picture as a field, or, with the option, when its picture timing SEI says so.
-  An MPEG-2 track gets its scan type from `progressive_sequence` and, with the
-  option, from the picture coding extensions of its first samples. `reader.NewInBandScan` drives
-  it off another sample table. See [docs/library.md](docs/library.md).
-
-## [0.63.0] - 2026-11-01
-
-### Breaking
-
-- Bytes written: a remux of a Matroska source that states a disposition flag
-  as 0 (`FlagOriginal` 0, ...) leaves the element out, the spec default, and
-  writes a flag set to 1 after `FlagForced`, where the source's own sat after
-  its Video or Audio element; the media bytes are unchanged.
 
 ### Fixed
 
@@ -85,6 +69,18 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 - `matroska.ReadStream`: the forward-only reader on the facade; the CLI and the
   wasm go through the facade alone.
+- The in-band option (`WithInBandColourFallback`, `mp4.Options.InBandColour`,
+  always on in the remux and plan entry points) reads the first 16 samples of
+  an H.264 track whose SPS allows field coding and gives it `interlaced` on
+  proof - field-coded slices, frames whose fields have different picture order
+  counts, or the picture timing SEI - with `FieldOrder` `tt`/`bb` when the
+  samples agree; on MP4 too, and for an `avc3` record from the SPS the samples
+  carry. An HEVC track whose hvcC states both source flags or neither is
+  `interlaced` when its SPS codes every picture as a field, or, with the
+  option, when its picture timing SEI says so. An MPEG-2 track gets its scan
+  type from `progressive_sequence` and, with the option, from the picture
+  coding extensions of its first samples. `reader.NewInBandScan` drives it off
+  another sample table. See [docs/library.md](docs/library.md).
 
 ### Changed
 
