@@ -135,6 +135,9 @@ type BlockReader struct {
 	// failure began, and where the search for the media behind it starts.
 	elemStart int64
 	elemID    uint32 // the ID of that element, 0 while its header is unread
+	// segUnsized says the Segment header this reader read declares no size (a streamed write): past its media, bytes
+	// that are no Matroska element are trailing bytes, not a cut. A reader seated at an offset cannot tell.
+	segUnsized bool
 	// skipDamage makes Next resume on the next valid Cluster past a damaged
 	// region instead of returning an error (SetSkipDamage); skippedBytes counts
 	// what was passed over.
@@ -593,6 +596,8 @@ func (br *BlockReader) init() error {
 
 	if h2.Size >= 0 {
 		br.segEnd = startPos + h2.Size
+	} else {
+		br.segUnsized = true
 	}
 	return nil
 }
@@ -699,7 +704,7 @@ func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 		}
 		resume, found, end := br.clusterAfter(from)
 		cut := errors.Is(err, io.ErrUnexpectedEOF)
-		if !found && cut && br.segEnd < 0 && !br.cutInMedia() {
+		if !found && end >= 0 && cut && br.segUnsized && !br.cutInMedia() {
 			return b, io.EOF // bytes after the media of a Segment of unknown size (a tag, padding): the end, not a cut
 		}
 		if !found && end >= 0 && br.skipDamage {
