@@ -14,6 +14,13 @@ import (
 // rfc6381Codec returns the codec string for one output track, or "".
 func rfc6381Codec(t *outTrack) string {
 	cp := t.mkv.CodecPrivate
+	// A Dolby Vision stream whose base layer is not cross-compatible carries a Dolby sample entry (see visualEntry):
+	// its string is that entry's, <entry>.<profile>.<level>, two digits each.
+	if dv := t.mkv.DolbyVision; dv != nil && dv.BLSignalCompatID == 0 {
+		if et := dvEntryTypes[t.mkv.Codec]; et != "" {
+			return fmt.Sprintf("%s.%02d.%02d", et, dv.Profile, dv.Level)
+		}
+	}
 	switch t.mkv.Codec {
 	case "h264":
 		// avcC: configurationVersion, AVCProfileIndication, profile_compatibility,

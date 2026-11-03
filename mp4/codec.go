@@ -48,10 +48,14 @@ func lookupCodec(short string) (codecSpec, bool) {
 	return s, ok
 }
 
+// dvEntryTypes is the Dolby sample entry type of each codec a non-cross-compatible Dolby Vision stream rides on: the
+// init's entry and the manifests' codec string both take it from here.
+var dvEntryTypes = map[string]string{"h264": "dva1", "hevc": "dvh1", "av1": "dav1"}
+
 var codecTable = map[string]codecSpec{
-	"h264": {handler: "vide", video: true, brand: "avc1", sampleEntry: visualEntry("avc1", "dva1", "avcC")},
-	"hevc": {handler: "vide", video: true, brand: "hvc1", sampleEntry: visualEntry("hvc1", "dvh1", "hvcC")},
-	"av1":  {handler: "vide", video: true, brand: "av01", sampleEntry: visualEntry("av01", "dav1", "av1C")},
+	"h264": {handler: "vide", video: true, brand: "avc1", sampleEntry: visualEntry("avc1", dvEntryTypes["h264"], "avcC")},
+	"hevc": {handler: "vide", video: true, brand: "hvc1", sampleEntry: visualEntry("hvc1", dvEntryTypes["hevc"], "hvcC")},
+	"av1":  {handler: "vide", video: true, brand: "av01", sampleEntry: visualEntry("av01", dvEntryTypes["av1"], "av1C")},
 	// VP9 in MP4 (vp09 + vpcC, ISO/IEC 14496-15 style per the VP9-in-ISOBMFF
 	// spec). The vpcC is built from the first keyframe's uncompressed header
 	// when the Matroska track carries no VPCodecConfigurationRecord.

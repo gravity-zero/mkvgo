@@ -125,6 +125,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   top-level box as `Diagnose` does, so a fragmented file cut short is said
   cut by both (past 16 boxes they left it unjudged while `Diagnose` said
   `truncated`).
+- Manifests: a Dolby Vision track carried in a Dolby sample entry (`dvh1`,
+  `dav1`, `dva1`: a base layer that is not cross-compatible, profile 5 or 7)
+  is named so in HLS `CODECS` and DASH `codecs`, `dvh1.PP.LL` (was the plain
+  `hvc1`/`av01`/`avc1` string, a codec the init does not carry).
 
 ## [0.63.0] - 2026-11-02
 
