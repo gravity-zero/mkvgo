@@ -285,6 +285,7 @@ type mp4SubTable struct {
 	state   []uint8 // subUnread, subEmpty or subText
 	text    []string
 	later   []int // per sample, the first text sample after it that starts after it (-1 none), once known (laterText)
+	steps   int   // samples visited by nextText and laterText, the cost the window tests count
 }
 
 const (
@@ -431,6 +432,7 @@ func (t *mp4SubTable) laterText(ctx context.Context, open func(context.Context) 
 			}
 		}
 		for k >= 0 && t.startMs[k] <= t.startMs[top] && t.later[k] != unknown {
+			t.steps++
 			k = t.later[k]
 		}
 		if k >= 0 && t.startMs[k] <= t.startMs[top] {
@@ -448,6 +450,7 @@ func (t *mp4SubTable) laterText(ctx context.Context, open func(context.Context) 
 // nextText is the first sample after j that holds text (-1 for none), reading ahead as far as that takes.
 func (t *mp4SubTable) nextText(ctx context.Context, open func(context.Context) (mkv.ReadSeekCloser, error), j int) (int, error) {
 	for k := j + 1; k < len(t.samples); k++ {
+		t.steps++
 		if t.state[k] == subUnread {
 			if err := t.load(ctx, open, []int{k}); err != nil {
 				return -1, err
