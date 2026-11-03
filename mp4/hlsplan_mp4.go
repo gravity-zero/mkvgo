@@ -165,7 +165,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	chapters := chapterMarkers(o, c.Chapters, fts[primaryIndex(fts)].presentMs)
 	p.master = buildMasterPlaylist(o, fts, p.subs, segs, iframes)
 	if o.Encrypt == nil {
-		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
+		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs), chapters, p.iframes)
 	}
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
 	for i, ft := range fts {

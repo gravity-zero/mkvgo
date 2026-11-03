@@ -296,7 +296,8 @@ type Options struct {
 	// NoIFrames drops the trick-play I-frame stream from HLS packaging
 	// (RemuxToHLS, RemuxToABR, PlanHLS, PlanABR): no EXT-X-I-FRAME-STREAM-INF in
 	// the master, no iframe.m3u8 written, listed or served (Resource refuses
-	// it), and no I-frame collection or Matroska keyframe walk behind it. For a
+	// it), no DASH trick-mode set in manifest.mpd, and no I-frame collection
+	// or Matroska keyframe walk behind it. For a
 	// server whose players scrub with their own trickplay images and must not
 	// trigger the keyframe walk an I-frame request costs. Off by default (the
 	// stream is offered whenever the presentation has keyframes and is not

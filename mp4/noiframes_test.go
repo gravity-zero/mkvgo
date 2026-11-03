@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -94,6 +95,9 @@ func TestNoIFrames(t *testing.T) {
 				if strings.HasPrefix(name, "iframe") || name == "master.m3u8" {
 					continue
 				}
+				if name == "manifest.mpd" {
+					b = withoutTrickMode(t, b)
+				}
 				if !bytes.Equal(off[name], b) {
 					t.Errorf("%s differs with NoIFrames", name)
 				}
@@ -143,6 +147,9 @@ func TestNoIFrames(t *testing.T) {
 					t.Fatal(err)
 				}
 				got, _, err := plan.Resource(ctx, name)
+				if name == "manifest.mpd" {
+					want = withoutTrickMode(t, want)
+				}
 				if err != nil || !bytes.Equal(got, want) {
 					t.Errorf("%s differs with NoIFrames (err %v)", name, err)
 				}
@@ -277,4 +284,17 @@ func TestNoIFramesReadsNothingForIframes(t *testing.T) {
 		t.Fatal("default iframe.m3u8 read nothing: the fixture does not show the walk the option avoids")
 	}
 	t.Logf("default iframe.m3u8 walk: %d bytes; NoIFrames: 0", def.bytes-before)
+}
+
+// trickModeSet matches the DASH trick-mode AdaptationSet over the I-frame fragments, and the id it names the video by.
+var trickModeSet = regexp.MustCompile(`(?s)    <AdaptationSet mimeType="video/mp4" contentType="video">\n      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode".*?</AdaptationSet>\n`)
+
+// withoutTrickMode is an MPD less its trick-mode set: what NoIFrames leaves, the I-frame fragments it names unserved.
+func withoutTrickMode(t *testing.T, mpd []byte) []byte {
+	t.Helper()
+	out := trickModeSet.ReplaceAll(mpd, nil)
+	if bytes.Equal(out, mpd) {
+		t.Fatalf("the default manifest has no trick-mode set:\n%s", mpd)
+	}
+	return bytes.Replace(out, []byte(`<AdaptationSet id="1" mimeType="video/mp4"`), []byte(`<AdaptationSet mimeType="video/mp4"`), 1)
 }

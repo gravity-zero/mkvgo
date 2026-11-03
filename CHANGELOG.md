@@ -78,6 +78,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   Atmos (E-AC-3 JOC) read from the stream, carried in the `dec3` and announced
   (`CHANNELS="16/JOC"`, the DASH `EC3_ExtensionType` property). One set of
   helpers serves every HLS and DASH writer.
+- DASH trick play: `manifest.mpd` (to-hls and the on-demand plan) carries a
+  DASH-IF trick-mode AdaptationSet over the I-frame fragments `iframe.m3u8`
+  already lists, one per segment (`maxPlayoutRate`, `codingDependency="false"`),
+  the video set taking `id="1"`; none under `NoIFrames` or encryption, nor in a
+  full pass where a segment does not open on a keyframe.
 
 ### Changed
 

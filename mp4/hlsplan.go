@@ -661,7 +661,15 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	p.stampSource()
 	p.tabAcct = newTableAccount(p)
 	if o.Encrypt == nil {
-		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters)
+		// Its I-frames are read on demand, after the manifest: each segment opens on a cued keyframe, so the trick-mode
+		// set lists one per segment, as the full pass of the same source does, its bandwidth bounded by the segment's.
+		var trick []iframeRef
+		if p.hasIframe {
+			for k, s := range segs {
+				trick = append(trick, iframeRef{seg: k, length: s.bytes})
+			}
+		}
+		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters, trick)
 	}
 	if err := ctx.Err(); err != nil { // the cover read does not see ctx
 		return nil, err

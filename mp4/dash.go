@@ -22,7 +22,7 @@ import (
 // (Options.ChapterMarkers), adds a Period-level EventStream - one Event per
 // chapter (see buildChapterEventStream); nil leaves the manifest unchanged
 // from before the option existed.
-func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64, chapters []mkv.Chapter) []byte {
+func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []float64, bandwidth int64, chapters []mkv.Chapter, iframes []iframeRef) []byte {
 	rw := urlRewriter(o)
 	var totalSec float64
 	for _, d := range durs {
@@ -55,6 +55,9 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		var as, rep string
 		if ft.outTrack.spec.video {
 			as = `mimeType="video/mp4" contentType="video"`
+			if len(iframes) > 0 && !o.NoIFrames {
+				as = `id="1" ` + as // the trick-mode set names it
+			}
 			rep = fmt.Sprintf(`id="v" bandwidth="%d"`, bandwidth)
 			if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
 				rep += fmt.Sprintf(` width="%d" height="%d"`, *t.Width, *t.Height)
@@ -94,6 +97,10 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		b.WriteString("    </AdaptationSet>\n")
 	}
 
+	if v := pickVideoFrag(fts); v != nil && len(iframes) > 0 && !o.NoIFrames {
+		b.WriteString(dashTrickMode(o, v, durs, iframes))
+	}
+
 	// Subtitle renditions: one whole-presentation WebVTT file each.
 	for i := range subs {
 		t := &subs[i].track
@@ -108,6 +115,53 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 
 	b.WriteString("  </Period>\n</MPD>\n")
 	return []byte(b.String())
+}
+
+// dashTrickMode is the trick-play AdaptationSet: the I-frame fragments iframe.m3u8 lists (each segment's leading
+// keyframe alone), as a DASH-IF trick-mode set of the video AdaptationSet (id 1). Each fragment spans its segment, so
+// played at the frame rate they run maxPlayoutRate times faster than real time.
+func dashTrickMode(o *Options, v *fragTrack, durs []float64, iframes []iframeRef) string {
+	rw := urlRewriter(o)
+	t := &v.outTrack.mkv
+	starts := make([]int64, len(durs)+1)
+	for i, d := range durs {
+		starts[i+1] = starts[i] + int64(d*1000+0.5)
+	}
+	var peak, span float64
+	tStarts := make([]int64, len(iframes))
+	tDurs := make([]int64, len(iframes))
+	for k, ifr := range iframes {
+		tStarts[k], tDurs[k] = starts[ifr.seg], starts[ifr.seg+1]-starts[ifr.seg]
+		if d := durs[ifr.seg]; d > 0 {
+			peak = max(peak, float64(ifr.length)*8/d)
+			span += d
+		}
+	}
+	rep := fmt.Sprintf(`id="trick" bandwidth="%d"`, int64(peak))
+	if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
+		rep += fmt.Sprintf(` width="%d" height="%d"`, *t.Width, *t.Height)
+	}
+	if codecs := rfc6381Codec(v.outTrack); codecs != "" {
+		rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
+	}
+	if t.FrameRate != nil && *t.FrameRate > 0 && span > 0 {
+		rep += fmt.Sprintf(` maxPlayoutRate="%d"`, max(1, int64(span/float64(len(iframes))**t.FrameRate+0.5)))
+	}
+	rep += ` codingDependency="false"`
+	var b strings.Builder
+	b.WriteString(`    <AdaptationSet mimeType="video/mp4" contentType="video">` + "\n")
+	b.WriteString(`      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="1"/>` + "\n")
+	fmt.Fprintf(&b, "      <Representation %s>\n", rep)
+	b.WriteString(`        <SegmentList timescale="1000">` + "\n")
+	fmt.Fprintf(&b, "          <Initialization sourceURL=\"%s\"/>\n", xmlAttr(rw(renditionInit([]*fragTrack{v}, 0))))
+	b.WriteString(dashTimelineSpans(tStarts, tDurs))
+	for _, ifr := range iframes {
+		fmt.Fprintf(&b, "          <SegmentURL media=\"%s\"/>\n", xmlAttr(rw(iframeName(ifr.seg))))
+	}
+	b.WriteString("        </SegmentList>\n")
+	b.WriteString("      </Representation>\n")
+	b.WriteString("    </AdaptationSet>\n")
+	return b.String()
 }
 
 // dashTimeline renders the shared SegmentTimeline (exact millisecond

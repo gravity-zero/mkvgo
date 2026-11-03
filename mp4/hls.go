@@ -515,7 +515,11 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	if o.SingleFile {
 		mpd = buildDASHManifestSingle(&o, fts, subs, durs, peakBandwidth(segs), rends)
 	} else {
-		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs), chapters)
+		var trick []iframeRef // every segment's I-frame, or none: a plan of the same source lists them all
+		if len(res.iframes) == len(segs) {
+			trick = res.iframes
+		}
+		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs), chapters, trick)
 	}
 	return res, fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
