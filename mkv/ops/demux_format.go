@@ -208,7 +208,6 @@ type oggStream struct {
 	seq    uint32
 	held   []byte // the last packet, written once the next one (or the end) says whether it is the last
 	heldGP int64
-	begun  bool
 }
 
 // page writes one page holding packet, with its granule position and flags (2 first, 4 last).
@@ -222,7 +221,7 @@ func (s *oggStream) page(w io.Writer, packet []byte, granule int64, flags byte) 
 		lacing = append(lacing, 255)
 	}
 	if len(lacing) > 255 {
-		return fmt.Errorf("Ogg packet of %d bytes past one page", len(packet))
+		return fmt.Errorf("an Ogg packet of %d bytes does not fit one page", len(packet))
 	}
 	h := make([]byte, 27, 27+len(lacing)+len(packet))
 	copy(h, "OggS")
