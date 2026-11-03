@@ -52,7 +52,7 @@ func openPackagingSource(ctx context.Context, srcPath string, fs *mkv.FS, moovLi
 		f.Close() // Matroska: the existing reader owns its own handle
 		// Attachment payloads stay on disk: the packager carries only the
 		// cover art, read on its own by loadCoverArt.
-		c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
+		c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback(), reader.WithInBandChannels())
 		if err != nil {
 			return nil, err
 		}

@@ -212,10 +212,11 @@ func dashLabel(t *mkv.Track, indent string) string {
 // count is unknown. The DASH side of the same fact is
 // dashAudioChannelConfiguration.
 func hlsChannelsAttr(t *mkv.Track) string {
-	if t.Channels == nil || *t.Channels == 0 {
+	ch := announcedChannels(t)
+	if ch == 0 {
 		return ""
 	}
-	return fmt.Sprintf(",CHANNELS=\"%d\"", *t.Channels)
+	return fmt.Sprintf(",CHANNELS=\"%d\"", ch)
 }
 
 // dashAudioChannelConfiguration is the Representation's
@@ -224,12 +225,13 @@ func hlsChannelsAttr(t *mkv.Track) string {
 // players expect: AC-3 and E-AC-3 carry the Dolby channel mask, everything
 // else the MPEG channel count.
 func dashAudioChannelConfiguration(t *mkv.Track, indent string) string {
-	if t.Channels == nil || *t.Channels == 0 {
+	ch := announcedChannels(t)
+	if ch == 0 {
 		return ""
 	}
-	scheme, value := "urn:mpeg:dash:23003:3:audio_channel_configuration:2011", fmt.Sprintf("%d", *t.Channels)
+	scheme, value := "urn:mpeg:dash:23003:3:audio_channel_configuration:2011", fmt.Sprintf("%d", ch)
 	if t.Codec == "ac3" || t.Codec == "eac3" {
-		if mask, ok := dolbyChannelMask(*t.Channels); ok {
+		if mask, ok := dolbyChannelMask(ch); ok {
 			scheme, value = "tag:dolby.com,2014:dash:audio_channel_configuration:2011", mask
 		}
 	}

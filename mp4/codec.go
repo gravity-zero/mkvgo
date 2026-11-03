@@ -409,8 +409,8 @@ func fixedU32(v, unitsPerOne float64) uint32 {
 // precision for that track.
 func audioSampleEntry(typ string, t *mkv.Track, config []byte) []byte {
 	channels := uint16(2)
-	if t.Channels != nil && *t.Channels > 0 {
-		channels = uint16(*t.Channels)
+	if ch := announcedChannels(t); ch > 0 {
+		channels = uint16(ch)
 	}
 	rate := uint32(48000)
 	if t.SampleRate != nil && *t.SampleRate > 0 {
@@ -435,7 +435,29 @@ func aacEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 	if len(t.CodecPrivate) == 0 {
 		return nil, errf("track %d (aac): missing CodecPrivate (AudioSpecificConfig)", t.ID)
 	}
-	return audioSampleEntry("mp4a", t, esdsBox(0x40, t.CodecPrivate)), nil
+	return audioSampleEntry("mp4a", withStreamChannels(t, aacChannels(t.CodecPrivate)), esdsBox(0x40, t.CodecPrivate)), nil
+}
+
+// announcedChannels is the channel count an output announces for an audio track: the one its stream states
+// (Track.StreamChannels, which the decoder configuration in the same init carries), else the container's; 0 unknown.
+func announcedChannels(t *mkv.Track) uint8 {
+	if t.StreamChannels != nil && *t.StreamChannels > 0 {
+		return *t.StreamChannels
+	}
+	if t.Channels != nil {
+		return *t.Channels
+	}
+	return 0
+}
+
+// withStreamChannels is t stating ch as its stream's channel count, t itself when ch is 0 (not derivable).
+func withStreamChannels(t *mkv.Track, ch uint8) *mkv.Track {
+	if ch == 0 {
+		return t
+	}
+	c := *t
+	c.StreamChannels = &ch
+	return &c
 }
 
 // esdsBox builds the esds (ES Descriptor) box for an audio stream with the given

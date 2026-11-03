@@ -164,7 +164,7 @@ func ac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errf("track %d (ac3): %w", t.ID, err)
 	}
-	return audioSampleEntry("ac-3", t, dac3), nil
+	return audioSampleEntry("ac-3", withStreamChannels(t, ac3Channels(dac3[8:])), dac3), nil
 }
 
 // parseAC3 builds a dac3 (AC3SpecificBox) from an AC-3 syncframe (ETSI TS 102
@@ -218,7 +218,7 @@ func eac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errf("track %d (eac3): %w", t.ID, err)
 	}
-	return audioSampleEntry("ec-3", t, dec3), nil
+	return audioSampleEntry("ec-3", withStreamChannels(t, eac3Channels(dec3[8:])), dec3), nil
 }
 
 var eac3Blocks = [4]uint32{1, 2, 3, 6}

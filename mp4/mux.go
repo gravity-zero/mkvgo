@@ -165,7 +165,7 @@ func RemuxToMP4(ctx context.Context, srcPath, dstPath string, opts ...Options) (
 	// the MP4, and it is read on its own below (loadCoverArt). The in-band
 	// fallback completes the colour and HDR10 static metadata the sample entry
 	// is written from, for a track whose container left them short.
-	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback())
+	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData(), reader.WithInBandColourFallback(), reader.WithInBandChannels())
 	if err != nil {
 		return err
 	}

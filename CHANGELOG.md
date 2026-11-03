@@ -33,6 +33,15 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   damage or a missing tail, and `diagnose` with a `truncated`, `damaged` or
   `sample-table` finding, where 3 replaces its 1. Without the flag nothing
   changes. `probe` prints `Truncated` in its text output too.
+- Bytes served: to-mp4, to-hls, the on-demand plan and the ABR/DASH packaging
+  announce an AAC, AC-3 or E-AC-3 track's channel count from its stream (the
+  AudioSpecificConfig, the first frame header) where the Matroska container
+  states another: the AudioSampleEntry's `channelcount`, the HLS `CHANNELS`
+  attribute and the DASH `AudioChannelConfiguration` now agree with the
+  decoder configuration of the same init (a 5.1 stream declared 2 by its
+  container was announced 2). Inits and playlists of such sources change; a
+  cache keyed on them is stale. The packaging reads one block more per AC-3
+  or E-AC-3 track at open.
 
 ### Added
 

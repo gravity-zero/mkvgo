@@ -345,7 +345,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// WithInBandColourFallback: the init's colr/mdcv/clli come from the track
 	// description, and an HDR10 mux often keeps the static metadata only
 	// in-band; one bounded read of the first sample, for such a track only.
-	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithBitrate(), reader.WithInBandColourFallback()}
+	metaOpts := []reader.ReadOption{reader.WithCues(), reader.WithTags(), reader.WithAttachments(), reader.WithoutAttachmentData(), reader.WithBitrate(), reader.WithInBandColourFallback(), reader.WithInBandChannels()}
 	if o.ChapterMarkers {
 		// Only fetched when the opt-in is set: an extra bounded SeekHead ->
 		// Chapters read a plan otherwise has no use for.
