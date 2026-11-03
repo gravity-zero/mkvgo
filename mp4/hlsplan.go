@@ -478,8 +478,11 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	for p.segEnd > srcSize && srcSize > 0 && len(cues) > 0 && !clusterHoldsAWholeBlock(ctx, srcPath, fs, c.SegmentStart+cues[len(cues)-1].ClusterPos, srcSize) {
 		cues = cues[:len(cues)-1]
 	}
-	if len(cues) == 0 {
+	if len(cues) == 0 && p.segEnd > srcSize {
 		return nil, errf("%s: %w: the file ends before the first cluster its Cues name, plan it once the file is complete", shown.Path(srcPath), mkv.ErrSourceTruncated)
+	}
+	if len(cues) == 0 { // the file holds its whole Segment: the positions are wrong, not the file
+		return nil, errf("%s: %w: every cue names a position past the end of the file, a corrupt index: rewrite it with mkvgo reindex", shown.Path(srcPath), mkv.ErrNoKeyframeIndex)
 	}
 	p.bounds = []int64{0}
 	p.offsets = []int64{c.SegmentStart + cues[0].ClusterPos}

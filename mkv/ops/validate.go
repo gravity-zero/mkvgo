@@ -173,13 +173,19 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "no-cues",
 			Message: "no Cues index - seeking, on-demand HLS and keyframe extraction need one (run `mkvgo reindex`)"})
 	case len(videoIDs) > 0:
-		misKeyed, videoCues, stale, pastEnd := 0, 0, 0, 0
+		misKeyed, videoKeyed, videoCues, stale, pastEnd, corrupt := 0, 0, 0, 0, 0, 0
+		cut := c.SegmentEnd > stat.Size() // the Segment declares more than the file holds
 		for _, cue := range c.Cues {
+			if videoIDs[cue.Track] {
+				videoKeyed++
+			}
 			switch {
 			case !videoIDs[cue.Track]:
 				misKeyed++
-			case c.SegmentStart+cue.ClusterPos >= stat.Size():
+			case c.SegmentStart+cue.ClusterPos >= stat.Size() && cut:
 				pastEnd++ // a cluster the file does not hold: it was cut, the index is not stale
+			case c.SegmentStart+cue.ClusterPos >= stat.Size():
+				corrupt++ // past the end of a file that holds its whole Segment: the index is wrong, not the file
 			default:
 				videoCues++
 				// A cue at or behind the point a broken walk stopped at is
@@ -198,7 +204,7 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		// track, which leaves an index that is mostly non-video and seeks fine:
 		// that is bloat (a reindex slims it), not a defect.
 		switch {
-		case misKeyed > 0 && videoCues == 0:
+		case misKeyed > 0 && videoKeyed == 0:
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityError, Code: "cues-non-video",
 				Message: fmt.Sprintf("all %d cue points reference a non-video track - no video cue to seek to, every seek lands mid-GOP (rewrite with `mkvgo reindex`)", misKeyed)})
 		case misKeyed > 0:
@@ -208,6 +214,10 @@ func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issu
 		if pastEnd > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-past-end",
 				Message: fmt.Sprintf("%d/%d cue points name clusters past the end of the file - the file is cut short (re-download the source; `mkvgo salvage` keeps the playable prefix meanwhile)", pastEnd, len(c.Cues))})
+		}
+		if corrupt > 0 {
+			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-stale",
+				Message: fmt.Sprintf("%d/%d cue points name positions past the end of a file that holds its whole Segment - a corrupt cue index (rewrite with `mkvgo reindex`)", corrupt, len(c.Cues))})
 		}
 		if stale > 0 {
 			issues = append(issues, mkv.Issue{Severity: mkv.SeverityWarning, Code: "cues-stale",

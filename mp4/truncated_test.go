@@ -327,3 +327,40 @@ func TestDeclaredSizeBoundedWalk(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanCorruptCuesOnACompleteFile: Cues naming only positions past the end of a file that holds its whole Segment
+// are a corrupt index: PlanHLS refuses it as ErrNoKeyframeIndex (reindex), not as a cut source to re-download.
+func TestPlanCorruptCuesOnACompleteFile(t *testing.T) {
+	src := buildMKV(t, synthFixtureTracks(), synthFixtureBlocks(0))
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := bytes.Index(data, []byte{0x1C, 0x53, 0xBB, 0x6B})
+	if start < 0 {
+		t.Fatal("fixture has no Cues")
+	}
+	n := 0
+	for i := start + 4; i+2 < len(data); i++ {
+		if data[i] == 0xF1 && data[i+1] > 0x80 && data[i+1] <= 0x88 { // CueClusterPosition: past any end
+			w := int(data[i+1] & 0x0F)
+			data[i+2] = 0x7F
+			for k := 1; k < w; k++ {
+				data[i+2+k] = 0xFF
+			}
+			n++
+			i += 1 + w
+		}
+	}
+	if n == 0 {
+		t.Fatal("no CueClusterPosition rewritten")
+	}
+	bad := filepath.Join(t.TempDir(), "corrupt.mkv")
+	if err := os.WriteFile(bad, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = PlanHLS(context.Background(), bad, Options{SegmentMs: 1000})
+	if !errors.Is(err, mkv.ErrNoKeyframeIndex) || errors.Is(err, mkv.ErrSourceTruncated) {
+		t.Fatalf("PlanHLS on a complete file with a corrupt index: %v; want ErrNoKeyframeIndex, not ErrSourceTruncated", err)
+	}
+}

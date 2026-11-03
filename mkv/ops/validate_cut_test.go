@@ -74,3 +74,76 @@ func TestCueHealthOnACutFile(t *testing.T) {
 		}
 	}
 }
+
+// corruptCues rewrites, inside the Cues element of data, every CueClusterPosition to its width's largest value (a
+// position past the end of the file) and, with retrack, the first CueTrack to track 2: a corrupt index.
+func corruptCues(t *testing.T, data []byte, retrack bool) []byte {
+	t.Helper()
+	out := append([]byte{}, data...)
+	start := bytes.Index(out, []byte{0x1C, 0x53, 0xBB, 0x6B})
+	if start < 0 {
+		t.Fatal("fixture has no Cues")
+	}
+	n := 0
+	for i := start + 4; i+2 < len(out); i++ {
+		switch {
+		case out[i] == 0xF1 && out[i+1] > 0x80 && out[i+1] <= 0x88: // CueClusterPosition
+			w := int(out[i+1] & 0x0F)
+			out[i+2] = 0x7F
+			for k := 1; k < w; k++ {
+				out[i+2+k] = 0xFF
+			}
+			n++
+			i += 1 + w
+		case retrack && out[i] == 0xF7 && out[i+1] == 0x81 && out[i+2] == 0x01: // CueTrack 1
+			out[i+2], retrack = 0x02, false
+		}
+	}
+	if n == 0 {
+		t.Fatal("no CueClusterPosition rewritten")
+	}
+	return out
+}
+
+// TestValidateCorruptCuesOnACompleteFile: cue points naming positions past the end of a file whose Segment ends
+// within it are a corrupt index a reindex rewrites - not a cut file to re-download - and a video cue among them still
+// counts as one: the index does not reference only non-video tracks.
+func TestValidateCorruptCuesOnACompleteFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 4)
+	for i := range 4 {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: make([]byte, 64)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: make([]byte, 16)},
+		})
+	}
+	sealed := filepath.Join(dir, "sealed.mkv")
+	if err := Reindex(ctx, buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 4000), sealed); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "corrupt.mkv")
+	writeAll(t, bad, corruptCues(t, readAll(t, sealed), true))
+	issues, err := Validate(ctx, bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := false
+	for _, i := range issues {
+		switch i.Code {
+		case "cues-past-end":
+			t.Errorf("a complete file's corrupt index reported as a cut: %s", i.Message)
+		case "cues-non-video":
+			if strings.HasPrefix(i.Message, "all ") {
+				t.Errorf("video cues reported absent: %s", i.Message)
+			}
+		case "cues-stale":
+			stale = stale || strings.Contains(i.Message, "reindex")
+		}
+	}
+	if !stale {
+		t.Errorf("no cues-stale issue sending to a reindex: %+v", issues)
+	}
+}
