@@ -455,14 +455,16 @@ func announcedChannels(t *mkv.Track) uint8 {
 	return 0
 }
 
-// withStreamChannels is t stating ch as its stream's channel count, t itself when ch is 0 (not derivable).
+// withStreamChannels records ch, what the decoder configuration of the entry being built says, as t's stream channel
+// count and returns t: the manifests written from t (HLS CHANNELS, DASH AudioChannelConfiguration) then announce what
+// the init does, however far into the file the stream's first frame was. ch 0 (not derivable) leaves t as it is.
 func withStreamChannels(t *mkv.Track, ch uint8) *mkv.Track {
 	if ch == 0 {
 		return t
 	}
-	c := *t
-	c.StreamChannels = &ch
-	return &c
+	t.StreamChannels = &ch
+	t.ChannelsMismatch = t.Channels != nil && *t.Channels != ch
+	return t
 }
 
 // esdsBox builds the esds (ES Descriptor) box for an audio stream with the given

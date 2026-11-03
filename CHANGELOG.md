@@ -49,6 +49,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   pair, was announced 6), and one whose access units open with an AC-3 core
   takes that core's fscod, bsid, bsmod, acmod and lfeon where AC-3 puts them
   (they were read as E-AC-3 fields).
+- Bytes served: the HLS `CHANNELS` and DASH `AudioChannelConfiguration` of
+  an AC-3, E-AC-3 or AAC track come from the sample entry the init carries,
+  also for a track whose first block lies past the in-band read's wait (they
+  fell back on the container's count there, the init saying another).
 
 ### Added
 

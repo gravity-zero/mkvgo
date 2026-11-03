@@ -161,3 +161,50 @@ func TestAnnouncedChannelsImplicitPS(t *testing.T) {
 		}
 	}
 }
+
+// TestAnnouncedChannelsLateAudioTrack: an audio track whose first block comes after more than the in-band read's
+// wait of other tracks' blocks is still announced in the master playlist with the channels its init states.
+func TestAnnouncedChannelsLateAudioTrack(t *testing.T) {
+	ctx := context.Background()
+	sr := 48000.0
+	two := uint8(2)
+	video := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: u32(640), Height: u32(360)}
+	audio := mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "ac3", SampleRate: &sr, Channels: &two}
+	ac3 := make([]byte, 768)
+	copy(ac3, makeAC3(0, 20, 8, 0, 7, 1))
+	var blocks []genBlock
+	for i := range 400 {
+		blocks = append(blocks, genBlock{track: 1, pts: int64(i) * 40, key: i%25 == 0, data: cencVideoSample()})
+	}
+	for i := range 100 {
+		blocks = append(blocks, genBlock{track: 2, pts: 8000 + int64(i)*32, key: true, data: ac3})
+	}
+	sortGenBlocks(blocks)
+	src := buildMKV(t, []mkv.Track{video, audio}, blocks)
+
+	plan, err := PlanHLS(ctx, src, Options{SegmentMs: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inits []byte
+	for _, name := range plan.Resources() {
+		if strings.HasSuffix(name, ".mp4") {
+			b, _, err := plan.Resource(ctx, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inits = append(inits, b...)
+		}
+	}
+	init := entryChannels(inits, "ac-3")
+	if m := string(plan.MasterPlaylist()); !strings.Contains(m, fmt.Sprintf(`CHANNELS="%d"`, init)) {
+		t.Errorf("plan: the init says %d channels, the master:\n%s", init, m)
+	}
+	hls := filepath.Join(t.TempDir(), "hls")
+	if err := RemuxToHLS(ctx, src, hls, Options{SegmentMs: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if m := readTextFile(t, filepath.Join(hls, "master.m3u8")); strings.Contains(m, "CHANNELS=") && !strings.Contains(m, fmt.Sprintf(`CHANNELS="%d"`, init)) {
+		t.Errorf("to-hls: the init says %d channels, the master:\n%s", init, m)
+	}
+}
