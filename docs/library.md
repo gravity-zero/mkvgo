@@ -1950,7 +1950,7 @@ output are `"mkvgo"`. The output also carries convention per-track
 statistics tags (`BPS`, `DURATION`, `NUMBER_OF_FRAMES`, `NUMBER_OF_BYTES`)
 accumulated during the stream - `WithBitrate()` reads them back head-only.
 
-**Demux** -- extract tracks to raw streams:
+**Demux** -- extract tracks, each as the file its codec's tools read:
 
 ```go
 err := matroska.Demux(ctx, matroska.DemuxOptions{
@@ -1960,7 +1960,7 @@ err := matroska.Demux(ctx, matroska.DemuxOptions{
 })
 ```
 
-`DemuxOptions.NoOverwrite` refuses the demux before anything is written when a file is already at an output name (the CLI sets it unless `-f`). Each track lands in `OutputDir/<trackID>.<codec>` - the codec being mkvgo's short name (`1.h264`), or the name the CodecID resolves to when it has none (`theora`), or the CodecID itself when nothing resolves it. `Demux`, `Mux` and `RemuxToWebM` leave no file under their output names when they fail; `Mux` reads its sources before creating the output, so a request naming a missing file or track leaves a file already at the output path untouched.
+`DemuxOptions.NoOverwrite` refuses the demux before anything is written when a file is already at an output name (the CLI sets it unless `-f`). Each track lands in `OutputDir/<trackID>.<ext>` in its codec's format: AAC as ADTS (`.aac`, the header from the AudioSpecificConfig), H.264 and HEVC as Annex-B with the parameter sets ahead of every keyframe (`.h264`, `.hevc`), Opus and Vorbis in Ogg (`.opus`, `.ogg`), FLAC with its STREAMINFO (`.flac`), PGS as `.sup`. Any other codec, a track lacking what its format needs, and every track under `DemuxOptions.Raw`, keeps the payloads as stored in `<trackID>.<codec>` - the codec being mkvgo's short name, or the name the CodecID resolves to when it has none (`theora`), or the CodecID itself when nothing resolves it. `Demux`, `Mux` and `RemuxToWebM` leave no file under their output names when they fail; `Mux` reads its sources before creating the output, so a request naming a missing file or track leaves a file already at the output path untouched.
 
 **Merge** -- combine all tracks from multiple MKVs:
 

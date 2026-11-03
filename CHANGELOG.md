@@ -44,6 +44,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   playlists of such sources change; a
   cache keyed on them is stale. The packaging reads one block more per AC-3
   or E-AC-3 track at open.
+- `demux` writes each track as the file its codec's tools read: AAC as ADTS,
+  H.264 / HEVC as Annex-B with the parameter sets ahead of every keyframe,
+  Opus and Vorbis in Ogg (`.opus`, `.ogg`, was `.vorbis`), FLAC with its
+  STREAMINFO, PGS as `.sup` (was `.hdmv_pgs_subtitle`); they were the bare
+  stored payloads, which no tool reads. `DemuxOptions.Raw` / `--raw` keeps
+  the old output.
 - Bytes served, HLS masters (`to-hls`, the plan, ABR, concat,
   `HLSFromCMAF`): audio tracks of different codecs form one group each
   (`aud-<codec>`) with one variant per group, whose `CODECS` names the video

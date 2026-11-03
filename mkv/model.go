@@ -802,6 +802,11 @@ type DemuxOptions struct {
 	TrackIDs   []uint64
 	// NoOverwrite refuses the demux, before anything is written, when a file is already at one of its output names.
 	NoOverwrite bool
+	// Raw writes each track's payloads as the file stores them, one after the other, named after the codec. By
+	// default a track goes out as the file its codec's tools read: AAC as ADTS (.aac), H.264 and HEVC as Annex-B
+	// with their parameter sets ahead of every keyframe (.h264, .hevc), Opus and Vorbis in Ogg (.opus, .ogg), FLAC
+	// with its STREAMINFO (.flac), PGS as a .sup; another codec, or a track lacking what its format needs, is raw.
+	Raw bool
 }
 
 // TrackInput is one track ops.Mux takes from a source file, with the language, name and default flag it gets.

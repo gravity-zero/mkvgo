@@ -32,7 +32,11 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		return err
 	}
 
-	writers, outputs, err := openOutputFiles(wanted, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs, mkv.SyncOutputFrom(extra))
+	formats := make(map[uint64]*demuxFormat, len(wanted))
+	for id, t := range wanted {
+		formats[id] = demuxFormatOf(t, opts.Raw)
+	}
+	writers, outputs, err := openOutputFiles(wanted, formats, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs, mkv.SyncOutputFrom(extra))
 	if err != nil {
 		return err
 	}
@@ -63,6 +67,13 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 			br.SetProgress(p, st.Size())
 		}
 	}
+	for _, id := range sortedTracks(writers) {
+		if h := formats[id].head; h != nil {
+			if err := h(writers[id]); err != nil {
+				return fmt.Errorf("write track %d: %w", id, err)
+			}
+		}
+	}
 
 	for {
 		if ctx.Err() != nil {
@@ -84,8 +95,15 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		if err != nil {
 			return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
 		}
-		if _, err := w.Write(data); err != nil {
+		if err := formats[blk.TrackNumber].frame(w, blk, data); err != nil {
 			return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
+		}
+	}
+	for _, id := range sortedTracks(writers) {
+		if e := formats[id].end; e != nil {
+			if err := e(writers[id]); err != nil {
+				return fmt.Errorf("write track %d: %w", id, err)
+			}
 		}
 	}
 	// Flush buffered writers so a final write error (e.g. disk full) is surfaced
@@ -124,12 +142,12 @@ const demuxWriteBuf = 1 << 20
 
 // openOutputFiles creates one output per track, in track order. On a failure
 // it closes and removes the files it had already created.
-func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrite bool, fs *mkv.FS, sync bool) (map[uint64]*bufio.Writer, []*output, error) {
+func openOutputFiles(tracks map[uint64]mkv.Track, formats map[uint64]*demuxFormat, dir, source string, noOverwrite bool, fs *mkv.FS, sync bool) (map[uint64]*bufio.Writer, []*output, error) {
 	writers := make(map[uint64]*bufio.Writer, len(tracks))
 	outputs := make([]*output, 0, len(tracks))
 	if noOverwrite {
 		for _, id := range sortedTracks(tracks) {
-			path, err := safePath(dir, fmt.Sprintf("%d.%s", id, sanitizeCodec(demuxCodecName(tracks[id]))))
+			path, err := safePath(dir, fmt.Sprintf("%d.%s", id, formats[id].ext))
 			if err != nil {
 				return nil, nil, err
 			}
@@ -145,7 +163,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, dir, source string, noOverwrit
 		return nil, nil, err
 	}
 	for _, id := range sortedTracks(tracks) {
-		name := fmt.Sprintf("%d.%s", id, sanitizeCodec(demuxCodecName(tracks[id])))
+		name := fmt.Sprintf("%d.%s", id, formats[id].ext)
 		path, err := safePath(dir, name)
 		if err != nil {
 			return abandon(err)

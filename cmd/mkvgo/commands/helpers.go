@@ -94,7 +94,7 @@ var CmdUsage = map[string]string{
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",
 	"verify":             "mkvgo verify [-json] <file.mkv|.mp4> (recompute content hashes, exit 1 on mismatch)",
 	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> [part2.mkv ...] (-blocks: per-track content hashes, MKV/WebM only; several files on the right = compare against their concatenation)",
-	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)]",
+	"demux":              "mkvgo demux <file.mkv> -o <dir> [-t trackID,... (default: all tracks)] [--raw]",
 	"mux":                "mkvgo mux -o <out.mkv|.mp4> <file:trackID> [<file:trackID> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge":              "mkvgo merge -o <out.mkv|.mp4> <file1> [<file2> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge-subtitle":     "mkvgo merge-subtitle <file.mkv|.mp4> -o <out> <subtitle> [-format srt|ass (default: from extension; MP4: srt only)] [-lang code (default: und)] [-name text]",

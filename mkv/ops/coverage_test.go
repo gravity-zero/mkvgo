@@ -512,7 +512,7 @@ func TestCovOpenOutputFiles_CreateError(t *testing.T) {
 	}
 	// Non-existent sub-dir → os.Create fails → DoCreate error cleanup path.
 	nonExistDir := filepath.Join(t.TempDir(), "nosuchsubdir")
-	_, _, err := openOutputFiles(tracks, nonExistDir, "", false, nil, false) // nil FS → os
+	_, _, err := openOutputFiles(tracks, rawFormats(tracks), nonExistDir, "", false, nil, false) // nil FS → os
 	if err == nil {
 		t.Fatal("expected error for non-existent directory")
 	}
@@ -1233,8 +1233,17 @@ func TestCovOpenOutputFiles_CleanupClosers(t *testing.T) {
 		1: {ID: 1, Codec: "h264"},
 		2: {ID: 2, Codec: "aac"},
 	}
-	_, _, err = openOutputFiles(tracks, t.TempDir(), "", false, fs, false)
+	_, _, err = openOutputFiles(tracks, rawFormats(tracks), t.TempDir(), "", false, fs, false)
 	if err == nil {
 		t.Fatal("expected error from second Create")
 	}
+}
+
+// rawFormats is the raw demux format of each track.
+func rawFormats(tracks map[uint64]mkv.Track) map[uint64]*demuxFormat {
+	f := make(map[uint64]*demuxFormat, len(tracks))
+	for id, t := range tracks {
+		f[id] = demuxFormatOf(t, true)
+	}
+	return f
 }

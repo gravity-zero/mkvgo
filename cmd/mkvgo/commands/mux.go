@@ -10,14 +10,16 @@ import (
 
 func CmdDemux(args []string) {
 	if len(args) < 3 {
-		FatalUsage("usage: mkvgo demux <file.mkv> -o <dir> [-t trackID,...]")
+		FatalUsage("usage: " + CmdUsage["demux"])
 	}
 	source := args[0]
 	var outDir string
 	var trackIDs []uint64
+	var raw bool
 
 	fl := newFlags("demux")
 	fl.String(&outDir, "-o")
+	fl.Bool(&raw, "--raw")
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
 	fl.Parse(args[1:])
 	if outDir == "" {
@@ -25,7 +27,7 @@ func CmdDemux(args []string) {
 	}
 
 	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
-		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force,
+		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force, Raw: raw,
 	}, writeOptions())
 	ClearProgress()
 	if err != nil {

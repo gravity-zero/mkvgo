@@ -350,23 +350,35 @@ mkvgo compare -blocks film.mkv part1.mkv part2.mkv part3.mkv
 
 ### demux
 
-Extract tracks to raw codec streams.
+Extract tracks, each as the file its codec's tools read.
 
 ```
-mkvgo demux <file.mkv> -o <dir> [-t trackID,...]
+mkvgo demux <file.mkv> -o <dir> [-t trackID,...] [--raw]
 ```
 
 | Flag | Description |
 |---|---|
 | `-o` | Output directory (required) |
 | `-t` | Comma-separated track IDs to extract (default: all) |
+| `--raw` | Write each track's payloads as the file stores them, one after the other |
 
 ```bash
 mkvgo demux video.mkv -o ./streams/
 mkvgo demux video.mkv -o ./streams/ -t 1,2
 ```
 
-Each track lands in `<dir>/<trackID>.<codec>` (`1.h264`, `2.aac`, `3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to, and the CodecID itself when nothing resolves it. A demux that fails leaves no file behind, and the files already under those names as they were.
+Each track lands in `<dir>/<trackID>.<ext>`, in its codec's own format:
+
+| Codec | Output |
+|---|---|
+| AAC | `.aac`, ADTS: each frame behind a header built from the AudioSpecificConfig (profile, rate, channels) |
+| H.264, HEVC | `.h264`, `.hevc`, Annex-B: start codes, the SPS/PPS (and VPS) ahead of every keyframe |
+| Opus | `.opus`, Ogg Opus: OpusHead, OpusTags, the granule counting the 48 kHz samples |
+| Vorbis | `.ogg`, Ogg Vorbis: the three headers, then the packets, the granule from the block timestamps |
+| FLAC | `.flac`: the `fLaC` marker and the STREAMINFO ahead of the frames |
+| PGS | `.sup`: each segment behind `PG` and its 90 kHz presentation time |
+
+Any other codec, or a track lacking what its format needs (an AAC without an AudioSpecificConfig, an H.264 without its avcC), keeps its payloads as stored, in `<trackID>.<codec>` (`3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to; so does every track under `--raw`. A demux that fails leaves no file behind, and the files already under those names as they were.
 
 ### extract-attachment
 
