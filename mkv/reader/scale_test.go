@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"testing"
-	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/costguard"
@@ -107,21 +106,19 @@ func TestMetadataReadCostGrowsLinearly(t *testing.T) {
 }
 
 // TestStatsFrameRatesGrowLinearly: each video track read every tag targeting its UID: n tracks sharing one UID and
-// n statistics tags for it cost n².
+// n statistics tags for it cost n². Counted in heap allocated, so the verdict does not hang on the machine's load.
 func TestStatsFrameRatesGrowLinearly(t *testing.T) {
-	costguard.Linear(t, 1000, func(n int) time.Duration {
+	costguard.LinearOps(t, 1000, func(n int) uint64 {
 		c := &mkv.Container{}
 		for range n {
 			c.Tracks = append(c.Tracks, mkv.Track{Type: mkv.VideoTrack, UID: 1})
 			c.Tags = append(c.Tags, mkv.Tag{TargetID: 1, SimpleTags: []mkv.SimpleTag{
 				{Name: "NUMBER_OF_FRAMES", Value: "2400"}, {Name: "DURATION", Value: "00:01:40.100000000"}}})
 		}
-		start := time.Now()
-		statsFrameRates(c)
-		d := time.Since(start)
+		heap := costguard.HeapWork(func() { statsFrameRates(c) })
 		if c.Tracks[n-1].EstimatedFrameRate == nil {
 			t.Fatal("no rate")
 		}
-		return d
+		return heap
 	})
 }
