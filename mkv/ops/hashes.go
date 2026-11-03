@@ -51,6 +51,7 @@ type HashMismatch struct {
 	Actual  string
 }
 
+// String describes the mismatch: the track and the start of both digests.
 func (m HashMismatch) String() string {
 	return fmt.Sprintf("track %d: content hash mismatch (stored %.12s…, actual %.12s…)", m.TrackID, m.Stored, m.Actual)
 }

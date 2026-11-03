@@ -11,6 +11,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// RemoveTrack writes dstPath: srcPath without the tracks removeIDs names, its blocks copied as they are.
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -91,6 +92,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	return mw.Finalize()
 }
 
+// AddTrack writes dstPath: srcPath with one track taken from another file added (input).
 func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -163,6 +165,8 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	return mw.Finalize()
 }
 
+// EditMetadata writes dstPath: srcPath with its metadata as edit leaves the Container read from it, the blocks
+// copied as they are.
 func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -221,6 +225,7 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*mkv.C
 	return mw.Finalize()
 }
 
+// ExtractAttachment writes the payload of attachment attachID of srcPath to outPath.
 func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, outPath string, opts ...mkv.Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err

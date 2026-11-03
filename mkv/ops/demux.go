@@ -12,6 +12,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
+// Demux writes each requested track of the source to its own file in the output directory.
 func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (err error) {
 	if err := oneopt.Check(extra); err != nil {
 		return err

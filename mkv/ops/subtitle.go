@@ -76,6 +76,7 @@ func (q *openCues) flush(nextMs int64, hasNext bool) error {
 	return nil
 }
 
+// ExtractSubtitle writes the text subtitle track trackID of srcPath to outPath as SRT; a bitmap track is refused.
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -338,6 +339,8 @@ func decodeSubtitleCue(codec string, data []byte) string {
 	}
 }
 
+// MergeSubtitle writes dstPath: srcPath with the SRT file srtPath added as a subtitle track with the given
+// language and name.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err

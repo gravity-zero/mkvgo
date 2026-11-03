@@ -134,6 +134,7 @@ func (fs *FS) DoOpenContext(ctx context.Context, path string) (ReadSeekCloser, e
 	return fs.DoOpen(path)
 }
 
+// DoOpen opens path for reading through fs.Open, or os.Open when fs or its Open is nil.
 func (fs *FS) DoOpen(path string) (ReadSeekCloser, error) {
 	if fs != nil && fs.Open != nil {
 		return fs.Open(path)
@@ -141,6 +142,7 @@ func (fs *FS) DoOpen(path string) (ReadSeekCloser, error) {
 	return os.Open(path)
 }
 
+// DoCreate creates or truncates path through fs.Create, or os.Create when fs or its Create is nil.
 func (fs *FS) DoCreate(path string) (WriteSeekCloser, error) {
 	if fs != nil && fs.Create != nil {
 		return fs.Create(path)
@@ -148,6 +150,7 @@ func (fs *FS) DoCreate(path string) (WriteSeekCloser, error) {
 	return os.Create(path)
 }
 
+// DoOpenFile opens path with flag and perm through fs.OpenFile, or os.OpenFile when fs or its OpenFile is nil.
 func (fs *FS) DoOpenFile(path string, flag int, perm os.FileMode) (ReadWriteSeekCloser, error) {
 	if fs != nil && fs.OpenFile != nil {
 		return fs.OpenFile(path, flag, perm)
@@ -155,6 +158,7 @@ func (fs *FS) DoOpenFile(path string, flag int, perm os.FileMode) (ReadWriteSeek
 	return os.OpenFile(path, flag, perm)
 }
 
+// DoStat describes path through fs.Stat, or os.Stat when fs or its Stat is nil.
 func (fs *FS) DoStat(path string) (os.FileInfo, error) {
 	if fs != nil && fs.Stat != nil {
 		return fs.Stat(path)
@@ -162,6 +166,7 @@ func (fs *FS) DoStat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
+// DoMkdirAll creates path and its missing parents through fs.MkdirAll, or os.MkdirAll when fs or its MkdirAll is nil.
 func (fs *FS) DoMkdirAll(path string, perm os.FileMode) error {
 	if fs != nil && fs.MkdirAll != nil {
 		return fs.MkdirAll(path, perm)
@@ -169,6 +174,7 @@ func (fs *FS) DoMkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
+// DoWriteFile writes data to path through fs.WriteFile, or os.WriteFile when fs or its WriteFile is nil.
 func (fs *FS) DoWriteFile(path string, data []byte, perm os.FileMode) error {
 	if fs != nil && fs.WriteFile != nil {
 		return fs.WriteFile(path, data, perm)
@@ -176,6 +182,7 @@ func (fs *FS) DoWriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(path, data, perm)
 }
 
+// DoRemove removes path through fs.Remove, or os.Remove when fs or its Remove is nil.
 func (fs *FS) DoRemove(path string) error {
 	if fs != nil && fs.Remove != nil {
 		return fs.Remove(path)
@@ -183,6 +190,7 @@ func (fs *FS) DoRemove(path string) error {
 	return os.Remove(path)
 }
 
+// DoRename renames oldpath to newpath through fs.Rename, or os.Rename when fs or its Rename is nil.
 func (fs *FS) DoRename(oldpath, newpath string) error {
 	if fs != nil && fs.Rename != nil {
 		return fs.Rename(oldpath, newpath)

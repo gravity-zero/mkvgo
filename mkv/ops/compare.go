@@ -13,6 +13,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
+// Compare lists what differs between the files at pathA and pathB: info, tracks, chapters, attachments and tags.
 func Compare(ctx context.Context, pathA, pathB string, opts ...mkv.Options) ([]mkv.Diff, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err

@@ -538,6 +538,7 @@ func (br *BlockReader) SetKnownTracks(tracks []mkv.Track) {
 	}
 }
 
+// SetProgress makes the walk report its position to fn as it reads, against total bytes (-1 when unknown).
 func (br *BlockReader) SetProgress(fn mkv.ProgressFunc, total int64) {
 	br.progressFn = fn
 	br.progressTotal = total

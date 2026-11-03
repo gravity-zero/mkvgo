@@ -27,23 +27,58 @@ const DefaultTimecodeScale = mkv.DefaultTimecodeScale
 
 // --- Type aliases ---
 
+// TrackType is mkv.TrackType: a track's kind, "video", "audio", "subtitle" or a rarer Matroska kind.
 type TrackType = mkv.TrackType
+
+// Container is mkv.Container: a Matroska or WebM file as read.
 type Container = mkv.Container
+
+// SegmentInfo is mkv.SegmentInfo: the Segment's Info element.
 type SegmentInfo = mkv.SegmentInfo
+
+// Track is mkv.Track: one TrackEntry with what the reader derived from its stream.
 type Track = mkv.Track
+
+// Chapter is mkv.Chapter: one chapter atom, times in milliseconds.
 type Chapter = mkv.Chapter
+
+// Attachment is mkv.Attachment: one attached file (a font, a cover).
 type Attachment = mkv.Attachment
+
+// Tag is mkv.Tag: one Tag element, its target and its SimpleTags.
 type Tag = mkv.Tag
+
+// SimpleTag is mkv.SimpleTag: one name/value pair of a Tag.
 type SimpleTag = mkv.SimpleTag
+
+// Block is mkv.Block: one frame of a track as a BlockReader delivers it.
 type Block = mkv.Block
+
+// CuePoint is mkv.CuePoint: one seek index entry, its time in milliseconds.
 type CuePoint = mkv.CuePoint
+
+// MuxOptions is mkv.MuxOptions, what Mux writes.
 type MuxOptions = mkv.MuxOptions
+
+// DemuxOptions is mkv.DemuxOptions, what Demux extracts.
 type DemuxOptions = mkv.DemuxOptions
+
+// TrackInput is mkv.TrackInput: one track Mux or AddTrack takes from a source.
 type TrackInput = mkv.TrackInput
+
+// MergeInput is mkv.MergeInput: one source of Merge and the tracks taken from it.
 type MergeInput = mkv.MergeInput
+
+// MergeOptions is mkv.MergeOptions, what Merge writes.
 type MergeOptions = mkv.MergeOptions
+
+// SplitOptions is mkv.SplitOptions, how Split cuts a file.
 type SplitOptions = mkv.SplitOptions
+
+// TimeRange is mkv.TimeRange: a span of the timeline in milliseconds.
 type TimeRange = mkv.TimeRange
+
+// Severity is mkv.Severity: an Issue's severity.
 type Severity = mkv.Severity
 
 // ErrNotMatroska is returned by Open/Read/OpenMeta/ReadMeta when the input is not
@@ -62,19 +97,39 @@ var ErrMPEGTS = mkv.ErrMPEGTS
 // it; the file is repaired with Reindex and Options.Resync (or Salvage).
 var ErrDamagedRegion = reader.ErrDamagedRegion
 
+// Issue is mkv.Issue: one finding of Validate.
 type Issue = mkv.Issue
+
+// DiffType is mkv.DiffType: how a section differs between two compared files.
 type DiffType = mkv.DiffType
+
+// Diff is mkv.Diff: one difference Compare found.
 type Diff = mkv.Diff
+
+// ProgressFunc is mkv.ProgressFunc: called with the bytes processed and the total (-1 when unknown).
 type ProgressFunc = mkv.ProgressFunc
+
+// Options is mkv.Options: the options every operation takes (progress, FS, verification, repair).
 type Options = mkv.Options
+
+// FS is mkv.FS: the file system operations go through; nil is the local disk.
 type FS = mkv.FS
+
+// BlockReader is reader.BlockReader: a forward walk of a file's blocks, cluster by cluster.
 type BlockReader = reader.BlockReader
+
+// SRTEntry is subtitle.SRTEntry: one SubRip cue.
 type SRTEntry = subtitle.SRTEntry
+
+// ASSFile is subtitle.ASSFile: a parsed ASS/SSA file.
 type ASSFile = subtitle.ASSFile
+
+// ASSEvent is subtitle.ASSEvent: one ASS Dialogue line.
 type ASSEvent = subtitle.ASSEvent
 
 // --- Constants ---
 
+// The track kinds, the severities of an Issue and the kinds of a Diff, as in package mkv.
 const (
 	VideoTrack      = mkv.VideoTrack
 	AudioTrack      = mkv.AudioTrack
@@ -86,6 +141,7 @@ const (
 	DiffChanged     = mkv.DiffChanged
 )
 
+// CodecShortName is mkv.CodecShortName: Matroska CodecID to the short codec name of Track.Codec.
 var CodecShortName = mkv.CodecShortName
 
 // FFprobeCodecName maps an mkvgo short codec name to the conventional codec_name
@@ -158,7 +214,11 @@ func ExtractKeyframeSample(ctx context.Context, srcPath string, atMs int64, opts
 // KeyframeSelect, KeyframeBatchSample and KeyframeStats describe a batch
 // keyframe extraction. See ExtractKeyframes.
 type KeyframeSelect = ops.KeyframeSelect
+
+// KeyframeBatchSample is ops.KeyframeBatchSample: one keyframe ExtractKeyframes hands to its callback.
 type KeyframeBatchSample = ops.KeyframeBatchSample
+
+// KeyframeStats is ops.KeyframeStats: what a batch keyframe extraction did.
 type KeyframeStats = ops.KeyframeStats
 
 // Access point kinds of KeyframeBatchSample.Access.
@@ -206,7 +266,11 @@ func WriteKeyframeStream(ctx context.Context, srcPath string, sel KeyframeSelect
 // model - see ops.Target for the capability fields and TargetByName for the
 // built-in profiles.
 type Target = ops.Target
+
+// TrackVerdict is ops.TrackVerdict: one track's playability against a Target.
 type TrackVerdict = ops.TrackVerdict
+
+// PlayabilityReport is ops.PlayabilityReport: the per-track verdicts of Playability and the file's verdict.
 type PlayabilityReport = ops.PlayabilityReport
 
 // Playability evaluates every track of the file at path against target
@@ -230,6 +294,8 @@ func TargetByName(name string) (Target, bool) {
 // Rung and LadderInput are the ABR ladder recommendation model - see
 // ops.RecommendLadder.
 type Rung = ops.Rung
+
+// LadderInput is ops.LadderInput: the source properties RecommendLadder caps its ladder at.
 type LadderInput = ops.LadderInput
 
 // RecommendLadder returns a sensible ABR ladder capped at the source
@@ -254,6 +320,7 @@ func RecommendLadderFor(ctx context.Context, path string, opts ...Options) ([]Ru
 // ops.ServingStrategy.
 type ServingStrategy = ops.ServingStrategy
 
+// The serving strategies Ingest recommends: play the file as it is, remux it to HLS, or transcode it.
 const (
 	StrategyDirectPlay = ops.StrategyDirectPlay
 	StrategyRemuxHLS   = ops.StrategyRemuxHLS
@@ -350,6 +417,8 @@ func WithCues() ReadOption { return reader.WithCues() }
 // reader.WithoutTailScan.
 func WithoutTailScan() ReadOption { return reader.WithoutTailScan() }
 
+// NewBlockReader walks the blocks of the Matroska file r from its start, timed in milliseconds; timecodeScale is the
+// Segment's TimecodeScale (0: the default 1 ms). See reader.NewBlockReader.
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {
 	return reader.NewBlockReader(r, timecodeScale)
 }
@@ -418,42 +487,55 @@ func WebMNonSubsetElements(c *Container) []string {
 
 // --- Operations ---
 
+// Mux writes a new file from tracks taken from one or more sources. See ops.Mux.
 func Mux(ctx context.Context, opts MuxOptions, extra ...Options) error {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
 	return ops.Mux(ctx, opts, extra...)
 }
+
+// Demux writes each requested track of a file to its own file. See ops.Demux.
 func Demux(ctx context.Context, opts DemuxOptions, extra ...Options) error {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
 	return ops.Demux(ctx, opts, extra...)
 }
+
+// Split cuts a file into parts at keyframes and returns their paths. See ops.Split.
 func Split(ctx context.Context, opts SplitOptions, extra ...Options) ([]string, error) {
 	if err := oneopt.Check(extra); err != nil {
 		return nil, err
 	}
 	return ops.Split(ctx, opts, extra...)
 }
+
+// Join writes the sources one after the other on one timeline. See ops.Join.
 func Join(ctx context.Context, sources []string, dstPath string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
 	return ops.Join(ctx, sources, dstPath, opts...)
 }
+
+// Merge writes one file holding the tracks of several sources, the metadata of the first. See ops.Merge.
 func Merge(ctx context.Context, opts MergeOptions, extra ...Options) error {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
 	return ops.Merge(ctx, opts, extra...)
 }
+
+// Validate lists what in a file breaks playback or seeking, each issue with a severity and a code. See ops.Validate.
 func Validate(ctx context.Context, path string, opts ...Options) ([]Issue, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
 	return ops.Validate(ctx, path, opts...)
 }
+
+// Compare lists what differs between two files' metadata. See ops.Compare.
 func Compare(ctx context.Context, pathA, pathB string, opts ...Options) ([]Diff, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
@@ -892,6 +974,7 @@ func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, ds
 	return ops.ApplyRollback(ctx, repairedPath, delta, dstPath, opts...)
 }
 
+// RemoveTrack writes dstPath: srcPath without the tracks removeIDs names. See ops.RemoveTrack.
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -899,6 +982,7 @@ func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint6
 	return ops.RemoveTrack(ctx, srcPath, dstPath, removeIDs, opts...)
 }
 
+// AddTrack writes dstPath: srcPath with one track of another file added. See ops.AddTrack.
 func AddTrack(ctx context.Context, srcPath, dstPath string, input TrackInput, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -906,6 +990,7 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input TrackInput, op
 	return ops.AddTrack(ctx, srcPath, dstPath, input, opts...)
 }
 
+// EditMetadata writes dstPath: srcPath with its metadata as edit leaves it. See ops.EditMetadata.
 func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*Container), opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -917,6 +1002,8 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*Conta
 // it; the file is left as it was, and EditMetadata rewrites it instead.
 var ErrNoRoomInPlace = ops.ErrNoRoomInPlace
 
+// EditInPlace applies edit to the metadata of the file at path without rewriting its media; ErrNoRoomInPlace when
+// the edit does not fit. See ops.EditInPlace.
 func EditInPlace(ctx context.Context, path string, edit func(*Container), opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -924,6 +1011,7 @@ func EditInPlace(ctx context.Context, path string, edit func(*Container), opts .
 	return ops.EditInPlace(ctx, path, edit, opts...)
 }
 
+// ExtractAttachment writes the payload of attachment attachID to outPath. See ops.ExtractAttachment.
 func ExtractAttachment(ctx context.Context, srcPath string, attachID uint64, outPath string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -943,6 +1031,7 @@ func LoadAttachmentData(ctx context.Context, a *Attachment, opts ...Options) err
 	return ops.LoadAttachmentData(ctx, a, opts...)
 }
 
+// ExtractSubtitle writes a text subtitle track to outPath as SRT. See ops.ExtractSubtitle.
 func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -950,6 +1039,7 @@ func ExtractSubtitle(ctx context.Context, srcPath string, trackID uint64, outPat
 	return ops.ExtractSubtitle(ctx, srcPath, trackID, outPath, opts...)
 }
 
+// ExtractASS writes an ASS/SSA subtitle track to outPath as an .ass file. See ops.ExtractASS.
 func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -1074,6 +1164,7 @@ func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {
 	return subtitle.FileToWebVTT(srcPath, w)
 }
 
+// MergeSubtitle writes dstPath: srcPath with an SRT file added as a subtitle track. See ops.MergeSubtitle.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -1081,6 +1172,7 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	return ops.MergeSubtitle(ctx, srcPath, srtPath, dstPath, lang, name, opts...)
 }
 
+// MergeASS writes dstPath: srcPath with an ASS/SSA file added as a subtitle track. See ops.MergeASS.
 func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -1088,6 +1180,8 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	return ops.MergeASS(ctx, srcPath, assPath, dstPath, lang, name, opts...)
 }
 
+// MergeWithSubtitles writes dstPath: basePath with other sources' tracks and an SRT file added. See
+// ops.MergeWithSubtitles.
 func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, srtLang, srtName string, extraSources []MergeInput, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -1097,6 +1191,8 @@ func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, 
 
 // --- Subtitle parsers ---
 
+// The subtitle file parsers and the ASS time formatter of package subtitle: ParseSRT and ParseSRTReader read
+// SubRip, ParseASS reads ASS/SSA, FormatASSTimestamp formats milliseconds as an ASS time.
 var (
 	ParseSRT           = subtitle.ParseSRT
 	ParseSRTReader     = subtitle.ParseSRTReader

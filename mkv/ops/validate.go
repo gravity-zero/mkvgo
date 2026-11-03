@@ -10,6 +10,8 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
+// Validate checks the file at path against what players rely on - header, tracks, index, timestamps - and lists
+// the issues found, each with a severity and a stable code.
 func Validate(ctx context.Context, path string, opts ...mkv.Options) ([]mkv.Issue, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err

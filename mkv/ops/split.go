@@ -19,6 +19,8 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// Split cuts the source into parts by time ranges, by chapters or every EveryMs, at keyframes, and returns the
+// paths of the parts written.
 func Split(ctx context.Context, opts mkv.SplitOptions, extra ...mkv.Options) ([]string, error) {
 	if err := oneopt.Check(extra); err != nil {
 		return nil, err

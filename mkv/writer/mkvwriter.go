@@ -22,6 +22,8 @@ const SeekHeadReserve = 256
 // rewrite. mkvpropedit reserves space the same way.
 const MetadataReserve = 1024
 
+// MKVWriter writes a Matroska file in one pass: the header and an open Segment, the metadata, clusters with their
+// cue points, then Finalize writes the Cues and the SeekHead and seals the Segment size.
 type MKVWriter struct {
 	W             io.WriteSeeker
 	SegDataStart  int64
@@ -45,6 +47,7 @@ type MKVWriter struct {
 	clusterBuf    ew // every cluster is assembled here, so its storage is allocated once
 }
 
+// NewMKVWriter returns a writer that writes a Matroska file to w.
 func NewMKVWriter(w io.WriteSeeker) *MKVWriter {
 	return &MKVWriter{W: w}
 }
@@ -54,10 +57,14 @@ func (m *MKVWriter) pos() int64 {
 	return p
 }
 
+// RelPos is the write position relative to the start of the Segment's data, the base of every SeekHead and Cues
+// offset.
 func (m *MKVWriter) RelPos() int64 {
 	return m.pos() - m.SegDataStart
 }
 
+// WriteStart writes the EBML header (DocType "matroska") and opens the Segment, its size left open and room
+// reserved for the SeekHead.
 func (m *MKVWriter) WriteStart() error {
 	if err := WriteEBMLHeader(m.W); err != nil {
 		return err
@@ -88,6 +95,8 @@ func (m *MKVWriter) startSegment() error {
 
 const minCueIntervalMs = 500
 
+// WriteClusterWithCues writes one cluster at clusterTS (milliseconds) and records a cue point for its first video
+// keyframe; in a file without video, for its first block, at most one every 500 ms.
 func (m *MKVWriter) WriteClusterWithCues(clusterTS int64, timecodeScale int64, blocks []mkv.Block) error {
 	clusterOffset := m.RelPos()
 
@@ -151,6 +160,8 @@ func (m *MKVWriter) WriteTagsElement(tags []mkv.Tag) error {
 	return nil
 }
 
+// Finalize writes the Cues, fills the reserved SeekHead with the positions of the top-level elements and seals the
+// Segment size.
 func (m *MKVWriter) Finalize() error {
 	if len(m.Cues) > 0 {
 		m.CuesPos = m.RelPos()
@@ -226,6 +237,7 @@ func (m *MKVWriter) sealSegmentSize(segSize int64) error {
 	return err
 }
 
+// WriteMetadata writes Info (duration durationMs), Tracks, and the chapters, attachments and tags of c.
 func (m *MKVWriter) WriteMetadata(c *mkv.Container, tracks []mkv.Track, durationMs int64) error {
 	m.videoTracks = map[uint64]bool{}
 	for _, t := range tracks {

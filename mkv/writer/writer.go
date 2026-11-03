@@ -131,6 +131,7 @@ func writeSegment(w io.Writer, c *mkv.Container) error {
 	return WriteMasterElement(w, mkv.IDSegment, seg.Bytes())
 }
 
+// WriteUintElement writes element id holding val as an unsigned integer in its fewest bytes.
 func WriteUintElement(w io.Writer, id uint32, val uint64) error {
 	n := ebml.UintLen(val)
 	if _, err := ebml.WriteElementHeader(w, id, int64(n)); err != nil {
@@ -140,6 +141,7 @@ func WriteUintElement(w io.Writer, id uint32, val uint64) error {
 	return err
 }
 
+// WriteFloatElement writes element id holding val as an 8-byte float.
 func WriteFloatElement(w io.Writer, id uint32, val float64) error {
 	if _, err := ebml.WriteElementHeader(w, id, 8); err != nil {
 		return err
@@ -148,6 +150,7 @@ func WriteFloatElement(w io.Writer, id uint32, val float64) error {
 	return err
 }
 
+// WriteStringElement writes element id holding the string val.
 func WriteStringElement(w io.Writer, id uint32, val string) error {
 	if _, err := ebml.WriteElementHeader(w, id, int64(len(val))); err != nil {
 		return err
@@ -156,6 +159,7 @@ func WriteStringElement(w io.Writer, id uint32, val string) error {
 	return err
 }
 
+// WriteBytesElement writes element id holding the bytes val.
 func WriteBytesElement(w io.Writer, id uint32, val []byte) error {
 	if _, err := ebml.WriteElementHeader(w, id, int64(len(val))); err != nil {
 		return err
@@ -164,6 +168,7 @@ func WriteBytesElement(w io.Writer, id uint32, val []byte) error {
 	return err
 }
 
+// WriteMasterElement writes master element id around children, its already encoded content.
 func WriteMasterElement(w io.Writer, id uint32, children []byte) error {
 	if _, err := ebml.WriteElementHeader(w, id, int64(len(children))); err != nil {
 		return err
@@ -172,6 +177,7 @@ func WriteMasterElement(w io.Writer, id uint32, children []byte) error {
 	return err
 }
 
+// WriteEBMLHeader writes the EBML header of a Matroska file (DocType "matroska", version 4, read version 2).
 func WriteEBMLHeader(w io.Writer) error {
 	return writeEBMLHeaderDocType(w, "matroska", 4, 2)
 }
@@ -246,6 +252,7 @@ func WriteSegmentInfo(w io.Writer, info *mkv.SegmentInfo, durationMs int64) erro
 	return e.flush(w, mkv.IDInfo)
 }
 
+// WriteTracks writes the Tracks element: one TrackEntry per track.
 func WriteTracks(w io.Writer, tracks []mkv.Track) error {
 	var e ew
 	for i := range tracks {
@@ -421,6 +428,7 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 	}
 }
 
+// WriteChapters writes the Chapters element: chapters in one default edition.
 func WriteChapters(w io.Writer, chapters []mkv.Chapter) error {
 	return WriteEditions(w, chapters, nil)
 }
@@ -487,6 +495,7 @@ func writeChapterAtom(ed *ew, ch *mkv.Chapter, depth int) {
 	})
 }
 
+// WriteTags writes the Tags element.
 func WriteTags(w io.Writer, tags []mkv.Tag) error {
 	var e ew
 	for i := range tags {
@@ -649,6 +658,7 @@ func elementHeaderLen(id uint32, size int64) (int64, error) {
 	return int64(n), err
 }
 
+// WriteSimpleBlock writes one SimpleBlock of track trackNum, relTC after its cluster's timestamp.
 func WriteSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, data []byte) error {
 	trackVINT := ebml.DataSizeLen(int64(trackNum))
 	bodySize := int64(trackVINT + 2 + 1 + len(data))
@@ -676,6 +686,7 @@ func WriteSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe bool, 
 	return err
 }
 
+// WriteCluster writes one cluster at clusterTS (milliseconds) holding blocks, timed in timecodeScale units.
 func WriteCluster(w io.Writer, clusterTS int64, timecodeScale int64, blocks []mkv.Block) error {
 	_, err := WriteClusterOffsets(w, clusterTS, timecodeScale, blocks)
 	return err
@@ -967,6 +978,7 @@ func writeHDRStatic(c *ew, h *mkv.HDRStaticMetadata) {
 	})
 }
 
+// WriteCues writes the Cues element from cue points in milliseconds, converted to timecodeScale units.
 func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {
 	if timecodeScale <= 0 { // guard against divide-by-zero from a malformed source
 		timecodeScale = 1000000
@@ -991,11 +1003,13 @@ func WriteCues(w io.Writer, cues []mkv.CuePoint, timecodeScale int64) error {
 	return e.flush(w, mkv.IDCues)
 }
 
+// SeekEntry is one SeekHead entry: a top-level element's ID and its position relative to the Segment's data.
 type SeekEntry struct {
 	ID  uint32
 	Pos int64
 }
 
+// WriteSeekHead writes a SeekHead element listing entries.
 func WriteSeekHead(w io.Writer, entries []SeekEntry) error {
 	var e ew
 	for _, se := range entries {
@@ -1007,6 +1021,7 @@ func WriteSeekHead(w io.Writer, entries []SeekEntry) error {
 	return e.flush(w, mkv.IDSeekHead)
 }
 
+// EncodeElementID returns the bytes of an EBML element ID, its length marker included.
 func EncodeElementID(id uint32) []byte {
 	n := ebml.ElementIDLen(id)
 	buf := make([]byte, n)
@@ -1070,6 +1085,8 @@ func WriteVoid(w io.Writer, totalSize int) error {
 	return err
 }
 
+// CodecIDFromShort is the Matroska CodecID of a short codec name ("h264" to "V_MPEG4/ISO/AVC"), short itself
+// when it is no short name (already a CodecID).
 func CodecIDFromShort(short string) string {
 	for full, s := range mkv.CodecShortName {
 		if s == short {

@@ -22,6 +22,7 @@ type HashMismatch struct {
 	CutShort bool
 }
 
+// String describes the mismatch: the track, the start of both digests, and the missing tail when the file is cut.
 func (m HashMismatch) String() string {
 	s := fmt.Sprintf("track %d: content hash mismatch (stored %.12s…, actual %.12s…)", m.TrackID, m.Stored, m.Actual)
 	if m.CutShort {

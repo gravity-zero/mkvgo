@@ -14,6 +14,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// Join writes dstPath: the sources one after the other on one timeline, which must have the same tracks.
 func Join(ctx context.Context, sources []string, dstPath string, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err

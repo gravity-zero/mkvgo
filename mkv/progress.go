@@ -137,6 +137,7 @@ type Options struct {
 	SyncOutput bool
 }
 
+// ProgressFrom is the Progress of the first Options, nil when there is none.
 func ProgressFrom(opts []Options) ProgressFunc {
 	if len(opts) > 0 && opts[0].Progress != nil {
 		return opts[0].Progress
@@ -144,6 +145,7 @@ func ProgressFrom(opts []Options) ProgressFunc {
 	return nil
 }
 
+// FSFrom is the FS of the first Options, nil (the OS) when there is none.
 func FSFrom(opts []Options) *FS {
 	if len(opts) > 0 && opts[0].FS != nil {
 		return opts[0].FS
@@ -151,18 +153,22 @@ func FSFrom(opts []Options) *FS {
 	return nil
 }
 
+// DeepVerifyFrom is the DeepVerify of the first Options, false when there is none.
 func DeepVerifyFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].DeepVerify
 }
 
+// KeepBackupFrom is the KeepBackup of the first Options, false when there is none.
 func KeepBackupFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].KeepBackup
 }
 
+// ResyncFrom is the Resync of the first Options, false when there is none.
 func ResyncFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].Resync
 }
 
+// OnSkipFrom is the OnSkip callback of the first Options, nil when there is none.
 func OnSkipFrom(opts []Options) func(DamagedRange) {
 	if len(opts) > 0 && opts[0].OnSkip != nil {
 		return opts[0].OnSkip
@@ -184,6 +190,7 @@ func DamageBytesFrom(opts []Options) int64 {
 	return opts[0].DamageBytes
 }
 
+// OnRepairFrom is the OnRepair callback of the first Options, nil when there is none.
 func OnRepairFrom(opts []Options) func(RepairedRange) {
 	if len(opts) > 0 && opts[0].OnRepair != nil {
 		return opts[0].OnRepair
@@ -191,10 +198,12 @@ func OnRepairFrom(opts []Options) func(RepairedRange) {
 	return nil
 }
 
+// CleanCutFrom is the CleanCut of the first Options, false when there is none.
 func CleanCutFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].CleanCut
 }
 
+// RollbackSinkFrom is the RollbackSink of the first Options, nil when there is none.
 func RollbackSinkFrom(opts []Options) io.Writer {
 	if len(opts) > 0 {
 		return opts[0].RollbackSink
@@ -202,10 +211,12 @@ func RollbackSinkFrom(opts []Options) io.Writer {
 	return nil
 }
 
+// RollbackRequiredFrom is the RollbackRequired of the first Options, false when there is none.
 func RollbackRequiredFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].RollbackRequired
 }
 
+// OnRollbackFrom is the OnRollback callback of the first Options, nil when there is none.
 func OnRollbackFrom(opts []Options) func(RollbackInfo) {
 	if len(opts) > 0 && opts[0].OnRollback != nil {
 		return opts[0].OnRollback
@@ -213,14 +224,17 @@ func OnRollbackFrom(opts []Options) func(RollbackInfo) {
 	return nil
 }
 
+// StrictVerifyFrom is the StrictVerify of the first Options, false when there is none.
 func StrictVerifyFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].StrictVerify
 }
 
+// SyncOutputFrom is the SyncOutput of the first Options, false when there is none.
 func SyncOutputFrom(opts []Options) bool {
 	return len(opts) > 0 && opts[0].SyncOutput
 }
 
+// OnPreexistingFrom is the OnPreexisting callback of the first Options, nil when there is none.
 func OnPreexistingFrom(opts []Options) func(Issue) {
 	if len(opts) > 0 && opts[0].OnPreexisting != nil {
 		return opts[0].OnPreexisting

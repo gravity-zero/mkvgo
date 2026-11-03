@@ -10,12 +10,14 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// SRTEntry is one SubRip cue: its start and end in milliseconds and its text.
 type SRTEntry struct {
 	StartMs int64
 	EndMs   int64
 	Text    string
 }
 
+// ParseSRT reads the SubRip file at path.
 func ParseSRT(path string) ([]SRTEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -59,6 +61,7 @@ func ParseSRTReader(r io.Reader) ([]SRTEntry, error) {
 	return entries, scanner.Err()
 }
 
+// FormatSRTTime formats milliseconds as a SubRip time, HH:MM:SS,mmm.
 func FormatSRTTime(ms int64) string {
 	h := ms / mkv.MsPerHour
 	m := (ms % mkv.MsPerHour) / mkv.MsPerMinute

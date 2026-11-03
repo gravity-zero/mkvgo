@@ -15,6 +15,8 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// MergeASS writes dstPath: srcPath with the ASS/SSA file assPath added as a subtitle track, its styles kept,
+// with the given language and name.
 func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name string, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -88,6 +90,8 @@ func MergeASS(ctx context.Context, srcPath, assPath, dstPath string, lang, name 
 	return mw.Finalize()
 }
 
+// ExtractASS writes the ASS/SSA subtitle track trackID of srcPath to outPath as an .ass file, its header and styles
+// restored from the track's CodecPrivate.
 func ExtractASS(ctx context.Context, srcPath string, trackID uint64, outPath string, opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err

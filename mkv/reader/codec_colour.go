@@ -434,6 +434,8 @@ func croppedPicture(width, height, cropW, cropH uint32) (w, h uint32) {
 	return width - cropW, height - cropH
 }
 
+// PictureSizeFromCodecPrivate reads the coded picture size, cropping applied, from the SPS of an H.264 or HEVC
+// CodecPrivate; ok is false for another codec or a record it cannot parse.
 func PictureSizeFromCodecPrivate(codec string, cp []byte) (width, height uint32, ok bool) {
 	var bc *bitstreamColour
 	switch codec {

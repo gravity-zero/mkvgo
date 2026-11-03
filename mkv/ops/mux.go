@@ -15,6 +15,7 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
+// Mux writes a new file from tracks taken from one or more source files, with the metadata opts gives.
 func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...mkv.Options) (err error) {
 	if err := oneopt.Check(extra); err != nil {
 		return err

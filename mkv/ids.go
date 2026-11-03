@@ -1,7 +1,9 @@
 package mkv
 
+// IDVoid is the EBML ID of a Void element: padding a reader skips, where a writer reserves room to grow an element in place.
 const IDVoid = 0xEC
 
+// EBML IDs of the Segment and its top-level children.
 const (
 	IDSegment     = 0x18538067
 	IDSeekHead    = 0x114D9B74
@@ -14,12 +16,14 @@ const (
 	IDCluster     = 0x1F43B675
 )
 
+// EBML IDs of the Info children that link a Segment to the ones before and after it.
 const (
 	IDSegmentUID = 0x73A4
 	IDPrevUID    = 0x3CB923
 	IDNextUID    = 0x3EB923
 )
 
+// EBML IDs of the Info children: the timebase, the duration, the writing applications, the date and the title.
 const (
 	IDTimecodeScale = 0x2AD7B1
 	IDDuration      = 0x4489
@@ -29,6 +33,7 @@ const (
 	IDTitle         = 0x7BA9
 )
 
+// EBML IDs of a TrackEntry (Tracks > TrackEntry) and its children: identity, flags, codec, language and timing.
 const (
 	IDTrackEntry           = 0xAE
 	IDTrackNumber          = 0xD7
@@ -51,6 +56,7 @@ const (
 	IDSeekPreRoll          = 0x56BB   // pre-roll to decode before a seek point, in ns
 )
 
+// EBML IDs of a TrackEntry's ContentEncodings: the compression or encryption applied to its blocks.
 const (
 	IDContentEncodings      = 0x6D80
 	IDContentEncoding       = 0x6240
@@ -65,6 +71,7 @@ const (
 	IDAESSettingsCipherMode = 0x47E8 // 1 CTR, 2 CBC
 )
 
+// EBML IDs of a TrackEntry's Video element and its children: picture size, interlacing, stereo mode and projection.
 const (
 	IDVideo          = 0xE0
 	IDPixelWidth     = 0xB0
@@ -136,6 +143,7 @@ const (
 	IDLuminanceMin      = 0x55DA
 )
 
+// EBML IDs of a TrackEntry's Audio element and its children.
 const (
 	IDAudio              = 0xE1
 	IDSamplingFreq       = 0xB5
@@ -144,6 +152,7 @@ const (
 	IDBitDepth           = 0x6264
 )
 
+// EBML IDs of the Chapters elements: an edition, its chapter atoms and their display strings.
 const (
 	IDEditionEntry       = 0x45B9
 	IDChapterAtom        = 0xB6
@@ -156,6 +165,7 @@ const (
 	IDEditionFlagOrdered = 0x45DD
 )
 
+// EBML IDs of an AttachedFile (Attachments > AttachedFile) and its children.
 const (
 	IDAttachedFile    = 0x61A7
 	IDFileDescription = 0x467E
@@ -165,6 +175,7 @@ const (
 	IDFileUID         = 0x46AE
 )
 
+// EBML IDs of a Tag (Tags > Tag), its Targets and its SimpleTags.
 const (
 	IDTag             = 0x7373
 	IDTargets         = 0x63C0
@@ -178,6 +189,7 @@ const (
 	IDTagBinary       = 0x4485
 )
 
+// EBML IDs of a Cluster's children: its timestamp and the blocks it holds.
 const (
 	IDTimestamp      = 0xE7
 	IDSimpleBlock    = 0xA3
@@ -188,6 +200,7 @@ const (
 	IDDiscardPadding = 0x75A2
 )
 
+// EBML IDs of the edition and chapter flags and the chapter display language.
 const (
 	IDEditionUID         = 0x45BC
 	IDEditionFlagHidden  = 0x45BD
@@ -197,6 +210,7 @@ const (
 	IDChapLanguage       = 0x437C
 )
 
+// EBML IDs of a CuePoint (Cues > CuePoint) and its children.
 const (
 	IDCuePoint          = 0xBB
 	IDCueTime           = 0xB3
@@ -206,12 +220,14 @@ const (
 	IDCueRelativePos    = 0xF0
 )
 
+// EBML IDs of a Seek (SeekHead > Seek) and its children.
 const (
 	IDSeek         = 0x4DBB
 	IDSeekID       = 0x53AB
 	IDSeekPosition = 0x53AC
 )
 
+// TrackType values a TrackEntry states (the Matroska TrackType element).
 const (
 	TrackTypeVideo    = 1
 	TrackTypeAudio    = 2
@@ -223,6 +239,7 @@ const (
 	TrackTypeMetadata = 33
 )
 
+// CodecShortName maps a Matroska CodecID to the short codec name mkvgo gives Track.Codec ("V_MPEG4/ISO/AVC" to "h264").
 var CodecShortName = map[string]string{
 	"V_MPEG4/ISO/AVC":  "h264",
 	"V_MPEGH/ISO/HEVC": "hevc",

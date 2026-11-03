@@ -85,6 +85,8 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...mkv.Options) err
 	return Mux(ctx, muxOpts, extra...)
 }
 
+// MergeWithSubtitles writes dstPath: basePath with the tracks of extraSources and the SRT file srtPath added as a
+// subtitle track with the given language and name.
 func MergeWithSubtitles(ctx context.Context, basePath, srtPath, dstPath string, srtLang, srtName string, extraSources []mkv.MergeInput, opts ...mkv.Options) error {
 	if err := oneopt.Check(opts); err != nil {
 		return err

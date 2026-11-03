@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
+// TrackType is a track's kind, named: "video", "audio", "subtitle", and the rarer Matroska kinds.
 type TrackType string
 
+// The track kinds, one per Matroska TrackType value.
 const (
 	VideoTrack    TrackType = "video"
 	AudioTrack    TrackType = "audio"
@@ -97,12 +99,15 @@ func (c Compression) String() string {
 	return "none"
 }
 
+// Milliseconds per hour, minute and second, for formatting the millisecond times the API returns.
 const (
 	MsPerHour   = 3600000
 	MsPerMinute = 60000
 	MsPerSecond = 1000
 )
 
+// Container is a Matroska or WebM file as read: its Segment Info, tracks, chapters, attachments, tags, and what the
+// reader measured about it (duration, index, damage skipped).
 type Container struct {
 	Path     string      `json:"path"`
 	Info     SegmentInfo `json:"info"`
@@ -181,6 +186,7 @@ func (c *Container) IsWebM() bool {
 	return c.DocType == "webm"
 }
 
+// SegmentInfo is the Segment's Info element: title, writing applications, duration, timebase, date and Segment UIDs.
 type SegmentInfo struct {
 	Title string `json:"title"`
 	// MuxingApp/WritingApp default to "mkvgo" at write time when empty.
@@ -203,6 +209,8 @@ type SegmentInfo struct {
 	NextUID       []byte     `json:"next_uid,omitempty"`
 }
 
+// Track is one TrackEntry: its identity, codec, flags and language, and its Video or Audio properties, with what the
+// reader derived from the stream where the header leaves it short.
 type Track struct {
 	ID uint64 `json:"id"`
 	// UID is the Matroska TrackUID (64-bit); distinct from TrackNumber (ID).
@@ -578,6 +586,7 @@ func avReduce(num, den, max uint64) (uint64, uint64) {
 	return a1n, a1d
 }
 
+// Chapter is one chapter atom: its title, start and end in milliseconds, and its nested chapters.
 type Chapter struct {
 	ID          uint64    `json:"id"`
 	Title       string    `json:"title"`
@@ -587,6 +596,7 @@ type Chapter struct {
 	SubChapters []Chapter `json:"sub_chapters,omitempty"`
 }
 
+// Edition is one EditionEntry: a list of chapters with its default, hidden and ordered flags.
 type Edition struct {
 	UID      uint64    `json:"uid,omitempty"`
 	Default  bool      `json:"default,omitempty"`
@@ -595,6 +605,7 @@ type Edition struct {
 	Chapters []Chapter `json:"chapters"`
 }
 
+// Attachment is one AttachedFile (a font, a cover): its name, MIME type, description and payload.
 type Attachment struct {
 	ID       uint64 `json:"id"`
 	Name     string `json:"name"`
@@ -613,12 +624,14 @@ type Attachment struct {
 	DataOffset int64  `json:"-"`
 }
 
+// Tag is one Tag element: the target it describes (TargetType, TargetID) and its SimpleTags.
 type Tag struct {
 	TargetType string      `json:"target_type"`
 	TargetID   uint64      `json:"target_id"`
 	SimpleTags []SimpleTag `json:"simple_tags"`
 }
 
+// SimpleTag is one name/value pair of a Tag, with its language and nested SimpleTags.
 type SimpleTag struct {
 	Name     string      `json:"name"`
 	Value    string      `json:"value,omitempty"`
@@ -627,6 +640,7 @@ type SimpleTag struct {
 	SubTags  []SimpleTag `json:"sub_tags,omitempty"`
 }
 
+// Block is one frame (or laced group of frames) of a track: its timecode in milliseconds, keyframe flag and payload.
 type Block struct {
 	TrackNumber uint64
 	Timecode    int64
@@ -769,6 +783,7 @@ type CuePoint struct {
 	RelativePos int64 `json:"relative_pos"`
 }
 
+// MuxOptions says what ops.Mux writes: the output path, the tracks taken from each source, and the metadata.
 type MuxOptions struct {
 	OutputPath string
 	Tracks     []TrackInput
@@ -780,6 +795,7 @@ type MuxOptions struct {
 	Attachments []Attachment
 }
 
+// DemuxOptions says what ops.Demux extracts: the source, the output directory and the tracks (all when empty).
 type DemuxOptions struct {
 	SourcePath string
 	OutputDir  string
@@ -788,6 +804,7 @@ type DemuxOptions struct {
 	NoOverwrite bool
 }
 
+// TrackInput is one track ops.Mux takes from a source file, with the language, name and default flag it gets.
 type TrackInput struct {
 	SourcePath string
 	TrackID    uint64
@@ -796,11 +813,13 @@ type TrackInput struct {
 	IsDefault  bool
 }
 
+// MergeInput is one source of ops.Merge and the tracks taken from it (all when empty).
 type MergeInput struct {
 	SourcePath string
 	TrackIDs   []uint64
 }
 
+// MergeOptions says what ops.Merge writes: the output path and its inputs.
 type MergeOptions struct {
 	OutputPath string
 	Inputs     []MergeInput
@@ -809,6 +828,7 @@ type MergeOptions struct {
 	Progress ProgressFunc
 }
 
+// SplitOptions says how ops.Split cuts a file: by time ranges, by chapters or every EveryMs, and how parts are named.
 type SplitOptions struct {
 	SourcePath string
 	OutputDir  string
@@ -825,6 +845,7 @@ type SplitOptions struct {
 	Pattern string
 }
 
+// TimeRange is a span of the timeline in milliseconds; an EndMs of 0 runs to the end of the file.
 type TimeRange struct {
 	StartMs int64
 	EndMs   int64
@@ -833,11 +854,13 @@ type TimeRange struct {
 // Severity of a validation issue.
 type Severity string
 
+// The severities of a validation issue: an error breaks playback or seeking, a warning does not.
 const (
 	SeverityError   Severity = "error"
 	SeverityWarning Severity = "warning"
 )
 
+// Issue is one finding of ops.Validate: its severity, message, stable code and track.
 type Issue struct {
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
@@ -857,24 +880,29 @@ func (i Issue) Key() string {
 	return fmt.Sprintf("%s/%d", i.Code, i.Track)
 }
 
+// String formats the issue as "[severity] message".
 func (i Issue) String() string {
 	return fmt.Sprintf("[%s] %s", i.Severity, i.Message)
 }
 
+// DiffType says how a section differs between two files compared by ops.Compare.
 type DiffType string
 
+// The kinds of difference: present only in the second file, only in the first, or in both with other values.
 const (
 	DiffAdded   DiffType = "added"
 	DiffRemoved DiffType = "removed"
 	DiffChanged DiffType = "changed"
 )
 
+// Diff is one difference ops.Compare found: its kind, the section it is in and what differs.
 type Diff struct {
 	Type    DiffType `json:"type"`
 	Section string   `json:"section"`
 	Detail  string   `json:"detail"`
 }
 
+// String formats the difference as "[type] section: detail".
 func (d Diff) String() string {
 	return fmt.Sprintf("[%s] %s: %s", d.Type, d.Section, d.Detail)
 }

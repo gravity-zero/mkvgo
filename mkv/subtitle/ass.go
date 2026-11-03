@@ -10,11 +10,13 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// ASSFile is a parsed ASS/SSA file: its header (script info and styles, verbatim) and its Dialogue events.
 type ASSFile struct {
 	Header string
 	Events []ASSEvent
 }
 
+// ASSEvent is one Dialogue line: its start and end in milliseconds, its layer and the fields after the times.
 type ASSEvent struct {
 	StartMs int64
 	EndMs   int64
@@ -22,6 +24,7 @@ type ASSEvent struct {
 	Fields  string // Style,Name,MarginL,MarginR,MarginV,Effect,Text
 }
 
+// ParseASS reads the ASS/SSA file at path.
 func ParseASS(path string) (*ASSFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -72,6 +75,7 @@ func ParseASS(path string) (*ASSFile, error) {
 	return ass, scanner.Err()
 }
 
+// FormatASSTimestamp formats milliseconds as an ASS time, H:MM:SS.cc (centiseconds, truncated).
 func FormatASSTimestamp(ms int64) string {
 	h := ms / mkv.MsPerHour
 	m := (ms % mkv.MsPerHour) / mkv.MsPerMinute
@@ -80,6 +84,7 @@ func FormatASSTimestamp(ms int64) string {
 	return fmt.Sprintf("%d:%02d:%02d.%02d", h, m, s, cs)
 }
 
+// ParseASSTimestamp reads an ASS time, H:MM:SS.cc, into milliseconds; ok is false when s is not one.
 func ParseASSTimestamp(s string) (int64, bool) {
 	var h, m, sec, cs int64
 	s = strings.Replace(s, ".", ":", 1)

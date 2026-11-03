@@ -15,6 +15,8 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
+// Open reads the Matroska or WebM file at path from the local disk: its metadata and, with the options, its index,
+// tags, chapters and attachments.
 func Open(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -24,6 +26,7 @@ func Open(ctx context.Context, path string, opts ...ReadOption) (*mkv.Container,
 	return Read(ctx, f, path, opts...)
 }
 
+// OpenWithFS is Open through fs (nil: the local disk), for a file served by S3, HTTP or memory.
 func OpenWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {
@@ -41,6 +44,7 @@ func OpenWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption
 // body-skip there never refills a window it would immediately discard.
 const fullReadBufSize = 32 << 10
 
+// Read reads a Matroska or WebM container from r; path only names it in errors and in Container.Path.
 func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption) (*mkv.Container, error) {
 	var o readOpts
 	for _, opt := range opts {

@@ -25,6 +25,8 @@ type DamageError struct {
 	Cause  error
 }
 
+// Error says where the damage lies and what to do: raise the damage bound or rewrite the file with a resyncing
+// reindex.
 func (e *DamageError) Error() string {
 	if e.Resume < 0 {
 		return fmt.Sprintf("damaged region at offset %d longer than the walk looks past it - damage inside the file; raise the damage bound or rewrite the file with a resyncing reindex (%v)", e.Offset, e.Cause)
@@ -37,6 +39,7 @@ func (e *DamageError) Error() string {
 // last Cluster entered before it and of the Cluster resumed on; -1 when the walk has not entered that Cluster.
 type DamageRange struct{ From, To, FromMs, ToMs int64 }
 
+// Is makes errors.Is(err, ErrDamagedRegion) hold for a DamageError.
 func (e *DamageError) Is(target error) bool { return target == ErrDamagedRegion }
 
 // SetSkipDamage makes the walk tolerant of damage inside the file: where Next
@@ -55,7 +58,9 @@ func (br *BlockReader) SetDamageScan(n int64) { br.damageScan = n }
 
 // SkippedBytes is how many bytes of damaged regions a SetSkipDamage walk has
 // passed over so far; SkippedRanges, which regions.
-func (br *BlockReader) SkippedBytes() int64          { return br.skippedBytes }
+func (br *BlockReader) SkippedBytes() int64 { return br.skippedBytes }
+
+// SkippedRanges lists the damaged regions a SetSkipDamage walk has passed over so far, in file order.
 func (br *BlockReader) SkippedRanges() []DamageRange { return br.skipped }
 
 // maxZeroTail is the longest run of null bytes closing a file that is taken
