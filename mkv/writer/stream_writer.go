@@ -181,7 +181,7 @@ func (s *StreamWriter) WriteBlock(b mkv.Block) error {
 	if err != nil {
 		return err
 	}
-	return WriteSimpleBlock(s.w, b.TrackNumber, relTC, b.Keyframe, b.Data)
+	return s.writeBlock(relTC, b)
 }
 
 // WriteBlockInCurrentCluster appends a block to the current cluster without
@@ -205,7 +205,21 @@ func (s *StreamWriter) WriteBlockInCurrentCluster(b mkv.Block) error {
 	if err != nil {
 		return err
 	}
-	return WriteSimpleBlock(s.w, b.TrackNumber, relTC, b.Keyframe, b.Data)
+	return s.writeBlock(relTC, b)
+}
+
+// writeBlock writes b as a SimpleBlock, or as a BlockGroup when it carries additions (a non-keyframe naming a
+// reference, its only mark in a group).
+func (s *StreamWriter) writeBlock(relTC int16, b mkv.Block) error {
+	if len(b.Additions) == 0 {
+		return WriteSimpleBlock(s.w, b.TrackNumber, relTC, b.Keyframe, b.Data)
+	}
+	var ref *int64
+	if !b.Keyframe {
+		d := int64(-1)
+		ref = &d
+	}
+	return writeBlockGroup(s.w, b.TrackNumber, relTC, b.Data, 0, ref, 0, b.Additions)
 }
 
 // Close flushes any buffered data and signals the end of the stream. For a

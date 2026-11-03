@@ -103,6 +103,18 @@ const (
 	// BlockAddIDType values for Dolby Vision (the four-character codes as uint32).
 	BlockAddIDTypeDVCC = 0x64766343 // "dvcC"
 	BlockAddIDTypeDVVC = 0x64767643 // "dvvC"
+	// BlockAddIDTypeITUT35 is the BlockAddIDType of ITU-T T.35 metadata (HDR10+ dynamic metadata among it), its
+	// blocks' additions under BlockAddID 4.
+	BlockAddIDTypeITUT35 = 4
+)
+
+// EBML IDs of a BlockGroup's BlockAdditions: data a block carries beside its frame, each BlockMore keyed by its
+// BlockAddID (1 when absent).
+const (
+	IDBlockAdditions  = 0x75A1
+	IDBlockMore       = 0xA6
+	IDBlockAddID      = 0xEE
+	IDBlockAdditional = 0xA5
 )
 
 // Colour element (0x55B0) and its sub-elements. Values are CICP / ITU-T H.273

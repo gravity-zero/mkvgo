@@ -1092,6 +1092,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 	var block mkv.Block
 	var found, referenced bool
 	var durationMs, paddingNs int64
+	var additions []mkv.BlockAddition
 
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
@@ -1129,6 +1130,10 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 			if err := br.r.discard(h.Size); err != nil {
 				return mkv.Block{}, err
 			}
+		case mkv.IDBlockAdditions:
+			if additions, err = br.parseBlockAdditions(h.Size); err != nil {
+				return mkv.Block{}, err
+			}
 		case mkv.IDDiscardPadding:
 			if h.Size > 8 {
 				return mkv.Block{}, fmt.Errorf("DiscardPadding of %d bytes: a signed integer holds 8 at most", h.Size)
@@ -1150,6 +1155,7 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 		return mkv.Block{}, fmt.Errorf("BlockGroup without Block element")
 	}
 	block.Duration = durationMs
+	block.Additions = additions
 	if n := len(br.pending); n > 0 { // the padding trims the end of the lace's last frame
 		br.pending[n-1].DiscardPaddingNs = paddingNs
 	} else {
@@ -1166,6 +1172,61 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 		}
 	}
 	return block, nil
+}
+
+// maxBlockAdditional bounds one BlockAdditional: an alpha plane of a large frame, metadata, never media-sized.
+const maxBlockAdditional = 16 << 20
+
+// parseBlockAdditions reads a BlockAdditions: each BlockMore's BlockAddID (1 when absent) and BlockAdditional.
+func (br *BlockReader) parseBlockAdditions(size int64) ([]mkv.BlockAddition, error) {
+	end := br.r.tell() + size
+	var out []mkv.BlockAddition
+	for br.r.tell() < end {
+		h, _, err := ebml.ReadElementHeader(br.r)
+		if err != nil {
+			return nil, err
+		}
+		if err := pastEnd(h, br.r.tell(), end); err != nil {
+			return nil, err
+		}
+		if h.ID != mkv.IDBlockMore {
+			if err := br.r.discard(h.Size); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		more := mkv.BlockAddition{ID: 1}
+		moreEnd := br.r.tell() + h.Size
+		for br.r.tell() < moreEnd {
+			c, _, err := ebml.ReadElementHeader(br.r)
+			if err != nil {
+				return nil, err
+			}
+			if err := pastEnd(c, br.r.tell(), moreEnd); err != nil {
+				return nil, err
+			}
+			switch c.ID {
+			case mkv.IDBlockAddID:
+				if more.ID, err = ebml.ReadUint(br.r, c.Size); err != nil {
+					return nil, err
+				}
+			case mkv.IDBlockAdditional:
+				if c.Size > maxBlockAdditional {
+					return nil, fmt.Errorf("BlockAdditional of %d bytes past the %d a block's addition may hold", c.Size, maxBlockAdditional)
+				}
+				more.Data = make([]byte, c.Size)
+				if _, err := io.ReadFull(br.r, more.Data); err != nil {
+					return nil, err
+				}
+			default:
+				if err := br.r.discard(c.Size); err != nil {
+					return nil, err
+				}
+			}
+		}
+		out = append(out, more)
+	}
+	return out, nil
 }
 
 func safeTimecodeMs(v, scale int64) (int64, error) {

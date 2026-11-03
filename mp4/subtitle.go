@@ -124,6 +124,7 @@ func (t *outTrack) addTextBlock(cw *countWriter, b mkv.Block) error {
 	t.pendCuePTS = b.Timecode
 	t.pendCueDur = b.Duration
 	t.pendCueText = append(t.pendCueText[:0], b.Data...)
+	t.pendCueAdds = b.Additions
 	return nil
 }
 
@@ -155,7 +156,11 @@ func (t *outTrack) flushPendingCue(cw *countWriter, nextStart int64) error {
 	if dur <= 0 {
 		dur = 1
 	}
-	if err := t.emitSample(cw, t.spec.cueSample(t.pendCueText), t.pendCuePTS, t.pendCuePTS, dur, true); err != nil {
+	sample := t.spec.cueSample(t.pendCueText)
+	if t.spec.cueSampleAdds != nil {
+		sample = t.spec.cueSampleAdds(t.pendCueText, t.pendCueAdds)
+	}
+	if err := t.emitSample(cw, sample, t.pendCuePTS, t.pendCuePTS, dur, true); err != nil {
 		return err
 	}
 

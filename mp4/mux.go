@@ -63,7 +63,8 @@ type outTrack struct {
 	pendCuePTS    int64
 	pendCueDur    int64
 	pendCueText   []byte
-	mediaEndMs    int64 // the source's duration, which a cue stating none never runs past (0 unknown)
+	pendCueAdds   []mkv.BlockAddition // the pending cue's block additions (a WebVTT cue's settings and identifier)
+	mediaEndMs    int64               // the source's duration, which a cue stating none never runs past (0 unknown)
 
 	// chapter-track state. isChapter marks the synthetic QuickTime chapter track
 	// (its samples are the titles in chapterList); chapterRefID, set on the media

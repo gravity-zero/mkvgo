@@ -27,6 +27,24 @@ type Cue struct {
 	Text     string // payload, may contain newlines
 }
 
+// WebVTTAddition reads a Matroska WebVTT cue's BlockAddition (BlockAddID 1): its first line is the cue settings
+// list, its second the cue identifier, the rest the comment blocks before the cue (draft-ietf-cellar-codec 5.4.4).
+// Both "" when the block carries none.
+func WebVTTAddition(adds []mkv.BlockAddition) (settings, id string) {
+	for _, a := range adds {
+		if a.ID != 1 {
+			continue
+		}
+		lines := strings.SplitN(string(a.Data), "\n", 3)
+		settings = strings.TrimRight(lines[0], "\r")
+		if len(lines) > 1 {
+			id = strings.TrimRight(lines[1], "\r")
+		}
+		return settings, id
+	}
+	return "", ""
+}
+
 // FormatVTTTime formats a millisecond timestamp as a WebVTT time HH:MM:SS.mmm.
 func FormatVTTTime(ms int64) string {
 	if ms < 0 {

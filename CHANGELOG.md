@@ -84,6 +84,13 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   Atmos (E-AC-3 JOC) read from the stream, carried in the `dec3` and announced
   (`CHANNELS="16/JOC"`, the DASH `EC3_ExtensionType` property). One set of
   helpers serves every HLS and DASH writer.
+- Block additions: `Block.Additions` reads a BlockGroup's `BlockAdditions`
+  (VP8/VP9 alpha, ITU-T T.35 / HDR10+, WebVTT cue settings), every rewrite
+  writes them back (the block a BlockGroup), with the track's
+  `BlockAdditionMappings`; `Track.HDR10Plus` from a T.35 mapping or, in-band,
+  the additions. WebVTT cue settings reach the converted WebVTT and the native
+  `wvtt` sample (`sttg`, `iden`). They were dropped by every rewrite. MP4 has
+  no standard carriage for a VP9 alpha plane or VP9 HDR10+: not carried there.
 - DASH trick play: `manifest.mpd` (to-hls and the on-demand plan) carries a
   DASH-IF trick-mode AdaptationSet over the I-frame fragments `iframe.m3u8`
   already lists, one per segment (`maxPlayoutRate`, `codingDependency="false"`),

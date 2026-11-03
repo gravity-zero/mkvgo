@@ -699,6 +699,9 @@ func subCueFromBlockRecovered(t *mkv.Track, b mkv.Block) (subtitle.Cue, bool, bo
 		return subtitle.Cue{}, false, recovered, nil
 	}
 	cue := subtitle.Cue{StartMs: b.Timecode, Text: text}
+	if canonicalSubCodec(t.Codec) == "webvtt" {
+		cue.Settings, _ = subtitle.WebVTTAddition(b.Additions)
+	}
 	if b.Duration > 0 {
 		cue.EndMs = b.Timecode + b.Duration
 	}

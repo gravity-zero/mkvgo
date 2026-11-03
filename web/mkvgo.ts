@@ -83,6 +83,10 @@ export interface Track {
   color_range?: number
   hdr?: unknown
   dolby_vision?: unknown
+  /** BlockAdditionMapping elements other than Dolby Vision's: what the blocks' additions hold. */
+  block_addition_mappings?: { value: number; name?: string; type: number }[]
+  /** HDR10+ dynamic metadata in the block additions (an ITU-T T.35 mapping, or found by the in-band read). */
+  hdr10_plus?: boolean
   /** Derived display fields (same as the CLI -json output). */
   /** The prober's codec_name for the track (resolves VFW FourCCs, PCM depths...); a raw CodecID when unresolved. */
   codec_name?: string

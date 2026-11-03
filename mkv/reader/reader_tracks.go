@@ -601,7 +601,8 @@ func (p *parser) parseMasteringMetadata(size int64, t *mkv.Track) error {
 func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
 	cur, _ := p.r.Seek(0, io.SeekCurrent)
 	end := cur + size
-	var addType uint64
+	var addType, value uint64
+	var name string
 	var extra []byte
 	for {
 		pos, _ := p.r.Seek(0, io.SeekCurrent)
@@ -622,6 +623,21 @@ func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
 				return err
 			}
 			addType = v
+		case mkv.IDBlockAddIDValue:
+			v, err := readUintOf(p.r, eh)
+			if err != nil {
+				return err
+			}
+			value = v
+		case mkv.IDBlockAddIDName:
+			if err := p.chargeMeta(eh.Size); err != nil {
+				return err
+			}
+			v, err := ebml.ReadBytes(p.r, eh.Size)
+			if err != nil {
+				return err
+			}
+			name = string(v)
 		case mkv.IDBlockAddIDExtraData:
 			if err := p.chargeMeta(eh.Size); err != nil {
 				return err
@@ -640,7 +656,12 @@ func (p *parser) parseBlockAdditionMapping(size int64, t *mkv.Track) error {
 	if addType == mkv.BlockAddIDTypeDVCC || addType == mkv.BlockAddIDTypeDVVC {
 		if dv := mkv.ParseDolbyVisionConfig(extra); dv != nil {
 			t.DolbyVision = dv
+			return nil
 		}
+	}
+	t.BlockAdditionMappings = append(t.BlockAdditionMappings, mkv.BlockAdditionMapping{Value: value, Name: name, Type: addType, ExtraData: extra})
+	if addType == mkv.BlockAddIDTypeITUT35 && (len(extra) == 0 || mkv.IsHDR10Plus(extra)) {
+		t.HDR10Plus = true // the one T.35 mapping (HDR10+ in practice), or one whose header names HDR10+
 	}
 	return nil
 }

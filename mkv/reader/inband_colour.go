@@ -255,6 +255,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 		if err != nil {
 			return
 		}
+		markHDR10Plus(c, blk)
 		for _, id := range activeTracks(need, scans) {
 			if id == blk.TrackNumber {
 				waits[id] = 0
@@ -277,6 +278,20 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			if sc.left--; sc.left == 0 || sc.s.done() {
 				sc.s.apply(sc.t)
 				delete(scans, blk.TrackNumber)
+			}
+		}
+	}
+}
+
+// markHDR10Plus sets HDR10Plus on blk's track when its additions hold HDR10+ dynamic metadata (ITU-T T.35).
+func markHDR10Plus(c *mkv.Container, blk mkv.Block) {
+	for _, a := range blk.Additions {
+		if !mkv.IsHDR10Plus(a.Data) {
+			continue
+		}
+		for i := range c.Tracks {
+			if c.Tracks[i].ID == blk.TrackNumber && c.Tracks[i].Type == mkv.VideoTrack {
+				c.Tracks[i].HDR10Plus = true
 			}
 		}
 	}

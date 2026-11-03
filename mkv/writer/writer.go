@@ -375,6 +375,20 @@ func writeTrackFields(e *ew, t *mkv.Track) {
 			writeUnmodeled(v, t, mkv.IDVideo)
 		})
 	}
+	for _, m := range t.BlockAdditionMappings {
+		e.master(mkv.IDBlockAdditionMapping, func(me *ew) {
+			if m.Value != 0 {
+				me.uint(mkv.IDBlockAddIDValue, m.Value)
+			}
+			if m.Name != "" {
+				me.str(mkv.IDBlockAddIDName, m.Name)
+			}
+			me.uint(mkv.IDBlockAddIDType, m.Type)
+			if len(m.ExtraData) > 0 {
+				me.raw(mkv.IDBlockAddIDExtraData, m.ExtraData)
+			}
+		})
+	}
 	if t.DolbyVision != nil {
 		_, addType := t.DolbyVision.BoxType()
 		rec := mkv.EncodeDolbyVisionConfig(t.DolbyVision)
@@ -727,7 +741,7 @@ func writeClusterOffsets(w io.Writer, e *ew, clusterTS int64, timecodeScale int6
 		if e.err != nil {
 			break
 		}
-		if b.Duration > 0 || b.DiscardPaddingNs != 0 {
+		if b.Duration > 0 || b.DiscardPaddingNs != 0 || len(b.Additions) > 0 {
 			// A block with an explicit duration (e.g. a subtitle cue) or a padding
 			// to discard is written as a BlockGroup so it can be carried. A Block has no
 			// keyframe flag: a frame that is not a keyframe says so by naming a
@@ -744,7 +758,7 @@ func writeClusterOffsets(w io.Writer, e *ew, clusterTS int64, timecodeScale int6
 				}
 				ref = &d
 			}
-			e.err = writeBlockGroup(&e.Buffer, b.TrackNumber, relTC, b.Data, rawDur, ref, b.DiscardPaddingNs)
+			e.err = writeBlockGroup(&e.Buffer, b.TrackNumber, relTC, b.Data, rawDur, ref, b.DiscardPaddingNs, b.Additions)
 			lastTC[b.TrackNumber] = b.Timecode
 			continue
 		}
@@ -775,13 +789,13 @@ const maxLaceFrames = 256
 // timecode, none carrying a duration. 1 when blocks[0] stands alone.
 func lacedRun(blocks []mkv.Block) int {
 	first := &blocks[0]
-	if !first.Laced || first.Duration > 0 || first.DiscardPaddingNs != 0 {
+	if !first.Laced || first.Duration > 0 || first.DiscardPaddingNs != 0 || len(first.Additions) > 0 {
 		return 1
 	}
 	n := 1
 	for n < len(blocks) && n < maxLaceFrames {
 		b := &blocks[n]
-		if !b.Laced || b.Duration > 0 || b.DiscardPaddingNs != 0 || b.TrackNumber != first.TrackNumber ||
+		if !b.Laced || b.Duration > 0 || b.DiscardPaddingNs != 0 || len(b.Additions) > 0 || b.TrackNumber != first.TrackNumber ||
 			b.Timecode != first.Timecode || b.Keyframe != first.Keyframe {
 			break
 		}
@@ -842,7 +856,7 @@ func writeLacedSimpleBlock(w io.Writer, trackNum uint64, relTC int16, keyframe b
 // WriteBlockGroup writes a BlockGroup containing a Block and a BlockDuration
 // (in raw timecode-scale units). Used for subtitle cues, which need a duration.
 func WriteBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64) error {
-	return writeBlockGroup(w, trackNum, relTC, data, rawDuration, nil, 0)
+	return writeBlockGroup(w, trackNum, relTC, data, rawDuration, nil, 0, nil)
 }
 
 // writeSintElement writes a signed integer element in the fewest bytes that
@@ -867,7 +881,7 @@ func writeSintElement(w io.Writer, id uint32, val int64) error {
 // referenced frame's timestamp relative to this block's, in raw
 // timecode-scale units): its presence is what marks the frame as not a
 // keyframe. A block with a padding and no duration names no BlockDuration.
-func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64, ref *int64, paddingNs int64) error {
+func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64, ref *int64, paddingNs int64, additions []mkv.BlockAddition) error {
 	var inner bytes.Buffer
 	trackVINT := ebml.DataSizeLen(int64(trackNum))
 	bodySize := int64(trackVINT + 2 + 1 + len(data))
@@ -879,7 +893,28 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 	}
 	inner.Write([]byte{byte(uint16(relTC) >> 8), byte(relTC), 0x00}) // timecode + flags
 	inner.Write(data)
-	if rawDuration > 0 || paddingNs == 0 {
+	if len(additions) > 0 { // after the Block, as the schema orders a BlockGroup
+		var adds bytes.Buffer
+		for _, a := range additions {
+			var more bytes.Buffer
+			if a.ID != 1 { // 1 is the default
+				if err := WriteUintElement(&more, mkv.IDBlockAddID, a.ID); err != nil {
+					return err
+				}
+			}
+			if _, err := ebml.WriteElementHeader(&more, mkv.IDBlockAdditional, int64(len(a.Data))); err != nil {
+				return err
+			}
+			more.Write(a.Data)
+			if err := WriteMasterElement(&adds, mkv.IDBlockMore, more.Bytes()); err != nil {
+				return err
+			}
+		}
+		if err := WriteMasterElement(&inner, mkv.IDBlockAdditions, adds.Bytes()); err != nil {
+			return err
+		}
+	}
+	if rawDuration > 0 || (paddingNs == 0 && len(additions) == 0) {
 		if err := WriteUintElement(&inner, mkv.IDBlockDuration, rawDuration); err != nil {
 			return err
 		}

@@ -36,8 +36,10 @@ type codecSpec struct {
 	// Timed-text subtitle encoders (set only when text is true). cueSample turns
 	// one Matroska subtitle block's payload into an MP4 sample; emptySample is the
 	// gap/lead-in/bridge sample that keeps the text track continuous.
-	cueSample   func(payload []byte) []byte
-	emptySample []byte
+	cueSample func(payload []byte) []byte
+	// cueSampleAdds, when set, builds the sample from the block's additions too (a wvtt cue's settings).
+	cueSampleAdds func(payload []byte, adds []mkv.BlockAddition) []byte
+	emptySample   []byte
 }
 
 // lookupCodec returns the codecSpec for a Matroska short codec name, or ok=false
@@ -80,7 +82,7 @@ var codecTable = map[string]codecSpec{
 // read by Apple/Safari/CMAF, but many mainstream demuxers do not recognise it, so
 // it is not the default.
 var wvttSpec = codecSpec{handler: "text", text: true, sampleEntry: wvttEntry,
-	cueSample: encodeWVTTCue, emptySample: wvttEmptyCue}
+	cueSample: encodeWVTTCue, cueSampleAdds: encodeWVTTCueWith, emptySample: wvttEmptyCue}
 
 // subtitleCarriage returns how a Matroska subtitle codec is carried into MP4.
 //

@@ -357,6 +357,12 @@ type Track struct {
 	// Dolby Vision (MP4 dvcC/dvvC box, or Matroska dvcC/dvvC BlockAdditionMapping);
 	// nil otherwise. See ParseDolbyVisionConfig.
 	DolbyVision *DolbyVision `json:"dolby_vision,omitempty"`
+	// BlockAdditionMappings are the track's BlockAdditionMapping elements other than Dolby Vision's (DolbyVision
+	// holds that one): what its blocks' additions are. A rewrite writes them back.
+	BlockAdditionMappings []BlockAdditionMapping `json:"block_addition_mappings,omitempty"`
+	// HDR10Plus says the track carries HDR10+ dynamic metadata (SMPTE ST 2094-40) in its block additions: an ITU-T
+	// T.35 BlockAdditionMapping, or, under reader.WithInBandColourFallback, a block whose additions hold it.
+	HDR10Plus bool `json:"hdr10_plus,omitempty"`
 
 	// HDR holds the HDR10 static metadata (Content Light Level + Mastering Display)
 	// when the stream carries it; nil otherwise. probers report it as frame side
@@ -669,11 +675,38 @@ type Block struct {
 	// each one plays - and the writer keeps them in one laced block rather than
 	// spreading them into blocks that would all claim the same instant.
 	Laced bool
+	// Additions are the block's BlockAdditions (a BlockGroup's), in file order: an alpha channel (VP8/VP9, ID 1),
+	// ITU-T T.35 metadata such as HDR10+ (ID 4), a WebVTT cue's settings, identifier and comments (ID 1). nil for
+	// none; a rewrite writes them back, the block becoming a BlockGroup. A laced block's sit on its first frame.
+	Additions []BlockAddition
 	// Size is the frame's payload byte length. It always equals len(Data) when
 	// Data was read; a structure-only walk (BlockReader.SetHeaderOnly) leaves
 	// Data nil and reports the size here alone, so a caller that only needs
 	// sample sizes (not bytes) never pays for the payload read.
 	Size int64
+}
+
+// BlockAddition is one BlockMore of a BlockGroup: data a block carries beside its frame, keyed by ID (its
+// BlockAddID), which the track's BlockAdditionMapping or the codec defines.
+type BlockAddition struct {
+	ID   uint64
+	Data []byte
+}
+
+// BlockAdditionMapping is one BlockAdditionMapping of a track: the BlockAddID its blocks' additions use (Value), an
+// optional Name, what they hold (Type: a four-character code, or BlockAddIDTypeITUT35) and the configuration it
+// needs (ExtraData).
+type BlockAdditionMapping struct {
+	Value     uint64 `json:"value"`
+	Name      string `json:"name,omitempty"`
+	Type      uint64 `json:"type"`
+	ExtraData []byte `json:"-"`
+}
+
+// IsHDR10Plus reports whether data is HDR10+ dynamic metadata as ITU-T T.35 carries it: country code 0xB5,
+// terminal provider code 0x003C, provider oriented code 0x0001 (CTA-861).
+func IsHDR10Plus(data []byte) bool {
+	return len(data) >= 5 && data[0] == 0xB5 && data[1] == 0x00 && data[2] == 0x3C && data[3] == 0x00 && data[4] == 0x01
 }
 
 // DecodePayload returns a block's payload as content: inflated when the track

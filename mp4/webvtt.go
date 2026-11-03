@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // webvtt.go - native WebVTT carriage in MP4 (wvtt, ISO/IEC 14496-30) plus the
@@ -37,12 +38,22 @@ func wvttEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 }
 
 // encodeWVTTCue builds one wvtt sample: a single VTTCueBox (vttc) with a
-// CuePayloadBox (payl) holding the cue text. Per-cue settings/identifiers that
-// Matroska stores in BlockAdditions are not carried (the block reader does not
-// surface them); the payload text and its inline markup are preserved verbatim.
-func encodeWVTTCue(payload []byte) []byte {
-	payl := boxf("payl", func(w *bw) { w.bytes(payload) })
-	return boxf("vttc", func(w *bw) { w.bytes(payl) })
+// CuePayloadBox (payl) holding the cue text and its inline markup verbatim.
+func encodeWVTTCue(payload []byte) []byte { return encodeWVTTCueWith(payload, nil) }
+
+// encodeWVTTCueWith is encodeWVTTCue carrying the cue identifier (iden) and settings (sttg) a Matroska block stores
+// in its BlockAddition, in the order ISO/IEC 14496-30 places them before the payload.
+func encodeWVTTCueWith(payload []byte, adds []mkv.BlockAddition) []byte {
+	settings, id := subtitle.WebVTTAddition(adds)
+	return boxf("vttc", func(w *bw) {
+		if id != "" {
+			w.bytes(boxf("iden", func(b *bw) { b.bytes([]byte(id)) }))
+		}
+		if settings != "" {
+			w.bytes(boxf("sttg", func(b *bw) { b.bytes([]byte(settings)) }))
+		}
+		w.bytes(boxf("payl", func(b *bw) { b.bytes(payload) }))
+	})
 }
 
 // wvttEmptyCue is a VTTEmptyCueBox (vtte): the sample filling the gaps between
