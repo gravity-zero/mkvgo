@@ -76,8 +76,10 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		if o.CENC != nil {
 			b.WriteString(cencContentProtection(o.CENC))
 		}
-		if !ft.outTrack.spec.video {
-			b.WriteString(dashLabel(t, "      ")) // after ContentProtection: the schema's order
+		if ft.outTrack.spec.video {
+			b.WriteString(dashVideoProperties(t, "      "))
+		} else {
+			b.WriteString(dashDescriptors(renditionOf(ft.outTrack), false, "      ")) // after ContentProtection: the schema's order
 		}
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		if !ft.outTrack.spec.video {
@@ -97,7 +99,7 @@ func buildDASHManifest(o *Options, fts []*fragTrack, subs []hlsSubTrack, durs []
 		t := &subs[i].track
 		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
-		b.WriteString(dashLabel(t, "      "))
+		b.WriteString(dashDescriptors(rendition{t: t}, true, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(fmt.Sprintf("sub%d.vtt", i+1))))
 		b.WriteString("      </Representation>\n")

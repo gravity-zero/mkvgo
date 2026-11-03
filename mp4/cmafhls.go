@@ -68,61 +68,32 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		return []byte(b.String())
 	}
 
-	var (
-		audioCodecs  []string
-		audioUnknown bool // one audio codec without a string: no CODECS anywhere
-	)
+	audioR := make([]rendition, len(audio))
 	for i, r := range audio {
-		t := &r.tracks[r.primary]
-		name := t.Name
-		if name == "" {
-			name = t.ResolvedLanguage()
-		}
-		if name == "" {
-			name = fmt.Sprintf("Audio %d", i+1)
-		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		attrs += hlsChannelsAttr(t)
-		if i == 0 {
-			attrs += ",DEFAULT=YES"
-		}
-		fmt.Fprintf(&b, "#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(r.id+".m3u8")))
-		switch cs := cmafCodecs(r.tracks); {
-		case cs == "":
-			audioUnknown = true
-		case !containsString(audioCodecs, cs):
-			audioCodecs = append(audioCodecs, cs)
+		audioR[i] = rendition{t: &r.tracks[r.primary], codec: cmafCodecs(r.tracks)}
+	}
+	groups := audioGroupsOf(audioR)
+	for _, g := range groups {
+		for n, k := range g.members {
+			b.WriteString(hlsAudioMedia(audioR[k], k+1, n == 0, g.id, rw(audio[k].id+".m3u8"))) // an external init says "enabled", not "default"
 		}
 	}
-
+	variants := groups
+	if len(variants) == 0 {
+		variants = []audioGroup{{}}
+	}
 	for _, r := range video {
-		t := &r.tracks[r.primary]
-		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth)
-		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
-			inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
+		for _, g := range variants {
+			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth)
+			inf += hlsVideoAttrs(&r.tracks[r.primary])
+			if codecs := joinCodecs(cmafCodecs(r.tracks), g.codec, g.id != ""); codecs != "" {
+				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
+			}
+			if g.id != "" {
+				inf += fmt.Sprintf(",AUDIO=%s", hlsQuoted(g.id))
+			}
+			fmt.Fprintf(&b, "%s\n%s\n", inf, uriLine(rw(r.id+".m3u8")))
 		}
-		if t.FrameRate != nil && *t.FrameRate > 0 {
-			inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
-		}
-		if vcs := cmafCodecs(r.tracks); vcs != "" && !audioUnknown {
-			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(strings.Join(append([]string{vcs}, audioCodecs...), ",")))
-		}
-		if len(audio) > 0 {
-			inf += ",AUDIO=\"aud\""
-		}
-		fmt.Fprintf(&b, "%s\n%s\n", inf, uriLine(rw(r.id+".m3u8")))
 	}
 	return []byte(b.String())
-}
-
-func containsString(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

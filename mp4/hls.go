@@ -1232,58 +1232,29 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 
-	// Audio renditions (demuxed): one EXT-X-MEDIA per audio track; the first
-	// (or the flagged default) is DEFAULT=YES so players auto-select it.
+	// Audio renditions (demuxed): one EXT-X-MEDIA per audio track, grouped by codec; in each group the flagged
+	// default, else the first, is DEFAULT=YES so players auto-select it.
 	prim := primaryIndex(fts)
-	nAudio := 0
-	hasDefaultAudio := false
-	for i, ft := range fts {
-		hasDefaultAudio = hasDefaultAudio || (i != prim && !ft.outTrack.spec.video && ft.outTrack.mkv.IsDefault)
-	}
+	var audio []rendition
+	var audioAt []int
+	var mainCodecs []string // the variant's own tracks: the video, or an audio-only source's primary
 	for i, ft := range fts {
 		if i == prim || ft.outTrack.spec.video {
+			mainCodecs = append(mainCodecs, rfc6381Codec(ft.outTrack))
 			continue
 		}
-		nAudio++
-		t := &ft.outTrack.mkv
-		name := t.Name
-		if name == "" && t.ResolvedLanguage() != "" {
-			name = t.ResolvedLanguage()
-		}
-		if name == "" {
-			name = fmt.Sprintf("Audio %d", nAudio)
-		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		attrs += hlsChannelsAttr(t)
-		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
-			attrs += ",DEFAULT=YES"
-		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(renditionPlaylist(fts, i))))...)
+		audio = append(audio, renditionOf(ft.outTrack))
+		audioAt = append(audioAt, i)
 	}
-
+	groups := audioGroupsOf(audio)
+	defaults := groupDefaults(audio, groups)
+	for _, g := range groups {
+		for _, k := range g.members {
+			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw(renditionPlaylist(fts, audioAt[k])))...)
+		}
+	}
 	for i := range subs {
-		t := &subs[i].track
-		name := t.Name
-		if name == "" && t.ResolvedLanguage() != "" {
-			name = t.ResolvedLanguage()
-		}
-		if name == "" {
-			name = fmt.Sprintf("Subtitles %d", i+1)
-		}
-		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		if t.IsDefault {
-			attrs += ",DEFAULT=YES"
-		}
-		if t.IsForced {
-			attrs += ",FORCED=YES"
-		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("sub%d.m3u8", i+1))))...)
+		b = append(b, hlsSubtitleMedia(&subs[i].track, i+1, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 	}
 
 	// Peak and average bandwidth over the media segments (bits per second).
@@ -1302,26 +1273,30 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	if totalSec > 0 {
 		avg = totalBits / totalSec
 	}
-	inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", int64(peak), int64(avg))
+	base := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", int64(peak), int64(avg))
 	if v := pickVideoFrag(fts); v != nil {
-		t := &v.outTrack.mkv
-		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
-			inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
-		}
-		if t.FrameRate != nil && *t.FrameRate > 0 {
-			inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
-		}
+		base += hlsVideoAttrs(&v.outTrack.mkv)
 	}
-	if codecs := hlsCodecsAttr(fts); codecs != "" {
-		inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
-	}
-	if nAudio > 0 {
-		inf += ",AUDIO=\"aud\""
-	}
+	main := joinKnown(mainCodecs)
+	tail := ""
 	if len(subs) > 0 {
-		inf += ",SUBTITLES=\"subs\""
+		tail = ",SUBTITLES=\"subs\""
 	}
-	b = append(b, (inf + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
+	// One variant per audio group: the same media, its codecs and its audio named together.
+	variants := groups
+	if len(variants) == 0 {
+		variants = []audioGroup{{}}
+	}
+	for _, g := range variants {
+		inf := base
+		if codecs := joinCodecs(main, g.codec, g.id != ""); codecs != "" {
+			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
+		}
+		if g.id != "" {
+			inf += fmt.Sprintf(",AUDIO=%s", hlsQuoted(g.id))
+		}
+		b = append(b, (inf + tail + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
+	}
 	if len(iframes) > 0 && o != nil && o.Encrypt == nil && o.CENC == nil && !o.NoIFrames {
 		b = append(b, iframeStreamInf(o, fts, dursOf(segs), iframes)...)
 	}

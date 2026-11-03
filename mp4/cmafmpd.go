@@ -676,6 +676,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 			as += ` startWithSAP="1"`
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
+		b.WriteString(dashVideoProperties(&video[0].tracks[video[0].primary], "      "))
 	}
 	for _, r := range video {
 		t := &r.tracks[r.primary]
@@ -709,7 +710,7 @@ func renderCMAFManifest(o *Options, video, audio []*cmafRep) []byte {
 			rep += fmt.Sprintf(` codecs="%s"`, xmlAttr(codecs))
 		}
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
-		b.WriteString(dashLabel(t, "      "))
+		b.WriteString(dashDescriptors(rendition{t: t, codec: cmafCodecs(r.tracks)}, false, "      "))
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		writeCMAFAddressing(&b, rw, r)

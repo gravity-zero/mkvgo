@@ -1,6 +1,9 @@
 package mp4
 
 import (
+	"bytes"
+	"encoding/binary"
+
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -267,6 +270,152 @@ func eac3Header(f []byte) (strmtyp, substream uint32, s eac3Substream, chanmap u
 	return strmtyp, substream, s, chanmap, chanmape, !r.err && s.bsid > 10 && s.bsid <= 16
 }
 
+// eac3JOC reads the Dolby Atmos signalling of an independent E-AC-3 syncframe at f: the complexity index of its
+// joint object coding (flag_ec3_extension_type_a in addbsi, ETSI TS 102 366 E.1.2.2), 0 for none. The BSI is walked
+// field by field to reach addbsi.
+func eac3JOC(f []byte) uint8 {
+	r := &bitReader{data: f}
+	r.skip(16)
+	strmtyp := r.bits(2)
+	r.skip(3 + 11) // substreamid, frmsiz
+	fscod := r.bits(2)
+	numblkscod := uint32(3)
+	if fscod == 3 {
+		r.skip(2)
+	} else {
+		numblkscod = r.bits(2)
+	}
+	acmod, lfeon := r.bits(3), r.bits(1)
+	r.skip(5 + 5) // bsid, dialnorm
+	if r.bits(1) == 1 {
+		r.skip(8) // compr
+	}
+	if acmod == 0 {
+		r.skip(5)
+		if r.bits(1) == 1 {
+			r.skip(8)
+		}
+	}
+	if strmtyp == 1 && r.bits(1) == 1 {
+		r.skip(16) // chanmap
+	}
+	if r.bits(1) == 1 { // mixmdate
+		if acmod > 2 {
+			r.skip(2) // dmixmod
+		}
+		if acmod&1 != 0 && acmod > 2 {
+			r.skip(6) // ltrtcmixlev, lorocmixlev
+		}
+		if acmod&4 != 0 {
+			r.skip(6) // ltrtsurmixlev, lorosurmixlev
+		}
+		if lfeon == 1 && r.bits(1) == 1 {
+			r.skip(5) // lfemixlevcod
+		}
+		if strmtyp == 0 {
+			if r.bits(1) == 1 {
+				r.skip(6) // pgmscl
+			}
+			if acmod == 0 && r.bits(1) == 1 {
+				r.skip(6) // pgmscl2
+			}
+			if r.bits(1) == 1 {
+				r.skip(6) // extpgmscl
+			}
+			switch r.bits(2) { // mixdef
+			case 1:
+				r.skip(5)
+			case 2:
+				r.skip(12)
+			case 3:
+				r.skip(int(r.bits(5)+2) * 8)
+			}
+			if acmod < 2 {
+				if r.bits(1) == 1 {
+					r.skip(14) // panmean, paninfo
+				}
+				if acmod == 0 && r.bits(1) == 1 {
+					r.skip(14)
+				}
+			}
+			if r.bits(1) == 1 { // frmmixcfginfoe
+				if numblkscod == 0 {
+					r.skip(5)
+				} else {
+					for range eac3Blocks[numblkscod] {
+						if r.bits(1) == 1 {
+							r.skip(5)
+						}
+					}
+				}
+			}
+		}
+	}
+	if r.bits(1) == 1 { // infomdate
+		r.skip(3 + 1 + 1) // bsmod, copyrightb, origbs
+		if acmod == 2 {
+			r.skip(4)
+		}
+		if acmod >= 6 {
+			r.skip(2)
+		}
+		if r.bits(1) == 1 {
+			r.skip(8)
+		}
+		if acmod == 0 && r.bits(1) == 1 {
+			r.skip(8)
+		}
+		if fscod < 3 {
+			r.skip(1)
+		}
+	}
+	if strmtyp == 0 && numblkscod != 3 {
+		r.skip(1) // convsync
+	}
+	if strmtyp == 2 {
+		if numblkscod == 3 || r.bits(1) == 1 {
+			r.skip(6) // frmsizecod
+		}
+	}
+	if r.bits(1) == 0 { // addbsie
+		return 0
+	}
+	addbsil := r.bits(6)
+	r.skip(7)
+	if r.bits(1) == 0 || addbsil < 1 { // flag_ec3_extension_type_a, then its complexity index
+		return 0
+	}
+	c := r.bits(8)
+	if r.err {
+		return 0
+	}
+	return uint8(c)
+}
+
+// entryJOC is the Atmos complexity index an ec-3 sample entry's dec3 carries, 0 for none or another entry.
+func entryJOC(entry []byte) uint8 {
+	i := bytes.Index(entry, []byte("dec3"))
+	if i < 4 {
+		return 0
+	}
+	size := int(binary.BigEndian.Uint32(entry[i-4:]))
+	if size < 8 || i-4+size > len(entry) {
+		return 0
+	}
+	p := entry[i+4 : i-4+size]
+	if len(p) < 5 || p[1]&0x07 != 0 { // one independent substream: the layout written here
+		return 0
+	}
+	base := 5
+	if p[4]>>1&0x0F > 0 { // num_dep_sub (bits 35-38): chan_loc follows
+		base = 6
+	}
+	if len(p) < base+2 || p[base]&1 == 0 {
+		return 0
+	}
+	return p[base+1]
+}
+
 // ac3Core reads the BSI of an AC-3 syncframe opening an E-AC-3 access unit (bsid 10 or less).
 func ac3Core(f []byte) (eac3Substream, bool) {
 	r := &bitReader{data: f}
@@ -317,7 +466,8 @@ func acmodHasCs(acmod uint32) bool { return acmod == 4 || acmod == 5 }
 
 // parseEAC3 builds a dec3 (EC3SpecificBox, ETSI TS 102 366 Annex F) from the access unit opening frame: its
 // independent substream - an E-AC-3 one, or an AC-3 core read as AC-3 - and the dependent substreams after it, whose
-// channel locations chan_loc gathers, so a 7.1 (a 5.1 and the rear pair) says 8 channels as it decodes.
+// channel locations chan_loc gathers, so a 7.1 (a 5.1 and the rear pair) says 8 channels as it decodes; and the
+// Atmos (JOC) complexity index its addbsi signals.
 func parseEAC3(frame []byte) ([]byte, error) {
 	off := findSync(frame, 0x0B77, 16)
 	if off < 0 || off+6 > len(frame) {
@@ -325,6 +475,7 @@ func parseEAC3(frame []byte) ([]byte, error) {
 	}
 	f := frame[off:]
 	var ind eac3Substream
+	var joc uint8
 	if f[5]>>3 <= 10 {
 		core, ok := ac3Core(f)
 		if !ok {
@@ -337,6 +488,7 @@ func parseEAC3(frame []byte) ([]byte, error) {
 			return nil, errf("malformed E-AC-3 syncframe")
 		}
 		ind = s
+		joc = eac3JOC(f)
 	}
 	dataRate, numDep, chanLoc := ind.kbps, uint32(0), uint32(0)
 	for p := ind.size; p > 0 && p+6 <= len(f) && f[p] == 0x0B && f[p+1] == 0x77 && numDep < 15; {
@@ -377,6 +529,11 @@ func parseEAC3(frame []byte) ([]byte, error) {
 		w.write(chanLoc, 9)
 	} else {
 		w.write(0, 1) // reserved
+	}
+	if joc > 0 { // Dolby Atmos: flag_ec3_extension_type_a and complexity_index_type_a after the substreams
+		w.write(0, 7)
+		w.write(1, 1)
+		w.write(uint32(joc), 8)
 	}
 	return box("dec3", w.bytes()), nil
 }

@@ -87,70 +87,25 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	var b []byte
 	b = append(b, "#EXTM3U\n#EXT-X-VERSION:7\n"...)
 
-	// Audio and subtitle groups from the reference source, under v1/.
+	// Audio and subtitle groups from the reference source, under v1/: one audio group per codec.
 	ref := results[0]
-	nAudio := 0
-	hasDefaultAudio := false
-	for _, ft := range ref.fts {
-		hasDefaultAudio = hasDefaultAudio || (!ft.outTrack.spec.video && ft.outTrack.mkv.IsDefault)
-	}
+	var audio []rendition
+	var audioAt []int
 	for i, ft := range ref.fts {
-		if ft.outTrack.spec.video {
-			continue
+		if !ft.outTrack.spec.video {
+			audio = append(audio, renditionOf(ft.outTrack))
+			audioAt = append(audioAt, i)
 		}
-		nAudio++
-		t := &ft.outTrack.mkv
-		name := t.Name
-		if name == "" && t.ResolvedLanguage() != "" {
-			name = t.ResolvedLanguage()
+	}
+	groups := audioGroupsOf(audio)
+	defaults := groupDefaults(audio, groups)
+	for _, g := range groups {
+		for _, k := range g.members {
+			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw("v1/"+renditionPlaylist(ref.fts, audioAt[k])))...)
 		}
-		if name == "" {
-			name = fmt.Sprintf("Audio %d", nAudio)
-		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		attrs += hlsChannelsAttr(t)
-		if t.IsDefault || (!hasDefaultAudio && nAudio == 1) {
-			attrs += ",DEFAULT=YES"
-		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw("v1/"+renditionPlaylist(ref.fts, i))))...)
 	}
 	for i := range ref.subs {
-		t := &ref.subs[i].track
-		name := t.Name
-		if name == "" && t.ResolvedLanguage() != "" {
-			name = t.ResolvedLanguage()
-		}
-		if name == "" {
-			name = fmt.Sprintf("Subtitles %d", i+1)
-		}
-		attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		if t.IsDefault {
-			attrs += ",DEFAULT=YES"
-		}
-		if t.IsForced {
-			attrs += ",FORCED=YES"
-		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("v1/sub%d.m3u8", i+1))))...)
-	}
-
-	// The audio codec strings ride on every variant (the group is shared).
-	var audioCodecs string
-	for _, ft := range ref.fts {
-		if ft.outTrack.spec.video {
-			continue
-		}
-		if cs := rfc6381Codec(ft.outTrack); cs != "" {
-			audioCodecs += "," + cs
-		} else {
-			audioCodecs = ""
-			break
-		}
+		b = append(b, hlsSubtitleMedia(&ref.subs[i].track, i+1, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
 	}
 
 	// A video-only variant plays the reference's audio alongside: its BANDWIDTH carries that audio's peak too.
@@ -160,31 +115,31 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 			sharedAudio = max(sharedAudio, int64(float64(s.audioBytes)*8/s.durSec))
 		}
 	}
+	variants := groups
+	if len(variants) == 0 {
+		variants = []audioGroup{{}}
+	}
 	for vi, res := range results {
 		bw := peakBandwidth(res.segs)
 		if vi > 0 {
 			bw += sharedAudio
 		}
-		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", bw)
-		if v := pickVideoFrag(res.fts); v != nil {
-			t := &v.outTrack.mkv
-			if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
-				inf += fmt.Sprintf(",RESOLUTION=%dx%d", *t.Width, *t.Height)
+		for _, g := range variants {
+			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", bw)
+			if v := pickVideoFrag(res.fts); v != nil {
+				inf += hlsVideoAttrs(&v.outTrack.mkv)
+				if codecs := joinCodecs(rfc6381Codec(v.outTrack), g.codec, g.id != ""); codecs != "" {
+					inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
+				}
 			}
-			if t.FrameRate != nil && *t.FrameRate > 0 {
-				inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
+			if g.id != "" {
+				inf += fmt.Sprintf(",AUDIO=%s", hlsQuoted(g.id))
 			}
-			if vcs := rfc6381Codec(v.outTrack); vcs != "" && (audioCodecs != "" || nAudio == 0) {
-				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(vcs+audioCodecs))
+			if len(ref.subs) > 0 {
+				inf += ",SUBTITLES=\"subs\""
 			}
+			b = append(b, (inf + "\n" + uriLine(rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1))) + "\n")...)
 		}
-		if nAudio > 0 {
-			inf += ",AUDIO=\"aud\""
-		}
-		if len(ref.subs) > 0 {
-			inf += ",SUBTITLES=\"subs\""
-		}
-		b = append(b, (inf + "\n" + uriLine(rw(fmt.Sprintf("v%d/playlist.m3u8", vi+1))) + "\n")...)
 	}
 
 	// Trick-play: one I-frame stream per variant that exposes an I-frame
@@ -262,6 +217,9 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 
 	// Video: one AdaptationSet, one Representation per variant (the switch set).
 	b.WriteString(`    <AdaptationSet mimeType="video/mp4" contentType="video">` + "\n")
+	if v := pickVideoFrag(results[0].fts); v != nil {
+		b.WriteString(dashVideoProperties(&v.outTrack.mkv, "      "))
+	}
 	for vi, res := range results {
 		v := pickVideoFrag(res.fts)
 		if v == nil {
@@ -313,7 +271,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		}
 		media := "v1/" + strings.Replace(renditionSegment(ref.fts, i, 0), "00001", "$Number%05d$", 1)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
-		b.WriteString(dashLabel(t, "      "))
+		b.WriteString(dashDescriptors(renditionOf(ft.outTrack), false, "      "))
 		fmt.Fprintf(&b, "      <Representation %s>\n", rep)
 		b.WriteString(dashAudioChannelConfiguration(t, "        "))
 		fmt.Fprintf(&b, `        <SegmentTemplate initialization="%s" media="%s" startNumber="1" timescale="1000">`+"\n",
@@ -327,7 +285,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 		t := &ref.subs[i].track
 		as := `mimeType="text/vtt" contentType="text"` + dashLangAttr(t)
 		fmt.Fprintf(&b, "    <AdaptationSet %s>\n", as)
-		b.WriteString(dashLabel(t, "      "))
+		b.WriteString(dashDescriptors(rendition{t: t}, true, "      "))
 		fmt.Fprintf(&b, `      <Representation id="sub%d" bandwidth="0">`+"\n", i+1)
 		fmt.Fprintf(&b, "        <BaseURL>%s</BaseURL>\n", xmlEscapeText(rw(fmt.Sprintf("v1/sub%d.vtt", i+1))))
 		b.WriteString("      </Representation>\n")

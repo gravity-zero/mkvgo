@@ -1132,6 +1132,27 @@ every audio Representation its real `bandwidth` (from its samples, else the
 container's `BPS`/`btrt` figure, 0 only when unknown). On the HLS side each
 `EXT-X-MEDIA` audio rendition declares `CHANNELS` when the count is known.
 
+Every manifest - `to-hls`, the on-demand plan, ABR, concat, `HLSFromCMAF`, the
+DASH MPDs - says the same of a track, from one set of helpers
+(`mp4/manifest_attrs.go`):
+
+- Audio groups: one HLS audio group per codec (`aud-ac-3`, `aud-mp4a.40.2`;
+  a single codec keeps `aud`), one variant per group whose `CODECS` names the
+  video and that group's codec, one `DEFAULT=YES` per group.
+- Video range: `VIDEO-RANGE=PQ` or `HLG` from the transfer characteristics or
+  the Dolby Vision base layer (SDR, the default, is left unsaid); the DASH
+  video AdaptationSet carries the CICP `SupplementalProperty` elements
+  (`ColourPrimaries`, `TransferCharacteristics`, `MatrixCoefficients`). A
+  cross-compatible Dolby Vision stream (profile 8.1, 8.4, 10.1) adds
+  `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"`.
+- Dispositions: `CHARACTERISTICS` in HLS (audio description, hard of hearing,
+  SDH subtitles; a forced subtitle says `FORCED=YES`; HLS defines no
+  characteristic for a commentary), `Accessibility` and `Role` in DASH (`main`,
+  `commentary`, `description`, `caption`, `forced-subtitle`, `subtitle`).
+- Dolby Atmos (E-AC-3 JOC, read from the stream's `addbsi` and written into
+  the `dec3`): `CHANNELS="16/JOC"` (the object complexity index) in HLS, the
+  `tag:dolby.com,2018:dash:EC3_ExtensionType:2018` property in DASH.
+
 A `CMAFPresentation` with `Audio` only (no `Video`) is valid for both
 functions: an audio-only manifest, one AdaptationSet per representation in
 DASH, one audio-only variant per representation in the HLS master.

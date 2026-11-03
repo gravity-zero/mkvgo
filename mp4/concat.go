@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -343,52 +344,22 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 
 	ref := results[0]
 	audioIdx := audioFts(ref.fts)
-	hasDefaultAudio := false
-	for _, i := range audioIdx {
-		hasDefaultAudio = hasDefaultAudio || ref.fts[i].outTrack.mkv.IsDefault
-	}
+	audio := make([]rendition, len(audioIdx))
 	for j, i := range audioIdx {
-		t := &ref.fts[i].outTrack.mkv
-		name := t.Name
-		if name == "" && t.ResolvedLanguage() != "" {
-			name = t.ResolvedLanguage()
+		audio[j] = renditionOf(ref.fts[i].outTrack)
+	}
+	groups := audioGroupsOf(audio)
+	defaults := groupDefaults(audio, groups)
+	for _, g := range groups {
+		for _, k := range g.members {
+			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw(fmt.Sprintf("audio%d.m3u8", k+1)))...)
 		}
-		if name == "" {
-			name = fmt.Sprintf("Audio %d", j+1)
-		}
-		attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=\"aud\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-		if l := t.ResolvedLanguage(); l != "" {
-			attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-		}
-		attrs += hlsChannelsAttr(t)
-		if t.IsDefault || (!hasDefaultAudio && j == 0) {
-			attrs += ",DEFAULT=YES"
-		}
-		b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("audio%d.m3u8", j+1))))...)
 	}
 
 	subsOK := subsAligned(results)
 	if subsOK {
 		for i := range ref.subs {
-			t := &ref.subs[i].track
-			name := t.Name
-			if name == "" && t.ResolvedLanguage() != "" {
-				name = t.ResolvedLanguage()
-			}
-			if name == "" {
-				name = fmt.Sprintf("Subtitles %d", i+1)
-			}
-			attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
-			if l := t.ResolvedLanguage(); l != "" {
-				attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
-			}
-			if t.IsDefault {
-				attrs += ",DEFAULT=YES"
-			}
-			if t.IsForced {
-				attrs += ",FORCED=YES"
-			}
-			b = append(b, fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(rw(fmt.Sprintf("sub%d.m3u8", i+1))))...)
+			b = append(b, hlsSubtitleMedia(&ref.subs[i].track, i+1, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 		}
 	}
 
@@ -411,26 +382,40 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 			}
 		}
 	}
-	inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg)
-	if maxArea > 0 {
-		inf += fmt.Sprintf(",RESOLUTION=%dx%d", w, h)
-	}
-	if v := pickVideoFrag(ref.fts); v != nil {
-		t := &v.outTrack.mkv
-		if t.FrameRate != nil && *t.FrameRate > 0 {
-			inf += fmt.Sprintf(",FRAME-RATE=%.3f", *t.FrameRate)
+	base := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg)
+	var mainCodecs []string
+	for i, ft := range ref.fts {
+		if !slices.Contains(audioIdx, i) {
+			mainCodecs = append(mainCodecs, rfc6381Codec(ft.outTrack))
 		}
 	}
-	if codecs := hlsCodecsAttr(ref.fts); codecs != "" {
-		inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
+	if v := pickVideoFrag(ref.fts); v != nil {
+		t := v.outTrack.mkv // the largest picture across the parts, the rest from part 0
+		if maxArea > 0 {
+			t.Width, t.Height = &w, &h
+		}
+		base += hlsVideoAttrs(&t)
+	} else if maxArea > 0 {
+		base += fmt.Sprintf(",RESOLUTION=%dx%d", w, h)
 	}
-	if len(audioIdx) > 0 {
-		inf += ",AUDIO=\"aud\""
-	}
+	tail := ""
 	if subsOK && len(ref.subs) > 0 {
-		inf += ",SUBTITLES=\"subs\""
+		tail = ",SUBTITLES=\"subs\""
 	}
-	b = append(b, (inf + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
+	variants := groups
+	if len(variants) == 0 {
+		variants = []audioGroup{{}}
+	}
+	for _, g := range variants {
+		inf := base
+		if codecs := joinCodecs(joinKnown(mainCodecs), g.codec, g.id != ""); codecs != "" {
+			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
+		}
+		if g.id != "" {
+			inf += fmt.Sprintf(",AUDIO=%s", hlsQuoted(g.id))
+		}
+		b = append(b, (inf + tail + "\n" + uriLine(rw("playlist.m3u8")) + "\n")...)
+	}
 	return b
 }
 

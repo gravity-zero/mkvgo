@@ -44,6 +44,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   playlists of such sources change; a
   cache keyed on them is stale. The packaging reads one block more per AC-3
   or E-AC-3 track at open.
+- Bytes served, HLS masters (`to-hls`, the plan, ABR, concat,
+  `HLSFromCMAF`): audio tracks of different codecs form one group each
+  (`aud-<codec>`) with one variant per group, whose `CODECS` names the video
+  and that group's codec once (a single codec keeps the group `aud` and one
+  variant, its `CODECS` no longer repeating the audio codec per track); one
+  `DEFAULT=YES` per group. See Added for the new attributes.
 - Bytes served: an E-AC-3 track's `dec3` lists the dependent substreams of
   its first programme and their channel locations (a 7.1, a 5.1 and the rear
   pair, was announced 6), and one whose access units open with an AC-3 core
@@ -66,6 +72,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - `undeclared-compression` and `unsized-laced-audio` findings set `Track`.
 - `BlockReader.StoppedShort`: the walk ended because the source stops inside
   an element.
+- Manifests: `VIDEO-RANGE` (PQ, HLG) and `SUPPLEMENTAL-CODECS` (Dolby Vision
+  8.x / 10.x) in HLS, the CICP colour properties in DASH; `CHARACTERISTICS`
+  (HLS) and `Accessibility` / `Role` (DASH) from the disposition flags; Dolby
+  Atmos (E-AC-3 JOC) read from the stream, carried in the `dec3` and announced
+  (`CHANNELS="16/JOC"`, the DASH `EC3_ExtensionType` property). One set of
+  helpers serves every HLS and DASH writer.
 
 ### Changed
 
