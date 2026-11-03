@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/ebml"
 	"github.com/gravity-zero/mkvgo/internal/costguard"
@@ -120,5 +121,60 @@ func TestStatsFrameRatesGrowLinearly(t *testing.T) {
 			t.Fatal("no rate")
 		}
 		return heap
+	})
+}
+
+// TestMetadataReadCostGrowsLinearlyTimed is TestMetadataReadCostGrowsLinearly on the clock, nightly: it also sees a
+// quadratic that neither reads nor allocates.
+func TestMetadataReadCostGrowsLinearlyTimed(t *testing.T) {
+	costguard.SkipUnlessTimed(t)
+	readers := map[string]func(data []byte) (*mkv.Container, error){
+		"Read": func(data []byte) (*mkv.Container, error) {
+			return Read(context.Background(), bytes.NewReader(data), "scale.mkv")
+		},
+		"ReadMeta": func(data []byte) (*mkv.Container, error) {
+			return ReadMeta(context.Background(), bytes.NewReader(data), "scale.mkv", WithChapters(), WithTags(), WithCues())
+		},
+		"ReadStream": func(data []byte) (*mkv.Container, error) {
+			c, _, err := ReadStream(context.Background(), bytes.NewReader(data))
+			return c, err
+		},
+	}
+	for _, kind := range []string{"tracks", "chapters", "tags", "cues"} {
+		for name, read := range readers {
+			if kind == "cues" && name == "ReadStream" {
+				continue // a stream stops at the first Cluster and leaves the Cues to the seekable reader
+			}
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				costguard.Linear(t, 20_000, func(n int) time.Duration {
+					data := scaledSegment(kind, n)
+					start := time.Now()
+					if _, err := read(data); err != nil {
+						t.Fatal(err)
+					}
+					return costguard.Since(start)
+				})
+			})
+		}
+	}
+}
+
+// TestStatsFrameRatesGrowLinearlyTimed is TestStatsFrameRatesGrowLinearly on the clock, nightly.
+func TestStatsFrameRatesGrowLinearlyTimed(t *testing.T) {
+	costguard.SkipUnlessTimed(t)
+	costguard.Linear(t, 1000, func(n int) time.Duration {
+		c := &mkv.Container{}
+		for range n {
+			c.Tracks = append(c.Tracks, mkv.Track{Type: mkv.VideoTrack, UID: 1})
+			c.Tags = append(c.Tags, mkv.Tag{TargetID: 1, SimpleTags: []mkv.SimpleTag{
+				{Name: "NUMBER_OF_FRAMES", Value: "2400"}, {Name: "DURATION", Value: "00:01:40.100000000"}}})
+		}
+		start := time.Now()
+		statsFrameRates(c)
+		d := time.Since(start)
+		if c.Tracks[n-1].EstimatedFrameRate == nil {
+			t.Fatal("no rate")
+		}
+		return d
 	})
 }

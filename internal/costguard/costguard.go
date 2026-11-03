@@ -79,9 +79,20 @@ func Linear(t testing.TB, n int, fn func(n int) time.Duration) {
 // Since is time.Since, for an fn handed to Linear that times all it does.
 func Since(start time.Time) time.Duration { return time.Since(start) }
 
+// SkipUnlessTimed skips t unless COSTGUARD_TIMED is set: the timed twin of a LinearOps test, run by the nightly job
+// on a quiet runner, where load cannot fail it. LinearOps counts what a path reads, seeks and allocates; a loop that
+// does none of that, a quadratic of pure CPU, only the clock sees.
+func SkipUnlessTimed(t testing.TB) {
+	t.Helper()
+	if os.Getenv("COSTGUARD_TIMED") == "" {
+		t.Skip("timed cost test: set COSTGUARD_TIMED=1 (nightly job)")
+	}
+}
+
 // LinearOps fails t when fn's operation count at 4n items is more than 8 times its count at n. fn builds its input of
 // n items, runs the phase under test and returns what that phase did - reads, seeks, bytes, allocations, whatever it
 // counts - so the verdict holds whatever the machine's load; a linear path counts about 4 times, a quadratic one 16.
+// A quadratic loop that neither reads nor allocates escapes it: keep a timed twin under SkipUnlessTimed.
 func LinearOps(t testing.TB, n int, fn func(n int) uint64) {
 	t.Helper()
 	small, large := max(fn(n), 1), fn(4*n)
