@@ -9,6 +9,24 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ## [Unreleased]
 
+### Breaking
+
+- JSON keys: a cue point (`cues[]` in a Container's JSON) carries
+  `time_ms`, `track`, `cluster_pos`, `relative_pos`, and a dropped track
+  (`dropped_tracks[]`, CLI `probe --json` and the WASM remux results) `id`,
+  `type`, `codec`, `reason`; they were the Go field names (`TimeMs`, `ID`,
+  ...), the only CamelCase keys left. A test holds every Container key to
+  snake_case.
+- `Diagnose`: a Segment that declares no size (a streamed write) is a note in
+  the new `Diagnosis.Notes`, no longer a finding: such a file is `Healthy` and
+  `diagnose` exits 0. The `streamed-size` kind and its remedy are unchanged.
+- `--exit-damaged` also applies to the commands that read: `info` and `probe`
+  on a local file cut short, `track-ends` on one cut short (now said on
+  stderr) or whose walk passed over damage, `salvage --dry-run` that maps
+  damage or a missing tail, and `diagnose` with a `truncated`, `damaged` or
+  `sample-table` finding, where 3 replaces its 1. Without the flag nothing
+  changes. `probe` prints `Truncated` in its text output too.
+
 ### Added
 
 - `SourceCutShort` / `CutShortOf` (ops and the `matroska` facade): whether a

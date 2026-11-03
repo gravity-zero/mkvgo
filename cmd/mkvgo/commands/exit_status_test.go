@@ -95,6 +95,56 @@ func TestExitDamaged(t *testing.T) {
 	}
 }
 
+// TestExitDamagedReadingCommands: the commands that only read a source exit 3
+// under --exit-damaged when it is cut short, as the writing ones do; without
+// the flag they keep their status (diagnose 1 on findings), and a whole source
+// exits 0 either way.
+func TestExitDamagedReadingCommands(t *testing.T) {
+	whole, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "testdata", "sample.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cut := filepath.Join(dir, "cut.mkv")
+	if err := os.WriteFile(cut, whole[:len(whole)*6/10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(dir, "whole.mkv")
+	if err := os.WriteFile(full, whole, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ExitDamaged, sawDamage, JsonOutput = false, false, false })
+	commands := map[string]func(src string){
+		"info":              CmdInfo,
+		"info --json":       func(src string) { JsonOutput = true; CmdInfo(src) },
+		"probe":             CmdProbe,
+		"probe --json":      func(src string) { JsonOutput = true; CmdProbe(src) },
+		"diagnose":          func(src string) { CmdDiagnose([]string{src}) },
+		"track-ends":        func(src string) { CmdTrackEnds([]string{src}) },
+		"salvage --dry-run": func(src string) { CmdSalvage([]string{"--dry-run", src}) },
+	}
+	for name, run := range commands {
+		for _, tc := range []struct {
+			src  string
+			flag bool
+			want int
+		}{
+			{cut, true, 3},
+			{cut, false, map[bool]int{true: 1, false: 0}[name == "diagnose"]},
+			{full, true, 0},
+		} {
+			ExitDamaged, sawDamage, JsonOutput = tc.flag, false, false
+			got := exitStatus(t, func() { run(tc.src) })
+			if got == -1 {
+				got = DamagedStatus()
+			}
+			if got != tc.want {
+				t.Errorf("%s %s, --exit-damaged %v: status %d, want %d", name, filepath.Base(tc.src), tc.flag, got, tc.want)
+			}
+		}
+	}
+}
+
 // TestJSONOutput: under --json an error is one JSON object on stderr carrying
 // its exit status, and reindex prints its report as one JSON object.
 func TestJSONOutput(t *testing.T) {

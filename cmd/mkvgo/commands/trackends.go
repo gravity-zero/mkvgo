@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/gravity-zero/mkvgo/matroska"
 )
@@ -26,6 +27,13 @@ func CmdTrackEnds(args []string) {
 	report, err := matroska.TrackEnds(cliCtx, rest[0])
 	if err != nil {
 		FatalErr(err)
+	}
+	if cut := sourceCutShort(rest[0]); cut != nil {
+		noteDamage()
+		fmt.Fprintf(os.Stderr, "warning: %s is cut short (%d of %d bytes): the ends are those of what arrived\n", rest[0], cut.FileSize, cut.DeclaredSize)
+	}
+	if report.SkippedBytes > 0 {
+		noteDamage()
 	}
 	if jsonOut || JsonOutput {
 		PrintJSON(report)

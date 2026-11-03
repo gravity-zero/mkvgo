@@ -242,7 +242,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 	}
 
 	if sizeFinding != nil {
-		d.Findings = append(d.Findings, *sizeFinding)
+		d.Notes = append(d.Notes, *sizeFinding) // a Segment of unknown size plays: worth knowing, not a defect
 	}
 
 	// The tolerant walk, when the size check warranted it or the caller asked.
@@ -337,9 +337,11 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		damaged = damaged || len(d.Damage.RepairedRanges) > 0
 	}
 	if damaged {
-		for i := range d.Findings {
-			d.Findings[i].Detail = resyncAdvice(d.Findings[i].Detail)
-			d.Findings[i].Remedy = resyncAdvice(d.Findings[i].Remedy)
+		for _, fs := range [][]Finding{d.Findings, d.Notes} {
+			for i := range fs {
+				fs[i].Detail = resyncAdvice(fs[i].Detail)
+				fs[i].Remedy = resyncAdvice(fs[i].Remedy)
+			}
 		}
 	}
 

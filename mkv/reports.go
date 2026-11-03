@@ -240,6 +240,9 @@ type Finding struct {
 type Diagnosis struct {
 	Healthy  bool      `json:"healthy"`
 	Findings []Finding `json:"findings"`
+	// Notes are facts about the file that are no defect and leave it Healthy:
+	// "streamed-size", a Segment that declares no size (a streamed write).
+	Notes []Finding `json:"notes,omitempty"`
 	// CueHealth is the index classification behind the index findings.
 	// Matroska only: an MP4's sample table is its index by construction.
 	CueHealth *CueHealthReport `json:"cue_health,omitempty"`

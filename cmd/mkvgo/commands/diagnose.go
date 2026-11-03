@@ -25,7 +25,8 @@ func mp4Diagnose(ctx context.Context, path string, _ ...matroska.Options) (*matr
 // the first bytes, never the name) run the head-only MP4 triage: box-layout
 // truncation, missing moov, edit-list audio delays.
 //
-// Exit contract: 0 healthy, 1 findings present (scriptable, like validate).
+// Exit contract: 0 healthy, 1 findings present (scriptable, like validate); 3 under --exit-damaged when a finding
+// says the bytes are cut or damaged (truncated, damaged, sample-table).
 func CmdDiagnose(args []string) {
 	requireLocal("diagnose", args...)
 	var jsonOut, deep bool
@@ -58,6 +59,17 @@ func CmdDiagnose(args []string) {
 				fmt.Printf("  [%s] %s\n      remedy: %s\n", f.Kind, f.Detail, f.Remedy)
 			}
 		}
+		for _, n := range d.Notes {
+			fmt.Printf("  note [%s] %s (%s)\n", n.Kind, n.Detail, n.Remedy)
+		}
+	}
+	for _, f := range d.Findings {
+		if f.Kind == matroska.FindingTruncated || f.Kind == matroska.FindingDamaged || f.Kind == matroska.FindingSampleTable {
+			noteDamage()
+		}
+	}
+	if code := DamagedStatus(); code != 0 {
+		osExit(code)
 	}
 	if !d.Healthy {
 		osExit(1)

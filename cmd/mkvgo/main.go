@@ -288,9 +288,11 @@ Global flags:
   -f, --force   Overwrite an existing output file (commands that write a new
                 file refuse to clobber one without it)
   --exit-damaged
-                Exit 3 instead of 0 when a command acted on an incomplete or
-                damaged source and said on stderr what it passed over (salvage,
-                reindex --resync, subtitle extraction, to-mp4, from-mp4, to-hls)
+                Exit 3 instead of 0 when the source is incomplete or damaged
+                and the command said so: those that write passed over it
+                (salvage, reindex --resync, subtitle extraction, to-mp4,
+                from-mp4, to-hls), those that read found it (info, probe,
+                diagnose, track-ends, salvage --dry-run)
   --sync        Flush a new Matroska output to disk before renaming it into
                 place, so it survives a power loss (costs the wait for the
                 disk; without it a power loss can leave an empty file under

@@ -12,10 +12,10 @@ import (
 // DroppedTrack describes a source track that the remux did not carry into the
 // output, with a human-readable reason. It is reported through Options.OnDrop.
 type DroppedTrack struct {
-	ID     uint64
-	Type   mkv.TrackType
-	Codec  string
-	Reason string
+	ID     uint64        `json:"id"`
+	Type   mkv.TrackType `json:"type"`
+	Codec  string        `json:"codec"`
+	Reason string        `json:"reason"`
 }
 
 // Truncation describes a source cut short: an MP4 whose sample tables place media past the

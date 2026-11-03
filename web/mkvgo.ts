@@ -183,10 +183,10 @@ export interface Tag {
 }
 
 export interface DroppedTrack {
-  ID: number
-  Type: TrackType
-  Codec: string
-  Reason: string
+  id: number
+  type: TrackType
+  codec: string
+  reason: string
 }
 
 export interface AbortOptions {
@@ -543,6 +543,8 @@ export interface Finding {
 export interface Diagnosis {
   healthy: boolean
   findings: Finding[] | null
+  /** Facts that are no defect and leave the file healthy: "streamed-size". */
+  notes?: Finding[]
   /** Matroska only: an MP4's sample table is its index by construction. */
   cue_health?: CueHealthReport
   /**

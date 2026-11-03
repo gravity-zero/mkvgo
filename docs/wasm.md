@@ -569,7 +569,7 @@ Remuxing a dropped file to a downloadable MP4:
 const onRemux = async (file: File) => {
   const bytes = new Uint8Array(await file.arrayBuffer())
   const { data, droppedTracks } = await mkvgo.remuxToMP4(bytes, { fastStart: true, skipUnsupported: true })
-  droppedTracks.forEach((d) => console.warn(`dropped #${d.ID} (${d.Codec}): ${d.Reason}`))
+  droppedTracks.forEach((d) => console.warn(`dropped #${d.id} (${d.codec}): ${d.reason}`))
   const url = URL.createObjectURL(new Blob([data], { type: 'video/mp4' }))
   Object.assign(document.createElement('a'), { href: url, download: 'out.mp4' }).click()
 }

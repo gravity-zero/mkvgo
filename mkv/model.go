@@ -760,13 +760,13 @@ const DefaultTimecodeScale = 1_000_000
 // that by scaling the value themselves must drop the compensation: the field's
 // type is unchanged, so nothing catches it.
 type CuePoint struct {
-	TimeMs     int64
-	Track      uint64
-	ClusterPos int64 // relative to the Segment body (Container.SegmentStart)
+	TimeMs     int64  `json:"time_ms"`
+	Track      uint64 `json:"track"`
+	ClusterPos int64  `json:"cluster_pos"` // relative to the Segment body (Container.SegmentStart)
 	// RelativePos is the block's offset inside the cluster's data, counted
 	// from its first element (CueRelativePosition); 0 when the file does not
 	// say - a block never sits there, the Timestamp does.
-	RelativePos int64
+	RelativePos int64 `json:"relative_pos"`
 }
 
 type MuxOptions struct {

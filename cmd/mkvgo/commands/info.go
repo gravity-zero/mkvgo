@@ -27,6 +27,9 @@ func sourceCutShort(path string) *matroska.CutShort {
 func CmdInfo(path string) {
 	c, _ := loadContainer(path, false)
 	cut := sourceCutShort(path)
+	if cut != nil {
+		noteDamage()
+	}
 	if JsonOutput {
 		PrintJSON(struct {
 			Path          string             `json:"path"`
@@ -166,11 +169,14 @@ func CmdTags(path string) {
 
 func CmdProbe(path string) {
 	c, dropped := loadContainer(path, true)
+	var cut *matroska.CutShort
+	if !isRemoteURL(path) { // a remote probe keeps its request budget: no stat for the cut
+		cut = sourceCutShort(path)
+	}
+	if cut != nil {
+		noteDamage()
+	}
 	if JsonOutput {
-		var cut *matroska.CutShort
-		if !isRemoteURL(path) { // a remote probe keeps its request budget: no stat for the cut
-			cut = sourceCutShort(path)
-		}
 		if len(dropped) == 0 {
 			PrintJSON(containerForJSON(c, cut))
 			return
@@ -186,6 +192,9 @@ func CmdProbe(path string) {
 	fmt.Printf("File:        %s\n", c.Path)
 	fmt.Printf("Title:       %s\n", c.Info.Title)
 	fmt.Printf("Duration:    %s (%d ms)\n", FmtMs(c.DurationMs), c.DurationMs)
+	if cut != nil {
+		fmt.Printf("Truncated:   %d of %d bytes - run `mkvgo diagnose`\n", cut.FileSize, cut.DeclaredSize)
+	}
 	if c.DocType != "" {
 		fmt.Printf("DocType:     %s\n", c.DocType)
 	}

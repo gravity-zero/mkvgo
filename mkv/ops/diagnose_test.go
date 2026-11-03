@@ -313,3 +313,35 @@ func TestDiagnose_WrongContainer(t *testing.T) {
 		t.Error("garbage content must keep failing Diagnose")
 	}
 }
+
+// TestDiagnoseStreamedSizeIsANote: a whole file whose Segment declares no size
+// (a streamed write) is healthy; the unknown size is a note, not a finding.
+func TestDiagnoseStreamedSizeIsANote(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 4)
+	for i := range 4 {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: make([]byte, 64)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: make([]byte, 16)},
+		})
+	}
+	sealed := filepath.Join(dir, "sealed.mkv")
+	if err := Reindex(ctx, buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 4000), sealed); err != nil {
+		t.Fatal(err)
+	}
+	streamed := filepath.Join(dir, "streamed.mkv")
+	writeAll(t, streamed, makeSegmentStreamed(t, readAll(t, sealed)))
+	d, err := Diagnose(ctx, streamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Healthy || len(d.Findings) != 0 {
+		t.Errorf("streamed whole file: healthy %v, findings %+v; want healthy, none", d.Healthy, d.Findings)
+	}
+	if len(d.Notes) != 1 || d.Notes[0].Kind != mkv.FindingStreamedSize {
+		t.Errorf("streamed whole file: notes %+v, want one %s", d.Notes, mkv.FindingStreamedSize)
+	}
+}
