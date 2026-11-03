@@ -387,3 +387,32 @@ func TestDiagnoseStreamedCutInsideABlock(t *testing.T) {
 		t.Errorf("the cut tail is reported as damage too: %+v", d.Findings)
 	}
 }
+
+// TestDiagnoseDeepVerifyStreamed: under DeepVerify a Segment of unknown size runs to the end of the file - nothing of
+// it is trailing junk - and damage inside its body is reported.
+func TestDiagnoseDeepVerifyStreamed(t *testing.T) {
+	dir := t.TempDir()
+	data, clusters := streamedFixture(t, dir)
+	whole := filepath.Join(dir, "whole.mkv")
+	writeAll(t, whole, data)
+	d, err := Diagnose(context.Background(), whole, mkv.Options{DeepVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Healthy || len(d.Findings) != 0 {
+		t.Errorf("whole streamed file under DeepVerify: healthy %v, findings %+v; want healthy, none", d.Healthy, d.Findings)
+	}
+	damaged := append([]byte{}, data...)
+	copy(damaged[clusters[3]:], bytes.Repeat([]byte{0xFF}, 64)) // the fourth cluster's header and first block
+	bad := filepath.Join(dir, "damaged.mkv")
+	writeAll(t, bad, damaged)
+	if d, err = Diagnose(context.Background(), bad, mkv.Options{DeepVerify: true}); err != nil {
+		t.Fatal(err)
+	}
+	if f := hasFinding(d, mkv.FindingDamaged); f == nil || f.Scope != mkv.ScopeBody {
+		t.Errorf("streamed file damaged in its body under DeepVerify: findings %+v; want damaged in the body", d.Findings)
+	}
+	if hasFinding(d, mkv.FindingTrailingJunk) != nil {
+		t.Errorf("a Segment of unknown size has no trailing junk: %+v", d.Findings)
+	}
+}

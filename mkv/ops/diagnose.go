@@ -112,6 +112,8 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		if declaredEnd > size {
 			d.MissingTailBytes = declaredEnd - size
 		}
+	} else {
+		declaredEnd = size // a Segment of unknown size runs to the end of the file: none of it is trailing bytes
 	}
 	needWalk := mkv.DeepVerifyFrom(opts)
 	var sizeFinding *Finding

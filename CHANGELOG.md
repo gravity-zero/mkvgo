@@ -112,6 +112,9 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   `Diagnose` reports it `truncated` (tail) and `track-ends` warns of the cut
   and exits 3 under `--exit-damaged` (both took it for whole since the cut
   tail stopped counting as damage); `TrackEndsReport.StoppedShort` says so.
+- `Diagnose` with `DeepVerify` on a Segment of unknown size: the Segment runs
+  to the end of the file, so its damaged regions are reported (the whole file
+  was counted as trailing junk and its body damage dropped).
 
 ## [0.63.0] - 2026-11-02
 
