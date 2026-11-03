@@ -193,20 +193,6 @@ func subsAligned(results []*hlsResult) bool {
 	return true
 }
 
-// avgBandwidth is peakBandwidth's average-bitrate counterpart, over the same
-// per-segment durations/sizes.
-func avgBandwidth(segs []segInfo) int64 {
-	var totalBits, totalSec float64
-	for _, s := range segs {
-		totalBits += float64(s.bytes) * 8
-		totalSec += s.durSec
-	}
-	if totalSec <= 0 {
-		return peakBandwidth(segs)
-	}
-	return int64(totalBits / totalSec)
-}
-
 // cumulativeDurationsMs returns, for each part, the total presentation
 // duration (ms) of every part before it: the shift a part's subtitle cues
 // need to land on the concatenated timeline.
@@ -358,21 +344,19 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 
 	subsOK := subsAligned(results)
 	if subsOK {
+		subTracks := make([]*mkv.Track, len(ref.subs))
 		for i := range ref.subs {
-			b = append(b, hlsSubtitleMedia(&ref.subs[i].track, i+1, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+			subTracks[i] = &ref.subs[i].track
+		}
+		subDef := subtitleDefault(subTracks)
+		for i, t := range subTracks {
+			b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 		}
 	}
 
-	var peak, avg int64
 	var maxArea int64
 	var w, h uint32
 	for _, res := range results {
-		if p := peakBandwidth(res.segs); p > peak {
-			peak = p
-		}
-		if a := avgBandwidth(res.segs); a > avg {
-			avg = a
-		}
 		if v := pickVideoFrag(res.fts); v != nil {
 			t := &v.outTrack.mkv
 			if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
@@ -382,13 +366,15 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 			}
 		}
 	}
-	base := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg)
 	var mainCodecs []string
+	var mainAt []int
 	for i, ft := range ref.fts {
 		if !slices.Contains(audioIdx, i) {
 			mainCodecs = append(mainCodecs, rfc6381Codec(ft.outTrack))
+			mainAt = append(mainAt, i)
 		}
 	}
+	base := ""
 	if v := pickVideoFrag(ref.fts); v != nil {
 		t := v.outTrack.mkv // the largest picture across the parts, the rest from part 0
 		if maxArea > 0 {
@@ -407,7 +393,13 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		variants = []audioGroup{{}}
 	}
 	for _, g := range variants {
-		inf := base
+		// The parts share one track layout: each part's own tracks and this group's audio, the highest of the parts.
+		var peak, avg int64
+		for _, res := range results {
+			p, a := bandwidthOf(res.segs, groupTracks(mainAt, g, audioIdx))
+			peak, avg = max(peak, p), max(avg, a)
+		}
+		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg) + base
 		if codecs := joinCodecs(joinKnown(mainCodecs), g.codec, g.id != ""); codecs != "" {
 			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
 		}

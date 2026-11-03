@@ -138,6 +138,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 			segEnd = p.bounds[k+1]
 		}
 		var segBytes, audioBytes int64
+		perTrack := make([]int64, len(fts))
 		for i, ft := range fts {
 			starts[i] = append(starts[i], int32(cursors[i]))
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
@@ -146,12 +147,13 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 				iframes = append(iframes, iframeRef{seg: k, length: segmentFileLen(iframeSegment(seg)) + int64(seg.samples[0].size)})
 			}
 			segBytes += head + seg.dataLen
+			perTrack[i] = head + seg.dataLen
 			if !ft.outTrack.spec.video {
 				audioBytes += head + seg.dataLen
 			}
 		}
 		p.durs[k] = float64(segEndOrLast(p.bounds, k, fts)-segStart) / 1000
-		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes, audioBytes: audioBytes})
+		segs = append(segs, segInfo{durSec: p.durs[k], bytes: segBytes, audioBytes: audioBytes, perTrack: perTrack})
 	}
 	if video != nil && o.Encrypt == nil && o.CENC == nil && len(iframes) > 0 {
 		p.iframe = buildIFramePlaylist(o, fts, p.durs, iframes)
@@ -165,7 +167,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	chapters := chapterMarkers(o, c.Chapters, fts[primaryIndex(fts)].presentMs)
 	p.master = buildMasterPlaylist(o, fts, p.subs, segs, iframes)
 	if o.Encrypt == nil {
-		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, peakBandwidth(segs), chapters, p.iframes)
+		p.mpd = buildDASHManifest(o, fts, p.subs, p.durs, videoBandwidth(segs, fts), chapters, p.iframes)
 	}
 	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
 	for i, ft := range fts {

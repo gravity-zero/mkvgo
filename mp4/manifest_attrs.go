@@ -6,6 +6,7 @@ package mp4
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -56,8 +57,19 @@ func hlsAudioMedia(r rendition, n int, isDefault bool, group, uri string) string
 	return fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(uri))
 }
 
+// subtitleDefault is the subtitle track DEFAULT=YES goes to: the first one flagged default (a track without
+// FlagDefault reads as flagged), -1 for none. HLS allows one per group.
+func subtitleDefault(tracks []*mkv.Track) int {
+	for i, t := range tracks {
+		if t.IsDefault {
+			return i
+		}
+	}
+	return -1
+}
+
 // hlsSubtitleMedia is the EXT-X-MEDIA line of subtitle rendition number n (from 1), group "subs", at uri.
-func hlsSubtitleMedia(t *mkv.Track, n int, uri string) string {
+func hlsSubtitleMedia(t *mkv.Track, n int, isDefault bool, uri string) string {
 	attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(renditionName(t, "Subtitles", n)))
 	if l := t.ResolvedLanguage(); l != "" {
 		attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
@@ -65,7 +77,7 @@ func hlsSubtitleMedia(t *mkv.Track, n int, uri string) string {
 	if c := hlsCharacteristics(t, true); c != "" {
 		attrs += ",CHARACTERISTICS=" + hlsQuoted(c)
 	}
-	if t.IsDefault {
+	if isDefault {
 		attrs += ",DEFAULT=YES"
 	}
 	if t.IsForced {
@@ -156,9 +168,50 @@ type audioGroup struct {
 	members []int  // indexes into the renditions
 }
 
-// audioGroupsOf splits audio renditions into one group per codec: a player that cannot decode one codec picks the
-// variant of another. A single codec keeps the one group "aud".
+// audioGroupsOf splits audio renditions into one group per codec - a player that cannot decode one codec picks the
+// variant of another - when every language is in every group: a player lists only its variant's group, so a split
+// that left a language in one codec alone would hide it from the others. Otherwise, or with a single codec, one group
+// "aud" holds them all, its codec string every codec they use.
 func audioGroupsOf(audio []rendition) []audioGroup {
+	groups := splitByCodec(audio)
+	if len(groups) > 1 && !sameLanguages(audio, groups) {
+		one := audioGroup{id: "aud"}
+		var codecs []string
+		for i, r := range audio {
+			one.members = append(one.members, i)
+			if !slices.Contains(codecs, r.codec) {
+				codecs = append(codecs, r.codec)
+			}
+		}
+		one.codec = joinKnown(codecs)
+		return []audioGroup{one}
+	}
+	return groups
+}
+
+// sameLanguages reports whether every group holds the same set of languages.
+func sameLanguages(audio []rendition, groups []audioGroup) bool {
+	langs := func(g audioGroup) []string {
+		var l []string
+		for _, i := range g.members {
+			if x := audio[i].t.ResolvedLanguage(); !slices.Contains(l, x) {
+				l = append(l, x)
+			}
+		}
+		slices.Sort(l)
+		return l
+	}
+	first := langs(groups[0])
+	for _, g := range groups[1:] {
+		if !slices.Equal(langs(g), first) {
+			return false
+		}
+	}
+	return true
+}
+
+// splitByCodec groups audio renditions by codec string (Atmos apart), "aud-<codec>" each, "aud" for a single one.
+func splitByCodec(audio []rendition) []audioGroup {
 	var groups []audioGroup
 	byKey := map[string]int{}
 	for i, r := range audio {
@@ -305,4 +358,47 @@ func dashRoles(t *mkv.Track, text bool, indent string) string {
 		fmt.Fprintf(&b, `%s<Role schemeIdUri="urn:mpeg:dash:role:2011" value="%s"/>`+"\n", indent, role)
 	}
 	return b.String()
+}
+
+// bandwidthOf is the peak and average bit rate of the tracks at idx (fts indexes) over segs, from each segment's
+// bytes per track; the whole segment's when those are unknown (a Matroska plan's estimate from the source).
+func bandwidthOf(segs []segInfo, idx []int) (peak, avg int64) {
+	var p, bits, secs float64
+	for _, s := range segs {
+		b := s.bytes
+		if s.perTrack != nil {
+			b = 0
+			for _, i := range idx {
+				if i >= 0 && i < len(s.perTrack) {
+					b += s.perTrack[i]
+				}
+			}
+		}
+		if s.durSec > 0 {
+			p = max(p, float64(b)*8/s.durSec)
+		}
+		bits += float64(b) * 8
+		secs += s.durSec
+	}
+	if secs <= 0 {
+		return int64(p), int64(p)
+	}
+	return int64(p), int64(bits / secs)
+}
+
+// groupTracks is the fts indexes of a variant: its own tracks (main) and its audio group's members (at maps a
+// rendition to its fts index).
+func groupTracks(main []int, g audioGroup, at []int) []int {
+	idx := append([]int{}, main...)
+	for _, k := range g.members {
+		idx = append(idx, at[k])
+	}
+	return idx
+}
+
+// videoBandwidth is the peak bit rate of the video rendition alone, what its DASH Representation announces (the
+// audio has AdaptationSets of its own); the whole segments' when the bytes per track are unknown.
+func videoBandwidth(segs []segInfo, fts []*fragTrack) int64 {
+	peak, _ := bandwidthOf(segs, []int{slices.Index(fts, pickVideoFrag(fts))})
+	return peak
 }

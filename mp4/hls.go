@@ -173,7 +173,8 @@ type hlsSubTrack struct {
 type segInfo struct {
 	durSec     float64
 	bytes      int64
-	audioBytes int64 // the part of bytes in non-video renditions: what a video-only ABR variant shares from the reference
+	audioBytes int64   // the part of bytes in non-video renditions: what a video-only ABR variant shares from the reference
+	perTrack   []int64 // bytes of each rendition (fts index) in the segment; nil when only the total is known
 }
 
 // RemuxToHLS reads the Matroska/WebM file at srcPath and writes a fragmented-MP4
@@ -513,13 +514,13 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// (subN.vtt), which writeSubtitleRendition also wrote.
 	var mpd []byte
 	if o.SingleFile {
-		mpd = buildDASHManifestSingle(&o, fts, subs, durs, peakBandwidth(segs), rends)
+		mpd = buildDASHManifestSingle(&o, fts, subs, durs, videoBandwidth(segs, fts), rends)
 	} else {
 		var trick []iframeRef // every segment's I-frame, or none: a plan of the same source lists them all
 		if len(res.iframes) == len(segs) {
 			trick = res.iframes
 		}
-		mpd = buildDASHManifest(&o, fts, subs, durs, peakBandwidth(segs), chapters, trick)
+		mpd = buildDASHManifest(&o, fts, subs, durs, videoBandwidth(segs, fts), chapters, trick)
 	}
 	return res, fs.DoWriteFile(filepath.Join(outputDir, "manifest.mpd"), mpd, 0o644)
 }
@@ -916,6 +917,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 		}
 
 		var segBytes, audioBytes int64
+		perTrack := make([]int64, len(fts))
 		for i, ft := range fts {
 			from := cursors[i]
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
@@ -1000,6 +1002,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				fileBytes = int64(len(head)) + seg.dataLen
 			}
 			segBytes += fileBytes
+			perTrack[i] = fileBytes
 			if !ft.outTrack.spec.video {
 				audioBytes += fileBytes
 			}
@@ -1008,6 +1011,7 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 			durSec:     float64(segEndOrLast(bounds, k, fts)-segStart) / 1000,
 			bytes:      segBytes,
 			audioBytes: audioBytes,
+			perTrack:   perTrack,
 		})
 	}
 	return infos, iframes, nil
@@ -1245,9 +1249,11 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	var audio []rendition
 	var audioAt []int
 	var mainCodecs []string // the variant's own tracks: the video, or an audio-only source's primary
+	var mainAt []int
 	for i, ft := range fts {
 		if i == prim || ft.outTrack.spec.video {
 			mainCodecs = append(mainCodecs, rfc6381Codec(ft.outTrack))
+			mainAt = append(mainAt, i)
 			continue
 		}
 		audio = append(audio, renditionOf(ft.outTrack))
@@ -1260,29 +1266,18 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw(renditionPlaylist(fts, audioAt[k])))...)
 		}
 	}
+	subTracks := make([]*mkv.Track, len(subs))
 	for i := range subs {
-		b = append(b, hlsSubtitleMedia(&subs[i].track, i+1, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+		subTracks[i] = &subs[i].track
+	}
+	subDef := subtitleDefault(subTracks)
+	for i, t := range subTracks {
+		b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 	}
 
-	// Peak and average bandwidth over the media segments (bits per second).
-	var peak, totalBits float64
-	var totalSec float64
-	for _, s := range segs {
-		if s.durSec > 0 {
-			if bps := float64(s.bytes) * 8 / s.durSec; bps > peak {
-				peak = bps
-			}
-		}
-		totalBits += float64(s.bytes) * 8
-		totalSec += s.durSec
-	}
-	avg := peak
-	if totalSec > 0 {
-		avg = totalBits / totalSec
-	}
-	base := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", int64(peak), int64(avg))
+	video := ""
 	if v := pickVideoFrag(fts); v != nil {
-		base += hlsVideoAttrs(&v.outTrack.mkv)
+		video = hlsVideoAttrs(&v.outTrack.mkv)
 	}
 	main := joinKnown(mainCodecs)
 	tail := ""
@@ -1295,7 +1290,9 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 		variants = []audioGroup{{}}
 	}
 	for _, g := range variants {
-		inf := base
+		// Peak and average over the media segments of what this variant plays: its own tracks and its audio group.
+		peak, avg := bandwidthOf(segs, groupTracks(mainAt, g, audioAt))
+		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg) + video
 		if codecs := joinCodecs(main, g.codec, g.id != ""); codecs != "" {
 			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
 		}

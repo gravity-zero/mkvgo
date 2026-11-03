@@ -36,15 +36,18 @@ func ac3Sample() func(int) []byte {
 	return func(int) []byte { return f }
 }
 
-// TestHLSAudioGroupPerCodec: audio tracks of two codecs form two groups, and the master has one variant per group,
-// its CODECS naming the video and that group's codec - a player that cannot decode one picks the other.
+// TestHLSAudioGroupPerCodec: audio tracks of two codecs, each language in both, form two groups, and the master has
+// one variant per group, its CODECS naming the video and that group's codec - a player that cannot decode one picks
+// the other, with every language still offered.
 func TestHLSAudioGroupPerCodec(t *testing.T) {
 	sr := 48000.0
 	two, six := uint8(2), uint8(6)
 	src := manifestFixture(t, manifestVideo(), []mkv.Track{
 		{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: []byte{0x11, 0x90}, SampleRate: &sr, Channels: &two, Language: "eng"},
 		{ID: 3, Type: mkv.AudioTrack, Codec: "ac3", SampleRate: &sr, Channels: &six, Language: "fre"},
-	}, []func(int) []byte{cencAudioSample, ac3Sample()})
+		{ID: 4, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: []byte{0x11, 0x90}, SampleRate: &sr, Channels: &two, Language: "fre"},
+		{ID: 5, Type: mkv.AudioTrack, Codec: "ac3", SampleRate: &sr, Channels: &six, Language: "eng"},
+	}, []func(int) []byte{cencAudioSample, ac3Sample(), cencAudioSample, ac3Sample()})
 	dir := filepath.Join(t.TempDir(), "hls")
 	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 1000}); err != nil {
 		t.Fatal(err)
@@ -134,11 +137,11 @@ func TestManifestAccessibility(t *testing.T) {
 		t.Errorf("hard of hearing audio: %s", got)
 	}
 	sdh := mkv.Track{Language: "eng", HearingImpaired: true}
-	if got := hlsSubtitleMedia(&sdh, 1, "s.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog,public.accessibility.describes-music-and-sound"`) {
+	if got := hlsSubtitleMedia(&sdh, 1, false, "s.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog,public.accessibility.describes-music-and-sound"`) {
 		t.Errorf("SDH subtitles: %s", got)
 	}
 	forced := mkv.Track{Language: "eng", IsForced: true}
-	if got := hlsSubtitleMedia(&forced, 1, "s.m3u8"); !strings.Contains(got, "FORCED=YES") || strings.Contains(got, "CHARACTERISTICS") {
+	if got := hlsSubtitleMedia(&forced, 1, false, "s.m3u8"); !strings.Contains(got, "FORCED=YES") || strings.Contains(got, "CHARACTERISTICS") {
 		t.Errorf("forced subtitles: %s", got)
 	}
 	for _, tc := range []struct {

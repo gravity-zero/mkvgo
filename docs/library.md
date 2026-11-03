@@ -1136,9 +1136,13 @@ Every manifest - `to-hls`, the on-demand plan, ABR, concat, `HLSFromCMAF`, the
 DASH MPDs - says the same of a track, from one set of helpers
 (`mp4/manifest_attrs.go`):
 
-- Audio groups: one HLS audio group per codec (`aud-ac-3`, `aud-mp4a.40.2`;
-  a single codec keeps `aud`), one variant per group whose `CODECS` names the
-  video and that group's codec, one `DEFAULT=YES` per group.
+- Audio groups: one HLS audio group per codec (`aud-ac-3`, `aud-mp4a.40.2`)
+  when every language is in every group - Safari and AVPlayer list only the
+  variant's group, so a French AAC beside an English AC-3 stays one group `aud`
+  - one variant per group whose `CODECS` names the video and that group's
+  codecs, and whose `BANDWIDTH` counts the video and that group's audio; one
+  `DEFAULT=YES` per audio group, at most one in the subtitle group. The DASH
+  video Representation's `bandwidth` is the video alone.
 - Video range: `VIDEO-RANGE=PQ` or `HLG` from the transfer characteristics or
   the Dolby Vision base layer (SDR, the default, is left unsaid); the DASH
   video AdaptationSet carries the CICP `SupplementalProperty` elements

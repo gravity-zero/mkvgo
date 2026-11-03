@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"testing"
@@ -298,7 +299,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 
 	even := []segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 660}, {durSec: 6, bytes: 540}, {durSec: 6, bytes: 1500}, {durSec: 6, bytes: 600}} // 2.5x peak: never asked
 	for i, s := range boundSegmentSpans(even, yes) {
-		if s != even[i] {
+		if !reflect.DeepEqual(s, even[i]) {
 			t.Errorf("span %d changed: %+v -> %+v", i, even[i], s)
 		}
 	}
@@ -309,7 +310,7 @@ func TestBoundSegmentSpans(t *testing.T) {
 	peak := []segInfo{{durSec: 6, bytes: 600}, {durSec: 6, bytes: 660}, {durSec: 6, bytes: 3300}, {durSec: 6, bytes: 540}, {durSec: 6, bytes: 600}} // 5.5x real peak, the file says no
 	asked = map[int]bool{}
 	for i, s := range boundSegmentSpans(peak, no) {
-		if s != peak[i] {
+		if !reflect.DeepEqual(s, peak[i]) {
 			t.Errorf("a real peak must be kept: span %d %+v -> %+v", i, peak[i], s)
 		}
 	}
@@ -389,7 +390,7 @@ func TestRemoteForeignChecksMatchLocal(t *testing.T) {
 	st, _ := os.Stat(src)
 	raw, bounded := rawSpans(local, st.Size()), 0
 	for k := range remote.segs {
-		if remote.segs[k] != local.segs[k] {
+		if !reflect.DeepEqual(remote.segs[k], local.segs[k]) {
 			t.Errorf("span %d: remote %+v, local %+v", k, remote.segs[k], local.segs[k])
 		}
 		if local.segs[k].bytes != raw[k].bytes {

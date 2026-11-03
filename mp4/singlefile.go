@@ -89,6 +89,7 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 		}
 		endMs := segEndOrLast(bounds, k, fts)
 		var segBytes int64
+		perTrack := make([]int64, len(fts))
 		for i, ft := range fts {
 			plans[i].froms = append(plans[i].froms, cursors[i])
 			seg := segmentWindow(ft, &cursors[i], segStart, segEnd)
@@ -98,8 +99,9 @@ func writeSingleFileRenditions(ctx context.Context, o *Options, fs *mkv.FS, dir 
 			scale := tsScale(ft.timescale)
 			segDur[i] = append(segDur[i], scale(endMs)-scale(segStart))
 			segBytes += int64(len(head)) + seg.dataLen
+			perTrack[i] = int64(len(head)) + seg.dataLen
 		}
-		infos = append(infos, segInfo{durSec: float64(endMs-segStart) / 1000, bytes: segBytes})
+		infos = append(infos, segInfo{durSec: float64(endMs-segStart) / 1000, bytes: segBytes, perTrack: perTrack})
 	}
 
 	// Pass 2: assemble each rendition file - init, sidx (sizes now known),

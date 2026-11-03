@@ -669,7 +669,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 				trick = append(trick, iframeRef{seg: k, length: s.bytes})
 			}
 		}
-		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, peakBandwidth(segs), chapters, trick)
+		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, videoBandwidth(segs, fts), chapters, trick)
 	}
 	if err := ctx.Err(); err != nil { // the cover read does not see ctx
 		return nil, err

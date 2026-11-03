@@ -22,10 +22,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/shown"
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // RemuxToABR packages the sources - quality variants of the same content,
@@ -104,28 +106,22 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw("v1/"+renditionPlaylist(ref.fts, audioAt[k])))...)
 		}
 	}
+	subTracks := make([]*mkv.Track, len(ref.subs))
 	for i := range ref.subs {
-		b = append(b, hlsSubtitleMedia(&ref.subs[i].track, i+1, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
+		subTracks[i] = &ref.subs[i].track
+	}
+	subDef := subtitleDefault(subTracks)
+	for i, t := range subTracks {
+		b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
 	}
 
-	// A video-only variant plays the reference's audio alongside: its BANDWIDTH carries that audio's peak too.
-	var sharedAudio int64
-	for _, s := range ref.segs {
-		if s.durSec > 0 {
-			sharedAudio = max(sharedAudio, int64(float64(s.audioBytes)*8/s.durSec))
-		}
-	}
 	variants := groups
 	if len(variants) == 0 {
 		variants = []audioGroup{{}}
 	}
 	for vi, res := range results {
-		bw := peakBandwidth(res.segs)
-		if vi > 0 {
-			bw += sharedAudio
-		}
 		for _, g := range variants {
-			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", bw)
+			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", abrVariantBandwidth(ref, res, g, audioAt))
 			if v := pickVideoFrag(res.fts); v != nil {
 				inf += hlsVideoAttrs(&v.outTrack.mkv)
 				if codecs := joinCodecs(rfc6381Codec(v.outTrack), g.codec, g.id != ""); codecs != "" {
@@ -155,6 +151,38 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	}
 
 	return b
+}
+
+// abrVariantBandwidth is a variant's peak bit rate: its video, and the reference's audio of its group played
+// alongside, segment by segment. Without the bytes per track (a Matroska plan) or with timelines that differ, the
+// variant's whole segments, plus the reference's whole audio for a variant other than the reference.
+func abrVariantBandwidth(ref, res *hlsResult, g audioGroup, audioAt []int) int64 {
+	v := pickVideoFrag(res.fts)
+	vidx := slices.Index(res.fts, v)
+	if v == nil || len(res.segs) != len(ref.segs) || len(res.segs) == 0 || res.segs[0].perTrack == nil || ref.segs[0].perTrack == nil {
+		bw := peakBandwidth(res.segs)
+		if res != ref {
+			var shared int64
+			for _, s := range ref.segs {
+				if s.durSec > 0 {
+					shared = max(shared, int64(float64(s.audioBytes)*8/s.durSec))
+				}
+			}
+			bw += shared
+		}
+		return bw
+	}
+	var peak float64
+	for k, s := range res.segs {
+		bytes := s.perTrack[vidx]
+		for _, m := range g.members {
+			bytes += ref.segs[k].perTrack[audioAt[m]]
+		}
+		if s.durSec > 0 {
+			peak = max(peak, float64(bytes)*8/s.durSec)
+		}
+	}
+	return int64(peak)
 }
 
 // abrVariantsAligned reports whether every variant shares the same segment
@@ -233,7 +261,8 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 			}
 		}
 		t := &v.outTrack.mkv
-		rep := fmt.Sprintf(`id="v%d" bandwidth="%d"`, vi+1, peakBandwidth(res.segs))
+		vbw, _ := bandwidthOf(res.segs, []int{vidx}) // the video alone: the audio has its own AdaptationSet
+		rep := fmt.Sprintf(`id="v%d" bandwidth="%d"`, vi+1, vbw)
 		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
 			rep += fmt.Sprintf(` width="%d" height="%d"`, *t.Width, *t.Height)
 		}
