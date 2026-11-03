@@ -44,6 +44,11 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   playlists of such sources change; a
   cache keyed on them is stale. The packaging reads one block more per AC-3
   or E-AC-3 track at open.
+- Bytes served: an E-AC-3 track's `dec3` lists the dependent substreams of
+  its first programme and their channel locations (a 7.1, a 5.1 and the rear
+  pair, was announced 6), and one whose access units open with an AC-3 core
+  takes that core's fscod, bsid, bsmod, acmod and lfeon where AC-3 puts them
+  (they were read as E-AC-3 fields).
 
 ### Added
 

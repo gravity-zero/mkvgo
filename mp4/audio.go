@@ -223,58 +223,161 @@ func eac3Entry(t *mkv.Track, firstFrame []byte) ([]byte, error) {
 
 var eac3Blocks = [4]uint32{1, 2, 3, 6}
 
-// parseEAC3 builds a dec3 (EC3SpecificBox) describing a single independent
-// substream from the first E-AC-3 syncframe (ETSI TS 102 366 Annex E).
-func parseEAC3(frame []byte) ([]byte, error) {
-	off := findSync(frame, 0x0B77, 16)
-	if off < 0 {
-		return nil, errf("no E-AC-3 syncword")
-	}
-	r := &bitReader{data: frame[off:]}
+// eac3Substream is what a dec3 says of an independent substream, read from the frame that opens an access unit.
+type eac3Substream struct {
+	fscod, bsid, bsmod, acmod, lfeon uint32
+	kbps                             uint32 // the frame's bit rate
+	size                             int    // the frame's bytes, 0 when unknown
+}
+
+// eac3Header reads an E-AC-3 syncframe's header at f: strmtyp, substreamid, the substream fields, and, for a
+// dependent substream, its chanmap (chanmape false when it has none).
+func eac3Header(f []byte) (strmtyp, substream uint32, s eac3Substream, chanmap uint32, chanmape bool, ok bool) {
+	r := &bitReader{data: f}
 	r.skip(16) // syncword
-	r.skip(2)  // strmtyp
-	r.skip(3)  // substreamid
+	strmtyp, substream = r.bits(2), r.bits(3)
 	frmsiz := r.bits(11)
-	fscod := r.bits(2)
-	var numblkscod uint32
-	if fscod == 3 {
+	s.fscod = r.bits(2)
+	numblkscod := uint32(3)
+	if s.fscod == 3 {
 		r.skip(2) // fscod2
-		numblkscod = 3
 	} else {
 		numblkscod = r.bits(2)
 	}
-	acmod := r.bits(3)
-	lfeon := r.bits(1)
-	bsid := r.bits(5)
-	if r.err {
-		return nil, errf("malformed E-AC-3 syncframe")
+	s.acmod, s.lfeon, s.bsid = r.bits(3), r.bits(1), r.bits(5)
+	s.size = int(frmsiz+1) * 2
+	if s.fscod < 3 {
+		s.kbps = uint32(s.size) * 8 * ac3SampleRates[s.fscod] / (eac3Blocks[numblkscod] * 256 * 1000)
 	}
-
-	// Nominal data rate in kbit/s, derived from the frame size and duration.
-	dataRate := uint32(0)
-	if fscod < 3 {
-		sr := ac3SampleRates[fscod]
-		samples := eac3Blocks[numblkscod] * 256
-		if samples > 0 {
-			frameBytes := (frmsiz + 1) * 2
-			dataRate = frameBytes * 8 * sr / (samples * 1000)
+	if strmtyp == 1 {
+		r.skip(5) // dialnorm
+		if r.bits(1) == 1 {
+			r.skip(8) // compr
 		}
+		if s.acmod == 0 {
+			r.skip(5) // dialnorm2
+			if r.bits(1) == 1 {
+				r.skip(8) // compr2
+			}
+		}
+		if chanmape = r.bits(1) == 1; chanmape {
+			chanmap = r.bits(16)
+		}
+	}
+	return strmtyp, substream, s, chanmap, chanmape, !r.err && s.bsid > 10 && s.bsid <= 16
+}
+
+// ac3Core reads the BSI of an AC-3 syncframe opening an E-AC-3 access unit (bsid 10 or less).
+func ac3Core(f []byte) (eac3Substream, bool) {
+	r := &bitReader{data: f}
+	r.skip(16 + 16) // syncword, crc1
+	var s eac3Substream
+	s.fscod = r.bits(2)
+	frmsizecod := r.bits(6)
+	s.bsid, s.bsmod, s.acmod = r.bits(5), r.bits(3), r.bits(3)
+	if s.acmod&0x1 != 0 && s.acmod != 0x1 {
+		r.skip(2) // cmixlev
+	}
+	if s.acmod&0x4 != 0 {
+		r.skip(2) // surmixlev
+	}
+	if s.acmod == 0x2 {
+		r.skip(2) // dsurmod
+	}
+	s.lfeon = r.bits(1)
+	if r.err || s.fscod == 3 || frmsizecod>>1 >= uint32(len(ac3Bitrates)) {
+		return s, false
+	}
+	s.kbps = ac3Bitrates[frmsizecod>>1]
+	s.size = ac3SyncframeBytes(s.fscod, frmsizecod)
+	return s, true
+}
+
+// ac3SyncframeBytes is an AC-3 syncframe's size from its fscod and frmsizecod.
+func ac3SyncframeBytes(fscod, frmsizecod uint32) int {
+	kbps := int(ac3Bitrates[frmsizecod>>1])
+	switch fscod {
+	case 0:
+		return 4 * kbps
+	case 1: // 44.1 kHz: rounded down to words, odd codes one word more
+		return 2 * (kbps*1000*1536/44100/16 + int(frmsizecod&1))
+	}
+	return 6 * kbps
+}
+
+// eac3ChanmapLoc is the chan_loc bit of each chanmap position, most significant first: -1 for the positions an
+// independent substream's acmod and lfeon place, and for Lts/Rts, which chan_loc has no bit for.
+var eac3ChanmapLoc = [16]int8{-1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, -1, 8, -1}
+
+// chanLocCs is chan_loc's back centre bit, the one position an acmod places that chan_loc also names.
+const chanLocCs = 1 << 2
+
+// acmodHasCs reports an acmod with a back centre (2/1, 3/1).
+func acmodHasCs(acmod uint32) bool { return acmod == 4 || acmod == 5 }
+
+// parseEAC3 builds a dec3 (EC3SpecificBox, ETSI TS 102 366 Annex F) from the access unit opening frame: its
+// independent substream - an E-AC-3 one, or an AC-3 core read as AC-3 - and the dependent substreams after it, whose
+// channel locations chan_loc gathers, so a 7.1 (a 5.1 and the rear pair) says 8 channels as it decodes.
+func parseEAC3(frame []byte) ([]byte, error) {
+	off := findSync(frame, 0x0B77, 16)
+	if off < 0 || off+6 > len(frame) {
+		return nil, errf("no E-AC-3 syncword")
+	}
+	f := frame[off:]
+	var ind eac3Substream
+	if f[5]>>3 <= 10 {
+		core, ok := ac3Core(f)
+		if !ok {
+			return nil, errf("malformed AC-3 core of an E-AC-3 syncframe")
+		}
+		ind = core
+	} else {
+		strmtyp, _, s, _, _, ok := eac3Header(f)
+		if !ok || strmtyp == 1 {
+			return nil, errf("malformed E-AC-3 syncframe")
+		}
+		ind = s
+	}
+	dataRate, numDep, chanLoc := ind.kbps, uint32(0), uint32(0)
+	for p := ind.size; p > 0 && p+6 <= len(f) && f[p] == 0x0B && f[p+1] == 0x77 && numDep < 15; {
+		strmtyp, _, dep, chanmap, chanmape, ok := eac3Header(f[p:])
+		if !ok || strmtyp != 1 {
+			break // the next access unit, or another programme
+		}
+		numDep++
+		dataRate += dep.kbps
+		if chanmape {
+			for i, loc := range eac3ChanmapLoc {
+				if loc >= 0 && chanmap&(1<<(15-i)) != 0 {
+					chanLoc |= 1 << loc
+				}
+			}
+		} else if acmodHasCs(dep.acmod) {
+			chanLoc |= chanLocCs
+		}
+		p += dep.size
+	}
+	if acmodHasCs(ind.acmod) {
+		chanLoc &^= chanLocCs
 	}
 
 	var w bitWriter
 	w.write(dataRate, 13)
 	w.write(0, 3) // num_ind_sub - 1 (one independent substream)
-	// independent substream 0:
-	w.write(fscod, 2)
-	w.write(bsid, 5)
+	w.write(ind.fscod, 2)
+	w.write(ind.bsid, 5)
 	w.write(0, 1) // reserved
 	w.write(0, 1) // asvc
-	w.write(0, 3) // bsmod (not in the main bsi; default to main service)
-	w.write(acmod, 3)
-	w.write(lfeon, 1)
+	w.write(ind.bsmod, 3)
+	w.write(ind.acmod, 3)
+	w.write(ind.lfeon, 1)
 	w.write(0, 3) // reserved
-	w.write(0, 4) // num_dep_sub
-	w.write(0, 1) // reserved (num_dep_sub == 0)
+	w.write(numDep, 4)
+	if numDep > 0 {
+		w.write(chanLoc, 9)
+	} else {
+		w.write(0, 1) // reserved
+	}
 	return box("dec3", w.bytes()), nil
 }
 

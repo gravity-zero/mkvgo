@@ -103,7 +103,7 @@ func TestParseEAC3DataRateArithmetic(t *testing.T) {
 	bw.write(3, 2)       // numblkscod=3 → samples=6*256=1536
 	bw.write(3, 3)       // acmod=3
 	bw.write(0, 1)       // lfeon
-	bw.write(8, 5)       // bsid=8
+	bw.write(16, 5)      // bsid=16 (E-AC-3; 8 would be an AC-3 core)
 	bw.write(0, 8)       // padding
 
 	dec3, err := parseEAC3(bw.bytes())
