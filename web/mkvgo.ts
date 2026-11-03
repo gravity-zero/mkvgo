@@ -266,7 +266,7 @@ export interface TrackVerdict {
   type: TrackType
   verdict: Verdict
   /** Why remux or transcode; empty for direct-play. */
-  reasons?: string[] | null
+  reasons?: string[]
 }
 
 /**
@@ -386,8 +386,8 @@ export interface SalvageReport {
   clusters_copied: number
   bytes_copied: number
   bytes_skipped: number
-  damaged_ranges: DamagedRange[] | null
-  repaired_ranges: RepairedRange[] | null
+  damaged_ranges: DamagedRange[]
+  repaired_ranges: RepairedRange[]
   /** Video bytes a clean-cut repair would drop after gaps (cleanCut option). */
   clean_cut_bytes: number
   /**
@@ -542,7 +542,7 @@ export interface Finding {
  */
 export interface Diagnosis {
   healthy: boolean
-  findings: Finding[] | null
+  findings: Finding[]
   /** Facts that are no defect and leave the file healthy: "streamed-size". */
   notes?: Finding[]
   /** Matroska only: an MP4's sample table is its index by construction. */

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gravity-zero/mkvgo/internal/jsonfill"
 	"io"
 	"math"
 	"os"
@@ -427,7 +428,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 func PrintJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := enc.Encode(jsonfill.Of(v)); err != nil {
 		FatalErr(err)
 	}
 }

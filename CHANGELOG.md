@@ -11,6 +11,13 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 
 ### Breaking
 
+- JSON (CLI `-json` and the WASM results): an empty list is `[]` and an
+  empty map `{}`, where some reports gave `null` (`findings`,
+  `damaged_ranges`, `repaired_ranges`, a Container's `chapters` and
+  `attachments`, the `chapters`, `validate` and `compare` reports of a file
+  with none); an optional section is still left out. A jq `.findings[]` or a
+  JS `.map` no longer meets a null; a check for `=== null` must test the
+  length. The Go API is unchanged (a nil slice stays nil).
 - JSON keys: a cue point (`cues[]` in a Container's JSON) carries
   `time_ms`, `track`, `cluster_pos`, `relative_pos`, and a dropped track
   (`dropped_tracks[]`, CLI `probe --json` and the WASM remux results) `id`,
