@@ -144,6 +144,25 @@ func streamedCopy(t *testing.T, src string) string {
 	return out
 }
 
+// id3Tag is an ID3v2 tag header as a tagger appends it: read as EBML, an element running past the end of the file.
+var id3Tag = []byte{'I', 'D', '3', 0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 'T', 'I', 'T', '2'}
+
+// oversizedVoidTail is a Void element declaring 4096 bytes, with 6 present.
+var oversizedVoidTail = []byte{0xEC, 0x50, 0x00, 0, 0, 0, 0, 0, 0}
+
+// withTail rewrites the file at path with tail appended, and returns path.
+func withTail(t *testing.T, path string, tail []byte) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, tail...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestConversionsReportCutSource pins that the conversions of a source cut short - a Matroska that stops before
 // the end its Segment declares, an MP4 whose media runs past the file - write what arrived and say so once through
 // OnTruncated, and that a whole source says nothing.
@@ -186,6 +205,18 @@ func TestConversionsReportCutSource(t *testing.T) {
 			return RemuxToHLS(ctx, src, t.TempDir(), o)
 		}},
 		{"to-hls whole mkv", mkvSrc, 0, func(src string, o Options) error {
+			return RemuxToHLS(ctx, src, t.TempDir(), o)
+		}},
+		{"to-mp4 whole mkv of unknown size and an ID3 tag", withTail(t, streamedCopy(t, mkvSrc), id3Tag), 0, func(src string, o Options) error {
+			return RemuxToMP4(ctx, src, filepath.Join(t.TempDir(), "o.mp4"), o)
+		}},
+		{"to-hls whole mkv of unknown size and an ID3 tag", withTail(t, streamedCopy(t, mkvSrc), id3Tag), 0, func(src string, o Options) error {
+			return RemuxToHLS(ctx, src, t.TempDir(), o)
+		}},
+		{"to-mp4 whole mkv of unknown size and an oversized Void", withTail(t, streamedCopy(t, mkvSrc), oversizedVoidTail), 0, func(src string, o Options) error {
+			return RemuxToMP4(ctx, src, filepath.Join(t.TempDir(), "o.mp4"), o)
+		}},
+		{"to-hls whole mkv of unknown size and an oversized Void", withTail(t, streamedCopy(t, mkvSrc), oversizedVoidTail), 0, func(src string, o Options) error {
 			return RemuxToHLS(ctx, src, t.TempDir(), o)
 		}},
 		{"to-hls cut mp4", cutMP4, mp4Size, func(src string, o Options) error {

@@ -134,6 +134,7 @@ type BlockReader struct {
 	// elemStart is the offset of the element the walk is reading: where a
 	// failure began, and where the search for the media behind it starts.
 	elemStart int64
+	elemID    uint32 // the ID of that element, 0 while its header is unread
 	// skipDamage makes Next resume on the next valid Cluster past a damaged
 	// region instead of returning an error (SetSkipDamage); skippedBytes counts
 	// what was passed over.
@@ -647,10 +648,27 @@ func (br *BlockReader) Next() (mkv.Block, error) {
 	return b, err
 }
 
-// StoppedShort reports whether Next ended on a source that stops inside an
-// element (io.ErrUnexpectedEOF): the file is cut there, whatever its Segment
-// declares - the one sign of a cut in a Segment of unknown size.
+// StoppedShort reports whether the walk ended on a source that stops inside an
+// element of its media (io.ErrUnexpectedEOF, or, under SetSkipDamage, the
+// region passed over to the end): the file is cut there, whatever its Segment
+// declares - the one sign of a cut in a Segment of unknown size. Bytes that
+// are no Matroska element after such a Segment's media (an ID3 tag, a Void
+// running past the end) end the walk with io.EOF instead.
 func (br *BlockReader) StoppedShort() bool { return br.stoppedShort }
+
+// cutInMedia reports whether the element the source stops inside belongs to the media: it lies inside a Cluster of
+// declared size, or it is a Cluster, a Cluster's child or a top-level Matroska element. Void, CRC-32 and unknown IDs
+// are not: after a Segment of unknown size they are trailing bytes.
+func (br *BlockReader) cutInMedia() bool {
+	if br.inCluster && br.clusterEnd >= 0 {
+		return true
+	}
+	switch br.elemID {
+	case mkv.IDTimestamp, mkv.IDSimpleBlock, mkv.IDBlockGroup:
+		return true
+	}
+	return isSegmentLevelID(br.elemID)
+}
 
 func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 	for {
@@ -680,8 +698,13 @@ func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 			from = br.suspectAt
 		}
 		resume, found, end := br.clusterAfter(from)
+		cut := errors.Is(err, io.ErrUnexpectedEOF)
+		if !found && cut && br.segEnd < 0 && !br.cutInMedia() {
+			return b, io.EOF // bytes after the media of a Segment of unknown size (a tag, padding): the end, not a cut
+		}
 		if !found && end >= 0 && br.skipDamage {
 			br.skipDamageTo(from, end) // the damage runs to the end: the walk is over
+			br.stoppedShort = br.stoppedShort || cut
 			return b, io.EOF
 		}
 		if !found {
@@ -747,7 +770,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				br.peeked = nil
 			} else {
 				hdrStart = br.r.tell()
-				br.elemStart = hdrStart
+				br.elemStart, br.elemID = hdrStart, 0
 				var err error
 				h, _, err = ebml.ReadElementHeader(br.r)
 				if err != nil {
@@ -761,6 +784,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				}
 			}
 
+			br.elemID = h.ID
 			// For unknown-size clusters, a segment-level element ends the cluster.
 			if br.clusterEnd < 0 && isSegmentLevelID(h.ID) {
 				br.inCluster = false
@@ -834,7 +858,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 			br.peeked = nil
 		} else {
 			hdrStart = br.r.tell()
-			br.elemStart = hdrStart
+			br.elemStart, br.elemID = hdrStart, 0
 			var err error
 			h, _, err = ebml.ReadElementHeader(br.r)
 			if err != nil {
@@ -848,6 +872,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 			}
 		}
 
+		br.elemID = h.ID
 		if h.ID == mkv.IDCluster {
 			br.atHead = false
 			br.suspected = false

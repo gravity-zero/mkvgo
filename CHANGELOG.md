@@ -104,7 +104,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
 - A Matroska whose Segment declares no size (a streamed write) and that stops
   inside a block: `Fingerprint` refuses it with `ErrSourceTruncated` (was a
   bare "unexpected EOF"), and to-mp4 / to-hls report the cut through
-  `OnTruncated` (they were silent).
+  `OnTruncated` (they were silent). Such a Segment whole and followed by
+  bytes that are no Matroska element (an ID3 tag, a Void running past the
+  end) is not cut: only an end inside a sized Cluster, a block or a
+  top-level element counts.
 
 ## [0.63.0] - 2026-11-02
 

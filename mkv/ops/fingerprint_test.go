@@ -316,6 +316,23 @@ func TestFingerprint_TruncatedMKVRefused(t *testing.T) {
 	if _, err := Fingerprint(context.Background(), junk); err != nil {
 		t.Errorf("Fingerprint of a whole MKV with trailing junk: %v", err)
 	}
+	// A whole Segment of unknown size followed by bytes that are no Matroska element - an ID3 tag, a Void running
+	// past the end - is whole: those bytes end the media, they do not cut it.
+	whole := append([]byte{}, data...)
+	seg = bytes.Index(whole, []byte{0x18, 0x53, 0x80, 0x67})
+	copy(whole[seg+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	for name, tail := range map[string][]byte{
+		"an ID3 tag":        {'I', 'D', '3', 0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 'T', 'I', 'T', '2'},
+		"an oversized Void": {0xEC, 0x50, 0x00, 0, 0, 0, 0, 0, 0},
+	} {
+		p := filepath.Join(dir, "streamed-tail.mkv")
+		if err := os.WriteFile(p, append(append([]byte{}, whole...), tail...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Fingerprint(context.Background(), p); err != nil {
+			t.Errorf("Fingerprint of a whole MKV of unknown size followed by %s: %v", name, err)
+		}
+	}
 }
 
 // TestFingerprint_MP4Extensionless proves the content-sniffing fallback: an
