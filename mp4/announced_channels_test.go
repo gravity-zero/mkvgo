@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,4 +122,42 @@ func readBytes(t *testing.T, p string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// TestAnnouncedChannelsImplicitPS: an AAC config that says LC mono without
+// signalling PS can be HE-AACv2 with implicit PS - the decoder outputs stereo -
+// so a container stating 2 channels keeps its 2; an explicit AOT 29 (PS) is
+// 2 from the config itself.
+func TestAnnouncedChannelsImplicitPS(t *testing.T) {
+	sr := 48000.0
+	one, two := uint8(1), uint8(2)
+	cases := []struct {
+		name      string
+		asc       []byte
+		container *uint8
+		want      int
+	}{
+		{"LC mono, container 2", []byte{0x11, 0x88}, &two, 2},
+		{"LC mono, container 1", []byte{0x11, 0x88}, &one, 1},
+		{"LC mono, container silent", []byte{0x11, 0x88}, nil, 1},
+		{"AOT 29 (PS), container 2", []byte{0xEB, 0x09, 0x88}, &two, 2},
+		{"AOT 29 (PS), container 1", []byte{0xEB, 0x09, 0x88}, &one, 2},
+	}
+	for _, c := range cases {
+		tr := &mkv.Track{ID: 2, Type: mkv.AudioTrack, Codec: "aac", CodecPrivate: c.asc, SampleRate: &sr, Channels: c.container}
+		entry, err := aacEntry(tr, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := entryChannels(entry, "mp4a"); got != c.want {
+			t.Errorf("%s: AudioSampleEntry channelcount %d, want %d", c.name, got, c.want)
+		}
+		read := *tr // as the reader leaves it under WithInBandChannels: the config's count in StreamChannels
+		if ch := aacChannels(c.asc); ch > 0 {
+			read.StreamChannels = &ch
+		}
+		if got, want := hlsChannelsAttr(&read), fmt.Sprintf(`,CHANNELS="%d"`, c.want); got != want {
+			t.Errorf("%s: HLS attribute %q, want %q", c.name, got, want)
+		}
+	}
 }

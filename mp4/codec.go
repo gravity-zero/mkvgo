@@ -442,6 +442,11 @@ func aacEntry(t *mkv.Track, _ []byte) ([]byte, error) {
 // (Track.StreamChannels, which the decoder configuration in the same init carries), else the container's; 0 unknown.
 func announcedChannels(t *mkv.Track) uint8 {
 	if t.StreamChannels != nil && *t.StreamChannels > 0 {
+		// An AAC config saying mono without signalling PS can be HE-AACv2 with implicit PS, decoded as stereo:
+		// a container stating 2 knows it.
+		if *t.StreamChannels == 1 && t.Codec == "aac" && t.Channels != nil && *t.Channels == 2 {
+			return 2
+		}
 		return *t.StreamChannels
 	}
 	if t.Channels != nil {
