@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -52,17 +53,36 @@ func scaledSegment(kind string, n int) []byte {
 	return b.Bytes()
 }
 
-// Reading a file costs in proportion to its metadata, whichever element holds it and whichever reader reads it.
+// opCountingReader counts the calls made on r and the bytes they read.
+type opCountingReader struct {
+	r            io.ReadSeeker
+	calls, bytes uint64
+}
+
+func (c *opCountingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.calls++
+	c.bytes += uint64(n)
+	return n, err
+}
+
+func (c *opCountingReader) Seek(off int64, whence int) (int64, error) {
+	c.calls++
+	return c.r.Seek(off, whence)
+}
+
+// Reading a file costs in proportion to its metadata, whichever element holds it and whichever reader reads it:
+// counted in calls on the source, bytes read and heap allocated, so the verdict does not hang on the machine's load.
 func TestMetadataReadCostGrowsLinearly(t *testing.T) {
-	readers := map[string]func(data []byte) (*mkv.Container, error){
-		"Read": func(data []byte) (*mkv.Container, error) {
-			return Read(context.Background(), bytes.NewReader(data), "scale.mkv")
+	readers := map[string]func(src io.ReadSeeker) (*mkv.Container, error){
+		"Read": func(src io.ReadSeeker) (*mkv.Container, error) {
+			return Read(context.Background(), src, "scale.mkv")
 		},
-		"ReadMeta": func(data []byte) (*mkv.Container, error) {
-			return ReadMeta(context.Background(), bytes.NewReader(data), "scale.mkv", WithChapters(), WithTags(), WithCues())
+		"ReadMeta": func(src io.ReadSeeker) (*mkv.Container, error) {
+			return ReadMeta(context.Background(), src, "scale.mkv", WithChapters(), WithTags(), WithCues())
 		},
-		"ReadStream": func(data []byte) (*mkv.Container, error) {
-			c, _, err := ReadStream(context.Background(), bytes.NewReader(data))
+		"ReadStream": func(src io.ReadSeeker) (*mkv.Container, error) {
+			c, _, err := ReadStream(context.Background(), src)
 			return c, err
 		},
 	}
@@ -72,13 +92,14 @@ func TestMetadataReadCostGrowsLinearly(t *testing.T) {
 				continue // a stream stops at the first Cluster and leaves the Cues to the seekable reader
 			}
 			t.Run(kind+"/"+name, func(t *testing.T) {
-				costguard.Linear(t, 20_000, func(n int) time.Duration {
-					data := scaledSegment(kind, n)
-					start := time.Now()
-					if _, err := read(data); err != nil {
-						t.Fatal(err)
-					}
-					return costguard.Since(start)
+				costguard.LinearOps(t, 2_000, func(n int) uint64 {
+					src := &opCountingReader{r: bytes.NewReader(scaledSegment(kind, n))}
+					heap := costguard.HeapWork(func() {
+						if _, err := read(src); err != nil {
+							t.Fatal(err)
+						}
+					})
+					return src.calls + src.bytes + heap
 				})
 			})
 		}

@@ -78,3 +78,27 @@ func Linear(t testing.TB, n int, fn func(n int) time.Duration) {
 
 // Since is time.Since, for an fn handed to Linear that times all it does.
 func Since(start time.Time) time.Duration { return time.Since(start) }
+
+// LinearOps fails t when fn's operation count at 4n items is more than 8 times its count at n. fn builds its input of
+// n items, runs the phase under test and returns what that phase did - reads, seeks, bytes, allocations, whatever it
+// counts - so the verdict holds whatever the machine's load; a linear path counts about 4 times, a quadratic one 16.
+func LinearOps(t testing.TB, n int, fn func(n int) uint64) {
+	t.Helper()
+	small, large := max(fn(n), 1), fn(4*n)
+	if os.Getenv("COSTGUARD_VERBOSE") != "" {
+		t.Logf("%d ops for %d, %d for %d", small, n, large, 4*n)
+	}
+	if ratio := float64(large) / float64(small); ratio > 8 {
+		t.Errorf("4 times the input did %.1f times the operations (%d for %d, %d for %d): the cost grows faster than the input", ratio, small, n, large, 4*n)
+	}
+}
+
+// HeapWork is what the process allocated while fn ran: its heap allocations plus their bytes, so a path copying a list
+// that grows counts quadratically, as it costs.
+func HeapWork(fn func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	fn()
+	runtime.ReadMemStats(&after)
+	return after.Mallocs - before.Mallocs + after.TotalAlloc - before.TotalAlloc
+}
