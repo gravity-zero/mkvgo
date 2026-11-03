@@ -50,7 +50,7 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 	defer f.Close()
 
 	d := &mkv.Diagnosis{AudioDelaysNs: map[uint64]int64{}}
-	lay := diagnoseScanBoxes(f, d, 0)
+	lay := diagnoseScanBoxes(f, d)
 
 	if lay.moovOff < 0 {
 		d.Findings = append(d.Findings, mkv.Finding{
@@ -77,7 +77,7 @@ func Diagnose(ctx context.Context, path string, opts ...Options) (*mkv.Diagnosis
 // DeclaredSize walks the top-level boxes of the MP4/MOV at path, head-only (one header read per box), and returns
 // the file's size and where its boxes declare it ends: past the size for a file cut short,
 // the size itself for a whole file. Trailing junk, and a last box that runs to the end of the file, declare no more
-// than the size. A file of more than 16 top-level boxes (a fragmented one) is not walked: declared is 0, unknown.
+// than the size. Every top-level box is walked, a fragmented file's included: the rule Diagnose applies.
 func DeclaredSize(ctx context.Context, path string, opts ...Options) (size, declared int64, err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return 0, 0, err
@@ -100,13 +100,9 @@ func DeclaredSizeOf(ctx context.Context, r io.ReadSeeker) (size, declared int64,
 		return 0, 0, err
 	}
 	var d mkv.Diagnosis
-	diagnoseScanBoxes(r, &d, declaredSizeBoxes)
+	diagnoseScanBoxes(r, &d)
 	return d.FileSize, d.DeclaredSize, nil
 }
-
-// declaredSizeBoxes bounds DeclaredSize's walk: a progressive MP4 has a handful of top-level boxes, a fragmented one a
-// pair per fragment, thousands of reads (requests, remotely) to answer a metadata listing.
-const declaredSizeBoxes = 16
 
 // diagnoseSampleTables reads every track's sample table as a remux does and reports one it cannot hold, or whose
 // samples lie outside every mdat box - a chunk at offset 0 reads the ftyp as media.
@@ -143,9 +139,8 @@ func diagnoseSampleTables(f mkv.ReadSeekCloser, size int64, moovRaw []byte, d *m
 
 // diagnoseScanBoxes walks the top-level boxes tolerantly: instead of failing
 // on a malformed layout it records the finding (truncated / trailing junk)
-// and still reports the moov when one is reachable. maxBoxes > 0 stops the
-// walk after that many boxes, d.DeclaredSize left 0 (unknown).
-func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayout {
+// and still reports the moov when one is reachable.
+func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis) *topLayout {
 	lay := &topLayout{moovOff: -1}
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -155,10 +150,7 @@ func diagnoseScanBoxes(f io.ReadSeeker, d *mkv.Diagnosis, maxBoxes int) *topLayo
 	d.FileSize = size
 	var off int64
 	hdr := make([]byte, 16)
-	for n := 0; off+8 <= size; n++ {
-		if maxBoxes > 0 && n == maxBoxes {
-			return lay
-		}
+	for off+8 <= size {
 		if _, err := f.Seek(off, io.SeekStart); err != nil {
 			return lay
 		}

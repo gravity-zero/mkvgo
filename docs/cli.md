@@ -87,8 +87,8 @@ per timecode unit; 1000000 (one millisecond) is what nearly every file uses.
 too for a local file, a remote probe keeping its request budget) appears only for
 a file that stops before the end it declares: its metadata
 reads whole, its media does not, and `diagnose` says how much is missing. It is read
-from the head (the Matroska Segment size, the top-level MP4 boxes; an MP4 of more
-than 16 of them, a fragmented one, is not judged). Bytes past the declared end are
+from the head (the Matroska Segment size, every top-level MP4 box, a fragmented
+file's included, as `diagnose` reads them). Bytes past the declared end are
 trailing junk, not a cut.
 
 `DocType` (`doc_type` in JSON) is the EBML header's DocType as the file declares

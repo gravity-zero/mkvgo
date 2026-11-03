@@ -121,6 +121,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   `PlanHLS` refuses with `ErrNoKeyframeIndex` (was `ErrSourceTruncated`). A
   video cue among them no longer leaves `cues-non-video` saying every cue
   references a non-video track.
+- MP4: `info`, `probe`, `SourceCutShort` and `mp4.DeclaredSize` walk every
+  top-level box as `Diagnose` does, so a fragmented file cut short is said
+  cut by both (past 16 boxes they left it unjudged while `Diagnose` said
+  `truncated`).
 
 ## [0.63.0] - 2026-11-02
 

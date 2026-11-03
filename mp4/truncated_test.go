@@ -291,9 +291,9 @@ func TestTruncatedMP4BeforeATracksFirstSample(t *testing.T) {
 	}
 }
 
-// TestDeclaredSizeBoundedWalk pins DeclaredSize: a cut box declares past the file, a whole one the file itself, and
-// a file of more top-level boxes than the walk reads (a fragmented one) declares nothing rather than being read whole.
-func TestDeclaredSizeBoundedWalk(t *testing.T) {
+// TestDeclaredSizeWalk pins DeclaredSize: a cut box declares past the file, a whole one the file itself, however many
+// top-level boxes come before it (a fragmented file's pairs) - the rule Diagnose applies.
+func TestDeclaredSizeWalk(t *testing.T) {
 	box := func(n int) []byte {
 		b := make([]byte, n)
 		b[2], b[3] = byte(n>>8), byte(n)
@@ -304,7 +304,7 @@ func TestDeclaredSizeBoundedWalk(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		few = append(few, box(16)...)
 	}
-	for i := 0; i < declaredSizeBoxes+4; i++ {
+	for i := 0; i < 40; i++ {
 		many = append(many, box(16)...)
 	}
 	cases := []struct {
@@ -314,7 +314,8 @@ func TestDeclaredSizeBoundedWalk(t *testing.T) {
 	}{
 		{"whole", few, int64(len(few))},
 		{"cut", few[:len(few)-4], int64(len(few))},
-		{"many boxes, cut", many[:len(many)-4], 0},
+		{"many boxes, whole", many, int64(len(many))},
+		{"many boxes, cut", many[:len(many)-4], int64(len(many))},
 	}
 	for _, tc := range cases {
 		p := filepath.Join(t.TempDir(), "f.mp4")
@@ -324,6 +325,17 @@ func TestDeclaredSizeBoundedWalk(t *testing.T) {
 		size, declared, err := DeclaredSize(context.Background(), p)
 		if err != nil || size != int64(len(tc.data)) || declared != tc.declared {
 			t.Errorf("%s: DeclaredSize = %d, %d, %v; want %d, %d", tc.name, size, declared, err, len(tc.data), tc.declared)
+		}
+		d, err := Diagnose(context.Background(), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cut := false
+		for _, f := range d.Findings {
+			cut = cut || f.Kind == mkv.FindingTruncated
+		}
+		if want := tc.declared > int64(len(tc.data)); cut != want {
+			t.Errorf("%s: Diagnose truncated %v, DeclaredSize says cut %v", tc.name, cut, want)
 		}
 	}
 }

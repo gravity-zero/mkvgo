@@ -17,8 +17,8 @@ type CutShort struct {
 }
 
 // SourceCutShort reports whether the Matroska/WebM or MP4/MOV source at path stops before the end it declares - its
-// Segment, its top-level boxes - from the head only: nil for a whole file, trailing junk, a Segment of unknown size or
-// a fragmented MP4 (no declared end). Diagnose says "truncated" on the same sizes.
+// Segment, its top-level boxes - from the head only: nil for a whole file, trailing junk or a Segment of unknown size.
+// An MP4's top-level boxes are all walked, a fragmented one's included. Diagnose says "truncated" on the same sizes.
 func SourceCutShort(ctx context.Context, path string, opts ...mkv.Options) (*CutShort, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
