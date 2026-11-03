@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"slices"
@@ -343,5 +344,46 @@ func TestDiagnoseStreamedSizeIsANote(t *testing.T) {
 	}
 	if len(d.Notes) != 1 || d.Notes[0].Kind != mkv.FindingStreamedSize {
 		t.Errorf("streamed whole file: notes %+v, want one %s", d.Notes, mkv.FindingStreamedSize)
+	}
+}
+
+// streamedFixture is a sealed file of 8 one-second clusters, video and audio, rewritten with a Segment of unknown
+// size; its bytes and the offsets of its clusters.
+func streamedFixture(t *testing.T, dir string) ([]byte, []int64) {
+	t.Helper()
+	tracks := []mkv.Track{videoTrack(1), audioTrack(2)}
+	sets := make([][]mkv.Block, 0, 8)
+	for i := range 8 {
+		ts := int64(i * 1000)
+		sets = append(sets, []mkv.Block{
+			{TrackNumber: 1, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0x11}, 400)},
+			{TrackNumber: 2, Timecode: ts, Keyframe: true, Data: bytes.Repeat([]byte{0x22}, 100)},
+		})
+	}
+	sealed := filepath.Join(dir, "sealed.mkv")
+	if err := Reindex(context.Background(), buildMultiClusterMKV(t, dir, "src.mkv", tracks, sets, 8000), sealed); err != nil {
+		t.Fatal(err)
+	}
+	data := makeSegmentStreamed(t, readAll(t, sealed))
+	return data, findAll(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+}
+
+// TestDiagnoseStreamedCutInsideABlock: a Segment of unknown size that stops inside a block is cut short - the walk
+// stopping inside the media says so, there being no declared size to compare with - a truncated finding at the tail.
+func TestDiagnoseStreamedCutInsideABlock(t *testing.T) {
+	dir := t.TempDir()
+	data, _ := streamedFixture(t, dir)
+	cut := filepath.Join(dir, "cut.mkv")
+	writeAll(t, cut, data[:len(data)-50])
+	d, err := Diagnose(context.Background(), cut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := hasFinding(d, mkv.FindingTruncated)
+	if d.Healthy || f == nil || f.Scope != mkv.ScopeTail {
+		t.Fatalf("streamed file cut in a block: healthy %v, findings %+v; want a truncated finding at the tail", d.Healthy, d.Findings)
+	}
+	if hasFinding(d, mkv.FindingDamaged) != nil {
+		t.Errorf("the cut tail is reported as damage too: %+v", d.Findings)
 	}
 }

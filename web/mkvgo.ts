@@ -510,6 +510,11 @@ export interface TrackEndsReport {
    * media continuing behind it); absent when the stretch walked is sound.
    */
   skipped_bytes?: number
+  /**
+   * The walk ended because the source stops inside its media: the file is
+   * cut there, the one sign of a cut in a Segment of unknown size.
+   */
+  stopped_short?: boolean
 }
 
 /** One diagnosed defect with its remedy; see Diagnosis. */

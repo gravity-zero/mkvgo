@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -232,4 +233,37 @@ func captureStdout(t *testing.T, fn func()) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// TestExitDamagedStreamedCut: a Matroska whose Segment declares no size (a streamed write) and that stops inside a
+// block is cut short: diagnose finds it truncated, and diagnose and track-ends exit 3 under --exit-damaged.
+func TestExitDamagedStreamedCut(t *testing.T) {
+	whole, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "testdata", "sample.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append([]byte{}, whole[:len(whole)*6/10]...)
+	seg := bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})
+	if seg < 0 || data[seg+4] != 0x01 {
+		t.Fatal("fixture has no 8-byte Segment size")
+	}
+	copy(data[seg+4:], []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	cut := filepath.Join(t.TempDir(), "streamed-cut.mkv")
+	if err := os.WriteFile(cut, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ExitDamaged, sawDamage, JsonOutput = false, false, false })
+	for name, run := range map[string]func(){
+		"diagnose":   func() { CmdDiagnose([]string{cut}) },
+		"track-ends": func() { CmdTrackEnds([]string{cut}) },
+	} {
+		ExitDamaged, sawDamage, JsonOutput = true, false, false
+		got := exitStatus(t, run)
+		if got == -1 {
+			got = DamagedStatus()
+		}
+		if got != 3 {
+			t.Errorf("%s --exit-damaged on a streamed file cut in a block: status %d, want 3", name, got)
+		}
+	}
 }

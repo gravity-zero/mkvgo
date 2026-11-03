@@ -81,11 +81,11 @@ func trackEndsFrom(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		want[t.ID] = true
 	}
 	if len(want) > 0 {
-		skipped, err := walkTrackEnds(ctx, path, fs, meta, want, ends)
+		skipped, cut, err := walkTrackEnds(ctx, path, fs, meta, want, ends)
 		if err != nil {
 			return nil, fmt.Errorf("track ends: %w", err)
 		}
-		r.SkippedBytes = skipped
+		r.SkippedBytes, r.StoppedShort = skipped, cut
 	}
 	judgeTrackEnds(r)
 	r.StartMs = timelineStartMs(path, fs, meta.Info.TimecodeScale)
@@ -126,10 +126,10 @@ func timelineStartMs(path string, fs *mkv.FS, scale int64) int64 {
 var tailWalkWindowsMs = []int64{120_000, 900_000}
 
 // walkTrackEnds establishes the ends of the tracks in want by walking the tail.
-func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container, want map[uint64]bool, ends map[uint64]*mkv.TrackEnd) (skipped int64, err error) {
+func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Container, want map[uint64]bool, ends map[uint64]*mkv.TrackEnd) (skipped int64, cut bool, err error) {
 	f, err := fs.DoOpen(path)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer f.Close()
 	scale := meta.Info.TimecodeScale
@@ -161,7 +161,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 	complete := false // the last walk reached the end of the clusters
 	for _, window := range tailWalkWindowsMs {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		windowStart = refMs - window
 		if windowStart < 0 || refMs <= 0 {
@@ -171,17 +171,17 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 		if startOff < 0 {
 			windowStart = 0
 		}
-		last, clusters, done, passed, err := walkTailFrom(f, scale, startOff, meta.SegmentEnd, meta.Tracks, durs, strided, pending)
+		last, clusters, done, passed, stopped, err := walkTailFrom(f, scale, startOff, meta.SegmentEnd, meta.Tracks, durs, strided, pending)
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
-		skipped = passed // the widest window walked covers the ones before it
+		skipped, cut = passed, stopped // the widest window walked covers the ones before it
 		if clusters == 0 && startOff >= 0 {
 			// The cue's position is not a cluster: a stale index. Walk from
 			// the first cluster instead, the one start that cannot lie.
 			windowStart = 0
-			if last, _, done, skipped, err = walkTailFrom(f, scale, -1, meta.SegmentEnd, meta.Tracks, durs, strided, pending); err != nil {
-				return 0, err
+			if last, _, done, skipped, cut, err = walkTailFrom(f, scale, -1, meta.SegmentEnd, meta.Tracks, durs, strided, pending); err != nil {
+				return 0, false, err
 			}
 		}
 		complete = done
@@ -202,7 +202,7 @@ func walkTrackEnds(ctx context.Context, path string, fs *mkv.FS, meta *mkv.Conta
 			ends[id].EndMs, ends[id].Source = windowStart, "walk-bound"
 		}
 	}
-	return skipped, nil
+	return skipped, cut, nil
 }
 
 // trackStride measures how long one frame of a track lasts when nothing in the
@@ -276,20 +276,20 @@ func cutTail(f io.Seeker, skipped []reader.DamageRange, segEnd int64) int64 {
 // reached the end cleanly (false: stopped on an undecodable element - junk past
 // the clusters, or damage - keeping what it saw). A track in strided states no
 // frame duration: its end is measured from its own block stride.
-func walkTailFrom(f io.ReadSeeker, scale, startOff, segEnd int64, tracks []mkv.Track, durs map[uint64]int64, strided, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, skipped int64, err error) {
+func walkTailFrom(f io.ReadSeeker, scale, startOff, segEnd int64, tracks []mkv.Track, durs map[uint64]int64, strided, pending map[uint64]bool) (last map[uint64]int64, clusters int64, done bool, skipped int64, cut bool, err error) {
 	var br *reader.BlockReader
 	if startOff < 0 {
 		// NewBlockReader parses the EBML header from the current position:
 		// the file is at wherever the previous walk left it.
 		if _, err = f.Seek(0, io.SeekStart); err != nil {
-			return nil, 0, false, 0, err
+			return nil, 0, false, 0, false, err
 		}
 		br, err = reader.NewBlockReader(f, scale)
 	} else {
 		br, err = reader.NewBlockReaderAt(f, scale, startOff)
 	}
 	if err != nil {
-		return nil, 0, false, 0, err
+		return nil, 0, false, 0, false, err
 	}
 	br.SetSegmentEnd(segEnd) // what follows the Segment is trailing data, not damage the walk passed over
 	br.SetHeaderOnly(true)
@@ -300,13 +300,13 @@ func walkTailFrom(f io.ReadSeeker, scale, startOff, segEnd int64, tracks []mkv.T
 	br.SetKnownTracks(tracks) // a walk from a cue never passes over the Tracks element
 	last = map[uint64]int64{}
 	strides := map[uint64]*trackStride{}
-	finish := func(done bool) (map[uint64]int64, int64, bool, int64, error) {
+	finish := func(done bool) (map[uint64]int64, int64, bool, int64, bool, error) {
 		for id, s := range strides {
 			if end := s.endMs(); end > last[id] {
 				last[id] = end
 			}
 		}
-		return last, br.ClusterCount(), done, br.SkippedBytes() - cutTail(f, br.SkippedRanges(), segEnd), nil
+		return last, br.ClusterCount(), done, br.SkippedBytes() - cutTail(f, br.SkippedRanges(), segEnd), br.StoppedShort(), nil
 	}
 	for {
 		blk, nerr := br.Next()

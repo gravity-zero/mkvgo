@@ -31,6 +31,9 @@ func CmdTrackEnds(args []string) {
 	if cut := sourceCutShort(rest[0]); cut != nil {
 		noteDamage()
 		fmt.Fprintf(os.Stderr, "warning: %s is cut short (%d of %d bytes): the ends are those of what arrived\n", rest[0], cut.FileSize, cut.DeclaredSize)
+	} else if report.StoppedShort {
+		noteDamage()
+		fmt.Fprintf(os.Stderr, "warning: %s stops inside its media (cut short): the ends are those of what arrived\n", rest[0])
 	}
 	if report.SkippedBytes > 0 {
 		noteDamage()

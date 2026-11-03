@@ -151,6 +151,11 @@ type TrackEndsReport struct {
 	// the file before the tail window). A copy of the file is refused there;
 	// Reindex with Resync repairs it.
 	SkippedBytes int64 `json:"skipped_bytes,omitempty"`
+	// StoppedShort says the walk ended because the source stops inside its
+	// media: the file is cut there, whatever its Segment declares - the one
+	// sign of a cut in a Segment of unknown size. The cut tail is not counted
+	// in SkippedBytes.
+	StoppedShort bool `json:"stopped_short,omitempty"`
 }
 
 // CueHole is one hole in a file's video cue coverage: GapMs of picture no cue

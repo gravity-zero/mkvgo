@@ -142,6 +142,15 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		}
 		d.TrackEnds = ends
 	}
+	if ends := d.TrackEnds; !known && ends != nil && ends.StoppedShort {
+		// No declared size to compare with: the walk stopping inside the media is the cut.
+		d.Findings = append(d.Findings, Finding{
+			Kind:   mkv.FindingTruncated,
+			Scope:  mkv.ScopeTail,
+			Detail: fmt.Sprintf("the source stops inside its media: %d bytes present of a Segment that declares no size, a repair recovers the playable prefix only", size),
+			Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
+		})
+	}
 	if ends := d.TrackEnds; ends != nil && ends.SkippedBytes > 0 {
 		d.Findings = append(d.Findings, Finding{
 			Kind:  mkv.FindingDamaged,

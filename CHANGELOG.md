@@ -108,6 +108,10 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   bytes that are no Matroska element (an ID3 tag, a Void running past the
   end) is not cut: only an end inside a sized Cluster, a block or a
   top-level element counts.
+- A Matroska whose Segment declares no size and that stops inside a block:
+  `Diagnose` reports it `truncated` (tail) and `track-ends` warns of the cut
+  and exits 3 under `--exit-damaged` (both took it for whole since the cut
+  tail stopped counting as damage); `TrackEndsReport.StoppedShort` says so.
 
 ## [0.63.0] - 2026-11-02
 
