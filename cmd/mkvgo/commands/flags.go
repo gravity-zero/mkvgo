@@ -64,6 +64,16 @@ func (c *cliFlags) Parse(args []string) []string {
 	return c.parse(args, true)
 }
 
+// ParseSource is Parse for a command whose first operand is its source: flags may come before it, after it or
+// between the operands. It returns the source and the operands after it; without one it exits with usage.
+func (c *cliFlags) ParseSource(args []string, usage string) (string, []string) {
+	ops := c.Parse(args)
+	if len(ops) == 0 {
+		FatalUsage("usage: " + usage)
+	}
+	return ops[0], ops[1:]
+}
+
 // ParseKnown is Parse leaving unknown flags among the operands, for a command
 // that hands them to another parser (serve and the shared HLS flags).
 func (c *cliFlags) ParseKnown(args []string) []string {

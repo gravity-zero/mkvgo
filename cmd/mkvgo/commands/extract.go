@@ -20,15 +20,18 @@ func CmdExtractAttachment(args []string) {
 	if len(args) < 4 {
 		FatalUsage("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
-	source := args[0]
-	attID, err := strconv.ParseUint(args[1], 10, 64)
-	if err != nil {
-		FatalUsage(fmt.Sprintf("invalid attachment ID %q", args[1]))
-	}
+
 	var outPath string
 	fl := newFlags("extract-attachment")
 	fl.String(&outPath, "-o")
-	fl.Parse(args[2:])
+	source, ops := fl.ParseSource(args, "mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
+	if len(ops) != 1 {
+		FatalUsage("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
+	}
+	attID, err := strconv.ParseUint(ops[0], 10, 64)
+	if err != nil {
+		FatalUsage(fmt.Sprintf("invalid attachment ID %q", ops[0]))
+	}
 	if outPath == "" {
 		FatalUsage("usage: mkvgo extract-attachment <file.mkv> <attachmentID> -o <outfile>")
 	}
@@ -46,7 +49,6 @@ func CmdExtractSubtitle(args []string) {
 	if len(args) < 5 {
 		FatalUsage("usage: " + usage)
 	}
-	source := args[0]
 	var outPath, format, indexPath string
 	var trackID uint64
 	var damageBytes int64
@@ -64,7 +66,7 @@ func CmdExtractSubtitle(args []string) {
 		trackID = id
 	}, "-t")
 	fl.String(&format, "-format")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, usage)
 	if outPath == "" || trackID == 0 {
 		FatalUsage("usage: " + usage)
 	}
@@ -230,7 +232,6 @@ func CmdSubtitleIndex(args []string) {
 	if len(args) < 3 {
 		FatalUsage("usage: " + usage)
 	}
-	source := args[0]
 	var outPath string
 	var trackIDs []uint64
 	var damageBytes int64
@@ -248,7 +249,7 @@ func CmdSubtitleIndex(args []string) {
 			trackIDs = append(trackIDs, id)
 		}
 	}, "-t")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, usage)
 	if outPath == "" {
 		FatalUsage("usage: " + usage)
 	}

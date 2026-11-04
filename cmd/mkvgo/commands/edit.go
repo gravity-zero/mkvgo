@@ -137,12 +137,12 @@ JSON schema:
   "tags": [{"target_type": "MOVIE", "simple_tags": [{"name": "TITLE", "value": "X"}]}]
 }`)
 	}
-	source := args[0]
 	var outPath, jsonStr string
 
 	fl := newFlags("edit")
 	fl.String(&outPath, "-o")
-	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+	source, ops := fl.ParseSource(args, CmdUsage["edit"])
+	if len(ops) > 0 {
 		jsonStr = ops[len(ops)-1]
 	}
 	if outPath == "" {
@@ -177,12 +177,12 @@ func CmdEditTitle(args []string) {
 	if len(args) < 4 {
 		FatalUsage("usage: " + CmdUsage["edit-title"])
 	}
-	source := args[0]
 	var outPath, title string
 
 	fl := newFlags("edit-title")
 	fl.String(&outPath, "-o")
-	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+	source, ops := fl.ParseSource(args, CmdUsage["edit-title"])
+	if len(ops) > 0 {
 		title = ops[len(ops)-1]
 	}
 	if outPath == "" || title == "" {
@@ -204,7 +204,6 @@ func CmdEditTrack(args []string) {
 	if len(args) < 5 {
 		FatalUsage("usage: " + CmdUsage["edit-track"])
 	}
-	source := args[0]
 	var outPath string
 	var trackID uint64
 	var language, name *string
@@ -226,7 +225,7 @@ func CmdEditTrack(args []string) {
 	fl.Do(func() { noDefault = false; setDefault = &noDefault }, "-no-default")
 	fl.Do(func() { isForced = true; setForced = &isForced }, "-forced")
 	fl.Do(func() { noForced = false; setForced = &noForced }, "-no-forced")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, CmdUsage["edit-track"])
 	if outPath == "" || trackID == 0 {
 		FatalUsage("usage: " + CmdUsage["edit-track"])
 	}

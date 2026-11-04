@@ -67,6 +67,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   `dva1`) in `CODECS`.
 - Commands that read a whole local file refuse an http(s)/s3:// source with
   exit 2; documented JSON keys and `-json` list held to the code by a test.
+- CLI: `demux`, `split`, `edit`, `edit-title`, `edit-track`, `remove-track`,
+  `add-track`, `merge-subtitle`, `extract-subtitle`, `subtitle-index` and
+  `extract-attachment` read flags placed before the source (`demux --raw f.mkv`
+  opened a file named `--raw`).
 
 ## [0.63.0] - 2026-11-02
 

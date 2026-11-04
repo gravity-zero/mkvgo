@@ -12,7 +12,6 @@ func CmdDemux(args []string) {
 	if len(args) < 3 {
 		FatalUsage("usage: " + CmdUsage["demux"])
 	}
-	source := args[0]
 	var outDir string
 	var trackIDs []uint64
 	var raw bool
@@ -21,7 +20,7 @@ func CmdDemux(args []string) {
 	fl.String(&outDir, "-o")
 	fl.Bool(&raw, "--raw")
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, CmdUsage["demux"])
 	if outDir == "" {
 		FatalUsage("missing -o <dir>")
 	}
@@ -88,14 +87,13 @@ func CmdRemoveTrack(args []string) {
 	if len(args) < 5 {
 		FatalUsage("usage: " + CmdUsage["remove-track"])
 	}
-	source := args[0]
 	var outPath string
 	var trackIDs []uint64
 
 	fl := newFlags("remove-track")
 	fl.String(&outPath, "-o")
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, CmdUsage["remove-track"])
 	if outPath == "" || len(trackIDs) == 0 {
 		FatalUsage("usage: " + CmdUsage["remove-track"])
 	}
@@ -120,7 +118,6 @@ func CmdAddTrack(args []string) {
 	if len(args) < 4 {
 		FatalUsage("usage: " + CmdUsage["add-track"])
 	}
-	base := args[0]
 	var outPath string
 	var input matroska.TrackInput
 
@@ -128,7 +125,8 @@ func CmdAddTrack(args []string) {
 	fl.String(&outPath, "-o")
 	fl.Func(func(v string) { input.Language = v }, "-lang")
 	fl.Func(func(v string) { input.Name = v }, "-name")
-	for _, op := range fl.Parse(args[1:]) {
+	base, ops := fl.ParseSource(args, CmdUsage["add-track"])
+	for _, op := range ops {
 		if srcPath, trackID, ok := splitTrackSpec(op); ok {
 			id, err := strconv.ParseUint(trackID, 10, 64)
 			if err != nil {

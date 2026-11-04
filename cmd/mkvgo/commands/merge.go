@@ -47,7 +47,6 @@ func CmdMergeSubtitle(args []string) {
 	if len(args) < 4 {
 		FatalUsage("usage: " + CmdUsage["merge-subtitle"])
 	}
-	source := args[0]
 	var outPath, subPath, format, lang, name string
 	lang = "und"
 
@@ -56,7 +55,8 @@ func CmdMergeSubtitle(args []string) {
 	fl.String(&format, "-format")
 	fl.String(&lang, "-lang")
 	fl.String(&name, "-name")
-	if ops := fl.Parse(args[1:]); len(ops) > 0 {
+	source, ops := fl.ParseSource(args, CmdUsage["merge-subtitle"])
+	if len(ops) > 0 {
 		subPath = ops[len(ops)-1]
 	}
 	if outPath == "" || subPath == "" {

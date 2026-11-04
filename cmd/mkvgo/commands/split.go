@@ -12,7 +12,6 @@ func CmdSplit(args []string) {
 	if len(args) < 3 {
 		FatalUsage("usage: " + CmdUsage["split"])
 	}
-	source := args[0]
 	var outDir, pattern string
 	var byChapters bool
 	var everyMs int64
@@ -30,7 +29,7 @@ func CmdSplit(args []string) {
 		everyMs = ms
 	}, "-every")
 	fl.String(&pattern, "-pattern")
-	fl.Parse(args[1:])
+	source, _ := fl.ParseSource(args, CmdUsage["split"])
 	if outDir == "" {
 		FatalUsage("missing -o <dir>")
 	}
