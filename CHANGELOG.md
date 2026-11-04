@@ -53,8 +53,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   properties, `CHARACTERISTICS` / `Role` / `Accessibility`, Dolby Atmos (JOC)
   and a DASH trick-mode set over the I-frame fragments.
 - HLS: `X-MKVGO-TRACK="<n>"` on every audio and subtitle `EXT-X-MEDIA`, the
-  source track's number, to pair a rendition with its track without its
-  `NAME`. See [library.md](docs/library.md) (manifests).
+  identifier the source file gives the track (Matroska TrackNumber, MP4 `tkhd`
+  track_ID), to pair a rendition with its track without its `NAME`; the probe
+  gives it as `Track.FileTrackID`. See [library.md](docs/library.md)
+  (manifests).
 - Block additions: `Block.Additions`, `Track.BlockAdditionMappings`,
   `Track.HDR10Plus`; every rewrite keeps them, WebVTT cue settings reach the
   converted WebVTT and `wvtt`.

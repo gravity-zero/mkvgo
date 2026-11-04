@@ -131,6 +131,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 		id := uint64(i + 1)
 		mt := mkv.Track{
 			ID:           id,
+			FileTrackID:  uint64(t.trackID),
 			UID:          id,
 			Type:         t.trackType,
 			Codec:        t.codec,

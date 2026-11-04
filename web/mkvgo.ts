@@ -83,6 +83,8 @@ export interface Track {
   color_range?: number
   hdr?: unknown
   dolby_vision?: unknown
+  /** The identifier the file gives the track (Matroska TrackNumber, MP4 tkhd track_ID), read never assigned; HLS X-MKVGO-TRACK. */
+  file_track_id?: number
   /** BlockAdditionMapping elements other than Dolby Vision's: what the blocks' additions hold. */
   block_addition_mappings?: { value: number; name?: string; type: number }[]
   /** HDR10+ dynamic metadata in the block additions (an ITU-T T.35 mapping, or found by the in-band read). */

@@ -1144,12 +1144,14 @@ DASH MPDs - says the same of a track, from one set of helpers
   of that group; one `DEFAULT=YES` per audio group, at most one in the
   subtitle group; every `NAME` unique in its group (" 2", " 3" on a collision).
 - Source track: every audio and subtitle `EXT-X-MEDIA` carries
-  `X-MKVGO-TRACK="<n>"`, the source track's number as every mkvgo command and
-  the probe give it (the Matroska TrackNumber, an MP4 track's 1-based
-  position), a client attribute players ignore (RFC 8216). An integrator
-  pairs a rendition with its own track by it, whatever the `NAME`, the group
-  or the tracks left out. `HLSFromCMAF` has none: each of its representations
-  is a file of its own. The DASH
+  `X-MKVGO-TRACK="<n>"`, the identifier the source file gives the track - the
+  Matroska TrackNumber, the MP4 `tkhd` track_ID, `Track.FileTrackID` in the
+  probe - a client attribute players ignore (RFC 8216). It is read from the
+  file, never assigned: the same whatever mkvgo keeps or drops and whatever
+  its version (an MP4's `Track.ID` is its position among the kept tracks, and
+  shifts when a track mkvgo dropped is kept). An integrator pairs a rendition
+  with its own track by it, whatever the `NAME` or the group. `HLSFromCMAF`
+  has none: each of its representations is a file of its own. The DASH
   video Representation's `bandwidth` is the video alone.
 - Video range: `VIDEO-RANGE=PQ` or `HLG` from the transfer characteristics or
   the Dolby Vision base layer (SDR, the default, is left unsaid); the DASH

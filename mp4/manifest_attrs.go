@@ -126,14 +126,18 @@ func hlsSubtitleMedia(t *mkv.Track, name string, isDefault bool, uri string) str
 }
 
 // trackAttr is the X-MKVGO-TRACK client attribute (RFC 8216 4.4.6.1: players ignore it) naming a rendition's source
-// track by the number every mkvgo command and the probe use (the Matroska TrackNumber, an MP4 track's 1-based
-// position): what an integrator pairs a rendition with its own track by, whatever its NAME, its group or the tracks
-// left out. "" for a track without one.
+// track by the identifier the file itself gives it (Track.FileTrackID: the Matroska TrackNumber, the MP4 tkhd
+// track_ID): what an integrator pairs a rendition with its own track by, whatever its NAME, its group, the tracks left
+// out or the mkvgo version. A track built in code falls back on its ID; "" for one with neither.
 func trackAttr(t *mkv.Track) string {
-	if t.ID == 0 {
+	id := t.FileTrackID
+	if id == 0 {
+		id = t.ID
+	}
+	if id == 0 {
 		return ""
 	}
-	return fmt.Sprintf(",X-MKVGO-TRACK=\"%d\"", t.ID)
+	return fmt.Sprintf(",X-MKVGO-TRACK=\"%d\"", id)
 }
 
 // hlsCharacteristics is the CHARACTERISTICS of a rendition from its disposition flags, the Apple accessibility

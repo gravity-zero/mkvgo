@@ -71,7 +71,7 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 	audioR := make([]rendition, len(audio))
 	for i, r := range audio {
 		t := r.tracks[r.primary]
-		t.ID = 0 // each representation is a file of its own: its track number names no source track (no X-MKVGO-TRACK)
+		t.ID, t.FileTrackID = 0, 0 // each representation is a file of its own: its track number names no source track (no X-MKVGO-TRACK)
 		audioR[i] = rendition{t: &t, codec: cmafCodecs(r.tracks)}
 	}
 	groups := audioGroupsOf(audioR)

@@ -357,6 +357,10 @@ type Track struct {
 	// Dolby Vision (MP4 dvcC/dvvC box, or Matroska dvcC/dvvC BlockAdditionMapping);
 	// nil otherwise. See ParseDolbyVisionConfig.
 	DolbyVision *DolbyVision `json:"dolby_vision,omitempty"`
+	// FileTrackID is the identifier the source file itself gives the track - the Matroska TrackNumber, the MP4
+	// tkhd track_ID - read, never assigned: unlike ID (an MP4 track's position among the tracks mkvgo keeps), it
+	// does not depend on what mkvgo keeps or drops, nor on its version. 0 for a track built in code.
+	FileTrackID uint64 `json:"file_track_id,omitempty"`
 	// BlockAdditionMappings are the track's BlockAdditionMapping elements other than Dolby Vision's (DolbyVision
 	// holds that one): what its blocks' additions are. A rewrite writes them back.
 	BlockAdditionMappings []BlockAdditionMapping `json:"block_addition_mappings,omitempty"`

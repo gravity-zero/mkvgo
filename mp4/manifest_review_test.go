@@ -1,7 +1,9 @@
 package mp4
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -276,4 +278,48 @@ func TestRenditionTrackNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("concat", readTextFile(t, filepath.Join(cc, "master.m3u8")))
+}
+
+// TestRenditionTrackNumberMP4: for an MP4 source X-MKVGO-TRACK is the track_ID its tkhd states - the file's own
+// identifier, the same whatever mkvgo keeps or drops - not the track's position; the probe gives it as FileTrackID.
+func TestRenditionTrackNumberMP4(t *testing.T) {
+	data, err := os.ReadFile(editShiftFixture(t, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := bytes.Index(data, []byte("tkhd"))
+	second := first + 4 + bytes.Index(data[first+4:], []byte("tkhd"))
+	if first < 0 || second <= first {
+		t.Fatal("fixture has no second tkhd")
+	}
+	off := second + 4 + 12 // version 0: version+flags, creation, modification, then track_ID
+	if data[second+4] == 1 {
+		off = second + 4 + 20
+	}
+	binary.BigEndian.PutUint32(data[off:], 7) // the audio track: position 2, track_ID 7
+	src := filepath.Join(t.TempDir(), "ids.mp4")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := OpenMeta(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := c.Tracks[1]; a.ID != 2 || a.FileTrackID != 7 {
+		t.Fatalf("audio track: ID %d, FileTrackID %d; want 2 (position) and 7 (tkhd)", a.ID, a.FileTrackID)
+	}
+	dir := filepath.Join(t.TempDir(), "hls")
+	if err := RemuxToHLS(context.Background(), src, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	if m := readTextFile(t, filepath.Join(dir, "master.m3u8")); !strings.Contains(m, `X-MKVGO-TRACK="7"`) {
+		t.Errorf("to-hls of an MP4: the audio rendition does not carry its tkhd track_ID 7:\n%s", m)
+	}
+	plan, err := PlanHLS(context.Background(), src, Options{SegmentMs: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := string(plan.MasterPlaylist()); !strings.Contains(m, `X-MKVGO-TRACK="7"`) {
+		t.Errorf("plan of an MP4: the audio rendition does not carry its tkhd track_ID 7:\n%s", m)
+	}
 }

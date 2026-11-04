@@ -83,7 +83,7 @@ func (p *parser) parseTrackEntry(size int64) (mkv.Track, error) {
 			if err != nil {
 				return t, err
 			}
-			t.ID = v
+			t.ID, t.FileTrackID = v, v
 		case mkv.IDTrackUID:
 			v, err := readUintOf(p.r, eh)
 			if err != nil {
