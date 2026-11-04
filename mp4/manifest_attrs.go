@@ -93,7 +93,7 @@ func hlsAudioMedia(r rendition, name string, isDefault bool, group, uri string) 
 	if isDefault {
 		attrs += ",DEFAULT=YES"
 	}
-	return fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(uri))
+	return fmt.Sprintf("#EXT-X-MEDIA:%s%s,URI=%s\n", attrs, trackAttr(t), hlsURI(uri))
 }
 
 // subtitleDefault is the subtitle track DEFAULT=YES goes to: the first one flagged default (a track without
@@ -122,7 +122,18 @@ func hlsSubtitleMedia(t *mkv.Track, name string, isDefault bool, uri string) str
 	if t.IsForced {
 		attrs += ",FORCED=YES"
 	}
-	return fmt.Sprintf("#EXT-X-MEDIA:%s,URI=%s\n", attrs, hlsURI(uri))
+	return fmt.Sprintf("#EXT-X-MEDIA:%s%s,URI=%s\n", attrs, trackAttr(t), hlsURI(uri))
+}
+
+// trackAttr is the X-MKVGO-TRACK client attribute (RFC 8216 4.4.6.1: players ignore it) naming a rendition's source
+// track by the number every mkvgo command and the probe use (the Matroska TrackNumber, an MP4 track's 1-based
+// position): what an integrator pairs a rendition with its own track by, whatever its NAME, its group or the tracks
+// left out. "" for a track without one.
+func trackAttr(t *mkv.Track) string {
+	if t.ID == 0 {
+		return ""
+	}
+	return fmt.Sprintf(",X-MKVGO-TRACK=\"%d\"", t.ID)
 }
 
 // hlsCharacteristics is the CHARACTERISTICS of a rendition from its disposition flags, the Apple accessibility

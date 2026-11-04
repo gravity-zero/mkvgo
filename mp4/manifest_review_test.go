@@ -236,3 +236,44 @@ func TestRenditionNamesUnique(t *testing.T) {
 	}
 	check("concat", readTextFile(t, filepath.Join(cc, "master.m3u8")))
 }
+
+// TestRenditionTrackNumber: every audio and subtitle EXT-X-MEDIA names its source track (X-MKVGO-TRACK, the number
+// every mkvgo command and the probe use), so an integrator pairs renditions with its tracks without reading NAMEs -
+// in to-hls, the ABR and the concat masters, whatever the grouping.
+func TestRenditionTrackNumber(t *testing.T) {
+	src := reviewFixture(t, []mkv.Track{aacTrack(2, "fre"), ac3Track(3, "fre")},
+		[]mkv.Track{{ID: 4, Language: "und"}, {ID: 5, Language: "und"}})
+	check := func(name, m string) {
+		t.Helper()
+		got := map[string]string{}
+		for _, l := range strings.Split(m, "\n") {
+			if !strings.HasPrefix(l, "#EXT-X-MEDIA:") {
+				continue
+			}
+			g := regexp.MustCompile(`,X-MKVGO-TRACK="(\d+)"`).FindStringSubmatch(l)
+			u := regexp.MustCompile(`URI="([^"]+)"`).FindStringSubmatch(l)
+			if g == nil || u == nil {
+				t.Errorf("%s: no X-MKVGO-TRACK on %s", name, l)
+				continue
+			}
+			got[filepath.Base(u[1])] = g[1]
+		}
+		want := map[string]string{"audio1.m3u8": "2", "audio2.m3u8": "3", "sub1.m3u8": "4", "sub2.m3u8": "5"}
+		for uri, id := range want {
+			if got[uri] != id {
+				t.Errorf("%s: %s X-MKVGO-TRACK %q, want %q\n%s", name, uri, got[uri], id, m)
+			}
+		}
+	}
+	check("to-hls", readTextFile(t, filepath.Join(toHLS(t, src), "master.m3u8")))
+	abr := filepath.Join(t.TempDir(), "abr")
+	if err := RemuxToABR(context.Background(), []string{src, src}, abr, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	check("abr", readTextFile(t, filepath.Join(abr, "master.m3u8")))
+	cc := filepath.Join(t.TempDir(), "concat")
+	if err := RemuxConcatToHLS(context.Background(), []string{src, src}, cc, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	check("concat", readTextFile(t, filepath.Join(cc, "master.m3u8")))
+}
