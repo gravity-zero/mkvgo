@@ -101,18 +101,19 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	}
 	groups := audioGroupsOf(audio)
 	defaults := groupDefaults(audio, groups)
+	names := groupNames(audio, groups)
 	for _, g := range groups {
 		for _, k := range g.members {
-			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw("v1/"+renditionPlaylist(ref.fts, audioAt[k])))...)
+			b = append(b, hlsAudioMedia(audio[k], names[k], defaults[k], g.id, rw("v1/"+renditionPlaylist(ref.fts, audioAt[k])))...)
 		}
 	}
 	subTracks := make([]*mkv.Track, len(ref.subs))
 	for i := range ref.subs {
 		subTracks[i] = &ref.subs[i].track
 	}
-	subDef := subtitleDefault(subTracks)
+	subDef, subNames := subtitleDefault(subTracks), subtitleNames(subTracks)
 	for i, t := range subTracks {
-		b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
+		b = append(b, hlsSubtitleMedia(t, subNames[i], i == subDef, rw(fmt.Sprintf("v1/sub%d.m3u8", i+1)))...)
 	}
 
 	variants := groups
@@ -153,8 +154,8 @@ func buildABRMaster(o Options, results []*hlsResult) []byte {
 	return b
 }
 
-// abrVariantBandwidth is a variant's peak bit rate: its video, and the reference's audio of its group played
-// alongside, segment by segment. Without the bytes per track (a Matroska plan) or with timelines that differ, the
+// abrVariantBandwidth is a variant's peak bit rate: its video, and the heaviest of the reference's audio tracks of its
+// group played alongside, segment by segment. Without the bytes per track (a Matroska plan) or with timelines that differ, the
 // variant's whole segments, plus the reference's whole audio for a variant other than the reference.
 func abrVariantBandwidth(ref, res *hlsResult, g audioGroup, audioAt []int) int64 {
 	v := pickVideoFrag(res.fts)
@@ -174,10 +175,11 @@ func abrVariantBandwidth(ref, res *hlsResult, g audioGroup, audioAt []int) int64
 	}
 	var peak float64
 	for k, s := range res.segs {
-		bytes := s.perTrack[vidx]
+		var heaviest int64 // a player plays one track of the group at a time
 		for _, m := range g.members {
-			bytes += ref.segs[k].perTrack[audioAt[m]]
+			heaviest = max(heaviest, ref.segs[k].perTrack[audioAt[m]])
 		}
+		bytes := s.perTrack[vidx] + heaviest
 		if s.durSec > 0 {
 			peak = max(peak, float64(bytes)*8/s.durSec)
 		}
@@ -261,7 +263,7 @@ func combinedDASH(o Options, results []*hlsResult) []byte {
 			}
 		}
 		t := &v.outTrack.mkv
-		vbw, _ := bandwidthOf(res.segs, []int{vidx}) // the video alone: the audio has its own AdaptationSet
+		vbw, _ := bandwidthOf(res.segs, []int{vidx}, nil) // the video alone: the audio has its own AdaptationSet
 		rep := fmt.Sprintf(`id="v%d" bandwidth="%d"`, vi+1, vbw)
 		if t.Width != nil && t.Height != nil && *t.Width > 0 && *t.Height > 0 {
 			rep += fmt.Sprintf(` width="%d" height="%d"`, *t.Width, *t.Height)

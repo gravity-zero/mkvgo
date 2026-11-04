@@ -73,9 +73,10 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 		audioR[i] = rendition{t: &r.tracks[r.primary], codec: cmafCodecs(r.tracks)}
 	}
 	groups := audioGroupsOf(audioR)
+	names := groupNames(audioR, groups)
 	for _, g := range groups {
 		for n, k := range g.members {
-			b.WriteString(hlsAudioMedia(audioR[k], k+1, n == 0, g.id, rw(audio[k].id+".m3u8"))) // an external init says "enabled", not "default"
+			b.WriteString(hlsAudioMedia(audioR[k], names[k], n == 0, g.id, rw(audio[k].id+".m3u8"))) // an external init says "enabled", not "default"
 		}
 	}
 	variants := groups

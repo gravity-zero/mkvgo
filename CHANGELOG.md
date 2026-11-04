@@ -56,10 +56,12 @@ series of minor versions closes (0.6x at 0.70.0), its versions move to
   group (a player lists only its variant's group); otherwise one group `aud`
   keeps them all, its variant's `CODECS` naming each codec once. One
   `DEFAULT=YES` per audio group and at most one in the subtitle group (every
-  track without FlagDefault read as default gave several). Each variant's
-  `BANDWIDTH` / `AVERAGE-BANDWIDTH` counts its video and its own group's audio
-  (was every audio track's); the DASH video Representation's `bandwidth` its
-  video alone (was the audio too). See Added for the new attributes.
+  track without FlagDefault read as default gave several); every `NAME` unique
+  in its group (untitled tracks of one language get " 2", " 3"). Each
+  variant's `BANDWIDTH` / `AVERAGE-BANDWIDTH` counts its video and the
+  heaviest audio track of its group, the one a player may pick (was every
+  audio track's); the DASH video Representation's `bandwidth` its video alone
+  (was the audio too). See Added for the new attributes.
 - Bytes served: an E-AC-3 track's `dec3` lists the dependent substreams of
   its first programme and their channel locations (a 7.1, a 5.1 and the rear
   pair, was announced 6), and one whose access units open with an AC-3 core

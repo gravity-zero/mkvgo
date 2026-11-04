@@ -128,8 +128,8 @@ func segmentBits(t *testing.T, dir, prefix string, n int) []float64 {
 	return out
 }
 
-// TestBandwidthPerVariant: each HLS variant announces its video and the audio of its own group, not every audio
-// track's; the DASH video Representation announces the video alone.
+// TestBandwidthPerVariant: each HLS variant announces its video and the heaviest audio track of its own group, not
+// every audio track's; the DASH video Representation announces the video alone.
 func TestBandwidthPerVariant(t *testing.T) {
 	dir := toHLS(t, reviewFixture(t, []mkv.Track{aacTrack(2, "fre"), aacTrack(3, "eng"), ac3Track(4, "fre"), ac3Track(5, "eng")}, nil))
 	pl := readTextFile(t, filepath.Join(dir, "playlist.m3u8"))
@@ -152,7 +152,14 @@ func TestBandwidthPerVariant(t *testing.T) {
 		return int64(p)
 	}
 	a := func(i int) []float64 { return segmentBits(t, dir, "seg_a"+strconv.Itoa(i)+"_", n) }
-	wantAAC, wantAC3 := peak(video, a(1), a(2)), peak(video, a(3), a(4))
+	heaviest := func(x, y []float64) []float64 { // a player plays one track of the group at a time
+		out := make([]float64, n)
+		for k := range n {
+			out[k] = max(x[k], y[k])
+		}
+		return out
+	}
+	wantAAC, wantAC3 := peak(video, heaviest(a(1), a(2))), peak(video, heaviest(a(3), a(4)))
 	m := readTextFile(t, filepath.Join(dir, "master.m3u8"))
 	got := map[string]int64{}
 	for _, l := range strings.Split(m, "\n") {
@@ -161,10 +168,71 @@ func TestBandwidthPerVariant(t *testing.T) {
 		}
 	}
 	if got["aud-mp4a.40.2"] != wantAAC || got["aud-ac-3"] != wantAC3 {
-		t.Errorf("variant BANDWIDTH AAC %d, AC-3 %d; want %d (video + AAC), %d (video + AC-3)\n%s", got["aud-mp4a.40.2"], got["aud-ac-3"], wantAAC, wantAC3, m)
+		t.Errorf("variant BANDWIDTH AAC %d, AC-3 %d; want %d (video + heaviest AAC), %d (video + heaviest AC-3)\n%s", got["aud-mp4a.40.2"], got["aud-ac-3"], wantAAC, wantAC3, m)
 	}
 	mpd := readTextFile(t, filepath.Join(dir, "manifest.mpd"))
 	if g := regexp.MustCompile(`<Representation id="v" bandwidth="(\d+)"`).FindStringSubmatch(mpd); g == nil || g[1] != strconv.FormatInt(peak(video), 10) {
 		t.Errorf("DASH video Representation %v, want the video alone, %d", g, peak(video))
 	}
+}
+
+// TestBandwidthHeaviestTrackOfGroup: a variant plays one audio track of its group at a time, so its BANDWIDTH and
+// AVERAGE-BANDWIDTH count the video and the heaviest of the group's tracks, not their sum.
+func TestBandwidthHeaviestTrackOfGroup(t *testing.T) {
+	dir := toHLS(t, reviewFixture(t, []mkv.Track{aacTrack(2, "fre"), aacTrack(3, "eng")}, nil))
+	pl := readTextFile(t, filepath.Join(dir, "playlist.m3u8"))
+	var durs []float64
+	for _, m := range regexp.MustCompile(`#EXTINF:([0-9.]+),`).FindAllStringSubmatch(pl, -1) {
+		d, _ := strconv.ParseFloat(m[1], 64)
+		durs = append(durs, d)
+	}
+	n := len(durs)
+	video, fre, eng := segmentBits(t, dir, "seg", n), segmentBits(t, dir, "seg_a1_", n), segmentBits(t, dir, "seg_a2_", n)
+	var peak, bits, secs float64
+	for k := range n {
+		b := video[k] + max(fre[k], eng[k])
+		peak = max(peak, b/durs[k])
+		bits += b
+		secs += durs[k]
+	}
+	want := regexp.MustCompile(`BANDWIDTH=` + strconv.FormatInt(int64(peak), 10) + `,AVERAGE-BANDWIDTH=` + strconv.FormatInt(int64(bits/secs), 10) + `\b`)
+	if m := readTextFile(t, filepath.Join(dir, "master.m3u8")); !want.MatchString(m) {
+		t.Errorf("want BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d (video + the heaviest audio):\n%s", int64(peak), int64(bits/secs), m)
+	}
+}
+
+// TestRenditionNamesUnique: renditions of one group never share a NAME - untitled tracks of one language get " 2",
+// " 3" - in to-hls, the ABR and the concat masters.
+func TestRenditionNamesUnique(t *testing.T) {
+	src := reviewFixture(t, []mkv.Track{aacTrack(2, "fre"), aacTrack(3, "fre")},
+		[]mkv.Track{{ID: 4, Language: "und"}, {ID: 5, Language: "und"}, {ID: 6, Language: "und"}})
+	check := func(name, m string) {
+		t.Helper()
+		seen := map[string]bool{}
+		for _, l := range strings.Split(m, "\n") {
+			g := regexp.MustCompile(`^#EXT-X-MEDIA:TYPE=(\w+),GROUP-ID="([^"]+)",NAME="([^"]+)"`).FindStringSubmatch(l)
+			if g == nil {
+				continue
+			}
+			key := g[1] + "/" + g[2] + "/" + g[3]
+			if seen[key] {
+				t.Errorf("%s: NAME %q twice in group %s:\n%s", name, g[3], g[2], m)
+			}
+			seen[key] = true
+		}
+		if len(seen) != 5 {
+			t.Errorf("%s: %d renditions, want 5:\n%s", name, len(seen), m)
+		}
+	}
+	check("to-hls", readTextFile(t, filepath.Join(toHLS(t, src), "master.m3u8")))
+	abr := filepath.Join(t.TempDir(), "abr")
+	if err := RemuxToABR(context.Background(), []string{src, src}, abr, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	check("abr", readTextFile(t, filepath.Join(abr, "master.m3u8")))
+	cc := filepath.Join(t.TempDir(), "concat")
+	if err := RemuxConcatToHLS(context.Background(), []string{src, src}, cc, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	check("concat", readTextFile(t, filepath.Join(cc, "master.m3u8")))
 }

@@ -1140,8 +1140,9 @@ DASH MPDs - says the same of a track, from one set of helpers
   when every language is in every group - Safari and AVPlayer list only the
   variant's group, so a French AAC beside an English AC-3 stays one group `aud`
   - one variant per group whose `CODECS` names the video and that group's
-  codecs, and whose `BANDWIDTH` counts the video and that group's audio; one
-  `DEFAULT=YES` per audio group, at most one in the subtitle group. The DASH
+  codecs, and whose `BANDWIDTH` counts the video and the heaviest audio track
+  of that group; one `DEFAULT=YES` per audio group, at most one in the
+  subtitle group; every `NAME` unique in its group (" 2", " 3" on a collision). The DASH
   video Representation's `bandwidth` is the video alone.
 - Video range: `VIDEO-RANGE=PQ` or `HLG` from the transfer characteristics or
   the Dolby Vision base layer (SDR, the default, is left unsaid); the DASH

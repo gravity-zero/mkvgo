@@ -130,18 +130,18 @@ func TestManifestAccessibility(t *testing.T) {
 	ad := mkv.Track{Language: "eng", VisualImpaired: true}
 	hoh := mkv.Track{Language: "eng", HearingImpaired: true}
 	comm := mkv.Track{Language: "eng", Commentary: true}
-	if got := hlsAudioMedia(rendition{t: &ad}, 1, false, "aud", "a.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.describes-video"`) {
+	if got := hlsAudioMedia(rendition{t: &ad}, "eng", false, "aud", "a.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.describes-video"`) {
 		t.Errorf("audio description: %s", got)
 	}
-	if got := hlsAudioMedia(rendition{t: &hoh}, 1, false, "aud", "a.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.enhances-speech-intelligibility"`) {
+	if got := hlsAudioMedia(rendition{t: &hoh}, "eng", false, "aud", "a.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.enhances-speech-intelligibility"`) {
 		t.Errorf("hard of hearing audio: %s", got)
 	}
 	sdh := mkv.Track{Language: "eng", HearingImpaired: true}
-	if got := hlsSubtitleMedia(&sdh, 1, false, "s.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog,public.accessibility.describes-music-and-sound"`) {
+	if got := hlsSubtitleMedia(&sdh, "eng", false, "s.m3u8"); !strings.Contains(got, `CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog,public.accessibility.describes-music-and-sound"`) {
 		t.Errorf("SDH subtitles: %s", got)
 	}
 	forced := mkv.Track{Language: "eng", IsForced: true}
-	if got := hlsSubtitleMedia(&forced, 1, false, "s.m3u8"); !strings.Contains(got, "FORCED=YES") || strings.Contains(got, "CHARACTERISTICS") {
+	if got := hlsSubtitleMedia(&forced, "eng", false, "s.m3u8"); !strings.Contains(got, "FORCED=YES") || strings.Contains(got, "CHARACTERISTICS") {
 		t.Errorf("forced subtitles: %s", got)
 	}
 	for _, tc := range []struct {

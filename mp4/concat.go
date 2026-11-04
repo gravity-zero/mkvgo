@@ -336,9 +336,10 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 	}
 	groups := audioGroupsOf(audio)
 	defaults := groupDefaults(audio, groups)
+	names := groupNames(audio, groups)
 	for _, g := range groups {
 		for _, k := range g.members {
-			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw(fmt.Sprintf("audio%d.m3u8", k+1)))...)
+			b = append(b, hlsAudioMedia(audio[k], names[k], defaults[k], g.id, rw(fmt.Sprintf("audio%d.m3u8", k+1)))...)
 		}
 	}
 
@@ -348,9 +349,9 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		for i := range ref.subs {
 			subTracks[i] = &ref.subs[i].track
 		}
-		subDef := subtitleDefault(subTracks)
+		subDef, subNames := subtitleDefault(subTracks), subtitleNames(subTracks)
 		for i, t := range subTracks {
-			b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+			b = append(b, hlsSubtitleMedia(t, subNames[i], i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 		}
 	}
 
@@ -396,7 +397,7 @@ func buildConcatMaster(o *Options, results []*hlsResult) []byte {
 		// The parts share one track layout: each part's own tracks and this group's audio, the highest of the parts.
 		var peak, avg int64
 		for _, res := range results {
-			p, a := bandwidthOf(res.segs, groupTracks(mainAt, g, audioIdx))
+			p, a := bandwidthOf(res.segs, mainAt, groupAt(g, audioIdx))
 			peak, avg = max(peak, p), max(avg, a)
 		}
 		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg) + base

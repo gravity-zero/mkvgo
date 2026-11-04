@@ -36,10 +36,49 @@ func renditionName(t *mkv.Track, kind string, n int) string {
 	return fmt.Sprintf("%s %d", kind, n)
 }
 
-// hlsAudioMedia is the EXT-X-MEDIA line of audio rendition number n (from 1) in group, at uri.
-func hlsAudioMedia(r rendition, n int, isDefault bool, group, uri string) string {
+// uniqueNames makes each NAME of one group unique, as HLS requires: a repeated one (untitled tracks of one
+// language) gets " 2", " 3", the first keeping its own.
+func uniqueNames(names []string) []string {
+	used := map[string]bool{}
+	out := make([]string, len(names))
+	for i, n := range names {
+		name := n
+		for k := 2; used[name]; k++ {
+			name = fmt.Sprintf("%s %d", n, k)
+		}
+		used[name], out[i] = true, name
+	}
+	return out
+}
+
+// groupNames is the NAME of each audio rendition (audio index order), unique within its group.
+func groupNames(audio []rendition, groups []audioGroup) []string {
+	out := make([]string, len(audio))
+	for _, g := range groups {
+		names := make([]string, len(g.members))
+		for j, k := range g.members {
+			names[j] = renditionName(audio[k].t, "Audio", k+1)
+		}
+		for j, n := range uniqueNames(names) {
+			out[g.members[j]] = n
+		}
+	}
+	return out
+}
+
+// subtitleNames is the NAME of each subtitle rendition, unique within the "subs" group.
+func subtitleNames(tracks []*mkv.Track) []string {
+	names := make([]string, len(tracks))
+	for i, t := range tracks {
+		names[i] = renditionName(t, "Subtitles", i+1)
+	}
+	return uniqueNames(names)
+}
+
+// hlsAudioMedia is the EXT-X-MEDIA line of an audio rendition named name in group, at uri.
+func hlsAudioMedia(r rendition, name string, isDefault bool, group, uri string) string {
 	t := r.t
-	attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=%s,NAME=%s,AUTOSELECT=YES", hlsQuoted(group), hlsQuoted(renditionName(t, "Audio", n)))
+	attrs := fmt.Sprintf("TYPE=AUDIO,GROUP-ID=%s,NAME=%s,AUTOSELECT=YES", hlsQuoted(group), hlsQuoted(name))
 	if l := t.ResolvedLanguage(); l != "" {
 		attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 	}
@@ -68,9 +107,9 @@ func subtitleDefault(tracks []*mkv.Track) int {
 	return -1
 }
 
-// hlsSubtitleMedia is the EXT-X-MEDIA line of subtitle rendition number n (from 1), group "subs", at uri.
-func hlsSubtitleMedia(t *mkv.Track, n int, isDefault bool, uri string) string {
-	attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(renditionName(t, "Subtitles", n)))
+// hlsSubtitleMedia is the EXT-X-MEDIA line of a subtitle rendition named name, group "subs", at uri.
+func hlsSubtitleMedia(t *mkv.Track, name string, isDefault bool, uri string) string {
+	attrs := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%s,AUTOSELECT=YES", hlsQuoted(name))
 	if l := t.ResolvedLanguage(); l != "" {
 		attrs += fmt.Sprintf(",LANGUAGE=%s", hlsQuoted(l))
 	}
@@ -360,19 +399,27 @@ func dashRoles(t *mkv.Track, text bool, indent string) string {
 	return b.String()
 }
 
-// bandwidthOf is the peak and average bit rate of the tracks at idx (fts indexes) over segs, from each segment's
-// bytes per track; the whole segment's when those are unknown (a Matroska plan's estimate from the source).
-func bandwidthOf(segs []segInfo, idx []int) (peak, avg int64) {
+// bandwidthOf is the peak and average bit rate over segs of the tracks at main (fts indexes) and the heaviest, in each
+// segment, of the tracks at alts - a variant's audio group, of which a player plays one at a time - from each
+// segment's bytes per track; the whole segment's when those are unknown (a Matroska plan's estimate).
+func bandwidthOf(segs []segInfo, main, alts []int) (peak, avg int64) {
 	var p, bits, secs float64
 	for _, s := range segs {
 		b := s.bytes
 		if s.perTrack != nil {
 			b = 0
-			for _, i := range idx {
+			for _, i := range main {
 				if i >= 0 && i < len(s.perTrack) {
 					b += s.perTrack[i]
 				}
 			}
+			var heaviest int64
+			for _, i := range alts {
+				if i >= 0 && i < len(s.perTrack) {
+					heaviest = max(heaviest, s.perTrack[i])
+				}
+			}
+			b += heaviest
 		}
 		if s.durSec > 0 {
 			p = max(p, float64(b)*8/s.durSec)
@@ -386,12 +433,11 @@ func bandwidthOf(segs []segInfo, idx []int) (peak, avg int64) {
 	return int64(p), int64(bits / secs)
 }
 
-// groupTracks is the fts indexes of a variant: its own tracks (main) and its audio group's members (at maps a
-// rendition to its fts index).
-func groupTracks(main []int, g audioGroup, at []int) []int {
-	idx := append([]int{}, main...)
-	for _, k := range g.members {
-		idx = append(idx, at[k])
+// groupAt is the fts indexes of a group's members (at maps a rendition to its fts index).
+func groupAt(g audioGroup, at []int) []int {
+	idx := make([]int, len(g.members))
+	for j, k := range g.members {
+		idx[j] = at[k]
 	}
 	return idx
 }
@@ -399,6 +445,6 @@ func groupTracks(main []int, g audioGroup, at []int) []int {
 // videoBandwidth is the peak bit rate of the video rendition alone, what its DASH Representation announces (the
 // audio has AdaptationSets of its own); the whole segments' when the bytes per track are unknown.
 func videoBandwidth(segs []segInfo, fts []*fragTrack) int64 {
-	peak, _ := bandwidthOf(segs, []int{slices.Index(fts, pickVideoFrag(fts))})
+	peak, _ := bandwidthOf(segs, []int{slices.Index(fts, pickVideoFrag(fts))}, nil)
 	return peak
 }

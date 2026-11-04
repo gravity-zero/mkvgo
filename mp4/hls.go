@@ -1261,18 +1261,19 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	}
 	groups := audioGroupsOf(audio)
 	defaults := groupDefaults(audio, groups)
+	names := groupNames(audio, groups)
 	for _, g := range groups {
 		for _, k := range g.members {
-			b = append(b, hlsAudioMedia(audio[k], k+1, defaults[k], g.id, rw(renditionPlaylist(fts, audioAt[k])))...)
+			b = append(b, hlsAudioMedia(audio[k], names[k], defaults[k], g.id, rw(renditionPlaylist(fts, audioAt[k])))...)
 		}
 	}
 	subTracks := make([]*mkv.Track, len(subs))
 	for i := range subs {
 		subTracks[i] = &subs[i].track
 	}
-	subDef := subtitleDefault(subTracks)
+	subDef, subNames := subtitleDefault(subTracks), subtitleNames(subTracks)
 	for i, t := range subTracks {
-		b = append(b, hlsSubtitleMedia(t, i+1, i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
+		b = append(b, hlsSubtitleMedia(t, subNames[i], i == subDef, rw(fmt.Sprintf("sub%d.m3u8", i+1)))...)
 	}
 
 	video := ""
@@ -1291,7 +1292,7 @@ func buildMasterPlaylist(o *Options, fts []*fragTrack, subs []hlsSubTrack, segs 
 	}
 	for _, g := range variants {
 		// Peak and average over the media segments of what this variant plays: its own tracks and its audio group.
-		peak, avg := bandwidthOf(segs, groupTracks(mainAt, g, audioAt))
+		peak, avg := bandwidthOf(segs, mainAt, groupAt(g, audioAt))
 		inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d", peak, avg) + video
 		if codecs := joinCodecs(main, g.codec, g.id != ""); codecs != "" {
 			inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
