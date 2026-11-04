@@ -15,27 +15,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	var filtered []string
-	for _, a := range os.Args[1:] {
-		switch a {
-		case "-json", "--json":
-			commands.JsonOutput = true
-		case "-in-band", "--in-band":
-			commands.InBand = true
-		case "-fps-reads", "--fps-reads":
-			commands.FrameRateReads = true
-		case "-f", "--force", "-force":
-			commands.Force = true
-		case "--sync", "-sync":
-			commands.SyncOutput = true
-		case "--exit-damaged", "-exit-damaged":
-			commands.ExitDamaged = true
-		case "--version", "-version":
-			fmt.Printf("mkvgo %s\n", version)
-			os.Exit(0)
-		default:
-			filtered = append(filtered, a)
-		}
+	filtered, showVersion := commands.TakeGlobalFlags(os.Args[1:])
+	if showVersion {
+		fmt.Printf("mkvgo %s\n", version)
+		os.Exit(0)
 	}
 	if len(filtered) == 0 || filtered[0] == "--help" || filtered[0] == "-h" {
 		usage()
@@ -53,26 +36,19 @@ func main() {
 
 	switch cmd {
 	case "info":
-		commands.RequireArgs(args, 1, commands.CmdUsage["info"])
-		commands.CmdInfo(args[0])
+		commands.CmdInfo(commands.SourceArg("info", args))
 	case "tracks":
-		commands.RequireArgs(args, 1, commands.CmdUsage["tracks"])
-		commands.CmdTracks(args[0])
+		commands.CmdTracks(commands.SourceArg("tracks", args))
 	case "chapters":
-		commands.RequireArgs(args, 1, commands.CmdUsage["chapters"])
-		commands.CmdChapters(args[0])
+		commands.CmdChapters(commands.SourceArg("chapters", args))
 	case "attachments":
-		commands.RequireArgs(args, 1, commands.CmdUsage["attachments"])
-		commands.CmdAttachments(args[0])
+		commands.CmdAttachments(commands.SourceArg("attachments", args))
 	case "tags":
-		commands.RequireArgs(args, 1, commands.CmdUsage["tags"])
-		commands.CmdTags(args[0])
+		commands.CmdTags(commands.SourceArg("tags", args))
 	case "probe":
-		commands.RequireArgs(args, 1, commands.CmdUsage["probe"])
-		commands.CmdProbe(args[0])
+		commands.CmdProbe(commands.SourceArg("probe", args))
 	case "keyframes":
-		commands.RequireArgs(args, 1, commands.CmdUsage["keyframes"])
-		commands.CmdKeyframes(args[0])
+		commands.CmdKeyframes(commands.SourceArg("keyframes", args))
 	case "to-vtt":
 		commands.CmdToVTT(args)
 	case "demux":

@@ -71,6 +71,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   `add-track`, `merge-subtitle`, `extract-subtitle`, `subtitle-index` and
   `extract-attachment` read flags placed before the source (`demux --raw f.mkv`
   opened a file named `--raw`).
+- CLI: `info`, `probe`, `tracks`, `chapters`, `attachments`, `keyframes` and
+  `tags` refuse an unknown flag with exit 2, before or after the file (it was
+  opened as a file before it, ignored after it); global flags stay accepted
+  anywhere.
 
 ## [0.63.0] - 2026-11-02
 

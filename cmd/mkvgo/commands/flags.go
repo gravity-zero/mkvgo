@@ -74,6 +74,39 @@ func (c *cliFlags) ParseSource(args []string, usage string) (string, []string) {
 	return ops[0], ops[1:]
 }
 
+// TakeGlobalFlags sets the flags every command takes, wherever they stand (--json, --exit-damaged, --force...), and
+// returns the other arguments; version reports --version.
+func TakeGlobalFlags(args []string) (rest []string, version bool) {
+	for _, a := range args {
+		switch a {
+		case "-json", "--json":
+			JsonOutput = true
+		case "-in-band", "--in-band":
+			InBand = true
+		case "-fps-reads", "--fps-reads":
+			FrameRateReads = true
+		case "-f", "--force", "-force":
+			Force = true
+		case "--sync", "-sync":
+			SyncOutput = true
+		case "--exit-damaged", "-exit-damaged":
+			ExitDamaged = true
+		case "--version", "-version":
+			version = true
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest, version
+}
+
+// SourceArg is the source of a command that takes it alone (info, probe, tracks...): an unknown flag, before or
+// after it, exits 2 as unknown, as every command's does, instead of naming a file or going unread.
+func SourceArg(cmd string, args []string) string {
+	source, _ := newFlags(cmd).ParseSource(args, CmdUsage[cmd])
+	return source
+}
+
 // ParseKnown is Parse leaving unknown flags among the operands, for a command
 // that hands them to another parser (serve and the shared HLS flags).
 func (c *cliFlags) ParseKnown(args []string) []string {
