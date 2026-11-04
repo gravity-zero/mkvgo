@@ -11,160 +11,62 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Breaking
 
-- JSON (CLI `-json` and the WASM results): an empty list is `[]` and an
-  empty map `{}`, where some reports gave `null` (`findings`,
-  `damaged_ranges`, `repaired_ranges`, a Container's `chapters` and
-  `attachments`, the `chapters`, `validate` and `compare` reports of a file
-  with none); an optional section is still left out. A jq `.findings[]` or a
-  JS `.map` no longer meets a null; a check for `=== null` must test the
-  length. The Go API is unchanged (a nil slice stays nil).
-- JSON keys: a cue point (`cues[]` in a Container's JSON) carries
-  `time_ms`, `track`, `cluster_pos`, `relative_pos`, and a dropped track
-  (`dropped_tracks[]`, CLI `probe --json` and the WASM remux results) `id`,
-  `type`, `codec`, `reason`; they were the Go field names (`TimeMs`, `ID`,
-  ...), the only CamelCase keys left. A test holds every Container key to
-  snake_case.
-- `Diagnose`: a Segment that declares no size (a streamed write) is a note in
-  the new `Diagnosis.Notes`, no longer a finding: such a file is `Healthy` and
-  `diagnose` exits 0. The `streamed-size` kind and its remedy are unchanged.
-- `--exit-damaged` also applies to the commands that read: `info` and `probe`
-  on a local file cut short, `track-ends` on one cut short (now said on
-  stderr) or whose walk passed over damage, `salvage --dry-run` that maps
-  damage or a missing tail, and `diagnose` with a `truncated`, `damaged` or
-  `sample-table` finding, where 3 replaces its 1. Without the flag nothing
-  changes. `probe` prints `Truncated` in its text output too.
-- Bytes served: to-mp4, to-hls, the on-demand plan and the ABR/DASH packaging
-  announce an AAC, AC-3 or E-AC-3 track's channel count from its stream (the
-  AudioSpecificConfig, the first frame header) where the Matroska container
-  states another: the AudioSampleEntry's `channelcount`, the HLS `CHANNELS`
-  attribute and the DASH `AudioChannelConfiguration` now agree with the
-  decoder configuration of the same init (a 5.1 stream declared 2 by its
-  container was announced 2); an AAC config saying mono without signalling
-  PS keeps a container's 2, an implicit PS decoding as stereo. Inits and
-  playlists of such sources change; a
-  cache keyed on them is stale. The packaging reads one block more per AC-3
-  or E-AC-3 track at open.
-- `demux` writes each track as the file its codec's tools read: AAC as ADTS,
-  H.264 / HEVC as Annex-B with the parameter sets ahead of every keyframe,
-  Opus and Vorbis in Ogg (`.opus`, `.ogg`, was `.vorbis`), FLAC with its
-  STREAMINFO, PGS as `.sup` (was `.hdmv_pgs_subtitle`); they were the bare
-  stored payloads, which no tool reads. `DemuxOptions.Raw` / `--raw` keeps
-  the old output.
-- Bytes served, HLS masters (`to-hls`, the plan, ABR, concat,
-  `HLSFromCMAF`): audio tracks of different codecs form one group each
-  (`aud-<codec>`) with one variant per group when every language is in every
-  group (a player lists only its variant's group); otherwise one group `aud`
-  keeps them all, its variant's `CODECS` naming each codec once. One
-  `DEFAULT=YES` per audio group and at most one in the subtitle group (every
-  track without FlagDefault read as default gave several); every `NAME` unique
-  in its group (untitled tracks of one language get " 2", " 3"). Each
-  variant's `BANDWIDTH` / `AVERAGE-BANDWIDTH` counts its video and the
-  heaviest audio track of its group, the one a player may pick (was every
-  audio track's); the DASH video Representation's `bandwidth` its video alone
-  (was the audio too). See Added for the new attributes.
-- Bytes served: an E-AC-3 track's `dec3` lists the dependent substreams of
-  its first programme and their channel locations (a 7.1, a 5.1 and the rear
-  pair, was announced 6), and one whose access units open with an AC-3 core
-  takes that core's fscod, bsid, bsmod, acmod and lfeon where AC-3 puts them
-  (they were read as E-AC-3 fields).
-- Bytes served: the HLS `CHANNELS` and DASH `AudioChannelConfiguration` of
-  an AC-3, E-AC-3 or AAC track come from the sample entry the init carries,
-  also for a track whose first block lies past the in-band read's wait (they
-  fell back on the container's count there, the init saying another).
+- JSON (CLI `-json`, WASM): an empty list is `[]` and an empty map `{}`, never
+  `null`; the `cues[]` and `dropped_tracks[]` keys are snake_case
+  (`time_ms`, `cluster_pos`, `id`, `reason`...). The Go API is unchanged.
+- `Diagnose`: a Segment of unknown size (a streamed write) is a note in
+  `Diagnosis.Notes`, no longer a finding; such a file is healthy.
+- `--exit-damaged` also covers `info`, `probe`, `track-ends`,
+  `salvage --dry-run` and `diagnose` (3 replaces its 1 on damage).
+- `demux` writes each track as its codec's file (ADTS, Annex-B, Ogg, FLAC,
+  `.sup`); `--raw` / `DemuxOptions.Raw` keeps the old bare payloads. See
+  [cli.md](docs/cli.md#demux).
+- Bytes served (inits, playlists, MPD): a cache keyed on them is stale.
+  - Audio channels come from the stream (the AudioSpecificConfig, the AC-3 /
+    E-AC-3 frame header, the init's sample entry), not the container; an
+    E-AC-3 `dec3` lists its dependent substreams (a 7.1 says 8) and reads an
+    AC-3 core as AC-3.
+  - HLS masters: one audio group per codec when every language is in each,
+    else one group; one `DEFAULT=YES` per group; unique `NAME`s; each
+    variant's `BANDWIDTH` is its video and its group's heaviest audio track,
+    the DASH video `bandwidth` the video alone. See
+    [library.md](docs/library.md) (manifests).
 
 ### Added
 
-- `SourceCutShort` / `CutShortOf` (ops and the `matroska` facade): whether a
-  Matroska or MP4 source stops before the end it declares, head-only; the
-  CLI's `truncated` object, now also in the WASM probe result.
-- `Finding.Scope` (`head`, `body`, `tail`): where a defect of the file's
-  bytes lies, so a `damaged` finding says whether media is lost in the middle.
-  The Finding kinds are constants (`mkv.Finding*`, `FindingKinds()`, also in
-  the `matroska` facade); every documented list now names all 16.
-- `undeclared-compression` and `unsized-laced-audio` findings set `Track`.
-- `BlockReader.StoppedShort`: the walk ended because the source stops inside
-  an element.
-- Manifests: `VIDEO-RANGE` (PQ, HLG) and `SUPPLEMENTAL-CODECS` (Dolby Vision
-  8.x / 10.x) in HLS, the CICP colour properties in DASH; `CHARACTERISTICS`
-  (HLS) and `Accessibility` / `Role` (DASH) from the disposition flags; Dolby
-  Atmos (E-AC-3 JOC) read from the stream, carried in the `dec3` and announced
-  (`CHANNELS="16/JOC"`, the DASH `EC3_ExtensionType` property). One set of
-  helpers serves every HLS and DASH writer.
-- Block additions: `Block.Additions` reads a BlockGroup's `BlockAdditions`
-  (VP8/VP9 alpha, ITU-T T.35 / HDR10+, WebVTT cue settings), every rewrite
-  writes them back (the block a BlockGroup), with the track's
-  `BlockAdditionMappings`; `Track.HDR10Plus` from a T.35 mapping or, in-band,
-  the additions. WebVTT cue settings reach the converted WebVTT and the native
-  `wvtt` sample (`sttg`, `iden`). They were dropped by every rewrite. MP4 has
-  no standard carriage for a VP9 alpha plane or VP9 HDR10+: not carried there.
-- DASH trick play: `manifest.mpd` (to-hls and the on-demand plan) carries a
-  DASH-IF trick-mode AdaptationSet over the I-frame fragments `iframe.m3u8`
-  already lists, one per segment (`maxPlayoutRate`, `codingDependency="false"`),
-  the video set taking `id="1"`; none under `NoIFrames` or encryption, nor in a
-  full pass where a segment does not open on a keyframe.
+- `SourceCutShort` / `CutShortOf`: whether a source stops before its declared
+  end, head-only (also the WASM probe's `truncated`).
+- `Finding.Scope` (`head`, `body`, `tail`), the `mkv.Finding*` kind constants
+  and `FindingKinds()`; `Track` on two more findings.
+- `BlockReader.StoppedShort`, `TrackEndsReport.StoppedShort`.
+- Manifests: `VIDEO-RANGE`, `SUPPLEMENTAL-CODECS` (Dolby Vision), CICP
+  properties, `CHARACTERISTICS` / `Role` / `Accessibility`, Dolby Atmos (JOC)
+  and a DASH trick-mode set over the I-frame fragments.
+- Block additions: `Block.Additions`, `Track.BlockAdditionMappings`,
+  `Track.HDR10Plus`; every rewrite keeps them, WebVTT cue settings reach the
+  converted WebVTT and `wvtt`.
 
 ### Changed
 
-- Refusals carry the sentinel of their condition, for `errors.Is`:
-  `ErrNoKeyframeIndex` (PlanHLS without Cues or without a video cue, Split
-  every N without keyframes, ExtractKeyframeSample), `ErrNoVideo`
-  (ExtractKeyframeSample, RecommendLadderFor, PlanConcat), `ErrSourceTruncated`
-  (PlanHLS on a file ending before its first cued cluster, Analyze on a file
-  cut inside a block), `ErrDamagedRegion` (Salvage past its resync scan),
-  `ErrSourceChanged` (an I-frame that no longer matches its plan). The first
-  two now live in `mkv` (the `ops` and `matroska` names are the same values).
-  The messages change wording: match on the sentinels, not the text.
+- Refusals carry their sentinel for `errors.Is` (`ErrNoKeyframeIndex`,
+  `ErrNoVideo`, `ErrSourceTruncated`, `ErrDamagedRegion`, `ErrSourceChanged`);
+  the messages change wording, match the sentinels.
 
 ### Fixed
 
-- The commands that read the whole file from a local disk (`cue-health`,
-  `track-ends`, `diagnose`, `validate`, `verify`, `hash`, `compare -blocks`,
-  `salvage`) refuse an http(s)/s3:// source with exit 2 and the commands
-  that take one (was a bare "no such file" open error).
-- Docs: the `-json` command list (`verify` has a JSON report, `hash` does
-  not), the jq examples (snake_case keys), `validate` on non-video cues,
-  the remote-capable commands, `diagnose`'s JSON keys and its MP4 usage,
-  `CompareContainers`, `TrackEndsReport.SkippedBytes`, the TypeScript
-  disposition flags; a test now holds the `-json` list and the jq keys to
-  the code, and the usage lines come from one table.
-- On a file cut short: `Analyze` adds a warning that its stats cover what
-  arrived (MKV and MP4; an MP4's totals were silent); `Validate` reports the
-  cue points naming clusters past the end as `cues-past-end` (was
-  `cues-stale` with a reindex remedy); a `CueHealth` verdict's reason names
-  the cut and the re-download before any reindex.
-- `Diagnose` reports a file cut exactly between two clusters as `truncated`
-  (it said `healthy`, with `missing_tail_bytes` set in the same report); the
-  declared Segment size alone decides it.
-- A file cut inside a block: `TrackEnds.SkippedBytes` no longer counts the cut
-  tail, so `Diagnose` stops reporting it as damage with media behind it.
-- A Matroska whose Segment declares no size (a streamed write) and that stops
-  inside a block: `Fingerprint` refuses it with `ErrSourceTruncated` (was a
-  bare "unexpected EOF"), and to-mp4 / to-hls report the cut through
-  `OnTruncated` (they were silent). Such a Segment whole and followed by
-  bytes that are no Matroska element (an ID3 tag, a Void running past the
-  end) is not cut: only an end inside a sized Cluster, a block or a
-  top-level element counts.
-- A Matroska whose Segment declares no size and that stops inside a block:
-  `Diagnose` reports it `truncated` (tail) and `track-ends` warns of the cut
-  and exits 3 under `--exit-damaged` (both took it for whole since the cut
-  tail stopped counting as damage); `TrackEndsReport.StoppedShort` says so.
-- `Diagnose` with `DeepVerify` on a Segment of unknown size: the Segment runs
-  to the end of the file, so its damaged regions are reported (the whole file
-  was counted as trailing junk and its body damage dropped).
-- Cue points naming positions past the end of a file that holds its whole
-  Segment are a corrupt index, not a cut: `Validate` reports them as
-  `cues-stale` with a reindex (was `cues-past-end`, "re-download"), and
-  `PlanHLS` refuses with `ErrNoKeyframeIndex` (was `ErrSourceTruncated`). A
-  video cue among them no longer leaves `cues-non-video` saying every cue
-  references a non-video track.
-- MP4: `info`, `probe`, `SourceCutShort` and `mp4.DeclaredSize` walk every
-  top-level box as `Diagnose` does, so a fragmented file cut short is said
-  cut by both (past 16 boxes they left it unjudged while `Diagnose` said
-  `truncated`).
-- Manifests: a Dolby Vision track carried in a Dolby sample entry (`dvh1`,
-  `dav1`, `dva1`: a base layer that is not cross-compatible, profile 5 or 7)
-  is named so in HLS `CODECS` and DASH `codecs`, `dvh1.PP.LL` (was the plain
-  `hvc1`/`av01`/`avc1` string, a codec the init does not carry).
+- Cut and damaged files: `Diagnose` says `truncated` for a file cut between
+  clusters, or one of unknown size cut inside a block; a cut tail is no longer
+  damage; trailing tags or Voids after a streamed Segment are not a cut;
+  `DeepVerify` on a streamed Segment reports its body damage; `Analyze`,
+  `Validate` and `CueHealth` name the cut.
+- Cue points past the end of a complete file are a corrupt index to reindex
+  (`cues-stale`, `ErrNoKeyframeIndex`), not a cut source.
+- MP4: `DeclaredSize`, `info` and `probe` walk every top-level box, as
+  `Diagnose` does.
+- A Dolby Vision track in a Dolby sample entry is named `dvh1.PP.LL` (`dav1`,
+  `dva1`) in `CODECS`.
+- Commands that read a whole local file refuse an http(s)/s3:// source with
+  exit 2; documented JSON keys and `-json` list held to the code by a test.
 
 ## [0.63.0] - 2026-11-02
 
