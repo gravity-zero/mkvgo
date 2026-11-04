@@ -31,6 +31,15 @@ its series' file in [changelog/](changelog/) when a newer one ships.
     variant's `BANDWIDTH` is its video and its group's heaviest audio track,
     the DASH video `bandwidth` the video alone. See
     [library.md](docs/library.md) (manifests).
+  - New manifest attributes and elements (see Added): `VIDEO-RANGE`,
+    `SUPPLEMENTAL-CODECS`, the CICP properties, `CHARACTERISTICS`, `Role` and
+    `Accessibility`, Atmos (`CHANNELS="16/JOC"`, the `EC3_ExtensionType`
+    property, the `dec3` extension), and the DASH trick-mode AdaptationSet
+    (the video set gaining `id="1"`).
+  - A Dolby Vision track in a Dolby sample entry is named `dvh1.PP.LL`
+    (`dav1`, `dva1`) in `CODECS` / `codecs` (see Fixed).
+  - An integrator caching masters, MPDs or inits built by an earlier version
+    must rebuild them.
 
 ### Added
 
