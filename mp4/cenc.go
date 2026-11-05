@@ -561,12 +561,16 @@ func cbcsEncryptWholeSample(block cipher.Block, iv []byte, sample []byte) {
 // as segmentWindow/segmentTrack lay them out; samples' srcOff values are what
 // the per-sample 'cenc' IV derives from (see this file's doc comment).
 func prepareCENCSegment(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64, samples []fragSample, data []byte) (*cencTrafData, []byte, error) {
+	return prepareCENCSegmentInPlace(c, isVideo, codec, private, trackID, samples, append([]byte(nil), data...))
+}
+
+// prepareCENCSegmentInPlace is prepareCENCSegment encrypting data itself, for a caller that owns it.
+func prepareCENCSegmentInPlace(c *CENCOptions, isVideo bool, codec string, private []byte, trackID uint64, samples []fragSample, out []byte) (*cencTrafData, []byte, error) {
 	k, err := newCENCCipher(c, isVideo, codec, private, trackID)
 	if err != nil {
 		return nil, nil, err
 	}
-	out := append([]byte(nil), data...)
-	td := &cencTrafData{hasSubsample: isVideo}
+	td := &cencTrafData{hasSubsample: isVideo, entries: make([]sencEntry, 0, len(samples))}
 	pos := 0
 	for i := range samples {
 		size := int(samples[i].size)

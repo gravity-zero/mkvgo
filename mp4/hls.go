@@ -890,6 +890,22 @@ func iframeSegment(seg trackSegment) trackSegment {
 	return one
 }
 
+// writeHeadAndData writes a segment file from its head and its media, without joining them first.
+func writeHeadAndData(fs *mkv.FS, path string, head, data []byte) error {
+	out, err := fs.DoCreate(path)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(head)
+	if err == nil {
+		_, err = out.Write(data)
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 // writeSegments writes each rendition's .m4s per boundary interval and returns
 // the per-boundary aggregate duration/bytes (across renditions) plus the
 // video I-frame references, for the playlists.
@@ -928,11 +944,11 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				// samples themselves), computed here - the same "know the size
 				// before the size is needed" two-pass principle buildMoof
 				// already applies to trun's data_offset.
-				plain, err := media[i].read(seg.samples, from, seg.dataLen)
+				plain, err := media[i].readReused(seg.samples, from, seg.dataLen)
 				if err != nil {
 					return nil, nil, err
 				}
-				td, cipher, err := prepareCENCSegment(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.CodecPrivate, ft.outTrack.mkv.ID, seg.samples, plain)
+				td, cipher, err := prepareCENCSegmentInPlace(o.CENC, ft.outTrack.spec.video, ft.outTrack.mkv.Codec, ft.outTrack.mkv.CodecPrivate, ft.outTrack.mkv.ID, seg.samples, plain)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -966,13 +982,10 @@ func writeSegments(ctx context.Context, o *Options, fs *mkv.FS, dir string, fts 
 				}
 				fileBytes = int64(len(enc))
 			case o.CENC != nil:
-				out := make([]byte, 0, int64(len(head))+int64(len(cipherData)))
-				out = append(out, head...)
-				out = append(out, cipherData...)
-				if err := fs.DoWriteFile(filepath.Join(dir, renditionSegment(fts, i, k)), out, 0o644); err != nil {
+				if err := writeHeadAndData(fs, filepath.Join(dir, renditionSegment(fts, i, k)), head, cipherData); err != nil {
 					return nil, nil, err
 				}
-				fileBytes = int64(len(out))
+				fileBytes = int64(len(head)) + int64(len(cipherData))
 			default:
 				lead, samples, at, rest := head, seg.samples, from, seg.dataLen
 				var key []byte // the keyframe, read once for the segment and its I-frame fragment

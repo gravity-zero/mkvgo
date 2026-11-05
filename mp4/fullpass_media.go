@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 )
@@ -79,7 +80,8 @@ type trackMedia struct {
 	prefix []byte
 	offs   []int64
 	buf    []byte
-	wipe   bool // the bytes are an encrypted segment's plaintext: pooled buffers go back zeroed
+	wipe   bool   // the bytes are an encrypted segment's plaintext: pooled buffers go back zeroed
+	seg    []byte // readReused's buffer, kept from segment to segment
 }
 
 // openTrackMedia opens each track's sample bytes; src is the direct source, nil when every track has a temp file.
@@ -253,6 +255,54 @@ func (c *directCopier) flush() error {
 	}
 	c.used = 0
 	return err
+}
+
+// readReused is read into a buffer the track keeps for its next segment: the bytes are the caller's until then.
+func (m *trackMedia) readReused(samples []fragSample, from int, dataLen int64) ([]byte, error) {
+	if err := segmentFits(dataLen); err != nil {
+		return nil, err
+	}
+	if int64(cap(m.seg)) < dataLen+1 { // the spare byte lets ReadFrom see the end of its run without growing
+		m.seg = make([]byte, 0, max(dataLen+1, 2*int64(cap(m.seg))))
+	}
+	if m.tmp != nil {
+		b := m.seg[:dataLen]
+		if _, err := io.ReadFull(m.tmp, b); err != nil {
+			return nil, errf("read segment media: %w", err)
+		}
+		return b, nil
+	}
+	w := &segmentBuffer{b: m.seg[:0]}
+	if err := m.write(w, nil, samples, from, dataLen); err != nil {
+		return nil, err
+	}
+	m.seg = w.b[:0]
+	return w.b, nil
+}
+
+// segmentBuffer collects a segment's bytes into b, its capacity sized beforehand; ReadFrom fills it in place.
+type segmentBuffer struct{ b []byte }
+
+func (s *segmentBuffer) Write(p []byte) (int, error) {
+	s.b = append(s.b, p...)
+	return len(p), nil
+}
+
+func (s *segmentBuffer) ReadFrom(r io.Reader) (int64, error) {
+	var n int64
+	for {
+		if len(s.b) == cap(s.b) {
+			s.b = slices.Grow(s.b, 64<<10)
+		}
+		m, err := r.Read(s.b[len(s.b):cap(s.b)])
+		s.b, n = s.b[:len(s.b)+m], n+int64(m)
+		if errors.Is(err, io.EOF) {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
+		}
+	}
 }
 
 // read returns the dataLen bytes of the track's samples from index from on.
