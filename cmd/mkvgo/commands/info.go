@@ -7,10 +7,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-// sourceCutShort reports whether path stops before the end it declares; nil for a whole file, stdin, or a size that
-// cannot be read.
+// sourceCutShort reports whether path stops before the end it declares; nil for a whole file, stdin, a size that
+// cannot be read, or a remote source: the check walks a fragmented MP4's every box, a request each.
 func sourceCutShort(path string) *matroska.CutShort {
-	if path == "-" {
+	if path == "-" || isRemoteURL(path) {
 		return nil
 	}
 	var opts []matroska.Options
@@ -169,10 +169,7 @@ func CmdTags(path string) {
 
 func CmdProbe(path string) {
 	c, dropped := loadContainer(path, true)
-	var cut *matroska.CutShort
-	if !isRemoteURL(path) { // a remote probe keeps its request budget: no stat for the cut
-		cut = sourceCutShort(path)
-	}
+	cut := sourceCutShort(path)
 	if cut != nil {
 		noteDamage()
 	}
