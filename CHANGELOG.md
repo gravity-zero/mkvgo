@@ -11,8 +11,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Security
 
-- A BlockAdditional of unknown size crashed every walk of the file (demux,
-  remux, HLS plan, `info -in-band`); it is refused as damage, and so is a
+- A BlockAdditional of unknown size crashed demux, remux, the HLS plan and
+  `info -in-band` on the file; it is refused as damage, and so is a
   BlockMore or BlockAdditions of unknown size and a BlockGroup with more than
   64 BlockMore or 16 MiB of additions. Upgrade.
 - WebVTT: a cue's settings or identifier taken from its BlockAddition could end
