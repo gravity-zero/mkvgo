@@ -204,8 +204,13 @@ func TestFileToWebVTT_RefusesInputWithNoCue(t *testing.T) {
 func TestWebVTTAdditionCannotTimeAnotherCue(t *testing.T) {
 	adds := []mkv.BlockAddition{{ID: 1, Data: []byte("line:0\r\r00:00:00.000 --> 99:59:59.000\rX\nid\r--> 1")}}
 	settings, id := WebVTTAddition(adds)
-	if settings != "line:0" || id != "id" {
-		t.Errorf("settings %q, id %q; want \"line:0\" and \"id\"", settings, id)
+	if settings != "line:0" || id != "" { // its second line is the empty one between the two CRs
+		t.Errorf("settings %q, id %q; want \"line:0\" and none", settings, id)
+	}
+	for _, data := range []string{"line:0\rid", "line:0\r\nid\r\nNOTE c", "line:0\nid"} { // CR, CRLF and LF all end a line
+		if s, i := WebVTTAddition([]mkv.BlockAddition{{ID: 1, Data: []byte(data)}}); s != "line:0" || i != "id" {
+			t.Errorf("%q: settings %q, id %q; want \"line:0\" and \"id\"", data, s, i)
+		}
 	}
 	var buf bytes.Buffer
 	cues := []Cue{{StartMs: 0, EndMs: 1000, Settings: settings, Text: "a"}, {StartMs: 1000, EndMs: 2000, Settings: "align:start\r\r00:00:00.000 --> 99:00:00.000", Text: "b"}}

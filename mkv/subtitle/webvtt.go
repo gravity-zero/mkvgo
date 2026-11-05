@@ -35,7 +35,7 @@ func WebVTTAddition(adds []mkv.BlockAddition) (settings, id string) {
 		if a.ID != 1 {
 			continue
 		}
-		lines := strings.SplitN(string(a.Data), "\n", 3)
+		lines := strings.SplitN(strings.ReplaceAll(strings.ReplaceAll(string(a.Data), "\r\n", "\n"), "\r", "\n"), "\n", 3) // CR, LF and CRLF all end a line
 		settings = vttLine(lines[0])
 		if len(lines) > 1 {
 			id = vttLine(lines[1])
