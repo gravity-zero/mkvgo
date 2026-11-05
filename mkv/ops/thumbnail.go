@@ -159,7 +159,7 @@ func annexBFromLengthPrefixed(data []byte, lenSize int) ([]byte, error) {
 			n = n<<8 | int(data[pos+i])
 		}
 		pos += lenSize
-		if n <= 0 || pos+n > len(data) {
+		if n <= 0 || n > len(data)-pos { // pos+n wraps on 32-bit
 			return nil, fmt.Errorf("NAL size %d out of bounds at %d", n, pos)
 		}
 		out = append(out, 0, 0, 0, 1)
