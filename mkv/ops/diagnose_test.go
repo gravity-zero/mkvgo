@@ -416,3 +416,22 @@ func TestDiagnoseDeepVerifyStreamed(t *testing.T) {
 		t.Errorf("a Segment of unknown size has no trailing junk: %+v", d.Findings)
 	}
 }
+
+// TestDiagnoseDeepVerifyStreamedCut: the symmetric case of TestDiagnoseDeepVerifyStreamed - a Segment of unknown size
+// cut inside a block under DeepVerify reported its cut tail as body damage, not as a truncation.
+func TestDiagnoseDeepVerifyStreamedCut(t *testing.T) {
+	dir := t.TempDir()
+	data, _ := streamedFixture(t, dir)
+	cut := filepath.Join(dir, "cut.mkv")
+	writeAll(t, cut, data[:len(data)-50])
+	d, err := Diagnose(context.Background(), cut, mkv.Options{DeepVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := hasFinding(d, mkv.FindingTruncated); d.Healthy || f == nil || f.Scope != mkv.ScopeTail {
+		t.Errorf("streamed file cut in a block under DeepVerify: healthy %v, findings %+v; want truncated at the tail", d.Healthy, d.Findings)
+	}
+	if hasFinding(d, mkv.FindingDamaged) != nil {
+		t.Errorf("the cut tail is reported as damage too: %+v", d.Findings)
+	}
+}

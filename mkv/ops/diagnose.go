@@ -144,14 +144,15 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		}
 		d.TrackEnds = ends
 	}
+	// No declared size to compare with: the walk stopping inside the media is the cut.
+	unsizedCut := Finding{
+		Kind:   mkv.FindingTruncated,
+		Scope:  mkv.ScopeTail,
+		Detail: fmt.Sprintf("the source stops inside its media: %d bytes present of a Segment that declares no size, a repair recovers the playable prefix only", size),
+		Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
+	}
 	if ends := d.TrackEnds; !known && ends != nil && ends.StoppedShort {
-		// No declared size to compare with: the walk stopping inside the media is the cut.
-		d.Findings = append(d.Findings, Finding{
-			Kind:   mkv.FindingTruncated,
-			Scope:  mkv.ScopeTail,
-			Detail: fmt.Sprintf("the source stops inside its media: %d bytes present of a Segment that declares no size, a repair recovers the playable prefix only", size),
-			Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
-		})
+		d.Findings = append(d.Findings, unsizedCut)
 	}
 	if ends := d.TrackEnds; ends != nil && ends.SkippedBytes > 0 {
 		d.Findings = append(d.Findings, Finding{
@@ -285,15 +286,24 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 					midBytes += r.EndOffset - r.StartOffset
 				}
 			}
+			var cut *Finding
 			switch {
 			case declaredEnd > size: // the size alone proves it, a cut between clusters walks clean
-				d.Findings = append(d.Findings, Finding{
+				cut = &Finding{
 					Kind:  mkv.FindingTruncated,
 					Scope: mkv.ScopeTail,
 					Detail: fmt.Sprintf("the source ends early: %d of %d declared bytes present, a repair recovers the playable prefix only",
 						size, declaredEnd),
 					Remedy: "re-download the source (mkvgo salvage keeps the playable prefix meanwhile)",
-				})
+				}
+			case !known && report.TruncatedTail: // the damage running to the end of the file is the cut, not body damage
+				cut = &unsizedCut
+			}
+			switch {
+			case cut != nil:
+				if !hasKind(d.Findings, mkv.FindingTruncated) { // the tail walk may have named the cut already
+					d.Findings = append(d.Findings, *cut)
+				}
 				if midDamage > 0 {
 					d.Findings = append(d.Findings, Finding{
 						Kind:  mkv.FindingDamaged,
@@ -605,4 +615,14 @@ func unsizedLacedAudioFindings(ctx context.Context, path string, fs *mkv.FS, met
 		})
 	}
 	return out
+}
+
+// hasKind reports whether findings hold one of the given kind.
+func hasKind(findings []Finding, kind string) bool {
+	for _, f := range findings {
+		if f.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
