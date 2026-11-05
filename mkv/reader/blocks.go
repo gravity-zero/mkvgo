@@ -1177,10 +1177,14 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 // maxBlockAdditional bounds one BlockAdditional: an alpha plane of a large frame, metadata, never media-sized.
 const maxBlockAdditional = 16 << 20
 
+// maxBlockMores bounds a BlockGroup's BlockMore count; their data together stays within maxBlockAdditional.
+const maxBlockMores = 64
+
 // parseBlockAdditions reads a BlockAdditions: each BlockMore's BlockAddID (1 when absent) and BlockAdditional.
 func (br *BlockReader) parseBlockAdditions(size int64) ([]mkv.BlockAddition, error) {
 	end := br.r.tell() + size
 	var out []mkv.BlockAddition
+	var held int64
 	for br.r.tell() < end {
 		h, _, err := ebml.ReadElementHeader(br.r)
 		if err != nil {
@@ -1194,6 +1198,9 @@ func (br *BlockReader) parseBlockAdditions(size int64) ([]mkv.BlockAddition, err
 				return nil, err
 			}
 			continue
+		}
+		if len(out) == maxBlockMores {
+			return nil, fmt.Errorf("BlockGroup with more than %d BlockMore elements", maxBlockMores)
 		}
 		more := mkv.BlockAddition{ID: 1}
 		moreEnd := br.r.tell() + h.Size
@@ -1211,8 +1218,11 @@ func (br *BlockReader) parseBlockAdditions(size int64) ([]mkv.BlockAddition, err
 					return nil, err
 				}
 			case mkv.IDBlockAdditional:
-				if c.Size > maxBlockAdditional {
-					return nil, fmt.Errorf("BlockAdditional of %d bytes past the %d a block's addition may hold", c.Size, maxBlockAdditional)
+				if c.Size < 0 {
+					return nil, fmt.Errorf("BlockAdditional of unknown size")
+				}
+				if held += c.Size; held > maxBlockAdditional {
+					return nil, fmt.Errorf("block additions of %d bytes past the %d a block's additions may hold", held, maxBlockAdditional)
 				}
 				more.Data = make([]byte, c.Size)
 				if _, err := io.ReadFull(br.r, more.Data); err != nil {
