@@ -1065,7 +1065,7 @@ func parseAV1OBUs(b []byte, seqProfile uint32, bc *bitstreamColour) {
 		size := len(b) - i
 		if hasSize == 1 {
 			sz, n, ok := leb128(b[i:])
-			if !ok {
+			if !ok || sz > uint64(len(b)-i-n) { // compared before the int conversion: it wrapped on 32 bits
 				return
 			}
 			i += n
