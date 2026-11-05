@@ -207,6 +207,10 @@ const maxInBandBlocks = 128
 // bounded (one, or maxScanSamples) and so is each wait between them.
 const maxInBandTotalBlocks = (maxScanSamples + 1) * maxInBandBlocks
 
+// inBandScanHead is the head of a sample the scan reads, where the SEI and the first slice header sit: the MP4
+// scan's cap, so both containers settle a stream alike, and a block of millions of NALs costs no more than its head.
+const inBandScanHead = 16 << 10
+
 // fillColourFromFirstSample is the WithInBandColourFallback worker. For every
 // video track whose description is incomplete head-only - colour behind a bare
 // hvcC (no in-record SPS), a VP9 profile with no vpcC, HDR10 static metadata the
@@ -274,7 +278,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			recordDerived(t, &stated)
 		}
 		if sc, ok := scans[blk.TrackNumber]; ok {
-			sc.s.feed(blk.Data, false)
+			sc.s.feed(blk.Data[:min(len(blk.Data), inBandScanHead)], len(blk.Data) > inBandScanHead)
 			if sc.left--; sc.left == 0 || sc.s.done() {
 				sc.s.apply(sc.t)
 				delete(scans, blk.TrackNumber)

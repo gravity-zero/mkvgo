@@ -101,7 +101,7 @@ func newAVCScan(cp []byte) *avcScan {
 }
 
 func (s *avcScan) addSPS(bc *bitstreamColour) {
-	if info := bc.avc; info.valid() {
+	if info := bc.avc; info.valid() && info.id <= 31 { // seq_parameter_set_id is 0..31 (7.4.2.1.1)
 		s.sps[info.id] = &info
 	}
 }
@@ -116,7 +116,7 @@ func (s *avcScan) addPPS(nal []byte) {
 	p := avcPPSInfo{spsID: r.ue()}
 	r.bit() // entropy_coding_mode_flag
 	p.bottomPOC = r.bit() == 1
-	if !r.err {
+	if !r.err && id <= 255 && p.spsID <= 31 { // pic_parameter_set_id is 0..255 (7.4.2.2)
 		s.pps[id] = p
 	}
 }
