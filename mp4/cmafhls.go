@@ -87,7 +87,11 @@ func buildCMAFMaster(o *Options, video, audio []*cmafRep) []byte {
 	}
 	for _, r := range video {
 		for _, g := range variants {
-			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth)
+			heaviest := int64(0) // a variant plays its video and any audio of its group: the peak is the heaviest one's
+			for _, k := range g.members {
+				heaviest = max(heaviest, audio[k].bandwidth)
+			}
+			inf := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d", r.bandwidth+heaviest)
 			inf += hlsVideoAttrs(&r.tracks[r.primary])
 			if codecs := joinCodecs(cmafCodecs(r.tracks), g.codec, g.id != ""); codecs != "" {
 				inf += fmt.Sprintf(",CODECS=%s", hlsQuoted(codecs))
