@@ -36,9 +36,9 @@ func WebVTTAddition(adds []mkv.BlockAddition) (settings, id string) {
 			continue
 		}
 		lines := strings.SplitN(string(a.Data), "\n", 3)
-		settings = strings.TrimRight(lines[0], "\r")
+		settings = vttLine(lines[0])
 		if len(lines) > 1 {
-			id = strings.TrimRight(lines[1], "\r")
+			id = vttLine(lines[1])
 		}
 		return settings, id
 	}
@@ -71,14 +71,26 @@ func WriteWebVTT(w io.Writer, cues []Cue) error {
 			continue
 		}
 		timing := FormatVTTTime(c.StartMs) + " --> " + FormatVTTTime(c.EndMs)
-		if c.Settings != "" {
-			timing += " " + c.Settings
+		if settings := vttLine(c.Settings); settings != "" {
+			timing += " " + settings
 		}
 		if _, err := fmt.Fprintf(bw, "%s\n%s\n\n", timing, text); err != nil {
 			return err
 		}
 	}
 	return bw.Flush()
+}
+
+// vttLine keeps s up to its first line end, and nothing when it holds an arrow: a settings list or an identifier
+// that went on would end its line and time a cue of its own.
+func vttLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	if strings.Contains(s, "-->") {
+		return ""
+	}
+	return s
 }
 
 // vttCueText is a cue's text as one cue's payload: line ends as \n, no blank line to end it early, no arrow to time another.

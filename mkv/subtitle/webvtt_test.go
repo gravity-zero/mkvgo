@@ -1,11 +1,14 @@
 package subtitle
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 func TestFormatVTTTime(t *testing.T) {
@@ -193,5 +196,23 @@ func TestFileToWebVTT_RefusesInputWithNoCue(t *testing.T) {
 	b.Reset()
 	if err := FileToWebVTT(write("empty.srt", []byte("  \n\n")), &b); err != nil || !strings.HasPrefix(b.String(), "WEBVTT") {
 		t.Errorf("blank srt: want an empty WebVTT, got %v %q", err, b.String())
+	}
+}
+
+// TestWebVTTAdditionCannotTimeAnotherCue: a cue's settings from its BlockAddition were written raw on the timing
+// line - a CR inside them ended the line, and what followed timed a cue of its own.
+func TestWebVTTAdditionCannotTimeAnotherCue(t *testing.T) {
+	adds := []mkv.BlockAddition{{ID: 1, Data: []byte("line:0\r\r00:00:00.000 --> 99:59:59.000\rX\nid\r--> 1")}}
+	settings, id := WebVTTAddition(adds)
+	if settings != "line:0" || id != "id" {
+		t.Errorf("settings %q, id %q; want \"line:0\" and \"id\"", settings, id)
+	}
+	var buf bytes.Buffer
+	cues := []Cue{{StartMs: 0, EndMs: 1000, Settings: settings, Text: "a"}, {StartMs: 1000, EndMs: 2000, Settings: "align:start\r\r00:00:00.000 --> 99:00:00.000", Text: "b"}}
+	if err := WriteWebVTT(&buf, cues); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(buf.String(), "-->"); n != 2 {
+		t.Errorf("%d timing arrows for 2 cues:\n%q", n, buf.String())
 	}
 }
