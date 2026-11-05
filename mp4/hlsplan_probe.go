@@ -345,5 +345,6 @@ func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
 		ts[i] = scale(ms)
 	}
 	pt.ft.ctsShiftTS = compositionShiftTS(ts, sync)
+	p.opensOnKeyframe = len(sync) > 0 && sync[0]
 	return nil
 }

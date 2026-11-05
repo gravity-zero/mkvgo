@@ -111,7 +111,10 @@ type HLSPlan struct {
 	// encrypted): it says whether iframe.m3u8 is a valid resource name for a
 	// Matroska plan, independent of whether the lazy pass has run yet.
 	hasIframe bool
-	iframeMu  sync.Mutex
+	// opensOnKeyframe: the first segment's first video frame is a keyframe, as every later segment's is (each opens
+	// on a cued one); the trick-mode set lists a fragment a segment only then, all or none as the full pass does.
+	opensOnKeyframe bool
+	iframeMu        sync.Mutex
 	// iframeErr caches a PERMANENT build error only (never a context
 	// cancellation - see the subtitle-cue scan's poisoning fix): a transient
 	// error must not stick around and fail every later request.
@@ -664,7 +667,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		// Its I-frames are read on demand, after the manifest: each segment opens on a cued keyframe, so the trick-mode
 		// set lists one per segment, as the full pass of the same source does, its bandwidth bounded by the segment's.
 		var trick []iframeRef
-		if p.hasIframe {
+		if p.hasIframe && p.opensOnKeyframe {
 			for k, s := range segs {
 				trick = append(trick, iframeRef{seg: k, length: s.bytes})
 			}
