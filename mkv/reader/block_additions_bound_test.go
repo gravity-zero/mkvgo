@@ -44,6 +44,21 @@ func TestBlockAdditionalOfUnknownSize(t *testing.T) {
 	refusedNoPanic(t, "unknown-size BlockAdditional", groupWithAdditions(more))
 }
 
+// TestBlockAdditionsOfUnknownSize: a BlockMore of unknown size kept an empty addition of its own, and a BlockAdditions
+// of unknown size left its BlockMores to the group; both are damage, refused as an unknown-size BlockAdditional is.
+func TestBlockAdditionsOfUnknownSize(t *testing.T) {
+	refusedNoPanic(t, "unknown-size BlockMore", groupWithAdditions([]byte{0xA6, 0xFF, 0xA5, 0x81, 0x01}))
+
+	var g bytes.Buffer
+	g.Write([]byte{0x75, 0xA1, 0xFF}) // BlockAdditions of unknown size
+	g.Write(wrapEl(mkv.IDBlockMore, wrapEl(mkv.IDBlockAdditional, []byte{1})))
+	g.Write(wrapEl(mkv.IDBlock, []byte{0x81, 0x00, 0x00, 0x00, 0xAA}))
+	var c bytes.Buffer
+	c.Write(uintEl(mkv.IDTimestamp, 0))
+	c.Write(wrapEl(mkv.IDBlockGroup, g.Bytes()))
+	refusedNoPanic(t, "unknown-size BlockAdditions", buildBlockReaderInput(c.Bytes()))
+}
+
 // TestBlockAdditionsAreBounded: one BlockGroup kept every BlockMore its file held - 2 bytes on disk each, 32 in
 // memory, and up to 16 MiB each with data - with no cap past the single BlockAdditional's.
 func TestBlockAdditionsAreBounded(t *testing.T) {

@@ -1131,6 +1131,9 @@ func (br *BlockReader) parseBlockGroup(size int64) (mkv.Block, error) {
 				return mkv.Block{}, err
 			}
 		case mkv.IDBlockAdditions:
+			if h.Size < 0 {
+				return mkv.Block{}, fmt.Errorf("BlockAdditions of unknown size")
+			}
 			if additions, err = br.parseBlockAdditions(h.Size); err != nil {
 				return mkv.Block{}, err
 			}
@@ -1198,6 +1201,9 @@ func (br *BlockReader) parseBlockAdditions(size int64) ([]mkv.BlockAddition, err
 				return nil, err
 			}
 			continue
+		}
+		if h.Size < 0 {
+			return nil, fmt.Errorf("BlockMore of unknown size")
 		}
 		if len(out) == maxBlockMores {
 			return nil, fmt.Errorf("BlockGroup with more than %d BlockMore elements", maxBlockMores)
