@@ -84,12 +84,13 @@ func adtsFormat(t mkv.Track) *demuxFormat {
 		return nil
 	}
 	profile := cfg.CoreObjectType - 1
+	var h [7]byte // reused frame to frame
 	return &demuxFormat{ext: "aac", frame: func(w io.Writer, _ mkv.Block, data []byte) error {
 		n := len(data) + 7
 		if n >= 1<<13 {
 			return cannotHold("AAC frame of %d bytes is too long for ADTS", len(data))
 		}
-		h := [7]byte{
+		h = [7]byte{
 			0xFF, 0xF1, // syncword, MPEG-4, layer 0, no CRC
 			byte(profile<<6) | byte(sf<<2) | byte(cc>>2),
 			byte(cc&3)<<6 | byte(n>>11),
@@ -139,11 +140,13 @@ func annexBFormat(ext string, record []byte, lenSize int, params []byte) *demuxF
 		return nil
 	}
 	first := true
+	var buf []byte // reused frame to frame
 	return &demuxFormat{ext: ext, frame: func(w io.Writer, blk mkv.Block, data []byte) error {
-		out, err := annexBFromLengthPrefixed(data, lenSize)
+		out, err := annexBAppend(buf[:0], data, lenSize)
 		if err != nil {
 			return &frameError{err}
 		}
+		buf = out
 		if first || blk.Keyframe {
 			first = false
 			if _, err := w.Write(params); err != nil {

@@ -68,6 +68,14 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 			br.SetProgress(p, st.Size())
 		}
 	}
+	// Every format writes or copies a frame before the next one is read: one payload buffer serves them all.
+	var payload []byte
+	br.SetBlockBuffer(func(_ uint64, size int) []byte {
+		if cap(payload) < size {
+			payload = make([]byte, size)
+		}
+		return payload[:size]
+	})
 	for _, id := range sortedTracks(writers) {
 		if h := formats[id].head; h != nil {
 			if err := h(writers[id]); err != nil {

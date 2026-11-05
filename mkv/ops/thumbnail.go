@@ -146,10 +146,15 @@ func packKeyframe(t *mkv.Track, ptsMs int64, data []byte) (*KeyframeSample, erro
 
 // annexBFromLengthPrefixed rewrites length-prefixed NAL units as Annex-B.
 func annexBFromLengthPrefixed(data []byte, lenSize int) ([]byte, error) {
+	return annexBAppend(make([]byte, 0, len(data)+16), data, lenSize)
+}
+
+// annexBAppend appends data's length-prefixed NAL units to dst as Annex-B.
+func annexBAppend(dst, data []byte, lenSize int) ([]byte, error) {
 	if lenSize < 1 || lenSize > 4 {
 		return nil, fmt.Errorf("bad NAL length size %d", lenSize)
 	}
-	out := make([]byte, 0, len(data)+16)
+	out := dst
 	for pos := 0; pos < len(data); {
 		if pos+lenSize > len(data) {
 			return nil, fmt.Errorf("truncated NAL length at %d", pos)
