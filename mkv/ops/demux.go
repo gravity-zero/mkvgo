@@ -3,6 +3,7 @@ package ops
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -96,6 +97,11 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 			return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
 		}
 		if err := formats[blk.TrackNumber].frame(w, blk, data); err != nil {
+			var fe *frameError
+			if errors.As(err, &fe) {
+				return fmt.Errorf("track %d, block at %.3f s: %w; demux with --raw (DemuxOptions.Raw) to keep the stored payloads",
+					blk.TrackNumber, float64(blk.Timecode)/1000, err)
+			}
 			return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
 		}
 	}

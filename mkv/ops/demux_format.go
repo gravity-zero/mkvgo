@@ -20,6 +20,15 @@ type demuxFormat struct {
 	end   func(w io.Writer) error
 }
 
+// frameError is a frame its track's file cannot hold, as opposed to a write that failed.
+type frameError struct{ err error }
+
+func (e *frameError) Error() string { return e.err.Error() }
+func (e *frameError) Unwrap() error { return e.err }
+
+// cannotHold marks err as a frame the track's file cannot hold.
+func cannotHold(format string, a ...any) error { return &frameError{fmt.Errorf(format, a...)} }
+
 // demuxFormatOf picks t's format; raw keeps every track's stored payloads.
 func demuxFormatOf(t mkv.Track, raw bool) *demuxFormat {
 	plain := &demuxFormat{
@@ -78,7 +87,7 @@ func adtsFormat(t mkv.Track) *demuxFormat {
 	return &demuxFormat{ext: "aac", frame: func(w io.Writer, _ mkv.Block, data []byte) error {
 		n := len(data) + 7
 		if n >= 1<<13 {
-			return fmt.Errorf("AAC frame of %d bytes is too long for ADTS", len(data))
+			return cannotHold("AAC frame of %d bytes is too long for ADTS", len(data))
 		}
 		h := [7]byte{
 			0xFF, 0xF1, // syncword, MPEG-4, layer 0, no CRC
@@ -133,7 +142,7 @@ func annexBFormat(ext string, record []byte, lenSize int, params []byte) *demuxF
 	return &demuxFormat{ext: ext, frame: func(w io.Writer, blk mkv.Block, data []byte) error {
 		out, err := annexBFromLengthPrefixed(data, lenSize)
 		if err != nil {
-			return err
+			return &frameError{err}
 		}
 		if first || blk.Keyframe {
 			first = false
@@ -179,11 +188,11 @@ func supFormat() *demuxFormat {
 		pts := uint32(blk.Timecode * 90)
 		for len(data) > 0 {
 			if len(data) < 3 {
-				return fmt.Errorf("PGS block ends inside a segment header")
+				return cannotHold("PGS block ends inside a segment header")
 			}
 			n := 3 + int(binary.BigEndian.Uint16(data[1:3]))
 			if n > len(data) {
-				return fmt.Errorf("PGS segment of %d bytes past its block's %d", n, len(data))
+				return cannotHold("PGS segment of %d bytes past its block's %d", n, len(data))
 			}
 			var h [10]byte
 			h[0], h[1] = 'P', 'G'
@@ -202,7 +211,7 @@ func supFormat() *demuxFormat {
 
 // --- Ogg: Opus, Vorbis -----------------------------------------------------------------------------------------
 
-// oggStream writes one logical Ogg bitstream, one packet a page.
+// oggStream writes one logical Ogg bitstream, a packet a page (or more, for a packet longer than one).
 type oggStream struct {
 	serial uint32
 	seq    uint32
@@ -210,31 +219,41 @@ type oggStream struct {
 	heldGP int64
 }
 
-// page writes one page holding packet, with its granule position and flags (2 first, 4 last).
+// page writes packet with its granule position and flags (2 first, 4 last): on one page, or on as many as its 255
+// lacing values a page take, each one after the first continuing it (flag 1) and only the last one ending it.
 func (s *oggStream) page(w io.Writer, packet []byte, granule int64, flags byte) error {
-	var lacing []byte
-	for n := len(packet); ; n -= 255 {
-		if n < 255 {
-			lacing = append(lacing, byte(n))
-			break
+	const pageMax = 255 * 255 // a page's body when its 255 lacing values are all 255: the packet goes on
+	for cont := byte(0); ; cont = 1 {
+		body, gp, f := packet, granule, flags|cont
+		if len(packet) >= pageMax {
+			body, gp, f = packet[:pageMax], -1, cont|flags&2 // no packet ends on this page
 		}
-		lacing = append(lacing, 255)
+		lacing := make([]byte, 0, 255)
+		for n := len(body); len(lacing) < 255; n -= 255 {
+			if n < 255 {
+				lacing = append(lacing, byte(n))
+				break
+			}
+			lacing = append(lacing, 255)
+		}
+		h := make([]byte, 27, 27+len(lacing)+len(body))
+		copy(h, "OggS")
+		h[5] = f
+		binary.LittleEndian.PutUint64(h[6:], uint64(gp))
+		binary.LittleEndian.PutUint32(h[14:], s.serial)
+		binary.LittleEndian.PutUint32(h[18:], s.seq)
+		h[26] = byte(len(lacing))
+		h = append(append(h, lacing...), body...)
+		binary.LittleEndian.PutUint32(h[22:], oggCRC(h))
+		s.seq++
+		if _, err := w.Write(h); err != nil {
+			return err
+		}
+		if len(packet) < pageMax {
+			return nil
+		}
+		packet, flags = packet[pageMax:], flags&^2
 	}
-	if len(lacing) > 255 {
-		return fmt.Errorf("an Ogg packet of %d bytes does not fit one page", len(packet))
-	}
-	h := make([]byte, 27, 27+len(lacing)+len(packet))
-	copy(h, "OggS")
-	h[5] = flags
-	binary.LittleEndian.PutUint64(h[6:], uint64(granule))
-	binary.LittleEndian.PutUint32(h[14:], s.serial)
-	binary.LittleEndian.PutUint32(h[18:], s.seq)
-	h[26] = byte(len(lacing))
-	h = append(append(h, lacing...), packet...)
-	binary.LittleEndian.PutUint32(h[22:], oggCRC(h))
-	s.seq++
-	_, err := w.Write(h)
-	return err
 }
 
 // packet queues a media packet ending at granule, writing the one before it.
@@ -298,9 +317,10 @@ func oggOpusFormat(t mkv.Track) *demuxFormat {
 			tags = append(append(tags, "mkvgo"...), 0, 0, 0, 0)
 			return s.page(w, tags, 0, 0)
 		},
-		frame: func(w io.Writer, _ mkv.Block, data []byte) error {
+		frame: func(w io.Writer, blk mkv.Block, data []byte) error {
 			granule += int64(opusPacketSamples(data))
-			return s.packet(w, data, granule)
+			trim := max(blk.DiscardPaddingNs, 0) * 48 / 1_000_000 // the end trim in 48 kHz samples (RFC 7845 4.4)
+			return s.packet(w, data, granule-min(trim, granule))
 		},
 		end: s.end,
 	}
@@ -337,7 +357,8 @@ func opusPacketSamples(p []byte) int {
 
 // oggVorbisFormat writes an Ogg Vorbis file: the three headers the CodecPrivate holds (Xiph-laced), the
 // identification one on a page of its own, then a packet a page. A page's granule is the end of its packet in
-// samples at the stream's rate, from the block timestamps: exact for the decoder, which counts samples itself, and
+// samples at the stream's rate, from the block timestamps - the next packet's start, the block's duration, or for the
+// last one without either its start plus the step before it: exact for the decoder, which counts samples itself, and
 // to the timestamps' millisecond for a seek.
 func oggVorbisFormat(t mkv.Track) *demuxFormat {
 	headers, ok := xiphHeaders(t.CodecPrivate)
@@ -349,6 +370,7 @@ func oggVorbisFormat(t mkv.Track) *demuxFormat {
 		return nil
 	}
 	s := &oggStream{serial: uint32(t.ID)}
+	prevStart, step := int64(-1), int64(0)
 	return &demuxFormat{ext: "ogg",
 		head: func(w io.Writer) error {
 			if err := s.page(w, headers[0], 0, 2); err != nil {
@@ -360,8 +382,16 @@ func oggVorbisFormat(t mkv.Track) *demuxFormat {
 			return s.page(w, headers[2], 0, 0)
 		},
 		frame: func(w io.Writer, blk mkv.Block, data []byte) error {
-			endMs := blk.Timecode + blk.Duration
-			return s.packet(w, data, endMs*rate/1000)
+			start := max(blk.Timecode, 0) * rate / 1000
+			if s.held != nil && start > prevStart {
+				s.heldGP, step = start, start-prevStart // the packet held ends where this one starts
+			}
+			prevStart = start
+			end := start + step
+			if blk.Duration > 0 {
+				end = (max(blk.Timecode, 0) + blk.Duration) * rate / 1000
+			}
+			return s.packet(w, data, end)
 		},
 		end: s.end,
 	}
