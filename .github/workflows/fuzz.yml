@@ -55,4 +55,9 @@ jobs:
         with:
           go-version: stable
       - name: Timed cost tests
-        run: COSTGUARD_TIMED=1 go test -run 'GrowsLinearlyTimed$' -count=1 ./...
+        # A timed twin the pattern misses is skipped in silence: the job counts the twins that passed.
+        run: |
+          COSTGUARD_TIMED=1 go test -run 'LinearlyTimed$' -count=1 -v ./... | tee timed.log
+          want=$(grep -rhE '^func Test[A-Za-z0-9]*LinearlyTimed\(' --include='*_test.go' . | wc -l)
+          got=$(grep -cE '^--- PASS: Test[A-Za-z0-9]*LinearlyTimed ' timed.log)
+          [ "$got" -eq "$want" ] || { echo "$got timed twins passed of $want"; exit 1; }
