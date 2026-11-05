@@ -394,15 +394,18 @@ func eac3JOC(f []byte) uint8 {
 
 // entryJOC is the Atmos complexity index an ec-3 sample entry's dec3 carries, 0 for none or another entry.
 func entryJOC(entry []byte) uint8 {
-	i := bytes.Index(entry, []byte("dec3"))
-	if i < 4 {
+	if len(entry) < 8 || string(entry[4:8]) != "ec-3" { // another entry's bytes (an esds copies a CodecPrivate) say nothing
 		return 0
 	}
-	size := int(binary.BigEndian.Uint32(entry[i-4:]))
-	if size < 8 || i-4+size > len(entry) {
+	i := bytes.Index(entry[8:], []byte("dec3")) + 8
+	if i < 12 {
 		return 0
 	}
-	p := entry[i+4 : i-4+size]
+	size := int64(binary.BigEndian.Uint32(entry[i-4:]))
+	if size < 8 || size > int64(len(entry)-(i-4)) { // compared in int64: i-4+size wraps an int on 32-bit
+		return 0
+	}
+	p := entry[i+4 : i-4+int(size)]
 	if len(p) < 5 || p[1]&0x07 != 0 { // one independent substream: the layout written here
 		return 0
 	}
