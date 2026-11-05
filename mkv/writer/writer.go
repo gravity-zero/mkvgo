@@ -882,18 +882,17 @@ func writeSintElement(w io.Writer, id uint32, val int64) error {
 // timecode-scale units): its presence is what marks the frame as not a
 // keyframe. A block with a padding and no duration names no BlockDuration.
 func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, rawDuration uint64, ref *int64, paddingNs int64, additions []mkv.BlockAddition) error {
-	var inner bytes.Buffer
+	var head, tail bytes.Buffer // the group around the frame, which goes to w as it is
 	trackVINT := ebml.DataSizeLen(int64(trackNum))
 	bodySize := int64(trackVINT + 2 + 1 + len(data))
-	if _, err := ebml.WriteElementHeader(&inner, mkv.IDBlock, bodySize); err != nil {
+	if _, err := ebml.WriteElementHeader(&head, mkv.IDBlock, bodySize); err != nil {
 		return err
 	}
-	if _, err := ebml.WriteDataSize(&inner, int64(trackNum)); err != nil {
+	if _, err := ebml.WriteDataSize(&head, int64(trackNum)); err != nil {
 		return err
 	}
-	inner.Write([]byte{byte(uint16(relTC) >> 8), byte(relTC), 0x00}) // timecode + flags
-	inner.Write(data)
-	if len(additions) > 0 { // after the Block, as the schema orders a BlockGroup
+	head.Write([]byte{byte(uint16(relTC) >> 8), byte(relTC), 0x00}) // timecode + flags
+	if len(additions) > 0 {                                         // after the Block, as the schema orders a BlockGroup
 		var adds bytes.Buffer
 		for _, a := range additions {
 			var more bytes.Buffer
@@ -910,26 +909,34 @@ func writeBlockGroup(w io.Writer, trackNum uint64, relTC int16, data []byte, raw
 				return err
 			}
 		}
-		if err := WriteMasterElement(&inner, mkv.IDBlockAdditions, adds.Bytes()); err != nil {
+		if err := WriteMasterElement(&tail, mkv.IDBlockAdditions, adds.Bytes()); err != nil {
 			return err
 		}
 	}
 	if rawDuration > 0 || (paddingNs == 0 && len(additions) == 0) {
-		if err := WriteUintElement(&inner, mkv.IDBlockDuration, rawDuration); err != nil {
+		if err := WriteUintElement(&tail, mkv.IDBlockDuration, rawDuration); err != nil {
 			return err
 		}
 	}
 	if ref != nil {
-		if err := writeSintElement(&inner, mkv.IDReferenceBlock, *ref); err != nil {
+		if err := writeSintElement(&tail, mkv.IDReferenceBlock, *ref); err != nil {
 			return err
 		}
 	}
 	if paddingNs != 0 {
-		if err := writeSintElement(&inner, mkv.IDDiscardPadding, paddingNs); err != nil {
+		if err := writeSintElement(&tail, mkv.IDDiscardPadding, paddingNs); err != nil {
 			return err
 		}
 	}
-	return WriteMasterElement(w, mkv.IDBlockGroup, inner.Bytes())
+	if _, err := ebml.WriteElementHeader(w, mkv.IDBlockGroup, int64(head.Len()+len(data)+tail.Len())); err != nil {
+		return err
+	}
+	for _, b := range [][]byte{head.Bytes(), data, tail.Bytes()} {
+		if _, err := w.Write(b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hasColour reports whether a track carries any colour code points.
