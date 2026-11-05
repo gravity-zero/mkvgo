@@ -9,6 +9,17 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Security
+
+- A BlockAdditional of unknown size crashed every walk of the file (demux,
+  remux, HLS plan, `info`); it is refused as damage, and so is a BlockGroup
+  with more than 64 BlockMore or 16 MiB of additions. Upgrade.
+- WebVTT: a cue's settings or identifier taken from its BlockAddition could end
+  its line and time cues of its own in the served or extracted `.vtt`; they
+  stop at their first line end, and one holding `-->` is dropped.
+- 32-bit builds: a NAL length past its frame crashed `demux` and keyframe
+  extraction; it is refused.
+
 ## [0.64.0] - 2026-11-04
 
 ### Breaking
