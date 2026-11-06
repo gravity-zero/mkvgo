@@ -25,8 +25,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   remedy.
 - `info` on an http(s) or s3 source leaves `truncated` out, as `probe` does:
   the check cost a request per top-level box of a fragmented MP4.
-- The H.264 in-band scan reads each sample's first 16 KiB, as the MP4 one
-  does: a slice header past it no longer settles `scan_type`.
+- The in-band scan of an H.264, HEVC or MPEG-2 track reads each sample's first
+  16 KiB, as the MP4 one does: a header past it no longer settles `scan_type`.
 - WebVTT: a BlockAddition's lines end at CR, LF or CRLF, so one written with
   CR alone keeps its cue identifier (served and extracted `.vtt`, `wvtt`).
 
