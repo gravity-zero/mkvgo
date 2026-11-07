@@ -569,22 +569,24 @@ func TestTableCacheProcessBudget(t *testing.T) {
 	}
 }
 
-// prefetch asks for a dense rendition prefetchAhead in front of its copy, and
-// for each read of an exact one at once (runs gathered through holes up to
-// exactReadGap).
+// prefetch asks for a rendition's span prefetchAhead in front of its copy, an
+// exact one (audio) as a dense one: its runs read one by one would each start
+// a small disk read of its own, and break the video's large ones (a full read
+// of a 20-minute interleaved MP4 took 11,217 disk reads of 79 KiB, 863 of 1 MiB
+// once the audio's span was asked for whole).
 func TestPrefetchRanges(t *testing.T) {
 	type rng struct{ off, n int64 }
 	var will []rng
 	defer func(w func(*os.File, int64, int64)) { adviseWillNeed = w }(adviseWillNeed)
 	adviseWillNeed = func(_ *os.File, off, n int64) { will = append(will, rng{off, n}) }
 	pieces := []span{{emit: []byte("head")}, {off: 1000, n: 100}, {off: 1200, n: 100}, {off: 1300 + 200<<10, n: 50}}
-	prefetch(nil, pieces, false, streamBufBytes)
+	prefetch(nil, pieces)
 	if len(will) != 1 || will[0] != (rng{1000, 200<<10 + 350}) {
 		t.Fatalf("dense: %v", will)
 	}
 	will = nil
 	const mib = 1 << 20
-	a := prefetch(nil, []span{{off: 0, n: 3 * mib}, {off: 3 * mib, n: 3 * mib}, {off: 6 * mib, n: 6 * mib}, {off: 12 * mib, n: 8 * mib}}, false, streamBufBytes)
+	a := prefetch(nil, []span{{off: 0, n: 3 * mib}, {off: 3 * mib, n: 3 * mib}, {off: 6 * mib, n: 6 * mib}, {off: 12 * mib, n: 8 * mib}})
 	for _, at := range []int64{0, 3 * mib, 6 * mib, 12 * mib} {
 		a.advance(at)
 	}
@@ -592,9 +594,9 @@ func TestPrefetchRanges(t *testing.T) {
 		t.Fatalf("dense, 20 MiB: %v, want %v", will, want)
 	}
 	will = nil
-	prefetch(nil, pieces, true, streamBufBytes)
-	if len(will) != 2 || will[0] != (rng{1000, 300}) || will[1] != (rng{1300 + 200<<10, 50}) {
-		t.Fatalf("exact: %v", will)
+	prefetch(nil, pieces)
+	if len(will) != 1 || will[0] != (rng{1000, 200<<10 + 350}) {
+		t.Fatalf("exact: %v, want its whole span at once", will)
 	}
 }
 

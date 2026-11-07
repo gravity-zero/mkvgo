@@ -900,7 +900,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		err := c.copyParallel(ctx, w, pieces, ra, remoteReadGap, parallelMaxBytes, remoteReads)
 		return c.written, err
 	}
-	var dense *ahead // a dense rendition read ahead of its copy, nil otherwise
+	var pre *ahead // the rendition read ahead of its copy on a local disk, nil otherwise
 	if c.file != nil {
 		if c.exact && p.onNetwork(c.file) {
 			// Each read is a round trip on a network mount: the reads go out together.
@@ -908,7 +908,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 			return c.written, err
 		}
 		if !p.onNetwork(c.file) {
-			dense = prefetch(c.file, pieces, c.exact, len(c.buf))
+			pre = prefetch(c.file, pieces)
 		}
 	}
 	for i, pc := range pieces {
@@ -924,7 +924,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 		if c.exact {
 			c.reach = exactReach(pieces, i, len(c.buf))
 		}
-		dense.advance(pc.off)
+		pre.advance(pc.off)
 		if err := c.copy(w, pc.off, pc.n); err != nil {
 			return c.written, err
 		}
@@ -946,12 +946,12 @@ var exactReadGap int64 = 64 << 10
 // adviseWillNeed is willNeed, swappable for a test.
 var adviseWillNeed = willNeed
 
-// prefetchAhead is how far ahead of its copy a dense rendition is asked for:
+// prefetchAhead is how far ahead of its copy a rendition is asked for:
 // measured against its whole range at once, a cold 1080p video segment came
 // 18 % sooner from a fast disk, and as soon from one capped at 250 MB/s.
 var prefetchAhead int64 = 8 << 20
 
-// ahead asks for a dense rendition's bytes prefetchAhead in front of its copy.
+// ahead asks for a rendition's bytes prefetchAhead in front of its copy.
 type ahead struct {
 	f         *os.File
 	next, end int64 // asked for up to next; the rendition ends at end
@@ -968,11 +968,13 @@ func (a *ahead) advance(at int64) {
 }
 
 // prefetch has the kernel start reading the pieces' source bytes before the
-// copy asks for them: a dense rendition (video) prefetchAhead in front of the
-// copy, which advances it (on a cold disk, sendfile calls of a frame each
-// would otherwise wait for their own small reads), an exact one (audio) read
-// by read, all at once.
-func prefetch(f *os.File, pieces []span, exact bool, bufLen int) *ahead {
+// copy asks for them, prefetchAhead in front of the copy, which advances it:
+// on a cold disk, sendfile calls of a frame each would otherwise wait for their
+// own small reads. An exact rendition (audio) is asked for over its whole span
+// too, the video between its runs included: read run by run, each run started
+// a small disk read of its own and broke the video's large ones (a full read of
+// a 20-minute interleaved MP4: 11,217 disk reads of 79 KiB, 863 of 1 MiB so).
+func prefetch(f *os.File, pieces []span) *ahead {
 	first, last := -1, -1
 	for i, pc := range pieces {
 		if pc.emit == nil {
@@ -985,21 +987,9 @@ func prefetch(f *os.File, pieces []span, exact bool, bufLen int) *ahead {
 	if first < 0 {
 		return nil
 	}
-	if !exact {
-		a := &ahead{f: f, next: pieces[first].off, end: pieces[last].off + pieces[last].n}
-		a.advance(a.next)
-		return a
-	}
-	i := first
-	for i <= last {
-		reach := exactReach(pieces, i, bufLen)
-		adviseWillNeed(f, pieces[i].off, reach-pieces[i].off)
-		i++
-		for i <= last && (pieces[i].emit != nil || pieces[i].off+pieces[i].n <= reach) {
-			i++ // within that read
-		}
-	}
-	return nil
+	a := &ahead{f: f, next: pieces[first].off, end: pieces[last].off + pieces[last].n}
+	a.advance(a.next)
+	return a
 }
 
 // networkSource is onNetwork, swappable for a test.

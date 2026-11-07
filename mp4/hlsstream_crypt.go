@@ -276,7 +276,7 @@ func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (
 		r.pieces[x] = span{off: t.offs[ti][x], n: int64(s.size) - int64(len(r.prefix))}
 	}
 	if r.c.file != nil && !p.onNetwork(r.c.file) {
-		r.ahead = prefetch(r.c.file, r.pieces, r.c.exact, len(r.c.buf))
+		r.ahead = prefetch(r.c.file, r.pieces)
 	}
 	return r, nil
 }

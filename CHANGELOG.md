@@ -34,6 +34,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - CLI: `to-mp4`, `from-mp4` and `to-hls` name `--skip-unsupported` where the
   refusal named `Options.SkipUnsupported`; `edit-inplace` refused for want of
   room names the `mkvgo edit` command that rewrites the file.
+- HLS from a local MP4 (`serve`, `Open`): an audio segment is read ahead over
+  its whole span like a video one; read run by run it broke the video's large
+  disk reads (a full read of a 20-minute file: 11,217 reads of 79 KiB, 863 of
+  1 MiB with the next entry).
 
 ## [0.65.1] - 2026-11-07
 
