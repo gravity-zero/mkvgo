@@ -32,24 +32,30 @@ func TestInBandScanParameterSetIDsBounded(t *testing.T) {
 	}
 }
 
-// TestInBandScanReadsASampleHead: the MP4 scan reads each sample's first 16 KiB, where the SEI and the first slice
-// header sit; the Matroska one walked the whole block, up to 64 MiB of NALs. Both read the head alone: a slice past
-// it proves nothing.
-func TestInBandScanReadsASampleHead(t *testing.T) {
-	var c scanCase
-	for _, sc := range scanCases() {
-		if sc.scan == "interlaced" && !sc.noOpt && sc.video == nil {
-			c = sc
-			break
-		}
+// TestInBandScanReadsTheSecondFieldOfABlock: a Matroska block holding both fields of a frame, its first one past
+// 16 KiB (a 1080i broadcast muxed by mkvmerge, measured), lost its field order once the scan read a block's first
+// 16 KiB alone; the walk reads the head of every NAL, so the second field's slice header is read.
+func TestInBandScanReadsTheSecondFieldOfABlock(t *testing.T) {
+	big := append(scanSlice{field: true, frameNum: 1, lsb: 2}.nal(), bytes.Repeat([]byte{0x55}, 20_000)...)
+	pair := au(big, scanSlice{field: true, bottom: true, frameNum: 1, lsb: 3}.nal())
+	avcc := scanAvcC([][]byte{scanSPS{}.nal()}, [][]byte{scanPPS(0, 0, false)})
+	meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(avcc, nil, pair)), "", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if c.scan == "" {
-		t.Fatal("no interlaced case")
+	if tr := meta.Tracks[0]; tr.ScanType != "interlaced" || tr.FieldOrder != "tt" {
+		t.Errorf("got %q/%q, want interlaced/tt", tr.ScanType, tr.FieldOrder)
 	}
-	filler := lenPrefixed4(append([]byte{0x0C}, make([]byte, 20_000)...)) // filler data NAL, past the 16 KiB head
+}
+
+// TestInBandScanBoundsTheNALsOfASample: a block of thousands of tiny NALs costs the walk no more than its first
+// maxSampleNALs; a slice past them proves nothing.
+func TestInBandScanBoundsTheNALsOfASample(t *testing.T) {
+	c := scanCases()[0]
+	filler := lenPrefixed4([]byte{0x0C, 0xFF}) // filler data NAL
 	var frames [][]byte
 	for _, f := range c.frames {
-		frames = append(frames, append(append([]byte{}, filler...), f...))
+		frames = append(frames, append(bytes.Repeat(filler, maxSampleNALs), f...))
 	}
 	avcc := scanAvcC([][]byte{c.sps.nal()}, [][]byte{scanPPS(0, c.sps.id, c.bottomPOC)})
 	meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(avcc, c.video, frames...)), "", WithInBandColourFallback())
@@ -57,6 +63,6 @@ func TestInBandScanReadsASampleHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := meta.Tracks[0].ScanType; got == "interlaced" {
-		t.Errorf("%s: slices past each sample's first 16 KiB proved %q", c.name, got)
+		t.Errorf("%s: slices past %d NALs proved %q", c.name, maxSampleNALs, got)
 	}
 }

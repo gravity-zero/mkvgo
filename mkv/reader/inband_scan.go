@@ -1,6 +1,10 @@
 package reader
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"math"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
 
 // maxScanSamples bounds how many samples of an H.264 track are read looking for
 // proof of interlacing: an encoder that codes some pictures as frames rarely codes
@@ -10,6 +14,14 @@ const maxScanSamples = 16
 // maxSliceHeader is how much of a slice NAL is unescaped to reach the picture
 // order count fields: a slice header gets there in far fewer bytes.
 const maxSliceHeader = 64
+
+// maxSampleNALs bounds the NALs walked in one sample: both fields of a frame and
+// their slices fit many times over, a block of millions of tiny NALs does not.
+const maxSampleNALs = 1024
+
+// maxSampleParse bounds the bytes of one H.264 sample's NAL heads the scan
+// unescapes: parameter sets, SEI and slice headers, wherever they sit in it.
+const maxSampleParse = 16 << 10
 
 // avcSPSInfo is what H.264 slice headers and picture timing SEI need from an SPS.
 type avcSPSInfo struct {
@@ -155,6 +167,10 @@ func avcCPPSList(cp []byte) [][]byte {
 // display orders that already disagree. One order is checked against every sample.
 func (s *avcScan) done() bool { return s.interlaced && len(s.structOrders) > 1 }
 
+// head is whole samples: the walk bounds its NALs and the bytes it parses, and a
+// frame's second field can sit past its first one's 16 KiB.
+func (s *avcScan) head() int { return math.MaxInt }
+
 // feed reads one length-prefixed access unit: in-band parameter sets, the picture
 // timing SEI, and the first slice of each picture in it. truncated says frame is
 // only the first bytes of the sample: its last NAL may then be cut short, and
@@ -169,7 +185,21 @@ func (s *avcScan) feed(frame []byte, truncated bool) {
 func (s *avcScan) walk(frame []byte, truncated bool) {
 	var seis [][]byte
 	var picSPS *avcSPSInfo
+	budget := maxSampleParse
 	forEachLengthPrefixed(frame, s.nalLen, truncated, func(nal []byte) {
+		if budget <= 0 {
+			return
+		}
+		switch nal[0] & 0x1f {
+		case 1, 5:
+			budget -= min(len(nal), maxSliceHeader)
+		default:
+			nal = nal[:min(len(nal), budget)]
+			budget -= len(nal)
+		}
+		if len(nal) < 2 {
+			return
+		}
 		switch nal[0] & 0x1f {
 		case 7:
 			if bc := parseAVCSPS(unescapeRBSP(nal[1:])); bc != nil {
@@ -367,7 +397,10 @@ func forEachLengthPrefixed(frame []byte, nalLen int, truncated bool, fn func(nal
 	if nalLen < 1 || nalLen > 4 {
 		return
 	}
-	for off := 0; off+nalLen <= len(frame); {
+	for off, nals := 0, 0; off+nalLen <= len(frame); {
+		if nals++; nals > maxSampleNALs {
+			return
+		}
 		n := int64(0)
 		for i := 0; i < nalLen; i++ {
 			n = n<<8 | int64(frame[off+i])
@@ -395,6 +428,7 @@ type scanner interface {
 	feed(frame []byte, truncated bool)
 	done() bool
 	apply(t *mkv.Track)
+	head() int // bytes of a sample worth feeding
 }
 
 // newScanner returns the scanner for t, nil when its samples have nothing to
@@ -478,6 +512,8 @@ func (s *mpeg2Scan) picture(structure uint32, tff, progressiveFrame bool) {
 func (s *mpeg2Scan) done() bool {
 	return (s.interlaced && len(s.orders) > 1) || (s.progressiveSeq && !s.interlaced)
 }
+
+func (s *mpeg2Scan) head() int { return inBandScanHead }
 
 func (s *mpeg2Scan) apply(t *mkv.Track) {
 	if t.ScanType != "" {
@@ -605,6 +641,8 @@ func (s *hevcScan) picTiming(payload []byte) {
 }
 
 func (s *hevcScan) done() bool { return s.interlaced && len(s.orders) > 1 }
+
+func (s *hevcScan) head() int { return inBandScanHead }
 
 func (s *hevcScan) apply(t *mkv.Track) {
 	if t.ScanType != "" || !s.interlaced {

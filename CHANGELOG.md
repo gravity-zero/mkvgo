@@ -9,6 +9,12 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- Matroska: the H.264 in-band scan walks the whole block again (at most 1,024
+  NALs, 16 KiB of headers parsed), so a block holding both fields of a frame,
+  its first one past 16 KiB, keeps its `field_order` (0.65.0 lost it).
+
 ## [0.65.0] - 2026-11-06
 
 ### Breaking
