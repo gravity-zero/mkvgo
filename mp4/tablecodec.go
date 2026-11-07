@@ -77,7 +77,7 @@ func (t *windowTable) view(ti int) *windowTable {
 	if t.packed == nil {
 		return t
 	}
-	v := &windowTable{segs: make([]trackSegment, len(t.packed)), heads: t.heads, offs: make([][]int64, len(t.packed)), data: t.data}
+	v := &windowTable{segs: make([]trackSegment, len(t.packed)), heads: t.heads, offs: make([][]int64, len(t.packed)), data: t.data, span: t.span}
 	if t.packed[ti] != nil {
 		v.segs[ti], v.offs[ti] = unpackTrack(t.packed[ti])
 	}

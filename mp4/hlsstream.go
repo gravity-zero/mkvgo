@@ -136,6 +136,25 @@ type windowTable struct {
 	kept   []int64 // per track, what data holds under the window budget until taken; their sum is held
 	taken  []bool  // per track, whether a kept segment was handed out
 	held   int64
+	// span is the source range the window's samples cover across every rendition, [lo, hi) (hi 0 when unknown):
+	// the first request of a window reads the whole of it ahead, whichever rendition it is for.
+	span [2]int64
+}
+
+// windowsSpan is the source range the walked windows cover across every track.
+func windowsSpan(windows [][]segSample) (span [2]int64) {
+	for _, w := range windows {
+		if len(w) == 0 {
+			continue
+		}
+		if span[1] == 0 || w[0].off < span[0] {
+			span[0] = w[0].off
+		}
+		if end := w[len(w)-1].end; end > span[1] {
+			span[1] = end
+		}
+	}
+	return span
 }
 
 type tableFlight struct {
@@ -416,7 +435,7 @@ func (p *HLSPlan) buildTable(ctx context.Context, n int) (*windowTable, error) {
 		}
 	}
 	p.learnOtherRate(n, otherBytes)
-	t := &windowTable{packed: make([][]byte, len(p.tracks)), heads: make([][]byte, len(p.tracks)), data: make([][]byte, len(p.tracks))}
+	t := &windowTable{packed: make([][]byte, len(p.tracks)), heads: make([][]byte, len(p.tracks)), data: make([][]byte, len(p.tracks)), span: windowsSpan(windows)}
 	if keep {
 		t.kept, t.taken = make([]int64, len(p.tracks)), make([]bool, len(p.tracks))
 	}
@@ -532,6 +551,21 @@ func (p *HLSPlan) mp4Table(ti, n int) (*windowTable, error) {
 	t := &windowTable{segs: make([]trackSegment, len(p.tracks)), heads: make([][]byte, len(p.tracks)), offs: make([][]int64, len(p.tracks)), data: make([][]byte, len(p.tracks))}
 	t.segs[ti], t.offs[ti] = p.mp4Segment(ti, n)
 	t.heads[ti] = buildSegmentFile(uint32(n+1), t.segs[ti])
+	for tj := range p.tracks { // the window's range over every rendition, for the read-ahead
+		seg, offs := t.segs[tj], t.offs[tj]
+		if tj != ti {
+			seg, offs = p.mp4Segment(tj, n)
+		}
+		if len(offs) == 0 {
+			continue
+		}
+		if t.span[1] == 0 || offs[0] < t.span[0] {
+			t.span[0] = offs[0]
+		}
+		if end := offs[len(offs)-1] + int64(seg.samples[len(seg.samples)-1].size); end > t.span[1] {
+			t.span[1] = end
+		}
+	}
 	return t, nil
 }
 
@@ -908,7 +942,7 @@ func (p *HLSPlan) writeSpans(ctx context.Context, w io.Writer, head []byte, t *w
 			return c.written, err
 		}
 		if !p.onNetwork(c.file) {
-			pre = prefetch(c.file, pieces)
+			pre = prefetch(c.file, pieces, t.span, p.followsServed(win))
 		}
 	}
 	for i, pc := range pieces {
@@ -974,7 +1008,17 @@ func (a *ahead) advance(at int64) {
 // too, the video between its runs included: read run by run, each run started
 // a small disk read of its own and broke the video's large ones (a full read of
 // a 20-minute interleaved MP4: 11,217 disk reads of 79 KiB, 863 of 1 MiB so).
-func prefetch(f *os.File, pieces []span) *ahead {
+// The read runs over the window's whole range (window, every rendition) when
+// the pieces leave part of it out: a player fetches a window's renditions
+// together, and asked from its own first sample, the first request left the
+// window to come off the disk in two runs with a short one between (a
+// fragmented MP4, its audio runs behind each fragment's video: 1,656 reads of
+// 681 KiB for a file a sequential read takes in 1,104 of 1 MiB).
+// With extend (the window before this one was just served: a player reading
+// in order) the range runs on to the next chunk boundary of the disk, where the
+// next window's own read-ahead starts: the seam is read once, whole. Asked for
+// a window alone, that would read up to a chunk nobody wants.
+func prefetch(f *os.File, pieces []span, window [2]int64, extend bool) *ahead {
 	first, last := -1, -1
 	for i, pc := range pieces {
 		if pc.emit == nil {
@@ -988,8 +1032,21 @@ func prefetch(f *os.File, pieces []span) *ahead {
 		return nil
 	}
 	a := &ahead{f: f, next: pieces[first].off, end: pieces[last].off + pieces[last].n}
+	if window[1] > 0 {
+		a.next, a.end = min(a.next, window[0]), max(a.end, window[1])
+	}
+	if extend && f != nil {
+		a.end = roundUpTo(a.end, readAheadBytes(f))
+	}
 	a.advance(a.next)
 	return a
+}
+
+// followsServed reports whether window n follows the window served last (n itself, its other rendition): a player
+// reading in order, whose read-ahead may run on to the next window. It then records n as served.
+func (p *HLSPlan) followsServed(n int) bool {
+	last := p.servedWin.Swap(int64(n) + 1) // stored one up: zero means none
+	return last == int64(n) || last == int64(n)+1
 }
 
 // networkSource is onNetwork, swappable for a test.

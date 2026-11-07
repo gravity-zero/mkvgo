@@ -42,6 +42,12 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   larger of the disk's `read_ahead_kb` and `max_sectors_kb`, the most the kernel
   reads per call: at the default 128 KiB read-ahead, 7,062 reads of 126 KiB for
   that full read became 863.
+- HLS segments read from a local file: the read-ahead covers the whole window
+  across renditions, not the requested segment's own span. A player fetches a
+  window's audio and video together; asked from its own first sample, the first
+  request left the window to come off the disk in two runs (a fragmented MP4
+  with its audio behind each fragment's video: 1,656 disk reads where a
+  sequential read takes 1,104).
 
 ## [0.65.1] - 2026-11-07
 

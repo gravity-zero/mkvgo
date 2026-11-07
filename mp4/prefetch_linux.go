@@ -23,9 +23,26 @@ const willNeedChunk = 128 << 10
 func willNeed(f *os.File, off, n int64) {
 	const fadvWillNeed = 3
 	chunk := readAheadBytes(f)
-	for end := off + n; off < end; off += chunk {
-		_, _, _ = syscall.Syscall6(syscall.SYS_FADVISE64, f.Fd(), uintptr(off), uintptr(min(chunk, end-off)), fadvWillNeed, 0, 0)
+	for end := off + n; off < end; {
+		to := willNeedCut(off, end, chunk)
+		_, _, _ = syscall.Syscall6(syscall.SYS_FADVISE64, f.Fd(), uintptr(off), uintptr(to-off), fadvWillNeed, 0, 0)
+		off = to
 	}
+}
+
+// willNeedCut is where the piece asked for from off ends: the next chunk boundary of the file, or end. Pieces cut
+// on the file's boundaries rather than the range's let two ranges that meet share a boundary, so a window read
+// ahead to a boundary (ahead.extend) and the next one's start make one read of the disk, not two halves.
+func willNeedCut(off, end, chunk int64) int64 {
+	return min(end, off-off%chunk+chunk)
+}
+
+// roundUpTo is v rounded up to a multiple of unit.
+func roundUpTo(v, unit int64) int64 {
+	if r := v % unit; r != 0 {
+		return v + unit - r
+	}
+	return v
 }
 
 // fsByDev caches, per device, what the filesystem behind it is (fsInfo).

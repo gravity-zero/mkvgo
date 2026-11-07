@@ -50,7 +50,7 @@ func (p *HLSPlan) openCENC(ctx context.Context, h *ResourceHandle) error {
 	td := &cencTrafData{hasSubsample: k.isVideo, entries: make([]sencEntry, len(seg.samples))}
 	var rd *sampleReader
 	if k.isVideo {
-		if rd, err = p.newSampleReader(ctx, h.table, h.ti); err != nil {
+		if rd, err = p.newSampleReader(ctx, h.table, h.ti, h.n); err != nil {
 			return err
 		}
 		defer rd.close()
@@ -121,7 +121,7 @@ func (p *HLSPlan) writeCENC(ctx context.Context, w io.Writer, h *ResourceHandle,
 		}
 		if rd == nil {
 			var err error
-			if rd, err = p.newSampleReader(ctx, h.table, h.ti); err != nil {
+			if rd, err = p.newSampleReader(ctx, h.table, h.ti, h.n); err != nil {
 				return cw.pos, err
 			}
 			defer rd.close()
@@ -259,7 +259,7 @@ type sampleReader struct {
 	ahead  *ahead // a video rendition read ahead of the samples, nil otherwise
 }
 
-func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (*sampleReader, error) {
+func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti, win int) (*sampleReader, error) {
 	src, err := p.openSource(ctx)
 	if err != nil {
 		return nil, err
@@ -276,7 +276,7 @@ func (p *HLSPlan) newSampleReader(ctx context.Context, t *windowTable, ti int) (
 		r.pieces[x] = span{off: t.offs[ti][x], n: int64(s.size) - int64(len(r.prefix))}
 	}
 	if r.c.file != nil && !p.onNetwork(r.c.file) {
-		r.ahead = prefetch(r.c.file, r.pieces)
+		r.ahead = prefetch(r.c.file, r.pieces, t.span, p.followsServed(win))
 	}
 	return r, nil
 }

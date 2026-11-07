@@ -171,6 +171,7 @@ type HLSPlan struct {
 	// that the source was once found changed: final for the plan.
 	srcStatAt  atomic.Int64
 	srcChanged atomic.Bool
+	servedWin  atomic.Int64 // the window served last, one up (followsServed)
 	// sourceID is SourceID, computed once.
 	sourceIDOnce sync.Once
 	sourceID     string
