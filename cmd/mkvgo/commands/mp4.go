@@ -68,7 +68,7 @@ func CmdToMP4(args []string) {
 	})
 	ClearProgress()
 	if err != nil {
-		FatalErr(err)
+		FatalErr(FlagWords(err))
 	}
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }
@@ -105,7 +105,7 @@ func CmdFromMP4(args []string) {
 	})
 	ClearProgress()
 	if err != nil {
-		FatalErr(err)
+		FatalErr(FlagWords(err))
 	}
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }

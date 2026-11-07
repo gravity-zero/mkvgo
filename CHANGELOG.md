@@ -31,6 +31,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - `diagnose` and `track-ends`: the bytes a walk skips past an unreadable element
   are no longer called damage (they include the sound media up to the next
   Cluster it could read); the message points to `salvage --dry-run` for the map.
+- CLI: `to-mp4`, `from-mp4` and `to-hls` name `--skip-unsupported` where the
+  refusal named `Options.SkipUnsupported`; `edit-inplace` refused for want of
+  room names the `mkvgo edit` command that rewrites the file.
 
 ## [0.65.1] - 2026-11-07
 

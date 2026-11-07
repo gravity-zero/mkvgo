@@ -205,6 +205,23 @@ func FatalErr(err error) {
 	Fatal(msg)
 }
 
+// FlagWords is err as a command that takes --skip-unsupported tells it: the library's hint names the Options field,
+// the command line the flag. errors.Is and As still reach err.
+func FlagWords(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "set Options.SkipUnsupported") {
+		return err
+	}
+	return flagWords{err}
+}
+
+type flagWords struct{ error }
+
+func (f flagWords) Error() string {
+	return strings.ReplaceAll(f.error.Error(), "set Options.SkipUnsupported", "pass --skip-unsupported")
+}
+
+func (f flagWords) Unwrap() error { return f.error }
+
 // rejectFlagArg fails with a clear "unknown flag" error when a positional argument
 // looks like an option (starts with '-'), so a mistyped flag fails loudly instead of
 // being treated as a filename. A lone "-" (conventionally stdin) is allowed.

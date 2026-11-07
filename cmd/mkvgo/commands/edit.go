@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -292,6 +293,9 @@ MP4: appends a new moov and retires the old one (crash-ordered).`)
 		err = mp4.EditInPlace(cliCtx, source, edit)
 	} else {
 		err = matroska.EditInPlace(cliCtx, source, edit)
+	}
+	if errors.Is(err, matroska.ErrNoRoomInPlace) {
+		Fatal(fmt.Sprintf("%v: mkvgo edit %s -o <out> '<json>' writes the edited file in full", err, source))
 	}
 	if err != nil {
 		FatalErr(err)

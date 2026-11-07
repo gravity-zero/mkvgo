@@ -312,7 +312,7 @@ func CmdToHLS(args []string) {
 	err := mp4.RemuxToHLS(cliCtx, src, outDir, opts)
 	ClearProgress()
 	if err != nil {
-		FatalErr(err)
+		FatalErr(FlagWords(err))
 	}
 	fmt.Printf("HLS written → %s (play master.m3u8; init.mp4 + segments + subtitle renditions)\n", outDir)
 }
