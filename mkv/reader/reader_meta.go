@@ -91,6 +91,11 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	// Keyframe recovery for a Cues-less file (Cues, when present, already filled
 	// Keyframes head-only above and win). The complete index is preferred over the
 	// sample when both are requested.
+	if o.keyframeWalk && len(c.Keyframes) > 0 {
+		if ks := p.buildKeyframeIndex(videoTrackID(c), c.Info.TimecodeScale); len(ks) > 0 {
+			c.Keyframes = ks
+		}
+	}
 	if len(c.Keyframes) == 0 {
 		switch {
 		case o.keyframeIndex:

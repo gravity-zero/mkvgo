@@ -15,6 +15,7 @@ type readOpts struct {
 	inBandColour     bool
 	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
 	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
+	keyframeWalk     bool // build it even when the file has Cues
 	bitrate          bool // follow the SeekHead to Tags for per-track BPS → Track.Bitrate
 	cues             bool // keep the raw CuePoints on the metadata path (WithCues)
 	tags             bool // keep the Tags element on the metadata path (WithTags)
@@ -140,6 +141,13 @@ func WithBitrate() ReadOption {
 // never scanned (the head-only Cues index is used).
 func WithKeyframeIndex() ReadOption {
 	return func(o *readOpts) { o.keyframeIndex = true }
+}
+
+// WithKeyframeWalk is WithKeyframeIndex on a file with Cues too: Cues may index only some keyframes (one a Cluster,
+// say), so the same sequential pass lists every one in their place. It reads the whole Segment; the Cues stay
+// Keyframes when the pass finds no video keyframe.
+func WithKeyframeWalk() ReadOption {
+	return func(o *readOpts) { o.keyframeIndex, o.keyframeWalk = true, true }
 }
 
 // defaultKeyframeSamples is the sample count WithSampledKeyframes uses for a

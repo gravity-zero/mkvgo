@@ -48,7 +48,7 @@ func main() {
 	case "probe":
 		commands.CmdProbe(commands.SourceArg("probe", args))
 	case "keyframes":
-		commands.CmdKeyframes(commands.SourceArg("keyframes", args))
+		commands.CmdKeyframesArgs(args)
 	case "to-vtt":
 		commands.CmdToVTT(args)
 	case "demux":

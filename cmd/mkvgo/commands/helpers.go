@@ -88,7 +88,7 @@ var CmdUsage = map[string]string{
 	"attachments":        "mkvgo attachments [-json] <file.mkv|.mp4|->",
 	"tags":               "mkvgo tags [-json] <file.mkv|.mp4|->",
 	"probe":              "mkvgo probe [-json] [-in-band] [-fps-reads] <file.mkv|.mp4|-> (full head-only metadata; -json adds every derived field: aspect ratios, colour names, hdr_format, resolved_language, effective_sample_rate; -in-band reads one sample to complete colour / HDR10 static metadata the header left out)",
-	"keyframes":          "mkvgo keyframes [-json] <file.mkv|.mp4>",
+	"keyframes":          "mkvgo keyframes [-json] [-walk] <file.mkv|.mp4>",
 	"to-vtt":             "mkvgo to-vtt <subtitle.srt|.ass|.vtt> -o <out.vtt>",
 	"validate":           "mkvgo validate [-json] [-strict] <file.mkv> (exit 1 on errors; -strict: warnings fail too)",
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",

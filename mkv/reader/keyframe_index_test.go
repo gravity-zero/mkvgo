@@ -6,6 +6,9 @@ import (
 	"io"
 	"reflect"
 	"testing"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/writer"
 )
 
 // TestKeyframeIndexComplete proves the complete index collects EVERY video
@@ -138,4 +141,48 @@ func contains(s []int64, v int64) bool {
 		}
 	}
 	return false
+}
+
+// TestKeyframeWalkPastPartialCues pins WithKeyframeWalk: Cues that index one keyframe per Cluster (as many muxers
+// write them) list only those, and the walk lists every keyframe in their place.
+func TestKeyframeWalkPastPartialCues(t *testing.T) {
+	f, err := createTempFile(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeTempFile(f)
+	mw := writer.NewMKVWriter(f)
+	mustNoErr(t, mw.WriteStart())
+	mustNoErr(t, mw.WriteMetadata(&mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: 1_000_000}}, []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264"}}, 2000))
+	for _, tc := range []int64{0, 1000} {
+		blocks := []mkv.Block{
+			{TrackNumber: 1, Timecode: tc, Keyframe: true, Data: []byte{1}},
+			{TrackNumber: 1, Timecode: tc + 33, Data: []byte{2}},
+			{TrackNumber: 1, Timecode: tc + 66, Keyframe: true, Data: []byte{3}},
+		}
+		mustNoErr(t, mw.WriteClusterWithCues(tc, 1_000_000, blocks)) // a cue for the first keyframe only
+	}
+	mustNoErr(t, mw.Finalize())
+
+	_, err = f.Seek(0, io.SeekStart)
+	mustNoErr(t, err)
+	c, err := ReadMeta(context.Background(), f, "x.mkv", WithKeyframeIndex())
+	mustNoErr(t, err)
+	if want := []int64{0, 1000}; !reflect.DeepEqual(c.Keyframes, want) {
+		t.Errorf("from the Cues: %v, want %v", c.Keyframes, want)
+	}
+	_, err = f.Seek(0, io.SeekStart)
+	mustNoErr(t, err)
+	c, err = ReadMeta(context.Background(), f, "x.mkv", WithKeyframeWalk())
+	mustNoErr(t, err)
+	if want := []int64{0, 66, 1000, 1066}; !reflect.DeepEqual(c.Keyframes, want) {
+		t.Errorf("walked: %v, want %v", c.Keyframes, want)
+	}
+}
+
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

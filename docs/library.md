@@ -1581,6 +1581,10 @@ ks := c.Keyframes                                  // []int64 ms, ascending, de-
 c, _ = matroska.OpenMeta(ctx, "no-cues.mkv", matroska.WithKeyframeIndex())
 ks = c.Keyframes
 
+// Cues may index only some keyframes (one a Cluster): walk the Segment for every one.
+c, _ = matroska.OpenMeta(ctx, "video.mkv", matroska.WithKeyframeWalk())
+ks = c.Keyframes
+
 // MP4: opt-in, since building the sample table dominates the parse on a long movie.
 c, _, err := mp4.OpenMeta(ctx, "video.mp4", mp4.Options{Keyframes: true})
 ks = c.Keyframes

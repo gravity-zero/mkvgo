@@ -187,14 +187,15 @@ cat video.mkv | mkvgo probe -
 
 ### keyframes
 
-List the video track's keyframe timestamps - MKV/WebM from the Cues seek index (head-only), or, when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, from a structural scan, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
+List the video track's keyframe timestamps - MKV/WebM from the Cues seek index (head-only; Cues may index only some keyframes, one a Cluster say, which the text form then says on stderr), or, with `-walk` or when the file carries no Cues, from a complete sequential structural scan of the Segment (every keyframe, from a structural scan, no demux/decode); MP4 from the sample table. The cut points an `-c copy` segmenter aligns on.
 
 ```
-mkvgo keyframes [-json] <file.mkv|.mp4>
+mkvgo keyframes [-json] [-walk] <file.mkv|.mp4>
 ```
 
 ```bash
 mkvgo keyframes video.mkv            # HH:MM:SS  <ms>  per line
+mkvgo keyframes -walk video.mkv      # every keyframe, not only the cued ones (reads the whole file)
 mkvgo keyframes -json movie.mp4      # [0, 2000, 4000, ...]
 ```
 

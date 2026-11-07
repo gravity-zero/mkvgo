@@ -12,12 +12,26 @@ import (
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
+// CmdKeyframesArgs runs keyframes from its arguments: -walk lists every keyframe of a Matroska that has Cues.
+func CmdKeyframesArgs(args []string) {
+	var walk bool
+	fl := newFlags("keyframes")
+	fl.Bool(&walk, "-walk", "--walk")
+	source, _ := fl.ParseSource(args, CmdUsage["keyframes"])
+	keyframes(source, walk)
+}
+
 // CmdKeyframes prints a file's video keyframe timestamps (ms). MKV/WebM reads the
 // Cues seek index head-only; MP4 builds the sample table (opt-in). A Cues-less
 // Matroska builds the complete keyframe index from a sequential structural pass.
-func CmdKeyframes(path string) {
+func CmdKeyframes(path string) { keyframes(path, false) }
+
+// keyframes is CmdKeyframes; walk lists a Matroska's keyframes from the structural pass even when it has Cues,
+// which may index only some of them. Listed from the Cues, the text form says so on stderr.
+func keyframes(path string, walk bool) {
 	isMP4, fs := sniffSource(path) // remote: head-only over HTTP Range requests / s3 SigV4
 	var ks []int64
+	fromCues := false
 	if isMP4 {
 		c, _, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: true, FS: fs})
 		if err != nil {
@@ -25,14 +39,26 @@ func CmdKeyframes(path string) {
 		}
 		ks = c.Keyframes
 	} else {
-		// WithKeyframeIndex is a no-op when the file has Cues, so passing it always
-		// keeps Cues-indexed files head-only while building the complete index for
-		// Cues-less ones (the "no external fallback" path). A nil fs is the OS.
-		c, err := matroska.OpenMetaWithFS(cliCtx, path, fs, matroska.WithKeyframeIndex())
-		if err != nil {
-			FatalErr(err)
+		// Head-only first: a file with Cues lists them. A Cues-less one, or -walk, takes the complete index from the
+		// structural pass (the "no external fallback" path). A nil fs is the OS.
+		if !walk {
+			c, err := matroska.OpenMetaWithFS(cliCtx, path, fs)
+			if err != nil {
+				FatalErr(err)
+			}
+			ks, fromCues = c.Keyframes, len(c.Keyframes) > 0
 		}
-		ks = c.Keyframes
+		if !fromCues {
+			opt := matroska.WithKeyframeIndex()
+			if walk {
+				opt = matroska.WithKeyframeWalk()
+			}
+			c, err := matroska.OpenMetaWithFS(cliCtx, path, fs, opt)
+			if err != nil {
+				FatalErr(err)
+			}
+			ks = c.Keyframes
+		}
 	}
 
 	if JsonOutput {
@@ -48,6 +74,9 @@ func CmdKeyframes(path string) {
 	}
 	for _, ms := range ks {
 		fmt.Printf("%s  %d\n", FmtMs(ms), ms)
+	}
+	if fromCues {
+		fmt.Fprintf(os.Stderr, "listed from the Cues index (%d entries): a keyframe between two cues is not listed; -walk lists every one (reads the whole file)\n", len(ks))
 	}
 }
 

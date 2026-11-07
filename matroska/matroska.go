@@ -379,6 +379,10 @@ func WithSampledKeyframes(n int) ReadOption { return reader.WithSampledKeyframes
 // index. Files with Cues are never scanned. See reader.WithKeyframeIndex.
 func WithKeyframeIndex() ReadOption { return reader.WithKeyframeIndex() }
 
+// WithKeyframeWalk is WithKeyframeIndex on a file with Cues too, which may index only some keyframes: the whole
+// Segment is read. See reader.WithKeyframeWalk.
+func WithKeyframeWalk() ReadOption { return reader.WithKeyframeWalk() }
+
 // WithBitrate fills each track's Bitrate from the Matroska "BPS" tag (the per-track
 // bitrate probers show as TAG:BPS; their own bit_rate field stays N/A for
 // Matroska) on the metadata-only path, which otherwise leaves Bitrate nil for

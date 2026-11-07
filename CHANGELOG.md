@@ -16,6 +16,12 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (RFC 9559 6.8) instead of refusing; it still refuses a file with no SeekHead
   or with bytes after its Segment.
 
+### Added
+
+- `keyframes -walk` / `matroska.WithKeyframeWalk`: every keyframe from a pass
+  over the Segment, for Cues that index only some of them. Listed from the
+  Cues, the text form now says so on stderr.
+
 ### Fixed
 
 - `demux` of Vorbis to Ogg: each page's granule counts the samples the decoder
