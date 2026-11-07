@@ -38,6 +38,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   its whole span like a video one; read run by run it broke the video's large
   disk reads (a full read of a 20-minute file: 11,217 reads of 79 KiB, 863 of
   1 MiB with the next entry).
+- Linux read-ahead requests (`posix_fadvise` WILLNEED) go in pieces of the
+  larger of the disk's `read_ahead_kb` and `max_sectors_kb`, the most the kernel
+  reads per call: at the default 128 KiB read-ahead, 7,062 reads of 126 KiB for
+  that full read became 863.
 
 ## [0.65.1] - 2026-11-07
 
