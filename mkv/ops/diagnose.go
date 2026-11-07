@@ -158,7 +158,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		d.Findings = append(d.Findings, Finding{
 			Kind:  mkv.FindingDamaged,
 			Scope: mkv.ScopeBody,
-			Detail: fmt.Sprintf("the tail walk passed over %d byte(s) of damage inside the file: an element that cannot be read, with media continuing behind it",
+			Detail: fmt.Sprintf("the tail walk met an element it cannot read inside the file and skipped %d byte(s) to the next Cluster it could read, media included: `mkvgo salvage --dry-run` maps the damage itself",
 				ends.SkippedBytes),
 			Remedy: "mkvgo reindex --resync",
 		})

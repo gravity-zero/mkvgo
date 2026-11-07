@@ -411,6 +411,9 @@ func TestDiagnoseDeepVerifyStreamed(t *testing.T) {
 	}
 	if f := hasFinding(d, mkv.FindingDamaged); f == nil || f.Scope != mkv.ScopeBody {
 		t.Errorf("streamed file damaged in its body under DeepVerify: findings %+v; want damaged in the body", d.Findings)
+	} else if !strings.Contains(f.Detail, "skipped") || !strings.Contains(f.Detail, "media included") || !strings.Contains(f.Detail, "mkvgo salvage --dry-run") {
+		// The count is what the walk jumped to the next Cluster it could read, not the damage itself.
+		t.Errorf("damaged detail %q: want the bytes skipped, media included, and where the damage is mapped", f.Detail)
 	}
 	if hasFinding(d, mkv.FindingTrailingJunk) != nil {
 		t.Errorf("a Segment of unknown size has no trailing junk: %+v", d.Findings)

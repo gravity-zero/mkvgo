@@ -60,7 +60,7 @@ func CmdTrackEnds(args []string) {
 		fmt.Printf("  picture ends %s\n", FmtMs(report.VideoEndMs))
 	}
 	if report.SkippedBytes > 0 {
-		fmt.Printf("  the walk passed over %d byte(s) of damage inside the file (repair: mkvgo reindex --resync)\n", report.SkippedBytes)
+		fmt.Printf("  the walk skipped %d byte(s) past an element it cannot read inside the file, media included (damage map: mkvgo salvage --dry-run; repair: mkvgo reindex --resync)\n", report.SkippedBytes)
 	}
 	if report.AudioShortfallMs > 0 {
 		fmt.Printf("  audio track %d stops %.3fs before the picture\n", report.ShortAudioTrack, float64(report.AudioShortfallMs)/1000)

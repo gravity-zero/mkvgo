@@ -28,6 +28,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   yields (block sizes and modes from the headers), less the last block's
   DiscardPadding, instead of a guess from the timestamps that cut the end
   short or ran past it.
+- `diagnose` and `track-ends`: the bytes a walk skips past an unreadable element
+  are no longer called damage (they include the sound media up to the next
+  Cluster it could read); the message points to `salvage --dry-run` for the map.
 
 ## [0.65.1] - 2026-11-07
 
