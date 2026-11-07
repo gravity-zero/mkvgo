@@ -351,10 +351,10 @@ mkvgo compare -blocks film.mkv part1.mkv part2.mkv part3.mkv
 
 ### demux
 
-Extract tracks, each as the file its codec's tools read.
+Extract tracks, each as the file its codec's tools read, from a Matroska/WebM or an MP4/MOV (an MP4's tracks and blocks are those `from-mp4` would write: the same streams come out of either container, byte for byte what `ffmpeg -c copy` extracts).
 
 ```
-mkvgo demux <file.mkv> -o <dir> [-t trackID,...] [--raw]
+mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,...] [--raw]
 ```
 
 | Flag | Description |

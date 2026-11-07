@@ -195,7 +195,7 @@ Commands:
   tracks        List tracks (MKV/WebM or MP4)
   chapters      List chapters (MKV/WebM or MP4)
   attachments   List attachments
-  demux         Extract tracks to raw streams
+  demux         Extract tracks to raw streams (MKV/WebM or MP4)
   mux           Combine tracks into one file (MKV/WebM or MP4)
   remove-track  Remove tracks (MKV/WebM or MP4)
   add-track     Add a track from another file of the same container

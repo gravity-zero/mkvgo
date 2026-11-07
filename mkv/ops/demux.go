@@ -11,47 +11,35 @@ import (
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
+	"github.com/gravity-zero/mkvgo/mp4"
 )
 
-// Demux writes each requested track of the source to its own file in the output directory.
+// Demux writes each requested track of the source to its own file in the output directory. The source is a
+// Matroska/WebM, or an MP4: its tracks and blocks are then those RemuxFromMP4 would write to a Matroska, so the
+// streams come out the same (ADTS, Annex-B, Ogg) from either container.
 func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (err error) {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
-	fs := mkv.FSFrom(extra)
+	isMP4, fs, err := opensLikeMP4(ctx, opts.SourcePath, mkv.FSFrom(extra))
+	if err != nil {
+		return err
+	}
+	if isMP4 {
+		return demuxMP4(ctx, opts, fs, extra)
+	}
 	c, err := reader.OpenWithFS(ctx, opts.SourcePath, fs, reader.WithoutAttachmentData())
 	if err != nil {
 		return err
 	}
-
-	wanted := buildTrackSet(c, opts.TrackIDs)
-	if len(wanted) == 0 {
-		return fmt.Errorf("no matching tracks found")
-	}
-
-	if err := fs.DoMkdirAll(opts.OutputDir, 0755); err != nil {
-		return err
-	}
-
-	formats := make(map[uint64]*demuxFormat, len(wanted))
-	for id, t := range wanted {
-		formats[id] = demuxFormatOf(t, opts.Raw)
-	}
-	writers, outputs, err := openOutputFiles(wanted, formats, opts.OutputDir, opts.SourcePath, opts.NoOverwrite, fs, mkv.SyncOutputFrom(extra))
-	if err != nil {
+	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra)}
+	if err := d.open(c); err != nil {
 		return err
 	}
 	// A demux that fails leaves no truncated stream under its output names, nor
 	// touches the files already there; every output is closed before any is
 	// moved into place, so one that fails to close keeps them all out.
-	defer func() {
-		for _, o := range outputs {
-			o.close(&err)
-		}
-		for _, o := range outputs {
-			o.commit(&err)
-		}
-	}()
+	defer d.settle(&err)
 
 	f, err := fs.DoOpen(opts.SourcePath)
 	if err != nil {
@@ -76,14 +64,6 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		}
 		return payload[:size]
 	})
-	for _, id := range sortedTracks(writers) {
-		if h := formats[id].head; h != nil {
-			if err := h(writers[id]); err != nil {
-				return fmt.Errorf("write track %d: %w", id, err)
-			}
-		}
-	}
-
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -95,39 +75,111 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 		if err != nil {
 			return fmt.Errorf("read block: %w", err)
 		}
-		track, ok := wanted[blk.TrackNumber]
-		if !ok {
-			continue
-		}
-		w := writers[blk.TrackNumber]
-		data, err := track.DecodePayload(blk.Data)
-		if err != nil {
-			return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
-		}
-		if err := formats[blk.TrackNumber].frame(w, blk, data); err != nil {
-			var fe *frameError
-			if errors.As(err, &fe) {
-				return fmt.Errorf("track %d, block at %.3f s: %w; demux with --raw (DemuxOptions.Raw) to keep the stored payloads",
-					blk.TrackNumber, float64(blk.Timecode)/1000, err)
-			}
-			return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
+		if err := d.frame(blk); err != nil {
+			return err
 		}
 	}
-	for _, id := range sortedTracks(writers) {
-		if e := formats[id].end; e != nil {
-			if err := e(writers[id]); err != nil {
+	return d.finish()
+}
+
+// demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats.
+func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mkv.Options) (err error) {
+	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra)}
+	defer d.settle(&err)
+	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra)}
+	if err := mp4.WalkBlocks(ctx, opts.SourcePath, d.open, d.frame, o); err != nil {
+		return err
+	}
+	return d.finish()
+}
+
+// demuxer holds a demux's outputs: one file per wanted track, in its format.
+type demuxer struct {
+	opts    mkv.DemuxOptions
+	fs      *mkv.FS
+	sync    bool
+	wanted  map[uint64]mkv.Track
+	formats map[uint64]*demuxFormat
+	writers map[uint64]*bufio.Writer
+	outputs []*output
+}
+
+// open picks the tracks, creates their files and writes each format's head.
+func (d *demuxer) open(c *mkv.Container) error {
+	d.wanted = buildTrackSet(c, d.opts.TrackIDs)
+	if len(d.wanted) == 0 {
+		return fmt.Errorf("no matching tracks found")
+	}
+	if err := d.fs.DoMkdirAll(d.opts.OutputDir, 0755); err != nil {
+		return err
+	}
+	d.formats = make(map[uint64]*demuxFormat, len(d.wanted))
+	for id, t := range d.wanted {
+		d.formats[id] = demuxFormatOf(t, d.opts.Raw)
+	}
+	var err error
+	d.writers, d.outputs, err = openOutputFiles(d.wanted, d.formats, d.opts.OutputDir, d.opts.SourcePath, d.opts.NoOverwrite, d.fs, d.sync)
+	if err != nil {
+		return err
+	}
+	for _, id := range sortedTracks(d.writers) {
+		if h := d.formats[id].head; h != nil {
+			if err := h(d.writers[id]); err != nil {
 				return fmt.Errorf("write track %d: %w", id, err)
 			}
 		}
 	}
-	// Flush buffered writers so a final write error (e.g. disk full) is surfaced
-	// rather than swallowed by the deferred Close.
-	for _, id := range sortedTracks(writers) {
-		if err := writers[id].Flush(); err != nil {
+	return nil
+}
+
+// frame writes one block to its track's file, decoded and framed by the format.
+func (d *demuxer) frame(blk mkv.Block) error {
+	track, ok := d.wanted[blk.TrackNumber]
+	if !ok {
+		return nil
+	}
+	w := d.writers[blk.TrackNumber]
+	data, err := track.DecodePayload(blk.Data)
+	if err != nil {
+		return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
+	}
+	if err := d.formats[blk.TrackNumber].frame(w, blk, data); err != nil {
+		var fe *frameError
+		if errors.As(err, &fe) {
+			return fmt.Errorf("track %d, block at %.3f s: %w; demux with --raw (DemuxOptions.Raw) to keep the stored payloads",
+				blk.TrackNumber, float64(blk.Timecode)/1000, err)
+		}
+		return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
+	}
+	return nil
+}
+
+// finish writes each format's end and flushes, so a final write error (a disk full) surfaces rather than being
+// swallowed by the deferred close.
+func (d *demuxer) finish() error {
+	for _, id := range sortedTracks(d.writers) {
+		if e := d.formats[id].end; e != nil {
+			if err := e(d.writers[id]); err != nil {
+				return fmt.Errorf("write track %d: %w", id, err)
+			}
+		}
+	}
+	for _, id := range sortedTracks(d.writers) {
+		if err := d.writers[id].Flush(); err != nil {
 			return fmt.Errorf("flush track %d: %w", id, err)
 		}
 	}
 	return nil
+}
+
+// settle closes every output, then moves them into place; a failure keeps them all out.
+func (d *demuxer) settle(err *error) {
+	for _, o := range d.outputs {
+		o.close(err)
+	}
+	for _, o := range d.outputs {
+		o.commit(err)
+	}
 }
 
 func buildTrackSet(c *mkv.Container, trackIDs []uint64) map[uint64]mkv.Track {

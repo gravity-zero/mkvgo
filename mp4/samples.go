@@ -69,39 +69,57 @@ func ForEachBlock(ctx context.Context, path string, fn func(b mkv.Block) error, 
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
+	var c *mkv.Container
+	err := WalkBlocks(ctx, path, func(cc *mkv.Container) error { c = cc; return nil }, fn, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// WalkBlocks is ForEachBlock with the remux's metadata handed to start before the first block: a consumer that
+// writes each track to a file of its own (a demux) opens them from the tracks first. An error from start or fn
+// stops the walk and is returned.
+func WalkBlocks(ctx context.Context, path string, start func(c *mkv.Container) error, fn func(b mkv.Block) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	src, err := o.FS.DoOpen(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer src.Close()
 	fi, err := o.FS.DoStat(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	size := fi.Size()
 	mv, err := parseMP4Limit(src, size, sampleFull, o.moovLimit())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, d := range mv.dropped {
 		o.report(d)
 	}
 	cut, isCut := mv.truncation(size)
 	if err := carriableTracks(mv, &o); err != nil {
-		return nil, err
+		return err
 	}
 	if sampleCount(mv) == 0 {
-		return nil, errf("the source holds no samples (an initialisation segment?): nothing to read")
+		return errf("the source holds no samples (an initialisation segment?): nothing to read")
 	}
 	c := containerFromMovie(mv)
 	c.Tracks = buildMKVTracks(mv, o.MP3ContainerDelay)
 	c.Path = path
+	if err := start(c); err != nil {
+		return err
+	}
 	if err := forEachBlock(ctx, src, mv, size, o.Progress, func(b mkv.Block, _ int64) error { return fn(b) }); err != nil {
-		return nil, err
+		return err
 	}
 	if isCut && o.OnTruncated != nil {
 		o.OnTruncated(cut)
 	}
-	return c, nil
+	return nil
 }

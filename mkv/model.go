@@ -834,6 +834,7 @@ type MuxOptions struct {
 
 // DemuxOptions says what ops.Demux extracts: the source, the output directory and the tracks (all when empty).
 type DemuxOptions struct {
+	// SourcePath is a Matroska/WebM, or an MP4: its tracks and blocks are then those its remux to Matroska would write.
 	SourcePath string
 	OutputDir  string
 	TrackIDs   []uint64
