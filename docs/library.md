@@ -2031,12 +2031,15 @@ there when the callback does not change them, so a title edit never needs room f
 they are folded into the head without duplication, or rewritten in their old
 element when the head cannot hold them and they are no larger.
 A file with no SeekHead is stepped through, element by element past the
-clusters, to find them. When the edit fits nowhere, `EditInPlace` returns an
-error matching `matroska.ErrNoRoomInPlace` (`errors.Is`) before writing a
-byte, and `EditMetadata` is the way through. A Segment of unknown size (a live
+clusters, to find them. When the head still cannot hold the edit, the Tags,
+then the Chapters, the Info and the Tracks are voided there and written again
+at the end of the Segment, which grows by them (RFC 9559 6.1 and 6.8); that
+takes a head SeekHead and nothing after the Segment. When the edit fits
+nowhere, `EditInPlace` returns an error matching `matroska.ErrNoRoomInPlace`
+(`errors.Is`) before writing a byte, and `EditMetadata` is the way through. A Segment of unknown size (a live
 recording) is edited like any other.
 
-Modifies the file directly without rewriting cluster data. Only safe for metadata changes that fit in the existing header space.
+Modifies the file directly without rewriting cluster data; the file grows only by the elements moved to the end of the Segment.
 
 ```go
 err := matroska.EditInPlace(ctx, "video.mkv",

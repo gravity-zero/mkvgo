@@ -342,6 +342,7 @@ func TestEditInPlace_MetadataTooLarge(t *testing.T) {
 		testBlocks(1),
 		300,
 	)
+	appendTrailingVoid(t, src) // nowhere to move the Info to
 
 	ctx := context.Background()
 	err := EditInPlace(ctx, src, func(c *mkv.Container) {

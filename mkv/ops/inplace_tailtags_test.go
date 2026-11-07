@@ -74,11 +74,12 @@ func TestEditInPlaceRewritesTailTagsWhereTheyAre(t *testing.T) {
 	}
 }
 
-// TestEditInPlaceRefusalLeavesTheFileAsItWas pins that an edit with no room is refused as ErrNoRoomInPlace, its
-// message unchanged, before a single byte of the file is written.
+// TestEditInPlaceRefusalLeavesTheFileAsItWas pins that an edit with no room, bytes after the Segment leaving nowhere
+// to move the Tags to, is refused as ErrNoRoomInPlace, its message unchanged, before a single byte of the file is written.
 func TestEditInPlaceRefusalLeavesTheFileAsItWas(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tail.mkv")
 	tailTagsMKV(t, path, 30)
+	appendTrailingVoid(t, path)
 	before, err := os.ReadFile(path)
 	mustNil(t, err)
 	err = EditInPlace(context.Background(), path, func(c *mkv.Container) {

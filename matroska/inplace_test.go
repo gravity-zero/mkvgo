@@ -2,7 +2,9 @@ package matroska
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -50,24 +52,28 @@ func TestEditInPlaceTrackLanguage(t *testing.T) {
 
 func TestEditInPlaceTooLarge(t *testing.T) {
 	requireFixture(t)
-	dir := t.TempDir()
-	path := dir + "/copy.mkv"
+	longTitle := strings.Repeat("very long title padding ", 1000)
+	edit := func(c *Container) { c.Info.Title = longTitle }
+
+	// The head cannot hold it: the Info moves to the end of the Segment.
+	path := t.TempDir() + "/copy.mkv"
 	copyFile(t, fixturePath, path)
+	assertNoErr(t, EditInPlace(context.Background(), path, edit))
+	c, err := Open(context.Background(), path)
+	assertNoErr(t, err)
+	assertEqual(t, c.Info.Title, longTitle, "title moved to the end of the Segment")
 
-	err := EditInPlace(context.Background(), path, func(c *Container) {
-		// Set a very long title that won't fit in the available space
-		longTitle := ""
-		for i := 0; i < 1000; i++ {
-			longTitle += "very long title padding "
-		}
-		c.Info.Title = longTitle
-	})
-	if err == nil {
-		t.Fatal("expected error for metadata too large")
+	// Bytes after the Segment leave nowhere to move it: refused, the file unchanged.
+	path = t.TempDir() + "/trailing.mkv"
+	copyFile(t, fixturePath, path)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	assertNoErr(t, err)
+	_, err = f.Write([]byte{0xEC, 0x81, 0x00}) // a 3-byte Void
+	assertNoErr(t, f.Close())
+	assertNoErr(t, err)
+	if err := EditInPlace(context.Background(), path, edit); !errors.Is(err, ErrNoRoomInPlace) {
+		t.Fatalf("err = %v, want ErrNoRoomInPlace", err)
 	}
-	t.Logf("expected error: %v", err)
-
-	// File should be unchanged
-	c, _ := Open(context.Background(), path)
+	c, _ = Open(context.Background(), path)
 	assertEqual(t, c.Info.Title, "Test Fixture", "title unchanged after failed edit")
 }
