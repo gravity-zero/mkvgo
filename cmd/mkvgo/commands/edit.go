@@ -267,7 +267,7 @@ func CmdEditInPlace(args []string) {
        mkvgo edit-inplace <file.mkv|.mp4> -    (read from stdin)
 
 Edits metadata in-place without rewriting the file. Instant on large files.
-MKV: fails if the new metadata outgrows the room reserved for it.
+MKV: metadata the head cannot hold moves to the end of the Segment (Tags first).
 MP4: appends a new moov and retires the old one (crash-ordered).`)
 	}
 	source := args[0]

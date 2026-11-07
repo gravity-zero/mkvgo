@@ -120,62 +120,69 @@ func TestEditInPlace_NeverDropsTheSeekHead(t *testing.T) {
 
 	// Titles leaving 0..280 bytes of slack after the metadata. The band below
 	// SeekHeadReserve (256) is where the old code dropped the SeekHead; the
-	// exact-fit and one-byte-gap boundaries live in there too.
-	var edits, refusals int
-	for slack := int64(0); slack <= 280; slack++ {
-		titleLen := 1
-		for available-metaSizeWithTitle(t, c, strings.Repeat("A", titleLen)) > slack &&
-			int64(titleLen) < available {
-			titleLen++
-		}
-		title := strings.Repeat("A", titleLen)
-		if available-metaSizeWithTitle(t, c, title) != slack {
-			continue // no title length lands exactly on this slack (VINT width jumps)
-		}
-
-		path := buildMinimalMKV(t, dir, "sweep.mkv", tracks, testBlocks(1), 300)
-		before, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := EditInPlace(ctx, path, func(ct *mkv.Container) { ct.Info.Title = title }); err != nil {
-			after, rerr := os.ReadFile(path)
-			if rerr != nil {
-				t.Fatal(rerr)
+	// exact-fit and one-byte-gap boundaries live in there too. Bytes after the
+	// Segment leave nowhere to move an element to, so that pass refuses past
+	// the region; without them every edit lands, the Info moved when need be.
+	for _, trailing := range []bool{true, false} {
+		var edits, refusals int
+		for slack := int64(0); slack <= 280; slack++ {
+			titleLen := 1
+			for available-metaSizeWithTitle(t, c, strings.Repeat("A", titleLen)) > slack &&
+				int64(titleLen) < available {
+				titleLen++
 			}
-			if !bytes.Equal(before, after) {
-				t.Fatalf("slack=%d: EditInPlace failed (%v) but wrote to the file anyway", slack, err)
+			title := strings.Repeat("A", titleLen)
+			if available-metaSizeWithTitle(t, c, title) != slack {
+				continue // no title length lands exactly on this slack (VINT width jumps)
 			}
-			if !strings.Contains(err.Error(), "exceeds available space") {
-				t.Fatalf("slack=%d: unexpected error: %v", slack, err)
+
+			path := buildMinimalMKV(t, dir, "sweep.mkv", tracks, testBlocks(1), 300)
+			if trailing {
+				appendTrailingVoid(t, path)
 			}
-			refusals++
-			continue
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := EditInPlace(ctx, path, func(ct *mkv.Container) { ct.Info.Title = title }); err != nil {
+				after, rerr := os.ReadFile(path)
+				if rerr != nil {
+					t.Fatal(rerr)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatalf("slack=%d: EditInPlace failed (%v) but wrote to the file anyway", slack, err)
+				}
+				if !strings.Contains(err.Error(), "exceeds available space") {
+					t.Fatalf("slack=%d: unexpected error: %v", slack, err)
+				}
+				refusals++
+				continue
+			}
+
+			edits++
+			assertSeekHeadIntact(t, path)
+
+			got, err := reader.OpenWithFS(ctx, path, nil)
+			if err != nil {
+				t.Fatalf("slack=%d: file unreadable after the edit: %v", slack, err)
+			}
+			if got.Info.Title != title {
+				t.Fatalf("slack=%d: title not applied", slack)
+			}
+			if len(got.Tracks) != 1 {
+				t.Fatalf("slack=%d: tracks lost", slack)
+			}
+			if len(got.Cues) == 0 {
+				t.Fatalf("slack=%d: cues lost", slack)
+			}
 		}
 
-		edits++
-		assertSeekHeadIntact(t, path)
-
-		got, err := reader.OpenWithFS(ctx, path, nil)
-		if err != nil {
-			t.Fatalf("slack=%d: file unreadable after the edit: %v", slack, err)
+		if edits == 0 || (refusals == 0) == trailing {
+			t.Fatalf("trailing=%v: %d edits, %d refusals; want both branches with bytes after the Segment, no refusal without", trailing, edits, refusals)
 		}
-		if got.Info.Title != title {
-			t.Fatalf("slack=%d: title not applied", slack)
-		}
-		if len(got.Tracks) != 1 {
-			t.Fatalf("slack=%d: tracks lost", slack)
-		}
-		if len(got.Cues) == 0 {
-			t.Fatalf("slack=%d: cues lost", slack)
-		}
+		t.Logf("trailing=%v: %d edits (SeekHead intact), %d refusals (file untouched)", trailing, edits, refusals)
 	}
-
-	if edits == 0 || refusals == 0 {
-		t.Fatalf("sweep exercised only one branch: %d edits, %d refusals", edits, refusals)
-	}
-	t.Logf("sweep: %d edits (SeekHead intact), %d refusals (file untouched)", edits, refusals)
 }
 
 // TestEditInPlace_ShrinksTheSeekHeadSlot pins what the fix adds: when the grown

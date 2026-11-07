@@ -998,8 +998,8 @@ func EditMetadata(ctx context.Context, srcPath, dstPath string, edit func(*Conta
 	return ops.EditMetadata(ctx, srcPath, dstPath, edit, opts...)
 }
 
-// ErrNoRoomInPlace is returned (errors.Is) by EditInPlace when the edited metadata does not fit where the file keeps
-// it; the file is left as it was, and EditMetadata rewrites it instead.
+// ErrNoRoomInPlace is returned (errors.Is) by EditInPlace when the edited metadata fits neither the head nor, moved,
+// the end of the Segment; the file is left as it was, and EditMetadata rewrites it instead.
 var ErrNoRoomInPlace = ops.ErrNoRoomInPlace
 
 // EditInPlace applies edit to the metadata of the file at path without rewriting its media; ErrNoRoomInPlace when

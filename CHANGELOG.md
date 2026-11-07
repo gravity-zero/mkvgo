@@ -9,6 +9,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Changed
+
+- Matroska `edit-inplace` / `EditInPlace`: a head with no room left moves the
+  Tags, then the Chapters, the Info and the Tracks to the end of the Segment
+  (RFC 9559 6.8) instead of refusing; it still refuses a file with no SeekHead
+  or with bytes after its Segment.
+
 ## [0.65.1] - 2026-11-07
 
 ### Fixed

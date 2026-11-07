@@ -575,8 +575,11 @@ mkvgo edit-inplace <file.mkv|.mp4> '<json>'
 ```
 
 On an MP4/MOV the new moov is appended and the old one retired to a `free` box (crash-ordered; see the MP4/MOV note above). On Matroska: mkvgo-written files reserve padding after the metadata, so edits that GROW
-the metadata (longer title, added tags/chapters) usually still fit; beyond
-the reserve the command fails and a full rewrite (`edit`) is needed. The
+the metadata (longer title, added tags/chapters) usually still fit. Beyond
+the reserve, the Tags, then the Chapters, the Info and the Tracks move to the
+end of the Segment, the file growing by them; the command fails, and a full
+rewrite (`edit`) is needed, only on a file with no SeekHead or with bytes
+after its Segment. The
 head SeekHead is rebuilt in place (its Cues entry preserved), and tags kept
 after the clusters (mux statistics) are folded into the head, not duplicated.
 

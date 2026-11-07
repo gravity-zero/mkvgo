@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -29,7 +30,9 @@ import (
 // Attachments sitting after the clusters (mux statistics tags, chapters some
 // muxers write there) stay there when the edit leaves them as they are; edited, they are
 // folded into the head metadata and the old bytes voided, or, Tags and
-// Chapters, rewritten in the old element's place when the head cannot hold them.
+// Chapters, rewritten in the old element's place when the head cannot hold them. When the head holds the edit by no
+// other means, the Tags, then the Chapters, the Info and the Tracks are voided there and written again at the end of
+// the Segment, which grows by them (RFC 9559 6.1 and 6.8): that takes a SeekHead and nothing after the Segment.
 func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), opts ...mkv.Options) (err error) {
 	if err := oneopt.Check(opts); err != nil {
 		return err
@@ -77,6 +80,8 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		stay[id] = bytes.Equal(before[id], after[id]) && (!region.inHead[id] || raw[id] != nil)
 	}
 	kept := region.keptSeekEntries
+	moved := map[uint32][]byte{} // head elements written again at the end of the Segment, the head out of room
+	var appendAt int64
 	lay := func() ([]byte, []writer.SeekEntry, int64, []byte, error) {
 		region.keptSeekEntries = kept
 		for id, t := range region.tail {
@@ -84,7 +89,16 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 				region.keptSeekEntries = append(region.keptSeekEntries, t.entry)
 			}
 		}
-		metaBytes, entries, err := serializeHead(c, stay, raw)
+		skip := maps.Clone(stay)
+		pos := appendAt - region.segDataStart
+		for _, id := range moveOrder {
+			if b := moved[id]; b != nil {
+				region.keptSeekEntries = append(region.keptSeekEntries, writer.SeekEntry{ID: id, Pos: pos})
+				pos += int64(len(b))
+				skip[id] = true
+			}
+		}
+		metaBytes, entries, err := serializeHead(c, skip, raw)
 		if err != nil {
 			return nil, nil, 0, nil, err
 		}
@@ -103,6 +117,13 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 			metaBytes, _, reserve, seekData, err = lay()
 		}
 	}
+	var segSize []byte // the Segment's size field grown by the moved elements, nil when it stays as it is
+	if errors.Is(err, ErrNoRoomInPlace) {
+		segSize, err = moveToSegmentEnd(path, fs, c, &region, stay, raw, after, moved, &appendAt, err, func() error {
+			metaBytes, _, reserve, seekData, err = lay()
+			return err
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -119,6 +140,13 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 	// safety: the Sync below stays best-effort, as documented.
 	defer closeWithErr(f, &err)
 
+	// The moved elements land first, the Segment grown over them, before the head points at them: a crash in between
+	// leaves the old head, whole, and a Segment that ends in elements no SeekHead names.
+	if len(moved) > 0 {
+		if err := appendMoved(f, appendAt, moved, region.segSizePos, segSize); err != nil {
+			return err
+		}
+	}
 	if _, err := f.Seek(region.start, io.SeekStart); err != nil {
 		return err
 	}
@@ -174,6 +202,84 @@ func EditInPlace(ctx context.Context, path string, edit func(*mkv.Container), op
 		if err := s.Sync(); err != nil {
 			return fmt.Errorf("sync: %w", err)
 		}
+	}
+	return nil
+}
+
+// moveOrder is the order head elements leave a full head for the end of the Segment: the Tags first, which RFC 9559
+// 6.8 sends there, the Tracks last, which a player needs before the first frame.
+var moveOrder = []uint32{mkv.IDTags, mkv.IDChapters, mkv.IDInfo, mkv.IDTracks}
+
+// moveToSegmentEnd moves head elements, in moveOrder, to the end of the Segment until lay fits the rest in the head,
+// and returns the Segment's grown size field (nil for a Segment of unknown size). It returns noRoom, the head's own
+// refusal, when the file has no SeekHead to point at them, bytes after its Segment, or no move that fits.
+func moveToSegmentEnd(path string, fs *mkv.FS, c *mkv.Container, region *metadataRegion, stay map[uint32]bool, raw, after,
+	moved map[uint32][]byte, appendAt *int64, noRoom error, lay func() error) ([]byte, error) {
+	st, err := fs.DoStat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !region.hadSeekHead || (region.segSize >= 0 && region.segDataStart+region.segSize != st.Size()) {
+		return nil, noRoom
+	}
+	*appendAt = st.Size()
+	present := map[uint32]bool{mkv.IDInfo: true, mkv.IDTracks: len(c.Tracks) > 0, mkv.IDTags: len(c.Tags) > 0,
+		mkv.IDChapters: len(c.Chapters) > 0 || len(c.OtherEditions) > 0}
+	err = noRoom
+	var total int64
+	for _, id := range moveOrder {
+		b := raw[id]
+		if b == nil && present[id] && !stay[id] {
+			b = after[id]
+		}
+		if b == nil {
+			continue
+		}
+		moved[id], raw[id] = b, nil
+		total += int64(len(b))
+		if err = lay(); !errors.Is(err, ErrNoRoomInPlace) {
+			break
+		}
+	}
+	if err != nil {
+		clear(moved)
+		if errors.Is(err, ErrNoRoomInPlace) {
+			return nil, noRoom
+		}
+		return nil, err
+	}
+	if region.segSize < 0 {
+		return nil, nil
+	}
+	var size bytes.Buffer
+	if _, err := ebml.WriteDataSizeWidth(&size, region.segSize+total, region.segSizeWidth); err != nil {
+		clear(moved)
+		return nil, noRoom
+	}
+	return size.Bytes(), nil
+}
+
+// appendMoved writes the moved elements at the end of the Segment, in moveOrder, then its grown size field (none for
+// a Segment of unknown size), and syncs them before the head is rewritten to point at them.
+func appendMoved(f mkv.ReadWriteSeekCloser, at int64, moved map[uint32][]byte, sizePos int64, size []byte) error {
+	if _, err := f.Seek(at, io.SeekStart); err != nil {
+		return err
+	}
+	for _, id := range moveOrder {
+		if _, err := f.Write(moved[id]); err != nil {
+			return err
+		}
+	}
+	if size != nil {
+		if _, err := f.Seek(sizePos, io.SeekStart); err != nil {
+			return err
+		}
+		if _, err := f.Write(size); err != nil {
+			return err
+		}
+	}
+	if s, ok := f.(interface{ Sync() error }); ok {
+		return s.Sync()
 	}
 	return nil
 }
@@ -463,6 +569,10 @@ type metadataRegion struct {
 	// segDataStart is the absolute offset of the Segment data (SeekHead
 	// positions are relative to it).
 	segDataStart int64
+	// segSize is the Segment's declared size, -1 when unknown; segSizePos and segSizeWidth place its size field.
+	segSize      int64
+	segSizePos   int64
+	segSizeWidth int
 	hadSeekHead  bool
 	// seekHeadPos is the absolute offset of the head SeekHead. It is NOT always
 	// region.start: a file may reserve a Void before it.
@@ -497,7 +607,8 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 		return metadataRegion{}, err
 	}
 
-	h, _, err = ebml.ReadElementHeader(f)
+	segPos, _ := f.Seek(0, io.SeekCurrent)
+	h, segHdrLen, err := ebml.ReadElementHeader(f)
 	if err != nil {
 		return metadataRegion{}, err
 	}
@@ -508,8 +619,10 @@ func findMetadataRegion(path string, fs *mkv.FS) (metadataRegion, error) {
 	var segEnd int64 = -1
 	region := metadataRegion{start: -1, tail: map[uint32]tailElement{}, inHead: map[uint32]bool{}, headElems: map[uint32]tailElement{}, headTwice: map[uint32]bool{}}
 	region.segDataStart, _ = f.Seek(0, io.SeekCurrent)
+	region.segSize, region.segSizePos, region.segSizeWidth = -1, segPos+4, segHdrLen-4
 	if h.Size >= 0 {
 		segEnd = region.segDataStart + h.Size
+		region.segSize = h.Size
 	}
 
 	// closedBy is the first element in the head that is neither metadata nor a Void (the Cues, say): the region ends
@@ -687,6 +800,9 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 			}
 			region.tail[e.ID] = tailElement{pos: abs, size: int64(hdrLen) + th.Size, entry: e}
 			continue
+		}
+		if (e.ID == mkv.IDInfo || e.ID == mkv.IDTracks) && region.inHead[e.ID] {
+			continue // stale: the head holds the element, which gets a fresh entry or moves with one
 		}
 		region.keptSeekEntries = append(region.keptSeekEntries, e)
 	}
