@@ -360,9 +360,11 @@ func opusPacketSamples(p []byte) int {
 
 // oggVorbisFormat writes an Ogg Vorbis file: the three headers the CodecPrivate holds (Xiph-laced), the
 // identification one on a page of its own, then a packet a page. A page's granule is the end of its packet in
-// samples at the stream's rate, from the block timestamps - the next packet's start, the block's duration, or for the
-// last one without either its start plus the step before it: exact for the decoder, which counts samples itself, and
-// to the timestamps' millisecond for a seek.
+// samples at the stream's rate. With the block sizes and the modes the headers give, it counts the samples the
+// decoder yields (a quarter of the packet's block and of the one before, none for the first), from the first block's
+// start, so the last page says where the audio ends, less the block's DiscardPadding (Vorbis I A.2). Without them it
+// comes from the block timestamps: the next
+// packet's start, the block's duration, or for the last one without either its start plus the step before it.
 func oggVorbisFormat(t mkv.Track) *demuxFormat {
 	headers, ok := xiphHeaders(t.CodecPrivate)
 	if !ok || len(headers) != 3 || len(headers[0]) < 16 || string(headers[0][1:7]) != "vorbis" {
@@ -373,17 +375,35 @@ func oggVorbisFormat(t mkv.Track) *demuxFormat {
 		return nil
 	}
 	s := &oggStream{serial: uint32(t.ID)}
+	head := func(w io.Writer) error {
+		if err := s.page(w, headers[0], 0, 2); err != nil {
+			return err
+		}
+		if err := s.page(w, headers[1], 0, 0); err != nil {
+			return err
+		}
+		return s.page(w, headers[2], 0, 0)
+	}
+	if vb, ok := parseVorbisBlocks(headers[0], headers[2]); ok {
+		granule, prev := int64(-1), 0
+		return &demuxFormat{ext: "ogg", head: head, end: s.end,
+			frame: func(w io.Writer, blk mkv.Block, data []byte) error {
+				if granule < 0 {
+					granule = max(blk.Timecode, 0) * rate / 1000
+				}
+				if cur := vb.blockSize(data); cur > 0 {
+					if prev > 0 {
+						granule += int64(prev/4 + cur/4)
+					}
+					prev = cur
+				}
+				trim := (max(blk.DiscardPaddingNs, 0)*rate + 500_000_000) / 1_000_000_000 // in ns: the nearest sample
+				return s.packet(w, data, granule-min(trim, granule))
+			},
+		}
+	}
 	prevStart, step := int64(-1), int64(0)
-	return &demuxFormat{ext: "ogg",
-		head: func(w io.Writer) error {
-			if err := s.page(w, headers[0], 0, 2); err != nil {
-				return err
-			}
-			if err := s.page(w, headers[1], 0, 0); err != nil {
-				return err
-			}
-			return s.page(w, headers[2], 0, 0)
-		},
+	return &demuxFormat{ext: "ogg", head: head, end: s.end,
 		frame: func(w io.Writer, blk mkv.Block, data []byte) error {
 			start := max(blk.Timecode, 0) * rate / 1000
 			if s.held != nil && start > prevStart {
@@ -396,9 +416,101 @@ func oggVorbisFormat(t mkv.Track) *demuxFormat {
 			}
 			return s.packet(w, data, end)
 		},
-		end: s.end,
 	}
 }
+
+// vorbisBlocks is what a Vorbis audio packet's sample count takes: the two block sizes and each mode's blockflag.
+type vorbisBlocks struct {
+	size     [2]int
+	long     []bool
+	modeBits int
+}
+
+// blockSize is the block an audio packet codes, 0 for an empty or a header packet or a mode the setup lacks.
+func (vb vorbisBlocks) blockSize(p []byte) int {
+	if len(p) == 0 || p[0]&1 != 0 {
+		return 0
+	}
+	mode := int(p[0]>>1) & (1<<vb.modeBits - 1)
+	if mode >= len(vb.long) {
+		return 0
+	}
+	if vb.long[mode] {
+		return vb.size[1]
+	}
+	return vb.size[0]
+}
+
+// parseVorbisBlocks reads the block sizes from the identification header and the modes' blockflags from the end of
+// the setup header, read backwards from its framing bit as the modes are the last thing it holds; the codebooks
+// before them need no parsing. The mode count is the last one whose 6-bit field agrees with the modes read.
+func parseVorbisBlocks(ident, setup []byte) (vorbisBlocks, bool) {
+	var vb vorbisBlocks
+	if len(ident) < 30 || len(setup) < 8 || setup[0] != 5 || string(setup[1:7]) != "vorbis" {
+		return vb, false
+	}
+	e0, e1 := int(ident[28]&0x0F), int(ident[28]>>4)
+	if e0 < 6 || e1 > 13 || e0 > e1 {
+		return vb, false
+	}
+	vb.size = [2]int{1 << e0, 1 << e1}
+	r := backBits{b: setup, pos: len(setup) * 8}
+	for {
+		bit, ok := r.read(1)
+		if !ok {
+			return vb, false
+		}
+		if bit == 1 {
+			break
+		}
+	}
+	var flags []bool
+	count := 0
+	for len(flags) < 64 && r.pos >= 41+6 {
+		mapping, _ := r.read(8)
+		transform, _ := r.read(16)
+		window, _ := r.read(16)
+		if mapping > 63 || transform != 0 || window != 0 {
+			break
+		}
+		flag, _ := r.read(1)
+		flags = append(flags, flag == 1)
+		if n, _ := r.peek(6); int(n)+1 == len(flags) {
+			count = len(flags)
+		}
+	}
+	if count == 0 {
+		return vb, false
+	}
+	for i := range count { // read last mode first
+		vb.long = append(vb.long, flags[count-1-i])
+	}
+	for 1<<vb.modeBits < count {
+		vb.modeBits++
+	}
+	return vb, true
+}
+
+// backBits reads an LSB-first bit stream backwards from bit pos, each value most significant bit first: a field
+// written last comes back first, its value intact.
+type backBits struct {
+	b   []byte
+	pos int
+}
+
+func (r *backBits) read(n int) (uint32, bool) {
+	if r.pos < n {
+		return 0, false
+	}
+	var v uint32
+	for range n {
+		r.pos--
+		v = v<<1 | uint32(r.b[r.pos/8]>>(r.pos%8)&1)
+	}
+	return v, true
+}
+
+func (r backBits) peek(n int) (uint32, bool) { return r.read(n) }
 
 // xiphHeaders splits a Xiph-laced CodecPrivate: the count less one, the sizes of all but the last (each a run of
 // 255s and a final byte), then the packets.

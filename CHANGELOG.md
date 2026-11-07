@@ -16,6 +16,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (RFC 9559 6.8) instead of refusing; it still refuses a file with no SeekHead
   or with bytes after its Segment.
 
+### Fixed
+
+- `demux` of Vorbis to Ogg: each page's granule counts the samples the decoder
+  yields (block sizes and modes from the headers), less the last block's
+  DiscardPadding, instead of a guess from the timestamps that cut the end
+  short or ran past it.
+
 ## [0.65.1] - 2026-11-07
 
 ### Fixed

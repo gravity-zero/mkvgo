@@ -104,3 +104,69 @@ func TestDemuxRefusalSaysWhatToDo(t *testing.T) {
 		}
 	}
 }
+
+// vorbisSetupTail writes a setup header whose end holds the modes (their blockflags) and the framing bit, packed
+// LSB first as Vorbis packs it; the codebooks and the rest before them are stood in for by a few arbitrary bits.
+func vorbisSetupTail(long []bool) []byte {
+	var out []byte
+	var acc, n uint
+	put := func(v uint32, bits int) {
+		for i := range bits {
+			acc |= uint(v>>i&1) << n
+			if n++; n == 8 {
+				out, acc, n = append(out, byte(acc)), 0, 0
+			}
+		}
+	}
+	for _, b := range []byte("\x05vorbis") {
+		put(uint32(b), 8)
+	}
+	put(0x1ABC, 13)
+	put(uint32(len(long)-1), 6)
+	for _, l := range long {
+		flag := uint32(0)
+		if l {
+			flag = 1
+		}
+		put(flag, 1)
+		put(0, 16) // window type
+		put(0, 16) // transform type
+		put(0, 8)  // mapping
+	}
+	put(1, 1) // framing
+	if n > 0 {
+		out = append(out, byte(acc))
+	}
+	return out
+}
+
+// TestDemuxOggVorbisGranuleCountsTheDecodedSamples: with a setup header to read the modes from, each page's granule
+// is the samples decoded through its packet (a packet yields a quarter of its block and of the one before, the first
+// none), not a step guessed from the timestamps: the last one says where the audio really ends, its DiscardPadding
+// taken off.
+func TestDemuxOggVorbisGranuleCountsTheDecodedSamples(t *testing.T) {
+	dir := t.TempDir()
+	ident := append([]byte("\x01vorbis\x00\x00\x00\x00\x01\x44\xac\x00\x00"), make([]byte, 12)...) // 1 ch, 44.1 kHz
+	ident = append(ident, 0xB8, 0x01)                                                              // blocks of 256 and 2048, framing
+	comment, setup := []byte("\x03vorbis"), vorbisSetupTail([]bool{false, true})
+	cp := append([]byte{2, byte(len(ident)), byte(len(comment))}, ident...)
+	cp = append(append(cp, comment...), setup...)
+	tr := mkv.Track{ID: 1, Type: mkv.AudioTrack, Codec: "vorbis", CodecPrivate: cp, SampleRate: f64(44100), Channels: u8(1)}
+	modes := []byte{1, 1, 0, 1, 1} // long, long, short, long, long: the mode number sits after the packet-type bit
+	var blocks []mkv.Block
+	for i, m := range modes {
+		blocks = append(blocks, mkv.Block{TrackNumber: 1, Timecode: int64(i) * 100, Keyframe: true, Data: []byte{m << 1, 0xAA}})
+	}
+	blocks[len(blocks)-1].DiscardPaddingNs = 100 * 1_000_000_000 / 44100 // 100 samples the decoder drops at the end
+	src := buildMultiClusterMKV(t, dir, "src.mkv", []mkv.Track{tr}, [][]mkv.Block{blocks}, 500)
+	pages := oggPages(t, readAll(t, filepath.Join(demuxTo(t, src, false), "1.ogg")))
+	want := []int64{0, 1024, 1024 + 576, 1024 + 576 + 576, 1024 + 576 + 576 + 1024 - 100}
+	if len(pages) != 3+len(want) {
+		t.Fatalf("%d pages, want %d", len(pages), 3+len(want))
+	}
+	for i, p := range pages[3:] {
+		if p.granule != want[i] {
+			t.Errorf("packet %d: granule %d, want %d", i, p.granule, want[i])
+		}
+	}
+}
