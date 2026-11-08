@@ -9,6 +9,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-11-08
+
 ### Breaking
 
 - `demux` of a Matroska/WebM writes five more codecs in the file their tools
@@ -125,14 +127,6 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   request left the window to come off the disk in two runs (a fragmented MP4
   with its audio behind each fragment's video: 1,656 disk reads where a
   sequential read takes 1,104).
-
-## [0.65.1] - 2026-11-07
-
-### Fixed
-
-- Matroska: the H.264 in-band scan walks the whole block again (at most 1,024
-  NALs, 16 KiB of headers parsed), so a block holding both fields of a frame,
-  its first one past 16 KiB, keeps its `field_order` (0.65.0 lost it).
 
 ## Older versions
 
