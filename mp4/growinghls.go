@@ -223,34 +223,14 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, err
 	}
 
-	planned, _, err := planTracks(c, o)
+	planned, _, err := planTracksFor(c, o, false)
 	if err != nil {
 		return nil, err
 	}
 	keep := keepTrackSet(&o)
-	var media []*outTrack
-	var videoSeen bool
-	for _, t := range planned {
-		if t.isChapter || t.spec.text {
-			continue
-		}
-		if keep != nil && !keep[t.mkv.ID] {
-			continue // Virtual Edit Layer: this track is not in the kept subset
-		}
-		if t.spec.video {
-			if videoSeen {
-				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
-				continue
-			}
-			videoSeen = true
-		} else if o.VideoOnly {
-			continue
-		}
-		media = append(media, t)
-	}
-	if len(media) == 0 {
-		return nil, errf("no audio or video track to segment")
+	media, videoSeen, err := selectMedia(planned, &o, keep)
+	if err != nil {
+		return nil, err
 	}
 	if !videoSeen {
 		return nil, errf("%s: play-while-downloading requires a video track (an audio-only growing plan is not supported in this version, matching PlanHLS)", shown.Path(srcPath))

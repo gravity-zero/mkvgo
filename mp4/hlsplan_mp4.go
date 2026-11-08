@@ -63,34 +63,14 @@ func newPackagingSource(f mkv.ReadSeekCloser, mv *movie, size int64) *packagingS
 // including the master's BANDWIDTH - equal the full pass exactly.
 func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs *mkv.FS, o *Options, segMs int64) (*HLSPlan, error) {
 	c := ps.c
-	planned, _, err := planTracks(c, *o)
+	planned, _, err := planTracksFor(c, *o, false)
 	if err != nil {
 		return nil, err
 	}
 	keep := keepTrackSet(o)
-	var media []*outTrack
-	var videoSeen bool
-	for _, t := range planned {
-		if t.isChapter || t.spec.text {
-			continue
-		}
-		if keep != nil && !keep[t.mkv.ID] {
-			continue // Virtual Edit Layer: this track is not in the kept subset
-		}
-		if t.spec.video {
-			if videoSeen {
-				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
-				continue
-			}
-			videoSeen = true
-		} else if o.VideoOnly {
-			continue
-		}
-		media = append(media, t)
-	}
-	if len(media) == 0 {
-		return nil, errf("no audio or video track to segment")
+	media, _, err := selectMedia(planned, o, keep)
+	if err != nil {
+		return nil, err
 	}
 	if err := cencPreflight(o, media); err != nil {
 		return nil, err
@@ -98,7 +78,11 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 
 	p := &HLSPlan{srcPath: srcPath, fs: fs, opts: *o, mp4src: true}
 	if !o.VideoOnly {
-		p.subs = filterSubTracks(planSubTracks(c, *o), keep)
+		subs, err := planSubTracks(c, *o)
+		if err != nil {
+			return nil, err
+		}
+		p.subs = filterSubTracks(subs, keep)
 	}
 	p.subMu = make([]sync.Mutex, len(p.subs))
 	p.subScan = make([]subScanState, len(p.subs))

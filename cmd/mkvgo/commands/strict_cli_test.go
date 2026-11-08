@@ -79,3 +79,50 @@ func TestStrictRefusesDroppedTracks(t *testing.T) {
 		t.Errorf("demux --strict: %q, want track 1 (ulaw) refused by --strict", msg)
 	}
 }
+
+const twoVideoASSFixture = "../../../internal/testdata/two_video_ass.mkv" // two H.264 video tracks, an ASS subtitle
+
+// TestTracksJSONSaysWhatMP4AndHLSCarry: on a Matroska, tracks -json says per track whether to-mp4 and to-hls/serve
+// carry it and why not, the reasons naming the flags; an MP4 source has no such fields.
+func TestTracksJSONSaysWhatMP4AndHLSCarry(t *testing.T) {
+	commands.JsonOutput = true
+	t.Cleanup(func() { commands.JsonOutput = false })
+	var tracks []map[string]any
+	if err := json.Unmarshal(stdoutOf(t, func() { commands.CmdTracks(twoVideoASSFixture) }), &tracks); err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 3 {
+		t.Fatalf("%d tracks, want 3", len(tracks))
+	}
+	if tracks[0]["to_mp4"] != true || tracks[0]["to_hls"] != true {
+		t.Errorf("track 1 = %v, want to_mp4 and to_hls true", tracks[0])
+	}
+	if tracks[1]["to_mp4"] != true || tracks[1]["to_hls"] != false || !strings.Contains(tracks[1]["to_hls_refusal"].(string), "secondary video") {
+		t.Errorf("track 2 = %v, want to_hls false as a secondary video", tracks[1])
+	}
+	reason, _ := tracks[2]["to_mp4_refusal"].(string)
+	if tracks[2]["to_mp4"] != false || !strings.Contains(reason, "--flatten-subs") || strings.Contains(reason, "Options.") || tracks[2]["to_hls"] != true {
+		t.Errorf("track 3 = %v, want to_mp4 false naming --flatten-subs and to_hls true", tracks[2])
+	}
+	var mp4Tracks []map[string]any
+	if err := json.Unmarshal(stdoutOf(t, func() { commands.CmdTracks(ulawFixture) }), &mp4Tracks); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mp4Tracks[0]["to_mp4"]; ok {
+		t.Errorf("an MP4 source carries to_mp4: %v", mp4Tracks[0])
+	}
+}
+
+// TestStrictRefusesDropsTowardsMP4AndHLS: --strict fails to-mp4 and to-hls on a track they would drop, naming it
+// and the flag.
+func TestStrictRefusesDropsTowardsMP4AndHLS(t *testing.T) {
+	dir := t.TempDir()
+	msg := fatalMessage(t, 1, func() { commands.CmdToMP4([]string{"--strict", twoVideoASSFixture, filepath.Join(dir, "out.mp4")}) })
+	if !strings.Contains(msg, "track 3 (ass)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
+		t.Errorf("to-mp4 --strict: %q, want track 3 (ass) refused by --strict", msg)
+	}
+	msg = fatalMessage(t, 1, func() { commands.CmdToHLS([]string{"--strict", twoVideoASSFixture, "-o", filepath.Join(dir, "hls")}) })
+	if !strings.Contains(msg, "track 2 (h264)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
+		t.Errorf("to-hls --strict: %q, want track 2 (h264) refused by --strict", msg)
+	}
+}

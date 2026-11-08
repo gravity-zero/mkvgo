@@ -114,9 +114,11 @@ type Options struct {
 	// the output instead of failing the whole remux. The remux still fails if no
 	// supported track remains. Every dropped track is reported via OnDrop.
 	SkipUnsupported bool
-	// Strict fails RemuxFromMP4, ForEachBlock and WalkBlocks by name on any track they would drop - a subtitle
-	// Matroska has no form for, a still picture, a non-media track - whatever SkipUnsupported says: nothing is
-	// left out silently. The operations that write MP4 keep dropping what MP4 cannot carry, reported via OnDrop.
+	// Strict fails the operation by name on any track it would drop, whatever SkipUnsupported says, so nothing is
+	// left out silently: towards Matroska (RemuxFromMP4, ForEachBlock, WalkBlocks) a subtitle Matroska has no form
+	// for, a still picture, a non-media track; towards MP4 and HLS (RemuxToMP4, RemuxToHLS and its variants,
+	// PlanHLS, the growing plan) a subtitle the output has no form for, a secondary video track, an encrypted or
+	// unsupported codec. TracksCarriage says ahead of time what each target would drop.
 	Strict bool
 	// OnDrop, when non-nil, is called once per dropped track (unsupported codecs,
 	// and subtitle/other tracks the format cannot carry). It never receives a

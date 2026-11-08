@@ -12,10 +12,11 @@ import (
 // --flatten-subs (carry ASS/SSA as plain tx3g, losing styling), --webvtt-native
 // (carry WebVTT as lossless wvtt instead of tx3g; not read by every demuxer).
 func CmdToMP4(args []string) {
-	var faststart, skip, flatten, wvtt, mp3delay, hashes bool
+	var faststart, skip, strict, flatten, wvtt, mp3delay, hashes bool
 	var rest []string
 	fl := newFlags("CmdToMP4")
 	fl.Bool(&faststart, "--faststart", "-faststart")
+	fl.Bool(&strict, "--strict", "-strict")
 	fl.Bool(&hashes, "--hash", "-hash")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
 	fl.Bool(&flatten, "--flatten-subs", "-flatten-subs")
@@ -53,13 +54,12 @@ func CmdToMP4(args []string) {
 		Progress:          NewProgressBar(),
 		FastStart:         faststart,
 		SkipUnsupported:   skip,
+		Strict:            strict,
 		FlattenStyledSubs: flatten,
 		NativeWebVTT:      wvtt,
 		MP3ContainerDelay: mp3delay,
 		ContentHashes:     hashes,
-		OnDrop: func(d mp4.DroppedTrack) {
-			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-		},
+		OnDrop:            dropLine,
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()
 			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))
@@ -96,10 +96,7 @@ func CmdFromMP4(args []string) {
 		SkipUnsupported:   skip,
 		Strict:            strict,
 		MP3ContainerDelay: mp3delay,
-		OnDrop: func(d mp4.DroppedTrack) {
-			ClearProgress()
-			fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-		},
+		OnDrop:            dropLine,
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()
 			fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the output holds what arrived"))

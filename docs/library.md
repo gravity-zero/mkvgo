@@ -1487,6 +1487,8 @@ err := mp4.RemuxToMP4(ctx, "in.mkv", "out.mp4", mp4.Options{
 
 `RemuxFromMP4`, `ForEachBlock` and `WalkBlocks` report every track they leave out through `Options.OnDrop`, one `DroppedTrack` (`mkv.DroppedTrack`: the MP4's own track ID, type, codec, reason) each, subtitles Matroska has no form for and non-media tracks (cover art, timecode) included: the callback is the list of what the output lacks. `Options.Strict` fails them by name on any such track instead, whatever `SkipUnsupported` says. A probe says the same ahead of time: `Track.Unsupported` on an MP4 track is the reason the remux would drop or refuse it by, `""` for one it carries.
 
+The other direction follows the same rule: `RemuxToMP4`, `RemuxToHLS` and its variants, `PlanHLS` and the growing plan report every Matroska track they leave out through `Options.OnDrop` (a subtitle the output has no form for, a secondary video track in HLS, an encrypted or unsupported codec under `SkipUnsupported`), and `Options.Strict` fails them by name on any of them. HLS no longer reports an ASS track dropped with the MP4 reason while carrying it as a WebVTT rendition: a target reports its own drops only. `mp4.TracksCarriage(c, opts...)` says ahead of time, per track and per target (`Carriage.MP4`, `Carriage.HLS`: `""` or the reason), what the two would do, by running their own planning head-only.
+
 The same two operations are exposed on the CLI as `mkvgo to-mp4` and
 `mkvgo from-mp4` (see [cli.md](cli.md)).
 

@@ -31,6 +31,7 @@ type hlsFlags struct {
 	noIFrames       bool
 	damageBytes     int64
 	skipUnsupported bool
+	strict          bool
 	sourceAccess    mp4.SourceAccess
 	synthIndex      bool
 	audioShift      map[uint64]int64
@@ -93,6 +94,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	}, "--sub-offset")
 	fl.Bool(&f.chapterMarkers, "--chapter-markers")
 	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
+	fl.Bool(&f.strict, "--strict", "-strict")
 	fl.Bool(&f.noIFrames, "--no-iframes")
 	fl.Func(damageBytesFlag(&f.damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
@@ -251,6 +253,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		NoIFrames:              f.noIFrames,
 		DamageBytes:            f.damageBytes,
 		SkipUnsupported:        f.skipUnsupported,
+		Strict:                 f.strict,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,
 		SourceAccess:           f.sourceAccess,
@@ -301,9 +304,7 @@ func CmdToHLS(args []string) {
 
 	opts := f.options(src)
 	opts.Progress = NewProgressBar()
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	opts.OnTruncated = func(t mp4.Truncation) {
 		ClearProgress()
 		fmt.Fprintln(os.Stderr, cutShortWarning(src, t, "the HLS holds what arrived"))
@@ -333,9 +334,7 @@ func CmdHLSSegment(args []string) {
 	src, what := rest[0], rest[1]
 
 	opts := f.options(src)
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	plan, err := mp4.PlanHLS(cliCtx, src, opts)
 	if err != nil {
 		FatalErr(err)
@@ -394,9 +393,7 @@ func CmdToABR(args []string) {
 	f.randomCENCIV()
 	opts := f.options(f.rest[0])
 	opts.Progress = NewProgressBar()
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	err := mp4.RemuxToABR(cliCtx, f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
@@ -420,9 +417,7 @@ func CmdABRSegment(args []string) {
 	what, sources := rest[0], rest[1:]
 
 	opts := f.options(sources[0])
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	plan, err := mp4.PlanABR(cliCtx, sources, opts)
 	if err != nil {
 		FatalErr(err)

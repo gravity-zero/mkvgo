@@ -315,6 +315,12 @@ func globalTags(c *mkv.Container) []mkv.SimpleTag {
 // planTracks selects the output tracks and validates each codec up front so the
 // remux fails before touching the destination if a track cannot be carried.
 func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
+	return planTracksFor(c, o, true)
+}
+
+// planTracksFor is planTracks; with subs false the subtitle tracks are left to the caller, neither planned nor
+// reported (an HLS presentation carries them as WebVTT renditions, planSubTracks, under its own rules).
+func planTracksFor(c *mkv.Container, o Options, subs bool) ([]*outTrack, []string, error) {
 	var (
 		tracks []*outTrack
 		brands []string
@@ -322,12 +328,17 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 	)
 	for i := range c.Tracks {
 		t := c.Tracks[i]
+		if t.Type == mkv.SubtitleTrack && !subs {
+			continue
+		}
 
 		// An encrypted track's bytes are not its frames: mkvgo does not decrypt.
 		if t.Encryption != "" {
 			reason := "encrypted (" + t.Encryption + "): mkvgo does not decrypt"
 			if o.SkipUnsupported {
-				o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: reason})
+				if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: reason}); err != nil {
+					return nil, nil, err
+				}
 				continue
 			}
 			return nil, nil, errf("track %d (%s) is %s (set Options.SkipUnsupported to drop it)", t.ID, t.Codec, reason)
@@ -338,8 +349,9 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 		if t.Type == mkv.SubtitleTrack {
 			s, ok := subtitleCarriage(t.Codec, o.FlattenStyledSubs, o.NativeWebVTT)
 			if !ok {
-				o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-					Reason: subtitleDropReason(t.Codec)})
+				if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: subtitleDropReason(t.Codec)}); err != nil {
+					return nil, nil, err
+				}
 				continue
 			}
 			spec = s
@@ -347,8 +359,9 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			s, ok := lookupCodec(t.Codec)
 			if !ok {
 				if o.SkipUnsupported {
-					o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-						Reason: "codec not supported for MP4"})
+					if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: "codec not supported for MP4"}); err != nil {
+						return nil, nil, err
+					}
 					continue
 				}
 				return nil, nil, errf("track %d: codec %q cannot be remuxed to MP4 (set Options.SkipUnsupported to drop it)", t.ID, t.Codec)
@@ -359,8 +372,9 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			case mkv.CompressionNone, mkv.CompressionHeaderStrip, mkv.CompressionZlib, mkv.CompressionBzlib:
 			default:
 				if o.SkipUnsupported {
-					o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-						Reason: "ContentCompression " + t.Compression.String() + " cannot be decoded"})
+					if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: "ContentCompression " + t.Compression.String() + " cannot be decoded"}); err != nil {
+						return nil, nil, err
+					}
 					continue
 				}
 				return nil, nil, errf("track %d: ContentCompression %s cannot be decoded for MP4 (zlib and bzlib are) - re-mux the track uncompressed first, or set Options.SkipUnsupported to drop it", t.ID, t.Compression)
@@ -385,7 +399,9 @@ func planTracks(c *mkv.Container, o Options) ([]*outTrack, []string, error) {
 			entry, err := spec.sampleEntry(&t, nil)
 			if err != nil {
 				if o.SkipUnsupported {
-					o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: err.Error()})
+					if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: err.Error()}); err != nil {
+						return nil, nil, err
+					}
 					continue
 				}
 				return nil, nil, err

@@ -121,12 +121,12 @@ var CmdUsage = map[string]string{
 	"track-ends":         "mkvgo track-ends <file.mkv> [-json] (where each track's content really ends: statistics tags when they describe the file, else a bounded header-only tail walk; picture end and audio shortfall)",
 	"cue-health":         "mkvgo cue-health <file.mkv> [-json] [-probe] (head-only seek-index triage: which tracks the cues reference; -probe looks inside each hole; exit 1 when unhealthy)",
 	"diagnose":           "mkvgo diagnose <file.mkv|.mp4> [--deep-verify] [-json] (one-call triage with a remedy per finding; MKV: index health + audio delay + size coherence; MP4: box layout + edit-list delays; exit 1 on findings)",
-	"serve":              "mkvgo serve <file.mkv> [-addr 127.0.0.1:8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--buffered] [--cors] [--source-access auto|local|network] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
+	"serve":              "mkvgo serve <file.mkv> [-addr 127.0.0.1:8478] [--strict] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--buffered] [--cors] [--source-access auto|local|network] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
 	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors] [--max-in-flight 64] [--max-waiting 1024] [--memory-limit <MiB>] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
-	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv|.mp4> <output.mp4> (an MP4/MOV input is rewritten fast start, sample for sample)",
+	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--strict] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv|.mp4> <output.mp4> (an MP4/MOV input is rewritten fast start, sample for sample)",
 	"from-mp4":           "mkvgo from-mp4 [--skip-unsupported] [--strict] [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
-	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--skip-unsupported] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--audio-shift track=ms] [--chapter-markers] [--no-iframes] (fragmented-MP4 HLS; virtual track subset by ID or language; virtual subtitle/audio resync; opt-in chapter/ad-insertion markers)",
+	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--skip-unsupported] [--strict] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--audio-shift track=ms] [--chapter-markers] [--no-iframes] (fragmented-MP4 HLS; virtual track subset by ID or language; virtual subtitle/audio resync; opt-in chapter/ad-insertion markers)",
 	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N|resource-name> [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--audio-shift track=ms] [--synthesize-index] [--chapter-markers] [--no-iframes] [--damage-bytes n] (build one HLS resource on demand; --synthesize-index serves a no-Cue source by walking it once)",
 	"to-abr":             "mkvgo to-abr -o <dir> <best.mkv> <lower.mkv> [...] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--chapter-markers] [--no-iframes] (multi-variant HLS master from pre-encoded qualities)",
 	"abr-segment":        "mkvgo abr-segment <master.m3u8|v{k}/name> <best> <lower> [...] [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--chapter-markers] [--no-iframes] [--damage-bytes n] (build one ABR resource on demand)",
@@ -222,9 +222,32 @@ var flagPhrases = strings.NewReplacer(
 	"set Options.SkipUnsupported", "pass --skip-unsupported",
 	"which DemuxOptions.Strict refuses", "which --strict refuses",
 	"which Options.Strict refuses", "which --strict refuses",
+	"set Options.FlattenStyledSubs", "pass --flatten-subs",
 )
 
 func (f flagWords) Error() string { return flagPhrases.Replace(f.error.Error()) }
+
+// dropLine prints a track an operation leaves out, on stderr, the reason naming the command line's flags.
+func dropLine(d mp4.DroppedTrack) {
+	ClearProgress()
+	fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, flagPhrases.Replace(d.Reason))
+}
+
+// carriageOf is what to-mp4 and to-hls/serve would do with each track of a Matroska source (nil for an MP4, which
+// to-mp4 rewrites whole), the reasons naming the command line's flags.
+func carriageOf(c *matroska.Container) []mp4.Carriage {
+	if c.DocType == "" {
+		return nil
+	}
+	cr, err := mp4.TracksCarriage(c)
+	if err != nil {
+		return nil
+	}
+	for i := range cr {
+		cr[i].MP4, cr[i].HLS = flagPhrases.Replace(cr[i].MP4), flagPhrases.Replace(cr[i].HLS)
+	}
+	return cr
+}
 
 func (f flagWords) Unwrap() error { return f.error }
 
@@ -486,12 +509,19 @@ type trackJSON struct {
 	// not, ToMatroskaRefusal is the reason from-mp4 drops or refuses it by (Track.Unsupported).
 	ToMatroska        bool   `json:"to_matroska"`
 	ToMatroskaRefusal string `json:"to_matroska_refusal,omitempty"`
+	// ToMP4 and ToHLS say, on a Matroska source, whether to-mp4 and to-hls/serve carry the track; when not, the
+	// refusal is the reason they drop it by (mp4.TracksCarriage). Absent on an MP4 source.
+	ToMP4        *bool  `json:"to_mp4,omitempty"`
+	ToMP4Refusal string `json:"to_mp4_refusal,omitempty"`
+	ToHLS        *bool  `json:"to_hls,omitempty"`
+	ToHLSRefusal string `json:"to_hls_refusal,omitempty"`
 }
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
 // fields alongside the raw values.
 func tracksForJSON(c *matroska.Container) []trackJSON {
 	out := make([]trackJSON, len(c.Tracks))
+	cr := carriageOf(c)
 	for i, t := range c.Tracks {
 		out[i] = trackJSON{Track: t,
 			CodecName:           c.TrackCodecName(&t),
@@ -510,6 +540,10 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 			EffectiveSampleRate: t.EffectiveSampleRate(),
 			ToMatroska:          t.Unsupported == "",
 			ToMatroskaRefusal:   t.Unsupported,
+		}
+		if cr != nil {
+			mp4OK, hlsOK := cr[i].MP4 == "", cr[i].HLS == ""
+			out[i].ToMP4, out[i].ToMP4Refusal, out[i].ToHLS, out[i].ToHLSRefusal = &mp4OK, cr[i].MP4, &hlsOK, cr[i].HLS
 		}
 		out[i].FrameRate, out[i].FrameRateEstimated = t.FrameRate, t.FrameRate == nil && t.EstimatedFrameRate != nil
 		if out[i].FrameRateEstimated {

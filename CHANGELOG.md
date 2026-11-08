@@ -46,6 +46,16 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (`mp4.DroppedTrack` is now that type). `tracks` and `probe` say per track
   whether `from-mp4` carries it: `to_matroska` and `to_matroska_refusal` in
   `-json` (`Track.Unsupported`), `[not carried to Matroska: reason]` in text.
+- The same towards MP4 and HLS/CMAF: `to-mp4`, `to-hls` (and the ABR
+  commands) and `serve` print every Matroska track they leave out - a
+  subtitle the output has no form for, a secondary video track, an encrypted
+  or unsupported codec - as `dropped track N (codec): reason` on stderr, exit
+  0 as before, and take `--strict` (`Options.Strict`) to fail by name on any
+  of them. `tracks` and `probe` say per track, on a Matroska, whether each
+  target carries it: `to_mp4` / `to_mp4_refusal` and `to_hls` /
+  `to_hls_refusal` in `-json` (`mp4.TracksCarriage`), the reasons naming the
+  flags. Fixed on the way: HLS reported an ASS track dropped with the MP4
+  reason while carrying it as a WebVTT rendition.
 - `from-mp4` carries MPEG-4 Part 2 (`mp4v` → `V_MPEG4/ISO/ASP`), TrueHD (`mlpa`
   → `A_TRUEHD`) and ALAC (`alac` → `A_ALAC`), as the mainstream muxer does;
   decoded, the Matroska matches the MP4 (checked with a decoder on real files).

@@ -75,7 +75,8 @@ func CmdTracks(path string) {
 		PrintJSON(tracksForJSON(c))
 		return
 	}
-	for _, t := range c.Tracks {
+	cr := carriageOf(c)
+	for i, t := range c.Tracks {
 		fmt.Printf("#%d  %-8s  %-10s  lang=%-5s  name=%q", t.ID, t.Type, t.Codec, t.Language, t.Name)
 		if t.Width != nil && t.Height != nil {
 			fmt.Printf("  %dx%d", *t.Width, *t.Height)
@@ -94,6 +95,12 @@ func CmdTracks(path string) {
 		}
 		if t.Unsupported != "" {
 			fmt.Printf("  [not carried to Matroska: %s]", t.Unsupported)
+		}
+		if cr != nil && cr[i].MP4 != "" {
+			fmt.Printf("  [not carried to MP4: %s]", cr[i].MP4)
+		}
+		if cr != nil && cr[i].HLS != "" {
+			fmt.Printf("  [not carried to HLS: %s]", cr[i].HLS)
 		}
 		fmt.Println()
 	}
@@ -206,7 +213,8 @@ func CmdProbe(path string) {
 	fmt.Println()
 
 	fmt.Printf("Tracks (%d):\n", len(c.Tracks))
-	for _, t := range c.Tracks {
+	cr := carriageOf(c)
+	for i, t := range c.Tracks {
 		fmt.Printf("  #%d  %-8s  %-10s  lang=%-5s  name=%q", t.ID, t.Type, t.Codec, t.Language, t.Name)
 		if t.Width != nil && t.Height != nil {
 			fmt.Printf("  %dx%d", *t.Width, *t.Height)
@@ -327,6 +335,12 @@ func CmdProbe(path string) {
 		}
 		if t.Unsupported != "" {
 			fmt.Printf("        not carried to Matroska: %s\n", t.Unsupported)
+		}
+		if cr != nil && cr[i].MP4 != "" {
+			fmt.Printf("        not carried to MP4: %s\n", cr[i].MP4)
+		}
+		if cr != nil && cr[i].HLS != "" {
+			fmt.Printf("        not carried to HLS: %s\n", cr[i].HLS)
 		}
 		if t.StereoMode != nil || t.Projection != "" {
 			fmt.Print("        spatial:")

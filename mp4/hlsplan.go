@@ -362,7 +362,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	if len(c.Cues) == 0 && !o.SynthesizeIndex {
 		return nil, errf("%s: no Cues index: %w, or plan with Options.SynthesizeIndex (on-demand HLS seeks through the Cues)", shown.Path(srcPath), mkv.ErrNoKeyframeIndex)
 	}
-	planned, _, err := planTracks(c, o)
+	planned, _, err := planTracksFor(c, o, false)
 	if err != nil {
 		return nil, err
 	}
@@ -371,29 +371,9 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 	// dropped), each audio, and - unless VideoOnly (an ABR variant carries only
 	// its video) - the subtitle renditions.
 	keep := keepTrackSet(&o)
-	var media []*outTrack
-	var videoSeen bool
-	for _, t := range planned {
-		if t.isChapter || t.spec.text {
-			continue
-		}
-		if keep != nil && !keep[t.mkv.ID] {
-			continue // Virtual Edit Layer: this track is not in the kept subset
-		}
-		if t.spec.video {
-			if videoSeen {
-				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
-				continue
-			}
-			videoSeen = true
-		} else if o.VideoOnly {
-			continue
-		}
-		media = append(media, t)
-	}
-	if len(media) == 0 {
-		return nil, errf("no audio or video track to segment")
+	media, videoSeen, err := selectMedia(planned, &o, keep)
+	if err != nil {
+		return nil, err
 	}
 	if !videoSeen {
 		return nil, errf("HLS output requires a video track")
@@ -410,7 +390,11 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 	}
 	if !o.VideoOnly {
-		p.subs = filterSubTracks(planSubTracks(c, o), keep)
+		subs, err := planSubTracks(c, o)
+		if err != nil {
+			return nil, err
+		}
+		p.subs = filterSubTracks(subs, keep)
 	}
 	if p.subIndex == nil {
 		if ix, verified, unverified := cueSubtitleIndexFrom(c, p.subs); ix != nil {

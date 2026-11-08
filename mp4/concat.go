@@ -87,7 +87,7 @@ func probeConcatSource(ctx context.Context, src string, o *Options) (concatProbe
 		return concatProbe{}, err
 	}
 	defer ps.Close()
-	planned, _, err := planTracks(ps.c, *o)
+	planned, _, err := planTracksFor(ps.c, *o, false)
 	if err != nil {
 		return concatProbe{}, err
 	}

@@ -244,7 +244,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	}
 	defer ps.Close()
 	c := ps.c
-	planned, _, err := planTracks(c, o)
+	planned, _, err := planTracksFor(c, o, false)
 	if err != nil {
 		return nil, err
 	}
@@ -255,36 +255,19 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// subtitles as WebVTT renditions. Secondary video tracks have no HLS/DASH
 	// form here (they would be camera angles) and are dropped with a reason.
 	keep := keepTrackSet(&o)
-	var media []*outTrack
-	var videoSeen bool
-	for _, t := range planned {
-		if t.isChapter || t.spec.text {
-			continue
-		}
-		if keep != nil && !keep[t.mkv.ID] {
-			continue // Virtual Edit Layer: this track is not in the kept subset
-		}
-		if t.spec.video {
-			if videoSeen {
-				o.report(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
-					Reason: "the presentation carries one video track; secondary video tracks are dropped"})
-				continue
-			}
-			videoSeen = true
-		} else if o.VideoOnly {
-			continue // an ABR variant contributes only its video rendition
-		}
-		media = append(media, t)
-	}
-	if len(media) == 0 {
-		return nil, errf("no audio or video track to segment")
+	media, _, err := selectMedia(planned, &o, keep)
+	if err != nil {
+		return nil, err
 	}
 	if err := cencPreflight(&o, media); err != nil {
 		return nil, err
 	}
 	var subs []hlsSubTrack
 	if !o.VideoOnly {
-		subs = filterSubTracks(planSubTracks(c, o), keep)
+		if subs, err = planSubTracks(c, o); err != nil {
+			return nil, err
+		}
+		subs = filterSubTracks(subs, keep)
 	}
 
 	if err := fs.DoMkdirAll(outputDir, 0o755); err != nil {
@@ -527,28 +510,63 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 
 // planSubTracks selects the text subtitle tracks carried as WebVTT renditions.
 // Bitmap formats have no text form and are dropped with a reason.
-func planSubTracks(c *mkv.Container, o Options) []hlsSubTrack {
+func planSubTracks(c *mkv.Container, o Options) ([]hlsSubTrack, error) {
 	var subs []hlsSubTrack
 	for _, t := range c.Tracks {
 		if t.Type != mkv.SubtitleTrack {
 			continue
 		}
+		var reason string
 		switch canonicalSubCodec(t.Codec) {
 		case "srt", "webvtt", "ass", "ssa":
 			subs = append(subs, hlsSubTrack{track: t})
+			continue
 		case "pgs":
 			// HLS carries subtitles as WebVTT renditions, and a picture has no
 			// WebVTT form. Burning it into the video or shipping a sprite sheet
 			// is player-side packaging, which is the consumer's call - so name
 			// the extractor rather than pretend the track is unusable.
-			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-				Reason: "PGS subtitles are pictures and HLS renditions carry WebVTT; extract them with matroska.ExtractSubtitlePGS and overlay them player-side"})
+			reason = "PGS subtitles are pictures and HLS renditions carry WebVTT; extract them with matroska.ExtractSubtitlePGS and overlay them player-side"
 		default:
-			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-				Reason: "subtitle format not representable as WebVTT (bitmap formats cannot be carried)"})
+			reason = "subtitle format not representable as WebVTT (bitmap formats cannot be carried)"
+		}
+		if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: reason}); err != nil {
+			return nil, err
 		}
 	}
-	return subs
+	return subs, nil
+}
+
+// selectMedia is the media of an HLS presentation among the planned tracks: one video rendition (a secondary
+// video track has no HLS/DASH form here, it would be a camera angle, and is dropped with a reason), each audio
+// unless Options.VideoOnly (an ABR variant contributes its video alone), within the kept subset. videoSeen says
+// a video track is among them.
+func selectMedia(planned []*outTrack, o *Options, keep map[uint64]bool) (media []*outTrack, videoSeen bool, err error) {
+	for _, t := range planned {
+		if t.isChapter || t.spec.text {
+			continue
+		}
+		if keep != nil && !keep[t.mkv.ID] {
+			continue // Virtual Edit Layer: this track is not in the kept subset
+		}
+		if t.spec.video {
+			if videoSeen {
+				if err := o.drop(DroppedTrack{ID: t.mkv.ID, Type: t.mkv.Type, Codec: t.mkv.Codec,
+					Reason: "the presentation carries one video track; secondary video tracks are dropped"}); err != nil {
+					return nil, false, err
+				}
+				continue
+			}
+			videoSeen = true
+		} else if o.VideoOnly {
+			continue
+		}
+		media = append(media, t)
+	}
+	if len(media) == 0 {
+		return nil, false, errf("no audio or video track to segment")
+	}
+	return media, videoSeen, nil
 }
 
 // collectFragSamples reads every block once, writing each media sample's bytes to

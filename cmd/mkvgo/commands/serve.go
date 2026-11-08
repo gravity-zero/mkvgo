@@ -74,9 +74,7 @@ func CmdServe(args []string) {
 	opts.StreamFromFS = true // a remote source streams too: a segment held whole per request grew without bound past capacity
 	mp4.SetMaxConcurrentWalks(cfg.maxWalks)
 	mp4.SetWindowBytes(cfg.windowBytes)
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	plan, err := mp4.PlanHLS(cliCtx, src, opts)
 	if err != nil {
 		FatalErr(err)
