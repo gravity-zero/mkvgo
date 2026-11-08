@@ -63,6 +63,9 @@ type MuxOptions = mkv.MuxOptions
 // DemuxOptions is mkv.DemuxOptions, what Demux extracts.
 type DemuxOptions = mkv.DemuxOptions
 
+// DroppedTrack is mkv.DroppedTrack: a track Demux left out of an MP4, with its reason (DemuxOptions.OnDrop).
+type DroppedTrack = mkv.DroppedTrack
+
 // TrackInput is mkv.TrackInput: one track Mux or AddTrack takes from a source.
 type TrackInput = mkv.TrackInput
 

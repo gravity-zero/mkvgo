@@ -90,8 +90,8 @@ func TestDemuxMP4RefusesAnUncarriableTrackUnlessSkipped(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	out := func(n string) string { return filepath.Join(dir, n) }
-	var drops []uint64
-	onDrop := func(id uint64, _, _ string) { drops = append(drops, id) }
+	var drops []mkv.DroppedTrack
+	onDrop := func(d mkv.DroppedTrack) { drops = append(drops, d) }
 	err := Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("a"), OnDrop: onDrop})
 	if err == nil || !strings.Contains(err.Error(), "track 1 (ulaw)") || !strings.Contains(err.Error(), "set DemuxOptions.SkipUnsupported to drop it") {
 		t.Fatalf("demux with an uncarriable track: err = %v, want it named with the option that drops it", err)
@@ -101,8 +101,12 @@ func TestDemuxMP4RefusesAnUncarriableTrackUnlessSkipped(t *testing.T) {
 	}
 	drops = nil
 	mustNil(t, Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("b"), SkipUnsupported: true, OnDrop: onDrop}))
-	if names := dirNames(t, out("b")); len(drops) != 1 || drops[0] != 1 || len(names) != 1 || names[0] != "2.aac" {
-		t.Errorf("skipping unsupported: dropped %v, files %v, want track 1 dropped and 2.aac alone", drops, names)
+	if names := dirNames(t, out("b")); len(drops) != 1 || drops[0].ID != 1 || drops[0].Type != mkv.AudioTrack || drops[0].Codec != "ulaw" || len(names) != 1 || names[0] != "2.aac" {
+		t.Errorf("skipping unsupported: dropped %+v, files %v, want the audio track 1 (ulaw) dropped and 2.aac alone", drops, names)
+	}
+	err = Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("e"), SkipUnsupported: true, Strict: true})
+	if err == nil || !strings.Contains(err.Error(), "track 1 (ulaw)") || !strings.Contains(err.Error(), "DemuxOptions.Strict") {
+		t.Errorf("strict: err = %v, want track 1 (ulaw) refused by DemuxOptions.Strict whatever SkipUnsupported says", err)
 	}
 	drops = nil
 	mustNil(t, Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("c"), TrackIDs: []uint64{2}, OnDrop: onDrop}))

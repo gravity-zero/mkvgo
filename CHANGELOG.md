@@ -35,9 +35,17 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   are under Breaking); written bare, none of them decoded.
   An MP4 track the remux cannot carry follows the remux's rule: the demux
   fails by its name (exit 1) unless `--skip-unsupported`
-  (`DemuxOptions.SkipUnsupported`) drops it, printed as a `dropped track`
-  line, or `-t` names other tracks; a zero-length NAL unit no longer refuses
-  an H.264/HEVC frame.
+  (`DemuxOptions.SkipUnsupported`) drops it or `-t` names other tracks; a
+  zero-length NAL unit no longer refuses an H.264/HEVC frame.
+- `from-mp4` and `demux`: every track left out, a subtitle Matroska has no
+  form for (TTML, CEA-608) or a non-media track included, is printed on
+  stderr as `dropped track N (codec): reason` (N the file's own track ID),
+  exit 0 as before; `--strict` (`Options.Strict`, `DemuxOptions.Strict`)
+  fails them by name on any such track. The library reports each one through
+  `Options.OnDrop` / `DemuxOptions.OnDrop` as a `mkv.DroppedTrack`
+  (`mp4.DroppedTrack` is now that type). `tracks` and `probe` say per track
+  whether `from-mp4` carries it: `to_matroska` and `to_matroska_refusal` in
+  `-json` (`Track.Unsupported`), `[not carried to Matroska: reason]` in text.
 - `from-mp4` carries MPEG-4 Part 2 (`mp4v` → `V_MPEG4/ISO/ASP`), TrueHD (`mlpa`
   → `A_TRUEHD`) and ALAC (`alac` → `A_ALAC`), as the mainstream muxer does;
   decoded, the Matroska matches the MP4 (checked with a decoder on real files).

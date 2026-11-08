@@ -91,6 +91,7 @@ func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mk
 	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra), dropped: map[uint64]mp4.DroppedTrack{}}
 	defer d.settle(&err)
 	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra), SkipUnsupported: opts.SkipUnsupported || len(opts.TrackIDs) > 0,
+		Strict: opts.Strict && len(opts.TrackIDs) == 0, // a track TrackIDs leaves out is not dropped: it was not asked for
 		OnDrop: func(t mp4.DroppedTrack) { d.dropped[t.ID] = t }}
 	start := func(c *mkv.Container) error {
 		for _, id := range opts.TrackIDs {
@@ -100,8 +101,7 @@ func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mk
 		}
 		if opts.OnDrop != nil && len(opts.TrackIDs) == 0 {
 			for _, id := range sortedDropped(d.dropped) {
-				t := d.dropped[id]
-				opts.OnDrop(t.ID, t.Codec, t.Reason)
+				opts.OnDrop(d.dropped[id])
 			}
 		}
 		return d.open(c)
@@ -112,10 +112,10 @@ func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mk
 	return d.finish()
 }
 
-// demuxOptionWords is a remux refusal as the demux's caller reads it: the option that drops the track is
-// DemuxOptions.SkipUnsupported here. errors.Is and As still reach err.
+// demuxOptionWords is a remux refusal as the demux's caller reads it: the options that drop or refuse the track
+// are DemuxOptions.SkipUnsupported and DemuxOptions.Strict here. errors.Is and As still reach err.
 func demuxOptionWords(err error) error {
-	if !strings.Contains(err.Error(), "set Options.SkipUnsupported") {
+	if msg := err.Error(); !strings.Contains(msg, "set Options.SkipUnsupported") && !strings.Contains(msg, "which Options.Strict refuses") {
 		return err
 	}
 	return optionWords{err}
@@ -124,7 +124,8 @@ func demuxOptionWords(err error) error {
 type optionWords struct{ error }
 
 func (o optionWords) Error() string {
-	return strings.ReplaceAll(o.error.Error(), "set Options.SkipUnsupported", "set DemuxOptions.SkipUnsupported")
+	msg := strings.ReplaceAll(o.error.Error(), "set Options.SkipUnsupported", "set DemuxOptions.SkipUnsupported")
+	return strings.ReplaceAll(msg, "which Options.Strict refuses", "which DemuxOptions.Strict refuses")
 }
 
 func (o optionWords) Unwrap() error { return o.error }

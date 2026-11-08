@@ -56,7 +56,9 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 		return err
 	}
 	for _, d := range mv.dropped {
-		o.report(d) // cover art / non-media tracks the MKV output does not carry
+		if err := o.drop(d); err != nil { // cover art / non-media tracks the MKV output does not carry
+			return err
+		}
 	}
 	// Taken before carriableTracks drops a track the cut left empty, reported once the output is closed.
 	cut, isCut := mv.truncation(size)
@@ -136,6 +138,7 @@ func buildMKVTracks(mv *movie, mp3Delay bool) []mkv.Track {
 			Type:         t.trackType,
 			Codec:        t.codec,
 			CodecPrivate: t.codecPrivate,
+			Unsupported:  dropReason(t), // "" once carriableTracks has kept the track
 		}
 		// Language and the "default" selection flag, so a probe carries the same
 		// track-selection metadata probers report (not gated by codec support).

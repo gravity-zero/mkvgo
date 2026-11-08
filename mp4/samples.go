@@ -100,7 +100,9 @@ func WalkBlocks(ctx context.Context, path string, start func(c *mkv.Container) e
 		return err
 	}
 	for _, d := range mv.dropped {
-		o.report(d)
+		if err := o.drop(d); err != nil {
+			return err
+		}
 	}
 	cut, isCut := mv.truncation(size)
 	if err := carriableTracks(mv, &o); err != nil {

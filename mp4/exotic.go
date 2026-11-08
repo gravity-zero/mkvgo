@@ -328,6 +328,14 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 	}
 }
 
+// dropReason is why a remux to Matroska would not carry t, in words; "" when it carries it.
+func dropReason(t *inTrack) string {
+	if t.encryption != "" {
+		return "encrypted (" + t.encryption + "): mkvgo does not decrypt"
+	}
+	return t.unsupported
+}
+
 // carriableTracks keeps the tracks a remux can carry. An audio or video track
 // it cannot refuses the remux, or is dropped under Options.SkipUnsupported; a
 // subtitle track never does - it is dropped with its reason, the rule of every
@@ -336,10 +344,7 @@ func carriableTracks(mv *movie, o *Options) error {
 	kept := mv.tracks[:0]
 	for i := range mv.tracks {
 		t := mv.tracks[i]
-		reason := t.unsupported
-		if t.encryption != "" {
-			reason = "encrypted (" + t.encryption + "): mkvgo does not decrypt"
-		}
+		reason := dropReason(&t)
 		if reason == "" {
 			kept = append(kept, t)
 			continue
@@ -350,7 +355,9 @@ func carriableTracks(mv *movie, o *Options) error {
 			}
 			return errf("track %d (%s): %s (set Options.SkipUnsupported to drop it)", t.trackID, t.codec, reason)
 		}
-		o.report(DroppedTrack{ID: uint64(t.trackID), Type: t.trackType, Codec: t.codec, Reason: reason})
+		if err := o.drop(DroppedTrack{ID: uint64(t.trackID), Type: t.trackType, Codec: t.codec, Reason: reason}); err != nil {
+			return err
+		}
 	}
 	mv.tracks = kept
 	if len(mv.tracks) == 0 {

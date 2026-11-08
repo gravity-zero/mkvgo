@@ -249,7 +249,11 @@ type Track struct {
 	// Encryption names the scheme the track's payloads are encrypted with, as the source states it: a Matroska
 	// ContentEncryption ("AES-CTR", "AES-CBC", "AES", "DES", "3DES", "Twofish", "Blowfish", "unspecified") or an
 	// MP4 protected sample entry's schm ("cenc", "cbcs", "cbc1", "cens"). "" when the track is clear.
-	Encryption       string   `json:"encryption,omitempty"`
+	Encryption string `json:"encryption,omitempty"`
+	// Unsupported is why a remux to Matroska would not carry this MP4 track, the reason it drops or refuses it by
+	// (a sample entry Matroska has no form for, an encrypted track mkvgo does not decrypt); "" for a track it
+	// carries, and for every Matroska track. Read by a probe, never written.
+	Unsupported      string   `json:"unsupported,omitempty"`
 	Width            *uint32  `json:"width,omitempty"`
 	Height           *uint32  `json:"height,omitempty"`
 	Channels         *uint8   `json:"channels,omitempty"`
@@ -852,8 +856,21 @@ type DemuxOptions struct {
 	// subtitle track it cannot carry is dropped either way. TrackIDs naming other tracks leaves such a track out
 	// of the question; naming it fails the demux whatever this says.
 	SkipUnsupported bool
-	// OnDrop reports an MP4 track the demux leaves out, with its reason, when TrackIDs is empty.
-	OnDrop func(id uint64, codec, reason string)
+	// Strict fails the demux of an MP4 by name on any track it would drop, a subtitle included, whatever
+	// SkipUnsupported says: nothing is left out silently.
+	Strict bool
+	// OnDrop reports an MP4 track the demux leaves out, when TrackIDs is empty: every track from-mp4 would drop,
+	// subtitles included.
+	OnDrop func(DroppedTrack)
+}
+
+// DroppedTrack is a source track an operation did not carry into its output, with the reason, in words: the ID
+// is the one the source file gives the track (a Matroska TrackNumber, an MP4 tkhd track_ID).
+type DroppedTrack struct {
+	ID     uint64    `json:"id"`
+	Type   TrackType `json:"type"`
+	Codec  string    `json:"codec"`
+	Reason string    `json:"reason"`
 }
 
 // TrackInput is one track ops.Mux takes from a source file, with the language, name and default flag it gets.

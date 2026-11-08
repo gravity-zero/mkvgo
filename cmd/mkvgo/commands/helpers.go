@@ -94,7 +94,7 @@ var CmdUsage = map[string]string{
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",
 	"verify":             "mkvgo verify [-json] <file.mkv|.mp4> (recompute content hashes, exit 1 on mismatch)",
 	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> [part2.mkv ...] (-blocks: per-track content hashes, MKV/WebM only; several files on the right = compare against their concatenation)",
-	"demux":              "mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,... (default: all tracks)] [--raw] [--skip-unsupported]",
+	"demux":              "mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,... (default: all tracks)] [--raw] [--skip-unsupported] [--strict]",
 	"mux":                "mkvgo mux -o <out.mkv|.mp4> <file:trackID> [<file:trackID> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge":              "mkvgo merge -o <out.mkv|.mp4> <file1> [<file2> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge-subtitle":     "mkvgo merge-subtitle <file.mkv|.mp4> -o <out> <subtitle> [-format srt|ass (default: from extension; MP4: srt only)] [-lang code (default: und)] [-name text]",
@@ -124,7 +124,7 @@ var CmdUsage = map[string]string{
 	"serve":              "mkvgo serve <file.mkv> [-addr 127.0.0.1:8478] [--direct | --auto [-target mse-generic]] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--buffered] [--cors] [--source-access auto|local|network] (serve one file's on-demand HLS plan over HTTP, or the raw file for a direct-play client)",
 	"serve-growing":      "mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--cors] [--max-in-flight 64] [--max-waiting 1024] [--memory-limit <MiB>] (play while downloading: serve a still-growing file as HLS, EVENT playlist until it finishes)",
 	"to-mp4":             "mkvgo to-mp4 [--faststart] [--skip-unsupported] [--flatten-subs] [--webvtt-native] [--mp3-container-delay] [--hash] <input.mkv|.mp4> <output.mp4> (an MP4/MOV input is rewritten fast start, sample for sample)",
-	"from-mp4":           "mkvgo from-mp4 [--skip-unsupported] [--mp3-container-delay] <input.mp4> <output.mkv>",
+	"from-mp4":           "mkvgo from-mp4 [--skip-unsupported] [--strict] [--mp3-container-delay] <input.mp4> <output.mkv>",
 	"to-webm":            "mkvgo to-webm <input.mkv> <output.webm>",
 	"to-hls":             "mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--skip-unsupported] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--audio-shift track=ms] [--chapter-markers] [--no-iframes] (fragmented-MP4 HLS; virtual track subset by ID or language; virtual subtitle/audio resync; opt-in chapter/ad-insertion markers)",
 	"hls-segment":        "mkvgo hls-segment <input.mkv|url> <master|playlist|init|N|resource-name> [-o out] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--sub-offset ms] [--audio-shift track=ms] [--synthesize-index] [--chapter-markers] [--no-iframes] [--damage-bytes n] (build one HLS resource on demand; --synthesize-index serves a no-Cue source by walking it once)",
@@ -205,10 +205,10 @@ func FatalErr(err error) {
 	Fatal(msg)
 }
 
-// FlagWords is err as a command that takes --skip-unsupported tells it: the library's hint names the Options (or
-// DemuxOptions) field, the command line the flag. errors.Is and As still reach err.
+// FlagWords is err as a command that takes --skip-unsupported and --strict tells it: the library's hint names the
+// Options (or DemuxOptions) field, the command line the flag. errors.Is and As still reach err.
 func FlagWords(err error) error {
-	if err == nil || !strings.Contains(err.Error(), "Options.SkipUnsupported") {
+	if err == nil || (!strings.Contains(err.Error(), "Options.SkipUnsupported") && !strings.Contains(err.Error(), "Options.Strict")) {
 		return err
 	}
 	return flagWords{err}
@@ -216,10 +216,15 @@ func FlagWords(err error) error {
 
 type flagWords struct{ error }
 
-func (f flagWords) Error() string {
-	msg := strings.ReplaceAll(f.error.Error(), "set DemuxOptions.SkipUnsupported", "pass --skip-unsupported")
-	return strings.ReplaceAll(msg, "set Options.SkipUnsupported", "pass --skip-unsupported")
-}
+// flagPhrases are the library's option hints and the command line's.
+var flagPhrases = strings.NewReplacer(
+	"set DemuxOptions.SkipUnsupported", "pass --skip-unsupported",
+	"set Options.SkipUnsupported", "pass --skip-unsupported",
+	"which DemuxOptions.Strict refuses", "which --strict refuses",
+	"which Options.Strict refuses", "which --strict refuses",
+)
+
+func (f flagWords) Error() string { return flagPhrases.Replace(f.error.Error()) }
 
 func (f flagWords) Unwrap() error { return f.error }
 
@@ -477,6 +482,10 @@ type trackJSON struct {
 	StereoModeName      string   `json:"stereo_mode_name,omitempty"`
 	ResolvedLanguage    string   `json:"resolved_language,omitempty"`
 	EffectiveSampleRate float64  `json:"effective_sample_rate,omitempty"`
+	// ToMatroska says whether a remux to Matroska carries the track (always for a Matroska source); when it does
+	// not, ToMatroskaRefusal is the reason from-mp4 drops or refuses it by (Track.Unsupported).
+	ToMatroska        bool   `json:"to_matroska"`
+	ToMatroskaRefusal string `json:"to_matroska_refusal,omitempty"`
 }
 
 // tracksForJSON wraps tracks so the marshaled JSON carries the derived display
@@ -499,6 +508,8 @@ func tracksForJSON(c *matroska.Container) []trackJSON {
 			StereoModeName:      t.StereoModeName(),
 			ResolvedLanguage:    c.TrackLanguage(&t),
 			EffectiveSampleRate: t.EffectiveSampleRate(),
+			ToMatroska:          t.Unsupported == "",
+			ToMatroskaRefusal:   t.Unsupported,
 		}
 		out[i].FrameRate, out[i].FrameRateEstimated = t.FrameRate, t.FrameRate == nil && t.EstimatedFrameRate != nil
 		if out[i].FrameRateEstimated {

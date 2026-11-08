@@ -9,14 +9,9 @@ import (
 
 // options.go - the option type shared by RemuxToMP4 and RemuxFromMP4.
 
-// DroppedTrack describes a source track that the remux did not carry into the
-// output, with a human-readable reason. It is reported through Options.OnDrop.
-type DroppedTrack struct {
-	ID     uint64        `json:"id"`
-	Type   mkv.TrackType `json:"type"`
-	Codec  string        `json:"codec"`
-	Reason string        `json:"reason"`
-}
+// DroppedTrack is mkv.DroppedTrack: a source track the operation did not carry into its output, with a
+// human-readable reason, reported through Options.OnDrop (the ID is the source file's own, an MP4 tkhd track_ID).
+type DroppedTrack = mkv.DroppedTrack
 
 // Truncation describes a source cut short: an MP4 whose sample tables place media past the
 // end of the file (its moov at the head), a Matroska that stops before the end its Segment declares. A remux or an
@@ -119,6 +114,10 @@ type Options struct {
 	// the output instead of failing the whole remux. The remux still fails if no
 	// supported track remains. Every dropped track is reported via OnDrop.
 	SkipUnsupported bool
+	// Strict fails RemuxFromMP4, ForEachBlock and WalkBlocks by name on any track they would drop - a subtitle
+	// Matroska has no form for, a still picture, a non-media track - whatever SkipUnsupported says: nothing is
+	// left out silently. The operations that write MP4 keep dropping what MP4 cannot carry, reported via OnDrop.
+	Strict bool
 	// OnDrop, when non-nil, is called once per dropped track (unsupported codecs,
 	// and subtitle/other tracks the format cannot carry). It never receives a
 	// track that was successfully included.
@@ -350,6 +349,15 @@ func (o Options) report(d DroppedTrack) {
 	if o.OnDrop != nil {
 		o.OnDrop(d)
 	}
+}
+
+// drop reports d, or refuses it by name under Options.Strict.
+func (o Options) drop(d DroppedTrack) error {
+	if o.Strict {
+		return errf("track %d (%s): %s (dropped, which Options.Strict refuses)", d.ID, d.Codec, d.Reason)
+	}
+	o.report(d)
+	return nil
 }
 
 // SourceAccess is how a source is reached (Options.SourceAccess).

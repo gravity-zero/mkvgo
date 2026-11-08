@@ -92,6 +92,9 @@ func CmdTracks(path string) {
 		if t.DolbyVision != nil {
 			fmt.Printf("  [DoVi p%d]", t.DolbyVision.Profile)
 		}
+		if t.Unsupported != "" {
+			fmt.Printf("  [not carried to Matroska: %s]", t.Unsupported)
+		}
 		fmt.Println()
 	}
 }
@@ -321,6 +324,9 @@ func CmdProbe(path string) {
 		if dv := t.DolbyVision; dv != nil {
 			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",
 				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent)
+		}
+		if t.Unsupported != "" {
+			fmt.Printf("        not carried to Matroska: %s\n", t.Unsupported)
 		}
 		if t.StereoMode != nil || t.Projection != "" {
 			fmt.Print("        spatial:")

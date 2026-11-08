@@ -77,11 +77,12 @@ func CmdToMP4(args []string) {
 // track, a sample entry without a Matroska form); --mp3-container-delay carries an MP3's edit-list delay into
 // Matroska CodecDelay (opt-in; see Options.MP3ContainerDelay).
 func CmdFromMP4(args []string) {
-	var mp3delay, skip bool
+	var mp3delay, skip, strict bool
 	var rest []string
 	fl := newFlags("CmdFromMP4")
 	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
+	fl.Bool(&strict, "--strict", "-strict")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		FatalUsage("usage: " + CmdUsage["from-mp4"])
@@ -93,9 +94,11 @@ func CmdFromMP4(args []string) {
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		SkipUnsupported:   skip,
+		Strict:            strict,
 		MP3ContainerDelay: mp3delay,
 		OnDrop: func(d mp4.DroppedTrack) {
-			fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
+			ClearProgress()
+			fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
 		},
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()

@@ -24,6 +24,11 @@ func TestFlagWordsNameTheFlag(t *testing.T) {
 	if msg := commands.FlagWords(fmt.Errorf("track 1 (ulaw): no form (set DemuxOptions.SkipUnsupported to drop it)")).Error(); strings.Contains(msg, "Options.") || !strings.Contains(msg, "(pass --skip-unsupported to drop it)") {
 		t.Errorf("the demux wording is not translated: %q", msg)
 	}
+	for _, in := range []string{"track 2 (stpp): no form (dropped, which Options.Strict refuses)", "track 2 (stpp): no form (dropped, which DemuxOptions.Strict refuses)"} {
+		if msg := commands.FlagWords(fmt.Errorf("%s", in)).Error(); strings.Contains(msg, "Options.") || !strings.Contains(msg, "(dropped, which --strict refuses)") {
+			t.Errorf("the strict wording is not translated: %q", msg)
+		}
+	}
 	if !errors.Is(err, os.ErrInvalid) {
 		t.Error("the wrapped error is lost")
 	}
