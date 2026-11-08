@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -34,10 +35,12 @@ func TestPlanServesThroughChmodChownAndHardLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	open("chmod")
-	if err := os.Chown(src, os.Getuid(), os.Getgid()); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS != "windows" { // chown is not a Windows operation
+		if err := os.Chown(src, os.Getuid(), os.Getgid()); err != nil {
+			t.Fatal(err)
+		}
+		open("chown")
 	}
-	open("chown")
 	if err := os.Link(src, src+".link"); err != nil {
 		t.Fatal(err)
 	}
