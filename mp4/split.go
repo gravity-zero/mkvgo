@@ -57,7 +57,9 @@ func loadCutModel(r io.ReadSeeker, path string, size, base int64, budget *int64,
 	}
 	for _, d := range mv.dropped {
 		d.Reason += " (not carried)"
-		o.report(d)
+		if err := o.drop(d); err != nil {
+			return nil, err
+		}
 	}
 	boxes, err := iterBoxes(payload)
 	if err != nil {

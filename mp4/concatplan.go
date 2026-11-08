@@ -96,8 +96,10 @@ func PlanConcat(ctx context.Context, sources []string, opts ...Options) (*Concat
 	if !cp.subsOK {
 		for i := range results[0].subs {
 			t := &results[0].subs[i].track
-			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-				Reason: "subtitle rendition layout differs across the concatenated sources (count/language/name/forced must match); subtitles dropped from the concatenated presentation"})
+			if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+				Reason: "subtitle rendition layout differs across the concatenated sources (count/language/name/forced must match); subtitles dropped from the concatenated presentation"}); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		for j := range results[0].subs {

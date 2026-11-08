@@ -38,6 +38,10 @@ var FrameRateReads bool
 // file. Without it, commands that write a new file refuse to clobber one.
 var Force bool
 
+// Strict (--strict) fails an operation by name on any track it would leave out (mp4.Options.Strict,
+// DemuxOptions.Strict), where the default drops it with a dropped track line.
+var Strict bool
+
 // SyncOutput is the global --sync flag: a command writing a new Matroska file
 // flushes it to disk before renaming it into place (Options.SyncOutput).
 var SyncOutput bool

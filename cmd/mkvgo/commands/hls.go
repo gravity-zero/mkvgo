@@ -31,7 +31,6 @@ type hlsFlags struct {
 	noIFrames       bool
 	damageBytes     int64
 	skipUnsupported bool
-	strict          bool
 	sourceAccess    mp4.SourceAccess
 	synthIndex      bool
 	audioShift      map[uint64]int64
@@ -94,7 +93,6 @@ func parseHLSFlags(args []string) hlsFlags {
 	}, "--sub-offset")
 	fl.Bool(&f.chapterMarkers, "--chapter-markers")
 	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
-	fl.Bool(&f.strict, "--strict", "-strict")
 	fl.Bool(&f.noIFrames, "--no-iframes")
 	fl.Func(damageBytesFlag(&f.damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
@@ -253,7 +251,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		NoIFrames:              f.noIFrames,
 		DamageBytes:            f.damageBytes,
 		SkipUnsupported:        f.skipUnsupported,
-		Strict:                 f.strict,
+		Strict:                 Strict,
 		SynthesizeIndex:        f.synthIndex,
 		AudioPresentationShift: f.audioShift,
 		SourceAccess:           f.sourceAccess,

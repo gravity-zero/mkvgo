@@ -87,11 +87,9 @@ func decodePatch(raw []byte) EditPatch {
 	return patch
 }
 
-// mp4Options is the CLI's mp4.Options: a progress bar, and every track left out reported.
+// mp4Options is the CLI's mp4.Options: a progress bar, every track left out reported on stderr, --strict.
 func mp4Options() mp4.Options {
-	return mp4.Options{Progress: NewProgressBar(), OnDrop: func(d mp4.DroppedTrack) {
-		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}}
+	return mp4.Options{Progress: NewProgressBar(), OnDrop: dropLine, Strict: Strict}
 }
 
 // guardOutput refuses an output that exists (unless -f) or that is one of the inputs, which -f never allows.

@@ -424,8 +424,10 @@ func writeConcatSubtitles(o *Options, fs *mkv.FS, outDir string, results []*hlsR
 	if !subsAligned(results) {
 		for i := range results[0].subs {
 			t := &results[0].subs[i].track
-			o.report(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
-				Reason: "subtitle rendition layout differs across the concatenated sources (count/language/name/forced must match); subtitles dropped from the concatenated presentation"})
+			if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec,
+				Reason: "subtitle rendition layout differs across the concatenated sources (count/language/name/forced must match); subtitles dropped from the concatenated presentation"}); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

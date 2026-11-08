@@ -18,9 +18,7 @@ func CmdConcatHLS(args []string) {
 	f.randomCENCIV()
 	opts := f.options(f.rest[0])
 	opts.Progress = NewProgressBar()
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Printf("dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	err := mp4.RemuxConcatToHLS(cliCtx, f.rest, f.outDir, opts)
 	ClearProgress()
 	if err != nil {
@@ -43,9 +41,7 @@ func CmdConcatSegment(args []string) {
 	what, sources := rest[0], rest[1:]
 
 	opts := f.options(sources[0])
-	opts.OnDrop = func(d mp4.DroppedTrack) {
-		fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", d.ID, d.Codec, d.Reason)
-	}
+	opts.OnDrop = dropLine
 	plan, err := mp4.PlanConcat(cliCtx, sources, opts)
 	if err != nil {
 		FatalErr(err)

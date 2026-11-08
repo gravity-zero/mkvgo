@@ -66,14 +66,16 @@ func stdoutOf(t *testing.T, fn func()) []byte {
 // flag; the default drops it with a dropped track line.
 func TestStrictRefusesDroppedTracks(t *testing.T) {
 	dir := t.TempDir()
+	commands.Strict = true
+	t.Cleanup(func() { commands.Strict = false })
 	msg := fatalMessage(t, 1, func() {
-		commands.CmdFromMP4([]string{"--strict", "--skip-unsupported", ulawFixture, filepath.Join(dir, "out.mkv")})
+		commands.CmdFromMP4([]string{"--skip-unsupported", ulawFixture, filepath.Join(dir, "out.mkv")})
 	})
 	if !strings.Contains(msg, "track 1 (ulaw)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
 		t.Errorf("from-mp4 --strict: %q, want track 1 (ulaw) refused by --strict", msg)
 	}
 	msg = fatalMessage(t, 1, func() {
-		commands.CmdDemux([]string{"--strict", "--skip-unsupported", ulawFixture, "-o", filepath.Join(dir, "demux")})
+		commands.CmdDemux([]string{"--skip-unsupported", ulawFixture, "-o", filepath.Join(dir, "demux")})
 	})
 	if !strings.Contains(msg, "track 1 (ulaw)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
 		t.Errorf("demux --strict: %q, want track 1 (ulaw) refused by --strict", msg)
@@ -117,11 +119,13 @@ func TestTracksJSONSaysWhatMP4AndHLSCarry(t *testing.T) {
 // and the flag.
 func TestStrictRefusesDropsTowardsMP4AndHLS(t *testing.T) {
 	dir := t.TempDir()
-	msg := fatalMessage(t, 1, func() { commands.CmdToMP4([]string{"--strict", twoVideoASSFixture, filepath.Join(dir, "out.mp4")}) })
+	commands.Strict = true
+	t.Cleanup(func() { commands.Strict = false })
+	msg := fatalMessage(t, 1, func() { commands.CmdToMP4([]string{twoVideoASSFixture, filepath.Join(dir, "out.mp4")}) })
 	if !strings.Contains(msg, "track 3 (ass)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
 		t.Errorf("to-mp4 --strict: %q, want track 3 (ass) refused by --strict", msg)
 	}
-	msg = fatalMessage(t, 1, func() { commands.CmdToHLS([]string{"--strict", twoVideoASSFixture, "-o", filepath.Join(dir, "hls")}) })
+	msg = fatalMessage(t, 1, func() { commands.CmdToHLS([]string{twoVideoASSFixture, "-o", filepath.Join(dir, "hls")}) })
 	if !strings.Contains(msg, "track 2 (h264)") || !strings.Contains(msg, "--strict") || strings.Contains(msg, "Options.") {
 		t.Errorf("to-hls --strict: %q, want track 2 (h264) refused by --strict", msg)
 	}

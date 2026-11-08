@@ -20,9 +20,18 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (`.caf`; was `.alac`), PCM in WAV (`.wav`; was `.pcm`, or the sample format
   such as `.pcm_f64le`; big-endian samples turned little-endian). `--raw`
   (`DemuxOptions.Raw`) still writes the former files, names included.
+- `mp4.DroppedTrack` is now an alias of `mkv.DroppedTrack`, the one struct both
+  directions report through (gorelease lists the type and every signature
+  carrying it as changed; source that names `mp4.DroppedTrack` compiles as it
+  is, the two being one type).
 
 ### Changed
 
+- The `dropped track N (codec): reason` lines of `to-mp4`, `from-mp4`,
+  `to-hls` (and `to-abr`, `concat-hls`), `split`, `join`, `mux`, `merge` and
+  `merge-subtitle` go to stderr, no longer stdout, like those of `serve`,
+  `demux` and the segment commands: stdout keeps the command's result alone.
+  `--strict` is a global flag, taken by every one of these commands.
 - Matroska `edit-inplace` / `EditInPlace`: a head with no room left moves the
   Tags, then the Chapters, the Info and the Tracks to the end of the Segment
   (RFC 9559 6.8) instead of refusing; it still refuses a file with no SeekHead
@@ -51,7 +60,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   subtitle the output has no form for, a secondary video track, an encrypted
   or unsupported codec - as `dropped track N (codec): reason` on stderr, exit
   0 as before, and take `--strict` (`Options.Strict`) to fail by name on any
-  of them. `tracks` and `probe` say per track, on a Matroska, whether each
+  of them; so do `split`, `join`, `mux`, `merge` and the concatenations for
+  the non-media tracks and subtitles they leave out, so the flag means the
+  same everywhere. `tracks` and `probe` say per track, on a Matroska, whether each
   target carries it: `to_mp4` / `to_mp4_refusal` and `to_hls` /
   `to_hls_refusal` in `-json` (`mp4.TracksCarriage`), the reasons naming the
   flags. Fixed on the way: HLS reported an ASS track dropped with the MP4

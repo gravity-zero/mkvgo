@@ -12,11 +12,10 @@ import (
 // --flatten-subs (carry ASS/SSA as plain tx3g, losing styling), --webvtt-native
 // (carry WebVTT as lossless wvtt instead of tx3g; not read by every demuxer).
 func CmdToMP4(args []string) {
-	var faststart, skip, strict, flatten, wvtt, mp3delay, hashes bool
+	var faststart, skip, flatten, wvtt, mp3delay, hashes bool
 	var rest []string
 	fl := newFlags("CmdToMP4")
 	fl.Bool(&faststart, "--faststart", "-faststart")
-	fl.Bool(&strict, "--strict", "-strict")
 	fl.Bool(&hashes, "--hash", "-hash")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
 	fl.Bool(&flatten, "--flatten-subs", "-flatten-subs")
@@ -54,7 +53,7 @@ func CmdToMP4(args []string) {
 		Progress:          NewProgressBar(),
 		FastStart:         faststart,
 		SkipUnsupported:   skip,
-		Strict:            strict,
+		Strict:            Strict,
 		FlattenStyledSubs: flatten,
 		NativeWebVTT:      wvtt,
 		MP3ContainerDelay: mp3delay,
@@ -77,12 +76,11 @@ func CmdToMP4(args []string) {
 // track, a sample entry without a Matroska form); --mp3-container-delay carries an MP3's edit-list delay into
 // Matroska CodecDelay (opt-in; see Options.MP3ContainerDelay).
 func CmdFromMP4(args []string) {
-	var mp3delay, skip, strict bool
+	var mp3delay, skip bool
 	var rest []string
 	fl := newFlags("CmdFromMP4")
 	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
-	fl.Bool(&strict, "--strict", "-strict")
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		FatalUsage("usage: " + CmdUsage["from-mp4"])
@@ -94,7 +92,7 @@ func CmdFromMP4(args []string) {
 		FS:                sourceFS(src),
 		Progress:          NewProgressBar(),
 		SkipUnsupported:   skip,
-		Strict:            strict,
+		Strict:            Strict,
 		MP3ContainerDelay: mp3delay,
 		OnDrop:            dropLine,
 		OnTruncated: func(t mp4.Truncation) {

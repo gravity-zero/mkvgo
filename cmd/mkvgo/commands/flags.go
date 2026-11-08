@@ -91,6 +91,8 @@ func TakeGlobalFlags(args []string) (rest []string, version bool) {
 			SyncOutput = true
 		case "--exit-damaged", "-exit-damaged":
 			ExitDamaged = true
+		case "--strict", "-strict":
+			Strict = true
 		case "--version", "-version":
 			version = true
 		default:

@@ -118,7 +118,8 @@ type Options struct {
 	// left out silently: towards Matroska (RemuxFromMP4, ForEachBlock, WalkBlocks) a subtitle Matroska has no form
 	// for, a still picture, a non-media track; towards MP4 and HLS (RemuxToMP4, RemuxToHLS and its variants,
 	// PlanHLS, the growing plan) a subtitle the output has no form for, a secondary video track, an encrypted or
-	// unsupported codec. TracksCarriage says ahead of time what each target would drop.
+	// unsupported codec; Mux, Split and the concatenations the non-media tracks and the subtitles they leave out.
+	// TracksCarriage says ahead of time what each target would drop.
 	Strict bool
 	// OnDrop, when non-nil, is called once per dropped track (unsupported codecs,
 	// and subtitle/other tracks the format cannot carry). It never receives a

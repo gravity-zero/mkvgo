@@ -117,7 +117,9 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...Options) error {
 			if err != nil {
 				return errf("merge: %s: %w", shown.Path(in.SourcePath), err)
 			}
-			reportDropped(o, dropped)
+			if err := reportDropped(o, dropped); err != nil {
+				return err
+			}
 			for _, t := range c.Tracks {
 				ids = append(ids, t.ID)
 			}
@@ -175,12 +177,16 @@ func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, 
 	return muxMP4(ctx, inputs, dstPath, nil, o)
 }
 
-// reportDropped tells OnDrop about the traks a mux leaves out (timecode, chapter images...).
-func reportDropped(o Options, dropped []DroppedTrack) {
+// reportDropped tells OnDrop about the traks a mux leaves out (timecode, chapter images...), or refuses them under
+// Options.Strict.
+func reportDropped(o Options, dropped []DroppedTrack) error {
 	for _, d := range dropped {
 		d.Reason += " (not carried)"
-		o.report(d)
+		if err := o.drop(d); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // allTracks lists every probe track of an MP4 source as mux inputs.
@@ -189,7 +195,9 @@ func allTracks(ctx context.Context, path string, o Options) ([]muxInput, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", shown.Path(path), err)
 	}
-	reportDropped(o, dropped)
+	if err := reportDropped(o, dropped); err != nil {
+		return nil, err
+	}
 	var out []muxInput
 	for _, t := range c.Tracks {
 		out = append(out, muxInput{path: path, id: t.ID})

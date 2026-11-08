@@ -14,13 +14,12 @@ func CmdDemux(args []string) {
 	}
 	var outDir string
 	var trackIDs []uint64
-	var raw, skip, strict bool
+	var raw, skip bool
 
 	fl := newFlags("demux")
 	fl.String(&outDir, "-o")
 	fl.Bool(&raw, "--raw")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
-	fl.Bool(&strict, "--strict", "-strict")
 	fl.Func(func(v string) { trackIDs = ParseTrackIDs(v) }, "-t")
 	source, _ := fl.ParseSource(args, CmdUsage["demux"])
 	if outDir == "" {
@@ -28,7 +27,7 @@ func CmdDemux(args []string) {
 	}
 
 	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
-		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force, Raw: raw, SkipUnsupported: skip, Strict: strict,
+		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force, Raw: raw, SkipUnsupported: skip, Strict: Strict,
 		OnDrop: dropLine,
 	}, writeOptions())
 	ClearProgress()
