@@ -9,6 +9,18 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Breaking
+
+- `demux` of a Matroska/WebM writes five more codecs in the file their tools
+  read, where it wrote the bare payloads under the codec's name: AV1 as a
+  low-overhead OBU stream with a temporal delimiter a temporal unit (`.obu`;
+  was `.av1`, which a decoder read as no frame at all), VP8 and VP9 in IVF
+  (`.ivf`; were `.vp8`, `.vp9`), MPEG-4 Part 2 behind its VOS/VOL headers
+  (`.m4v`; was `.mpeg4`), ALAC in CAF with its magic cookie and packet table
+  (`.caf`; was `.alac`), PCM in WAV (`.wav`; was `.pcm`, or the sample format
+  such as `.pcm_f64le`; big-endian samples turned little-endian). `--raw`
+  (`DemuxOptions.Raw`) still writes the former files, names included.
+
 ### Changed
 
 - Matroska `edit-inplace` / `EditInPlace`: a head with no room left moves the
@@ -18,10 +30,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Added
 
-- `demux` writes every stream in the file its codec's tools read: AV1 as a
-  low-overhead OBU stream with a temporal delimiter a temporal unit, VP8 and
-  VP9 in IVF, MPEG-4 Part 2 behind its VOS/VOL headers, ALAC in CAF with its
-  cookie and packet table, PCM in WAV. Written bare, none of them decoded.
+- `demux` writes every stream in the file its codec's tools read, from an MP4
+  as from a Matroska (the five codecs an existing Matroska demux changes for
+  are under Breaking); written bare, none of them decoded.
   An MP4 track the remux cannot carry follows the remux's rule: the demux
   fails by its name (exit 1) unless `--skip-unsupported`
   (`DemuxOptions.SkipUnsupported`) drops it, printed as a `dropped track`
