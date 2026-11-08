@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/gravity-zero/mkvgo/matroska"
@@ -27,6 +28,9 @@ func CmdDemux(args []string) {
 
 	err := matroska.Demux(cliCtx, matroska.DemuxOptions{
 		SourcePath: source, OutputDir: outDir, TrackIDs: trackIDs, NoOverwrite: !Force, Raw: raw,
+		OnDrop: func(id uint64, codec, reason string) {
+			fmt.Fprintf(os.Stderr, "dropped track %d (%s): %s\n", id, codec, reason)
+		},
 	}, writeOptions())
 	ClearProgress()
 	if err != nil {

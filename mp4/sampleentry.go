@@ -107,7 +107,7 @@ func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 	case "mlpa":
 		// TrueHD: A_TRUEHD, every frame self-describing, no private data.
 		parseAudioFields(tr, payload)
-		tr.codec = "A_TRUEHD"
+		tr.codec = "truehd"
 	case "mp4v":
 		// MPEG-4 Visual: the esds DecoderSpecificInfo (the VOL headers) is the CodecPrivate, as the mainstream muxer
 		// writes V_MPEG4/ISO/ASP; any other object type behind an mp4v entry (JPEG, say) has no Matroska form.

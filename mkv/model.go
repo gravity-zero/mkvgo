@@ -842,9 +842,14 @@ type DemuxOptions struct {
 	NoOverwrite bool
 	// Raw writes each track's payloads as the file stores them, one after the other, named after the codec. By
 	// default a track goes out as the file its codec's tools read: AAC as ADTS (.aac), H.264 and HEVC as Annex-B
-	// with their parameter sets ahead of every keyframe (.h264, .hevc), Opus and Vorbis in Ogg (.opus, .ogg), FLAC
-	// with its STREAMINFO (.flac), PGS as a .sup; another codec, or a track lacking what its format needs, is raw.
+	// with their parameter sets ahead of every keyframe (.h264, .hevc), AV1 as a low-overhead OBU stream (.obu),
+	// VP8 and VP9 in IVF (.ivf), MPEG-4 Part 2 behind its headers (.m4v), Opus and Vorbis in Ogg (.opus, .ogg), FLAC
+	// with its STREAMINFO (.flac), ALAC in CAF (.caf), PCM in WAV (.wav), PGS as a .sup; another codec, or a track
+	// lacking what its format needs, is raw.
 	Raw bool
+	// OnDrop reports an MP4 track the demux leaves out, with its reason: one its remux to Matroska cannot carry (an
+	// encrypted track, a sample entry Matroska has no form for). Asked for by ID, such a track fails the demux instead.
+	OnDrop func(id uint64, codec, reason string)
 }
 
 // TrackInput is one track ops.Mux takes from a source file, with the language, name and default flag it gets.

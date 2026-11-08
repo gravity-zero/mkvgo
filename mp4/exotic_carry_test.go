@@ -70,8 +70,8 @@ func TestFromMP4CarriesALACTrueHDAndMPEG4Visual(t *testing.T) {
 		t.Error("an alac child too short for the ALACSpecificConfig was carried")
 	}
 	truehd := parseOneEntry(t, mkv.AudioTrack, audioEntryBytes("mlpa", 2, 24, 48000, box("dmlp", make([]byte, 10))))
-	if truehd.codec != "A_TRUEHD" || len(truehd.codecPrivate) != 0 || truehd.unsupported != "" || truehd.channels != 2 {
-		t.Errorf("mlpa: codec %q private %d bytes unsupported %q channels %d", truehd.codec, len(truehd.codecPrivate), truehd.unsupported, truehd.channels)
+	if truehd.codec != "truehd" || len(truehd.codecPrivate) != 0 || truehd.unsupported != "" || truehd.channels != 2 {
+		t.Errorf("mlpa: codec %q (want truehd, the reader's short name) private %d bytes unsupported %q channels %d", truehd.codec, len(truehd.codecPrivate), truehd.unsupported, truehd.channels)
 	}
 	dsi := []byte{0x00, 0x00, 0x01, 0xB0, 0xF5, 0x00, 0x00, 0x01, 0xB5, 0x09}
 	mpeg4 := parseOneEntry(t, mkv.VideoTrack, visualEntryBytes("mp4v", 176, 144, esdsBox(0x20, dsi)))

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
@@ -82,15 +83,43 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 	return d.finish()
 }
 
-// demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats.
+// demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats. A track
+// the remux cannot carry is left out and reported through DemuxOptions.OnDrop, as from-mp4 drops it; asked for
+// by ID, it fails the demux by name.
 func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mkv.Options) (err error) {
-	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra)}
+	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra), dropped: map[uint64]mp4.DroppedTrack{}}
 	defer d.settle(&err)
-	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra)}
-	if err := mp4.WalkBlocks(ctx, opts.SourcePath, d.open, d.frame, o); err != nil {
+	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra), SkipUnsupported: true, OnDrop: func(t mp4.DroppedTrack) {
+		d.dropped[t.ID] = t
+	}}
+	start := func(c *mkv.Container) error {
+		for _, id := range opts.TrackIDs {
+			if t, ok := d.dropped[id]; ok {
+				return fmt.Errorf("track %d (%s) cannot be demuxed: %s", t.ID, t.Codec, t.Reason)
+			}
+		}
+		if opts.OnDrop != nil {
+			for _, id := range sortedDropped(d.dropped) {
+				t := d.dropped[id]
+				opts.OnDrop(t.ID, t.Codec, t.Reason)
+			}
+		}
+		return d.open(c)
+	}
+	if err := mp4.WalkBlocks(ctx, opts.SourcePath, start, d.frame, o); err != nil {
 		return err
 	}
 	return d.finish()
+}
+
+// sortedDropped is the dropped tracks' IDs in order.
+func sortedDropped(m map[uint64]mp4.DroppedTrack) []uint64 {
+	ids := make([]uint64, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // demuxer holds a demux's outputs: one file per wanted track, in its format.
@@ -102,6 +131,8 @@ type demuxer struct {
 	formats map[uint64]*demuxFormat
 	writers map[uint64]*bufio.Writer
 	outputs []*output
+	files   map[uint64]*output
+	dropped map[uint64]mp4.DroppedTrack // MP4 tracks the remux cannot carry, left out
 }
 
 // open picks the tracks, creates their files and writes each format's head.
@@ -121,6 +152,10 @@ func (d *demuxer) open(c *mkv.Container) error {
 	d.writers, d.outputs, err = openOutputFiles(d.wanted, d.formats, d.opts.OutputDir, d.opts.SourcePath, d.opts.NoOverwrite, d.fs, d.sync)
 	if err != nil {
 		return err
+	}
+	d.files = make(map[uint64]*output, len(d.outputs))
+	for i, id := range sortedTracks(d.writers) { // the outputs were created in this order
+		d.files[id] = d.outputs[i]
 	}
 	for _, id := range sortedTracks(d.writers) {
 		if h := d.formats[id].head; h != nil {
@@ -167,6 +202,11 @@ func (d *demuxer) finish() error {
 	for _, id := range sortedTracks(d.writers) {
 		if err := d.writers[id].Flush(); err != nil {
 			return fmt.Errorf("flush track %d: %w", id, err)
+		}
+		if fin := d.formats[id].finish; fin != nil {
+			if err := fin(d.files[id]); err != nil {
+				return fmt.Errorf("write track %d: %w", id, err)
+			}
 		}
 	}
 	return nil

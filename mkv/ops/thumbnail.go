@@ -151,25 +151,9 @@ func annexBFromLengthPrefixed(data []byte, lenSize int) ([]byte, error) {
 
 // annexBAppend appends data's length-prefixed NAL units to dst as Annex-B.
 func annexBAppend(dst, data []byte, lenSize int) ([]byte, error) {
-	if lenSize < 1 || lenSize > 4 {
-		return nil, fmt.Errorf("bad NAL length size %d", lenSize)
-	}
-	out := dst
-	for pos := 0; pos < len(data); {
-		if pos+lenSize > len(data) {
-			return nil, fmt.Errorf("truncated NAL length at %d", pos)
-		}
-		var n int
-		for i := 0; i < lenSize; i++ {
-			n = n<<8 | int(data[pos+i])
-		}
-		pos += lenSize
-		if n <= 0 || n > len(data)-pos { // pos+n wraps on 32-bit
-			return nil, fmt.Errorf("NAL size %d out of bounds at %d", n, pos)
-		}
-		out = append(out, 0, 0, 0, 1)
-		out = append(out, data[pos:pos+n]...)
-		pos += n
+	out, err := appendAnnexB(dst, data, lenSize)
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

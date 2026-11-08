@@ -18,6 +18,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Added
 
+- `demux` writes every stream in the file its codec's tools read: AV1 as a
+  low-overhead OBU stream with a temporal delimiter a temporal unit, VP8 and
+  VP9 in IVF, MPEG-4 Part 2 behind its VOS/VOL headers, ALAC in CAF with its
+  cookie and packet table, PCM in WAV. Written bare, none of them decoded.
+  An MP4 track the remux cannot carry is left out with a `dropped track`
+  line, not a library option name; a zero-length NAL unit no longer refuses
+  an H.264/HEVC frame.
 - `from-mp4` carries MPEG-4 Part 2 (`mp4v` → `V_MPEG4/ISO/ASP`), TrueHD (`mlpa`
   → `A_TRUEHD`) and ALAC (`alac` → `A_ALAC`), as the mainstream muxer does;
   decoded, the Matroska matches the MP4 (checked with a decoder on real files).

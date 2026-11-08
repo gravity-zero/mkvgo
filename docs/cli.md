@@ -379,7 +379,7 @@ Each track lands in `<dir>/<trackID>.<ext>`, in its codec's own format:
 | FLAC | `.flac`: the `fLaC` marker and the STREAMINFO ahead of the frames |
 | PGS | `.sup`: each segment behind `PG` and its 90 kHz presentation time |
 
-Any other codec, or a track lacking what its format needs (an AAC without an AudioSpecificConfig, an H.264 without its avcC), keeps its payloads as stored, in `<trackID>.<codec>` (`3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to; so does every track under `--raw`. A demux that fails leaves no file behind, and the files already under those names as they were.
+AV1 goes out as a low-overhead OBU stream with a temporal delimiter a temporal unit (`.obu`), VP8 and VP9 in IVF (`.ivf`), MPEG-4 Part 2 behind its VOS/VOL headers (`.m4v`), ALAC in CAF with its magic cookie and packet table (`.caf`), PCM in WAV (`.wav`, big-endian samples turned little-endian). Any other codec, or a track lacking what its format needs (an AAC without an AudioSpecificConfig, an H.264 without its avcC), keeps its payloads as stored, in `<trackID>.<codec>` (`3.theora`), the codec being mkvgo's short name or, failing one, the name the CodecID resolves to; so does every track under `--raw`. A demux that fails leaves no file behind, and the files already under those names as they were.
 
 ### extract-attachment
 

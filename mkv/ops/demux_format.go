@@ -4,20 +4,24 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // demuxFormat writes one track's frames as the file its codec's tools read: ADTS for AAC, Annex-B with the parameter
-// sets for H.264 and HEVC, Ogg for Opus and Vorbis, a FLAC stream with its STREAMINFO, a .sup for PGS. A codec with
+// sets for H.264 and HEVC, a low-overhead OBU stream for AV1, IVF for VP8 and VP9, MPEG-4 Part 2 behind its headers,
+// Ogg for Opus and Vorbis, a FLAC stream with its STREAMINFO, CAF for ALAC, WAV for PCM, a .sup for PGS. A codec with
 // none, or a track lacking what its format needs (an AudioSpecificConfig, a decoder record), keeps its payloads as
-// they are stored.
+// they are stored. finish, when set, runs once the stream is flushed, on the file itself: the sizes a header
+// states (WAV, CAF, an IVF frame count) are patched in then; a file that cannot seek keeps the placeholders.
 type demuxFormat struct {
-	ext   string
-	head  func(w io.Writer) error
-	frame func(w io.Writer, blk mkv.Block, data []byte) error
-	end   func(w io.Writer) error
+	ext    string
+	head   func(w io.Writer) error
+	frame  func(w io.Writer, blk mkv.Block, data []byte) error
+	end    func(w io.Writer) error
+	finish func(f io.WriteSeeker) error
 }
 
 // frameError is a frame its track's file cannot hold, as opposed to a write that failed.
@@ -54,11 +58,303 @@ func demuxFormatOf(t mkv.Track, raw bool) *demuxFormat {
 		f = oggVorbisFormat(t)
 	case "pgs":
 		f = supFormat()
+	case "av1":
+		f = obuFormat(t)
+	case "vp8", "vp9":
+		f = ivfFormat(t)
+	case "V_MPEG4/ISO/SP", "V_MPEG4/ISO/ASP", "V_MPEG4/ISO/AP":
+		f = headersFirstFormat("m4v", t.CodecPrivate)
+	case "A_ALAC":
+		f = cafALACFormat(t)
+	case "pcm", "A_PCM/INT/LIT", "A_PCM/INT/BIG", "A_PCM/FLOAT/IEEE":
+		f = wavFormat(t)
 	}
 	if f == nil {
 		return plain
 	}
 	return f
+}
+
+// --- AV1: low-overhead OBU stream -------------------------------------------------------------------------------
+
+// obuFormat writes the blocks as temporal units of a low-overhead bitstream, each opened by a temporal delimiter
+// (the stored block holds none), a keyframe that carries no sequence header taking the av1C's configOBUs: what a
+// decoder reads as .obu. Written bare, the stream decoded nothing.
+func obuFormat(t mkv.Track) *demuxFormat {
+	var config []byte
+	if len(t.CodecPrivate) > 4 {
+		config = t.CodecPrivate[4:]
+	}
+	return &demuxFormat{ext: "obu", frame: func(w io.Writer, blk mkv.Block, data []byte) error {
+		if obuType(data) == 2 { // the muxer kept the temporal delimiter
+			_, err := w.Write(data)
+			return err
+		}
+		if _, err := w.Write([]byte{0x12, 0x00}); err != nil {
+			return err
+		}
+		if blk.Keyframe && len(config) > 0 && !holdsOBU(data, 1) {
+			if _, err := w.Write(config); err != nil {
+				return err
+			}
+		}
+		_, err := w.Write(data)
+		return err
+	}}
+}
+
+// obuType is the type of the OBU p opens on, -1 when p is empty.
+func obuType(p []byte) int {
+	if len(p) == 0 {
+		return -1
+	}
+	return int(p[0]>>3) & 0xF
+}
+
+// holdsOBU reports whether an OBU of the type sits among p's OBUs; a stream forEachOBU cannot step through counts as
+// holding it, so nothing is inserted into what is not understood.
+func holdsOBU(p []byte, typ byte) bool {
+	found := false
+	err := forEachOBU(p, func(t byte, _, _ []byte) bool {
+		found = found || t == typ
+		return !found
+	})
+	return found || err != nil
+}
+
+// --- VP8, VP9: IVF ------------------------------------------------------------------------------------------------
+
+// ivfFormat writes the frames in IVF (DKIF header, each frame behind its size and its timestamp in milliseconds),
+// the frame count patched into the header once the stream ends.
+func ivfFormat(t mkv.Track) *demuxFormat {
+	fourcc := map[string]string{"vp8": "VP80", "vp9": "VP90"}[t.Codec]
+	var w, h uint16
+	if t.Width != nil {
+		w = uint16(*t.Width)
+	}
+	if t.Height != nil {
+		h = uint16(*t.Height)
+	}
+	var count uint32
+	return &demuxFormat{ext: "ivf",
+		head: func(out io.Writer) error {
+			hdr := append([]byte{'D', 'K', 'I', 'F', 0, 0, 32, 0}, fourcc...)
+			hdr = binary.LittleEndian.AppendUint16(hdr, w)
+			hdr = binary.LittleEndian.AppendUint16(hdr, h)
+			hdr = binary.LittleEndian.AppendUint32(hdr, 1000) // timebase denominator: milliseconds
+			hdr = binary.LittleEndian.AppendUint32(hdr, 1)
+			hdr = binary.LittleEndian.AppendUint32(hdr, 0) // the frame count, patched by finish
+			hdr = append(hdr, 0, 0, 0, 0)
+			_, err := out.Write(hdr)
+			return err
+		},
+		frame: func(out io.Writer, blk mkv.Block, data []byte) error {
+			var fh [12]byte
+			binary.LittleEndian.PutUint32(fh[:], uint32(len(data)))
+			binary.LittleEndian.PutUint64(fh[4:], uint64(max(blk.Timecode, 0)))
+			if _, err := out.Write(fh[:]); err != nil {
+				return err
+			}
+			count++
+			_, err := out.Write(data)
+			return err
+		},
+		finish: func(f io.WriteSeeker) error { return patchU32LE(f, 24, count) },
+	}
+}
+
+// patchU32LE writes v little-endian at off; a file that cannot seek (a pipe) keeps what was written.
+func patchU32LE(f io.WriteSeeker, off int64, v uint32) error {
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return nil
+	}
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], v)
+	_, err := f.Write(b[:])
+	return err
+}
+
+// --- MPEG-4 Part 2 --------------------------------------------------------------------------------------------------
+
+// headersFirstFormat writes the CodecPrivate (the VOS, VO and VOL headers of MPEG-4 Part 2) ahead of the frames as
+// stored: the decoder reads its configuration from the stream.
+func headersFirstFormat(ext string, headers []byte) *demuxFormat {
+	if len(headers) == 0 {
+		return nil
+	}
+	return &demuxFormat{ext: ext,
+		head:  func(w io.Writer) error { _, err := w.Write(headers); return err },
+		frame: func(w io.Writer, _ mkv.Block, data []byte) error { _, err := w.Write(data); return err },
+	}
+}
+
+// --- ALAC: CAF ------------------------------------------------------------------------------------------------------
+
+// cafALACFormat writes a CAF: the audio description from the 24-byte ALACSpecificConfig, the config as the magic
+// cookie (kuki), the frames in the data chunk, its size patched once the stream ends, and then the packet table
+// (pakt) every packet's size, which a variable-rate codec needs. No ALAC tool reads bare frames.
+func cafALACFormat(t mkv.Track) *demuxFormat {
+	cookie := t.CodecPrivate
+	if len(cookie) < 24 {
+		return nil
+	}
+	framesPerPacket := binary.BigEndian.Uint32(cookie[0:4])
+	bits, channels := uint32(cookie[5]), uint32(cookie[9])
+	rate := float64(binary.BigEndian.Uint32(cookie[20:24]))
+	if rate == 0 && t.SampleRate != nil {
+		rate = *t.SampleRate
+	}
+	var sizes []int64
+	var dataSizePos, total int64
+	return &demuxFormat{ext: "caf",
+		head: func(w io.Writer) error {
+			var b []byte
+			b = append(b, 'c', 'a', 'f', 'f', 0, 1, 0, 0)
+			b = cafChunk(b, "desc", 32)
+			b = binary.BigEndian.AppendUint64(b, math.Float64bits(rate))
+			b = append(b, 'a', 'l', 'a', 'c')
+			b = binary.BigEndian.AppendUint32(b, 0) // format flags
+			b = binary.BigEndian.AppendUint32(b, 0) // bytes per packet: variable
+			b = binary.BigEndian.AppendUint32(b, framesPerPacket)
+			b = binary.BigEndian.AppendUint32(b, channels)
+			b = binary.BigEndian.AppendUint32(b, bits)
+			b = cafChunk(b, "kuki", int64(len(cookie)))
+			b = append(b, cookie...)
+			dataSizePos = int64(len(b)) + 4
+			b = cafChunk(b, "data", -1)             // unknown until finish: valid as the last chunk if the file cannot seek
+			b = binary.BigEndian.AppendUint32(b, 0) // edit count
+			_, err := w.Write(b)
+			return err
+		},
+		frame: func(w io.Writer, _ mkv.Block, data []byte) error {
+			sizes = append(sizes, int64(len(data)))
+			total += int64(len(data))
+			_, err := w.Write(data)
+			return err
+		},
+		finish: func(f io.WriteSeeker) error {
+			if _, err := f.Seek(dataSizePos, io.SeekStart); err != nil {
+				return nil
+			}
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], uint64(4+total))
+			if _, err := f.Write(b[:]); err != nil {
+				return err
+			}
+			if _, err := f.Seek(0, io.SeekEnd); err != nil {
+				return err
+			}
+			var table []byte
+			for _, n := range sizes {
+				table = cafVarint(table, uint64(n))
+			}
+			var pakt []byte
+			pakt = cafChunk(pakt, "pakt", int64(24+len(table)))
+			pakt = binary.BigEndian.AppendUint64(pakt, uint64(len(sizes)))
+			pakt = binary.BigEndian.AppendUint64(pakt, uint64(len(sizes))*uint64(framesPerPacket))
+			pakt = binary.BigEndian.AppendUint32(pakt, 0) // priming frames
+			pakt = binary.BigEndian.AppendUint32(pakt, 0) // remainder frames
+			pakt = append(pakt, table...)
+			_, err := f.Write(pakt)
+			return err
+		},
+	}
+}
+
+// cafChunk appends a chunk header: its type and its size (-1 when unknown).
+func cafChunk(b []byte, typ string, size int64) []byte {
+	b = append(b, typ...)
+	return binary.BigEndian.AppendUint64(b, uint64(size))
+}
+
+// cafVarint appends v as CAF's packet table integer: 7 bits a byte, high bit set on every byte but the last.
+func cafVarint(b []byte, v uint64) []byte {
+	var tmp [10]byte
+	i := len(tmp)
+	for {
+		i--
+		tmp[i] = byte(v & 0x7F)
+		v >>= 7
+		if v == 0 {
+			break
+		}
+	}
+	for j := i; j < len(tmp)-1; j++ {
+		tmp[j] |= 0x80
+	}
+	return append(b, tmp[i:]...)
+}
+
+// --- PCM: WAV --------------------------------------------------------------------------------------------------------
+
+// wavFormat writes PCM as a WAV, the sizes patched once the stream ends: integers as PCM, floats as IEEE float,
+// integers above 16 bits or any layout above two channels in the extensible form; big-endian samples go out little-endian, the one order WAV
+// has. A track missing its rate, channels or bit depth keeps its payloads bare.
+func wavFormat(t mkv.Track) *demuxFormat {
+	if t.SampleRate == nil || t.Channels == nil || t.BitDepth == nil || *t.BitDepth == 0 || *t.BitDepth%8 != 0 {
+		return nil
+	}
+	rate, channels, bits := uint32(*t.SampleRate), uint16(*t.Channels), uint16(*t.BitDepth)
+	float := t.Codec == "A_PCM/FLOAT/IEEE"
+	big := t.Codec == "A_PCM/INT/BIG"
+	width := int(bits / 8)
+	var dataSizePos, total int64
+	return &demuxFormat{ext: "wav",
+		head: func(w io.Writer) error {
+			tag := uint16(1)
+			if float {
+				tag = 3
+			}
+			extensible := channels > 2 || (!float && bits > 16)
+			var fmtChunk []byte
+			if extensible {
+				fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, 0xFFFE)
+			} else {
+				fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, tag)
+			}
+			fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, channels)
+			fmtChunk = binary.LittleEndian.AppendUint32(fmtChunk, rate)
+			fmtChunk = binary.LittleEndian.AppendUint32(fmtChunk, rate*uint32(channels)*uint32(width))
+			fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, channels*uint16(width))
+			fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, bits)
+			if extensible {
+				fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, 22)
+				fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, bits) // valid bits
+				fmtChunk = binary.LittleEndian.AppendUint32(fmtChunk, 0)    // channel mask: unspecified
+				fmtChunk = binary.LittleEndian.AppendUint16(fmtChunk, tag)
+				fmtChunk = append(fmtChunk, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71)
+			}
+			var b []byte
+			b = append(b, 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ')
+			b = binary.LittleEndian.AppendUint32(b, uint32(len(fmtChunk)))
+			b = append(b, fmtChunk...)
+			b = append(b, 'd', 'a', 't', 'a')
+			dataSizePos = int64(len(b))
+			b = append(b, 0, 0, 0, 0)
+			_, err := w.Write(b)
+			return err
+		},
+		frame: func(w io.Writer, _ mkv.Block, data []byte) error {
+			if big && width > 1 {
+				swapped := make([]byte, len(data))
+				for i := 0; i+width <= len(data); i += width {
+					for j := 0; j < width; j++ {
+						swapped[i+j] = data[i+width-1-j]
+					}
+				}
+				data = swapped
+			}
+			total += int64(len(data))
+			_, err := w.Write(data)
+			return err
+		},
+		finish: func(f io.WriteSeeker) error {
+			if err := patchU32LE(f, 4, uint32(min(dataSizePos-4+total, 0xFFFFFFFF))); err != nil {
+				return err
+			}
+			return patchU32LE(f, dataSizePos, uint32(min(total, 0xFFFFFFFF)))
+		},
+	}
 }
 
 // --- AAC: ADTS -------------------------------------------------------------------------------------------------

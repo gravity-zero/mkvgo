@@ -608,7 +608,10 @@ func appendAnnexB(dst, data []byte, lenSize int) ([]byte, error) {
 			n = n<<8 | int(data[pos+i])
 		}
 		pos += lenSize
-		if n <= 0 || n > len(data)-pos {
+		if n == 0 { // padding some muxers leave: skipped, as the mainstream bitstream filter skips it
+			continue
+		}
+		if n < 0 || n > len(data)-pos {
 			return dst, fmt.Errorf("NAL size %d out of bounds at %d", n, pos)
 		}
 		dst = append(dst, 0, 0, 0, 1)
