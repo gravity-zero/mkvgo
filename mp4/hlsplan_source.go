@@ -161,14 +161,10 @@ func (p *HLSPlan) stampSource() {
 	}
 }
 
-// statStamp is what a plan holds its source to: its size and modification time, and where the system reports
-// one its inode change time (ctime), so a file rewritten in place at the same size with its mtime put back (cp -p
-// of a same-size file) is a changed source too; a chmod or a rename moves it as well, a rebuild the price. Without
-// a ctime (a remote source, Windows, WASM) the size and the mtime stand alone.
+// statStamp is what a plan holds its source to: its size and modification time (the file identity is checked
+// beside it). The inode change time was part of it in 0.66.0 and made a chmod, a chown or a hard link of the file
+// a changed source: every later segment of a running serve failed until the process was restarted.
 func statStamp(fi os.FileInfo) string {
-	if ct, ok := changeTime(fi); ok {
-		return fmt.Sprintf("%x-%x-%x", fi.Size(), fi.ModTime().UnixNano(), ct)
-	}
 	return fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
 }
 

@@ -653,12 +653,9 @@ mismatch ends the call with an error that
 `mkv.ErrSourceChanged`) matches:
 
 - A local file is verified on the open file itself at every read (`fstat`:
-  size, mtime, the inode change time where the system reports one (Linux,
-  macOS) and the OS file identity, so a file renamed over the source with the
-  same size and mtime counts as changed, and so does one rewritten in place at
-  the same size with its mtime put back, `cp -p` of a same-size file; a chmod
-  or a rename of the source counts as changed too, a rebuild the price): no
-  byte of another file is ever copied. Its path is also stat'ed before a request, at most once a
+  size, mtime and the OS file identity, so a file renamed over the source
+  with the same size and mtime counts as changed; a chmod, a chown or a hard
+  link of the source does not): no byte of another file is ever copied. Its path is also stat'ed before a request, at most once a
   second per plan, so a change is usually refused before the status line
   goes out; within that second it is caught by the read's `fstat`, and a
   streamed segment then ends as a cut connection. On a network mount the
