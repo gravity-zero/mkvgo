@@ -95,6 +95,41 @@ func parseEntry(tr *inTrack, typ string, payload []byte) (bool, string, error) {
 	case "fLaC":
 		tr.codec = "flac"
 		err = extractFLAC(tr, payload, audioHdr)
+	case "alac":
+		// A_ALAC carries the 24-byte ALACSpecificConfig alone; the alac child holds it behind its version and flags.
+		parseAudioFields(tr, payload)
+		cfg, cerr := childConfig(payload, audioHdr, "alac")
+		if cerr != nil || len(cfg) < 28 {
+			err = errf("alac entry without its ALACSpecificConfig")
+			break
+		}
+		tr.codec, tr.codecPrivate = "A_ALAC", append([]byte(nil), cfg[4:28]...)
+	case "mlpa":
+		// TrueHD: A_TRUEHD, every frame self-describing, no private data.
+		parseAudioFields(tr, payload)
+		tr.codec = "A_TRUEHD"
+	case "mp4v":
+		// MPEG-4 Visual: the esds DecoderSpecificInfo (the VOL headers) is the CodecPrivate, as the mainstream muxer
+		// writes V_MPEG4/ISO/ASP; any other object type behind an mp4v entry (JPEG, say) has no Matroska form.
+		describeEntry(tr, payload)
+		esds, cerr := childConfig(payload, visualHdr, "esds")
+		if cerr != nil {
+			err = cerr
+			break
+		}
+		objType, dsi, avgBitrate, perr := parseESDS(esds)
+		if perr != nil {
+			err = perr
+			break
+		}
+		if objType != 0x20 {
+			err = errf("mp4v entry of object type 0x%02X, not MPEG-4 Visual", objType)
+			break
+		}
+		if tr.bitrate == 0 {
+			tr.bitrate = avgBitrate
+		}
+		tr.codec, tr.codecPrivate = "V_MPEG4/ISO/ASP", append([]byte(nil), dsi...)
 	case "tx3g":
 		tr.codec = "srt" // tx3g timed text → S_TEXT/UTF8
 	case "wvtt":
