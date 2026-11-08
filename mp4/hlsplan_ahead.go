@@ -59,12 +59,40 @@ func (p *HLSPlan) hintWindow(src io.Reader, n int, start int64) {
 	if n+1 < len(p.offsets) {
 		end = p.offsets[n+1] + windowPeekBytes
 	}
-	if f, ok := src.(*os.File); ok && end != math.MaxInt64 && !p.onNetwork(f) { // the walk reads through the window: have it all coming in at once
+	p.hintRange(src, start, end)
+}
+
+// hintRange tells the source a walk is about to read [start, end): a local file has the kernel start reading it
+// all now, in the disk's own request sizes (adviseWillNeed), a remote one fetches it with one request.
+func (p *HLSPlan) hintRange(src io.Reader, start, end int64) {
+	if end <= start {
+		return
+	}
+	if f, ok := src.(*os.File); ok && end != math.MaxInt64 && !p.onNetwork(f) { // the walk reads through the range: have it all coming in at once
 		adviseWillNeed(f, start, end-start)
 	}
 	if h, ok := src.(mkv.RangeHinter); ok {
 		h.HintRange(start, end)
 	}
+}
+
+// clusterEndOff is where a walk stopping before the cluster stamped ms stops reading: the cued cluster opening the
+// first window at or past ms, plus the look into it, else the Segment's end.
+func (p *HLSPlan) clusterEndOff(ms int64) int64 {
+	end := p.segEnd
+	if end <= 0 && p.srcInfo != nil { // a Segment of unknown size ends with the file
+		end = p.srcInfo.Size()
+	}
+	if ms == math.MaxInt64 {
+		return end
+	}
+	if k := sort.Search(len(p.bounds), func(k int) bool { return p.bounds[k] >= ms }); k < len(p.offsets) {
+		if end <= 0 {
+			return p.offsets[k] + windowPeekBytes
+		}
+		return min(p.offsets[k]+windowPeekBytes, end)
+	}
+	return end
 }
 
 // windowPeekBytes is how far past the next window's cluster a walk is

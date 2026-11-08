@@ -261,12 +261,18 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	br.SetTrackDefaultDurations(p.trackDurs)
 	br.KeepTracks(track.track.ID)
 	var local []subtitle.Cue
+	from := past
 	for {
 		stopAt := cur.scanned + subScanStrideMs
 		if stopAt < cur.scanned {
 			stopAt = math.MaxInt64
 		}
 		br.StopBeforeClusterMs(stopAt)
+		// The stride reads the clusters up to stopAt through, the other tracks' blocks included: asked for whole
+		// and ahead, as a window's walk is, instead of header by header in small disk reads that then split the
+		// windows' own read-ahead (a 2 GB MKV: 10,966 disk reads of 184 KiB for its first full read, 2,823 once
+		// the cursors were done).
+		p.hintRange(src, from, p.clusterEndOff(stopAt))
 		for {
 			b, err := br.Next()
 			if errors.Is(err, reader.ErrClusterLimit) {
@@ -274,6 +280,7 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 				local = local[:0]
 				cur.next = br.ResumeOffset()
 				cur.scanned = stopAt
+				from = cur.next
 				break
 			}
 			// Clean end (incl. a truncated/over-declared tail); all cues to this
@@ -361,10 +368,17 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 		if stopAt < cur.scanned {
 			stopAt = math.MaxInt64
 		}
+		if target > cur.scanned && target < stopAt {
+			stopAt = target // seeking to each block amortises no walk: read no further ahead than this request needs
+		}
 		from := start
 		if cur.next != 0 {
 			from = cur.next
 		}
+		// The blocks sit in the clusters up to stopAt, read a few KiB at a time from scattered positions ahead of the
+		// media: asked for whole first, they come in the disk's own request sizes and the pages left behind no
+		// longer split the windows' read-ahead.
+		p.hintRange(src, from, p.clusterEndOff(stopAt))
 		j := sort.Search(len(entries), func(k int) bool { return entries[k].Pos.ClusterStart >= from })
 		var local []subtitle.Cue
 		for ; j < len(entries); j++ {

@@ -100,6 +100,17 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   larger of the disk's `read_ahead_kb` and `max_sectors_kb`, the most the kernel
   reads per call: at the default 128 KiB read-ahead, 7,062 reads of 126 KiB for
   that full read became 863.
+- HLS from a local Matroska (`serve`, `Open`): the scan a subtitle rendition
+  makes of the clusters ahead of its window asks the disk for its range
+  first, as a window's walk does, and from the Cues (or a subtitle index)
+  reads no further ahead than the request needs; it read the blocks a few
+  KiB at a time from scattered positions, and the pages it left split the
+  next windows' read-ahead (a 2 GB MKV with three subtitle tracks, full read
+  of every rendition on a fresh plan, HDD: 10,948 disk reads of 184 KiB at
+  119 MB/s became 2,900 of 690 KiB at 176 MB/s, a sequential read of the file
+  taking 2,300 of 875 KiB at 267; through a FUSE mount 17,400 of 115 KiB at
+  107 MB/s became 8,700 of 230 KiB at 141 MB/s; random access unchanged on
+  both).
 - HLS segments read from a local file: the read-ahead covers the whole window
   across renditions, not the requested segment's own span. A player fetches a
   window's audio and video together; asked from its own first sample, the first
