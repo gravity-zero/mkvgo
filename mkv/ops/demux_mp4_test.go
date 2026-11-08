@@ -81,3 +81,36 @@ func TestDemuxMP4NamesTracksByTheFileIDs(t *testing.T) {
 		t.Errorf("track 1 asked for: err = %v, want it refused by name", err)
 	}
 }
+
+// TestDemuxMP4RefusesAnUncarriableTrackUnlessSkipped: a track the remux cannot carry refuses the demux by name,
+// as from-mp4 does, so a caller reading the error alone sees it; SkipUnsupported drops it instead, reported
+// through OnDrop, and TrackIDs naming the other tracks leaves it out of the question. Named by TrackIDs, it fails
+// whatever SkipUnsupported says.
+func TestDemuxMP4RefusesAnUncarriableTrackUnlessSkipped(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	out := func(n string) string { return filepath.Join(dir, n) }
+	var drops []uint64
+	onDrop := func(id uint64, _, _ string) { drops = append(drops, id) }
+	err := Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("a"), OnDrop: onDrop})
+	if err == nil || !strings.Contains(err.Error(), "track 1 (ulaw)") || !strings.Contains(err.Error(), "set DemuxOptions.SkipUnsupported to drop it") {
+		t.Fatalf("demux with an uncarriable track: err = %v, want it named with the option that drops it", err)
+	}
+	if _, err := os.Stat(out("a")); !os.IsNotExist(err) {
+		t.Error("the refused demux left its output directory")
+	}
+	drops = nil
+	mustNil(t, Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("b"), SkipUnsupported: true, OnDrop: onDrop}))
+	if names := dirNames(t, out("b")); len(drops) != 1 || drops[0] != 1 || len(names) != 1 || names[0] != "2.aac" {
+		t.Errorf("skipping unsupported: dropped %v, files %v, want track 1 dropped and 2.aac alone", drops, names)
+	}
+	drops = nil
+	mustNil(t, Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("c"), TrackIDs: []uint64{2}, OnDrop: onDrop}))
+	if names := dirNames(t, out("c")); len(drops) != 0 || len(names) != 1 || names[0] != "2.aac" {
+		t.Errorf("track 2 asked for: dropped %v, files %v, want nothing dropped and 2.aac alone", drops, names)
+	}
+	err = Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out("d"), TrackIDs: []uint64{1}, SkipUnsupported: true})
+	if err == nil || !strings.Contains(err.Error(), "track 1 (ulaw)") || strings.Contains(err.Error(), "SkipUnsupported") {
+		t.Errorf("track 1 asked for: err = %v, want it refused by name, no option to suggest", err)
+	}
+}

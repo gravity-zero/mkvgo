@@ -94,7 +94,7 @@ var CmdUsage = map[string]string{
 	"hash":               "mkvgo hash <file.mkv> [-o <out.mkv>] (stores per-track CONTENT_SHA256 tags; in-place without -o)",
 	"verify":             "mkvgo verify [-json] <file.mkv|.mp4> (recompute content hashes, exit 1 on mismatch)",
 	"compare":            "mkvgo compare [-json] [-blocks] <a.mkv|.mp4> <b.mkv|.mp4> [part2.mkv ...] (-blocks: per-track content hashes, MKV/WebM only; several files on the right = compare against their concatenation)",
-	"demux":              "mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,... (default: all tracks)] [--raw]",
+	"demux":              "mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,... (default: all tracks)] [--raw] [--skip-unsupported]",
 	"mux":                "mkvgo mux -o <out.mkv|.mp4> <file:trackID> [<file:trackID> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge":              "mkvgo merge -o <out.mkv|.mp4> <file1> [<file2> ...] (all MKV/WebM or all MP4/MOV)",
 	"merge-subtitle":     "mkvgo merge-subtitle <file.mkv|.mp4> -o <out> <subtitle> [-format srt|ass (default: from extension; MP4: srt only)] [-lang code (default: und)] [-name text]",
@@ -205,10 +205,10 @@ func FatalErr(err error) {
 	Fatal(msg)
 }
 
-// FlagWords is err as a command that takes --skip-unsupported tells it: the library's hint names the Options field,
-// the command line the flag. errors.Is and As still reach err.
+// FlagWords is err as a command that takes --skip-unsupported tells it: the library's hint names the Options (or
+// DemuxOptions) field, the command line the flag. errors.Is and As still reach err.
 func FlagWords(err error) error {
-	if err == nil || !strings.Contains(err.Error(), "set Options.SkipUnsupported") {
+	if err == nil || !strings.Contains(err.Error(), "Options.SkipUnsupported") {
 		return err
 	}
 	return flagWords{err}
@@ -217,7 +217,8 @@ func FlagWords(err error) error {
 type flagWords struct{ error }
 
 func (f flagWords) Error() string {
-	return strings.ReplaceAll(f.error.Error(), "set Options.SkipUnsupported", "pass --skip-unsupported")
+	msg := strings.ReplaceAll(f.error.Error(), "set DemuxOptions.SkipUnsupported", "pass --skip-unsupported")
+	return strings.ReplaceAll(msg, "set Options.SkipUnsupported", "pass --skip-unsupported")
 }
 
 func (f flagWords) Unwrap() error { return f.error }

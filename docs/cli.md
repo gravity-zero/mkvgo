@@ -354,14 +354,17 @@ mkvgo compare -blocks film.mkv part1.mkv part2.mkv part3.mkv
 Extract tracks, each as the file its codec's tools read, from a Matroska/WebM or an MP4/MOV (an MP4's tracks and blocks are those `from-mp4` would write: the same streams come out of either container, byte for byte what `ffmpeg -c copy` extracts).
 
 ```
-mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,...] [--raw]
+mkvgo demux <file.mkv|.mp4> -o <dir> [-t trackID,...] [--raw] [--skip-unsupported]
 ```
 
 | Flag | Description |
 |---|---|
 | `-o` | Output directory (required) |
-| `-t` | Comma-separated track IDs to extract (default: all) |
+| `-t` | Comma-separated track IDs to extract (default: all), the IDs `tracks` lists |
 | `--raw` | Write each track's payloads as the file stores them, one after the other |
+| `--skip-unsupported` | MP4: drop an audio or video track the remux to Matroska cannot carry instead of failing by its name |
+
+An MP4 follows the remux's rule for a track it cannot carry (an encrypted track, a sample entry Matroska has no form for): the demux fails by the track's name, exit `1`, unless `--skip-unsupported` drops it (printed as `dropped track N (codec): reason` on stderr, exit `0`) or `-t` names other tracks; a subtitle it cannot carry is dropped with its reason either way, and named by `-t` the track fails whatever the flag says. The IDs, in `-t` as in the file names, are the MP4's own (the ones `tracks` lists), not the carried tracks' positions.
 
 ```bash
 mkvgo demux video.mkv -o ./streams/

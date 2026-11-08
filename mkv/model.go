@@ -847,8 +847,12 @@ type DemuxOptions struct {
 	// with its STREAMINFO (.flac), ALAC in CAF (.caf), PCM in WAV (.wav), PGS as a .sup; another codec, or a track
 	// lacking what its format needs, is raw.
 	Raw bool
-	// OnDrop reports an MP4 track the demux leaves out, with its reason: one its remux to Matroska cannot carry (an
-	// encrypted track, a sample entry Matroska has no form for). Asked for by ID, such a track fails the demux instead.
+	// SkipUnsupported drops an MP4 audio or video track its remux to Matroska cannot carry (an encrypted track, a
+	// sample entry Matroska has no form for) instead of refusing the demux by its name, the rule of from-mp4; a
+	// subtitle track it cannot carry is dropped either way. TrackIDs naming other tracks leaves such a track out
+	// of the question; naming it fails the demux whatever this says.
+	SkipUnsupported bool
+	// OnDrop reports an MP4 track the demux leaves out, with its reason, when TrackIDs is empty.
 	OnDrop func(id uint64, codec, reason string)
 }
 

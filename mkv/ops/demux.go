@@ -83,23 +83,22 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 	return d.finish()
 }
 
-// demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats. A track
-// the remux cannot carry is left out and reported through DemuxOptions.OnDrop, as from-mp4 drops it; asked for
-// by ID, it fails the demux by name. The IDs, in TrackIDs as in the file names, are the MP4's own, the ones tracks
-// lists.
+// demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats, under the
+// remux's own rule for a track it cannot carry: refused by name, or dropped under DemuxOptions.SkipUnsupported and
+// reported through OnDrop. TrackIDs naming other tracks leaves such a track out of the question; naming it fails
+// the demux by name. The IDs, in TrackIDs as in the file names, are the MP4's own, the ones tracks lists.
 func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mkv.Options) (err error) {
 	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra), dropped: map[uint64]mp4.DroppedTrack{}}
 	defer d.settle(&err)
-	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra), SkipUnsupported: true, OnDrop: func(t mp4.DroppedTrack) {
-		d.dropped[t.ID] = t
-	}}
+	o := mp4.Options{FS: fs, Progress: mkv.ProgressFrom(extra), SkipUnsupported: opts.SkipUnsupported || len(opts.TrackIDs) > 0,
+		OnDrop: func(t mp4.DroppedTrack) { d.dropped[t.ID] = t }}
 	start := func(c *mkv.Container) error {
 		for _, id := range opts.TrackIDs {
 			if t, ok := d.dropped[id]; ok {
 				return fmt.Errorf("track %d (%s) cannot be demuxed: %s", t.ID, t.Codec, t.Reason)
 			}
 		}
-		if opts.OnDrop != nil {
+		if opts.OnDrop != nil && len(opts.TrackIDs) == 0 {
 			for _, id := range sortedDropped(d.dropped) {
 				t := d.dropped[id]
 				opts.OnDrop(t.ID, t.Codec, t.Reason)
@@ -108,10 +107,27 @@ func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mk
 		return d.open(c)
 	}
 	if err := mp4.WalkBlocks(ctx, opts.SourcePath, start, d.frame, o); err != nil {
-		return err
+		return demuxOptionWords(err)
 	}
 	return d.finish()
 }
+
+// demuxOptionWords is a remux refusal as the demux's caller reads it: the option that drops the track is
+// DemuxOptions.SkipUnsupported here. errors.Is and As still reach err.
+func demuxOptionWords(err error) error {
+	if !strings.Contains(err.Error(), "set Options.SkipUnsupported") {
+		return err
+	}
+	return optionWords{err}
+}
+
+type optionWords struct{ error }
+
+func (o optionWords) Error() string {
+	return strings.ReplaceAll(o.error.Error(), "set Options.SkipUnsupported", "set DemuxOptions.SkipUnsupported")
+}
+
+func (o optionWords) Unwrap() error { return o.error }
 
 // demuxID is the identifier a demux names t by, in TrackIDs as in the file name: the one the source file gives the
 // track (a Matroska TrackNumber, an MP4 track_ID), which a track the MP4 remux drops does not shift.

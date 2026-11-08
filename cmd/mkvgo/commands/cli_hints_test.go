@@ -21,6 +21,9 @@ func TestFlagWordsNameTheFlag(t *testing.T) {
 	if !strings.Contains(commands.FlagWords(fmt.Errorf("re-encode it, or set Options.SkipUnsupported to drop the track")).Error(), "or pass --skip-unsupported to drop the track") {
 		t.Error("the second wording is not translated")
 	}
+	if msg := commands.FlagWords(fmt.Errorf("track 1 (ulaw): no form (set DemuxOptions.SkipUnsupported to drop it)")).Error(); strings.Contains(msg, "Options.") || !strings.Contains(msg, "(pass --skip-unsupported to drop it)") {
+		t.Errorf("the demux wording is not translated: %q", msg)
+	}
 	if !errors.Is(err, os.ErrInvalid) {
 		t.Error("the wrapped error is lost")
 	}
