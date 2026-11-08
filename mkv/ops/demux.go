@@ -85,7 +85,8 @@ func Demux(ctx context.Context, opts mkv.DemuxOptions, extra ...mkv.Options) (er
 
 // demuxMP4 is Demux on an MP4: the tracks and blocks RemuxFromMP4 would write, through the same formats. A track
 // the remux cannot carry is left out and reported through DemuxOptions.OnDrop, as from-mp4 drops it; asked for
-// by ID, it fails the demux by name.
+// by ID, it fails the demux by name. The IDs, in TrackIDs as in the file names, are the MP4's own, the ones tracks
+// lists.
 func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mkv.Options) (err error) {
 	d := &demuxer{opts: opts, fs: fs, sync: mkv.SyncOutputFrom(extra), dropped: map[uint64]mp4.DroppedTrack{}}
 	defer d.settle(&err)
@@ -110,6 +111,15 @@ func demuxMP4(ctx context.Context, opts mkv.DemuxOptions, fs *mkv.FS, extra []mk
 		return err
 	}
 	return d.finish()
+}
+
+// demuxID is the identifier a demux names t by, in TrackIDs as in the file name: the one the source file gives the
+// track (a Matroska TrackNumber, an MP4 track_ID), which a track the MP4 remux drops does not shift.
+func demuxID(t mkv.Track) uint64 {
+	if t.FileTrackID != 0 {
+		return t.FileTrackID
+	}
+	return t.ID
 }
 
 // sortedDropped is the dropped tracks' IDs in order.
@@ -176,15 +186,15 @@ func (d *demuxer) frame(blk mkv.Block) error {
 	w := d.writers[blk.TrackNumber]
 	data, err := track.DecodePayload(blk.Data)
 	if err != nil {
-		return fmt.Errorf("track %d: %w", blk.TrackNumber, err)
+		return fmt.Errorf("track %d: %w", demuxID(track), err)
 	}
 	if err := d.formats[blk.TrackNumber].frame(w, blk, data); err != nil {
 		var fe *frameError
 		if errors.As(err, &fe) {
 			return fmt.Errorf("track %d, block at %.3f s: %w; demux with --raw (DemuxOptions.Raw) to keep the stored payloads",
-				blk.TrackNumber, float64(blk.Timecode)/1000, err)
+				demuxID(track), float64(blk.Timecode)/1000, err)
 		}
-		return fmt.Errorf("write track %d: %w", blk.TrackNumber, err)
+		return fmt.Errorf("write track %d: %w", demuxID(track), err)
 	}
 	return nil
 }
@@ -232,11 +242,11 @@ func buildTrackSet(c *mkv.Container, trackIDs []uint64) map[uint64]mkv.Track {
 	}
 	idx := make(map[uint64]mkv.Track, len(c.Tracks))
 	for _, t := range c.Tracks {
-		idx[t.ID] = t
+		idx[demuxID(t)] = t
 	}
 	for _, id := range trackIDs {
 		if t, ok := idx[id]; ok {
-			m[id] = t
+			m[t.ID] = t // keyed by the block's TrackNumber
 		}
 	}
 	return m
@@ -253,7 +263,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, formats map[uint64]*demuxForma
 	outputs := make([]*output, 0, len(tracks))
 	if noOverwrite {
 		for _, id := range sortedTracks(tracks) {
-			path, err := safePath(dir, fmt.Sprintf("%d.%s", id, formats[id].ext))
+			path, err := safePath(dir, fmt.Sprintf("%d.%s", demuxID(tracks[id]), formats[id].ext))
 			if err != nil {
 				return nil, nil, err
 			}
@@ -269,7 +279,7 @@ func openOutputFiles(tracks map[uint64]mkv.Track, formats map[uint64]*demuxForma
 		return nil, nil, err
 	}
 	for _, id := range sortedTracks(tracks) {
-		name := fmt.Sprintf("%d.%s", id, formats[id].ext)
+		name := fmt.Sprintf("%d.%s", demuxID(tracks[id]), formats[id].ext)
 		path, err := safePath(dir, name)
 		if err != nil {
 			return abandon(err)

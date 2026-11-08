@@ -31,8 +31,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   AC-4 still has no Matroska form.
 - `demux` and `matroska.Demux` take an MP4/MOV: its tracks and blocks are those
   `from-mp4` would write, through the same formats (ADTS, Annex-B, Ogg), byte
-  for byte what `ffmpeg -c copy` extracts; `mp4.WalkBlocks` hands a reader the
-  remux's tracks before its blocks.
+  for byte what `ffmpeg -c copy` extracts; the tracks are named and selected
+  (`-t`) by the MP4's own track IDs, the ones `tracks` lists; `mp4.WalkBlocks`
+  hands a reader the remux's tracks before its blocks.
 - `keyframes -walk` / `matroska.WithKeyframeWalk`: every keyframe from a pass
   over the Segment, for Cues that index only some of them. Listed from the
   Cues, the text form now says so on stderr.

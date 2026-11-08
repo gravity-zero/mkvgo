@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -60,5 +61,23 @@ func TestDemuxMP4SelectsTracks(t *testing.T) {
 	}
 	if err := Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4Fixture, OutputDir: out + "2", TrackIDs: []uint64{9}}); err == nil {
 		t.Error("an unknown track ID was accepted")
+	}
+}
+
+const demuxMP4DroppedFixture = "../../internal/testdata/aac_ulaw.mov" // track 1 mu-law (no Matroska form), track 2 AAC
+
+// TestDemuxMP4NamesTracksByTheFileIDs: the IDs an MP4 demux takes in TrackIDs and puts in the file names are the
+// MP4's own (the ones tracks lists), not the carried tracks' positions, which a track the remux drops shifts: here
+// the AAC is track 2 of the file and track 1 of the remux.
+func TestDemuxMP4NamesTracksByTheFileIDs(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "out")
+	mustNil(t, Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out, TrackIDs: []uint64{2}}))
+	if names := dirNames(t, out); len(names) != 1 || names[0] != "2.aac" {
+		t.Errorf("files %v, want 2.aac alone", names)
+	}
+	err := Demux(ctx, mkv.DemuxOptions{SourcePath: demuxMP4DroppedFixture, OutputDir: out + "2", TrackIDs: []uint64{1}})
+	if err == nil || !strings.Contains(err.Error(), "track 1 (ulaw)") {
+		t.Errorf("track 1 asked for: err = %v, want it refused by name", err)
 	}
 }
