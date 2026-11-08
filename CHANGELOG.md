@@ -27,6 +27,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Changed
 
+- A plan's source stamp (`ErrSourceChanged`) takes in the inode change time
+  where the system reports one (Linux, macOS), with the size and the mtime: a
+  source rewritten in place at the same size with its mtime put back (`cp -p`
+  of a same-size file) is now a changed source, which no configuration caught
+  (measured: on a union mount keeping the page cache, the segments read before
+  the rewrite were the old file's). A chmod or a rename of the source counts
+  as changed too; the plan is rebuilt. Windows, WASM and remote sources keep
+  the size and mtime stamp.
 - The `dropped track N (codec): reason` lines of `to-mp4`, `from-mp4`,
   `to-hls` (and `to-abr`, `concat-hls`), `split`, `join`, `mux`, `merge` and
   `merge-subtitle` go to stderr, no longer stdout, like those of `serve`,
