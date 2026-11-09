@@ -202,7 +202,7 @@ func FatalErr(err error) {
 		dieOfInterrupt()
 		return
 	}
-	msg := err.Error()
+	msg := flagPhrases.Replace(err.Error()) // every command exits here: the library's option names read as its flags
 	if errors.Is(err, matroska.ErrDamagedRegion) {
 		msg += "\nrepair it with `mkvgo reindex --resync`"
 	}
@@ -227,6 +227,8 @@ var flagPhrases = strings.NewReplacer(
 	"which DemuxOptions.Strict refuses", "which --strict refuses",
 	"which Options.Strict refuses", "which --strict refuses",
 	"set Options.FlattenStyledSubs", "pass --flatten-subs",
+	"plan with Options.SynthesizeIndex", "pass --synthesize-index",
+	"Options.NoIFrames is set", "--no-iframes is set",
 )
 
 func (f flagWords) Error() string { return flagPhrases.Replace(f.error.Error()) }
