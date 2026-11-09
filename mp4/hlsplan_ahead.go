@@ -80,7 +80,7 @@ func (p *HLSPlan) hintRange(src io.Reader, start, end int64) {
 // first window at or past ms, plus the look into it, else the Segment's end.
 func (p *HLSPlan) clusterEndOff(ms int64) int64 {
 	end := p.segEnd
-	if end <= 0 && p.srcInfo != nil { // a Segment of unknown size ends with the file
+	if p.srcInfo != nil && (end <= 0 || end > p.srcInfo.Size()) { // a Segment of unknown size ends with the file, and none runs past it
 		end = p.srcInfo.Size()
 	}
 	if ms == math.MaxInt64 {
