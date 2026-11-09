@@ -1123,7 +1123,10 @@ func WriteVoid(w io.Writer, totalSize int) error {
 	if _, err := w.Write(hdr); err != nil {
 		return err
 	}
-	_, err = w.Write(make([]byte, totalSize-len(hdr)))
+	zeros := make([]byte, min(totalSize-len(hdr), 64<<10))
+	for left := totalSize - len(hdr); left > 0 && err == nil; left -= len(zeros) {
+		_, err = w.Write(zeros[:min(left, len(zeros))])
+	}
 	return err
 }
 

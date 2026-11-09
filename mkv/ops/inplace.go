@@ -765,11 +765,19 @@ func scanTail(f mkv.ReadSeekCloser, pos, segEnd int64, region *metadataRegion) e
 				region.tailUnknown = true // more than one: not one element to keep or rewrite
 				return nil
 			}
-			region.tail[eh.ID] = tailElement{pos: pos, size: int64(hdrLen) + eh.Size}
+			region.tail[eh.ID] = tailElement{pos: pos, size: heldSize(f, pos, int64(hdrLen)+eh.Size)}
 		}
 		pos += int64(hdrLen) + eh.Size
 	}
 	return nil
+}
+
+// heldSize is how much of an element declaring size bytes at pos the file holds: a file cut short ends it early.
+func heldSize(f io.Seeker, pos, size int64) int64 {
+	if end, err := f.Seek(0, io.SeekEnd); err == nil && pos+size > end {
+		return end - pos
+	}
+	return size
 }
 
 // classifyTailEntries re-reads the old SeekHead and sorts its entries: those
@@ -798,7 +806,7 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 				region.tailUnknown = true
 				continue
 			}
-			region.tail[e.ID] = tailElement{pos: abs, size: int64(hdrLen) + th.Size, entry: e}
+			region.tail[e.ID] = tailElement{pos: abs, size: heldSize(f, abs, int64(hdrLen)+th.Size), entry: e}
 			continue
 		}
 		if (e.ID == mkv.IDInfo || e.ID == mkv.IDTracks) && region.inHead[e.ID] {
