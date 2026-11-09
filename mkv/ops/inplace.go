@@ -794,7 +794,8 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 		if abs >= region.start && abs < region.end {
 			continue // head element: rewritten, gets a fresh entry
 		}
-		if isTailID(e.ID) {
+		movedOut := (e.ID == mkv.IDInfo || e.ID == mkv.IDTracks) && !region.inHead[e.ID] // an earlier edit moved it to the Segment's end
+		if isTailID(e.ID) || movedOut {
 			if _, err := f.Seek(abs, io.SeekStart); err != nil {
 				return err
 			}
@@ -809,7 +810,7 @@ func classifyTailEntries(f mkv.ReadSeekCloser, path string, fs *mkv.FS, region *
 			region.tail[e.ID] = tailElement{pos: abs, size: heldSize(f, abs, int64(hdrLen)+th.Size), entry: e}
 			continue
 		}
-		if (e.ID == mkv.IDInfo || e.ID == mkv.IDTracks) && region.inHead[e.ID] {
+		if e.ID == mkv.IDInfo || e.ID == mkv.IDTracks {
 			continue // stale: the head holds the element, which gets a fresh entry or moves with one
 		}
 		region.keptSeekEntries = append(region.keptSeekEntries, e)
