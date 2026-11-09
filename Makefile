@@ -78,7 +78,7 @@ preflight:
 	  GOOS=$$os CGO_ENABLED=0 go build ./... || exit 1; \
 	  GOOS=$$os CGO_ENABLED=0 go vet ./...   || exit 1; \
 	done
-	@echo "== wasm build =="; GOOS=js GOARCH=wasm CGO_ENABLED=0 go build ./cmd/mkvgo-wasm/
+	@echo "== wasm build+vet =="; GOOS=js GOARCH=wasm CGO_ENABLED=0 go build ./cmd/mkvgo-wasm/ && GOOS=js GOARCH=wasm CGO_ENABLED=0 go vet ./cmd/mkvgo-wasm/
 	@echo "== GOARCH=arm (32-bit) build =="; GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...
 	@echo "== lint =="; \
 	  lint="$$(command -v golangci-lint || echo "$$(go env GOPATH)/bin/golangci-lint")"; \

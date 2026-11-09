@@ -44,6 +44,10 @@ jobs:
         if: runner.os == 'Linux'
         run: make wasm-smoke
 
+      - name: Test (WebAssembly, Node)
+        if: runner.os == 'Linux'
+        run: GOOS=js GOARCH=wasm go test -count=1 -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./cmd/mkvgo-wasm/
+
       - name: Build (32-bit)
         shell: bash
         run: GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...
