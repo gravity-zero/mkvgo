@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 
@@ -377,8 +378,11 @@ func (p *HLSPlan) extendCursorIndexed(ctx context.Context, i int, cur *subCursor
 		}
 		// The blocks sit in the clusters up to stopAt, read a few KiB at a time from scattered positions ahead of the
 		// media: asked for whole first, they come in the disk's own request sizes and the pages left behind no
-		// longer split the windows' read-ahead.
-		p.hintRange(src, from, p.clusterEndOff(stopAt))
+		// longer split the windows' read-ahead. A remote source is asked for each block as it is reached: the whole
+		// range in one request is the media between them too, a minute of the file for a few KiB of cues.
+		if _, local := src.(*os.File); local {
+			p.hintRange(src, from, p.clusterEndOff(stopAt))
+		}
 		j := sort.Search(len(entries), func(k int) bool { return entries[k].Pos.ClusterStart >= from })
 		var local []subtitle.Cue
 		for ; j < len(entries); j++ {
