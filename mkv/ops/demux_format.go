@@ -204,8 +204,8 @@ func cafALACFormat(t mkv.Track) *demuxFormat {
 	if rate == 0 && t.SampleRate != nil {
 		rate = *t.SampleRate
 	}
-	var sizes []int64
-	var dataSizePos, total int64
+	var table []byte // the packet table: each packet's size as a varint, 1 or 2 bytes a packet
+	var dataSizePos, total, packets int64
 	return &demuxFormat{ext: "caf",
 		head: func(w io.Writer) error {
 			var b []byte
@@ -227,8 +227,12 @@ func cafALACFormat(t mkv.Track) *demuxFormat {
 			return err
 		},
 		frame: func(w io.Writer, _ mkv.Block, data []byte) error {
-			sizes = append(sizes, int64(len(data)))
+			if len(data) == 0 {
+				return cannotHold("empty ALAC packet")
+			}
+			table = cafVarint(table, uint64(len(data)))
 			total += int64(len(data))
+			packets++
 			_, err := w.Write(data)
 			return err
 		},
@@ -244,14 +248,10 @@ func cafALACFormat(t mkv.Track) *demuxFormat {
 			if _, err := f.Seek(0, io.SeekEnd); err != nil {
 				return err
 			}
-			var table []byte
-			for _, n := range sizes {
-				table = cafVarint(table, uint64(n))
-			}
 			var pakt []byte
 			pakt = cafChunk(pakt, "pakt", int64(24+len(table)))
-			pakt = binary.BigEndian.AppendUint64(pakt, uint64(len(sizes)))
-			pakt = binary.BigEndian.AppendUint64(pakt, uint64(len(sizes))*uint64(framesPerPacket))
+			pakt = binary.BigEndian.AppendUint64(pakt, uint64(packets))
+			pakt = binary.BigEndian.AppendUint64(pakt, uint64(packets)*uint64(framesPerPacket))
 			pakt = binary.BigEndian.AppendUint32(pakt, 0) // priming frames
 			pakt = binary.BigEndian.AppendUint32(pakt, 0) // remainder frames
 			pakt = append(pakt, table...)
