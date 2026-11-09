@@ -516,6 +516,16 @@ func planSubTracks(c *mkv.Container, o Options) ([]hlsSubTrack, error) {
 		if t.Type != mkv.SubtitleTrack {
 			continue
 		}
+		if t.Encryption != "" { // its bytes are not its cues: refused or dropped as towards MP4, never served as text
+			reason := "encrypted (" + t.Encryption + "): mkvgo does not decrypt"
+			if !o.SkipUnsupported {
+				return nil, errf("track %d (%s) is %s (set Options.SkipUnsupported to drop it)", t.ID, t.Codec, reason)
+			}
+			if err := o.drop(DroppedTrack{ID: t.ID, Type: t.Type, Codec: t.Codec, Reason: reason}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		var reason string
 		switch canonicalSubCodec(t.Codec) {
 		case "srt", "webvtt", "ass", "ssa":
