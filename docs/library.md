@@ -11,7 +11,7 @@ task-first starting point (CLI and Go side by side).
 | `mkv/reader` | `github.com/gravity-zero/mkvgo/mkv/reader` | Parse MKV files into `Container` |
 | `mkv/writer` | `github.com/gravity-zero/mkvgo/mkv/writer` | Write `Container` to MKV bytes |
 | `mkv/ops` | `github.com/gravity-zero/mkvgo/mkv/ops` | High-level operations |
-| `mkv/subtitle` | `github.com/gravity-zero/mkvgo/mkv/subtitle` | SRT/ASS parsing |
+| `mkv/subtitle` | `github.com/gravity-zero/mkvgo/mkv/subtitle` | SRT/ASS parsing, PGS/VobSub/DVB bitmap decoding |
 | `matroska` | `github.com/gravity-zero/mkvgo/matroska` | Facade -- re-exports everything |
 | `ebml` | `github.com/gravity-zero/mkvgo/ebml` | Low-level EBML codec |
 
@@ -1908,6 +1908,58 @@ no WebVTT rendering - which player-side packaging a bitmap track gets is the
 consumer's decision, not an extractor's. CLI: `mkvgo extract-subtitle -format
 pgs -o <dir>` writes one PNG per cue plus a `cues.json` manifest, driven by the
 streaming form.
+
+### Bitmap subtitles: VobSub and DVB
+
+DVD rips carry `S_VOBSUB` and broadcast captures `S_DVBSUB`: pictures again,
+in two more codecs. `subtitle.VobSubDecoder` and `subtitle.DVBSubDecoder` are
+block-level decoders with the shape of `subtitle.PGSDecoder`: built from the
+track's CodecPrivate, fed the track's blocks in file order, `Reset` when the
+read skips blocks. Both return `[]subtitle.BitmapDisplaySet`, which is the
+type `PGSDisplaySet` names, so one consumer serves the three codecs: pictures
+in straight-alpha `*image.NRGBA`, each with its position on the subtitle
+plane (`ScreenW`/`ScreenH`), and a set with no object where the screen clears.
+
+```go
+dec, err := subtitle.NewVobSubDecoder(track.CodecPrivate) // or NewDVBSubDecoder
+for each block of the track {
+    data, err := track.DecodePayload(block.Data) // a track stored compressed
+    sets, err := dec.Decode(data)
+    for _, ds := range sets {
+        start := blockTime + ds.Delay
+        // ds.Objects: X, Y, Forced, Image; none = the screen clears at start
+    }
+}
+```
+
+What differs from PGS:
+
+- **VobSub** reads its 16 colours and its plane size from the CodecPrivate (the
+  header of a `.idx` file); a track without them is refused, its pictures
+  having no colours. A block is one subpicture unit and gives one set, which
+  carries its own timing: `Delay` before the picture shows and `Duration`
+  until its stop command, zero when the unit has none (the block's duration or
+  the next block then ends it). `Forced` is the unit's forced-display command.
+  A unit a muxer spread over several blocks comes out with the block that
+  completes it; its time is the first block's. Colour and contrast changes
+  within a picture (command `0x07`) are not applied.
+- **DVB** keeps regions, their pixels and the colour tables between blocks: a
+  display set sends only what changed, until a page composition declares a
+  mode change or an acquisition point. A set's objects are the regions on
+  screen, one picture each. The CodecPrivate names the service's composition
+  and ancillary pages, the segments of other pages being ignored; without one
+  every page is decoded. 2, 4 and 8-bit pixels, map tables, the default colour
+  tables and the display definition (plane size, window) are read; character
+  objects are not drawn. `Forced`, `Delay` and `Duration` are never set.
+- Both cut each picture down to its visible pixels, `X`, `Y` moving with the
+  cut, and leave a picture with no visible pixel out of its set: a region that
+  was only erased reads as a clear.
+
+Both bound what a block can cost, as the PGS decoder does: a picture or a
+region is at most 4096 pixels a side, a DVB block fills and draws at most four
+such planes, an epoch's regions hold at most 16 MiB; past a bound, as on any
+malformed block, `Decode` returns an error and the next block is decoded
+normally.
 
 ---
 
