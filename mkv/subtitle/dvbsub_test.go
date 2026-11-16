@@ -2,8 +2,10 @@ package subtitle
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- synthetic DVB builders: segments byte by byte, so the tests pin the wire format ---
@@ -98,11 +100,7 @@ func dvbShow4x2() []byte {
 
 func newDVBSub(t *testing.T) *DVBSubDecoder {
 	t.Helper()
-	d, err := NewDVBSubDecoder(dvbTestPrivate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return d
+	return NewDVBSubDecoder(dvbTestPrivate)
 }
 
 func decodeOneDVB(t *testing.T, d *DVBSubDecoder, block []byte) BitmapDisplaySet {
@@ -256,18 +254,9 @@ func TestDVBSubDecoder_OtherPagesAreAnotherService(t *testing.T) {
 	if got := nrgbaAt(t, ds.Objects[0].Image, 0, 0); got != [4]uint8{255, 255, 255, 255} {
 		t.Errorf("pixel = %v, want the white of the ancillary page's CLUT", got)
 	}
-	all, err := NewDVBSubDecoder(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	all := NewDVBSubDecoder(nil)
 	if sets, _ := all.Decode(concat(foreign, dvbSeg(dvbSegEnd, 0x0099, nil))); len(sets) != 1 {
 		t.Errorf("without CodecPrivate a page gave %d sets, want 1", len(sets))
-	}
-}
-
-func TestNewDVBSubDecoder_ShortCodecPrivate(t *testing.T) {
-	if _, err := NewDVBSubDecoder([]byte{0, 1, 0}); err == nil || !strings.Contains(err.Error(), "the two page IDs take 4") {
-		t.Errorf("err = %v, want a refusal naming the page IDs", err)
 	}
 }
 
@@ -383,7 +372,6 @@ func TestDVBSub_PixelDataRefusals(t *testing.T) {
 	}{
 		"4-bit string in a 2-bit region": {2, []byte{dvbData4Bit, 0x10, 0x00}, "a 4-bit pixel string in a 2-bit region"},
 		"8-bit string in a 4-bit region": {4, []byte{dvbData8Bit, 0x10, 0x00, 0x00}, "an 8-bit pixel string in a 4-bit region"},
-		"undefined block type":           {4, []byte{0x33}, "type 0x33"},
 		"map table cut short":            {8, []byte{dvbMap4To8, 1, 2, 3}, "a map table of 16 bytes, 3 remain"},
 	} {
 		if _, err := dvbDraw(t, tc.depth, 4, false, 0, tc.data); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -452,7 +440,6 @@ func TestDVBSubDecoder_Malformed(t *testing.T) {
 		block []byte
 		want  string
 	}{
-		"not a segment":           {[]byte{0x47, 0x10, 0, 1, 0, 0}, "where a segment starts"},
 		"short header":            {[]byte{dvbSync, 0x10, 0}, "a segment header needs 6"},
 		"segment past the block":  {[]byte{dvbSync, 0x10, 0, 1, 0, 9, 0}, "declares 9 bytes"},
 		"page cut short":          {seg(dvbSegPage, 15), "page composition segment holds 1 bytes"},
@@ -538,5 +525,107 @@ func TestDVBSubObjectListedManyTimesBounded(t *testing.T) {
 	_, err := newDVBSub(t).Decode(block)
 	if err == nil || !strings.Contains(err.Error(), "fills and draws more than") {
 		t.Fatalf("err = %v, want the block's pixel bound", err)
+	}
+}
+
+// A page may place one region many times: it is read through its CLUT once per display set, the placements sharing
+// the picture. 32 placements of a 1024x1024 region each made a picture of 4 MiB.
+func TestDVBSubRegionRenderedOncePerDisplaySet(t *testing.T) {
+	at := make([]dvbPlacement, 32)
+	for i := range at {
+		at[i] = dvbPlacement{region: 0, x: i, y: 2 * i}
+	}
+	block := concat(dvbPCS(2, at...), dvbRCS(0, true, 1024, 1024, 3, 0, 1), dvbEDS())
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	sets, err := newDVBSub(t).Decode(block)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sets) != 1 || len(sets[0].Objects) != 32 {
+		t.Fatalf("%d display sets, want one placing the region 32 times", len(sets))
+	}
+	for i, o := range sets[0].Objects {
+		if o.X != i || o.Y != 2*i || o.Image != sets[0].Objects[0].Image {
+			t.Fatalf("placement %d at %d,%d with its own picture; want %d,%d sharing the first", i, o.X, o.Y, i, 2*i)
+		}
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 12<<20 {
+		t.Errorf("32 placements of one 1024x1024 region allocated %d MiB, want the region and one picture, 5 MiB", alloc>>20)
+	}
+}
+
+// The budget counts a region once per display set too: 8 placements of a full-size region are one picture.
+func TestDVBSubPlacementsOfOneRegionCostOnePicture(t *testing.T) {
+	at := make([]dvbPlacement, 8)
+	block := concat(dvbPCS(2, at...), dvbRCS(0, true, dvbMaxDim, dvbMaxDim, 3, 0, 1), dvbEDS())
+	if _, err := newDVBSub(t).Decode(block); err != nil {
+		t.Fatalf("8 placements of one region: %v", err)
+	}
+}
+
+func TestNewDVBSubDecoder_ShortCodecPrivateDecodesEveryPage(t *testing.T) {
+	for n := 1; n <= 3; n++ {
+		d := NewDVBSubDecoder(make([]byte, n))
+		if sets, err := d.Decode(concat(dvbSeg(dvbSegPage, 0x0099, []byte{15, 2 << 2}), dvbSeg(dvbSegEnd, 0x0099, nil))); err != nil || len(sets) != 1 {
+			t.Errorf("%d byte(s): a page gave %d sets, err %v; want it decoded", n, len(sets), err)
+		}
+	}
+}
+
+// Bytes that are no segment end the block: the display set composed ahead of them is given, without an error.
+func TestDVBSubDecoder_JunkAfterTheSegments(t *testing.T) {
+	show := dvbShow4x2()
+	noEnd := show[:len(show)-len(dvbEDS())]
+	for name, block := range map[string][]byte{
+		"after the end segment": concat(show, []byte{0x47, 0x1f, 0xff, 0x10}),
+		"in place of it":        concat(noEnd, []byte{0x00, 0x00}),
+	} {
+		sets, err := newDVBSub(t).Decode(block)
+		if err != nil || len(sets) != 1 || len(sets[0].Objects) != 1 {
+			t.Errorf("%s: %d sets, err %v; want the display set", name, len(sets), err)
+		}
+	}
+}
+
+// A pixel-data block of a type the format does not define ends its field: what was drawn ahead of it stays.
+func TestDVBSubDecoder_UnknownPixelDataEndsTheField(t *testing.T) {
+	top := concat(dvbTop4x2, []byte{0x33, 0x01, 0x02})
+	ds := decodeOneDVB(t, newDVBSub(t), concat(dvbPCS(2, dvbPlacement{}), dvbRCS(0, true, 4, 2, 2, 0, 0, dvbObjectRef{id: 7}),
+		dvbTestCLUT, dvbODS(7, false, top, dvbBottom4x2), dvbEDS()))
+	if len(ds.Objects) != 1 || ds.Objects[0].Image.Bounds().Dy() != 2 {
+		t.Fatalf("%d objects; want the picture, both lines drawn", len(ds.Objects))
+	}
+}
+
+// A block refused part-way gives back, with the error, the display sets it had completed and the one it was composing.
+func TestDVBSubDecoder_ErrorKeepsTheSetsAheadOfIt(t *testing.T) {
+	bad := dvbSeg(dvbSegRegion, dvbTestPage, []byte{0, 0, 0, 4})
+	d := newDVBSub(t)
+	sets, err := d.Decode(concat(dvbShow4x2(), dvbPCS(0, dvbPlacement{x: 100, y: 500}), bad, dvbEDS()))
+	if err == nil || !strings.Contains(err.Error(), "region composition segment needs") {
+		t.Fatalf("err = %v, want the region's", err)
+	}
+	if len(sets) != 2 || len(sets[0].Objects) != 1 || len(sets[1].Objects) != 1 {
+		t.Fatalf("%d sets with the error; want the completed one and the one being composed", len(sets))
+	}
+	// The next block starts from the state the error left, which is the one the sets showed.
+	if ds := decodeOneDVB(t, d, concat(dvbPCS(0, dvbPlacement{x: 100, y: 500}), dvbEDS())); len(ds.Objects) != 1 {
+		t.Errorf("the block after the error shows %d objects, want the region still held", len(ds.Objects))
+	}
+}
+
+// The page's time-out is given as it is, a bound on how long the set stays without a successor, not its duration.
+func TestDVBSubDecoder_Timeout(t *testing.T) {
+	d := newDVBSub(t)
+	ds := decodeOneDVB(t, d, dvbShow4x2())
+	if ds.Timeout != 15*time.Second || ds.Duration != 0 || ds.Delay != 0 {
+		t.Errorf("timeout %v duration %v delay %v; want the page's 15 s and no duration", ds.Timeout, ds.Duration, ds.Delay)
+	}
+	short := dvbSeg(dvbSegPage, dvbTestPage, []byte{3, 0})
+	if ds := decodeOneDVB(t, d, concat(short, dvbEDS())); ds.Timeout != 3*time.Second {
+		t.Errorf("timeout %v after a page of 3 s", ds.Timeout)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -145,10 +146,7 @@ func TestDVBSubDecoder_RealTrack(t *testing.T) {
 	if track.Codec != "dvbsub" || len(blocks) != 46 {
 		t.Fatalf("sample holds a %q track of %d blocks, want dvbsub and 46", track.Codec, len(blocks))
 	}
-	d, err := subtitle.NewDVBSubDecoder(track.CodecPrivate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := subtitle.NewDVBSubDecoder(track.CodecPrivate)
 	type shown struct {
 		timeMs  int64
 		objects []sampleCue
@@ -160,8 +158,8 @@ func TestDVBSubDecoder_RealTrack(t *testing.T) {
 		if err != nil {
 			t.Fatalf("block %d at %d ms: %v", i, b.Timecode, err)
 		}
-		if len(got) != 1 || got[0].ScreenW != 720 || got[0].ScreenH != 576 || got[0].Delay != 0 || got[0].Duration != 0 {
-			t.Fatalf("block %d: %d sets; want one, untimed, on 720x576", i, len(got))
+		if len(got) != 1 || got[0].ScreenW != 720 || got[0].ScreenH != 576 || got[0].Delay != 0 || got[0].Duration != 0 || got[0].Timeout != 15*time.Second {
+			t.Fatalf("block %d: %d sets; want one on 720x576, with no time of its own but the page's 15 s time-out", i, len(got))
 		}
 		s := shown{timeMs: b.Timecode}
 		for _, o := range got[0].Objects {
@@ -341,10 +339,7 @@ func BenchmarkDVBSubTrack(b *testing.B) {
 	b.SetBytes(trackBytes(blocks))
 	b.ReportAllocs()
 	for b.Loop() {
-		d, err := subtitle.NewDVBSubDecoder(track.CodecPrivate)
-		if err != nil {
-			b.Fatal(err)
-		}
+		d := subtitle.NewDVBSubDecoder(track.CodecPrivate)
 		decodeTrack(b, blocks, d.Decode)
 	}
 }

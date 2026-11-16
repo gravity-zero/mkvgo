@@ -102,10 +102,7 @@ func FuzzDVBSubDecode(f *testing.F) {
 			if filter {
 				private = dvbTestPrivate
 			}
-			d, err := NewDVBSubDecoder(private)
-			if err != nil {
-				t.Fatal(err)
-			}
+			d := NewDVBSubDecoder(private)
 			if cut > 0 && cut < len(data) {
 				_, _ = d.Decode(data[:cut])
 				_, _ = d.Decode(data[cut:])

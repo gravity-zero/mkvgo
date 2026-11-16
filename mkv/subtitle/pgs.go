@@ -92,8 +92,11 @@ type PGSDisplaySet struct {
 	ScreenW, ScreenH int // the subtitle plane the positions are expressed in
 	Objects          []PGSObject
 	// Delay is how long after the block's time the set takes effect, and Duration how long its pictures then stay
-	// on screen; zero when the stream says neither (PGS and DVB never do, VobSub does).
+	// on screen: a VobSub unit's start and stop commands. Zero when the stream says neither, as PGS and DVB never do.
 	Delay, Duration time.Duration
+	// Timeout is how long the set may stay on screen when nothing replaces or clears it: a DVB page's time-out, a
+	// bound of whole seconds, not a duration. Zero for PGS and VobSub.
+	Timeout time.Duration
 }
 
 // Clear reports whether this display set empties the screen rather than filling

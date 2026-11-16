@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"time"
 )
 
 const dvbSync = 0x0f // the first byte of every segment
@@ -131,33 +132,31 @@ type DVBSubDecoder struct {
 	regions          map[uint8]*dvbRegion
 	cluts            map[uint8]*dvbCLUT
 	page             []dvbPlacement
-	held             int // what the epoch's regions hold (dvbMaxEpochBytes)
-	budget           int // what the block being decoded may still fill and draw (dvbMaxBlockPixels)
+	timeout          time.Duration // the page's time-out
+	held             int           // what the epoch's regions hold (dvbMaxEpochBytes)
+	budget           int           // what the block being decoded may still fill and draw (dvbMaxBlockPixels)
 }
 
 // NewDVBSubDecoder reads the composition and ancillary page IDs from the track's CodecPrivate, the segments of
-// other pages being another service's; with no CodecPrivate every page is decoded.
-func NewDVBSubDecoder(codecPrivate []byte) (*DVBSubDecoder, error) {
-	d := &DVBSubDecoder{}
-	switch {
-	case len(codecPrivate) == 0:
-		d.anyPage = true
-	case len(codecPrivate) >= 4:
-		d.pages = [2]uint16{binary.BigEndian.Uint16(codecPrivate), binary.BigEndian.Uint16(codecPrivate[2:])}
-	default:
-		return nil, fmt.Errorf("DVB subtitle: the track's CodecPrivate holds %d byte(s), the two page IDs take 4", len(codecPrivate))
+// other pages being another service's; with a CodecPrivate too short to hold them every page is decoded.
+func NewDVBSubDecoder(codecPrivate []byte) *DVBSubDecoder {
+	if len(codecPrivate) < 4 {
+		return &DVBSubDecoder{anyPage: true}
 	}
-	return d, nil
+	return &DVBSubDecoder{pages: [2]uint16{binary.BigEndian.Uint16(codecPrivate), binary.BigEndian.Uint16(codecPrivate[2:])}}
 }
 
 // Reset drops the epoch: call it when the read skips blocks, so a display set cannot draw on another part's regions.
 func (d *DVBSubDecoder) Reset() {
-	d.regions, d.cluts, d.page, d.held = nil, nil, nil, 0
+	d.regions, d.cluts, d.page, d.held, d.timeout = nil, nil, nil, 0, 0
 	d.screenW, d.screenH, d.winX, d.winY = 0, 0, 0, 0
 }
 
 // Decode decodes one Matroska block into the display sets it completes, almost always one: a set's objects are the
-// regions on screen, each cut down to its visible pixels, and a set with none clears the screen.
+// regions on screen, each cut down to its visible pixels, and a set with none clears the screen; its Timeout is the
+// page's, the end of a set being the next one. Bytes that are no
+// segment end the block. A segment that cannot be read is an error, returned with the sets completed ahead of it
+// and the one being composed, which show the state the decoder is left in.
 //
 // A block of a track stored compressed (mkv.Track.Compression) is decoded first: mkv.Track.DecodePayload.
 func (d *DVBSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
@@ -165,26 +164,31 @@ func (d *DVBSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
 	d.budget = dvbMaxBlockPixels
 	composed := false // a page composition is waiting for the end of its display set
 	emit := func() error {
-		ds, err := d.compose()
-		out = append(out, ds)
 		composed = false
+		ds, err := d.compose()
+		if err == nil {
+			out = append(out, ds)
+		}
 		return err
+	}
+	fail := func(err error) ([]BitmapDisplaySet, error) {
+		if composed {
+			_ = emit()
+		}
+		return out, err
 	}
 
 	b := block
 	if len(b) >= 2 && b[0] == 0x20 && b[1] == 0x00 { // the PES data field's own header, when a muxer kept it
 		b = b[2:]
 	}
-	for len(b) > 0 && b[0] != 0xff {
-		if b[0] != dvbSync {
-			return nil, fmt.Errorf("DVB subtitle: byte %#02x where a segment starts with %#02x", b[0], dvbSync)
-		}
+	for len(b) > 0 && b[0] == dvbSync {
 		if len(b) < 6 {
-			return nil, fmt.Errorf("DVB subtitle: %d trailing byte(s) where a segment header needs 6", len(b))
+			return fail(fmt.Errorf("DVB subtitle: %d trailing byte(s) where a segment header needs 6", len(b)))
 		}
 		typ, page, size := b[1], binary.BigEndian.Uint16(b[2:]), int(binary.BigEndian.Uint16(b[4:]))
 		if size > len(b)-6 {
-			return nil, fmt.Errorf("DVB subtitle: a %#02x segment declares %d bytes, %d remain in the block", typ, size, len(b)-6)
+			return fail(fmt.Errorf("DVB subtitle: a %#02x segment declares %d bytes, %d remain in the block", typ, size, len(b)-6))
 		}
 		p := b[6 : 6+size]
 		b = b[6+size:]
@@ -215,12 +219,12 @@ func (d *DVBSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
 			}
 		}
 		if err != nil {
-			return nil, err
+			return fail(err)
 		}
 	}
 	if composed {
 		if err := emit(); err != nil {
-			return nil, err
+			return out, err
 		}
 	}
 	return out, nil
@@ -259,7 +263,7 @@ func (d *DVBSubDecoder) parsePage(p []byte) error {
 	if state := p[1] >> 2 & 3; state == 1 || state == 2 {
 		d.regions, d.cluts, d.held = nil, nil, 0
 	}
-	d.page = d.page[:0]
+	d.page, d.timeout = d.page[:0], time.Duration(p[0])*time.Second
 	for e := p[head:]; len(e) > 0; e = e[entry:] {
 		d.page = append(d.page, dvbPlacement{region: e[0], x: int(binary.BigEndian.Uint16(e[2:])), y: int(binary.BigEndian.Uint16(e[4:]))})
 	}
@@ -514,8 +518,8 @@ func (p *dvbPen) field(data []byte, x, y int) error {
 			tableLen = 16
 		case dvbDataEndRow:
 			p.x, p.y = x, p.y+2
-		default:
-			return fmt.Errorf("a pixel-data block of type %#02x, which the format does not define", typ)
+		default: // a type the format does not define: its length is not known, the field ends here
+			return p.err
 		}
 		if tableLen == 0 {
 			continue
@@ -648,42 +652,63 @@ func (p *dvbPen) string8(data []byte) int {
 }
 
 // compose turns the page into a display set: each region on screen, read through its CLUT, where the page puts it.
+// A region the page places several times is read once, its placements sharing the picture.
 func (d *DVBSubDecoder) compose() (BitmapDisplaySet, error) {
-	ds := BitmapDisplaySet{ScreenW: d.screenW, ScreenH: d.screenH}
+	ds := BitmapDisplaySet{ScreenW: d.screenW, ScreenH: d.screenH, Timeout: d.timeout}
 	if ds.ScreenW == 0 { // no display definition: the format's standard-definition plane
 		ds.ScreenW, ds.ScreenH = 720, 576
 	}
+	type picture struct {
+		img *image.NRGBA // nil when the region shows nothing
+		at  image.Point
+	}
+	var seen map[uint8]picture
 	for _, pl := range d.page {
-		r := d.regions[pl.region]
-		if r == nil {
-			if err := d.spend(1); err != nil {
+		pic, ok := seen[pl.region]
+		if !ok {
+			r := d.regions[pl.region]
+			if r == nil {
+				if err := d.spend(1); err != nil {
+					return ds, err
+				}
+				continue
+			}
+			if err := d.spend(r.w * r.h); err != nil {
 				return ds, err
 			}
-			continue
-		}
-		if err := d.spend(r.w * r.h); err != nil {
+			pic.img, pic.at = trimTransparent(d.render(r))
+			if seen == nil {
+				seen = make(map[uint8]picture, len(d.page))
+			}
+			seen[pl.region] = pic
+		} else if err := d.spend(1); err != nil {
 			return ds, err
 		}
-		clut := d.cluts[r.clut]
-		if clut == nil {
-			clut = dvbDefaultCLUT
-		}
-		colours := clut.c256[:]
-		switch r.depth {
-		case 4:
-			colours = clut.c16[:]
-		case 2:
-			colours = clut.c4[:]
-		}
-		img := image.NewNRGBA(image.Rect(0, 0, r.w, r.h))
-		for i, v := range r.pix {
-			if c := colours[int(v)&(len(colours)-1)]; c[3] != 0 {
-				copy(img.Pix[4*i:4*i+4], c[:])
-			}
-		}
-		if img, at := trimTransparent(img); img != nil {
-			ds.Objects = append(ds.Objects, BitmapObject{X: d.winX + pl.x + at.X, Y: d.winY + pl.y + at.Y, Image: img})
+		if pic.img != nil {
+			ds.Objects = append(ds.Objects, BitmapObject{X: d.winX + pl.x + pic.at.X, Y: d.winY + pl.y + pic.at.Y, Image: pic.img})
 		}
 	}
 	return ds, nil
+}
+
+// render reads a region's pixels through its CLUT, or the default one when the epoch defined none of that ID.
+func (d *DVBSubDecoder) render(r *dvbRegion) *image.NRGBA {
+	clut := d.cluts[r.clut]
+	if clut == nil {
+		clut = dvbDefaultCLUT
+	}
+	colours := clut.c256[:]
+	switch r.depth {
+	case 4:
+		colours = clut.c16[:]
+	case 2:
+		colours = clut.c4[:]
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, r.w, r.h))
+	for i, v := range r.pix {
+		if c := colours[int(v)&(len(colours)-1)]; c[3] != 0 {
+			copy(img.Pix[4*i:4*i+4], c[:])
+		}
+	}
+	return img
 }
