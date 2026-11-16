@@ -9,6 +9,17 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Added
+
+- `subtitle.VobSubDecoder` and `subtitle.DVBSubDecoder` decode the bitmap
+  subtitles of DVD rips (`S_VOBSUB`) and of broadcast captures (`S_DVBSUB`)
+  block by block, as `subtitle.PGSDecoder` does PGS. Both return the PGS
+  decoder's display sets (`subtitle.BitmapDisplaySet`, the same type): each
+  picture in straight-alpha NRGBA with its position on the subtitle plane, an
+  empty set where the screen clears.
+- `subtitle.PGSDisplaySet` gains `Delay` and `Duration`, which a VobSub unit's
+  start and stop commands set; they stay zero for PGS and DVB.
+
 ## [0.66.2] - 2026-11-10
 
 ### Security
