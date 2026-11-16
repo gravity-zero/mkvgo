@@ -175,7 +175,7 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 	want := -1
 	var head [14]byte
 	for start := pos; pos-start < vobsubMaxUnitScan; {
-		if n, err := sub.ReadAt(head[:6], pos); err != nil {
+		if n, err := readFullAt(sub, head[:6], pos); err != nil {
 			if n == 0 && pos == start && errors.Is(err, io.EOF) {
 				return nil, 0, errVobSubPastEnd
 			}
@@ -189,7 +189,7 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 		}
 		switch head[3] {
 		case 0xba: // pack header: 14 bytes and the stuffing its last byte counts
-			if _, err := sub.ReadAt(head[:], pos); err != nil {
+			if _, err := readFullAt(sub, head[:], pos); err != nil {
 				return nil, 0, fmt.Errorf("a pack header cut short at byte %d: %w", pos, err)
 			}
 			if head[4]>>6 != 1 {
@@ -201,7 +201,7 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 		case 0xbd: // private stream 1: the subpictures
 			size := int(binary.BigEndian.Uint16(head[4:6]))
 			pkt := make([]byte, size)
-			if _, err := sub.ReadAt(pkt, pos+6); err != nil {
+			if _, err := readFullAt(sub, pkt, pos+6); err != nil {
 				return nil, 0, fmt.Errorf("a packet of %d bytes cut short at byte %d: %w", size, pos, err)
 			}
 			pos += 6 + int64(size)
@@ -226,4 +226,13 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 		}
 	}
 	return nil, 0, fmt.Errorf("the unit is not complete within %d bytes of the .sub", vobsubMaxUnitScan)
+}
+
+// readFullAt is ReadAt without the io.EOF a reader may return along with the last bytes of its file.
+func readFullAt(r io.ReaderAt, p []byte, off int64) (int, error) {
+	n, err := r.ReadAt(p, off)
+	if n == len(p) {
+		return n, nil
+	}
+	return n, err
 }

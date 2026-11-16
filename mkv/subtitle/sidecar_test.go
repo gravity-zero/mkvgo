@@ -257,3 +257,30 @@ func TestForEachSUPDisplaySet_Bounded(t *testing.T) {
 		t.Errorf("err = %v, want the display set bound", err)
 	}
 }
+
+// eofReaderAt returns io.EOF together with the last bytes of the file, as io.ReaderAt allows.
+
+// eofReaderAt returns io.EOF together with the last bytes of the file, as io.ReaderAt allows.
+type eofReaderAt struct{ data []byte }
+
+func (r eofReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[off:])
+	if off+int64(n) == int64(len(r.data)) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func TestVobSubIndex_ForEachUnit_ReaderAtEOFWithTheLastBytes(t *testing.T) {
+	unit := vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)})
+	sub := subPack(0x20, true, unit)
+	ix := &VobSubIndex{Streams: []VobSubStream{{Entries: []VobSubEntry{{1000, 0}}}}}
+	var got []byte
+	err := ix.ForEachUnit(eofReaderAt{sub}, 0, func(_ int64, u []byte) error { got = u; return nil })
+	if err != nil || !bytes.Equal(got, unit) {
+		t.Errorf("err %v, %d bytes; want the unit that ends the file", err, len(got))
+	}
+}
