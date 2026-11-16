@@ -22,7 +22,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   video: a VobSub `.idx`/`.sub` pair and a PGS `.sup`, one unit or display set
   at a time, each with its time, in the form the decoders take.
 - `subtitle.PGSDisplaySet` gains `Delay` and `Duration`, which a VobSub unit's
-  start and stop commands set; they stay zero for PGS and DVB.
+  start and stop commands set, and `Timeout`, a DVB page's time-out; each is
+  zero where the codec has no such thing.
 
 ## [0.66.2] - 2026-11-10
 
