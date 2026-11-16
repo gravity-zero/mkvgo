@@ -57,3 +57,61 @@ func FuzzPGSDecode(f *testing.F) {
 		})
 	})
 }
+
+// FuzzVobSubDecode: any bytes handed to a VobSub decoder, in one block or split in two, give display sets or an
+// error, never a panic, within the input's time budget.
+func FuzzVobSubDecode(f *testing.F) {
+	f.Add(vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)}, spuSeq{date: 300, cmds: []byte{spuStop}}), 7)
+	f.Add(vobsubSPU(nil, nil, spuSeq{date: 45, cmds: []byte{spuStop}}), 0)
+	f.Add([]byte{0x00, 0x08, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04}, 0)
+	f.Fuzz(func(t *testing.T, data []byte, cut int) {
+		costguard.Fuzz(t, len(data), func() {
+			d, err := NewVobSubDecoder([]byte(vobsubIdx))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cut > 0 && cut < len(data) {
+				_, _ = d.Decode(data[:cut])
+				_, _ = d.Decode(data[cut:])
+				return
+			}
+			_, _ = d.Decode(data)
+		})
+	})
+}
+
+// FuzzVobSubHeader: any CodecPrivate gives a decoder or an error, never a panic.
+func FuzzVobSubHeader(f *testing.F) {
+	f.Add([]byte(vobsubIdx))
+	f.Add([]byte("size: 0x0\npalette: ,\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		costguard.Fuzz(t, len(data), func() { _, _ = NewVobSubDecoder(data) })
+	})
+}
+
+// FuzzDVBSubDecode: any bytes handed to a DVB subtitle decoder, in one block or split in two, with or without the
+// page filter, give display sets or an error, never a panic, within the input's time budget.
+func FuzzDVBSubDecode(f *testing.F) {
+	f.Add(dvbShow4x2(), 0, true)
+	f.Add(concat(dvbShow4x2(), dvbPCS(0), dvbEDS()), len(dvbShow4x2()), false)
+	f.Add(concat(dvbPCS(2, dvbPlacement{}), dvbRCS(0, true, 720, 36, 3, 0, 1, dvbObjectRef{id: 1}),
+		dvbODS(1, true, []byte{dvbMap2To8, 1, 2, 3, 4, dvbData2Bit, 0x6c, 0x00, dvbDataEndRow, dvbData8Bit, 0x41, 0x00, 0x00}, nil)), 9, true)
+	f.Fuzz(func(t *testing.T, data []byte, cut int, filter bool) {
+		costguard.Fuzz(t, len(data), func() {
+			var private []byte
+			if filter {
+				private = dvbTestPrivate
+			}
+			d, err := NewDVBSubDecoder(private)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cut > 0 && cut < len(data) {
+				_, _ = d.Decode(data[:cut])
+				_, _ = d.Decode(data[cut:])
+				return
+			}
+			_, _ = d.Decode(data)
+		})
+	})
+}

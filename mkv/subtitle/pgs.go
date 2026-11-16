@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"time"
 )
 
 // Segment types, from the display set's segment header (type, 16-bit size).
@@ -90,6 +91,9 @@ type PGSObject struct {
 type PGSDisplaySet struct {
 	ScreenW, ScreenH int // the subtitle plane the positions are expressed in
 	Objects          []PGSObject
+	// Delay is how long after the block's time the set takes effect, and Duration how long its pictures then stay
+	// on screen; zero when the stream says neither (PGS and DVB never do, VobSub does).
+	Delay, Duration time.Duration
 }
 
 // Clear reports whether this display set empties the screen rather than filling
