@@ -17,6 +17,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   decoder's display sets (`subtitle.BitmapDisplaySet`, the same type): each
   picture in straight-alpha NRGBA with its position on the subtitle plane, an
   empty set where the screen clears.
+- `subtitle.ParseVobSubIndex` with `VobSubIndex.ForEachUnit`, and
+  `subtitle.ForEachSUPDisplaySet`, read the bitmap subtitles that sit beside a
+  video: a VobSub `.idx`/`.sub` pair and a PGS `.sup`, one unit or display set
+  at a time, each with its time, in the form the decoders take.
 - `subtitle.PGSDisplaySet` gains `Delay` and `Duration`, which a VobSub unit's
   start and stop commands set; they stay zero for PGS and DVB.
 
