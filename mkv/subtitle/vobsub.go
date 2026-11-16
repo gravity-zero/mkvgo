@@ -46,6 +46,10 @@ type VobSubDecoder struct {
 // Reset drops a unit left incomplete: call it when the read skips blocks, so the next one is not taken for its rest.
 func (d *VobSubDecoder) Reset() { d.pending = nil }
 
+// Pending reports whether the last block started a unit that the next blocks complete: the time of the display set
+// they will give is that block's.
+func (d *VobSubDecoder) Pending() bool { return len(d.pending) > 0 }
+
 // NewVobSubDecoder reads the plane size and the palette from the track's CodecPrivate.
 func NewVobSubDecoder(codecPrivate []byte) (*VobSubDecoder, error) {
 	d := &VobSubDecoder{}
@@ -104,14 +108,17 @@ type spuState struct {
 func (s *spuState) visible() bool { return s.alpha != [4]uint8{} }
 
 // Decode decodes one Matroska block, a whole subpicture unit: one display set holding its picture, cut down to its
-// visible pixels, with the Delay before it shows and the Duration its stop command gives it, or an empty set for a
-// unit that shows nothing. A unit spread over several blocks gives nothing until the block that completes it; its
-// time is the first block's.
+// visible pixels, with the Delay before it shows and the Duration its stop command gives it (zero when it has
+// none), or an empty set for a unit that shows nothing. A unit spread over several blocks gives nothing until the
+// block that completes it, and its time is the first block's: Pending says so after each block. A block that is a
+// whole unit of its own never completes the one before, which is dropped.
 //
 // A block of a track stored compressed (mkv.Track.Compression) is decoded first: mkv.Track.DecodePayload.
 func (d *VobSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
 	if len(d.pending) > 0 {
-		block = append(d.pending, block...)
+		if !wholeSPU(block) { // a block that is a unit of its own does not complete the one before
+			block = append(d.pending, block...)
+		}
 		d.pending = nil
 	}
 	if len(block) < 4 {
@@ -140,6 +147,10 @@ func (d *VobSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
 		ds.Delay = spuDate(st.stopAt)
 		return []BitmapDisplaySet{ds}, nil
 	}
+	if st.stopped && st.stopAt == st.startAt { // shown and removed at once: nothing is seen
+		ds.Delay = spuDate(st.startAt)
+		return []BitmapDisplaySet{ds}, nil
+	}
 	if !st.hasArea || !st.hasOffsets {
 		return nil, fmt.Errorf("VobSub: the subpicture starts a display without naming its area and its data")
 	}
@@ -155,6 +166,15 @@ func (d *VobSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
 		ds.Objects = []BitmapObject{{X: st.x1 + at.X, Y: st.y1 + at.Y, Forced: st.forced, Image: img}}
 	}
 	return []BitmapDisplaySet{ds}, nil
+}
+
+// wholeSPU reports a block that holds exactly the unit its header declares, control sequences inside it.
+func wholeSPU(block []byte) bool {
+	if len(block) < 8 {
+		return false
+	}
+	size, ctrl := int(binary.BigEndian.Uint16(block[0:2])), int(binary.BigEndian.Uint16(block[2:4]))
+	return size == len(block) && ctrl >= 4 && ctrl+4 <= size
 }
 
 // spuDate converts a control sequence's date, in units of 1024 ticks of the 90 kHz clock.

@@ -290,3 +290,46 @@ func TestVobSubDecoder_UnitOverTwoBlocks(t *testing.T) {
 		t.Fatalf("after Reset a whole unit gave %d sets, err %v; want its picture", len(sets), err)
 	}
 }
+
+// A block that declares more than it holds is not completed by a block that is a whole unit of its own.
+func TestVobSubDecoder_WholeUnitAfterAnIncompleteOne(t *testing.T) {
+	unit := vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)}, spuSeq{date: 300, cmds: []byte{spuStop}})
+	damaged := append([]byte(nil), unit...)
+	damaged[0] = 0x40 // declares 16 KiB and more
+	d := newVobSub(t)
+	if sets, err := d.Decode(damaged); err != nil || len(sets) != 0 {
+		t.Fatalf("the damaged block gave %d sets, err %v; want nothing yet", len(sets), err)
+	}
+	for i := 0; i < 3; i++ {
+		sets, err := d.Decode(unit)
+		if err != nil || len(sets) != 1 || len(sets[0].Objects) != 1 {
+			t.Fatalf("whole unit %d after the damaged block: %d sets, err %v; want its picture", i, len(sets), err)
+		}
+	}
+	if d.Pending() {
+		t.Error("the damaged block's bytes are still held")
+	}
+}
+
+// Pending tells a caller the block it just fed started a unit, whose time is that block's.
+func TestVobSubDecoder_Pending(t *testing.T) {
+	unit := vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)})
+	d := newVobSub(t)
+	if d.Pending() {
+		t.Fatal("a new decoder holds a unit")
+	}
+	if _, err := d.Decode(unit[:7]); err != nil || !d.Pending() {
+		t.Fatalf("after the first part: pending=%v, err %v", d.Pending(), err)
+	}
+	if sets, err := d.Decode(unit[7:]); err != nil || len(sets) != 1 || d.Pending() {
+		t.Fatalf("after the second part: %d sets, pending=%v, err %v", len(sets), d.Pending(), err)
+	}
+}
+
+// A stop at the date of the start shows nothing: an empty set, not a picture without an end.
+func TestVobSubDecoder_StopAtTheStartShowsNothing(t *testing.T) {
+	ds := decodeOneVobSub(t, vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{date: 20, cmds: append(spuShow4x2(spuStart), spuStop)}))
+	if !ds.Clear() || ds.Delay != 20*1024*time.Second/90000 || ds.Duration != 0 {
+		t.Errorf("clear=%v delay=%v duration=%v; want an empty set at the unit's date", ds.Clear(), ds.Delay, ds.Duration)
+	}
+}
