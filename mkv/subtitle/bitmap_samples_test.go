@@ -4,6 +4,7 @@ package subtitle_test
 // The golden pictures are the mainstream decoder's rendering of one display set on the whole subtitle plane.
 
 import (
+	"bytes"
 	"context"
 	"image"
 	"image/png"
@@ -197,6 +198,112 @@ func TestDVBSubDecoder_RealTrack(t *testing.T) {
 	}
 	if n := planeDiff(t, golden, "../../internal/testdata/dvbsub_set13.png"); n != 0 {
 		t.Errorf("display set 13 differs from its golden rendering on %d pixels", n)
+	}
+}
+
+// The .idx/.sub pair the VobSub sample was muxed from gives the same units at the same times as the Matroska.
+func TestVobSubIndex_RealPair(t *testing.T) {
+	_, blocks := sampleTrack(t, vobsubSample)
+	type unit struct {
+		timeMs int64
+		data   []byte
+	}
+	var want []unit // a unit the muxer cut in two is the two blocks, at the time of the first
+	for _, b := range blocks {
+		if n := len(want); n > 0 && len(want[n-1].data) < int(want[n-1].data[0])<<8|int(want[n-1].data[1]) {
+			want[n-1].data = append(want[n-1].data, b.Data...)
+			continue
+		}
+		want = append(want, unit{b.Timecode, b.Data})
+	}
+
+	idx, err := os.Open("../../internal/testdata/vobsub.idx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	ix, err := subtitle.ParseVobSubIndex(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ix.Streams) != 1 || ix.Streams[0].Language != "en" || ix.Streams[0].Index != 0 || len(ix.Streams[0].Entries) != 47 {
+		t.Fatalf("index = %d streams, the first %q with %d entries; want one, en, 47", len(ix.Streams), ix.Streams[0].Language, len(ix.Streams[0].Entries))
+	}
+	sub, err := os.Open("../../internal/testdata/vobsub.sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	d, err := subtitle.NewVobSubDecoder(ix.Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []unit
+	var first subtitle.BitmapDisplaySet
+	err = ix.ForEachUnit(sub, 0, func(timeMs int64, data []byte) error {
+		sets, err := d.Decode(data)
+		if err != nil || len(sets) != 1 {
+			t.Errorf("unit at %d ms: %d sets, err %v", timeMs, len(sets), err)
+		} else if len(got) == 0 {
+			first = sets[0]
+		}
+		got = append(got, unit{timeMs, append([]byte(nil), data...)})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 47 entries: three are the second packet of a unit, the last sits at the end of the .sub.
+	if len(got) != 43 || len(want) != 43 {
+		t.Fatalf("the pair gives %d units, the Matroska %d; want 43 each", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].timeMs != want[i].timeMs || !bytes.Equal(got[i].data, want[i].data) {
+			t.Errorf("unit %d: %d ms and %d bytes from the pair, %d ms and %d bytes from the Matroska", i, got[i].timeMs, len(got[i].data), want[i].timeMs, len(want[i].data))
+		}
+	}
+	if n := planeDiff(t, first, "../../internal/testdata/vobsub_cue0.png"); n != 0 {
+		t.Errorf("the first unit differs from its golden rendering on %d pixels", n)
+	}
+}
+
+// A real .sup: one whole display set, then one the file stops in the middle of.
+func TestForEachSUPDisplaySet_RealFile(t *testing.T) {
+	f, err := os.Open("../../internal/testdata/pgs_sub.sup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	d := subtitle.NewPGSDecoder()
+	var times []int64
+	var first subtitle.BitmapDisplaySet
+	err = subtitle.ForEachSUPDisplaySet(f, func(timeMs int64, set []byte) error {
+		sets, err := d.Decode(set)
+		if err != nil || len(sets) != 1 {
+			t.Errorf("display set at %d ms: %d sets, err %v", timeMs, len(sets), err)
+		} else if len(times) == 0 {
+			first = sets[0]
+		}
+		times = append(times, timeMs)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(times) != 2 || times[0] != 67 || times[1] != 401 {
+		t.Fatalf("display sets at %v ms, want 67 and 401", times)
+	}
+	if first.ScreenW != 1920 || first.ScreenH != 1080 || len(first.Objects) != 2 {
+		t.Fatalf("first set: plane %dx%d, %d objects; want 1920x1080 and 2", first.ScreenW, first.ScreenH, len(first.Objects))
+	}
+	for i, want := range []sampleCue{{x: 383, y: 956, w: 1156, h: 67}, {x: 100, y: 958, w: 123, h: 63}} {
+		o := first.Objects[i]
+		if got := (sampleCue{x: o.X, y: o.Y, w: o.Image.Bounds().Dx(), h: o.Image.Bounds().Dy()}); got != want {
+			t.Errorf("object %d = %+v, want %+v", i, got, want)
+		}
+	}
+	if n := planeDiff(t, first, "../../internal/testdata/pgs_sub_set0.png"); n != 0 {
+		t.Errorf("the first display set differs from its golden rendering on %d pixels", n)
 	}
 }
 

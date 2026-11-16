@@ -115,3 +115,36 @@ func FuzzDVBSubDecode(f *testing.F) {
 		})
 	})
 }
+
+// FuzzVobSubFiles: any .idx and any .sub give units or an error, never a panic, within the input's time budget.
+func FuzzVobSubFiles(f *testing.F) {
+	unit := vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)})
+	f.Add([]byte(vobsubIdxFile), concat(subPack(0x20, true, unit[:9]), subPadding(5), subPack(0x20, false, unit[9:])))
+	f.Add([]byte("id: en, index: 0\ntimestamp: 00:00:00:000, filepos: 0\n"), []byte{0, 0, 1, 0xbd, 0, 4, 0x80, 0, 0, 0x20})
+	f.Fuzz(func(t *testing.T, idx, sub []byte) {
+		costguard.Fuzz(t, len(idx)+len(sub), func() {
+			ix, err := ParseVobSubIndex(bytes.NewReader(idx))
+			if err != nil {
+				return
+			}
+			for i := range ix.Streams {
+				_ = ix.ForEachUnit(bytes.NewReader(sub), i, func(int64, []byte) error { return nil })
+			}
+		})
+	})
+}
+
+// FuzzSUPFile: any bytes read as a .sup give display sets or an error, never a panic.
+func FuzzSUPFile(f *testing.F) {
+	f.Add(supFile(concat(pgsPCS(1920, 1080, pgsEpochStart, 0), pgsEND()), pgsPCS(1920, 1080, 0, 0)))
+	f.Add([]byte("PG"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		costguard.Fuzz(t, len(data), func() {
+			d := NewPGSDecoder()
+			_ = ForEachSUPDisplaySet(bytes.NewReader(data), func(_ int64, set []byte) error {
+				_, _ = d.Decode(set)
+				return nil
+			})
+		})
+	})
+}
