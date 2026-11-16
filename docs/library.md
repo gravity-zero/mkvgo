@@ -1961,6 +1961,38 @@ such planes, an epoch's regions hold at most 16 MiB; past a bound, as on any
 malformed block, `Decode` returns an error and the next block is decoded
 normally.
 
+### Bitmap subtitles beside the video: .idx/.sub and .sup
+
+The same pictures also travel as files of their own: VobSub as a `.idx` and
+a `.sub`, PGS as a `.sup`. Two readers turn them into what the decoders take,
+one unit or display set at a time, so a whole file is never held.
+
+```go
+ix, err := subtitle.ParseVobSubIndex(idxFile)       // the .idx: header, languages, times
+dec, err := subtitle.NewVobSubDecoder(ix.Header)
+err = ix.ForEachUnit(subFile, 0, func(timeMs int64, unit []byte) error {
+    sets, err := dec.Decode(unit)                    // as for a Matroska block
+    return err
+})
+
+pgs := subtitle.NewPGSDecoder()
+err = subtitle.ForEachSUPDisplaySet(supFile, func(timeMs int64, set []byte) error {
+    sets, err := pgs.Decode(set)
+    return err
+})
+```
+
+`VobSubIndex.Streams` lists the languages of the pair (`Language`, `Name`,
+`Index`) and, for each, the time and the position of every subpicture, the
+`delay:` and `time offset:` lines applied. `ForEachUnit` reads the `.sub` (an
+MPEG-2 program stream, through an `io.ReaderAt`) and gathers each unit from
+the packets of its language; an index entry that points into the unit before
+it, or at the end of the `.sub`, is passed over, and a unit the `.sub` holds
+only in part is an error. `ForEachSUPDisplaySet` gives each display set at the
+presentation time of its composition segment; a file cut inside a segment gives
+the sets ahead of it, then an error, and one that ends between two segments
+gives its last set as it stands.
+
 ---
 
 ## Editing MP4/MOV natively
