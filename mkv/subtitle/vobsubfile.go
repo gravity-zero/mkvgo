@@ -187,8 +187,8 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 		if head[0] != 0 || head[1] != 0 || head[2] != 1 {
 			return nil, 0, fmt.Errorf("byte %d does not start an MPEG packet", pos)
 		}
-		switch code := head[3]; {
-		case code == 0xba: // pack header: 14 bytes and the stuffing its last byte counts
+		switch head[3] {
+		case 0xba: // pack header: 14 bytes and the stuffing its last byte counts
 			if _, err := sub.ReadAt(head[:], pos); err != nil {
 				return nil, 0, fmt.Errorf("a pack header cut short at byte %d: %w", pos, err)
 			}
@@ -196,9 +196,9 @@ func readVobSubUnit(sub io.ReaderAt, pos int64, substream byte) ([]byte, int64, 
 				return nil, 0, fmt.Errorf("the pack at byte %d is not an MPEG-2 program stream pack", pos)
 			}
 			pos += 14 + int64(head[13]&7)
-		case code == 0xb9: // program end
+		case 0xb9: // program end
 			return nil, 0, fmt.Errorf("the stream ends %d bytes into a unit of %d", len(unit), want)
-		case code == 0xbd: // private stream 1: the subpictures
+		case 0xbd: // private stream 1: the subpictures
 			size := int(binary.BigEndian.Uint16(head[4:6]))
 			pkt := make([]byte, size)
 			if _, err := sub.ReadAt(pkt, pos+6); err != nil {

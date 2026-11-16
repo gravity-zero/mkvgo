@@ -482,11 +482,13 @@ func (p *dvbPen) field(data []byte, x, y int) error {
 		tableLen := 0
 		switch typ {
 		case dvbData2Bit:
-			p.table = nil
-			if depth == 8 {
+			switch depth {
+			case 8:
 				p.table = map2to8[:]
-			} else if depth == 4 {
+			case 4:
 				p.table = map2to4[:]
+			default:
+				p.table = nil
 			}
 			data = data[p.string2(data):]
 		case dvbData4Bit:
@@ -667,9 +669,10 @@ func (d *DVBSubDecoder) compose() (BitmapDisplaySet, error) {
 			clut = dvbDefaultCLUT
 		}
 		colours := clut.c256[:]
-		if r.depth == 4 {
+		switch r.depth {
+		case 4:
 			colours = clut.c16[:]
-		} else if r.depth == 2 {
+		case 2:
 			colours = clut.c4[:]
 		}
 		img := image.NewNRGBA(image.Rect(0, 0, r.w, r.h))
