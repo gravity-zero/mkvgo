@@ -131,10 +131,16 @@ c, _ := matroska.OpenMeta(ctx, "video.mkv", matroska.WithInBandColourFallback())
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt            # text → SRT
 mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass # styled → ASS
 mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt # → WebVTT
+mkvgo extract-subtitle video.mkv -t 4 -o subs/ -format png    # bitmap (PGS, VobSub, DVB) → PNGs + cues.json
 ```
 
 ```go
 err := matroska.ExtractSubtitle(ctx, "video.mkv", 3, "subs.srt")
+
+// A bitmap track, whatever its codec: one timed picture per cue.
+err = matroska.ForEachSubtitleBitmap(ctx, "video.mkv", 4, func(c matroska.BitmapCue) error {
+    return save(c.Image, c.StartMs, c.EndMs, c.X, c.Y)
+})
 ```
 
 ## Convert MKV ↔ MP4 (no re-encode)

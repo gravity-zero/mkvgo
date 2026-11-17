@@ -1739,7 +1739,8 @@ time-out, and 3 s after its start for a last cue nothing closes. A display set
 of several pictures (two PGS windows, two DVB regions) is one cue, composited
 on the smallest rectangle that holds them. A text track is refused by name, as
 is a bitmap codec without a decoder here. `ForEachSubtitlePGS` and its
-siblings below are the same read for a track that must be PGS.
+siblings below are the same read for a track that must be PGS. CLI: `mkvgo
+extract-subtitle -format png`, with `-index` for the indexed form.
 
 The read under it is exported for a consumer that decodes on its own:
 
@@ -1953,8 +1954,9 @@ The decoder was written from the format description; mkvgo is MIT and links no
 third-party subtitle decoder. Out of scope by design: no OCR, no sprite sheet,
 no WebVTT rendering - which player-side packaging a bitmap track gets is the
 consumer's decision, not an extractor's. CLI: `mkvgo extract-subtitle -format
-pgs -o <dir>` writes one PNG per cue plus a `cues.json` manifest, driven by the
-streaming form.
+png -o <dir>` writes one PNG per cue plus a `cues.json` manifest for a bitmap
+track of any of the three codecs, driven by the streaming form; `-format pgs`
+does the same for a track that must be PGS.
 
 ### Bitmap subtitles: VobSub and DVB
 
