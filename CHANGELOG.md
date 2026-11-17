@@ -27,6 +27,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Fixed
 
+- A fragmented MP4 without `mehd` lasts until its latest track ends, a track
+  ending where it starts plus what its samples last: a video track that
+  starts after zero (a composition offset, no edit list) and outlasts the
+  audio was left out, the duration being the longest sum of sample durations
+  (2.763 s for a file whose last frame ends at 2.803 s). The probe and the
+  `Duration` `from-mp4` writes change together; a track's own duration does
+  not.
 - A bitmap cue whose block states a duration ends no later than its DVB
   page's time-out; the block's duration won.
 - `ForEachSubtitleBitmap`, `ForEachSubtitlePGS`, their `From` forms and
