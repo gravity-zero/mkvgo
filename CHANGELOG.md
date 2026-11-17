@@ -16,8 +16,19 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   decoder's error; nil for a damaged region. `extract-subtitle` names such a
   block on stderr by its time and that error, in a message of its own.
 
+### Changed
+
+- `subtitle.DVBSubDecoder` and `subtitle.PGSDecoder` keep the picture of a
+  region or an object from one display set to the next, until its pixels or
+  its colours change: a display set that only names it again no longer reads
+  it through its colour table again (a 14-byte block made a 4096x4096 region
+  be rendered whole). Display sets that show the same picture now share one
+  image, as its placements within a set did: treat the images as read-only.
+
 ### Fixed
 
+- A bitmap cue whose block states a duration ends no later than its DVB
+  page's time-out; the block's duration won.
 - `ForEachSubtitleBitmap`, `ForEachSubtitlePGS`, their `From` forms and
   `extract-subtitle -format png|pgs`: a block that reads but does not decode
   no longer fails the whole track. It is lost alone, the cue on screen ending
