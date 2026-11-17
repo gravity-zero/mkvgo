@@ -15,8 +15,45 @@ func FuzzPGSAssembler(f *testing.F) {
 	f.Fuzz(func(t *testing.T, first, second []byte, durMs int64) {
 		costguard.Fuzz(t, len(first)+len(second), func() {
 			var cues []PGSCue
-			a := newPGSAssembler(func(c PGSCue) error { cues = append(cues, c); return nil }, &mkv.Track{Codec: "S_HDMV/PGS"})
+			a, err := newBitmapAssembler(func(c PGSCue) error { cues = append(cues, c); return nil }, &mkv.Track{Codec: "pgs"})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if a.block(1000, durMs%5000, first) != nil || a.block(2000, 0, second) != nil {
+				return
+			}
+			for _, c := range cues {
+				if c.EndMs <= c.StartMs {
+					t.Fatalf("cue %d..%d ms ends before it starts", c.StartMs, c.EndMs)
+				}
+			}
+		})
+	})
+}
+
+// FuzzBitmapAssembler: two VobSub or DVB blocks of any bytes, with a region lost between them or not, decode and
+// flatten to cues or an error, never a panic, and every cue ends after it starts.
+func FuzzBitmapAssembler(f *testing.F) {
+	f.Add(false, []byte{0x00, 0x08, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04}, []byte{0x00, 0x0a}, int64(0), false)
+	f.Add(true, []byte{0x0f, 0x10, 0x00, 0x01, 0x00, 0x02, 0x0f, 0x20, 0x0f, 0x80, 0x00, 0x01, 0x00, 0x00}, []byte{0x0f, 0x80, 0x00, 0x01, 0x00, 0x00}, int64(40), true)
+	f.Fuzz(func(t *testing.T, dvb bool, first, second []byte, durMs int64, lost bool) {
+		costguard.Fuzz(t, len(first)+len(second), func() {
+			track := &mkv.Track{Codec: "vobsub", CodecPrivate: []byte("size: 720x576\npalette: 000000, ff0000, 00ff00, 0000ff, ffffff, 101010, 202020, 303030, 404040, 505050, 606060, 707070, 808080, 909090, a0a0a0, b0b0b0\n")}
+			if dvb {
+				track = &mkv.Track{Codec: "dvbsub"}
+			}
+			var cues []BitmapCue
+			a, err := newBitmapAssembler(func(c BitmapCue) error { cues = append(cues, c); return nil }, track)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.block(1000, durMs%5000, first) != nil {
+				return
+			}
+			if lost && a.lost(1500) != nil {
+				return
+			}
+			if a.block(2000, 0, second) != nil || a.finish() != nil {
 				return
 			}
 			for _, c := range cues {

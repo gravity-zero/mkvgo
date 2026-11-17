@@ -1,0 +1,231 @@
+package ops
+
+// subbitmap.go - bitmap subtitle tracks as timed pictures, whatever the codec: PGS (Blu-ray), VobSub (DVD) and DVB
+// (broadcast) each decode to display sets (mkv/subtitle), and the rules that turn display sets into cues are the
+// same for the three. The blocks come from the read of subblocks.go, walked or served from a SubtitleIndex.
+
+import (
+	"context"
+	"fmt"
+	"image"
+	"image/draw"
+
+	"github.com/gravity-zero/mkvgo/internal/oneopt"
+	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/subtitle"
+)
+
+// BitmapCue is one bitmap subtitle of any codec: the type PGSCue names.
+type BitmapCue = PGSCue
+
+// ForEachSubtitleBitmap walks srcPath once and calls fn with each cue of the bitmap subtitle track trackID, in
+// presentation order: a PGS, VobSub or DVB track, decoded by its codec. Only one cue's picture is alive at a time,
+// so a whole track is written out in bounded memory. An error from fn stops the walk and is returned as is.
+//
+// A cue starts where its display set takes effect and ends, in this order: where the stream says (a VobSub stop
+// command), at the duration the muxer wrote for its block, or where the next display set begins - no later than a
+// DVB page's time-out, and 3 s after its start for a last cue nothing closes. A display set of several pictures is
+// one cue, composited on the smallest rectangle that holds them.
+func ForEachSubtitleBitmap(ctx context.Context, srcPath string, trackID uint64, fn func(BitmapCue) error, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return walkSubtitleBlocks(ctx, srcPath, trackID, bitmapCues(fn, nil), opts)
+}
+
+// ForEachSubtitleBitmapFrom is ForEachSubtitleBitmap served from a prebuilt index, under the checks of
+// ForEachSubtitleBlockFrom. The index is read from its first entry: the state of a bitmap codec spans blocks, and a
+// cue decoded from the middle of a track could draw on pictures that were never read.
+func ForEachSubtitleBitmapFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(BitmapCue) error, opts ...mkv.Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return indexedSubtitleBlocks(ctx, srcPath, trackID, ix, bitmapCues(fn, nil), opts)
+}
+
+// bitmapDecoder is what the three codecs' decoders share.
+type bitmapDecoder interface {
+	Decode(block []byte) ([]subtitle.BitmapDisplaySet, error)
+	Reset()
+}
+
+// newBitmapDecoder picks the decoder of a subtitle track's codec, and the name its errors go by.
+func newBitmapDecoder(t *mkv.Track) (bitmapDecoder, string, error) {
+	switch t.Codec {
+	case "pgs":
+		return subtitle.NewPGSDecoder(), "PGS", nil
+	case "vobsub":
+		d, err := subtitle.NewVobSubDecoder(t.CodecPrivate)
+		return d, "VobSub", err
+	case "dvbsub":
+		return subtitle.NewDVBSubDecoder(t.CodecPrivate), "DVB subtitle", nil
+	}
+	if isTextSubtitle(t.Codec) {
+		return nil, "", fmt.Errorf("subtitle track %d codec %q is text, not bitmaps - extract it as WebVTT instead", t.ID, t.Codec)
+	}
+	return nil, "", fmt.Errorf("subtitle track %d codec %q is not a bitmap subtitle this reads (PGS, VobSub, DVB)", t.ID, t.Codec)
+}
+
+// bitmapCues is the sink that decodes a bitmap track's blocks into cues; check, when set, refuses the track first.
+func bitmapCues(fn func(BitmapCue) error, check func(*mkv.Track) error) subtitleSink {
+	var asm *bitmapAssembler
+	return subtitleSink{
+		accept: func(_ *mkv.Container, t *mkv.Track) error {
+			if check != nil {
+				if err := check(t); err != nil {
+					return err
+				}
+			}
+			a, err := newBitmapAssembler(fn, t)
+			asm = a
+			return err
+		},
+		block: func(blk mkv.Block) error { return asm.block(blk.Timecode, blk.Duration, blk.Data) },
+		lost:  func(fromMs int64) error { return asm.lost(fromMs) },
+		end:   func() error { return asm.finish() },
+	}
+}
+
+// bitmapAssembler turns the stream of decoded display sets into timed cues. A cue's end is often not in its own
+// block: it is the time of the next display set, which is normally an empty one meaning "clear the screen". So a
+// cue is held open until the block that ends it arrives, and emitted then - one cue of latency, never the whole
+// track.
+type bitmapAssembler struct {
+	dec    bitmapDecoder
+	name   string
+	emit   func(BitmapCue) error
+	track  *mkv.Track
+	open   *BitmapCue
+	latest int64 // when the open cue ends at the latest: its page's time-out, 0 for none
+	unitMs int64 // the time of the block that started the unit being decoded
+}
+
+func newBitmapAssembler(fn func(BitmapCue) error, t *mkv.Track) (*bitmapAssembler, error) {
+	dec, name, err := newBitmapDecoder(t)
+	if err != nil {
+		return nil, err
+	}
+	return &bitmapAssembler{dec: dec, name: name, emit: fn, track: t}, nil
+}
+
+func (a *bitmapAssembler) block(timeMs, durMs int64, data []byte) error {
+	data, err := decompressSubtitleBlock(a.track, data)
+	if err != nil {
+		return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+	}
+	// A unit spread over several blocks (VobSub) is dated by the first of them.
+	if c, ok := a.dec.(interface{ Continues([]byte) bool }); !ok || !c.Continues(data) {
+		a.unitMs = timeMs
+	}
+	sets, err := a.dec.Decode(data)
+	if err != nil {
+		return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+	}
+	for i := range sets {
+		ds := &sets[i]
+		start := a.unitMs + ds.Delay.Milliseconds()
+		// Whatever is on screen ends where this display set begins, whether the new one clears the screen or
+		// replaces it.
+		if err := a.closeAt(start); err != nil {
+			return err
+		}
+		if ds.Clear() {
+			continue
+		}
+		cue, err := flattenDisplaySet(ds, start, a.name)
+		if err != nil {
+			return fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+		}
+		// The stream's own end, then the muxer's, are known now: emit and hold nothing.
+		switch {
+		case ds.Duration > 0:
+			cue.EndMs = start + ds.Duration.Milliseconds()
+		case durMs > 0:
+			cue.EndMs = timeMs + durMs
+		}
+		if cue.EndMs > cue.StartMs {
+			if err := a.emit(cue); err != nil {
+				return err
+			}
+			continue
+		}
+		a.open, a.latest = &cue, 0
+		if ds.Timeout > 0 {
+			a.latest = start + ds.Timeout.Milliseconds()
+		}
+	}
+	return nil
+}
+
+// closeAt ends the open cue at t, or at its time-out when that comes first. A t that does not move the clock
+// forward (two display sets inside one block) would make a zero-length cue, so the default duration is used
+// instead - the same fallback the text path applies.
+func (a *bitmapAssembler) closeAt(t int64) error {
+	if a.open == nil {
+		return nil
+	}
+	cue := *a.open
+	a.open = nil
+	cue.EndMs = t
+	if a.latest > 0 && cue.EndMs > a.latest {
+		cue.EndMs = a.latest
+	}
+	if cue.EndMs <= cue.StartMs {
+		cue.EndMs = cue.StartMs + defaultSubDurationMs
+	}
+	return a.emit(cue)
+}
+
+// lost ends the cue on screen where a region the read just passed over begins, and forgets the state it cut.
+func (a *bitmapAssembler) lost(fromMs int64) error {
+	a.dec.Reset()
+	return a.closeAt(fromMs)
+}
+
+// finish flushes a cue the track never closed - a last subtitle with no trailing "clear" display set, which is
+// common enough not to be an error.
+func (a *bitmapAssembler) finish() error {
+	if a.open == nil {
+		return nil
+	}
+	cue := *a.open
+	a.open = nil
+	cue.EndMs = cue.StartMs + defaultSubDurationMs
+	if a.latest > 0 && a.latest < cue.EndMs {
+		cue.EndMs = a.latest
+	}
+	return a.emit(cue)
+}
+
+// flattenDisplaySet reduces a display set to the one picture a cue holds. Most sets carry a single object and are
+// handed over untouched; a set with several (a disc that puts a top and a bottom line in two windows, a broadcast
+// with one region a line) is composited onto the smallest rectangle covering them, so X, Y stays a real screen
+// position rather than becoming meaningless.
+func flattenDisplaySet(ds *subtitle.BitmapDisplaySet, startMs int64, name string) (BitmapCue, error) {
+	cue := BitmapCue{StartMs: startMs, ScreenW: ds.ScreenW, ScreenH: ds.ScreenH}
+	if len(ds.Objects) == 1 {
+		o := ds.Objects[0]
+		cue.X, cue.Y, cue.Forced, cue.Image = o.X, o.Y, o.Forced, o.Image
+		return cue, nil
+	}
+	var union image.Rectangle
+	for _, o := range ds.Objects {
+		r := o.Image.Bounds().Add(image.Pt(o.X, o.Y))
+		union = union.Union(r)
+		cue.Forced = cue.Forced || o.Forced
+	}
+	if union.Dx() > bitmapMaxPlane || union.Dy() > bitmapMaxPlane {
+		return cue, fmt.Errorf("%s: a display set spreads its objects over %dx%d pixels, past the %d a subtitle plane holds: the track is damaged or forged", name, union.Dx(), union.Dy(), bitmapMaxPlane)
+	}
+	out := image.NewNRGBA(image.Rect(0, 0, union.Dx(), union.Dy()))
+	for _, o := range ds.Objects {
+		at := image.Pt(o.X-union.Min.X, o.Y-union.Min.Y)
+		draw.Draw(out, image.Rectangle{Min: at, Max: at.Add(o.Image.Bounds().Size())}, o.Image, image.Point{}, draw.Over)
+	}
+	cue.X, cue.Y, cue.Image = union.Min.X, union.Min.Y, out
+	return cue, nil
+}
+
+// bitmapMaxPlane bounds the picture several objects are composited onto, as the formats bound each object: placed
+// far apart by a forged composition, two dots would otherwise ask for a picture of gigabytes.
+const bitmapMaxPlane = 4096

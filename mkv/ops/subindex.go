@@ -26,7 +26,6 @@ import (
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
-	"github.com/gravity-zero/mkvgo/mkv/subtitle"
 )
 
 // ErrIndexStale is returned when an index does not describe the file it is
@@ -274,107 +273,11 @@ func ExtractSubtitleWebVTTFrom(ctx context.Context, srcPath string, trackID uint
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
-	if ix == nil {
-		return fmt.Errorf("nil subtitle index")
-	}
-	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenMetaWithFS(ctx, srcPath, fs)
-	if err != nil {
+	vtt := &webVTTCues{}
+	if err := indexedSubtitleBlocks(ctx, srcPath, trackID, ix, vtt.sink(), opts); err != nil {
 		return err
 	}
-	st, err := fs.DoStat(srcPath)
-	if err != nil {
-		return err
-	}
-	if err := ix.checkAgainst(c, st.Size()); err != nil {
-		return err
-	}
-
-	codec, err := textSubtitleCodec(c, trackID)
-	if err != nil {
-		return err
-	}
-	track := subtitleTrackByID(c, trackID)
-	entries, ok := ix.entries[trackID]
-	if !ok {
-		return fmt.Errorf("%w: track %d", ErrTrackNotIndexed, trackID)
-	}
-
-	f, err := fs.DoOpen(srcPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var br *reader.BlockReader
-	var dmg *subtitleDamage
-	cues := make([]subtitle.Cue, 0, len(entries))
-	for i := range entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		e := &entries[i]
-		if br == nil {
-			// The first position seats the reader; the rest re-seat it, so the
-			// read window is allocated once for the whole track.
-			br, err = reader.NewBlockReaderFrom(f, ix.tcScale, e.pos)
-			if err != nil {
-				return err
-			}
-			br.KeepTracks(trackID)
-			// A mid-file reader never walks over the Tracks element, so it
-			// cannot pick the per-frame strides up on its own: without them a
-			// laced block's frames would all carry the block timecode, and the
-			// output would differ from the walking extractor's.
-			br.SetTrackDefaultDurations(reader.TrackDefaultDurations(c.Tracks))
-			dmg = tolerateSubtitleDamage(br, opts)
-		} else if err := br.SeekTo(e.pos); err != nil {
-			return err
-		}
-		// One entry, e.frames frames: an unlaced block takes exactly one turn
-		// here, a laced one takes its whole lace without re-seeking.
-		for k := int64(0); k < e.frames; k++ {
-			blk, err := br.Next()
-			if dmg.pending() && (k > 0 || seatZeroed(f, e.pos.Off)) { // the entry lies in a damaged region: its cues are lost
-				fromMs, ok := dmg.skipped()
-				closeOpenCue(cues, fromMs, ok)
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("%w: reading the block at offset %d: %w", ErrIndexStale, e.pos.Off, err)
-			}
-			if blk.TrackNumber != trackID {
-				return fmt.Errorf("%w: offset %d holds track %d, the index recorded track %d",
-					ErrIndexStale, e.pos.Off, blk.TrackNumber, trackID)
-			}
-			// Only the block's first frame carries the recorded timecode; the
-			// rest are strided by the track's DefaultDuration, which a mid-file
-			// reader cannot know - so they are not checked against the index.
-			if k == 0 && blk.Timecode != e.timeMs {
-				return fmt.Errorf("%w: offset %d holds track %d at %d ms, the index recorded %d ms",
-					ErrIndexStale, e.pos.Off, trackID, blk.Timecode, e.timeMs)
-			}
-			payload, err := decompressSubtitleBlock(track, blk.Data)
-			if err != nil {
-				return err
-			}
-			text := decodeSubtitleCue(codec, payload)
-			if text == "" {
-				continue
-			}
-			end := int64(0)
-			if blk.Duration > 0 {
-				end = blk.Timecode + blk.Duration
-			}
-			cue := subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text}
-			if codec == "webvtt" {
-				cue.Settings, _ = subtitle.WebVTTAddition(blk.Additions)
-			}
-			cues = append(cues, cue)
-		}
-	}
-	subtitle.SettleCueEnds(cues, c.DurationMs)
-	return subtitle.WriteWebVTT(w, cues)
+	return vtt.write(w)
 }
 
 // checkAgainst rejects an index built from a different file. The size and the
@@ -391,22 +294,6 @@ func (ix *SubtitleIndex) checkAgainst(c *mkv.Container, size int64) error {
 		return fmt.Errorf("%w: a different timecode scale", ErrIndexStale)
 	}
 	return nil
-}
-
-// textSubtitleCodec resolves the codec of a track that must exist, be a
-// subtitle track, and be convertible to WebVTT - the same checks
-// ExtractSubtitleWebVTT makes before it reads anything.
-func textSubtitleCodec(c *mkv.Container, trackID uint64) (string, error) {
-	for _, t := range c.Tracks {
-		if t.ID != trackID || t.Type != mkv.SubtitleTrack {
-			continue
-		}
-		if !isTextSubtitle(t.Codec) {
-			return "", fmt.Errorf("subtitle track %d codec %q is not text (cannot convert to WebVTT)", trackID, t.Codec)
-		}
-		return t.Codec, nil
-	}
-	return "", fmt.Errorf("subtitle track %d not found", trackID)
 }
 
 // MarshalBinary encodes the index. Positions and timecodes are monotonic per

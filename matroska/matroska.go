@@ -1165,6 +1165,46 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 	return ops.ForEachSubtitlePGSFrom(ctx, srcPath, trackID, ix, fn, opts...)
 }
 
+// BitmapCue is one decoded bitmap subtitle of any codec: the type PGSCue names. See ops.BitmapCue.
+type BitmapCue = ops.BitmapCue
+
+// ForEachSubtitleBitmap calls fn with each cue of a bitmap subtitle track - PGS, VobSub or DVB, decoded by its
+// codec - walking the source once, one cue's picture alive at a time. See ops.ForEachSubtitleBitmap.
+func ForEachSubtitleBitmap(ctx context.Context, srcPath string, trackID uint64, fn func(BitmapCue) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ForEachSubtitleBitmap(ctx, srcPath, trackID, fn, opts...)
+}
+
+// ForEachSubtitleBitmapFrom is ForEachSubtitleBitmap served from a prebuilt index. See ops.ForEachSubtitleBitmapFrom.
+func ForEachSubtitleBitmapFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(BitmapCue) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ForEachSubtitleBitmapFrom(ctx, srcPath, trackID, ix, fn, opts...)
+}
+
+// SubtitleBlock is one block of a subtitle track, its payload as the codec reads it. See ops.SubtitleBlock.
+type SubtitleBlock = ops.SubtitleBlock
+
+// ForEachSubtitleBlock calls fn with each block of a subtitle track, whatever its codec, walking the source once.
+// See ops.ForEachSubtitleBlock.
+func ForEachSubtitleBlock(ctx context.Context, srcPath string, trackID uint64, fn func(SubtitleBlock) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ForEachSubtitleBlock(ctx, srcPath, trackID, fn, opts...)
+}
+
+// ForEachSubtitleBlockFrom is ForEachSubtitleBlock served from a prebuilt index. See ops.ForEachSubtitleBlockFrom.
+func ForEachSubtitleBlockFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, fn func(SubtitleBlock) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ForEachSubtitleBlockFrom(ctx, srcPath, trackID, ix, fn, opts...)
+}
+
 // SubtitleFileToWebVTT converts an external subtitle sidecar (.srt/.ass/.ssa/.vtt)
 // to WebVTT, written to w. See subtitle.FileToWebVTT.
 func SubtitleFileToWebVTT(srcPath string, w io.Writer) error {

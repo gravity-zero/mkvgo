@@ -227,78 +227,66 @@ func verifiedCueIndex(ctx context.Context, srcPath string, trackID uint64, opts 
 
 // extractSubtitleWebVTTWalk is ExtractSubtitleWebVTT walking the whole file.
 func extractSubtitleWebVTTWalk(ctx context.Context, srcPath string, trackID uint64, w io.Writer, opts ...mkv.Options) error {
-	fs := mkv.FSFrom(opts)
-	c, err := reader.OpenWithFS(ctx, srcPath, fs, reader.WithoutAttachmentData())
+	vtt := &webVTTCues{}
+	if err := walkSubtitleBlocks(ctx, srcPath, trackID, vtt.sink(), opts); err != nil {
+		return err
+	}
+	if err := vtt.write(w); err != nil {
+		return err
+	}
+	return truncatedSource(srcPath, mkv.FSFrom(opts), vtt.cues)
+}
+
+// webVTTCues gathers a text subtitle track's blocks as WebVTT cues.
+type webVTTCues struct {
+	c     *mkv.Container
+	track *mkv.Track
+	cues  []subtitle.Cue
+}
+
+// sink reads a track that must be text; a cue left open by a damaged region ends where the region starts.
+func (v *webVTTCues) sink() subtitleSink {
+	return subtitleSink{
+		accept: func(c *mkv.Container, t *mkv.Track) error {
+			if !isTextSubtitle(t.Codec) {
+				return fmt.Errorf("subtitle track %d codec %q is not text (cannot convert to WebVTT)", t.ID, t.Codec)
+			}
+			v.c, v.track = c, t
+			return nil
+		},
+		block: v.block,
+		lost: func(fromMs int64) error {
+			closeOpenCue(v.cues, fromMs, true)
+			return nil
+		},
+	}
+}
+
+func (v *webVTTCues) block(blk mkv.Block) error {
+	payload, err := decompressSubtitleBlock(v.track, blk.Data)
 	if err != nil {
 		return err
 	}
+	text := decodeSubtitleCue(v.track.Codec, payload)
+	if text == "" {
+		return nil
+	}
+	end := int64(0)
+	if blk.Duration > 0 {
+		end = blk.Timecode + blk.Duration
+	}
+	cue := subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text}
+	if v.track.Codec == "webvtt" {
+		cue.Settings, _ = subtitle.WebVTTAddition(blk.Additions)
+	}
+	v.cues = append(v.cues, cue)
+	return nil
+}
 
-	var track *mkv.Track
-	for i := range c.Tracks {
-		if c.Tracks[i].ID == trackID && c.Tracks[i].Type == mkv.SubtitleTrack {
-			track = &c.Tracks[i]
-			break
-		}
-	}
-	if track == nil {
-		return fmt.Errorf("subtitle track %d not found", trackID)
-	}
-	codec := track.Codec
-	if !isTextSubtitle(codec) {
-		return fmt.Errorf("subtitle track %d codec %q is not text (cannot convert to WebVTT)", trackID, codec)
-	}
-
-	f, err := fs.DoOpen(srcPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	br, err := reader.NewBlockReader(f, c.Info.TimecodeScale)
-	if err != nil {
-		return err
-	}
-	br.KeepTracks(trackID) // reader-side filter, as in ExtractSubtitle
-	dmg := tolerateSubtitleDamage(br, opts)
-
-	var cues []subtitle.Cue
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		blk, err := br.Next()
-		if err == io.EOF {
-			fromMs, ok := dmg.skipped()
-			closeOpenCue(cues, fromMs, ok)
-			break
-		}
-		if err != nil {
-			return err
-		}
-		fromMs, ok := dmg.skipped()
-		closeOpenCue(cues, fromMs, ok)
-		payload, err := decompressSubtitleBlock(track, blk.Data)
-		if err != nil {
-			return err
-		}
-		text := decodeSubtitleCue(codec, payload)
-		if text == "" {
-			continue
-		}
-		end := int64(0)
-		if blk.Duration > 0 {
-			end = blk.Timecode + blk.Duration
-		}
-		cue := subtitle.Cue{StartMs: blk.Timecode, EndMs: end, Text: text}
-		if codec == "webvtt" {
-			cue.Settings, _ = subtitle.WebVTTAddition(blk.Additions)
-		}
-		cues = append(cues, cue)
-	}
-	subtitle.SettleCueEnds(cues, c.DurationMs)
-	if err := subtitle.WriteWebVTT(w, cues); err != nil {
-		return err
-	}
-	return truncatedSource(srcPath, fs, cues)
+// write settles the ends the blocks did not state and writes the cues.
+func (v *webVTTCues) write(w io.Writer) error {
+	subtitle.SettleCueEnds(v.cues, v.c.DurationMs)
+	return subtitle.WriteWebVTT(w, v.cues)
 }
 
 // ErrSourceTruncated reports a source that stops before the end its Segment declares (a download not finished):
