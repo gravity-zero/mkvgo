@@ -46,13 +46,12 @@ func CmdExtractAttachment(args []string) {
 
 func CmdExtractSubtitle(args []string) {
 	usage := CmdUsage["extract-subtitle"]
-	if len(args) < 5 {
+	if len(args) < 3 {
 		FatalUsage("usage: " + usage)
 	}
 	var outPath, format, indexPath string
 	var trackID uint64
 	var damageBytes int64
-	format = "srt"
 
 	fl := newFlags("extract-subtitle")
 	fl.String(&outPath, "-o")
@@ -67,6 +66,13 @@ func CmdExtractSubtitle(args []string) {
 	}, "-t")
 	fl.String(&format, "-format")
 	source, _ := fl.ParseSource(args, usage)
+	if isBitmapSubtitleFile(source) {
+		extractBitmapSubtitleFile(source, outPath, format, indexPath, trackID, damageBytes, usage)
+		return
+	}
+	if format == "" {
+		format = "srt"
+	}
 	if outPath == "" || trackID == 0 {
 		FatalUsage("usage: " + usage)
 	}
@@ -196,6 +202,42 @@ type pgsCueManifest struct {
 	ScreenH int    `json:"screen_h"`
 	Forced  bool   `json:"forced,omitempty"`
 	File    string `json:"file"`
+}
+
+// isBitmapSubtitleFile reports a subtitle file that sits beside a video: a PGS .sup, a VobSub .idx or .sub.
+func isBitmapSubtitleFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".sup", ".idx", ".sub":
+		return true
+	}
+	return false
+}
+
+// extractBitmapSubtitleFile writes the cues of a .sup or a .idx/.sub pair as PNGs and a manifest. -t picks the
+// language of a .idx by its position in it, from 1; a .sup holds one.
+func extractBitmapSubtitleFile(source, outPath, format, indexPath string, stream uint64, damageBytes int64, usage string) {
+	if outPath == "" {
+		FatalUsage("usage: " + usage)
+	}
+	if format != "" && format != "png" && !(format == "pgs" && strings.EqualFold(filepath.Ext(source), ".sup")) {
+		FatalUsage(fmt.Sprintf("%s holds bitmap subtitles: -format png writes them, -format %s does not apply", filepath.Base(source), format))
+	}
+	if indexPath != "" {
+		FatalUsage("-index applies to a subtitle track of an MKV/WebM, not to a subtitle file beside the video")
+	}
+	if stream == 0 {
+		stream = 1
+	}
+	guardOutput(outPath, source)
+	opts := subtitleReadOptions(damageBytes)
+	opts.SyncOutput = SyncOutput
+	n, err := writePGSDir(outPath, func(fn func(matroska.BitmapCue) error) error {
+		return matroska.ForEachSubtitleBitmapFile(cliCtx, source, int(stream-1), fn, opts)
+	})
+	if err != nil {
+		FatalErr(err)
+	}
+	fmt.Printf("extracted %d bitmap cue(s) from %s (stream %d) → %s\n", n, source, stream, outPath)
 }
 
 // writePGSDir writes one PNG per cue into outDir plus a cues.json manifest. It
@@ -333,6 +375,10 @@ func subtitleIndexFromCues(source string, trackIDs []uint64, opts ...matroska.Op
 func subtitleReadOptions(damageBytes int64) matroska.Options {
 	return matroska.Options{DamageBytes: damageBytes, OnSkip: func(r matroska.DamagedRange) {
 		noteDamage()
+		if r.Err != nil && r.StartOffset < 0 { // a unit of a file beside the video: no byte range there
+			fmt.Fprintf(os.Stderr, "lost the subtitle at %d ms, which does not decode: %v\n", r.ApproxStartMs, r.Err)
+			return
+		}
 		if r.Err != nil { // a block that was read: its time and what its decoder said
 			fmt.Fprintf(os.Stderr, "lost the subtitle block at %d ms (bytes %d to %d), which does not decode: %v\n",
 				r.ApproxStartMs, r.StartOffset, r.EndOffset, r.Err)

@@ -266,3 +266,46 @@ func TestCmdExtractSubtitle_NamesABlockThatDoesNotDecode(t *testing.T) {
 		t.Errorf("the region is announced as %q", lines[1])
 	}
 }
+
+// A .sup or a .idx/.sub pair beside the video is read as -format png without one, -t picking a .idx's language from
+// 1; a unit that does not decode is named on stderr by its time and its error.
+func TestCmdExtractSubtitle_BitmapFileBesideTheVideo(t *testing.T) {
+	dir := t.TempDir()
+	out := capture(t, func() {
+		commands.CmdExtractSubtitle([]string{"../../../internal/testdata/pgs_sub.sup", "-o", filepath.Join(dir, "sup")})
+	})
+	if !strings.Contains(out, "extracted 2 bitmap cue(s) from ../../../internal/testdata/pgs_sub.sup (stream 1)") {
+		t.Errorf("stdout = %q, want the two display sets of the .sup", out)
+	}
+	sub, err := os.ReadFile("../../../internal/testdata/vobsub.sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := os.ReadFile("../../../internal/testdata/vobsub.idx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The unit of the first entry, at 132499 ms, its control sequences placed inside its header.
+	unit := 14 + int(sub[13]&7) + 6 + 3 + int(sub[14+int(sub[13]&7)+8]) + 1
+	sub[unit+2], sub[unit+3] = 0, 2
+	for name, data := range map[string][]byte{"film.idx": idx, "film.sub": sub} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errOut := stderrOf(t, func() {
+		out = capture(t, func() {
+			commands.CmdExtractSubtitle([]string{filepath.Join(dir, "film.sub"), "-t", "1", "-o", filepath.Join(dir, "vob"), "-format", "png"})
+		})
+	})
+	if !strings.Contains(out, "extracted 42 bitmap cue(s)") {
+		t.Errorf("stdout = %q, want 42 cues", out)
+	}
+	if want := "lost the subtitle at 132499 ms, which does not decode: VobSub: the subpicture places its control sequences at byte 2"; !strings.HasPrefix(strings.TrimSpace(errOut), want) {
+		t.Errorf("stderr = %q, want it to start with %q", errOut, want)
+	}
+	blob, err := os.ReadFile(filepath.Join(dir, "vob", "cues.json"))
+	if err != nil || !strings.Contains(string(blob), `"start_ms": 147355`) {
+		t.Errorf("the manifest does not hold the second cue: %v", err)
+	}
+}
