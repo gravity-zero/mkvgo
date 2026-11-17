@@ -1742,7 +1742,9 @@ on the smallest rectangle that holds them. A block that reads but does not
 decode - its payload does not decompress, its bytes are not what the codec
 reads, its pictures cannot be composited - is lost alone: the cue on screen
 ends at the block's time, the decoder starts afresh, the block is reported
-through `Options.OnSkip` (its byte range, its time) and the read goes on. A
+through `Options.OnSkip` and the read goes on. The `DamagedRange` of such a
+block carries its byte range, its time and, in `Err`, the decoder's error;
+`Err` is nil for a damaged region, bytes the read jumped over. A
 DVB decoder that starts afresh holds no region and no colour table, so nothing
 shows until the stream's next acquisition point or mode change. With a
 negative `Options.DamageBytes`, which refuses any damage, such a block fails
