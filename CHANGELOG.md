@@ -11,6 +11,12 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Added
 
+- `ForEachSubtitleBitmapFile` (`matroska`, `mkv/ops`) gives a bitmap subtitle
+  file that sits beside a video - a PGS `.sup`, or a VobSub `.idx`/`.sub`
+  pair - as cues, timed and ended as `ForEachSubtitleBitmap` does a track's,
+  a unit that does not decode lost alone. `extract-subtitle` reads such a file
+  as `-format png`, `-t` picking a `.idx`'s language from 1.
+
 - `DamagedRange.Err` (`mkv`, `matroska`): set on the range `Options.OnSkip`
   gets for a bitmap subtitle block that was read but did not decode, to the
   decoder's error; nil for a damaged region. `extract-subtitle` names such a
