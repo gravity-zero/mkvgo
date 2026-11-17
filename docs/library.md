@@ -1921,17 +1921,28 @@ in straight-alpha `*image.NRGBA`, each with its position on the subtitle
 plane (`ScreenW`/`ScreenH`), and a set with no object where the screen clears.
 
 ```go
-dec, err := subtitle.NewVobSubDecoder(track.CodecPrivate) // or dec := subtitle.NewDVBSubDecoder(track.CodecPrivate)
+// VobSub: a unit is one block, or several when a muxer cut it; it is dated by the block that starts it.
+dec, err := subtitle.NewVobSubDecoder(track.CodecPrivate)
 var unitTime int64
 for each block of the track {
-    if !dec.Pending() { // VobSub: a unit over several blocks keeps the time of its first
+    data, err := track.DecodePayload(block.Data) // a track stored compressed
+    if !dec.Continues(data) {
         unitTime = block.Timecode
     }
-    data, err := track.DecodePayload(block.Data) // a track stored compressed
     sets, err := dec.Decode(data)
     for _, ds := range sets {
         start := unitTime + ds.Delay.Milliseconds()
         // ds.Objects: X, Y, Forced, Image; none = the screen clears at start
+    }
+}
+
+// DVB: a block is a display set, shown at the block's time.
+dvb := subtitle.NewDVBSubDecoder(track.CodecPrivate)
+for each block of the track {
+    data, err := track.DecodePayload(block.Data)
+    sets, err := dvb.Decode(data)
+    for _, ds := range sets {
+        // ds.Objects at block.Timecode; none = the screen clears
     }
 }
 ```
@@ -1945,9 +1956,10 @@ What differs from PGS:
   until its stop command, zero when the unit has none (the block's duration or
   the next block then ends it). `Forced` is the unit's forced-display command.
   A unit a muxer spread over several blocks comes out with the block that
-  completes it, and its time is the first block's: `Pending` reports, after
-  each block, that a unit is waiting for its rest. A block that is a whole
-  unit of its own never completes the one before, which is dropped. A stop at
+  completes it, and its time is the first block's: `Continues`, asked ahead
+  of each `Decode`, tells whether the block is the rest of a unit or starts
+  one. A block that is a whole unit of its own never completes the one before,
+  which is dropped, and so starts one. A stop at
   the date of the start gives an empty set. Colour and contrast changes
   within a picture (command `0x07`) are not applied.
 - **DVB** keeps regions, their pixels and the colour tables between blocks: a

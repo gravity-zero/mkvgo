@@ -154,7 +154,8 @@ func (d *DVBSubDecoder) Reset() {
 
 // Decode decodes one Matroska block into the display sets it completes, almost always one: a set's objects are the
 // regions on screen, each cut down to its visible pixels, and a set with none clears the screen; its Timeout is the
-// page's, the end of a set being the next one. Bytes that are no
+// page's, the end of a set being the next one. The images are freshly allocated and owned by the caller; a region
+// a page places more than once shares one image between its placements. Bytes that are no
 // segment end the block. A segment that cannot be read is an error, returned with the sets completed ahead of it
 // and the one being composed, which show the state the decoder is left in.
 //
