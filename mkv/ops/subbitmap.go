@@ -20,11 +20,12 @@ type BitmapCue = PGSCue
 
 // ForEachSubtitleBitmap walks srcPath once and calls fn with each cue of the bitmap subtitle track trackID, in
 // presentation order: a PGS, VobSub or DVB track, decoded by its codec. Only one cue's picture is alive at a time,
-// so a whole track is written out in bounded memory. An error from fn stops the walk and is returned as is.
+// so a whole track is written out in bounded memory; a cue that shows the picture of an earlier one is handed the
+// same image, to be read and not written. An error from fn stops the walk and is returned as is.
 //
 // A cue starts where its display set takes effect and ends, in this order: where the stream says (a VobSub stop
-// command), at the duration the muxer wrote for its block, or where the next display set begins - no later than a
-// DVB page's time-out, and 3 s after its start for a last cue nothing closes. A display set of several pictures is
+// command), at the duration the muxer wrote for its block, or where the next display set begins - in every case no
+// later than a DVB page's time-out, and 3 s after its start for a last cue nothing closes. A display set of several pictures is
 // one cue, composited on the smallest rectangle that holds them.
 //
 // A block that reads but does not decode is lost alone: the cue on screen ends at its time, the decoder starts
@@ -189,6 +190,9 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 		s := decodedSet{cue: cue}
 		if ds.Timeout > 0 {
 			s.latest = start + ds.Timeout.Milliseconds()
+			if cue.EndMs > s.latest { // the end the block states, when the page's time-out comes first
+				s.cue.EndMs = s.latest
+			}
 		}
 		shown = append(shown, s)
 	}

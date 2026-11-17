@@ -640,3 +640,27 @@ func TestBitmapAssembler_UndecodableBlock(t *testing.T) {
 		t.Errorf("refusing any damage, err = %v; want the block's own", err)
 	}
 }
+
+// A cue whose block states a duration still ends no later than its page's time-out.
+func TestBitmapAssembler_BlockDurationPastTheTimeout(t *testing.T) {
+	dec := &scriptedDecoder{sets: map[byte][]subtitle.BitmapDisplaySet{
+		'c': {shownSet(3, subtitle.BitmapDisplaySet{Timeout: 2 * time.Second})},
+	}}
+	var got []cueShape
+	a := &bitmapAssembler{dec: dec, name: "test", track: &mkv.Track{}, emit: func(c BitmapCue) error {
+		got = append(got, cueShape{startMs: c.StartMs, endMs: c.EndMs})
+		return nil
+	}}
+	for _, b := range []mkv.Block{
+		{Timecode: 1000, Duration: 9000, Data: []byte("c")}, // the time-out comes first: 1000..3000
+		{Timecode: 20000, Duration: 500, Data: []byte("c")}, // the duration comes first: 20000..20500
+	} {
+		if err := a.block(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []cueShape{{startMs: 1000, endMs: 3000}, {startMs: 20000, endMs: 20500}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("cues %+v, want %+v", got, want)
+	}
+}
