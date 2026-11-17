@@ -9,6 +9,16 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ForEachSubtitleBitmap`, `ForEachSubtitlePGS`, their `From` forms and
+  `extract-subtitle -format png|pgs`: a block that reads but does not decode
+  no longer fails the whole track. It is lost alone, the cue on screen ending
+  at its time, and reported through `Options.OnSkip`; the rest of the track is
+  delivered. `Options.DamageBytes` negative (`--damage-bytes -1`) still fails
+  the read on it. A PGS track with such a block failed since PGS extraction
+  exists.
+
 ## [0.68.0] - 2026-11-17
 
 ### Added
