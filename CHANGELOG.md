@@ -9,6 +9,21 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Added
+
+- `ForEachSubtitleBitmap` and `ForEachSubtitleBitmapFrom` (`matroska`,
+  `mkv/ops`) give a bitmap subtitle track as timed pictures whatever its codec,
+  PGS, VobSub or DVB, walking the file or served from a `SubtitleIndex`;
+  `BitmapCue` is the type `PGSCue` names. `ForEachSubtitlePGS` and its
+  siblings are unchanged.
+- `ForEachSubtitleBlock` and `ForEachSubtitleBlockFrom` give the blocks of a
+  subtitle track of any codec (`SubtitleBlock`: time, duration, decoded
+  payload), walked or served from an index under the checks of the other
+  indexed reads, a damaged region passed over as a `Lost` call.
+- `extract-subtitle -format png` writes any bitmap track (PGS, VobSub, DVB) as
+  PNGs and a `cues.json` manifest, with `-index` too; `-format pgs` is
+  unchanged.
+
 ## [0.67.0] - 2026-11-17
 
 ### Added
