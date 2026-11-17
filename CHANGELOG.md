@@ -9,13 +9,20 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Added
+
+- `DamagedRange.Err` (`mkv`, `matroska`): set on the range `Options.OnSkip`
+  gets for a bitmap subtitle block that was read but did not decode, to the
+  decoder's error; nil for a damaged region. `extract-subtitle` names such a
+  block on stderr by its time and that error, in a message of its own.
+
 ### Fixed
 
 - `ForEachSubtitleBitmap`, `ForEachSubtitlePGS`, their `From` forms and
   `extract-subtitle -format png|pgs`: a block that reads but does not decode
   no longer fails the whole track. It is lost alone, the cue on screen ending
-  at its time, and reported through `Options.OnSkip`; the rest of the track is
-  delivered. `Options.DamageBytes` negative (`--damage-bytes -1`) still fails
+  at its time, and reported through `Options.OnSkip` (`DamagedRange.Err`
+  says why); the rest of the track is delivered. `Options.DamageBytes` negative (`--damage-bytes -1`) still fails
   the read on it. A PGS track with such a block failed since PGS extraction
   exists.
 
