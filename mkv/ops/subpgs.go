@@ -48,6 +48,9 @@ type PGSCue struct {
 // 1.7 GB of decoded NRGBA - more than mkvgo's whole budget. Use
 // ForEachSubtitlePGS unless the track is known to be short.
 func ExtractSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, opts ...mkv.Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	var cues []PGSCue
 	err := ForEachSubtitlePGS(ctx, srcPath, trackID, func(c PGSCue) error {
 		cues = append(cues, c)
@@ -73,6 +76,9 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 // MEMORY: as ExtractSubtitlePGS - see ForEachSubtitlePGSFrom for the bounded
 // form.
 func ExtractSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64, ix *SubtitleIndex, opts ...mkv.Options) ([]PGSCue, error) {
+	if err := oneopt.Check(opts); err != nil {
+		return nil, err
+	}
 	var cues []PGSCue
 	err := ForEachSubtitlePGSFrom(ctx, srcPath, trackID, ix, func(c PGSCue) error {
 		cues = append(cues, c)
