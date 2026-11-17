@@ -808,3 +808,68 @@ func TestShortLPCMEntryIsRefused(t *testing.T) {
 		t.Error("a 16-byte lpcm entry was accepted")
 	}
 }
+
+// TestFragmentedDurationIsTheLatestTrackEnd: a fragmented file without an edit list whose track starts after
+// zero (its samples carry a composition offset) lasts until that track ends, its start plus the duration of its
+// samples, not for the durations alone; the probe, the keyframe probe and the Duration a remux writes agree.
+func TestFragmentedDurationIsTheLatestTrackEnd(t *testing.T) {
+	moof1, mdat1 := oneFragment(1, 0, []uint32{10, 10, 10}, []uint32{1024, 1024, 1024}, []uint32{2048, 2048, 2048}, 1)
+	moof2, mdat2 := oneFragment(1, 3072, []uint32{10, 10}, []uint32{1024, 1024}, []uint32{3072, 0}, 1)
+	data := fragmentedAAC(0, moof1, mdat1, moof2, mdat2)
+	const samplesEnd, trackEnd = 5120 * 1000 / 48000, (2048 + 5120) * 1000 / 48000 // 106 ms, 149 ms
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{{"probe", Options{}}, {"keyframe probe", Options{Keyframes: true}}} {
+		c, _ := probeMovie(t, data, tc.opts)
+		if c.DurationMs != trackEnd {
+			t.Errorf("%s: DurationMs = %d, want %d: the track's start plus its samples", tc.name, c.DurationMs, trackEnd)
+		}
+		if c.Tracks[0].DurationMs != samplesEnd {
+			t.Errorf("%s: track DurationMs = %d, want its %d ms of samples", tc.name, c.Tracks[0].DurationMs, samplesEnd)
+		}
+	}
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "late.mp4"), filepath.Join(dir, "late.mkv")
+	if err := os.WriteFile(src, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemuxFromMP4(context.Background(), src, dst); err != nil {
+		t.Fatalf("RemuxFromMP4: %v", err)
+	}
+	c, blocks := readMKV(t, dst)
+	if c.DurationMs != trackEnd {
+		t.Errorf("remux: the Matroska states %d ms, want %d", c.DurationMs, trackEnd)
+	}
+	var last int64
+	for _, b := range blocks {
+		last = max(last, b.Timecode)
+	}
+	if last >= c.DurationMs {
+		t.Errorf("remux: a block is shown at %d ms, at or past the %d ms the file states", last, c.DurationMs)
+	}
+}
+
+// TestFragmentedDurationIgnoresAStrayOffset: one sample whose composition offset is far from the others' (a bit
+// flipped in a damaged file) does not stretch the duration: the track still ends at its start plus its samples.
+func TestFragmentedDurationIgnoresAStrayOffset(t *testing.T) {
+	moof1, mdat1 := oneFragment(1, 0, []uint32{10, 10, 10}, []uint32{1024, 1024, 1024}, []uint32{2048, 2048, 2048}, 1)
+	moof2, mdat2 := oneFragment(1, 3072, []uint32{10, 10}, []uint32{1024, 1024}, []uint32{2048 | 1<<24, 2048}, 1)
+	data := fragmentedAAC(0, moof1, mdat1, moof2, mdat2)
+	const trackEnd = (2048 + 5120) * 1000 / 48000
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{{"probe", Options{}}, {"keyframe probe", Options{Keyframes: true}}} {
+		if c, _ := probeMovie(t, data, tc.opts); c.DurationMs != trackEnd {
+			t.Errorf("%s: DurationMs = %d, want %d", tc.name, c.DurationMs, trackEnd)
+		}
+	}
+	mv, err := parseMP4(bytes.NewReader(data), int64(len(data)), sampleFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := containerFromMovie(mv); c.DurationMs != trackEnd {
+		t.Errorf("full parse: DurationMs = %d, want %d", c.DurationMs, trackEnd)
+	}
+}

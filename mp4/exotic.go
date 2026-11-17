@@ -227,7 +227,7 @@ func ticksOf(ms int64, timescale uint32) int64 {
 // not state; media bytes are never read.
 func fragmentEnds(r io.ReadSeeker, size int64, moovBoxes []memBox, mv *movie) {
 	trex := parseTrexDefaults(moovBoxes)
-	ends := map[uint32]int64{}
+	ends, starts := map[uint32]int64{}, map[uint32]int64{}
 	var hdr [16]byte
 	for off := int64(0); off+8 <= size; {
 		if _, err := r.Seek(off, io.SeekStart); err != nil {
@@ -257,7 +257,7 @@ func fragmentEnds(r io.ReadSeeker, size int64, moovBoxes []memBox, mv *movie) {
 			if err != nil {
 				break
 			}
-			moofEnds(payload, trex, ends)
+			moofEnds(payload, trex, ends, starts)
 		}
 		off += boxSize
 	}
@@ -268,12 +268,17 @@ func fragmentEnds(r io.ReadSeeker, size int64, moovBoxes []memBox, mv *movie) {
 		}
 		endMs := ticksToMs(end, t.timescale)
 		t.durationMs = max(t.durationMs, endMs)
-		mv.durationMs = max(mv.durationMs, endMs)
+		t.fragEndTicks = max(t.fragEndTicks, end)
+		if off, ok := starts[id]; ok && !t.fragStarted {
+			t.fragStartOff, t.fragStarted = off, true
+		}
+		mv.durationMs = max(mv.durationMs, endMs, t.shownEndMs()) // the movie ends with its latest track
 	}
 }
 
-// moofEnds raises each track's decode end from the trafs of one moof.
-func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
+// moofEnds raises each track's decode end from the trafs of one moof, and records in starts the composition offset
+// of the first sample a track's fragments hold.
+func moofEnds(moof []byte, trex map[uint32]trexDefault, ends, starts map[uint32]int64) {
 	boxes, err := iterBoxes(moof)
 	if err != nil {
 		return
@@ -319,6 +324,11 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 				if err != nil {
 					return
 				}
+				if _, seen := starts[h.trackID]; !seen {
+					if off, ok := trunFirstOffset(tb.payload); ok {
+						starts[h.trackID] = off
+					}
+				}
 				dur += d
 			}
 		}
@@ -326,6 +336,25 @@ func moofEnds(moof []byte, trex map[uint32]trexDefault, ends map[uint32]int64) {
 			ends[h.trackID] = end
 		}
 	}
+}
+
+// trunFirstOffset is the composition offset of the first sample of a trun that trunSpan accepted: 0 when its
+// samples carry none, not ok when it holds no sample.
+func trunFirstOffset(p []byte) (int64, bool) {
+	flags := binary.BigEndian.Uint32(p[0:4]) & 0xFFFFFF
+	if binary.BigEndian.Uint32(p[4:8]) == 0 {
+		return 0, false
+	}
+	if flags&trunSampleCTS == 0 {
+		return 0, true
+	}
+	at := 8
+	for _, f := range []uint32{trunDataOffset, trunFirstSampleFlag, trunSampleDuration, trunSampleSize, trunSampleFlags} {
+		if flags&f != 0 {
+			at += 4
+		}
+	}
+	return int64(int32(binary.BigEndian.Uint32(p[at:]))), true // signed in both versions, as parseMoofSamples reads it
 }
 
 // dropReason is why a remux to Matroska would not carry t, in words; "" when it carries it.

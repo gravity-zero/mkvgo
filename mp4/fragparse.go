@@ -128,7 +128,9 @@ func readFragmentSamples(r io.ReadSeeker, size int64, mv *movie, moovBoxes []mem
 			last := t.samples[n-1]
 			end := last.ctsMs + last.durMs
 			t.durationMs = max(t.durationMs, end)
-			mv.durationMs = max(mv.durationMs, end)
+			// The movie lasts until its latest track ends, and a track ends where it starts plus what its
+			// samples last: one that starts after zero (a composition offset, no edit list) ends that much later.
+			mv.durationMs = max(mv.durationMs, end, t.shownEndMs())
 		}
 	}
 	return nil
@@ -453,6 +455,10 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 			off += 4
 		}
 
+		if !t.fragStarted {
+			t.fragStartOff, t.fragStarted = ctsOff, true
+		}
+		t.fragEndTicks = max(t.fragEndTicks, dts+int64(dur))
 		cts := ticksToMs(dts+ctsOff, t.timescale) + t.editShiftMs
 		if cts < 0 {
 			cts = 0
@@ -471,4 +477,14 @@ func appendTrunSamples(p []byte, t *inTrack, base, dataCursor, dts int64, defDur
 		dts += int64(dur)
 	}
 	return sampleOff, dts, nil
+}
+
+// shownEndMs is when a fragmented track's presentation ends: its start plus the duration of its samples, 0 when
+// it has no fragment. The start is the composition offset of its first sample; one stray offset further on (a
+// damaged file) does not move it.
+func (t *inTrack) shownEndMs() int64 {
+	if t.fragEndTicks <= 0 || t.timescale == 0 {
+		return 0
+	}
+	return max(ticksToMs(t.fragEndTicks+max(t.fragStartOff, 0), t.timescale)+t.editShiftMs, 0)
 }
