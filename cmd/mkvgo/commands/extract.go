@@ -333,6 +333,11 @@ func subtitleIndexFromCues(source string, trackIDs []uint64, opts ...matroska.Op
 func subtitleReadOptions(damageBytes int64) matroska.Options {
 	return matroska.Options{DamageBytes: damageBytes, OnSkip: func(r matroska.DamagedRange) {
 		noteDamage()
+		if r.Err != nil { // a block that was read: its time and what its decoder said
+			fmt.Fprintf(os.Stderr, "lost the subtitle block at %d ms (bytes %d to %d), which does not decode: %v\n",
+				r.ApproxStartMs, r.StartOffset, r.EndOffset, r.Err)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "skipped a damaged region at bytes %d to %d (about %d to %d ms): the subtitles in it are lost\n",
 			r.StartOffset, r.EndOffset, r.ApproxStartMs, r.ApproxEndMs)
 	}}

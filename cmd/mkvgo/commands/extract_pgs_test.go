@@ -231,3 +231,38 @@ func TestCmdExtractSubtitle_PNGWritesAVobSubTrack(t *testing.T) {
 		}
 	}
 }
+
+// On stderr a block that does not decode is named by its time and its error, in words of its own: a region the read
+// jumped over keeps the message it had.
+func TestCmdExtractSubtitle_NamesABlockThatDoesNotDecode(t *testing.T) {
+	data, err := os.ReadFile("../../../internal/testdata/vobsub.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(data[len(data)/2 : len(data)/2+4096])
+	src := filepath.Join(t.TempDir(), "zeroed.mkv")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out string
+	errOut := stderrOf(t, func() {
+		out = capture(t, func() {
+			commands.CmdExtractSubtitle([]string{src, "-t", "1", "-o", filepath.Join(t.TempDir(), "subs"), "-format", "png"})
+		})
+	})
+	if !strings.Contains(out, "extracted 41 bitmap cue(s)") {
+		t.Errorf("stdout = %q, want 41 cues", out)
+	}
+	lines := strings.Split(strings.TrimSpace(errOut), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stderr holds %d line(s), want the region and the block:\n%s", len(lines), errOut)
+	}
+	// The block sits ahead of the zeroed bytes it runs into: it is read, then the region is jumped over.
+	want := "lost the subtitle block at 230872 ms (bytes "
+	if !strings.HasPrefix(lines[0], want) || !strings.HasSuffix(lines[0], "), which does not decode: VobSub: the control sequence at byte 2979 names byte 0 as the next one, which is not after it") {
+		t.Errorf("the block is announced as %q, want its time and the decoder's error", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "skipped a damaged region at bytes ") || strings.Contains(lines[1], "decode") {
+		t.Errorf("the region is announced as %q", lines[1])
+	}
+}
