@@ -1732,12 +1732,15 @@ err := matroska.ForEachSubtitleBitmap(ctx, "movie.mkv", trackID, func(c matroska
 err = matroska.ForEachSubtitleBitmapFrom(ctx, "movie.mkv", trackID, ix, fn)
 ```
 
-`BitmapCue` is the type `PGSCue` names. One cue's picture is alive at a time.
+`BitmapCue` is the type `PGSCue` names. One cue's picture is alive at a time;
+a cue that shows the same picture as an earlier one (a DVB region, a PGS
+object, that did not change) is handed the same image, so treat `Image` as
+read-only.
 A cue starts where its display set takes effect and ends, in this order: where
 the stream says (a VobSub stop command), at the duration the muxer wrote for
-its block, or where the next display set begins - no later than a DVB page's
-time-out, and 3 s after its start for a last cue nothing closes. A display set
-of several pictures (two PGS windows, two DVB regions) is one cue, composited
+its block, or where the next display set begins - in every case no later than
+a DVB page's time-out, and 3 s after its start for a last cue nothing closes.
+A display set of several pictures (two PGS windows, two DVB regions) is one cue, composited
 on the smallest rectangle that holds them. A block that reads but does not
 decode - its payload does not decompress, its bytes are not what the codec
 reads, its pictures cannot be composited - is lost alone: the cue on screen
@@ -2027,8 +2030,10 @@ What differs from PGS:
 - **DVB** keeps regions, their pixels and the colour tables between blocks: a
   display set sends only what changed, until a page composition declares a
   mode change or an acquisition point. A set's objects are the regions on
-  screen, one picture each; a region the page places several times is read
-  once, its placements sharing the picture. The CodecPrivate names the
+  screen, one picture each; a region is read once for as long as it shows the
+  same thing, its placements and the display sets that follow sharing the
+  picture until its pixels or its colours change (the PGS decoder keeps an
+  object's picture the same way): treat the images as read-only. The CodecPrivate names the
   service's composition and ancillary pages, the segments of other pages being
   ignored; with one too short to name them every page is decoded. 2, 4 and
   8-bit pixels, map tables, the default colour tables and the display
