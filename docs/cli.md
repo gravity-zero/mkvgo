@@ -451,7 +451,7 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-o` | Output file path, or directory for `png` and `pgs` (required) |
 | `-format` | Output format: `srt` (default), `ass`, `vtt`, `png` or `pgs` |
 | `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, `png` and `pgs`, MKV/WebM only) |
-| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
+| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `png` and `pgs`, a block that reads but does not decode is lost and named the same way. With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt

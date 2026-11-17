@@ -1628,7 +1628,8 @@ within `Options.DamageBytes` of it, 64 MiB by default (`mkv.DefaultDamageBytes`)
 as the on-demand HLS windows do. The cues inside the region are lost and the
 rest of the track is delivered; a bitmap cue the region left on screen ends
 with the default duration (or at the start of the cluster the region begins
-in) instead of lasting until the next cue past it. Each region is reported once
+in) instead of lasting until the next cue past it. The bitmap reads lose the
+same way, alone, a block that reads but does not decode. Each region is reported once
 through `Options.OnSkip`, with its byte range and the timestamps of the
 clusters around it. A longer region fails the read with
 `reader.ErrDamagedRegion`, and a negative `DamageBytes` refuses any damage.
@@ -1737,7 +1738,16 @@ the stream says (a VobSub stop command), at the duration the muxer wrote for
 its block, or where the next display set begins - no later than a DVB page's
 time-out, and 3 s after its start for a last cue nothing closes. A display set
 of several pictures (two PGS windows, two DVB regions) is one cue, composited
-on the smallest rectangle that holds them. A text track is refused by name, as
+on the smallest rectangle that holds them. A block that reads but does not
+decode - its payload does not decompress, its bytes are not what the codec
+reads, its pictures cannot be composited - is lost alone: the cue on screen
+ends at the block's time, the decoder starts afresh, the block is reported
+through `Options.OnSkip` (its byte range, its time) and the read goes on. A
+DVB decoder that starts afresh holds no region and no colour table, so nothing
+shows until the stream's next acquisition point or mode change. With a
+negative `Options.DamageBytes`, which refuses any damage, such a block fails
+the read by its time. An error the callback returns and a cancelled context
+always stop it. A text track is refused by name, as
 is a bitmap codec without a decoder here. `ForEachSubtitlePGS` and its
 siblings below are the same read for a track that must be PGS. CLI: `mkvgo
 extract-subtitle -format png`, with `-index` for the indexed form.
