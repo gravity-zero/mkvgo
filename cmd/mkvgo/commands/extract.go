@@ -219,7 +219,8 @@ func extractBitmapSubtitleFile(source, outPath, format, indexPath string, stream
 	if outPath == "" {
 		FatalUsage("usage: " + usage)
 	}
-	if format != "" && format != "png" && !(format == "pgs" && strings.EqualFold(filepath.Ext(source), ".sup")) {
+	pgsOfSup := format == "pgs" && strings.EqualFold(filepath.Ext(source), ".sup")
+	if format != "" && format != "png" && !pgsOfSup {
 		FatalUsage(fmt.Sprintf("%s holds bitmap subtitles: -format png writes them, -format %s does not apply", filepath.Base(source), format))
 	}
 	if indexPath != "" {
