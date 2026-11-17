@@ -57,6 +57,7 @@ type dvbCLUT struct {
 	c4   [4][4]uint8
 	c16  [16][4]uint8
 	c256 [256][4]uint8
+	gen  uint64 // moves each time a definition changes an entry: a picture read through it is then out of date
 }
 
 var dvbDefaultCLUT = newDVBDefaultCLUT()
@@ -116,6 +117,17 @@ type dvbRegion struct {
 	clut        uint8
 	pix         []byte
 	objects     []dvbObjectRef
+	// shown is the picture last read from the region, handed back until its pixels or its colours change; nil
+	// once a pixel is written. It holds up to four bytes for each of the region's.
+	shown *dvbPicture
+}
+
+// dvbPicture is a region as a display set shows it, and the CLUT it was read through.
+type dvbPicture struct {
+	img  *image.NRGBA // nil when the region shows nothing
+	at   image.Point  // where the picture sits in the region
+	clut *dvbCLUT
+	gen  uint64
 }
 
 type dvbPlacement struct {
@@ -154,8 +166,9 @@ func (d *DVBSubDecoder) Reset() {
 
 // Decode decodes one Matroska block into the display sets it completes, almost always one: a set's objects are the
 // regions on screen, each cut down to its visible pixels, and a set with none clears the screen; its Timeout is the
-// page's, the end of a set being the next one. The images are freshly allocated and owned by the caller; a region
-// a page places more than once shares one image between its placements. Bytes that are no
+// page's, the end of a set being the next one. An image is shared by every placement, and by every display set,
+// that shows the same picture: a region is read once and its image handed back for as long as neither its pixels
+// nor its colours change. Treat the images as read-only. Bytes that are no
 // segment end the block. A segment that cannot be read is an error, returned with the sets completed ahead of it
 // and the one being composed, which show the state the decoder is left in.
 //
@@ -341,6 +354,9 @@ func (d *DVBSubDecoder) parseRegion(p []byte) error {
 	}
 	d.held = held
 	r.clut, r.objects = p[7], refs
+	if fill {
+		r.shown = nil
+	}
 	if fill && (!fresh || background != 0) {
 		for i := range r.pix {
 			r.pix[i] = background
@@ -392,6 +408,7 @@ func (d *DVBSubDecoder) parseCLUT(p []byte) error {
 		if flags&0x20 != 0 {
 			c.c256[entry] = col
 		}
+		c.gen++
 	}
 	return nil
 }
@@ -424,6 +441,7 @@ func (d *DVBSubDecoder) parseObject(p []byte) error {
 			if ref.id != id {
 				continue
 			}
+			r.shown = nil
 			pen := dvbPen{d: d, r: r, skipOne: p[2]&2 != 0}
 			if err := pen.field(top, ref.x, ref.y); err != nil {
 				return fmt.Errorf("DVB subtitle: object %d: %w", id, err)
@@ -653,35 +671,33 @@ func (p *dvbPen) string8(data []byte) int {
 }
 
 // compose turns the page into a display set: each region on screen, read through its CLUT, where the page puts it.
-// A region the page places several times is read once, its placements sharing the picture.
+// A region is read once for as long as it shows the same thing: the placements of one display set share its
+// picture, and so do the display sets that follow until its pixels or its colours change.
 func (d *DVBSubDecoder) compose() (BitmapDisplaySet, error) {
 	ds := BitmapDisplaySet{ScreenW: d.screenW, ScreenH: d.screenH, Timeout: d.timeout}
 	if ds.ScreenW == 0 { // no display definition: the format's standard-definition plane
 		ds.ScreenW, ds.ScreenH = 720, 576
 	}
-	type picture struct {
-		img *image.NRGBA // nil when the region shows nothing
-		at  image.Point
-	}
-	var seen map[uint8]picture
 	for _, pl := range d.page {
-		pic, ok := seen[pl.region]
-		if !ok {
-			r := d.regions[pl.region]
-			if r == nil {
-				if err := d.spend(1); err != nil {
-					return ds, err
-				}
-				continue
+		r := d.regions[pl.region]
+		if r == nil {
+			if err := d.spend(1); err != nil {
+				return ds, err
 			}
+			continue
+		}
+		clut := d.cluts[r.clut]
+		if clut == nil {
+			clut = dvbDefaultCLUT
+		}
+		pic := r.shown
+		if pic == nil || pic.clut != clut || pic.gen != clut.gen {
 			if err := d.spend(r.w * r.h); err != nil {
 				return ds, err
 			}
-			pic.img, pic.at = trimTransparent(d.render(r))
-			if seen == nil {
-				seen = make(map[uint8]picture, len(d.page))
-			}
-			seen[pl.region] = pic
+			pic = &dvbPicture{clut: clut, gen: clut.gen}
+			pic.img, pic.at = trimTransparent(renderDVBRegion(r, clut))
+			r.shown = pic
 		} else if err := d.spend(1); err != nil {
 			return ds, err
 		}
@@ -692,12 +708,8 @@ func (d *DVBSubDecoder) compose() (BitmapDisplaySet, error) {
 	return ds, nil
 }
 
-// render reads a region's pixels through its CLUT, or the default one when the epoch defined none of that ID.
-func (d *DVBSubDecoder) render(r *dvbRegion) *image.NRGBA {
-	clut := d.cluts[r.clut]
-	if clut == nil {
-		clut = dvbDefaultCLUT
-	}
+// renderDVBRegion reads a region's pixels through a CLUT.
+func renderDVBRegion(r *dvbRegion, clut *dvbCLUT) *image.NRGBA {
 	colours := clut.c256[:]
 	switch r.depth {
 	case 4:

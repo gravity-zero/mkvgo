@@ -63,6 +63,8 @@ const (
 	// pgsMaxBlockPixels bounds the pixels one block's display sets decode: four 4096x4096 objects, 256 MiB. A real
 	// block places one or two subtitle-sized objects; only a forged one names objects over and over.
 	pgsMaxBlockPixels = 4 * pgsMaxObjectDim * pgsMaxObjectDim
+	// pgsMaxKeptPixels bounds the pictures kept from one display set to the next: one 4096x4096 object, 64 MiB.
+	pgsMaxKeptPixels = pgsMaxObjectDim * pgsMaxObjectDim
 )
 
 // PGSObject is one picture of a display set, already composed: the palette is
@@ -106,7 +108,28 @@ func (ds *PGSDisplaySet) Clear() bool { return len(ds.Objects) == 0 }
 // pgsPalette holds a palette's 256 entries, already converted to straight RGBA.
 // Entries default to fully transparent: a PDS updates only the entries it
 // carries, and an index the palette never defined must not paint anything.
-type pgsPalette [256][4]uint8
+type pgsPalette struct {
+	rgba [256][4]uint8
+	gen  uint64 // moves each time a definition changes an entry: a picture rendered under it is then out of date
+}
+
+// pgsNoPalette stands for a palette the epoch never defined: every entry transparent.
+var pgsNoPalette = &pgsPalette{}
+
+// pgsPick names what a composition asks of an object: the object, or one crop of it.
+type pgsPick struct {
+	id      uint16
+	cropped bool
+	crop    image.Rectangle
+}
+
+// pgsPicture is a picture the decoder keeps: what it was rendered from, to tell when it is out of date.
+type pgsPicture struct {
+	def *pgsObjectDef
+	pal *pgsPalette
+	gen uint64
+	img *image.NRGBA
+}
 
 // pgsObjectDef is a defined object, kept as its RLE rather than as a decoded
 // bitmap. Two reasons: an epoch's objects stay alive across display sets, and
@@ -128,6 +151,10 @@ type PGSDecoder struct {
 	pendID   uint16
 	objBytes int // what the epoch's objects hold (pgsMaxEpochBytes)
 	pixels   int // what the block being decoded may still decode (pgsMaxBlockPixels)
+	// kept holds the picture last rendered for each object or crop of one, handed back as long as neither the
+	// object nor its palette changed; keptPixels is what they hold together (pgsMaxKeptPixels).
+	kept       map[pgsPick]pgsPicture
+	keptPixels int
 }
 
 // NewPGSDecoder returns a decoder with no epoch state.
@@ -138,14 +165,16 @@ func NewPGSDecoder() *PGSDecoder { return &PGSDecoder{} }
 // against pictures that belong to a different part of the file.
 func (d *PGSDecoder) Reset() {
 	d.palettes, d.objects, d.pending, d.objBytes = nil, nil, nil, 0
+	d.kept, d.keptPixels = nil, 0
 }
 
 // Decode decodes one Matroska block into the display sets it holds. Almost
 // always that is exactly one; the slice exists because the format allows a
 // block to carry several, and dropping the extras would silently lose cues.
 //
-// The returned images are freshly allocated and owned by the caller; an object a display set places more than once
-// shares one image between its placements.
+// An image is shared by every placement, and by every display set, that shows the same picture: an object, or a
+// crop of one, is rendered once and its image handed back for as long as neither the object nor its palette
+// changes. Treat the images as read-only.
 func (d *PGSDecoder) Decode(block []byte) ([]PGSDisplaySet, error) {
 	var out []PGSDisplaySet
 	var comp *pgsComposition
@@ -183,7 +212,7 @@ func (d *PGSDecoder) Decode(block []byte) ([]PGSDisplaySet, error) {
 				// An epoch start invalidates everything carried over. It comes
 				// BEFORE the PDS/ODS of its own display set, so clearing here
 				// discards the old epoch without touching the new one.
-				d.palettes, d.objects, d.pending, d.objBytes = nil, nil, nil, 0
+				d.Reset()
 			}
 			comp = c
 		case pgsSegPDS:
@@ -328,7 +357,10 @@ func (d *PGSDecoder) parsePalette(p []byte) error {
 	for off := 0; off < len(entries); off += entryLen {
 		e := entries[off : off+entryLen]
 		r, g, bl := ycrcbToRGB(e[1], e[2], e[3])
-		pal[e[0]] = [4]uint8{r, g, bl, e[4]}
+		pal.rgba[e[0]] = [4]uint8{r, g, bl, e[4]}
+	}
+	if len(entries) > 0 {
+		pal.gen++
 	}
 	return nil
 }
@@ -414,49 +446,51 @@ func (d *PGSDecoder) compose(c *pgsComposition) (PGSDisplaySet, error) {
 		// A composition against a palette this epoch never defined paints
 		// nothing at all. Treating it as a clear is the honest reading - there
 		// is no colour to invent - and it keeps the timeline consistent.
-		pal = &pgsPalette{}
+		pal = pgsNoPalette
 	}
-	// A composition may name one object, or one crop of it, many times: each is decoded once, its references
-	// sharing the bitmap, so a few bytes naming an object again never cost another picture.
-	type pick struct {
-		id   uint16
-		crop image.Rectangle
-	}
-	decoded := map[pick]*image.NRGBA{}
 	for _, co := range c.objects {
-		key := pick{id: co.objectID}
-		if co.cropped {
-			key.crop = image.Rect(co.cropX, co.cropY, co.cropX+co.cropW, co.cropY+co.cropH)
-		}
-		if img, ok := decoded[key]; ok {
-			if img != nil {
-				ds.Objects = append(ds.Objects, PGSObject{X: co.x, Y: co.y, Forced: co.forced, Image: img})
-			}
-			continue
-		}
-		decoded[key] = nil
 		def := d.objects[co.objectID]
-		if def != nil {
-			if d.pixels -= def.w * def.h; d.pixels < 0 {
-				return ds, fmt.Errorf("PGS: the block's display sets decode to more than %d pixels: the track is damaged or forged", pgsMaxBlockPixels)
-			}
-		}
 		if def == nil {
 			// The object was defined in a part of the epoch the caller did not
 			// read (a mid-file start). Skipping keeps the rest of the display
 			// set; inventing a picture would be worse than a missing one.
 			continue
 		}
-		img, err := decodePGSRLE(def, pal)
+		key := pgsPick{id: co.objectID, cropped: co.cropped}
+		if co.cropped {
+			key.crop = image.Rect(co.cropX, co.cropY, co.cropX+co.cropW, co.cropY+co.cropH)
+		}
+		img, err := d.picture(key, def, pal)
 		if err != nil {
 			return ds, fmt.Errorf("PGS: object %d: %w", co.objectID, err)
 		}
-		x, y := co.x, co.y
-		if co.cropped {
-			r := image.Rect(co.cropX, co.cropY, co.cropX+co.cropW, co.cropY+co.cropH).Intersect(img.Bounds())
-			if r.Empty() {
-				continue
-			}
+		if img != nil {
+			ds.Objects = append(ds.Objects, PGSObject{X: co.x, Y: co.y, Forced: co.forced, Image: img})
+		}
+	}
+	return ds, nil
+}
+
+// picture renders an object, or the crop of it a composition asks for, under a palette; nil when the crop holds
+// nothing of the object. A composition may name one object many times, and display set after display set: the
+// picture is kept and handed back until the object or the palette changes, so a few bytes naming an object again
+// never cost another picture.
+func (d *PGSDecoder) picture(key pgsPick, def *pgsObjectDef, pal *pgsPalette) (*image.NRGBA, error) {
+	if p, ok := d.kept[key]; ok && p.def == def && p.pal == pal && p.gen == pal.gen {
+		return p.img, nil
+	}
+	if d.pixels -= def.w * def.h; d.pixels < 0 {
+		return nil, fmt.Errorf("the block's display sets decode to more than %d pixels: the track is damaged or forged", pgsMaxBlockPixels)
+	}
+	img, err := decodePGSRLE(def, pal)
+	if err != nil {
+		return nil, err
+	}
+	if key.cropped {
+		r := key.crop.Intersect(img.Bounds())
+		if r.Empty() {
+			img = nil
+		} else {
 			// SubImage shares the backing array; re-origin it at 0,0 so the
 			// caller gets a plain top-left-anchored picture and X/Y stay the
 			// composition's own coordinates.
@@ -468,10 +502,28 @@ func (d *PGSDecoder) compose(c *pgsComposition) (PGSDisplaySet, error) {
 			}
 			img = cropped
 		}
-		decoded[key] = img
-		ds.Objects = append(ds.Objects, PGSObject{X: x, Y: y, Forced: co.forced, Image: img})
 	}
-	return ds, nil
+	d.keep(key, pgsPicture{def: def, pal: pal, gen: pal.gen, img: img})
+	return img, nil
+}
+
+// keep holds a picture for the display sets to come, dropping the ones held when together they pass the bound.
+func (d *PGSDecoder) keep(key pgsPick, p pgsPicture) {
+	size := 0
+	if p.img != nil {
+		size = p.img.Rect.Dx() * p.img.Rect.Dy()
+	}
+	if old, ok := d.kept[key]; ok && old.img != nil {
+		d.keptPixels -= old.img.Rect.Dx() * old.img.Rect.Dy()
+	}
+	if d.keptPixels+size > pgsMaxKeptPixels {
+		d.kept, d.keptPixels = nil, 0
+	}
+	if d.kept == nil {
+		d.kept = make(map[pgsPick]pgsPicture, 2)
+	}
+	d.kept[key] = p
+	d.keptPixels += size
 }
 
 // decodePGSRLE expands one object's run-length data straight into an NRGBA
@@ -493,7 +545,7 @@ func decodePGSRLE(def *pgsObjectDef, pal *pgsPalette) (*image.NRGBA, error) {
 	x, y := 0, 0
 
 	paint := func(idx byte, run int) {
-		c := pal[idx]
+		c := pal.rgba[idx]
 		for run > 0 && y < def.h {
 			if x >= def.w {
 				x, y = 0, y+1
