@@ -439,18 +439,18 @@ mkvgo remove-attachment video.mkv -o out.mkv 2
 
 ### extract-subtitle
 
-Extract an embedded text subtitle track as SRT, ASS or WebVTT. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt).
+Extract an embedded text subtitle track as SRT, ASS or WebVTT, or a bitmap one as pictures. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt). `-format png` reads a bitmap track of an MKV/WebM (PGS, VobSub or DVB, by its codec) and writes into the directory `-o` one PNG per cue and a `cues.json` manifest: for each cue its file, `start_ms`, `end_ms`, its position `x`, `y` on the subtitle plane `screen_w` x `screen_h`, and `forced`. `-format pgs` is the same for a PGS track, any other codec refused.
 
 ```
-mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt] [--damage-bytes <n>]
+mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt|png|pgs] [-index <index.mkvsix>] [--damage-bytes <n>]
 ```
 
 | Flag | Description |
 |---|---|
 | `-t` | Track ID to extract (required) |
-| `-o` | Output file path (required) |
-| `-format` | Output format: `srt` (default), `ass`, or `vtt` |
-| `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, MKV/WebM only) |
+| `-o` | Output file path, or directory for `png` and `pgs` (required) |
+| `-format` | Output format: `srt` (default), `ass`, `vtt`, `png` or `pgs` |
+| `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, `png` and `pgs`, MKV/WebM only) |
 | `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
 
 ```bash
@@ -459,6 +459,8 @@ mkvgo extract-subtitle video.mkv -t 3 -o subs.ass -format ass
 mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt
 mkvgo extract-subtitle movie.mp4  -t 3 -o subs.vtt -format vtt
 mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt -index video.mkvsix
+mkvgo extract-subtitle dvdrip.mkv -t 4 -o subs/ -format png
+mkvgo extract-subtitle dvdrip.mkv -t 4 -o subs/ -format png -index dvdrip.mkvsix
 ```
 
 ### subtitle-index

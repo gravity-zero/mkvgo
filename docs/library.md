@@ -1620,14 +1620,15 @@ A Matroska track whose blocks the source's own Cues all name - their count match
 #### A damaged region
 
 Every Matroska subtitle read - `ExtractSubtitle`, `ExtractASS`,
-`ExtractSubtitleWebVTT`, `ForEachSubtitlePGS`, their `From` forms,
-`BuildSubtitleIndex` and `SubtitleIndex.Resolve` - passes over a damaged region
+`ExtractSubtitleWebVTT`, `ForEachSubtitleBitmap`, `ForEachSubtitlePGS`,
+`ForEachSubtitleBlock`, their `From` forms, `BuildSubtitleIndex` and
+`SubtitleIndex.Resolve` - passes over a damaged region
 (a zeroed stretch, bytes a download never received) when the next Cluster lies
 within `Options.DamageBytes` of it, 64 MiB by default (`mkv.DefaultDamageBytes`),
 as the on-demand HLS windows do. The cues inside the region are lost and the
-rest of the track is delivered; a PGS cue the region left on screen ends with
-the default duration (or at the start of the cluster the region begins in)
-instead of lasting until the next cue past it. Each region is reported once
+rest of the track is delivered; a bitmap cue the region left on screen ends
+with the default duration (or at the start of the cluster the region begins
+in) instead of lasting until the next cue past it. Each region is reported once
 through `Options.OnSkip`, with its byte range and the timestamps of the
 clusters around it. A longer region fails the read with
 `reader.ErrDamagedRegion`, and a negative `DamageBytes` refuses any damage.
@@ -1714,6 +1715,52 @@ the choice is only about what the store carries; a caller that only ever serves
 WebVTT can name the text tracks and skip the rest. `Tracks()`, `Blocks(id)` and
 `SourceSize()` report what an index covers. CLI: `mkvgo subtitle-index`.
 
+### Bitmap subtitles as cues, whatever the codec
+
+A bitmap subtitle track - PGS on a Blu-ray rip, VobSub on a DVD rip, DVB on a
+broadcast capture - comes out as timed pictures through one call, which picks
+the decoder from the track's codec:
+
+```go
+// Walking the file:
+err := matroska.ForEachSubtitleBitmap(ctx, "movie.mkv", trackID, func(c matroska.BitmapCue) error {
+    return png.Encode(w, c.Image) // c.StartMs, c.EndMs, c.X, c.Y, c.ScreenW, c.ScreenH, c.Forced
+})
+
+// Served from a SubtitleIndex: a seek per block instead of a pass over the file.
+err = matroska.ForEachSubtitleBitmapFrom(ctx, "movie.mkv", trackID, ix, fn)
+```
+
+`BitmapCue` is the type `PGSCue` names. One cue's picture is alive at a time.
+A cue starts where its display set takes effect and ends, in this order: where
+the stream says (a VobSub stop command), at the duration the muxer wrote for
+its block, or where the next display set begins - no later than a DVB page's
+time-out, and 3 s after its start for a last cue nothing closes. A display set
+of several pictures (two PGS windows, two DVB regions) is one cue, composited
+on the smallest rectangle that holds them. A text track is refused by name, as
+is a bitmap codec without a decoder here. `ForEachSubtitlePGS` and its
+siblings below are the same read for a track that must be PGS.
+
+The read under it is exported for a consumer that decodes on its own:
+
+```go
+err := matroska.ForEachSubtitleBlockFrom(ctx, "movie.mkv", trackID, ix, func(b matroska.SubtitleBlock) error {
+    if b.Lost { // a damaged region was passed over, from b.TimeMs: reset a stateful decoder
+        return nil
+    }
+    // b.TimeMs, b.DurationMs, b.Data: the payload as the codec reads it, a compressed track decoded
+    return nil
+})
+```
+
+`ForEachSubtitleBlock` walks the file and `ForEachSubtitleBlockFrom` seeks
+where the index recorded each block, for a subtitle track of any codec. Served
+from an index, the read checks that the index describes the file (size,
+Segment UID, timecode scale) and that every block carries the track and the
+time recorded, or returns `ErrIndexStale`; a track the index does not cover is
+`ErrTrackNotIndexed`. The blocks are always served from the first: a bitmap
+codec's state spans blocks.
+
 ### Bitmap subtitles: PGS
 
 Blu-ray rips carry their subtitles as `S_HDMV/PGS`: not text, but a stream of
@@ -1734,7 +1781,7 @@ err = matroska.ForEachSubtitlePGSFrom(ctx, "movie.mkv", trackID, ix, func(c matr
 
 **The index needs nothing new.** `BuildSubtitleIndex` selects tracks by TYPE and
 never by codec, so an index built by any release since the feature landed
-already holds the PGS track's blocks: serving one costs a seek, not a rebuild,
+already holds a bitmap track's blocks, PGS, VobSub or DVB: serving one costs a seek, not a rebuild,
 and the wire format is unchanged.
 
 **Which entry point.** The index is not the answer to every extraction, and it
@@ -1913,7 +1960,8 @@ streaming form.
 
 DVD rips carry `S_VOBSUB` and broadcast captures `S_DVBSUB`: pictures again,
 in two more codecs. `subtitle.VobSubDecoder` and `subtitle.DVBSubDecoder` are
-block-level decoders with the shape of `subtitle.PGSDecoder`: built from the
+block-level decoders with the shape of `subtitle.PGSDecoder`, the ones
+`ForEachSubtitleBitmap` drives, for a caller with its own read loop: built from the
 track's CodecPrivate, fed the track's blocks in file order, `Reset` when the
 read skips blocks. Both return `[]subtitle.BitmapDisplaySet`, which is the
 type `PGSDisplaySet` names, so one consumer serves the three codecs: pictures
