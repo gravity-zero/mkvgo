@@ -189,7 +189,7 @@ mkvgo <command> [options]      # global: -json, -f/--force, --version
 | | `playability` · `ladder` | Direct-play verdict per client target / recommended ABR rungs capped at the source |
 | | `ingest` | One-call serving plan for a file: direct-play, remux to HLS, or transcode |
 | **Extract** | `demux` | Extract tracks to raw streams (MKV/WebM or MP4) |
-| | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT, or a bitmap track (PGS, VobSub, DVB) → PNGs + manifest; external sidecar → WebVTT |
+| | `extract-subtitle` · `to-vtt` | Subtitle track → SRT/ASS/WebVTT, or a bitmap track (PGS, VobSub, DVB) → PNGs + manifest; external sidecar → WebVTT, or a `.sup`/`.idx`+`.sub` → PNGs + manifest |
 | | `extract-attachment` · `add-attachment` · `remove-attachment` | Manage attachments (MIME sniffed) |
 | | `extract-frame` | Keyframe nearest a time, decoder-ready - thumbnail/storyboard pipelines |
 | | `extract-frames` | Keyframe-only Matroska stream (every N seconds or at given times) |

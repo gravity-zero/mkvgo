@@ -2057,8 +2057,26 @@ error.
 ### Bitmap subtitles beside the video: .idx/.sub and .sup
 
 The same pictures also travel as files of their own: VobSub as a `.idx` and
-a `.sub`, PGS as a `.sup`. Two readers turn them into what the decoders take,
-one unit or display set at a time, so a whole file is never held.
+a `.sub`, PGS as a `.sup`. One call gives them as cues, timed and ended by the
+rules of `ForEachSubtitleBitmap`:
+
+```go
+// A .sup, or a VobSub pair named by its .idx or its .sub (the other beside it, same name);
+// the stream picks the .idx's language by its position, from 0.
+err := matroska.ForEachSubtitleBitmapFile(ctx, "movie.idx", 0, func(c matroska.BitmapCue) error {
+    return png.Encode(w, c.Image) // c.StartMs, c.EndMs, c.X, c.Y, c.ScreenW, c.ScreenH, c.Forced
+})
+```
+
+A unit or a display set that does not decode is lost alone and reported
+through `Options.OnSkip` with its time and error and no byte range
+(`StartOffset` and `EndOffset` -1), unless a negative `Options.DamageBytes`
+refuses it. A file the reader cannot go through to its end - a `.sup` cut in a
+segment, a unit the `.sub` holds in part - gives the cues ahead of the fault,
+then its error. CLI: `mkvgo extract-subtitle movie.idx -o <dir>`.
+
+Under it, two readers turn the files into what the decoders take, one unit or
+display set at a time, so a whole file is never held.
 
 ```go
 ix, err := subtitle.ParseVobSubIndex(idxFile)       // the .idx: header, languages, times

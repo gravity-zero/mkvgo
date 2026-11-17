@@ -439,10 +439,10 @@ mkvgo remove-attachment video.mkv -o out.mkv 2
 
 ### extract-subtitle
 
-Extract an embedded text subtitle track as SRT, ASS or WebVTT, or a bitmap one as pictures. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt). `-format png` reads a bitmap track of an MKV/WebM (PGS, VobSub or DVB, by its codec) and writes into the directory `-o` one PNG per cue and a `cues.json` manifest: for each cue its file, `start_ms`, `end_ms`, its position `x`, `y` on the subtitle plane `screen_w` x `screen_h`, and `forced`. `-format pgs` is the same for a PGS track, any other codec refused.
+Extract an embedded text subtitle track as SRT, ASS or WebVTT, or a bitmap one as pictures. SRT/ASS apply to MKV/WebM; WebVTT (`-format vtt`) also works on MP4 (tx3g/wvtt). `-format png` reads a bitmap track of an MKV/WebM (PGS, VobSub or DVB, by its codec) and writes into the directory `-o` one PNG per cue and a `cues.json` manifest: for each cue its file, `start_ms`, `end_ms`, its position `x`, `y` on the subtitle plane `screen_w` x `screen_h`, and `forced`. `-format pgs` is the same for a PGS track, any other codec refused. A bitmap subtitle file that sits beside the video - a PGS `.sup`, or a VobSub pair named by its `.idx` or its `.sub` - is written the same way, `-format png` being its only format and its default; `-t` picks the language of a `.idx` by its position in it, from 1 (default 1).
 
 ```
-mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt|png|pgs] [-index <index.mkvsix>] [--damage-bytes <n>]
+mkvgo extract-subtitle <file.mkv|.mp4|.sup|.idx|.sub> -t <trackID> -o <out> [-format srt|ass|vtt|png|pgs] [-index <index.mkvsix>] [--damage-bytes <n>]
 ```
 
 | Flag | Description |
@@ -451,7 +451,7 @@ mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vt
 | `-o` | Output file path, or directory for `png` and `pgs` (required) |
 | `-format` | Output format: `srt` (default), `ass`, `vtt`, `png` or `pgs` |
 | `-index` | Serve from a `subtitle-index` file instead of walking the source (`-format vtt`, `png` and `pgs`, MKV/WebM only) |
-| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `png` and `pgs`, a block that reads but does not decode is lost too, and named on stderr by its time and its decoding error (`lost the subtitle block at <ms> ms (bytes <from> to <to>), which does not decode: <error>`). With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
+| `--damage-bytes` | How far past an unreadable element the read looks for the next Cluster (MKV/WebM). A damaged region within it is passed over, its cues lost and named on stderr; a longer one fails the extraction. With `png` and `pgs`, a block that reads but does not decode is lost too, and named on stderr by its time and its decoding error (`lost the subtitle block at <ms> ms (bytes <from> to <to>), which does not decode: <error>`; for a file beside the video, `lost the subtitle at <ms> ms, which does not decode: <error>`). With `--exit-damaged`, an extraction that passed over a region exits 3. `-1` refuses any damage. Default 64 MiB |
 
 ```bash
 mkvgo extract-subtitle video.mkv -t 3 -o subs.srt
@@ -461,6 +461,8 @@ mkvgo extract-subtitle movie.mp4  -t 3 -o subs.vtt -format vtt
 mkvgo extract-subtitle video.mkv -t 3 -o subs.vtt -format vtt -index video.mkvsix
 mkvgo extract-subtitle dvdrip.mkv -t 4 -o subs/ -format png
 mkvgo extract-subtitle dvdrip.mkv -t 4 -o subs/ -format png -index dvdrip.mkvsix
+mkvgo extract-subtitle dvdrip.idx -t 2 -o subs/   # the second language of a .idx/.sub pair
+mkvgo extract-subtitle movie.sup -o subs/
 ```
 
 ### subtitle-index
