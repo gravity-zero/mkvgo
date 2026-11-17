@@ -9,6 +9,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-11-17
+
 ### Added
 
 - `ForEachSubtitleBitmap` and `ForEachSubtitleBitmapFrom` (`matroska`,
@@ -23,21 +25,3 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - `extract-subtitle -format png` writes any bitmap track (PGS, VobSub, DVB) as
   PNGs and a `cues.json` manifest, with `-index` too; `-format pgs` is
   unchanged.
-
-## [0.67.0] - 2026-11-17
-
-### Added
-
-- `subtitle.VobSubDecoder` and `subtitle.DVBSubDecoder` decode the bitmap
-  subtitles of DVD rips (`S_VOBSUB`) and of broadcast captures (`S_DVBSUB`)
-  block by block, as `subtitle.PGSDecoder` does PGS. Both return the PGS
-  decoder's display sets (`subtitle.BitmapDisplaySet`, the same type): each
-  picture in straight-alpha NRGBA with its position on the subtitle plane, an
-  empty set where the screen clears.
-- `subtitle.ParseVobSubIndex` with `VobSubIndex.ForEachUnit`, and
-  `subtitle.ForEachSUPDisplaySet`, read the bitmap subtitles that sit beside a
-  video: a VobSub `.idx`/`.sub` pair and a PGS `.sup`, one unit or display set
-  at a time, each with its time, in the form the decoders take.
-- `subtitle.PGSDisplaySet` gains `Delay` and `Duration`, which a VobSub unit's
-  start and stop commands set, and `Timeout`, a DVB page's time-out; each is
-  zero where the codec has no such thing.
