@@ -306,23 +306,44 @@ func TestVobSubDecoder_WholeUnitAfterAnIncompleteOne(t *testing.T) {
 			t.Fatalf("whole unit %d after the damaged block: %d sets, err %v; want its picture", i, len(sets), err)
 		}
 	}
-	if d.Pending() {
+	if d.Continues(unit[7:]) {
 		t.Error("the damaged block's bytes are still held")
 	}
 }
 
-// Pending tells a caller the block it just fed started a unit, whose time is that block's.
-func TestVobSubDecoder_Pending(t *testing.T) {
+// A unit takes the time of the block that starts it: the first of the blocks it is spread over, and the block
+// itself when it drops an incomplete unit ahead of it.
+func TestVobSubDecoder_ContinuesDatesTheUnit(t *testing.T) {
 	unit := vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{cmds: spuShow4x2(spuStart)})
+	damaged := append([]byte(nil), unit...)
+	damaged[0] = 0x40 // declares 16 KiB and more
 	d := newVobSub(t)
-	if d.Pending() {
-		t.Fatal("a new decoder holds a unit")
+	if d.Continues(unit) || d.Continues(unit[:7]) {
+		t.Fatal("a new decoder takes a block as the rest of a unit")
 	}
-	if _, err := d.Decode(unit[:7]); err != nil || !d.Pending() {
-		t.Fatalf("after the first part: pending=%v, err %v", d.Pending(), err)
-	}
-	if sets, err := d.Decode(unit[7:]); err != nil || len(sets) != 1 || d.Pending() {
-		t.Fatalf("after the second part: %d sets, pending=%v, err %v", len(sets), d.Pending(), err)
+	var unitTime int64
+	for i, b := range []struct {
+		timeMs   int64
+		data     []byte
+		sets     int
+		wantTime int64
+	}{
+		{1000, damaged, 0, 0},
+		{132499, unit, 1, 132499}, // a whole unit: the damaged one is dropped, and its time with it
+		{200000, unit[:7], 0, 0},
+		{200017, unit[7:], 1, 200000}, // the rest of a unit: the time of its first block
+		{300000, unit, 1, 300000},
+	} {
+		if !d.Continues(b.data) {
+			unitTime = b.timeMs
+		}
+		sets, err := d.Decode(b.data)
+		if err != nil || len(sets) != b.sets {
+			t.Fatalf("block %d at %d ms: %d sets, err %v; want %d", i, b.timeMs, len(sets), err, b.sets)
+		}
+		if len(sets) == 1 && unitTime != b.wantTime {
+			t.Errorf("block %d: its unit is dated %d ms, want %d", i, unitTime, b.wantTime)
+		}
 	}
 }
 

@@ -46,9 +46,11 @@ type VobSubDecoder struct {
 // Reset drops a unit left incomplete: call it when the read skips blocks, so the next one is not taken for its rest.
 func (d *VobSubDecoder) Reset() { d.pending = nil }
 
-// Pending reports whether the last block started a unit that the next blocks complete: the time of the display set
-// they will give is that block's.
-func (d *VobSubDecoder) Pending() bool { return len(d.pending) > 0 }
+// Continues reports whether Decode will take block as the rest of the unit the blocks before it started, rather
+// than as the start of a unit: a caller asks it ahead of each Decode, a unit's time being that of its first block.
+func (d *VobSubDecoder) Continues(block []byte) bool {
+	return len(d.pending) > 0 && !wholeSPU(block)
+}
 
 // NewVobSubDecoder reads the plane size and the palette from the track's CodecPrivate.
 func NewVobSubDecoder(codecPrivate []byte) (*VobSubDecoder, error) {
@@ -110,17 +112,15 @@ func (s *spuState) visible() bool { return s.alpha != [4]uint8{} }
 // Decode decodes one Matroska block, a whole subpicture unit: one display set holding its picture, cut down to its
 // visible pixels, with the Delay before it shows and the Duration its stop command gives it (zero when it has
 // none), or an empty set for a unit that shows nothing. A unit spread over several blocks gives nothing until the
-// block that completes it, and its time is the first block's: Pending says so after each block. A block that is a
-// whole unit of its own never completes the one before, which is dropped.
+// block that completes it, and its time is the first block's: Continues tells, ahead of Decode, whether a block
+// starts a unit. A block that is a whole unit of its own never completes the one before, which is dropped.
 //
 // A block of a track stored compressed (mkv.Track.Compression) is decoded first: mkv.Track.DecodePayload.
 func (d *VobSubDecoder) Decode(block []byte) ([]BitmapDisplaySet, error) {
-	if len(d.pending) > 0 {
-		if !wholeSPU(block) { // a block that is a unit of its own does not complete the one before
-			block = append(d.pending, block...)
-		}
-		d.pending = nil
+	if d.Continues(block) {
+		block = append(d.pending, block...)
 	}
+	d.pending = nil // a block that is a unit of its own does not complete the one before, which is dropped
 	if len(block) < 4 {
 		return nil, fmt.Errorf("VobSub: a subpicture needs 4 bytes of header, the block holds %d", len(block))
 	}

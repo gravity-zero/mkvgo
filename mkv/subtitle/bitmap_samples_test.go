@@ -106,7 +106,11 @@ func TestVobSubDecoder_RealTrack(t *testing.T) {
 	}
 	var cues []sampleCue
 	var first subtitle.BitmapDisplaySet
+	var unitTime int64
 	for i, b := range blocks {
+		if !d.Continues(b.Data) {
+			unitTime = b.Timecode
+		}
 		sets, err := d.Decode(b.Data)
 		if err != nil {
 			t.Fatalf("block %d at %d ms: %v", i, b.Timecode, err)
@@ -119,7 +123,7 @@ func TestVobSubDecoder_RealTrack(t *testing.T) {
 				first = ds
 			}
 			o := ds.Objects[0]
-			cues = append(cues, sampleCue{b.Timecode, ds.Duration.Milliseconds(), o.X, o.Y, o.Image.Bounds().Dx(), o.Image.Bounds().Dy()})
+			cues = append(cues, sampleCue{unitTime, ds.Duration.Milliseconds(), o.X, o.Y, o.Image.Bounds().Dx(), o.Image.Bounds().Dy()})
 		}
 	}
 	// Three of the 46 blocks hold the first part of a unit the muxer cut in two.
@@ -129,7 +133,8 @@ func TestVobSubDecoder_RealTrack(t *testing.T) {
 	for i, want := range map[int]sampleCue{
 		0:  {132499, 4960, 259, 379, 200, 24},
 		1:  {147355, 4733, 259, 76, 203, 63},
-		4:  {185919, 2696, 234, 340, 250, 63}, // a unit over two blocks
+		4:  {185919, 2696, 234, 340, 250, 63}, // a unit over two blocks of one time
+		27: {302018, 1524, 236, 379, 247, 30}, // a unit over two blocks, the second at 302035 ms
 		42: {359834, 1262, 232, 379, 254, 24},
 	} {
 		if cues[i] != want {
