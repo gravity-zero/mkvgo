@@ -211,8 +211,11 @@ func (a *bitmapAssembler) undecodable(blk mkv.Block, err error) error {
 		return err
 	}
 	if a.onSkip != nil {
-		a.onSkip(mkv.DamagedRange{StartOffset: blk.DataOffset, EndOffset: blk.DataOffset + int64(len(blk.Data)),
-			ApproxStartMs: blk.Timecode, ApproxEndMs: blk.Timecode, Err: err})
+		r := mkv.DamagedRange{StartOffset: -1, EndOffset: -1, ApproxStartMs: blk.Timecode, ApproxEndMs: blk.Timecode, Err: err}
+		if blk.DataOffset >= 0 { // a block of the file; a unit of a file beside it has no byte range here
+			r.StartOffset, r.EndOffset = blk.DataOffset, blk.DataOffset+int64(len(blk.Data))
+		}
+		a.onSkip(r)
 	}
 	return nil
 }

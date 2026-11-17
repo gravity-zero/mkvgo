@@ -21,7 +21,8 @@ type DamagedRange struct {
 	ApproxStartMs int64 `json:"approx_start_ms"`
 	ApproxEndMs   int64 `json:"approx_end_ms"`
 	// Err is set when the range is one block that was read but did not decode, where a damaged region is bytes a
-	// read jumped over: the decoder's error. The block's time is ApproxStartMs.
+	// read jumped over: the decoder's error. The block's time is ApproxStartMs; StartOffset and EndOffset are -1
+	// for a unit of a subtitle file read beside the video, which has no byte range there.
 	Err error `json:"-"`
 }
 

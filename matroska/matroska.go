@@ -1185,6 +1185,16 @@ func ForEachSubtitleBitmapFrom(ctx context.Context, srcPath string, trackID uint
 	return ops.ForEachSubtitleBitmapFrom(ctx, srcPath, trackID, ix, fn, opts...)
 }
 
+// ForEachSubtitleBitmapFile calls fn with each cue of a bitmap subtitle file beside a video - a PGS .sup, or a
+// VobSub .idx/.sub pair, stream picking the .idx's language from 0 - timed as ForEachSubtitleBitmap times a track's.
+// See ops.ForEachSubtitleBitmapFile.
+func ForEachSubtitleBitmapFile(ctx context.Context, path string, stream int, fn func(BitmapCue) error, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ForEachSubtitleBitmapFile(ctx, path, stream, fn, opts...)
+}
+
 // SubtitleBlock is one block of a subtitle track, its payload as the codec reads it. See ops.SubtitleBlock.
 type SubtitleBlock = ops.SubtitleBlock
 
