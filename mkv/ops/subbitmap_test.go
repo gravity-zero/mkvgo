@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"image"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -381,7 +383,7 @@ func TestBitmapAssembler_CueEnds(t *testing.T) {
 		{30040, 0, "f"},   // completes it: dated 30000, ended by the next set at 31000
 		{31000, 0, "g"},   // never closed: its time-out, shorter than the default: 31000..33000
 	} {
-		if err := a.block(b.timeMs, b.durMs, []byte(b.data)); err != nil {
+		if err := a.block(mkv.Block{Timecode: b.timeMs, Duration: b.durMs, Data: []byte(b.data)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -414,13 +416,13 @@ func TestBitmapAssembler_LostRegion(t *testing.T) {
 		got = append(got, cueShape{startMs: c.StartMs, endMs: c.EndMs})
 		return nil
 	}}
-	if err := a.block(1000, 0, []byte("b")); err != nil {
+	if err := a.block(mkv.Block{Timecode: 1000, Data: []byte("b")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.lost(1800); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.block(9000, 0, []byte("b")); err != nil {
+	if err := a.block(mkv.Block{Timecode: 9000, Data: []byte("b")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.finish(); err != nil {
@@ -429,5 +431,185 @@ func TestBitmapAssembler_LostRegion(t *testing.T) {
 	want := []cueShape{{startMs: 1000, endMs: 1800}, {startMs: 9000, endMs: 9000 + defaultSubDurationMs}}
 	if dec.resets != 1 || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("%d reset(s), cues %+v; want one reset and %+v", dec.resets, got, want)
+	}
+}
+
+// zeroedCopy copies a sample with n bytes zeroed from its middle.
+func zeroedCopy(t *testing.T, src string, n int) string {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(data[len(data)/2 : len(data)/2+n])
+	path := filepath.Join(t.TempDir(), "zeroed.mkv")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A block that reads but does not decode is lost alone: a VobSub track with 4096 bytes zeroed in the middle of the
+// file gives every cue but the two the zeros hit, where it gave none.
+func TestForEachSubtitleBitmap_UndecodableBlockIsLostAlone(t *testing.T) {
+	ctx := context.Background()
+	bad := zeroedCopy(t, vobsubSampleMKV, 4096)
+	whole := collectCues(t, func(fn func(BitmapCue) error) error { return ForEachSubtitleBitmap(ctx, vobsubSampleMKV, 1, fn) })
+	ix, err := BuildSubtitleIndex(ctx, vobsubSampleMKV, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, read := range map[string]func(fn func(BitmapCue) error, o mkv.Options) error{
+		"walk": func(fn func(BitmapCue) error, o mkv.Options) error { return ForEachSubtitleBitmap(ctx, bad, 1, fn, o) },
+		"index": func(fn func(BitmapCue) error, o mkv.Options) error {
+			return ForEachSubtitleBitmapFrom(ctx, bad, 1, ix, fn, o)
+		},
+	} {
+		var skips []mkv.DamagedRange
+		var cues []BitmapCue
+		if err := read(func(c BitmapCue) error { cues = append(cues, c); return nil }, onSkipInto(&skips)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(cues) != 41 || len(skips) == 0 {
+			t.Fatalf("%s: %d cues of %d and %d region(s) reported; want 41 and at least one", name, len(cues), len(whole), len(skips))
+		}
+		// Every cue that came out is one of the whole track's, pixels included.
+		byStart := map[int64]BitmapCue{}
+		for _, c := range whole {
+			byStart[c.StartMs] = c
+		}
+		for _, c := range cues {
+			w, ok := byStart[c.StartMs]
+			if !ok || shapeOf(c) != shapeOf(w) || !bytes.Equal(c.Image.Pix, w.Image.Pix) {
+				t.Errorf("%s: the cue at %d ms is not the whole track's", name, c.StartMs)
+			}
+		}
+		// A read that refuses any damage still fails, on the block and by its time.
+		err := read(func(BitmapCue) error { return nil }, mkv.Options{DamageBytes: -1})
+		if err == nil {
+			t.Errorf("%s: a read refusing any damage passed over the zeroed bytes", name)
+		}
+	}
+}
+
+// pgsDamagedFixture is buildPGSFixture's track with a block that reads but is no display set between its cues.
+func pgsDamagedFixture(t *testing.T) string {
+	t.Helper()
+	tracks := []mkv.Track{subtitleTrack(1, "pgs")}
+	blocks := []mkv.Block{
+		{TrackNumber: 1, Timecode: 0, Data: pgsShow(10, 100, 900, true)}, // open: ended by the block that does not decode
+		{TrackNumber: 1, Timecode: 700, Data: []byte{0x16, 0xff, 0xff, 0x00}},
+		{TrackNumber: 1, Timecode: 1000, Duration: 400, Data: pgsShow(11, 200, 950, true)},
+		{TrackNumber: 1, Timecode: 2000, Data: pgsShow(12, 300, 960, false)},
+	}
+	return buildMinimalMKV(t, t.TempDir(), "pgsbad.mkv", tracks, blocks, 3000)
+}
+
+func TestForEachSubtitleBitmap_UndecodablePGSBlock(t *testing.T) {
+	ctx := context.Background()
+	path := pgsDamagedFixture(t)
+	want := []cueShape{{0, 700, 100, 900, 4, 2}, {1000, 1400, 200, 950, 4, 2}, {2000, 2000 + defaultSubDurationMs, 300, 960, 4, 2}}
+	ix, err := BuildSubtitleIndex(ctx, path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, read := range map[string]func(fn func(PGSCue) error, o mkv.Options) error{
+		"bitmap walk": func(fn func(PGSCue) error, o mkv.Options) error { return ForEachSubtitleBitmap(ctx, path, 1, fn, o) },
+		"pgs walk":    func(fn func(PGSCue) error, o mkv.Options) error { return ForEachSubtitlePGS(ctx, path, 1, fn, o) },
+		"bitmap index": func(fn func(PGSCue) error, o mkv.Options) error {
+			return ForEachSubtitleBitmapFrom(ctx, path, 1, ix, fn, o)
+		},
+		"pgs index": func(fn func(PGSCue) error, o mkv.Options) error {
+			return ForEachSubtitlePGSFrom(ctx, path, 1, ix, fn, o)
+		},
+	} {
+		var skips []mkv.DamagedRange
+		var got []cueShape
+		if err := read(func(c PGSCue) error { got = append(got, shapeOf(c)); return nil }, onSkipInto(&skips)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+			t.Errorf("%s: cues %+v, want %+v", name, got, want)
+		}
+		if len(skips) != 1 || skips[0].ApproxStartMs != 700 || skips[0].ApproxEndMs != 700 || skips[0].EndOffset-skips[0].StartOffset != 4 || skips[0].StartOffset <= 0 {
+			t.Errorf("%s: OnSkip got %+v, want once the 4 bytes of the block at 700 ms", name, skips)
+		}
+		err := read(func(PGSCue) error { return nil }, mkv.Options{DamageBytes: -1})
+		if err == nil || !strings.Contains(err.Error(), "subtitle block at 700 ms: PGS: a 0x16 segment declares 65535 bytes") {
+			t.Errorf("%s: refusing any damage, err = %v; want the block's own", name, err)
+		}
+		// What the caller's function returns stays fatal, also from the cue the lost block closes.
+		stop := errors.New("stop")
+		if err := read(func(PGSCue) error { return stop }, mkv.Options{}); err != stop {
+			t.Errorf("%s: err = %v, want the callback's own", name, err)
+		}
+	}
+	// So does a cancelled context.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := ForEachSubtitleBitmap(cancelled, path, 1, func(PGSCue) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Errorf("a cancelled read: err = %v, want context.Canceled", err)
+	}
+	if err := ForEachSubtitleBitmapFrom(cancelled, path, 1, ix, func(PGSCue) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Errorf("a cancelled indexed read: err = %v, want context.Canceled", err)
+	}
+}
+
+// failingDecoder fails on blocks starting with '!' after handing back the sets it had, as the DVB decoder does.
+type failingDecoder struct {
+	scriptedDecoder
+}
+
+func (d *failingDecoder) Decode(block []byte) ([]subtitle.BitmapDisplaySet, error) {
+	if block[0] == '!' {
+		return d.sets['b'], errors.New("a segment that cannot be read")
+	}
+	return d.scriptedDecoder.Decode(block)
+}
+
+// The sets a decoder returns with its error are dropped with the block, the decoder is reset and the cue on screen
+// ends at the block's time; a display set that cannot be composited is lost the same way.
+func TestBitmapAssembler_UndecodableBlock(t *testing.T) {
+	far := subtitle.BitmapDisplaySet{ScreenW: 720, ScreenH: 576, Objects: []subtitle.BitmapObject{
+		{X: 0, Y: 0, Image: image.NewNRGBA(image.Rect(0, 0, 1, 1))},
+		{X: bitmapMaxPlane + 1, Y: 0, Image: image.NewNRGBA(image.Rect(0, 0, 1, 1))},
+	}}
+	dec := &failingDecoder{scriptedDecoder{sets: map[byte][]subtitle.BitmapDisplaySet{
+		'b': {shownSet(2, subtitle.BitmapDisplaySet{})},
+		'f': {shownSet(3, subtitle.BitmapDisplaySet{}), far},
+	}}}
+	var got []cueShape
+	var skips []mkv.DamagedRange
+	a := &bitmapAssembler{dec: dec, name: "test", track: &mkv.Track{}, onSkip: func(r mkv.DamagedRange) { skips = append(skips, r) },
+		emit: func(c BitmapCue) error {
+			got = append(got, cueShape{startMs: c.StartMs, endMs: c.EndMs, x: c.X})
+			return nil
+		}}
+	for _, b := range []mkv.Block{
+		{Timecode: 1000, Data: []byte("b"), DataOffset: 100},
+		{Timecode: 1500, Data: []byte("!x"), DataOffset: 200}, // fails: its sets dropped, the cue of 1000 ends here
+		{Timecode: 2000, Data: []byte("b"), DataOffset: 300},
+		{Timecode: 2600, Data: []byte("fyz"), DataOffset: 400}, // its second set cannot be composited: the whole block is lost
+		{Timecode: 3000, Data: []byte("b"), DataOffset: 500},
+	} {
+		if err := a.block(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.finish(); err != nil {
+		t.Fatal(err)
+	}
+	want := []cueShape{{startMs: 1000, endMs: 1500, x: 2}, {startMs: 2000, endMs: 2600, x: 2}, {startMs: 3000, endMs: 3000 + defaultSubDurationMs, x: 2}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("cues %+v, want %+v", got, want)
+	}
+	wantSkips := []mkv.DamagedRange{{StartOffset: 200, EndOffset: 202, ApproxStartMs: 1500, ApproxEndMs: 1500}, {StartOffset: 400, EndOffset: 403, ApproxStartMs: 2600, ApproxEndMs: 2600}}
+	if dec.resets != 2 || len(skips) != 2 || skips[0] != wantSkips[0] || skips[1] != wantSkips[1] {
+		t.Errorf("%d reset(s), OnSkip %+v; want 2 and %+v", dec.resets, skips, wantSkips)
+	}
+
+	a.strict = true
+	if err := a.block(mkv.Block{Timecode: 4000, Data: []byte("!")}); err == nil || !strings.Contains(err.Error(), "subtitle block at 4000 ms: a segment that cannot be read") {
+		t.Errorf("refusing any damage, err = %v; want the block's own", err)
 	}
 }

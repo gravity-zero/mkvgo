@@ -67,7 +67,7 @@ func ForEachSubtitlePGS(ctx context.Context, srcPath string, trackID uint64, fn 
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
-	return walkSubtitleBlocks(ctx, srcPath, trackID, bitmapCues(fn, checkPGSTrack), opts)
+	return walkSubtitleBlocks(ctx, srcPath, trackID, bitmapCues(fn, checkPGSTrack, opts), opts)
 }
 
 // ExtractSubtitlePGSFrom is ExtractSubtitlePGS served from a prebuilt index:
@@ -95,7 +95,7 @@ func ForEachSubtitlePGSFrom(ctx context.Context, srcPath string, trackID uint64,
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
-	return indexedSubtitleBlocks(ctx, srcPath, trackID, ix, bitmapCues(fn, checkPGSTrack), opts)
+	return indexedSubtitleBlocks(ctx, srcPath, trackID, ix, bitmapCues(fn, checkPGSTrack, opts), opts)
 }
 
 // checkPGSTrack refuses a subtitle track that is not PGS. The message names the codec it did find, because the

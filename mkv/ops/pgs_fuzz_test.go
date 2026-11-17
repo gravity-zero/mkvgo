@@ -15,11 +15,11 @@ func FuzzPGSAssembler(f *testing.F) {
 	f.Fuzz(func(t *testing.T, first, second []byte, durMs int64) {
 		costguard.Fuzz(t, len(first)+len(second), func() {
 			var cues []PGSCue
-			a, err := newBitmapAssembler(func(c PGSCue) error { cues = append(cues, c); return nil }, &mkv.Track{Codec: "pgs"})
+			a, err := newBitmapAssembler(func(c PGSCue) error { cues = append(cues, c); return nil }, &mkv.Track{Codec: "pgs"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if a.block(1000, durMs%5000, first) != nil || a.block(2000, 0, second) != nil {
+			if a.block(mkv.Block{Timecode: 1000, Duration: durMs % 5000, Data: first}) != nil || a.block(mkv.Block{Timecode: 2000, Data: second}) != nil {
 				return
 			}
 			for _, c := range cues {
@@ -43,17 +43,17 @@ func FuzzBitmapAssembler(f *testing.F) {
 				track = &mkv.Track{Codec: "dvbsub"}
 			}
 			var cues []BitmapCue
-			a, err := newBitmapAssembler(func(c BitmapCue) error { cues = append(cues, c); return nil }, track)
+			a, err := newBitmapAssembler(func(c BitmapCue) error { cues = append(cues, c); return nil }, track, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if a.block(1000, durMs%5000, first) != nil {
+			if a.block(mkv.Block{Timecode: 1000, Duration: durMs % 5000, Data: first}) != nil {
 				return
 			}
 			if lost && a.lost(1500) != nil {
 				return
 			}
-			if a.block(2000, 0, second) != nil || a.finish() != nil {
+			if a.block(mkv.Block{Timecode: 2000, Data: second}) != nil || a.finish() != nil {
 				return
 			}
 			for _, c := range cues {
