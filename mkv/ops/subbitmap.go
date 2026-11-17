@@ -28,7 +28,7 @@ type BitmapCue = PGSCue
 // one cue, composited on the smallest rectangle that holds them.
 //
 // A block that reads but does not decode is lost alone: the cue on screen ends at its time, the decoder starts
-// afresh and the block is reported through Options.OnSkip, the read going on - unless Options.DamageBytes refuses
+// afresh and the block is reported through Options.OnSkip (DamagedRange.Err says why), the read going on - unless Options.DamageBytes refuses
 // any damage, which fails the read on it. A DVB decoder that starts afresh holds no region and no colour table, so
 // nothing shows until the stream's next acquisition point or mode change.
 func ForEachSubtitleBitmap(ctx context.Context, srcPath string, trackID uint64, fn func(BitmapCue) error, opts ...mkv.Options) error {
@@ -157,7 +157,7 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 	timeMs := blk.Timecode
 	data, err := decompressSubtitleBlock(a.track, blk.Data)
 	if err != nil {
-		return nil, fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+		return nil, err
 	}
 	// A unit spread over several blocks (VobSub) is dated by the first of them.
 	if c, ok := a.dec.(interface{ Continues([]byte) bool }); !ok || !c.Continues(data) {
@@ -165,7 +165,7 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 	}
 	sets, err := a.dec.Decode(data)
 	if err != nil { // the sets a decoder hands back with its error go with the block
-		return nil, fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+		return nil, err
 	}
 	shown := make([]decodedSet, 0, len(sets))
 	for i := range sets {
@@ -177,7 +177,7 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 		}
 		cue, err := flattenDisplaySet(ds, start, a.name)
 		if err != nil {
-			return nil, fmt.Errorf("subtitle block at %d ms: %w", timeMs, err)
+			return nil, err
 		}
 		// The stream's own end, then the muxer's.
 		switch {
@@ -196,10 +196,11 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 }
 
 // undecodable loses a block that reads but does not decode: the decoder forgets its state, the cue on screen ends
-// at the block's time and the block is reported as a damaged region. A read that refuses any damage fails on it.
+// at the block's time and the block is reported through OnSkip with the decoder's error. A read that refuses any
+// damage fails on it.
 func (a *bitmapAssembler) undecodable(blk mkv.Block, err error) error {
 	if a.strict {
-		return err
+		return fmt.Errorf("subtitle block at %d ms: %w", blk.Timecode, err)
 	}
 	a.dec.Reset()
 	if err := a.closeAt(blk.Timecode); err != nil {
@@ -207,7 +208,7 @@ func (a *bitmapAssembler) undecodable(blk mkv.Block, err error) error {
 	}
 	if a.onSkip != nil {
 		a.onSkip(mkv.DamagedRange{StartOffset: blk.DataOffset, EndOffset: blk.DataOffset + int64(len(blk.Data)),
-			ApproxStartMs: blk.Timecode, ApproxEndMs: blk.Timecode})
+			ApproxStartMs: blk.Timecode, ApproxEndMs: blk.Timecode, Err: err})
 	}
 	return nil
 }

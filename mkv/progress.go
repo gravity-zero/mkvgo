@@ -20,6 +20,9 @@ type DamagedRange struct {
 	EndOffset     int64 `json:"end_offset"`
 	ApproxStartMs int64 `json:"approx_start_ms"`
 	ApproxEndMs   int64 `json:"approx_end_ms"`
+	// Err is set when the range is one block that was read but did not decode, where a damaged region is bytes a
+	// read jumped over: the decoder's error. The block's time is ApproxStartMs.
+	Err error `json:"-"`
 }
 
 // RepairedRange records one region that a tolerant walk (ops.Salvage, or

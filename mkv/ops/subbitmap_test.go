@@ -188,7 +188,7 @@ func TestForEachSubtitleBlock_LostRegion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		if len(skips) != 1 || skips[0].EndOffset != clusters[6] || skips[0].ApproxStartMs != tc.lostMs {
+		if len(skips) != 1 || skips[0].EndOffset != clusters[6] || skips[0].ApproxStartMs != tc.lostMs || skips[0].Err != nil {
 			t.Errorf("%s: OnSkip got %+v, want once a region from %d ms ending at byte %d", tc.name, skips, tc.lostMs, clusters[6])
 		}
 		if lost != 1 || lostAt != 4 || times[3] != 3200 || times[4] != tc.nextMs {
@@ -470,8 +470,23 @@ func TestForEachSubtitleBitmap_UndecodableBlockIsLostAlone(t *testing.T) {
 		if err := read(func(c BitmapCue) error { cues = append(cues, c); return nil }, onSkipInto(&skips)); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if len(cues) != 41 || len(skips) == 0 {
-			t.Fatalf("%s: %d cues of %d and %d region(s) reported; want 41 and at least one", name, len(cues), len(whole), len(skips))
+		if len(cues) != 41 {
+			t.Fatalf("%s: %d cues of %d, want 41", name, len(cues), len(whole))
+		}
+		// What OnSkip reports tells the two losses apart: bytes the read jumped over, and a block that was read.
+		regions, blocks := 0, 0
+		for _, r := range skips {
+			if r.Err == nil {
+				regions++
+				continue
+			}
+			blocks++
+			if r.ApproxStartMs != 230872 || r.ApproxEndMs != 230872 || !strings.HasPrefix(r.Err.Error(), "VobSub: the control sequence at byte 2979") {
+				t.Errorf("%s: the block that does not decode is reported at %d ms as %q", name, r.ApproxStartMs, r.Err)
+			}
+		}
+		if regions != 1 || blocks != 1 {
+			t.Errorf("%s: OnSkip got %d damaged region(s) and %d undecodable block(s), want one of each: %+v", name, regions, blocks, skips)
 		}
 		// Every cue that came out is one of the whole track's, pixels included.
 		byStart := map[int64]BitmapCue{}
@@ -533,6 +548,8 @@ func TestForEachSubtitleBitmap_UndecodablePGSBlock(t *testing.T) {
 		}
 		if len(skips) != 1 || skips[0].ApproxStartMs != 700 || skips[0].ApproxEndMs != 700 || skips[0].EndOffset-skips[0].StartOffset != 4 || skips[0].StartOffset <= 0 {
 			t.Errorf("%s: OnSkip got %+v, want once the 4 bytes of the block at 700 ms", name, skips)
+		} else if skips[0].Err == nil || skips[0].Err.Error() != "PGS: a 0x16 segment declares 65535 bytes, 1 remain in the block" {
+			t.Errorf("%s: the block is reported with the error %v, want the decoder's own", name, skips[0].Err)
 		}
 		err := read(func(PGSCue) error { return nil }, mkv.Options{DamageBytes: -1})
 		if err == nil || !strings.Contains(err.Error(), "subtitle block at 700 ms: PGS: a 0x16 segment declares 65535 bytes") {
@@ -604,8 +621,18 @@ func TestBitmapAssembler_UndecodableBlock(t *testing.T) {
 		t.Errorf("cues %+v, want %+v", got, want)
 	}
 	wantSkips := []mkv.DamagedRange{{StartOffset: 200, EndOffset: 202, ApproxStartMs: 1500, ApproxEndMs: 1500}, {StartOffset: 400, EndOffset: 403, ApproxStartMs: 2600, ApproxEndMs: 2600}}
-	if dec.resets != 2 || len(skips) != 2 || skips[0] != wantSkips[0] || skips[1] != wantSkips[1] {
-		t.Errorf("%d reset(s), OnSkip %+v; want 2 and %+v", dec.resets, skips, wantSkips)
+	wantErrs := []string{"a segment that cannot be read", "test: a display set spreads its objects over"}
+	if dec.resets != 2 || len(skips) != 2 {
+		t.Fatalf("%d reset(s), OnSkip %+v; want 2 and %+v", dec.resets, skips, wantSkips)
+	}
+	for i, r := range skips {
+		if r.Err == nil || !strings.HasPrefix(r.Err.Error(), wantErrs[i]) {
+			t.Errorf("skip %d carries the error %v, want one starting with %q", i, r.Err, wantErrs[i])
+		}
+		r.Err = nil
+		if r != wantSkips[i] {
+			t.Errorf("skip %d = %+v, want %+v", i, r, wantSkips[i])
+		}
 	}
 
 	a.strict = true
