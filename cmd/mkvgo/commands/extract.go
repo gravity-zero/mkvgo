@@ -75,8 +75,8 @@ func CmdExtractSubtitle(args []string) {
 	opts.SyncOutput = SyncOutput
 
 	if indexPath != "" {
-		if format != "vtt" && format != "pgs" {
-			FatalUsage("-index applies to -format vtt and -format pgs only")
+		if format != "vtt" && format != "pgs" && format != "png" {
+			FatalUsage("-index applies to -format vtt, -format png and -format pgs only")
 		}
 		if isMP4Content(source) {
 			Fatal("-index applies to MKV/WebM only: an MP4 already carries its own sample table")
@@ -87,6 +87,10 @@ func CmdExtractSubtitle(args []string) {
 		}
 		if format == "pgs" {
 			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d (from %s) → %s\n", n, trackID, indexPath, outPath)
+			return
+		}
+		if format == "png" {
+			fmt.Printf("extracted %d bitmap cue(s) from subtitle track %d (from %s) → %s\n", n, trackID, indexPath, outPath)
 			return
 		}
 		fmt.Printf("extracted subtitle track %d (vtt, from %s) → %s\n", trackID, indexPath, outPath)
@@ -109,6 +113,18 @@ func CmdExtractSubtitle(args []string) {
 			fmt.Printf("extracted %d PGS cue(s) from subtitle track %d → %s\n", n, trackID, outPath)
 			return
 		}
+	case "png":
+		if isMP4Content(source) {
+			Fatal("bitmap subtitles are read from Matroska: -format png applies to MKV/WebM only")
+		}
+		var n int
+		n, err = writePGSDir(outPath, func(fn func(matroska.BitmapCue) error) error {
+			return matroska.ForEachSubtitleBitmap(cliCtx, source, trackID, fn, opts)
+		})
+		if err == nil {
+			fmt.Printf("extracted %d bitmap cue(s) from subtitle track %d → %s\n", n, trackID, outPath)
+			return
+		}
 	case "srt":
 		if isMP4Content(source) {
 			Fatal("MP4 subtitle extraction supports only -format vtt")
@@ -120,7 +136,7 @@ func CmdExtractSubtitle(args []string) {
 		}
 		err = matroska.ExtractASS(cliCtx, source, trackID, outPath, opts)
 	default:
-		FatalUsage(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, pgs)", format))
+		FatalUsage(fmt.Sprintf("unknown format %q (supported: srt, ass, vtt, png, pgs)", format))
 	}
 	if err != nil {
 		FatalErr(err)
@@ -154,6 +170,11 @@ func extractFromIndex(source string, trackID uint64, format, indexPath, outPath 
 	if format == "pgs" {
 		return writePGSDir(outPath, func(fn func(matroska.PGSCue) error) error {
 			return matroska.ForEachSubtitlePGSFrom(cliCtx, source, trackID, &ix, fn, opts)
+		})
+	}
+	if format == "png" {
+		return writePGSDir(outPath, func(fn func(matroska.BitmapCue) error) error {
+			return matroska.ForEachSubtitleBitmapFrom(cliCtx, source, trackID, &ix, fn, opts)
 		})
 	}
 	return 0, writeFileFrom(outPath, func(out io.Writer) error {

@@ -168,3 +168,66 @@ func TestCmdExtractSubtitle_PGSIndexRejectsSRT(t *testing.T) {
 }
 
 var _ = matroska.PGSCue{} // the facade type the CLI is the parity partner of
+
+// -format png reads any bitmap track by its codec: a DVD's VobSub comes out as the same PNGs and manifest, walked
+// and served from a subtitle index.
+func TestCmdExtractSubtitle_PNGWritesAVobSubTrack(t *testing.T) {
+	src := "../../../internal/testdata/vobsub.mkv"
+	dir := t.TempDir()
+	walked := filepath.Join(dir, "walked")
+	out := capture(t, func() {
+		commands.CmdExtractSubtitle([]string{src, "-t", "1", "-o", walked, "-format", "png"})
+	})
+	if !strings.Contains(out, "extracted 43 bitmap cue(s)") {
+		t.Errorf("stdout = %q, want the cue count", out)
+	}
+	index := filepath.Join(dir, "subs.mkvsix")
+	capture(t, func() { commands.CmdSubtitleIndex([]string{src, "-o", index}) })
+	indexed := filepath.Join(dir, "indexed")
+	out = capture(t, func() {
+		commands.CmdExtractSubtitle([]string{src, "-t", "1", "-o", indexed, "-format", "png", "-index", index})
+	})
+	if !strings.Contains(out, "extracted 43 bitmap cue(s)") || !strings.Contains(out, "from "+index) {
+		t.Errorf("stdout = %q, want the cue count and the index", out)
+	}
+
+	type cue struct {
+		StartMs int64  `json:"start_ms"`
+		EndMs   int64  `json:"end_ms"`
+		X       int    `json:"x"`
+		Y       int    `json:"y"`
+		ScreenW int    `json:"screen_w"`
+		ScreenH int    `json:"screen_h"`
+		File    string `json:"file"`
+	}
+	read := func(d string) (cues []cue) {
+		blob, err := os.ReadFile(filepath.Join(d, "cues.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(blob, &cues); err != nil {
+			t.Fatal(err)
+		}
+		return cues
+	}
+	cues := read(walked)
+	if len(cues) != 43 || cues[0] != (cue{132499, 137459, 259, 379, 720, 480, "00000.png"}) {
+		t.Fatalf("%d cues, the first %+v", len(cues), cues[0])
+	}
+	f, err := os.Open(filepath.Join(walked, cues[0].File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil || img.Bounds().Dx() != 200 || img.Bounds().Dy() != 24 {
+		t.Errorf("the first picture: %v, err %v; want 200x24", img.Bounds(), err)
+	}
+	for i, c := range read(indexed) {
+		a, errA := os.ReadFile(filepath.Join(walked, c.File))
+		b, errB := os.ReadFile(filepath.Join(indexed, c.File))
+		if c != cues[i] || errA != nil || errB != nil || string(a) != string(b) {
+			t.Fatalf("cue %d served from the index differs from the walk", i)
+		}
+	}
+}

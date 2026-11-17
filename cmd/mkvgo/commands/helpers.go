@@ -113,7 +113,7 @@ var CmdUsage = map[string]string{
 	"set-chapters":       "mkvgo set-chapters <file.mkv|.mp4> -o <out> <chapters.txt> (OGM format: CHAPTER01=00:00:00.000 / CHAPTER01NAME=Intro)",
 	"extract-chapters":   "mkvgo extract-chapters <file.mkv|.mp4> [-o <chapters.txt>] (OGM format, stdout by default)",
 	"remove-attachment":  "mkvgo remove-attachment <file.mkv> -o <out.mkv> <attachmentID|name>",
-	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt|pgs (default: srt; pgs writes a directory of PNGs + cues.json)] [-index <index.mkvsix> (vtt/pgs, MKV only)] [--damage-bytes n (MKV: pass over a damaged region within n bytes, its cues lost; default 64 MiB)]",
+	"extract-subtitle":   "mkvgo extract-subtitle <file.mkv|.mp4> -t <trackID> -o <out> [-format srt|ass|vtt|png|pgs (default: srt; png writes a bitmap track - PGS, VobSub, DVB - as a directory of PNGs + cues.json, pgs the same for a PGS track only)] [-index <index.mkvsix> (vtt/png/pgs, MKV only)] [--damage-bytes n (MKV: pass over a damaged region within n bytes, its cues lost; default 64 MiB)]",
 	"subtitle-index":     "mkvgo subtitle-index <file.mkv> -o <index.mkvsix> [-t 4,5 (default: every subtitle track)] [-from-cues] [--damage-bytes n]",
 	"split":              "mkvgo split <file.mkv|.mp4> -o <dir> [-chapters | -range 0-5:00,5:00-0 | -every 6:00] [-pattern part_%03d.mkv|.mp4 ({title} = chapter title)]",
 	"join":               "mkvgo join -o <out.mkv|.mp4> <file1> <file2> ... (all MKV/WebM or all MP4/MOV)",
