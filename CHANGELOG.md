@@ -17,6 +17,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   keeps the audio up to about a frame late past it, as before 0.62.0
   (`docs/library.md`, HLS plan).
 
+### Fixed
+
+- `Playability` and `Ingest` send a PQ or HLG video with no mastering metadata
+  or MaxCLL to transcode on a target without HDR (reason `HDR (PQ transfer) is
+  unsupported on target`); it was direct-play before. They also read the first
+  sample of a video track whose header states no colour, so a PQ stated only in
+  the SPS counts.
+
 ## [0.69.0] - 2026-11-17
 
 ### Added

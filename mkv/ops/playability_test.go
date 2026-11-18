@@ -12,6 +12,7 @@ package ops
 
 import (
 	"context"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,70 @@ func TestPlayability_HEVCMain10HDR10_Safari_DirectPlay_Chrome_Transcode(t *testi
 	}
 	if len(v.Reasons) == 0 || !strings.Contains(strings.ToLower(v.Reasons[0]), "hevc") {
 		t.Fatalf("chrome reasons = %v, want a reason mentioning HEVC", v.Reasons)
+	}
+}
+
+// TestPlayability_HDRTransferWithoutStaticMetadata: a PQ or HLG video with no
+// MasteringMetadata/MaxCLL is still HDR; an SDR target must transcode it.
+func TestPlayability_HDRTransferWithoutStaticMetadata(t *testing.T) {
+	sdrTV := Target{Name: "custom", Container: []string{"mkv"}, VideoCodecs: []string{"hevc"}, HEVCMain10: true}
+	hdrTV := sdrTV
+	hdrTV.HDR = true
+	for _, tc := range []struct {
+		name     string
+		transfer uint16
+		want     string
+	}{{"PQ", 16, "PQ"}, {"HLG", 18, "HLG"}} {
+		track := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", Profile: "Main 10",
+			ColorPrimaries: u16(9), ColorTransfer: u16(tc.transfer)}
+		v := evaluateTrack(track, "mkv", sdrTV)
+		if v.Verdict != verdictTranscode || len(v.Reasons) != 1 || !strings.Contains(v.Reasons[0], tc.want) {
+			t.Errorf("%s on SDR target: verdict = %q, reasons = %v, want transcode naming %s", tc.name, v.Verdict, v.Reasons, tc.want)
+		}
+		if v := evaluateTrack(track, "mkv", hdrTV); v.Verdict != verdictDirectPlay {
+			t.Errorf("%s on HDR target: verdict = %q, reasons = %v, want direct-play", tc.name, v.Verdict, v.Reasons)
+		}
+	}
+	sdr := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", Profile: "Main 10", ColorPrimaries: u16(1), ColorTransfer: u16(1)}
+	if v := evaluateTrack(sdr, "mkv", sdrTV); v.Verdict != verdictDirectPlay {
+		t.Errorf("SDR on SDR target: verdict = %q, reasons = %v, want direct-play", v.Verdict, v.Reasons)
+	}
+}
+
+// TestPlayability_PQInBandOnly: a HEVC track whose bare hvcC and missing Colour
+// element leave the header silent, PQ stated only by the first sample's SPS (as
+// some 2160p remuxes write it), is HDR for Playability.
+func TestPlayability_PQInBandOnly(t *testing.T) {
+	hvcC, err := hex.DecodeString("0102200000009000000000001ef000fcfdfafa00000f03200001001840010c01ffff02200000030090000003000003001e959809210001002d42010102200000030090000003000003001ea0208104d96566924caf016a12201208000003000800000300c04022000100074401c172b42240")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sps []byte
+	for off, a := 23, 0; a < int(hvcC[22]); a++ {
+		typ, n := hvcC[off]&0x3f, int(hvcC[off+1])<<8|int(hvcC[off+2])
+		off += 3
+		for range n {
+			ln := int(hvcC[off])<<8 | int(hvcC[off+1])
+			if typ == 33 {
+				sps = hvcC[off+2 : off+2+ln]
+			}
+			off += 2 + ln
+		}
+	}
+	bare := append([]byte(nil), hvcC[:23]...)
+	bare[22] = 0
+	frame := append([]byte{0, 0, 0, byte(len(sps))}, sps...)
+	video := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bare, Width: u32(3840), Height: u32(2160)}
+	src := buildMultiClusterMKV(t, t.TempDir(), "pq.mkv", []mkv.Track{video},
+		[][]mkv.Block{{{TrackNumber: 1, Keyframe: true, Data: frame}}}, 40)
+
+	sdrTV := Target{Name: "custom", Container: []string{"mkv"}, VideoCodecs: []string{"hevc"}, HEVCMain10: true}
+	r, err := Playability(context.Background(), src, sdrTV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := r.Tracks[0]; v.Verdict != verdictTranscode || !strings.Contains(strings.Join(v.Reasons, "|"), "HDR") {
+		t.Errorf("PQ in-band only on SDR target: verdict = %q, reasons = %v, want transcode for HDR", v.Verdict, v.Reasons)
 	}
 }
 

@@ -43,8 +43,8 @@ type Target struct {
 	// MaxLevelH264/MaxLevelHEVC cap the codec level (0 = no limit).
 	MaxLevelH264 int
 	MaxLevelHEVC int
-	// HDR/DolbyVision gate HDR10 static metadata / Dolby Vision configuration
-	// records regardless of which video codec carries them.
+	// HDR gates HDR10 static metadata and a PQ/HLG transfer; DolbyVision gates
+	// Dolby Vision configuration records; both regardless of the video codec.
 	HDR         bool
 	DolbyVision bool
 	// HEVCMain10 gates 10-bit HEVC (profile "Main 10"); VP9Profile2 gates
@@ -93,13 +93,14 @@ func verdictRank(v string) int {
 
 // Playability evaluates every track of the file at path against target and
 // returns the per-track and overall verdicts. It reads head-only metadata
-// only (Matroska/WebM via reader.OpenMetaWithFS, MP4/MOV via mp4.OpenMeta) -
-// no block walk, no decode.
+// (Matroska/WebM via reader.OpenMetaWithFS, MP4/MOV via mp4.OpenMeta), plus the
+// first sample of a video track whose colour or HDR10 metadata the header leaves
+// out - no block walk, no decode.
 func Playability(ctx context.Context, path string, target Target, opts ...mkv.Options) (*PlayabilityReport, error) {
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
-	c, srcContainer, err := openAnyMeta(ctx, path, mkv.FSFrom(opts))
+	c, srcContainer, err := openAnyMeta(ctx, path, mkv.FSFrom(opts), true)
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +217,12 @@ func evaluateVideoTrack(v *TrackVerdict, t mkv.Track, target Target) {
 	if t.DolbyVision != nil && !target.DolbyVision {
 		reasons = append(reasons, "Dolby Vision is unsupported on target")
 	}
-	if t.HDR != nil && !target.HDR {
-		reasons = append(reasons, "HDR10 static metadata is unsupported on target")
+	if !target.HDR {
+		if t.HDR != nil {
+			reasons = append(reasons, "HDR10 static metadata is unsupported on target")
+		} else if t.DolbyVision == nil && t.ColorTransfer != nil && (*t.ColorTransfer == 16 || *t.ColorTransfer == 18) {
+			reasons = append(reasons, fmt.Sprintf("HDR (%s transfer) is unsupported on target", map[uint16]string{16: "PQ", 18: "HLG"}[*t.ColorTransfer]))
+		}
 	}
 	if target.MaxWidth > 0 && t.Width != nil && int(*t.Width) > target.MaxWidth {
 		reasons = append(reasons, fmt.Sprintf("width %d exceeds target max %d", *t.Width, target.MaxWidth))
@@ -376,20 +381,25 @@ func opensLikeMP4(ctx context.Context, path string, fs *mkv.FS) (bool, *mkv.FS, 
 // MP4/MOV source, the reader chosen by the first bytes (opensLikeMP4). It returns the
 // container's format name ("mkv" or "mp4") alongside the metadata, since
 // Playability needs it to know whether the source container already plays on
-// the target.
-func openAnyMeta(ctx context.Context, path string, fs *mkv.FS) (*mkv.Container, string, error) {
+// the target. inBand reads the first sample of a video track whose colour or
+// HDR10 metadata the header leaves out (PQ stated only in the SPS).
+func openAnyMeta(ctx context.Context, path string, fs *mkv.FS, inBand bool) (*mkv.Container, string, error) {
 	isMP4, fs, err := opensLikeMP4(ctx, path, fs)
 	if err != nil {
 		return nil, "", err
 	}
 	if isMP4 {
-		c, _, err := mp4.OpenMetaWithFS(ctx, path, fs)
+		c, _, err := mp4.OpenMetaWithFS(ctx, path, fs, mp4.Options{InBandColour: inBand})
 		if err != nil {
 			return nil, "", err
 		}
 		return c, "mp4", nil
 	}
-	c, err := reader.OpenMetaWithFS(ctx, path, fs)
+	var ropts []reader.ReadOption
+	if inBand {
+		ropts = append(ropts, reader.WithInBandColourFallback())
+	}
+	c, err := reader.OpenMetaWithFS(ctx, path, fs, ropts...)
 	if err != nil {
 		return nil, "", err
 	}

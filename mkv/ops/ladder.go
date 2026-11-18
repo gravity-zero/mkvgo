@@ -140,7 +140,7 @@ func RecommendLadderFor(ctx context.Context, path string, opts ...mkv.Options) (
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
-	c, _, err := openAnyMeta(ctx, path, mkv.FSFrom(opts))
+	c, _, err := openAnyMeta(ctx, path, mkv.FSFrom(opts), false)
 	if err != nil {
 		return nil, err
 	}

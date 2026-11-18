@@ -111,7 +111,7 @@ func Ingest(ctx context.Context, path string, opts IngestOptions) (*ServingPlan,
 		return nil, err
 	}
 
-	c, srcContainer, err := openAnyMeta(ctx, path, opts.FS)
+	c, srcContainer, err := openAnyMeta(ctx, path, opts.FS, true)
 	if err != nil {
 		return nil, fmt.Errorf("ingest: %w", err)
 	}
