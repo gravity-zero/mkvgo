@@ -319,8 +319,12 @@ first block's slot (no earlier than where the window before ends, when its
 timecodes leave the grid), and ends where the next one opens. A run of stored
 timecodes a frame ahead of the grid leaves the frames after it a frame late;
 the window where the run ends gives that frame back, its frames from there
-slightly shorter, and the audio after it is on its own timecodes again. This
-rule is experimental: how players render that window is still being measured.
+slightly shorter, and the audio after it is on its own timecodes again; a
+segment served alone carries the same bytes whatever order the segments are
+asked in. Measured on a run of +32 ms: hls.js and Shaka in Chrome, and
+ExoPlayer, play the samples back to back and stay in sync with or without it;
+Firefox follows the timestamps and keeps the audio up to about a frame late
+past the window, as it did before this rule. Safari is not measured.
 `HLSPlan.CueDensity()` reports what the plan cut on - the number of video cue
 points, the widest gap between two of them and where it opens, the median
 gap, the last one, and whether `SynthesizeIndex` built them (then every

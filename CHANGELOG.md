@@ -9,6 +9,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Changed
+
+- Grid-timed audio whose timecodes run a frame ahead of the grid for a while
+  is no longer described as experimental: measured in hls.js, Shaka and
+  ExoPlayer, no player stalls on the window that absorbs the frame; Firefox
+  keeps the audio up to about a frame late past it, as before 0.62.0
+  (`docs/library.md`, HLS plan).
+
 ## [0.69.0] - 2026-11-17
 
 ### Added
