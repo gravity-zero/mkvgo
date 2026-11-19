@@ -27,7 +27,7 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - `PlanHLS` without a subtitle index no longer walks the file again for each
   subtitle rendition: the cues come from the window walks, and on a local
   source a subtitle request builds the windows the video then serves from. A
-  1080p episode played with one subtitle read 213 % of what was served, 108 %
+  1080p episode played with one subtitle read 213 % of what was served, 113 %
   now (102 % without the subtitle); three subtitles cost what one does
   (`docs/library.md`, HLS plan).
 - A window walk and a streamed segment no longer ask the disk to read ahead
