@@ -65,6 +65,9 @@ func (p *HLSPlan) hintWindow(src io.Reader, n int, start int64) {
 // hintRange tells the source a walk is about to read [start, end): a local file has the kernel start reading it
 // all now, in the disk's own request sizes (adviseWillNeed), a remote one fetches it with one request.
 func (p *HLSPlan) hintRange(src io.Reader, start, end int64) {
+	if p.srcInfo != nil && end > p.srcInfo.Size() && end != math.MaxInt64 {
+		end = p.srcInfo.Size() // a range past the file's end (a window's look past the last cluster, a forged size) is not there to read
+	}
 	if end <= start {
 		return
 	}

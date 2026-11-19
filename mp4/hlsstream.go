@@ -1036,7 +1036,11 @@ func prefetch(f *os.File, pieces []span, window [2]int64, extend bool) *ahead {
 		a.next, a.end = min(a.next, window[0]), max(a.end, window[1])
 	}
 	if extend && f != nil {
-		a.end = roundUpTo(a.end, readAheadBytes(f))
+		end := roundUpTo(a.end, readAheadBytes(f))
+		if st, err := f.Stat(); err == nil && end > st.Size() {
+			end = max(a.end, st.Size()) // the chunk boundary past the file's end is not there to read
+		}
+		a.end = end
 	}
 	a.advance(a.next)
 	return a
