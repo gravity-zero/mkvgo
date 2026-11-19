@@ -174,17 +174,15 @@ func (p *HLSPlan) walkBlocksPos(ctx context.Context, off, end int64, headerOnly 
 		return err
 	}
 	defer src.Close()
-	if h, ok := src.(mkv.RangeHinter); ok {
-		// Unbounded, the walk runs until fn has seen enough: up to the next window's cluster, or the end past the last.
-		to := end
-		if to < 0 {
-			to = math.MaxInt64
-			if i := sort.Search(len(p.offsets), func(k int) bool { return p.offsets[k] > off }); i < len(p.offsets) {
-				to = p.offsets[i] + windowPeekBytes
-			}
+	// Unbounded, the walk runs until fn has seen enough: up to the next window's cluster, or the end past the last.
+	to := end
+	if to < 0 {
+		to = math.MaxInt64
+		if i := sort.Search(len(p.offsets), func(k int) bool { return p.offsets[k] > off }); i < len(p.offsets) {
+			to = p.offsets[i] + windowPeekBytes
 		}
-		h.HintRange(off, to)
 	}
+	p.hintRemote(src, off, to)
 	br, err := p.blockReaderAt(src, off)
 	if err != nil {
 		return err
