@@ -2037,8 +2037,12 @@ for each block of the track {
 What differs from PGS:
 
 - **VobSub** reads its 16 colours and its plane size from the CodecPrivate (the
-  header of a `.idx` file); a track without them is refused, its pictures
-  having no colours. A block is one subpicture unit and gives one set, which
+  header of a `.idx` file); a header without its `size:` line is refused, its
+  pictures having no place on the screen. One without its `palette:` line (an
+  old `.idx`, whose palette stayed in the `.ifo` beside it) is read, each
+  picture drawn in greys from black to white in the order of the pixel values
+  it shows: the text reads, its colours are not the disc's. A block is one
+  subpicture unit and gives one set, which
   carries its own timing: `Delay` before the picture shows and `Duration`
   until its stop command, zero when the unit has none (the block's duration or
   the next block then ends it). `Forced` is the unit's forced-display command.

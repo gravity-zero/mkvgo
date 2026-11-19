@@ -211,9 +211,8 @@ func TestVobSubDecoder_RunLengthForms(t *testing.T) {
 
 func TestNewVobSubDecoder_Refusals(t *testing.T) {
 	for name, tc := range map[string]struct{ idx, want string }{
-		"empty":           {"", "lacks the size: or palette: line"},
-		"no palette":      {"size: 720x576\n", "lacks the size: or palette: line"},
-		"no size":         {"palette: 0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f\n", "lacks the size: or palette: line"},
+		"empty":           {"", "lacks its size: line"},
+		"no size":         {"palette: 0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f\n", "lacks its size: line"},
 		"short palette":   {"size: 720x576\npalette: 000000, ffffff\n", "holds 2 colours"},
 		"bad colour":      {"size: 720x576\npalette: zz,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f\n", "not an RRGGBB colour"},
 		"bad size":        {"size: 720\npalette: 0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f\n", "not a width x height"},
@@ -352,5 +351,29 @@ func TestVobSubDecoder_StopAtTheStartShowsNothing(t *testing.T) {
 	ds := decodeOneVobSub(t, vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{date: 20, cmds: append(spuShow4x2(spuStart), spuStop)}))
 	if !ds.Clear() || ds.Delay != 20*1024*time.Second/90000 || ds.Duration != 0 {
 		t.Errorf("clear=%v delay=%v duration=%v; want an empty set at the unit's date", ds.Clear(), ds.Delay, ds.Duration)
+	}
+}
+
+// TestVobSubDecoder_NoPalette: an old .idx keeps its palette in the .ifo beside it and states none. Its pictures
+// were refused; they are drawn in greys from black to white in the order of the pixel values the picture shows,
+// the transparent one left out, so the text reads.
+func TestVobSubDecoder_NoPalette(t *testing.T) {
+	d, err := NewVobSubDecoder([]byte("size: 720x576\n"))
+	if err != nil {
+		t.Fatalf("a header with a size and no palette: %v", err)
+	}
+	sets, err := d.Decode(vobsubSPU(spuTop4x2, spuBottom4x2, spuSeq{date: 0, cmds: spuShow4x2(spuStart)}))
+	if err != nil || len(sets) != 1 || len(sets[0].Objects) != 1 {
+		t.Fatalf("decode: %d sets, %v", len(sets), err)
+	}
+	img := sets[0].Objects[0].Image
+	black, grey, white := [4]uint8{0, 0, 0, 255}, [4]uint8{128, 128, 128, 255}, [4]uint8{255, 255, 255, 255}
+	want := [2][4][4]uint8{{black, black, grey, white}, {grey, grey, grey, grey}} // values 1, 1, 2, 3 then 2s
+	for y := range want {
+		for x := range want[y] {
+			if got := nrgbaAt(t, img, x, y); got != want[y][x] {
+				t.Errorf("pixel %d,%d = %v, want %v", x, y, got, want[y][x])
+			}
+		}
 	}
 }

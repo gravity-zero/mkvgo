@@ -40,6 +40,7 @@ const vobsubMaxDim = 4096
 type VobSubDecoder struct {
 	screenW, screenH int
 	palette          [16][3]uint8
+	guessed          bool   // the header states no palette: each picture's colours are greys (guessedColours)
 	pending          []byte // a unit whose first blocks hold less than it declares, at most 64 KiB
 }
 
@@ -52,7 +53,9 @@ func (d *VobSubDecoder) Continues(block []byte) bool {
 	return len(d.pending) > 0 && !wholeSPU(block)
 }
 
-// NewVobSubDecoder reads the plane size and the palette from the track's CodecPrivate.
+// NewVobSubDecoder reads the plane size and the palette from the track's CodecPrivate, or a .idx file's header. A
+// header with no palette: line (an old .idx, whose palette is in the .ifo beside it) is accepted: its pictures are
+// drawn in greys.
 func NewVobSubDecoder(codecPrivate []byte) (*VobSubDecoder, error) {
 	d := &VobSubDecoder{}
 	var sized, coloured bool
@@ -86,9 +89,10 @@ func NewVobSubDecoder(codecPrivate []byte) (*VobSubDecoder, error) {
 			coloured = true
 		}
 	}
-	if !sized || !coloured {
-		return nil, fmt.Errorf("VobSub: the track's CodecPrivate lacks the size: or palette: line of a .idx header, without which its pictures have no colours")
+	if !sized {
+		return nil, fmt.Errorf("VobSub: the header (a .idx file's, or the track's CodecPrivate) lacks its size: line, without which its pictures have no place on the screen")
 	}
+	d.guessed = !coloured // an old .idx keeps its palette in the .ifo beside it: the pictures are drawn in greys
 	return d, nil
 }
 
@@ -278,6 +282,38 @@ func (s *spuState) commands(spu []byte, p, date int) error {
 	return nil
 }
 
+// guessedLevels are the greys of a picture showing 1 to 4 palette entries, in the order of its pixel values.
+var guessedLevels = [4][4]uint8{{0xff}, {0x00, 0xff}, {0x00, 0x80, 0xff}, {0x00, 0x55, 0xaa, 0xff}}
+
+// guessedColours colours a picture whose header states no palette: the palette entries its visible pixel values
+// name take greys from black to white in the order of those values, one entry one grey, so an outline and its text
+// stay apart.
+func guessedColours(s *spuState) [4][4]uint8 {
+	var seen [16]bool
+	shown := 0
+	for v, a := range s.alpha {
+		if a != 0 && !seen[s.colour[v]] {
+			seen[s.colour[v]] = true
+			shown++
+		}
+	}
+	var rgba [4][4]uint8
+	var level [16]uint8
+	seen, next := [16]bool{}, 0
+	for v, a := range s.alpha {
+		if a == 0 {
+			continue
+		}
+		if e := s.colour[v]; !seen[e] {
+			seen[e], level[e] = true, guessedLevels[shown-1][next]
+			next++
+		}
+		l := level[s.colour[v]]
+		rgba[v] = [4]uint8{l, l, l, a * 17}
+	}
+	return rgba
+}
+
 // picture expands the two fields into one image: the even lines from the first, the odd lines from the second.
 func (d *VobSubDecoder) picture(data []byte, s *spuState) (*image.NRGBA, error) {
 	w, h := s.x2-s.x1+1, s.y2-s.y1+1
@@ -293,6 +329,9 @@ func (d *VobSubDecoder) picture(data []byte, s *spuState) (*image.NRGBA, error) 
 	for v := range rgba {
 		c := d.palette[s.colour[v]]
 		rgba[v] = [4]uint8{c[0], c[1], c[2], s.alpha[v] * 17}
+	}
+	if d.guessed {
+		rgba = guessedColours(s)
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	nib := [2]int{s.offset[0] * 2, s.offset[1] * 2} // each field's read position, in nibbles

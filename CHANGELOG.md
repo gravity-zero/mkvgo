@@ -61,6 +61,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   the Matroska source was read past undecodable bytes between its elements,
   and exit 3 under `--exit-damaged`: they said nothing.
 
+### Changed
+
+- A VobSub header with no `palette:` line (an old `.idx`, whose palette is in
+  the `.ifo` beside it, or a track muxed from one) is read instead of refused:
+  each picture is drawn in greys from black to white in the order of the pixel
+  values it shows. A header with no `size:` line is still refused, and the
+  refusal no longer speaks of a CodecPrivate for a `.idx` file.
+
 ### Added
 
 - `Diagnosis.ResyncedBytes` (`resynced_bytes` in JSON): the bytes the head

@@ -319,7 +319,7 @@ func TestForEachSubtitleBitmap_Refusals(t *testing.T) {
 	}{
 		"a text track":              {ForEachSubtitleBitmap(ctx, path, 3, none), "codec \"srt\" is text, not bitmaps - extract it as WebVTT instead"},
 		"a codec without decoder":   {ForEachSubtitleBitmap(ctx, other, 1, none), "is not a bitmap subtitle this reads (PGS, VobSub, DVB)"},
-		"VobSub without its header": {ForEachSubtitleBitmap(ctx, other, 2, none), "lacks the size: or palette: line"},
+		"VobSub without its header": {ForEachSubtitleBitmap(ctx, other, 2, none), "lacks its size: line"},
 		"a video track":             {ForEachSubtitleBitmap(ctx, path, 1, none), "subtitle track 1 not found"},
 		"the PGS read on VobSub":    {ForEachSubtitlePGS(ctx, vobsubSampleMKV, 1, none), "codec \"vobsub\" is not PGS (S_HDMV/PGS)"},
 		"index: nil":                {ForEachSubtitleBitmapFrom(ctx, path, 2, nil, none), "nil subtitle index"},
