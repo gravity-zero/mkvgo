@@ -789,12 +789,16 @@ plan counts both outcomes (`SubtitleCueIndexed`, `SubtitleCueUnverified`);
 
 With neither, the subtitle renditions take their cues from the window walks:
 a walk reads every block of the clusters it covers, the subtitles' included,
-so a cluster a walk read whole is not walked again for its subtitles. On a
-local source whose segments are written from the source, a subtitle request
-builds the window tables it lacks itself, and the video then serves from the
-same walks: a viewer playing the video with a subtitle reads the file about
-once (113 % of what was served over 100 segments of a real 1080p episode, 213 %
-walking; three subtitles cost what one does). The tables run up to a minute
+so a cluster a walk read whole is not walked again for its subtitles. When the
+segments are written from the source, a subtitle request builds the window
+tables it lacks itself, and the video then serves from the same walks: a viewer
+playing the video with a subtitle reads a local file about once (113 % of what
+was served over 100 segments of a real 1080p episode, 213 % walking; three
+subtitles cost what one does). A network source keeps the segments its walks
+read under the window budget, which a subtitle ahead of the video can outrun:
+those are fetched again, and the source still gives about half what it did
+(1.30 GB asked for 30 segments with three subtitles, 666 MB now, 333 MB without
+them). The tables run up to a minute
 past the request, where the walk's strides stop. A window longer than a minute
 and the last window, whose walk runs to the end of the file, are not built for
 a subtitle; their clusters, any cluster no walk read whole and any past a

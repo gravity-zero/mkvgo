@@ -41,41 +41,43 @@ func TestPlanHLSSubtitleHarvestServesTheSameWebVTT(t *testing.T) {
 		src := build(t)
 		for orderName, order := range subOrders {
 			for vName, video := range videoFirst {
-				t.Run(name+"/"+orderName+"/"+vName, func(t *testing.T) {
-					walked, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000})
-					if err != nil {
-						t.Fatal(err)
-					}
-					mp4.DisableSubHarvestForTest(walked)
-					harvested, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000})
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, res := range subNames(walked, order) {
-						var n int
-						if _, err := fmt.Sscanf(res[len("subX_"):], "%05d.vtt", &n); err == nil {
-							for _, v := range video(harvested, n) {
-								if v >= 0 && v < harvested.NumSegments() {
-									openAll(t, harvested, harvested.SegmentName(v))
+				for _, access := range []mp4.SourceAccess{mp4.SourceLocal, mp4.SourceNetwork} {
+					t.Run(fmt.Sprintf("%s/%s/%s/%v", name, orderName, vName, access), func(t *testing.T) {
+						walked, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000})
+						if err != nil {
+							t.Fatal(err)
+						}
+						mp4.DisableSubHarvestForTest(walked)
+						harvested, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000, SourceAccess: access})
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, res := range subNames(walked, order) {
+							var n int
+							if _, err := fmt.Sscanf(res[len("subX_"):], "%05d.vtt", &n); err == nil {
+								for _, v := range video(harvested, n) {
+									if v >= 0 && v < harvested.NumSegments() {
+										openAll(t, harvested, harvested.SegmentName(v))
+									}
 								}
 							}
+							want, _, werr := walked.Resource(ctx, res)
+							got, _, gerr := harvested.Resource(ctx, res)
+							if werr != nil || gerr != nil {
+								t.Fatalf("%s: walked %v, harvested %v", res, werr, gerr)
+							}
+							if !bytes.Equal(got, want) {
+								t.Fatalf("%s differs when harvested:\n%s\n--- walked:\n%s", res, got, want)
+							}
 						}
-						want, _, werr := walked.Resource(ctx, res)
-						got, _, gerr := harvested.Resource(ctx, res)
-						if werr != nil || gerr != nil {
-							t.Fatalf("%s: walked %v, harvested %v", res, werr, gerr)
+						if st := harvested.Stats(); st.SubtitleHarvestedClusters == 0 {
+							t.Errorf("no cluster harvested: %+v", st)
 						}
-						if !bytes.Equal(got, want) {
-							t.Fatalf("%s differs when harvested:\n%s\n--- walked:\n%s", res, got, want)
+						if st := walked.Stats(); st.SubtitleHarvestedClusters != 0 || st.SubtitleWalks == 0 {
+							t.Errorf("the reference harvested: %+v", st)
 						}
-					}
-					if st := harvested.Stats(); st.SubtitleHarvestedClusters == 0 {
-						t.Errorf("no cluster harvested: %+v", st)
-					}
-					if st := walked.Stats(); st.SubtitleHarvestedClusters != 0 || st.SubtitleWalks == 0 {
-						t.Errorf("the reference harvested: %+v", st)
-					}
-				})
+					})
+				}
 			}
 		}
 	}
