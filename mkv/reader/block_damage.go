@@ -124,6 +124,29 @@ func (br *BlockReader) skipDamageTo(from, to int64) {
 	br.timeSkip = true
 }
 
+// leaveStrayCluster reports whether the walk just failed on the first child of a Cluster declaring at most
+// tinyCluster bytes: bytes that read as a Cluster header and hold no media. It seats the walk behind them, as if the
+// Cluster had not been entered; a tolerant walk counts them.
+func (br *BlockReader) leaveStrayCluster() bool {
+	if !br.inCluster || br.clusterEnd < 0 || br.clusterEnd-br.clusterBody > tinyCluster || br.elemStart != br.clusterBody {
+		return false
+	}
+	end := br.clusterEnd
+	if br.r.reset(end) != nil {
+		return false
+	}
+	if br.skipDamage {
+		br.clusterCount-- // not a Cluster: the range is stamped with the one before it, if any
+		br.skipDamageTo(br.clusterStart, end)
+		br.clusterCount++
+	}
+	br.clusterCount--
+	br.inCluster, br.clusterEnd = false, -1
+	br.pending, br.peeked, br.awaitLimit = nil, nil, false
+	br.atHead = br.fromStart && br.clusterCount == 0
+	return true
+}
+
 // maxTailJunk is the longest run of bytes that are no element, between the last Cluster and a valid element closing
 // the Segment (Cues, Tags...), taken for what an in-place rewrite left behind: too short to hold a Cluster worth the
 // name. A longer run may be a Cluster whose header was lost, and stays the error it is.

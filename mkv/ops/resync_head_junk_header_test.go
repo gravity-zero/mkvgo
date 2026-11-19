@@ -131,3 +131,25 @@ func spliceGrowing(t *testing.T, data []byte, at int, extra []byte) []byte {
 	copy(out[segAt+4:], size.Bytes())
 	return out
 }
+
+// TestAnalyzeSaysWhatItPassedOver: the stats of a file read past stray bytes are whole, and say the file is not.
+func TestAnalyzeSaysWhatItPassedOver(t *testing.T) {
+	data := livefixture.Build(livefixture.Options{SizedClusters: true})
+	cluster := bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75})
+	src := filepath.Join(t.TempDir(), "junk.mkv")
+	writeAll(t, src, spliceGrowing(t, data, cluster, []byte("0000\x00\x00")))
+	r, err := Analyze(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if r.ClusterCount != livefixture.Clusters {
+		t.Errorf("clusters = %d, want %d", r.ClusterCount, livefixture.Clusters)
+	}
+	told := false
+	for _, w := range r.Warnings {
+		told = told || (strings.Contains(w, "6 undecodable byte(s)") && strings.Contains(w, "reindex --resync"))
+	}
+	if !told {
+		t.Errorf("warnings = %q, want the 6 bytes passed over and the command that removes them", r.Warnings)
+	}
+}

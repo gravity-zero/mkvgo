@@ -240,6 +240,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			}
 			offs.merge(found)
 		case mkv.IDCluster:
+			if p.strayCluster(eh) {
+				c.ResyncedBytes += p.pos() - elemStart
+				continue
+			}
 			if p.firstCluster == 0 {
 				p.firstCluster = elemStart
 				if gotTracks && p.skippedPayload < skipToExactReads {

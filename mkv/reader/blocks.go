@@ -124,6 +124,8 @@ type BlockReader struct {
 	hasStop      bool          // a cluster-timecode limit is set
 	awaitLimit   bool          // stopped at a cluster beyond stopMs; recheck on Next
 	clusterStart int64         // absolute offset of the current cluster's header
+	clusterBody  int64         // absolute offset of its first child
+	fromStart    bool          // the walk began at the Segment's start (init)
 	blockStart   int64         // absolute offset of the block element Next last returned from
 	clusterCount int64         // number of Cluster elements entered so far
 	// atHead is set on a reader that walks the Segment from its start, until
@@ -593,7 +595,7 @@ func (br *BlockReader) init() error {
 	// Wrap the raw reader in a counting buffered reader.
 	// The buffer will issue its first real Read from startPos onwards.
 	br.r = newCountingReader(br.raw, startPos)
-	br.atHead = true
+	br.atHead, br.fromStart = true, true
 
 	if h2.Size >= 0 {
 		br.segEnd = startPos + h2.Size
@@ -708,6 +710,9 @@ func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 		}
 		if br.r.failed != nil {
 			return b, err // the source itself failed (I/O, cancellation, replaced file): not damage in the file
+		}
+		if br.leaveStrayCluster() {
+			continue
 		}
 		if br.clusterCount == 0 && br.damageScan <= 0 {
 			// Not one Cluster entered yet: a reader seated on a position that
@@ -906,7 +911,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 		if h.ID == mkv.IDCluster {
 			br.atHead = false
 			br.suspected = false
-			br.clusterStart = hdrStart
+			br.clusterStart, br.clusterBody = hdrStart, br.r.tell()
 			br.clusterCount++
 			br.inCluster = true
 			if h.Size >= 0 {

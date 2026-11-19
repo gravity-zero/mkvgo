@@ -34,6 +34,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   as an element running past the end with the offset and the command that
   works (`mkvgo reindex --resync`), not `copy unknown 0x8C body: EOF` nor a
   "truncated file" pointing back at the command that refused.
+- Bytes that read as a Cluster header too small to hold a block (8 bytes at
+  most, opening with no element of a Cluster) are passed over as the stray
+  bytes they are instead of refused as a damaged region, and `diagnose` counts
+  them.
+- `analyze` warns when the file it measured was read past undecodable bytes.
 
 ### Added
 

@@ -518,11 +518,16 @@ func analyze(ctx context.Context, path string, fs *mkv.FS) (*AnalyzeReport, erro
 		acc.observe(blk.Timecode, durMs, blk.Size, blk.Keyframe, newPacket)
 	}
 
-	return finishAnalyzeReport(&AnalyzeReport{
+	report := finishAnalyzeReport(&AnalyzeReport{
 		DeclaredDurationMs:        c.DurationMs,
 		ClusterCount:              br.ClusterCount(),
 		ClusterTimecodeBackstepMs: maxBackstepTicks * c.Info.TimecodeScale / 1_000_000,
-	}, c.Tracks, accs), nil
+	}, c.Tracks, accs)
+	if c.ResyncedBytes > 0 {
+		// The stats are whole, the file is not sound: a reader that does not resynchronize stops on those bytes.
+		report.Warnings = append(report.Warnings, fmt.Sprintf("%d undecodable byte(s) between elements were passed over to read the file: `mkvgo reindex --resync` rewrites it without them", c.ResyncedBytes))
+	}
+	return report, nil
 }
 
 // finishAnalyzeReport derives report's per-track stats, totals and Warnings

@@ -281,6 +281,35 @@ func junkHeader(r io.ReadSeeker, segEnd, pos int64, eh ebml.ElementHeader) bool 
 	return !framedTo(r, segEnd, pos+eh.Size, hops)
 }
 
+// tinyCluster is the largest Cluster body that cannot hold a block: a Timestamp and a SimpleBlock's own header take
+// more.
+const tinyCluster = 8
+
+// clusterChildByte reports whether b opens the ID of an element a Cluster holds, padding included.
+func clusterChildByte(b byte) bool {
+	switch b {
+	case 0xE7, 0xA3, 0xA0, 0xA7, 0xAB, 0x58, 0xBF, 0xEC:
+		return true
+	}
+	return false
+}
+
+// strayCluster reports a Cluster header declaring at most tinyCluster bytes that open with no element of a Cluster:
+// bytes that read as a Cluster header, holding no media. The read is left past them; otherwise on the Cluster's body.
+func (p *parser) strayCluster(eh ebml.ElementHeader) bool {
+	if eh.Size <= 0 || eh.Size > tinyCluster {
+		return false
+	}
+	pos := p.pos()
+	var b [1]byte
+	if _, err := io.ReadFull(p.r, b[:]); err == nil && !clusterChildByte(b[0]) {
+		_, _ = p.r.Seek(pos+eh.Size, io.SeekStart)
+		return true
+	}
+	_, _ = p.r.Seek(pos, io.SeekStart)
+	return false
+}
+
 // padOverrun is how far into a Void or CRC-32 a resync looks for the element it swallowed: an element header, at
 // most 12 bytes, and room to tell it apart.
 const padOverrun = 32
@@ -536,6 +565,10 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				}
 			}
 		case mkv.IDCluster:
+			if p.strayCluster(eh) {
+				c.ResyncedBytes += p.pos() - elemStart
+				continue
+			}
 			if p.firstCluster == 0 {
 				p.firstCluster = elemStart
 				p.estimateFrameRates(c, p.pos(), clusterEnd(p.pos(), eh.Size))

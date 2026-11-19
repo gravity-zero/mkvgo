@@ -75,6 +75,7 @@ func TestHeadJunkThatReadsAsAnElement(t *testing.T) {
 		{"declares a size that ends inside a later Cluster", []byte{'0', '0', '0', 0x40, 0x60, 0x00}},
 		{"a Void declaring 6 bytes too many", []byte{0xEC, 0x8A, 0x00, 0x00, 0x00, 0x00}},
 		{"a CRC-32 declaring 6 bytes too many", []byte{0xBF, 0x8A, 0x00, 0x00, 0x00, 0x00}},
+		{"a Cluster header over one null byte", []byte{0x1F, 0x43, 0xB6, 0x75, 0x81, 0x00}},
 	}
 	for _, s := range shapes {
 		for _, j := range junks {
