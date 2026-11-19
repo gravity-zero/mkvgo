@@ -1,7 +1,6 @@
 package reader
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 )
@@ -29,13 +28,25 @@ func readExact(r io.Reader, n int64) ([]byte, error) {
 		}
 		return buf, nil
 	}
-	var buf bytes.Buffer
-	buf.Grow(readExactAllocEager)
-	if _, err := io.CopyN(&buf, r, n); err != nil {
-		if err == io.EOF {
-			return nil, io.ErrUnexpectedEOF
+	// From 1 MiB, doubled as the bytes come: a size only declared (60 MiB for ten bytes) allocates the first step.
+	buf := make([]byte, 0, readExactGrowFrom)
+	for int64(len(buf)) < n {
+		if len(buf) == cap(buf) {
+			next := make([]byte, len(buf), min(n, 2*int64(cap(buf))))
+			copy(next, buf)
+			buf = next
 		}
-		return nil, err
+		got, err := io.ReadFull(r, buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+got]
+		if err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
 	}
-	return buf.Bytes(), nil
+	return buf, nil
 }
+
+// readExactGrowFrom is the first step of a read past readExactAllocEager.
+const readExactGrowFrom = 1 << 20
