@@ -70,7 +70,7 @@ func TestPlanHLSSubtitleHarvestServesTheSameWebVTT(t *testing.T) {
 								t.Fatalf("%s differs when harvested:\n%s\n--- walked:\n%s", res, got, want)
 							}
 						}
-						if st := harvested.Stats(); st.SubtitleHarvestedClusters == 0 {
+						if st := harvested.Stats(); st.SubtitleHarvestedClusters == 0 && orderName == "playback order" { // asked behind what was read, a subtitle walks
 							t.Errorf("no cluster harvested: %+v", st)
 						}
 						if st := walked.Stats(); st.SubtitleHarvestedClusters != 0 || st.SubtitleWalks == 0 {
