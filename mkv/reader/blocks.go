@@ -131,6 +131,7 @@ type BlockReader struct {
 	// past there (see resyncHead). A reader seated at a recorded position never
 	// sets it - an undecodable header there means the position is stale.
 	atHead bool
+	pad    padding // the Void or CRC-32 last skipped ahead of the first Cluster
 	// elemStart is the offset of the element the walk is reading: where a
 	// failure began, and where the search for the media behind it starts.
 	elemStart int64
@@ -602,14 +603,15 @@ func (br *BlockReader) init() error {
 	return nil
 }
 
-// resyncHead repositions the walk on the next valid segment-level element at
-// or after from, and reports whether it found one. It is the block walk's
-// share of the head resync Read and ReadMeta do: junk between the Segment
-// header and the first Cluster must not make every block unreachable. On a
-// non-seekable source, or when nothing valid follows, it reports false and
-// the caller returns the decode error it already holds.
-func (br *BlockReader) resyncHead(from int64) bool {
-	if _, err := br.raw.Seek(from, io.SeekStart); err != nil {
+// resyncHead repositions the walk on the next valid segment-level element after the header at at that could not be
+// used, and reports whether it found one. It is the block walk's share of the head resync Read and ReadMeta do:
+// junk between the Segment header and the first Cluster must not make every block unreachable. On a non-seekable
+// source, or when nothing valid follows, it reports false and the caller returns the decode error it already holds.
+func (br *BlockReader) resyncHead(at int64) bool {
+	if br.raw == nil {
+		return false
+	}
+	if _, err := br.raw.Seek(br.pad.from(at), io.SeekStart); err != nil {
 		return false
 	}
 	off, err := resyncToSegmentElement(br.raw, -1, br.segEnd)
@@ -617,31 +619,24 @@ func (br *BlockReader) resyncHead(from int64) bool {
 		return false
 	}
 	if br.skipDamage {
-		br.skipDamageTo(from-1, off) // a tolerant walk reports what it passed over, a Cluster it lost included
+		br.skipDamageTo(off-br.pad.passed(at, off), off) // a tolerant walk reports what it passed over, a Cluster it lost included
 	}
 	return true
 }
 
-// headJunk is the head reads' junkAt for the block walk: an element ahead of the first Cluster that is no
-// segment-level element, Void or CRC-32 and whose declared end frames nothing is bytes that happen to decode as a
-// header, not an element to skip by its size. The walk is left where it was.
+// headJunk is the head reads' junkAt for the block walk: an element ahead of the first Cluster whose declared end
+// frames nothing (junkHeader) is bytes that happen to decode as a header, not an element to skip by its size. The
+// walk is left where it was.
 func (br *BlockReader) headJunk(h ebml.ElementHeader) bool {
-	if isSegmentLevelID(h.ID) || h.ID == mkv.IDVoid || h.ID == 0xBF {
-		return false
-	}
-	if br.raw == nil {
-		return false
+	if br.raw == nil || h.Size < 0 || isSegmentLevelID(h.ID) || h.ID == mkv.IDVoid || h.ID == 0xBF {
+		return false // nothing to look past for
 	}
 	if cur, err := br.raw.Seek(0, io.SeekCurrent); err != nil || seekFails(br.raw, cur) {
 		return false // a forward-only source cannot be looked past
 	}
 	pos := br.r.tell()
-	hops := maxFramedHops
-	if matroskaIDs[h.ID] {
-		hops = 0
-	}
-	framed := framedTo(br.raw, br.segEnd, pos+h.Size, hops)
-	return br.r.reset(pos) == nil && !framed
+	junk := junkHeader(br.raw, br.segEnd, pos, h)
+	return br.r.reset(pos) == nil && junk
 }
 
 func seekFails(r io.Seeker, off int64) bool {
@@ -897,7 +892,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				if errors.Is(err, io.EOF) {
 					return mkv.Block{}, io.EOF
 				}
-				if br.atHead && br.resyncHead(hdrStart+1) {
+				if br.atHead && br.resyncHead(hdrStart) {
 					continue
 				}
 				return mkv.Block{}, err
@@ -918,11 +913,11 @@ func (br *BlockReader) next() (mkv.Block, error) {
 			}
 			continue
 		}
+		if br.atHead && (h.Size < 0 || br.headJunk(h)) && br.resyncHead(hdrStart) {
+			continue
+		}
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
-		}
-		if br.atHead && br.headJunk(h) && br.resyncHead(hdrStart+1) {
-			continue
 		}
 		if h.ID == mkv.IDTracks && (br.trackDurNs == nil || br.known == nil) && h.Size <= 16<<20 {
 			// Walking over the track metadata anyway: pick up the per-track
@@ -932,6 +927,9 @@ func (br *BlockReader) next() (mkv.Block, error) {
 				return mkv.Block{}, err
 			}
 			continue
+		}
+		if br.atHead {
+			br.pad.note(h.ID, hdrStart, br.r.tell(), h.Size)
 		}
 		if err := br.r.discard(h.Size); err != nil {
 			return mkv.Block{}, err

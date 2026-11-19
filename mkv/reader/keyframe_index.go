@@ -70,8 +70,10 @@ walk:
 			continue
 		}
 
+		elemStart := p.pos()
 		h, _, err := p.readHeader()
 		if err != nil {
+			p.backIntoPadding(elemStart)
 			if !p.resyncCluster(segEnd, &inCluster, &haveTS, &clusterTS, &clusterEnd) {
 				break
 			}
@@ -94,9 +96,17 @@ walk:
 				}
 				continue
 			}
-			if h.Size < 0 {
+			if h.Size < 0 && p.pad.end != elemStart {
 				break
 			}
+			if p.junkAt(h) { // bytes that read as a header: their size leads nowhere
+				p.backIntoPadding(elemStart)
+				if !p.resyncCluster(segEnd, &inCluster, &haveTS, &clusterTS, &clusterEnd) {
+					break
+				}
+				continue
+			}
+			p.pad.note(h.ID, elemStart, p.pos(), h.Size)
 			if err := p.skip(h.Size); err != nil {
 				break
 			}
@@ -157,6 +167,14 @@ walk:
 		}
 	}
 	return finalizeIndex(times)
+}
+
+// backIntoPadding seats the walk in the tail of the padding that ended at off, where the Cluster it swallowed
+// starts; elsewhere the walk stays where it is.
+func (p *parser) backIntoPadding(off int64) {
+	if from := p.pad.from(off); from < off {
+		_, _ = p.r.Seek(from, io.SeekStart)
+	}
 }
 
 // resyncCluster recovers from a corrupt header by scanning to the next valid

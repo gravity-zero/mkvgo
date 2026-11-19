@@ -16,6 +16,12 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   no longer make `analyze`, `ingest -analyze` and `validate` report a complete
   file as cut short, or lose its first Clusters without a word: the block walk
   resynchronizes past them as the head reads do.
+- A Void or CRC-32 ahead of the first Cluster declaring a few bytes too many
+  no longer swallows the head of the element behind it: the readers
+  resynchronize on that element instead of losing it without a word.
+- `reindex --resync` and `salvage` keep the Info and Tracks that sit behind
+  such bytes (the output had no track, exit 0), and `keyframes -walk` no longer
+  loses the keyframes of the Clusters a stray size led it past.
 
 ## [0.70.0] - 2026-11-19
 

@@ -454,6 +454,17 @@ func (w *salvageWalker) dropIndexElement(h ebml.ElementHeader, elemStart int64, 
 	if h.Size < 0 || h.Size > maxReindexClusterSize {
 		return w.skipToNextCluster()
 	}
+	if h.ID == mkv.IDVoid {
+		// A Void declaring a few bytes too many swallows the head of the element behind it: trusted only when an
+		// element, or the end, starts where it claims to end.
+		end := elemStart + int64(hdrBytes) + h.Size
+		trusted := end >= w.fileSize || end == w.declaredEnd || validTopLevelAt(w.raw, end, w.fileSize)
+		w.restoreStreamAt(elemStart + int64(hdrBytes))
+		w.consumed = elemStart // not yet consumed; a resync stays anchored here
+		if !trusted {
+			return w.skipTo(reader.ResyncToSegmentElement)
+		}
+	}
 	if w.rb == nil {
 		if _, err := io.CopyN(io.Discard, w.r, h.Size); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -704,7 +715,9 @@ func (w *salvageWalker) copyUnknownElement(h ebml.ElementHeader, elemStart int64
 		w.consumed = elemStart // not yet consumed; keep resync anchored here
 	}
 	if !trusted {
-		return w.skipToNextCluster()
+		// On ANY segment-level element, as an undecodable header does: junk that decodes ahead of the Info and
+		// Tracks must not take them into the skipped range.
+		return w.skipTo(reader.ResyncToSegmentElement)
 	}
 	if _, err := ebml.WriteElementID(w.out, h.ID); err != nil {
 		return false, fmt.Errorf("salvage: write unknown 0x%X ID: %w", h.ID, err)

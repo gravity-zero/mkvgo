@@ -171,6 +171,7 @@ type parser struct {
 	rateReads bool
 	// lookedPast, when set, records that an element was judged by looking past its end (withLookedPast).
 	lookedPast *bool
+	pad        padding // the Void or CRC-32 last skipped among the Segment's children
 	// chapterAtoms and simpleTags count what the file yielded so far, against maxChapterAtoms and maxSimpleTags.
 	chapterAtoms, simpleTags int
 	// rateRejected says the TrackEntry being parsed stated a SamplingFrequency no file can mean.
@@ -244,25 +245,75 @@ func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 	return true
 }
 
-// junkAt reports a segment child that is no segment-level element, Void or CRC-32 and whose declared end leads to no
-// segment-level element nor the Segment's end (framedTo; a Matroska ID out of place must open one at once): bytes read
-// as a header where the framing was lost, to resync past rather than skip by the size they happen to declare. The
-// read position is kept.
+// junkAt reports a segment child whose declared end leads to no segment-level element nor the Segment's end
+// (junkHeader): bytes read as a header where the framing was lost, to resync past rather than skip by the size they
+// happen to declare. The read position is kept.
 func (p *parser) junkAt(eh ebml.ElementHeader) bool {
-	if eh.Size < 0 || isSegmentLevelID(eh.ID) || eh.ID == mkv.IDVoid || eh.ID == 0xBF {
-		return false
+	if isSegmentLevelID(eh.ID) || eh.ID == mkv.IDVoid || eh.ID == 0xBF {
+		return false // judged without a look, nor the seek back that costs a remote source a request
+	}
+	if eh.Size < 0 {
+		return true // no size on an ID that cannot go without: met behind padding that declared too much
 	}
 	pos := p.pos()
+	junk := junkHeader(p.r, p.segEnd, pos, eh)
+	_, _ = p.r.Seek(pos, io.SeekStart)
+	if junk {
+		p.markLookedPast()
+	}
+	return junk
+}
+
+// junkHeader reports a header met among the Segment's children, its body at pos, that is no segment-level element
+// nor padding and whose declared end frames nothing (framedTo; a Matroska ID out of place must open a segment-level
+// element at once). The read position is left anywhere.
+func junkHeader(r io.ReadSeeker, segEnd, pos int64, eh ebml.ElementHeader) bool {
+	if eh.Size < 0 || isSegmentLevelID(eh.ID) {
+		return false
+	}
+	if eh.ID == mkv.IDVoid || eh.ID == 0xBF {
+		return false // skipped unread; one that declared too much shows at the header behind it (padding)
+	}
 	hops := maxFramedHops
 	if matroskaIDs[eh.ID] {
 		hops = 0
 	}
-	framed := framedTo(p.r, p.segEnd, pos+eh.Size, hops)
-	_, _ = p.r.Seek(pos, io.SeekStart)
-	if !framed {
-		p.markLookedPast()
+	return !framedTo(r, segEnd, pos+eh.Size, hops)
+}
+
+// padOverrun is how far into a Void or CRC-32 a resync looks for the element it swallowed: an element header, at
+// most 12 bytes, and room to tell it apart.
+const padOverrun = 32
+
+// padding remembers the last Void or CRC-32 skipped among the Segment's children. One declaring a few bytes too many
+// swallows the head of the element behind it, and reading its end to find out would cost every sound file a read:
+// it shows when the header met at its end is no element, and the resync then starts inside it.
+type padding struct{ start, body, end int64 }
+
+// note records the Void or CRC-32 at start whose body of size bytes opens at body; any other element forgets it.
+func (pd *padding) note(id uint32, start, body, size int64) {
+	*pd = padding{}
+	if id == mkv.IDVoid || id == 0xBF {
+		*pd = padding{start: start, body: body, end: body + size}
 	}
-	return !framed
+}
+
+// from is where the resync after a failure at off looks from: the tail of the padding that ended there, else the
+// next byte.
+func (pd *padding) from(off int64) int64 {
+	if pd.end != off || off == 0 {
+		return off + 1
+	}
+	return max(pd.body, pd.end-padOverrun)
+}
+
+// passed is the bytes a resync from a failure at off to found went over: from the padding's start when the element
+// found lies inside it.
+func (pd *padding) passed(off, found int64) int64 {
+	if found < off {
+		return found - pd.start
+	}
+	return found - off
 }
 
 // maxFramedHops bounds the well-formed elements framedTo follows before deciding.
@@ -406,7 +457,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			// any of them, not only a Cluster, or junk ahead of the metadata
 			// would cost the Info and Tracks behind it. If nothing recognizable
 			// remains, stop with the metadata gathered so far.
-			off, rerr := p.resyncToSegmentElement(elemStart+1, -1, endPos)
+			off, rerr := p.resyncToSegmentElement(p.pad.from(elemStart), -1, endPos)
 			if rerr != nil {
 				return rerr
 			}
@@ -414,10 +465,10 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 				c.ResyncedBytes += max(p.junkEnd(-1, endPos)-elemStart, 0) // passed over all the same
 				break
 			}
-			c.ResyncedBytes += off - elemStart
+			c.ResyncedBytes += p.pad.passed(elemStart, off)
 			continue
 		}
-		if eh.Size < 0 && eh.ID != mkv.IDCluster {
+		if eh.Size < 0 && eh.ID != mkv.IDCluster && (isSegmentLevelID(eh.ID) || p.pad.end != elemStart) {
 			// A live muxer's Cues or Tags declare no size: walked to the element that ends them, where the walk resumes.
 			if err := p.skipUnknownSizeElement(endPos); err != nil {
 				return err
@@ -586,7 +637,7 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 			}
 		default:
 			if p.junkAt(eh) { // resynced past as an undecodable header is
-				off, err := p.resyncToSegmentElement(elemStart+1, -1, endPos)
+				off, err := p.resyncToSegmentElement(p.pad.from(elemStart), -1, endPos)
 				if err != nil {
 					return err
 				}
@@ -594,9 +645,10 @@ func (p *parser) parseSegment(ctx context.Context, c *mkv.Container) error {
 					c.ResyncedBytes += max(p.junkEnd(-1, endPos)-elemStart, 0) // passed over all the same
 					return nil
 				}
-				c.ResyncedBytes += off - elemStart
+				c.ResyncedBytes += p.pad.passed(elemStart, off)
 				continue
 			}
+			p.pad.note(eh.ID, elemStart, p.pos(), eh.Size)
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}

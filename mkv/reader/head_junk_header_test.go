@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/gravity-zero/mkvgo/ebml"
@@ -47,7 +48,7 @@ func beforeFirstCluster(t *testing.T, o livefixture.Options, extra []byte) []byt
 
 // TestHeadJunkThatReadsAsAnElement: bytes left ahead of the first Cluster that happen to decode as an element header
 // (the tail of an old tag string, "0000" then two null bytes: an unknown ID declaring 1 MiB) are junk to every reader,
-// the block walk included. It used to skip them by the size they declare: past the end of the file, reported as a
+// the block walk included, and so is a Void that declares more than it holds. It used to skip them by the size they declare: past the end of the file, reported as a
 // source cut short, or into the media, losing the Clusters it landed past without a word.
 func TestHeadJunkThatReadsAsAnElement(t *testing.T) {
 	ctx := context.Background()
@@ -65,6 +66,8 @@ func TestHeadJunkThatReadsAsAnElement(t *testing.T) {
 		{"declares more than the file holds", []byte("0000\x00\x00")},
 		{"declares a few bytes into the Cluster", []byte{'0', '0', '0', 0x88, 0x00, 0x00}},
 		{"declares a size that ends inside a later Cluster", []byte{'0', '0', '0', 0x40, 0x60, 0x00}},
+		{"a Void declaring 6 bytes too many", []byte{0xEC, 0x8A, 0x00, 0x00, 0x00, 0x00}},
+		{"a CRC-32 declaring 6 bytes too many", []byte{0xBF, 0x8A, 0x00, 0x00, 0x00, 0x00}},
 	}
 	for _, s := range shapes {
 		for _, j := range junks {
@@ -89,6 +92,15 @@ func TestHeadJunkThatReadsAsAnElement(t *testing.T) {
 				if n, _, _ := drainBlocks(t, tolerant); n != livefixture.Blocks || tolerant.SkippedBytes() != want {
 					t.Errorf("tolerant walk: %d blocks, %d bytes skipped; want %d blocks and the %d junk bytes",
 						n, tolerant.SkippedBytes(), livefixture.Blocks, want)
+				}
+
+				sound, err := ReadMeta(ctx, bytes.NewReader(livefixture.Build(s.opts)), "sound.mkv", WithKeyframeWalk())
+				if err != nil || len(sound.Keyframes) == 0 {
+					t.Fatalf("keyframe walk of the sound fixture: %d keyframes, %v", len(sound.Keyframes), err)
+				}
+				walked, err := ReadMeta(ctx, bytes.NewReader(data), "junk.mkv", WithKeyframeWalk())
+				if err != nil || !slices.Equal(walked.Keyframes, sound.Keyframes) {
+					t.Errorf("keyframe walk: %v (%v), want the sound file's %v", walked.Keyframes, err, sound.Keyframes)
 				}
 
 				full, err := Read(ctx, bytes.NewReader(data), "junk.mkv")

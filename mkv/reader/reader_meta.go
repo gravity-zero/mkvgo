@@ -157,7 +157,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			// Tracks behind it. Look for the next segment-level element, as
 			// Read does, but no further than headResyncCap: a head scan must
 			// not turn into a read of the whole file on a wrecked one.
-			off, rerr := p.resyncToSegmentElement(elemStart+1, elemStart+1+headResyncCap, endPos)
+			off, rerr := p.resyncToSegmentElement(p.pad.from(elemStart), elemStart+1+headResyncCap, endPos)
 			if rerr != nil {
 				return rerr
 			}
@@ -165,10 +165,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 				c.ResyncedBytes += max(p.junkEnd(elemStart+1+headResyncCap, endPos)-elemStart, 0)
 				break // nothing recognizable in the window: return what we have
 			}
-			c.ResyncedBytes += off - elemStart
+			c.ResyncedBytes += p.pad.passed(elemStart, off)
 			continue
 		}
-		if eh.Size < 0 && eh.ID != mkv.IDCluster {
+		if eh.Size < 0 && eh.ID != mkv.IDCluster && (isSegmentLevelID(eh.ID) || p.pad.end != elemStart) {
 			// A live muxer's Cues or Tags declare no size: walked to the element that ends them, where the walk resumes.
 			if err := p.skipUnknownSizeElement(p.segEnd); err != nil {
 				return err
@@ -284,7 +284,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 			continue
 		default:
 			if p.junkAt(eh) { // looked past as Read does, no further than headResyncCap
-				off, err := p.resyncToSegmentElement(elemStart+1, elemStart+1+headResyncCap, endPos)
+				off, err := p.resyncToSegmentElement(p.pad.from(elemStart), elemStart+1+headResyncCap, endPos)
 				if err != nil {
 					return err
 				}
@@ -292,9 +292,10 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 					c.ResyncedBytes += max(p.junkEnd(elemStart+1+headResyncCap, endPos)-elemStart, 0)
 					return p.finalizeHeadMeta(c, offs, o) // nothing recognizable in the window: what we have
 				}
-				c.ResyncedBytes += off - elemStart
+				c.ResyncedBytes += p.pad.passed(elemStart, off)
 				continue
 			}
+			p.pad.note(eh.ID, elemStart, p.pos(), eh.Size)
 			if err := p.skip(eh.Size); err != nil {
 				return err
 			}
