@@ -251,10 +251,13 @@ func (h *subHarvest) harvested(start int64, sub int) (ms int64, known, whole boo
 	return c.ms, true, true, c.next, blocks
 }
 
-// prebuildsTables reports whether a subtitle cursor may build the window tables it needs: a local Matroska source
-// the segments are written from, whose tables are structure only, so the video then serves from the very walk.
-func (p *HLSPlan) prebuildsTables(ctx context.Context) bool {
-	return !p.mp4src && p.streams() && !p.networkSrc(ctx)
+// prebuildsTables reports whether a subtitle cursor may build the window tables it needs: a Matroska source the
+// segments are written from, so the video then serves from the very walk. A network source's walk keeps the segments
+// under the window budget, which a cursor ahead of the video can outrun: those are copied again when asked for, and
+// still the source gave half what it did walked for each subtitle (a 1080p episode over a network mount, 30 segments
+// with 3 subtitles: 1.30 GB asked of it, 666 MB now; 333 MB without the subtitles).
+func (p *HLSPlan) prebuildsTables(context.Context) bool {
+	return !p.mp4src && p.streams()
 }
 
 // harvestWindow builds the table of a window whose walk reads the cluster at off, one not built yet in this scan;

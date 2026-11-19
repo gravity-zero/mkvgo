@@ -98,11 +98,8 @@ func TestSubtitleHarvestLeavesTheMediaAlone(t *testing.T) {
 	ctx := context.Background()
 	for _, build := range []func(testing.TB) string{buildSeekFixture, buildSubCursorFixture} {
 		src := build(t)
-		for _, local := range []bool{false, true} {
-			o := Options{SegmentMs: 2000}
-			if local {
-				o.SourceAccess = SourceLocal
-			}
+		for _, access := range []SourceAccess{SourceAuto, SourceLocal, SourceNetwork} {
+			o := Options{SegmentMs: 2000, SourceAccess: access}
 			plain, err := PlanHLS(ctx, src, o)
 			if err != nil {
 				t.Fatal(err)
@@ -121,7 +118,7 @@ func TestSubtitleHarvestLeavesTheMediaAlone(t *testing.T) {
 				want, _, werr := plain.Resource(ctx, plain.SegmentName(n))
 				got, _, gerr := harvested.Resource(ctx, harvested.SegmentName(n))
 				if werr != nil || gerr != nil || !bytes.Equal(got, want) {
-					t.Fatalf("segment %d differs (local %v): %v, %v", n, local, werr, gerr)
+					t.Fatalf("segment %d differs (access %v): %v, %v", n, access, werr, gerr)
 				}
 			}
 		}

@@ -30,10 +30,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   sample of a video track whose header states no colour, so a PQ stated only in
   the SPS counts.
 - `PlanHLS` without a subtitle index no longer walks the file again for each
-  subtitle rendition: the cues come from the window walks, and on a local
-  source a subtitle request builds the windows the video then serves from. A
-  1080p episode played with one subtitle read 213 % of what was served, 113 %
-  now (102 % without the subtitle); three subtitles cost what one does
+  subtitle rendition: the cues come from the window walks, and a subtitle
+  request builds the windows the video then serves from (over a network
+  mount, half of what was asked of the source before). A 1080p episode
+  played with one subtitle read 213 % of what was served, 113 % now (102 %
+  without the subtitle); three subtitles cost what one does
   (`docs/library.md`, HLS plan).
 - A window walk and a streamed segment no longer ask the disk to read ahead
   past the end of the file, and a remote source (`mkv.RangeHinter`) is no
