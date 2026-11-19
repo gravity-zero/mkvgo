@@ -167,12 +167,12 @@ func TestSubtitleHarvestBuildsNotTheLastWindow(t *testing.T) {
 	}
 }
 
-// A subtitle request builds no window before its own: the margin behind a seek and the probe of the track's head are
-// windows the video does not play, walked once as before rather than built whole, overlap and all (a film's last
-// minutes over a network mount: 218 MB asked of the source, 289 MB with the margin's windows built).
+// On a network source, a subtitle request builds no window before its own: the margin behind a seek and the probe of
+// the track's head are windows the video does not play, walked once as before rather than built whole, overlap and
+// kept segments and all (a film's last minutes: 218 MB asked of the source, 289 MB with the margin's windows built).
 func TestSubtitleHarvestBuildsNoWindowBehindTheRequest(t *testing.T) {
 	ctx := context.Background()
-	plan, err := PlanHLS(ctx, buildSeekFixture(t), Options{SegmentMs: 2000, SourceAccess: SourceLocal})
+	plan, err := PlanHLS(ctx, buildSeekFixture(t), Options{SegmentMs: 2000, SourceAccess: SourceNetwork})
 	if err != nil {
 		t.Fatal(err)
 	}

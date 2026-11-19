@@ -304,10 +304,17 @@ func (p *HLSPlan) harvestWindow(ctx context.Context, off int64, first int, tried
 // what precedes it committed, and the walk serves from there. Caller holds subMu[i].
 func (p *HLSPlan) extendCursorHarvested(ctx context.Context, i int, cur *subCursor, target, uptoMs int64) (served bool, err error) {
 	st := &p.subScan[i]
-	build := p.prebuildsTables(ctx) && uptoMs > 0
-	// Only the request's own window and those after it, which the video plays: the margin behind a seek and the probe
-	// of the track's head are walked as before, a window built whole reading its overlap with the next as well.
-	first := sort.Search(len(p.bounds), func(k int) bool { return p.bounds[k] >= uptoMs }) - 1
+	// A network source builds only the request's own window and those after it, which the video plays: the margin
+	// behind a seek and the probe of the track's head are walked as before, a window built whole there reading its
+	// overlap and keeping segments nobody asks for (a film's last minutes: 218 MB asked of the source, 289 MB with
+	// them built). A local one builds them too: the window is a structure, and a viewer coming back to the start
+	// plays the very windows the probe built (a seek mid-film then back to the start: 208 % read walking them, 280 %).
+	behind := !p.networkSrc(ctx)
+	build := p.prebuildsTables(ctx) && (uptoMs > 0 || behind)
+	first := 0
+	if !behind {
+		first = sort.Search(len(p.bounds), func(k int) bool { return p.bounds[k] >= uptoMs }) - 1
+	}
 	tried := map[int]bool{}
 	var took int64
 	defer func() {
