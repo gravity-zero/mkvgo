@@ -441,7 +441,7 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		if !o.SynthesizeIndex {
 			return nil, errf("%s: the Cues index no video keyframe: %w, or plan with Options.SynthesizeIndex (on-demand HLS seeks through them)", shown.Path(srcPath), mkv.ErrNoKeyframeIndex)
 		}
-		cues, err = synthesizeVideoCues(ctx, srcPath, fs, c, vidID, p.trackDurs)
+		cues, err = p.synthesizeVideoCues(ctx, srcPath, fs, c, vidID, p.trackDurs)
 		if err != nil {
 			return nil, err
 		}

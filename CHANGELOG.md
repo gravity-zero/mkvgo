@@ -37,6 +37,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (`docs/library.md`, HLS plan).
 - A window walk and a streamed segment no longer ask the disk to read ahead
   past the end of the file.
+- `PlanHLS` with `SynthesizeIndex` passes over a damaged region as the window
+  walks do (`DamageBytes`) instead of ending the index there: the last window
+  ran over the rest of the file (a 43 min episode with damaged regions planned
+  35 windows, the last served as one 2.2 GB segment; 309 now).
 
 ## [0.69.0] - 2026-11-17
 
