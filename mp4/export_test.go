@@ -6,3 +6,7 @@ var (
 	BuildSubCursorFixtureForTest = buildSubCursorFixture
 	BuildSeekFixtureForTest      = buildSeekFixture
 )
+
+// DisableSubHarvestForTest makes p walk the clusters for its subtitle cues as it did before the window walks
+// harvested them: the reference the harvested cues are compared with.
+func DisableSubHarvestForTest(p *HLSPlan) { p.harvest.off = true }

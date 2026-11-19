@@ -787,6 +787,18 @@ cluster, and each block read is checked against its cue like an index's. The
 plan counts both outcomes (`SubtitleCueIndexed`, `SubtitleCueUnverified`);
 `matroska.SubtitleIndexFromCues` is the same derivation for your own use.
 
+With neither, the subtitle renditions take their cues from the window walks:
+a walk reads every block of the clusters it covers, the subtitles' included,
+so a cluster a walk read whole is not walked again for its subtitles. On a
+local source whose segments are written from the source, a subtitle request
+builds the window tables it lacks itself, and the video then serves from the
+same walks: a viewer playing the video with a subtitle reads the file about
+once (108 % of what was served over 100 segments of a real 1080p episode, 213 %
+walking; three subtitles cost what one does). The tables run a little past the
+request, by the 32.7 s a block may sit after its cluster. A cluster no walk read
+whole, or one past a damaged region, is walked as before. `SubtitleHarvestedClusters`
+counts the clusters served this way.
+
 **Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
 time: the moov sample table already has every segment's exact sample count,
 sizes and sync flags, so it costs nothing extra. A Matroska plan instead

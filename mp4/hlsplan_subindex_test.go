@@ -72,6 +72,7 @@ func TestPlanHLSSubtitleIndexServesTheSameWebVTT(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				mp4.DisableSubHarvestForTest(walked)
 				indexed, err := mp4.PlanHLS(ctx, src, mp4.Options{SegmentMs: 2000, SubtitleIndex: ix})
 				if err != nil {
 					t.Fatal(err)
@@ -181,6 +182,7 @@ func TestPlanHLSSubtitleIndexStaleFallsBackToTheWalk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mp4.DisableSubHarvestForTest(walked)
 	for name, index := range map[string]mp4.SubtitleBlockIndex{
 		"an index built from another file":      other,
 		"an index whose timecodes do not match": shiftedIndex{own},
@@ -196,8 +198,8 @@ func TestPlanHLSSubtitleIndexStaleFallsBackToTheWalk(t *testing.T) {
 				t.Fatalf("%s: %s differs from the walk (%v, %v)", name, res, werr, gerr)
 			}
 		}
-		if st := plan.Stats(); st.SubtitleWalks == 0 || st.SubtitleIndexedBlocks != 0 {
-			t.Errorf("%s: %d walks, %d blocks kept from the index, want the walk alone", name, st.SubtitleWalks, st.SubtitleIndexedBlocks)
+		if st := plan.Stats(); st.SubtitleWalks+st.SubtitleHarvestedClusters == 0 || st.SubtitleIndexedBlocks != 0 {
+			t.Errorf("%s: %d walks, %d clusters harvested, %d blocks kept from the index, want the walk or the harvest alone", name, st.SubtitleWalks, st.SubtitleHarvestedClusters, st.SubtitleIndexedBlocks)
 		}
 	}
 }

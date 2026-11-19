@@ -73,6 +73,11 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	var br *reader.BlockReader
 	defer p.countWalk(&br)()
 	var ahead [][]aheadBlock
+	subOf := p.harvestTracks() // the subtitle blocks are read along, for the subtitle renditions (see subHarvest)
+	kept := keep
+	for id := range subOf {
+		kept = append(kept[:len(kept):len(kept)], id)
+	}
 	from := p.segPosAt(n)
 	cold, err := p.pastDamage(p.coldStart(n)) // a seat inside a damaged region already met starts past it
 	if err != nil {
@@ -90,7 +95,11 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	}
 	p.tolerateDamage(br)
 	br.SetTrackDefaultDurations(p.trackDurs)
-	br.KeepTracks(keep...)
+	br.KeepTracks(kept...)
+	seat := cold
+	if from.Valid() {
+		seat = from.Off
+	}
 	if !from.Valid() && cold < p.offsets[n] { // the clusters before the window's own, header-only, then the window's
 		if ahead, err = p.coldAhead(ctx, src, br, n, index, segStart, structure, keepAudio); err != nil {
 			return nil, nil, none, err
@@ -103,11 +112,15 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 		if err = br.RestartAt(own); err != nil {
 			return nil, nil, none, err
 		}
+		seat = own
 	}
 	br.SetHeaderOnly(structure)
 	if keepAudio {
 		br.SetHeaderOnlyTracks(p.tracks[p.videoIndex()].ft.outTrack.mkv.ID)
+	} else if subOf != nil {
+		br.SetHeaderOnlyTracks(keep...) // the subtitle payloads are read whatever the walk skips
 	}
+	rec := p.newHarvestRec(subOf, seat)
 
 	// The video is most of a window's bytes: its blocks are read straight
 	// into the buffer its segment is served from (see windowInPlace), not
@@ -192,8 +205,12 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 				}
 			}
 			skips, inPlace = k, none
+			if rec != nil {
+				rec.broken = true // a damaged region passed over: this walk harvests nothing
+			}
 		}
 		if p.walkEnd(err) { // clean end, incl. a truncated/over-declared tail
+			rec.end()
 			for ti := range p.tracks {
 				if !crossed[ti] {
 					p.learnTrackEnd(ti, maxInt64(seen[ti], segStart))
@@ -204,6 +221,11 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 		if err != nil {
 			return nil, nil, none, errf("read block: %w", err)
 		}
+		if si, ok := subOf[b.TrackNumber]; ok {
+			rec.observe(br.Pos(), &b, si)
+			continue
+		}
+		rec.observe(br.Pos(), &b, -1)
 		if farOff > 0 && crossedAny && !triedFar && p.walkedFar(from, br.Pos(), farOff) { // a track still missing far past the window: stored after the video?
 			triedFar = true
 			for ti := range p.tracks {
@@ -328,6 +350,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	if segEnd < 1<<62 && p.fillDamage(windows, nextPts, resume, segStart, segEnd) {
 		inPlace = none
 	}
+	rec.commit()
 	return windows, nextPts, inPlace, nil
 }
 

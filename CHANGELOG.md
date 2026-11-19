@@ -17,6 +17,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   keeps the audio up to about a frame late past it, as before 0.62.0
   (`docs/library.md`, HLS plan).
 
+### Added
+
+- `HLSPlanStats.SubtitleHarvestedClusters`: the clusters a subtitle rendition
+  took its cues from as a window walk read them.
+
 ### Fixed
 
 - `Playability` and `Ingest` send a PQ or HLG video with no mastering metadata
@@ -24,6 +29,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   unsupported on target`); it was direct-play before. They also read the first
   sample of a video track whose header states no colour, so a PQ stated only in
   the SPS counts.
+- `PlanHLS` without a subtitle index no longer walks the file again for each
+  subtitle rendition: the cues come from the window walks, and on a local
+  source a subtitle request builds the windows the video then serves from. A
+  1080p episode played with one subtitle read 213 % of what was served, 108 %
+  now (102 % without the subtitle); three subtitles cost what one does
+  (`docs/library.md`, HLS plan).
+- A window walk and a streamed segment no longer ask the disk to read ahead
+  past the end of the file.
 
 ## [0.69.0] - 2026-11-17
 
