@@ -657,7 +657,7 @@ var ErrCorruptSource = errors.New("the source is structurally corrupt")
 // rewrite that reads past it, where a bare EOF said nothing.
 func overrunErr(op, doing string, id uint32, off int64, err error) error {
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return fmt.Errorf("%s: element 0x%X at offset %d declares more bytes than the file holds: the file is damaged there or cut short (`mkvgo reindex --resync` rewrites what it holds into a new file): %w", op, id, off, err)
+		return fmt.Errorf("%s: element 0x%X at offset %d declares more bytes than the file holds: the file is damaged there or cut short (Options.Resync / `mkvgo reindex --resync` rewrites what it holds into a new file): %w", op, id, off, err)
 	}
 	return fmt.Errorf("%s: %s 0x%X: %w", op, doing, id, err)
 }

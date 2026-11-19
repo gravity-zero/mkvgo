@@ -249,11 +249,14 @@ func (p *parser) pastParent(eh ebml.ElementHeader, end int64) bool {
 // (junkHeader): bytes read as a header where the framing was lost, to resync past rather than skip by the size they
 // happen to declare. The read position is kept.
 func (p *parser) junkAt(eh ebml.ElementHeader) bool {
-	if isSegmentLevelID(eh.ID) || eh.ID == mkv.IDVoid || eh.ID == 0xBF {
-		return false // judged without a look, nor the seek back that costs a remote source a request
+	if isSegmentLevelID(eh.ID) {
+		return false
 	}
 	if eh.Size < 0 {
-		return true // no size on an ID that cannot go without: met behind padding that declared too much
+		return true // no size on an ID that cannot go without, padding included: met behind padding that declared too much
+	}
+	if eh.ID == mkv.IDVoid || eh.ID == 0xBF {
+		return false // judged without a look, nor the seek back that costs a remote source a request
 	}
 	pos := p.pos()
 	junk := junkHeader(p.r, p.segEnd, pos, eh)
@@ -336,13 +339,15 @@ func (pd *padding) from(off int64) int64 {
 	return max(pd.body, pd.end-padOverrun)
 }
 
-// passed is the bytes a resync from a failure at off to found went over: from the padding's start when the element
-// found lies inside it.
+// passed is the bytes a resync from a failure at off to found went over, and forgets the padding: the ones the
+// padding declared too many when the element found lies inside it, not the padding itself.
 func (pd *padding) passed(off, found int64) int64 {
+	n := found - off
 	if found < off {
-		return found - pd.start
+		n = pd.end - found
 	}
-	return found - off
+	*pd = padding{}
+	return n
 }
 
 // maxFramedHops bounds the well-formed elements framedTo follows before deciding.

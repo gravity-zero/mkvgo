@@ -228,3 +228,91 @@ func TestWholeHeadCountsJunkBehindWhatWasAsked(t *testing.T) {
 		t.Errorf("WithWholeHead on a sound head: ResyncedBytes %d, %v", c.ResyncedBytes, err)
 	}
 }
+
+// TestPaddingThatSwallowsAClusterHead: a Void declaring 6 bytes too many ahead of a Cluster that is not the first
+// (the last one, with Tags behind it, or one in the middle) hides that Cluster's header. The walk resumes on it:
+// the last one used to be dropped without an error, the walk ending as if the media stopped there.
+func TestPaddingThatSwallowsAClusterHead(t *testing.T) {
+	opts := livefixture.Options{SizedClusters: true, TailTags: true}
+	sound := livefixture.Build(opts)
+	id := []byte{0x1F, 0x43, 0xB6, 0x75}
+	first := bytes.Index(sound, id)
+	second := first + 4 + bytes.Index(sound[first+4:], id)
+	for name, at := range map[string]int{"the last Cluster": bytes.LastIndex(sound, id), "the second Cluster": second} {
+		t.Run(name, func(t *testing.T) {
+			data := spliceAt(t, sound, at, []byte{0xEC, 0x8A, 0x00, 0x00, 0x00, 0x00})
+			for _, tolerant := range []bool{false, true} {
+				br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+				if err != nil {
+					t.Fatalf("NewBlockReader: %v", err)
+				}
+				br.SetSkipDamage(tolerant)
+				if n, _, last := drainBlocks(t, br); n != livefixture.Blocks || last != livefixture.LastBlockMs {
+					t.Errorf("tolerant %v: %d blocks, last %d; want %d and %d", tolerant, n, last, livefixture.Blocks, livefixture.LastBlockMs)
+				}
+				if tolerant && br.SkippedBytes() != 6 {
+					t.Errorf("tolerant walk skipped %d bytes, want the 6 the Void declared too many", br.SkippedBytes())
+				}
+			}
+		})
+	}
+}
+
+// TestClusterWithAShrunkSizeIsNotStray: a first Cluster whose size was damaged down to 2 bytes still opens with a
+// Timestamp: it is a Cluster, and its media behind the 2 bytes is damage the strict walk refuses. Only bytes that
+// open with no element of a Cluster are passed over as stray.
+func TestClusterWithAShrunkSizeIsNotStray(t *testing.T) {
+	data := beforeFirstCluster(t, livefixture.Options{SizedClusters: true}, []byte{0x1F, 0x43, 0xB6, 0x75, 0x82, 0xE7, 0x83, 0x01, 0x02, 0x03})
+	br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+	if err != nil {
+		t.Fatalf("NewBlockReader: %v", err)
+	}
+	for err == nil {
+		_, err = br.Next()
+	}
+	if !errors.Is(err, ErrDamagedRegion) {
+		t.Errorf("strict walk ended on %v, want a damaged region", err)
+	}
+}
+
+// TestPaddingDeclaringTooMuchCountsItsExcess: the bytes passed over are the ones the Void declared too many, not
+// the Void.
+func TestPaddingDeclaringTooMuchCountsItsExcess(t *testing.T) {
+	void := append([]byte{0xEC, 0x40, 0x68}, make([]byte, 100)...) // declares 104, holds 100
+	data := beforeFirstCluster(t, livefixture.Options{SizedClusters: true}, void)
+	c, err := Read(context.Background(), bytes.NewReader(data), "void.mkv")
+	if err != nil || c.ResyncedBytes != 4 {
+		t.Errorf("Read: ResyncedBytes %d (%v), want the 4 bytes declared too many", c.ResyncedBytes, err)
+	}
+	br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+	if err != nil {
+		t.Fatalf("NewBlockReader: %v", err)
+	}
+	br.SetSkipDamage(true)
+	if n, _, _ := drainBlocks(t, br); n != livefixture.Blocks || br.SkippedBytes() != 4 {
+		t.Errorf("tolerant walk: %d blocks, %d bytes skipped; want %d and 4", n, br.SkippedBytes(), livefixture.Blocks)
+	}
+}
+
+// TestUnsizedPaddingBehindPadding: a Void then bytes that read as a Void of unknown size are junk to resync past,
+// not an element the head read fails to skip.
+func TestUnsizedPaddingBehindPadding(t *testing.T) {
+	data := beforeFirstCluster(t, livefixture.Options{SizedClusters: true}, []byte{0xEC, 0x82, 0x00, 0x00, 0xEC, 0xFF})
+	for name, read := range map[string]func() (*mkv.Container, error){
+		"Read": func() (*mkv.Container, error) { return Read(context.Background(), bytes.NewReader(data), "v.mkv") },
+		"ReadMeta": func() (*mkv.Container, error) {
+			return ReadMeta(context.Background(), bytes.NewReader(data), "v.mkv", WithWholeHead())
+		},
+	} {
+		if c, err := read(); err != nil || c.ResyncedBytes != 2 {
+			t.Errorf("%s: %v, ResyncedBytes %d; want the 2 stray bytes passed over", name, err, resyncedOf(c))
+		}
+	}
+}
+
+func resyncedOf(c *mkv.Container) int64 {
+	if c == nil {
+		return -1
+	}
+	return c.ResyncedBytes
+}

@@ -39,13 +39,22 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   bytes they are instead of refused as a damaged region, and `diagnose` counts
   them.
 - `analyze` warns when the file it measured was read past undecodable bytes.
+- What a strict block walk now reads past without an error, where it failed
+  or lost media before: bytes ahead of the first Cluster that decode as an
+  element whose size leads nowhere or that declare no size, the excess of a
+  Void or CRC-32 that declares too much, 8 bytes at most read as a Cluster,
+  64 at most before the closing elements. `Container.ResyncedBytes`,
+  `validate`, `diagnose` and `analyze` say so for the head; a tolerant walk
+  counts them all (`SkippedBytes`). `ReadStream` cannot look past an element
+  and keeps skipping a header that decodes by its size.
 
 ### Added
 
 - `Diagnosis.ResyncedBytes` (`resynced_bytes` in JSON): the bytes the head
   read passed over ahead of the first Cluster, so a caller needs no second
-  read to count them. `reader.WithWholeHead` gives the same count to a head
-  read of its own.
+  read to count them. `WithWholeHead` (`reader` and `matroska`) gives the
+  same count to a head read of its own. A Void declaring too much counts for
+  its excess.
 
 ## [0.70.0] - 2026-11-19
 

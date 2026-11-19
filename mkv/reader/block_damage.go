@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/mkv"
 )
 
 // errUnframed is the failure of the walk on bytes past the first Cluster that decode as an element header whose
@@ -128,8 +131,19 @@ func (br *BlockReader) skipDamageTo(from, to int64) {
 // tinyCluster bytes: bytes that read as a Cluster header and hold no media. It seats the walk behind them, as if the
 // Cluster had not been entered; a tolerant walk counts them.
 func (br *BlockReader) leaveStrayCluster() bool {
-	if !br.inCluster || br.clusterEnd < 0 || br.clusterEnd-br.clusterBody > tinyCluster || br.elemStart != br.clusterBody {
+	if br.raw == nil || !br.inCluster || br.clusterEnd < 0 || br.clusterEnd-br.clusterBody > tinyCluster || br.elemStart != br.clusterBody {
 		return false
+	}
+	cur, err := br.raw.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false
+	}
+	var first [1]byte
+	_, serr := br.raw.Seek(br.clusterBody, io.SeekStart)
+	_, rerr := io.ReadFull(br.raw, first[:])
+	if serr != nil || rerr != nil || clusterChildByte(first[0]) {
+		_, _ = br.raw.Seek(cur, io.SeekStart)
+		return false // it opens as a Cluster does: damage to place, not stray bytes
 	}
 	end := br.clusterEnd
 	if br.r.reset(end) != nil {
@@ -147,27 +161,64 @@ func (br *BlockReader) leaveStrayCluster() bool {
 	return true
 }
 
+// resumeInPadding reports whether the walk just failed, outside any Cluster, on the header that follows a Void or
+// CRC-32, and a valid segment-level element starts in that padding's tail: the padding declared too much and
+// swallowed its head. The walk is seated on that element; a tolerant walk counts the bytes declared too many.
+func (br *BlockReader) resumeInPadding() bool {
+	at := br.elemStart
+	from := br.pad.from(at)
+	if br.raw == nil || br.inCluster || from >= at {
+		return false
+	}
+	cur, err := br.raw.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false
+	}
+	off := int64(-1)
+	if _, err := br.raw.Seek(from, io.SeekStart); err == nil {
+		off, _ = resyncToSegmentElement(br.raw, at, br.segEnd)
+	}
+	if off < 0 || off >= at || br.r.reset(off) != nil {
+		_, _ = br.raw.Seek(cur, io.SeekStart)
+		return false
+	}
+	if passed := br.pad.passed(at, off); br.skipDamage {
+		br.skipDamageTo(off-passed, off)
+	}
+	return true
+}
+
 // maxTailJunk is the longest run of bytes that are no element, between the last Cluster and a valid element closing
 // the Segment (Cues, Tags...), taken for what an in-place rewrite left behind: too short to hold a Cluster worth the
 // name. A longer run may be a Cluster whose header was lost, and stays the error it is.
 const maxTailJunk = 64
 
 // tailJunk reports whether the element the walk could not read at from, outside any Cluster and with no Cluster
-// behind it, is at most maxTailJunk bytes ahead of a valid segment-level element, or follows padding that swallowed
-// the head of one: the media is whole, the walk is over. A tolerant walk counts the bytes.
+// behind it, is at most maxTailJunk bytes ahead of a valid segment-level element that is no Cluster: the media is
+// whole, the walk is over. A tolerant walk counts the bytes.
 func (br *BlockReader) tailJunk(from int64) bool {
 	if br.raw == nil || br.inCluster || br.clusterCount == 0 {
 		return false
 	}
-	if _, err := br.raw.Seek(br.pad.from(from), io.SeekStart); err != nil {
+	cur, err := br.raw.Seek(0, io.SeekCurrent)
+	if err != nil {
 		return false
 	}
-	off, err := resyncToSegmentElement(br.raw, from+1+maxTailJunk, br.segEnd)
-	if err != nil || off < 0 || off-from > maxTailJunk {
+	off := int64(-1)
+	if _, err := br.raw.Seek(from+1, io.SeekStart); err == nil {
+		off, _ = resyncToSegmentElement(br.raw, from+1+maxTailJunk, br.segEnd)
+	}
+	if off >= 0 {
+		if id, _, err := ebml.ReadElementID(br.raw); err != nil || id == mkv.IDCluster {
+			off = -1 // media behind the bytes: not the end
+		}
+	}
+	if off < 0 || off-from > maxTailJunk {
+		_, _ = br.raw.Seek(cur, io.SeekStart)
 		return false
 	}
 	if br.skipDamage {
-		br.skipDamageTo(off-br.pad.passed(from, off), off)
+		br.skipDamageTo(from, off)
 	}
 	return true
 }

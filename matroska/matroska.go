@@ -424,6 +424,11 @@ func WithCues() ReadOption { return reader.WithCues() }
 // reader.WithoutTailScan.
 func WithoutTailScan() ReadOption { return reader.WithoutTailScan() }
 
+// WithWholeHead walks the head to the first Cluster even once the read has
+// what it was asked for, so Container.ResyncedBytes counts every byte passed
+// over ahead of the media. See reader.WithWholeHead.
+func WithWholeHead() ReadOption { return reader.WithWholeHead() }
+
 // NewBlockReader walks the blocks of the Matroska file r from its start, timed in milliseconds; timecodeScale is the
 // Segment's TimecodeScale (0: the default 1 ms). See reader.NewBlockReader.
 func NewBlockReader(r io.ReadSeeker, timecodeScale int64) (*BlockReader, error) {

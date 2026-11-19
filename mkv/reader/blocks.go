@@ -620,8 +620,8 @@ func (br *BlockReader) resyncHead(at int64) bool {
 	if err != nil || off < 0 || br.r.reset(off) != nil {
 		return false
 	}
-	if br.skipDamage {
-		br.skipDamageTo(off-br.pad.passed(at, off), off) // a tolerant walk reports what it passed over, a Cluster it lost included
+	if passed := br.pad.passed(at, off); br.skipDamage {
+		br.skipDamageTo(off-passed, off) // a tolerant walk reports what it passed over, a Cluster it lost included
 	}
 	return true
 }
@@ -711,7 +711,7 @@ func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 		if br.r.failed != nil {
 			return b, err // the source itself failed (I/O, cancellation, replaced file): not damage in the file
 		}
-		if br.leaveStrayCluster() {
+		if br.leaveStrayCluster() || br.resumeInPadding() {
 			continue
 		}
 		if br.clusterCount == 0 && br.damageScan <= 0 {
