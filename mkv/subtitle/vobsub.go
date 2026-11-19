@@ -190,7 +190,11 @@ func (s *spuState) read(spu []byte, ctrl int) error {
 		}
 		date := int(binary.BigEndian.Uint16(spu[pos:]))
 		next := int(binary.BigEndian.Uint16(spu[pos+2:]))
-		if err := s.commands(spu, pos+4, date); err != nil {
+		end := len(spu)
+		if next > pos+4 && next < end {
+			end = next // a sequence ends where the next one starts, whether or not it says so
+		}
+		if err := s.commands(spu[:end], pos+4, date); err != nil {
 			return err
 		}
 		if s.started && s.visible() {

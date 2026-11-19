@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -250,25 +251,27 @@ func writePGSDir(outDir string, each func(func(matroska.PGSCue) error) error) (i
 	}
 	var manifest []pgsCueManifest
 	n := 0
+	// A picture shown again (the same object composed anew, a few bytes of stream each time) is encoded once.
+	var last *image.NRGBA
+	var encoded bytes.Buffer
 	err := each(func(c matroska.PGSCue) error {
 		name := fmt.Sprintf("%05d.png", n)
-		f, err := os.Create(filepath.Join(outDir, name))
-		if err != nil {
-			return err
+		if c.Image != last || c.Image == nil {
+			// A PGS cue holds at most 256 colours, so truecolour spends four bytes
+			// a pixel to say what one can - about a third more on disk for output
+			// a consumer will cache. Fall back to the picture as decoded if it
+			// somehow does not fit a palette.
+			var img image.Image = c.Image
+			if p := subtitle.Paletted(c.Image); p != nil {
+				img = p
+			}
+			encoded.Reset()
+			if err := png.Encode(&encoded, img); err != nil {
+				return err
+			}
+			last = c.Image
 		}
-		// A PGS cue holds at most 256 colours, so truecolour spends four bytes
-		// a pixel to say what one can - about a third more on disk for output
-		// a consumer will cache. Fall back to the picture as decoded if it
-		// somehow does not fit a palette.
-		var img image.Image = c.Image
-		if p := subtitle.Paletted(c.Image); p != nil {
-			img = p
-		}
-		if err := png.Encode(f, img); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
+		if err := os.WriteFile(filepath.Join(outDir, name), encoded.Bytes(), 0o644); err != nil {
 			return err
 		}
 		manifest = append(manifest, pgsCueManifest{

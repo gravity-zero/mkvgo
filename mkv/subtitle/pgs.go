@@ -60,9 +60,10 @@ const (
 	pgsMaxObjectBytes = 4 << 20
 	// pgsMaxEpochBytes bounds what an epoch's objects hold together: they live until the next epoch start.
 	pgsMaxEpochBytes = 4 * pgsMaxObjectBytes
-	// pgsMaxBlockPixels bounds the pixels one block's display sets decode: four 4096x4096 objects, 256 MiB. A real
-	// block places one or two subtitle-sized objects; only a forged one names objects over and over.
-	pgsMaxBlockPixels = 4 * pgsMaxObjectDim * pgsMaxObjectDim
+	// pgsMaxBlockPixels bounds the pixels one block's display sets decode: two 4096x4096 objects, 128 MiB, the two
+	// objects a composition may place. A real block places one or two subtitle-sized objects; only a forged one
+	// names objects over and over.
+	pgsMaxBlockPixels = 2 * pgsMaxObjectDim * pgsMaxObjectDim
 	// pgsMaxKeptPixels bounds the pictures kept from one display set to the next: one 4096x4096 object, 64 MiB.
 	pgsMaxKeptPixels = pgsMaxObjectDim * pgsMaxObjectDim
 )
