@@ -27,6 +27,20 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   file is no longer reported as cut short by `analyze`, nor refused by
   `demux`, `split`, `remove-track` and `fingerprint`. A longer run is still
   refused: it may hide a Cluster.
+- `diagnose` no longer answers healthy when stray bytes sit between the head
+  elements it reads and the first Cluster: it walks the head to the first
+  Cluster.
+- The strict `reindex`, `reindex-inplace` and `retime` refuse bytes that read
+  as an element running past the end with the offset and the command that
+  works (`mkvgo reindex --resync`), not `copy unknown 0x8C body: EOF` nor a
+  "truncated file" pointing back at the command that refused.
+
+### Added
+
+- `Diagnosis.ResyncedBytes` (`resynced_bytes` in JSON): the bytes the head
+  read passed over ahead of the first Cluster, so a caller needs no second
+  read to count them. `reader.WithWholeHead` gives the same count to a head
+  read of its own.
 
 ## [0.70.0] - 2026-11-19
 

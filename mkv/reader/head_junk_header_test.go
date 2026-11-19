@@ -196,3 +196,34 @@ func TestTailJunkIsNotACut(t *testing.T) {
 		t.Errorf("a run of %d bytes that are no element ended the walk as a clean end: it may hide a Cluster", maxTailJunk+1)
 	}
 }
+
+// headIndexAndTags is a Cues element of one CuePoint and a Tags element of one tag: what lets a head read asked for
+// both stop before the first Cluster.
+var headIndexAndTags = []byte{
+	0x1C, 0x53, 0xBB, 0x6B, 0x8D, 0xBB, 0x8B, 0xB3, 0x81, 0x00, 0xB7, 0x86, 0xF7, 0x81, 0x01, 0xF1, 0x81, 0x00,
+	0x12, 0x54, 0xC3, 0x67, 0x8E, 0x73, 0x73, 0x8B, 0x67, 0xC8, 0x88, 0x45, 0xA3, 0x81, 0x41, 0x44, 0x87, 0x81, 0x42,
+}
+
+// TestWholeHeadCountsJunkBehindWhatWasAsked: a head read stops at the last element it was asked for, so junk
+// between that element and the first Cluster can go uncounted (measured on a muxer's file whose tracks state their
+// frame duration; this fixture's do not, and the plain read goes on to the first Cluster for a frame rate).
+// WithWholeHead walks on to the first Cluster whatever the file, and counts it.
+func TestWholeHeadCountsJunkBehindWhatWasAsked(t *testing.T) {
+	ctx := context.Background()
+	junk := []byte("0000\x00\x00")
+	indexed := headIndexAndTags
+	data := beforeFirstCluster(t, livefixture.Options{SizedClusters: true}, append(append([]byte(nil), indexed...), junk...))
+
+	early, err := ReadMeta(ctx, bytes.NewReader(data), "junk.mkv", WithCues(), WithTags())
+	if err != nil || len(early.Cues) != 1 || early.Tags == nil {
+		t.Fatalf("head read: %d cues, tags %v, %v; the fixture must give it both ahead of the junk", len(early.Cues), early.Tags != nil, err)
+	}
+	whole, err := ReadMeta(ctx, bytes.NewReader(data), "junk.mkv", WithCues(), WithTags(), WithWholeHead())
+	if err != nil || whole.ResyncedBytes != int64(len(junk)) {
+		t.Errorf("WithWholeHead: ResyncedBytes %d (%v), want the %d junk bytes", whole.ResyncedBytes, err, len(junk))
+	}
+	sound := beforeFirstCluster(t, livefixture.Options{SizedClusters: true}, indexed)
+	if c, err := ReadMeta(ctx, bytes.NewReader(sound), "sound.mkv", WithCues(), WithTags(), WithWholeHead()); err != nil || c.ResyncedBytes != 0 {
+		t.Errorf("WithWholeHead on a sound head: ResyncedBytes %d, %v", c.ResyncedBytes, err)
+	}
+}

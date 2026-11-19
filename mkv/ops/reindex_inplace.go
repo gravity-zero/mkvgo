@@ -586,7 +586,7 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 				return nil, fmt.Errorf("reindex inplace: unknown-size non-cluster element 0x%X", h.ID)
 			}
 			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-				return nil, inplaceReadErr(fmt.Sprintf("skip 0x%X", h.ID), err)
+				return nil, inplaceReadErr(fmt.Sprintf("element 0x%X at offset %d", h.ID, elemOff), err)
 			}
 			pos += h.Size
 		}
@@ -596,12 +596,12 @@ func scanInPlace(ctx context.Context, path string, fs *mkv.FS, timecodeScale int
 }
 
 // inplaceReadErr wraps a read failure encountered while scanning. A genuine
-// EOF partway through an element means the file is truncated: point the
-// caller at Reindex, which copies to a new file and can fall back to a full
-// rewrite. Any other error is reported as-is.
+// EOF partway through an element means the file is cut short, or damaged where
+// bytes read as a header: point the caller at the resyncing Reindex, which
+// copies what the file holds to a new one. Any other error is reported as-is.
 func inplaceReadErr(context string, err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-		return fmt.Errorf("reindex inplace: truncated file (%s), use mkvgo reindex instead: %w", context, err)
+		return fmt.Errorf("reindex inplace: the file is cut short or damaged (%s runs past its end): `mkvgo reindex --resync` rewrites what it holds into a new file: %w", context, err)
 	}
 	return fmt.Errorf("reindex inplace: %s: %w", context, err)
 }

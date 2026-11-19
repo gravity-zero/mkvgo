@@ -268,6 +268,10 @@ type Diagnosis struct {
 	// AudioDelaysNs holds every audio track's start delay relative to the
 	// video, whether or not it crossed the finding threshold.
 	AudioDelaysNs map[uint64]int64 `json:"audio_delays_ns"`
+	// ResyncedBytes counts the undecodable bytes ahead of the first Cluster
+	// the head read passed over (the "damaged" finding of scope head), 0 on a
+	// sound head. Matroska only.
+	ResyncedBytes int64 `json:"resynced_bytes,omitempty"`
 	// Damage is the tolerant-walk report, present only when the size check
 	// warranted the walk (Matroska only).
 	Damage *SalvageReport `json:"damage,omitempty"`

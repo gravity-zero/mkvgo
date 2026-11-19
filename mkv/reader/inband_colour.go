@@ -12,6 +12,7 @@ type ReadOption func(*readOpts)
 
 type readOpts struct {
 	noTailScan       bool // refuse the EOF fallback: the SeekHead alone must resolve (WithoutTailScan)
+	wholeHead        bool // walk the head to the first Cluster whatever was asked (WithWholeHead)
 	inBandColour     bool
 	sampledKeyframes int  // 0 = off; >0 = number of Cluster timestamps to sample
 	keyframeIndex    bool // build the COMPLETE keyframe index (sequential pass)
@@ -103,6 +104,15 @@ func WithChapters() ReadOption {
 // none.
 func WithCues() ReadOption {
 	return func(o *readOpts) { o.cues = true }
+}
+
+// WithWholeHead makes the metadata path walk the head to the first Cluster even
+// once it has what it was asked for, so Container.ResyncedBytes counts every
+// byte it had to pass over ahead of the media: the read otherwise stops at the
+// last element it needs and says nothing of junk behind it. The elements it
+// has no use for are skipped, not read.
+func WithWholeHead() ReadOption {
+	return func(o *readOpts) { o.wholeHead = true }
 }
 
 // WithoutTailScan turns OFF the bounded read back from EOF, so the metadata path

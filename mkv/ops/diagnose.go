@@ -57,7 +57,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 
 	// One head-only read serves the index verdict, the track ends and the hole
 	// probe alike: Tracks, Cues (with their positions) and Tags.
-	meta, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues(), reader.WithTags())
+	meta, err := reader.OpenMetaWithFS(ctx, path, fs, reader.WithCues(), reader.WithTags(), reader.WithWholeHead())
 	if err != nil {
 		// A .mkv that is really an ISO base media file is a CLASSIFICATION,
 		// not an error: an error would put the file back in the failed pile
@@ -333,6 +333,7 @@ func Diagnose(ctx context.Context, path string, opts ...mkv.Options) (*Diagnosis
 		}
 	}
 
+	d.ResyncedBytes = meta.ResyncedBytes
 	if meta.ResyncedBytes > 0 {
 		// Junk in the head - ahead of the metadata, or between it and the first
 		// Cluster: the head read resynced past it, a strict rewrite will not.

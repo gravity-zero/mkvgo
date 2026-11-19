@@ -319,7 +319,7 @@ func (p *parser) parseSegmentMeta(ctx context.Context, c *mkv.Container, o readO
 // stop early, unless a video track without DefaultDuration needs the first
 // cluster's timestamps and the next header is already held.
 func (p *parser) headWantsMore(c *mkv.Container, o readOpts) bool {
-	return p.wantsFrameRate(c) || (o.cues && len(c.Cues) == 0) ||
+	return o.wholeHead || p.wantsFrameRate(c) || (o.cues && len(c.Cues) == 0) ||
 		((o.tags || o.bitrate) && c.Tags == nil) ||
 		(o.chapters && c.Chapters == nil) ||
 		(o.attachments && c.Attachments == nil)

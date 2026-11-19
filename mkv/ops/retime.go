@@ -553,7 +553,7 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 			}
 		default:
 			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-				return nil, nil, fmt.Errorf("retime: skip 0x%X: %w", h.ID, err)
+				return nil, nil, overrunErr("retime", "skip", h.ID, elemStart, err)
 			}
 		}
 		consumed = elemStart + int64(hdrBytes) + h.Size

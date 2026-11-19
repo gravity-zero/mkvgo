@@ -150,7 +150,7 @@ func reindexFastCopy(mw *writer.MKVWriter, srcPath string, timecodeScale int64, 
 				return fmt.Errorf("reindex: unknown-size non-cluster element 0x%X", h.ID)
 			}
 			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
-				return fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
+				return overrunErr("reindex", "skip", h.ID, consumed, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 		}
@@ -652,6 +652,16 @@ func Reindex(ctx context.Context, srcPath, dstPath string, opts ...mkv.Options) 
 // Options.Resync, or Salvage) and then retry. errors.Is-able.
 var ErrCorruptSource = errors.New("the source is structurally corrupt")
 
+// overrunErr is a strict walk's failure to skip or copy the element at off. One that declares more bytes than the
+// file holds is damage where it stands (bytes that read as a header) or a cut: the message says so and names the
+// rewrite that reads past it, where a bare EOF said nothing.
+func overrunErr(op, doing string, id uint32, off int64, err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("%s: element 0x%X at offset %d declares more bytes than the file holds: the file is damaged there or cut short (`mkvgo reindex --resync` rewrites what it holds into a new file): %w", op, id, off, err)
+	}
+	return fmt.Errorf("%s: %s 0x%X: %w", op, doing, id, err)
+}
+
 // clusterMutator lets a rewrite transform each cluster body in place before
 // it is written (RetimeTracksReplace patches block timecodes and cluster
 // CRCs this way). It returns the byte-range patches it applied, sorted by
@@ -822,7 +832,7 @@ func reindexCopyOut(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, sy
 				litDst = rb.literalWriter(h.Size)
 			}
 			if _, err := io.CopyN(litDst, r, h.Size); err != nil {
-				return nil, 0, nil, fmt.Errorf("reindex: skip 0x%X: %w", h.ID, err)
+				return nil, 0, nil, overrunErr("reindex", "skip", h.ID, consumed, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 
@@ -1008,7 +1018,7 @@ func reindexCopyOut(ctx context.Context, srcPath, dstPath string, fs *mkv.FS, sy
 				bodyDst = io.MultiWriter(out, rb.copyRunStreamed(bodyOff, h.Size))
 			}
 			if _, err := io.CopyN(bodyDst, r, h.Size); err != nil {
-				return nil, 0, nil, fmt.Errorf("reindex: copy unknown 0x%X body: %w", h.ID, err)
+				return nil, 0, nil, overrunErr("reindex", "copy", h.ID, consumed, err)
 			}
 			consumed += int64(hdrBytes) + h.Size
 		}
