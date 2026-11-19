@@ -533,13 +533,10 @@ func retimeScan(ctx context.Context, f io.ReadSeeker, size int64, shiftTC map[ui
 
 		switch h.ID {
 		case mkv.IDCluster, mkv.IDCues:
-			if int(h.Size) > len(buf) {
-				buf = make([]byte, h.Size)
-			}
-			body := buf[:h.Size]
-			if _, err := io.ReadFull(r, body); err != nil {
+			if buf, err = readBody(r, buf, h.Size); err != nil {
 				return nil, nil, fmt.Errorf("retime: read 0x%X body: %w", h.ID, err)
 			}
+			body := buf
 			bodyOff := elemStart + int64(hdrBytes)
 			var ps []retimePatch
 			if h.ID == mkv.IDCluster {

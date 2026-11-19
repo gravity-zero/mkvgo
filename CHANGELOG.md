@@ -40,6 +40,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - A block's declared size no longer allocates more than 8 MiB before its bytes
   arrive (a 51-byte file declaring a 60 MiB block allocated 60 MiB on every
   walk that met it).
+- `retime` and `reindex` no longer allocate a cluster's declared size before
+  its bytes arrive (a 32-byte file declaring a 200 MiB cluster allocated it).
 - `PlanHLS` with `SynthesizeIndex` passes over a damaged region as the window
   walks do (`DamageBytes`) instead of ending the index there: the last window
   ran over the rest of the file (a 43 min episode with damaged regions planned
