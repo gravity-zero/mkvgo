@@ -983,10 +983,11 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 		if br.blockBuf != nil {
 			data = br.blockBuf(uint64(trackNum), int(dataSize))
 		}
-		if int64(len(data)) != dataSize {
-			data = make([]byte, dataSize)
-		}
-		if _, err := io.ReadFull(br.r, data); err != nil {
+		if int64(len(data)) == dataSize {
+			if _, err := io.ReadFull(br.r, data); err != nil {
+				return mkv.Block{}, err
+			}
+		} else if data, err = readExact(br.r, dataSize); err != nil { // a declared size the file may not hold: grown as read
 			return mkv.Block{}, err
 		}
 		return mkv.Block{
@@ -1016,8 +1017,7 @@ func (br *BlockReader) parseBlock(size int64, simple bool) (mkv.Block, error) {
 			return mkv.Block{}, err
 		}
 	} else {
-		raw = make([]byte, dataSize)
-		if _, err := io.ReadFull(br.r, raw); err != nil {
+		if raw, err = readExact(br.r, dataSize); err != nil {
 			return mkv.Block{}, err
 		}
 		if len(raw) == 0 {

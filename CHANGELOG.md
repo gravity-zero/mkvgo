@@ -42,6 +42,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   tens of MB, were read on every call. A cluster's declared size is no longer
   allocated before its bytes arrive (a 32-byte file declaring 200 MiB
   allocated 200 MiB).
+- A block's declared size no longer allocates more than 8 MiB before its bytes
+  arrive (a 51-byte file declaring a 60 MiB block allocated 60 MiB on every
+  walk that met it).
 - `PlanHLS` with `SynthesizeIndex` passes over a damaged region as the window
   walks do (`DamageBytes`) instead of ending the index there: the last window
   ran over the rest of the file (a 43 min episode with damaged regions planned
