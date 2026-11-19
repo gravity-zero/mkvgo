@@ -35,5 +35,6 @@ func CmdToWebM(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
+	tellResynced(src)
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }

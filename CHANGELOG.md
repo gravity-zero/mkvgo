@@ -52,6 +52,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   picture, 64 MiB for 30 bytes of block); a PGS object's buffer grows with
   its data instead of taking the 4 MiB its first segment may declare; a nil
   `SubtitleIndex` refuses `MarshalBinary` instead of panicking.
+- Bitmap subtitles, again: a PGS block hands back two planes of pictures at
+  most, not four (256 MiB for 115 bytes of block); a VobSub control sequence
+  with no end command stops where the next one starts instead of running its
+  header as commands (a picture forced on, at the wrong time); `extract-subtitle
+  -format png` encodes a picture shown again once, each cue keeping its file.
+- `to-mp4`, `to-webm`, `to-hls`, `demux`, `split` and `remove-track` warn when
+  the Matroska source was read past undecodable bytes between its elements,
+  and exit 3 under `--exit-damaged`: they said nothing.
 
 ### Added
 

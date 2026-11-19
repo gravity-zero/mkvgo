@@ -55,6 +55,22 @@ var sawDamage bool
 
 func noteDamage() { sawDamage = true }
 
+// tellResynced warns that the Matroska source at path was read past undecodable bytes between its elements: the
+// command's result holds the media, the source stays a file a reader that does not resynchronize stops on. It
+// counts for --exit-damaged. Nothing for an MP4, a URL or stdin.
+func tellResynced(path string) {
+	if path == "-" || isRemoteURL(path) || isMP4Content(path) {
+		return
+	}
+	c, err := matroska.Open(cliCtx, path, matroska.WithoutAttachmentData())
+	if err != nil || c.ResyncedBytes == 0 {
+		return
+	}
+	ClearProgress()
+	fmt.Fprintf(os.Stderr, "warning: %s holds %d undecodable byte(s) between its elements, passed over to read it: the result holds its media; `mkvgo reindex --resync` rewrites the source without them\n", path, c.ResyncedBytes)
+	noteDamage()
+}
+
 // DamagedStatus is the exit status of a command that returned: 3 under --exit-damaged when it passed over damage
 // or a missing tail, 0 otherwise.
 func DamagedStatus() int {

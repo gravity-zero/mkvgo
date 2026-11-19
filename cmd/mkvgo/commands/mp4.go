@@ -69,6 +69,7 @@ func CmdToMP4(args []string) {
 	if err != nil {
 		FatalErr(FlagWords(err))
 	}
+	tellResynced(src)
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }
 
@@ -105,6 +106,7 @@ func CmdFromMP4(args []string) {
 	if err != nil {
 		FatalErr(FlagWords(err))
 	}
+	tellResynced(src)
 	fmt.Printf("remuxed %s → %s\n", src, dst)
 }
 

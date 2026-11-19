@@ -34,6 +34,7 @@ func CmdDemux(args []string) {
 	if err != nil {
 		FatalErr(FlagWords(err))
 	}
+	tellResynced(source)
 	fmt.Printf("demuxed %s → %s\n", source, outDir)
 }
 
@@ -113,6 +114,7 @@ func CmdRemoveTrack(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
+	tellResynced(source)
 	fmt.Printf("removed tracks %v → %s\n", trackIDs, outPath)
 }
 

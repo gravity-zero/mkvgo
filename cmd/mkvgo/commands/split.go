@@ -63,6 +63,7 @@ func CmdSplit(args []string) {
 	if err != nil {
 		FatalErr(err)
 	}
+	tellResynced(source)
 	for i, p := range outputs {
 		fmt.Printf("part %d → %s\n", i+1, p)
 	}

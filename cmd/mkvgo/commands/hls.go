@@ -313,6 +313,7 @@ func CmdToHLS(args []string) {
 	if err != nil {
 		FatalErr(FlagWords(err))
 	}
+	tellResynced(src)
 	fmt.Printf("HLS written → %s (play master.m3u8; init.mp4 + segments + subtitle renditions)\n", outDir)
 }
 

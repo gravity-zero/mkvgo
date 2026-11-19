@@ -267,7 +267,8 @@ Global flags:
                 Exit 3 instead of 0 when the source is incomplete or damaged
                 and the command said so: those that write passed over it
                 (salvage, reindex --resync, subtitle extraction, to-mp4,
-                from-mp4, to-hls), those that read found it (info, probe,
+                from-mp4, to-webm, to-hls, demux, split, remove-track), those
+                that read found it (info, probe,
                 diagnose, track-ends, salvage --dry-run)
   --sync        Flush a new Matroska output to disk before renaming it into
                 place, so it survives a power loss (costs the wait for the
