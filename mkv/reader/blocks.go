@@ -622,6 +622,33 @@ func (br *BlockReader) resyncHead(from int64) bool {
 	return true
 }
 
+// headJunk is the head reads' junkAt for the block walk: an element ahead of the first Cluster that is no
+// segment-level element, Void or CRC-32 and whose declared end frames nothing is bytes that happen to decode as a
+// header, not an element to skip by its size. The walk is left where it was.
+func (br *BlockReader) headJunk(h ebml.ElementHeader) bool {
+	if isSegmentLevelID(h.ID) || h.ID == mkv.IDVoid || h.ID == 0xBF {
+		return false
+	}
+	if br.raw == nil {
+		return false
+	}
+	if cur, err := br.raw.Seek(0, io.SeekCurrent); err != nil || seekFails(br.raw, cur) {
+		return false // a forward-only source cannot be looked past
+	}
+	pos := br.r.tell()
+	hops := maxFramedHops
+	if matroskaIDs[h.ID] {
+		hops = 0
+	}
+	framed := framedTo(br.raw, br.segEnd, pos+h.Size, hops)
+	return br.r.reset(pos) == nil && !framed
+}
+
+func seekFails(r io.Seeker, off int64) bool {
+	_, err := r.Seek(off, io.SeekStart)
+	return err != nil
+}
+
 // isSegmentLevelID returns true for element IDs that can appear directly
 // inside a Segment (as opposed to inside a Cluster). These are used to detect
 // the boundary of unknown-size clusters: reading such an ID while inside a
@@ -893,6 +920,9 @@ func (br *BlockReader) next() (mkv.Block, error) {
 		}
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
+		}
+		if br.atHead && br.headJunk(h) && br.resyncHead(hdrStart+1) {
+			continue
 		}
 		if h.ID == mkv.IDTracks && (br.trackDurNs == nil || br.known == nil) && h.Size <= 16<<20 {
 			// Walking over the track metadata anyway: pick up the per-track

@@ -9,6 +9,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stray bytes ahead of the first Cluster that happen to decode as an element
+  header (the tail of an old tag an in-place edit before 0.56.0 could leave)
+  no longer make `analyze`, `ingest -analyze` and `validate` report a complete
+  file as cut short, or lose its first Clusters without a word: the block walk
+  resynchronizes past them as the head reads do.
+
 ## [0.70.0] - 2026-11-19
 
 ### Changed

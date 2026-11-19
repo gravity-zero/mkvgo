@@ -257,7 +257,7 @@ func (p *parser) junkAt(eh ebml.ElementHeader) bool {
 	if matroskaIDs[eh.ID] {
 		hops = 0
 	}
-	framed := p.framedTo(pos+eh.Size, hops)
+	framed := framedTo(p.r, p.segEnd, pos+eh.Size, hops)
 	_, _ = p.r.Seek(pos, io.SeekStart)
 	if !framed {
 		p.markLookedPast()
@@ -271,28 +271,29 @@ const maxFramedHops = 8
 // framedTo reports whether off is the Segment's end, the file's end under an unknown-size Segment, a segment-level
 // element, or reaches one through at most hops well-formed elements a reader skips by their size (Void, CRC-32, an
 // ID outside Matroska's). The read position is left anywhere.
-func (p *parser) framedTo(off int64, hops int) bool {
+func framedTo(r io.ReadSeeker, segEnd, off int64, hops int) bool {
 	for ; hops >= 0; hops-- {
-		if off == p.segEnd {
+		if off == segEnd {
 			return true
 		}
-		if p.segEnd >= 0 && off > p.segEnd {
+		if segEnd >= 0 && off > segEnd {
 			return false
 		}
-		if _, err := p.r.Seek(off, io.SeekStart); err != nil {
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
 			return false
 		}
-		eh, n, err := ebml.ReadElementHeader(p.r)
-		if err == io.EOF && p.segEnd < 0 {
-			return true
+		eh, n, err := ebml.ReadElementHeader(r)
+		if err == io.EOF && segEnd < 0 {
+			end, serr := r.Seek(0, io.SeekEnd)
+			return serr == nil && off == end // past the end is no end: the size that led there is junk
 		}
-		if err != nil || eh.Size < 0 {
+		if err != nil {
 			return false
 		}
 		if isSegmentLevelID(eh.ID) {
-			return true
+			return true // a live recording's Cluster declares no size
 		}
-		if eh.ID != mkv.IDVoid && eh.ID != 0xBF && matroskaIDs[eh.ID] {
+		if eh.Size < 0 || (eh.ID != mkv.IDVoid && eh.ID != 0xBF && matroskaIDs[eh.ID]) {
 			return false
 		}
 		off += int64(n) + eh.Size
