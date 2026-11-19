@@ -32,6 +32,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   (`docs/library.md`, HLS plan).
 - A window walk and a streamed segment no longer ask the disk to read ahead
   past the end of the file.
+- `AudioStartDelays` (and `Diagnose`) seek over what precedes the first
+  cluster instead of reading it: the attachments, a subtitle's fonts often
+  tens of MB, were read on every call. A cluster's declared size is no longer
+  allocated before its bytes arrive (a 32-byte file declaring 200 MiB
+  allocated 200 MiB).
 - `PlanHLS` with `SynthesizeIndex` passes over a damaged region as the window
   walks do (`DamageBytes`) instead of ending the index there: the last window
   ran over the rest of the file (a 43 min episode with damaged regions planned

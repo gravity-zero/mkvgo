@@ -100,6 +100,19 @@ func scanFirstBlockTimes(ctx context.Context, path string, fs *mkv.FS, want, vid
 	}
 	defer raw.Close()
 	r := bufio.NewReaderSize(raw, reindexBufSize)
+	// skip passes n bytes over: a seek past what the buffer holds, so the attachments (fonts, tens of MB) stored
+	// ahead of the clusters are not read.
+	skip := func(n int64) error {
+		if n <= int64(r.Buffered()) {
+			_, err := r.Discard(int(n))
+			return err
+		}
+		if _, err := raw.Seek(n-int64(r.Buffered()), io.SeekCurrent); err != nil {
+			return err
+		}
+		r.Reset(raw)
+		return nil
+	}
 
 	ebmlHdr, _, err := ebml.ReadElementHeader(r)
 	if err != nil || ebmlHdr.ID != ebml.IDEBMLHeader || ebmlHdr.Size < 0 {
@@ -129,7 +142,7 @@ func scanFirstBlockTimes(ctx context.Context, path string, fs *mkv.FS, want, vid
 	// The loop is tolerant past this point: a truncated or damaged tail does
 	// not invalidate the first-block times already measured - the scan stops
 	// and reports what it saw (Diagnose runs this on broken files by design).
-	var buf []byte
+	var buf bytes.Buffer
 	var scanned int64
 	for scanned < audioDelayScanCap && !done() {
 		if err := ctx.Err(); err != nil {
@@ -143,20 +156,18 @@ func scanFirstBlockTimes(ctx context.Context, path string, fs *mkv.FS, want, vid
 			break
 		}
 		if h.ID != mkv.IDCluster {
-			if _, err := io.CopyN(io.Discard, r, h.Size); err != nil {
+			if err := skip(h.Size); err != nil {
 				break
 			}
 			continue
 		}
-		if int(h.Size) > len(buf) {
-			buf = make([]byte, h.Size)
-		}
-		body := buf[:h.Size]
-		n, err := io.ReadFull(r, body)
+		// The body grows as its bytes arrive: a size the file only declares (forged, cut short) allocates nothing.
+		buf.Reset()
+		n, err := buf.ReadFrom(io.LimitReader(r, h.Size))
 		// A cut-off cluster still carries blocks up to the cut: scan the
 		// prefix that was read, then stop.
-		scanClusterFirstTimes(body[:n], want, video, firstTC, &videoKF)
-		if err != nil {
+		scanClusterFirstTimes(buf.Bytes(), want, video, firstTC, &videoKF)
+		if err != nil || n < h.Size {
 			break
 		}
 		scanned += h.Size
