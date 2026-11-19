@@ -380,6 +380,9 @@ type HLSPlanStats struct {
 	// name some blocks but could not be verified complete, which walk.
 	SubtitleCueIndexed    int64
 	SubtitleCueUnverified int64
+	// SubtitleHarvestedClusters counts the clusters a subtitle rendition took its cues from as a window walk read
+	// them, instead of walking them again.
+	SubtitleHarvestedClusters int64
 	// SpreadLacedTracks counts the laced audio tracks whose frame size nothing
 	// confirmed (no DefaultDuration, no frame size in the stream or a codec
 	// table, no trusted frame count): their frames are spread over each

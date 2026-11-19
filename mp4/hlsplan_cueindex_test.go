@@ -110,6 +110,7 @@ func TestPlanHLSSubtitleIndexDerivedFromCues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mp4.DisableSubHarvestForTest(walked)
 	cases := map[string]struct {
 		src         string
 		indexed     int64
@@ -144,8 +145,8 @@ func TestPlanHLSSubtitleIndexDerivedFromCues(t *testing.T) {
 					}
 				}
 				st = plan.Stats()
-				if (st.SubtitleWalks > 0) != tc.walks || (st.SubtitleIndexedBlocks > 0) != tc.blocksByPos {
-					t.Errorf("%d walks, %d blocks by position; want walks=%v, byPosition=%v", st.SubtitleWalks, st.SubtitleIndexedBlocks, tc.walks, tc.blocksByPos)
+				if (st.SubtitleWalks+st.SubtitleHarvestedClusters > 0) != tc.walks || (st.SubtitleIndexedBlocks > 0) != tc.blocksByPos {
+					t.Errorf("%d walks, %d clusters harvested, %d blocks by position; want walked or harvested=%v, byPosition=%v", st.SubtitleWalks, st.SubtitleHarvestedClusters, st.SubtitleIndexedBlocks, tc.walks, tc.blocksByPos)
 				}
 			})
 		}

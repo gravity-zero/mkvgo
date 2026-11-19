@@ -97,6 +97,7 @@ type HLSPlan struct {
 	subs       []hlsSubTrack   // declared renditions; cues fetched lazily, then cached
 	subMu      []sync.Mutex    // serialises each track's cue scans
 	subScan    []subScanState  // per-track incremental cue scan state
+	harvest    subHarvest      // subtitle blocks the window walks read on their way (see subHarvest)
 	segs       []segInfo       // per-segment duration/bytes (BANDWIDTH; ABR master reuse)
 	mp4src     bool            // MP4 source: windows cut from the sample table, exact by construction
 	share      mp4Share        // a remote MP4 window's audio, kept by its video read

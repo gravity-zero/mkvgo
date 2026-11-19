@@ -246,6 +246,11 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 		// The index did not hold for this track: the walk below serves, from
 		// the cursor as it stood.
 	}
+	// The clusters the window walks read: the same scan, taken from them.
+	if served, err := p.extendCursorHarvested(ctx, i, cur, target, uptoMs); served || err != nil {
+		return err
+	}
+	start = cur.next // the first cluster the walks did not read whole
 	p.winMu.Lock()
 	p.stats.SubtitleWalks++
 	p.winMu.Unlock()
