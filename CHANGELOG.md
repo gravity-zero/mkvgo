@@ -31,7 +31,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   now (102 % without the subtitle); three subtitles cost what one does
   (`docs/library.md`, HLS plan).
 - A window walk and a streamed segment no longer ask the disk to read ahead
-  past the end of the file.
+  past the end of the file, and a remote source (`mkv.RangeHinter`) is no
+  longer asked for an open-ended range: the plan's head peek and its last
+  window hinted to `MaxInt64`.
 - `AudioStartDelays` (and `Diagnose`) seek over what precedes the first
   cluster instead of reading it: the attachments, a subtitle's fonts often
   tens of MB, were read on every call. A cluster's declared size is no longer

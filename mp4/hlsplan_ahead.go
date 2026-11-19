@@ -74,7 +74,20 @@ func (p *HLSPlan) hintRange(src io.Reader, start, end int64) {
 	if f, ok := src.(*os.File); ok && end != math.MaxInt64 && !p.onNetwork(f) { // the walk reads through the range: have it all coming in at once
 		adviseWillNeed(f, start, end-start)
 	}
-	if h, ok := src.(mkv.RangeHinter); ok {
+	p.hintRemote(src, start, end)
+}
+
+// hintRemote asks a remote source for [start, end) in one request, the end held to the Segment's or the file's: an
+// unbounded walk (the last window, a peek past the last cue) asked for an open-ended range.
+func (p *HLSPlan) hintRemote(src io.Reader, start, end int64) {
+	h, ok := src.(mkv.RangeHinter)
+	if !ok {
+		return
+	}
+	if last := p.clusterEndOff(math.MaxInt64); last > 0 && end > last {
+		end = last
+	}
+	if end > start {
 		h.HintRange(start, end)
 	}
 }
