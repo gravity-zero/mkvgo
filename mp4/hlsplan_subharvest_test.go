@@ -108,7 +108,7 @@ func TestPlanHLSSubtitleHarvestReadsTheSourceOnce(t *testing.T) {
 	if walked.WalkReadBytes < 2*alone.WalkReadBytes {
 		t.Fatalf("the walked subtitles read %d bytes, the video alone %d: the fixture no longer shows the second walk", walked.WalkReadBytes, alone.WalkReadBytes)
 	}
-	if harvested.SubtitleWalks != 0 || harvested.WalkReadBytes*10 > alone.WalkReadBytes*11 {
+	if harvested.SubtitleHarvestedClusters == 0 || harvested.WalkReadBytes*100 > alone.WalkReadBytes*102 { // the last window's clusters are walked
 		t.Errorf("harvested: %d walks, %d bytes walked; the video alone %d, walked subtitles %d", harvested.SubtitleWalks, harvested.WalkReadBytes, alone.WalkReadBytes, walked.WalkReadBytes)
 	}
 }

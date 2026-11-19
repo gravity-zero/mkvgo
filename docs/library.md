@@ -793,11 +793,13 @@ so a cluster a walk read whole is not walked again for its subtitles. On a
 local source whose segments are written from the source, a subtitle request
 builds the window tables it lacks itself, and the video then serves from the
 same walks: a viewer playing the video with a subtitle reads the file about
-once (108 % of what was served over 100 segments of a real 1080p episode, 213 %
-walking; three subtitles cost what one does). The tables run a little past the
-request, by the 32.7 s a block may sit after its cluster. A cluster no walk read
-whole, or one past a damaged region, is walked as before. `SubtitleHarvestedClusters`
-counts the clusters served this way.
+once (113 % of what was served over 100 segments of a real 1080p episode, 213 %
+walking; three subtitles cost what one does). The tables run up to a minute
+past the request, where the walk's strides stop. A window longer than a minute
+and the last window, whose walk runs to the end of the file, are not built for
+a subtitle; their clusters, any cluster no walk read whole and any past a
+damaged region are walked as before. `SubtitleHarvestedClusters` counts the
+clusters served from the walks.
 
 **Plan-time cost.** An MP4 plan builds `iframe.m3u8` eagerly, at `PlanHLS`
 time: the moov sample table already has every segment's exact sample count,

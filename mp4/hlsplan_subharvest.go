@@ -24,7 +24,7 @@ type subHarvest struct {
 
 // maxHarvestBlocks bounds the subtitle blocks a plan holds from its walks (a feature film's text tracks hold a few
 // thousand); past it, clusters not yet met are walked as before.
-const maxHarvestBlocks = 1 << 18
+const maxHarvestBlocks = 1 << 16
 
 // harvestCluster is what the walks read of one cluster.
 type harvestCluster struct {
@@ -55,6 +55,7 @@ type harvestRec struct {
 	seat   int64 // offset the reader was seated at
 	parts  []*harvestCluster
 	starts []int64
+	count  int64 // the reader's ClusterCount at the last block observed
 	broken bool
 }
 
@@ -78,11 +79,14 @@ func (p *HLSPlan) newHarvestRec(subOf map[uint64]int, seat int64) *harvestRec {
 	return &harvestRec{p: p, subOf: subOf, seat: seat}
 }
 
-// observe folds in the block the walk's reader just returned, sub being its index in p.subs or -1 for a media block.
-func (r *harvestRec) observe(pos reader.BlockPos, b *mkv.Block, sub int) {
+// observe folds in the block the walk's reader just returned, sub being its index in p.subs or -1 for a media block;
+// count is the reader's ClusterCount.
+func (r *harvestRec) observe(pos reader.BlockPos, count int64, b *mkv.Block, sub int) {
 	if r == nil || r.broken {
 		return
 	}
+	passed := len(r.parts) > 0 && count != r.count && count != r.count+1 // a cluster holding no kept block lay between
+	r.count = count
 	n := len(r.parts)
 	if n == 0 || r.starts[n-1] != pos.ClusterStart {
 		ms, ok := r.p.clusterMs(pos.ClusterTS)
@@ -94,7 +98,9 @@ func (r *harvestRec) observe(pos reader.BlockPos, b *mkv.Block, sub int) {
 		if n > 0 {
 			prev := r.parts[n-1]
 			prev.spans[0][1] = math.MaxInt64 // read to its end: the reader went on to this cluster
-			prev.next = pos.ClusterStart
+			if !passed {
+				prev.next = pos.ClusterStart // with one between, the walk's stop may fall on that one: left to the walk
+			}
 		} else if r.seat > pos.ClusterStart {
 			lo = r.seat // seated inside the cluster: what precedes the seat was not read
 		}
@@ -153,7 +159,7 @@ func (r *harvestRec) commit() {
 		if c.whole {
 			continue
 		}
-		c.spans = append(c.spans, part.spans[0])
+		c.spans = mergeSpans(append(c.spans, part.spans[0]))
 		if part.next != -1 {
 			c.next = part.next
 		}
@@ -192,6 +198,20 @@ func mergeHarvested(a, b []harvestBlock) []harvestBlock {
 		})
 	}
 	return a
+}
+
+// mergeSpans sorts the spans and joins those that meet, so a cluster read again by later walks holds no more spans.
+func mergeSpans(spans [][2]int64) [][2]int64 {
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	out := spans[:1]
+	for _, x := range spans[1:] {
+		if last := &out[len(out)-1]; x[0] <= last[1] {
+			last[1] = max(last[1], x[1])
+		} else {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // spansCover reports whether the spans read a cluster starting at start through to its end with no gap.
@@ -245,6 +265,12 @@ func (p *HLSPlan) harvestWindow(ctx context.Context, off int64, tried map[int]bo
 		if n < 0 || tried[n] {
 			continue
 		}
+		if n == p.segCount-1 {
+			continue // the last window's walk runs to the end of the file, whatever lies past its Cues: the stride bounds the walk's
+		}
+		if ms := p.windowMs(n); ms <= 0 || ms > subScanStrideMs {
+			continue // a window longer than the walk's stride reads more than the walk would
+		}
 		tried[n] = true
 		if _, err := p.table(ctx, n); err != nil {
 			return false
@@ -272,9 +298,6 @@ func (p *HLSPlan) extendCursorHarvested(ctx context.Context, i int, cur *subCurs
 		stopAt := cur.scanned + subScanStrideMs
 		if stopAt < cur.scanned {
 			stopAt = math.MaxInt64
-		}
-		if target > cur.scanned && target < stopAt {
-			stopAt = target // a window built ahead is a walk the video may never use: build no further than this request needs
 		}
 		next := cur.next
 		if next == 0 {

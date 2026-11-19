@@ -222,10 +222,10 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			return nil, nil, none, errf("read block: %w", err)
 		}
 		if si, ok := subOf[b.TrackNumber]; ok {
-			rec.observe(br.Pos(), &b, si)
+			rec.observe(br.Pos(), br.ClusterCount(), &b, si)
 			continue
 		}
-		rec.observe(br.Pos(), &b, -1)
+		rec.observe(br.Pos(), br.ClusterCount(), &b, -1)
 		if farOff > 0 && crossedAny && !triedFar && p.walkedFar(from, br.Pos(), farOff) { // a track still missing far past the window: stored after the video?
 			triedFar = true
 			for ti := range p.tracks {
