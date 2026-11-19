@@ -272,8 +272,10 @@ func (p *HLSPlan) walkVideoHeadersOnly(ctx context.Context, fn func(mkv.Block) (
 // payload bytes). The cost is the walk a persistent repair would pay anyway,
 // but nothing is written: the only road to seekable on-demand playback for a
 // source on a read-only mount. A structurally broken cluster stream still
-// refuses (repair or salvage first).
-func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container, vidID uint64, trackDurs map[uint64]int64) ([]mkv.CuePoint, error) {
+// refuses (repair or salvage first). A damaged region is passed over as the window walks pass over it
+// (Options.DamageBytes): the cue points go on past it, where the synthesis stopped at the first one and left the
+// last window to run over the rest of the file.
+func (p *HLSPlan) synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv.Container, vidID uint64, trackDurs map[uint64]int64) ([]mkv.CuePoint, error) {
 	src, err := fs.DoOpen(srcPath)
 	if err != nil {
 		return nil, err
@@ -286,6 +288,8 @@ func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv
 	br.SetTrackDefaultDurations(trackDurs)
 	br.KeepTracks(vidID)
 	br.SetHeaderOnly(true)
+	p.tolerateDamage(br)
+	defer p.noteSkipped(br)
 	var cues []mkv.CuePoint
 	lastCluster := int64(-1)
 	for {
@@ -293,7 +297,7 @@ func synthesizeVideoCues(ctx context.Context, srcPath string, fs *mkv.FS, c *mkv
 			return nil, err
 		}
 		b, err := br.Next()
-		if isBlockWalkEnd(err) {
+		if p.walkEnd(err) {
 			return cues, nil
 		}
 		if err != nil {
