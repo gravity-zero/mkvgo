@@ -399,7 +399,8 @@ func (d *PGSDecoder) parseObject(p []byte) error {
 		}
 		want := dataLen - 4
 		d.pendID = id
-		d.pending = &pgsObjectDef{w: w, h: h, want: want, rle: make([]byte, 0, want)}
+		// Room for what this segment brings, not for what it declares: the rest grows as it arrives.
+		d.pending = &pgsObjectDef{w: w, h: h, want: want, rle: make([]byte, 0, min(want, len(rest)-dims))}
 		rest = rest[dims:]
 	} else if d.pending == nil || d.pendID != id {
 		return fmt.Errorf("PGS: object %d continues a definition that never started", id)

@@ -301,11 +301,11 @@ func (ix *SubtitleIndex) checkAgainst(c *mkv.Container, size int64) error {
 // previous entry - a 10 331-block index over eight tracks comes to ~150 KiB
 // rather than the ~400 KiB the raw int64s would take.
 func (ix *SubtitleIndex) MarshalBinary() ([]byte, error) {
-	if ix.unresolved {
-		return nil, fmt.Errorf("subtitle index derived from the Cues is not resolved yet (call Resolve first)")
-	}
 	if ix == nil {
 		return nil, fmt.Errorf("nil subtitle index")
+	}
+	if ix.unresolved {
+		return nil, fmt.Errorf("subtitle index derived from the Cues is not resolved yet (call Resolve first)")
 	}
 	var b []byte
 	b = append(b, subIndexMagic...)

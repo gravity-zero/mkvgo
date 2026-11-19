@@ -47,6 +47,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   `validate`, `diagnose` and `analyze` say so for the head; a tolerant walk
   counts them all (`SkippedBytes`). `ReadStream` cannot look past an element
   and keeps skipping a header that decodes by its size.
+- Bitmap subtitles: a block whose display sets together composite more than
+  two subtitle planes is passed over as damaged (each composition had its own
+  picture, 64 MiB for 30 bytes of block); a PGS object's buffer grows with
+  its data instead of taking the 4 MiB its first segment may declare; a nil
+  `SubtitleIndex` refuses `MarshalBinary` instead of panicking.
 
 ### Added
 

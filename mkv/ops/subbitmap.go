@@ -169,6 +169,7 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 		return nil, err
 	}
 	shown := make([]decodedSet, 0, len(sets))
+	budget := bitmapMaxBlockPixels
 	for i := range sets {
 		ds := &sets[i]
 		start := a.unitMs + ds.Delay.Milliseconds()
@@ -176,7 +177,7 @@ func (a *bitmapAssembler) decode(blk mkv.Block) ([]decodedSet, error) {
 			shown = append(shown, decodedSet{cue: BitmapCue{StartMs: start}, clear: true})
 			continue
 		}
-		cue, err := flattenDisplaySet(ds, start, a.name)
+		cue, err := flattenDisplaySet(ds, start, a.name, &budget)
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +265,11 @@ func (a *bitmapAssembler) finish() error {
 // handed over untouched; a set with several (a disc that puts a top and a bottom line in two windows, a broadcast
 // with one region a line) is composited onto the smallest rectangle covering them, so X, Y stays a real screen
 // position rather than becoming meaningless.
-func flattenDisplaySet(ds *subtitle.BitmapDisplaySet, startMs int64, name string) (BitmapCue, error) {
+//
+// budget is what the block's display sets may still composite, in pixels: a picture the size of the union, and each
+// object drawn onto it. The decoders bound what they decode, not this: a composition of a few bytes names again
+// objects already decoded.
+func flattenDisplaySet(ds *subtitle.BitmapDisplaySet, startMs int64, name string, budget *int) (BitmapCue, error) {
 	cue := BitmapCue{StartMs: startMs, ScreenW: ds.ScreenW, ScreenH: ds.ScreenH}
 	if len(ds.Objects) == 1 {
 		o := ds.Objects[0]
@@ -280,6 +285,16 @@ func flattenDisplaySet(ds *subtitle.BitmapDisplaySet, startMs int64, name string
 	if union.Dx() > bitmapMaxPlane || union.Dy() > bitmapMaxPlane {
 		return cue, fmt.Errorf("%s: a display set spreads its objects over %dx%d pixels, past the %d a subtitle plane holds: the track is damaged or forged", name, union.Dx(), union.Dy(), bitmapMaxPlane)
 	}
+	work := union.Dx() * union.Dy()
+	for _, o := range ds.Objects {
+		work += o.Image.Bounds().Dx() * o.Image.Bounds().Dy()
+		if work > *budget {
+			break // no need to add up a forged list to its end
+		}
+	}
+	if *budget -= work; *budget < 0 {
+		return cue, fmt.Errorf("%s: the display sets of one block composite more than the %d pixels two subtitle planes hold: the track is damaged or forged", name, bitmapMaxBlockPixels)
+	}
 	out := image.NewNRGBA(image.Rect(0, 0, union.Dx(), union.Dy()))
 	for _, o := range ds.Objects {
 		at := image.Pt(o.X-union.Min.X, o.Y-union.Min.Y)
@@ -292,3 +307,6 @@ func flattenDisplaySet(ds *subtitle.BitmapDisplaySet, startMs int64, name string
 // bitmapMaxPlane bounds the picture several objects are composited onto, as the formats bound each object: placed
 // far apart by a forged composition, two dots would otherwise ask for a picture of gigabytes.
 const bitmapMaxPlane = 4096
+
+// bitmapMaxBlockPixels bounds what the display sets of one block composite together (flattenDisplaySet): two planes.
+const bitmapMaxBlockPixels = 2 * bitmapMaxPlane * bitmapMaxPlane
