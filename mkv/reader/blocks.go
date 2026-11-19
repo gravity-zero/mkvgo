@@ -131,7 +131,7 @@ type BlockReader struct {
 	// past there (see resyncHead). A reader seated at a recorded position never
 	// sets it - an undecodable header there means the position is stale.
 	atHead bool
-	pad    padding // the Void or CRC-32 last skipped ahead of the first Cluster
+	pad    padding // the Void or CRC-32 last skipped among the Segment's children
 	// elemStart is the offset of the element the walk is reading: where a
 	// failure began, and where the search for the media behind it starts.
 	elemStart int64
@@ -726,8 +726,11 @@ func (br *BlockReader) nextTolerant() (mkv.Block, error) {
 		}
 		resume, found, end := br.clusterAfter(from)
 		cut := errors.Is(err, io.ErrUnexpectedEOF)
-		if !found && end >= 0 && cut && br.segUnsized && !br.cutInMedia() {
+		if !found && end >= 0 && (cut || errors.Is(err, errUnframed)) && br.segUnsized && !br.cutInMedia() {
 			return b, io.EOF // bytes after the media of a Segment of unknown size (a tag, padding): the end, not a cut
+		}
+		if !found && end >= 0 && br.tailJunk(from) {
+			return b, io.EOF // a few stray bytes between the last Cluster and the elements that close the Segment
 		}
 		if !found && end >= 0 && br.skipDamage {
 			br.skipDamageTo(from, end) // the damage runs to the end: the walk is over
@@ -916,6 +919,10 @@ func (br *BlockReader) next() (mkv.Block, error) {
 		if br.atHead && (h.Size < 0 || br.headJunk(h)) && br.resyncHead(hdrStart) {
 			continue
 		}
+		if !br.atHead && br.headJunk(h) {
+			// Past the first Cluster the same bytes are damage for nextTolerant to place: media may hide behind them.
+			return mkv.Block{}, fmt.Errorf("element 0x%X at offset %d: %w", h.ID, hdrStart, errUnframed)
+		}
 		if h.Size < 0 {
 			return mkv.Block{}, fmt.Errorf("unknown-size element 0x%X outside cluster", h.ID)
 		}
@@ -928,9 +935,7 @@ func (br *BlockReader) next() (mkv.Block, error) {
 			}
 			continue
 		}
-		if br.atHead {
-			br.pad.note(h.ID, hdrStart, br.r.tell(), h.Size)
-		}
+		br.pad.note(h.ID, hdrStart, br.r.tell(), h.Size)
 		if err := br.r.discard(h.Size); err != nil {
 			return mkv.Block{}, err
 		}

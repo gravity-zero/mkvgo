@@ -6,6 +6,10 @@ import (
 	"io"
 )
 
+// errUnframed is the failure of the walk on bytes past the first Cluster that decode as an element header whose
+// size leads to no element.
+var errUnframed = errors.New("it declares a size that leads to no element")
+
 // ErrDamagedRegion is what a DamageError matches (errors.Is): the walk met an
 // element it cannot read while media continues behind it.
 var ErrDamagedRegion = errors.New("damaged region in the cluster stream")
@@ -118,6 +122,31 @@ func (br *BlockReader) skipDamageTo(from, to int64) {
 	}
 	br.skipped = append(br.skipped, DamageRange{From: from, To: to, FromMs: fromMs, ToMs: -1})
 	br.timeSkip = true
+}
+
+// maxTailJunk is the longest run of bytes that are no element, between the last Cluster and a valid element closing
+// the Segment (Cues, Tags...), taken for what an in-place rewrite left behind: too short to hold a Cluster worth the
+// name. A longer run may be a Cluster whose header was lost, and stays the error it is.
+const maxTailJunk = 64
+
+// tailJunk reports whether the element the walk could not read at from, outside any Cluster and with no Cluster
+// behind it, is at most maxTailJunk bytes ahead of a valid segment-level element, or follows padding that swallowed
+// the head of one: the media is whole, the walk is over. A tolerant walk counts the bytes.
+func (br *BlockReader) tailJunk(from int64) bool {
+	if br.raw == nil || br.inCluster || br.clusterCount == 0 {
+		return false
+	}
+	if _, err := br.raw.Seek(br.pad.from(from), io.SeekStart); err != nil {
+		return false
+	}
+	off, err := resyncToSegmentElement(br.raw, from+1+maxTailJunk, br.segEnd)
+	if err != nil || off < 0 || off-from > maxTailJunk {
+		return false
+	}
+	if br.skipDamage {
+		br.skipDamageTo(off-br.pad.passed(from, off), off)
+	}
+	return true
 }
 
 // clusterAfter looks for a valid Cluster past off (the start of an element the walk could not read) and leaves the

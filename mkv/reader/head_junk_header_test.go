@@ -3,6 +3,8 @@ package reader
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"slices"
 	"testing"
 
@@ -16,6 +18,15 @@ import (
 func beforeFirstCluster(t *testing.T, o livefixture.Options, extra []byte) []byte {
 	t.Helper()
 	data := livefixture.Build(o)
+	return spliceAt(t, data, bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75}), extra)
+}
+
+// spliceAt returns data with extra spliced in at offset at, a sized Segment grown by as much.
+func spliceAt(t *testing.T, data []byte, at int, extra []byte) []byte {
+	t.Helper()
+	if at < 0 {
+		t.Fatal("nowhere to splice in the fixture")
+	}
 	r := bytes.NewReader(data)
 	h, n, err := ebml.ReadElementHeader(r)
 	if err != nil {
@@ -29,13 +40,9 @@ func beforeFirstCluster(t *testing.T, o livefixture.Options, extra []byte) []byt
 	if err != nil || seg.ID != mkv.IDSegment {
 		t.Fatalf("Segment header: 0x%X, %v", seg.ID, err)
 	}
-	cluster := bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75})
-	if cluster < 0 {
-		t.Fatal("no Cluster in the fixture")
-	}
-	out := append([]byte(nil), data[:cluster]...)
+	out := append([]byte(nil), data[:at]...)
 	out = append(out, extra...)
-	out = append(out, data[cluster:]...)
+	out = append(out, data[at:]...)
 	if seg.Size >= 0 {
 		var size bytes.Buffer
 		if _, err := ebml.WriteDataSizeWidth(&size, seg.Size+int64(len(extra)), segHdr-4); err != nil {
@@ -139,5 +146,53 @@ func TestHeadUnknownElementIsNotJunk(t *testing.T) {
 		if err != nil || c.ResyncedBytes != 0 {
 			t.Errorf("sized %v: Read: ResyncedBytes %d, err %v; want a sound file", opts.SizedClusters, c.ResyncedBytes, err)
 		}
+	}
+}
+
+// TestTailJunkIsNotACut: a few bytes that are no element between the last Cluster and the Tags closing a finished
+// file (what an in-place rewrite can leave) end the block walk as the end of the media they are. They used to be
+// skipped by the size they happen to declare, past the end of the file: a complete file reported as cut short. A run
+// long enough to hide a Cluster stays an error.
+func TestTailJunkIsNotACut(t *testing.T) {
+	opts := livefixture.Options{SizedClusters: true, TailTags: true}
+	sound := livefixture.Build(opts)
+	tags := bytes.LastIndex(sound, []byte{0x12, 0x54, 0xC3, 0x67})
+	for name, junk := range map[string][]byte{
+		"declares more than the file holds":  []byte("0000\x00\x00"),
+		"declares a few bytes into the Tags": {'0', '0', '0', 0x88, 0x00, 0x00},
+		"does not decode":                    bytes.Repeat([]byte{livefixture.JunkByte}, 6),
+		"a Void declaring 6 bytes too many":  {0xEC, 0x8A, 0x00, 0x00, 0x00, 0x00},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := spliceAt(t, sound, tags, junk)
+			br, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+			if err != nil {
+				t.Fatalf("NewBlockReader: %v", err)
+			}
+			if n, _, last := drainBlocks(t, br); n != livefixture.Blocks || last != livefixture.LastBlockMs || br.StoppedShort() {
+				t.Errorf("blocks = %d, last %d, stopped short %v; want %d, %d and a whole file", n, last, br.StoppedShort(), livefixture.Blocks, livefixture.LastBlockMs)
+			}
+			tolerant, err := NewBlockReader(bytes.NewReader(data), 1_000_000)
+			if err != nil {
+				t.Fatalf("NewBlockReader: %v", err)
+			}
+			tolerant.SetSkipDamage(true)
+			if n, _, _ := drainBlocks(t, tolerant); n != livefixture.Blocks || tolerant.SkippedBytes() != int64(len(junk)) || tolerant.StoppedShort() {
+				t.Errorf("tolerant walk: %d blocks, %d bytes skipped, stopped short %v; want %d blocks, the %d junk bytes, a whole file",
+					n, tolerant.SkippedBytes(), tolerant.StoppedShort(), livefixture.Blocks, len(junk))
+			}
+		})
+	}
+
+	long := spliceAt(t, sound, tags, bytes.Repeat([]byte{livefixture.JunkByte}, maxTailJunk+1))
+	br, err := NewBlockReader(bytes.NewReader(long), 1_000_000)
+	if err != nil {
+		t.Fatalf("NewBlockReader: %v", err)
+	}
+	for err == nil {
+		_, err = br.Next()
+	}
+	if errors.Is(err, io.EOF) {
+		t.Errorf("a run of %d bytes that are no element ended the walk as a clean end: it may hide a Cluster", maxTailJunk+1)
 	}
 }

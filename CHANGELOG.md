@@ -22,6 +22,11 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 - `reindex --resync` and `salvage` keep the Info and Tracks that sit behind
   such bytes (the output had no track, exit 0), and `keyframes -walk` no longer
   loses the keyframes of the Clusters a stray size led it past.
+- A few stray bytes between the last Cluster and the Cues or Tags closing a
+  finished file (up to 64) end the block walk as the end of the media: such a
+  file is no longer reported as cut short by `analyze`, nor refused by
+  `demux`, `split`, `remove-track` and `fingerprint`. A longer run is still
+  refused: it may hide a Cluster.
 
 ## [0.70.0] - 2026-11-19
 
