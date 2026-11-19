@@ -265,7 +265,29 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 	defer p.countWalk(&br)()
 	p.tolerateDamage(br)
 	br.SetTrackDefaultDurations(p.trackDurs)
-	br.KeepTracks(track.track.ID)
+	// The walk reads every subtitle track's blocks along with this one's, for the others' cursors (see subHarvest):
+	// three subtitles asked behind the video walk the clusters once, not once each.
+	// The media blocks come by their headers alone: they show where each cluster ends, which a cluster holds whole.
+	subOf := p.harvestTracks()
+	kept := []uint64{track.track.ID}
+	for id := range subOf {
+		if id != track.track.ID {
+			kept = append(kept, id)
+		}
+	}
+	if subOf != nil {
+		media := make([]uint64, 0, len(p.tracks))
+		for _, pt := range p.tracks {
+			media = append(media, pt.ft.outTrack.mkv.ID)
+		}
+		kept = append(kept, media...)
+		br.SetHeaderOnly(true)
+		br.SetHeaderOnlyTracks(media...)
+	}
+	br.KeepTracks(kept...)
+	rec := p.newHarvestRec(subOf, past)
+	defer rec.commit()
+	skips := len(br.SkippedRanges())
 	var local []subtitle.Cue
 	from := past
 	for {
@@ -289,15 +311,25 @@ func (p *HLSPlan) extendCursorLocked(ctx context.Context, i int, cur *subCursor,
 				from = cur.next
 				break
 			}
+			if k := len(br.SkippedRanges()); k > skips {
+				skips = k
+				rec.skip() // a damaged region passed over: the cluster it lies in is left to the walks
+			}
 			// Clean end (incl. a truncated/over-declared tail); all cues to this
 			// point are collected, so finish cleanly.
 			if p.walkEnd(err) {
+				rec.end()
 				cur.add(local...)
 				cur.done = true
 				return nil
 			}
 			if err != nil {
 				return st.keep(errf("read block: %w", err))
+			}
+			if si, ok := subOf[b.TrackNumber]; ok {
+				rec.observe(br.Pos(), br.ClusterCount(), &b, si)
+			} else {
+				rec.observe(br.Pos(), br.ClusterCount(), &b, -1)
 			}
 			if b.TrackNumber != track.track.ID {
 				continue

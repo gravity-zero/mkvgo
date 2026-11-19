@@ -205,9 +205,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 				}
 			}
 			skips, inPlace = k, none
-			if rec != nil {
-				rec.broken = true // a damaged region passed over: this walk harvests nothing
-			}
+			rec.skip() // a damaged region passed over: the cluster it lies in is left to the walks
 		}
 		if p.walkEnd(err) { // clean end, incl. a truncated/over-declared tail
 			rec.end()

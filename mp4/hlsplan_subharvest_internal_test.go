@@ -75,6 +75,11 @@ func TestSubtitleHarvestKeepsTheWalkStrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for n := 0; n < 100; n++ { // the video's first 200 s, read before: the subtitles are served from its walks
+		if _, err := harvested.Segment(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, res := range []string{"sub1_00019.vtt", "sub1_00097.vtt"} {
 		want, _, werr := walked.Resource(ctx, res)
 		got, _, gerr := harvested.Resource(ctx, res)
@@ -154,10 +159,78 @@ func TestSubtitleHarvestBuildsNotTheLastWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := plan.segCount - 1
-	if plan.harvestWindow(ctx, plan.offsets[last], map[int]bool{last - 1: true}) {
+	if plan.harvestWindow(ctx, plan.offsets[last], 0, map[int]bool{last - 1: true}) {
 		t.Error("the last window was built for a subtitle")
 	}
 	if n := plan.Stats().TableBuilds; n != 0 {
 		t.Errorf("%d tables built", n)
+	}
+}
+
+// A subtitle request builds no window before its own: the margin behind a seek and the probe of the track's head are
+// windows the video does not play, walked once as before rather than built whole, overlap and all (a film's last
+// minutes over a network mount: 218 MB asked of the source, 289 MB with the margin's windows built).
+func TestSubtitleHarvestBuildsNoWindowBehindTheRequest(t *testing.T) {
+	ctx := context.Background()
+	plan, err := PlanHLS(ctx, buildSeekFixture(t), Options{SegmentMs: 2000, SourceAccess: SourceLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := plan.NumSegments() - 10
+	if _, _, err := plan.Resource(ctx, fmt.Sprintf("sub1_%05d.vtt", n+1)); err != nil {
+		t.Fatal(err)
+	}
+	plan.tabMu.Lock()
+	defer plan.tabMu.Unlock()
+	for k := range plan.tables {
+		if k < n {
+			t.Errorf("window %d built for a subtitle of window %d", k, n)
+		}
+	}
+}
+
+// A damaged region costs the harvest the cluster it lies in, not the walk's whole record: the subtitles are the
+// walk's, and a second subtitle takes the clusters past the region from the first one's walk (a damaged episode:
+// three subtitles after a seek walked the same 138 MB once each).
+func TestSubtitleHarvestPastADamagedRegion(t *testing.T) {
+	ctx := context.Background()
+	clean := buildSeekFixture(t)
+	offs := clusterOffsets(t, clean)
+	mid := offs[len(offs)/2]
+	bad := zeroedSource(t, clean, mid+4<<10, mid+12<<10)
+	fs := &mkv.FS{Open: func(p string) (mkv.ReadSeekCloser, error) { return os.Open(p) }} // no window built for a subtitle
+	read := func(tracks int, harvest bool) (int64, map[string][]byte) {
+		plan, err := PlanHLS(ctx, bad, Options{SegmentMs: 2000, FS: fs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan.harvest.off = !harvest
+		out := map[string][]byte{}
+		n := plan.NumSegments()
+		for k := n/2 - 40; k < n/2+40; k++ { // a seek before the region, then through it
+			for s := 1; s <= tracks; s++ {
+				res := fmt.Sprintf("sub%d_%05d.vtt", s, k+1)
+				b, _, err := plan.Resource(ctx, res)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out[res] = b
+			}
+		}
+		if plan.Stats().DamageSkips == 0 {
+			t.Fatal("no damage met: the fixture misses the case")
+		}
+		return plan.Stats().WalkReadBytes, out
+	}
+	_, want := read(2, false)
+	one, _ := read(1, true)
+	two, got := read(2, true)
+	for res, b := range want {
+		if !bytes.Equal(got[res], b) {
+			t.Fatalf("%s differs when harvested:\n%s\n--- walked:\n%s", res, got[res], b)
+		}
+	}
+	if two*10 > one*13 {
+		t.Errorf("two subtitles walked %d bytes, one %d: the second walked again past the region", two, one)
 	}
 }

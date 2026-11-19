@@ -56,6 +56,7 @@ type harvestRec struct {
 	parts  []*harvestCluster
 	starts []int64
 	count  int64 // the reader's ClusterCount at the last block observed
+	resume bool  // a damaged region was passed over: the next block starts a record of its own
 	broken bool
 }
 
@@ -88,14 +89,16 @@ func (r *harvestRec) observe(pos reader.BlockPos, count int64, b *mkv.Block, sub
 	passed := len(r.parts) > 0 && count != r.count && count != r.count+1 // a cluster holding no kept block lay between
 	r.count = count
 	n := len(r.parts)
-	if n == 0 || r.starts[n-1] != pos.ClusterStart {
+	if r.resume || n == 0 || r.starts[n-1] != pos.ClusterStart {
 		ms, ok := r.p.clusterMs(pos.ClusterTS)
 		if !ok || (n > 0 && pos.ClusterStart < r.starts[n-1]) {
 			r.broken = true
 			return
 		}
 		lo := pos.ClusterStart
-		if n > 0 {
+		if r.resume {
+			lo, r.resume = pos.Off, false // past the region: what precedes this block in its cluster was not read
+		} else if n > 0 {
 			prev := r.parts[n-1]
 			prev.spans[0][1] = math.MaxInt64 // read to its end: the reader went on to this cluster
 			if !passed {
@@ -127,9 +130,21 @@ func (r *harvestRec) observe(pos reader.BlockPos, count int64, b *mkv.Block, sub
 	c.blocks = append(c.blocks, harvestBlock{off: pos.Off, frame: frame, sub: sub, cue: cue, ok: ok, recovered: recovered, err: err})
 }
 
+// skip drops the cluster a damaged region was passed over in: the walk's clusters before it stand, and the record
+// resumes at the next block.
+func (r *harvestRec) skip() {
+	if r == nil || r.broken {
+		return
+	}
+	if n := len(r.parts); n > 0 {
+		r.parts, r.starts = r.parts[:n-1], r.starts[:n-1]
+	}
+	r.resume = true
+}
+
 // end marks the walk's last cluster read to the source's clean end.
 func (r *harvestRec) end() {
-	if r == nil || r.broken || len(r.parts) == 0 {
+	if r == nil || r.broken || r.resume || len(r.parts) == 0 { // ending past a damaged region: its tail was not seen
 		return
 	}
 	last := r.parts[len(r.parts)-1]
@@ -260,12 +275,12 @@ func (p *HLSPlan) prebuildsTables(context.Context) bool {
 	return !p.mp4src && p.streams()
 }
 
-// harvestWindow builds the table of a window whose walk reads the cluster at off, one not built yet in this scan;
-// it reports whether it built one.
-func (p *HLSPlan) harvestWindow(ctx context.Context, off int64, tried map[int]bool) bool {
+// harvestWindow builds the table of a window from first on whose walk reads the cluster at off, one not built yet in
+// this scan; it reports whether it built one.
+func (p *HLSPlan) harvestWindow(ctx context.Context, off int64, first int, tried map[int]bool) bool {
 	k := sort.Search(min(len(p.offsets), p.segCount), func(k int) bool { return p.offsets[k] > off }) - 1
 	for _, n := range []int{k, k - 1} { // a walk seated past the cluster's start leaves its head to the previous window's
-		if n < 0 || tried[n] {
+		if n < first || tried[n] {
 			continue
 		}
 		if n == p.segCount-1 {
@@ -289,7 +304,10 @@ func (p *HLSPlan) harvestWindow(ctx context.Context, off int64, tried map[int]bo
 // what precedes it committed, and the walk serves from there. Caller holds subMu[i].
 func (p *HLSPlan) extendCursorHarvested(ctx context.Context, i int, cur *subCursor, target, uptoMs int64) (served bool, err error) {
 	st := &p.subScan[i]
-	build := p.prebuildsTables(ctx)
+	build := p.prebuildsTables(ctx) && uptoMs > 0
+	// Only the request's own window and those after it, which the video plays: the margin behind a seek and the probe
+	// of the track's head are walked as before, a window built whole reading its overlap with the next as well.
+	first := sort.Search(len(p.bounds), func(k int) bool { return p.bounds[k] >= uptoMs }) - 1
 	tried := map[int]bool{}
 	var took int64
 	defer func() {
@@ -313,7 +331,7 @@ func (p *HLSPlan) extendCursorHarvested(ctx context.Context, i int, cur *subCurs
 				break // the walk's StopBeforeClusterMs: the stride ends before this cluster
 			}
 			if !whole {
-				if build && p.harvestWindow(ctx, next, tried) {
+				if build && p.harvestWindow(ctx, next, max(first, 0), tried) {
 					continue
 				}
 				cur.add(local...)
