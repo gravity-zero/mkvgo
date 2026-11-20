@@ -442,7 +442,16 @@ type scanner interface {
 // settle: a scan type already stated, a codec without one, or a record that
 // already rules interlacing out.
 func newScanner(t *mkv.Track) scanner {
-	if t.Type != mkv.VideoTrack || t.ScanType != "" {
+	if t.Type != mkv.VideoTrack {
+		return nil
+	}
+	if t.Codec == "V_MPEG2" || t.Codec == "mpeg2" {
+		if t.ScanType != "" && t.Profile != "" {
+			return nil
+		}
+		return &mpeg2Scan{orders: map[string]bool{}, scanKnown: t.ScanType != ""}
+	}
+	if t.ScanType != "" {
 		return nil
 	}
 	switch {
@@ -454,8 +463,6 @@ func newScanner(t *mkv.Track) scanner {
 		if s := newHEVCScan(t.CodecPrivate); s != nil {
 			return s
 		}
-	case t.Codec == "V_MPEG2" || t.Codec == "mpeg2":
-		return &mpeg2Scan{orders: map[string]bool{}}
 	}
 	return nil
 }
@@ -470,6 +477,10 @@ type mpeg2Scan struct {
 	interlaced, progressiveSeq bool
 	orders                     map[string]bool
 	firstField                 bool // the last picture was the first field of a frame
+	// The sequence extension also names the stream: profile, level, chroma format.
+	// scanKnown: the container states the scan type, the scan is here for those alone.
+	desc      bitstreamColour
+	scanKnown bool
 }
 
 func (s *mpeg2Scan) feed(frame []byte, _ bool) {
@@ -480,9 +491,8 @@ func (s *mpeg2Scan) feed(frame []byte, _ bool) {
 		r := &bitReader{data: frame[i+4:]}
 		switch r.bits(4) {
 		case 1: // sequence extension
-			r.bits(8)
-			if p := r.bit(); !r.err {
-				s.progressiveSeq = s.progressiveSeq || p == 1
+			if mpeg2SequenceExtension(r, &s.desc) {
+				s.progressiveSeq = true
 			}
 		case 8: // picture coding extension
 			r.bits(16) // f_codes
@@ -517,12 +527,16 @@ func (s *mpeg2Scan) picture(structure uint32, tff, progressiveFrame bool) {
 }
 
 func (s *mpeg2Scan) done() bool {
+	if s.scanKnown {
+		return s.desc.profile != ""
+	}
 	return (s.interlaced && len(s.orders) > 1) || (s.progressiveSeq && !s.interlaced)
 }
 
 func (s *mpeg2Scan) head() int { return inBandScanHead }
 
 func (s *mpeg2Scan) apply(t *mkv.Track) {
+	mergeBitstreamColour(t, &s.desc)
 	if t.ScanType != "" {
 		return
 	}
@@ -545,7 +559,7 @@ func (s *mpeg2Scan) apply(t *mkv.Track) {
 type InBandScan struct{ s scanner }
 
 // NewInBandScan returns the scan for t, nil when t needs none: not H.264, HEVC or MPEG-2,
-// a scan type already stated, or an H.264 SPS that codes frames only.
+// a scan type already stated (and, for MPEG-2, a profile), or an H.264 SPS that codes frames only.
 func NewInBandScan(t *mkv.Track) *InBandScan {
 	if s := newScanner(t); s != nil {
 		return &InBandScan{s}

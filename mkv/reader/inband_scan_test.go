@@ -639,3 +639,55 @@ func TestInBandAVC3Description(t *testing.T) {
 		t.Errorf("profile=%q pix=%q determined=%v, want %q %q %v", g.Profile, g.PixelFormat, g.ColourDetermined, w.Profile, w.PixelFormat, w.ColourDetermined)
 	}
 }
+
+// TestMPEG2DescriptionFFmpegFiles: the sequence extension of the first block
+// gives the profile, the level and the pixel format of an MPEG-2 track with no
+// CodecPrivate, whether or not the container states the scan type.
+func TestMPEG2DescriptionFFmpegFiles(t *testing.T) {
+	for _, file := range []string{"mpeg2_tff.mkv", "mpeg2_progressive.mkv"} {
+		raw, err := os.ReadFile("../../internal/testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range map[string][]byte{"as written": raw, "scan elements cleared": stripScanElements(t, raw)} {
+			c, err := ReadMeta(context.Background(), bytes.NewReader(data), "", WithInBandColourFallback())
+			if err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			if g := c.Tracks[0]; g.Profile != "Main" || u16v(g.Level) != 8 || g.PixelFormat != "yuv420p" {
+				t.Errorf("%s (%s): profile=%q level=%d pix=%q, want Main 8 yuv420p", file, name, g.Profile, u16v(g.Level), g.PixelFormat)
+			}
+		}
+	}
+}
+
+// TestMPEG2DescriptionFromCodecPrivate: the same fields head-only when the
+// record holds the sequence extension, 4:2:2 profile included.
+func TestMPEG2DescriptionFromCodecPrivate(t *testing.T) {
+	ext := func(pl byte, chroma uint32) []byte {
+		b := &tbw{}
+		b.u(1, 4)
+		b.u(uint32(pl), 8)
+		b.u(1, 1)
+		b.u(chroma, 2)
+		b.u(0, 1)
+		return append([]byte{0, 0, 1, 0xb5}, b.bytes()...)
+	}
+	for _, c := range []struct {
+		pl      byte
+		chroma  uint32
+		profile string
+		level   int
+		pix     string
+	}{{0x48, 1, "Main", 8, "yuv420p"}, {0x44, 1, "Main", 4, "yuv420p"}, {0x85, 2, "4:2:2", 5, "yuv422p"}, {0x14, 3, "High", 4, "yuv444p"}} {
+		bc := mpeg2Colour(ext(c.pl, c.chroma))
+		if bc == nil {
+			t.Fatalf("0x%02X: nil", c.pl)
+		}
+		tr := &mkv.Track{Type: mkv.VideoTrack}
+		mergeBitstreamColour(tr, bc)
+		if tr.Profile != c.profile || u16v(tr.Level) != c.level || tr.PixelFormat != c.pix {
+			t.Errorf("0x%02X: profile=%q level=%d pix=%q, want %q %d %q", c.pl, tr.Profile, u16v(tr.Level), tr.PixelFormat, c.profile, c.level, c.pix)
+		}
+	}
+}

@@ -331,3 +331,15 @@ func TestVP9FeatureMetadataInBandColour(t *testing.T) {
 		t.Errorf("with a Colour element: space=%v transfer=%d, want the element alone", tr.ColorSpace, u16v(tr.ColorTransfer))
 	}
 }
+
+// TestVP8PixelFormat: VP8 has one pixel format, stated head-only.
+func TestVP8PixelFormat(t *testing.T) {
+	data := bytes.Replace(vp9MKV(nil, nil, 320, 240, []byte{0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a}), []byte("V_VP9"), []byte("V_VP8"), 1)
+	c, err := ReadMeta(context.Background(), bytes.NewReader(data), "x.webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := c.Tracks[0]; tr.Codec != "V_VP8" && tr.Codec != "vp8" || tr.PixelFormat != "yuv420p" || u16v(tr.VideoBitDepth) != 8 {
+		t.Errorf("codec=%q pix=%q depth=%d, want vp8 yuv420p 8", tr.Codec, tr.PixelFormat, u16v(tr.VideoBitDepth))
+	}
+}

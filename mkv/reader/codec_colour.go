@@ -142,6 +142,10 @@ func FillColourFromCodecPrivate(t *mkv.Track) {
 // left nil from the codec bitstream. Called for video tracks after the TrackEntry
 // is parsed. Safe on any input.
 func fillColourFromCodecPrivate(t *mkv.Track) {
+	if t.Type == mkv.VideoTrack && (t.Codec == "V_VP8" || t.Codec == "vp8") {
+		mergeBitstreamColour(t, &bitstreamColour{chroma: u16p(1), bitDepth: u16p(8)}) // VP8 codes 8-bit 4:2:0 alone
+		return
+	}
 	if t.Type != mkv.VideoTrack || len(t.CodecPrivate) == 0 {
 		return
 	}
@@ -241,8 +245,7 @@ func mpeg2Colour(cp []byte) *bitstreamColour {
 		r := &bitReader{data: cp[i+4:]}
 		switch r.bits(4) { // extension_start_code_identifier
 		case 1: // sequence extension: progressive_sequence 1 makes every frame progressive
-			r.bits(8) // profile_and_level_indication
-			if r.bit() == 1 && !r.err && bc.scanType == "" {
+			if mpeg2SequenceExtension(r, bc) && bc.scanType == "" {
 				bc.scanType = "progressive"
 			}
 		case 2: // sequence display extension
@@ -256,10 +259,57 @@ func mpeg2Colour(cp []byte) *bitstreamColour {
 			}
 		}
 	}
-	if !bc.determined && bc.scanType == "" {
+	if !bc.determined && bc.scanType == "" && bc.profile == "" {
 		return nil
 	}
 	return bc
+}
+
+// mpeg2SequenceExtension reads the head of a sequence extension past its id: the
+// profile and level, then progressive_sequence, which it returns, then the chroma
+// format. The first extension read names the stream; MPEG-2 video is 8 bits.
+func mpeg2SequenceExtension(r *bitReader, bc *bitstreamColour) (progressive bool) {
+	pl := r.bits(8) // profile_and_level_indication
+	progressive = r.bit() == 1 && !r.err
+	chroma := r.bits(2)
+	if r.err || bc.profile != "" {
+		return progressive
+	}
+	bc.profile, bc.level = mpeg2ProfileLevel(pl)
+	if chroma != 0 {
+		bc.chroma, bc.bitDepth = u16p(uint16(chroma)), u16p(8)
+	}
+	return progressive
+}
+
+// mpeg2ProfileLevel names profile_and_level_indication (ISO 13818-2 table 8-2,
+// and the escape codes of the 4:2:2 profile): the level is its 4-bit code, 8 for Main.
+func mpeg2ProfileLevel(pl uint32) (string, *uint16) {
+	level := u16p(uint16(pl & 0x0f))
+	if pl&0x80 != 0 {
+		if pl == 0x85 || pl == 0x82 {
+			return "4:2:2", level
+		}
+		return "", nil
+	}
+	switch *level {
+	case 4, 6, 8, 10:
+	default:
+		level = nil
+	}
+	switch (pl >> 4) & 7 {
+	case 5:
+		return "Simple", level
+	case 4:
+		return "Main", level
+	case 3:
+		return "SNR Scalable", level
+	case 2:
+		return "Spatially Scalable", level
+	case 1:
+		return "High", level
+	}
+	return "", nil
 }
 
 // --- bit reader (MSB-first) with Exp-Golomb, over-read tracked in err ----------
