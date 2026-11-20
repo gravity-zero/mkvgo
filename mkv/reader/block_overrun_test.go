@@ -2,6 +2,7 @@ package reader
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -91,7 +92,7 @@ func TestKeyframeIndexResyncsPastAnOverrunningBlock(t *testing.T) {
 	data, _ := overrunClusters(false)
 	segStart := int64(bytes.Index(data, []byte{0x1F, 0x43, 0xB6, 0x75}))
 	p := &parser{r: bytes.NewReader(data), segStart: segStart, segEnd: -1}
-	times := p.buildKeyframeIndex(0, 1000000)
+	times := p.buildKeyframeIndex(context.Background(), 0, 1000000)
 	found := false
 	for _, ms := range times {
 		found = found || ms == 1000

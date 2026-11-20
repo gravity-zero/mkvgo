@@ -92,17 +92,20 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	// Keyframes head-only above and win). The complete index is preferred over the
 	// sample when both are requested.
 	if o.keyframeWalk && len(c.Keyframes) > 0 {
-		if ks := p.buildKeyframeIndex(videoTrackID(c), c.Info.TimecodeScale); len(ks) > 0 {
+		if ks := p.buildKeyframeIndex(ctx, videoTrackID(c), c.Info.TimecodeScale); len(ks) > 0 {
 			c.Keyframes = ks
 		}
 	}
 	if len(c.Keyframes) == 0 {
 		switch {
 		case o.keyframeIndex:
-			c.Keyframes = p.buildKeyframeIndex(videoTrackID(c), c.Info.TimecodeScale)
+			c.Keyframes = p.buildKeyframeIndex(ctx, videoTrackID(c), c.Info.TimecodeScale)
 		case o.sampledKeyframes > 0:
 			c.Keyframes = p.sampleClusterKeyframes(o.sampledKeyframes, c.Info.TimecodeScale, videoTrackID(c))
 		}
+	}
+	if err := ctx.Err(); err != nil && (o.keyframeWalk || o.keyframeIndex) {
+		return nil, err // the walk reads the whole file: cancelled on the way, its keyframes are not the file's
 	}
 	if o.inBandChannels {
 		fillStreamChannels(ctx, r, c)

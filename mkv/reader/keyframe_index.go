@@ -2,6 +2,7 @@ package reader
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -28,7 +29,7 @@ import (
 // end, and continues - so a damaged region costs at most the keyframes in it.
 // Matroska carries no edit list, so block times need no shift; this matches the
 // Cues-derived index (keyframeTimesMs), the other Matroska keyframe path.
-func (p *parser) buildKeyframeIndex(videoTrack uint64, scale int64) []int64 {
+func (p *parser) buildKeyframeIndex(ctx context.Context, videoTrack uint64, scale int64) []int64 {
 	segStart, segEnd := p.segStart, p.segEnd
 	if segEnd < 0 { // unknown-size Segment: walk to the file end
 		if end, err := p.r.Seek(0, io.SeekEnd); err == nil {
@@ -88,6 +89,9 @@ walk:
 
 		if !inCluster {
 			if h.ID == mkv.IDCluster {
+				if ctx.Err() != nil {
+					return nil // cancelled: the caller reports it, a partial index is not the file's
+				}
 				inCluster, haveTS, clusterTS = true, false, 0
 				if h.Size >= 0 {
 					clusterEnd = p.pos() + h.Size
