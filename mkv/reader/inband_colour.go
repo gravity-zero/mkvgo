@@ -249,7 +249,7 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	scans := make(map[uint64]*scanning)
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
-		if needsInBandColour(t) || needsInBandHDR(t) {
+		if NeedsInBandColour(t) {
 			need[t.ID] = t
 		}
 		if needsInBandScan(t) {
@@ -343,7 +343,16 @@ func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S) []uint64 {
 // whose static metadata the container does not carry (see
 // WithInBandColourFallback). Exposed so the mp4 package can drive the same
 // fallback off its sample table; the H.264 scan type is NewInBandScan's.
-func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needsInBandHDR(t) }
+func NeedsInBandColour(t *mkv.Track) bool {
+	return needsInBandColour(t) || needsInBandHDR(t) || mayBeHLGBySEI(t)
+}
+
+// mayBeHLGBySEI reports an HEVC track the header says bt2020-10 (14): the
+// transfer HLG advertises to legacy decoders, the real one travelling in an
+// Alternative Transfer Characteristics SEI of the samples.
+func mayBeHLGBySEI(t *mkv.Track) bool {
+	return t.Type == mkv.VideoTrack && isHEVCCodec(t.Codec) && t.ColorTransfer != nil && *t.ColorTransfer == 14
+}
 
 // ApplyInBandColour fills t from its first sample: for HEVC, one
 // length-prefixed access unit - the SPS VUI, an Alternative Transfer
@@ -405,6 +414,11 @@ func applyInBandHeader(t *mkv.Track, frame []byte) {
 	default:
 		applyInBandSPSColour(t, frame)
 	}
+	if mayBeHLGBySEI(t) {
+		if tc, ok := atcTransferFromFrame(frame, hevcNALLen(t)); ok {
+			t.ColorTransfer = &tc
+		}
+	}
 	if needsInBandHDR(t) {
 		applyInBandHDR(t, frame)
 	}
@@ -424,10 +438,7 @@ func isHEVCCodec(codec string) bool {
 // SPS VUI via the existing SPS parser, then an Alternative Transfer
 // Characteristics SEI override if present.
 func applyInBandSPSColour(t *mkv.Track, frame []byte) {
-	nalLen := 4
-	if len(t.CodecPrivate) >= 22 {
-		nalLen = int(t.CodecPrivate[21]&0x03) + 1
-	}
+	nalLen := hevcNALLen(t)
 	if sps := firstHEVCNAL(frame, nalLen, 33); len(sps) >= 3 { // 33 = SPS_NUT
 		bc := &bitstreamColour{}
 		parseHEVCSPS(unescapeRBSP(sps[2:]), bc) // strip the 2-byte NAL header
@@ -440,6 +451,14 @@ func applyInBandSPSColour(t *mkv.Track, frame []byte) {
 	if tc, ok := atcTransferFromFrame(frame, nalLen); ok {
 		t.ColorTransfer = &tc
 	}
+}
+
+// hevcNALLen is the NAL length prefix size the hvcC states, 4 without one.
+func hevcNALLen(t *mkv.Track) int {
+	if len(t.CodecPrivate) >= 22 {
+		return int(t.CodecPrivate[21]&0x03) + 1
+	}
+	return 4
 }
 
 // forEachHEVCNAL walks the length-prefixed NAL units of a frame (prefix nalLen

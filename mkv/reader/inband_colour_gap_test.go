@@ -60,3 +60,32 @@ func TestInBandColourHEVCRecordWithoutSPS(t *testing.T) {
 		t.Errorf("transfer=%q determined=%v, want smpte2084 true", tr.ColorTransferName(), tr.ColourDetermined)
 	}
 }
+
+// TestInBandColourHLGBySEI: an HEVC track the header says bt2020-10 may be HLG,
+// named by an Alternative Transfer Characteristics SEI in its samples alone.
+func TestInBandColourHLGBySEI(t *testing.T) {
+	frame := lenPrefixed4(atcSEINAL(18))
+	data := hdrTrackMKV("V_MPEGH/ISO/HEVC", mustHex(t, hevcHDRPrivateHex), 14, nil, frame)
+	base, err := ReadMeta(context.Background(), bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := base.Tracks[0].ColorTransferName(); got != "bt2020-10" {
+		t.Fatalf("head only: transfer=%q, want bt2020-10", got)
+	}
+	c, err := ReadMeta(context.Background(), bytes.NewReader(data), "x.mkv", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := c.Tracks[0]; tr.ColorTransferName() != "arib-std-b67" || !tr.IsHDR() {
+		t.Errorf("transfer=%q hdr=%v, want arib-std-b67 true", tr.ColorTransferName(), tr.IsHDR())
+	}
+	// No such SEI: the header's word stands.
+	c, err = ReadMeta(context.Background(), bytes.NewReader(hdrTrackMKV("V_MPEGH/ISO/HEVC", mustHex(t, hevcHDRPrivateHex), 14, nil, lenPrefixed4([]byte{0x26, 0x01, 0xaf}))), "x.mkv", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Tracks[0].ColorTransferName(); got != "bt2020-10" {
+		t.Errorf("without the SEI: transfer=%q, want bt2020-10", got)
+	}
+}
