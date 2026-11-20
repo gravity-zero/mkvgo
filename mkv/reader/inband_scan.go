@@ -63,6 +63,7 @@ type avcScan struct {
 	// that codes frames only proves the track progressive, as it would head-only.
 	inBandSPS             bool
 	sawSPS, sawFieldCoded bool
+	firstSPS              *bitstreamColour // the first in-band SPS: what the record would have described
 
 	interlaced bool
 	// Field orders the samples stated. pic_struct is the display order and wins,
@@ -204,6 +205,9 @@ func (s *avcScan) walk(frame []byte, truncated bool) {
 		case 7:
 			if bc := parseAVCSPS(unescapeRBSP(nal[1:])); bc != nil {
 				s.addSPS(bc)
+				if s.firstSPS == nil {
+					s.firstSPS = bc
+				}
 				s.sawSPS = true
 				s.sawFieldCoded = s.sawFieldCoded || bc.avc.fieldCoding
 			}
@@ -366,6 +370,9 @@ func orderOf(topFirst bool) string {
 // when every sample that stated one agreed - the pic_struct orders when there
 // are any, else the picture order counts. Nothing is written otherwise.
 func (s *avcScan) apply(t *mkv.Track) {
+	if s.inBandSPS && s.firstSPS != nil {
+		mergeBitstreamColour(t, s.firstSPS)
+	}
 	if s.pairStruct && !s.pulldown && !s.progressive {
 		s.interlaced = true
 	}

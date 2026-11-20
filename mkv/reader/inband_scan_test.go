@@ -617,3 +617,25 @@ func TestMPEG2ScanPictures(t *testing.T) {
 		t.Error("a CodecPrivate sequence extension with progressive_sequence 1 gave no progressive scan type")
 	}
 }
+
+// TestInBandAVC3Description: a record with no SPS leaves the profile, the pixel
+// format and the colour signalling to the SPS the samples carry.
+func TestInBandAVC3Description(t *testing.T) {
+	sps := scanSPS{frameOnly: true}
+	frame := au(sps.nal(), scanPPS(0, 0, true), frameOnlySlice(true, scanSlice{idr: true}))
+	want, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(scanAvcC([][]byte{sps.nal()}, nil), nil, frame)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := want.Tracks[0]
+	if w.Profile == "" || w.PixelFormat == "" || !w.ColourDetermined {
+		t.Fatalf("fixture: the record with its SPS gives profile=%q pix=%q determined=%v", w.Profile, w.PixelFormat, w.ColourDetermined)
+	}
+	meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(scanAvcC(nil, nil), nil, frame)), "", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := meta.Tracks[0]; g.Profile != w.Profile || g.PixelFormat != w.PixelFormat || g.ColourDetermined != w.ColourDetermined {
+		t.Errorf("profile=%q pix=%q determined=%v, want %q %q %v", g.Profile, g.PixelFormat, g.ColourDetermined, w.Profile, w.PixelFormat, w.ColourDetermined)
+	}
+}
