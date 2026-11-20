@@ -19,6 +19,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   samples carry; an MPEG-2 track with no CodecPrivate gets its profile, level
   and pixel format from its first sample. Each such track costs one more
   bounded read under the option.
+- A fragmented MP4 read head-only gets the first-sample fallback too
+  (`mp4.Options.InBandColour`): its sample tables are empty, so nothing was
+  read and an `avc3` or `hev1` track kept no profile, level or colour. The
+  first `moof` is read for where the first samples are.
 - An MPEG-2 CodecPrivate gives the profile, level and pixel format head-only,
   and a VP8 track its pixel format: they were empty.
 - Bitmap subtitles: a DVB block fills and draws a full-size region and one

@@ -131,16 +131,17 @@ type movie struct {
 	tracks      []inTrack
 	chapters    []mkv.Chapter
 	dropped     []DroppedTrack
-	durationMs  int64             // from mvhd, used when the sample table was not built
-	tags        []mkv.SimpleTag   // file-level metadata from udta/meta/ilst
-	title       string            // ©nam, for Info.Title
-	cover       *mkv.Attachment   // covr cover art, carried as an MKV attachment
-	hashes      map[uint32]string // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
-	fragmented  bool              // an mvex box is present → sample data is in moof fragments
-	mehdKnown   bool              // the mvex's mehd stated the fragments' total duration
-	chapterTrak []byte            // the trak of a QuickTime chapter track (tref/chap), read when there is no chpl
-	fragHeld    int64             // the samples every track holds, kept by readFragmentSamples for each traf's room
-	trackIdx    map[uint32]int    // tracks by track_ID (the first of an ID), for trackByID while fragments are read
+	durationMs  int64                  // from mvhd, used when the sample table was not built
+	tags        []mkv.SimpleTag        // file-level metadata from udta/meta/ilst
+	title       string                 // ©nam, for Info.Title
+	cover       *mkv.Attachment        // covr cover art, carried as an MKV attachment
+	hashes      map[uint32]string      // freeform CONTENT_SHA256_<id> atoms, for VerifyContentHashes
+	fragmented  bool                   // an mvex box is present → sample data is in moof fragments
+	mehdKnown   bool                   // the mvex's mehd stated the fragments' total duration
+	chapterTrak []byte                 // the trak of a QuickTime chapter track (tref/chap), read when there is no chpl
+	fragHeld    int64                  // the samples every track holds, kept by readFragmentSamples for each traf's room
+	trackIdx    map[uint32]int         // tracks by track_ID (the first of an ID), for trackByID while fragments are read
+	trex        map[uint32]trexDefault // the mvex defaults, kept for the first fragment's samples (in-band fallback)
 }
 
 // memBox is a box parsed from an in-memory buffer.
@@ -330,6 +331,9 @@ func parseMoov(moovPayload []byte, size int64, mode sampleMode) (*movie, error) 
 	// real per-sample data (frame rate, keyframes) lives in the moof fragments,
 	// which a head-only probe does not read. Record it so the caller can fall back.
 	mv.fragmented = hasMemBox(moovBoxes, "mvex")
+	if mv.fragmented {
+		mv.trex = parseTrexDefaults(moovBoxes)
+	}
 
 	// mvhd carries the movie timescale (needed to convert empty-edit durations,
 	// which are in the movie timebase) and the movie duration (used as the metadata

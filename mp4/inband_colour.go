@@ -177,6 +177,9 @@ func prefixLen(l sampleLoc) int64 { return min(int64(l.size), inbandScanCap) }
 // HEVC SPS VUI (and ATC SEI), reusing the reader package's logic. Best-effort:
 // any failure leaves the colour unset, exactly as without the option.
 func fillInBandColour(r io.ReadSeeker, mv *movie, c *mkv.Container) {
+	if mv.fragmented {
+		fragHeadSamples(r, mv)
+	}
 	for i := range mv.tracks {
 		if i >= len(c.Tracks) {
 			break
@@ -198,5 +201,103 @@ func fillInBandColour(r io.ReadSeeker, mv *movie, c *mkv.Container) {
 			continue
 		}
 		reader.ApplyInBandColour(mt, buf)
+	}
+}
+
+// maxBoxesToFirstMoof bounds the top-level boxes fragHeadSamples steps over looking for the first moof.
+const maxBoxesToFirstMoof = 32
+
+// fragHeadSamples gives the tracks of a fragmented movie the place of their first samples, which the first moof
+// states: their sample tables are empty, so the in-band fallback had nothing to read. Best-effort, and the movie
+// keeps no sample of it.
+func fragHeadSamples(r io.ReadSeeker, mv *movie) {
+	missing := false
+	for i := range mv.tracks {
+		t := &mv.tracks[i]
+		if t.firstSampleSize != 0 {
+			continue
+		}
+		if len(t.samples) == 0 {
+			missing = true
+			continue
+		}
+		// A full parse already walked the fragments: the samples are here.
+		t.firstSampleOffset, t.firstSampleSize = t.samples[0].offset, t.samples[0].size
+		for _, s := range t.samples[:min(len(t.samples), headSampleCount)] {
+			t.headSamples = append(t.headSamples, sampleLoc{off: s.offset, size: s.size})
+		}
+	}
+	if !missing {
+		return
+	}
+	size, err := r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return
+	}
+	var hdr [16]byte
+	off := int64(0)
+	for n := 0; n < maxBoxesToFirstMoof && off+8 <= size; n++ {
+		if _, err := r.Seek(off, io.SeekStart); err != nil {
+			return
+		}
+		if _, err := io.ReadFull(r, hdr[:8]); err != nil {
+			return
+		}
+		boxSize, headerLen := int64(binary.BigEndian.Uint32(hdr[:4])), int64(8)
+		switch boxSize {
+		case 1:
+			if _, err := io.ReadFull(r, hdr[8:16]); err != nil {
+				return
+			}
+			boxSize, headerLen = int64(binary.BigEndian.Uint64(hdr[8:16])), 16
+		case 0:
+			boxSize = size - off
+		}
+		if boxSize < headerLen || boxSize > size-off {
+			return
+		}
+		if string(hdr[4:8]) != "moof" {
+			off += boxSize
+			continue
+		}
+		if boxSize-headerLen > maxFragMoofBytes {
+			return
+		}
+		payload, err := readExact(r, boxSize-headerLen)
+		if err != nil {
+			return
+		}
+		firstMoofSamples(payload, off, mdatEnd(r, off+boxSize, size), mv)
+		return
+	}
+}
+
+// firstMoofSamples parses one moof for the first samples of each track that has none, and puts the movie back as it was.
+func firstMoofSamples(moof []byte, moofStart, limit int64, mv *movie) {
+	type saved struct {
+		n   int
+		end int64
+	}
+	before, held := make([]saved, len(mv.tracks)), mv.fragHeld
+	mv.trackIdx = make(map[uint32]int, len(mv.tracks))
+	for i := range mv.tracks {
+		before[i] = saved{len(mv.tracks[i].samples), mv.tracks[i].fragDecodeEnd}
+		if _, dup := mv.trackIdx[mv.tracks[i].trackID]; !dup {
+			mv.trackIdx[mv.tracks[i].trackID] = i
+		}
+	}
+	err := parseMoofSamples(moof, moofStart, mv.trex, mv, limit)
+	mv.trackIdx, mv.fragHeld = nil, held
+	for i := range mv.tracks {
+		t := &mv.tracks[i]
+		fresh := t.samples[before[i].n:]
+		if err == nil && t.firstSampleSize == 0 && before[i].n == 0 && len(fresh) > 0 {
+			t.firstSampleOffset, t.firstSampleSize = fresh[0].offset, fresh[0].size
+			t.headSamples = t.headSamples[:0]
+			for _, s := range fresh[:min(len(fresh), headSampleCount)] {
+				t.headSamples = append(t.headSamples, sampleLoc{off: s.offset, size: s.size})
+			}
+		}
+		t.samples, t.fragDecodeEnd = t.samples[:before[i].n], before[i].end
 	}
 }
