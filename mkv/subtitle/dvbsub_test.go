@@ -480,10 +480,10 @@ func TestDVBSubDecoder_NonPixelObjectsIgnored(t *testing.T) {
 func TestDVBSubBlockPixelsBounded(t *testing.T) {
 	fill := dvbRCS(0, true, dvbMaxDim, dvbMaxDim, 3, 0, 1)
 	d := newDVBSub(t)
-	if _, err := d.Decode(concat(fill, fill, fill, fill)); err != nil {
-		t.Fatalf("four fills of a full-size region: %v", err)
+	if _, err := d.Decode(concat(fill, fill)); err != nil {
+		t.Fatalf("two fills of a full-size region: %v", err)
 	}
-	_, err := d.Decode(concat(fill, fill, fill, fill, fill))
+	_, err := d.Decode(concat(fill, fill, fill))
 	if err == nil || !strings.Contains(err.Error(), "fills and draws more than") {
 		t.Fatalf("err = %v, want the block's pixel bound", err)
 	}

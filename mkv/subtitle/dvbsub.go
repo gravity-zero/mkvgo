@@ -46,8 +46,9 @@ const (
 	dvbMaxDim = 4096
 	// dvbMaxEpochBytes bounds what an epoch's regions hold together: they live until the next mode change.
 	dvbMaxEpochBytes = 16 << 20
-	// dvbMaxBlockPixels bounds the work of one block, counted in pixels filled, drawn and handed back.
-	dvbMaxBlockPixels = 4 * dvbMaxDim * dvbMaxDim
+	// dvbMaxBlockPixels bounds the work of one block, counted in pixels filled, drawn and handed back: a
+	// full-size region and one picture of it, and the small change of placements and object references.
+	dvbMaxBlockPixels = 2*dvbMaxDim*dvbMaxDim + 1<<20
 	// dvbObjectRefBytes is what one object reference of a region counts for in dvbMaxEpochBytes.
 	dvbObjectRefBytes = 24
 )
