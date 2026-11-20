@@ -9,6 +9,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- A VP9 track whose CodecPrivate holds the Matroska feature records (profile,
+  bit depth, chroma, no colour) and that has no Colour element gets its colour
+  from the keyframe header under `WithInBandColourFallback`: the header was
+  read only when the profile was missing, so the colour stayed undetermined.
+
 ## [0.71.0] - 2026-11-20
 
 ### Fixed

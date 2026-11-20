@@ -288,3 +288,36 @@ func TestParseVP9FeatureMetadataStrict(t *testing.T) {
 		}
 	}
 }
+
+// TestVP9FeatureMetadataInBandColour: a Codec Feature Metadata CodecPrivate
+// states a profile but no colour, so the keyframe header is still read for it.
+func TestVP9FeatureMetadataInBandColour(t *testing.T) {
+	ctx := context.Background()
+	cp := []byte{1, 1, 0, 3, 1, 8, 4, 1, 1} // profile 0, 8 bits, 4:2:0, no level
+	data := vp9MKV(cp, nil, 1920, 1080, vp9KeyframeHeaderBytes(0, 2, false))
+	base, err := ReadMeta(ctx, bytes.NewReader(data), "x.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := base.Tracks[0]; tr.Profile != "Profile 0" || tr.ColourDetermined || tr.ColorSpace != nil {
+		t.Fatalf("head only: profile=%q determined=%v space=%v, want Profile 0, no colour", tr.Profile, tr.ColourDetermined, tr.ColorSpace)
+	}
+	c, err := ReadMeta(ctx, bytes.NewReader(data), "x.mkv", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := c.Tracks[0]
+	if !tr.ColourDetermined || tr.ColorSpaceName() != "bt709" || u16v(tr.ColorRange) != 1 {
+		t.Errorf("determined=%v space=%q range=%d, want true bt709 1", tr.ColourDetermined, tr.ColorSpaceName(), u16v(tr.ColorRange))
+	}
+
+	// A container Colour element settles it: the first sample is not read.
+	colour := masterElem(mkv.IDColour, uintElem(mkv.IDColourTransfer, 16, 1))
+	c, err = ReadMeta(ctx, bytes.NewReader(vp9MKV(cp, colour, 1920, 1080, vp9KeyframeHeaderBytes(0, 2, false))), "x.mkv", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := c.Tracks[0]; tr.ColorSpace != nil || u16v(tr.ColorTransfer) != 16 {
+		t.Errorf("with a Colour element: space=%v transfer=%d, want the element alone", tr.ColorSpace, u16v(tr.ColorTransfer))
+	}
+}

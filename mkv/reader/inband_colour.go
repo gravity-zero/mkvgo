@@ -336,7 +336,7 @@ func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S) []uint64 {
 
 // NeedsInBandColour reports whether t is a video track whose stream
 // description can only be completed from its first sample: an HEVC track with a
-// bare hvcC and no colour, a VP9 track with no vpcC, or an HDR HEVC/AV1 track
+// bare hvcC and no colour, a VP9 track with no profile or no colour, or an HDR HEVC/AV1 track
 // whose static metadata the container does not carry (see
 // WithInBandColourFallback). Exposed so the mp4 package can drive the same
 // fallback off its sample table; the H.264 scan type is NewInBandScan's.
@@ -354,14 +354,14 @@ func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame)
 // needsInBandColour reports whether t is a video track whose description can
 // only come from its first sample: HEVC with no container/SPS colour yet and a
 // hvcC that holds no NAL arrays (numOfArrays == 0, byte 22 of the configuration
-// record); or VP9 with no profile yet - no vpcC in CodecPrivate, the profile
-// then exists only in the keyframe header.
+// record); or VP9 with no profile or no colour yet - no vpcC in CodecPrivate,
+// or the Matroska feature records that state no colour: the keyframe header has both.
 func needsInBandColour(t *mkv.Track) bool {
 	if t.Type != mkv.VideoTrack {
 		return false
 	}
 	if isVP9Codec(t.Codec) {
-		return t.Profile == ""
+		return t.Profile == "" || !t.ColourDetermined && t.ColorTransfer == nil && t.ColorPrimaries == nil && t.ColorSpace == nil
 	}
 	if t.ColorTransfer != nil || t.ColorPrimaries != nil || t.ColorSpace != nil {
 		return false
