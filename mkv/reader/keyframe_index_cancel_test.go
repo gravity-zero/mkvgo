@@ -18,7 +18,7 @@ type cancelAfter struct {
 }
 
 func (c *cancelAfter) Read(p []byte) (int, error) {
-	if pos, _ := c.Reader.Seek(0, io.SeekCurrent); pos >= c.past {
+	if pos, _ := c.Seek(0, io.SeekCurrent); pos >= c.past {
 		c.cancel()
 	}
 	return c.Reader.Read(p[:min(len(p), 32)]) // short reads, so the walk meets the cancellation on its way

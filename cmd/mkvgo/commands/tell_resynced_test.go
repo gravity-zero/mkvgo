@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gravity-zero/mkvgo/internal/livefixture"
 	"github.com/gravity-zero/mkvgo/ebml"
+	"github.com/gravity-zero/mkvgo/internal/livefixture"
 )
 
 // growSegment adds n to the size a sized Segment declares, in place.
