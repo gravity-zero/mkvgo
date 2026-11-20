@@ -323,7 +323,7 @@ type Track struct {
 	Unmodeled []RawElement `json:"-"`
 	// ColourDetermined reports that the colour was actually read from a source - the
 	// container Colour element, an MP4 colr box, or the codec bitstream's colour
-	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC) - even when it resolves
+	// signalling (H.264/HEVC VUI, AV1 color_config, VP9 vpcC or keyframe header) - even when it resolves
 	// to "unspecified" (all Color* nil). It distinguishes a confirmed-SDR/unspecified
 	// stream (true, Color* nil) from one whose colour could not be read at all
 	// (false): a caller should treat the latter, not the former, as "fall back".

@@ -144,7 +144,7 @@ func vp9HeaderColour(h *VP9KeyframeHeader) *bitstreamColour {
 	case 7: // CS_RGB = sRGB (IEC 61966-2-1): identity matrix
 		bc.primaries, bc.transfer, bc.matrix = u16p(1), u16p(13), u16p(0)
 	}
-	bc.determined = h.ColorSpace != 0 && h.ColorSpace != 6
+	bc.determined = h.ColorSpace != 6 // unknown (0) is the stream saying so; 6 is reserved
 	return bc
 }
 

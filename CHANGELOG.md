@@ -22,3 +22,6 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   video read as having no colour); an HEVC track whose `hvcC` holds arrays
   but no SPS. A VP9 Matroska file with no colour anywhere costs one more
   bounded read under the option.
+- A VP9 keyframe header that says its colour is unknown sets
+  `ColourDetermined`, as an H.264, HEVC or AV1 stream stating "unspecified"
+  does: the colour was read, there is none to find elsewhere.

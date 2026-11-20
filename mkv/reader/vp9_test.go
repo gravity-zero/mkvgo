@@ -147,7 +147,7 @@ func TestVP9InBandHeader(t *testing.T) {
 		{"profile 2 bt2020 leaves transfer open", 2, 5, false, nil, "Profile 2", "yuv420p10le", 10, 9, -1, 9, 1, true},
 		{"bt601 fixes matrix and transfer only", 0, 1, false, nil, "Profile 0", "yuv420p", 8, -1, 6, 5, 1, true},
 		{"srgb", 0, 7, true, nil, "Profile 0", "yuv444p", 8, 1, 13, 0, 2, true},
-		{"unknown fills nothing", 0, 0, true, nil, "Profile 0", "yuv420p", 8, -1, -1, -1, 2, false},
+		{"unknown fills nothing, read all the same", 0, 0, true, nil, "Profile 0", "yuv420p", 8, -1, -1, -1, 2, true},
 		{"container transfer wins", 2, 5, false,
 			masterElem(mkv.IDColour, uintElem(mkv.IDColourTransfer, 16, 1)),
 			"Profile 2", "yuv420p10le", 10, 9, 16, 9, 1, true},
