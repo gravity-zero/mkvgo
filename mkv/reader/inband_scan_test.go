@@ -631,12 +631,16 @@ func TestInBandAVC3Description(t *testing.T) {
 	if w.Profile == "" || w.PixelFormat == "" || !w.ColourDetermined {
 		t.Fatalf("fixture: the record with its SPS gives profile=%q pix=%q determined=%v", w.Profile, w.PixelFormat, w.ColourDetermined)
 	}
-	meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(scanAvcC(nil, nil), nil, frame)), "", WithInBandColourFallback())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g := meta.Tracks[0]; g.Profile != w.Profile || g.PixelFormat != w.PixelFormat || g.ColourDetermined != w.ColourDetermined {
-		t.Errorf("profile=%q pix=%q determined=%v, want %q %q %v", g.Profile, g.PixelFormat, g.ColourDetermined, w.Profile, w.PixelFormat, w.ColourDetermined)
+	// With or without a scan type from the container: a muxer that states it keeps the SPS in the samples all the same.
+	progressive := masterElem(mkv.IDVideo, uintElem(mkv.IDFlagInterlaced, 2, 1))
+	for name, video := range map[string][]byte{"no scan type": nil, "container says progressive": progressive} {
+		meta, err := ReadMeta(context.Background(), bytes.NewReader(avcScanMKV(scanAvcC(nil, nil), video, frame)), "", WithInBandColourFallback())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g := meta.Tracks[0]; g.Profile != w.Profile || g.PixelFormat != w.PixelFormat || g.ColourDetermined != w.ColourDetermined {
+			t.Errorf("%s: profile=%q pix=%q determined=%v, want %q %q %v", name, g.Profile, g.PixelFormat, g.ColourDetermined, w.Profile, w.PixelFormat, w.ColourDetermined)
+		}
 	}
 }
 

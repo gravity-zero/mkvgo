@@ -64,6 +64,7 @@ type avcScan struct {
 	inBandSPS             bool
 	sawSPS, sawFieldCoded bool
 	firstSPS              *bitstreamColour // the first in-band SPS: what the record would have described
+	descOnly              bool             // the container states the scan type: the scan is here for that SPS alone
 
 	interlaced bool
 	// Field orders the samples stated. pic_struct is the display order and wins,
@@ -166,7 +167,12 @@ func avcCPPSList(cp []byte) [][]byte {
 
 // done reports whether more samples cannot change the verdict: interlaced, and
 // display orders that already disagree. One order is checked against every sample.
-func (s *avcScan) done() bool { return s.interlaced && len(s.structOrders) > 1 }
+func (s *avcScan) done() bool {
+	if s.descOnly {
+		return s.firstSPS != nil
+	}
+	return s.interlaced && len(s.structOrders) > 1
+}
 
 // head is whole samples: the walk bounds its NALs and the bytes it parses, and a
 // frame's second field can sit past its first one's 16 KiB.
@@ -452,6 +458,11 @@ func newScanner(t *mkv.Track) scanner {
 		return &mpeg2Scan{orders: map[string]bool{}, scanKnown: t.ScanType != ""}
 	}
 	if t.ScanType != "" {
+		// An H.264 record with no SPS still leaves the profile to the samples.
+		if s := newAVCScan(t.CodecPrivate); isAVCCodec(t.Codec) && t.Profile == "" && s != nil && s.inBandSPS {
+			s.descOnly = true
+			return s
+		}
 		return nil
 	}
 	switch {
