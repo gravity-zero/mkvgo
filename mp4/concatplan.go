@@ -262,16 +262,15 @@ func (cp *ConcatPlan) windowedSubtitle(ctx context.Context, k, j, n int) ([]byte
 	if n < 0 || n >= p.segCount {
 		return nil, noResource("subtitle segment %d out of range for part %d (0..%d)", n, k, p.segCount-1)
 	}
-	segStart := p.bounds[n]
-	var segEnd int64 = math.MaxInt64
-	if n+1 < p.segCount {
-		segEnd = p.bounds[n+1]
-	}
-	cues, err := p.subCuesForWindow(ctx, j, segStart, segEnd)
+	window, err := p.subtitleWindow(ctx, j, n)
 	if err != nil {
 		return nil, err
 	}
-	return shiftWindowVTT(cues, segStart, segEnd, cp.cumMs[k])
+	var buf strings.Builder
+	if err := subtitle.WriteWebVTT(&buf, shiftCues(window, cp.cumMs[k])); err != nil {
+		return nil, err
+	}
+	return []byte(buf.String()), nil
 }
 
 // wholeSubtitle builds the j-th subtitle rendition's whole-presentation
@@ -287,7 +286,7 @@ func (cp *ConcatPlan) wholeSubtitle(ctx context.Context, j int) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, shiftCues(cues, cp.cumMs[k])...)
+		all = append(all, shiftCues(subtitle.ShiftCues(cues, p.opts.SubtitleOffsetMs), cp.cumMs[k])...)
 	}
 	var buf strings.Builder
 	if err := subtitle.WriteWebVTT(&buf, all); err != nil {

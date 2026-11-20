@@ -435,7 +435,7 @@ func writeConcatSubtitles(o *Options, fs *mkv.FS, outDir string, results []*hlsR
 		var whole []subtitle.Cue
 		for k, res := range results {
 			bounds := res.bounds
-			cuesLocal := res.subs[j].cues
+			cuesLocal := subtitle.ShiftCues(res.subs[j].cues, o.SubtitleOffsetMs)
 			for n := range res.durs {
 				segStart := bounds[n]
 				var segEnd int64 = math.MaxInt64

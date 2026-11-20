@@ -554,6 +554,19 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 	if err := p.checkSource(); err != nil {
 		return nil, err
 	}
+	window, err := p.subtitleWindow(ctx, i, n)
+	if err != nil {
+		return nil, err
+	}
+	var buf strings.Builder
+	if err := subtitle.WriteWebVTT(&buf, window); err != nil {
+		return nil, err
+	}
+	return []byte(buf.String()), nil
+}
+
+// subtitleWindow is the cues of rendition i that segment n shows, Options.SubtitleOffsetMs applied.
+func (p *HLSPlan) subtitleWindow(ctx context.Context, i, n int) ([]subtitle.Cue, error) {
 	segStart := p.bounds[n]
 	var segEnd int64 = math.MaxInt64
 	if n+1 < p.segCount {
@@ -581,9 +594,5 @@ func (p *HLSPlan) subtitleSegment(ctx context.Context, i, n int) ([]byte, error)
 			window = append(window, cue)
 		}
 	}
-	var buf strings.Builder
-	if err := subtitle.WriteWebVTT(&buf, window); err != nil {
-		return nil, err
-	}
-	return []byte(buf.String()), nil
+	return window, nil
 }
