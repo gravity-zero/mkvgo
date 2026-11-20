@@ -311,7 +311,17 @@ func TestVP9FeatureMetadataInBandColour(t *testing.T) {
 		t.Errorf("determined=%v space=%q range=%d, want true bt709 1", tr.ColourDetermined, tr.ColorSpaceName(), u16v(tr.ColorRange))
 	}
 
-	// A container Colour element settles it: the first sample is not read.
+	// A Colour element that states the range alone leaves the colour to the keyframe.
+	rangeOnly := masterElem(mkv.IDColour, uintElem(mkv.IDColourRange, 1, 1))
+	c, err = ReadMeta(ctx, bytes.NewReader(vp9MKV(cp, rangeOnly, 1920, 1080, vp9KeyframeHeaderBytes(0, 2, false))), "x.mkv", WithInBandColourFallback())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := c.Tracks[0]; tr.ColorSpaceName() != "bt709" {
+		t.Errorf("with a range-only Colour element: space=%q, want bt709", tr.ColorSpaceName())
+	}
+
+	// A container Colour element that names a colour settles it: the first sample is not read.
 	colour := masterElem(mkv.IDColour, uintElem(mkv.IDColourTransfer, 16, 1))
 	c, err = ReadMeta(ctx, bytes.NewReader(vp9MKV(cp, colour, 1920, 1080, vp9KeyframeHeaderBytes(0, 2, false))), "x.mkv", WithInBandColourFallback())
 	if err != nil {

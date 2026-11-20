@@ -11,10 +11,15 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Fixed
 
-- A VP9 track whose CodecPrivate holds the Matroska feature records (profile,
-  bit depth, chroma, no colour) and that has no Colour element gets its colour
-  from the keyframe header under `WithInBandColourFallback`: the header was
-  read only when the profile was missing, so the colour stayed undetermined.
+- Under `WithInBandColourFallback` (`-in-band`, `mp4.Options.InBandColour`),
+  three video tracks whose header names no colour now get it from their first
+  sample, where they kept none or the wrong "determined": a VP9 track whose
+  CodecPrivate holds the Matroska feature records, or whose Colour element
+  states the range alone (the keyframe header was read only when the profile
+  was missing); an AV1 track whose `av1C` holds no sequence header (a PQ
+  video read as having no colour); an HEVC track whose `hvcC` holds arrays
+  but no SPS. A VP9 Matroska file with no colour anywhere costs one more
+  bounded read under the option.
 
 ## [0.71.0] - 2026-11-20
 

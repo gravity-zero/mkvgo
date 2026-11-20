@@ -186,12 +186,15 @@ func WithSampledKeyframes(n int) ReadOption {
 // sample triggers a read of that sample:
 //
 //   - HEVC whose colour is absent from BOTH the container and the codec-private
-//     SPS - a bare hvcC with no NAL arrays, as streaming-style muxes write when
+//     SPS - an hvcC that holds no SPS, as streaming-style muxes write when
 //     they keep the parameter sets in-band: the SPS is recovered and its colour
 //     VUI parsed;
-//   - VP9 with no vpcC in CodecPrivate - how WebM is normally muxed - whose
-//     profile, bit depth and chroma subsampling (Profile, VideoBitDepth,
-//     PixelFormat, ColorRange) exist only in the keyframe's uncompressed header;
+//   - AV1 whose container names no colour and whose av1C holds no sequence
+//     header: the first temporal unit's is read;
+//   - VP9 whose container names no colour, or with no vpcC in CodecPrivate -
+//     how WebM is normally muxed: profile, bit depth, chroma subsampling and
+//     colour (Profile, VideoBitDepth, PixelFormat, ColorRange, the colour
+//     code points) come from the keyframe's uncompressed header;
 //   - an HDR (PQ or HLG) HEVC or AV1 track whose static metadata is incomplete
 //     in the container - no MasteringMetadata, or no MaxCLL/MaxFALL - as most
 //     HDR10 muxes write it, keeping only the in-band copy (HEVC SEI 137/144, AV1
@@ -336,7 +339,7 @@ func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S) []uint64 {
 
 // NeedsInBandColour reports whether t is a video track whose stream
 // description can only be completed from its first sample: an HEVC track with a
-// bare hvcC and no colour, a VP9 track with no profile or no colour, or an HDR HEVC/AV1 track
+// hvcC that holds no SPS, an av1C that holds no sequence header, a VP9 track with no colour, or an HDR HEVC/AV1 track
 // whose static metadata the container does not carry (see
 // WithInBandColourFallback). Exposed so the mp4 package can drive the same
 // fallback off its sample table; the H.264 scan type is NewInBandScan's.
@@ -352,25 +355,34 @@ func NeedsInBandColour(t *mkv.Track) bool { return needsInBandColour(t) || needs
 func ApplyInBandColour(t *mkv.Track, frame []byte) { applyInBandHeader(t, frame) }
 
 // needsInBandColour reports whether t is a video track whose description can
-// only come from its first sample: HEVC with no container/SPS colour yet and a
-// hvcC that holds no NAL arrays (numOfArrays == 0, byte 22 of the configuration
-// record); or VP9 with no profile or no colour yet - no vpcC in CodecPrivate,
-// or the Matroska feature records that state no colour: the keyframe header has both.
+// only come from its first sample: no colour from the container, and a codec
+// record that states none - a VP9 track (the keyframe header has it, and the
+// profile no vpcC gave), an AV1 av1C with no sequence header, an hvcC with no SPS.
 func needsInBandColour(t *mkv.Track) bool {
 	if t.Type != mkv.VideoTrack {
 		return false
 	}
-	if isVP9Codec(t.Codec) {
-		return t.Profile == "" || !t.ColourDetermined && t.ColorTransfer == nil && t.ColorPrimaries == nil && t.ColorSpace == nil
+	if isVP9Codec(t.Codec) && t.Profile == "" {
+		return true
 	}
 	if t.ColorTransfer != nil || t.ColorPrimaries != nil || t.ColorSpace != nil {
 		return false
 	}
-	if !isHEVCCodec(t.Codec) {
-		return false
+	switch {
+	case isVP9Codec(t.Codec):
+		return true
+	case isAV1Codec(t.Codec):
+		return len(t.CodecPrivate) >= 4 && !privateStatesColour(t)
+	case isHEVCCodec(t.Codec):
+		return len(t.CodecPrivate) >= 23 && t.CodecPrivate[0] == 1 && !privateStatesColour(t)
 	}
-	cp := t.CodecPrivate
-	return len(cp) >= 23 && cp[0] == 1 && cp[22] == 0
+	return false
+}
+
+// privateStatesColour reports that the CodecPrivate holds the colour signalling itself, unspecified or not.
+func privateStatesColour(t *mkv.Track) bool {
+	bc := parseCodecColour(t.Codec, t.CodecPrivate)
+	return bc != nil && bc.determined
 }
 
 // applyInBandHeader dispatches the first-sample parse on the codec: the colour
@@ -385,7 +397,12 @@ func applyInBandHeader(t *mkv.Track, frame []byte) {
 			mergeBitstreamColour(t, vp9HeaderColour(h))
 		}
 		return
-	case needsInBandColour(t):
+	case !needsInBandColour(t):
+	case isAV1Codec(t.Codec):
+		bc := &bitstreamColour{}
+		parseAV1OBUs(frame, uint32(t.CodecPrivate[1]>>5), bc)
+		mergeBitstreamColour(t, bc)
+	default:
 		applyInBandSPSColour(t, frame)
 	}
 	if needsInBandHDR(t) {

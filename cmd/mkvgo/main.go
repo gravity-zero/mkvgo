@@ -254,8 +254,9 @@ Global flags:
                 retime, salvage...; ignored by commands without a report); an
                 error goes to stderr as {"error":"...","exit":N}
   -in-band      Complete a video track's description from its first sample
-                when the header leaves it short: colour behind a bare hvcC,
-                VP9 profile with no vpcC, HDR10 static metadata kept in-band
+                when the header leaves it short: colour behind a bare hvcC
+                or av1C, VP9 profile or colour the header does not state,
+                HDR10 static metadata kept in-band
                 (info, tracks, probe; one bounded read; ignored elsewhere)
   -fps-reads    Let the frame-rate estimate of a Matroska track without
                 DefaultDuration read the block headers it needs in the first
