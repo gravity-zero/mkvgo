@@ -9,71 +9,38 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-11-21
+
 ### Added
 
 - `Options.SignedCompositionOffsets` (`--signed-offsets` on `to-hls`,
-  `hls-segment`, `serve` and `serve-growing`): a reordered video's composition offsets are written signed,
-  with no composition shift and no video edit list. A player that ignores the
-  edit list showed the picture late by the reordering depth (84 ms on a
-  two-frame pyramid); it now shows it on time. Off by default.
+  `hls-segment`, `serve` and `serve-growing`): a reordered video's composition
+  offsets are written signed, with no composition shift and no video edit
+  list. A player that ignores the edit list showed the picture late by the
+  reordering depth (84 ms on a two-frame pyramid). Off by default.
 
-### Changed
+### Breaking
 
-- The HLS/DASH init segment no longer carries the cover art (`RemuxToHLS`,
-  `PlanHLS`, `PlanGrowingHLS`, `to-hls`, `serve`, `hls-segment`): a player
-  downloads the init before its first frame, and a large cover made it several
-  megabytes. Title and tags stay; `RemuxToMP4` still carries the cover.
-
-### Fixed
-
-- HLS/DASH from an H.264 or HEVC video whose opening frames are in
-  presentation order and which reorders frames only later: up to a quarter of
-  the frames shared a presentation time with a neighbour, and players dropped
-  them. The composition shift now covers the reordering depth the parameter
-  sets declare (`max_num_reorder_frames`, `sps_max_num_reorder_pics`), and
-  is measured past a first GOP of a frame or two, which showed none.
-  **Integration note**: for such a source, and for one that declares a deeper
-  reordering than its opening frames show, the init segment's edit list and
-  the segments' composition offsets change together - drop cached inits and
-  segments of the same source at once.
-- A video that reorders deeper than its opening frames and its parameter sets
-  announce (parameter sets that change mid-file, or state no depth) keeps
-  every frame's presentation time in HLS/DASH: the composition offset of such
-  a frame is written negative (`trun` version 1) where it was clamped to zero
-  and the frame took its neighbour's time. A reader that pulls its decode
-  clock back for a negative offset presents that video later by the deepest
-  one (two frames on the files measured). A frame that presents before
-  more than 16 frames decoded ahead of it carries a broken timestamp, not a
-  reordered one: it presents at its decode time and moves no other frame's.
-- HLS/DASH from a video where a frame shares the timestamp of the keyframe
-  after it: the segment opened on that frame instead of its keyframe, and
-  served on demand it lost the frames stored between the two. Such a frame
-  now stays in the segment it decodes in, full pass and on demand, and the
-  segment's last decode times end before the next segment's first.
-
-## [0.71.2] - 2026-11-20
+- The HLS/DASH init segment no longer carries the cover art: a large cover
+  made it megabytes a player fetches before its first frame. Title and tags
+  stay; `RemuxToMP4` still carries the cover.
+- HLS/DASH bytes change for a video the fixes below concern: its init's edit
+  list and its segments' composition offsets move together. Drop the cached
+  init and segments of one source at once.
 
 ### Fixed
 
-- Under `WithInBandColourFallback` (`-in-band`, `mp4.Options.InBandColour`):
-  an HEVC track declared bt2020-10 is read as HLG (`arib-std-b67`) when an
-  Alternative Transfer Characteristics SEI of its first sample says so - the
-  header alone made an HLG video an SDR one; an H.264 record with no SPS
-  (`avc3`) gets its profile, level, pixel format and colour from the SPS its
-  samples carry; an MPEG-2 track with no CodecPrivate gets its profile, level
-  and pixel format from its first sample. Each such track costs one more
-  bounded read under the option.
-- A fragmented MP4 read head-only gets the first-sample fallback too
-  (`mp4.Options.InBandColour`): its sample tables are empty, so nothing was
-  read and an `avc3` or `hev1` track kept no profile, level or colour. The
-  first `moof` is read for where the first samples are.
-- An MPEG-2 CodecPrivate gives the profile, level and pixel format head-only,
-  and a VP8 track its pixel format: they were empty.
-- Bitmap subtitles: a DVB block fills and draws a full-size region and one
-  picture of it, not four planes (254 bytes of block allocated 208 MiB); a
-  block asking for more is passed over as damaged.
-- A keyframe walk (`WithKeyframeIndex`, `keyframes -walk`) cancelled on its
-  way returns the cancellation: it returned the keyframes met so far with no
-  error.
-- `concat-hls`, `concat-segment` and `PlanConcat` apply `--sub-offset`
-  (`Options.SubtitleOffsetMs`): the option was accepted and ignored.
+- HLS/DASH lost frames of a video that reorders deeper than its opening
+  frames show: frames shared a presentation time and players dropped them, a
+  quarter to a half of a segment's. The composition shift now covers the
+  depth the parameter sets declare, and is measured past a first GOP of a
+  frame or two.
+- A video that reorders deeper than its parameter sets announce keeps every
+  presentation time through a negative composition offset (`trun` version
+  1); a reader that pulls its decode clock back for one presents that video
+  later by it.
+- A frame with a stray timestamp (it presents before more than 16 frames
+  decoded ahead of it) presents at its decode time and moves no other
+  frame's; full pass and on demand agree on it.
+- A segment opens on its keyframe when a frame shares the keyframe's
+  timestamp, and served on demand it keeps the frames stored between the two.
