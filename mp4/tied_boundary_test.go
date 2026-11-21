@@ -199,3 +199,85 @@ func lowestTrunOffset(seg []byte) int64 {
 	}
 	return low
 }
+
+// Options.SignedCompositionOffsets: a B-pyramid's offsets go below zero around a first frame that presents when it
+// decodes, the init carries no edit list for the video, and both paths write the same bytes. Without the option the
+// same source gets its edit list and no negative offset.
+func TestSignedCompositionOffsets(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	path := filepath.Join(t.TempDir(), "in.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const scale = 1_000_000
+	m := writer.NewMKVWriter(f)
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}}
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(c, tracks, 149*40); err != nil {
+		t.Fatal(err)
+	}
+	for g := 0; g < 6; g++ { // one cluster a GOP: a keyframe, then groups decoded P B b b
+		base := g * 25
+		order := []int{0}
+		for k := 1; k < 25; k += 4 {
+			order = append(order, k+3, k+1, k, k+2)
+		}
+		var blks []mkv.Block
+		for _, i := range order {
+			blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: int64(base+i) * 40, Keyframe: i == 0, Data: []byte{0, 0, 0, 1, 0x41, byte(base + i)}})
+		}
+		if err := m.WriteClusterWithCues(int64(g)*1000, scale, blks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, signed := range []bool{false, true} {
+		o := Options{SegmentMs: 2000, SignedCompositionOffsets: signed}
+		dir := t.TempDir()
+		if err := RemuxToHLS(ctx, path, dir, o); err != nil {
+			t.Fatal(err)
+		}
+		plan, err := PlanHLS(ctx, path, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		init, err := os.ReadFile(filepath.Join(dir, "init.mp4"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(plan.InitSegment(), init) {
+			t.Errorf("signed=%v: the plan's init differs from the full pass", signed)
+		}
+		if got := bytes.Contains(init, []byte("elst")); got == signed {
+			t.Errorf("signed=%v: init carries an edit list = %v", signed, got)
+		}
+		lowest := int64(0)
+		for n := 0; n < plan.NumSegments(); n++ {
+			full, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			od, err := plan.Segment(ctx, n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(od, full) {
+				t.Errorf("signed=%v segment %d: on demand differs from the full pass", signed, n)
+			}
+			lowest = min(lowest, lowestTrunOffset(full))
+		}
+		if want := map[bool]int64{false: 0, true: -80}[signed]; lowest != want {
+			t.Errorf("signed=%v: lowest composition offset %d, want %d", signed, lowest, want)
+		}
+	}
+}

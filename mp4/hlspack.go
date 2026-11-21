@@ -198,8 +198,8 @@ const planCtxEvery = 4096
 // mp4PlanTracks builds the on-demand plan state for an MP4 source: each
 // track's fragment samples fully timed from the sample table (head-only) plus
 // the parallel file offsets Segment reads through. Returns the fragTracks in
-// planTracks order and the per-track sample offsets.
-func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack) (fts []*fragTrack, offsets [][]int64, err error) {
+// planTracks order and the per-track sample offsets. signed is Options.SignedCompositionOffsets.
+func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack, signed bool) (fts []*fragTrack, offsets [][]int64, err error) {
 	for _, t := range media {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -257,7 +257,7 @@ func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack)
 		if grid == 0 {
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid, nil, declaredReorderDepth(&t.mkv), t.spec.video)
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid, nil, declaredReorderDepth(&t.mkv), t.spec.video, signed)
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}

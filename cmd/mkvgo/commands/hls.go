@@ -29,6 +29,7 @@ type hlsFlags struct {
 	subOffset       int64
 	chapterMarkers  bool
 	noIFrames       bool
+	signedOffsets   bool
 	damageBytes     int64
 	skipUnsupported bool
 	sourceAccess    mp4.SourceAccess
@@ -94,6 +95,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Bool(&f.chapterMarkers, "--chapter-markers")
 	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
 	fl.Bool(&f.noIFrames, "--no-iframes")
+	fl.Bool(&f.signedOffsets, "--signed-offsets")
 	fl.Func(damageBytesFlag(&f.damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
 		switch v {
@@ -240,21 +242,22 @@ func (f hlsFlags) options(src string) mp4.Options {
 		keep = resolveKeepLangs(src, f.keepLangs)
 	}
 	o := mp4.Options{
-		FS:                     sourceFS(src),
-		SegmentMs:              f.segMs,
-		Encrypt:                f.encrypt,
-		CENC:                   f.cenc,
-		SingleFile:             f.singleFile,
-		KeepTracks:             keep,
-		SubtitleOffsetMs:       f.subOffset,
-		ChapterMarkers:         f.chapterMarkers,
-		NoIFrames:              f.noIFrames,
-		DamageBytes:            f.damageBytes,
-		SkipUnsupported:        f.skipUnsupported,
-		Strict:                 Strict,
-		SynthesizeIndex:        f.synthIndex,
-		AudioPresentationShift: f.audioShift,
-		SourceAccess:           f.sourceAccess,
+		FS:                       sourceFS(src),
+		SegmentMs:                f.segMs,
+		Encrypt:                  f.encrypt,
+		CENC:                     f.cenc,
+		SingleFile:               f.singleFile,
+		KeepTracks:               keep,
+		SubtitleOffsetMs:         f.subOffset,
+		ChapterMarkers:           f.chapterMarkers,
+		NoIFrames:                f.noIFrames,
+		SignedCompositionOffsets: f.signedOffsets,
+		DamageBytes:              f.damageBytes,
+		SkipUnsupported:          f.skipUnsupported,
+		Strict:                   Strict,
+		SynthesizeIndex:          f.synthIndex,
+		AudioPresentationShift:   f.audioShift,
+		SourceAccess:             f.sourceAccess,
 	}
 	if f.prefix != "" {
 		prefix := f.prefix

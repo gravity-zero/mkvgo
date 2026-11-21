@@ -181,7 +181,7 @@ func TestFillFragTimingLateReorderKeepsEveryPTS(t *testing.T) {
 			samples = append(samples, fragSample{ptsMs: int64(30+4*g+k) * 1001 / 24})
 		}
 	}
-	_, _, _, shift := fillFragTimingTS(samples, nil, 42, movieTimescale, 0, nil, 2, false)
+	_, _, _, shift := fillFragTimingTS(samples, nil, 42, movieTimescale, 0, nil, 2, false, false)
 	if shift != 84 {
 		t.Fatalf("shift = %d, want 84 (two frames)", shift)
 	}

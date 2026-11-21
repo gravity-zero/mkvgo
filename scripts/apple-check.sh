@@ -6,6 +6,7 @@
 #   late        the parameter sets declare the reordering, the opening frames show none: a positive shift, taken back
 #               by the init's edit list;
 #   undeclared  the header declares no reordering and the stream reorders after its first GOP: negative offsets.
+# Both are read again under --signed-offsets: no shift, no edit list, negative offsets from the first B-frame on.
 # The same source remuxed by ffmpeg to a plain MP4 is read the same way and printed for reference.
 #
 # Usage: sh scripts/apple-check.sh   (ffmpeg, ffprobe, go, swiftc and python3 on PATH)
@@ -91,19 +92,20 @@ read_back() { # read_back <name> <file> <trun source or -> -> prints the stored 
 }
 
 failed=0
-check() { # check <name> <negative|positive>
-  name=$1; want=$2
+check() { # check <name> <negative|positive> [mkvgo to-hls flags...]
+  name=$1; want=$2; shift 2
   ffprobe -v error -select_streams v:0 -show_entries packet=pts_time -of csv=p=0 "$TMP/$name.mkv" | tr -d ',\r' | sort -n > "$TMP/$name.want"
   cp "$TMP/$name.want" "$TMP/$name-reference.want"
   if [ "$(sort -u "$TMP/$name.want" | wc -l)" -ne "$(wc -l < "$TMP/$name.want")" ] || [ "$(wc -l < "$TMP/$name.want")" -ne 144 ]; then
     echo "  FAIL $name: the fixture has $(wc -l < "$TMP/$name.want") frames and $(sort -u "$TMP/$name.want" | wc -l) distinct presentation times, 144 of each expected"; failed=1; return
   fi
-  "$TMP/mkvgo" to-hls "$TMP/$name.mkv" -o "$TMP/$name.hls" -segment 2 >/dev/null 2>"$TMP/$name.log" || { cat "$TMP/$name.log" >&2; exit 1; }
+  rm -rf "$TMP/$name.hls"
+  "$TMP/mkvgo" to-hls "$TMP/$name.mkv" -o "$TMP/$name.hls" -segment 2 "$@" >/dev/null 2>"$TMP/$name.log" || { cat "$TMP/$name.log" >&2; exit 1; }
   cat "$TMP/$name.hls/init.mp4" "$TMP/$name.hls"/seg*.m4s > "$TMP/$name.mp4"
   ffmpeg -nostdin -v error -y -i "$TMP/$name.mkv" -c copy "$TMP/$name-reference.mp4"
   echo "  $name, the reference muxer's plain MP4:"
   read_back "$name-reference" "$TMP/$name-reference.mp4" -
-  echo "  $name, mkvgo's HLS:"
+  echo "  $name, mkvgo's HLS $*:"
   read_back "$name" "$TMP/$name.mp4" "$TMP/$name.mp4"
   lowest=$(python3 "$TMP/compare.py" "$TMP/$name.mp4" "$TMP/$name.want" "$TMP/$name.want" | sed 's/.*lowest composition offset \(-*[0-9]*\).*/\1/')
   if [ "$want" = negative ] && [ "$lowest" -ge 0 ]; then echo "  FAIL $name: no negative composition offset, the fixture does not test what it names"; failed=1; fi
@@ -114,5 +116,7 @@ check() { # check <name> <negative|positive>
 echo "== AVFoundation against the source"
 check late positive
 check undeclared negative
+check late negative --signed-offsets
+check undeclared negative --signed-offsets
 [ "$failed" = 0 ] || { echo "apple-check: FAILED" >&2; exit 1; }
 echo "apple-check: ALL PASS"

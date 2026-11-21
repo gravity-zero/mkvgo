@@ -307,6 +307,18 @@ type Options struct {
 	// either way.
 	NoIFrames bool
 
+	// SignedCompositionOffsets writes a reordered video's composition offsets
+	// signed, around a first frame that presents when it decodes, with no
+	// composition shift and no edit list to take one back (RemuxToHLS,
+	// PlanHLS, PlanGrowingHLS and their MP4-source counterparts) - the CMAF
+	// 'cmf2' form. A player that ignores the video edit list then presents
+	// the picture on time, where the default form (non-negative offsets
+	// pushed up by the reordering depth, an edit list taking it back) shows
+	// it late by that depth; a reader that pulls its decode clock back for a
+	// negative offset shows it late with this one instead. Off by default.
+	// Init and segments both change with it: one setting per presentation.
+	SignedCompositionOffsets bool
+
 	// DamageBytes is how far past an unreadable element an on-demand window
 	// walk (PlanHLS, PlanABR) looks for the next Cluster before refusing the
 	// window: a damaged region shorter than this is passed over, a longer one

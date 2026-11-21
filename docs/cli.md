@@ -1147,7 +1147,7 @@ Package a media file - **MKV/WebM or MP4/MOV** (sniffed from the first bytes)
 Text subtitle tracks (SRT, WebVTT, ASS/SSA flattened to plain text) ride as segmented **WebVTT renditions** (`subN.m3u8` + `subN_*.vtt`), declared in the master playlist with their language/name/default/forced flags; bitmap subtitles (PGS/VOBSUB) are dropped with a reason. This is the CMAF "copy rung" of an HLS ladder - the packaging, not the encoding: bitrate variants (real adaptive streaming) still require a transcoder.
 
 ```
-mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--skip-unsupported] [--strict] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--chapter-markers] [--no-iframes]
+mkvgo to-hls <input.mkv> -o <dir> [-segment 6] [--skip-unsupported] [--strict] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--chapter-markers] [--no-iframes] [--signed-offsets]
 ```
 
 Every track the presentation leaves out - a secondary video track (one video rendition is carried), a bitmap subtitle (PGS, VobSub), an unsupported codec under `--skip-unsupported`, an encrypted track - is printed on stderr as `dropped track N (codec): reason`, the exit code staying 0; `--strict` fails the packaging by name on any of them, whatever `--skip-unsupported` says (`serve` and the ABR commands take the same two flags). `tracks -json` says ahead of time, per track, whether `to-hls` and `serve` carry it (`to_hls`, `to_hls_refusal`).
@@ -1162,6 +1162,7 @@ Every track the presentation leaves out - a secondary video track (one video ren
 | `--audio-shift` | Re-base an audio track in presentation (`track=ms`, repeatable; positive = the track's content starts late and is presented earlier - feed it `diagnose`'s per-track delay). The samples are copied verbatim and the media segments are byte-identical with or without the shift: only the init segment's edit list moves, so a constant A/V desync is cancelled in the served stream without touching the source. Over-shifts clamp to the presentation start. The persistent repair remains `mkvgo retime` |
 | `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
 | `--no-iframes` | Drop the trick-play I-frame stream: no `EXT-X-I-FRAME-STREAM-INF` in the master, no `iframe.m3u8` nor `iframeNNNNN.m4s` written or served (`hls-segment iframe` refuses it). For players that scrub with their own trickplay images. Segments and the other playlists are unchanged. Also on `hls-segment`, `to-abr`, `abr-segment`. See [streaming.md](streaming.md#trick-play-scrubbing) |
+| `--signed-offsets` | Write a reordered video's composition offsets signed, with no composition shift and no video edit list (CMAF `cmf2` form): a player that ignores the edit list presents the picture on time instead of late by the reordering depth. Init and segments both change: use one setting per presentation. Also on `hls-segment` |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
@@ -1275,7 +1276,7 @@ and reading only that window - first-play latency is milliseconds and storage
 cost is zero, whatever the file size.
 
 ```
-mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--synthesize-index] [--chapter-markers] [--no-iframes] [--damage-bytes <n>]
+mkvgo hls-segment <input.mkv|url> <master|playlist|init|N> [-o out] [-segment 6] [--sub-offset <ms>] [--audio-shift <track>=<ms>] [--synthesize-index] [--chapter-markers] [--no-iframes] [--signed-offsets] [--damage-bytes <n>]
 ```
 
 Without `-o` the resource goes to stdout (pipe it from a server handler).

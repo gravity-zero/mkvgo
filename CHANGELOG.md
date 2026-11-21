@@ -9,6 +9,14 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Added
+
+- `Options.SignedCompositionOffsets` (`--signed-offsets` on `to-hls` and
+  `hls-segment`): a reordered video's composition offsets are written signed,
+  with no composition shift and no video edit list. A player that ignores the
+  edit list showed the picture late by the reordering depth (84 ms on a
+  two-frame pyramid); it now shows it on time. Off by default.
+
 ### Changed
 
 - The HLS/DASH init segment no longer carries the cover art (`RemuxToHLS`,

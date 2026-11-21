@@ -377,7 +377,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid, gridBounds, declaredReorderDepth(&ft.outTrack.mkv), ft.outTrack.spec.video)
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid, gridBounds, declaredReorderDepth(&ft.outTrack.mkv), ft.outTrack.spec.video, o.SignedCompositionOffsets)
 		ft.ptsTS = nil
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift

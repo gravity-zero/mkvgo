@@ -526,7 +526,9 @@ func (p *GrowingHLSPlan) settleLeadLocked() {
 	for i, ms := range p.leadPts {
 		ts[i] = scale(ms)
 	}
-	pt.ft.ctsShiftTS = compositionShiftTS(ts, p.leadSync, declaredReorderDepth(&pt.ft.outTrack.mkv))
+	if !p.opts.SignedCompositionOffsets {
+		pt.ft.ctsShiftTS = compositionShiftTS(ts, p.leadSync, declaredReorderDepth(&pt.ft.outTrack.mkv))
+	}
 }
 
 // extendHeadLocked folds one block into head resolution: the track's first

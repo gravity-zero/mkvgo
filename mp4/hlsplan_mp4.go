@@ -88,7 +88,7 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	p.subScan = make([]subScanState, len(p.subs))
 	p.mp4subs = mp4SubTables(ps, p.subs)
 
-	fts, offs, err := mp4PlanSamples(ctx, ps, media)
+	fts, offs, err := mp4PlanSamples(ctx, ps, media, p.opts.SignedCompositionOffsets)
 	if err != nil {
 		return nil, err
 	}

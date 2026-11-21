@@ -95,6 +95,8 @@ func oldParseHLSFlags(args []string) hlsFlags {
 			f.skipUnsupported = true
 		case "--no-iframes":
 			f.noIFrames = true
+		case "--signed-offsets":
+			f.signedOffsets = true
 		case "--damage-bytes":
 			needValue(args, &i)
 			n, err := strconv.ParseInt(args[i], 10, 64)
@@ -231,7 +233,7 @@ func TestCLI03_HLSFlagsParity(t *testing.T) {
 		"--keep-tracks": {"1,2", "1, x"}, "--keep-lang": {"fre,ENG", " , "}, "--audio-lang": {"spa"}, "--sub-offset": {"-500", "x"},
 		"--damage-bytes": {"100", "0", "-1"}, "--source-access": {"auto", "local", "network", "nfs"}, "--audio-shift": {"2=500", "bad"},
 	}
-	bools := []string{"--single-file", "--chapter-markers", "--skip-unsupported", "-skip-unsupported", "--no-iframes", "--synthesize-index", "--cenc-inline-key"}
+	bools := []string{"--single-file", "--chapter-markers", "--skip-unsupported", "-skip-unsupported", "--no-iframes", "--signed-offsets", "--synthesize-index", "--cenc-inline-key"}
 	operands := []string{"in.mkv", "master.m3u8", "-", "--bogus", "-x"}
 	var flags []string
 	for k := range values {
