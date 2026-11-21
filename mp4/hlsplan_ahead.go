@@ -176,7 +176,9 @@ func (p *HLSPlan) coldAhead(ctx context.Context, src io.ReadSeeker, br *reader.B
 		if !p.tracks[ti].ft.outTrack.spec.video {
 			p.learnAhead(pos, b)
 		}
-		if b.BlockTimecode >= segStart {
+		// Once a track's window has opened, every later block of the track is the window's, as in the full pass: a
+		// reordered frame after it presents before segStart when the opening frame shares the keyframe's timestamp.
+		if b.BlockTimecode >= segStart || len(ahead[ti]) > 0 {
 			ahead[ti] = append(ahead[ti], aheadBlock{b: b, pos: pos})
 		}
 	}

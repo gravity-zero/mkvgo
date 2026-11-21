@@ -464,7 +464,7 @@ func (p *HLSPlan) farTrackIn(ctx context.Context, src io.ReadSeeker, i int, rg t
 			}
 			continue
 		}
-		if b.BlockTimecode < segStart || (b.BlockTimecode <= lastMs && b.DataOffset <= lastOff) {
+		if (b.BlockTimecode < segStart && len(out) == 0) || (b.BlockTimecode <= lastMs && b.DataOffset <= lastOff) {
 			continue // before the window, or a block the walk already holds (a later block may carry an earlier time: reordered video)
 		}
 		if b.BlockTimecode >= segEnd {

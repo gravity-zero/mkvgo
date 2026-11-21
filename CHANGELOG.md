@@ -34,6 +34,10 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   and the frame took its neighbour's time. A reader that pulls its decode
   clock back for a negative offset presents that video later by the deepest
   one (two frames on the files measured).
+- On-demand HLS (`PlanHLS`, `serve`, `hls-segment`): a segment served cold
+  lost the frames stored after one that shares its keyframe's timestamp, in
+  the cluster before the keyframe's. It now holds the frames the full pass
+  puts in it.
 
 ## [0.71.2] - 2026-11-20
 
