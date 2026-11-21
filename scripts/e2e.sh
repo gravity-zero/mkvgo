@@ -275,4 +275,38 @@ done
 [ "$same" -ge 20 ] || { echo "e2e: only $same codec names could be compared" >&2; exit 1; }
 echo "  codec names OK: $same identical, $unresolved unresolved, $skipped encoder(s) unavailable"
 
+echo "== late reordering: every frame keeps the presentation time the prober reads in the source"
+# The opening frames are in presentation order and the B-pyramid starts with the second part, under the same
+# parameter sets: what the first frames show is not what the stream reorders by. No frame of the HLS output may
+# take another's presentation time, full pass and on demand, from Matroska and from MP4.
+LR="b-pyramid=normal:keyint=48:min-keyint=48:scenecut=0"
+gen lr_a -f lavfi -i "testsrc2=size=320x180:rate=24000/1001" -frames:v 48 -c:v libx264 -preset medium -pix_fmt yuv420p -bf 3 -x264-params "$LR:b-adapt=1:b-bias=-100"
+gen lr_b -f lavfi -i "testsrc2=size=320x180:rate=24000/1001" -frames:v 96 -c:v libx264 -preset medium -pix_fmt yuv420p -bf 3 -x264-params "$LR:b-adapt=0"
+printf "file 'lr_a.mkv'\nfile 'lr_b.mkv'\n" > "$TMP/lr.txt"
+gen lr -f concat -safe 0 -i "$(stage "$TMP/lr.txt")" -c copy
+pts_of() { # pts_of <local file> -> the video packets' presentation times, in file order
+  ffp -select_streams v -show_entries packet=pts_time -of csv=p=0 "$(stage "$1")" | tr -d '\r,'
+}
+"$MKVGO" -f to-mp4 --faststart "$TMP/lr.mkv" "$TMP/lr.mp4" >/dev/null
+for src in lr.mkv lr.mp4; do
+  pts_of "$TMP/$src" > "$TMP/lr.src"
+  first=$(awk 'NR>1 && $1+0<prev {print NR-1; exit} {prev=$1+0}' "$TMP/lr.src")
+  [ -n "$first" ] && [ "$first" -gt 24 ] || { echo "e2e: the late-reordering fixture reorders from packet '${first:-never}', expected past the first 24" >&2; exit 1; }
+  sort -n "$TMP/lr.src" > "$TMP/lr.want"
+  rm -rf "$TMP/lr.full" "$TMP/lr.od"; mkdir "$TMP/lr.od"
+  "$MKVGO" to-hls "$TMP/$src" -o "$TMP/lr.full" -segment 2 >/dev/null
+  n=$(ls "$TMP/lr.full" | grep -c '^seg')
+  "$MKVGO" hls-segment "$TMP/$src" init -o "$TMP/lr.od/init.mp4" -segment 2 >/dev/null
+  i=1; while [ "$i" -le "$n" ]; do
+    "$MKVGO" hls-segment "$TMP/$src" "$i" -o "$TMP/lr.od/$(printf 'seg%05d.m4s' "$i")" -segment 2 >/dev/null; i=$((i+1))
+  done
+  for k in full od; do
+    cat "$TMP/lr.$k/init.mp4" "$TMP/lr.$k"/seg*.m4s > "$TMP/lr_$k.mp4"
+    pts_of "$TMP/lr_$k.mp4" | sort -n > "$TMP/lr.got"
+    cmp -s "$TMP/lr.want" "$TMP/lr.got" || {
+      echo "e2e: $src ($k): $(sort -u "$TMP/lr.got" | wc -l) distinct presentation times for $(wc -l < "$TMP/lr.want") frames, $(diff "$TMP/lr.want" "$TMP/lr.got" | grep -c '^>') differ from the source" >&2; exit 1; }
+  done
+  echo "  late reordering OK: $src, $(wc -l < "$TMP/lr.want") frames over $n segments, reordering from packet $first"
+done
+
 echo "e2e: ALL PASS"
