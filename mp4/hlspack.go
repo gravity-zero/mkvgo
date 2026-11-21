@@ -257,7 +257,7 @@ func mp4PlanSamples(ctx context.Context, ps *packagingSource, media []*outTrack)
 		if grid == 0 {
 			grid = mp4FrameGridTS(ps, t, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid, nil, declaredReorderDepth(&t.mkv))
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ptsTS, t.frameDurMs, ft.timescale, grid, nil, declaredReorderDepth(&t.mkv), t.spec.video)
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}

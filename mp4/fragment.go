@@ -356,7 +356,7 @@ func measuredShiftTS(ptsTS []int64) int64 {
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
 func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
-	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS, nil, 0)
+	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS, nil, 0, false)
 }
 
 // fillFragTimingTS is fillFragTiming with, when ptsTS is not nil, each
@@ -368,8 +368,9 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 //
 // bounds, when not nil, are the segment starts (ms): grid-timed audio is then
 // timed window by window (gridTimeWindows), as an on-demand plan times it.
-// reorder is the track's declared reordering depth (compositionShiftTS).
-func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64, bounds []int64, reorder int) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
+// reorder is the track's declared reordering depth (compositionShiftTS); video says the track is the video one,
+// whose windows a frame tied with a boundary keyframe stays out of (tiedBeforeKey).
+func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64, bounds []int64, reorder int, video bool) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
 	n := len(samples)
 	if n == 0 {
 		return 0, false, 0, 0
@@ -456,7 +457,11 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		dts[i] = pts(i)
 	}
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
-	strictlyIncreasing(dts)
+	if bounds == nil {
+		strictlyIncreasing(dts)
+	} else {
+		windowedIncreasing(samples, dts, bounds, video)
+	}
 	base := dts[0]
 	for i := range samples {
 		samples[i].dtsTS = dts[i] - base
@@ -499,6 +504,33 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		totalTS += samples[i].durTS
 	}
 	return offsetMs, hasCTS, totalTS, ctsShiftTS
+}
+
+// windowedIncreasing is strictlyIncreasing window by window, as an on-demand plan times them (timeSegmentWindow): a
+// tie inside a window moves the later sample one tick on, and a window whose last times reach the next window's first
+// ends before it (endBefore), so no window's times depend on the one before it.
+func windowedIncreasing(samples []fragSample, dts []int64, bounds []int64, video bool) {
+	start := 0
+	for k := 1; k <= len(bounds) && start < len(dts); k++ {
+		end := len(dts)
+		if k < len(bounds) {
+			end = windowEndIndex(samples, start, bounds[k], video)
+		}
+		strictlyIncreasing(dts[start:end])
+		if end < len(dts) {
+			endBefore(dts[start:end], dts[end])
+		}
+		start = end
+	}
+}
+
+// endBefore pulls a window's last decode times back until they end before limit, the next window's first: two samples
+// share a timestamp across the boundary.
+func endBefore(dts []int64, limit int64) {
+	for x := len(dts) - 1; x >= 0 && dts[x] >= limit; x-- {
+		limit--
+		dts[x] = limit
+	}
 }
 
 // strictlyIncreasing makes sorted decode times strictly increasing: a time equal to the one before - two blocks

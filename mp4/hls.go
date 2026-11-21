@@ -377,7 +377,7 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 		if grid == 0 && ps.mv != nil {
 			grid = mp4FrameGridTS(ps, ft.outTrack, ft.timescale)
 		}
-		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid, gridBounds, declaredReorderDepth(&ft.outTrack.mkv))
+		off, hasCTS, totalTS, ctsShift := fillFragTimingTS(ft.samples, ft.ptsTS, ft.outTrack.frameDurMs, ft.timescale, grid, gridBounds, declaredReorderDepth(&ft.outTrack.mkv), ft.outTrack.spec.video)
 		ft.ptsTS = nil
 		ft.offsetMs, ft.hasCTS, ft.durMediaTS = off, hasCTS, totalTS
 		ft.ctsShiftTS = ctsShift
@@ -862,13 +862,10 @@ func audioIndex(fts []*fragTrack, i int) int {
 }
 
 // segmentWindow returns track i's cursor window for boundary k, advancing the
-// cursor: the samples from the cursor to the first one at/past segEnd.
+// cursor: the samples from the cursor to the first one at/past segEnd (windowEndIndex).
 func segmentWindow(ft *fragTrack, cursor *int, segStart, segEnd int64) trackSegment {
 	start := *cursor
-	j := start
-	for j < len(ft.samples) && ft.samples[j].blockPtsMs < segEnd {
-		j++
-	}
+	j := windowEndIndex(ft.samples, start, segEnd, ft.outTrack.spec.video)
 	*cursor = j
 	seg := trackSegment{
 		trackID: ft.outTrack.mp4ID,
@@ -1494,4 +1491,14 @@ func refusePackagedSource(outputDir string, sources ...string) error {
 		}
 	}
 	return nil
+}
+
+// windowEndIndex is where the window opening at start ends: the first sample at or past segEnd, a video frame tied
+// with the boundary keyframe excepted (tiedBeforeKey).
+func windowEndIndex(samples []fragSample, start int, segEnd int64, video bool) int {
+	j := start
+	for j < len(samples) && (samples[j].blockPtsMs < segEnd || tiedBeforeKey(video, samples[j].sync, samples[j].blockPtsMs, segEnd)) {
+		j++
+	}
+	return j
 }

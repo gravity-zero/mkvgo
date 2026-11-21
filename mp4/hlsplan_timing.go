@@ -170,6 +170,9 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64, span g
 	}
 	sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
 	strictlyIncreasing(dts)
+	if nextPts >= 0 && !window[len(window)-1].cut {
+		endBefore(dts, scale(nextPts)) // the full pass's windowedIncreasing
+	}
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
 		window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS) // signed, as fillFragTiming leaves it

@@ -279,8 +279,9 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 			}
 			continue
 		}
+		video := p.tracks[ti].ft.outTrack.spec.video
 		if !started[ti] {
-			if b.BlockTimecode < segStart {
+			if b.BlockTimecode < segStart || (n > 0 && tiedBeforeKey(video, b.Keyframe, b.BlockTimecode, segStart)) {
 				continue // interleaved leftovers of the previous window
 			}
 			started[ti] = true
@@ -294,7 +295,7 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 		if !pt.ft.outTrack.spec.video {
 			p.learnAhead(br.Pos(), b)
 		}
-		if b.BlockTimecode >= segEnd {
+		if b.BlockTimecode >= segEnd && !tiedBeforeKey(video, b.Keyframe, b.BlockTimecode, segEnd) {
 			if needKey[ti] && len(windows[ti]) == 0 {
 				if b.Keyframe {
 					k, err := sampleOf(pt, b, structure && (!keepAudio || pt.ft.outTrack.spec.video))
@@ -350,6 +351,13 @@ func (p *HLSPlan) walkWindow(ctx context.Context, n int, segStart, segEnd int64,
 	}
 	rec.commit()
 	return windows, nextPts, inPlace, nil
+}
+
+// tiedBeforeKey reports a video frame that is no keyframe and is stamped exactly on a segment boundary: two frames
+// share that timestamp, and this one decodes in the GOP before the keyframe that makes the boundary. It stays in the
+// window it decodes in, so every segment opens on its keyframe.
+func tiedBeforeKey(video, keyframe bool, ms, bound int64) bool {
+	return video && !keyframe && ms == bound
 }
 
 // reorderLookahead bounds the blocks a peek reads past a boundary (no codec reorders deeper).
@@ -600,7 +608,7 @@ func (p *HLSPlan) walkScatteredWindow(ctx context.Context, src io.ReadSeeker, n 
 			if !pt.ft.outTrack.spec.video {
 				p.learnAhead(br.Pos(), b)
 			}
-			if b.BlockTimecode >= segEnd {
+			if b.BlockTimecode >= segEnd && !tiedBeforeKey(pt.ft.outTrack.spec.video, b.Keyframe, b.BlockTimecode, segEnd) {
 				crossed = true
 				peek = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
 				p.learnSegPos(n+1, br.Pos())

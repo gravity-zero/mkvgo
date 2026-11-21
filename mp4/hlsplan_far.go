@@ -464,10 +464,11 @@ func (p *HLSPlan) farTrackIn(ctx context.Context, src io.ReadSeeker, i int, rg t
 			}
 			continue
 		}
-		if (b.BlockTimecode < segStart && len(out) == 0) || (b.BlockTimecode <= lastMs && b.DataOffset <= lastOff) {
+		video := pt.ft.outTrack.spec.video
+		if (len(out) == 0 && (b.BlockTimecode < segStart || (n > 0 && tiedBeforeKey(video, b.Keyframe, b.BlockTimecode, segStart)))) || (b.BlockTimecode <= lastMs && b.DataOffset <= lastOff) {
 			continue // before the window, or a block the walk already holds (a later block may carry an earlier time: reordered video)
 		}
-		if b.BlockTimecode >= segEnd {
+		if b.BlockTimecode >= segEnd && !tiedBeforeKey(video, b.Keyframe, b.BlockTimecode, segEnd) {
 			crossed = true
 			peek = startPeek(b.Timecode, pt.ft.outTrack.spec.video)
 			p.learnSegPos(n+1, pos) // the next window opens here at the latest: a linear walk of it must not start past this block
