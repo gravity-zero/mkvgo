@@ -1,0 +1,32 @@
+name: Apple timestamps
+
+# What Apple's media stack reads in mkvgo's HLS output: no Linux tool answers for it, so a macOS runner does.
+on:
+  push:
+    paths:
+      - 'mp4/**'
+      - 'scripts/apple-*'
+      - '.github/workflows/apple.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  avfoundation:
+    runs-on: macos-latest
+    env:
+      GOTOOLCHAIN: local
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: AVFoundation reads mkvgo's HLS output
+        run: sh scripts/apple-check.sh
