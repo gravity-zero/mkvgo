@@ -491,8 +491,8 @@ func (p *GrowingHLSPlan) walkCluster(ctx context.Context, src mkv.ReadSeekCloser
 }
 
 // extendLeadLocked folds one video block into the composition-shift prefix: the
-// opening frames, up to the second keyframe (the first GOP shows the whole reorder
-// pattern) or compositionPrefix, whichever comes first. The shift is settled before
+// opening frames, up to compositionPrefix (a first GOP of a frame or two shows no
+// reordering, so the prefix does not stop on it). The shift is settled before
 // a single output is published, because the edit list it produces lives in the INIT
 // - a byte a player fetches once and caches, and which therefore may never change
 // under it mid-session.
@@ -500,7 +500,7 @@ func (p *GrowingHLSPlan) extendLeadLocked(b mkv.Block) {
 	if p.leadDone {
 		return
 	}
-	if (len(p.leadPts) > 0 && b.Keyframe) || len(p.leadPts) >= compositionPrefix {
+	if len(p.leadPts) >= compositionPrefix {
 		p.settleLeadLocked()
 		return
 	}

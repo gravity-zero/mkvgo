@@ -28,6 +28,39 @@ func TestCompositionPrefixLen(t *testing.T) {
 	}
 }
 
+// ordered is n frames in presentation order, step apart.
+func ordered(step int64, n int) []int64 {
+	out := make([]int64, n)
+	for i := range out {
+		out[i] = int64(i) * step
+	}
+	return out
+}
+
+// loneKeyThenReorder is a keyframe alone, a second keyframe, then groups decoded P B B (one frame of reordering).
+func loneKeyThenReorder(step int64, n int) []int64 {
+	out := []int64{0, step}
+	for k := int64(2); len(out) < n; k += 3 {
+		out = append(out, (k+2)*step, k*step, (k+1)*step)
+	}
+	return out[:n]
+}
+
+func loneKeySync(n int) []bool {
+	s := make([]bool, n)
+	s[0], s[1] = true, true
+	return s
+}
+
+// pyramid is a keyframe then groups of four decoded P B b b, a B-pyramid two frames deep.
+func pyramid(step int64, n int) []int64 {
+	out := []int64{0}
+	for k := int64(1); len(out) < n; k += 4 {
+		out = append(out, (k+3)*step, (k+1)*step, k*step, (k+2)*step)
+	}
+	return out[:n]
+}
+
 func TestCompositionShiftTS(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -51,6 +84,15 @@ func TestCompositionShiftTS(t *testing.T) {
 		// The frame at 84 decodes later: its hole is not a frame duration.
 		{"declared depth, a hole in the prefix", []int64{0, 126, 42}, []bool{true, false, false}, 2, 84},
 		{"declared depth, native ticks", []int64{0, 3754, 7508, 11261}, []bool{true, false, false, false}, 2, 7508},
+		// A first GOP of one frame shows nothing: the frames after it are measured (two keyframes, then I P B B).
+		{"one-frame first GOP", loneKeyThenReorder(42, 30), loneKeySync(30), 0, 42},
+		// Past compositionPrefix nothing is read: a reordering that starts there is not measured.
+		{"reordering past the prefix", append(ordered(42, 26), 1176, 1092, 1134), make([]bool, 29), 0, 0},
+		// A first GOP longer than the prefix keeps what its 24 frames measured, as before (one frame over the two
+		// the pyramid needs: the prefix ends mid-group).
+		{"long first GOP keeps the prefix measure", pyramid(42, 28), append([]bool{true}, make([]bool, 27)...), 0, 126},
+		// The same frames behind a one-frame first GOP are measured over their complete part: exactly two frames.
+		{"complete part is not inflated", append([]int64{-42}, pyramid(42, 28)...), append([]bool{true, true}, make([]bool, 27)...), 0, 84},
 	}
 	for _, tc := range cases {
 		if got := compositionShiftTS(tc.pts, tc.sync, tc.reorder); got != tc.want {
@@ -59,15 +101,18 @@ func TestCompositionShiftTS(t *testing.T) {
 	}
 }
 
-// A stream whose first GOP shows one level of reordering but which later reorders deeper, with no parameter set
+// A stream whose opening frames show one level of reordering but which later reorders deeper, with no parameter set
 // to announce it: the late frame's offset goes negative (trun version 1 is signed) and every frame keeps the
 // presentation time the source gives it. Clamped to zero, it took its neighbour's and a player dropped it.
 func TestFillFragTimingDeeperReorderKeepsPTS(t *testing.T) {
-	// First GOP: I P B B (shift = 42, one frame). The second GOP reorders two frames deep.
-	samples := []fragSample{
-		{ptsMs: 0, sync: true}, {ptsMs: 126}, {ptsMs: 42}, {ptsMs: 84},
-		{ptsMs: 168, sync: true}, {ptsMs: 336}, {ptsMs: 252}, {ptsMs: 210},
-		{ptsMs: 294}, {ptsMs: 378}, {ptsMs: 420}, {ptsMs: 462},
+	// First GOP: I P B B (shift = 42, one frame), then frames in order past the measured prefix, then a group
+	// reordered two frames deep.
+	samples := []fragSample{{ptsMs: 0, sync: true}, {ptsMs: 126}, {ptsMs: 42}, {ptsMs: 84}}
+	for i := 4; i < 30; i++ {
+		samples = append(samples, fragSample{ptsMs: int64(i) * 42, sync: i == 4})
+	}
+	for _, k := range []int64{33, 31, 30, 32, 34, 35} {
+		samples = append(samples, fragSample{ptsMs: k * 42})
 	}
 	_, hasCTS, _, shift := fillFragTiming(samples, 42, movieTimescale, 0)
 	if shift != 42 {

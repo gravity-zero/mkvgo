@@ -322,8 +322,8 @@ func (p *HLSPlan) synthesizeVideoCues(ctx context.Context, srcPath string, fs *m
 // the opening frames alone, HEADER-ONLY: block headers carry the timecodes and the
 // keyframe flag, and no sample byte is read. The full pass measures the same shift
 // over the same prefix of the same track (compositionShiftTS), so the two inits
-// stay byte-identical while this one costs a handful of headers, not a GOP of
-// video.
+// stay byte-identical while this one costs compositionPrefix headers, not a GOP
+// of video.
 func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
 	pt := p.tracks[p.videoIndex()]
 	var (
@@ -331,9 +331,6 @@ func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
 		sync []bool
 	)
 	err := p.walkVideoHeadersOnly(ctx, func(b mkv.Block) (bool, error) {
-		if len(pts) > 0 && b.Keyframe {
-			return false, nil // the GOP closed: the reorder pattern is fully in hand
-		}
 		pts = append(pts, b.Timecode)
 		sync = append(sync, b.Keyframe)
 		return len(pts) < compositionPrefix, nil

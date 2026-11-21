@@ -319,15 +319,35 @@ func compositionPrefixLen(sync []bool) int {
 // reorder is the depth the track's parameter sets declare (declaredReorderDepth):
 // a stream may open on frames in presentation order and reorder only later, so
 // the shift is never less than that many frames of the prefix's frame duration.
+//
+// The first GOP may be a frame or two long and show nothing: the frames past it,
+// up to compositionPrefix, are measured too, over the part of them that is
+// complete (completePrefixLen), so a short first GOP hides no reordering.
 func compositionShiftTS(ptsTS []int64, sync []bool, reorder int) int64 {
-	n := compositionPrefixLen(sync)
-	if n > len(ptsTS) {
-		n = len(ptsTS)
+	if len(ptsTS) > compositionPrefix {
+		ptsTS = ptsTS[:compositionPrefix]
 	}
-	if n < 2 {
-		return 0
+	n := min(compositionPrefixLen(sync), len(ptsTS))
+	shift := measuredShiftTS(ptsTS[:n])
+	shift = max(shift, measuredShiftTS(ptsTS[:completePrefixLen(ptsTS)]))
+	return max(shift, int64(reorder)*prefixFrameTS(ptsTS))
+}
+
+// completePrefixLen is how many leading samples (decode order) are sure to hold every frame presented before their
+// last: the samples before the last one that presents later than all before it. The frames decoded after such a
+// sample present after the ones before it, so nothing is missing from that part and its measure is exact; past it, a
+// frame not read yet would be counted as a reordering. A slice shorter than compositionPrefix is the whole track.
+func completePrefixLen(ptsTS []int64) int {
+	if len(ptsTS) < compositionPrefix {
+		return len(ptsTS)
 	}
-	return max(measuredShiftTS(ptsTS[:n]), int64(reorder)*prefixFrameTS(ptsTS[:n]))
+	last, top := 0, int64(0)
+	for i, pts := range ptsTS {
+		if i == 0 || pts > top {
+			last, top = i, pts
+		}
+	}
+	return last
 }
 
 // measuredShiftTS is max(DTS - PTS) over the samples given, DTS being their sorted PTS.
