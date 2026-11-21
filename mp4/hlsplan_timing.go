@@ -168,6 +168,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64, span g
 	for x := range window {
 		dts[x] = scale(window[x].ptsMs)
 	}
+	stray := strayTimestamps(dts) // the full pass's windowedStrays
 	sort.Slice(dts, func(a, b int) bool { return dts[a] < dts[b] })
 	strictlyIncreasing(dts)
 	if nextPts >= 0 && !window[len(window)-1].cut {
@@ -175,7 +176,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64, span g
 	}
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
-		window[x].ctsTS = int32(compositionOffsetTS(scale(window[x].ptsMs), dts[x], pt.ft.ctsShiftTS, pt.ft.reorderReachTS)) // fillFragTiming's rule
+		window[x].ctsTS = int32(compositionOffsetTS(scale(window[x].ptsMs), dts[x], pt.ft.ctsShiftTS, stray != nil && stray[x])) // fillFragTiming's rule
 	}
 	for x := 0; x < len(window)-1; x++ {
 		window[x].durTS = dts[x+1] - dts[x]

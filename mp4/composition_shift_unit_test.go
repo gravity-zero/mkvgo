@@ -214,26 +214,61 @@ func FuzzDeclaredReorderDepth(f *testing.F) {
 	})
 }
 
-// A frame stamped further back than reordering reaches carries a broken timestamp: its offset is 0, not seconds below.
-func TestCompositionOffsetBoundedByReorderReach(t *testing.T) {
-	const shift, reach = 84, 16 * 42
-	cases := []struct {
-		name     string
-		pts, dts int64
-		want     int64
-	}{
-		{"in order", 1000, 1000, 84},
-		{"reordered within the shift", 958, 1000, 42},
-		{"reordered deeper than the shift", 874, 1000, -42},
-		{"as deep as reordering goes", 1000 - reach, 1000, 84 - reach},
-		{"stamped seconds back", 1000 - 2502, 1000, 0},
+// A sample that presents before more than maxReorderDepth samples decoded ahead of it carries a broken timestamp: it is
+// flagged and takes the latest time seen. A frame reordered across a long frame duration is not one - what counts is
+// how many frames it is reordered across, not how long they last.
+func TestStrayTimestamps(t *testing.T) {
+	ordered := func(n int) []int64 {
+		out := make([]int64, n)
+		for i := range out {
+			out[i] = int64(i) * 40
+		}
+		return out
 	}
-	for _, tc := range cases {
-		if got := compositionOffsetTS(tc.pts, tc.dts, shift, reach); got != tc.want {
-			t.Errorf("%s: compositionOffsetTS = %d, want %d", tc.name, got, tc.want)
+	if got := strayTimestamps(ordered(100)); got != nil {
+		t.Errorf("frames in order: flagged %v", got)
+	}
+
+	late := append(ordered(60), 100) // decoded last, stamped 2.3 s back: 57 frames decoded ahead of it present later
+	stray := strayTimestamps(late)
+	if stray == nil || !stray[60] || late[60] != 59*40 {
+		t.Errorf("stray stamp: flagged=%v, rewritten to %d, want flagged and %d", stray != nil && stray[60], late[60], 59*40)
+	}
+	for i := 0; i < 60; i++ {
+		if stray[i] || late[i] != int64(i)*40 {
+			t.Fatalf("sample %d was touched: flagged=%v time=%d", i, stray[i], late[i])
 		}
 	}
-	if got := compositionOffsetTS(900, 1000, 0, 0); got != 0 {
-		t.Errorf("no frame duration known: compositionOffsetTS = %d, want 0", got)
+
+	deep := ordered(40) // the deepest reordering there is: one frame presenting before the 16 decoded ahead of it
+	deep = append(deep, 2000, 2040, 2080, 2120, 2160, 2200, 2240, 2280, 2320, 2360, 2400, 2440, 2480, 2520, 2560, 2600, 1960)
+	if got := strayTimestamps(deep); got != nil {
+		t.Errorf("16 frames of reordering: flagged %v", got)
+	}
+
+	gap := append(ordered(30), 5000, 3000) // an anchor after a long frame, then the B-frame two seconds before it
+	if got := strayTimestamps(gap); got != nil {
+		t.Errorf("one frame of reordering across a long frame duration: flagged %v", got)
+	}
+}
+
+// A B-frame across a long frame duration keeps its presentation time, however far before its anchor it presents.
+func TestFillFragTimingLongFrameReorderKeepsPTS(t *testing.T) {
+	var samples []fragSample
+	for i := 0; i < 30; i++ {
+		samples = append(samples, fragSample{ptsMs: int64(i) * 40, sync: i == 0})
+	}
+	samples = append(samples, fragSample{ptsMs: 5000}, fragSample{ptsMs: 3000}, fragSample{ptsMs: 5040})
+	_, _, _, shift := fillFragTiming(samples, 40, movieTimescale, 0)
+	seen := map[int64]bool{}
+	for i, s := range samples {
+		pts := s.dtsTS + int64(s.ctsTS) - shift
+		if pts != s.ptsMs {
+			t.Errorf("sample %d presents at %d, want %d", i, pts, s.ptsMs)
+		}
+		if seen[pts] {
+			t.Errorf("sample %d shares the presentation time %d", i, pts)
+		}
+		seen[pts] = true
 	}
 }

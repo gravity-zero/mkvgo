@@ -333,25 +333,52 @@ func compositionShiftTS(ptsTS []int64, sync []bool, reorder int) int64 {
 	return max(shift, int64(reorder)*prefixFrameTS(ptsTS))
 }
 
-// reorderReachTS is the furthest a frame can present before it decodes through reordering alone: maxReorderDepth
-// frames of the prefix's frame duration. 0 when the prefix shows no frame duration.
-func reorderReachTS(ptsTS []int64) int64 {
-	if len(ptsTS) > compositionPrefix {
-		ptsTS = ptsTS[:compositionPrefix]
+// strayTimestamps rewrites, in decode order, the presentation times decode times are derived from, and reports the
+// samples it rewrote; nil when it rewrote none. A sample that presents before more than maxReorderDepth samples
+// decoded ahead of it is not reordered - no codec reorders that deep - its timestamp is broken (a muxer's stray
+// stamp, seconds back at the end of a GOP). It takes the latest time seen so far, so it keeps its place in decode
+// order and moves no other sample's decode time; it then presents at its decode time (compositionOffsetTS).
+func strayTimestamps(pts []int64) []bool {
+	var (
+		top   [maxReorderDepth + 1]int64 // the latest presentation times seen, ascending
+		n     int
+		stray []bool
+	)
+	for i, p := range pts {
+		if n == len(top) && p < top[0] {
+			if stray == nil {
+				stray = make([]bool, len(pts))
+			}
+			stray[i] = true
+			pts[i] = top[n-1]
+			continue
+		}
+		if n < len(top) {
+			top[n] = p
+			n++
+		} else if p > top[0] {
+			top[0] = p
+		} else {
+			continue
+		}
+		for k := n - 1; k > 0 && top[k] < top[k-1]; k-- { // one insertion step keeps top sorted
+			top[k], top[k-1] = top[k-1], top[k]
+		}
+		for k := 0; k < n-1 && top[k] > top[k+1]; k++ {
+			top[k], top[k+1] = top[k+1], top[k]
+		}
 	}
-	return maxReorderDepth * prefixFrameTS(ptsTS)
+	return stray
 }
 
 // compositionOffsetTS is a sample's composition offset: negative when the stream reorders deeper than the shift
-// covers, so the frame keeps its own presentation time. A frame stamped further back than any reordering reaches
-// carries a broken timestamp, not a reordered one: it presents at its decode time, offset 0, and a reader that pulls
-// its decode clock back by the deepest negative offset is not moved by seconds for one such frame.
-func compositionOffsetTS(pts, dts, shift, reach int64) int64 {
-	off := pts - dts + shift
-	if off < 0 && dts-pts > reach {
+// covers, so the frame keeps its own presentation time; 0 for a stray timestamp (strayTimestamps), which a reader
+// that pulls its decode clock back by the deepest negative offset would otherwise follow by seconds.
+func compositionOffsetTS(pts, dts, shift int64, stray bool) int64 {
+	if stray {
 		return 0
 	}
-	return off
+	return pts - dts + shift
 }
 
 // completePrefixLen is how many leading samples (decode order) are sure to hold every frame presented before their
@@ -497,6 +524,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 	for i := range samples {
 		dts[i] = pts(i)
 	}
+	stray := windowedStrays(samples, dts, bounds, video)
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
 	if bounds == nil {
 		strictlyIncreasing(dts)
@@ -517,7 +545,6 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		syncs = append(syncs, samples[i].sync)
 	}
 	ctsShiftTS = compositionShiftTS(prefix, syncs, reorder)
-	reach := reorderReachTS(prefix)
 	for i := 0; i < n-1; i++ {
 		samples[i].durTS = dts[i+1] - dts[i]
 	}
@@ -538,7 +565,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		// sets announce (they changed mid-file, or state nothing) lands below
 		// zero here: the offset stays signed (trun version 1), so the frame keeps
 		// its own presentation time instead of taking its neighbour's.
-		off := compositionOffsetTS(pts(i), dts[i], ctsShiftTS, reach)
+		off := compositionOffsetTS(pts(i), dts[i], ctsShiftTS, stray != nil && stray[i])
 		samples[i].ctsTS = int32(off)
 		if off != 0 {
 			hasCTS = true
@@ -546,6 +573,30 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		totalTS += samples[i].durTS
 	}
 	return offsetMs, hasCTS, totalTS, ctsShiftTS
+}
+
+// windowedStrays is strayTimestamps window by window, as an on-demand plan sees them (timeSegmentWindow): the whole
+// track is one window when bounds is nil. pts is rewritten in place.
+func windowedStrays(samples []fragSample, pts []int64, bounds []int64, video bool) []bool {
+	if bounds == nil {
+		return strayTimestamps(pts)
+	}
+	var stray []bool
+	start := 0
+	for k := 1; k <= len(bounds) && start < len(pts); k++ {
+		end := len(pts)
+		if k < len(bounds) {
+			end = windowEndIndex(samples, start, bounds[k], video)
+		}
+		if w := strayTimestamps(pts[start:end]); w != nil {
+			if stray == nil {
+				stray = make([]bool, len(pts))
+			}
+			copy(stray[start:end], w)
+		}
+		start = end
+	}
+	return stray
 }
 
 // windowedIncreasing is strictlyIncreasing window by window, as an on-demand plan times them (timeSegmentWindow): a

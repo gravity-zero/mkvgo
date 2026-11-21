@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,9 +96,15 @@ func TestSegmentOpensOnItsKeyframeWhenAFrameSharesItsTimestamp(t *testing.T) {
 	}
 }
 
-// The last frame of a GOP is stamped two seconds back, as a muxer's stray timestamp: both paths give it the same
-// times, and its composition offset is not written seconds below zero.
+// The last frame of a GOP is stamped two seconds back, as a muxer's stray timestamp, inside its own segment or in the
+// span of the segment before: both paths give every sample the same times, and no composition offset goes below zero.
 func TestStrayTimestampSameOnBothPaths(t *testing.T) {
+	for _, stamp := range []int64{2010, 1970} {
+		t.Run(fmt.Sprintf("stamped %d", stamp), func(t *testing.T) { strayTimestampParity(t, stamp) })
+	}
+}
+
+func strayTimestampParity(t *testing.T, stamp int64) {
 	w, h := uint32(320), uint32(240)
 	path := filepath.Join(t.TempDir(), "in.mkv")
 	f, err := os.Create(path)
@@ -119,7 +126,7 @@ func TestStrayTimestampSameOnBothPaths(t *testing.T) {
 		for i := g * 25; i < g*25+25; i++ {
 			pts := int64(i) * 40
 			if i == 99 {
-				pts = 2010 // the frame before the keyframe at 4 s, stamped two seconds back, in its own segment
+				pts = stamp // the frame before the keyframe at 4 s
 			}
 			blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: pts, Keyframe: i%25 == 0, Data: []byte{0, 0, 0, 1, 0x41, byte(i)}})
 		}
@@ -154,8 +161,8 @@ func TestStrayTimestampSameOnBothPaths(t *testing.T) {
 		if !bytes.Equal(od, full) {
 			t.Errorf("segment %d: on demand differs from the full pass (%d vs %d bytes)", n, len(od), len(full))
 		}
-		if low := lowestTrunOffset(full); low < -16*40 {
-			t.Errorf("segment %d: a composition offset of %d ms, further back than reordering reaches", n, low)
+		if low := lowestTrunOffset(full); low < 0 {
+			t.Errorf("segment %d: a composition offset of %d ms for a stray timestamp", n, low)
 		}
 	}
 }

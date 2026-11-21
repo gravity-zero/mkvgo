@@ -527,7 +527,6 @@ func (p *GrowingHLSPlan) settleLeadLocked() {
 		ts[i] = scale(ms)
 	}
 	pt.ft.ctsShiftTS = compositionShiftTS(ts, p.leadSync, declaredReorderDepth(&pt.ft.outTrack.mkv))
-	pt.ft.reorderReachTS = reorderReachTS(ts)
 }
 
 // extendHeadLocked folds one block into head resolution: the track's first

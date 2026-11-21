@@ -34,9 +34,9 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   a frame is written negative (`trun` version 1) where it was clamped to zero
   and the frame took its neighbour's time. A reader that pulls its decode
   clock back for a negative offset presents that video later by the deepest
-  one (two frames on the files measured). A frame stamped further back
-  than reordering reaches (16 frames) carries a broken timestamp and keeps
-  offset 0.
+  one (two frames on the files measured). A frame that presents before
+  more than 16 frames decoded ahead of it carries a broken timestamp, not a
+  reordered one: it presents at its decode time and moves no other frame's.
 - HLS/DASH from a video where a frame shares the timestamp of the keyframe
   after it: the segment opened on that frame instead of its keyframe, and
   served on demand it lost the frames stored between the two. Such a frame
