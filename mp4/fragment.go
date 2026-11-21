@@ -350,7 +350,7 @@ func measuredShiftTS(ptsTS []int64) int64 {
 // offset (in the track's media timescale), from the presentation timestamps  -
 // the same reconstruction the progressive path uses (sample.go reconstructTiming):
 // DTS is the sorted PTS in decode order, durations are the diffs, ctts = PTS - DTS
-// plus the track's composition shift, which keeps every offset non-negative (see
+// plus the track's composition shift, which keeps the offsets non-negative for the reordering the stream announces (see
 // compositionShiftTS; the init's edit list takes the shift back out, so the
 // presentation still starts where the source does).
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
@@ -461,7 +461,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 	for i := range samples {
 		samples[i].dtsTS = dts[i] - base
 	}
-	// The shift that keeps every composition offset non-negative, measured over
+	// The shift that keeps the composition offsets non-negative, measured over
 	// the SAME bounded prefix the on-demand plan measures it over, so both derive
 	// the same init.
 	prefix := make([]int64, 0, compositionPrefix)
@@ -487,15 +487,11 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		if samples[i].ptsMs < offsetMs {
 			offsetMs = samples[i].ptsMs
 		}
+		// A stream that reorders deeper than its opening frames and its parameter
+		// sets announce (they changed mid-file, or state nothing) lands below
+		// zero here: the offset stays signed (trun version 1), so the frame keeps
+		// its own presentation time instead of taking its neighbour's.
 		off := pts(i) - dts[i] + ctsShiftTS
-		if off < 0 {
-			// Only a stream that reorders deeper later than it does in its first
-			// GOPs can land here. Clamping keeps the offsets non-negative - the
-			// invariant the whole shift exists to hold - at the price of that one
-			// sample presenting at its decode time, a sub-frame error, instead of
-			// letting a reader re-shift the ENTIRE presentation.
-			off = 0
-		}
 		samples[i].ctsTS = int32(off)
 		if off != 0 {
 			hasCTS = true

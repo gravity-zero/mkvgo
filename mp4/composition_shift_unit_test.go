@@ -1,7 +1,7 @@
 package mp4
 
 // The branches the end-to-end tests never reach: the prefix rule's edges, and the
-// clamp that catches a stream reordering deeper than its opening GOP announced.
+// stream reordering deeper than its opening GOP announced.
 
 import (
 	"encoding/hex"
@@ -59,18 +59,15 @@ func TestCompositionShiftTS(t *testing.T) {
 	}
 }
 
-// TestFillFragTimingClampsDeeperReorder covers the safety branch: a stream whose
-// first GOP shows one level of reordering but which later reorders deeper than the
-// shift measured from it. The offsets must STILL come out non-negative - a single
-// sample presenting at its decode time is a sub-frame error, whereas one negative
-// offset would have a reader re-time the entire presentation.
-func TestFillFragTimingClampsDeeperReorder(t *testing.T) {
-	// First GOP: I P B B (shift = 42, one frame). Then a frame thrown far further
-	// ahead in decode order than anything that first GOP justified.
+// A stream whose first GOP shows one level of reordering but which later reorders deeper, with no parameter set
+// to announce it: the late frame's offset goes negative (trun version 1 is signed) and every frame keeps the
+// presentation time the source gives it. Clamped to zero, it took its neighbour's and a player dropped it.
+func TestFillFragTimingDeeperReorderKeepsPTS(t *testing.T) {
+	// First GOP: I P B B (shift = 42, one frame). The second GOP reorders two frames deep.
 	samples := []fragSample{
 		{ptsMs: 0, sync: true}, {ptsMs: 126}, {ptsMs: 42}, {ptsMs: 84},
-		{ptsMs: 168, sync: true}, {ptsMs: 500}, {ptsMs: 210}, {ptsMs: 252},
-		{ptsMs: 294}, {ptsMs: 336}, {ptsMs: 378}, {ptsMs: 420},
+		{ptsMs: 168, sync: true}, {ptsMs: 336}, {ptsMs: 252}, {ptsMs: 210},
+		{ptsMs: 294}, {ptsMs: 378}, {ptsMs: 420}, {ptsMs: 462},
 	}
 	_, hasCTS, _, shift := fillFragTiming(samples, 42, movieTimescale, 0)
 	if shift != 42 {
@@ -79,10 +76,17 @@ func TestFillFragTimingClampsDeeperReorder(t *testing.T) {
 	if !hasCTS {
 		t.Fatal("hasCTS = false on a reordered track")
 	}
+	negative := 0
 	for i, s := range samples {
 		if s.ctsTS < 0 {
-			t.Errorf("sample %d kept a negative composition offset (%d): the clamp did not hold", i, s.ctsTS)
+			negative++
 		}
+		if pts := s.dtsTS + int64(s.ctsTS) - shift; pts != s.ptsMs {
+			t.Errorf("sample %d presents at %d, want %d", i, pts, s.ptsMs)
+		}
+	}
+	if negative == 0 {
+		t.Error("no offset went negative: the fixture does not reorder deeper than its first GOP")
 	}
 }
 

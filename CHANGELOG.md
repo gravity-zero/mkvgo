@@ -27,6 +27,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   reordering than its opening frames show, the init segment's edit list and
   the segments' composition offsets change together - drop cached inits and
   segments of the same source at once.
+- A video that reorders deeper than its opening frames and its parameter sets
+  announce (parameter sets that change mid-file, or state no depth) keeps
+  every frame's presentation time in HLS/DASH: the composition offset of such
+  a frame is written negative (`trun` version 1) where it was clamped to zero
+  and the frame took its neighbour's time. A reader that pulls its decode
+  clock back for a negative offset presents that video later by the deepest
+  one (two frames on the files measured).
 
 ## [0.71.2] - 2026-11-20
 

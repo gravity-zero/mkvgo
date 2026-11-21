@@ -172,11 +172,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64, span g
 	strictlyIncreasing(dts)
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
-		off := scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS
-		if off < 0 {
-			off = 0 // fillFragTiming's clamp, window-local (same rule, same bytes)
-		}
-		window[x].ctsTS = int32(off)
+		window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS) // signed, as fillFragTiming leaves it
 	}
 	for x := 0; x < len(window)-1; x++ {
 		window[x].durTS = dts[x+1] - dts[x]
