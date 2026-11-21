@@ -10,9 +10,10 @@ import (
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
-// The remux and the packagers carry only the cover art out of a source's
-// attachments: a font set stays on disk, never read. Measured through a
-// counting FS on a source whose font dwarfs its media.
+// The remux carries only the cover art out of a source's attachments, and the
+// packagers none of them (a player fetches the init before its first frame): a
+// font set stays on disk, never read. Measured through a counting FS on a
+// source whose font dwarfs its media.
 func TestRemuxAndPackagingSkipFontPayloads(t *testing.T) {
 	ctx := context.Background()
 	font := make([]byte, 4<<20)
@@ -54,8 +55,8 @@ func TestRemuxAndPackagingSkipFontPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(plan.InitSegment(), cover) {
-		t.Error("the cover art must ride on the plan's init segment")
+	if bytes.Contains(plan.InitSegment(), cover) {
+		t.Error("the cover art must stay out of the plan's init segment")
 	}
 	if tally.bytes > budget {
 		t.Errorf("PlanHLS read %d KB, the font (%d KB) was loaded", tally.bytes>>10, len(font)>>10)
@@ -70,8 +71,8 @@ func TestRemuxAndPackagingSkipFontPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(init, cover) {
-		t.Error("the cover art must ride on the packaged init segment")
+	if bytes.Contains(init, cover) {
+		t.Error("the cover art must stay out of the packaged init segment")
 	}
 	if tally.bytes > budget {
 		t.Errorf("RemuxToHLS read %d KB, the font (%d KB) was loaded", tally.bytes>>10, len(font)>>10)

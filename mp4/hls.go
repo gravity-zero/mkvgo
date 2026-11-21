@@ -399,11 +399,8 @@ func remuxToHLSInto(ctx context.Context, srcPath, outputDir string, op *Options)
 	// (every audio sample is a sync point, so the same cut applies).
 	bounds := segmentBoundaries(fts[primaryIndex(fts)].samples, segMs)
 
-	cover, err := loadCoverArt(fs, c.Attachments)
-	if err != nil {
-		return nil, err
-	}
-	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover}
+	// No cover art: a player downloads the init before its first frame and shows none of it.
+	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
 
 	var segs []segInfo
 	var rends []sfRendition

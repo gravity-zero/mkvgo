@@ -101,9 +101,9 @@ func TestPlanHLSMatchesFullPass(t *testing.T) {
 			t.Errorf("master missing %q:\n%s", want, master)
 		}
 	}
-	// The init must carry the cover art, like the full pass (byte-checked above).
-	if !bytes.Contains(plan.InitSegment(), []byte("covr")) {
-		t.Error("init segment misses the covr cover-art atom")
+	// The init carries no cover art, like the full pass (byte-checked above).
+	if bytes.Contains(plan.InitSegment(), []byte("covr")) {
+		t.Error("init segment carries the covr cover-art atom")
 	}
 
 	// Resource() is the declarative entry point: every listed name resolves,

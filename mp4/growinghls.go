@@ -212,10 +212,6 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	if err != nil {
 		return nil, err
 	}
-	cover, err := loadCoverArt(fs, c.Attachments)
-	if err != nil {
-		return nil, err
-	}
 	if len(c.Tracks) == 0 {
 		return nil, errf("%s: no Tracks element yet (the downloader must write the head before play-while-downloading can start)", shown.Path(srcPath))
 	}
@@ -239,7 +235,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 	p := &GrowingHLSPlan{
 		srcPath: srcPath, fs: fs, opts: o, segMs: segMs,
 		segStart: c.SegmentStart, segDeclaredEnd: -1,
-		meta: movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover},
+		meta: movieMeta{title: c.Info.Title, tags: globalTags(c)},
 	}
 	p.full = &HLSPlan{srcPath: srcPath, fs: fs, tcScale: c.Info.TimecodeScale, opts: o,
 		trackDurs: reader.TrackDefaultDurations(c.Tracks)}

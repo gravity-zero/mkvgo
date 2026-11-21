@@ -660,14 +660,8 @@ func planHLS(ctx context.Context, srcPath string, opts ...Options) (*HLSPlan, er
 		}
 		p.mpd = buildDASHManifest(&o, fts, p.subs, p.durs, videoBandwidth(segs, fts), chapters, trick)
 	}
-	if err := ctx.Err(); err != nil { // the cover read does not see ctx
-		return nil, err
-	}
-	cover, err := loadCoverArt(fs, c.Attachments)
-	if err != nil {
-		return nil, err
-	}
-	meta := movieMeta{title: c.Info.Title, tags: globalTags(c), cover: cover}
+	// No cover art: a player downloads the init before its first frame and shows none of it.
+	meta := movieMeta{title: c.Info.Title, tags: globalTags(c)}
 	for i, ft := range fts {
 		m := movieMeta{}
 		if ft.outTrack.spec.video {

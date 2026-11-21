@@ -9,6 +9,13 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ## [Unreleased]
 
+### Changed
+
+- The HLS/DASH init segment no longer carries the cover art (`RemuxToHLS`,
+  `PlanHLS`, `PlanGrowingHLS`, `to-hls`, `serve`, `hls-segment`): a player
+  downloads the init before its first frame, and a large cover made it several
+  megabytes. Title and tags stay; `RemuxToMP4` still carries the cover.
+
 ## [0.71.2] - 2026-11-20
 
 ### Fixed
