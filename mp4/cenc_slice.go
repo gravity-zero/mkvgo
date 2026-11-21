@@ -642,6 +642,7 @@ type hevcSPS struct {
 	ltUsed              []bool // used_by_curr_pic_lt_sps_flag
 	temporalMVP         bool
 	sao                 bool
+	numReorderPics      int // sps_max_num_reorder_pics of the highest sub-layer
 }
 
 type hevcPPS struct {
@@ -696,7 +697,9 @@ func parseHEVCSPS(r *nalReader) (uint32, *hevcSPS, bool) {
 	}
 	for i := first; i <= maxSubLayersMinus1; i++ {
 		r.ue()
-		r.ue()
+		if n := r.ue(); n <= maxReorderDepth { // sps_max_num_reorder_pics: the highest sub-layer's is the stream's
+			sps.numReorderPics = int(n)
+		}
 		r.ue()
 	}
 	log2MinCb := r.ue() + 3

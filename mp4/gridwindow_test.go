@@ -97,8 +97,8 @@ func TestGridWindowsOnTheirTimecodesAfterARunAhead(t *testing.T) {
 	bounds := []int64{0, 2000, 4000, 6000, 8000, 10000}
 
 	clean, whole := build(false), build(false)
-	fillFragTimingTS(clean, nil, 0, 44100, g, bounds)
-	fillFragTimingTS(whole, nil, 0, 44100, g, nil)
+	fillFragTimingTS(clean, nil, 0, 44100, g, bounds, 0)
+	fillFragTimingTS(whole, nil, 0, 44100, g, nil, 0)
 	for i := range clean {
 		if clean[i].dtsTS != whole[i].dtsTS || clean[i].durTS != whole[i].durTS {
 			t.Fatalf("on the grid: frame %d timed %d+%d by window, %d+%d whole", i, clean[i].dtsTS, clean[i].durTS, whole[i].dtsTS, whole[i].durTS)
@@ -106,7 +106,7 @@ func TestGridWindowsOnTheirTimecodesAfterARunAhead(t *testing.T) {
 	}
 
 	s := build(true)
-	_, _, total, _ := fillFragTimingTS(s, nil, 0, 44100, g, bounds)
+	_, _, total, _ := fillFragTimingTS(s, nil, 0, 44100, g, bounds, 0)
 	anchor := scale(s[0].blockPtsMs)
 	for i := range s {
 		if s[i].blockPtsMs < 4000 {

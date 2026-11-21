@@ -346,7 +346,7 @@ func (p *HLSPlan) probeCompositionShift(ctx context.Context) error {
 	for i, ms := range pts {
 		ts[i] = scale(ms)
 	}
-	pt.ft.ctsShiftTS = compositionShiftTS(ts, sync)
+	pt.ft.ctsShiftTS = compositionShiftTS(ts, sync, declaredReorderDepth(&pt.ft.outTrack.mkv))
 	p.opensOnKeyframe = len(sync) > 0 && sync[0]
 	return nil
 }

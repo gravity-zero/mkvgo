@@ -16,6 +16,18 @@ its series' file in [changelog/](changelog/) when a newer one ships.
   downloads the init before its first frame, and a large cover made it several
   megabytes. Title and tags stay; `RemuxToMP4` still carries the cover.
 
+### Fixed
+
+- HLS/DASH from an H.264 or HEVC video whose opening frames are in
+  presentation order and which reorders frames only later: up to a quarter of
+  the frames shared a presentation time with a neighbour, and players dropped
+  them. The composition shift now covers the reordering depth the parameter
+  sets declare (`max_num_reorder_frames`, `sps_max_num_reorder_pics`).
+  **Integration note**: for such a source, and for one that declares a deeper
+  reordering than its opening frames show, the init segment's edit list and
+  the segments' composition offsets change together - drop cached inits and
+  segments of the same source at once.
+
 ## [0.71.2] - 2026-11-20
 
 ### Fixed

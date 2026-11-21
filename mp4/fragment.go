@@ -315,7 +315,11 @@ func compositionPrefixLen(sync []bool) int {
 // arriving one to two frames late. So the offsets must be non-negative before
 // they are written, and an edit list must then take back the shift that made them
 // so (buildEdts).
-func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
+//
+// reorder is the depth the track's parameter sets declare (declaredReorderDepth):
+// a stream may open on frames in presentation order and reorder only later, so
+// the shift is never less than that many frames of the prefix's frame duration.
+func compositionShiftTS(ptsTS []int64, sync []bool, reorder int) int64 {
 	n := compositionPrefixLen(sync)
 	if n > len(ptsTS) {
 		n = len(ptsTS)
@@ -323,6 +327,12 @@ func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
 	if n < 2 {
 		return 0
 	}
+	return max(measuredShiftTS(ptsTS[:n]), int64(reorder)*prefixFrameTS(ptsTS[:n]))
+}
+
+// measuredShiftTS is max(DTS - PTS) over the samples given, DTS being their sorted PTS.
+func measuredShiftTS(ptsTS []int64) int64 {
+	n := len(ptsTS)
 	dts := make([]int64, n)
 	copy(dts, ptsTS[:n])
 	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
@@ -346,7 +356,7 @@ func compositionShiftTS(ptsTS []int64, sync []bool) int64 {
 // DTS is rebased so the track's first sample is 0; the presentation offset (the
 // smallest PTS) is returned so the caller can emit it as an edit list.
 func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
-	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS, nil)
+	return fillFragTimingTS(samples, nil, lastDurMs, mts, gridTS, nil, 0)
 }
 
 // fillFragTimingTS is fillFragTiming with, when ptsTS is not nil, each
@@ -358,7 +368,8 @@ func fillFragTiming(samples []fragSample, lastDurMs int64, mts uint32, gridTS in
 //
 // bounds, when not nil, are the segment starts (ms): grid-timed audio is then
 // timed window by window (gridTimeWindows), as an on-demand plan times it.
-func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64, bounds []int64) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
+// reorder is the track's declared reordering depth (compositionShiftTS).
+func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts uint32, gridTS int64, bounds []int64, reorder int) (offsetMs int64, hasCTS bool, totalTS int64, ctsShiftTS int64) {
 	n := len(samples)
 	if n == 0 {
 		return 0, false, 0, 0
@@ -459,7 +470,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		prefix = append(prefix, pts(i))
 		syncs = append(syncs, samples[i].sync)
 	}
-	ctsShiftTS = compositionShiftTS(prefix, syncs)
+	ctsShiftTS = compositionShiftTS(prefix, syncs, reorder)
 	for i := 0; i < n-1; i++ {
 		samples[i].durTS = dts[i+1] - dts[i]
 	}
