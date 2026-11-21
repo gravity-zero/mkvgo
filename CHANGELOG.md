@@ -4,10 +4,9 @@ All notable changes to mkvgo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/). An entry says in a few lines what
 changes for the user and what to do; the detail lives in the docs. This file
-holds the unreleased changes and the latest release; an older version moves to
-its series' file in [changelog/](changelog/) when a newer one ships.
-
-## [Unreleased]
+holds the latest release and, above it, the changes not released yet when
+there are any; an older version moves to its series' file in
+[changelog/](changelog/) when a newer one ships.
 
 ## [0.72.0] - 2026-11-21
 

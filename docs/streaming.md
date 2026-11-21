@@ -557,6 +557,44 @@ ffmpeg -i frame.h264 -frames:v 1 thumb.jpg
 
 ---
 
+## Composition offsets and the edit list - `--signed-offsets`
+
+A video with B-frames stores its frames in decode order, so each one carries a
+composition offset: how long after it decodes it presents. There are two ways
+to write them.
+
+**Default.** The offsets are kept non-negative: every frame's is pushed up by
+the composition shift (the reordering depth the parameter sets declare, or the
+one the opening frames show), and the video's edit list in the init takes the
+shift back out. A player that applies the edit list presents every frame where
+the source has it.
+
+A player that does not apply it presents the picture later than the sound by
+the shift (84 ms for a two-frame pyramid at 24 fps). Measured: one Media
+Source implementation ignores a video edit list of more than one entry - the
+case of a video that starts after zero, whose edit list opens on an empty
+edit - and one player library ignores it when it plays DASH.
+
+**`Options.SignedCompositionOffsets` (`--signed-offsets`).** No shift: the
+first frame presents when it decodes, the offsets of the frames reordered
+after it go below zero (`trun` version 1), and the init carries no edit for
+it. Every player measured - two browser engines, a mobile player library in
+HLS and in DASH, and a desktop media framework - then presents every frame
+where the source has it.
+
+Two things to know before turning it on:
+
+- A reader that answers a negative offset by pulling its decode clock back
+  shows the picture late by the deepest one under this option, where the
+  default form is exact for it.
+- The init and the segments both change with the option. Use one setting for a
+  whole presentation, and treat a change of setting like a change of source:
+  new URLs, or the cached init and segments dropped together.
+
+The empty edit of a video that starts after zero is written either way.
+
+---
+
 ## Playing it in the browser
 
 The WebAssembly build runs the same packager client-side. `openHLS(file)` opens
