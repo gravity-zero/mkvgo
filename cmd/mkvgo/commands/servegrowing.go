@@ -39,7 +39,7 @@ func CmdServeGrowing(args []string) {
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
 
-	plan, err := mp4.PlanGrowingHLS(ctx, src, mp4.Options{SegmentMs: segMs})
+	plan, err := mp4.PlanGrowingHLS(ctx, src, mp4.Options{SegmentMs: segMs, SignedCompositionOffsets: cfg.signed})
 	if err != nil {
 		FatalErr(err)
 	}
@@ -99,6 +99,7 @@ type serveGrowingFlags struct {
 	addr        string
 	segMs       int64
 	cors        bool
+	signed      bool  // --signed-offsets: mp4.Options.SignedCompositionOffsets
 	maxInFlight int   // segments served at once (0 = no cap)
 	maxWaiting  int   // requests queued behind them before a 503
 	memoryLimit int64 // the Go runtime's soft memory limit in bytes (0 = left as GOMEMLIMIT sets it)
@@ -111,6 +112,7 @@ func parseServeGrowingFlags(args []string) serveGrowingFlags {
 	fl := newFlags("serve-growing")
 	fl.String(&cfg.addr, "-addr", "--addr")
 	fl.Bool(&cfg.cors, "-cors", "--cors")
+	fl.Bool(&cfg.signed, "--signed-offsets")
 	fl.Func(func(v string) { cfg.maxInFlight = countFlag(v, "--max-in-flight") }, "-max-in-flight", "--max-in-flight")
 	fl.Func(func(v string) { cfg.maxWaiting = countFlag(v, "--max-waiting") }, "-max-waiting", "--max-waiting")
 	fl.Func(func(v string) { cfg.memoryLimit = memoryLimitFlag(v) }, "-memory-limit", "--memory-limit")

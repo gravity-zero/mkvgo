@@ -35,6 +35,12 @@ func TestSEC08_ServeGrowingCORSOptIn(t *testing.T) {
 	if parseServeGrowingFlags([]string{"in.mkv"}).cors {
 		t.Error("serve-growing: CORS on by default")
 	}
+	if !parseServeGrowingFlags([]string{"in.mkv", "--signed-offsets"}).signed {
+		t.Error("serve-growing: --signed-offsets must set the option")
+	}
+	if !parseHLSFlags(parseServeFlags([]string{"in.mkv", "--signed-offsets"}).rest).options("in.mkv").SignedCompositionOffsets {
+		t.Error("serve: --signed-offsets must reach the plan's options")
+	}
 	if !parseServeGrowingFlags([]string{"in.mkv", "--cors"}).cors {
 		t.Error("serve-growing: --cors ignored")
 	}

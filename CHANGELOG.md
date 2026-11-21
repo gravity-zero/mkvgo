@@ -11,8 +11,8 @@ its series' file in [changelog/](changelog/) when a newer one ships.
 
 ### Added
 
-- `Options.SignedCompositionOffsets` (`--signed-offsets` on `to-hls` and
-  `hls-segment`): a reordered video's composition offsets are written signed,
+- `Options.SignedCompositionOffsets` (`--signed-offsets` on `to-hls`,
+  `hls-segment`, `serve` and `serve-growing`): a reordered video's composition offsets are written signed,
   with no composition shift and no video edit list. A player that ignores the
   edit list showed the picture late by the reordering depth (84 ms on a
   two-frame pyramid); it now shows it on time. Off by default.

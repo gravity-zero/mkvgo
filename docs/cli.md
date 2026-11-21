@@ -1162,7 +1162,7 @@ Every track the presentation leaves out - a secondary video track (one video ren
 | `--audio-shift` | Re-base an audio track in presentation (`track=ms`, repeatable; positive = the track's content starts late and is presented earlier - feed it `diagnose`'s per-track delay). The samples are copied verbatim and the media segments are byte-identical with or without the shift: only the init segment's edit list moves, so a constant A/V desync is cancelled in the served stream without touching the source. Over-shifts clamp to the presentation start. The persistent repair remains `mkvgo retime` |
 | `--chapter-markers` | Opt-in: expose the source's chapters as `EXT-X-DATERANGE` lines in the video media playlist and a chapter `EventStream` in `manifest.mpd` - chapter navigation and ad-insertion cue points, no re-segmentation. See [streaming.md](streaming.md#chapter-markers-and-ad-insertion-points) |
 | `--no-iframes` | Drop the trick-play I-frame stream: no `EXT-X-I-FRAME-STREAM-INF` in the master, no `iframe.m3u8` nor `iframeNNNNN.m4s` written or served (`hls-segment iframe` refuses it). For players that scrub with their own trickplay images. Segments and the other playlists are unchanged. Also on `hls-segment`, `to-abr`, `abr-segment`. See [streaming.md](streaming.md#trick-play-scrubbing) |
-| `--signed-offsets` | Write a reordered video's composition offsets signed, with no composition shift and no video edit list (CMAF `cmf2` form): a player that ignores the edit list presents the picture on time instead of late by the reordering depth. Init and segments both change: use one setting per presentation. Also on `hls-segment` |
+| `--signed-offsets` | Write a reordered video's composition offsets signed, with no composition shift and no video edit list (CMAF `cmf2` form): a player that ignores the edit list presents the picture on time instead of late by the reordering depth. Init and segments both change: use one setting per presentation. Also on `hls-segment`, `serve` and `serve-growing` |
 
 ```bash
 mkvgo to-hls video.mkv -o stream/
@@ -1333,7 +1333,7 @@ mkvgo hls-segment https://nas/movie.mkv 3          # remote: reads only segment 
 Serve one file's on-demand HLS presentation over plain HTTP -- `hls-segment` wrapped in a long-running `net/http` server (`mkvhttp.Handler`), so a player can be pointed straight at it: nothing is written to disk, every resource is built the first time it is requested.
 
 ```
-mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--cors]
+mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] [-segment 6] [--keep-tracks 1,2 | --keep-lang fre] [--window-cache <MiB>|off] [--window-bytes <MiB>|off] [--max-walks N] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--cors] [--signed-offsets]
 mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] --direct
 mkvgo serve <file.mkv|url> [-addr 127.0.0.1:8478] --auto [-target mse-generic]
 ```
@@ -1375,7 +1375,7 @@ See `docs/library.md` (`mkvhttp.Handler`, `mkvhttp.FileHandler`) for the full ca
 Play while downloading: serve a file that may still be growing (a download landing on disk) as HLS -- `mp4.PlanGrowingHLS` wrapped in the same long-running server `serve` uses. The media playlist is `EVENT`-typed and lengthens as new whole clusters land; once the source finishes (a Cues index appears, or the file simply stops growing and `Complete()` is signalled), it switches to `VOD` + `ENDLIST`.
 
 ```
-mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--cors]
+mkvgo serve-growing <file.mkv> [-addr 127.0.0.1:8478] [-segment 6] [--max-in-flight N] [--max-waiting N] [--memory-limit <MiB>] [--cors] [--signed-offsets]
 ```
 
 - `-addr` sets the listen address (default `127.0.0.1:8478`, this machine only, as for `serve`); `-segment` sets the target segment duration in seconds (default 6), like `serve`/`to-hls`.
