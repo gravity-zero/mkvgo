@@ -32,9 +32,14 @@ K="keyint=48:min-keyint=48:scenecut=0"
 enc late_a.mkv 48 -bf 3 -x264-params "b-pyramid=normal:$K:b-adapt=1:b-bias=-100"
 enc late_b.mkv 96 -bf 3 -x264-params "b-pyramid=normal:$K:b-adapt=0"
 join late_a.mkv late_b.mkv late.mkv
+# Two parts with different parameter sets: joined as MPEG-TS bytes, the second offset by the first's duration (the
+# concat demuxer stamps the frames after such a joint alike).
 enc undeclared_a.mkv 48 -bf 0 -x264-params "$K"
 enc undeclared_b.mkv 96 -bf 3 -x264-params "b-pyramid=normal:$K:b-adapt=0"
-join undeclared_a.mkv undeclared_b.mkv undeclared.mkv
+ffmpeg -nostdin -v error -y -i "$TMP/undeclared_a.mkv" -c copy -bsf:v h264_mp4toannexb -muxdelay 0 -muxpreload 0 "$TMP/undeclared_a.ts"
+ffmpeg -nostdin -v error -y -i "$TMP/undeclared_b.mkv" -c copy -bsf:v h264_mp4toannexb -muxdelay 0 -muxpreload 0 -output_ts_offset 2.002 "$TMP/undeclared_b.ts"
+cat "$TMP/undeclared_a.ts" "$TMP/undeclared_b.ts" > "$TMP/undeclared.ts"
+ffmpeg -nostdin -v error -y -i "$TMP/undeclared.ts" -c copy "$TMP/undeclared.mkv"
 
 cat > "$TMP/compare.py" <<'PY'
 # compare.py <mp4 or -> <source pts> <read pts> : prints "<verdict> <detail>"; verdict is ok or a reason
@@ -60,7 +65,8 @@ want = sorted(float(l) for l in open(want_path) if l.strip())
 got = sorted(float(l) for l in open(got_path) if l.strip())
 detail = '%d of %d frames, lowest composition offset %d' % (len(got), len(want), lowest)
 if len(got) != len(want):
-    print('count|' + detail)
+    missing = sorted(set(want) - set(got))[:6]
+    print('count|' + detail + ', source times not read: ' + ' '.join('%.3f' % m for m in missing))
     sys.exit(0)
 deltas = sorted(g - w for g, w in zip(got, want))
 detail += ', against the source %+.3f to %+.3f s' % (deltas[0], deltas[-1])
@@ -89,6 +95,9 @@ check() { # check <name> <negative|positive>
   name=$1; want=$2
   ffprobe -v error -select_streams v:0 -show_entries packet=pts_time -of csv=p=0 "$TMP/$name.mkv" | tr -d ',\r' | sort -n > "$TMP/$name.want"
   cp "$TMP/$name.want" "$TMP/$name-reference.want"
+  if [ "$(sort -u "$TMP/$name.want" | wc -l)" -ne "$(wc -l < "$TMP/$name.want")" ] || [ "$(wc -l < "$TMP/$name.want")" -ne 144 ]; then
+    echo "  FAIL $name: the fixture has $(wc -l < "$TMP/$name.want") frames and $(sort -u "$TMP/$name.want" | wc -l) distinct presentation times, 144 of each expected"; failed=1; return
+  fi
   "$TMP/mkvgo" to-hls "$TMP/$name.mkv" -o "$TMP/$name.hls" -segment 2 >/dev/null 2>"$TMP/$name.log" || { cat "$TMP/$name.log" >&2; exit 1; }
   cat "$TMP/$name.hls/init.mp4" "$TMP/$name.hls"/seg*.m4s > "$TMP/$name.mp4"
   ffmpeg -nostdin -v error -y -i "$TMP/$name.mkv" -c copy "$TMP/$name-reference.mp4"
