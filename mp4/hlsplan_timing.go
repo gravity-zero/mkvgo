@@ -175,7 +175,7 @@ func timeSegmentWindow(window []fragSample, pt *planTrack, nextPts int64, span g
 	}
 	for x := range window {
 		window[x].dtsTS = dts[x] - base
-		window[x].ctsTS = int32(scale(window[x].ptsMs) - dts[x] + pt.ft.ctsShiftTS) // signed, as fillFragTiming leaves it
+		window[x].ctsTS = int32(compositionOffsetTS(scale(window[x].ptsMs), dts[x], pt.ft.ctsShiftTS, pt.ft.reorderReachTS)) // fillFragTiming's rule
 	}
 	for x := 0; x < len(window)-1; x++ {
 		window[x].durTS = dts[x+1] - dts[x]

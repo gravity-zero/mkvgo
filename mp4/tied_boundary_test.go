@@ -3,6 +3,7 @@ package mp4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,4 +93,102 @@ func TestSegmentOpensOnItsKeyframeWhenAFrameSharesItsTimestamp(t *testing.T) {
 			t.Errorf("segment %d: on demand differs from the full pass (%d vs %d bytes)", n, len(od), len(full))
 		}
 	}
+}
+
+// The last frame of a GOP is stamped two seconds back, as a muxer's stray timestamp: both paths give it the same
+// times, and its composition offset is not written seconds below zero.
+func TestStrayTimestampSameOnBothPaths(t *testing.T) {
+	w, h := uint32(320), uint32(240)
+	path := filepath.Join(t.TempDir(), "in.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const scale = 1_000_000
+	m := writer.NewMKVWriter(f)
+	tracks := []mkv.Track{{ID: 1, Type: mkv.VideoTrack, Codec: "h264", CodecPrivate: fakeAVCC, Width: &w, Height: &h}}
+	c := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: scale, MuxingApp: "mkvgo-test", WritingApp: "mkvgo-test"}}
+	if err := m.WriteStart(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteMetadata(c, tracks, 149*40); err != nil {
+		t.Fatal(err)
+	}
+	for g := 0; g < 6; g++ { // one cluster a GOP of 25 frames, 40 ms each
+		var blks []mkv.Block
+		for i := g * 25; i < g*25+25; i++ {
+			pts := int64(i) * 40
+			if i == 99 {
+				pts = 2010 // the frame before the keyframe at 4 s, stamped two seconds back, in its own segment
+			}
+			blks = append(blks, mkv.Block{TrackNumber: 1, Timecode: pts, Keyframe: i%25 == 0, Data: []byte{0, 0, 0, 1, 0x41, byte(i)}})
+		}
+		if err := m.WriteClusterWithCues(int64(g)*1000, scale, blks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := RemuxToHLS(ctx, path, dir, Options{SegmentMs: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 3; n++ {
+		plan, err := PlanHLS(ctx, path, Options{SegmentMs: 2000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		full, err := os.ReadFile(filepath.Join(dir, plan.SegmentName(n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		od, err := plan.Segment(ctx, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(od, full) {
+			t.Errorf("segment %d: on demand differs from the full pass (%d vs %d bytes)", n, len(od), len(full))
+		}
+		if low := lowestTrunOffset(full); low < -16*40 {
+			t.Errorf("segment %d: a composition offset of %d ms, further back than reordering reaches", n, low)
+		}
+	}
+}
+
+// lowestTrunOffset is the lowest composition offset of a segment's first trun (0 when it carries none).
+func lowestTrunOffset(seg []byte) int64 {
+	i := bytes.Index(seg, []byte("trun"))
+	if i < 0 || i+16 > len(seg) {
+		return 0
+	}
+	flags := binary.BigEndian.Uint32(seg[i+4:i+8]) & 0xFFFFFF
+	n := int(binary.BigEndian.Uint32(seg[i+8 : i+12]))
+	p := i + 12
+	if flags&1 != 0 {
+		p += 4
+	}
+	if flags&4 != 0 {
+		p += 4
+	}
+	var low int64
+	for k := 0; k < n; k++ {
+		for _, f := range []uint32{0x100, 0x200, 0x400} {
+			if flags&f != 0 {
+				p += 4
+			}
+		}
+		if flags&0x800 != 0 {
+			if p+4 > len(seg) {
+				return low
+			}
+			low = min(low, int64(int32(binary.BigEndian.Uint32(seg[p:p+4]))))
+			p += 4
+		}
+	}
+	return low
 }

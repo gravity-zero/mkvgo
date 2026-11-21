@@ -150,6 +150,8 @@ type fragTrack struct {
 	// composition offsets stay non-negative (compositionShiftTS); the init's
 	// edit list takes exactly this much back out.
 	ctsShiftTS int64
+	// reorderReachTS bounds how far back a negative composition offset may reach (reorderReachTS, compositionOffsetTS).
+	reorderReachTS int64
 	// ptsTS, when not nil, holds each sample's presentation time in the
 	// track's own timescale (an MP4 source's video keeps its native ticks: see
 	// mp4NativeTimescale); the timing derivation then works on it instead of

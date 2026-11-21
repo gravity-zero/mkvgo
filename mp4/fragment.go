@@ -333,6 +333,27 @@ func compositionShiftTS(ptsTS []int64, sync []bool, reorder int) int64 {
 	return max(shift, int64(reorder)*prefixFrameTS(ptsTS))
 }
 
+// reorderReachTS is the furthest a frame can present before it decodes through reordering alone: maxReorderDepth
+// frames of the prefix's frame duration. 0 when the prefix shows no frame duration.
+func reorderReachTS(ptsTS []int64) int64 {
+	if len(ptsTS) > compositionPrefix {
+		ptsTS = ptsTS[:compositionPrefix]
+	}
+	return maxReorderDepth * prefixFrameTS(ptsTS)
+}
+
+// compositionOffsetTS is a sample's composition offset: negative when the stream reorders deeper than the shift
+// covers, so the frame keeps its own presentation time. A frame stamped further back than any reordering reaches
+// carries a broken timestamp, not a reordered one: it presents at its decode time, offset 0, and a reader that pulls
+// its decode clock back by the deepest negative offset is not moved by seconds for one such frame.
+func compositionOffsetTS(pts, dts, shift, reach int64) int64 {
+	off := pts - dts + shift
+	if off < 0 && dts-pts > reach {
+		return 0
+	}
+	return off
+}
+
 // completePrefixLen is how many leading samples (decode order) are sure to hold every frame presented before their
 // last: the samples before the last one that presents later than all before it. The frames decoded after such a
 // sample present after the ones before it, so nothing is missing from that part and its measure is exact; past it, a
@@ -496,6 +517,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		syncs = append(syncs, samples[i].sync)
 	}
 	ctsShiftTS = compositionShiftTS(prefix, syncs, reorder)
+	reach := reorderReachTS(prefix)
 	for i := 0; i < n-1; i++ {
 		samples[i].durTS = dts[i+1] - dts[i]
 	}
@@ -516,7 +538,7 @@ func fillFragTimingTS(samples []fragSample, ptsTS []int64, lastDurMs int64, mts 
 		// sets announce (they changed mid-file, or state nothing) lands below
 		// zero here: the offset stays signed (trun version 1), so the frame keeps
 		// its own presentation time instead of taking its neighbour's.
-		off := pts(i) - dts[i] + ctsShiftTS
+		off := compositionOffsetTS(pts(i), dts[i], ctsShiftTS, reach)
 		samples[i].ctsTS = int32(off)
 		if off != 0 {
 			hasCTS = true

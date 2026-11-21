@@ -213,3 +213,27 @@ func FuzzDeclaredReorderDepth(f *testing.F) {
 		}
 	})
 }
+
+// A frame stamped further back than reordering reaches carries a broken timestamp: its offset is 0, not seconds below.
+func TestCompositionOffsetBoundedByReorderReach(t *testing.T) {
+	const shift, reach = 84, 16 * 42
+	cases := []struct {
+		name     string
+		pts, dts int64
+		want     int64
+	}{
+		{"in order", 1000, 1000, 84},
+		{"reordered within the shift", 958, 1000, 42},
+		{"reordered deeper than the shift", 874, 1000, -42},
+		{"as deep as reordering goes", 1000 - reach, 1000, 84 - reach},
+		{"stamped seconds back", 1000 - 2502, 1000, 0},
+	}
+	for _, tc := range cases {
+		if got := compositionOffsetTS(tc.pts, tc.dts, shift, reach); got != tc.want {
+			t.Errorf("%s: compositionOffsetTS = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if got := compositionOffsetTS(900, 1000, 0, 0); got != 0 {
+		t.Errorf("no frame duration known: compositionOffsetTS = %d, want 0", got)
+	}
+}
