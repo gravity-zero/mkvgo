@@ -288,8 +288,11 @@ type Options struct {
 	// DolbyVision converts the layers of an HEVC Dolby Vision track while it is packaged, with no re-encode and
 	// the base layer byte for byte (see mkv.DolbyVisionConversion): the samples, their sizes and the track's
 	// configuration and manifest signalling all follow the conversion. Honoured by RemuxToMP4, RemuxFromMP4,
-	// RemuxToHLS, RemuxToABR and the on-demand plans of a Matroska source; an on-demand plan of an MP4 source
-	// refuses it. A sample that cannot be converted fails the operation with a *mkv.DolbyVisionError.
+	// RemuxToHLS, RemuxToABR and the on-demand plans of a Matroska source, whose master keeps the source's BANDWIDTH.
+	// An on-demand plan of an MP4 source, a growing plan and every other function that writes a file or a manifest, or
+	// hands out sample bytes (ForEachBlock, WalkBlocks), refuse a conversion before writing or calling back, with an
+	// error matching ErrDolbyVisionUnsupported. The functions that only describe a file (OpenMeta, ReadMeta, Diagnose,
+	// DeclaredSize, ForEachSample, VerifyContentHashes) describe the source as stored whatever the value. A sample that cannot be converted fails with a *mkv.DolbyVisionError.
 	DolbyVision mkv.DolbyVisionConversion
 
 	// ChapterMarkers exposes the source's chapters as navigable markers in the

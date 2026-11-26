@@ -27,6 +27,9 @@ func HLSFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) (map[
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
+	if err := refuseLayers(opts, "HLSFromCMAF"); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	video, audio, err := readCMAFPresentation(ctx, &o, p)
 	if err != nil {

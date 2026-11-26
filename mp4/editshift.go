@@ -58,6 +58,9 @@ func RetimeTracks(ctx context.Context, path string, shift map[uint64]int64, opts
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "RetimeTracks"); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if len(shift) == 0 {
 		return errf("retime: no track shifts given")

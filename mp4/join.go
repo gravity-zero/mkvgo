@@ -18,6 +18,9 @@ func Join(ctx context.Context, sources []string, dstPath string, opts ...Options
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "Join"); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if len(sources) < 2 {
 		return errf("join: at least two files are needed")

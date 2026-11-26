@@ -44,6 +44,9 @@ func Mux(ctx context.Context, opts mkv.MuxOptions, extra ...Options) error {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
+	if err := refuseLayers(extra, "Mux"); err != nil {
+		return err
+	}
 	if len(opts.Attachments) > 0 {
 		return errf("mux: an MP4 carries no attachments; mux to MKV to keep them")
 	}
@@ -102,6 +105,9 @@ func Merge(ctx context.Context, opts mkv.MergeOptions, extra ...Options) error {
 	if err := oneopt.Check(extra); err != nil {
 		return err
 	}
+	if err := refuseLayers(extra, "Merge"); err != nil {
+		return err
+	}
 	if len(opts.Inputs) == 0 {
 		return errf("merge: no inputs")
 	}
@@ -136,6 +142,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "AddTrack"); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	inputs, err := allTracks(ctx, srcPath, o)
 	if err != nil {
@@ -148,6 +157,9 @@ func AddTrack(ctx context.Context, srcPath, dstPath string, input mkv.TrackInput
 // MergeSubtitle writes srcPath to dstPath with an SRT file added as a timed-text (tx3g) subtitle track.
 func MergeSubtitle(ctx context.Context, srcPath, srtPath, dstPath string, lang, name string, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	if err := refuseLayers(opts, "MergeSubtitle"); err != nil {
 		return err
 	}
 	o := optionsFrom(opts)

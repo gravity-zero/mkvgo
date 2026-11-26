@@ -1,6 +1,10 @@
 package mp4
 
-import "github.com/gravity-zero/mkvgo/mkv"
+import (
+	"errors"
+
+	"github.com/gravity-zero/mkvgo/mkv"
+)
 
 // frameconvert.go - the optional per-frame audio codec seam.
 //
@@ -172,4 +176,16 @@ func convertsLayers(tracks []*outTrack) bool {
 		}
 	}
 	return false
+}
+
+// ErrDolbyVisionUnsupported is what an operation's error matches (errors.Is) when Options.DolbyVision asks for a
+// conversion it does not apply: nothing was read or written.
+var ErrDolbyVisionUnsupported = errors.New("the Dolby Vision conversion is not applied here")
+
+// refuseLayers refuses Options.DolbyVision on an operation that writes, or hands out, samples as they are stored.
+func refuseLayers(opts []Options, op string) error {
+	if optionsFrom(opts).DolbyVision == mkv.DolbyVisionKeep {
+		return nil
+	}
+	return errf("%s leaves the Dolby Vision layers as they are, Options.DolbyVision has to stay unset - convert with RemuxToMP4, RemuxFromMP4 or RemuxToHLS, then run %s on the result: %w", op, op, ErrDolbyVisionUnsupported)
 }

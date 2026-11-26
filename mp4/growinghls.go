@@ -224,7 +224,7 @@ func PlanGrowingHLS(ctx context.Context, srcPath string, opts ...Options) (*Grow
 		return nil, err
 	}
 	if convertsLayers(planned) {
-		return nil, errf("%s: a growing (still-downloading) HLS plan does not support Options.DolbyVision in this version - plan the file once it is complete", shown.Path(srcPath))
+		return nil, errf("%s: a growing (still-downloading) HLS plan does not support Options.DolbyVision in this version - plan the file once it is complete: %w", shown.Path(srcPath), ErrDolbyVisionUnsupported)
 	}
 	keep := keepTrackSet(&o)
 	media, videoSeen, err := selectMedia(planned, &o, keep)

@@ -69,6 +69,9 @@ func ForEachBlock(ctx context.Context, path string, fn func(b mkv.Block) error, 
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
+	if err := refuseLayers(opts, "ForEachBlock"); err != nil {
+		return nil, err
+	}
 	var c *mkv.Container
 	err := WalkBlocks(ctx, path, func(cc *mkv.Container) error { c = cc; return nil }, fn, opts...)
 	if err != nil {
@@ -82,6 +85,9 @@ func ForEachBlock(ctx context.Context, path string, fn func(b mkv.Block) error, 
 // stops the walk and is returned.
 func WalkBlocks(ctx context.Context, path string, start func(c *mkv.Container) error, fn func(b mkv.Block) error, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	if err := refuseLayers(opts, "WalkBlocks"); err != nil {
 		return err
 	}
 	o := optionsFrom(opts)

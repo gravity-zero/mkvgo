@@ -25,6 +25,9 @@ func EditInPlace(ctx context.Context, path string, fn func(c *mkv.Container), op
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "EditInPlace"); err != nil {
+		return err
+	}
 	o := optionsFrom(opts)
 	if err := ctx.Err(); err != nil {
 		return err

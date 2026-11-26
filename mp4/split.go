@@ -322,6 +322,9 @@ func Split(ctx context.Context, opts mkv.SplitOptions, extra ...Options) ([]stri
 	if err := oneopt.Check(extra); err != nil {
 		return nil, err
 	}
+	if err := refuseLayers(extra, "Split"); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(extra)
 	src, err := o.FS.DoOpen(opts.SourcePath)
 	if err != nil {

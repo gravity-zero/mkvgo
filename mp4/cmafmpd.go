@@ -77,6 +77,9 @@ func DASHFromCMAF(ctx context.Context, p CMAFPresentation, opts ...Options) ([]b
 	if err := oneopt.Check(opts); err != nil {
 		return nil, err
 	}
+	if err := refuseLayers(opts, "DASHFromCMAF"); err != nil {
+		return nil, err
+	}
 	o := optionsFrom(opts)
 	video, audio, err := readCMAFPresentation(ctx, &o, p)
 	if err != nil {

@@ -22,12 +22,18 @@ func Rewrite(ctx context.Context, srcPath, dstPath string, opts ...Options) erro
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "Rewrite"); err != nil {
+		return err
+	}
 	return rewriteMP4(ctx, srcPath, dstPath, rewriteOptions{}, optionsFrom(opts))
 }
 
 // EditMetadata writes srcPath to dstPath with fn's metadata changes, under the rules of EditInPlace.
 func EditMetadata(ctx context.Context, srcPath, dstPath string, fn func(c *mkv.Container), opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	if err := refuseLayers(opts, "EditMetadata"); err != nil {
 		return err
 	}
 	return rewriteMP4(ctx, srcPath, dstPath, rewriteOptions{edit: fn}, optionsFrom(opts))
@@ -38,12 +44,18 @@ func SetChapters(ctx context.Context, srcPath, dstPath string, chapters []mkv.Ch
 	if err := oneopt.Check(opts); err != nil {
 		return err
 	}
+	if err := refuseLayers(opts, "SetChapters"); err != nil {
+		return err
+	}
 	return EditMetadata(ctx, srcPath, dstPath, func(c *mkv.Container) { c.Chapters = chapters }, opts...)
 }
 
 // RemoveTrack writes srcPath to dstPath without the given tracks (probe track IDs); the other samples are copied untouched.
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	if err := refuseLayers(opts, "RemoveTrack"); err != nil {
 		return err
 	}
 	if len(removeIDs) == 0 {
