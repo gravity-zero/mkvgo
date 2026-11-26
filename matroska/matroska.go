@@ -986,6 +986,29 @@ func ApplyRollback(ctx context.Context, repairedPath string, delta io.Reader, ds
 	return ops.ApplyRollback(ctx, repairedPath, delta, dstPath, opts...)
 }
 
+// DolbyVisionConversion is mkv.DolbyVisionConversion: what ConvertDolbyVision, or mp4.Options.DolbyVision, does to the
+// layers of an HEVC Dolby Vision track.
+type DolbyVisionConversion = mkv.DolbyVisionConversion
+
+// The Dolby Vision conversions. See mkv.DolbyVisionConversion.
+const (
+	DolbyVisionKeep        = mkv.DolbyVisionKeep
+	DolbyVisionToProfile81 = mkv.DolbyVisionToProfile81
+	DolbyVisionToBaseLayer = mkv.DolbyVisionToBaseLayer
+)
+
+// DolbyVisionError is mkv.DolbyVisionError: the track or sample a Dolby Vision conversion could not rewrite.
+type DolbyVisionError = mkv.DolbyVisionError
+
+// ConvertDolbyVision writes dstPath: srcPath with its HEVC Dolby Vision tracks converted, no picture re-encoded. See
+// ops.ConvertDolbyVision.
+func ConvertDolbyVision(ctx context.Context, srcPath, dstPath string, conv DolbyVisionConversion, opts ...Options) error {
+	if err := oneopt.Check(opts); err != nil {
+		return err
+	}
+	return ops.ConvertDolbyVision(ctx, srcPath, dstPath, conv, opts...)
+}
+
 // RemoveTrack writes dstPath: srcPath without the tracks removeIDs names. See ops.RemoveTrack.
 func RemoveTrack(ctx context.Context, srcPath, dstPath string, removeIDs []uint64, opts ...Options) error {
 	if err := oneopt.Check(opts); err != nil {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 	"github.com/gravity-zero/mkvgo/mkv/writer"
@@ -108,6 +109,8 @@ type streamOpts struct {
 	// rebase against the same instant - has to be told.
 	bounds   *streamBounds
 	progress mkv.ProgressFunc
+	// dovi holds, per SOURCE track number, the rewriter of a Dolby Vision track being converted.
+	dovi map[uint64]*dovi.Track
 	// walk, when non-nil, carries the source walk across consecutive calls (Split's parts).
 	walk *sourceWalk
 }
@@ -495,6 +498,11 @@ func streamToWriter(ctx context.Context, mw *writer.MKVWriter, srcPath string, t
 			continue
 		}
 		blk.TrackNumber = newID
+		if k := opts.dovi[srcBlk.TrackNumber]; k != nil {
+			if blk.Data, err = k.Sample(nil, blk.Data, blk.Timecode); err != nil {
+				return err
+			}
+		}
 		if !firstSet {
 			firstTC, firstSet = blk.Timecode, true
 		}
