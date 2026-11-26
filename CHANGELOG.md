@@ -29,6 +29,9 @@ there are any; an older version moves to its series' file in
   `Track.DolbyVision.EnhancementLayer`, from the last 8 KiB of the first
   sample; other files read nothing more. Over HTTP a Matroska probe adds at
   most one request of 8 KiB when the first window holds the block headers.
+- `HLSPlan.Codecs` lists each video and audio track of a plan with the
+  RFC 6381 string its master writes, and says which have none: the video's
+  stays available when an audio track makes the master leave `CODECS` out.
 
 ## [0.72.0] - 2026-11-21
 

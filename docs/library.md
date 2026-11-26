@@ -253,7 +253,10 @@ plan.MasterPlaylist(); plan.MediaPlaylist(); plan.InitSegment()
 data, err = plan.Segment(ctx, n)    // the n-th (0-based) media segment
 vtt, err := plan.Subtitle(ctx, i)   // the i-th subtitle rendition as WebVTT
 plan.NumSegments(); plan.SegmentName(n)
+plan.Codecs()                       // each video and audio track with its RFC 6381 string
 ```
+
+`plan.Codecs()` lists the plan's video and audio tracks, the video first, each as a `PlanCodec`: `TrackID`, `Type`, `Codec`, and `RFC6381`, the string exactly as the master's `CODECS` writes it (`hvc1` or `hev1` prefix, tier, level and constraint bytes for HEVC, read from the `hvcC` header). `Known` is false, and `RFC6381` empty, for a codec with no string here, DTS for one: the master then leaves `CODECS` out of the variant whole, and the list still gives the video's string to a caller that writes its own master. With `Options.DolbyVision` the string is that of the track as served.
 
 ```go
 // A complete HLS server endpoint:
