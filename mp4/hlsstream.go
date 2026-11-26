@@ -171,7 +171,7 @@ func (p *HLSPlan) streams() bool {
 		return false
 	}
 	for _, pt := range p.tracks {
-		if pt.ft.outTrack.conv != nil {
+		if !pt.ft.outTrack.sourceBytes() {
 			return false
 		}
 	}

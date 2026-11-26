@@ -27,6 +27,9 @@ func sampleOf(pt *planTrack, b mkv.Block, structure bool) (segSample, error) {
 	if err != nil {
 		return segSample{}, err
 	}
+	if data, err = pt.ft.outTrack.rewriteLayers(data, b.Timecode); err != nil {
+		return segSample{}, err
+	}
 	meta.size = uint32(len(data))
 	return segSample{fragSample: meta, data: data, off: b.DataOffset, end: b.DataOffset + b.Size}, nil
 }

@@ -152,3 +152,24 @@ func (ot *outTrack) convertFrame(frame []byte) ([]byte, error) {
 	}
 	return ot.conv.Convert(frame)
 }
+
+// rewriteLayers runs one sample through the track's Dolby Vision rewriter, or returns it unchanged when the track has none.
+func (ot *outTrack) rewriteLayers(sample []byte, ptsMs int64) ([]byte, error) {
+	if ot.dv == nil {
+		return sample, nil
+	}
+	return ot.dv.Sample(nil, sample, ptsMs)
+}
+
+// sourceBytes reports whether the track's samples are written as the source stores them.
+func (ot *outTrack) sourceBytes() bool { return ot.conv == nil && ot.dv == nil }
+
+// convertsLayers reports whether Options.DolbyVision rewrites one of the tracks.
+func convertsLayers(tracks []*outTrack) bool {
+	for _, t := range tracks {
+		if t.dv != nil {
+			return true
+		}
+	}
+	return false
+}

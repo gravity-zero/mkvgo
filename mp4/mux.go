@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/internal/poison"
 	"github.com/gravity-zero/mkvgo/mkv"
@@ -48,6 +49,9 @@ type outTrack struct {
 	// each frame just before it is written to a segment. The track's identity
 	// (Codec, CodecPrivate, spec) has already been rebound to the output codec.
 	conv TrackConverter
+	// dv, when non-nil (Options.DolbyVision converts this track), rewrites each sample's Dolby Vision layers; mkv
+	// already holds the configuration the rewrite leaves.
+	dv *dovi.Track
 
 	samples    trackSamples
 	pending    []byte // current chunk's sample bytes, not yet written to mdat
@@ -381,7 +385,12 @@ func planTracksFor(c *mkv.Container, o Options, subs bool) ([]*outTrack, []strin
 			}
 			spec = s
 		}
+		dv, err := dovi.For(&t, o.DolbyVision)
+		if err != nil {
+			return nil, nil, err
+		}
 		ot := &outTrack{
+			dv:         dv,
 			mkv:        t,
 			spec:       spec,
 			mp4ID:      nextID,
@@ -453,7 +462,7 @@ func sizeByHeaders(br *reader.BlockReader, tracks []*outTrack) {
 			continue
 		}
 		ids = append(ids, t.mkv.ID)
-		if !t.spec.text && t.hasher == nil && t.mkv.Compression.Verbatim() {
+		if !t.spec.text && t.hasher == nil && t.dv == nil && t.mkv.Compression.Verbatim() {
 			sized = append(sized, t.mkv.ID)
 		}
 	}
@@ -697,6 +706,9 @@ func streamSamples(ctx context.Context, br *reader.BlockReader, tracks []*outTra
 		}
 		data, err := t.mkv.DecodePayload(b.Data)
 		if err != nil {
+			return 0, err
+		}
+		if data, err = t.rewriteLayers(data, b.Timecode); err != nil {
 			return 0, err
 		}
 		t.learnFrame(data)

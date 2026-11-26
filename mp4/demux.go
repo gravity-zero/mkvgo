@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/internal/oneopt"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
@@ -74,6 +75,12 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 		return errf("the source holds no samples (an initialisation segment?): nothing to remux")
 	}
 	tracks := buildMKVTracks(mv, o.MP3ContainerDelay)
+	layers := map[uint64]*dovi.Track{}
+	for i := range tracks {
+		if layers[tracks[i].ID], err = dovi.For(&tracks[i], o.DolbyVision); err != nil {
+			return err
+		}
+	}
 
 	if err := distinctOutput(fs, dstPath, srcPath); err != nil {
 		return err
@@ -95,7 +102,7 @@ func RemuxFromMP4(ctx context.Context, srcPath, dstPath string, opts ...Options)
 		}
 	}()
 
-	return writeMKV(ctx, dst, src, mv, tracks, size, progress)
+	return writeMKV(ctx, dst, src, mv, tracks, layers, size, progress)
 }
 
 // truncation reports a movie whose sample tables place media past the end of the size-byte file, with where the
@@ -271,7 +278,7 @@ type sampleRef struct {
 	idx   int
 }
 
-func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, mv *movie, tracks []mkv.Track, size int64, progress mkv.ProgressFunc) error {
+func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, mv *movie, tracks []mkv.Track, layers map[uint64]*dovi.Track, size int64, progress mkv.ProgressFunc) error {
 	m := writer.NewMKVWriter(dst)
 	if err := m.WriteStart(); err != nil {
 		return errf("write start: %w", err)
@@ -302,7 +309,12 @@ func writeMKV(ctx context.Context, dst mkv.WriteSeekCloser, src io.ReadSeeker, m
 		return nil
 	}
 
-	err := forEachBlock(ctx, src, mv, size, progress, func(block mkv.Block, dtsMs int64) error {
+	err := forEachBlock(ctx, src, mv, size, progress, func(block mkv.Block, dtsMs int64) (err error) {
+		if k := layers[block.TrackNumber]; k != nil {
+			if block.Data, err = k.Sample(nil, block.Data, block.Timecode); err != nil {
+				return err
+			}
+		}
 		if groupHasData && (dtsMs-groupStart >= clusterWindowMs ||
 			max(groupHi, block.Timecode)-min(groupLo, block.Timecode) > clusterSpanMax) {
 			if err := flush(); err != nil {

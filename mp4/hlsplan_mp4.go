@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/gravity-zero/mkvgo/internal/shown"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -66,6 +67,9 @@ func planHLSFromMP4(ctx context.Context, ps *packagingSource, srcPath string, fs
 	planned, _, err := planTracksFor(c, *o, false)
 	if err != nil {
 		return nil, err
+	}
+	if convertsLayers(planned) {
+		return nil, errf("%s: Options.DolbyVision is not supported on the on-demand plan of an MP4 source, whose sample sizes are fixed by its sample table - package it with RemuxToHLS, or remux it to Matroska with RemuxFromMP4 and the same option, then plan that file", shown.Path(srcPath))
 	}
 	keep := keepTrackSet(o)
 	media, _, err := selectMedia(planned, o, keep)

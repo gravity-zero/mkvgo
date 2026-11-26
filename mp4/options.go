@@ -285,6 +285,13 @@ type Options struct {
 	// RemuxToMP4/RemuxFromMP4 ignore it. See FrameConverter.
 	FrameConverter FrameConverter
 
+	// DolbyVision converts the layers of an HEVC Dolby Vision track while it is packaged, with no re-encode and
+	// the base layer byte for byte (see mkv.DolbyVisionConversion): the samples, their sizes and the track's
+	// configuration and manifest signalling all follow the conversion. Honoured by RemuxToMP4, RemuxFromMP4,
+	// RemuxToHLS, RemuxToABR and the on-demand plans of a Matroska source; an on-demand plan of an MP4 source
+	// refuses it. A sample that cannot be converted fails the operation with a *mkv.DolbyVisionError.
+	DolbyVision mkv.DolbyVisionConversion
+
 	// ChapterMarkers exposes the source's chapters as navigable markers in the
 	// HLS/DASH manifests (RemuxToHLS/PlanHLS): one EXT-X-DATERANGE per chapter
 	// in the video media playlist, and one Event per chapter in a DASH

@@ -45,7 +45,7 @@ func directReads(o *Options, src io.Reader) bool {
 // directTrack reports whether a track's samples can be read from the source
 // as they are stored: no conversion, no compression but a stripped header.
 func directTrack(t *outTrack) bool {
-	return t.conv == nil && t.mkv.Compression.Verbatim()
+	return t.sourceBytes() && t.mkv.Compression.Verbatim()
 }
 
 // learnFirstFrame reads a block walked by its header alone when the track has

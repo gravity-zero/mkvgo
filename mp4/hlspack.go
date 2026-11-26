@@ -136,6 +136,9 @@ func collectFromMP4(ctx context.Context, ps *packagingSource,
 		if err != nil {
 			return errf("convert frame: %w", err)
 		}
+		if data, err = ft.outTrack.rewriteLayers(data, s.ctsMs); err != nil {
+			return err
+		}
 		if ft.outTrack.sampleEntry == nil {
 			entry, err := ft.outTrack.spec.sampleEntry(&ft.outTrack.mkv, data)
 			if err != nil {
