@@ -38,6 +38,13 @@ func OpenMeta(ctx context.Context, path string, opts ...ReadOption) (*mkv.Contai
 
 // OpenMetaWithFS is OpenMeta against a caller-provided FS.
 func OpenMetaWithFS(ctx context.Context, path string, fs *mkv.FS, opts ...ReadOption) (*mkv.Container, error) {
+	var o readOpts
+	for _, fn := range opts {
+		fn(&o)
+	}
+	if o.dolbyVisionLayer && mkv.ReadShareFrom(ctx) == nil {
+		ctx = mkv.ShareReads(ctx) // the walk to the first block goes over the head again: one open, one version
+	}
 	f, err := fs.DoOpenContext(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", shown.Path(path), err)

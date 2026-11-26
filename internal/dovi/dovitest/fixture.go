@@ -32,6 +32,7 @@ type Spec struct {
 	Frames int    // stop after this many frames; 0 keeps them all
 	Pad    int    // bytes of filler NAL unit opening the first frame, ahead of the base layer
 	Trail  int    // bytes of filler NAL unit closing the first frame, behind the RPU
+	Attach int    // bytes of one attachment written ahead of the first cluster
 	RPU    []byte // the RPU of every frame in place of the generated one, unescaped
 }
 
@@ -124,6 +125,9 @@ func Build(tb testing.TB, dir string, s Spec) *Fixture {
 	defer out.Close()
 	mw := writer.NewMKVWriter(out)
 	meta := &mkv.Container{Info: mkv.SegmentInfo{TimecodeScale: c.Info.TimecodeScale, MuxingApp: "test", WritingApp: "test"}}
+	if s.Attach > 0 {
+		meta.Attachments = []mkv.Attachment{{ID: 1, Name: "cover.bin", MIMEType: "application/octet-stream", Size: int64(s.Attach), Data: make([]byte, s.Attach)}}
+	}
 	if err := errors.Join(mw.WriteStart(), mw.WriteMetadata(meta, []mkv.Track{fx.Track}, c.DurationMs)); err != nil {
 		tb.Fatal(err)
 	}

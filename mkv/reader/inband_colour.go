@@ -54,7 +54,9 @@ func WithInBandChannels() ReadOption {
 // Track.DolbyVision.EnhancementLayer; it stays "" when that sample has no readable RPU. Only a track the container
 // already states as profile 7 is read: the last 8 KiB of its first block, found by a walk of block headers under the
 // bounds of WithInBandColourFallback, which shares its own read of that block when both are passed. An RPU further
-// than that from the block's end leaves the field ""; any other file costs nothing more.
+// than that from the block's end leaves the field ""; any other file costs nothing more. On a remote source
+// OpenMetaWithFS opens under mkv.ShareReads, the caller's scope or one of its own: the walk reads again the head
+// already fetched, and the 8 KiB come from it or from one request of that size.
 func WithDolbyVisionLayer() ReadOption {
 	return func(o *readOpts) { o.dolbyVisionLayer = true }
 }
@@ -370,19 +372,29 @@ type layerTail struct {
 }
 
 // readLayerTails reads the last dovi.TailBytes of each block: a block of any size costs that much, and one whose RPU
-// sits further from its end leaves the layer unstated.
+// sits further from its end leaves the layer unstated. A source that reads at an offset is asked for just that span,
+// which a remote one serves from what it already fetched or with one request of that size, its window left alone.
 func readLayerTails(r io.ReadSeeker, tails []layerTail) {
 	for _, lt := range tails {
-		n := min(lt.size, dovi.TailBytes)
-		if _, err := r.Seek(lt.end-n, io.SeekStart); err != nil {
-			continue
-		}
-		tail := make([]byte, n)
-		if _, err := io.ReadFull(r, tail); err != nil {
+		tail := make([]byte, min(lt.size, dovi.TailBytes))
+		if readTail(r, tail, lt.end-int64(len(tail))) != nil {
 			continue
 		}
 		lt.t.DolbyVision.EnhancementLayer = dovi.TailLayer(lt.t, tail)
 	}
+}
+
+// readTail fills b from off: an exact read where r offers one, else a seek and a read.
+func readTail(r io.ReadSeeker, b []byte, off int64) error {
+	if ra, ok := r.(io.ReaderAt); ok {
+		_, err := ra.ReadAt(b, off)
+		return err
+	}
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := io.ReadFull(r, b)
+	return err
 }
 
 // activeTracks lists the tracks still read, each once.

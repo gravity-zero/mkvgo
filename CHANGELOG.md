@@ -27,7 +27,8 @@ there are any; an older version moves to its series' file in
 - `WithDolbyVisionLayer` / `mp4.Options.DolbyVisionLayer` and `-in-band` say
   whether a profile 7 enhancement layer is minimal (MEL) or full (FEL), in
   `Track.DolbyVision.EnhancementLayer`, from the last 8 KiB of the first
-  sample; other files read nothing more.
+  sample; other files read nothing more. Over HTTP a Matroska probe adds at
+  most one request of 8 KiB when the first window holds the block headers.
 
 ## [0.72.0] - 2026-11-21
 

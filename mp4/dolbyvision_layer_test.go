@@ -10,8 +10,10 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/gravity-zero/mkvgo/httpfs"
 	"github.com/gravity-zero/mkvgo/internal/dovi/dovitest"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // countedReader counts the bytes and the calls read through it.
@@ -149,4 +151,48 @@ func TestDolbyVisionOptionsProbeThenConvert(t *testing.T) {
 	}
 	out, _ := readMKV(t, dst)
 	checkDV(t, "the same Options, converting", o.DolbyVision, videoDV(out.Tracks))
+}
+
+// TestDolbyVisionLayerProbeThenPlanRemote: the probe's exact read of a block's tail must leave the plan that follows
+// on the same FS what it cost before, whether the caller shares reads across the two or not.
+func TestDolbyVisionLayerProbeThenPlanRemote(t *testing.T) {
+	fx := dovitest.Build(t, t.TempDir(), dovitest.Spec{Full: true, Pad: 6 << 20})
+	type cost struct {
+		gets  int
+		bytes int64
+	}
+	chain := func(shared bool, opts ...reader.ReadOption) (probe, plan cost) {
+		src := newRemoteSource(t, fx.Path)
+		hf := httpfs.New()
+		ctx := context.Background()
+		if shared {
+			ctx = mkv.ShareReads(ctx)
+		}
+		c, err := reader.OpenMetaWithFS(ctx, src.srv.URL+"/s.mkv", hf.Port(), opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := mkv.DolbyVisionELUnknown
+		if len(opts) > 0 {
+			want = mkv.DolbyVisionFEL
+		}
+		if got := c.Tracks[0].DolbyVision.EnhancementLayer; got != want {
+			t.Fatalf("layer %q, want %q", got, want)
+		}
+		probe.gets, _, _ = src.counts()
+		probe.bytes = hf.BytesFetched()
+		if _, err := PlanHLS(ctx, src.srv.URL+"/s.mkv", Options{FS: hf.Port()}); err != nil {
+			t.Fatal(err)
+		}
+		plan.gets, _, _ = src.counts()
+		return probe, cost{plan.gets - probe.gets, hf.BytesFetched() - probe.bytes}
+	}
+	for _, shared := range []bool{false, true} {
+		_, off := chain(shared)
+		probe, on := chain(shared, reader.WithDolbyVisionLayer())
+		t.Logf("shared scope %v: probe %d requests, %d bytes; plan %d requests, %d bytes after it, %d and %d after a probe without the option", shared, probe.gets, probe.bytes, on.gets, on.bytes, off.gets, off.bytes)
+		if on.gets > off.gets || on.bytes > off.bytes {
+			t.Errorf("shared scope %v: the plan costs %d requests and %d bytes after the layer probe, %d and %d without it", shared, on.gets, on.bytes, off.gets, off.bytes)
+		}
+	}
 }

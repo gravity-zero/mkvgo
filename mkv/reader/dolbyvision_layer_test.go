@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/gravity-zero/mkvgo/httpfs"
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/internal/dovi/dovitest"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/ops"
@@ -131,5 +138,87 @@ func TestDolbyVisionLayerBigFirstBlock(t *testing.T) {
 	near := dovitest.Build(t, t.TempDir(), dovitest.Spec{Full: true, Pad: big, Trail: 1 << 10})
 	if got, _ := probeCost(t, near.Path, reader.WithDolbyVisionLayer()); got.DolbyVision.EnhancementLayer != mkv.DolbyVisionFEL {
 		t.Errorf("RPU 1 KiB from the end of the block: layer %q, want FEL", got.DolbyVision.EnhancementLayer)
+	}
+}
+
+// remoteCost is what one cold head-only read over HTTP asked of the server.
+type remoteCost struct {
+	gets  []string
+	bytes int64
+}
+
+// remoteProbe serves path over HTTP, a strong ETag on its responses when etag is set, and reads it head-only under
+// opts through a new httpfs.FS: the video track, with the ranges asked and the bytes transferred.
+func remoteProbe(t *testing.T, path string, etag bool, opts ...reader.ReadOption) (mkv.Track, remoteCost) {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var cost remoteCost
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cost.gets = append(cost.gets, r.Method+" "+r.Header.Get("Range"))
+		mu.Unlock()
+		if etag {
+			w.Header().Set("ETag", `"v1"`)
+		}
+		http.ServeContent(w, r, "f.mkv", time.Time{}, bytes.NewReader(body))
+	}))
+	defer srv.Close()
+	fs := httpfs.New()
+	c, err := reader.OpenMetaWithFS(context.Background(), srv.URL+"/f.mkv", fs.Port(), opts...)
+	if err != nil || len(c.Tracks) == 0 {
+		t.Fatalf("%s: %v", path, err)
+	}
+	cost.bytes = fs.BytesFetched()
+	return c.Tracks[0], cost
+}
+
+// TestDolbyVisionLayerRemote: over HTTP the option fetched the head window a second time and a whole window for the
+// 8 KiB it reads. The walk reads the head again from what the open already fetched and the tail is asked for exactly:
+// nothing more for a file its first window holds, one request of 8 KiB for a large first block, and one window more
+// when attachments push the first cluster out of the head.
+func TestDolbyVisionLayerRemote(t *testing.T) {
+	const window, big = 512 << 10, 6 << 20
+	for _, tc := range []struct {
+		name                string
+		spec                dovitest.Spec
+		want                mkv.DolbyVisionEL
+		offGets             int // what the read costs without the option, unchanged
+		moreGets, moreBytes int // the most the option adds
+	}{
+		{"file within the first window", dovitest.Spec{Full: true}, mkv.DolbyVisionFEL, 1, 0, 0},
+		{"minimal layer", dovitest.Spec{}, mkv.DolbyVisionMEL, 1, 0, 0},
+		{"large first block", dovitest.Spec{Full: true, Pad: big}, mkv.DolbyVisionFEL, 2, 1, dovi.TailBytes},
+		{"RPU out of the budget", dovitest.Spec{Full: true, Pad: big, Trail: 16 << 10}, mkv.DolbyVisionELUnknown, 2, 1, dovi.TailBytes},
+		{"attachments ahead of the first cluster", dovitest.Spec{Full: true, Attach: 3 << 20}, mkv.DolbyVisionFEL, 2, 1, window},
+		{"attachments and a large first block", dovitest.Spec{Full: true, Attach: 3 << 20, Pad: big}, mkv.DolbyVisionFEL, 2, 2, window + dovi.TailBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := dovitest.Build(t, t.TempDir(), tc.spec)
+			plain, off := remoteProbe(t, fx.Path, true)
+			got, on := remoteProbe(t, fx.Path, true, reader.WithDolbyVisionLayer())
+			if plain.DolbyVision.EnhancementLayer != mkv.DolbyVisionELUnknown || len(off.gets) != tc.offGets || off.bytes > window+1<<10 {
+				t.Errorf("without the option: layer %q, %d bytes in %v, want %d requests within a window", plain.DolbyVision.EnhancementLayer, off.bytes, off.gets, tc.offGets)
+			}
+			if got.DolbyVision.EnhancementLayer != tc.want {
+				t.Errorf("layer %q, want %q", got.DolbyVision.EnhancementLayer, tc.want)
+			}
+			moreGets, moreBytes := len(on.gets)-len(off.gets), on.bytes-off.bytes
+			t.Logf("the option costs %d requests and %d bytes more: %v", moreGets, moreBytes, on.gets[len(off.gets):])
+			if moreGets > tc.moreGets || moreBytes > int64(tc.moreBytes) {
+				t.Errorf("the option costs %d requests and %d bytes more, want at most %d and %d: %v", moreGets, moreBytes, tc.moreGets, tc.moreBytes, on.gets)
+			}
+			for _, g := range on.gets {
+				if !strings.HasPrefix(g, "GET bytes=") {
+					t.Errorf("request %q is no ranged GET", g)
+				}
+			}
+			if weak, _ := remoteProbe(t, fx.Path, false, reader.WithDolbyVisionLayer()); weak.DolbyVision.EnhancementLayer != tc.want {
+				t.Errorf("no strong ETag to share reads under: layer %q, want %q", weak.DolbyVision.EnhancementLayer, tc.want)
+			}
+		})
 	}
 }
