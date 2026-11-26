@@ -135,6 +135,8 @@ func main() {
 		commands.CmdFromMP4(args)
 	case "to-webm":
 		commands.CmdToWebM(args)
+	case "dolby-vision":
+		commands.CmdDolbyVision(args)
 	case "to-hls":
 		commands.CmdToHLS(args)
 	case "hls-segment":
@@ -235,6 +237,8 @@ Commands:
   to-mp4        Remux an MKV/WebM to MP4 (--faststart, --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay)
   from-mp4      Remux an MP4 to MKV (--skip-unsupported, --mp3-container-delay)
   to-webm       Remux an MKV/WebM to WebM (WebM-subset codecs only)
+  dolby-vision  Convert a Dolby Vision profile 7 track to profile 8.1 or to
+                its base layer, without re-encoding (output: Matroska)
   to-hls        Remux an MKV/WebM to fragmented-MP4 HLS (init + segments + m3u8)
   hls-segment   Serve one HLS resource on demand (master/playlist/init/N) - no pre-generation
   to-abr        Package pre-encoded quality variants as one multi-variant HLS master (ABR light)

@@ -30,6 +30,7 @@ type hlsFlags struct {
 	chapterMarkers  bool
 	noIFrames       bool
 	signedOffsets   bool
+	dolbyVision     matroska.DolbyVisionConversion
 	damageBytes     int64
 	skipUnsupported bool
 	sourceAccess    mp4.SourceAccess
@@ -96,6 +97,7 @@ func parseHLSFlags(args []string) hlsFlags {
 	fl.Bool(&f.skipUnsupported, "--skip-unsupported", "-skip-unsupported")
 	fl.Bool(&f.noIFrames, "--no-iframes")
 	fl.Bool(&f.signedOffsets, "--signed-offsets")
+	dolbyVisionFlag(fl, &f.dolbyVision)
 	fl.Func(damageBytesFlag(&f.damageBytes), "--damage-bytes")
 	fl.Func(func(v string) {
 		switch v {
@@ -252,6 +254,7 @@ func (f hlsFlags) options(src string) mp4.Options {
 		ChapterMarkers:           f.chapterMarkers,
 		NoIFrames:                f.noIFrames,
 		SignedCompositionOffsets: f.signedOffsets,
+		DolbyVision:              f.dolbyVision,
 		DamageBytes:              f.damageBytes,
 		SkipUnsupported:          f.skipUnsupported,
 		Strict:                   Strict,

@@ -1135,6 +1135,27 @@ mkvgo to-webm <input.mkv> <output.webm>
 mkvgo to-webm video.mkv video.webm
 ```
 
+### dolby-vision
+
+Convert the Dolby Vision layers of an HEVC track without re-encoding. The base layer is copied byte for byte; the output is a Matroska file whatever the source container.
+
+```
+mkvgo dolby-vision --dolby-vision 8.1|base <input.mkv|.mp4> <output.mkv>
+```
+
+| Value | What it does | Applies to |
+|-------|--------------|------------|
+| `8.1` | Drops the enhancement layer and rewrites each RPU as profile 8.1: residual off, its quantizer removed, display management matrices of profile 8.1. With a full enhancement layer (FEL) the reshaping curves become the identity, because they described a picture the dropped layer completed. | profile 7 |
+| `base` | Drops the enhancement layer and the RPU: the base layer alone (HDR10 for profiles 7 and 8.1), no Dolby Vision signal left. | profiles 7 and 8 |
+
+```bash
+mkvgo dolby-vision --dolby-vision 8.1 film.p7.mkv film.p81.mkv
+```
+
+A full enhancement layer carries picture detail that neither value keeps: the result plays the base layer, with (`8.1`) or without (`base`) the dynamic metadata. A file with no track the value applies to is refused. A sample that cannot be converted (a damaged RPU, a NAL unit running past its sample) stops the command with the track and the time of that sample, and no output is left. Track statistics tags are measured again on the bytes written.
+
+The same conversion runs while a file is remuxed or packaged, with `--dolby-vision 8.1|base` on `to-mp4`, `from-mp4`, `to-hls` and `hls-segment`: sample sizes, the `dvvC` configuration and the playlist's `SUPPLEMENTAL-CODECS` describe the converted stream. On an on-demand plan the I-frame playlist is not offered for a converted track, and a plan over an MP4 source refuses the option (convert that file first).
+
 > The streaming commands (`to-hls`, `hls-segment`, `to-abr`, `concat-hls`,
 > `cmaf-mpd`, `cmaf-hls`) are covered end to end - modes, sources, ABR, concat, security, trick-play - in
 > the **[streaming guide](streaming.md)**. Below is the per-flag reference.

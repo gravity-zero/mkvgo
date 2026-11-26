@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gravity-zero/mkvgo/matroska"
 	"github.com/gravity-zero/mkvgo/mp4"
 )
 
@@ -21,6 +22,8 @@ func CmdToMP4(args []string) {
 	fl.Bool(&flatten, "--flatten-subs", "-flatten-subs")
 	fl.Bool(&wvtt, "--webvtt-native", "-webvtt-native")
 	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
+	var dv matroska.DolbyVisionConversion
+	dolbyVisionFlag(fl, &dv)
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		FatalUsage("usage: " + CmdUsage["to-mp4"])
@@ -37,6 +40,9 @@ func CmdToMP4(args []string) {
 
 	guardDistinct(dst, src)
 	if isMP4Content(src) {
+		if dv != matroska.DolbyVisionKeep {
+			Fatal("the source is already an MP4: to-mp4 rewrites it sample for sample, so --dolby-vision does not apply; convert it with `mkvgo dolby-vision`, which writes a Matroska file, then run to-mp4 on that file")
+		}
 		if skip || flatten || wvtt || mp3delay || hashes {
 			Fatal("the source is already an MP4: to-mp4 rewrites it sample for sample (fast start, free space dropped), so --skip-unsupported, --flatten-subs, --webvtt-native, --mp3-container-delay and --hash do not apply")
 		}
@@ -58,6 +64,7 @@ func CmdToMP4(args []string) {
 		NativeWebVTT:      wvtt,
 		MP3ContainerDelay: mp3delay,
 		ContentHashes:     hashes,
+		DolbyVision:       dv,
 		OnDrop:            dropLine,
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()
@@ -82,6 +89,8 @@ func CmdFromMP4(args []string) {
 	fl := newFlags("CmdFromMP4")
 	fl.Bool(&mp3delay, "--mp3-container-delay", "-mp3-container-delay")
 	fl.Bool(&skip, "--skip-unsupported", "-skip-unsupported")
+	var dv matroska.DolbyVisionConversion
+	dolbyVisionFlag(fl, &dv)
 	rest = fl.Parse(args)
 	if len(rest) < 2 {
 		FatalUsage("usage: " + CmdUsage["from-mp4"])
@@ -95,6 +104,7 @@ func CmdFromMP4(args []string) {
 		SkipUnsupported:   skip,
 		Strict:            Strict,
 		MP3ContainerDelay: mp3delay,
+		DolbyVision:       dv,
 		OnDrop:            dropLine,
 		OnTruncated: func(t mp4.Truncation) {
 			ClearProgress()

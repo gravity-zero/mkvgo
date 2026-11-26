@@ -8,6 +8,20 @@ holds the latest release and, above it, the changes not released yet when
 there are any; an older version moves to its series' file in
 [changelog/](changelog/) when a newer one ships.
 
+## [Unreleased]
+
+### Added
+
+- Dolby Vision profile 7 conversion without re-encoding, the base layer byte
+  for byte: to profile 8.1 (enhancement layer dropped, each RPU rewritten) or
+  to the base layer alone (HDR10). `mp4.Options.DolbyVision` on `RemuxToMP4`,
+  `RemuxFromMP4`, `RemuxToHLS`, `RemuxToABR` and the on-demand plans of a
+  Matroska source; `matroska.ConvertDolbyVision` and `mkvgo dolby-vision` for
+  a file; `--dolby-vision 8.1|base` on `to-mp4`, `from-mp4`, `to-hls` and
+  `hls-segment`. Sizes, `dvvC` and `SUPPLEMENTAL-CODECS` follow the
+  conversion; a sample that cannot be converted fails with a
+  `*mkv.DolbyVisionError`. See docs/library.md.
+
 ## [0.72.0] - 2026-11-21
 
 ### Added

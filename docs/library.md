@@ -427,6 +427,30 @@ It is a library-only option: unlike the scalar options above it cannot be a CLI
 flag or a wasm field, because the converter is code you inject, not a value -
 the CLI and wasm can only enable a converter compiled in alongside them.
 
+### Convert Dolby Vision profile 7 at packaging time (`Options.DolbyVision`)
+
+A dual-layer profile 7 track carries a base layer, an enhancement layer and an RPU per picture; many players take profile 8.1 or plain HDR10 only. `Options.DolbyVision` rewrites the samples on their way out, with no re-encode and the base layer byte for byte:
+
+```go
+plan, err := mp4.PlanHLS(ctx, "film.mkv", mp4.Options{DolbyVision: mkv.DolbyVisionToProfile81})
+```
+
+- `mkv.DolbyVisionToProfile81`: a profile 7 track loses its enhancement layer and each RPU is rewritten as profile 8.1 (residual off, quantizer removed, profile 8.1 display management matrices; the reshaping curves of a full enhancement layer become the identity). The track is then signalled as `dvvC` profile 8 with an HDR10 base, and the master playlist carries `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"`.
+- `mkv.DolbyVisionToBaseLayer`: a profile 7 or 8 track loses its enhancement layer and its RPU; no Dolby Vision box or playlist attribute is left.
+- A track the value does not apply to (another profile, another codec, no Dolby Vision) is carried as stored.
+
+Sample sizes, `trun`/`stsz` entries, segment lengths and the configuration all describe the bytes written. A sample that cannot be converted fails the call with a `*mkv.DolbyVisionError` (`Track`, `TimeMs`, `Reason`); it is never written as stored in its place.
+
+| Path | Behaviour |
+|------|-----------|
+| `RemuxToMP4`, `RemuxFromMP4` | converted; a fast-start pass reads the converted track's samples to size them |
+| `RemuxToHLS`, `RemuxToABR` | converted; the track is buffered through a temp file instead of copied from the source |
+| `PlanHLS`, `PlanABR` (Matroska source) | converted per window; segments are built in memory (`Open` falls back to `Resource`, `Stat` reports no size ahead), no I-frame playlist, and the master's `BANDWIDTH` stays the source's upper bound |
+| `PlanHLS` (MP4 source), `PlanGrowingHLS` | refused with a message naming the alternative |
+| `Mux`, `Rewrite`, `Split`, `Join` on MP4 | not applied: these move chunks without reading samples |
+
+To convert a file once and for all, `matroska.ConvertDolbyVision(ctx, src, dst, conv)` writes a Matroska file with the same rules, its statistics and content-hash tags measured on the bytes written.
+
 ### Play while downloading (`mp4.PlanGrowingHLS`)
 
 ```go
