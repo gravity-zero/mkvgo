@@ -181,8 +181,14 @@ func build(full, converted bool) []byte {
 	}
 	w.free = 0
 
+	crc := crcOf(w.b[1:])
+	return append(w.b, byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc), 0x80)
+}
+
+// crcOf is the CRC-32/MPEG-2 of b, bit by bit.
+func crcOf(b []byte) uint32 {
 	crc := uint32(0xFFFFFFFF)
-	for _, c := range w.b[1:] {
+	for _, c := range b {
 		crc ^= uint32(c) << 24
 		for range 8 {
 			if crc&0x80000000 != 0 {
@@ -192,5 +198,5 @@ func build(full, converted bool) []byte {
 			}
 		}
 	}
-	return append(w.b, byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc), 0x80)
+	return crc
 }

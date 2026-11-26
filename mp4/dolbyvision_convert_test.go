@@ -119,9 +119,14 @@ func TestDolbyVisionFromMP4(t *testing.T) {
 // TestDolbyVisionHLS: the full pass and the on-demand plan serve the converted samples, sized as written, and the
 // master playlist names the stream the conversion leaves.
 func TestDolbyVisionHLS(t *testing.T) {
+	t.Run("SDR base", func(t *testing.T) { dolbyVisionHLS(t, false) })
+	t.Run("HDR10 base", func(t *testing.T) { dolbyVisionHLS(t, true) })
+}
+
+func dolbyVisionHLS(t *testing.T, hdr bool) {
 	for _, tc := range dvConversions {
 		dir := t.TempDir()
-		fx := dovitest.Profile7(t, dir, true)
+		fx := dovitest.Build(t, dir, dovitest.Spec{Full: true, HDR: hdr})
 		want := bytes.Join(tc.want(fx), nil)
 		o := Options{DolbyVision: tc.conv, SegmentMs: 1000}
 
@@ -149,7 +154,7 @@ func TestDolbyVisionHLS(t *testing.T) {
 			t.Errorf("%s: the full pass wrote %d media bytes in %d segments, want %d", tc.name, len(got), len(names), len(want))
 		}
 		master, _ := os.ReadFile(filepath.Join(out, "master.m3u8"))
-		checkMaster(t, tc.name+" full pass", tc.conv, string(master))
+		checkMaster(t, tc.name+" full pass", tc.conv, hdr, string(master))
 
 		p, err := PlanHLS(context.Background(), fx.Path, o)
 		if err != nil {
@@ -172,18 +177,23 @@ func TestDolbyVisionHLS(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: the plan served %d media bytes, want %d", tc.name, len(got), len(want))
 		}
-		checkMaster(t, tc.name+" plan", tc.conv, string(p.MasterPlaylist()))
+		checkMaster(t, tc.name+" plan", tc.conv, hdr, string(p.MasterPlaylist()))
 		if init := p.InitSegment(); bytes.Contains(init, []byte("dvvC")) != (tc.conv == mkv.DolbyVisionToProfile81) || bytes.Contains(init, []byte("dvcC")) {
 			t.Errorf("%s: the plan's init segment carries the wrong Dolby Vision box", tc.name)
 		}
 	}
 }
 
-func checkMaster(t *testing.T, stage string, conv mkv.DolbyVisionConversion, master string) {
+// checkMaster holds a master playlist to the stream a conversion leaves: profile 8.1 is named beside a PQ base, and
+// the base layer alone keeps the range of its own description - SDR for an SDR base, PQ for an HDR10 one.
+func checkMaster(t *testing.T, stage string, conv mkv.DolbyVisionConversion, hdr bool, master string) {
 	t.Helper()
-	has := strings.Contains(master, `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"`)
-	if has != (conv == mkv.DolbyVisionToProfile81) || has != strings.Contains(master, "VIDEO-RANGE=PQ") || strings.Contains(master, "dvh1.07") {
-		t.Errorf("%s: master playlist does not name the converted stream:\n%s", stage, master)
+	has, pq := strings.Contains(master, `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"`), strings.Contains(master, "VIDEO-RANGE=PQ")
+	if !hdr && (has != (conv == mkv.DolbyVisionToProfile81) || has != pq || strings.Contains(master, "dvh1.07")) {
+		t.Errorf("%s, SDR base: master playlist does not name the converted stream:\n%s", stage, master)
+	}
+	if hdr && (has != (conv == mkv.DolbyVisionToProfile81) || !pq || strings.Contains(master, "dvh1.07") || (!has && strings.Contains(master, "dvh1"))) {
+		t.Errorf("%s, HDR10 base: master playlist does not name the converted stream:\n%s", stage, master)
 	}
 }
 
@@ -213,5 +223,40 @@ func TestDolbyVisionDamagedRPU(t *testing.T) {
 	}
 	if _, err := p.Segment(context.Background(), p.NumSegments()-1); !errors.As(err, &dvErr) {
 		t.Errorf("plan segment: %v", err)
+	}
+}
+
+// TestDolbyVisionFFprobe: an outside reader parses the converted MP4 and the converted HLS rendition to the values
+// the conversion owes. Opt-in: MKVGO_FFPROBE names the ffprobe to use.
+func TestDolbyVisionFFprobe(t *testing.T) {
+	ctx := context.Background()
+	for _, full := range []bool{false, true} {
+		dir := t.TempDir()
+		fx := dovitest.Build(t, dir, dovitest.Spec{Full: full, HDR: true})
+		src := filepath.Join(dir, "p7.mp4")
+		if err := RemuxToMP4(ctx, fx.Path, src, Options{FastStart: true}); err != nil {
+			t.Fatal(err)
+		}
+		for _, from := range []string{fx.Path, src} {
+			p81, base := filepath.Join(dir, "p81.mp4"), filepath.Join(dir, "base.mp4")
+			if from == src {
+				p81, base = filepath.Join(dir, "p81.mkv"), filepath.Join(dir, "base.mkv")
+			}
+			remux := RemuxToMP4
+			if from == src {
+				remux = RemuxFromMP4
+			}
+			if err := errors.Join(remux(ctx, from, p81, Options{DolbyVision: mkv.DolbyVisionToProfile81}),
+				remux(ctx, from, base, Options{DolbyVision: mkv.DolbyVisionToBaseLayer})); err != nil {
+				t.Fatal(err)
+			}
+			dovitest.CheckProfile81(t, from, p81, full)
+			dovitest.CheckBase(t, from, base)
+		}
+		hls := filepath.Join(dir, "hls")
+		if err := RemuxToHLS(ctx, fx.Path, hls, Options{DolbyVision: mkv.DolbyVisionToProfile81, SegmentMs: 1000}); err != nil {
+			t.Fatal(err)
+		}
+		dovitest.CheckProfile81(t, fx.Path, filepath.Join(hls, "playlist.m3u8"), full)
 	}
 }

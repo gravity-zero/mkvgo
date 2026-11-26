@@ -20,7 +20,14 @@ there are any; an older version moves to its series' file in
   a file; `--dolby-vision 8.1|base` on `to-mp4`, `from-mp4`, `to-hls` and
   `hls-segment`. Sizes, `dvvC` and `SUPPLEMENTAL-CODECS` follow the
   conversion; a sample that cannot be converted fails with a
-  `*mkv.DolbyVisionError`. See docs/library.md.
+  `*mkv.DolbyVisionError`. The `mp4` functions that write or hand out
+  samples without converting refuse the option
+  (`mp4.ErrDolbyVisionUnsupported`) instead of ignoring it. A converted
+  on-demand plan keeps the source's `BANDWIDTH`. See docs/library.md.
+- `WithDolbyVisionLayer` / `mp4.Options.DolbyVisionLayer` and `-in-band` say
+  whether a profile 7 enhancement layer is minimal (MEL) or full (FEL), in
+  `Track.DolbyVision.EnhancementLayer`, from the last 8 KiB of the first
+  sample; other files read nothing more.
 
 ## [0.72.0] - 2026-11-21
 
