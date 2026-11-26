@@ -91,6 +91,9 @@ func readMeta(ctx context.Context, r io.ReadSeeker, path string, o Options) (*mk
 	if o.InBandColour {
 		fillInBandColour(r, mv, c)
 	}
+	if o.DolbyVisionLayer {
+		fillDolbyVisionLayer(r, mv, c)
+	}
 	return c, mv.dropped, nil
 }
 

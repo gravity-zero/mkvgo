@@ -16,6 +16,7 @@ func TestFacadeReadOptionsOpenMeta(t *testing.T) {
 		opt  ReadOption
 	}{
 		{"InBandColourFallback", WithInBandColourFallback()},
+		{"DolbyVisionLayer", WithDolbyVisionLayer()},
 		{"SampledKeyframes", WithSampledKeyframes(16)},
 		{"KeyframeIndex", WithKeyframeIndex()},
 		{"Bitrate", WithBitrate()},

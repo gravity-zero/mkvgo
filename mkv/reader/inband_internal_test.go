@@ -294,7 +294,7 @@ func TestInBandColourErrorPaths(t *testing.T) {
 	// leave colour nil without panicking.
 	vid := mkv.Track{ID: 1, Type: mkv.VideoTrack, Codec: "hevc", CodecPrivate: bareHvcC()}
 	c := &mkv.Container{Tracks: []mkv.Track{vid}}
-	fillColourFromFirstSample(context.Background(), sf, c)
+	fillColourFromFirstSample(context.Background(), sf, c, readOpts{inBandColour: true})
 	if c.Tracks[0].ColorTransfer != nil {
 		t.Error("seek failure must leave colour nil")
 	}
@@ -302,7 +302,7 @@ func TestInBandColourErrorPaths(t *testing.T) {
 	// fillColourFromFirstSample: rewind succeeds but the file is not a valid MKV,
 	// so NewBlockReader fails - same graceful no-op.
 	c2 := &mkv.Container{Tracks: []mkv.Track{vid}}
-	fillColourFromFirstSample(context.Background(), bytes.NewReader([]byte{0, 0, 0, 0}), c2)
+	fillColourFromFirstSample(context.Background(), bytes.NewReader([]byte{0, 0, 0, 0}), c2, readOpts{inBandColour: true})
 	if c2.Tracks[0].ColorTransfer != nil {
 		t.Error("invalid MKV must leave colour nil")
 	}

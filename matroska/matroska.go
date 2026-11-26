@@ -356,6 +356,10 @@ type ReadOption = reader.ReadOption
 // passed. See reader.WithInBandColourFallback.
 func WithInBandColourFallback() ReadOption { return reader.WithInBandColourFallback() }
 
+// WithDolbyVisionLayer reads what a Dolby Vision profile 7 track's enhancement layer holds (MEL or FEL) from its
+// first sample into Track.DolbyVision.EnhancementLayer. See reader.WithDolbyVisionLayer.
+func WithDolbyVisionLayer() ReadOption { return reader.WithDolbyVisionLayer() }
+
 // WithFrameRateReads lets the frame-rate estimate of a video track without
 // DefaultDuration read the block headers it needs within the first 512 KiB, one
 // exact read each; off by default. See reader.WithFrameRateReads.
@@ -995,6 +999,16 @@ const (
 	DolbyVisionKeep        = mkv.DolbyVisionKeep
 	DolbyVisionToProfile81 = mkv.DolbyVisionToProfile81
 	DolbyVisionToBaseLayer = mkv.DolbyVisionToBaseLayer
+)
+
+// DolbyVisionEL is mkv.DolbyVisionEL: what a profile 7 enhancement layer holds, as WithDolbyVisionLayer reads it.
+type DolbyVisionEL = mkv.DolbyVisionEL
+
+// The enhancement layer contents. See mkv.DolbyVisionEL.
+const (
+	DolbyVisionELUnknown = mkv.DolbyVisionELUnknown
+	DolbyVisionMEL       = mkv.DolbyVisionMEL
+	DolbyVisionFEL       = mkv.DolbyVisionFEL
 )
 
 // DolbyVisionError is mkv.DolbyVisionError: the track or sample a Dolby Vision conversion could not rewrite.

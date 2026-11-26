@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/mkv"
 )
 
@@ -25,6 +26,7 @@ type readOpts struct {
 	chapters         bool // keep Container.Chapters on the metadata path (WithChapters)
 	frameRateReads   bool // let the frame-rate estimate read the block headers it needs (WithFrameRateReads)
 	inBandChannels   bool // read the channel count the audio streams state (WithInBandChannels)
+	dolbyVisionLayer bool // read what a profile 7 enhancement layer holds (WithDolbyVisionLayer)
 	lookedPast       *bool
 }
 
@@ -45,6 +47,16 @@ func withLookedPast(b *bool) ReadOption {
 // choice.
 func WithInBandChannels() ReadOption {
 	return func(o *readOpts) { o.inBandChannels = true }
+}
+
+// WithDolbyVisionLayer reads what the enhancement layer of a Dolby Vision profile 7 track holds - nothing the picture
+// needs (MEL) or a residual (FEL) - from the RPU of the track's first sample, into
+// Track.DolbyVision.EnhancementLayer; it stays "" when that sample has no readable RPU. Only a track the container
+// already states as profile 7 is read: the last 8 KiB of its first block, found by a walk of block headers under the
+// bounds of WithInBandColourFallback, which shares its own read of that block when both are passed. An RPU further
+// than that from the block's end leaves the field ""; any other file costs nothing more.
+func WithDolbyVisionLayer() ReadOption {
+	return func(o *readOpts) { o.dolbyVisionLayer = true }
 }
 
 // WithFrameRateReads lets the frame-rate estimate of a video track without
@@ -239,8 +251,9 @@ const inBandScanHead = 16 << 10
 // the bitstream states. Best-effort: any failure (no such track, unreadable
 // cluster, nothing usable in the frame) silently leaves the fields unset,
 // exactly as before the option.
-func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Container) {
-	need := make(map[uint64]*mkv.Track) // first sample still to read
+func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Container, o readOpts) {
+	need := make(map[uint64]*mkv.Track)   // first sample still to read
+	layers := make(map[uint64]*mkv.Track) // profile 7 tracks whose first sample is still to read
 	type scanning struct {
 		t    *mkv.Track
 		s    scanner
@@ -249,19 +262,24 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	scans := make(map[uint64]*scanning)
 	for i := range c.Tracks {
 		t := &c.Tracks[i]
-		if NeedsInBandColour(t) {
+		if o.inBandColour && NeedsInBandColour(t) {
 			need[t.ID] = t
 		}
-		if needsInBandScan(t) {
+		if o.inBandColour && needsInBandScan(t) {
 			scans[t.ID] = &scanning{t: t, s: newScanner(t), left: maxScanSamples}
 		}
+		if o.dolbyVisionLayer && dovi.Layered(t) {
+			layers[t.ID] = t
+		}
 	}
+	var tails []layerTail
+	defer func() { readLayerTails(r, tails) }()
 	defer func() {
 		for _, sc := range scans {
 			sc.s.apply(sc.t)
 		}
 	}()
-	if len(need) == 0 && len(scans) == 0 {
+	if len(need)+len(scans)+len(layers) == 0 {
 		return
 	}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
@@ -271,8 +289,19 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 	if err != nil {
 		return
 	}
+	var sized []uint64 // a track read for its layer alone gives its first block's place, not its bytes
+	for id := range layers {
+		_, a := need[id]
+		if _, b := scans[id]; !a && !b {
+			sized = append(sized, id)
+		}
+	}
+	if len(sized) > 0 {
+		br.SetHeaderOnly(true)
+		br.SetHeaderOnlyTracks(sized...)
+	}
 	waits := make(map[uint64]int) // blocks of other tracks since each track's last sample
-	for i := 0; i < maxInBandTotalBlocks && len(need)+len(scans) > 0; i++ {
+	for i := 0; i < maxInBandTotalBlocks && len(need)+len(scans)+len(layers) > 0; i++ {
 		if ctx.Err() != nil {
 			return
 		}
@@ -280,12 +309,15 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 		if err != nil {
 			return
 		}
-		markHDR10Plus(c, blk)
-		for _, id := range activeTracks(need, scans) {
+		if o.inBandColour {
+			markHDR10Plus(c, blk)
+		}
+		for _, id := range activeTracks(need, scans, layers) {
 			if id == blk.TrackNumber {
 				waits[id] = 0
 			} else if waits[id]++; waits[id] >= maxInBandBlocks {
 				delete(need, id)
+				delete(layers, id)
 				if sc, ok := scans[id]; ok {
 					sc.s.apply(sc.t)
 					delete(scans, id)
@@ -297,6 +329,14 @@ func fillColourFromFirstSample(ctx context.Context, r io.ReadSeeker, c *mkv.Cont
 			stated := *t
 			applyInBandHeader(t, blk.Data)
 			recordDerived(t, &stated)
+		}
+		if t, ok := layers[blk.TrackNumber]; ok {
+			delete(layers, blk.TrackNumber)
+			if blk.Data != nil {
+				t.DolbyVision.EnhancementLayer = dovi.Layer(t, blk.Data)
+			} else if !blk.Laced {
+				tails = append(tails, layerTail{t: t, end: blk.DataOffset + blk.Size, size: blk.Size})
+			}
 		}
 		if sc, ok := scans[blk.TrackNumber]; ok {
 			n := min(len(blk.Data), sc.s.head())
@@ -323,14 +363,42 @@ func markHDR10Plus(c *mkv.Container, blk mkv.Block) {
 	}
 }
 
+// layerTail is a profile 7 track's first block, known by where it ends.
+type layerTail struct {
+	t         *mkv.Track
+	end, size int64
+}
+
+// readLayerTails reads the last dovi.TailBytes of each block: a block of any size costs that much, and one whose RPU
+// sits further from its end leaves the layer unstated.
+func readLayerTails(r io.ReadSeeker, tails []layerTail) {
+	for _, lt := range tails {
+		n := min(lt.size, dovi.TailBytes)
+		if _, err := r.Seek(lt.end-n, io.SeekStart); err != nil {
+			continue
+		}
+		tail := make([]byte, n)
+		if _, err := io.ReadFull(r, tail); err != nil {
+			continue
+		}
+		lt.t.DolbyVision.EnhancementLayer = dovi.TailLayer(lt.t, tail)
+	}
+}
+
 // activeTracks lists the tracks still read, each once.
-func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S) []uint64 {
-	ids := make([]uint64, 0, len(need)+len(scans))
+func activeTracks[N, S any](need map[uint64]N, scans map[uint64]S, layers map[uint64]N) []uint64 {
+	ids := make([]uint64, 0, len(need)+len(scans)+len(layers))
 	for id := range need {
 		ids = append(ids, id)
 	}
-	for id := range scans {
+	for id := range layers {
 		if _, ok := need[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	for id := range scans {
+		_, a := need[id]
+		if _, b := layers[id]; !a && !b {
 			ids = append(ids, id)
 		}
 	}

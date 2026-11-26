@@ -22,7 +22,21 @@ type DolbyVision struct {
 	ELPresent        bool  `json:"el_present"`                 // el_present_flag
 	BLPresent        bool  `json:"bl_present"`                 // bl_present_flag
 	BLSignalCompatID uint8 `json:"bl_signal_compatibility_id"` // dv_bl_signal_compatibility_id
+	// EnhancementLayer is what a profile 7 track's enhancement layer holds, read from the first sample's RPU on request
+	// (reader.WithDolbyVisionLayer, mp4 Options.DolbyVisionLayer); "" when not read or not stated.
+	EnhancementLayer DolbyVisionEL `json:"enhancement_layer,omitempty"`
 }
+
+// DolbyVisionEL names the content of a Dolby Vision profile 7 enhancement layer.
+type DolbyVisionEL string
+
+// A minimal enhancement layer adds nothing to the picture, so dropping it loses none; a full one holds a residual
+// the base layer alone, or a conversion to profile 8.1, no longer shows.
+const (
+	DolbyVisionELUnknown DolbyVisionEL = ""
+	DolbyVisionMEL       DolbyVisionEL = "MEL"
+	DolbyVisionFEL       DolbyVisionEL = "FEL"
+)
 
 // ParseDolbyVisionConfig decodes a DOVIDecoderConfigurationRecord - the payload of
 // an MP4 dvcC/dvvC box or a Matroska dvcC/dvvC BlockAddIDExtraData. The fields it

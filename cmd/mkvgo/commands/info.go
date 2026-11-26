@@ -91,7 +91,7 @@ func CmdTracks(path string) {
 			fmt.Print("  [forced]")
 		}
 		if t.DolbyVision != nil {
-			fmt.Printf("  [DoVi p%d]", t.DolbyVision.Profile)
+			fmt.Printf("  [DoVi p%d%s]", t.DolbyVision.Profile, elSuffix(t.DolbyVision.EnhancementLayer))
 		}
 		if t.Unsupported != "" {
 			fmt.Printf("  [not carried to Matroska: %s]", t.Unsupported)
@@ -330,8 +330,8 @@ func CmdProbe(path string) {
 			fmt.Println()
 		}
 		if dv := t.DolbyVision; dv != nil {
-			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)\n",
-				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent)
+			fmt.Printf("        dolby vision: profile %d, level %d, bl_compatibility_id %d (rpu=%v el=%v bl=%v)%s\n",
+				dv.Profile, dv.Level, dv.BLSignalCompatID, dv.RPUPresent, dv.ELPresent, dv.BLPresent, elSuffix(dv.EnhancementLayer))
 		}
 		if t.Unsupported != "" {
 			fmt.Printf("        not carried to Matroska: %s\n", t.Unsupported)
@@ -400,4 +400,12 @@ func hasVideoTrack(c *matroska.Container) bool {
 		}
 	}
 	return false
+}
+
+// elSuffix names a profile 7 enhancement layer when -in-band read it.
+func elSuffix(el matroska.DolbyVisionEL) string {
+	if el == matroska.DolbyVisionELUnknown {
+		return ""
+	}
+	return " " + string(el)
 }

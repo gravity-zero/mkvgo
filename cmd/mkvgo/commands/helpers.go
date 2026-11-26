@@ -432,7 +432,7 @@ func loadContainer(path string, keyframes bool) (*matroska.Container, []mp4.Drop
 func globalReadOptions() []matroska.ReadOption {
 	var o []matroska.ReadOption
 	if InBand {
-		o = append(o, matroska.WithInBandColourFallback(), matroska.WithInBandChannels())
+		o = append(o, matroska.WithInBandColourFallback(), matroska.WithInBandChannels(), matroska.WithDolbyVisionLayer())
 	}
 	if FrameRateReads {
 		o = append(o, matroska.WithFrameRateReads())
@@ -444,7 +444,7 @@ func globalReadOptions() []matroska.ReadOption {
 // keyframe index. Shared by the extension dispatch and the mislabeled-container
 // fallback in loadContainer.
 func loadMP4Meta(path string, keyframes bool) (*matroska.Container, []mp4.DroppedTrack) {
-	c, dropped, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: keyframes, InBandColour: InBand})
+	c, dropped, err := mp4.OpenMeta(cliCtx, path, mp4.Options{Keyframes: keyframes, InBandColour: InBand, DolbyVisionLayer: InBand})
 	if err != nil {
 		FatalErr(err)
 	}
@@ -478,7 +478,7 @@ func loadRemote(url string, keyframes bool) (*matroska.Container, []mp4.DroppedT
 	isMP4, fs := sniffSource(url)
 	if isMP4 {
 		c, dropped, err := mp4.OpenMeta(cliCtx, url,
-			mp4.Options{Keyframes: keyframes, InBandColour: InBand, FS: fs})
+			mp4.Options{Keyframes: keyframes, InBandColour: InBand, DolbyVisionLayer: InBand, FS: fs})
 		if err != nil {
 			FatalErr(err)
 		}

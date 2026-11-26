@@ -110,10 +110,10 @@ func ReadMeta(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOpt
 	if o.inBandChannels {
 		fillStreamChannels(ctx, r, c)
 	}
-	if o.inBandColour {
+	if o.inBandColour || o.dolbyVisionLayer {
 		// Opted-in, and only for tracks that need it: recover colour from the
 		// first sample's in-band SPS. The head parse above stays untouched.
-		fillColourFromFirstSample(ctx, r, c)
+		fillColourFromFirstSample(ctx, r, c, o)
 	}
 	return c, nil
 }

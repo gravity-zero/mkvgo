@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/gravity-zero/mkvgo/internal/dovi"
 	"github.com/gravity-zero/mkvgo/mkv"
 	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
@@ -201,6 +202,32 @@ func fillInBandColour(r io.ReadSeeker, mv *movie, c *mkv.Container) {
 			continue
 		}
 		reader.ApplyInBandColour(mt, buf)
+	}
+}
+
+// fillDolbyVisionLayer is the Options.DolbyVisionLayer worker: the end of a profile 7 track's first sample says what
+// its enhancement layer holds. Best-effort, and no other track is read.
+func fillDolbyVisionLayer(r io.ReadSeeker, mv *movie, c *mkv.Container) {
+	for i := range min(len(mv.tracks), len(c.Tracks)) {
+		if !dovi.Layered(&c.Tracks[i]) {
+			continue
+		}
+		if mv.fragmented && mv.tracks[i].firstSampleSize == 0 {
+			fragHeadSamples(r, mv)
+		}
+		t := &mv.tracks[i]
+		n := min(int64(t.firstSampleSize), dovi.TailBytes)
+		if n == 0 {
+			continue
+		}
+		if _, err := r.Seek(t.firstSampleOffset+int64(t.firstSampleSize)-n, io.SeekStart); err != nil {
+			continue
+		}
+		tail := make([]byte, n)
+		if _, err := io.ReadFull(r, tail); err != nil {
+			continue
+		}
+		c.Tracks[i].DolbyVision.EnhancementLayer = dovi.TailLayer(&c.Tracks[i], tail)
 	}
 }
 

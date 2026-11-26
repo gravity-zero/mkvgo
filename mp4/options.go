@@ -167,6 +167,11 @@ type Options struct {
 	// always apply it, so the colr/mdcv/clli they write describe the stream
 	// whichever copy the source muxer kept.
 	InBandColour bool
+	// DolbyVisionLayer, on the metadata probe (OpenMeta/ReadMeta), reads what the enhancement layer of a Dolby Vision
+	// profile 7 track holds (MEL or FEL) into Track.DolbyVision.EnhancementLayer - the MP4 counterpart of
+	// reader.WithDolbyVisionLayer. Only a track the sample entry states as profile 7 is read: the last 8 KiB of its
+	// first sample, where the RPU sits.
+	DolbyVisionLayer bool
 	// SegmentMs is the target media-segment duration for RemuxToHLS, in
 	// milliseconds. Segments are cut on video keyframes, so the actual duration
 	// is the first keyframe at/after each multiple. 0 selects the default (6 s).

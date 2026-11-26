@@ -80,10 +80,10 @@ func Read(ctx context.Context, r io.ReadSeeker, path string, opts ...ReadOption)
 	if o.inBandChannels {
 		fillStreamChannels(ctx, r, c)
 	}
-	if o.inBandColour {
+	if o.inBandColour || o.dolbyVisionLayer {
 		// Same opt-in as the metadata path: one bounded read of the first sample,
 		// only for a track whose description the head left incomplete.
-		fillColourFromFirstSample(ctx, r, c)
+		fillColourFromFirstSample(ctx, r, c, o)
 	}
 	return c, nil
 }
