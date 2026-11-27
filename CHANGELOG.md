@@ -23,7 +23,8 @@ there are any; an older version moves to its series' file in
   `*mkv.DolbyVisionError`. The `mp4` functions that write or hand out
   samples without converting refuse the option
   (`mp4.ErrDolbyVisionUnsupported`) instead of ignoring it. A converted
-  on-demand plan keeps the source's `BANDWIDTH`. See docs/library.md.
+  on-demand plan keeps the source's `BANDWIDTH`. See docs/library.md. The
+  profile 8.1 output has not been validated on a Dolby Vision device.
 - `WithDolbyVisionLayer` / `mp4.Options.DolbyVisionLayer` and `-in-band` say
   whether a profile 7 enhancement layer is minimal (MEL) or full (FEL), in
   `Track.DolbyVision.EnhancementLayer`, from the last 8 KiB of the first

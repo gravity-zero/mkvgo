@@ -450,6 +450,8 @@ plan, err := mp4.PlanHLS(ctx, "film.mkv", mp4.Options{DolbyVision: mkv.DolbyVisi
 - `mkv.DolbyVisionToBaseLayer`: a profile 7 or 8 track loses its enhancement layer and its RPU; no Dolby Vision box or playlist attribute is left.
 - A track the value does not apply to (another profile, another codec, no Dolby Vision) is carried as stored.
 
+What has been played: the base layer alone, from a real profile 7 film, in Chrome on an HDR display and on an Amlogic hardware decoder. The profile 8.1 output has not been validated on any Dolby Vision device; its checks so far are structural (RPU syntax and CRC, signalling, an outside decoder reading the base layer).
+
 Sample sizes, `trun`/`stsz` entries, segment lengths and the configuration all describe the bytes written. A sample that cannot be converted fails the call with a `*mkv.DolbyVisionError` (`Track`, `TimeMs`, `Reason`); it is never written as stored in its place.
 
 | Path | Behaviour |
