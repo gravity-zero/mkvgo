@@ -8,6 +8,7 @@ import (
 
 	"github.com/gravity-zero/mkvgo/internal/dovi/dovitest"
 	"github.com/gravity-zero/mkvgo/mkv"
+	"github.com/gravity-zero/mkvgo/mkv/reader"
 )
 
 // dtsCoreFrame is a DTS core frame header stating 16 blocks of 32 samples.
@@ -121,6 +122,84 @@ func TestPlanCodecsOfAConvertedTrack(t *testing.T) {
 		written, ok := masterCodecs(t, plan.MasterPlaylist())
 		if len(got) != 1 || !got[0].Known || !ok || written != got[0].RFC6381 || !strings.HasPrefix(written, "hvc1.") {
 			t.Errorf("mode %d: listed %+v, master CODECS %q (present %v)", mode, got, written, ok)
+		}
+	}
+}
+
+// TestCodecString: a caller that packages a track without a plan gets the string a plan lists for it, under the
+// sample entry name it writes, and is told when there is none.
+func TestCodecString(t *testing.T) {
+	sr, ch := 48000.0, uint8(2)
+	aac := mkv.Track{Codec: "aac", CodecPrivate: fakeASC, SampleRate: &sr, Channels: &ch}
+	p7 := dovitest.Build(t, t.TempDir(), dovitest.Spec{Full: true, HDR: true})
+	for _, tc := range []struct{ name, src, tier string }{
+		{"main tier", codecsSource(t, false, aac, []byte{0xAA, 0x01}, 20), ".L"},
+		{"high tier", codecsSource(t, true, aac, []byte{0xAA, 0x01}, 20), ".H"},
+		{"profile 7", p7.Path, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := reader.OpenMeta(context.Background(), tc.src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := PlanHLS(context.Background(), tc.src, Options{SegmentMs: 2000})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed := plan.Codecs()
+			if len(listed) != len(c.Tracks) {
+				t.Fatalf("plan lists %d tracks, the file has %d", len(listed), len(c.Tracks))
+			}
+			for i := range c.Tracks {
+				want := listed[i].RFC6381
+				for _, entry := range []string{"", "hvc1"} {
+					if got, known := CodecString(&c.Tracks[i], entry); got != want || !known {
+						t.Errorf("track %d, entry %q: %q (known %v), the plan lists %q", c.Tracks[i].ID, entry, got, known, want)
+					}
+				}
+				if c.Tracks[i].Codec != "hevc" {
+					if got, _ := CodecString(&c.Tracks[i], "hev1"); got != want {
+						t.Errorf("track %d: %q under hev1, a name that is not this codec's must leave %q alone", c.Tracks[i].ID, got, want)
+					}
+					continue
+				}
+				rest, ok := strings.CutPrefix(want, "hvc1.")
+				if !ok || !strings.Contains(want, tc.tier) {
+					t.Fatalf("plan lists %q, want an hvc1 string with %q", want, tc.tier)
+				}
+				if got, known := CodecString(&c.Tracks[i], "hev1"); got != "hev1."+rest || !known {
+					t.Errorf("under hev1: %q (known %v), want %q", got, known, "hev1."+rest)
+				}
+				if got, _ := CodecString(&c.Tracks[i], "avc3"); got != want {
+					t.Errorf("under avc3: %q, a name of the other pair must leave %q alone", got, want)
+				}
+				inBand := c.Tracks[i]
+				inBand.CodecPrivate = append([]byte(nil), inBand.CodecPrivate[:23]...)
+				inBand.CodecPrivate[22] = 0 // no parameter set array: this package would write hev1
+				if got, _ := CodecString(&inBand, ""); got != "hev1."+rest {
+					t.Errorf("record without parameter sets: %q, want %q", got, "hev1."+rest)
+				}
+				if got, _ := CodecString(&inBand, "hvc1"); got != want {
+					t.Errorf("record without parameter sets under hvc1: %q, want %q", got, want)
+				}
+			}
+		})
+	}
+	hevc := p7.Track
+	for _, tc := range []struct {
+		name  string
+		track *mkv.Track
+		entry string
+	}{
+		{"DTS-HD", &mkv.Track{Codec: "dts", Profile: "DTS-HD MA"}, ""},
+		{"HEVC with a short record", &mkv.Track{Codec: "hevc", CodecPrivate: hevc.CodecPrivate[:12]}, "hvc1"},
+		{"HEVC without a record", &mkv.Track{Codec: "hevc"}, "hev1"},
+		{"VP9 without a record", &mkv.Track{Codec: "vp9"}, ""},
+		{"an entry that is none of the four", &hevc, "dvh1"},
+		{"no track", nil, "hvc1"},
+	} {
+		if got, known := CodecString(tc.track, tc.entry); got != "" || known {
+			t.Errorf("%s: %q (known %v), want no string and known false", tc.name, got, known)
 		}
 	}
 }

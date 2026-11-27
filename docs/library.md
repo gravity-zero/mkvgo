@@ -258,6 +258,14 @@ plan.Codecs()                       // each video and audio track with its RFC 6
 
 `plan.Codecs()` lists the plan's video and audio tracks, the video first, each as a `PlanCodec`: `TrackID`, `Type`, `Codec`, and `RFC6381`, the string exactly as the master's `CODECS` writes it (`hvc1` or `hev1` prefix, tier, level and constraint bytes for HEVC, read from the `hvcC` header). `Known` is false, and `RFC6381` empty, for a codec with no string here, DTS for one: the master then leaves `CODECS` out of the variant whole, and the list still gives the video's string to a caller that writes its own master. With `Options.DolbyVision` the string is that of the track as served.
 
+A caller that packages a track without a plan asks for the same string by track, naming the sample entry it writes:
+
+```go
+s, known := mp4.CodecString(&track, "hvc1") // "hvc1.2.4.H153.B0", true
+```
+
+`entry` is `"hvc1"` or `"hev1"` (`"avc1"` or `"avc3"` for H.264) and replaces the other name of its pair at the head of the string; `""` keeps the name this package would write, and a name of the other pair leaves the string alone, so one value serves every track of a file. `known` is false, with an empty string, for a codec that has none (DTS), a missing or short configuration record, VP9 without its record, or an `entry` that is none of the four. The track is described as served: hand in the track as it stands after any Dolby Vision conversion.
+
 ```go
 // A complete HLS server endpoint:
 http.HandleFunc("/hls/", func(w http.ResponseWriter, r *http.Request) {

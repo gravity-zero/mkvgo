@@ -32,6 +32,9 @@ there are any; an older version moves to its series' file in
 - `HLSPlan.Codecs` lists each video and audio track of a plan with the
   RFC 6381 string its master writes, and says which have none: the video's
   stays available when an audio track makes the master leave `CODECS` out.
+  `mp4.CodecString` gives the same string for one track under the sample
+  entry name the caller writes (`hvc1` or `hev1`), for packaging done
+  without a plan.
 
 ## [0.72.0] - 2026-11-21
 
